@@ -58,7 +58,7 @@ class HelperChatPanel;   // the helper agent's panel, embedded at the bottom of 
 // One row of a settings section. The caller supplies the reader (the current value fields) and
 // the writer, so QSettings stays the single source of truth.
 struct SettingRow {
-    enum Kind { Toggle, Choice, Text, Number, Button, Buttons, Info, Heading };
+    enum Kind { Toggle, Choice, Text, Number, Button, Buttons, Info, Heading, Subheading };
     Kind kind = Toggle;
     QString id;                 // stable identity: keeps focus and scroll across rebuilds
     QString label, detail;
@@ -70,6 +70,7 @@ struct SettingRow {
     std::function<void(const QString &)> onChoose;
     QString text, placeholder;                              // Text
     std::function<void(const QString &)> onText;
+    QStringList completions;                                // Text: offered as you type (contains-match)
     int number = 0, minimum = 0, maximum = 0;               // Number
     QString suffix;
     std::function<void(int)> onNumber;

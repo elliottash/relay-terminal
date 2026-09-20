@@ -15,6 +15,7 @@
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QCompleter>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QMouseEvent>
@@ -485,7 +486,7 @@ void SettingsPane::buildPage(QWidget *page, const SettingsSection &section) {
 }
 
 QWidget *SettingsPane::groupHeader(const QString &text, const QString &key) {
-    auto *label = mutedLabel(text.toUpper(), "settingsHeading");
+    auto *label = mutedLabel(text, "settingsHeading");   // as written, not shouted (owner, 2026-09-20)
     if (!key.isEmpty()) m_groups.insert(key, label);
     return label;
 }
@@ -520,6 +521,16 @@ void SettingsPane::addActionsList(QVBoxLayout *into) {
 
 QWidget *SettingsPane::settingRow(const SettingRow &row) {
     if (row.kind == SettingRow::Heading) return groupHeader(row.label);
+    if (row.kind == SettingRow::Subheading) {
+        // A group inside a section (one provider's models): the words as written, bold, with a
+        // little air above — a heading is the section's own name and stays the louder of the two.
+        auto *sub = new QLabel(row.label);
+        sub->setObjectName(QStringLiteral("settingsSubheading"));
+        sub->setWordWrap(true);
+        sub->setTextFormat(Qt::PlainText);
+        sub->setContentsMargins(10, 12, 10, 2);
+        return sub;
+    }
     if (row.kind == SettingRow::Info) {
         auto *info = mutedLabel(row.label, "settingsInfo");
         info->setContentsMargins(8, 4, 8, 4);
@@ -627,6 +638,16 @@ QWidget *SettingsPane::settingRow(const SettingRow &row) {
         auto *edit = new QLineEdit(row.text);
         edit->setPlaceholderText(row.placeholder);
         edit->setAccessibleName(row.label);
+        if (!row.completions.isEmpty()) {
+            // opencode's model box: the ids the provider serves, offered as you type, matched
+            // anywhere in the id ("flash" finds z-ai/glm-5.3-flash). Enter on a suggestion fills
+            // the box; the row's own editingFinished then writes it.
+            auto *completer = new QCompleter(row.completions, edit);
+            completer->setCaseSensitivity(Qt::CaseInsensitive);
+            completer->setFilterMode(Qt::MatchContains);
+            completer->setCompletionMode(QCompleter::PopupCompletion);
+            edit->setCompleter(completer);
+        }
         edit->setMinimumWidth(140);   // narrower than that, the label column goes first
         edit->setMaximumWidth(360);
         connect(edit, &QLineEdit::editingFinished, this, [edit, fn = row.onText, after, was = row.text] {
@@ -695,6 +716,7 @@ QWidget *SettingsPane::settingRow(const SettingRow &row) {
     }
     case SettingRow::Info:
     case SettingRow::Heading:
+    case SettingRow::Subheading:
         break;
     }
     m_rows.append(entry);
@@ -793,7 +815,7 @@ void SettingsPane::buildResults(const QString &needle) {
     int order = 0;
     for (const SettingsSection &section : std::as_const(m_sectionCache)) {
         for (const SettingRow &row : section.rows) {
-            if (row.kind == SettingRow::Info || row.kind == SettingRow::Heading) continue;
+            if (row.kind == SettingRow::Info || row.kind == SettingRow::Heading || row.kind == SettingRow::Subheading) continue;
             const int score = scoreOf(row.label, row.detail, section.title, row.aliases);
             if (score > 0) hits.append({actionsMode ? score / 2 : score, order++, row, {}, section.title, false,
                                         actionsMode ? section : SettingsSection()});

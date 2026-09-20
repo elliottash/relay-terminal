@@ -20,6 +20,9 @@ const QString kFavorites = QStringLiteral("models/favorites");
 const QString kRecent = QStringLiteral("models/recent");
 const QString kSort = QStringLiteral("models/sort");
 const QString kOpenrouter = QStringLiteral("models/openrouter_fallback");
+const QString kCollapsed = QStringLiteral("models/collapsed");
+const QString kThreshold = QStringLiteral("models/fallback_threshold");
+constexpr int kDefaultThreshold = 2;
 constexpr int kRecentCap = 10;
 
 QString str(const QJsonObject &object, const char *field) { return object.value(QLatin1String(field)).toString(); }
@@ -377,6 +380,21 @@ QStringList openrouterFallbackModels() {
     return models;
 }
 
+QStringList collapsedProviders() { return list(kCollapsed); }
+bool isCollapsed(const QString &preset) { return collapsedProviders().contains(preset); }
+void setCollapsed(const QString &preset, bool on) {
+    QStringList keys = collapsedProviders();
+    keys.removeAll(preset);
+    if (on) keys << preset;
+    store(kCollapsed, keys);
+}
+
+int fallbackThreshold() { return qMax(1, QSettings().value(kThreshold, kDefaultThreshold).toInt()); }
+void setFallbackThreshold(int count) {
+    if (count == kDefaultThreshold) QSettings().remove(kThreshold);
+    else QSettings().setValue(kThreshold, qMax(1, count));
+}
+
 Sort sort() { return sortFromId(QSettings().value(kSort).toString()); }
 void setSort(Sort sort) {
     if (sort == Sort::Priority) QSettings().remove(kSort);
@@ -447,6 +465,11 @@ Entry mainDefault(const Catalog &catalog) {
 Entry fallback(const Catalog &catalog) {
     const QList<Entry> list = shown(catalog);
     return list.size() < 2 ? Entry() : list.at(1);
+}
+
+QList<Entry> fallbacks(const Catalog &catalog) {
+    const QList<Entry> list = shown(catalog);
+    return list.mid(1, qMax(0, curation::fallbackThreshold() - 1));
 }
 
 QString limitsText(const QList<LimitWindow> &windows, qint64 now) {

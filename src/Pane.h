@@ -782,15 +782,12 @@ public:
     // Rank 2 of the priority list, kept in QSettings so requestOptions (static, read for every
     // worker) can name it as the failover's first candidate. A guest cannot be a failover target.
     static void rememberFallback(const relay::models::Catalog &catalog) {
-        const relay::models::Entry fallback = relay::models::fallback(catalog);
+        QStringList keys;
+        for (const relay::models::Entry &entry : relay::models::fallbacks(catalog))
+            if (!entry.guest) keys << entry.key;
         QSettings settings;
-        if (fallback.key.isEmpty() || fallback.guest) {
-            settings.remove(QStringLiteral("models/fallback/preset"));
-            settings.remove(QStringLiteral("models/fallback/model"));
-            return;
-        }
-        settings.setValue(QStringLiteral("models/fallback/preset"), fallback.preset);
-        settings.setValue(QStringLiteral("models/fallback/model"), fallback.model);
+        if (keys.isEmpty()) settings.remove(QStringLiteral("models/fallbacks"));
+        else settings.setValue(QStringLiteral("models/fallbacks"), keys);
     }
     // Options changed `guests/<guest>/model` or `…/effort`. A pane that is on that guest right now
     // asks its harness to move (`set_model` with the `guest` block, as `/model claude opus` does);
@@ -4143,10 +4140,18 @@ private:
                 // Rank 2 of Options › Models' priority list (owner, 2026-09-20): the model a failing
                 // turn is moved to first. Written by rememberFallback whenever the list or the
                 // catalog changes; null until there is a second ranked model.
-                {"fallback", settings.value(QStringLiteral("models/fallback/preset")).toString().isEmpty()
-                                 ? QJsonValue()
-                                 : QJsonValue(QJsonObject{{"preset", settings.value(QStringLiteral("models/fallback/preset")).toString()},
-                                                          {"model", settings.value(QStringLiteral("models/fallback/model")).toString()}})},
+                {"fallbacks", [&settings] {
+                    // Ranks 2 … threshold of Options › Models' priority list, in order (owner,
+                    // 2026-09-20: "as many as you want, according to priority"). Written by
+                    // rememberFallback as entry keys; the worker gets preset and model.
+                    QJsonArray chain;
+                    for (const QString &key : settings.value(QStringLiteral("models/fallbacks")).toStringList()) {
+                        QString preset, model;
+                        if (relay::models::Catalog::splitKey(key, &preset, &model))
+                            chain.append(QJsonObject{{"preset", preset}, {"model", model}});
+                    }
+                    return chain;
+                }()},
                 // Options › Security (card #3KB7). Always sent, including empty, so clearing a list
                 // in Options reaches the worker as "no rules" rather than as "unchanged".
                 {"command_denylist", QJsonArray::fromStringList(settings.value(QStringLiteral("security/command_denylist")).toStringList())},
@@ -15132,7 +15137,7 @@ private:
             {"glm-coding", "z.ai · glm-5.3 · coding plan", "https://api.z.ai/api/coding/paas/v4", "glm-5.3",
              "{\"thinking\":{\"type\":\"enabled\"},\"reasoning_effort\":\"high\"}"},
             {"minimax", "minimax · m3 · coding/token plan", "https://api.minimax.io/v1", "MiniMax-M3", "{}"},
-            {"openrouter", "openrouter · deepseek v4.1 flash", "https://openrouter.ai/api/v1", "deepseek/deepseek-v4.1-flash", "{}"},
+            {"openrouter", "openrouter", "https://openrouter.ai/api/v1", "deepseek/deepseek-v4.1-flash", "{}"},
             {"openai", "openai · gpt-6 astra", "https://api.openai.com/v1", "gpt-6-astra", "{\"reasoning_effort\":\"high\"}"},
             {"anthropic", "anthropic · claude opus 5", "https://api.anthropic.com/v1", "claude-opus-5", "{}"},
             {"gemini", "google · gemini 3.1 pro", "https://generativelanguage.googleapis.com/v1beta/openai",

@@ -10,7 +10,8 @@ no prompt is ever submitted. `drive.sh [build-dir]` reproduces every shot.
 | implementer-c-picker-filter.png | `flash` typed: one flat list of the two matching rows, the first selected |
 | implementer-d-picker-sort.png | the sort menu open (priority, a to z, intelligence, speed, most used, subscription left) |
 | implementer-e-options.png | `/models`: Options › Models — the providers group: only providers with a key (ordered by intelligence), Relay Free, OpenRouter always, Claude Code and Codex with `change login` / `test`; the rest behind `+ add provider` |
-| implementer-g-options-checklist.png | the checklist group: `relay free` and `kimi code · k3` with one toggle per model, and under `k3` the unchecked per-model switch "↳ when it fails, continue on openrouter's moonshotai/kimi-k3" (owner: off by default, on per model) |
+| implementer-g-options-checklist.png | the checklist group: one checkbox per provider ("3 of 3 models in the picker"; off hides all and folds the group), the models indented under it; the small "openrouter fallback" switch appears under a model only once an OpenRouter key is stored (none in this profile) |
+| implementer-h-options-priority.png | the priority group: ranks with ↑ ↓, "main" and "fallback 1 · /swap goes here", and the movable "fallbacks end here" line after rank 2 |
 | implementer-f-options-down.png | the same page at the end of the priority list (↑ ↓ per row, reset) and the defaults group |
 
 Seen and left as is: the box shows every model of every usable provider until the user un-checks

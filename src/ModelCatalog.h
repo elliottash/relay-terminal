@@ -125,6 +125,18 @@ bool openrouterFallback(const QString &key);
 void setOpenrouterFallback(const QString &key, bool on);
 QStringList openrouterFallbackModels();   // model ids, for the request option
 
+// A provider whose checkbox on Options › Models is off: every model hidden and the group folded.
+QStringList collapsedProviders();
+bool isCollapsed(const QString &preset);
+void setCollapsed(const QString &preset, bool on);
+
+// The fallback threshold (owner, 2026-09-20): a line in the priority list. Rank 1 is Main; every
+// model above the line after it is a fallback, in order — the second model is the main fallback,
+// the third the next, as many as you want. `fallbackThreshold` is how many models are above the
+// line (2 by default: Main and one fallback); a ranked list shorter than that stops early.
+int fallbackThreshold();
+void setFallbackThreshold(int count);
+
 Sort sort();
 void setSort(Sort sort);
 }  // namespace curation
@@ -136,6 +148,8 @@ QList<Entry> ordered(QList<Entry> entries, Sort sort, const Catalog &catalog);
 // Rank 1 and rank 2 of the shown list; an empty Entry (key.isEmpty()) when there is none.
 Entry mainDefault(const Catalog &catalog);
 Entry fallback(const Catalog &catalog);
+// Ranks 2 … threshold of the shown list, in order: the failover chain the worker is sent.
+QList<Entry> fallbacks(const Catalog &catalog);
 // The best "percent left" over a preset's windows, or -1 with no figures.
 double percentLeft(const Catalog &catalog, const QString &preset);
 // "5h 62% left, resets 14:30 · weekly 40% left, resets tue" — empty with no figures. `now` is

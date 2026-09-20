@@ -226,6 +226,27 @@ private Q_SLOTS:
         QCOMPARE(curation::openrouterFallbackModels(), QStringList{QStringLiteral("glm-5.3-flash")});
     }
 
+    void collapsedProvidersAndTheFallbackThreshold() {
+        QSettings().setValue(QStringLiteral("provider/preset"), QStringLiteral("kimi-code"));
+        const Catalog catalog = catalogFrom(presets());
+        QVERIFY(!curation::isCollapsed(QStringLiteral("glm-coding")));
+        curation::setCollapsed(QStringLiteral("glm-coding"), true);
+        QVERIFY(curation::isCollapsed(QStringLiteral("glm-coding")));
+        curation::setCollapsed(QStringLiteral("glm-coding"), false);
+        QVERIFY(curation::collapsedProviders().isEmpty());
+        // Two above the line by default: Main and one fallback.
+        QCOMPARE(curation::fallbackThreshold(), 2);
+        QCOMPARE(fallbacks(catalog).size(), 1);
+        QCOMPARE(fallbacks(catalog).first().key, fallback(catalog).key);
+        curation::setFallbackThreshold(4);
+        QCOMPARE(fallbacks(catalog).size(), 3);
+        QCOMPARE(fallbacks(catalog).first().key, QStringLiteral("kimi-code|kimi-for-coding-highspeed"));
+        curation::setFallbackThreshold(1);   // nothing above the line but Main
+        QVERIFY(fallbacks(catalog).isEmpty());
+        curation::setFallbackThreshold(99);
+        QCOMPARE(fallbacks(catalog).size(), shown(catalog).size() - 1);
+    }
+
     void sortRoundTrips() {
         QCOMPARE(curation::sort(), Sort::Priority);
         curation::setSort(Sort::Remaining);

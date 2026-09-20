@@ -2102,35 +2102,62 @@ private:
         }
 
         // ----- 2. which models the picker shows -------------------------------------------------
+        // One checkbox per provider (owner, 2026-09-20): off hides every model and folds the group.
+        // A provider whose catalog is open-ended (more than six models — OpenRouter's live list)
+        // shows only the models you checked plus an id box that completes from the whole list;
+        // one whose list is complete (Claude Code, Codex, a plan's three tiers) shows them all and
+        // needs no box.
         models.rows << headingRow(QStringLiteral("models in the picker"));
         {
             relay::SettingRow info;
             info.kind = relay::SettingRow::Info;
             info.id = QStringLiteral("info:models/shown");
-            info.label = QStringLiteral("A checked model is a row in every pane's model box and in the picker. Only providers "
-                                        "you can use are listed; add a key above to see a provider's models. The reasoning "
-                                        "levels are what the model accepts; the level itself is picked per pane.");
+            info.label = QStringLiteral("A checked model is a row in every pane's model box and in the picker. "
+                                        "The reasoning levels are what the model accepts; the level itself is picked per pane.");
             models.rows << info;
         }
+        bool openrouterKey = false;
+        for (const auto &value : presets) {
+            const QJsonObject preset = value.toObject();
+            if (str(preset, "id") == QStringLiteral("openrouter")) openrouterKey = preset.value(QStringLiteral("has_stored_key")).toBool();
+        }
+        constexpr int kOpenEnded = 6;   // more catalog models than this: an id box, only the checked shown
         for (const QString &presetId : catalog.presets()) {
             const QList<relay::models::Entry> rows = catalog.ofPreset(presetId);
             if (rows.isEmpty() || !rows.first().usable || rows.first().local) continue;
-            relay::SettingRow group;
-            group.kind = relay::SettingRow::Info;
-            group.id = QStringLiteral("info:models/group/") + presetId;
-            group.label = catalog.presetLabels.value(presetId, presetId);
-            models.rows << group;
+            const bool collapsed = relay::models::curation::isCollapsed(presetId);
+            int shownCount = 0;
+            for (const relay::models::Entry &entry : rows) if (relay::models::curation::isShown(entry)) ++shownCount;
+            relay::SettingRow head;
+            head.kind = relay::SettingRow::Toggle;
+            head.id = QStringLiteral("option:models/provider/") + presetId;
+            head.label = catalog.presetLabels.value(presetId, presetId);
+            head.detail = collapsed ? QStringLiteral("hidden from the picker · check to show its models")
+                                    : QStringLiteral("%1 of %2 models in the picker").arg(shownCount).arg(rows.size());
+            head.aliases = QStringLiteral("provider models picker show hide ") + rows.first().provider;
+            head.checked = !collapsed && shownCount > 0;
+            head.onToggle = [catalog, presetId, rows, curated](bool on) {
+                relay::models::curation::setCollapsed(presetId, !on);
+                for (const relay::models::Entry &entry : rows) relay::models::curation::setShown(entry.key, on, catalog);
+                curated();
+            };
+            models.rows << head;
+            if (collapsed) continue;
+            const bool openEnded = rows.size() > kOpenEnded;
+            QStringList unlisted;   // the ids the box completes from
             for (const relay::models::Entry &entry : rows) {
+                if (openEnded && !relay::models::curation::isShown(entry) && !entry.custom) { unlisted << entry.model; continue; }
                 relay::SettingRow row;
                 row.kind = relay::SettingRow::Toggle;
                 row.id = QStringLiteral("option:models/shown/") + entry.key;
-                row.label = entry.label + (entry.custom ? QStringLiteral(" (added by you)") : QString());
+                row.label = QStringLiteral("    ") + entry.label + (entry.custom ? QStringLiteral(" (added by you)") : QString());
                 QStringList notes;
-                if (!entry.tier.isEmpty()) notes << QStringLiteral("the provider's %1 model").arg(entry.tier);
+                if (!entry.tier.isEmpty()) notes << QStringLiteral("%1 model").arg(entry.tier);
                 notes << (entry.efforts.isEmpty() ? QStringLiteral("no reasoning setting")
-                                                  : QStringLiteral("reasoning: ") + entry.efforts.join(QStringLiteral(" · ")));
+                                                  : QStringLiteral("reasoning ") + entry.efforts.join(QStringLiteral(" · ")));
                 if (entry.intelligence >= 0) notes << QStringLiteral("intelligence %1").arg(entry.intelligence);
-                row.detail = notes.join(QStringLiteral(" · ")) + QStringLiteral(" · id ") + entry.model;
+                if (entry.label != entry.model.toLower()) notes << entry.model;
+                row.detail = QStringLiteral("    ") + notes.join(QStringLiteral(" · "));
                 row.aliases = QStringLiteral("model picker show hide ") + entry.model + QLatin1Char(' ') + entry.provider;
                 row.checked = relay::models::curation::isShown(entry);
                 row.onToggle = [catalog, key = entry.key, curated](bool on) {
@@ -2138,17 +2165,15 @@ private:
                     curated();
                 };
                 models.rows << row;
-                if (!entry.openrouter.isEmpty() && !entry.guest && !entry.hosted) {
+                if (openrouterKey && !entry.openrouter.isEmpty() && !entry.guest && !entry.hosted && entry.preset != QStringLiteral("openrouter")) {
                     // The same model on OpenRouter when this provider fails (owner, 2026-09-20):
-                    // off unless asked for, per model — a pay-as-you-go GPT-6 call nobody chose
-                    // is worse than a failed turn; a flash model is the case it is for.
+                    // off unless asked for, per model, and only offered once an OpenRouter key is
+                    // stored. Two words; the tooltip-sized detail is the row's aliases.
                     relay::SettingRow twin;
                     twin.kind = relay::SettingRow::Toggle;
                     twin.id = QStringLiteral("option:models/openrouter_fallback/") + entry.key;
-                    twin.label = QStringLiteral("    ↳ when it fails, continue on openrouter's %1").arg(entry.openrouter);
-                    twin.detail = QStringLiteral("The same model through your OpenRouter key, pay-as-you-go, for that turn only. "
-                                                 "Tried after the ranked fallback. Needs an OpenRouter key");
-                    twin.aliases = QStringLiteral("openrouter fallback failover twin ") + entry.model;
+                    twin.label = QStringLiteral("        openrouter fallback");
+                    twin.aliases = QStringLiteral("openrouter fallback failover twin ") + entry.model + QLatin1Char(' ') + entry.openrouter;
                     twin.checked = relay::models::curation::openrouterFallback(entry.key);
                     twin.reset = [key = entry.key, this] { relay::models::curation::setOpenrouterFallback(key, false); if (m_active) m_active->agentOptionsChanged(QStringLiteral("models/openrouter_fallback")); };
                     twin.changed = twin.checked;
@@ -2162,25 +2187,32 @@ private:
                     relay::SettingRow remove;
                     remove.kind = relay::SettingRow::Buttons;
                     remove.id = QStringLiteral("models/custom/") + entry.key;
-                    remove.label = QStringLiteral("remove %1").arg(entry.label);
-                    remove.detail = QStringLiteral("Forget this id; the provider's own list is unaffected");
+                    remove.label = QStringLiteral("    remove %1").arg(entry.label);
+                    remove.detail = QStringLiteral("    Forget this id; the provider's own list is unaffected");
                     remove.buttonTexts = QStringList{QStringLiteral("remove")};
                     remove.onButton = [key = entry.key, curated](int) { relay::models::curation::removeCustom(key); curated(); };
                     models.rows << remove;
                 }
             }
-            // A model the catalog does not list (owner's example: GPT Luna), by the id the API takes.
-            relay::SettingRow add = textRow(QStringLiteral("models/add/") + presetId, QStringLiteral("add a model by id"),
-                QStringLiteral("The model id as %1 takes it; it joins the picker at once").arg(rows.first().provider),
-                QStringLiteral("model id"), [catalog, presetId, curated](const QString &value) {
-                    const QString id = value.trimmed();
-                    if (id.isEmpty()) return;
-                    relay::models::curation::addCustom(presetId, id, catalog);
-                    QSettings().remove(QStringLiteral("models/add/") + presetId);   // the box empties: the row is below now
-                    curated();
-                });
-            add.text.clear(); add.changed = false;
-            models.rows << add;
+            if (openEnded) {
+                // opencode's box: type part of an id and pick from what the provider serves; an id
+                // it does not list is added as typed.
+                relay::SettingRow add = textRow(QStringLiteral("models/add/") + presetId, QStringLiteral("    add a model"),
+                    QStringLiteral("    %1 more on %2 · type to search their ids; an unlisted id is added as typed")
+                        .arg(unlisted.size()).arg(rows.first().provider),
+                    QStringLiteral("model id"), [catalog, presetId, curated](const QString &value) {
+                        const QString id = value.trimmed();
+                        if (id.isEmpty()) return;
+                        const QString key = relay::models::Catalog::keyFor(presetId, id);
+                        if (catalog.find(key)) relay::models::curation::setShown(key, true, catalog);
+                        else relay::models::curation::addCustom(presetId, id, catalog);
+                        QSettings().remove(QStringLiteral("models/add/") + presetId);   // the box empties: the row is above now
+                        curated();
+                    });
+                add.completions = unlisted;
+                add.text.clear(); add.changed = false;
+                models.rows << add;
+            }
             if (const QString guest = presetId.startsWith(QStringLiteral("guest:")) ? presetId.mid(6) : QString(); !guest.isEmpty()) {
                 // What the guest does when it wants to run a command or change a file. Relay's own
                 // agent has no per-action approvals and neither does a guest by default (the
@@ -2189,8 +2221,8 @@ private:
                 const QString key = guestSettingKey(guest, QStringLiteral("permissions"));
                 const QString current = QSettings().value(key).toString().trimmed();
                 relay::SettingRow ask = choiceRow(QStringLiteral("option:") + key,
-                    QStringLiteral("when it wants to use a tool"),
-                    QStringLiteral("%1 runs with no per-action approvals, like Relay's own agent. "
+                    QStringLiteral("    when it wants to use a tool"),
+                    QStringLiteral("    %1 runs with no per-action approvals, like Relay's own agent. "
                                    "Ask me puts each one to you as a card: Allow, Allow for session, "
                                    "Deny, or Deny and stop the turn").arg(rows.first().provider),
                     {QStringLiteral("bypass"), QStringLiteral("ask"), QStringLiteral("deny")},
@@ -2208,16 +2240,39 @@ private:
         }
 
         // ----- 3. priority ----------------------------------------------------------------------
+        // Rank 1 is Main. A line sits in the list (owner, 2026-09-20): every model above it after
+        // Main is a fallback, in order — the second model the main fallback, the third the next, as
+        // many as you want — and nothing below it is ever tried unasked. Relay Free is a fallback
+        // only when it is above the line, which is what the old "allow Relay Free" switch said.
         models.rows << headingRow(QStringLiteral("priority"));
         {
             relay::SettingRow info;
             info.kind = relay::SettingRow::Info;
             info.id = QStringLiteral("info:models/priority");
-            info.label = QStringLiteral("Rank 1 is Main: new panes start on it. Rank 2 is the fallback: /swap goes there and "
-                                        "back. This is also the picker's default order.");
+            info.label = QStringLiteral("Rank 1 is Main: new panes start on it. The models above the line after it are the "
+                                        "fallbacks, in order: /swap goes to the first, and a failing turn walks them. "
+                                        "This is also the picker's default order.");
             models.rows << info;
         }
         const QList<relay::models::Entry> ranked = relay::models::shown(catalog);
+        const int threshold = qBound(1, relay::models::curation::fallbackThreshold(), qMax(1, ranked.size()));
+        auto lineRow = [&] {
+            relay::SettingRow line;
+            line.kind = relay::SettingRow::Buttons;
+            line.id = QStringLiteral("models/threshold");
+            line.label = QStringLiteral("──────────── fallbacks end here ────────────");
+            line.detail = threshold <= 1 ? QStringLiteral("No fallback: a failing turn stops. Move the line down to add some")
+                                         : QStringLiteral("%1 fallback%2 above the line; nothing below it is tried unasked")
+                                               .arg(threshold - 1).arg(threshold == 2 ? QString() : QStringLiteral("s"));
+            line.aliases = QStringLiteral("fallback threshold line failover relay free");
+            line.buttonTexts = QStringList{QStringLiteral("↑"), QStringLiteral("↓")};
+            line.onButton = [this, catalog, threshold, curated, count = ranked.size()](int index) {
+                relay::models::curation::setFallbackThreshold(qBound(1, threshold + (index == 0 ? -1 : 1), qMax(1, count)));
+                applyMainDefault(catalog);
+                curated();
+            };
+            return line;
+        };
         for (int i = 0; i < ranked.size(); ++i) {
             const relay::models::Entry &entry = ranked.at(i);
             relay::SettingRow row;
@@ -2225,22 +2280,25 @@ private:
             row.id = QStringLiteral("models/rank/") + entry.key;
             row.label = QStringLiteral("%1. %2").arg(i + 1).arg(entry.displayName());
             row.detail = i == 0 ? QStringLiteral("main · new panes start here")
-                       : i == 1 ? QStringLiteral("fallback · /swap goes here")
-                                : QString();
+                       : i < threshold ? QStringLiteral("fallback %1%2").arg(i).arg(i == 1 ? QStringLiteral(" · /swap goes here") : QString())
+                                       : QString();
             row.aliases = QStringLiteral("priority order rank main fallback ") + entry.model;
             row.buttonTexts = QStringList{QStringLiteral("↑"), QStringLiteral("↓")};
-            row.agentSafeButtons = QList<int>{0, 1};   // reordering models, and the other arrow undoes it (#FEJQ)
             row.onButton = [this, catalog, key = entry.key, curated](int index) {
                 relay::models::curation::move(key, index == 0 ? -1 : 1, catalog);
                 applyMainDefault(catalog);
                 curated();
             };
             models.rows << row;
+            if (i + 1 == threshold) models.rows << lineRow();
         }
+        if (ranked.isEmpty()) models.rows << lineRow();
         models.rows << buttonRow(QStringLiteral("models.resetOrder"), QStringLiteral("reset the order"),
-                                 QStringLiteral("Back to the default: the default provider's main and flash models, then each provider's main"),
+                                 QStringLiteral("Back to the default: the default provider's main and flash models, then each provider's main; one fallback"),
                                  QStringLiteral("reset"), [this, catalog, curated] {
             relay::models::curation::resetPriority();
+            relay::models::curation::setFallbackThreshold(2);
+            applyMainDefault(catalog);
             curated();
         });
 
@@ -2264,25 +2322,13 @@ private:
                 if (m_active) m_active->agentOptionsChanged(QStringLiteral("agent/effort"));
             });
         }
-        models.rows << toggleRow(QStringLiteral("agent/panes_flash"), QStringLiteral("New panes use the Flash agent"),
-                                 QStringLiteral("Off: every pane starts on the main agent. On: the first pane of a window keeps it"), false);
         {
-            relay::SettingRow failover = toggleRow(QStringLiteral("agent/failover"), QStringLiteral("Fall over to a working provider"),
-                                                  QStringLiteral("A turn whose model keeps failing, after its retries, continues on another "
-                                                                 "provider with a stored key and then Relay Free — that turn only. "
-                                                                 "The pane keeps the model you chose"), true);
-            failover.aliases = QStringLiteral("failover fallback retry provider down error 429 overloaded");
+            relay::SettingRow failover = toggleRow(QStringLiteral("agent/failover"), QStringLiteral("Fall over to a fallback model"),
+                                                  QStringLiteral("A turn whose model keeps failing, after its retries, continues on the "
+                                                                 "fallbacks above the line in the priority list, in order — that turn "
+                                                                 "only. The pane keeps the model you chose"), true);
+            failover.aliases = QStringLiteral("failover fallback retry provider down error 429 overloaded relay free");
             models.rows << failover;
-            // Relay Free is the one failover target that is not already the user's own: another
-            // company's terms and a shared allowance, so it is opt-in even when failover is on
-            // (owner, 2026-09-19). A pane already running on Relay Free is unaffected.
-            relay::SettingRow hosted = toggleRow(QStringLiteral("agent/failover_hosted"),
-                                                 QStringLiteral("Allow Relay Free as a fallback when my own provider keeps failing"),
-                                                 QStringLiteral("Off: only your own providers with a stored key are tried. "
-                                                                "On: Relay's hosted service is the last resort, and the turn's "
-                                                                "conversation goes through it"), false);
-            hosted.aliases = QStringLiteral("failover relay free hosted fallback last resort");
-            models.rows << hosted;
         }
         models.rows << numberRow(QStringLiteral("provider/max_tokens"), QStringLiteral("Output token limit"),
                                  QStringLiteral("Per model call, reasoning included. 0 = automatic: each model's own "

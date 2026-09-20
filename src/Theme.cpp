@@ -457,7 +457,8 @@ QLineEdit#settingsSearch { padding: 6px 10px; font-size: 10.5pt; }
 QTabBar#settingsTabs::tab { padding: 4px 10px; margin: 0 2px 0 0; }
 QScrollArea#settingsPage, QWidget#settingsPageBody { background: transparent; border: none; }
 QLabel#settingsBlurb, QLabel#settingsInfo { color: @muted; }
-QLabel#settingsHeading { color: @muted; font-family: "@mono"; font-size: 9pt; font-weight: 600; letter-spacing: 1px; padding: 10px 10px 2px 10px; }
+QLabel#settingsHeading { color: @text; font-size: 11pt; font-weight: 700; padding: 16px 10px 4px 10px; border-bottom: 1px solid @border; }
+QLabel#settingsSubheading { color: @text; font-size: 10pt; font-weight: 600; }
 QFrame#settingsRow { background: transparent; border: 1px solid transparent; border-radius: 8px; }
 QFrame#settingsRow:hover { background: @surface; }
 QFrame#settingsRow[current="true"] { background: @surface; border-color: @accentBorder; }

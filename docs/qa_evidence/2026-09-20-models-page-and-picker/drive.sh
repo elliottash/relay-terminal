@@ -14,7 +14,9 @@
 #   implementer-e-options.png     /models: Options › Models — providers, the checklist, priority
 #   implementer-g-options-checklist.png the checklist group, with the per-model "continue on
 #                                 openrouter" switch under a model OpenRouter also serves
-#   implementer-f-options-down.png the same page scrolled to the priority list and defaults
+#   implementer-h-options-priority.png the priority group: ranks with ↑ ↓ and the movable
+#                                 'fallbacks end here' line after rank 2
+#   implementer-f-options-down.png the same page scrolled to the end of the priority list and defaults
 #
 # No provider account and no network turn: two literal non-key strings in the environment make
 # two presets "stored", and nothing is ever submitted. Needs Xvfb, xdotool, ImageMagick.
@@ -120,8 +122,11 @@ shot e-options
 # g. the checklist group: each model's row and, under one OpenRouter also serves, the opt-in switch
 for _ in 1 2 3; do k Page_Down; done; sleep 1
 shot g-options-checklist
+# h. the priority group: ranks with ↑ ↓, the fallback line after rank 2
+for _ in 1 2 3; do k Page_Down; done; sleep 1
+shot h-options-priority
 # f. scrolled down to priority and defaults
-for _ in 1 2 3 4 5 6 7 8; do k Page_Down; done; sleep 1
+for _ in 1 2 3 4 5 6; do k Page_Down; done; sleep 1
 shot f-options-down
 
 echo "shots written to $out"
