@@ -6,11 +6,14 @@
 //   view.update(paneState);        // every pane_state for this pane
 //   view.onEditText(message);      // the desktop's queue_edit_text answer
 //   view.onRefused(message);       // an `error` answering one of the view's own requests
+//   view.onAgentEvent(message);    // a worker event: the agent's ask (question/question_closed)
+//   view.onOwnerAsks(message);     // owner_asks: knocks, guest prompts, control requests
 //   view.terminalSlot              // where the host puts the terminal canvas
 //   view.destroy();
 //
-// The layout is the Qt pane's, top to bottom: terminal, thinking bubble, queue strip, prompt box
-// with its strip (folder, turn clock, "% left", model), in the colours of the desktop's own theme
+// The layout is the Qt pane's, top to bottom: terminal, thinking bubble, queue strip, what is
+// waiting for the person (the owner's decisions, then the agent's ask), prompt box with its strip
+// (folder, turn clock, "% left", model, Recap, Stop), in the colours of the desktop's own theme
 // (the message's `theme`, drawn by app/pane-theme.css).
 //
 // Everything the pane says about its own work comes from the message and is drawn as it arrived:
@@ -20,13 +23,15 @@
 // listed for that row.
 //
 // What the view does write is the words on its own controls, the parts the Qt pane has no
-// equivalent of: the touch action sheet's verbs (ACTION_WORDS), the send menu (SEND_WHEN), "New
-// conversation", the QUEUE heading, the "▸ running" lead, the accessibility labels, and the "Next
-// time" hints a keyboard gets. Those are fixed words about this view's own buttons — never a
-// restatement of anything in the message — and where the desktop has a word for the same thing
-// (its strip says QUEUE too, src/Pane.h) the two are kept in step by hand. It used to say here
-// that the view writes none of the pane's words, which was never true of them; owner, 2026-09-19:
-// published labels would still need these as a fallback, so the claim went instead (#0VT4).
+// equivalent of: the touch action sheet's verbs (ACTION_WORDS), the send menu (SEND_WHEN), the
+// pane menu (PANE_ACTIONS), the words on the owner's three decisions (OWNER_ASKS), "New
+// conversation", the QUEUE heading, the "▸ running" lead, "Stop", "Skip", the accessibility
+// labels, and the "Next time" hints a keyboard gets. Those are fixed words about this view's own
+// buttons — never a restatement of anything in the message — and where the desktop has a word for
+// the same thing (its strip says QUEUE too, src/Pane.h) the two are kept in step by hand. It used
+// to say here that the view writes none of the pane's words, which was never true of them; owner,
+// 2026-09-19: published labels would still need these as a fallback, so the claim went instead
+// (#0VT4).
 //
 // Everything from the wire goes in through textContent. There is no innerHTML here, and styles are
 // set through CSSOM only, so the app's CSP (no inline script or style) holds.
@@ -52,6 +57,21 @@ const SEND_WHEN = [
   ['steer', 'at the next tool call'],
   ['now', 'now'],
 ];
+
+// The pane's other actions, the ones the strip has no room for. The desktop reaches Recap from
+// Actions › Recap and `/recap`; a phone has neither, so it gets a menu of its own.
+const PANE_ACTIONS = [
+  ['recap', 'Recap the conversation'],
+];
+
+// The three decisions an owner's `full` device may take from away (protocol § 10.2, 10.3, 10.4;
+// owner's decision 6 on card #PH0N). The words are this view's own, as the sheet's and the queue
+// heading's are: the desktop's dialogs say the same, and nothing in the message restates them.
+const OWNER_ASKS = {
+  knock: { yes: 'Admit', no: 'Refuse' },
+  prompt: { yes: 'Run', no: 'Refuse' },
+  control: { yes: 'Allow', no: 'Deny' },
+};
 
 // Key text for the hints. The queue keys are fixed on the desktop (Pane.h, rebuildQueueStrip);
 // `send_now` and `sessions` are Keymap actions, so a host passes the live text for those.
@@ -151,6 +171,15 @@ export function mountPane(container, options = {}) {
   let typedAhead = '';        // keys typed on a selected row, for when its text comes back
   let editRow = '';           // the row whose text is in the prompt box
   let editRequest = '';       // the id of the queue_edit waiting for its text or a refusal
+  // The agent's ask (sessions protocol 27): the `question` event's own id and its questions, and
+  // which of them this view is showing. The desktop puts them up one at a time and each answer is
+  // one line, so the view steps through them the same way — there is no event per question.
+  let question = null;
+  let questionAt = 0;
+  // Knocks, guest prompts and control requests waiting for the owner (protocol § 10). The hub
+  // sends these to `full` devices only; the latest list replaces the last, so an item that has
+  // been decided — here, at the desk, or by lapsing — simply stops arriving.
+  let ownerAsks = [];
   let toastTimer = 0;
   const hintLast = new Map();
   let hintLastAny = -Infinity;
@@ -263,14 +292,43 @@ export function mountPane(container, options = {}) {
   // Where the host puts a control of its own (the client's microphone), so its buttons sit in the
   // pane's strip instead of a second bar under it. Empty and invisible until the host fills it.
   const hostSlot = el('span', 'rp-host-slot');
+  // The pane's actions with no room in the strip — Recap today (protocol § 6.4's
+  // `recap_request`). The desktop reaches it from Actions › Recap; a phone has no palette.
+  const moreButton = button('rp-chip rp-more', '⋯', 'Pane actions');
+  moreButton.setAttribute('aria-haspopup', 'menu');
+  // Stop, between the microphone and Send — the order the client's own composer has always had
+  // (app/index.html: mic, Stop, Send), and the one thing the pane view had no way to do at all
+  // once it was mounted (#PH0N). Drawn only while a turn is running, because there is nothing to
+  // stop otherwise and a phone's strip has no room for a dead button.
+  const stopButton = button('rp-stop', 'Stop', 'Stop the agent turn');
+  stopButton.hidden = true;
   const sendGroup = el('span', 'rp-send-group');
   const sendButton = button('rp-send', '', 'Send');
   sendButton.append(svgIcon(ICON_SEND));
   const sendMenuButton = button('rp-send-menu', '▾', 'When to send');
   sendMenuButton.setAttribute('aria-haspopup', 'menu');
   sendGroup.append(sendButton, sendMenuButton);
-  strip.append(folderChip, sessionsButton, spacer, clockChip, contextChip, allowanceChip, modelWrap, hostSlot, sendGroup);
+  strip.append(folderChip, sessionsButton, spacer, clockChip, contextChip, allowanceChip, modelWrap,
+               moreButton, hostSlot, stopButton, sendGroup);
   composer.append(line, strip);
+
+  // ---- what is waiting for the person ------------------------------------------------------
+  // Two strips above the prompt box, in the order they interrupt: the decisions only the owner can
+  // take (a knock at the door, a guest's prompt, a guest asking for the keyboard), then the
+  // agent's own question, which sits right on top of the box its answer is typed into.
+  const asks = el('section', 'rp-asks');
+  asks.setAttribute('aria-label', 'Waiting for you');
+  asks.hidden = true;
+  const ask = el('section', 'rp-ask');
+  ask.setAttribute('aria-label', 'The agent is asking');
+  ask.hidden = true;
+  const askHead = el('div', 'rp-ask-head');
+  const askHeader = el('span', 'rp-ask-header');
+  const askStep = el('span', 'rp-ask-step');
+  askHead.append(askHeader, askStep);
+  const askText = el('div', 'rp-ask-text');
+  const askChoices = el('div', 'rp-ask-choices');
+  ask.append(askHead, askText, askChoices);
 
   // ---- sheets: row actions, the send menu, the session manager -----------------------------
   const layer = el('div', 'rp-layer');
@@ -283,7 +341,7 @@ export function mountPane(container, options = {}) {
   let sheetOpener = null;
   let sheetKind = '';
 
-  root.append(termWrap, thinking, queue, composer, layer);
+  root.append(termWrap, thinking, queue, asks, ask, composer, layer);
   container.appendChild(root);
   placeDevice();
   const resize = typeof ResizeObserver === 'function' ? new ResizeObserver(placeDevice) : null;
@@ -593,21 +651,39 @@ export function mountPane(container, options = {}) {
   // ---- the prompt box ---------------------------------------------------------------------
   const busy = () => !!(obj(state && state.turn) && state.turn.busy === true);
 
-  function compose(text, when) {
-    if (!text.trim()) return;
+  // One prompt on its way to the desktop. `route` is what the protocol's `agent` field asks for:
+  // by default the line is routed the way the desktop's own composer would route it, and
+  // `route: false` keeps it agent-bound — which is what an answer to the agent's ask is, whatever
+  // its words happen to look like (sessions protocol 27.3).
+  function sendCompose(text, when, { route = true } = {}) {
     // `agent: false` asks the desktop to route the line the way its own prompt box would — a
     // command runs in the shell, anything else goes to the agent. Only a device the desktop
     // trusts with typing may ask for that, and the state says so: a full device is offered the
     // composer's own modes, an agent device only "agent". Without this a typed command reached
     // the agent, which ran it as a tool call on the owner's key (found by #W5N2's end-to-end QA).
     const modes = arr(state && state.composer && state.composer.modes);
-    const mayRoute = modes.includes('auto') || modes.includes('shell');
+    const mayRoute = route && (modes.includes('auto') || modes.includes('shell'));
     emit('compose', {
       text, when,
       ...(mayRoute ? { agent: false } : {}),
       // The same dedup id the client's older composer sends, so a retried send is not two prompts.
       msg_id: messageId(),
     });
+  }
+
+  function compose(text, when) {
+    if (!text.trim()) return;
+    if (askList()[questionAt]) {
+      // The agent is asking, and the prompt box is where its answer is typed (sessions protocol
+      // 27.4) — so while a question is drawn above the box, the line is sent agent-bound and the
+      // desktop's ask takes it. Routed first, a `full` device's line could have gone to the shell
+      // with the ask left standing and this view stepping past it (27.3); the shell is one Skip
+      // away, which is a smaller cost than a wrong answer on the phone's screen.
+      answerAsk(text, when);
+      editRow = '';
+      return;
+    }
+    sendCompose(text, when);
     editRow = '';
     staged = when === 'queue'
       ? { text, stage: 1, at: clock(), rowId: '', steerId: '', known: new Set(rowList().map((r) => r.id)) }
@@ -671,6 +747,143 @@ export function mountPane(container, options = {}) {
     const hasText = !!box.value.trim();
     sendButton.disabled = !hasText;
     sendMenuButton.hidden = !busy();
+  }
+
+  // ---- Stop, Recap, and what is waiting for the person --------------------------------------
+
+  // Whether this device may act on the pane at all. The hub empties `composer.modes` for a `view`
+  // device (protocol § 16, `for_capability`), and `view` is below the `agent` floor that
+  // `agent_stop` and `recap_request` need — so the one flag answers for both buttons.
+  const mayAct = () => arr(state && state.composer && state.composer.modes).length > 0;
+  // The owner's own level, as `pane_state` itself draws the line: the whole `sessions` block is
+  // dropped below `full`. The hub sends the owner's decisions to `full` devices only, so this is
+  // defence in depth rather than the gate — a row that arrived anyway is read, not pressed.
+  const ownerLevel = () => !!obj(state && state.sessions);
+
+  function renderStop() {
+    // Only while a turn is running: `turn.busy` is the one fact about it the state carries, and
+    // there is nothing to stop otherwise.
+    stopButton.hidden = !mayAct() || !busy();
+    moreButton.hidden = !mayAct();
+  }
+
+  function openPaneMenu() {
+    openSheet('pane', '', (node) => {
+      node.setAttribute('aria-label', 'Pane actions');
+      for (const [action, words] of PANE_ACTIONS) {
+        const item = sheetButton('', words, () => {
+          if (action === 'recap') emit('recap_request');
+        });
+        item.dataset.action = action;
+        node.appendChild(item);
+      }
+    }, moreButton);
+  }
+
+  // ---- the agent's ask (sessions protocol 27) ------------------------------------------------
+
+  const askList = () => arr(question && question.questions).filter(obj);
+
+  function stepAsk() {
+    questionAt += 1;
+    renderAsk();
+  }
+
+  function answerAsk(text, when = busy() ? 'queue' : 'now') {
+    // There is no `question_answer` a client may send (protocol § 10.1, sessions protocol 27.3):
+    // the answer is an ordinary prompt from this device, and the desktop's ask takes it. It is
+    // sent **agent-bound**: a choice the model happened to label "git status" is an answer to the
+    // question, not a command, and a routed one would run in the shell with the ask left standing
+    // (`Pane::submitRemote` hands an unrouted line to the ask before anything else).
+    sendCompose(text, when, { route: false });
+    stepAsk();
+  }
+
+  function renderAsk() {
+    const list = askList();
+    const item = questionAt < list.length ? list[questionAt] : null;
+    ask.hidden = !item;
+    askChoices.textContent = '';
+    if (!item) return;
+    // The worker's own words for the decision and the question (protocol 27.2), drawn as they
+    // arrived. The step counter is this view's, because the desktop asks them one at a time and
+    // a phone showing question 2 of 3 with no count would look like the whole ask.
+    askHeader.textContent = str(item.header);
+    askStep.textContent = list.length > 1 ? `${questionAt + 1} of ${list.length}` : '';
+    askStep.hidden = list.length <= 1;
+    askText.textContent = str(item.question);
+    if (!mayAct()) return;     // a `view` device reads the question; it does not answer it
+    for (const option of arr(item.options).filter(obj)) {
+      const label = str(option.label);
+      if (!label) continue;
+      const choice = button('rp-ask-choice', label);
+      if (option.recommended === true) choice.classList.add('rp-recommended');
+      if (str(option.description)) choice.title = str(option.description);
+      choice.addEventListener('click', () => answerAsk(label));
+      askChoices.appendChild(choice);
+    }
+    // The desk's two ways past a question (27.4): "/skip" skips this one, and anything else typed
+    // is the answer. The prompt box is directly below, so only the skip needs a button here.
+    const skip = button('rp-ask-skip', 'Skip');
+    skip.addEventListener('click', () => answerAsk('/skip'));
+    askChoices.appendChild(skip);
+  }
+
+  // ---- the owner's own decisions (protocol § 10.2, 10.3, 10.4) -------------------------------
+
+  // What each waiting item says. The fields are the hub's (a name, a role, the five-digit code, a
+  // guest's prompt); the sentence around them is this view's own, like the sheet's verbs.
+  function ownerAskLine(item) {
+    const name = str(item.name) || 'someone';
+    if (item.kind === 'knock') {
+      const role = str(item.role);
+      const code = str(item.code);
+      return `${name} wants to join${role ? ` as ${role}` : ''}${code ? ` · code ${code}` : ''}`;
+    }
+    if (item.kind === 'prompt') return `${name}: ${str(item.text)}`;
+    return `${name} asks to type`;
+  }
+
+  // The answer, in the desktop's own words for it (protocol § 10.5): the same three messages the
+  // sharing dialog sends, which is what makes a phone's Admit and a desktop's Admit one thing.
+  function answerOwnerAsk(item, yes) {
+    if (item.kind === 'knock') {
+      send({ t: 'knock_answer', participant: str(item.id), admit: yes,
+             role: str(item.role) || 'viewer' });
+    } else if (item.kind === 'prompt') {
+      send({ t: 'prompt_answer', id: str(item.id), approve: yes });
+    } else {
+      send({ t: 'control_answer', pane: str(item.pane), participant: str(item.id), grant: yes });
+    }
+    // The hub sends the list again once it has applied the answer; until then the row goes,
+    // because a button that stays pressable is a second admit waiting to happen.
+    ownerAsks = ownerAsks.filter((other) => other !== item);
+    renderOwnerAsks();
+  }
+
+  function renderOwnerAsks() {
+    const pane = paneId();
+    // A knock is about joining this desktop, not this pane, so it is shown wherever you are; a
+    // guest's prompt and a request for the keyboard name one pane and belong to that pane.
+    const items = ownerAsks.filter((item) => item.kind === 'knock' || !item.pane || item.pane === pane);
+    asks.textContent = '';
+    asks.hidden = items.length === 0;
+    for (const item of items) {
+      const row = el('div', 'rp-ask-row');
+      row.dataset.kind = str(item.kind);
+      row.dataset.askId = str(item.id);
+      row.append(el('span', 'rp-ask-row-text', ownerAskLine(item)));
+      if (!ownerLevel()) { asks.appendChild(row); continue; }
+      const words = OWNER_ASKS[item.kind] || OWNER_ASKS.knock;
+      const buttons = el('span', 'rp-ask-row-buttons');
+      const yes = button('rp-ask-yes', words.yes);
+      yes.addEventListener('click', () => answerOwnerAsk(item, true));
+      const no = button('rp-ask-no rp-danger', words.no);
+      no.addEventListener('click', () => answerOwnerAsk(item, false));
+      buttons.append(yes, no);
+      row.appendChild(buttons);
+      asks.appendChild(row);
+    }
   }
 
   // ---- drawing ----------------------------------------------------------------------------
@@ -823,6 +1036,9 @@ export function mountPane(container, options = {}) {
     renderThinking();
     renderQueue();
     renderStrip();
+    renderStop();
+    renderAsk();
+    renderOwnerAsks();
     // Rebuilt only when the rows actually changed. A `pane_state` arrives up to ten times a second
     // while a turn runs, and `openSheet()` clears the sheet and focuses its first button — so an
     // open conversations list threw the focus back to the top and scrolled itself there, ten times
@@ -853,6 +1069,12 @@ export function mountPane(container, options = {}) {
     box.focus();
   });
   on(sendMenuButton, 'click', openSendMenu);
+  on(stopButton, 'click', () => {
+    // The turn's Stop (protocol § 6.4). The desktop answers with `agent_stopped`, which takes
+    // `turn.busy` down and the button with it; nothing here guesses at the new state.
+    emit('agent_stop');
+  });
+  on(moreButton, 'click', openPaneMenu);
   on(box, 'keydown', (event) => {
     if (event.isComposing || event.keyCode === 229) return;
     if (event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.metaKey) {
@@ -1040,6 +1262,49 @@ export function mountPane(container, options = {}) {
       if (state) renderRows();
       renderSendState();
       showToast(str(m.message) || 'That row could not be taken back.');
+      return true;
+    },
+
+    // A worker event for this pane, as the host received it (`{t:"agent", pane, event}`) or the
+    // event on its own. The only ones the view draws are the agent's ask and its closing
+    // (sessions protocol 27): everything else the agent says is already on the screen above,
+    // because Relay prints it into the pane's terminal. Returns true when it was one of those.
+    onAgentEvent(message) {
+      const outer = obj(message);
+      if (!outer) return false;
+      const event = obj(outer.event) || outer;
+      const kind = str(event.event);
+      if (kind === 'question') {
+        question = { id: str(event.id), questions: arr(event.questions).filter(obj) };
+        questionAt = 0;
+      } else if (kind === 'question_closed') {
+        // Stop, or the end of the turn, took the ask away. An id for an ask this view is not
+        // showing is somebody else's, or one it has already dropped.
+        if (question && str(event.id) && str(event.id) !== question.id) return false;
+        question = null;
+        questionAt = 0;
+      } else if (['agent_finished', 'agent_stopped', 'cancelled', 'error'].includes(kind)) {
+        // The turn ended: the worker's `question_closed` says the same, but not for a view that
+        // missed it, and a question with no turn behind it has nobody to answer.
+        if (!question) return false;
+        question = null;
+        questionAt = 0;
+      } else {
+        return false;
+      }
+      renderAsk();
+      return true;
+    },
+
+    // `owner_asks {items}`: the knocks, guest prompts and control requests waiting for a decision
+    // (protocol § 10). The hub sends the whole list to a `full` device every time it changes, so
+    // the latest one replaces the last and an item that was decided anywhere simply stops
+    // arriving. Returns true when the message was one.
+    onOwnerAsks(message) {
+      const m = obj(message);
+      if (!m || (m.t !== undefined && m.t !== 'owner_asks')) return false;
+      ownerAsks = arr(m.items).filter(obj).filter((item) => OWNER_ASKS[str(item.kind)]);
+      renderOwnerAsks();
       return true;
     },
 

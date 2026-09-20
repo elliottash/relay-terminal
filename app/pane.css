@@ -231,6 +231,73 @@
 }
 .rp-row-x:hover { color: var(--qss-queueButton-hover-color); border-color: var(--qss-queueButton-hover-border-color); }
 
+/* ---- what is waiting for the person ------------------------------------------------------- */
+/* Two strips between the queue and the prompt box: the decisions only the owner can take, and the
+   agent's own question. Both are drawn in the theme's amber `warning` ink, which is what the
+   desktop pane draws an ask in — amber is the colour of something waiting on a person (#4E13). */
+.rp-asks, .rp-ask {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--qss-queueStrip-background);
+  border: 1px solid var(--rt-warning-border);
+  border-radius: var(--qss-queueStrip-border-radius);
+}
+.rp-ask-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--rp-tap);
+  min-width: 0;
+}
+.rp-ask-row-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--rt-text);
+}
+.rp-ask-row-buttons { flex: none; display: inline-flex; gap: 6px; }
+.rp-ask-head { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.rp-ask-header {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--rt-warning);
+  font-weight: 600;
+}
+.rp-ask-step { flex: none; color: var(--rt-muted); font-size: var(--rt-secondary-size); }
+.rp-ask-text { color: var(--rt-text); }
+.rp-ask-choices { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Every button in these two strips: a tap target, quiet until it is the recommended one. */
+.rp-ask-choice, .rp-ask-skip, .rp-ask-yes, .rp-ask-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--rp-tap);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 10px;
+  background: var(--qss-stripChip-background);
+  border: 1px solid var(--rt-border);
+  border-radius: var(--qss-stripChip-border-radius);
+  color: var(--rt-text);
+  cursor: pointer;
+}
+.rp-ask-choice:hover, .rp-ask-skip:hover, .rp-ask-yes:hover, .rp-ask-no:hover { border-color: var(--rt-accent-border); }
+/* `recommended` is a flag on the option, drawn rather than spelled (sessions protocol 27.5). */
+.rp-ask-choice.rp-recommended { border-color: var(--rt-accent); color: var(--rt-accent); }
+.rp-ask-skip { color: var(--rt-muted); }
+.rp-ask-yes { border-color: var(--rt-accent); color: var(--rt-accent); }
+.rp-ask-no.rp-danger { color: var(--rt-error); border-color: var(--rt-border); }
+
 /* ---- the prompt box and its strip --------------------------------------------------------- */
 .rp-composer {
   flex: none;
@@ -370,6 +437,24 @@ button.rp-chip:hover { color: var(--qss-stripChip-hover-color); border-color: va
   cursor: pointer;
 }
 .rp-send-menu { background: var(--qss-stripChip-background); color: var(--rt-accent); border-color: var(--rt-accent-border); }
+/* Stop: between the microphone and Send, the order the client's own composer has (app/index.html).
+   Amber, because it is the one button in the strip that ends something (--rt-warning is the
+   theme's "waiting on a person" ink, the same one the desktop draws an ask in). */
+.rp-stop {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: max(calc(var(--qss-stripChip-min-height) + 6px), var(--rp-tap));
+  padding: 0 10px;
+  border: 1px solid var(--rt-warning-border);
+  background: transparent;
+  color: var(--rt-warning);
+  border-radius: var(--qss-stripChip-border-radius);
+  cursor: pointer;
+}
+.rp-stop:hover { background: var(--rt-surface); }
+/* The pane's other actions (Recap today), as quiet as any other chip. */
+.rp-more { flex: none; }
 .rp-send:hover:not(:disabled) { background: var(--rt-accent-hover); }
 .rp-send:disabled { background: var(--qss-stripChip-background); border-color: var(--rt-border); color: var(--rt-disabled); cursor: default; }
 .rp-icon { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }

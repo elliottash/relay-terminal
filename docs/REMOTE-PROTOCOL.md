@@ -928,9 +928,16 @@ them on the screen, because Relay prints them into the terminal; stored transcri
 output (`turn_transcript_get`, `tool_output_get`) are refused, since they hold every file the
 agent read.
 
-`question` and `question_closed` (the ask of sessions protocol 27) are forwarded, but as
-of today no web client draws them and they are not in `GUEST_EVENTS`: an owner's phone and a share
-participant both see a question only as the text the desktop printed into the mirrored terminal.
+`question` and `question_closed` (the ask of sessions protocol 27) are forwarded and are not in
+`GUEST_EVENTS`: a share participant sees a question only as the text the desktop printed into the
+mirrored terminal. **The phone's pane view draws them** (`app/pane.js`, card #PH0N, 2026-09-20):
+the questions one at a time above the prompt box, in the worker's own words, one button per
+option with the recommended one marked, a Skip (the desk's `/skip`), and the prompt box for the
+person's own words. A tap or a line typed under the ask goes as an ordinary `compose` **without**
+`agent: false`, so the desktop's ask takes it before anything is routed (`Pane::submitRemote`):
+a choice the model labelled "git status" is an answer, not a command. A `view` device reads the
+question and is offered no button. Between questions the view steps by itself — the worker
+sends no event per question — and `question_closed`, or the turn ending, takes the ask down.
 The owner can still answer from a paired device: a remote line is routed first, exactly as a line
 typed at the desk is, and the ask takes it when the router sends it to the agent
 (`relay::input::askTakesRemoteLine`, `Pane::takeRemoteRoute`). A line the router sends to the
@@ -1122,7 +1129,24 @@ state, so the desktop's "alice is typing" cannot drift from theirs. A `share_pau
 These names are `OWNER_ONLY` in `remote/wire.py`, which is folded into `NEVER_FROM_CLIENT`, so the
 same message arriving over the wire from any device — the owner's own paired phone included — is
 refused `not_permitted` by the check every inbound message already passes through, and the existing
-"every type is classified" test covers them.
+"every type is classified" test covers them — **except the three answers.** Owner, 2026-09-20
+(card #PH0N, decision 6): a `full` device may admit a knock, decide a guest's prompt and grant
+the keyboard from away, so `knock_answer {participant, admit, role}`, `prompt_answer {id,
+approve}` and `control_answer {pane, participant, grant}` are `full` in `CLIENT_TYPES` (still
+never a guest's: `GUEST_NEVER`). A `full` device that can already run any command on the desktop
+gains nothing by answering "may alice type here?". What is waiting is sent to every `full` device
+as **`owner_asks {items}`** — the whole list, again whenever it changes, and once on `welcome` when
+it is not empty — each item `{kind: "knock" | "prompt" | "control", id, pane, name, …}`: a knock
+carries the invite's `role`, the five-digit `code` and `platform`; a prompt its whole `text` (the
+owner approves the text, never a preview, 10.4); a control request names the participant in `id`.
+The desktop's own dialog is asked exactly as before and **whichever answer arrives first is
+applied**: the hub's `_await_knock` waits on the GUI and the devices together, and a late
+`prompt_answer` or `control_answer` finds its item gone (`_run_prompt`, `_apply_control_answer`).
+A late answer from a device is not an error: it is sent the list as it now stands. The sidecar
+tells the GUI `request_gone {kind, id, pane}` for a row a phone decided, so the Sharing pane
+does not count it down to nothing. `owner_asks` is in `SERVER_TYPES` and not in
+`GUEST_SERVER_TYPES`; every device answer is audited (`knock_answer`, `prompt_answer`,
+`control_answer`, with the device id).
 
 **Pause** refuses every participant's input and prompts with `paused` while the screen keeps
 streaming, and a paused holder keeps nothing: control returns to the owner, because a pause that

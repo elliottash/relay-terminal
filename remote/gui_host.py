@@ -38,7 +38,9 @@ the GUI never links a crypto library and this process never touches a widget.
      "lines":[<row>]}                                       the answer to a `history`
 
   GUI → here, multiplayer (section 10.5). Desktop only: every one of these names is in
-  wire.OWNER_ONLY, so the same message over the wire from any device is refused.
+  wire.OWNER_ONLY, so the same message over the wire from any device is refused — except the
+  three answers (`knock_answer`, `prompt_answer`, `control_answer`), which a `full` device may
+  also send since #PH0N; the hub applies whichever answer arrives first.
     {"t":"invite_create","pane":"p1","role":"viewer","expires":86400,"uses":1}  → `invite`
                                           plus "tab":"t3" for the whole tab: every shared pane
                                           in it now, and every pane added to it later
@@ -116,6 +118,9 @@ the GUI never links a crypto library and this process never touches a widget.
     {"t":"prompt_ask","id":"<prompt id>","participant":"<id>","name":"alice","pane":"p1",
      "text":"the whole prompt","when":"now","plan":""}      a guest's prompt, waiting for you
     {"t":"control_ask","pane":"p1","participant":"<id>","name":"alice"}   ...for the keyboard
+    {"t":"request_gone","kind":"knock|prompt|control","id":"<id>","pane":"p1"}   a question above
+                                              was decided elsewhere (a `full` phone, #PH0N) or
+                                              lapsed: drop its row; an answer now does nothing
     {"t":"control","pane":"p1","holder":"participant:<id>","name":"alice","device":"",
      "device_name":""}                        who is driving now; `holder` is "owner", "agent" or
                                               "participant:<id>". `device` is the id of one of the
@@ -789,6 +794,10 @@ class Sidecar:
              "device_name": self.host.control.holder(pane).name}))
         self.host.on_share_state(lambda pane, paused, reason: self.emit(
             {"t": "share_state", "pane": pane, "paused": paused, "reason": reason}))
+        # A knock, a prompt or a control request a `full` device decided (#PH0N) is gone from
+        # the hub's list; the Sharing pane is told with `request_gone` so its row does not sit
+        # counting down to a decision that was already taken.
+        self.host.on_owner_asks(self._owner_asks_changed)
         # Both halves of `remote_state` that the hub owns: whether the rendezvous link is up, and
         # how many of the owner's own devices are connected. Wired before `serve` starts, or the
         # first "connected" would land before anyone was listening for it.
@@ -1295,9 +1304,40 @@ class Sidecar:
         except asyncio.TimeoutError:
             self.knocks.pop(request.participant, None)
             return False, wire.VIEWER
+        except asyncio.CancelledError:
+            # The hub stopped waiting: a `full` device answered first (`Host._await_knock`).
+            self.knocks.pop(request.participant, None)
+            raise
         if admit:
             self.loop.call_later(0.2, self.report_participants)
         return admit, role
+
+    def _owner_asks_changed(self, items: list) -> None:
+        """``request_gone {kind, id, pane}`` for every question the GUI was asked that the hub no
+        longer waits on — answered from a phone, or lapsed. The GUI's own answer to one of those
+        would arrive for a future already resolved, which is what the hub's guards are for."""
+        waiting = {(str(item.get("kind")), str(item.get("id")), str(item.get("pane") or ""))
+                   for item in items if isinstance(item, dict)}
+        kinds = {(kind, ident) for kind, ident, _ in waiting}
+        for participant, future in list(self.knocks.items()):
+            if ("knock", participant) in kinds:
+                continue
+            self.knocks.pop(participant, None)
+            self.emit({"t": "request_gone", "kind": "knock", "id": participant, "pane": ""})
+            if not future.done():
+                future.set_result((False, wire.VIEWER))     # nobody reads it; the hub decided
+        for prompt_id, future in list(self.prompts.items()):
+            if ("prompt", prompt_id) in kinds:
+                continue
+            self.emit({"t": "request_gone", "kind": "prompt", "id": prompt_id, "pane": ""})
+            if not future.done():
+                future.set_result(False)        # applied to a prompt the hub already dropped
+        for (pane, participant), future in list(self.controls.items()):
+            if ("control", participant, pane) in waiting:
+                continue
+            self.emit({"t": "request_gone", "kind": "control", "id": participant, "pane": pane})
+            if not future.done():
+                future.set_result(False)
 
     async def prompt(self, request: host_mod.PromptRequest) -> bool:
         """``prompt_ask {id, participant, name, pane, text}`` → ``prompt_answer {id, approve}``.

@@ -435,6 +435,244 @@ class PaneViewTests(unittest.TestCase):
 
         self.drive(main())
 
+    # ---- Stop, Recap, the agent's ask and the owner's decisions (card #PH0N, phase 2.6) --------
+
+    DRAWN = ("(s => [...document.querySelectorAll(s)]"
+             ".filter(e => e.getClientRects().length > 0).length)")
+
+    def test_stop_is_drawn_only_while_a_turn_runs_and_sends_agent_stop(self):
+        busy = fixture("busy_queue")
+        self.assertTrue(busy["turn"]["busy"])
+        idle = fixture("idle")
+        self.assertFalse(idle["turn"]["busy"])
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.open(browser, "idle")
+                self.assertEqual(await browser.evaluate(f"{self.DRAWN}('.rp-stop')"), 0,
+                                 "Stop is drawn with nothing to stop")
+                await self.open(browser, "busy_queue")
+                self.assertEqual(await browser.evaluate(f"{self.DRAWN}('.rp-stop')"), 1)
+                await browser.evaluate("document.querySelector('.rp-stop').click()")
+                await browser.wait_for("window.paneDemo.sent.length > 0")
+                self.assertEqual(await self.sent(browser), [{"t": "agent_stop", "pane": busy["pane"]}])
+                # The desktop's `agent_stopped` takes `turn.busy` down and the button with it.
+                later = dict(busy, seq=busy["seq"] + 1, turn={"phase": "idle", "clock": "", "busy": False})
+                await browser.evaluate("window.paneDemo.update(%s)" % json.dumps(later))
+                self.assertEqual(await browser.evaluate(f"{self.DRAWN}('.rp-stop')"), 0)
+                # A view-only device has nothing to stop with, busy or not.
+                await self.open(browser, "view_only")
+                self.assertEqual(await browser.evaluate(f"{self.DRAWN}('.rp-stop')"), 0)
+                self.assertEqual(await browser.evaluate(f"{self.DRAWN}('.rp-more')"), 0)
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
+    def test_recap_is_under_the_pane_menu_and_sends_recap_request(self):
+        state = fixture("idle")
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.open(browser, "idle")
+                self.assertEqual(await browser.evaluate(f"{self.DRAWN}('.rp-more')"), 1)
+                await browser.evaluate("document.querySelector('.rp-more').click()")
+                await browser.wait_for("!!document.querySelector('.rp-sheet-item[data-action=\"recap\"]')")
+                await browser.evaluate("document.querySelector('.rp-sheet-item[data-action=\"recap\"]').click()")
+                await browser.wait_for("window.paneDemo.sent.length > 0")
+                self.assertEqual(await self.sent(browser), [{"t": "recap_request", "pane": state["pane"]}])
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
+    QUESTION = {
+        "event": "question", "id": "q-1", "turn_id": "t-1",
+        "questions": [
+            {"header": "Which files", "question": "Apply the rename to which files?",
+             "options": [{"label": "This file only", "description": "just Pane.h", "recommended": True},
+                         {"label": "git status", "description": "a label that looks like a command"}],
+             "multiple": False},
+            {"header": "Anything else", "question": "Anything I should know before I start?",
+             "options": [], "multiple": False},
+        ],
+    }
+
+    def test_the_agents_question_is_drawn_and_a_tap_answers_it_agent_bound(self):
+        state = fixture("idle")            # a `full` device: composer modes auto/shell/agent
+        self.assertIn("shell", state["composer"]["modes"])
+        wrapped = {"t": "agent", "pane": state["pane"], "seq": 7, "event": self.QUESTION}
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.open(browser, "idle")
+                self.assertEqual(await browser.evaluate(f"{self.DRAWN}('.rp-ask')"), 0)
+                self.assertTrue(await browser.evaluate("window.paneDemo.agentEvent(%s)" % json.dumps(wrapped)))
+                self.assertEqual(await browser.evaluate(f"{self.DRAWN}('.rp-ask')"), 1)
+                # The worker's own words, character for character; the step count is the view's.
+                self.assertEqual(await browser.evaluate("document.querySelector('.rp-ask-header').textContent"),
+                                 "Which files")
+                self.assertEqual(await browser.evaluate("document.querySelector('.rp-ask-text').textContent"),
+                                 "Apply the rename to which files?")
+                self.assertEqual(await browser.evaluate("document.querySelector('.rp-ask-step').textContent"),
+                                 "1 of 2")
+                labels = json.loads(await browser.evaluate(
+                    "JSON.stringify([...document.querySelectorAll('.rp-ask-choice')].map(e => e.textContent))"))
+                self.assertEqual(labels, ["This file only", "git status"])
+                self.assertEqual(await browser.evaluate(
+                    "document.querySelector('.rp-ask-choice.rp-recommended').textContent"), "This file only")
+                # A choice that looks like a command is still an answer: sent agent-bound (no
+                # `agent: false`), so the desktop's ask takes it rather than the shell.
+                await browser.evaluate("document.querySelectorAll('.rp-ask-choice')[1].click()")
+                await browser.wait_for("window.paneDemo.sent.length > 0")
+                sent = await self.sent(browser)
+                self.assertEqual(sent[0]["t"], "compose")
+                self.assertEqual(sent[0]["pane"], state["pane"])
+                self.assertEqual(sent[0]["text"], "git status")
+                self.assertEqual(sent[0]["when"], "now")
+                self.assertNotIn("agent", sent[0])
+                self.assertTrue(sent[0]["msg_id"])
+                # The next question: open, so no choices, only Skip — and the prompt box answers it.
+                self.assertEqual(await browser.evaluate("document.querySelector('.rp-ask-header').textContent"),
+                                 "Anything else")
+                self.assertEqual(await browser.evaluate("document.querySelectorAll('.rp-ask-choice').length"), 0)
+                self.assertEqual(await browser.evaluate(f"{self.DRAWN}('.rp-ask-skip')"), 1)
+                await browser.evaluate("document.querySelector('.rp-input').value = 'ls -la first please'")
+                await browser.evaluate(
+                    "document.querySelector('.rp-input').dispatchEvent("
+                    "new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}))")
+                await browser.wait_for("window.paneDemo.sent.length > 1")
+                sent = await self.sent(browser)
+                self.assertEqual(sent[1]["text"], "ls -la first please")
+                self.assertNotIn("agent", sent[1], "an answer typed under the ask is agent-bound too")
+                # Both answered: the ask is gone, and the box routes as before.
+                self.assertEqual(await browser.evaluate(f"{self.DRAWN}('.rp-ask')"), 0)
+                await browser.evaluate("document.querySelector('.rp-input').value = 'git status'")
+                await browser.evaluate(
+                    "document.querySelector('.rp-input').dispatchEvent("
+                    "new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}))")
+                await browser.wait_for("window.paneDemo.sent.length > 2")
+                sent = await self.sent(browser)
+                self.assertIs(sent[2]["agent"], False)
+                self.assertEqual(browser.console, [])
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
+    def test_question_closed_and_the_end_of_the_turn_take_the_ask_away(self):
+        state = fixture("busy_queue")
+        wrapped = {"t": "agent", "pane": state["pane"], "event": self.QUESTION}
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.open(browser, "busy_queue")
+                await browser.evaluate("window.paneDemo.agentEvent(%s)" % json.dumps(wrapped))
+                self.assertEqual(await browser.evaluate(f"{self.DRAWN}('.rp-ask')"), 1)
+                # Somebody else's closing is not this ask's.
+                self.assertFalse(await browser.evaluate("window.paneDemo.agentEvent(%s)" % json.dumps(
+                    {"t": "agent", "pane": state["pane"], "event": {"event": "question_closed", "id": "q-9"}})))
+                self.assertEqual(await browser.evaluate(f"{self.DRAWN}('.rp-ask')"), 1)
+                self.assertTrue(await browser.evaluate("window.paneDemo.agentEvent(%s)" % json.dumps(
+                    {"t": "agent", "pane": state["pane"], "event": {"event": "question_closed", "id": "q-1", "reason": "stopped"}})))
+                self.assertEqual(await browser.evaluate(f"{self.DRAWN}('.rp-ask')"), 0)
+                # Skip is the desk's `/skip`, and the turn ending closes what is left.
+                await browser.evaluate("window.paneDemo.agentEvent(%s)" % json.dumps(wrapped))
+                await browser.evaluate("document.querySelector('.rp-ask-skip').click()")
+                await browser.wait_for("window.paneDemo.sent.length > 0")
+                sent = await self.sent(browser)
+                self.assertEqual(sent[0]["text"], "/skip")
+                self.assertEqual(sent[0]["when"], "queue", "a turn is running: the answer waits in it")
+                self.assertEqual(await browser.evaluate("document.querySelector('.rp-ask-step').textContent"), "2 of 2")
+                self.assertTrue(await browser.evaluate("window.paneDemo.agentEvent(%s)" % json.dumps(
+                    {"t": "agent", "pane": state["pane"], "event": {"event": "agent_finished"}})))
+                self.assertEqual(await browser.evaluate(f"{self.DRAWN}('.rp-ask')"), 0)
+                self.assertEqual(browser.console, [])
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
+    def test_a_view_only_device_reads_the_question_and_cannot_answer_it(self):
+        state = fixture("view_only")
+        wrapped = {"t": "agent", "pane": state["pane"], "event": self.QUESTION}
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.open(browser, "view_only")
+                await browser.evaluate("window.paneDemo.agentEvent(%s)" % json.dumps(wrapped))
+                self.assertEqual(await browser.evaluate(f"{self.DRAWN}('.rp-ask')"), 1)
+                self.assertEqual(await browser.evaluate("document.querySelector('.rp-ask-text').textContent"),
+                                 "Apply the rename to which files?")
+                self.assertEqual(await browser.evaluate("document.querySelectorAll('.rp-ask button').length"), 0)
+                self.assertEqual(await self.sent(browser), [])
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
+    def test_the_owners_decisions_are_rows_with_two_buttons_for_a_full_device(self):
+        state = fixture("idle")            # `sessions` present: the owner's level
+        self.assertIn("sessions", state)
+        pane = state["pane"]
+        asks = {"t": "owner_asks", "items": [
+            {"kind": "knock", "id": "p-alice", "name": "alice", "platform": "Chrome",
+             "role": "editor", "code": "48213", "pane": pane},
+            {"kind": "prompt", "id": "pr-1", "pane": pane, "name": "alice", "text": "run the tests"},
+            {"kind": "control", "id": "p-alice", "pane": pane, "name": "alice"},
+            {"kind": "prompt", "id": "pr-2", "pane": "another-pane", "name": "bob", "text": "elsewhere"},
+        ]}
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.open(browser, "idle")
+                self.assertEqual(await browser.evaluate(f"{self.DRAWN}('.rp-asks')"), 0)
+                self.assertTrue(await browser.evaluate("window.paneDemo.ownerAsks(%s)" % json.dumps(asks)))
+                rows = json.loads(await browser.evaluate(
+                    "JSON.stringify([...document.querySelectorAll('.rp-ask-row')]"
+                    ".map(e => [e.dataset.kind, e.querySelector('.rp-ask-row-text').textContent,"
+                    " [...e.querySelectorAll('button')].map(b => b.textContent)]))"))
+                # A knock is about the desktop and shows on any pane; a prompt or a control request
+                # for another pane belongs to that pane. The knock row carries the five digits.
+                self.assertEqual(rows, [
+                    ["knock", "alice wants to join as editor · code 48213", ["Admit", "Refuse"]],
+                    ["prompt", "alice: run the tests", ["Run", "Refuse"]],
+                    ["control", "alice asks to type", ["Allow", "Deny"]],
+                ])
+                await browser.evaluate("document.querySelector('.rp-ask-row[data-kind=\"knock\"] .rp-ask-yes').click()")
+                await browser.evaluate("document.querySelector('.rp-ask-row[data-kind=\"prompt\"] .rp-ask-no').click()")
+                await browser.evaluate("document.querySelector('.rp-ask-row[data-kind=\"control\"] .rp-ask-yes').click()")
+                await browser.wait_for("window.paneDemo.sent.length > 2")
+                self.assertEqual(await self.sent(browser), [
+                    {"t": "knock_answer", "participant": "p-alice", "admit": True, "role": "editor"},
+                    {"t": "prompt_answer", "id": "pr-1", "approve": False},
+                    {"t": "control_answer", "pane": pane, "participant": "p-alice", "grant": True},
+                ])
+                # Each row went as it was answered; the hub's next list is what brings one back.
+                self.assertEqual(await browser.evaluate(f"{self.DRAWN}('.rp-asks')"), 0)
+                await browser.evaluate("window.paneDemo.ownerAsks(%s)" % json.dumps(
+                    {"t": "owner_asks", "items": asks["items"][:1]}))
+                self.assertEqual(await browser.evaluate("document.querySelectorAll('.rp-ask-row').length"), 1)
+                await browser.evaluate("window.paneDemo.ownerAsks(%s)" % json.dumps({"t": "owner_asks", "items": []}))
+                self.assertEqual(await browser.evaluate(f"{self.DRAWN}('.rp-asks')"), 0)
+                self.assertEqual(browser.console, [])
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
 class OutboxTests(unittest.TestCase):

@@ -87,15 +87,26 @@ CLIENT_TYPES: dict[str, str | None] = {
     "control_request": FULL,
     "control_release": FULL,
     "secret_input": FULL,          # plus the per-device password switch; see host.py
+    # The owner's three decisions from away (card #PH0N, owner's decision 6, 2026-09-20): a
+    # `full` device may admit a knock, decide a guest's prompt and grant the keyboard, with the
+    # same three messages the desktop's Sharing pane sends the sidecar (section 10.5). `full`
+    # is the level that can already run any command on this desktop, so answering "may alice
+    # type here?" from it gives the phone nothing it did not have. The hub tells such devices
+    # what is waiting with `owner_asks`, and applies an answer exactly as it applies the GUI's.
+    "knock_answer": FULL,
+    "prompt_answer": FULL,
+    "control_answer": FULL,
 }
 
 # The owner's controls exist on the desktop only (section 10.5). They cross the GUI↔sidecar stdio
 # line as JSON, and they are refused on the wire from **any** device — the owner's own paired phone
 # included — because a phone that could mint an invite or change a role would be a second key to
-# the share, held by whoever holds the phone.
+# the share, held by whoever holds the phone. The three *answers* to what a guest asked
+# (`knock_answer`, `prompt_answer`, `control_answer`) left this set on 2026-09-20 (#PH0N): they
+# decide one person's one request, within what the invite already granted, and are `full` above.
 OWNER_ONLY = frozenset({
-    "invite_create", "invite_revoke", "knock_answer", "role_set", "participant_remove",
-    "share_pause", "share_end", "control_answer", "prompt_answer",
+    "invite_create", "invite_revoke", "role_set", "participant_remove",
+    "share_pause", "share_end",
     # Handing the keyboard back to the desktop (10.3) and the two per-share switches (10.4,
     # 10.5). `control_take` is the owner's *physical* keystroke, so a message that claimed to be
     # one, arriving over the wire, would be exactly the thing it exists to outrank.
@@ -157,6 +168,11 @@ GUEST_NEVER: dict[str, str] = {
     "tool_output_get": "stored tool output holds every file the agent read",
     "push_subscribe": "notifications belong to a device the owner paired",
     "push_unsubscribe": "notifications belong to a device the owner paired",
+    # The owner's answers to what guests asked: a guest deciding a knock, a prompt or the keyboard
+    # would be admitting themselves.
+    "knock_answer": "admitting people is the owner's",
+    "prompt_answer": "approving prompts is the owner's",
+    "control_answer": "granting the keyboard is the owner's",
     # There is no client message that lists devices, so there is nothing to name here for the
     # device list; it is unreachable because no type serves it, not because it is refused.
 }
@@ -176,6 +192,10 @@ SERVER_TYPES = frozenset({
     # client; nothing new is accepted *from* a client, because 10.3's two requests
     # (`control_request`, `control_release`) already existed in section 6.6.
     "prompt_decided", "control", "share_state",
+    # What is waiting for the owner (#PH0N): the knocks, guest prompts and control requests not
+    # yet decided, sent whole to `full` devices whenever the list changes, so a phone can answer
+    # them. Never to a guest: it names other people and carries their prompt text.
+    "owner_asks",
 })
 
 # What a **participant** may be sent, which is an allow-list for the same reason `GUEST_TYPES` is

@@ -1062,13 +1062,18 @@ class WireTableTests(unittest.TestCase):
     def test_nothing_new_is_accepted_from_a_client(self):
         """10.3 names `control_request` and `control_release`, which section 6.6 already had.
         Handing control back, pausing and the per-share switches are the owner's, on the desktop:
-        the same message over the wire is refused however the device is paired."""
+        the same message over the wire is refused however the device is paired. The two *answers*
+        (`control_answer`, `prompt_answer`) are `full` on the wire since #PH0N — see
+        PhoneDecisionTests — and are still never a guest's."""
         self.assertEqual(sorted(set(wire.GUEST_TYPES) - set(wire.CLIENT_TYPES)), [])
-        for kind in ("control_take", "control_revoke", "share_options", "share_pause",
-                     "control_answer", "prompt_answer"):
+        for kind in ("control_take", "control_revoke", "share_options", "share_pause"):
             self.assertIn(kind, wire.OWNER_ONLY, kind)
             self.assertIn(kind, wire.NEVER_FROM_CLIENT, kind)
             self.assertNotIn(kind, wire.CLIENT_TYPES, kind)
+        for kind in ("control_answer", "prompt_answer"):
+            self.assertEqual(wire.CLIENT_TYPES.get(kind), wire.FULL, kind)
+            self.assertNotIn(kind, wire.GUEST_TYPES, kind)
+            self.assertIn(kind, wire.GUEST_NEVER, kind)
 
     def test_every_type_a_guest_may_be_sent_is_a_server_type(self):
         self.assertEqual(sorted(wire.GUEST_SERVER_TYPES - wire.SERVER_TYPES), [])
@@ -1097,6 +1102,207 @@ class WireTableTests(unittest.TestCase):
 
 
 # ---- the audit log ---------------------------------------------------------------------------------
+
+class PhoneDecisionTests(unittest.TestCase):
+    """Card #PH0N (owner's decision 6, 2026-09-20): a `full` device is sent what is waiting for
+    the owner — `owner_asks {items}` — and may answer a knock, a guest's prompt or a request for
+    the keyboard with the same three messages the Sharing pane sends the sidecar. The desktop's
+    own dialog is still asked; whichever answer comes first is applied and the other is too late.
+    Here the desktop never answers, so what happens is the phone's doing."""
+
+    @staticmethod
+    async def never(request):
+        await asyncio.Event().wait()
+
+    @staticmethod
+    async def asks_with(phone, predicate, timeout=10.0):
+        """The next `owner_asks` whose items satisfy the predicate. A guest's own admission put
+        two lists in the phone's inbox already (the knock, then nothing), so the one a test
+        wants is found by its content rather than by being next."""
+        deadline = asyncio.get_running_loop().time() + timeout
+        while True:
+            left = deadline - asyncio.get_running_loop().time()
+            message = await phone.expect("owner_asks", timeout=max(0.05, left))
+            if predicate(message["items"]):
+                return message
+
+    def test_a_full_device_is_told_who_is_at_the_door_and_admits_them(self):
+        async def main():
+            async with Harness() as harness:
+                harness.host.knock_approver = self.never
+                phone, _ = await harness.owner_device(wire.FULL)
+                _, url = await harness.invite(role=wire.EDITOR)
+                guest = client_mod.Client(harness.base)
+                knocking = asyncio.create_task(guest.knock(url, name="alice", platform="Chrome"))
+                asks = await phone.expect("owner_asks", timeout=10)
+                self.assertEqual(len(asks["items"]), 1)
+                knock = asks["items"][0]
+                self.assertEqual(knock["kind"], "knock")
+                self.assertEqual(knock["name"], "alice")
+                self.assertEqual(knock["role"], wire.EDITOR)
+                self.assertEqual(knock["pane"], "pane-1")
+                self.assertEqual(len(knock["code"]), 5, "the five-digit code both screens show")
+                self.assertEqual(knock["code"], guest.auth_code)
+                # Admitted below the invite, exactly as the desktop's dialog may.
+                await phone.send({"t": "knock_answer", "participant": knock["id"],
+                                  "admit": True, "role": wire.VIEWER})
+                joined = await asyncio.wait_for(knocking, 10)
+                self.assertEqual(joined.participant, knock["id"])
+                self.assertEqual(joined.role, wire.VIEWER)
+                emptied = await phone.expect("owner_asks", timeout=10)
+                self.assertEqual(emptied["items"], [])
+                self.assertEqual(harness.host.knock_asks, {})
+                kinds = harness.audit_kinds()
+                self.assertIn("knock_answer", kinds)
+                self.assertIn("admitted", kinds)
+                self.assertEqual(next(l for l in harness.audit_lines() if l["kind"] == "knock_answer")["admit"], True)
+                await guest.close()
+                await phone.close()
+        run(main(), timeout=60)
+
+    def test_a_refusal_from_the_phone_closes_the_door(self):
+        async def main():
+            async with Harness() as harness:
+                harness.host.knock_approver = self.never
+                phone, _ = await harness.owner_device(wire.FULL)
+                _, url = await harness.invite(role=wire.EDITOR)
+                guest = client_mod.Client(harness.base)
+                knocking = asyncio.create_task(guest.knock(url, name="alice", platform="Chrome"))
+                knock = (await phone.expect("owner_asks", timeout=10))["items"][0]
+                await phone.send({"t": "knock_answer", "participant": knock["id"], "admit": False})
+                with self.assertRaises(wire.WireError) as caught:
+                    await asyncio.wait_for(knocking, 10)
+                self.assertEqual(caught.exception.code, "not_admitted")
+                self.assertEqual(harness.guests.live(), [])
+                await guest.close()
+                await phone.close()
+        run(main(), timeout=60)
+
+    def test_a_full_device_decides_a_guests_prompt_with_the_whole_text(self):
+        async def main():
+            async with Harness() as harness:
+                harness.approve_prompts = None                # the desk never answers
+                phone, _ = await harness.owner_device(wire.FULL)
+                guest, joined = await harness.guest()
+                await guest.send({"t": "compose", "pane": "pane-1",
+                                  "text": "rm -rf build && cmake --build build"})
+                pending = await guest.expect("prompt_pending", timeout=10)
+                asks = await self.asks_with(phone, lambda items: any(i["kind"] == "prompt" for i in items))
+                prompt = next(item for item in asks["items"] if item["kind"] == "prompt")
+                self.assertEqual(prompt["id"], pending["id"])
+                self.assertEqual(prompt["pane"], "pane-1")
+                self.assertEqual(prompt["name"], "alice")
+                self.assertEqual(prompt["text"], "rm -rf build && cmake --build build",
+                                 "the owner approves the text, never a preview (10.4)")
+                await phone.send({"t": "prompt_answer", "id": prompt["id"], "approve": True})
+                decided = await guest.expect("prompt_decided", timeout=10)
+                self.assertTrue(decided["approved"])
+                await harness.settle()
+                self.assertEqual(harness.source.composed[0]["text"], "rm -rf build && cmake --build build")
+                self.assertEqual(harness.source.composed[0]["origin"], f"guest:{joined.participant}")
+                self.assertTrue(harness.source.composed[0]["to_agent"])
+                await self.asks_with(phone, lambda items: items == [])
+                await guest.close()
+                await phone.close()
+        run(main(), timeout=60)
+
+    def test_a_full_device_grants_and_denies_the_keyboard(self):
+        async def main():
+            async with Harness() as harness:
+                harness.grant_control = None
+                phone, _ = await harness.owner_device(wire.FULL)
+                guest, joined = await harness.guest()
+                await guest.send({"t": "control_request", "pane": "pane-1"})
+                await guest.expect("control_pending", timeout=10)
+                asks = await self.asks_with(phone, lambda items: any(i["kind"] == "control" for i in items))
+                ask = next(item for item in asks["items"] if item["kind"] == "control")
+                self.assertEqual(ask, {"kind": "control", "id": joined.participant,
+                                       "pane": "pane-1", "name": "alice"})
+                await phone.send({"t": "control_answer", "pane": "pane-1",
+                                  "participant": joined.participant, "grant": False})
+                refused = await guest.expect("control", timeout=10)
+                self.assertEqual(refused["reason"], "refused")
+                self.assertEqual(refused["holder"], "owner")
+                await self.asks_with(phone, lambda items: items == [])
+
+                await guest.send({"t": "control_request", "pane": "pane-1"})
+                await guest.expect("control_pending", timeout=10)
+                await self.asks_with(phone, lambda items: any(i["kind"] == "control" for i in items))
+                await phone.send({"t": "control_answer", "pane": "pane-1",
+                                  "participant": joined.participant, "grant": True})
+                granted = await guest.expect("control", timeout=10)
+                self.assertEqual(granted["holder"], f"participant:{joined.participant}")
+                self.assertEqual(harness.host.control_holder("pane-1"), joined.participant)
+                await guest.close()
+                await phone.close()
+        run(main(), timeout=60)
+
+    def test_an_agent_device_and_a_guest_are_told_nothing_and_refused(self):
+        async def main():
+            async with Harness() as harness:
+                harness.approve_prompts = None
+                partner, _ = await harness.owner_device(wire.AGENT)
+                guest, joined = await harness.guest()
+                await guest.send({"t": "compose", "pane": "pane-1", "text": "ship it"})
+                pending = await guest.expect("prompt_pending", timeout=10)
+                await harness.settle()
+                self.assertEqual(await drain(partner, "owner_asks", timeout=0.5), [])
+                self.assertEqual(await drain(guest, "owner_asks", timeout=0.5), [])
+                for who, kind, body in ((partner, "prompt_answer", {"id": pending["id"], "approve": True}),
+                                        (guest, "prompt_answer", {"id": pending["id"], "approve": True}),
+                                        (guest, "knock_answer", {"participant": "x", "admit": True}),
+                                        (guest, "control_answer", {"pane": "pane-1", "participant": joined.participant, "grant": True})):
+                    await who.send({"t": kind, **body})
+                    with self.assertRaises(wire.WireError, msg=kind) as caught:
+                        await who.expect("never", timeout=5)
+                    self.assertEqual(caught.exception.code, "not_permitted", kind)
+                self.assertIsNotNone(harness.host.prompts.get(pending["id"]), "still waiting")
+                await guest.close()
+                await partner.close()
+        run(main(), timeout=60)
+
+    def test_a_phone_opened_while_someone_waits_is_told_at_once(self):
+        async def main():
+            async with Harness() as harness:
+                harness.approve_prompts = None
+                guest, _ = await harness.guest()
+                await guest.send({"t": "compose", "pane": "pane-1", "text": "ship it"})
+                await guest.expect("prompt_pending", timeout=10)
+                self.capability = wire.FULL
+                url, _ = await harness.host.open_pairing()
+                pairing_client = client_mod.Client(harness.base)
+                record = await pairing_client.pair(url, name="iPhone", platform="Safari")
+                await pairing_client.close()
+                phone = client_mod.Client(harness.base)
+                await phone.connect(record)
+                # Right after `panes`, before anything else is asked for.
+                await phone.expect("panes")
+                asks = await phone.expect("owner_asks", timeout=5)
+                self.assertEqual([item["kind"] for item in asks["items"]], ["prompt"])
+                await guest.close()
+                await phone.close()
+        run(main(), timeout=60)
+
+    def test_an_answer_that_comes_too_late_is_not_an_error(self):
+        async def main():
+            async with Harness() as harness:
+                phone, _ = await harness.owner_device(wire.FULL)
+                guest, _ = await harness.guest()
+                await guest.send({"t": "compose", "pane": "pane-1", "text": "ship it"})
+                pending = await guest.expect("prompt_pending", timeout=10)
+                await guest.expect("prompt_decided", timeout=10)      # the desk said yes at once
+                await harness.settle()
+                await drain(phone, "owner_asks", timeout=0.5)          # everything so far
+                await phone.send({"t": "prompt_answer", "id": pending["id"], "approve": False})
+                # Decided already: the phone is sent the list as it stands, not a refusal.
+                told = await phone.expect("owner_asks", timeout=10)
+                self.assertEqual(told["items"], [])
+                await harness.settle()
+                self.assertEqual(len(harness.source.composed), 1, "the desk's yes stood")
+                await guest.close()
+                await phone.close()
+        run(main(), timeout=60)
+
 
 class AuditTests(unittest.TestCase):
     def test_every_kind_of_section_10_6_is_written_and_names_the_participant(self):
@@ -1198,6 +1404,50 @@ class SidecarTests(unittest.TestCase):
                                  f"guest:{joined.participant}")
                 await client.close()
         run(main())
+
+    def test_a_question_a_phone_answered_is_dropped_from_the_desktop_too(self):
+        """The Sharing pane's row must not count down to a decision already taken: the sidecar
+        sends `request_gone {kind, id, pane}` for a question the hub no longer waits on."""
+        async def main():
+            async with Harness() as harness:
+                sidecar = await self.sidecar_for(harness)
+                harness.host.on_owner_asks(sidecar._owner_asks_changed)
+                phone, _ = await harness.owner_device(wire.FULL)
+                guest, joined = await harness.guest()
+                await guest.send({"t": "compose", "pane": "pane-1", "text": "please rebase"})
+                ask = await self.wait_for("prompt_ask")
+                await phone.expect("owner_asks", timeout=10)
+                await phone.send({"t": "prompt_answer", "id": ask["id"], "approve": True})
+                decided = await guest.expect("prompt_decided", timeout=10)
+                self.assertTrue(decided["approved"])
+                gone = await self.wait_for("request_gone")
+                self.assertEqual(gone, {"t": "request_gone", "kind": "prompt", "id": ask["id"],
+                                        "pane": ""})
+                self.assertEqual(sidecar.prompts, {}, "the sidecar's own wait is over")
+                # The desk's answer after the fact does nothing: the prompt ran once.
+                await sidecar.handle({"t": "prompt_answer", "id": ask["id"], "approve": False})
+                await harness.settle()
+                self.assertEqual(len(harness.source.composed), 1)
+
+                # The same for a knock, whose wait the hub cancels outright.
+                self.emitted.clear()
+                harness.host.knock_approver = sidecar.knock       # the GUI's dialog, never answered
+                _, url = await harness.invite(role=wire.EDITOR)
+                second = client_mod.Client(harness.base)
+                knocking = asyncio.create_task(second.knock(url, name="bob", platform="Chrome"))
+                knock = await self.wait_for("knock")
+                await phone.expect("owner_asks", timeout=10)
+                await phone.send({"t": "knock_answer", "participant": knock["participant"],
+                                  "admit": True, "role": wire.EDITOR})
+                await asyncio.wait_for(knocking, 10)
+                gone = await self.wait_for("request_gone")
+                self.assertEqual(gone["kind"], "knock")
+                self.assertEqual(gone["id"], knock["participant"])
+                self.assertEqual(sidecar.knocks, {})
+                await second.close()
+                await guest.close()
+                await phone.close()
+        run(main(), timeout=60)
 
     def test_a_refusal_over_the_line_stops_it(self):
         async def main():

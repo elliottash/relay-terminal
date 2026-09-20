@@ -105,6 +105,9 @@ window.paneDemo = {
   update: (state) => (view ? view.update(state) : false),
   editText: (message) => { if (view) view.onEditText(message); },
   refuse: (message) => (view ? view.onRefused(message) : false),
+  // The agent's ask and the owner's decisions (question / question_closed, owner_asks).
+  agentEvent: (message) => (view ? view.onAgentEvent(message) : false),
+  ownerAsks: (message) => (view ? view.onOwnerAsks(message) : false),
   toast: () => { const t = document.querySelector('.rp-toast'); return t && !t.hidden ? t.textContent : ''; },
   state: () => JSON.parse(document.body.dataset.demoState || 'null'),
 };

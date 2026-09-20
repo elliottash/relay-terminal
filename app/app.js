@@ -68,6 +68,11 @@ const models = new Map();   // pane -> {model, waiting}: the model indicator (is
 const statusSince = new Map();
 let inboxTimer = null;      // repaints the elapsed time on running rows
 let pendingOpen = '';       // a pane a notification asked for, before the pane list has arrived
+// The agent's open ask per pane (sessions protocol 27) and the owner's waiting decisions
+// (`owner_asks`, #PH0N), kept here because both can arrive before the pane view is mounted: the
+// desktop replays a pane's last events on `pane_focus`, ahead of the `pane_state` that mounts it.
+const openQuestions = new Map();
+let ownerAsks = null;
 
 const $ = (id) => document.getElementById(id);
 const show = (name) => {
@@ -618,6 +623,10 @@ function ensurePaneView() {
   // three-way send. The client's older one would be a second composer under it saying the same
   // thing, so it stands down while the view is up (the voice button moves, see below).
   $('composer').hidden = true;
+  // What arrived for this pane before the view existed: the question the agent is waiting on,
+  // and whoever is waiting at the door.
+  if (openQuestions.has(current)) paneView.onAgentEvent(openQuestions.get(current));
+  if (ownerAsks) paneView.onOwnerAsks(ownerAsks);
   // …except the microphone, which is the client's own and has no equivalent in the pane: it moves
   // into the strip beside the model, so voice still works while the view is up.
   paneView.hostSlot.append($('composer-mic'));
@@ -935,7 +944,11 @@ function onAgent(message) {
   }
   // Every pane's model, not just the open one's, so the indicator is right when it is opened.
   trackModel(message.pane, event);
+  trackQuestion(message);
   if (message.pane !== current) return;
+  // The pane view draws the agent's ask (question / question_closed); everything else the agent
+  // says is already on the screen above.
+  if (paneView) paneView.onAgentEvent(message);
   const note = (text) => { $('term-note').textContent = text; };
   // A desktop with no screen stream — the agent companion — has no terminal to print into, so
   // the reply is rendered here instead. With a terminal, this is silent: the same text is
@@ -1003,6 +1016,17 @@ function modelLine(event) {
   }
   // The reason is a whole sentence that names both models.
   return `✗ ${event.reason || `${model} did not take over.`}`;
+}
+
+// The agent's open ask, per pane, so a view mounted after the `question` arrived still draws it
+// (the desktop's `pane_focus` replay lands before the first `pane_state`). Stop and the end of the
+// turn close it on the desktop's word or on the turn's own ending, whichever is heard first.
+function trackQuestion(message) {
+  const event = message.event || {};
+  if (event.event === 'question' && event.id) openQuestions.set(message.pane, message);
+  else if (['question_closed', 'agent_finished', 'agent_stopped', 'cancelled', 'error'].includes(event.event)) {
+    openQuestions.delete(message.pane);
+  }
 }
 
 function trackModel(pane, event) {
@@ -1543,6 +1567,14 @@ rrp.addEventListener('pane_state', (event) => {
   const message = event.detail || {};
   if (!current || message.pane !== current) return;
   ensurePaneView().update(message);
+});
+
+// What is waiting for the owner (#PH0N): knocks, guest prompts and control requests, sent whole
+// to a `full` device every time the list changes. Kept for the next pane view to mount, and handed
+// to the one that is up; a knock is about this desktop, so it shows on whichever pane is open.
+rrp.addEventListener('owner_asks', (event) => {
+  ownerAsks = event.detail || null;
+  if (paneView && ownerAsks) paneView.onOwnerAsks(ownerAsks);
 });
 
 rrp.addEventListener('queue_edit_text', (event) => {

@@ -394,6 +394,16 @@ void RemoteShare::handle(const QJsonObject &message)
         m_sharing.setParticipants(message.value(QStringLiteral("items")).toArray(),
                                   message.value(QStringLiteral("invites")).toArray());
         emit sharingModelChanged();
+    } else if (kind == QLatin1String("request_gone")) {
+        // A knock, a prompt or a control request the owner decided from a `full` phone (#PH0N),
+        // or that lapsed on the hub: its row goes now rather than counting down to nothing.
+        const QString what = message.value(QStringLiteral("kind")).toString();
+        const auto which = what == QLatin1String("knock") ? sharing::Request::Kind::Knock
+                         : what == QLatin1String("prompt") ? sharing::Request::Kind::Prompt
+                                                           : sharing::Request::Kind::Control;
+        m_sharing.dropRequest(which, message.value(QStringLiteral("id")).toString());
+        emit sharingModelChanged();
+        if (which == sharing::Request::Kind::Knock) requestParticipants();
     } else if (kind == QLatin1String("control_ask")) {
         m_sharing.addControlAsk(message, QDateTime::currentMSecsSinceEpoch());
         emit sharingModelChanged();

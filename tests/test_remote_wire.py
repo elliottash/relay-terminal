@@ -100,6 +100,29 @@ class AllowListTests(unittest.TestCase):
 
 
 class DecodeTests(unittest.TestCase):
+    def test_the_owners_three_answers_are_full_on_the_wire_and_never_a_guests(self):
+        """Card #PH0N, the owner's decision 6 (2026-09-20): a `full` device may admit a knock,
+        decide a guest's prompt and grant the keyboard, with the same three messages the Sharing
+        pane sends the sidecar. They left OWNER_ONLY; the rest of the owner's controls did not."""
+        for kind in ("knock_answer", "prompt_answer", "control_answer"):
+            self.assertEqual(wire.CLIENT_TYPES.get(kind), wire.FULL, kind)
+            self.assertNotIn(kind, wire.OWNER_ONLY, kind)
+            self.assertNotIn(kind, wire.NEVER_FROM_CLIENT, kind)
+            # A guest deciding a knock, a prompt or the keyboard would be admitting themselves.
+            self.assertNotIn(kind, wire.GUEST_TYPES, kind)
+            self.assertIn(kind, wire.GUEST_NEVER, kind)
+            self.assertFalse(wire.allows(wire.AGENT, wire.CLIENT_TYPES[kind]), kind)
+        for kind in ("invite_create", "invite_revoke", "role_set", "participant_remove",
+                     "share_pause", "share_end", "control_take", "control_revoke",
+                     "share_options", "code_create", "code_revoke"):
+            self.assertIn(kind, wire.OWNER_ONLY, kind)
+            self.assertNotIn(kind, wire.CLIENT_TYPES, kind)
+
+    def test_owner_asks_goes_to_devices_and_never_to_a_guest(self):
+        self.assertIn("owner_asks", wire.SERVER_TYPES)
+        self.assertNotIn("owner_asks", wire.GUEST_SERVER_TYPES)
+        self.assertFalse(wire.may_send_to_guest("owner_asks"))
+
     def test_a_message_must_be_an_object_with_a_type(self):
         for bad in (b"[]", b'"hello"', b"{}", b'{"t": 3}', b"not json"):
             with self.assertRaises(wire.WireError, msg=bad):

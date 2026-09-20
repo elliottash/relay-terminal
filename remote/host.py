@@ -504,6 +504,12 @@ class Host:
         self.control_approver = control_approver
         self.prompts = guests_mod.PromptQueue()
         self.controls = guests_mod.ControlQueue()
+        # Knocks waiting for an answer, by participant id (#PH0N): the request and the future a
+        # `full` device's `knock_answer` resolves. The GUI's own answer still comes back through
+        # `knock_approver`; whichever arrives first decides, see `_await_knock`.
+        self.knock_asks: dict[str, tuple[KnockRequest, asyncio.Future]] = {}
+        self._owner_asks_sent = ""          # the last `owner_asks` body, so a repeat is not sent
+        self._owner_asks_watchers: list[Callable[[list], None]] = []
         # Who is driving each pane: **one** state across the owner's devices, the agent and the
         # participants (section 10.3, remote/control.py).
         self.control = control_mod.ControlBook(self._control_changed)
@@ -1343,6 +1349,7 @@ class Host:
         item = self.controls.park(participant.participant_id, pane)
         self.audit.record("control_request", participant=participant.participant_id, pane=pane)
         await channel.send({"t": "control_pending", "pane": pane})
+        self.send_owner_asks()
         self._spawn(self._decide_control(item, participant.name))
         return item
 
@@ -1356,9 +1363,15 @@ class Host:
         except Exception:
             log.exception("the owner's answer about control failed")
             granted = False
+        self._apply_control_answer(item, granted)
+
+    def _apply_control_answer(self, item: guests_mod.PendingControl, granted: bool) -> None:
+        """The owner's answer about the keyboard, from the desktop or from a `full` device
+        (`decide_control`), if the request is still there to answer."""
         if self.controls.get(item.pane, item.participant) is not item:
             return              # it lapsed, or they were removed: the answer is too late to apply
         self.controls.drop(item.pane, item.participant)
+        self.send_owner_asks()
         if granted and self.grant_control(item.pane, item.participant):
             # The handoff itself told them, and told everyone else on the pane the same thing.
             # A second, private "yes" would be one more message saying what they can already see.
@@ -1496,6 +1509,10 @@ class Host:
                                   reason="no longer an editor here")
                 self.control.take(pane)
         self.refresh_presence()
+        # Whatever lapsed, or went with a removed guest (`_guest_changed`, `_participant_left`),
+        # is off the phones' list too. Sent only when the list changed, so the once-a-second
+        # housekeeping costs nothing while nothing is waiting.
+        self.send_owner_asks()
 
     async def _housekeep(self) -> None:
         while self._running:
@@ -1632,6 +1649,9 @@ class Host:
         })
         await channel.send(self.stream("panes", limit=64).add(
             {"t": "panes", "items": self._items()}))
+        # A phone opened while somebody is at the door is told so now, not at the next knock.
+        if device.capability == wire.FULL and self.owner_asks_items():
+            await channel.send(self.owner_asks_message())
 
     async def _on_ping(self, channel: Channel, message: dict) -> None:
         await channel.send({"t": "pong", "at": message.get("at"), "server_time": time.time()})
@@ -1935,8 +1955,7 @@ class Host:
 
         self.guests.waiting(invite.invite_id, +1)
         try:
-            admitted, role = await asyncio.wait_for(self.knock_approver(request),
-                                                    guests_mod.KNOCK_TIMEOUT)
+            admitted, role = await self._await_knock(request)
         except asyncio.TimeoutError:
             # Two minutes with no answer is a refusal, not a question still open.
             admitted, role = False, wire.VIEWER
@@ -2064,6 +2083,7 @@ class Host:
                           prompt=item.prompt_id, text=text, plan=plan_id or None,
                           immediate=self.options_for(pane).prompts_immediate or None)
         await channel.send({"t": "prompt_pending", "id": item.prompt_id, "pane": pane})
+        self.send_owner_asks()
         if self.options_for(pane).prompts_immediate:
             # The owner's "guest prompts run immediately" (10.5). Still parked, still audited,
             # still agent-only: what it skips is the question, not the record or the routing.
@@ -2098,6 +2118,7 @@ class Host:
         if self.prompts.get(item.prompt_id) is not item:
             return
         self.prompts.drop(item.prompt_id)
+        self.send_owner_asks()
         if approved and self.share_state(item.pane)[0]:
             approved, reason = False, "paused"
         self.audit.record("prompt_decided", participant=item.participant, pane=item.pane,
@@ -2136,6 +2157,130 @@ class Host:
         self._spawn(self._run_prompt(item, participant.name if participant else "",
                                      approved=approve, reason="refused"))
         return True
+
+    # -- the owner's decisions from a `full` device (card #PH0N, owner's decision 6) -------------
+    # A knock, a guest's prompt and a request for the keyboard each wait for the owner. The
+    # desktop is asked through the three approver coroutines, exactly as before; alongside, every
+    # `full` device is sent the waiting list as `owner_asks {items}` and may answer any item with
+    # the same three messages the Sharing pane sends the sidecar (section 10.5). Whichever answer
+    # arrives first is applied and the other is too late, by the guards that already made a late
+    # GUI answer harmless: `_run_prompt` and `_apply_control_answer` check the item is still
+    # queued, and a knock's future is resolved once.
+
+    async def _await_knock(self, request: KnockRequest) -> tuple[bool, str]:
+        """The owner's answer to a knock: the desktop's, through `knock_approver`, or a `full`
+        device's `knock_answer`, whichever comes first, within `KNOCK_TIMEOUT`."""
+        loop = asyncio.get_running_loop()
+        answer: asyncio.Future = loop.create_future()
+        self.knock_asks[request.participant] = (request, answer)
+        self.send_owner_asks()
+        desk = asyncio.ensure_future(self.knock_approver(request))
+        try:
+            done, _ = await asyncio.wait({desk, answer}, timeout=guests_mod.KNOCK_TIMEOUT,
+                                         return_when=asyncio.FIRST_COMPLETED)
+            if answer in done:
+                return answer.result()
+            if desk in done:
+                return desk.result()            # an approver that raised is the caller's to log
+            raise asyncio.TimeoutError
+        finally:
+            self.knock_asks.pop(request.participant, None)
+            if not desk.done():
+                # The desktop's dialog is no longer waited on; the sidecar tells the GUI the row
+                # is decided (`request_gone`) from the `owner_asks` change below.
+                desk.cancel()
+            self.send_owner_asks()
+
+    def decide_knock(self, participant_id: str, admit: bool, role: str) -> bool:
+        """``knock_answer {participant, admit, role}`` from anywhere but the awaited approver."""
+        waiting = self.knock_asks.get(participant_id)
+        if waiting is None:
+            return False
+        request, answer = waiting
+        if answer.done():
+            return False
+        # The same clamp `_on_knock` applies: at most the invite's role, never above it.
+        if role not in wire.GUEST_ROLES or not wire.role_allows(request.role, role):
+            role = request.role
+        answer.set_result((bool(admit), role))
+        return True
+
+    def decide_control(self, pane: str, participant_id: str, grant: bool) -> bool:
+        """``control_answer {pane, participant, grant}`` from anywhere but the awaited approver."""
+        item = self.controls.get(pane, participant_id)
+        if item is None:
+            return False
+        self._apply_control_answer(item, bool(grant))
+        return True
+
+    def owner_asks_items(self) -> list[dict]:
+        """What is waiting for the owner, in the order it interrupts: knocks (about this desktop),
+        then guest prompts and control requests (each about one pane). Every field is the hub's
+        own: a name the guest chose (already `clean_label`led), the invite's role, the five-digit
+        code both screens show, the pane, and a prompt's whole text — the owner approves the
+        text, never a preview (10.4)."""
+        items: list[dict] = []
+        for participant_id, (request, _) in self.knock_asks.items():
+            items.append({"kind": "knock", "id": participant_id, "name": request.name,
+                          "platform": request.platform, "role": request.role,
+                          "code": request.code,
+                          "pane": request.panes[0] if request.panes else ""})
+        for item in list(self.prompts.pending.values()):
+            guest = self.guests.participant(item.participant)
+            items.append({"kind": "prompt", "id": item.prompt_id, "pane": item.pane,
+                          "name": guest.name if guest else "", "text": item.text})
+        for item in list(self.controls.pending.values()):
+            guest = self.guests.participant(item.participant)
+            items.append({"kind": "control", "id": item.participant, "pane": item.pane,
+                          "name": guest.name if guest else ""})
+        return items
+
+    def owner_asks_message(self) -> dict:
+        return {"t": "owner_asks", "items": self.owner_asks_items()}
+
+    def send_owner_asks(self) -> None:
+        """Every `full` device gets the whole list whenever it changes; a `view` or `agent` device
+        and every guest get nothing (`_fan_out` reads the capability live). The desktop's own
+        watchers are told too, so the Sharing pane can drop a row a phone decided."""
+        message = self.owner_asks_message()
+        body = json.dumps(message, sort_keys=True)
+        if body == self._owner_asks_sent:
+            return
+        self._owner_asks_sent = body
+        self._fan_out(message, needed=wire.FULL)
+        for callback in list(self._owner_asks_watchers):
+            try:
+                callback(message["items"])
+            except Exception:
+                log.exception("an owner_asks watcher failed")
+
+    def on_owner_asks(self, callback: Callable[[list], None]) -> None:
+        self._owner_asks_watchers.append(callback)
+
+    async def _on_knock_answer(self, channel: Channel, message: dict) -> None:
+        participant_id = str(message.get("participant") or "")
+        self.audit.record("knock_answer", device=channel.device_id, participant=participant_id,
+                          admit=bool(message.get("admit")))
+        if not self.decide_knock(participant_id, bool(message.get("admit")),
+                                 str(message.get("role") or "")):
+            # Decided already — at the desk, by another phone, or by lapsing. Not an error the
+            # person can act on: they are sent the list as it is now instead.
+            await channel.send(self.owner_asks_message())
+
+    async def _on_prompt_answer(self, channel: Channel, message: dict) -> None:
+        prompt_id = str(message.get("id") or "")
+        self.audit.record("prompt_answer", device=channel.device_id, prompt=prompt_id,
+                          approved=bool(message.get("approve")))
+        if not self.decide_prompt(prompt_id, bool(message.get("approve"))):
+            await channel.send(self.owner_asks_message())
+
+    async def _on_control_answer(self, channel: Channel, message: dict) -> None:
+        pane = str(message.get("pane") or "")
+        participant_id = str(message.get("participant") or "")
+        self.audit.record("control_answer", device=channel.device_id, pane=pane,
+                          participant=participant_id, granted=bool(message.get("grant")))
+        if not self.decide_control(pane, participant_id, bool(message.get("grant"))):
+            await channel.send(self.owner_asks_message())
 
     def guest_drives(self, channel: Channel, pane: str) -> bool:
         """Whether this guest may type into ``pane`` right now: the one control book says so, and
