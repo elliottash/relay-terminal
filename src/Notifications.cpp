@@ -29,6 +29,33 @@ QString NotificationCenter::post(const QString &title, const QString &body, cons
     return note.id;
 }
 
+QString NotificationCenter::postWithAction(const QString &title, const QString &body, const QString &kind,
+                                           const QString &source, const QString &actionLabel, const QString &actionId) {
+    const QString id = post(title, body, kind, source);
+    if (id.isEmpty()) return id;
+    for (Notification &note : m_entries) {
+        if (note.id != id) continue;
+        note.actionLabel = actionLabel;
+        note.actionId = actionId;
+        break;
+    }
+    Q_EMIT changed();
+    return id;
+}
+
+void NotificationCenter::amend(const QString &id, const QString &title, const QString &body,
+                               const QString &actionLabel, const QString &actionId) {
+    for (Notification &note : m_entries) {
+        if (note.id != id) continue;
+        if (!title.trimmed().isEmpty()) note.title = title.trimmed();
+        if (!body.trimmed().isEmpty()) note.body = body.trimmed();
+        note.actionLabel = actionLabel;
+        note.actionId = actionId;
+        Q_EMIT changed();
+        return;
+    }
+}
+
 QList<Notification> NotificationCenter::entries() const {
     QList<Notification> newestFirst;
     newestFirst.reserve(m_entries.size());

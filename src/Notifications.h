@@ -28,6 +28,12 @@ struct Notification {
     QString kind;      // kindInfo / kindSuccess / kindWarning / kindError
     QString source;    // pane session token, so the popup can go back to the pane; may be empty
     bool seen = false;
+    // ----- an entry that offers something (card #FEJQ, protocol §30.6) ------------------------
+    // An agent changed a setting, and the entry that says so carries the way back: "Agent changed
+    // Thinking display · collapse → never · [Undo]". The popup draws `actionLabel` as a button and
+    // hands `actionId` back to whoever is listening — a string, never a callback, so the offer
+    // outlives the turn, the worker and the popup that drew it. Both empty: no button.
+    QString actionLabel, actionId;
 };
 
 class NotificationCenter : public QObject {
@@ -41,6 +47,18 @@ public:
     // Adds an entry and returns its id. An empty title is ignored (returns an empty id).
     QString post(const QString &title, const QString &body = QString(),
                  const QString &kind = kindInfo, const QString &source = QString());
+
+    // The same, with a button on the entry (see Notification::actionLabel). The caller decides
+    // what `actionId` means and listens for it on the popup.
+    QString postWithAction(const QString &title, const QString &body, const QString &kind,
+                           const QString &source, const QString &actionLabel, const QString &actionId);
+
+    // Rewrite an entry that is already in the list: the offer it made has been taken, so it says
+    // what happened instead of offering it again ("Undone: Thinking display"). An empty title or
+    // body leaves that field as it was; the action is always replaced, so empty strings take the
+    // button away. Unknown ids are ignored.
+    void amend(const QString &id, const QString &title, const QString &body,
+               const QString &actionLabel, const QString &actionId);
 
     // Newest first.
     QList<Notification> entries() const;

@@ -5,6 +5,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QEvent>
 #include <QFileDialog>
@@ -50,6 +51,15 @@ void repolish(QWidget *widget) {
     widget->style()->unpolish(widget);
     widget->style()->polish(widget);
     widget->update();
+}
+
+// ----- rows an agent changed (card #FEJQ, protocol §30.6) ------------------------------------
+// One mark per row, process-wide: the Options pane a person is looking at is rarely the pane the
+// change came through, and there may be several open in several windows.
+struct AgentMark { QString previous, value; QDateTime when; };
+QHash<QString, AgentMark> &agentMarks() {
+    static QHash<QString, AgentMark> marks;
+    return marks;
 }
 
 QLabel *mutedLabel(const QString &text, const char *name) {
@@ -137,6 +147,36 @@ void SettingsWatch::notify() {
         for (const auto &listener : listeners)
             if (listener.first) listener.second();
     });
+}
+
+// ----- rows an agent changed (card #FEJQ, protocol §30.6) --------------------------------------------
+
+void SettingsPane::markAgentChanged(const QString &rowId, const QString &previous, const QString &value) {
+    if (rowId.isEmpty()) return;
+    agentMarks().insert(rowId, AgentMark{previous, value, QDateTime::currentDateTime()});
+    SettingsWatch::instance().notify();     // every open Options pane draws the note
+}
+
+void SettingsPane::clearAgentChanged(const QString &rowId) {
+    if (agentMarks().remove(rowId) > 0) SettingsWatch::instance().notify();
+}
+
+QString SettingsPane::agentChangeNote(const QString &rowId) {
+    const auto found = agentMarks().constFind(rowId);
+    if (found == agentMarks().constEnd()) return {};
+    // "just now" for the first minute, then minutes and hours: the same reading the notification
+    // centre gives its entries, so the two never disagree about when something happened.
+    const qint64 seconds = found->when.secsTo(QDateTime::currentDateTime());
+    const QString when = seconds < 60 ? QStringLiteral("just now")
+                       : seconds < 3600 ? QStringLiteral("%1 min ago").arg((seconds + 30) / 60)
+                                        : QStringLiteral("%1 h ago").arg(seconds / 3600);
+    return QStringLiteral("changed by the agent %1: %2 → %3").arg(when, found->previous, found->value);
+}
+
+void SettingsPane::forgetAgentChanges() {
+    if (agentMarks().isEmpty()) return;
+    agentMarks().clear();
+    SettingsWatch::instance().notify();
 }
 
 // ----- reset to defaults ---------------------------------------------------------------------------
@@ -459,6 +499,14 @@ QWidget *SettingsPane::settingRow(const SettingRow &row) {
     label->setTextFormat(Qt::PlainText);
     text->addWidget(label);
     if (!row.detail.isEmpty()) text->addWidget(mutedLabel(row.detail, "settingsRowDetail"));
+    // An agent wrote this row and the person has not touched it since: say so under the row, in
+    // the detail's own muted voice (#FEJQ, §30.6 — "the row is marked … so 'what did it do to my
+    // settings' is answerable by looking"). The mark goes at the first hand edit, below.
+    if (const QString note = agentChangeNote(row.id); !note.isEmpty()) {
+        auto *marker = mutedLabel(note, "settingsRowAgentNote");
+        marker->setProperty("agentChanged", true);
+        text->addWidget(marker);
+    }
     // A wrapping label will shrink to its longest word, so in a narrow pane the control beside it
     // took the row and "Log detail" and its detail came out a word or two per line. The words keep
     // a column of about eighteen characters (less when they are shorter); the control gives way.
@@ -471,7 +519,10 @@ QWidget *SettingsPane::settingRow(const SettingRow &row) {
     // so rows that describe other rows ("Flash · glm-5.3-flash") never go stale — and every other
     // Options pane with it. Focus and scroll survive the rebuild, and the rebuild happens on the
     // event loop, never inside the signal of the control it is about to delete.
-    auto after = [] { SettingsWatch::instance().notify(); };
+    // The person has answered whatever an agent did to this row, so its marker goes with the edit
+    // (#FEJQ, §30.6: the mark lasts "until the person touches the row"). Every control on the row
+    // writes through here, so there is one place that has to remember.
+    auto after = [id = row.id] { clearAgentChanged(id); SettingsWatch::instance().notify(); };
 
     // The changed indicator and the way back in one mark: a row whose value is not what Relay
     // ships with carries a ↺ between its words and its control (finding 8 of card #XZZB). It asks

@@ -104,6 +104,15 @@ target_include_directories(relay-settings PUBLIC src)
 target_link_libraries(relay-settings PUBLIC ${RELAY_QT}::Widgets)
 target_compile_options(relay-settings PRIVATE -Wall -Wextra -Wpedantic)
 
+# The agent drives the app (card #FEJQ, protocol §30): the catalog the window sends its workers,
+# the executor for one `app_command`, and the change log that makes a write visible and undoable.
+# It is rules over the two catalogs the Options and Actions panes already take, so it builds
+# without a window and tests/appcommands_test.cpp drives the whole channel offscreen.
+add_library(relay-appcommands STATIC src/AppCommands.cpp src/AppCommands.h)
+target_include_directories(relay-appcommands PUBLIC src)
+target_link_libraries(relay-appcommands PUBLIC relay-settings relay-notifications ${RELAY_QT}::Widgets)
+target_compile_options(relay-appcommands PRIVATE -Wall -Wextra -Wpedantic)
+
 # Settings › Local models (card #24XJ): the section's rows and the worker traffic behind them,
 # with no widgets of its own, so the same headless test can drive it.
 add_library(relay-localmodels STATIC src/LocalModelsSettings.cpp src/LocalModelsSettings.h)
@@ -459,7 +468,7 @@ if(RELAY_BUILD_APP)
         src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
-    target_link_libraries(relay PRIVATE relay-closedlist relay-localmodels relay-projects relay-escapees)
+    target_link_libraries(relay PRIVATE relay-closedlist relay-localmodels relay-projects relay-escapees relay-appcommands)
     target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-modelcatalog relay-modelpicker relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-queuesubmit relay-logging relay-voice relay-images relay-titles relay-panestatus relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::DBus ${RELAY_QT}::Network)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
@@ -516,6 +525,12 @@ if(BUILD_TESTING)
     target_link_libraries(relay-modelsettings-tests PRIVATE relay-modelsettings ${RELAY_QT}::Test)
     add_test(NAME modelsettings COMMAND relay-modelsettings-tests)
     set_tests_properties(modelsettings PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # The agent's side of Options and Actions (#FEJQ, §30): the catalog, the command executor, the
+    # change log and Undo. No window: the catalogs are the same structs the settings pane takes.
+    add_executable(relay-appcommands-tests tests/appcommands_test.cpp)
+    target_link_libraries(relay-appcommands-tests PRIVATE relay-appcommands ${RELAY_QT}::Test)
+    add_test(NAME appcommands COMMAND relay-appcommands-tests)
+    set_tests_properties(appcommands PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-settings-tests tests/settingspane_test.cpp)
     target_link_libraries(relay-settings-tests PRIVATE relay-settings relay-localmodels ${RELAY_QT}::Test)
     # The Local models section is placed by RelayWindow::settingsSections(), which needs a whole

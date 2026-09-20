@@ -311,6 +311,11 @@ public:
 
     // Called with the pane token of the clicked notification, when it has one.
     std::function<void(const QString &)> onOpenSource;
+    // The entry's own button was pressed (card #FEJQ, protocol §30.6): "Agent changed Thinking
+    // display · collapse → never · [Undo]". It is given the notification's id and its action id —
+    // strings, the same shape as onOpenSource's pane token, so the window resolves the offer
+    // itself and a popup knows nothing about change logs.
+    std::function<void(const QString &noteId, const QString &actionId)> onAction;
 
     void popUpUnder(QWidget *anchor) {
         rebuild();
@@ -368,6 +373,25 @@ private:
             body->setObjectName(QStringLiteral("notificationBody"));
             body->setWordWrap(true);
             text->addWidget(body);
+        }
+        // What the entry offers, under its words: Undo for a setting an agent changed (#FEJQ,
+        // §30.6 — "reversion / undo should be easy"). It is a real button rather than the whole
+        // row, because the row already means "take me to the pane this came from".
+        if (!note.actionLabel.isEmpty()) {
+            auto *offer = new QToolButton;
+            offer->setObjectName(QStringLiteral("popupTextButton"));
+            offer->setText(note.actionLabel);
+            offer->setFocusPolicy(Qt::NoFocus);
+            offer->setCursor(Qt::PointingHandCursor);
+            const QString noteId = note.id, actionId = note.actionId;
+            connect(offer, &QToolButton::clicked, this, [this, noteId, actionId] {
+                if (onAction) onAction(noteId, actionId);
+            });
+            auto *offerRow = new QHBoxLayout;
+            offerRow->setContentsMargins(0, 2, 0, 0);
+            offerRow->addWidget(offer);
+            offerRow->addStretch(1);
+            text->addLayout(offerRow);
         }
         layout->addLayout(text, 1);
         auto *dismiss = new QToolButton;

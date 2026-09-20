@@ -91,6 +91,19 @@ struct SettingRow {
     // Text rows: a Browse… button beside the box that picks a folder, for a row whose value is a
     // path (the Plans folder). A path is mistyped far more easily than it is browsed to.
     bool browse = false;
+    // ----- what an agent may do with this row (card #FEJQ, protocol §30.2) ----------------------
+    // The keyring holds this value — an API key, a token. Its value is never put in the catalog an
+    // agent is sent and it can never be set by one (owner decision 1, 2026-09-20: "every value row
+    // … except secrets, which no agent may set"). It is marked *here*, where the row is built and
+    // whoever writes it knows what it holds; guessing it from the id downstream is how a key ends
+    // up in a transcript the day someone renames one.
+    bool secret = false;
+    // Which of this row's buttons an agent may press (owner decision 2: opt-in, the line being
+    // "undoable in one click"). A Button row's own button is index 0; a Buttons row's are its
+    // indices, so a provider row can offer Test and withhold Remove. Empty — the default — means
+    // no agent may press anything on this row. relay::AppCommands lists these in the action
+    // catalog under a `row:<section>/<id>[#n]` key, because a button is an action, not a value.
+    QList<int> agentSafeButtons;
 };
 
 struct SettingsSection {
@@ -138,6 +151,11 @@ private:
 struct ActionItem {
     QString key, section, label, detail, shortcut, aliases;
     bool checked = false, stayOpen = false;
+    // Whether an agent may run this action (card #FEJQ, protocol §30.2). Off by default, so an
+    // action added tomorrow is not something an agent may do today; the catalog builder sets it
+    // from relay::appcommands::actionIsAgentSafe(), which is the owner's list of the reversible
+    // ones (open or reveal anything, test a key, refresh a server, copy a page, reorder, undo).
+    bool agentSafe = false;
     std::function<void()> run;
     std::function<QList<ActionItem>()> children;
     std::function<QList<ActionItem>(const QString &search)> typed;
@@ -187,6 +205,23 @@ public:
     void activateCurrent();
 
     static int fuzzyScore(const QString &needle, const QString &haystack);
+
+    // ----- rows an agent changed (card #FEJQ, protocol §30.6) ---------------------------------
+    // Owner, 2026-09-20: "it should be clear what's changed / done". A row an agent wrote carries
+    // a muted note under it — "changed by the agent just now: off → on" — in every Options pane
+    // there is, until the person touches that row. The marks are process-wide, like SettingsWatch
+    // and for the same reason: the pane that shows a row is not the pane, or the window, the
+    // change came through.
+    //
+    // `previous` and `value` are the values as they read to a person ("off", "on", "collapse"),
+    // not JSON: the note is a sentence, and the pane has no business decoding a wire value.
+    static void markAgentChanged(const QString &rowId, const QString &previous, const QString &value);
+    // The person edited the row: the mark has been answered and goes. Every control on a row calls
+    // this before it notifies, so a hand edit anywhere clears it everywhere.
+    static void clearAgentChanged(const QString &rowId);
+    // The note for a row, or empty when nothing marked it. Tests read this.
+    static QString agentChangeNote(const QString &rowId);
+    static void forgetAgentChanges();     // tests, and "the session is over"
 
     // What the Browse… button of a `browse` row opens, given what is in the box (empty for the
     // home folder); it answers with the folder chosen, or an empty string if nobody chose one. It
