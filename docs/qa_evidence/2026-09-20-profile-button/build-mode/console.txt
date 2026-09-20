@@ -1,0 +1,15 @@
+
+relay-profile: /home/elliott/repos/relay-terminal/docs/qa_evidence/2026-09-20-profile-button/build-mode
+  # Profile: build
+  
+  `scripts/relay-profile build --build-dir /tmp/claude-1000/-home-elliott-repos-relay-terminal/846bff2a-de91-4203-bbc2-bc35f5894e19/scratchpad/phase5/tiny/build` · spark-dcc9 · commit `f700c8fb+dirty` · 2026-09-20T21:15:20Z
+  
+  6 steps · 2.8 s wall · 3.2 s of compile time
+  
+  | Output | Seconds | Share |
+  |---|---:|---:|
+  | `CMakeFiles/beta.dir/src/beta.cpp.o` | 2.7 | 84.8% |
+  | `CMakeFiles/alpha.dir/src/alpha.cpp.o` | 0.3 | 8.9% |
+  | `libbeta.a` | 0.1 | 2.1% |
+  | `tiny` | 0.1 | 1.9% |
+  flame graph: scripts/relay-speedscope /home/elliott/repos/relay-terminal/docs/qa_evidence/2026-09-20-profile-button/build-mode/build.trace.json

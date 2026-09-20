@@ -1,0 +1,11 @@
+py-spy> Sampling process 250 times a second. Press Control-C to exit.
+
+........................................................
+----------------------------------------------------------------------
+Ran 56 tests in 0.007s
+
+OK
+
+py-spy> Stopped sampling because process exited
+py-spy> Wrote speedscope file to '/home/elliott/repos/relay-terminal/docs/qa_evidence/2026-09-20-profile-button/tests-mode/tests.speedscope.json'. Samples: 19 Errors: 0
+py-spy> Visit https://www.speedscope.app/ to view

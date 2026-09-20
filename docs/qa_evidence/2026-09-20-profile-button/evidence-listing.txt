@@ -1,0 +1,8 @@
+docs/qa_evidence/2026-09-20-profile-build/rows.json
+docs/qa_evidence/2026-09-20-profile-build/ninja_log
+docs/qa_evidence/2026-09-20-profile-build/build.trace.json
+docs/qa_evidence/2026-09-20-profile-build/meta.json
+docs/qa_evidence/2026-09-20-profile-build/configure.log
+docs/qa_evidence/2026-09-20-profile-build/build.json
+docs/qa_evidence/2026-09-20-profile-build/summary.md
+docs/qa_evidence/2026-09-20-profile-build/build.log

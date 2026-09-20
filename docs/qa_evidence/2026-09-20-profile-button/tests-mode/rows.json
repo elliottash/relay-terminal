@@ -1,0 +1,231 @@
+{
+ "kind": "profile",
+ "wall": 0.076,
+ "samples": 19,
+ "rows": [
+  {
+   "name": "_call_with_frames_removed",
+   "self": 0.024,
+   "total": 0.052,
+   "self_pct": 31.58,
+   "total_pct": 68.42,
+   "file": "<frozen importlib._bootstrap>",
+   "line": 488
+  },
+  {
+   "name": "process 1844691:\"\"",
+   "self": 0.016,
+   "total": 0.076,
+   "self_pct": 21.05,
+   "total_pct": 100.0
+  },
+  {
+   "name": "_compile_bytecode",
+   "self": 0.008,
+   "total": 0.008,
+   "self_pct": 10.53,
+   "total_pct": 10.53,
+   "file": "<frozen importlib._bootstrap_external>",
+   "line": 753
+  },
+  {
+   "name": "__exit__",
+   "self": 0.004,
+   "total": 0.004,
+   "self_pct": 5.26,
+   "total_pct": 5.26,
+   "file": "/usr/lib/python3.12/contextlib.py",
+   "line": 144
+  },
+  {
+   "name": "__setitem__",
+   "self": 0.004,
+   "total": 0.004,
+   "self_pct": 5.26,
+   "total_pct": 5.26,
+   "file": "/usr/lib/python3.12/enum.py",
+   "line": 456
+  },
+  {
+   "name": "_create_fn",
+   "self": 0.004,
+   "total": 0.004,
+   "self_pct": 5.26,
+   "total_pct": 5.26,
+   "file": "/usr/lib/python3.12/dataclasses.py",
+   "line": 473
+  },
+  {
+   "name": "_parse",
+   "self": 0.004,
+   "total": 0.004,
+   "self_pct": 5.26,
+   "total_pct": 5.26,
+   "file": "/usr/lib/python3.12/re/_parser.py",
+   "line": 548
+  },
+  {
+   "name": "add_argument",
+   "self": 0.004,
+   "total": 0.004,
+   "self_pct": 5.26,
+   "total_pct": 5.26,
+   "file": "/usr/lib/python3.12/argparse.py",
+   "line": 1489
+  },
+  {
+   "name": "get_data",
+   "self": 0.004,
+   "total": 0.004,
+   "self_pct": 5.26,
+   "total_pct": 5.26,
+   "file": "<frozen importlib._bootstrap_external>",
+   "line": 1187
+  },
+  {
+   "name": "get_data",
+   "self": 0.004,
+   "total": 0.004,
+   "self_pct": 5.26,
+   "total_pct": 5.26,
+   "file": "<frozen importlib._bootstrap_external>",
+   "line": 1186
+  },
+  {
+   "name": "_find_and_load",
+   "self": 0.0,
+   "total": 0.052,
+   "self_pct": 0.0,
+   "total_pct": 68.42,
+   "file": "<frozen importlib._bootstrap>",
+   "line": 1360
+  },
+  {
+   "name": "_find_and_load_unlocked",
+   "self": 0.0,
+   "total": 0.052,
+   "self_pct": 0.0,
+   "total_pct": 68.42,
+   "file": "<frozen importlib._bootstrap>",
+   "line": 1331
+  },
+  {
+   "name": "_load_unlocked",
+   "self": 0.0,
+   "total": 0.052,
+   "self_pct": 0.0,
+   "total_pct": 68.42,
+   "file": "<frozen importlib._bootstrap>",
+   "line": 935
+  },
+  {
+   "name": "exec_module",
+   "self": 0.0,
+   "total": 0.052,
+   "self_pct": 0.0,
+   "total_pct": 68.42,
+   "file": "<frozen importlib._bootstrap_external>",
+   "line": 995
+  },
+  {
+   "name": "<module>",
+   "self": 0.0,
+   "total": 0.036,
+   "self_pct": 0.0,
+   "total_pct": 47.37,
+   "file": "/usr/lib/python3.12/unittest/__main__.py",
+   "line": 18
+  },
+  {
+   "name": "_run_code",
+   "self": 0.0,
+   "total": 0.036,
+   "self_pct": 0.0,
+   "total_pct": 47.37,
+   "file": "<frozen runpy>",
+   "line": 88
+  },
+  {
+   "name": "_run_module_as_main",
+   "self": 0.0,
+   "total": 0.036,
+   "self_pct": 0.0,
+   "total_pct": 47.37,
+   "file": "<frozen runpy>",
+   "line": 198
+  },
+  {
+   "name": "__init__",
+   "self": 0.0,
+   "total": 0.032,
+   "self_pct": 0.0,
+   "total_pct": 42.11,
+   "file": "/usr/lib/python3.12/unittest/main.py",
+   "line": 104
+  },
+  {
+   "name": "createTests",
+   "self": 0.0,
+   "total": 0.028,
+   "self_pct": 0.0,
+   "total_pct": 36.84,
+   "file": "/usr/lib/python3.12/unittest/main.py",
+   "line": 164
+  },
+  {
+   "name": "loadTestsFromName",
+   "self": 0.0,
+   "total": 0.028,
+   "self_pct": 0.0,
+   "total_pct": 36.84,
+   "file": "/usr/lib/python3.12/unittest/loader.py",
+   "line": 137
+  },
+  {
+   "name": "loadTestsFromNames",
+   "self": 0.0,
+   "total": 0.028,
+   "self_pct": 0.0,
+   "total_pct": 36.84,
+   "file": "/usr/lib/python3.12/unittest/loader.py",
+   "line": 207
+  },
+  {
+   "name": "parseArgs",
+   "self": 0.0,
+   "total": 0.028,
+   "self_pct": 0.0,
+   "total_pct": 36.84,
+   "file": "/usr/lib/python3.12/unittest/main.py",
+   "line": 153
+  },
+  {
+   "name": "<module>",
+   "self": 0.0,
+   "total": 0.024,
+   "self_pct": 0.0,
+   "total_pct": 31.58,
+   "file": "/usr/lib/python3.12/unittest/__init__.py",
+   "line": 61
+  },
+  {
+   "name": "<module>",
+   "self": 0.0,
+   "total": 0.024,
+   "self_pct": 0.0,
+   "total_pct": 31.58,
+   "file": "/usr/lib/python3.12/unittest/case.py",
+   "line": 6
+  },
+  {
+   "name": "<module>",
+   "self": 0.0,
+   "total": 0.024,
+   "self_pct": 0.0,
+   "total_pct": 31.58,
+   "file": "/usr/lib/python3.12/pprint.py",
+   "line": 38
+  }
+ ],
+ "total_rows": 68
+}

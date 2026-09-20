@@ -1,0 +1,17 @@
+{
+ "target": "tests",
+ "mode": "tests",
+ "host": "spark-dcc9",
+ "commit": "f700c8fb+dirty",
+ "started": "2026-09-20T21:15:20Z",
+ "finished": "2026-09-20T21:15:20Z",
+ "command": "scripts/relay-profile tests tests.test_test_history",
+ "out": "/home/elliott/repos/relay-terminal/docs/qa_evidence/2026-09-20-profile-button/tests-mode",
+ "raw": [
+  "tests.speedscope.json"
+ ],
+ "tool_versions": {
+  "py-spy": "py-spy 0.4.2",
+  "python3": "Python 3.12.3"
+ }
+}

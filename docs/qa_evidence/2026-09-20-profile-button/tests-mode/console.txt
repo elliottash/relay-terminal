@@ -1,0 +1,16 @@
+relay-profile: py-spy record --rate 250 -- python3 -m unittest tests.test_test_history
+
+relay-profile: /home/elliott/repos/relay-terminal/docs/qa_evidence/2026-09-20-profile-button/tests-mode
+  # Profile: tests
+  
+  `scripts/relay-profile tests tests.test_test_history` · spark-dcc9 · commit `f700c8fb+dirty` · 2026-09-20T21:15:20Z
+  
+  68 functions · 19 samples · 0.1 s total
+  
+  | Function | Self | Self % | Total | Total % |
+  |---|---:|---:|---:|---:|
+  | _call_with_frames_removed<br>`<frozen importlib._bootstrap>:488` | 0.024 | 31.6% | 0.052 | 68.4% |
+  | process 1844691:"" | 0.016 | 21.1% | 0.076 | 100.0% |
+  | _compile_bytecode<br>`<frozen importlib._bootstrap_external>:753` | 0.008 | 10.5% | 0.008 | 10.5% |
+  | __exit__<br>`/usr/lib/python3.12/contextlib.py:144` | 0.004 | 5.3% | 0.004 | 5.3% |
+  flame graph: scripts/relay-speedscope /home/elliott/repos/relay-terminal/docs/qa_evidence/2026-09-20-profile-button/tests-mode/tests.speedscope.json

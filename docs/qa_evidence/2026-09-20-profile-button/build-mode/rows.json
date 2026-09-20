@@ -1,0 +1,63 @@
+{
+ "kind": "build",
+ "wall": 2.834,
+ "steps": 6,
+ "sum": 3.193,
+ "rows": [
+  {
+   "name": "CMakeFiles/beta.dir/src/beta.cpp.o",
+   "self": 2.708,
+   "total": 2.708,
+   "start": 1,
+   "end": 2709,
+   "self_pct": 84.81,
+   "total_pct": 84.81
+  },
+  {
+   "name": "CMakeFiles/alpha.dir/src/alpha.cpp.o",
+   "self": 0.285,
+   "total": 0.285,
+   "start": 1,
+   "end": 286,
+   "self_pct": 8.93,
+   "total_pct": 8.93
+  },
+  {
+   "name": "libbeta.a",
+   "self": 0.066,
+   "total": 0.066,
+   "start": 2709,
+   "end": 2775,
+   "self_pct": 2.07,
+   "total_pct": 2.07
+  },
+  {
+   "name": "tiny",
+   "self": 0.06,
+   "total": 0.06,
+   "start": 2775,
+   "end": 2835,
+   "self_pct": 1.88,
+   "total_pct": 1.88
+  },
+  {
+   "name": "libalpha.a",
+   "self": 0.05,
+   "total": 0.05,
+   "start": 286,
+   "end": 336,
+   "self_pct": 1.57,
+   "total_pct": 1.57
+  },
+  {
+   "name": "CMakeFiles/tiny.dir/src/main.cpp.o",
+   "self": 0.024,
+   "total": 0.024,
+   "start": 1,
+   "end": 25,
+   "self_pct": 0.75,
+   "total_pct": 0.75
+  }
+ ],
+ "total_rows": 6
+}
