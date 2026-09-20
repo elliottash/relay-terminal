@@ -228,6 +228,10 @@ void LocalModelsSettings::addEndpointRows(SettingsSection &into, const QJsonObje
         row.aliases = QStringLiteral("local model server endpoint llama ollama ")
                       + endpoint.value(QStringLiteral("base_url")).toString();
         row.buttonTexts = QStringList{QStringLiteral("Test"), QStringLiteral("Refresh"), QStringLiteral("Remove")};
+        // Test and Refresh are on the owner's list of what an agent may press (card #FEJQ,
+        // decision 2: "test a key, refresh/detect local servers"); Remove is not, because there is
+        // no one click that puts a forgotten server back.
+        row.agentSafeButtons = QList<int>{0, 1};
         row.onButton = [this, id, endpoint](int index) {
             if (index == 0) {
                 m_notes[id] = QStringLiteral("Testing…");
@@ -298,6 +302,7 @@ void LocalModelsSettings::addFindRows(SettingsSection &into) {
                                     "Nothing is contacted until you press it.");
         row.aliases = QStringLiteral("scan discover detect ollama lm studio llama.cpp vllm");
         row.buttonText = QStringLiteral("Find servers");
+        row.agentSafeButtons = QList<int>{0};   // a probe of four loopback ports, and it changes nothing (#FEJQ)
         row.run = [this] { findServers(); };
         into.rows << row;
     }
@@ -368,6 +373,7 @@ void LocalModelsSettings::addAddressRows(SettingsSection &into) {
         row.label = QStringLiteral("Detect");
         row.detail = QStringLiteral("Asks that address for its kind, its models and the window it was started with");
         row.buttonText = QStringLiteral("Detect");
+        row.agentSafeButtons = QList<int>{0};   // asks the typed address what it is; nothing is saved (#FEJQ)
         row.run = [this] {
             if (m_address.trimmed().isEmpty()) {
                 m_addNote = QStringLiteral("Type the server's address first.");
