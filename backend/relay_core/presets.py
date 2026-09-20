@@ -399,12 +399,70 @@ INTELLIGENCE.update({
 })
 
 
+# --- the same model on OpenRouter (owner, 2026-09-20) ---------------------------------------------
+# "If a model fails, fall back to the same model on OpenRouter": for each cloud catalog model id,
+# the OpenRouter slug that serves that model. Every slug below was checked against the listing at
+# https://openrouter.ai/api/v1/models (fetched 2026-09-20; no key needed), and a model with no
+# listing is simply absent rather than guessed at: kimi-for-coding and kimi-for-coding-highspeed
+# are Kimi Code's aliases for whatever it currently serves, not a named model; the relay-free rows
+# are Relay's own gateway; and the openrouter preset's rows are already OpenRouter slugs. A
+# "-highspeed" id is the same weights on a faster (pricier) serving tier, so it maps to the plain
+# slug — the model is the same, the speed is not carried — and k3-256k is K3 at a wider window,
+# which OpenRouter's kimi-k3 (1,048,576) covers. The failover (roles.openrouter_twin_candidate,
+# protocol 15.2.2) uses this only for the models the user opted in per model: it spends the
+# OpenRouter key at pay-as-you-go rates, which nobody wants to start doing for gpt-6 by surprise.
+OPENROUTER_TWINS: dict[str, str] = {
+    # z.ai
+    "glm-5.3": "z-ai/glm-5.3",
+    "glm-5.3-flash": "z-ai/glm-5.3-flash",
+    # kimi (Moonshot platform) and Kimi Code
+    "kimi-k3": "moonshotai/kimi-k3",
+    "kimi-k2.7-code-highspeed": "moonshotai/kimi-k2.7-code",
+    "k3": "moonshotai/kimi-k3",
+    "k3-256k": "moonshotai/kimi-k3",
+    # minimax
+    "MiniMax-M3": "minimax/minimax-m3",
+    "MiniMax-M2.7": "minimax/minimax-m2.7",
+    "MiniMax-M2.7-highspeed": "minimax/minimax-m2.7",
+    "MiniMax-M2.5": "minimax/minimax-m2.5",
+    # openai
+    "gpt-6-astra": "openai/gpt-6-astra",
+    "gpt-5.6-sol": "openai/gpt-5.6-sol",
+    "gpt-5.6-terra": "openai/gpt-5.6-terra",
+    "gpt-5.6-luna": "openai/gpt-5.6-luna",
+    # anthropic (OpenRouter spells the version with a dot)
+    "claude-opus-5": "anthropic/claude-opus-5",
+    "claude-sonnet-5": "anthropic/claude-sonnet-5",
+    "claude-haiku-4-5": "anthropic/claude-haiku-4.5",
+    "claude-fable-5-1": "anthropic/claude-fable-5.1",
+    # google
+    "gemini-3.1-pro-preview": "google/gemini-3.1-pro-preview",
+    "gemini-3.8-flash": "google/gemini-3.8-flash",
+    "gemini-3.5-flash-lite": "google/gemini-3.5-flash-lite",
+}
+
+
+def openrouter_twin(model_id) -> str | None:
+    """The OpenRouter slug serving the same model as this catalog id, or None.
+
+    None for a model OpenRouter does not list, for an id that is already an OpenRouter slug (it has
+    a slash: nothing to twin), and for anything that is not a model id at all.
+    """
+    if not isinstance(model_id, str) or "/" in model_id:
+        return None
+    return OPENROUTER_TWINS.get(model_id.strip())
+
+
 def catalog_rows(preset_id) -> list[dict]:
-    """The catalog rows of a preset with `efforts` resolved and `intelligence` filled in.
+    """The catalog rows of a preset with `efforts` resolved, `intelligence` filled in and the
+    model's OpenRouter twin named.
 
     `efforts` of None becomes the levels the preset's effort style offers, so the GUI always gets a
-    list and never has to know about styles. An id with no catalog — a local endpoint, a guest, an
-    unknown id — gets [] (a local endpoint's list is the probe's, protocol 28; a guest's is its own).
+    list and never has to know about styles. `openrouter` is `openrouter_twin(id)` — the slug that
+    serves the same model there, or None — so the GUI can offer the per-model "fall back to the same
+    model on OpenRouter" toggle only where there is one. An id with no catalog — a local endpoint, a
+    guest, an unknown id — gets [] (a local endpoint's list is the probe's, protocol 28; a guest's
+    is its own).
     """
     preset = PRESETS.get(preset_id) if isinstance(preset_id, str) else None
     if preset is None:
@@ -412,7 +470,8 @@ def catalog_rows(preset_id) -> list[dict]:
     default = effort_levels(preset.effort_style)
     return [{"id": row["id"], "label": row["label"], "tier": row["tier"],
              "efforts": list(default if row["efforts"] is None else row["efforts"]),
-             "intelligence": INTELLIGENCE.get(row["id"])}
+             "intelligence": INTELLIGENCE.get(row["id"]),
+             "openrouter": openrouter_twin(row["id"])}
             for row in MODEL_CATALOG.get(preset_id, [])]
 
 

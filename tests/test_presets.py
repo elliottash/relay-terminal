@@ -280,7 +280,7 @@ class TierTableTests(unittest.TestCase):
 class ModelCatalogTests(unittest.TestCase):
     """One list of models per provider row (owner, 2026-09-20): MODEL_CATALOG and catalog_rows()."""
 
-    ROW_KEYS = {"id", "label", "tier", "efforts", "intelligence"}
+    ROW_KEYS = {"id", "label", "tier", "efforts", "intelligence", "openrouter"}
 
     @staticmethod
     def tiers_naming(target: str, model: str) -> set:
@@ -351,6 +351,8 @@ class ModelCatalogTests(unittest.TestCase):
                     self.assertIn(row["id"], P.INTELLIGENCE)
                     self.assertEqual(row["intelligence"], P.INTELLIGENCE[row["id"]])
                     self.assertIn(row["intelligence"], (None, *range(0, 101)))
+                    # The same model on OpenRouter, or None: where the per-model toggle shows.
+                    self.assertEqual(row["openrouter"], P.openrouter_twin(row["id"]))
         # Resolved, not the style's name: the GUI never has to know about styles.
         self.assertEqual(P.catalog_rows("relay-free")[0]["efforts"], ["low", "medium"])
         self.assertEqual(P.catalog_rows("anthropic")[0]["efforts"], [])
@@ -361,6 +363,32 @@ class ModelCatalogTests(unittest.TestCase):
         # An id with no catalog — a local endpoint, a guest, nonsense — is [] and never raises.
         for other in ("local:bonsai", "guest:codex", "", None, 7):
             self.assertEqual(P.catalog_rows(other), [])
+
+    def test_every_openrouter_twin_names_a_catalog_model_and_a_real_slug(self):
+        # OPENROUTER_TWINS (owner, 2026-09-20): keyed by a cloud catalog model id, valued by the
+        # OpenRouter slug serving the same model (verified against openrouter.ai/api/v1/models).
+        catalog_ids = {row["id"] for preset_id, rows in P.MODEL_CATALOG.items()
+                       if preset_id not in ("relay-free", "openrouter") for row in rows}
+        self.assertTrue(set(P.OPENROUTER_TWINS) <= catalog_ids, set(P.OPENROUTER_TWINS) - catalog_ids)
+        for model_id, slug in P.OPENROUTER_TWINS.items():
+            with self.subTest(model_id):
+                self.assertIsInstance(slug, str)
+                self.assertTrue(slug.strip(), model_id)
+                self.assertEqual(slug, slug.strip())
+                # A slug is vendor/model, exactly one slash, no variant suffix (":batch", ":free").
+                self.assertEqual(slug.count("/"), 1, slug)
+                self.assertNotIn(":", slug)
+                self.assertNotIn("/", model_id)
+                self.assertEqual(P.openrouter_twin(model_id), slug)
+        # The rows that are already OpenRouter, and Relay's own gateway, have no twin.
+        for preset_id in ("openrouter", "relay-free"):
+            for row in P.catalog_rows(preset_id):
+                self.assertIsNone(row["openrouter"], (preset_id, row["id"]))
+        for other in ("deepseek/deepseek-v4.1-flash", "kimi-for-coding", "", None, 7):
+            self.assertIsNone(P.openrouter_twin(other), other)
+        # The one the owner asked for by name.
+        self.assertEqual(P.openrouter_twin("glm-5.3-flash"), "z-ai/glm-5.3-flash")
+        self.assertEqual(P.openrouter_twin("glm-5.3"), "z-ai/glm-5.3")
 
     def test_the_presets_event_carries_the_catalog(self):
         # to_dict() is what the worker's `presets` event sends per row, so `models` rides on it.

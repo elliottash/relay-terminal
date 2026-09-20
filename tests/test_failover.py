@@ -198,6 +198,34 @@ class RankedFallbackCandidateTests(unittest.TestCase):
         self.assertTrue(found.config.local)
 
 
+class OpenRouterTwinCandidateTests(unittest.TestCase):
+    """`RoleResolver.openrouter_twin_candidate`: the same model on OpenRouter (owner, 2026-09-20),
+    tried after the ranked fallback and before the catalog chain, on the same terms as any
+    candidate. Whether the user opted that model in is the agent's question, not the resolver's."""
+
+    def test_the_twin_is_built_on_the_same_terms_as_a_candidate(self):
+        made = resolver({'openrouter': 'k', 'kimi': 'k'})
+        with mock.patch('relay_core.hosted.available', return_value=False):
+            found = made.openrouter_twin_candidate('glm-5.3', 'main', {'glm'})
+            self.assertEqual((found.preset_id, found.config.model, found.config.api_key, found.source, found.tier),
+                             ('openrouter', 'z-ai/glm-5.3', 'k', 'failover', 'main'))
+            self.assertEqual(found.config.base_url, PRESETS['openrouter'].base_url)
+            # A Flash pane's model has its own twin; the tier is the record, not the lookup.
+            self.assertEqual(made.openrouter_twin_candidate('glm-5.3-flash', 'flash', {'glm'}).config.model,
+                             'z-ai/glm-5.3-flash')
+            # High is max reasoning, in OpenRouter's own words.
+            high = made.openrouter_twin_candidate('glm-5.3', 'high', {'glm'})
+            self.assertEqual(high.config.extra, {'reasoning': {'effort': 'xhigh'}})
+            # OpenRouter already asked this turn, and the failing host being openrouter.ai itself.
+            self.assertIsNone(made.openrouter_twin_candidate('glm-5.3', 'main', {'glm', 'openrouter'}))
+            self.assertIsNone(made.openrouter_twin_candidate('glm-5.3', 'main', set(), {'OPENROUTER.AI'}))
+            # No twin: a Kimi Code alias, an id that is already a slug, nonsense.
+            for model in ('kimi-for-coding', 'deepseek/deepseek-v4.1-flash', 'relay-main', '', None):
+                self.assertIsNone(made.openrouter_twin_candidate(model, 'main', {'glm'}), model)
+        # No OpenRouter key stored: not a spare, never an error.
+        self.assertIsNone(resolver({'kimi': 'k'}).openrouter_twin_candidate('glm-5.3', 'main', {'glm'}))
+
+
 class FailoverTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -210,10 +238,11 @@ class FailoverTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def agent(self, *, provider=None, failover=True, failover_hosted=False, roles=None,
-              config=CONFIG, preset_id='glm', fallback=None, effort=None):
+              config=CONFIG, preset_id='glm', fallback=None, effort=None, failover_openrouter=None):
         return Agent(config, self.temp.name, self.events.append, provider=provider,
                      preset_id=preset_id, failover=failover, failover_hosted=failover_hosted,
-                     fallback=fallback, roles=roles, effort=effort)
+                     fallback=fallback, roles=roles, effort=effort,
+                     failover_openrouter=failover_openrouter)
 
     def retries(self):
         """The moves, not the closing "back to the pane's own model" note."""
@@ -299,6 +328,98 @@ class FailoverTests(unittest.TestCase):
         self.assertEqual(self.events[-1]['event'], 'done')
         self.assertEqual(seen['effort'], 'high')
         self.assertIn('high', json.dumps(seen['extra']))           # said in OpenAI's own words
+
+    def test_a_model_the_user_opted_in_continues_on_its_openrouter_twin_before_the_catalog(self):
+        # Kimi is first by the catalog's order and has a key; the user ticked "fall back to the
+        # same model on OpenRouter" for glm-5.3 (owner, 2026-09-20), so that is where the turn goes.
+        self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 429 for glm-5.3.'))
+        self.stubs['kimi-k3'] = Answerer()
+        twin = Answerer()
+        self.stubs['z-ai/glm-5.3'] = twin
+        agent = self.agent(roles=resolver({'kimi': 'k', 'openrouter': 'k'}),
+                           failover_openrouter=['glm-5.3'])
+        agent.ask('hello')
+        self.assertEqual(self.events[-1]['event'], 'done')
+        moved = next(e for e in self.retries() if e['reason'] == 'failover')
+        self.assertEqual((moved['to_model'], moved['to_preset']), ('z-ai/glm-5.3', 'openrouter'))
+        self.assertEqual((twin.calls, self.stubs['kimi-k3'].calls), (1, 0))
+        # The note says what it is: the same model, through OpenRouter.
+        glm, router = PRESETS['glm'].label, PRESETS['openrouter'].label
+        self.assertEqual(moved['text'], f'{MAIN.model} ({glm}) keeps failing; continuing this turn on '
+                                        f'the same model through OpenRouter (z-ai/glm-5.3 ({router})).')
+        self.assertEqual(agent.config.model, MAIN.model)          # for that turn only, as ever
+
+    def test_the_ranked_fallback_still_goes_before_the_twin_and_the_catalog_after_it(self):
+        self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503 for glm-5.3.'))
+        self.stubs['gpt-6-mini'] = Refuser(ProviderError('Provider HTTP 503 for gpt-6-mini.'))
+        self.stubs['z-ai/glm-5.3'] = Refuser(ProviderError('Provider HTTP 503 for z-ai/glm-5.3.'))
+        self.stubs['kimi-k3'] = Answerer()
+        agent = self.agent(roles=resolver({'kimi': 'k', 'openai': 'k', 'openrouter': 'k'}),
+                           fallback={'preset': 'openai', 'model': 'gpt-6-mini'},
+                           failover_openrouter=['glm-5.3'])
+        agent.FAILOVER_PROVIDERS = 3
+        agent.ask('hello')
+        self.assertEqual(self.events[-1]['event'], 'done')
+        self.assertEqual([(e['attempt'], e['to_model']) for e in self.retries()],
+                         [(1, 'gpt-6-mini'), (2, 'z-ai/glm-5.3'), (3, 'kimi-k3')])
+        # OpenRouter was asked once, as the twin; the catalog chain does not ask it again.
+        self.assertEqual(self.stubs['z-ai/glm-5.3'].calls, 1)
+
+    def test_the_twin_is_off_by_default_and_opted_in_per_model(self):
+        for opted in (None, [], ['glm-5.3-flash'], ['z-ai/glm-5.3']):
+            with self.subTest(opted=opted):
+                self.events.clear()
+                self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503 for glm-5.3.'))
+                self.stubs['kimi-k3'] = Answerer()
+                self.stubs['z-ai/glm-5.3'] = Answerer()
+                agent = self.agent(roles=resolver({'kimi': 'k', 'openrouter': 'k'}),
+                                   failover_openrouter=opted)
+                agent.ask('hello')
+                self.assertEqual(self.events[-1]['event'], 'done')
+                self.assertEqual([e['to_model'] for e in self.retries()], ['kimi-k3'])
+                self.assertEqual(self.stubs['z-ai/glm-5.3'].calls, 0)
+
+    def test_a_twin_that_cannot_take_the_turn_is_skipped_silently(self):
+        # No OpenRouter key stored; the failing provider is OpenRouter itself; a model with no
+        # twin (a Kimi Code alias): each leaves the catalog order as it was.
+        kimi_code = PRESETS['kimi-code']
+        cases = (
+            ('no key', CONFIG, 'glm', {'kimi': 'k'}, ['glm-5.3'], 'kimi-k3'),
+            ('openrouter itself', ProviderConfig(PRESETS['openrouter'].base_url, 'glm-5.3', 'pane-key'),
+             'openrouter', {'kimi': 'k', 'openrouter': 'k'}, ['glm-5.3'], 'kimi-k3'),
+            ('no twin', ProviderConfig(kimi_code.base_url, 'kimi-for-coding', 'pane-key'),
+             'kimi-code', {'glm': 'k', 'openrouter': 'k'}, ['kimi-for-coding'], 'glm-5.3'),
+        )
+        for name, config, preset_id, keys, opted, expected in cases:
+            with self.subTest(name):
+                self.events.clear()
+                self.stubs.clear()
+                self.stubs[config.model] = Refuser(ProviderError(f'Provider HTTP 503 for {config.model}.'))
+                self.stubs['z-ai/glm-5.3'] = Answerer()
+                self.stubs[expected] = Answerer()
+                agent = self.agent(config=config, preset_id=preset_id, roles=resolver(keys, config, preset_id),
+                                   failover_openrouter=opted)
+                agent.ask('hello')
+                self.assertEqual(self.events[-1]['event'], 'done')
+                self.assertEqual([e['to_model'] for e in self.retries()], [expected])
+                self.assertEqual(self.stubs['z-ai/glm-5.3'].calls, 0)
+
+    def test_the_twin_runs_at_the_panes_effort_in_openrouters_words(self):
+        self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503 for glm-5.3.'))
+        seen = {}
+
+        class Effortful(Answerer):
+            def complete(inner, messages, tools, emit, cancel):
+                seen['effort'] = agent.effort
+                seen['extra'] = dict(agent.config.extra)
+                return super().complete(messages, tools, emit, cancel)
+        self.stubs['z-ai/glm-5.3'] = Effortful()
+        agent = self.agent(roles=resolver({'openrouter': 'k'}), effort='high',
+                           failover_openrouter=['glm-5.3'])
+        agent.ask('hello')
+        self.assertEqual(self.events[-1]['event'], 'done')
+        self.assertEqual(seen['effort'], 'high')
+        self.assertEqual(seen['extra'], {'reasoning': {'effort': 'high'}})
 
     def test_each_provider_is_asked_once_and_the_turn_fails_when_none_answers(self):
         error = ProviderError('Provider HTTP 503 for everyone.')
@@ -893,6 +1014,20 @@ class SubagentFailoverTests(unittest.TestCase):
         self.assertEqual([e['to_model'] for e in self.moves()], ['gpt-6-mini'])
         self.assertEqual(self.stubs['kimi-k3'].calls, 0)
 
+    def test_it_follows_the_panes_openrouter_opt_in(self):
+        self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503.'))
+        self.stubs['kimi-k3'] = Answerer()
+        self.stubs['z-ai/glm-5.3'] = Answerer()
+        main = SimpleNamespace(failover=True, failover_hosted=False, failover_openrouter=['glm-5.3'])
+        sub = self.subagent(self.factory({'kimi': 'k', 'openrouter': 'k'}, main=main))
+        self.assertEqual(sub.failover_openrouter, ['glm-5.3'])
+        sub.ask('go')
+        self.assertEqual(self.events[-1]['event'], 'done')
+        self.assertEqual([e['to_model'] for e in self.moves()], ['z-ai/glm-5.3'])
+        self.assertEqual(self.stubs['kimi-k3'].calls, 0)
+        # A pane double that says nothing about it: off, as for the pane.
+        self.assertEqual(self.subagent(self.factory({}, main=SimpleNamespace(failover=True))).failover_openrouter, [])
+
     def test_an_injected_provider_is_never_replaced(self):
         # The tests' own provider factory, and a guest harness: its owner decides what serves.
         injected = Refuser(ProviderError('Provider HTTP 503.'))
@@ -930,6 +1065,17 @@ class OptionTests(unittest.TestCase):
             self.assertEqual(validate_turn_options({'fallback': bad}), {'fallback': None}, bad)
         self.assertNotIn('fallback', validate_turn_options({}))
 
+    def test_the_openrouter_opt_in_is_a_list_of_model_ids_or_nothing(self):
+        # Per model, off by default (owner, 2026-09-20): a list of ids is kept, trimmed and
+        # de-duplicated; anything else is the empty list, never an error, as for `fallback`.
+        self.assertEqual(validate_turn_options({'failover_openrouter': ['glm-5.3-flash', ' glm-5.3 ', 'glm-5.3']}),
+                         {'failover_openrouter': ['glm-5.3-flash', 'glm-5.3']})
+        self.assertEqual(validate_turn_options({'failover_openrouter': []}), {'failover_openrouter': []})
+        self.assertEqual(validate_turn_options({'failover_openrouter': None}), {'failover_openrouter': []})
+        for bad in ('glm-5.3', True, 3, {'glm-5.3': True}, [3, '', None]):
+            self.assertEqual(validate_turn_options({'failover_openrouter': bad}), {'failover_openrouter': []}, bad)
+        self.assertNotIn('failover_openrouter', validate_turn_options({}))
+
     def test_set_options_applies_at_once_and_reports_back(self):
         with tempfile.TemporaryDirectory() as temp:
             events = []
@@ -951,3 +1097,11 @@ class OptionTests(unittest.TestCase):
             self.assertEqual(agent.fallback, {'preset': 'openai', 'model': 'gpt-6-mini'})
             agent.set_options({'fallback': None})
             self.assertIsNone(agent.options()['fallback'])
+            # The OpenRouter opt-in: nothing until a model is ticked, and a list of ids after.
+            self.assertEqual(agent.options()['failover_openrouter'], [])
+            agent.set_options({'failover_openrouter': ['glm-5.3-flash']})
+            self.assertEqual(agent.options()['failover_openrouter'], ['glm-5.3-flash'])
+            agent.set_options({'failover': True})                 # says nothing about it: kept
+            self.assertEqual(agent.failover_openrouter, ['glm-5.3-flash'])
+            agent.set_options({'failover_openrouter': None})
+            self.assertEqual(agent.options()['failover_openrouter'], [])

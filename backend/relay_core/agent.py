@@ -164,6 +164,26 @@ def validate_fallback(value) -> dict | None:
     return {"preset": preset.strip(), "model": model}
 
 
+def validate_failover_openrouter(value) -> list[str]:
+    """The `failover_openrouter` request option: the model ids the user opted in to "if this model
+    fails, continue on the same model through OpenRouter" (owner, 2026-09-20), as a list.
+
+    Off by default and per model, never a pane-wide switch: OpenRouter bills at pay-as-you-go
+    rates, and nobody wants a failing subscription to quietly start gpt-6 calls there — while
+    glm-5.3-flash there is exactly what the owner asked for. Anything that is not a list of
+    non-empty strings is the empty list — never an error, for the reason `validate_fallback` gives:
+    the GUI sends what it has, and a shape it cannot express must not refuse the whole configure.
+    Duplicates and surrounding whitespace are dropped; order is not meaningful.
+    """
+    if not isinstance(value, (list, tuple)):
+        return []
+    out: list[str] = []
+    for item in value:
+        if isinstance(item, str) and item.strip() and item.strip() not in out:
+            out.append(item.strip())
+    return out
+
+
 def validate_turn_options(request: dict) -> dict:
     """Agent options from configure / set_agent_options. Only keys present in the request are returned."""
     out = {}
@@ -183,6 +203,10 @@ def validate_turn_options(request: dict) -> dict:
     # 2026-09-20). Present-but-null clears it, which is why this is not `.get(...) is not None`.
     if "fallback" in request:
         out["fallback"] = validate_fallback(request["fallback"])
+    # The models that may continue on their OpenRouter twin (owner, 2026-09-20): a list of ids,
+    # present-but-null or an unusable shape clears it, like `fallback`.
+    if "failover_openrouter" in request:
+        out["failover_openrouter"] = validate_failover_openrouter(request["failover_openrouter"])
     if request.get("stall_timeout_s") is not None:
         out["stall_timeout_s"] = validate_stall_timeout(request["stall_timeout_s"])
     # The wait for the *first* usable chunk, which is prefill, queueing and routing rather than
@@ -383,6 +407,7 @@ class Agent:
                  stall_timeout_s: float = DEFAULT_STALL_TIMEOUT,
                  first_token_timeout_s: float = 0.0, failover: bool = True,
                  failover_hosted: bool = False, fallback: dict | None = None,
+                 failover_openrouter=None,
                  roles=None, board=None, app=None, security_options: dict | None = None,
                  approval_options: dict | None = None):
         self.emit = emit
@@ -408,6 +433,11 @@ class Agent:
         # failover tries before the catalog's order (owner, 2026-09-20): rank 2 is where `/swap`
         # goes, and the user put it there to be the one that takes over.
         self.fallback = validate_fallback(fallback)
+        # The model ids the user opted in to "the same model on OpenRouter" (owner, 2026-09-20),
+        # tried after the ranked fallback and before the catalog chain — but only when the model
+        # that failed is one of them. Empty by default: it spends the OpenRouter key at
+        # pay-as-you-go rates, which is a per-model decision, not a pane-wide one.
+        self.failover_openrouter = validate_failover_openrouter(failover_openrouter)
         self._injected_provider = provider is not None
         self.provider = provider or self._hook_preempt(_provider_for(config, self.stall_timeout_s))
         self._apply_stall_timeout()
@@ -648,7 +678,8 @@ class Agent:
                 "todo_tool": self.todo_tool, "stall_timeout_s": self.stall_timeout_s,
                 "first_token_timeout_s": self.first_token_timeout_s,
                 "max_program_writes": self.max_program_writes, "failover": self.failover,
-                "failover_hosted": self.failover_hosted, "fallback": self.fallback}
+                "failover_hosted": self.failover_hosted, "fallback": self.fallback,
+                "failover_openrouter": list(self.failover_openrouter)}
 
     def _apply_stall_timeout(self) -> None:
         """Push the pane's two deadlines onto the transport (also after a model switch)."""
@@ -2022,6 +2053,15 @@ class Agent:
             # or has already been asked this turn, the catalog's order stands unchanged.
             target = self.roles.fallback_candidate(self.fallback, swap["tier"], swap["tried"],
                                                    swap["hosts"], allow_hosted=swap["allow_hosted"])
+            # Then the same model on OpenRouter (owner, 2026-09-20), for a model the user opted in
+            # by id — the pane's own model, `from_model`, not whichever spare is serving by the
+            # second move. The resolver checks the rest: a twin exists, the OpenRouter key is
+            # stored, and the failing host is not openrouter.ai itself.
+            twin = False
+            if target is None and swap["from_model"] in self.failover_openrouter:
+                target = self.roles.openrouter_twin_candidate(swap["from_model"], swap["tier"],
+                                                              swap["tried"], swap["hosts"])
+                twin = target is not None
             if target is None:
                 candidates = self.roles.failover_candidates(swap["tier"], swap["tried"], swap["hosts"],
                                                             allow_hosted=swap["allow_hosted"])
@@ -2060,9 +2100,17 @@ class Agent:
         # Both ends named the same way as the plan and vision notes: model plus preset label.
         # Relay Free is said as what it is — Relay's own hosted service, not another of the user's
         # providers — because that is the one target they had to allow (owner, 2026-09-19).
-        text = (f"{from_name} keeps failing; continuing this turn on Relay's hosted service "
-                f"({to_name})." if target.config.hosted
-                else f"{from_name} keeps failing; continuing this turn on {to_name}.")
+        # The OpenRouter twin is said as what it is — the same model, through OpenRouter — because
+        # that is what the user opted in per model, and "z-ai/glm-5.3 (openrouter · …)" alone
+        # reads like a different model on a router.
+        if target.config.hosted:
+            text = (f"{from_name} keeps failing; continuing this turn on Relay's hosted service "
+                    f"({to_name}).")
+        elif twin:
+            text = (f"{from_name} keeps failing; continuing this turn on the same model through "
+                    f"OpenRouter ({to_name}).")
+        else:
+            text = f"{from_name} keeps failing; continuing this turn on {to_name}."
         logs.event(_log, "provider_failover", session=self.session_id, turn=record["turn_id"],
                    step=step, from_model=from_model, from_preset=from_preset,
                    to_model=target.config.model, to_preset=target.preset_id or "",

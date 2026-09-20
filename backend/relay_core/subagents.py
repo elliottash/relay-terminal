@@ -150,8 +150,10 @@ class SubagentFactory:
         return {"failover": bool(getattr(main, "failover", True)),
                 "failover_hosted": bool(getattr(main, "failover_hosted", False)),
                 # And the model the user ranked second (owner, 2026-09-20): it is the pane's
-                # first spare, so it is the subagent's too.
-                "fallback": getattr(main, "fallback", None)}
+                # first spare, so it is the subagent's too — as are the models they opted in to
+                # continue on their OpenRouter twin.
+                "fallback": getattr(main, "fallback", None),
+                "failover_openrouter": getattr(main, "failover_openrouter", None)}
 
     def base(self) -> tuple[ProviderConfig, str | None]:
         """The config a subagent that does not name a model uses: the "subagent" role, else main."""

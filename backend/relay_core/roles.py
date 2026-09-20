@@ -17,8 +17,8 @@ import urllib.parse
 from dataclasses import dataclass, replace
 
 from .presets import (PRESETS, TIER_LABELS, TIERS, apply_effort, effort_style, match_preset,
-                      provider_tier_model, tier_default, tier_fallbacks, validate_effort,
-                      validate_tier)
+                      openrouter_twin, provider_tier_model, tier_default, tier_fallbacks,
+                      validate_effort, validate_tier)
 from .provider import ProviderConfig
 from . import hosted, localmodels
 
@@ -29,6 +29,10 @@ def _hostname(base_url: str) -> str:
         return (urllib.parse.urlsplit(base_url or "").hostname or "").lower()
     except ValueError:
         return ""
+
+
+# The preset whose key the "same model on OpenRouter" failover spends (owner, 2026-09-20).
+OPENROUTER_PRESET_ID = "openrouter"
 
 
 def _hosted(preset_id) -> bool:
@@ -614,6 +618,45 @@ class RoleResolver:
                                    effort, "failover", tier)
         except ValueError:
             return None                 # a preset whose config will not validate: not a spare
+        return None if resolved.source == "fallback" else resolved
+
+    def openrouter_twin_candidate(self, model, tier: str, exclude, hosts=()) -> Resolved | None:
+        """The same model on OpenRouter (owner, 2026-09-20), as the failover target after the
+        ranked fallback and before the catalog chain, or None when it cannot take this turn.
+
+        ``model`` is the id that failed — the pane's own, not whatever spare is serving by the
+        second move — and `presets.openrouter_twin` says which OpenRouter slug serves it; a model
+        with no listing, or one that is already an OpenRouter slug, has no twin. Whether the user
+        wanted this for *that* model is the agent's question (`failover_openrouter` names the ids
+        they opted in): this resolver only says whether the move can be made, on the same terms as
+        any candidate — the `openrouter` preset's stored key through the same lookup, never when
+        that preset has already been asked this turn, and never back to openrouter.ai when the
+        failing host is OpenRouter itself. The tier is carried for the record; the twin is the same
+        model whatever tier the pane called it, and High runs it at max like every other candidate.
+
+        None means "the old order stands", never an error.
+        """
+        slug = openrouter_twin(model)
+        if slug is None:
+            return None
+        preset_id = OPENROUTER_PRESET_ID
+        if preset_id in exclude:
+            return None
+        preset = _preset(preset_id)
+        if preset is None:
+            return None
+        skip_hosts = {_hostname(PRESETS[p].base_url) for p in exclude if p in PRESETS}
+        skip_hosts |= {(h or "").lower() for h in hosts}
+        skip_hosts.discard("")
+        if _hostname(preset.base_url) in skip_hosts:
+            return None
+        tier = validate_tier(tier)
+        effort = "max" if tier == "high" else None
+        try:
+            resolved = self._build("main", preset_id, preset.base_url, slug, dict(preset.extra),
+                                   effort, "failover", tier)
+        except ValueError:
+            return None
         return None if resolved.source == "fallback" else resolved
 
     # ----- api --------------------------------------------------------------------------
