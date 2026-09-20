@@ -6156,6 +6156,15 @@ generalised, not a sibling of it:
   with no project attached gets a **board-less** helper: the `app` block and the app tools, no
   `board` block and no `board_*` tools (`configure` with an empty `workspace`; the page agent is
   built with `board=None` and takes the pane agent's workspace).
+- **The helper's `configure` carries the `keybindings` block too**, the same one a pane's does and
+  from the same builder (`Keymap::instance().catalog()`), and a reload is re-sent to every
+  configured helper beside the panes (`RelayWindow::sendHelperKeybindings()`). It is what lets
+  `app_action_list` answer with each action's current keys — the Actions pane is the palette "with
+  its keyboard shortcut beside it", and since `set_keybinding`'s schema stopped listing the actions
+  that tool result is where a shortcut is found. It also hands the helper `set_keybinding` itself,
+  which the owner decided on card `#GMCF` (2026-09-20): the helper may rebind a key. The worker
+  runs two agents, so a `keybindings` message replaces the catalogue on both (`worker.py`,
+  `BoardCommands.set_keybindings`). A card's Discuss or Plan turn still refuses the tool.
 - **`board_chat` gains `pane`**: `"switchboard"` (the default, and what a client that does not send
   the field means), `"options"`, `"actions"` or `"sessions"`; anything else is an error. It picks
   the brief that goes in front of the turn — the board roster and the page agent's job for

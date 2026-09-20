@@ -56,6 +56,7 @@ private slots:
     void theWindowsRuleAsksThePaneAndNothingElse();
     void attachTabIsTheOnlyWriterOfTheTabsProject();
     void theConfigureFunnelAlwaysSendsABoardBlock();
+    void theHelpersConfigureCarriesTheKeybindings();
     void theBoardPanePaintsFromTheBoardMaterials();
     void tabMetersGiveWayOnlyWhenFullLabelsDoNotFit();
 };
@@ -262,6 +263,30 @@ void BoardWorkspaceTests::theConfigureFunnelAlwaysSendsABoardBlock()
              text.count(QStringLiteral("withSessionFields(QJsonObject{{\"type\", \"configure\"}")));
     // Re-pointing an attached pane is `set_board`, not another configure: the conversation lives.
     QVERIFY(text.contains(QStringLiteral("QStringLiteral(\"set_board\")")));
+}
+
+// The tab helper's `configure` carries the keybinding catalogue, the same block a pane's does and
+// from the same builder (#GMCF, owner 2026-09-20). Without it `app_action_list` has no keys to
+// show, and the Actions pane's brief promises the palette "with its keyboard shortcut beside it";
+// with it the helper is also offered `set_keybinding`, which is the owner's decision. A reload has
+// to reach the helper too — a helper writing against last hour's keys is the failure this pins.
+void BoardWorkspaceTests::theHelpersConfigureCarriesTheKeybindings()
+{
+    const QString text = windowSource();
+    QVERIFY2(!text.isEmpty(), "src/RelayWindow.h could not be read");
+    const QString start = bodyOf(text, QStringLiteral("void startBoardWorker(QWidget *page) {"));
+    QVERIFY2(!start.isEmpty(), "RelayWindow::startBoardWorker() is gone");
+    // The pane's builder, not a second copy of the catalogue.
+    QVERIFY2(start.contains(QStringLiteral("configure.insert(QStringLiteral(\"keybindings\"), Keymap::instance().catalog())")),
+             qPrintable(start));
+    const QString send = bodyOf(text, QStringLiteral("void sendHelperKeybindings() {"));
+    QVERIFY2(!send.isEmpty(), "RelayWindow::sendHelperKeybindings() is gone");
+    QVERIFY(send.contains(QStringLiteral("QStringLiteral(\"keybindings\")")));
+    QVERIFY(send.contains(QStringLiteral("Keymap::instance().path()")));
+    // An unconfigured worker has no agent to hand it to and answers with an error.
+    QVERIFY2(send.contains(QStringLiteral("worker->configured()")), qPrintable(send));
+    // And the reload listener calls it, beside the panes'.
+    QVERIFY2(text.contains(QStringLiteral("sendHelperKeybindings();")), "nothing reloads the helper");
 }
 
 // The Switchboard's materials (docs/SWITCHBOARD-AESTHETIC.md 3.4, owner 2026-09-19 "yeah build

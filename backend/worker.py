@@ -373,6 +373,9 @@ def main():
                 if agent is None:
                     raise ValueError("Configure a provider before updating keybindings.")
                 agent.executor.keybindings = catalog
+                # The tab's helper runs a second Agent on this worker (30.7) and may rebind keys
+                # itself (#GMCF), so its executor is pointed at the same fresh catalogue.
+                board.set_keybindings(catalog)
                 emit({"event": "keybindings_updated", "id": request.get("id")})
             elif kind == "presets":
                 emit_presets(request.get("id"))

@@ -583,6 +583,110 @@ class ImportToolTest(ProtocolChatTest):
         self.assertNotIn("error", result)
 
 
+class HelperKeybindingTest(ProtocolChatTest):
+    """The helper may rebind keys (#GMCF, owner 2026-09-20: "yes" to question 3).
+
+    The Actions pane is Relay's palette "with its keyboard shortcut beside it", and the helper
+    is the agent answering there. Two things have to be true for that: the worker's keybinding
+    catalogue reaches the *helper's* agent — it is a second `Agent` with its own executor, so
+    the pane's one is not enough — and the helper's scope offers `set_keybinding`, which no
+    card turn's does.
+    """
+
+    ACTIONS = [{"id": "pane.close", "description": "Close pane", "keys": ["Ctrl+W"]},
+               {"id": "tab.new", "description": "New tab", "keys": ["Ctrl+T"]}]
+
+    def main_agent(self, catalog):
+        """A pane agent as `configure` builds one, with the GUI's keybinding catalogue on it."""
+        from relay_core.agent import Agent
+        from relay_core.provider import ProviderConfig
+
+        main = Agent(ProviderConfig("http://127.0.0.1:12345/v1", "mock", ""), str(self.repo),
+                     lambda event: None, keybindings=catalog)
+        self.commands.turns.agent = main
+        return main
+
+    def catalog(self):
+        import json as _json
+
+        from relay_core.keybindings import KeybindingCatalog
+        return KeybindingCatalog(str(self.repo / "relay" / "keybindings.json"),
+                                 _json.loads(_json.dumps(self.ACTIONS)))
+
+    def test_the_helper_is_built_on_the_workers_own_catalogue(self):
+        catalog = self.catalog()
+        self.main_agent(catalog)
+        agent, _tools = self.commands._build_page_agent(lambda event: None)
+        self.assertIs(agent.executor.keybindings, catalog)
+
+    def test_the_helpers_turn_offers_set_keybinding_last_and_a_card_turn_does_not(self):
+        catalog = self.catalog()
+        self.main_agent(catalog)
+        agent, tools = self.commands._build_page_agent(lambda event: None)
+
+        tools.begin_chat_turn()
+        names = [t["function"]["name"] for t in agent.tools()]
+        self.assertIn("set_keybinding", names)
+        # Last, for TAIL_TOOLS' reason: it is the one tool of this list that comes and goes.
+        self.assertEqual(names[-1], "set_keybinding")
+        self.assertNotIn("run_command", names)          # the scope is otherwise unchanged
+        self.assertNotIn("write_file", names)
+        tools.end_chat_turn()
+
+        # A card's Discuss or Plan turn reads the repository and writes the board: rebinding a
+        # key is not part of either, and the refusal says what the turn is for.
+        tools.begin_card_turn("discuss", "ABCD")
+        self.assertNotIn("set_keybinding", [t["function"]["name"] for t in agent.tools()])
+        self.assertFalse(tools.card_scope.allows("set_keybinding"))
+        tools.end_card_turn()
+
+    def test_a_helper_with_no_catalogue_is_offered_nothing_to_rebind(self):
+        """A GUI that sends no `keybindings` block: the tool simply is not there (#GMCF)."""
+        self.main_agent(None)
+        agent, tools = self.commands._build_page_agent(lambda event: None)
+        tools.begin_chat_turn()
+        self.assertNotIn("set_keybinding", [t["function"]["name"] for t in agent.tools()])
+        tools.end_chat_turn()
+
+    def test_the_helpers_app_action_list_shows_the_keys(self):
+        """The Actions pane's promise (`PANE_BRIEFS["actions"]`): the palette *with* its keys.
+
+        The rows come from the keybinding catalogue, read live through the worker's agent, so
+        this is the block the GUI's `configure` now carries arriving where the brief needs it.
+        """
+        from relay_core import app_tools as A
+
+        catalog = self.catalog()
+        main = self.main_agent(catalog)
+        commands = A.AppCommands(lambda event: None, agent=lambda: main)
+        main.app = commands.configure({"app": {
+            "tab": "t1", "writes_enabled": True, "options": [],
+            "actions": [{"key": "pane.close", "section": "Relay", "label": "Close pane",
+                         "agent_safe": False}]}})
+        agent, tools = self.commands._build_page_agent(lambda event: None)
+        tools.begin_chat_turn()
+        rows = {a["key"]: a for a in agent.app.run("app_action_list", {})["actions"]}
+        self.assertEqual(rows["pane.close"]["keys"], ["Ctrl+W"])
+        self.assertEqual(rows["tab.new"]["keys"], ["Ctrl+T"])   # shortcut-only, no palette row
+        names = [t["function"]["name"] for t in agent.tools()]
+        self.assertIn("app_action_list", names)
+        self.assertEqual(names[-1], "set_keybinding")
+        tools.end_chat_turn()
+
+    def test_a_reload_reaches_the_live_helper_agent(self):
+        """`worker.py`'s `keybindings` message: the pane's agent is not the helper's (30.7)."""
+        catalog = self.catalog()
+        self.main_agent(catalog)
+        agent, _tools = self.commands._build_page_agent(lambda event: None)
+        self.commands.chat.agent = agent
+        fresh = self.catalog()
+        self.commands.set_keybindings(fresh)
+        self.assertIs(agent.executor.keybindings, fresh)
+        # No helper yet is not an error: a worker whose Switchboard was never opened has none.
+        self.commands.chat.agent = None
+        self.commands.set_keybindings(self.catalog())
+
+
 class StubProvider:
     """Answers every request with one line, so a real `Agent.ask` finishes and autosaves."""
 

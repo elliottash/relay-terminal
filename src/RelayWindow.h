@@ -395,6 +395,7 @@ public:
         relay::SettingsWatch::instance().listen(this, [this] { sendAppCatalog(); });
         Keymap::instance().listen(this, [this] {
             for (Pane *pane : allPanes()) pane->sendKeybindings();
+            sendHelperKeybindings();   // the tab's helper reads and writes the same keys (#GMCF)
             const auto conflicts = Keymap::instance().conflicts();
             notice(conflicts.isEmpty() ? QStringLiteral("Keyboard shortcuts reloaded.")
                                                          : QStringLiteral("Keyboard shortcuts: ") + conflicts.join(QStringLiteral("; ")));
@@ -1664,6 +1665,21 @@ private:
             if (relay::BoardWorker *worker = it.value().data())
                 worker->send(QJsonObject{{QStringLiteral("type"), QStringLiteral("app_catalog")},
                                          {QStringLiteral("app"), appCommands().catalog(helperTab(worker))}});
+    }
+
+    // keybindings.json was reloaded, so every helper worker of this window is sent the catalogue
+    // again — `Pane::sendKeybindings()` for the helpers (§30.2, #GMCF). It matters twice over
+    // since the helper may rebind keys itself: `app_action_list` shows the keys as they are now,
+    // and the helper's own `set_keybinding` writes against the file it has just been told about.
+    // Only a configured worker: an unconfigured one has no agent to hand the catalogue to and
+    // answers the message with an error, which is why a pane guards on `m_configured` too.
+    void sendHelperKeybindings() {
+        for (auto it = m_boardWorkers.cbegin(); it != m_boardWorkers.cend(); ++it)
+            if (relay::BoardWorker *worker = it.value().data(); worker && worker->configured())
+                worker->send(QJsonObject{{QStringLiteral("type"), QStringLiteral("keybindings")},
+                                         {QStringLiteral("path"), Keymap::instance().path()},
+                                         {QStringLiteral("actions"),
+                                          Keymap::instance().catalog().value(QStringLiteral("actions"))}});
     }
 
     // One `app_command`, answered on the connection it arrived on. `who` is for the change log and
@@ -6318,6 +6334,12 @@ public:
         // the app block — the conversation is per (project, tab), and the project is `workspace`.
         configure.insert(QStringLiteral("tab"), tabIdOf(page));
         configure.insert(QStringLiteral("app"), appCatalogFor(page));
+        // The keybinding catalogue a pane's `configure` carries (§30.2), for the same reason and
+        // from the same builder: the helper's Actions pane is the palette "with its keyboard
+        // shortcut beside it", so `app_action_list` cannot answer without it — and the owner
+        // decided on #GMCF (2026-09-20) that the helper may also rebind one, which is the
+        // `set_keybinding` this block hands it. Reloads travel as `sendHelperKeybindings()`.
+        configure.insert(QStringLiteral("keybindings"), Keymap::instance().catalog());
         // Only this tab's helper: another tab, even on the same project, keeps its own.
         if (relay::BoardWorker *worker = boardWorker(page)) worker->start(configure);
     }

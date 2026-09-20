@@ -735,6 +735,12 @@ class BoardCommands:
                       # Protocol 30.4/30.7: the helper agent is the one that most needs the app
                       # tools — a question asked in Options is answered by this agent.
                       app=getattr(main, "app", None),
+                      # #GMCF (owner, 2026-09-20): the Actions pane is the palette with its
+                      # shortcuts beside it, so the helper may rebind one. The catalogue is the
+                      # worker's own — the same object the `configure` built and a `keybindings`
+                      # message replaces (`set_keybindings` below keeps this agent on the live
+                      # one) — so the helper and the pane write the same file through one path.
+                      keybindings=getattr(main.executor, "keybindings", None),
                       track_requests=False, todo_tool=False, completion_check=False,
                       stall_timeout_s=main.stall_timeout_s,
                       first_token_timeout_s=getattr(main, "first_token_timeout_s", 0.0),
@@ -811,6 +817,20 @@ class BoardCommands:
         self._send({**event, "id": rid} if rid is not None else event)
 
     # ---- set_board -------------------------------------------------------------
+    def set_keybindings(self, catalog) -> None:
+        """A `keybindings` message reached the worker: hand the live helper agent the new catalogue.
+
+        The helper is a second `Agent` with its own `ToolExecutor` (19.18), so the worker's own
+        `agent.executor.keybindings = catalog` misses it, and a helper that may rebind keys
+        (#GMCF, owner 2026-09-20) would otherwise go on writing against the keys as they were
+        when its conversation started.  Replaced in place, like the pane's: the conversation and
+        the tool list are the same afterwards, because the schema no longer carries the keys.
+        """
+        agent = getattr(self.chat, "agent", None)
+        executor = getattr(agent, "executor", None)
+        if executor is not None:
+            executor.keybindings = catalog
+
     def set_board(self, request: dict) -> None:
         """`set_board`: point this pane at another board (or none) without ending its conversation.
 

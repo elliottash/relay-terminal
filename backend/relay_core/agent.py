@@ -944,8 +944,14 @@ class Agent:
             # own turn (19.18): read-only files + the board. The app tools ride alongside the
             # scope rather than inside it — the helper answering in Options is the agent that
             # needs them most, and protocol 30.4 is that the tool set is the same everywhere.
-            return scope.tool_specs(self.executor.tools()) + (
+            offered = self.executor.tools()
+            specs = scope.tool_specs(offered) + (
                 self.app.tool_specs() if self.app is not None else [])
+            # #GMCF (owner, 2026-09-20): the helper may rebind keys, so a scope that allows
+            # `set_keybinding` gets it — last, for TAIL_TOOLS' reason. It exists only while the
+            # GUI has sent a keybinding catalogue, so from here it can only ever append.
+            return specs + [t for t in offered if t["function"]["name"] in TAIL_TOOLS
+                            and scope.allows(t["function"]["name"])]
         # One order for the life of the pane (#GMCF, distillation 4.2). The mode changes nothing
         # here: a tool that appears or disappears re-prefills the whole request, and on the Local
         # tier the chat template renders the tools *before* the system prompt, so a mode switch

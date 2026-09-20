@@ -867,6 +867,12 @@ CHAT_BOARD_TOOLS = ("board_list", "board_read", "board_create_card", "board_upda
                     # The page is where "which cards have no tests" is asked (protocol 31).
                     "tests_check", "tests_run")
 
+#: The executor tools the helper keeps beyond the read-only ones (#GMCF, owner 2026-09-20).
+#: `set_keybinding` writes Relay's `keybindings.json`, never the workspace, so it sits with the
+#: app tools the helper is given (30.4) rather than with the repository tools a card turn is
+#: fenced off from. `Agent.tools` offers it only while a keybinding catalogue has been sent.
+CHAT_APP_TOOLS = ("set_keybinding",)
+
 #: Where a Plan turn writes. SWITCHBOARD-DESIGN 12.4: plan mode writes the plan onto the card.
 PLAN_HEADING = "Plan"
 
@@ -918,12 +924,19 @@ class ChatScope:
     It rides in the `card_scope` slot — that is where the agent looks for a turn's scope — so it
     answers the same three questions `CardScope` does. `chat` marks it apart for the cleanup-only
     fence in `run`.
+
+    Since #GMCF (owner, 2026-09-20) it also keeps `set_keybinding`: the helper's Actions pane is
+    the palette "with its keyboard shortcut beside it", and the one thing asked of it there is to
+    move a shortcut. It belongs with the app tools rather than with the repository ones — it
+    writes Relay's own `keybindings.json` and nothing in the workspace — and it is offered only
+    while the GUI has sent a keybinding catalogue, which `Agent.tools` reads from the executor.
     """
     chat: bool = True
     mode: str = "chat"
 
     def allows(self, name: str) -> bool:
-        return name in CARD_READ_TOOLS or name == "search_files" or name in CHAT_BOARD_TOOLS
+        return (name in CARD_READ_TOOLS or name == "search_files" or name in CHAT_BOARD_TOOLS
+                or name in CHAT_APP_TOOLS)
 
     def tool_specs(self, executor_specs: list[dict]) -> list[dict]:
         """The turn's tool list: the executor's read-only tools, search_files, the board tools."""
