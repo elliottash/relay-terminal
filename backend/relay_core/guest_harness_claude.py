@@ -893,7 +893,9 @@ class ClaudeHarness:
         """
         with self._state_lock:
             running = self._model
-        rows = [{"id": alias, "label": alias.capitalize(), "efforts": list(EFFORTS),
+        # "claude opus", not "opus" (owner, 2026-09-20): the family name on the row, lower-case
+        # like every other model label; the id stays the alias `--model` takes.
+        rows = [{"id": alias, "label": "claude " + alias, "efforts": list(EFFORTS),
                  "default_effort": None} for alias in MODEL_ALIASES]
         known = {row["id"] for row in rows}
         if running and running not in known:

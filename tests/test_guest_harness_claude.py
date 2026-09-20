@@ -1021,7 +1021,7 @@ class ModelsTest(unittest.TestCase):
         harness = gh.ClaudeHarness(spawn=Spawner(), binary=_on_path())
         rows = harness.models()
         self.assertEqual([row["id"] for row in rows], list(gh.MODEL_ALIASES))
-        self.assertEqual([row["label"] for row in rows], ["Fable", "Opus", "Sonnet", "Haiku"])
+        self.assertEqual([row["label"] for row in rows], ["claude fable", "claude opus", "claude sonnet", "claude haiku"])
         for row in rows:
             self.assertEqual(row["efforts"], ["low", "medium", "high", "xhigh", "max"])
             self.assertIsNone(row["default_effort"])
