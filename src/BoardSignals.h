@@ -19,6 +19,7 @@
 
 #include <QDateTime>
 #include <QJsonObject>
+#include <QPair>
 #include <QList>
 #include <QMap>
 #include <QString>
@@ -165,6 +166,79 @@ private:
     QMap<QString, Signal> m_byKey;
     int m_pending = 0;
     bool m_seen = false;
+};
+
+// ----- signal threads (#AQ6X phase 3, decision 9) ------------------------------------------
+//
+// A failing check nobody is on gets its own agent thread (`backend/relay_core/signal_threads.py`).
+// The GUI never starts one and never stops one: it hears `signal_thread {state, key, thread_id,
+// session_id, outcome?, card?}` (protocol §32.4), says so once in the notification centre, amends
+// that entry when the thread ends, and answers "is this token live?" for the chip on the signal
+// the thread claimed — the claim is written under the **thread's** id, so without this the chip
+// would read `closed` for a thread that is working.
+
+// One signal thread, as this GUI has heard of it. `running` is the whole liveness rule: a thread
+// is live from the `started` event until the `finished` one, and a `signals_changed` payload's
+// `threads` list re-seeds it for a pane that opened after the thread did.
+struct SignalThreadRun {
+    QString key;         // the signal it is working on
+    QString threadId;    // its thread id — and the session token the signal's claim carries
+    QString sessionId;   // the owner session the thread is saved beside, for its history
+    QString card;        // the card it was promoted to, on a `gave-up` finish
+    QString outcome;     // fixed | gave-up | dismissed | stopped, once it has finished
+    bool running = true;
+
+    static SignalThreadRun fromJson(const QJsonObject &event);
+};
+
+// The notification a pickup posts, and the words it is amended to when the thread ends (decision
+// 9: "you get a notification that you can click on to open the agent thread"). Pure functions, so
+// every wording is read in tests/signals_test.cpp rather than by starting an agent.
+//
+// `reason` is the dismissal's own reason when the outcome is `dismissed`; the event does not carry
+// one, because the signal does (`Signal::dismissedReason`) and the pane has both.
+QString signalThreadTitle(const SignalThreadRun &run, const QString &reason = QString());
+QString signalThreadBody(const SignalThreadRun &run);
+// kindInfo / kindSuccess / kindWarning, as `relay::NotificationCenter` spells them: the same
+// vocabulary the board's other notice uses (a Plan that finished or failed).
+QString signalThreadKind(const SignalThreadRun &run);
+// "Open thread", the button on the entry; and the `actionId` it hands back, which is a string and
+// not a callback so the offer outlives the turn, the worker and the popup that drew it.
+QString signalThreadActionLabel();
+QString signalThreadActionId(const SignalThreadRun &run);
+// The thread id and owner session back out of such an `actionId`, or two empty strings when it is
+// not one. The one place the encoding is read, so the window does not parse it by hand.
+QPair<QString, QString> signalThreadOfAction(const QString &actionId);
+
+// Every signal thread this pane has heard of. Fed the same events the pane is fed — it takes the
+// two it knows and ignores the rest — so a pane can hand it everything, exactly as `SignalsState`
+// is handed everything.
+class SignalThreadsState {
+public:
+    // True when the event was one of ours (`signal_thread`, or the `threads` list on a
+    // `signals_changed` / `signals_list` payload).
+    bool take(const QString &type, const QJsonObject &event);
+    void clear();
+
+    // Whether this session token is a signal thread that is still working. This is what the
+    // board's `paneExists` callback falls back on: no pane has a thread's token, so without it
+    // the chip on a live thread's claim reads `closed`.
+    bool isRunning(const QString &token) const;
+    // The signal a token is working on, or empty — which is also how the chip's click knows to
+    // open a thread's history instead of revealing a pane.
+    QString keyOf(const QString &token) const;
+    // The thread working on a key right now, or nullptr.
+    const SignalThreadRun *forKey(const QString &key) const;
+    // The run a token names, running or finished, or nullptr.
+    const SignalThreadRun *forToken(const QString &token) const;
+    int runningCount() const;
+    // The `signal_thread` event this state took last, for the pane to notify about. `running`
+    // says which of the two it was. Empty `threadId` before any has arrived.
+    const SignalThreadRun &lastEvent() const { return m_last; }
+
+private:
+    QList<SignalThreadRun> m_runs;      // newest last; finished ones are kept for the amend
+    SignalThreadRun m_last;
 };
 
 // The signal's page, in the card detail's place: what the signal is, its excerpt, and the four

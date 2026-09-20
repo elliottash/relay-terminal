@@ -137,6 +137,12 @@ private slots:
     void theWordsOfARowAndOfAnExpiringDismissal();
     void theSignalSectionOfAPromotedCardsBody();
 
+    // ---- signal threads (phase 3, decision 9)
+    void aSignalThreadIsLiveFromItsStartedEventUntilItsFinishedOne();
+    void theWorkersOwnListReseedsAPaneThatOpenedLater();
+    void theNotificationSaysWhatTheThreadIsDoingAndHowItEnded();
+    void theOpenThreadActionCarriesTheThreadAndItsOwner();
+
     // ---- the pane
     void theFoldRowAppearsFoldsAndIsHiddenWhenThereAreNoSignals();
     void aSignalRowOpensItsPageAndEachActionSendsItsMessage();
@@ -331,6 +337,142 @@ void SignalsTests::theSignalSectionOfAPromotedCardsBody()
 }
 
 // ---------------------------------------------------------------- the pane
+
+// ---- signal threads -----------------------------------------------------------------------
+//
+// A pickup claims its signal under its **thread** id, and no pane has that token — so without
+// this state the chip on a working thread's claim would read `closed`, and clicking it would try
+// to reveal a pane that does not exist.
+
+void SignalsTests::aSignalThreadIsLiveFromItsStartedEventUntilItsFinishedOne()
+{
+    using relay::board::SignalThreadsState;
+    SignalThreadsState threads;
+    QVERIFY(!threads.isRunning(QStringLiteral("th1")));
+    QVERIFY(!threads.take(QStringLiteral("board"), QJsonObject{}));
+
+    const QJsonObject started{{"event", "signal_thread"}, {"state", "started"},
+                              {"key", "ctest:panelayout"}, {"thread_id", "th1"},
+                              {"session_id", "owner-1"}};
+    QVERIFY(threads.take(QStringLiteral("signal_thread"), started));
+    QVERIFY(threads.isRunning(QStringLiteral("th1")));
+    QCOMPARE(threads.keyOf(QStringLiteral("th1")), QStringLiteral("ctest:panelayout"));
+    QCOMPARE(threads.runningCount(), 1);
+    QVERIFY(threads.forKey(QStringLiteral("ctest:panelayout")) != nullptr);
+    QCOMPARE(threads.lastEvent().threadId, QStringLiteral("th1"));
+    QVERIFY(threads.lastEvent().running);
+
+    // A token nothing has heard of stays unknown: the fallback must not claim every string is a
+    // live thread, or a closed pane's chip would start reading `live`.
+    QVERIFY(!threads.isRunning(QStringLiteral("some-pane-token")));
+
+    const QJsonObject finished{{"event", "signal_thread"}, {"state", "finished"},
+                               {"key", "ctest:panelayout"}, {"thread_id", "th1"},
+                               {"session_id", "owner-1"}, {"outcome", "gave-up"},
+                               {"card", "K7Q2"}};
+    QVERIFY(threads.take(QStringLiteral("signal_thread"), finished));
+    QVERIFY(!threads.isRunning(QStringLiteral("th1")));
+    QCOMPARE(threads.runningCount(), 0);
+    QCOMPARE(threads.forKey(QStringLiteral("ctest:panelayout")), nullptr);
+    // The finished run is kept, because that is what the notification's amend is about.
+    QVERIFY(threads.forToken(QStringLiteral("th1")) != nullptr);
+    QCOMPARE(threads.forToken(QStringLiteral("th1"))->outcome, QStringLiteral("gave-up"));
+    QCOMPARE(threads.forToken(QStringLiteral("th1"))->card, QStringLiteral("K7Q2"));
+}
+
+void SignalsTests::theWorkersOwnListReseedsAPaneThatOpenedLater()
+{
+    using relay::board::SignalThreadsState;
+    SignalThreadsState threads;
+    // No `signal_thread` event has ever arrived here — this pane opened after the thread did, and
+    // every `signals_changed` carries what is running.
+    QVERIFY(threads.take(QStringLiteral("signals_changed"),
+                         QJsonObject{{"event", "signals_changed"},
+                                     {"threads", QJsonArray{
+                                          QJsonObject{{"key", "ctest:panelayout"},
+                                                      {"thread_id", "th9"},
+                                                      {"session_id", "owner-1"}}}}}));
+    QVERIFY(threads.isRunning(QStringLiteral("th9")));
+    QCOMPARE(threads.keyOf(QStringLiteral("th9")), QStringLiteral("ctest:panelayout"));
+
+    // A payload without the key at all is not ours: an older worker says nothing about threads,
+    // and reading its silence as "none are running" would blank a chip that was right.
+    QVERIFY(!threads.take(QStringLiteral("signals_changed"),
+                          QJsonObject{{"event", "signals_changed"}}));
+    QVERIFY(threads.isRunning(QStringLiteral("th9")));
+
+    // A thread this pane watched finish is not resurrected by a list that still names it.
+    threads.take(QStringLiteral("signal_thread"),
+                 QJsonObject{{"state", "finished"}, {"key", "ctest:panelayout"},
+                             {"thread_id", "th9"}, {"outcome", "fixed"}});
+    threads.take(QStringLiteral("signals_changed"),
+                 QJsonObject{{"threads", QJsonArray{QJsonObject{{"key", "ctest:panelayout"},
+                                                                {"thread_id", "th9"}}}}});
+    QVERIFY(!threads.isRunning(QStringLiteral("th9")));
+
+    // An empty list is the ordinary "nothing is running".
+    threads.take(QStringLiteral("signals_changed"), QJsonObject{{"threads", QJsonArray{}}});
+    QCOMPARE(threads.runningCount(), 0);
+}
+
+void SignalsTests::theNotificationSaysWhatTheThreadIsDoingAndHowItEnded()
+{
+    using relay::board::SignalThreadRun;
+    SignalThreadRun run;
+    run.key = QStringLiteral("ctest:panelayout");
+    run.threadId = QStringLiteral("th1");
+    run.sessionId = QStringLiteral("owner-1");
+
+    QCOMPARE(relay::board::signalThreadTitle(run),
+             QStringLiteral("Working on ctest:panelayout"));
+    QCOMPARE(relay::board::signalThreadKind(run), QStringLiteral("info"));
+    QVERIFY(relay::board::signalThreadBody(run).contains(QStringLiteral("No pane claimed")));
+
+    run.running = false;
+    run.outcome = QStringLiteral("fixed");
+    QCOMPARE(relay::board::signalThreadTitle(run),
+             QStringLiteral("Fixed ctest:panelayout (verified)"));
+    QCOMPARE(relay::board::signalThreadKind(run), QStringLiteral("success"));
+
+    run.outcome = QStringLiteral("gave-up");
+    run.card = QStringLiteral("K7Q2");
+    QCOMPARE(relay::board::signalThreadTitle(run),
+             QStringLiteral("Gave up on ctest:panelayout — promoted to #K7Q2"));
+    QCOMPARE(relay::board::signalThreadKind(run), QStringLiteral("warning"));
+    run.card.clear();
+    QCOMPARE(relay::board::signalThreadTitle(run),
+             QStringLiteral("Gave up on ctest:panelayout"));
+
+    // The dismissal's reason is the signal's, not the event's: the pane holds both.
+    run.outcome = QStringLiteral("dismissed");
+    QCOMPARE(relay::board::signalThreadTitle(run, QStringLiteral("Environmental")),
+             QStringLiteral("Dismissed ctest:panelayout: Environmental"));
+    QCOMPARE(relay::board::signalThreadTitle(run),
+             QStringLiteral("Dismissed ctest:panelayout"));
+    QCOMPARE(relay::board::signalThreadKind(run), QStringLiteral("info"));
+
+    run.outcome = QStringLiteral("stopped");
+    QCOMPARE(relay::board::signalThreadTitle(run),
+             QStringLiteral("Stopped working on ctest:panelayout"));
+    QCOMPARE(relay::board::signalThreadKind(run), QStringLiteral("warning"));
+}
+
+void SignalsTests::theOpenThreadActionCarriesTheThreadAndItsOwner()
+{
+    using relay::board::SignalThreadRun;
+    SignalThreadRun run;
+    run.key = QStringLiteral("ctest:panelayout");
+    run.threadId = QStringLiteral("abc123");
+    run.sessionId = QStringLiteral("owner-1");
+    QCOMPARE(relay::board::signalThreadActionLabel(), QStringLiteral("Open thread"));
+    const QString action = relay::board::signalThreadActionId(run);
+    QCOMPARE(relay::board::signalThreadOfAction(action).first, QStringLiteral("abc123"));
+    QCOMPARE(relay::board::signalThreadOfAction(action).second, QStringLiteral("owner-1"));
+    // Somebody else's action id is not ours, and a thread with no id offers no button at all.
+    QCOMPARE(relay::board::signalThreadOfAction(QStringLiteral("appundo:c3")).first, QString());
+    run.threadId.clear();
+    QCOMPARE(relay::board::signalThreadActionId(run), QString());
+}
 
 void SignalsTests::theFoldRowAppearsFoldsAndIsHiddenWhenThereAreNoSignals()
 {

@@ -438,6 +438,199 @@ QList<Row> SignalsState::rows(bool open, bool dismissedOpen) const
     return out;
 }
 
+// --------------------------------------------------------------- signal threads (#AQ6X)
+
+namespace {
+
+//: The `actionId` a signal-thread notification carries, so the button's meaning survives the
+//: worker, the turn and the popup that drew it. Two fields, and the separator cannot occur in
+//: either: a thread id and a session id are both `sessions::new_id()` hex.
+const QLatin1String kThreadAction("signalthread:");
+
+}  // namespace
+
+SignalThreadRun SignalThreadRun::fromJson(const QJsonObject &event)
+{
+    SignalThreadRun run;
+    run.key = event.value(QStringLiteral("key")).toString();
+    run.threadId = event.value(QStringLiteral("thread_id")).toString();
+    run.sessionId = event.value(QStringLiteral("session_id")).toString();
+    run.card = event.value(QStringLiteral("card")).toString();
+    run.outcome = event.value(QStringLiteral("outcome")).toString();
+    // A `signals_changed` payload's `threads` list carries no `state`: everything in it is
+    // running, which is what that list is for.
+    const QString state = event.value(QStringLiteral("state")).toString();
+    run.running = state != QStringLiteral("finished");
+    return run;
+}
+
+QString signalThreadTitle(const SignalThreadRun &run, const QString &reason)
+{
+    if (run.running)
+        return QStringLiteral("Working on %1").arg(run.key);
+    if (run.outcome == QStringLiteral("fixed"))
+        return QStringLiteral("Fixed %1 (verified)").arg(run.key);
+    if (run.outcome == QStringLiteral("gave-up"))
+        return run.card.isEmpty()
+                       ? QStringLiteral("Gave up on %1").arg(run.key)
+                       : QStringLiteral("Gave up on %1 — promoted to #%2").arg(run.key, run.card);
+    if (run.outcome == QStringLiteral("dismissed"))
+        return reason.isEmpty() ? QStringLiteral("Dismissed %1").arg(run.key)
+                                : QStringLiteral("Dismissed %1: %2").arg(run.key, reason);
+    return QStringLiteral("Stopped working on %1").arg(run.key);
+}
+
+QString signalThreadBody(const SignalThreadRun &run)
+{
+    if (run.running)
+        return QStringLiteral("No pane claimed this failing check, so Relay started its own agent "
+                              "thread on it. Nothing else is waiting on it.");
+    if (run.outcome == QStringLiteral("fixed"))
+        return QStringLiteral("The check passed enough times to close the signal, which is the "
+                              "only thing that closes one.");
+    if (run.outcome == QStringLiteral("gave-up"))
+        return QStringLiteral("The thread could not fix it, so it is a person's problem now. The "
+                              "signal stays open until the check passes.");
+    if (run.outcome == QStringLiteral("dismissed"))
+        return QStringLiteral("The thread showed this is not the code's fault. It keeps counting "
+                              "underneath and comes back when the dismissal expires.");
+    return QStringLiteral("The thread ended without a verdict; the signal is unclaimed again.");
+}
+
+QString signalThreadKind(const SignalThreadRun &run)
+{
+    if (run.running)
+        return QStringLiteral("info");
+    if (run.outcome == QStringLiteral("fixed"))
+        return QStringLiteral("success");
+    if (run.outcome == QStringLiteral("dismissed"))
+        return QStringLiteral("info");
+    return QStringLiteral("warning");     // gave up, or stopped with the check still red
+}
+
+QString signalThreadActionLabel()
+{
+    return QStringLiteral("Open thread");
+}
+
+QString signalThreadActionId(const SignalThreadRun &run)
+{
+    if (run.threadId.isEmpty())
+        return QString();
+    return kThreadAction + run.threadId + QLatin1Char(':') + run.sessionId;
+}
+
+QPair<QString, QString> signalThreadOfAction(const QString &actionId)
+{
+    if (!actionId.startsWith(kThreadAction))
+        return {};
+    const QString rest = actionId.mid(kThreadAction.size());
+    const int at = rest.indexOf(QLatin1Char(':'));
+    if (at < 0)
+        return {rest, QString()};
+    return {rest.left(at), rest.mid(at + 1)};
+}
+
+bool SignalThreadsState::take(const QString &type, const QJsonObject &event)
+{
+    if (type == QStringLiteral("signal_thread")) {
+        const SignalThreadRun run = SignalThreadRun::fromJson(event);
+        if (run.threadId.isEmpty())
+            return false;
+        for (int at = 0; at < m_runs.size(); ++at) {
+            if (m_runs.at(at).threadId != run.threadId)
+                continue;
+            // A finish carries no `card` when there is none, and the started event may have had
+            // one (a regression of a promoted signal): what is known is never unlearned.
+            SignalThreadRun merged = run;
+            if (merged.card.isEmpty())
+                merged.card = m_runs.at(at).card;
+            if (merged.sessionId.isEmpty())
+                merged.sessionId = m_runs.at(at).sessionId;
+            m_runs[at] = merged;
+            m_last = merged;
+            return true;
+        }
+        m_runs << run;
+        m_last = run;
+        return true;
+    }
+    if (type != QStringLiteral("signals_changed") && type != QStringLiteral("signals_list"))
+        return false;
+    if (!event.contains(QStringLiteral("threads")))
+        return false;
+    // The worker's own list of what is running, which is what a pane that opened after a thread
+    // started has instead of a `started` event. It replaces the *running* entries and leaves the
+    // finished ones, so an amend still finds the thread it is about.
+    QList<SignalThreadRun> kept;
+    for (const SignalThreadRun &run : m_runs)
+        if (!run.running)
+            kept << run;
+    const QJsonArray rows = event.value(QStringLiteral("threads")).toArray();
+    for (const QJsonValue &value : rows) {
+        SignalThreadRun run = SignalThreadRun::fromJson(value.toObject());
+        if (run.threadId.isEmpty())
+            continue;
+        // A thread this pane has already seen finish is not resurrected by a stale list.
+        bool done = false;
+        for (const SignalThreadRun &was : kept)
+            if (was.threadId == run.threadId)
+                done = true;
+        if (!done)
+            kept << run;
+    }
+    m_runs = kept;
+    return true;
+}
+
+void SignalThreadsState::clear()
+{
+    m_runs.clear();
+    m_last = SignalThreadRun();
+    m_last.running = false;
+}
+
+bool SignalThreadsState::isRunning(const QString &token) const
+{
+    const SignalThreadRun *run = forToken(token);
+    return run != nullptr && run->running;
+}
+
+QString SignalThreadsState::keyOf(const QString &token) const
+{
+    const SignalThreadRun *run = forToken(token);
+    return run ? run->key : QString();
+}
+
+const SignalThreadRun *SignalThreadsState::forKey(const QString &key) const
+{
+    if (key.isEmpty())
+        return nullptr;
+    for (int at = m_runs.size() - 1; at >= 0; --at)
+        if (m_runs.at(at).key == key && m_runs.at(at).running)
+            return &m_runs.at(at);
+    return nullptr;
+}
+
+const SignalThreadRun *SignalThreadsState::forToken(const QString &token) const
+{
+    if (token.isEmpty())
+        return nullptr;
+    for (int at = m_runs.size() - 1; at >= 0; --at)
+        if (m_runs.at(at).threadId == token)
+            return &m_runs.at(at);
+    return nullptr;
+}
+
+int SignalThreadsState::runningCount() const
+{
+    int count = 0;
+    for (const SignalThreadRun &run : m_runs)
+        if (run.running)
+            ++count;
+    return count;
+}
+
 // ------------------------------------------------------------------------ the detail
 
 namespace {
