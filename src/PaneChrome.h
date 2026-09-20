@@ -504,6 +504,10 @@ public:
                                                    {"hidden", m_board->hiddenSections()},
                                                    {"labels", m_board->labelFilter()},
                                                    {"self_closed", m_board->openSelfClosed()},
+                                                   // Which of the two signal rows are open
+                                                   // (#AQ6X): "signals", "dismissed". Same shape
+                                                   // as `self_closed`, and folded by default.
+                                                   {"signals", m_board->openSignals()},
                                                    {"sort", m_board->sortOrder()}}}};
         if (m_subagent) return m_subagent->node();
         // The Activity pane (card #QT8C) comes back open beside its owner, empty until the

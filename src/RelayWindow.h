@@ -6664,6 +6664,10 @@ private:
                                                  board.value(QStringLiteral("sort")).toString(),
                                                  board.value(QStringLiteral("labels")).toArray(),
                                                  board.value(QStringLiteral("self_closed")).toArray());
+                // Which of the signals rows were open (#AQ6X), set on the view rather than through
+                // one more argument: both are folded by default, so an older node opens nothing.
+                if (relay::BoardView *board_view = tool->board())
+                    board_view->setOpenSignals(board.value(QStringLiteral("signals")).toArray());
                 // A restored Switchboard attaches its tab, unless the tab already has a project —
                 // the saved `project` on the tab wins, and a tab holds one. Queued, because
                 // buildNode() runs before the page the pane will live in exists.
