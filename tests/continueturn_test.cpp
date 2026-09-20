@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// When Ctrl+Enter on an empty prompt box continues the agent's stopped turn (#SXF1). The rule is
-// the pane's, extracted so it can be held to its promise without a worker or a terminal: an empty
-// send-now may only ever mean "continue" for a turn that stopped at its limit or was cut off by a
-// restart — never for a finished conversation, and never in place of the busy-interrupt send.
+// Ctrl+Enter on an empty prompt box sends the agent the ordinary prompt `Continue` (#SXF1). The
+// rule is the pane's, extracted so it can be held to its promise without a worker or a terminal:
+// an empty box with an idle agent continues, whatever the last turn did — it is not gated on the
+// turn having stopped at a limit or been cut off by a restart (owner, 2026-09-20). Text in the box
+// is sent, and a busy agent is interrupted with it.
 #include "ContinueTurn.h"
 
 #include <QTest>
@@ -10,11 +11,9 @@
 using namespace relay::continueturn;
 
 namespace {
-State emptyIdle(bool limitReached = false, bool turnCutOff = false) {
+State emptyIdle() {
     State state;
     state.textEmpty = true;
-    state.limitReached = limitReached;
-    state.turnCutOff = turnCutOff;
     return state;
 }
 }   // namespace
@@ -22,32 +21,31 @@ State emptyIdle(bool limitReached = false, bool turnCutOff = false) {
 class ContinueTurnTest : public QObject {
     Q_OBJECT
 private slots:
-    void a_limit_stop_and_a_cut_off_restart_continue() {
-        // The card's two cases: the turn ran out of steps, or Relay closed mid-turn and the pane
-        // was restored from a session whose last turn never ended.
-        QCOMPARE(sendNowContinues(emptyIdle(true, false)), true);
-        QCOMPARE(sendNowContinues(emptyIdle(false, true)), true);
-        QCOMPARE(sendNowContinues(emptyIdle(true, true)), true);
+    void an_empty_box_with_an_idle_agent_continues() {
+        // The plain rule: nothing to type, nothing running — the send-now is Continue. The case the
+        // owner hit is this one: an ordinary turn had ended, the box was empty, and Ctrl+Enter
+        // answered "Type a prompt first." The pane's limit/cut-off marks are not part of State at
+        // all, so an empty idle box continues whether or not either is set.
+        QCOMPARE(sendNowContinues(emptyIdle()), true);
     }
 
-    void a_finished_conversation_does_not() {
-        // Nothing stopped early: an empty box has nothing to continue, so it keeps its old answer.
-        QCOMPARE(sendNowContinues(emptyIdle()), false);
-    }
-
-    void text_in_the_box_or_a_busy_agent_never_continues() {
-        // What Ctrl+Enter already meant (#N8VK's promise among them) is untouched: text is sent,
-        // and a busy agent is interrupted with it — the continue reading exists only in the
-        // empty-idle slot those two leave.
-        State typed = emptyIdle(true);
+    void text_in_the_box_never_continues() {
+        // What Ctrl+Enter already meant (#N8VK's promise among them) is untouched: text is sent.
+        State typed = emptyIdle();
         typed.textEmpty = false;
         QCOMPARE(sendNowContinues(typed), false);
-        State busy = emptyIdle(true);
+    }
+
+    void a_busy_agent_never_continues() {
+        // While the agent works, the empty box has nothing to interrupt with and nothing to send
+        // past the running turn: Ctrl+Enter keeps its busy answer.
+        State busy = emptyIdle();
         busy.agentBusy = true;
         QCOMPARE(sendNowContinues(busy), false);
-        State busyCutOff = emptyIdle(false, true);
-        busyCutOff.agentBusy = true;
-        QCOMPARE(sendNowContinues(busyCutOff), false);
+        State busyTyped = emptyIdle();
+        busyTyped.agentBusy = true;
+        busyTyped.textEmpty = false;
+        QCOMPARE(sendNowContinues(busyTyped), false);
     }
 };
 

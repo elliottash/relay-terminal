@@ -4039,7 +4039,7 @@ private:
                                 : QStringLiteral("Watch the reasoning and the tool calls in a pane beside the terminal"),
                             QStringLiteral("agent.internalsPane"), pane && pane->internals());
         // The row is a slow path, so it teaches the fast one (#SXF1): agent.continue's own key
-        // when it has one, else agent.interrupt's empty-box send-now that continues a stopped turn.
+        // when it has one, else agent.interrupt's empty-box send-now that sends Continue.
         QString continueKeys = Keymap::instance().shortcutText(QStringLiteral("agent.continue"));
         if (continueKeys.isEmpty()) continueKeys = Keymap::instance().shortcutText(QStringLiteral("agent.interrupt"));
         const QString continueHow = continueKeys.isEmpty() ? QStringLiteral("/continue")

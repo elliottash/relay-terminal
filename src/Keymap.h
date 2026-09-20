@@ -312,7 +312,7 @@ private:
         // Joining somebody else's share as a guest, with the meeting code and PIN they read out
         // (owner, 2026-09-18). No default key: /join CODE in any prompt box is the fast path.
         add("remote.join", "terminal", "Join a shared session: type the meeting code and PIN someone gave you", {});
-        add("agent.interrupt", "agent", "Send to the agent; while it is busy, interrupt it and send now; on an empty box, continue a stopped turn (prompt box)",
+        add("agent.interrupt", "agent", "Send to the agent; while it is busy, interrupt it and send now; on an empty box, send the prompt \"Continue\" (prompt box)",
             {QStringLiteral("Ctrl+Return"), QStringLiteral("Ctrl+Enter"), QStringLiteral("Ctrl+Alt+Return"), QStringLiteral("Ctrl+Alt+Enter")});
         add("agent.provider", "agent", "Provider and API keys (advanced endpoint settings)", {});
         add("agent.modelKeys", "agent", "API keys for model providers", {});
@@ -395,7 +395,7 @@ private:
         // sibling; no preset binds Alt+Shift+R and no other action does.
         add("agent.internalsPane", "agent", "Activity: watch this pane's reasoning and tool calls in a pane beside it",
             {QStringLiteral("Alt+Shift+R")});
-        add("agent.continue", "agent", "Continue the agent turn after a step limit or a cut-off restart (Ctrl+Enter on an empty box, or /continue)", {});
+        add("agent.continue", "agent", "Continue the agent turn: Ctrl+Enter on an empty prompt box, or /continue", {});
         add("agent.instructions", "agent", "Choose agent instruction files", {});
         add("agent.export", "agent", "Export the conversation as Markdown", {});
         // Image context: G for grab. Ctrl+Shift so it still works while a program owns the terminal,

@@ -888,7 +888,7 @@ Pasting never submits.
 | Key in the composer | Destination sent to the router |
 |---|---|
 | Enter | selected input mode (`auto`, `shell`, `agent`); a program reading a line gets it instead (section 9) |
-| Ctrl+Enter | `agent` |
+| Ctrl+Enter | `agent`; on an empty prompt box with the agent idle, the ordinary prompt `Continue` (card #SXF1) |
 | Ctrl+Shift+Enter | `shell` (terminal mode) |
 | Ctrl+Alt+Enter | agent, `when: "interrupt"` (section 11) |
 | Shift+Enter | newline |
@@ -2123,8 +2123,9 @@ name stays known (an alias cannot take it and it is never reported as an unknown
 `openItemsLine()`
 and `auditLine()` name todos and the user's own quoted words, never `R<n>` ids. `done {stop_reason:
 "limit"}` prints a `relay://continue/<pane>` link handled by `WindowManager::handleOpen`; Continue
-sends an ordinary ask. `max_steps`, `max_tool_calls` and `audit_requests` live in QSettings
-`agent/*`, go into `configure` and are sent with `set_agent_options` when changed.
+sends an ordinary ask — the same ask Ctrl+Enter sends from an empty prompt box (#SXF1). `max_steps`,
+`max_tool_calls` and `audit_requests` live in QSettings `agent/*`, go into `configure` and are sent
+with `set_agent_options` when changed.
 
 **The open task list under the prompt** (owner, 2026-09-19). The current task list also shows in the
 strip beneath the composer, beside the running agents — the same widget, `SubagentsPanel`

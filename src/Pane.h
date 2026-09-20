@@ -35,7 +35,7 @@
 #include "PaneLayout.h"
 #include "QueueNav.h"
 #include "QueueSubmit.h"   // when a submitted agent prompt starts its turn at once (#N8VK)
-#include "ContinueTurn.h"  // when Ctrl+Enter on an empty box continues a stopped turn (#SXF1)
+#include "ContinueTurn.h"  // when Ctrl+Enter on an empty box sends Continue (#SXF1)
 #include "TranscriptReplay.h"  // a resumed conversation with no saved text, drawn from its entries (#0TJ9)
 #include "PaneTitles.h"
 #include "PaneUsage.h"    // the pane's own CPU / memory share, for the header chip and the tab
@@ -1179,17 +1179,19 @@ public:
         pumpQueue();
     }
     // Ctrl+Enter: send to the agent. While the agent is busy, stop the current turn and send now.
-    // On an empty box with the agent idle, it continues a turn that stopped at its limit or was
-    // cut off by a restart (#SXF1); every other empty box still asks for a prompt.
+    // On an empty box with the agent idle it sends the ordinary prompt `Continue` — always, whatever
+    // the last turn did (#SXF1; owner, 2026-09-20: "ctrl+enter in an empty prompt should always send
+    // agent prompt 'continue'"). A password prompt is the one exception: the masked field stands in
+    // for the prompt box there, and an agent turn is not started in the middle of one.
     void interruptAgentWithPrompt() {
         if (sendSelectedSteerNow()) return;   // a selected steer row: that steer, now
         const QString text = m_editor->toPlainText().trimmed();
-        if (relay::continueturn::sendNowContinues({m_agentBusy, text.isEmpty(), m_limitReached, m_turnCutOff})) {
+        if (relay::continueturn::sendNowContinues({m_agentBusy, text.isEmpty()})) {
+            if (m_secretMode) { status(QStringLiteral("Not while a password prompt is open.")); return; }
             continueTurn();
             return;
         }
-        if (!m_agentBusy) {
-            if (text.isEmpty()) { status(QStringLiteral("Type a prompt first.")); return; }
+        if (!m_agentBusy) {   // an idle empty box returned above: what is here is a prompt
             requestRoute(true, QStringLiteral("agent"));
             return;
         }
@@ -9265,7 +9267,8 @@ public:
         focusInput();
     }
 
-    // "Continue" after a turn stopped at its step or tool-call limit: an ordinary ask.
+    // "Continue": an ordinary ask, sent by /continue, the ▸ Continue link, the palette row, and
+    // Ctrl+Enter on an empty prompt box (#SXF1).
     void continueTurn(bool slowPath = false) {
         if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
         m_limitReached = false;
@@ -9278,7 +9281,7 @@ public:
             const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.continue"));
             const QString sendNow = Keymap::instance().shortcutText(QStringLiteral("agent.interrupt"));
             hint(QStringLiteral("continue.slow"),
-                 !sendNow.isEmpty() ? relay::ShortcutHints::nextTime(sendNow, QStringLiteral("continue a stopped turn from an empty prompt box"))
+                 !sendNow.isEmpty() ? relay::ShortcutHints::nextTime(sendNow, QStringLiteral("send Continue from an empty prompt box"))
                                     : keys.isEmpty() ? QStringLiteral("Next time: /continue in the prompt box")
                                                      : relay::ShortcutHints::nextTime(keys, QStringLiteral("continue")));
         }
@@ -9316,7 +9319,7 @@ private:
     // the agent's prose rather than the grey machinery around it.
     void printContinueLink() {
         // The link is a slow path, so it teaches the fast one: agent.continue's own key when it
-        // has one, else the empty-box send-now that continues a stopped turn (#SXF1).
+        // has one, else the empty-box send-now that sends Continue (#SXF1).
         const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.continue"));
         const QString sendNow = Keymap::instance().shortcutText(QStringLiteral("agent.interrupt"));
         const QString fast = keys.isEmpty() ? (sendNow.isEmpty() ? QStringLiteral("/continue")
