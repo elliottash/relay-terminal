@@ -4166,6 +4166,11 @@ private:
         if (ok && threshold >= 0.5 && threshold <= 0.98) request.insert(QStringLiteral("compact_threshold"), threshold);
         const QString plans = settings.value(QStringLiteral("agent/plans_dir")).toString().trimmed();
         if (!plans.isEmpty() && QDir::isAbsolutePath(QDir::fromNativeSeparators(plans))) request.insert(QStringLiteral("plans_dir"), plans);
+        // This pane's own session token (#R9G7). The worker needs it to claim a Switchboard card
+        // for the pane it is running in — `board_claim` writes it into the card's front matter,
+        // and the Switchboard draws it as the chip that reveals this pane — so the token has to
+        // travel with the configure rather than be asked for later.
+        if (!m_token.isEmpty()) request.insert(QStringLiteral("pane_token"), m_token);
         request.insert(QStringLiteral("instructions"), QJsonObject{
             {"files", QJsonArray::fromStringList(settings.value(QStringLiteral("instructions/files")).toStringList())},
             {"project_auto", settings.value(QStringLiteral("instructions/project_auto"), true).toBool()}});
