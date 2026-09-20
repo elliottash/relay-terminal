@@ -67,6 +67,10 @@ class RequestStream:
         items = event.get("items")
         if not isinstance(items, list):
             return event
+        # A subagent's own event, forwarded with its id (15.4): it is another ledger entirely, and
+        # subagents have none today, so it travels whole rather than through this one's memory.
+        if event.get("agent_id") or event.get("subagent"):
+            return event
         # The reply to the `requests` command carries the id of the request it answers: the GUI
         # asked for the list, so it gets the list.
         if event.get("id") is not None or self._other_ledger(items):
