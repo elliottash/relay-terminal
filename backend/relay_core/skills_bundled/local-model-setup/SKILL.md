@@ -1,6 +1,7 @@
 ---
 name: local-model-setup
 description: Set up a local model server (llama.cpp, Ollama, vLLM) on this machine and register it with Relay: survey, choose, serve, smoke-test, register.
+short: Run a model locally (llama.cpp, Ollama, vLLM) and register it with Relay.
 ---
 
 # Set up a local model for Relay

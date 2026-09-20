@@ -1285,17 +1285,33 @@ class ClaimTests(BoardToolsTest):
 
 class ClaimPromptTests(BoardToolsTest):
     def test_the_prompt_names_this_session_and_the_cards_it_holds(self):
-        text = T.prompt_section(self.tools)
-        self.assertIn(f"Your session: {self.pane_token[:8]}.", text)
-        self.assertNotIn("You hold:", text)
+        note = T.session_note(self.tools)
+        self.assertIn(f"Your Switchboard session: {self.pane_token[:8]}.", note)
+        self.assertNotIn("You hold:", note)
         card_id = self.create()
         self.tools.run("board_claim", {"id": card_id})
-        self.assertIn(f"You hold: #{card_id}.", T.prompt_section(self.tools))
+        self.assertIn(f"You hold: #{card_id}.", T.session_note(self.tools))
+
+    def test_what_this_pane_holds_is_not_in_the_middle_of_the_prompt(self):
+        # The claim line is the one part of the Switchboard block that changes while the
+        # conversation runs, so `Agent.system_prompt` carries it at the very end (#GMCF): the
+        # policy above it has to stay byte-identical for a prompt cache to survive a claim.
+        before = T.prompt_section(self.tools)
+        self.tools.run("board_claim", {"id": self.create()})
+        self.assertEqual(T.prompt_section(self.tools), before)
+        self.assertNotIn("Your Switchboard session:", before)
+        self.assertNotIn("You hold:", before)
 
     def test_a_worker_with_no_token_says_nothing_about_a_session(self):
         tools = T.BoardTools(self.board, autonomy="auto",
                              state_path=self.repo / ".relay" / "none.json")
-        self.assertNotIn("Your session:", T.prompt_section(tools))
+        self.assertEqual(T.session_note(tools), "")
+        self.assertNotIn("Your Switchboard session:", T.prompt_section(tools))
+
+    def test_a_board_that_is_off_or_uninitialized_has_no_session_note(self):
+        self.assertEqual(T.session_note(None), "")
+        self.tools.state = "uninitialized"
+        self.assertEqual(T.session_note(self.tools), "")
 
 
 class ClaimMessageTests(BoardToolsTest):

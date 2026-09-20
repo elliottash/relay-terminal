@@ -3187,19 +3187,38 @@ def _tracked_by_git(repo: Path, path: Path) -> bool:
 
 # ------------------------------------------------------------------------- policy
 
+#: The parsed `board_policy.md`, keyed on what the file looked like when it was read (#GMCF): the
+#: policy is ~5 KB of the system prompt and `policy_text` used to re-read and re-regex it on every
+#: call. An edit to the file changes its mtime or its size, so a Switchboard worked on in this
+#: checkout still picks the new policy up on the next prompt build — no restart.
+_POLICY_CACHE: tuple[tuple[int, int], str] | None = None
+
+
 def policy_text() -> str:
     """The system-prompt block, versioned in `board_policy.md` so evals can pin it."""
+    global _POLICY_CACHE
     path = Path(__file__).resolve().parent / "board_policy.md"
     try:
+        stamp = path.stat()
+        key = (stamp.st_mtime_ns, stamp.st_size)
+        cached = _POLICY_CACHE
+        if cached is not None and cached[0] == key:
+            return cached[1]
         text = path.read_text(encoding="utf-8")
     except OSError:                                        # pragma: no cover - packaging slip
         return ""
     # The file's own provenance comment is for readers of the repository, not for the model.
-    return re.sub(r"<!--.*?-->", "", text, flags=re.S).strip()
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.S).strip()
+    _POLICY_CACHE = (key, text)
+    return text
 
 
 def prompt_section(tools: "BoardTools | None") -> str:
-    """What `Agent.system_prompt` appends when this workspace has a Switchboard."""
+    """What `Agent.system_prompt` appends when this workspace has a Switchboard.
+
+    Only the part that is the same on every request of the conversation: what this pane holds
+    changes as it works, so it is `session_note`, which the prompt carries at the end (#GMCF).
+    """
     if tools is None or tools.autonomy == "off":
         return ""
     text = policy_text()
@@ -3209,14 +3228,27 @@ def prompt_section(tools: "BoardTools | None") -> str:
         return UNINITIALIZED_NOTE
     tabs = ", ".join(t for t in tools._tab_map())
     folder = tools.board.root.name
-    # Your own token and the cards you hold, stated every turn (#R9G7), so the model never has
-    # to remember a session token or type one: `board_claim` fills both in from here.
-    token = tools.pane_token or ""
-    mine = (f" Your session: {token[:8]}." if token else "")
-    if tools.claimed:
-        mine += " You hold: " + ", ".join(f"#{c}" for c in tools.claimed) + "."
     header = (f"\n\nSwitchboard: this project has one ({folder}/board.yaml). Tabs: {tabs}. "
               f"Autonomy: {tools.autonomy}"
               + (" — your card writes are proposals the user accepts in the Switchboard pane."
-                 if tools.autonomy == "suggest" else "") + mine + "\n")
+                 if tools.autonomy == "suggest" else "") + "\n")
     return header + text
+
+
+def session_note(tools: "BoardTools | None") -> str:
+    """Your own token and the cards you hold, stated every turn (#R9G7), so the model never has to
+    remember a session token or type one: `board_claim` fills both in from here.
+
+    The one part of the prompt that changes while the conversation runs, so it goes at its very
+    end: a provider's prompt cache and llama.cpp's prefix cache both key on the prefix, and a line
+    that moves in the middle throws away everything after it (#GMCF, 2026-09-20).
+    """
+    if tools is None or tools.autonomy == "off" or tools.state == "uninitialized":
+        return ""
+    if not policy_text():
+        return ""
+    token = tools.pane_token or ""
+    mine = (f"Your Switchboard session: {token[:8]}." if token else "")
+    if tools.claimed:
+        mine += (" " if mine else "") + "You hold: " + ", ".join(f"#{c}" for c in tools.claimed) + "."
+    return f"\n{mine}\n" if mine else ""

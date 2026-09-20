@@ -1,6 +1,7 @@
 ---
 name: deliver
 description: Work a request through the Switchboard: check it is not done, claim its card, plan, execute, verify. "/deliver", "deliver this", "work this card".
+short: 'Deliver a request through the Switchboard: claim a card, plan, execute, verify.'
 ---
 
 # Deliver a request through the Switchboard

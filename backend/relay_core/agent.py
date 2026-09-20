@@ -789,8 +789,13 @@ class Agent:
         # agent that has neither, so a worker the GUI sent no `app` block to is unchanged.
         app_rules = app_tools.prompt_section(getattr(self, "app", None))
         own_rules = activity_tools.prompt_section(getattr(self, "activity", None))
+        # Everything above is the same on every request of this conversation; what follows changes
+        # while it runs (the mode, the cards this pane holds), so it is last. Both the providers'
+        # prompt caches and llama.cpp's prefix cache key on the prefix, and a line that moves in
+        # the middle of the prompt discards the cached work for everything after it (#GMCF).
+        volatile = plan + board_tools.session_note(getattr(self, "board", None))
         return (SYSTEM + "\nChosen workspace: " + str(self.executor.workspace.root) + skills_note + instructions
-                + todo_rules + board_rules + app_rules + own_rules + plan)
+                + todo_rules + board_rules + app_rules + own_rules + volatile)
 
     def refresh_system_prompt(self) -> None:
         self.messages[0] = {"role": "system", "content": self.system_prompt()}
