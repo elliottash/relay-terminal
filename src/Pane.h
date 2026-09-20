@@ -4280,13 +4280,21 @@ private:
     // the Activity pane's running row, and both folds, which fetch the real text with
     // `tool_output_get` when they are opened. Off, the worker sends the counts instead of ~66 KB
     // of UTF-8 per call.
-    bool needsToolOutputText() const { return showToolOutput() || sharedWithPhone(); }
+    bool needsToolOutputText() const { return needsToolOutputText(showToolOutput()); }
+    // The same answer from a `showToolOutput()` the caller has already read: the tool_output path
+    // asks per chunk and the setting is not free to read (#057J).
+    bool needsToolOutputText(bool show) const { return show || sharedWithPhone(); }
 
     // Tell the worker which of the two shapes to send, whenever the answer above can change: at
     // configure (withSessionFields below), when Options toggles Show tool output, and when this
-    // pane starts or stops being shared.
+    // pane starts or stops being shared. Sends nothing when the worker already has this answer,
+    // which is what lets the tool_output handler call it on a mismatch without chattering at a
+    // worker too old to know the option.
     void sendToolStreamOption() {
-        if (m_configured) send({{"type", "set_agent_options"}, {"stream_tool_output", needsToolOutputText()}});
+        const bool want = needsToolOutputText();
+        if (!m_configured || m_toolStreamSent == int(want)) return;
+        m_toolStreamSent = int(want);
+        send({{"type", "set_agent_options"}, {"stream_tool_output", want}});
     }
 
     // Session-related configure fields from settings (protocol sections 1 and 8).
@@ -4306,7 +4314,8 @@ private:
         // Protocol 23.10 (#PPR4): stated on every configure, not only when it changes, because a
         // fresh worker starts on the default — sending the text — and a pane that needs none of it
         // would otherwise pay for a turn's worth of output before the first toggle.
-        request.insert(QStringLiteral("stream_tool_output"), needsToolOutputText());
+        m_toolStreamSent = int(needsToolOutputText());
+        request.insert(QStringLiteral("stream_tool_output"), m_toolStreamSent != 0);
         request.insert(QStringLiteral("instructions"), QJsonObject{
             {"files", QJsonArray::fromStringList(settings.value(QStringLiteral("instructions/files")).toStringList())},
             {"project_auto", settings.value(QStringLiteral("instructions/project_auto"), true).toBool()}});
@@ -9766,10 +9775,19 @@ private:
             const relay::calllines::OutputCount count = relay::calllines::toolOutputCount(event);
             m_toolLines += count.lines;
             m_toolPartialLine = count.partial;
+            // The shape that arrived is not the shape this pane needs: ask again. Options tells
+            // only the *active* pane that Show tool output was toggled (`toggleRow`,
+            // src/RelayWindow.h), and a tab can be shared without this pane being asked, so a
+            // second pane would otherwise keep counting until its next configure. The setting is
+            // read once for both decisions — it is a QSettings construction on this path and that
+            // was 5 % of a tool-heavy turn (#057J) — and sendToolStreamOption() sends nothing when
+            // the worker already agrees, so a worker too old to know the option is not nagged.
+            const bool show = showToolOutput();
+            if (count.counted == needsToolOutputText(show)) sendToolStreamOption();
             if (m_internals) internalsToolOutput(count.lines);   // the row lives in the Activity pane (#QT8C)
             // `!count.counted` is the moment the switch is thrown mid-call: the worker has not read
             // the new option yet, so this chunk has no text to print and the row below counts it.
-            else if (showToolOutput() && !count.counted) {
+            else if (show && !count.counted) {
                 turnHeader(); printInline(event.value(QStringLiteral("text")).toString(), Ink::ToolOutput);
             }
             else if (!m_liveCall.isEmpty() && shellIdleAtPrompt()) {
@@ -15669,6 +15687,9 @@ private:
     bool m_queueWanted = false;   // the queue has something to show; room decides whether it does
     int m_toolLines = 0;              // lines of the running tool's collapsed output
     bool m_toolPartialLine = false;   // its last chunk had no trailing newline
+    // `stream_tool_output` as this worker was last told it, or -1 for "not yet" (protocol 23.10,
+    // #PPR4). Kept so the option is sent when the answer changes and not on every chunk.
+    mutable int m_toolStreamSent = -1;
     QString m_prefixMode, m_prefixPrevMode;
     QTimer m_idleTip;
     QTimer m_idleRecap;              // the idle-pane away recap (card #D54R)

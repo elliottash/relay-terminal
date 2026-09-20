@@ -1,0 +1,38 @@
+# after — 9702e504 (stream_tool_output), same two turns, same stub, same harness
+
+--- out/ipcafter.ipc/worker2gui.jsonl  messages=1121 bytes=316587
+message                         n     bytes      avg   share
+presets                         3    223517    74505   70.6%
+delta                        1009     51768       51   16.4%
+tool_result                    20      9242      462    2.9%
+tool_started                   20      7511      375    2.4%
+turn_summary                    2      6196     3098    2.0%
+configured                      1      4824     4824    1.5%
+requests                        6      4725      787    1.5%
+route                           7      2156      308    0.7%
+tool_output                    20      1780       89    0.6%
+agents                          1      1000     1000    0.3%
+queue_changed                   6       843      140    0.3%
+context                         6       840      140    0.3%
+session_summary                 1       419      419    0.1%
+status                          6       366       61    0.1%
+queued                          2       304      152    0.1%
+agent_started                   2       232      116    0.1%
+app_catalog_updated             2       202      101    0.1%
+agent_finished                  2       178       89    0.1%
+done                            2       166       83    0.1%
+session_title                   1       151      151    0.0%
+aliases                         1       128      128    0.0%
+ready                           1        39       39    0.0%
+
+--- out/ipcafter.ipc/gui2worker.jsonl  messages=16 bytes=210094
+message                         n     bytes      avg   share
+app_catalog                     2    128164    64082   61.0%
+configure                       1     73016    73016   34.8%
+route                           7      8163     1166    3.9%
+ask                             2       375      187    0.2%
+program_state                   1       251      251    0.1%
+aliases                         1        83       83    0.0%
+agents_list                     1        23       23    0.0%
+presets                         1        19       19    0.0%
+

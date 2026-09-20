@@ -1,0 +1,15 @@
+# #PPR4 scenario (d): 200 run_command calls, 2 000 lines (156 KB) of output each.
+# ./ab.sh — three rounds, before and after alternating, on spark with five other #PF4K agents
+# on the box (load 3-5).  before = /tmp/claude-1000/pf4k/build/relay (clean export of main before
+# the fix); after = a clean export of 9702e504, same cmake flags.  GUI-thread CPU seconds for the
+# whole run, from drive.sh's 200 ms per-thread samples reduced by an.py.
+
+b1 # TOTAL gui_cpu_s=6.89 proc_cpu_s=7.00 rss_start_MB=152.0 rss_end_MB=160.2 span_s=47.6
+a1 # TOTAL gui_cpu_s=5.84 proc_cpu_s=5.95 rss_start_MB=152.3 rss_end_MB=160.5 span_s=47.7
+b2 # TOTAL gui_cpu_s=6.80 proc_cpu_s=6.91 rss_start_MB=152.2 rss_end_MB=160.3 span_s=47.7
+a2 # TOTAL gui_cpu_s=5.74 proc_cpu_s=5.85 rss_start_MB=152.4 rss_end_MB=160.5 span_s=47.7
+b3 # TOTAL gui_cpu_s=7.15 proc_cpu_s=7.25 rss_start_MB=152.1 rss_end_MB=160.1 span_s=47.6
+a3 # TOTAL gui_cpu_s=5.49 proc_cpu_s=5.61 rss_start_MB=152.0 rss_end_MB=160.2 span_s=47.7
+
+before mean 6.95 s   after mean 5.69 s   delta 1.26 s = 18.1 %
+per call: 34.7 ms -> 28.4 ms

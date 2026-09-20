@@ -1,0 +1,40 @@
+# before — main at 34b5175e (/tmp/claude-1000/pf4k/build/relay), one 20 000-char prose turn + one turn of 20 run_command calls, 2 000 lines (156 KB) each
+
+--- out/ipcbefore.ipc/worker2gui.jsonl  messages=1123 bytes=1642498
+message                         n     bytes      avg   share
+tool_result                    20    672082    33604   40.9%
+tool_output                    20    664500    33225   40.5%
+presets                         3    223517    74505   13.6%
+delta                        1009     51768       51    3.2%
+tool_started                   20      7511      375    0.5%
+turn_summary                    2      6196     3098    0.4%
+configured                      1      4795     4795    0.3%
+requests                        6      4732      788    0.3%
+route                           8      2439      304    0.1%
+agents                          1      1000     1000    0.1%
+queue_changed                   7       933      133    0.1%
+context                         6       840      140    0.1%
+session_summary                 1       419      419    0.0%
+status                          6       366       61    0.0%
+queued                          2       304      152    0.0%
+agent_started                   2       232      116    0.0%
+app_catalog_updated             2       202      101    0.0%
+agent_finished                  2       178       89    0.0%
+done                            2       166       83    0.0%
+session_title                   1       151      151    0.0%
+aliases                         1       128      128    0.0%
+ready                           1        39       39    0.0%
+
+--- out/ipcbefore.ipc/gui2worker.jsonl  messages=19 bytes=212117
+message                         n     bytes      avg   share
+app_catalog                     2    128830    64415   60.7%
+configure                       1     73322    73322   34.6%
+route                           8      9176     1147    4.3%
+ask                             2       375      187    0.2%
+program_state                   1       251      251    0.1%
+aliases                         1        83       83    0.0%
+agents_list                     1        23       23    0.0%
+shutdown                        1        20       20    0.0%
+presets                         1        19       19    0.0%
+cancel                          1        18       18    0.0%
+

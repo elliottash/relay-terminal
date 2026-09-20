@@ -1,0 +1,117 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 934  of event 'armv8_pmuv3_0/cycles/P'
+# Event count (approx.): 5541238850
+#
+# Overhead  Command          Shared Object                        Symbol                                                                                                                                                                                                                                                                        
+# ........  ...............  ...................................  ..............................................................................................................................................................................................................................................................................
+#
+     5.58%  relay            libQt5Gui.so.5.15.13                 [.] 0x00000000005788f8
+     3.84%  relay            relay                                [.] relay::TerminalView::paintRow(QPainter&, int, relay::Line const&, int)::{lambda(int)#1}::operator()(int) const
+     2.49%  relay            libQt5Core.so.5.15.13                [.] QString::append(QChar)
+     2.24%  relay            libQt5Core.so.5.15.13                [.] QChar::direction(unsigned int)
+     2.12%  relay            libQt5Gui.so.5.15.13                 [.] 0x0000000000578954
+     2.10%  relay            relay                                [.] relay::LibVtermCore::Impl::convertCell(VTermScreenCell const&, relay::Line*, relay::Cell*) const
+     1.90%  relay            libQt5Gui.so.5.15.13                 [.] 0x0000000000389374
+     1.77%  relay            [kernel.kallsyms]                    [k] 0xffffc59376516320
+     1.77%  relay            libQt5Gui.so.5.15.13                 [.] 0x0000000000582460
+     1.74%  relay            [kernel.kallsyms]                    [k] 0xffffc593764f9db8
+     1.74%  relay            libQt5Gui.so.5.15.13                 [.] 0x0000000000389198
+     1.43%  relay            libQt5Gui.so.5.15.13                 [.] QPainterPath::ensureData_helper()
+     1.33%  relay            libQt5Gui.so.5.15.13                 [.] 0x0000000000582604
+     1.31%  relay            libQt5Gui.so.5.15.13                 [.] 0x00000000005788f4
+     1.22%  relay            relay                                [.] __aarch64_ldadd4_acq_rel
+     1.22%  relay            libQt5Core.so.5.15.13                [.] QString::startsWith(QString const&, Qt::CaseSensitivity) const
+     1.21%  relay            libQt5Core.so.5.15.13                [.] 0x00000000001345d4
+     1.20%  relay            relay                                [.] relay::LibVtermCore::hyperlinkRuns(QString const&) const
+     1.19%  relay            libQt5Core.so.5.15.13                [.] operator==(QString const&, QString const&)
+     0.96%  relay            relay                                [.] vterm_screen_get_cell
+     0.94%  relay            libc.so.6                            [.] malloc
+     0.90%  relay            libQt5Core.so.5.15.13                [.] 0x0000000000372a7c
+     0.83%  relay            libQt5Core.so.5.15.13                [.] QByteArray::indexOf(char, int) const
+     0.82%  relay            relay                                [.] relay::TerminalView::resolve(unsigned int, bool) const
+     0.79%  relay            relay                                [.] relay::TerminalView::paintRow(QPainter&, int, relay::Line const&, int)
+     0.78%  relay            [kernel.kallsyms]                    [k] 0xffffc5937651ca58
+     0.74%  relay            libc.so.6                            [.] _int_malloc
+     0.73%  relay            libQt5Gui.so.5.15.13                 [.] QBezier::addToPolygon(QDataBuffer<QPointF>&, double) const
+     0.71%  relay            libQt5Gui.so.5.15.13                 [.] 0x0000000000389194
+     0.69%  relay            libQt5Core.so.5.15.13                [.] qHash(QString const&, unsigned int)
+     0.66%  relay            libQt5Gui.so.5.15.13                 [.] QColor::operator==(QColor const&) const
+     0.61%  relay            libQt5Core.so.5.15.13                [.] 0x00000000003da2a4
+     0.53%  relay            libQt5Core.so.5.15.13                [.] 0x0000000000372b30
+     0.50%  relay            libQt5Gui.so.5.15.13                 [.] 0x0000000000389058
+     0.50%  relay            [kernel.kallsyms]                    [k] 0xffffc59377921484
+     0.50%  relay            [kernel.kallsyms]                    [k] 0xffffc5937790db78
+     0.42%  relay            libQt5Widgets.so.5.15.13             [.] QWidget::window() const
+
+
+# Samples: 511  of event 'armv8_pmuv3_1/cycles/P'
+# Event count (approx.): 3554944280
+#
+# Overhead  Command          Shared Object                Symbol                                                                                                                                                                                          
+# ........  ...............  ...........................  ................................................................................................................................................................................................
+#
+     5.52%  relay            libQt5Gui.so.5.15.13         [.] 0x0000000000389378
+     4.47%  relay            libQt5Core.so.5.15.13        [.] 0x0000000000372a80
+     2.72%  relay            libQt5Gui.so.5.15.13         [.] 0x00000000005788f4
+     2.48%  relay            relay                        [.] relay::TerminalView::paintRow(QPainter&, int, relay::Line const&, int)::{lambda(int)#1}::operator()(int) const
+     2.26%  relay            libQt5Gui.so.5.15.13         [.] 0x0000000000582604
+     2.10%  relay            libQt5Gui.so.5.15.13         [.] 0x00000000005788f8
+     1.75%  relay            libQt5Core.so.5.15.13        [.] 0x00000000003da2a4
+     1.65%  relay            libc.so.6                    [.] malloc
+     1.55%  relay            relay                        [.] relay::LibVtermCore::hyperlinkRuns(QString const&) const
+     1.55%  relay            [kernel.kallsyms]            [k] 0xffffc5937651ca58
+     1.42%  relay            relay                        [.] relay::LibVtermCore::Impl::convertCell(VTermScreenCell const&, relay::Line*, relay::Cell*) const
+     1.37%  relay            libQt5Gui.so.5.15.13         [.] 0x0000000000389198
+     1.36%  relay            libfontconfig.so.1.12.1      [.] 0x000000000000b0d0
+     1.36%  relay            libQt5Core.so.5.15.13        [.] qHash(QString const&, unsigned int)
+     1.05%  relay            relay                        [.] relay::TerminalView::resolve(unsigned int, bool) const
+     1.04%  relay            libQt5Core.so.5.15.13        [.] 0x00000000001345d4
+     0.94%  relay            relay                        [.] __aarch64_ldadd4_acq_rel
+     0.75%  relay            libQt5Gui.so.5.15.13         [.] 0x0000000000388d58
+     0.73%  relay            libQt5Gui.so.5.15.13         [.] QRasterPaintEngine::alphaPenBlt(void const*, int, int, int, int, int, int, bool)
+     0.70%  relay            libQt5Core.so.5.15.13        [.] 0x0000000000372a84
+     0.68%  relay            relay                        [.] vterm_screen_get_cell
+     0.68%  relay            [kernel.kallsyms]            [k] 0xffffc593778cd7a0
+     0.67%  relay            libfreetype.so.6.20.1        [.] FT_Get_Char_Index
+     0.66%  relay            libQt5Core.so.5.15.13        [.] QString::startsWith(QString const&, Qt::CaseSensitivity) const
+     0.61%  relay            libQt5Gui.so.5.15.13         [.] 0x0000000000578954
+     0.57%  relay            libc.so.6                    [.] malloc_consolidate
+     0.56%  relay            libfreetype.so.6.20.1        [.] FT_Load_Sfnt_Table
+     0.56%  relay            [kernel.kallsyms]            [k] 0xffffc59377921484
+     0.52%  relay            libQt5Core.so.5.15.13        [.] QCoreApplicationPrivate::sendThroughApplicationEventFilters(QObject*, QEvent*)
+     0.51%  relay            libc.so.6                    [.] __aarch64_cas4_acq
+     0.50%  relay            libQt5Gui.so.5.15.13         [.] 0x000000000038889c
+     0.50%  relay            libc.so.6                    [.] _int_free
+     0.49%  relay            [kernel.kallsyms]            [k] 0xffffc593765f4ef0
+     0.49%  relay            libQt5Widgets.so.5.15.13     [.] 0x00000000002258a0
+     0.49%  relay            libQt5Widgets.so.5.15.13     [.] 0x0000000000205d68
+     0.48%  relay            libQt5Core.so.5.15.13        [.] qgetenv(char const*)
+     0.47%  relay            [kernel.kallsyms]            [k] 0xffffc5937790db78
+     0.47%  relay            libQt5Gui.so.5.15.13         [.] 0x0000000000389194
+     0.47%  relay            relay                        [.] relay::(anonymous namespace)::logicalRowAt(relay::ViewportFrame const&, int, relay::(anonymous namespace)::LogicalRow*) [clone .constprop.0]
+     0.47%  relay            libQt5Widgets.so.5.15.13     [.] 0x000000000020de14
+     0.45%  relay            [kernel.kallsyms]            [k] 0xffffc5937756d228
+     0.45%  relay            libQt5XcbQpa.so.5.15.13      [.] 0x00000000000dc28c
+     0.44%  relay            libQt5Gui.so.5.15.13         [.] QTransform::map(QPointF const&) const
+     0.44%  relay            [kernel.kallsyms]            [k] 0xffffc5937651ca3c
+     0.44%  relay            libxcb.so.1.1.0              [.] 0x00000000000140bc
+     0.44%  relay            libQt5Gui.so.5.15.13         [.] 0x0000000000389064
+     0.43%  relay            libQt5Core.so.5.15.13        [.] 0x0000000000372a7c
+     0.43%  relay            libc.so.6                    [.] _int_malloc
+     0.42%  relay            libQt5Gui.so.5.15.13         [.] QRegion::QRegion()
+     0.42%  relay            libQt5Gui.so.5.15.13         [.] QPaintEngineEx::stroke(QVectorPath const&, QPen const&)
+     0.42%  relay            libQt5Widgets.so.5.15.13     [.] 0x0000000000558004
+     0.41%  relay            libQt5Gui.so.5.15.13         [.] 0x0000000000397b34
+     0.41%  relay            libQt5Gui.so.5.15.13         [.] 0x00000000003891a0
+     0.41%  relay            relay                        [.] memset@plt
+     0.41%  relay            libQt5Core.so.5.15.13        [.] QString::append(QChar)
+     0.40%  relay            libQt5Core.so.5.15.13        [.] QRectF::contains(QPointF const&) const
+
+
+#
+# (Cannot load tips.txt file, please install perf!)
+#
