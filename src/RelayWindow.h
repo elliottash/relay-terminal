@@ -2394,8 +2394,15 @@ private:
                 }
                 models.rows << row;
             }
-            models.rows << buttonRow(QStringLiteral("models.tier.add.") + tier, QStringLiteral("+ add a model"),
-                list.isEmpty() ? tierBlurbs.value(tier) : QString(), QStringLiteral("add…"), [this, tier, catalog, list, curated] {
+            // The button is the row (owner, 2026-09-20: "make '+ add a model…' a button rather than
+            // the separate 'add…' button on the right"); what the list is for is its hover.
+            relay::SettingRow add;
+            add.kind = relay::SettingRow::Buttons;
+            add.id = QStringLiteral("models.tier.add.") + tier;
+            add.tooltip = tierBlurbs.value(tier);
+            add.aliases = QStringLiteral("add a model ") + tier + QStringLiteral(" models list");
+            add.buttonTexts = QStringList{QStringLiteral("+ add a model…")};
+            add.onButton = [this, tier, catalog, list, curated](int) {
                     QList<relay::agentui::PickerRow> rows;
                     QList<relay::models::Entry> offered;
                     for (const relay::models::Entry &entry : relay::models::shown(catalog)) {
@@ -2416,7 +2423,8 @@ private:
                     relay::models::curation::addToTier(tier, entry.key, entry.efforts.isEmpty() ? QString() : entry.efforts.last());
                     applyMainDefault(catalog);
                     curated();
-                });
+                };
+            models.rows << add;
         }
         {
             // The two defaults (owner, 2026-09-20), computed by the worker from the providers you

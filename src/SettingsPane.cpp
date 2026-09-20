@@ -657,7 +657,10 @@ QWidget *SettingsPane::settingRow(const SettingRow &row) {
     const QFontMetrics metrics(label->font());
     const int words = std::max(metrics.horizontalAdvance(row.label), metrics.horizontalAdvance(row.detail) * 9 / 10);
     label->setMinimumWidth(std::min(words + 2, metrics.averageCharWidth() * 18));
-    box->addLayout(text, 1);
+    // A row with no words (a lone "+ add a model…" button under a list) keeps its control at the
+    // left, where the list's rows begin, rather than out at the right edge.
+    const bool wordless = row.label.isEmpty() && row.detail.isEmpty();
+    box->addLayout(text, wordless ? 0 : 1);
 
     if (!row.tooltip.isEmpty()) { line->setToolTip(row.tooltip); label->setToolTip(row.tooltip); }
     if (!row.infoUrl.isEmpty()) {
@@ -835,6 +838,7 @@ QWidget *SettingsPane::settingRow(const SettingRow &row) {
             hostBox->addWidget(button);
         }
         box->addWidget(host);
+        if (wordless) box->addStretch(1);
         constexpr int kWordsWant = 300;   // narrower than this beside the buttons, and they go below
         line->onResized = [box, text, host](int width) {
             const bool below = width - host->sizeHint().width() - 90 < kWordsWant;
