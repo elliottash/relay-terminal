@@ -1,0 +1,3 @@
+after switching the cycling row on:
+new_tab_new_theme=true
+randomize_new_tab=false
