@@ -1,0 +1,1008 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""The `app_*` tools: the agent drives the Relay app (card #FEJQ, protocol §30).
+
+The Switchboard tools (`board_tools.BoardTools`) are the model this copies.  There the agent
+changes *files*; here it changes the *app* — the rows of Options, the entries of the actions
+palette, which pane is open and what it is zoomed to — and the app lives in the GUI process, so
+every write is a round trip: the tool emits an `app_command` and blocks on the GUI's
+`app_command_result` (§30.3), exactly as `BoardTools.init` (`BoardInit.ask_and_wait`) blocks on
+the "initialize a Switchboard here?" dialog.  A tool result therefore says what *happened*,
+never what was asked for.
+
+What the GUI sends and what this module owns:
+
+* the **catalog** — the option rows and the actions, with their current values — arrives in the
+  `app` block of `configure` and is replaced by an `app_catalog` message (§30.2), the way the
+  keybinding catalog does (`keybindings.KeybindingCatalog.from_request`).  Nothing here reads a
+  settings file: the GUI owns the settings and this is its description of them, as fresh as the
+  last message.  Nothing is cached across a refresh — a row that is missing from the new catalog
+  has gone from the app.
+* the **policy** is in the catalog too, because it is the GUI's to decide: `writes_enabled`
+  (Options › Agent, "Agents may change options and run actions" — owner decision 3 of
+  2026-09-20), `settable` per row and `agent_safe` per action (decisions 1 and 2: every value
+  row except a secret, and actions that are undoable in one click).
+* the **change log** is this worker's own record of what it wrote, so `app_changes` can list it
+  and `app_undo` can reverse one.  The GUI keeps the authoritative log and performs the undo
+  itself (§30.6), so Undo works with no agent in the room; this is the agent's view of its own
+  half of it.
+
+Guardrails, in one place so they can be reviewed:
+
+* **A secret is never read and never written.**  A row marked `secret` arrives with no `value`
+  at all (§30.2), is listed without one, and `app_option_set` refuses it in one sentence before
+  a request is built.  API keys are the keystore's and the owner's.
+* **A row that is not a value is not settable.**  Button, buttons, info and heading rows are in
+  the catalog with `settable: false` so the agent can *name* one and open the pane at it; the
+  button itself is an action (`app_action_run`).
+* **Values are validated against the catalog before the GUI is asked** (§30.3: the worker
+  refuses `not_settable`, `secret`, `writes_disabled`, `not_agent_safe` and `invalid_value`
+  itself, as 22.3 refuses a command `bash -n` rejects).  A refused value costs no round trip.
+* **Only `agent_safe` actions run.**  The catalog marks them; the fence is the GUI's.
+* **Sessions search never leaves the worker.**  `app_sessions_search` asks the conversation
+  index directly (`conv_index.ConversationIndex.search`, the protocol-14 `conversations`
+  answer's own source), so asking "which session was that in" costs no GUI round trip.
+"""
+from __future__ import annotations
+
+import threading
+import time
+from dataclasses import dataclass, field
+from typing import Callable
+
+#: How long a tool waits for the GUI's `app_command_result` before giving up (§30.3: "within
+#: 20 s or the tool returns `no_reply`" — 22.4's deadline, for a channel with 22.4's shape).
+#: The board's own dialog has no timeout because a person is reading it; an `app_command` can
+#: reach a GUI with no handler for it (an older build, a pane whose window is gone), and a turn
+#: must not park forever on that.
+ANSWER_TIMEOUT = 20.0
+
+#: What an option row can be (§30.2).  The first four hold a value the agent may set; the rest
+#: are rows it can name and open (a button is run through `app_action_run`, decision 1).
+OPTION_KINDS = ("toggle", "choice", "text", "number", "button", "buttons", "info", "heading")
+VALUE_KINDS = ("toggle", "choice", "text", "number")
+
+#: What `app_open` can open.  The four panes the card is about; a card id opens the Switchboard.
+OPEN_TARGETS = ("options", "actions", "sessions", "switchboard")
+
+#: The commands that go out as `app_command` (§30.3).
+COMMANDS = ("open", "set_option", "run_action", "undo")
+
+#: The `error` vocabulary of `app_command_result` (§30.3).  The worker's own refusals use the
+#: same words, so a refusal reads the same whether the catalog caught it or the pane did.
+ERRORS = ("unknown_row", "unknown_action", "unknown_target", "unknown_change", "not_settable",
+          "secret", "writes_disabled", "invalid_value", "not_agent_safe", "busy", "failed",
+          "no_reply")
+
+#: What each of those means in a sentence, for the tool result when the GUI sends the code alone.
+ERROR_TEXT = {
+    "unknown_row": "Relay no longer has that option row.",
+    "unknown_action": "Relay no longer has that action.",
+    "unknown_target": "Relay cannot open that.",
+    "unknown_change": "Relay no longer holds that change.",
+    "not_settable": "That row is not one an agent may set.",
+    "secret": "That row holds a secret; no agent may set it.",
+    "writes_disabled": "Agents may not change options or run actions.",
+    "invalid_value": "Relay rejected that value.",
+    "not_agent_safe": "That action is not one an agent may run.",
+    "busy": "Relay was busy and did not do it.",
+    "failed": "Relay could not do it.",
+    "no_reply": "Relay did not answer.",
+}
+
+MAX_OPTIONS = 2000
+MAX_ACTIONS = 1000
+MAX_LABEL = 200
+MAX_DETAIL = 1000
+MAX_CHOICES = 200
+MAX_TEXT_VALUE = 4096
+MAX_LIST_ROWS = 60
+MAX_SEARCH = 200
+MAX_SESSION_ROWS = 25
+MAX_CHANGES = 100
+
+
+class AppToolError(ValueError):
+    """A refusal the model should read and correct.  Carries a machine-readable code.
+
+    Shaped like `board_tools.BoardToolError`: the dispatch turns it into a tool *result*, not an
+    exception, so a refused write is one sentence in the transcript and the turn carries on.
+    """
+
+    def __init__(self, message: str, code: str = "failed", **extra):
+        super().__init__(message)
+        self.code = code
+        self.extra = extra
+
+    def to_result(self) -> dict:
+        return {"error": str(self), "code": self.code, **self.extra}
+
+
+def spec(name: str, description: str, properties: dict, required: list[str]) -> dict:
+    return {"type": "function", "function": {"name": name, "description": description,
+            "parameters": {"type": "object", "properties": properties, "required": required,
+                           "additionalProperties": False}}}
+
+
+def _short(value, limit: int = 80) -> str:
+    text = "on" if value is True else "off" if value is False else "" if value is None else str(value)
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+# ------------------------------------------------------------------ the catalog
+
+def _text(value, what: str, maximum: int = MAX_LABEL, *, required: bool = False) -> str:
+    if value is None:
+        if required:
+            raise AppToolError(f"{what} is required.", code="catalog")
+        return ""
+    if not isinstance(value, str):
+        raise AppToolError(f"{what} must be text.", code="catalog")
+    return value[:maximum]
+
+
+@dataclass
+class OptionRow:
+    """One row of Options, as the GUI describes it (`settingsSections()` in RelayWindow, §30.2)."""
+
+    id: str
+    section: str = ""
+    section_label: str = ""
+    label: str = ""
+    detail: str = ""
+    kind: str = "info"
+    value: object = None
+    has_value: bool = False
+    choices: list = field(default_factory=list)
+    min: object = None
+    max: object = None
+    settable: bool = False
+    secret: bool = False
+
+    @property
+    def path(self) -> str:
+        """How a row is named in prose: "Agent › Agents may change options"."""
+        head = self.section_label or self.section
+        return f"{head} › {self.label}" if head else (self.label or self.id)
+
+    def row(self) -> dict:
+        """The listing shape.  A secret row is a row with no `value` at all (§30.2)."""
+        out = {"id": self.id, "section": self.section, "label": self.label, "kind": self.kind,
+               "settable": self.settable}
+        if self.has_value:
+            out["value"] = self.value
+        if self.section_label:
+            out["section_label"] = self.section_label
+        if self.secret:
+            out["secret"] = True
+        return out
+
+    def detail_row(self) -> dict:
+        """`app_option_get`: the listing shape plus what a person would read beside the row."""
+        out = self.row()
+        if self.detail:
+            out["detail"] = self.detail
+        if self.kind == "choice":
+            out["choices"] = [dict(c) for c in self.choices]
+        if self.kind == "number":
+            if self.min is not None:
+                out["min"] = self.min
+            if self.max is not None:
+                out["max"] = self.max
+        return out
+
+
+@dataclass
+class ActionRow:
+    """One entry of the actions palette (`searchableActions()` in RelayWindow, §30.2)."""
+
+    key: str
+    section: str = ""
+    label: str = ""
+    detail: str = ""
+    agent_safe: bool = False
+
+    def row(self) -> dict:
+        out = {"key": self.key, "section": self.section, "label": self.label,
+               "agent_safe": self.agent_safe}
+        if self.detail:
+            out["detail"] = self.detail
+        return out
+
+
+def _choices(value, row_id: str) -> list[dict]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or len(value) > MAX_CHOICES:
+        raise AppToolError(f"choices for {row_id} must be a list of at most {MAX_CHOICES} entries.",
+                           code="catalog")
+    out = []
+    for entry in value:
+        if not isinstance(entry, dict) or "value" not in entry:
+            raise AppToolError(f"each choice for {row_id} must be an object with a value.",
+                               code="catalog")
+        out.append({"value": entry["value"], "label": _text(entry.get("label"), "choice label")})
+    return out
+
+
+class AppCatalog:
+    """The GUI's description of Options and the actions palette, and what may be done with them.
+
+    Parsed once per `configure` / `app_catalog` message and then read-only, except for the one
+    value a successful `set_option` writes back: the catalog is the agent's picture of the app,
+    and a picture that still showed the old value after the write landed would make the next
+    `app_option_get` contradict the tool result the model has just read.
+    """
+
+    def __init__(self, value: dict):
+        if not isinstance(value, dict):
+            raise AppToolError("app must be an object with options and actions.", code="catalog")
+        #: The tab's persistent id (§30.2): what keys the helper worker, and what tells a pane
+        #: agent and the helper that they mean the same Options pane.
+        self.tab = _text(value.get("tab"), "app.tab")
+        self.writes_enabled = value.get("writes_enabled") is True
+        self.options: dict[str, OptionRow] = {}
+        self.actions: dict[str, ActionRow] = {}
+        self._lock = threading.Lock()
+        rows = value.get("options") or []
+        if not isinstance(rows, list) or len(rows) > MAX_OPTIONS:
+            raise AppToolError(f"app.options must be a list of at most {MAX_OPTIONS} rows.",
+                               code="catalog")
+        for entry in rows:
+            row = self._option(entry)
+            self.options[row.id] = row
+        actions = value.get("actions") or []
+        if not isinstance(actions, list) or len(actions) > MAX_ACTIONS:
+            raise AppToolError(f"app.actions must be a list of at most {MAX_ACTIONS} entries.",
+                               code="catalog")
+        for entry in actions:
+            action = self._action(entry)
+            self.actions[action.key] = action
+
+    # ---- parsing ---------------------------------------------------------------
+    @staticmethod
+    def _option(entry) -> OptionRow:
+        if not isinstance(entry, dict):
+            raise AppToolError("each app option must be an object.", code="catalog")
+        row_id = _text(entry.get("id"), "option id", required=True)
+        if not row_id:
+            raise AppToolError("each app option needs an id.", code="catalog")
+        kind = entry.get("kind")
+        if kind not in OPTION_KINDS:
+            raise AppToolError(f"option {row_id}: kind must be one of {', '.join(OPTION_KINDS)}.",
+                               code="catalog")
+        secret = entry.get("secret") is True
+        # A secret row arrives with no value; it is given none here either, so nothing downstream
+        # can leak one a future GUI sends by mistake.
+        has_value = "value" in entry and not secret
+        return OptionRow(
+            id=row_id, section=_text(entry.get("section"), "section"),
+            section_label=_text(entry.get("section_label"), "section_label"),
+            label=_text(entry.get("label"), "label"),
+            detail=_text(entry.get("detail"), "detail", MAX_DETAIL),
+            kind=kind, value=entry.get("value") if has_value else None, has_value=has_value,
+            choices=_choices(entry.get("choices"), row_id) if kind == "choice" else [],
+            min=entry.get("min"), max=entry.get("max"),
+            settable=entry.get("settable") is True and kind in VALUE_KINDS and not secret,
+            secret=secret)
+
+    @staticmethod
+    def _action(entry) -> ActionRow:
+        if not isinstance(entry, dict):
+            raise AppToolError("each app action must be an object.", code="catalog")
+        key = _text(entry.get("key"), "action key", required=True)
+        if not key:
+            raise AppToolError("each app action needs a key.", code="catalog")
+        return ActionRow(key=key, section=_text(entry.get("section"), "section"),
+                         label=_text(entry.get("label"), "label"),
+                         detail=_text(entry.get("detail"), "detail", MAX_DETAIL),
+                         agent_safe=entry.get("agent_safe") is True)
+
+    @classmethod
+    def from_request(cls, value) -> "AppCatalog | None":
+        """The `app` block of `configure`, or of an `app_catalog` message.  None when absent.
+
+        A worker that gets no block has no app tools at all, which is what every worker did
+        before §30 (the section's "all additive").
+        """
+        if value is None:
+            return None
+        return cls(value)
+
+    # ---- reading ---------------------------------------------------------------
+    def sections(self) -> list[dict]:
+        seen: dict[str, str] = {}
+        for row in self.options.values():
+            if row.section and row.section not in seen:
+                seen[row.section] = row.section_label or row.section
+        return [{"section": key, "label": label} for key, label in seen.items()]
+
+    def find(self, row_id) -> OptionRow:
+        if not isinstance(row_id, str) or not row_id.strip():
+            raise AppToolError("id must be the option row's id, as app_option_list gives it.",
+                               code="unknown_row")
+        row = self.options.get(row_id.strip())
+        if row is None:
+            near = [r.id for r in self.options.values() if row_id.strip().lower() in r.id.lower()][:5]
+            raise AppToolError(
+                f"Relay has no option row {row_id!r}. Find it with app_option_list"
+                + (f"; did you mean {', '.join(near)}?" if near else "."), code="unknown_row")
+        return row
+
+    def action(self, key) -> ActionRow:
+        if not isinstance(key, str) or not key.strip():
+            raise AppToolError("key must be the action's key, as app_action_list gives it.",
+                               code="unknown_action")
+        found = self.actions.get(key.strip())
+        if found is None:
+            near = [a.key for a in self.actions.values() if key.strip().lower() in a.key.lower()][:5]
+            raise AppToolError(
+                f"Relay has no action {key!r}. Find it with app_action_list"
+                + (f"; did you mean {', '.join(near)}?" if near else "."), code="unknown_action")
+        return found
+
+    def rows(self, section=None, search=None, limit: int = MAX_LIST_ROWS) -> list[OptionRow]:
+        section = (section or "").strip().lower()
+        needle = (search or "").strip().lower()[:MAX_SEARCH]
+        out = []
+        for row in self.options.values():
+            if section and section not in (row.section.lower(), (row.section_label or "").lower()):
+                continue
+            if needle and needle not in " ".join(
+                    (row.id, row.label, row.section, row.section_label, row.detail)).lower():
+                continue
+            out.append(row)
+            if len(out) >= limit:
+                break
+        return out
+
+    def matching_actions(self, search=None, limit: int = MAX_LIST_ROWS) -> list[ActionRow]:
+        needle = (search or "").strip().lower()[:MAX_SEARCH]
+        out = []
+        for action in self.actions.values():
+            if needle and needle not in " ".join(
+                    (action.key, action.label, action.section, action.detail)).lower():
+                continue
+            out.append(action)
+            if len(out) >= limit:
+                break
+        return out
+
+    def note_value(self, row_id: str, value) -> None:
+        """A `set_option` landed: the catalog now shows what the app shows."""
+        with self._lock:
+            row = self.options.get(row_id)
+            if row is not None and not row.secret:
+                row.value, row.has_value = value, True
+
+    # ---- validation ------------------------------------------------------------
+    def check_value(self, row: OptionRow, value):
+        """The value `set_option` would carry, or a refusal (§30.3: the worker's own check)."""
+        if row.kind == "toggle":
+            if type(value) is not bool:
+                raise AppToolError(f"{row.path} is a switch: value must be true or false.",
+                                   code="invalid_value")
+            return value
+        if row.kind == "choice":
+            allowed = [c["value"] for c in row.choices]
+            if value in allowed:
+                return value
+            # A model that read the labels rather than the values is corrected, not refused.
+            for choice in row.choices:
+                if isinstance(value, str) and value.strip().lower() in (
+                        str(choice["value"]).lower(), str(choice.get("label") or "").lower()):
+                    return choice["value"]
+            names = ", ".join(repr(c) for c in allowed[:20]) or "(none offered)"
+            raise AppToolError(f"{row.path} takes one of: {names}.", code="invalid_value")
+        if row.kind == "number":
+            if type(value) is bool or not isinstance(value, (int, float)):
+                raise AppToolError(f"{row.path} is a number: value must be a number.",
+                                   code="invalid_value")
+            if isinstance(row.min, (int, float)) and value < row.min:
+                raise AppToolError(f"{row.path} cannot go below {row.min}.", code="invalid_value")
+            if isinstance(row.max, (int, float)) and value > row.max:
+                raise AppToolError(f"{row.path} cannot go above {row.max}.", code="invalid_value")
+            return value
+        if row.kind == "text":
+            if not isinstance(value, str):
+                raise AppToolError(f"{row.path} is a text field: value must be text.",
+                                   code="invalid_value")
+            if len(value) > MAX_TEXT_VALUE:
+                raise AppToolError(f"{row.path}: text is limited to {MAX_TEXT_VALUE} characters.",
+                                   code="invalid_value")
+            # §30.4: "a string with no control characters". A newline or an escape in a settings
+            # field is a line the person never typed and cannot see they now have.
+            if any(ch < " " or ch == "\x7f" for ch in value):
+                raise AppToolError(f"{row.path} is a single-line field: the value may not contain "
+                                   "control characters or line breaks.", code="invalid_value")
+            return value
+        raise AppToolError(f"{row.path} is not a value row.", code="not_settable")
+
+
+# ------------------------------------------------------------------ the round trip
+
+class AppBridge:
+    """`app_command` out, `app_command_result` back — the one round trip (§30.3).
+
+    `BoardInit` is the shape: the request goes out as an event with an id, the GUI answers on
+    the protocol thread, and the turn thread that is waiting is woken.  Two differences, both
+    because this is not a dialog a person is reading: there is a deadline (`ANSWER_TIMEOUT`),
+    and Stop still ends it — the agent's `cancel_event` is watched exactly as `ask_and_wait`
+    watches it.
+
+    The command carries no tab or pane field: it travels down the asking worker's own pipe, so
+    a pane agent's commands come out of that pane's worker and the helper's out of its tab's.
+    """
+
+    def __init__(self, emit: Callable[[dict], None], cancel: threading.Event | None = None,
+                 timeout: float = ANSWER_TIMEOUT, clock: Callable[[], float] = time.monotonic):
+        self.emit = emit
+        #: The agent's `cancel_event`, set by the worker once there is an agent.
+        self.cancel = cancel
+        self.timeout = timeout
+        self.clock = clock
+        self._lock = threading.Lock()
+        self._pending: dict[str, list] = {}
+        self._next = 0
+
+    def send(self, command: str, fields: dict) -> dict:
+        """Emit one `app_command` and block until the GUI answers, or the deadline passes.
+
+        Returns the GUI's result dict (`{ok, error?, previous?, value?, change_id?}`); raises
+        `AppToolError(no_reply)` when nothing answered, so the caller reports it as a tool error.
+        """
+        with self._lock:
+            self._next += 1
+            command_id = f"ac-{self._next}"
+            done = threading.Event()
+            self._pending[command_id] = [done, None]
+        # The command's own fields go in first: `id` on the event is the *request* id, the one
+        # the result is matched by, and nothing a command carries may take that name from it.
+        # (§30.1 writes the row id as `id` too, which no JSON object can hold twice; the row id
+        # travels as `row`, which is what the GUI's executor reads — src/AppCommands.cpp.)
+        self.emit({**fields, "event": "app_command", "id": command_id, "command": command})
+        deadline = self.clock() + self.timeout
+        while not done.wait(0.05):
+            if self.cancel is not None and self.cancel.is_set():
+                self._take(command_id)
+                from .provider import Cancelled
+                raise Cancelled("Stopped.")
+            if self.clock() >= deadline:
+                self._take(command_id)
+                raise AppToolError(
+                    f"Relay did not answer the {command} request within {int(self.timeout)}s, so "
+                    "nothing was changed. Tell the user what you were trying to do and let them "
+                    "do it.", code="no_reply")
+        result = self._take(command_id)
+        return result if isinstance(result, dict) else {"ok": False, "error": "failed"}
+
+    def _take(self, command_id: str):
+        with self._lock:
+            entry = self._pending.pop(command_id, None)
+        return entry[1] if entry else None
+
+    def answer(self, reply: dict) -> dict:
+        """`app_command_result {id, ok, error?, previous?, value?, change_id?}` from the GUI."""
+        if not isinstance(reply, dict):
+            raise ValueError("app_command_result must be an object.")
+        command_id = reply.get("id")
+        if not isinstance(command_id, str) or not command_id:
+            raise ValueError("app_command_result needs the id of the app_command it answers.")
+        if "ok" in reply and type(reply.get("ok")) is not bool:
+            raise ValueError("app_command_result ok must be true or false.")
+        with self._lock:
+            entry = self._pending.get(command_id)
+            if entry is None:
+                # Late, or the turn was stopped: nothing is waiting for it.
+                return {"id": command_id, "pending": False}
+            entry[1] = dict(reply)
+            entry[0].set()
+        return {"id": command_id, "pending": True}
+
+    def fail_pending(self) -> None:
+        """Answer everything still waiting with a no (the worker is going, or was repointed)."""
+        with self._lock:
+            entries = list(self._pending.values())
+            self._pending.clear()
+        for entry in entries:
+            entry[1] = {"ok": False, "error": "no_reply"}
+            entry[0].set()
+
+
+def _refused(result: dict, what: str) -> AppToolError:
+    """The GUI said no: its code from the §30.3 vocabulary, plus whatever sentence it sent."""
+    code = result.get("error")
+    code = code if isinstance(code, str) and code in ERRORS else "failed"
+    sentence = ""
+    for key in ("text", "detail", "message"):
+        if isinstance(result.get(key), str) and result[key].strip():
+            sentence = result[key].strip()[:MAX_DETAIL]
+            break
+    if not sentence and isinstance(result.get("error"), str) and result["error"] not in ERRORS:
+        sentence = result["error"][:MAX_DETAIL]
+    return AppToolError(f"Relay refused {what}: {ERROR_TEXT.get(code, ERROR_TEXT['failed'])}"
+                        + (f" {sentence}" if sentence else ""), code=code)
+
+
+# ------------------------------------------------------------------ the tools
+
+_ROW_ARG = {"type": "string", "description": "The row's id, exactly as app_option_list gives it."}
+
+TOOL_SPECS = [
+    spec("app_option_list",
+         "List the rows of Relay's own Options, with their current values: the same rows the "
+         "person sees in the Options pane. Use it to answer \"what is this set to\" and to find "
+         "the id app_option_set needs. API keys and anything else the keyring holds are marked "
+         "secret and are listed with no value at all.",
+         {"section": {"type": "string", "description": "One section only, e.g. agent, appearance, privacy."},
+          "search": {"type": "string", "description": "Case-insensitive text matched against the id, label, section and description."}},
+         []),
+    spec("app_option_get",
+         "Read one option row in full: its value, what it is for, and — for a choice row — the "
+         "values it accepts.",
+         {"id": _ROW_ARG}, ["id"]),
+    spec("app_option_set",
+         "Change one option in Relay, as though the person had clicked it. The change is shown "
+         "to them at once as \"Agent changed <row>: <before> → <after> · Undo\", so say what you "
+         "changed and why in your reply rather than changing things quietly. Secrets (API keys) "
+         "and rows that are not values cannot be set here; a button row is run with "
+         "app_action_run.",
+         {"id": _ROW_ARG,
+          "value": {"description": "true/false for a switch, one of the row's choices for a "
+                                   "choice, a number inside its range, or a single line of text."}},
+         ["id", "value"]),
+    spec("app_action_list",
+         "List the actions Relay offers — the entries of its actions palette. `agent_safe` says "
+         "whether you may run one: only the actions the person can undo in a click are, and the "
+         "rest are listed so you can say where the button is.",
+         {"search": {"type": "string", "description": "Case-insensitive text matched against the key, label and section."}},
+         []),
+    spec("app_action_run",
+         "Run one of Relay's actions, as though the person had chosen it in the palette. Only "
+         "actions app_action_list marks agent_safe can be run.",
+         {"key": {"type": "string", "description": "The action's key, exactly as app_action_list gives it."}},
+         ["key"]),
+    spec("app_sessions_search",
+         "Search the person's past Relay conversations — the same index the Sessions pane uses. "
+         "One row per conversation: id, title, when, model, workspace and the turns that matched. "
+         "Answered inside Relay; nothing is sent anywhere.",
+         {"query": {"type": "string", "description": "Words to look for. The Sessions pane's operators work here too: project:, file:, model:, branch:, before:, after:, is:, -word."},
+          "limit": {"type": "integer", "minimum": 1, "maximum": MAX_SESSION_ROWS,
+                    "description": f"How many conversations to return (default 10, at most {MAX_SESSION_ROWS})."}},
+         ["query"]),
+    spec("app_open",
+         "Open one of Relay's panes for the person and zoom it to what you are talking about: "
+         "Options or the actions palette at a section or a row, Sessions at a search, the "
+         "Switchboard at a card. Use it instead of describing where a setting lives. It returns "
+         "once the pane is open.",
+         {"target": {"type": "string", "enum": list(OPEN_TARGETS),
+                     "description": "options, actions, sessions or switchboard."},
+          "section": {"type": "string", "description": "Options/actions: the section to open at."},
+          "row": {"type": "string", "description": "Options: the row id to reveal and highlight."},
+          "query": {"type": "string", "description": "Sessions or actions: the search to open with."},
+          "card": {"type": "string", "description": "Switchboard: a card id such as K7Q2 to open."}},
+         ["target"]),
+    spec("app_changes",
+         "List the changes you have made to Relay in this session — each with the row, what it "
+         "was, what it is now, and the change id app_undo takes.",
+         {}, []),
+    spec("app_undo",
+         "Undo one of your own changes, by the change id app_changes (or the result of "
+         "app_option_set) gives. The person can do the same from the notification Relay showed "
+         "them.",
+         {"change_id": {"type": "string", "description": "The change to reverse."}}, ["change_id"]),
+]
+
+TOOL_NAMES = tuple(s["function"]["name"] for s in TOOL_SPECS)
+
+#: The two tools `writes_enabled` gates.  `app_open` is not one of them (§30.4: it is not a
+#: write), and neither is `app_undo` (§30.4: putting a setting back is not a new write).
+WRITE_TOOLS = ("app_option_set", "app_action_run")
+
+
+class AppTools:
+    """The `app_*` tools for one worker: the helper's and every pane agent's alike (§30.4).
+
+    One instance per worker, shared by the pane's own agent and by the helper agents the board
+    worker builds (`board_protocol._build_page_agent`), so `app_changes` is "what this worker
+    changed" and not "what this one conversation changed".  What differs between those agents is
+    the brief they are given, not the tools — the card's "one tool set" decision.
+    """
+
+    def __init__(self, catalog: AppCatalog | None, bridge: AppBridge, *,
+                 sessions: Callable[[], object] | None = None, workspace: str | None = None,
+                 clock: Callable[[], float] = time.time):
+        self.catalog = catalog
+        self.bridge = bridge
+        #: Returns the shared `conv_index.ConversationIndex`, or None where there is none (a bare
+        #: Agent in a test, `RELAY_INDEX=off`).
+        self.sessions = sessions
+        self.workspace = workspace
+        self.clock = clock
+        self._lock = threading.Lock()
+        self.changes: list[dict] = []
+        self._next_change = 0
+
+    # ---- catalog ---------------------------------------------------------------
+    def set_catalog(self, catalog: AppCatalog | None) -> None:
+        """An `app_catalog` message (§30.2): the app's rows changed (a value, a row, the gate).
+
+        The old catalog is dropped whole — nothing is carried across — so a row the GUI no longer
+        sends is gone from the agent's view of the app, which is what it is.
+        """
+        self.catalog = catalog
+
+    @property
+    def tab(self) -> str:
+        return self.catalog.tab if self.catalog is not None else ""
+
+    def _need_catalog(self) -> AppCatalog:
+        if self.catalog is None:
+            raise AppToolError(
+                "This pane cannot see Relay's own settings, so the app tools are not available "
+                "here. Tell the user what to change and where.", code="failed")
+        return self.catalog
+
+    def _need_writes(self, what: str) -> AppCatalog:
+        catalog = self._need_catalog()
+        if not catalog.writes_enabled:
+            raise AppToolError(
+                f"\"Agents may change options and run actions\" is off in Options › Agent, so "
+                f"{what} is refused. Say what you would change and let the user turn it on.",
+                code="writes_disabled")
+        return catalog
+
+    # ---- dispatch, the BoardTools shape ----------------------------------------
+    def tool_specs(self) -> list[dict]:
+        return [dict(s) for s in TOOL_SPECS]
+
+    def handles(self, name: str) -> bool:
+        return name in TOOL_NAMES
+
+    def preview(self, name: str, args: dict) -> str:
+        """One human-readable block for the pane's tool line (no side effects)."""
+        head = name.replace("app_", "").replace("_", " ").upper()
+        if not isinstance(args, dict):
+            return f"RELAY {head}"
+        bits = [f"{key}: {_short(args[key], 120)}"
+                for key in ("id", "value", "key", "target", "section", "row", "query", "card",
+                            "search", "change_id")
+                if args.get(key) is not None]
+        return f"RELAY {head}\n\n" + ("\n".join(bits) or "(no arguments)")
+
+    def run(self, name: str, args: dict) -> dict:
+        if not self.handles(name):
+            raise AppToolError(f"unknown Relay app tool {name!r}")
+        if not isinstance(args, dict):
+            raise AppToolError("Tool arguments must be an object.")
+        handler = {"app_option_list": self._option_list, "app_option_get": self._option_get,
+                   "app_option_set": self._option_set, "app_action_list": self._action_list,
+                   "app_action_run": self._action_run, "app_sessions_search": self._sessions_search,
+                   "app_open": self._open, "app_changes": self._changes, "app_undo": self._undo}[name]
+        try:
+            return handler(dict(args))
+        except AppToolError as exc:
+            return exc.to_result()
+
+    # ---- options ---------------------------------------------------------------
+    def _option_list(self, args: dict) -> dict:
+        catalog = self._need_catalog()
+        rows = catalog.rows(args.get("section"), args.get("search"))
+        return {"rows": [row.row() for row in rows], "count": len(rows),
+                "total": len(catalog.options), "sections": catalog.sections(),
+                "writes_enabled": catalog.writes_enabled}
+
+    def _option_get(self, args: dict) -> dict:
+        return self._need_catalog().find(args.get("id")).detail_row()
+
+    def _option_set(self, args: dict) -> dict:
+        catalog = self._need_writes("changing an option")
+        row = catalog.find(args.get("id"))
+        if row.secret:
+            raise AppToolError(
+                f"{row.path} holds a secret. No agent may read or change it — the person sets it "
+                "themselves in Options.", code="secret")
+        if not row.settable:
+            raise AppToolError(
+                f"{row.path} is a {row.kind} row, not a value an agent may set"
+                + ("; run it with app_action_run, or open it with app_open."
+                   if row.kind in ("button", "buttons") else "."),
+                code="not_settable")
+        value = catalog.check_value(row, args.get("value"))
+        result = self.bridge.send("set_option", {"row": row.id, "value": value})
+        if not result.get("ok"):
+            raise _refused(result, f"changing {row.path}")
+        # §30.3: `previous` and `value` are read back from the row by the GUI, not echoed from
+        # the request, so a writer that normalises what it is given (a path that gets expanded,
+        # a number that gets clamped) is reported as what is now in force. The catalog's own
+        # values are the fallback for a GUI that answered without them.
+        after = result["value"] if "value" in result else value
+        before = result["previous"] if "previous" in result else row.value
+        catalog.note_value(row.id, after)
+        change_id = self._record(row, before, after, result.get("change_id"))
+        return {"ok": True, "id": row.id, "row": row.path, "previous": before, "value": after,
+                "before": _short(before), "after": _short(after), "change_id": change_id,
+                "text": f"Changed {row.path}: {_short(before)} → {_short(after)}. "
+                        f"Relay showed the user the change with an Undo button; you can also "
+                        f"reverse it with app_undo change_id {change_id}."}
+
+    # ---- actions ---------------------------------------------------------------
+    def _action_list(self, args: dict) -> dict:
+        catalog = self._need_catalog()
+        actions = catalog.matching_actions(args.get("search"))
+        return {"actions": [a.row() for a in actions], "count": len(actions),
+                "total": len(catalog.actions),
+                "runnable": sum(1 for a in actions if a.agent_safe),
+                "writes_enabled": catalog.writes_enabled}
+
+    def _action_run(self, args: dict) -> dict:
+        catalog = self._need_writes("running an action")
+        action = catalog.action(args.get("key"))
+        if not action.agent_safe:
+            raise AppToolError(
+                f"\"{action.label or action.key}\" is not one of the actions an agent may run "
+                "(only the ones the person can undo in a click are). Tell them where it is and "
+                "let them run it.", code="not_agent_safe")
+        result = self.bridge.send("run_action", {"key": action.key})
+        if not result.get("ok"):
+            raise _refused(result, f"running \"{action.label or action.key}\"")
+        change_id = None
+        if result.get("change_id"):
+            # An action the GUI logged as an undoable change — it says so by answering with a
+            # change_id — goes into app_changes like a set does.
+            change_id = self._record_action(action, result.get("change_id"))
+        out = {"ok": True, "key": action.key, "action": action.label or action.key,
+               "text": f"Ran \"{action.label or action.key}\"."}
+        if change_id:
+            out["change_id"] = change_id
+            out["text"] += f" Undo it with app_undo change_id {change_id}."
+        if isinstance(result.get("detail"), str) and result["detail"].strip():
+            # What the action actually did, when it has something to report ("3 servers found").
+            out["detail"] = result["detail"].strip()[:MAX_DETAIL]
+            out["text"] += " " + out["detail"]
+        return out
+
+    # ---- sessions --------------------------------------------------------------
+    def _sessions_search(self, args: dict) -> dict:
+        """The Sessions pane's own search, worker-side (§30.4, protocol 14): no round trip."""
+        query = args.get("query")
+        if not isinstance(query, str) or not query.strip():
+            raise AppToolError("app_sessions_search needs a query.", code="invalid_value")
+        limit = args.get("limit")
+        if limit is not None and type(limit) is not int:
+            raise AppToolError("limit must be an integer.", code="invalid_value")
+        limit = max(1, min(int(limit or 10), MAX_SESSION_ROWS))
+        if self.sessions is None:
+            raise AppToolError("The conversation index is not available in this pane.",
+                               code="failed")
+        try:
+            index = self.sessions()
+            # `scope="all"`: the person asking "which session was that in" means their sessions,
+            # not this workspace's. The query language's `project:` narrows it (14.2).
+            found = index.search(query.strip(), scope="all", workspace=self.workspace or None,
+                                 limit=limit, matches_per_item=3)
+        except (ValueError, OSError) as exc:
+            raise AppToolError(f"Session search failed: {str(exc)[:300]}", code="failed") from None
+        items = []
+        for item in (found.get("items") or [])[:limit]:
+            if not isinstance(item, dict):
+                continue
+            row = {key: item.get(key) for key in
+                   ("id", "title", "updated", "model", "workspace", "turns", "source")
+                   if item.get(key) is not None}
+            matches = [str(m.get("text") or "")[:200] for m in (item.get("matches") or [])[:3]
+                       if isinstance(m, dict)]
+            if matches:
+                row["matches"] = matches
+            items.append(row)
+        return {"items": items, "count": len(items), "total": found.get("total"),
+                "query": query.strip()}
+
+    # ---- navigation ------------------------------------------------------------
+    def _open(self, args: dict) -> dict:
+        target = args.get("target")
+        if target not in OPEN_TARGETS:
+            raise AppToolError(f"target must be one of {', '.join(OPEN_TARGETS)}.",
+                               code="unknown_target")
+        fields = {"target": target}
+        for key in ("section", "row", "query", "card"):
+            value = args.get(key)
+            if value is None or value == "":
+                continue
+            if not isinstance(value, str):
+                raise AppToolError(f"{key} must be text.", code="invalid_value")
+            fields[key] = value[:MAX_SEARCH]
+        if "row" in fields and self.catalog is not None:
+            # Reveal a row that exists: a misremembered id would open Options at nothing and read
+            # to the user as a bug in Relay rather than a bad guess.
+            fields["row"] = self.catalog.find(fields["row"]).id
+        if "card" in fields:
+            fields["card"] = fields["card"].strip().lstrip("#").upper()
+        result = self.bridge.send("open", fields)
+        if not result.get("ok"):
+            raise _refused(result, f"opening {target}")
+        where = ", ".join(f"{k} {v}" for k, v in fields.items() if k != "target")
+        return {"ok": True, **fields,
+                "text": f"Opened {target}" + (f" at {where}." if where else " for the user.")}
+
+    # ---- the change log --------------------------------------------------------
+    def _record(self, row: OptionRow, previous, value, gui_change_id) -> str:
+        with self._lock:
+            self._next_change += 1
+            change_id = str(gui_change_id) if gui_change_id else f"ch-{self._next_change}"
+            self.changes.append({"change_id": change_id, "kind": "option", "id": row.id,
+                                 "label": row.path, "previous": previous, "value": value,
+                                 "at": self.clock(), "undone": False})
+            del self.changes[:-MAX_CHANGES]
+        return change_id
+
+    def _record_action(self, action: ActionRow, gui_change_id) -> str:
+        with self._lock:
+            self._next_change += 1
+            change_id = str(gui_change_id) if gui_change_id else f"ch-{self._next_change}"
+            self.changes.append({"change_id": change_id, "kind": "action", "key": action.key,
+                                 "label": action.label or action.key, "at": self.clock(),
+                                 "undone": False})
+            del self.changes[:-MAX_CHANGES]
+        return change_id
+
+    def _changes(self, args: dict) -> dict:
+        """This worker's own writes, newest first (§30.4): built from the results it received."""
+        with self._lock:
+            items = [dict(c) for c in reversed(self.changes)]
+        now = self.clock()
+        for item in items:
+            item["when"] = round(max(0.0, now - item.pop("at")), 1)
+        return {"changes": items, "count": len(items)}
+
+    def _find_change(self, change_id: str) -> dict:
+        with self._lock:
+            found = next((c for c in self.changes if c["change_id"] == change_id), None)
+        if found is None:
+            raise AppToolError(
+                f"You made no change {change_id!r} in this session. app_changes lists what you "
+                "have changed; older changes are the person's to undo from Relay itself.",
+                code="unknown_change")
+        if found["undone"]:
+            raise AppToolError(f"Change {change_id} has already been undone.",
+                               code="unknown_change")
+        return found
+
+    def _undo(self, args: dict) -> dict:
+        change_id = args.get("change_id")
+        if not isinstance(change_id, str) or not change_id.strip():
+            raise AppToolError("app_undo needs the change_id of the change to reverse.",
+                               code="unknown_change")
+        found = self._find_change(change_id.strip())
+        # Deliberately not gated on `writes_enabled` (§30.4): it can only revert a change this
+        # worker itself made, and putting a setting back is not a new write.
+        result = self.bridge.send("undo", {"change_id": found["change_id"]})
+        if not result.get("ok"):
+            raise _refused(result, f"undoing {found['change_id']}")
+        with self._lock:
+            found["undone"] = True
+        if found["kind"] == "option" and self.catalog is not None:
+            self.catalog.note_value(found["id"], result.get("value", found.get("previous")))
+        back = _short(result["value"] if "value" in result else found.get("previous"))
+        return {"ok": True, "change_id": found["change_id"], "row": found["label"],
+                "text": f"Undid the change to {found['label']}"
+                        + (f" — it is {back} again." if back else ".")}
+
+
+# ------------------------------------------------------------------ the worker's half
+
+class AppCommands:
+    """What `backend/worker.py` holds: the catalog, the round trip, and the tools it hands out.
+
+    `board_protocol.BoardCommands` is the shape — one object per worker, created before the
+    first `configure`, asked for the agent's tools while an `Agent` is being built, and given
+    the protocol messages that belong to it.  The `AppTools` instance it makes **outlives** each
+    `configure`, so the change log (§30.4: "the writes this worker has made") survives the
+    rebuild of the agent that a model switch or a workspace change causes.
+    """
+
+    #: The protocol messages this object owns (§30.2, §30.3).
+    KINDS = frozenset({"app_catalog", "app_command_result"})
+
+    def __init__(self, emit: Callable[[dict], None], *,
+                 sessions: Callable[[], object] | None = None,
+                 agent: Callable[[], object] | None = None):
+        self.emit = emit
+        self.bridge = AppBridge(emit)
+        #: The live `AppTools`, or None while this worker has been sent no `app` block.
+        self.tools: AppTools | None = None
+        self._sessions = sessions
+        self._agent = agent
+
+    @staticmethod
+    def handles(kind) -> bool:
+        return kind in AppCommands.KINDS
+
+    def configure(self, request: dict | None, workspace: str | None = None) -> "AppTools | None":
+        """`configure`'s `app` block (§30.2): the tools the new `Agent` is built with, or None.
+
+        A `configure` replaces the agent, so anything still waiting on the old one's round trip
+        is answered rather than left parked on a pane that has gone.
+        """
+        self.bridge.fail_pending()
+        catalog = AppCatalog.from_request((request or {}).get("app"))
+        return self._apply(catalog, workspace)
+
+    def _apply(self, catalog: AppCatalog | None, workspace: str | None = None) -> "AppTools | None":
+        if catalog is None:
+            self.tools = None
+            return None
+        if self.tools is None:
+            self.tools = AppTools(catalog, self.bridge, sessions=self._sessions,
+                                  workspace=workspace)
+        else:
+            self.tools.set_catalog(catalog)
+            if workspace is not None:
+                self.tools.workspace = workspace
+        return self.tools
+
+    def bind_agent(self, agent) -> None:
+        """`configure` built a new Agent: its Stop ends a command that is waiting for the GUI."""
+        cancel = getattr(agent, "cancel_event", None)
+        if cancel is not None:
+            self.bridge.cancel = cancel
+
+    def dispatch(self, request: dict) -> None:
+        kind = request.get("type")
+        if kind == "app_catalog":
+            self._apply(AppCatalog.from_request(request.get("app")))
+            agent = self._agent() if self._agent is not None else None
+            if agent is not None and getattr(agent, "app", None) is not self.tools:
+                # The worker was configured before the GUI had a catalog (or has just lost one):
+                # the live agent's tool list and system prompt change without a new conversation,
+                # exactly as `set_board` re-points the board tools (19.11).
+                agent.app = self.tools
+                agent.refresh_system_prompt()
+            self.emit({"event": "app_catalog_updated", "id": request.get("id"),
+                       "options": len(self.tools.catalog.options) if self.tools else 0,
+                       "actions": len(self.tools.catalog.actions) if self.tools else 0,
+                       "writes_enabled": bool(self.tools and self.tools.catalog.writes_enabled)})
+        elif kind == "app_command_result":
+            self.bridge.answer(request)
+
+    def shutdown(self) -> None:
+        self.bridge.fail_pending()
+
+
+# ------------------------------------------------------------------ the brief
+
+def prompt_section(tools: "AppTools | None") -> str:
+    """What `Agent.system_prompt` appends when this pane can drive the app (§30.4).
+
+    The board's `prompt_section` is the model: a short header naming what is there, then the
+    rules.  It is kept to a paragraph because every pane agent carries it on every turn.
+    """
+    catalog = getattr(tools, "catalog", None) if tools is not None else None
+    if catalog is None:
+        return ""
+    safe = sum(1 for a in catalog.actions.values() if a.agent_safe)
+    lines = [
+        "",
+        "Relay itself: you can drive the app the user is sitting in. app_option_list and "
+        "app_option_get read its Options "
+        f"({len(catalog.options)} rows), app_action_list the actions ({safe} of "
+        f"{len(catalog.actions)} are ones you may run), app_sessions_search their past "
+        "conversations, and app_open puts any of Options, the actions palette, Sessions or the "
+        "Switchboard on screen zoomed to the row, search or card you are talking about — do "
+        "that instead of describing where a setting lives.",
+    ]
+    if catalog.writes_enabled:
+        lines.append(
+            "app_option_set and app_action_run change the app for real. Every change is shown to "
+            "the user at once as \"Agent changed <row>: <before> → <after> · Undo\", so change "
+            "only what was asked for, say in your reply what you changed, and use app_changes "
+            "and app_undo to reverse your own. Ask first when a change reaches beyond the "
+            "request.")
+    else:
+        lines.append(
+            "Changing options and running actions is switched off for agents in Options › Agent, "
+            "so app_option_set and app_action_run refuse: read, explain, open the row for them, "
+            "and let them make the change.")
+    lines.append(
+        "API keys and everything else the keyring holds are secret: their values never reach you "
+        "and no agent may set them.")
+    return "\n".join(lines) + "\n"
