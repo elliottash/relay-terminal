@@ -580,11 +580,26 @@ class Sidecar:
         sys.stdout.write(json.dumps(message, separators=(",", ":")) + "\n")
         sys.stdout.flush()
 
+    # The longest line the GUI may send in one go. asyncio's default is 64 KiB, and a `frame` of
+    # a wide pane, a `history_page` or a worker event forwarded whole (`agent`, which the GUI
+    # sends unfiltered and the hub's allow-list prunes) can be longer: on 2026-09-21 one such line
+    # killed the sidecar with `ValueError: Separator is not found, and chunk exceed the limit` —
+    # which, with remote control on, is the whole service going down a minute after launch
+    # (docs/qa_evidence/2026-09-21-ph0n-hosted-drive). A line longer than even this is dropped
+    # and logged, and the link goes on.
+    LINE_LIMIT = 32 * 1024 * 1024
+
     async def read_forever(self) -> None:
-        reader = asyncio.StreamReader()
+        reader = asyncio.StreamReader(limit=self.LINE_LIMIT)
         await self.loop.connect_read_pipe(lambda: asyncio.StreamReaderProtocol(reader), sys.stdin)
         while True:
-            line = await reader.readline()
+            try:
+                line = await reader.readline()
+            except ValueError as error:
+                # readline() has already discarded the over-long chunk; the next line is whole.
+                log.warning("dropped a line from the GUI longer than %d bytes: %s",
+                            self.LINE_LIMIT, error)
+                continue
             if not line:
                 break
             try:

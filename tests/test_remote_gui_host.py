@@ -904,6 +904,48 @@ class Always:
         return client, record
 
 
+class StdinReaderTests(unittest.TestCase):
+    """The GUI's line to the sidecar can be long — a wide pane's frame, a history page, a worker
+    event forwarded whole — and asyncio's default 64 KiB line limit killed the process on the
+    first such line (#PH0N, the hosted drive of 2026-09-21). Long lines are read; a line past
+    even the sidecar's own limit is dropped and the next one is handled."""
+
+    def _run(self, lines: list[bytes]) -> list[dict]:
+        async def main():
+            handled: list[dict] = []
+            read_end, write_end = os.pipe()
+            stdin = os.fdopen(read_end, "rb", buffering=0)
+            with mock.patch.object(gui_host.sys, "stdin", stdin):
+                side = gui_host.Sidecar()
+
+                async def record(message):
+                    handled.append(message)
+                side.handle = record
+
+                async def feed():
+                    with os.fdopen(write_end, "wb", buffering=0) as out:
+                        for line in lines:
+                            await asyncio.to_thread(out.write, line)
+                await asyncio.gather(side.read_forever(), feed())
+            stdin.close()
+            return handled
+        return asyncio.run(asyncio.wait_for(main(), 60))
+
+    def test_a_line_longer_than_64_kib_is_read_whole(self):
+        long_line = json.dumps({"t": "frame", "pane": "p1", "lines": ["x" * 200_000]}).encode() + b"\n"
+        handled = self._run([long_line, b'{"t":"devices"}\n'])
+        self.assertEqual([m["t"] for m in handled], ["frame", "devices"])
+        self.assertEqual(len(handled[0]["lines"][0]), 200_000)
+
+    def test_a_line_past_the_sidecars_own_limit_is_dropped_and_the_next_one_handled(self):
+        with mock.patch.object(gui_host.Sidecar, "LINE_LIMIT", 4096):
+            too_long = json.dumps({"t": "frame", "pane": "p1", "lines": ["x" * 10_000]}).encode() + b"\n"
+            with self.assertLogs(gui_host.log, level="WARNING") as logged:
+                handled = self._run([too_long, b'{"t":"devices"}\n'])
+        self.assertEqual([m["t"] for m in handled], ["devices"])
+        self.assertTrue(any("dropped a line" in line for line in logged.output))
+
+
 class AlwaysOnTests(unittest.TestCase):
     """Gap A of card #PH0N: "nothing is shared until the share button is pressed, in this Relay
     session". With `always`, `start` alone brings the service up at the remembered address, keeps
