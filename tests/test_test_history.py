@@ -542,6 +542,20 @@ class CheckCardTests(unittest.TestCase):
         self.assertLessEqual(len(out["actions"]), 3)
         self.assertTrue(out["findings"])
 
+    def test_a_line_naming_many_tests_reports_each_verdict_once(self):
+        discovered = [P.DiscoveredTest(id=f"unittest:tests.test_x.T.test_{i}", name=f"test_{i}",
+                                       runner="unittest", file="tests/test_x.py",
+                                       invocation=f"tests/test_x.py::T::test_{i}").to_dict()
+                      for i in range(5)]
+        recs = H.records(discovered, [])
+        out = H.check_card(["`tests/test_x.py`"], [], recs)
+        never = [f for f in out["findings"] if f["verdict"] == "never-run"]
+        self.assertEqual(len(never), 1)
+        self.assertEqual(never[0]["test"], "unittest:tests.test_x")
+        self.assertIn("5 of 5 never ran here", never[0]["message"])
+        self.assertIn("test_0, test_1, test_2…", never[0]["message"])
+        self.assertIn("Run these", out["actions"])
+
     def test_a_whole_file_line_resolves_to_every_case_in_it(self):
         records = self.records_for(
             {"id": "unittest:tests.test_board.CardTests.test_a", "file": "tests/test_board.py",
@@ -552,8 +566,9 @@ class CheckCardTests(unittest.TestCase):
         self.assertEqual(len(found), 2)
         out = H.check_card(["- `tests/test_board.py`"], [], records)
         self.assertEqual([f["verdict"] for f in out["findings"]], ["never-run"])
-        self.assertEqual(out["findings"][0]["test"],
-                         "unittest:tests.test_board.CardTests.test_b")
+        # A line naming many tests reports the verdict once, under the line's own id.
+        self.assertEqual(out["findings"][0]["test"], "unittest:tests.test_board")
+        self.assertIn("1 of 2 never ran here (test_b)", out["findings"][0]["message"])
 
     def test_a_ctest_name_is_a_regex_exactly_as_ctest_treats_it(self):
         records = self.records_for({"id": "ctest:board", "results": ["pass"]},
@@ -563,7 +578,8 @@ class CheckCardTests(unittest.TestCase):
         wide = H.resolve(H.parse_test_line("- `ctest -R boa.d`"), records)
         self.assertEqual(sorted(r["id"] for r in wide), ["ctest:board", "ctest:boardpane"])
         out = H.check_card(["- `ctest -R boa.d`"], [], records)
-        self.assertEqual([f["test"] for f in out["findings"]], ["ctest:boardpane"])
+        self.assertEqual([f["test"] for f in out["findings"]], ["ctest:boa.d"])
+        self.assertIn("1 of 2 never ran here (boardpane)", out["findings"][0]["message"])
 
     def test_an_unparsable_pattern_matches_nothing(self):
         records = self.records_for({"id": "ctest:board", "results": ["pass"]})

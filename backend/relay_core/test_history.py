@@ -791,6 +791,44 @@ def _covers(test_file: str, changed: str) -> bool:
     return a == b or (len(a) >= 4 and len(b) >= 4 and (a.startswith(b) or b.startswith(a)))
 
 
+_GROUP_PHRASES = {
+    "never-run": "never ran here",
+    "skipped-forever": "are skipped for good",
+    "edited": "were edited since their history began, so it starts over",
+    "flaky": "are flaky",
+    "slow": "are slow",
+    "failing": "failed the last time they ran",
+}
+
+
+def _grouped_findings(entry: dict, found: Sequence[dict]) -> list[dict]:
+    """One finding per verdict for a line that names many tests, not one per test.
+
+    `tests/test_board.py` is 92 cases; a card that lists the file would otherwise get 92 lines of
+    "has never run here", which no one reads.  So a line that resolves to more than one test
+    reports each verdict once — "tests/test_board.py: 92 of 92 never ran here" — naming the first
+    few tests, with the worst severity any of them carried.  A line that names one test keeps
+    the per-test wording.
+    """
+    by_verdict: dict[str, list[dict]] = {}
+    severity: dict[str, str] = {}
+    rank = {"failure": 2, "warning": 1, "notice": 0}
+    for record in found:
+        for finding in _test_findings(entry, record):
+            by_verdict.setdefault(finding["verdict"], []).append(finding)
+            if rank.get(finding["severity"], 0) >= rank.get(severity.get(finding["verdict"], "notice"), 0):
+                severity[finding["verdict"]] = finding["severity"]
+    out: list[dict] = []
+    for verdict, group in by_verdict.items():
+        names = [f["test"].rsplit(".", 1)[-1] for f in group[:3]]
+        shown = ", ".join(names) + ("…" if len(group) > 3 else "")
+        phrase = _GROUP_PHRASES.get(verdict, verdict)
+        out.append(_finding(entry["id"], verdict,
+                            f"{entry['invocation']}: {len(group)} of {len(found)} {phrase} ({shown})",
+                            severity.get(verdict, "warning")))
+    return out
+
+
 def check_card(test_lines: Sequence[str], card_commit_files: Sequence[str],
                records_list: Sequence[dict]) -> dict:
     """Check one card's `## Tests` section against discovery and history.  Silent when fine.
@@ -843,8 +881,10 @@ def check_card(test_lines: Sequence[str], card_commit_files: Sequence[str],
                                      f"{entry['invocation']} is not in the project any more",
                                      "failure"))
             continue
-        for record in found:
-            findings.extend(_test_findings(entry, record))
+        if len(found) == 1:
+            findings.extend(_test_findings(entry, found[0]))
+        else:
+            findings.extend(_grouped_findings(entry, found))
 
     changed = [f for f in (card_commit_files or []) if f]
     if changed and listed:
