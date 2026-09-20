@@ -7,7 +7,7 @@ assignee: claude-code
 rank: m8
 created: '2026-09-20'
 source: 'Claude Code in the owner''s terminal, 2026-09-20'
-links: {plans: [], commits: [dc091a86, fc2a0683, 692bbfad, d46c4f56, 2f55b0fd, 28f520df, d45effd9, 87e58db1, 4a7bec12, 477e55de, 44a072d4, 91aeec29, 9f650d76, e670b15a, 23361bf8, 1aa2b898, 19f22e3d, f960b3e0, f1778621, 0b53d6f1], evidence: [docs/qa_evidence/2026-09-20-perf-fixes/, docs/qa_evidence/2026-09-20-perf-fixes/prompt-distillation/PROPOSAL.md], related: [PF4K, TZWF, 7M6E, 057J], github: null}
+links: {plans: [], commits: [dc091a86, fc2a0683, 692bbfad, d46c4f56, 2f55b0fd, 28f520df, d45effd9, 87e58db1, 4a7bec12, 477e55de, 44a072d4, 91aeec29, 9f650d76, e670b15a, 23361bf8, 1aa2b898, 19f22e3d, f960b3e0, f1778621, 0b53d6f1, 7d868c4c, f8becbb1, cd356730, 497eb591], evidence: [docs/qa_evidence/2026-09-20-perf-fixes/, docs/qa_evidence/2026-09-20-perf-fixes/prompt-distillation/PROPOSAL.md], related: [PF4K, TZWF, 7M6E, 057J], github: null}
 ---
 # Five performance decisions from the #PF4K profile
 
@@ -57,13 +57,15 @@ decision 2 ("1-9 all seem good to me") are landed. Evidence per item under
    AUTO is unchanged until #7M6E is verified on Qt6.
 5. The `systemd-run` probe is asynchronous: a 5 s probe holds the window 565 ms, not 3.3 s.
 
-## Open for the owner
-- Whether the Lite tier should default to the short profile (the Local-tier A/B passed scenarios
-  1, 2 and 8 on both profiles).
-- Whether the Local tier gets the five-tool board set: it gets none until a scenario shows a local
-  model can file a card.
-- Whether the Actions-pane helper may rebind keys: its `app_action_list` shows no shortcuts until its
-  `configure` carries `keybindings`, which also hands it `set_keybinding`.
+## The three follow-ups (owner: "1 yes, 2 yes, 3 yes")
+- The Lite tier defaults to the short profile (cd356730); a tier failover re-prefills once and
+  restores byte for byte.
+- The Local tier gets the five-tool board set with the tiered policy: short profile 1,517 →
+  3,846 tokens with a board (4.6 s cold on bonsai), still 56 % under full. The A/B (eval scenario
+  13) shows Bonsai files and claims a card; on one of two runs it paraphrased the request rather
+  than quoting it verbatim — a 27B model is not yet reliable at verbatim capture.
+- The Actions-pane helper's configure carries the keybindings; it may rebind keys (7d868c4c),
+  +199 tokens per helper request.
 
 ## QA checklist
 - [ ] Options › Agent shows a "Prompt profile" row (auto / full / short); changing it applies live and the ⓘ pane says "short prompt" on the Local tier <!-- t:g1 -->
