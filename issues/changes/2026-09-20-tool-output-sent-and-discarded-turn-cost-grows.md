@@ -7,7 +7,7 @@ assignee: claude-code
 rank: m6
 created: '2026-09-20'
 source: 'Claude Code in the owner''s terminal, 2026-09-20 — found by the #PF4K profilers'
-links: {plans: [], commits: [9702e504, b8e91fe3, b42c24f7], evidence: [docs/qa_evidence/2026-09-20-perf-profile/, docs/qa_evidence/2026-09-20-perf-fixes/toolout/], related: [PF4K, 6W0Z], github: null}
+links: {plans: [], commits: [9702e504, b8e91fe3, b42c24f7, 5a76d136], evidence: [docs/qa_evidence/2026-09-20-perf-profile/, docs/qa_evidence/2026-09-20-perf-fixes/toolout/], related: [PF4K, 6W0Z], github: null}
 ---
 # Tool output is sent to the GUI and thrown away; per-turn GUI cost grows with the conversation
 
