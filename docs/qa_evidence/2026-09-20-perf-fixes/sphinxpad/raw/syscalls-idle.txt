@@ -1,0 +1,152 @@
+== b5-1-1  panes=1 load=0.39 over 20.0s
+   sys_enter_statx    2100  =  105.0/s
+   sys_enter_openat     740  =   37.0/s
+   sys_enter_getdents64     700  =   35.0/s
+   sys_enter_faccessat       0  =    0.0/s
+   sys_enter_newfstatat     550  =   27.5/s
+   sys_enter_read     890  =   44.5/s
+   TOTAL           4980  =  249.0/s
+== b5-4-1  panes=4 load=0.20 over 20.0s
+   sys_enter_statx    7350  =  367.5/s
+   sys_enter_openat    2960  =  148.0/s
+   sys_enter_getdents64    2800  =  140.0/s
+   sys_enter_faccessat       0  =    0.0/s
+   sys_enter_newfstatat    1750  =   87.5/s
+   sys_enter_read    3494  =  174.7/s
+   TOTAL          18354  =  917.7/s
+== a5-1-1  panes=1 load=0.11 over 20.0s
+   sys_enter_statx    1150  =   57.5/s
+   sys_enter_openat     490  =   24.5/s
+   sys_enter_getdents64     200  =   10.0/s
+   sys_enter_faccessat       0  =    0.0/s
+   sys_enter_newfstatat     500  =   25.0/s
+   sys_enter_read     890  =   44.5/s
+   TOTAL           3230  =  161.5/s
+== a5-4-1  panes=4 load=0.05 over 20.0s
+   sys_enter_statx    4600  =  230.0/s
+   sys_enter_openat    1960  =   98.0/s
+   sys_enter_getdents64     800  =   40.0/s
+   sys_enter_faccessat       0  =    0.0/s
+   sys_enter_newfstatat    2000  =  100.0/s
+   sys_enter_read    3493  =  174.7/s
+   TOTAL          12853  =  642.6/s
+== b6-1-1  panes=1 load=0.03 over 20.0s
+   sys_enter_statx    2100  =  105.0/s
+   sys_enter_openat     740  =   37.0/s
+   sys_enter_getdents64     700  =   35.0/s
+   sys_enter_faccessat       0  =    0.0/s
+   sys_enter_newfstatat     250  =   12.5/s
+   sys_enter_read     890  =   44.5/s
+   TOTAL           4680  =  234.0/s
+== b6-4-1  panes=4 load=0.16 over 20.0s
+   sys_enter_statx    7350  =  367.5/s
+   sys_enter_openat    2960  =  148.0/s
+   sys_enter_getdents64    2800  =  140.0/s
+   sys_enter_faccessat       0  =    0.0/s
+   sys_enter_newfstatat    1000  =   50.0/s
+   sys_enter_read    3493  =  174.7/s
+   TOTAL          17603  =  880.1/s
+Traceback (most recent call last):
+  File "/tmp/rx/h/syscalls.py", line 37, in <module>
+    harness.PROCS[pid].wait(timeout=60)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 1279, in wait
+    return self._wait(timeout=timeout)
+           ~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 2076, in _wait
+    raise TimeoutExpired(self.args, timeout)
+subprocess.TimeoutExpired: Command '['/home/elliott/relay-perf/build-qt6/relay', '--clean-shell', '--fresh']' timed out after 60 seconds
+== a6-1-1  panes=1 load=0.17 over 20.0s
+   sys_enter_statx    1150  =   57.5/s
+   sys_enter_openat     490  =   24.5/s
+   sys_enter_getdents64     200  =   10.0/s
+   sys_enter_faccessat       0  =    0.0/s
+   sys_enter_newfstatat     500  =   25.0/s
+   sys_enter_read     890  =   44.5/s
+   TOTAL           3230  =  161.5/s
+== a6-4-1  panes=4 load=0.18 over 20.0s
+   sys_enter_statx    4600  =  230.0/s
+   sys_enter_openat    1960  =   98.0/s
+   sys_enter_getdents64     800  =   40.0/s
+   sys_enter_faccessat       0  =    0.0/s
+   sys_enter_newfstatat    2000  =  100.0/s
+   sys_enter_read    3494  =  174.7/s
+   TOTAL          12854  =  642.7/s
+Traceback (most recent call last):
+  File "/tmp/rx/h/syscalls.py", line 37, in <module>
+    harness.PROCS[pid].wait(timeout=60)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 1279, in wait
+    return self._wait(timeout=timeout)
+           ~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 2076, in _wait
+    raise TimeoutExpired(self.args, timeout)
+subprocess.TimeoutExpired: Command '['/home/elliott/relay-perf/build2-qt6/relay', '--clean-shell', '--fresh']' timed out after 60 seconds
+== b5-1-2  panes=1 load=0.46 over 20.0s
+   sys_enter_statx    2100  =  105.0/s
+   sys_enter_openat     740  =   37.0/s
+   sys_enter_getdents64     700  =   35.0/s
+   sys_enter_faccessat       0  =    0.0/s
+   sys_enter_newfstatat     550  =   27.5/s
+   sys_enter_read     890  =   44.5/s
+   TOTAL           4980  =  249.0/s
+== b5-4-2  panes=4 load=0.35 over 20.0s
+   sys_enter_statx    7350  =  367.5/s
+   sys_enter_openat    2960  =  148.0/s
+   sys_enter_getdents64    2800  =  140.0/s
+   sys_enter_faccessat       0  =    0.0/s
+   sys_enter_newfstatat    1750  =   87.5/s
+   sys_enter_read    3493  =  174.7/s
+   TOTAL          18353  =  917.6/s
+== a5-1-2  panes=1 load=0.34 over 20.0s
+   sys_enter_statx    1150  =   57.5/s
+   sys_enter_openat     490  =   24.5/s
+   sys_enter_getdents64     200  =   10.0/s
+   sys_enter_faccessat       0  =    0.0/s
+   sys_enter_newfstatat     500  =   25.0/s
+   sys_enter_read     890  =   44.5/s
+   TOTAL           3230  =  161.5/s
+== a5-4-2  panes=4 load=0.25 over 20.0s
+   sys_enter_statx    4600  =  230.0/s
+   sys_enter_openat    1960  =   98.0/s
+   sys_enter_getdents64     800  =   40.0/s
+   sys_enter_faccessat       0  =    0.0/s
+   sys_enter_newfstatat    2000  =  100.0/s
+   sys_enter_read    3493  =  174.7/s
+   TOTAL          12853  =  642.6/s
+== b6-1-2  panes=1 load=0.30 over 20.0s
+   sys_enter_statx    2100  =  105.0/s
+   sys_enter_openat     740  =   37.0/s
+   sys_enter_getdents64     700  =   35.0/s
+   sys_enter_faccessat       0  =    0.0/s
+   sys_enter_newfstatat     250  =   12.5/s
+   sys_enter_read     890  =   44.5/s
+   TOTAL           4680  =  234.0/s
+== b6-4-2  panes=4 load=0.30 over 20.0s
+   sys_enter_statx    7474  =  373.7/s
+   sys_enter_openat    2998  =  149.9/s
+   sys_enter_getdents64    2816  =  140.8/s
+   sys_enter_faccessat       0  =    0.0/s
+   sys_enter_newfstatat    1000  =   50.0/s
+   sys_enter_read    3559  =  177.9/s
+   TOTAL          17847  =  892.4/s
+Traceback (most recent call last):
+  File "/tmp/rx/h/syscalls.py", line 37, in <module>
+    harness.PROCS[pid].wait(timeout=60)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 1279, in wait
+    return self._wait(timeout=timeout)
+           ~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 2076, in _wait
+    raise TimeoutExpired(self.args, timeout)
+subprocess.TimeoutExpired: Command '['/home/elliott/relay-perf/build-qt6/relay', '--clean-shell', '--fresh']' timed out after 60 seconds
+== a6-1-2  panes=1 load=0.19 over 20.0s
+   sys_enter_statx    1150  =   57.5/s
+   sys_enter_openat     490  =   24.5/s
+   sys_enter_getdents64     200  =   10.0/s
+   sys_enter_faccessat       0  =    0.0/s
+   sys_enter_newfstatat     204  =   10.2/s
+   sys_enter_read     869  =   43.5/s
+   TOTAL           2913  =  145.7/s
+== a6-4-2  panes=0 load=0.53 over 20.0s
+   TOTAL              0  =    0.0/s

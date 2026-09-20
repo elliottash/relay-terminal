@@ -1,0 +1,44 @@
+== now b  (/home/elliott/relay-perf/src)  load=0.05
+board_open          273 ms     2.54 MB total, biggest message  2.54 MB   352 cards   7229 B/card
+    text              92.6%    6696 B/card
+    path               1.0%      75 B/card
+    title              0.9%      67 B/card
+    implemented_by     0.5%      34 B/card
+board_refresh       157 ms   (no change, upserts=0, best of 3)
+board_refresh       158 ms   (one card touched, upserts=1, best of 3)
+board_search    unsupported (Unknown protocol message.)
+worker RSS           56 MB
+== now a  (/home/elliott/relay-perf/src2)  load=0.05
+board_open          199 ms     0.23 MB total, biggest message  0.23 MB   352 cards   653 B/card
+    path              11.5%      75 B/card
+    title             10.2%      67 B/card
+    implemented_by     5.2%      34 B/card
+    updated            3.4%      22 B/card
+board_refresh         4 ms   (no change, upserts=0, best of 3)
+board_refresh         5 ms   (one card touched, upserts=1, best of 3)
+board_search        0.4 ms      114 B   "zzzz" -> 2 ids
+board_search        1.2 ms      638 B   "composer" -> 67 ids
+board_search        1.1 ms     1022 B   "switchboard pane" -> 114 ids
+worker RSS           45 MB
+== 3000 b  (/home/elliott/relay-perf/src)  load=0.05
+board_open         1703 ms    21.63 MB total, biggest message 21.63 MB   3000 cards   7212 B/card
+    text              92.6%    6676 B/card
+    path               1.1%      79 B/card
+    title              1.0%      73 B/card
+    implemented_by     0.5%      35 B/card
+board_refresh      1367 ms   (no change, upserts=0, best of 3)
+board_refresh      1384 ms   (one card touched, upserts=1, best of 3)
+board_search    unsupported (Unknown protocol message.)
+worker RSS          184 MB
+== 3000 a  (/home/elliott/relay-perf/src2)  load=0.20
+board_open         1292 ms     1.97 MB total, biggest message  0.27 MB   3000 cards   657 B/card
+    path              12.0%      79 B/card
+    title             11.1%      73 B/card
+    implemented_by     5.4%      35 B/card
+    updated            3.4%      22 B/card
+board_refresh        43 ms   (no change, upserts=0, best of 3)
+board_refresh        42 ms   (one card touched, upserts=1, best of 3)
+board_search        4.1 ms      243 B   "zzzz" -> 18 ids
+board_search        7.0 ms     4839 B   "composer" -> 592 ids
+board_search        4.9 ms     7591 B   "switchboard pane" -> 935 ids
+worker RSS           91 MB

@@ -1,0 +1,49 @@
+a5b pid=1397909 load=0.23 geom=  Geometry: 1600x1000
+a5b board.open	first=129ms	last=446ms	cpu_gui=150ms	cpu_kids=270ms	frames=2
+a5b burst 'switch'	wall=269ms	cpu_proc=90ms	cpu_gui=90ms	peak100ms=20ms	ok
+a5b clear	wall=204ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+a5b burst 'switch'	wall=283ms	cpu_proc=90ms	cpu_gui=90ms	peak100ms=20ms	ok
+a5b clear	wall=144ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+a5b burst 'switch'	wall=278ms	cpu_proc=100ms	cpu_gui=100ms	peak100ms=10ms	ok
+a5b clear	wall=537ms	cpu_proc=30ms	cpu_gui=30ms	peak100ms=10ms	ok
+a5b burst 'switch'	wall=273ms	cpu_proc=90ms	cpu_gui=80ms	peak100ms=20ms	ok
+a5b clear	wall=204ms	cpu_proc=30ms	cpu_gui=30ms	peak100ms=10ms	ok
+a5b burst 'switch'	wall=587ms	cpu_proc=100ms	cpu_gui=90ms	peak100ms=10ms	ok
+a5b clear	wall=205ms	cpu_proc=20ms	cpu_gui=10ms	peak100ms=10ms	ok
+b6b pid=1398286 load=0.12 geom=  Geometry: 1600x1000
+b6b board.open	first=131ms	last=513ms	cpu_gui=170ms	cpu_kids=310ms	frames=2
+b6b burst 'switch'	wall=149ms	cpu_proc=140ms	cpu_gui=140ms	peak100ms=10ms	ok
+b6b clear	wall=206ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+b6b burst 'switch'	wall=146ms	cpu_proc=130ms	cpu_gui=150ms	peak100ms=10ms	ok
+b6b clear	wall=205ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+b6b burst 'switch'	wall=139ms	cpu_proc=130ms	cpu_gui=130ms	peak100ms=0ms	ok
+b6b clear	wall=208ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+b6b burst 'switch'	wall=368ms	cpu_proc=130ms	cpu_gui=140ms	peak100ms=10ms	ok
+b6b clear	wall=204ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+b6b burst 'switch'	wall=355ms	cpu_proc=130ms	cpu_gui=130ms	peak100ms=10ms	ok
+b6b clear	wall=207ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+a6b pid=1398775 load=0.21 geom=  Geometry: 1600x1000
+a6b board.open	first=120ms	last=410ms	cpu_gui=140ms	cpu_kids=220ms	frames=2
+a6b burst 'switch'	wall=289ms	cpu_proc=100ms	cpu_gui=90ms	peak100ms=20ms	ok
+a6b clear	wall=193ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+a6b burst 'switch'	wall=295ms	cpu_proc=110ms	cpu_gui=100ms	peak100ms=20ms	ok
+a6b clear	wall=210ms	cpu_proc=30ms	cpu_gui=10ms	peak100ms=10ms	ok
+a6b burst 'switch'	wall=279ms	cpu_proc=100ms	cpu_gui=100ms	peak100ms=20ms	ok
+a6b clear	wall=125ms	cpu_proc=30ms	cpu_gui=30ms	peak100ms=10ms	ok
+a6b burst 'switch'	wall=287ms	cpu_proc=90ms	cpu_gui=100ms	peak100ms=10ms	ok
+a6b clear	wall=151ms	cpu_proc=10ms	cpu_gui=20ms	peak100ms=10ms	ok
+a6b burst 'switch'	wall=285ms	cpu_proc=90ms	cpu_gui=110ms	peak100ms=10ms	ok
+a6b clear	wall=171ms	cpu_proc=20ms	cpu_gui=30ms	peak100ms=10ms	ok
+b5b pid=1399190 load=0.16 geom=  Geometry: 1600x1000
+b5b board.open	first=127ms	last=495ms	cpu_gui=170ms	cpu_kids=290ms	frames=2
+b5b burst 'switch'	wall=352ms	cpu_proc=130ms	cpu_gui=130ms	peak100ms=10ms	ok
+b5b clear	wall=186ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+b5b burst 'switch'	wall=374ms	cpu_proc=140ms	cpu_gui=120ms	peak100ms=20ms	ok
+b5b clear	wall=216ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+b5b burst 'switch'	wall=138ms	cpu_proc=120ms	cpu_gui=120ms	peak100ms=0ms	ok
+b5b clear	wall=94ms	cpu_proc=10ms	cpu_gui=10ms	peak100ms=10ms	ok
+b5b burst 'switch'	wall=136ms	cpu_proc=130ms	cpu_gui=120ms	peak100ms=0ms	ok
+b5b clear	wall=206ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+b5b burst 'switch'	wall=138ms	cpu_proc=120ms	cpu_gui=120ms	peak100ms=0ms	ok
+b5b clear	wall=211ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+BURST_DONE

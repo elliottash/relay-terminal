@@ -1,0 +1,40 @@
+== b: read-only tree, NO bytecode
+run 1: ready_wall=291.6 ms  child_cpu(total incl exit)=308.5 ms  maxrss=46.1 MiB
+run 2: ready_wall=299.9 ms  child_cpu(total incl exit)=315.4 ms  maxrss=46.2 MiB
+run 3: ready_wall=289.2 ms  child_cpu(total incl exit)=306.6 ms  maxrss=46.2 MiB
+run 4: ready_wall=295.6 ms  child_cpu(total incl exit)=311.9 ms  maxrss=46.2 MiB
+run 5: ready_wall=294.9 ms  child_cpu(total incl exit)=312.5 ms  maxrss=46.2 MiB
+run 6: ready_wall=296.8 ms  child_cpu(total incl exit)=313.3 ms  maxrss=46.2 MiB
+run 7: ready_wall=298.8 ms  child_cpu(total incl exit)=315.3 ms  maxrss=46.2 MiB
+median ready_wall = 295.6 ms   min = 289.2 ms  max = 299.9 ms
+python 3.14.4  loadavg (0.48681640625, 0.2412109375, 0.34130859375)
+== b: read-only tree, bytecode installed (what the packaging fix does)
+run 1: ready_wall=84.6 ms  child_cpu(total incl exit)=98.8 ms  maxrss=37.5 MiB
+run 2: ready_wall=88.8 ms  child_cpu(total incl exit)=104.0 ms  maxrss=37.5 MiB
+run 3: ready_wall=84.3 ms  child_cpu(total incl exit)=98.3 ms  maxrss=37.6 MiB
+run 4: ready_wall=85.2 ms  child_cpu(total incl exit)=100.0 ms  maxrss=37.6 MiB
+run 5: ready_wall=82.0 ms  child_cpu(total incl exit)=96.1 ms  maxrss=37.6 MiB
+run 6: ready_wall=85.3 ms  child_cpu(total incl exit)=100.2 ms  maxrss=37.6 MiB
+run 7: ready_wall=82.4 ms  child_cpu(total incl exit)=96.6 ms  maxrss=37.6 MiB
+median ready_wall = 84.6 ms   min = 82.0 ms  max = 88.8 ms
+python 3.14.4  loadavg (0.48681640625, 0.2412109375, 0.34130859375)
+== a: read-only tree, NO bytecode
+run 1: ready_wall=269.8 ms  child_cpu(total incl exit)=286.0 ms  maxrss=45.2 MiB
+run 2: ready_wall=271.4 ms  child_cpu(total incl exit)=287.9 ms  maxrss=45.2 MiB
+run 3: ready_wall=270.3 ms  child_cpu(total incl exit)=286.3 ms  maxrss=45.4 MiB
+run 4: ready_wall=271.4 ms  child_cpu(total incl exit)=288.8 ms  maxrss=45.4 MiB
+run 5: ready_wall=271.6 ms  child_cpu(total incl exit)=288.4 ms  maxrss=45.4 MiB
+run 6: ready_wall=268.4 ms  child_cpu(total incl exit)=284.5 ms  maxrss=45.4 MiB
+run 7: ready_wall=270.7 ms  child_cpu(total incl exit)=286.8 ms  maxrss=45.4 MiB
+median ready_wall = 270.7 ms   min = 268.4 ms  max = 271.6 ms
+python 3.14.4  loadavg (0.5283203125, 0.25390625, 0.34521484375)
+== a: read-only tree, bytecode installed (what the packaging fix does)
+run 1: ready_wall=79.3 ms  child_cpu(total incl exit)=92.8 ms  maxrss=37.0 MiB
+run 2: ready_wall=86.0 ms  child_cpu(total incl exit)=99.3 ms  maxrss=37.0 MiB
+run 3: ready_wall=78.6 ms  child_cpu(total incl exit)=92.2 ms  maxrss=37.0 MiB
+run 4: ready_wall=78.3 ms  child_cpu(total incl exit)=94.8 ms  maxrss=37.0 MiB
+run 5: ready_wall=79.0 ms  child_cpu(total incl exit)=92.8 ms  maxrss=37.0 MiB
+run 6: ready_wall=85.0 ms  child_cpu(total incl exit)=98.5 ms  maxrss=37.0 MiB
+run 7: ready_wall=83.3 ms  child_cpu(total incl exit)=96.9 ms  maxrss=37.0 MiB
+median ready_wall = 79.3 ms   min = 78.3 ms  max = 86.0 ms
+python 3.14.4  loadavg (0.5283203125, 0.25390625, 0.34521484375)

@@ -1,0 +1,13 @@
+=== configure pb qt5 17:24:51
+=== build pb qt5 17:24:53
+pb qt5 BUILD OK
+=== configure pb qt6 17:26:53
+=== build pb qt6 17:26:57
+pb qt6 BUILD OK
+=== configure pa qt5 17:30:19
+=== build pa qt5 17:30:20
+pa qt5 BUILD OK
+=== configure pa qt6 17:30:55
+=== build pa qt6 17:30:56
+pa qt6 BUILD OK
+PANES_BUILD_DONE

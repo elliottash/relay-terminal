@@ -1,0 +1,177 @@
+b5 pid=1392952 win=2097159 load=0.25 geom=Window 2097159   Position: 0,0 (screen: 0)   Geometry: 1320x860 
+b5 board.open	first=108ms	last=488ms	cpu_gui=170ms	cpu_kids=280ms	frames=2
+b5 filter r1 's'	wall=98ms	cpu_proc=30ms	cpu_gui=30ms	peak100ms=20ms	ok
+b5 filter r1 'w'	wall=32ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+b5 filter r1 'i'	wall=29ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+b5 filter r1 't'	wall=21ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=0ms	ok
+b5 filter r1 'c'	wall=21ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=0ms	ok
+b5 filter r1 'h'	wall=159ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+b5 filter r2 's'	wall=33ms	cpu_proc=20ms	cpu_gui=30ms	peak100ms=10ms	ok
+b5 filter r2 'w'	wall=21ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=0ms	ok
+b5 filter r2 'i'	wall=35ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+b5 filter r2 't'	wall=28ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+b5 filter r2 'c'	wall=27ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+b5 filter r2 'h'	wall=23ms	cpu_proc=20ms	cpu_gui=10ms	peak100ms=0ms	ok
+b5 filter r3 's'	wall=34ms	cpu_proc=20ms	cpu_gui=30ms	peak100ms=10ms	ok
+b5 filter r3 'w'	wall=28ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+b5 filter r3 'i'	wall=158ms	cpu_proc=30ms	cpu_gui=20ms	peak100ms=10ms	ok
+b5 filter r3 't'	wall=36ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+b5 filter r3 'c'	wall=33ms	cpu_proc=20ms	cpu_gui=40ms	peak100ms=10ms	ok
+b5 filter r3 'h'	wall=21ms	cpu_proc=20ms	cpu_gui=10ms	peak100ms=0ms	ok
+b5 worker_rss_kb=47416,53524
+b5 gui_rss_kb=135872
+a5 pid=1393447 win=2097159 load=0.26 geom=Window 2097159   Position: 0,0 (screen: 0)   Geometry: 1320x860 
+a5 board.open	first=146ms	last=419ms	cpu_gui=150ms	cpu_kids=230ms	frames=2
+a5 filter r1 's'	wall=407ms	cpu_proc=60ms	cpu_gui=50ms	peak100ms=20ms	ok
+a5 filter r1 'w'	wall=167ms	cpu_proc=30ms	cpu_gui=30ms	peak100ms=20ms	ok
+a5 filter r1 'i'	wall=168ms	cpu_proc=30ms	cpu_gui=20ms	peak100ms=20ms	ok
+a5 filter r1 't'	wall=177ms	cpu_proc=30ms	cpu_gui=30ms	peak100ms=20ms	ok
+a5 filter r1 'c'	wall=168ms	cpu_proc=40ms	cpu_gui=30ms	peak100ms=30ms	ok
+a5 filter r1 'h'	wall=173ms	cpu_proc=30ms	cpu_gui=30ms	peak100ms=20ms	ok
+a5 filter r2 's'	wall=217ms	cpu_proc=70ms	cpu_gui=60ms	peak100ms=50ms	ok
+a5 filter r2 'w'	wall=174ms	cpu_proc=30ms	cpu_gui=30ms	peak100ms=20ms	ok
+a5 filter r2 'i'	wall=175ms	cpu_proc=30ms	cpu_gui=40ms	peak100ms=20ms	ok
+a5 filter r2 't'	wall=176ms	cpu_proc=30ms	cpu_gui=30ms	peak100ms=20ms	ok
+a5 filter r2 'c'	wall=171ms	cpu_proc=20ms	cpu_gui=30ms	peak100ms=10ms	ok
+a5 filter r2 'h'	wall=169ms	cpu_proc=20ms	cpu_gui=30ms	peak100ms=10ms	ok
+a5 filter r3 's'	wall=193ms	cpu_proc=50ms	cpu_gui=40ms	peak100ms=30ms	ok
+a5 filter r3 'w'	wall=183ms	cpu_proc=40ms	cpu_gui=40ms	peak100ms=10ms	ok
+a5 filter r3 'i'	wall=175ms	cpu_proc=40ms	cpu_gui=30ms	peak100ms=20ms	ok
+a5 filter r3 't'	wall=173ms	cpu_proc=30ms	cpu_gui=30ms	peak100ms=20ms	ok
+a5 filter r3 'c'	wall=178ms	cpu_proc=30ms	cpu_gui=30ms	peak100ms=20ms	ok
+a5 filter r3 'h'	wall=169ms	cpu_proc=30ms	cpu_gui=30ms	peak100ms=20ms	ok
+a5 worker_rss_kb=46688,49936
+a5 gui_rss_kb=122836
+b6 pid=1393925 win=2097159 load=0.46 geom=Window 2097159   Position: 0,0 (screen: 0)   Geometry: 1320x860 
+b6 board.open	first=105ms	last=487ms	cpu_gui=160ms	cpu_kids=300ms	frames=2
+b6 filter r1 's'	wall=169ms	cpu_proc=30ms	cpu_gui=30ms	peak100ms=10ms	ok
+b6 filter r1 'w'	wall=26ms	cpu_proc=20ms	cpu_gui=30ms	peak100ms=10ms	ok
+b6 filter r1 'i'	wall=32ms	cpu_proc=30ms	cpu_gui=20ms	peak100ms=20ms	ok
+b6 filter r1 't'	wall=26ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+b6 filter r1 'c'	wall=35ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+b6 filter r1 'h'	wall=23ms	cpu_proc=10ms	cpu_gui=20ms	peak100ms=0ms	ok
+b6 filter r2 's'	wall=175ms	cpu_proc=30ms	cpu_gui=20ms	peak100ms=10ms	ok
+b6 filter r2 'w'	wall=33ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+b6 filter r2 'i'	wall=115ms	cpu_proc=30ms	cpu_gui=30ms	peak100ms=20ms	ok
+b6 filter r2 't'	wall=40ms	cpu_proc=30ms	cpu_gui=20ms	peak100ms=20ms	ok
+b6 filter r2 'c'	wall=35ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+b6 filter r2 'h'	wall=30ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+b6 filter r3 's'	wall=91ms	cpu_proc=30ms	cpu_gui=20ms	peak100ms=20ms	ok
+b6 filter r3 'w'	wall=30ms	cpu_proc=20ms	cpu_gui=20ms	peak100ms=10ms	ok
+b6 filter r3 'i'	wall=31ms	cpu_proc=30ms	cpu_gui=20ms	peak100ms=10ms	ok
+b6 filter r3 't'	wall=31ms	cpu_proc=20ms	cpu_gui=30ms	peak100ms=10ms	ok
+b6 filter r3 'c'	wall=33ms	cpu_proc=30ms	cpu_gui=20ms	peak100ms=10ms	ok
+b6 filter r3 'h'	wall=22ms	cpu_proc=10ms	cpu_gui=20ms	peak100ms=0ms	ok
+b6 worker_rss_kb=47484,53480
+b6 gui_rss_kb=98796
+a6 pid=1394382 win=2097159 load=0.23 geom=Window 2097159   Position: 0,0 (screen: 0)   Geometry: 1320x860 
+a6 board.open	first=107ms	last=414ms	cpu_gui=140ms	cpu_kids=240ms	frames=2
+a6 filter r1 's'	wall=205ms	cpu_proc=50ms	cpu_gui=50ms	peak100ms=30ms	ok
+a6 filter r1 'w'	wall=180ms	cpu_proc=30ms	cpu_gui=40ms	peak100ms=20ms	ok
+a6 filter r1 'i'	wall=171ms	cpu_proc=30ms	cpu_gui=30ms	peak100ms=20ms	ok
+a6 filter r1 't'	wall=182ms	cpu_proc=30ms	cpu_gui=30ms	peak100ms=20ms	ok
+a6 filter r1 'c'	wall=180ms	cpu_proc=30ms	cpu_gui=30ms	peak100ms=10ms	ok
+a6 filter r1 'h'	wall=184ms	cpu_proc=40ms	cpu_gui=40ms	peak100ms=20ms	ok
+a6 filter r2 's'	wall=190ms	cpu_proc=40ms	cpu_gui=50ms	peak100ms=20ms	ok
+a6 filter r2 'w'	wall=408ms	cpu_proc=40ms	cpu_gui=30ms	peak100ms=20ms	ok
+a6 filter r2 'i'	wall=170ms	cpu_proc=30ms	cpu_gui=30ms	peak100ms=20ms	ok
+a6 filter r2 't'	wall=165ms	cpu_proc=30ms	cpu_gui=30ms	peak100ms=20ms	ok
+a6 filter r2 'c'	wall=176ms	cpu_proc=30ms	cpu_gui=30ms	peak100ms=20ms	ok
+a6 filter r2 'h'	wall=166ms	cpu_proc=30ms	cpu_gui=20ms	peak100ms=20ms	ok
+a6 filter r3 's'	wall=212ms	cpu_proc=70ms	cpu_gui=60ms	peak100ms=40ms	ok
+a6 filter r3 'w'	wall=180ms	cpu_proc=30ms	cpu_gui=30ms	peak100ms=20ms	ok
+a6 filter r3 'i'	wall=173ms	cpu_proc=40ms	cpu_gui=30ms	peak100ms=20ms	ok
+a6 filter r3 't'	wall=180ms	cpu_proc=30ms	cpu_gui=40ms	peak100ms=20ms	ok
+a6 filter r3 'c'	wall=235ms	cpu_proc=40ms	cpu_gui=30ms	peak100ms=20ms	ok
+a6 filter r3 'h'	wall=176ms	cpu_proc=40ms	cpu_gui=40ms	peak100ms=30ms	ok
+a6 worker_rss_kb=46484,46176
+a6 gui_rss_kb=86476
+b5-3k pid=1394884 win=2097159 load=0.12 geom=Window 2097159   Position: 0,0 (screen: 0)   Geometry: 1320x860 
+b5-3k board.open	first=110ms	last=110ms	cpu_gui=80ms	cpu_kids=660ms	frames=1
+b5-3k filter r1 's'	wall=22ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b5-3k filter r1 'w'	wall=135ms	cpu_proc=10ms	cpu_gui=0ms	peak100ms=10ms	ok
+b5-3k filter r1 'i'	wall=25ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b5-3k filter r1 't'	wall=25ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b5-3k filter r1 'c'	wall=22ms	cpu_proc=0ms	cpu_gui=10ms	peak100ms=0ms	ok
+b5-3k filter r1 'h'	wall=25ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b5-3k filter r2 's'	wall=235ms	cpu_proc=10ms	cpu_gui=10ms	peak100ms=10ms	ok
+b5-3k filter r2 'w'	wall=23ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b5-3k filter r2 'i'	wall=281ms	cpu_proc=10ms	cpu_gui=0ms	peak100ms=10ms	ok
+b5-3k filter r2 't'	wall=23ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b5-3k filter r2 'c'	wall=22ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b5-3k filter r2 'h'	wall=23ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b5-3k filter r3 's'	wall=22ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b5-3k filter r3 'w'	wall=20ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b5-3k filter r3 'i'	wall=22ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b5-3k filter r3 't'	wall=23ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b5-3k filter r3 'c'	wall=26ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b5-3k filter r3 'h'	wall=24ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b5-3k worker_rss_kb=47228
+b5-3k gui_rss_kb=127788
+a5-3k pid=1395328 win=2097159 load=0.13 geom=Window 2097159   Position: 0,0 (screen: 0)   Geometry: 1320x860 
+a5-3k board.open	first=147ms	last=147ms	cpu_gui=80ms	cpu_kids=690ms	frames=1
+a5-3k filter r1 's'	wall=385ms	cpu_proc=220ms	cpu_gui=220ms	peak100ms=100ms	ok
+a5-3k filter r1 'w'	wall=289ms	cpu_proc=120ms	cpu_gui=130ms	peak100ms=80ms	ok
+a5-3k filter r1 'i'	wall=274ms	cpu_proc=100ms	cpu_gui=90ms	peak100ms=70ms	ok
+a5-3k filter r1 't'	wall=317ms	cpu_proc=100ms	cpu_gui=110ms	peak100ms=60ms	ok
+a5-3k filter r1 'c'	wall=259ms	cpu_proc=100ms	cpu_gui=90ms	peak100ms=60ms	ok
+a5-3k filter r1 'h'	wall=257ms	cpu_proc=100ms	cpu_gui=100ms	peak100ms=60ms	ok
+a5-3k filter r2 's'	wall=481ms	cpu_proc=210ms	cpu_gui=210ms	peak100ms=100ms	ok
+a5-3k filter r2 'w'	wall=282ms	cpu_proc=130ms	cpu_gui=120ms	peak100ms=90ms	ok
+a5-3k filter r2 'i'	wall=262ms	cpu_proc=90ms	cpu_gui=110ms	peak100ms=60ms	ok
+a5-3k filter r2 't'	wall=264ms	cpu_proc=100ms	cpu_gui=90ms	peak100ms=60ms	ok
+a5-3k filter r2 'c'	wall=265ms	cpu_proc=90ms	cpu_gui=100ms	peak100ms=60ms	ok
+a5-3k filter r2 'h'	wall=270ms	cpu_proc=100ms	cpu_gui=100ms	peak100ms=60ms	ok
+a5-3k filter r3 's'	wall=588ms	cpu_proc=210ms	cpu_gui=210ms	peak100ms=100ms	ok
+a5-3k filter r3 'w'	wall=271ms	cpu_proc=110ms	cpu_gui=120ms	peak100ms=80ms	ok
+a5-3k filter r3 'i'	wall=385ms	cpu_proc=110ms	cpu_gui=100ms	peak100ms=60ms	ok
+a5-3k filter r3 't'	wall=423ms	cpu_proc=100ms	cpu_gui=100ms	peak100ms=60ms	ok
+a5-3k filter r3 'c'	wall=271ms	cpu_proc=90ms	cpu_gui=100ms	peak100ms=60ms	ok
+a5-3k filter r3 'h'	wall=269ms	cpu_proc=100ms	cpu_gui=90ms	peak100ms=70ms	ok
+a5-3k worker_rss_kb=46620,94652
+a5-3k gui_rss_kb=129424
+b6-3k pid=1395698 win=2097159 load=0.26 geom=Window 2097159   Position: 0,0 (screen: 0)   Geometry: 1320x860 
+b6-3k board.open	first=108ms	last=108ms	cpu_gui=70ms	cpu_kids=650ms	frames=1
+b6-3k filter r1 's'	wall=27ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b6-3k filter r1 'w'	wall=22ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b6-3k filter r1 'i'	wall=24ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b6-3k filter r1 't'	wall=22ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b6-3k filter r1 'c'	wall=129ms	cpu_proc=10ms	cpu_gui=0ms	peak100ms=10ms	ok
+b6-3k filter r1 'h'	wall=21ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b6-3k filter r2 's'	wall=26ms	cpu_proc=0ms	cpu_gui=10ms	peak100ms=0ms	ok
+b6-3k filter r2 'w'	wall=272ms	cpu_proc=10ms	cpu_gui=0ms	peak100ms=10ms	ok
+b6-3k filter r2 'i'	wall=26ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b6-3k filter r2 't'	wall=22ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b6-3k filter r2 'c'	wall=25ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b6-3k filter r2 'h'	wall=21ms	cpu_proc=10ms	cpu_gui=0ms	peak100ms=0ms	ok
+b6-3k filter r3 's'	wall=22ms	cpu_proc=10ms	cpu_gui=0ms	peak100ms=0ms	ok
+b6-3k filter r3 'w'	wall=25ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b6-3k filter r3 'i'	wall=22ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b6-3k filter r3 't'	wall=22ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b6-3k filter r3 'c'	wall=141ms	cpu_proc=10ms	cpu_gui=10ms	peak100ms=10ms	ok
+b6-3k filter r3 'h'	wall=25ms	cpu_proc=0ms	cpu_gui=0ms	peak100ms=0ms	ok
+b6-3k worker_rss_kb=47388
+b6-3k gui_rss_kb=91152
+a6-3k pid=1396058 win=2097159 load=0.25 geom=Window 2097159   Position: 0,0 (screen: 0)   Geometry: 1320x860 
+a6-3k board.open	first=151ms	last=151ms	cpu_gui=90ms	cpu_kids=660ms	frames=1
+a6-3k filter r1 's'	wall=397ms	cpu_proc=230ms	cpu_gui=220ms	peak100ms=110ms	ok
+a6-3k filter r1 'w'	wall=316ms	cpu_proc=130ms	cpu_gui=140ms	peak100ms=90ms	ok
+a6-3k filter r1 'i'	wall=281ms	cpu_proc=120ms	cpu_gui=110ms	peak100ms=80ms	ok
+a6-3k filter r1 't'	wall=281ms	cpu_proc=110ms	cpu_gui=110ms	peak100ms=70ms	ok
+a6-3k filter r1 'c'	wall=285ms	cpu_proc=110ms	cpu_gui=120ms	peak100ms=70ms	ok
+a6-3k filter r1 'h'	wall=376ms	cpu_proc=120ms	cpu_gui=110ms	peak100ms=60ms	ok
+a6-3k filter r2 's'	wall=394ms	cpu_proc=230ms	cpu_gui=220ms	peak100ms=110ms	ok
+a6-3k filter r2 'w'	wall=293ms	cpu_proc=130ms	cpu_gui=150ms	peak100ms=90ms	ok
+a6-3k filter r2 'i'	wall=273ms	cpu_proc=110ms	cpu_gui=100ms	peak100ms=70ms	ok
+a6-3k filter r2 't'	wall=284ms	cpu_proc=110ms	cpu_gui=100ms	peak100ms=70ms	ok
+a6-3k filter r2 'c'	wall=283ms	cpu_proc=120ms	cpu_gui=120ms	peak100ms=70ms	ok
+a6-3k filter r2 'h'	wall=277ms	cpu_proc=100ms	cpu_gui=100ms	peak100ms=70ms	ok
+a6-3k filter r3 's'	wall=383ms	cpu_proc=220ms	cpu_gui=230ms	peak100ms=110ms	ok
+a6-3k filter r3 'w'	wall=310ms	cpu_proc=130ms	cpu_gui=130ms	peak100ms=100ms	ok
+a6-3k filter r3 'i'	wall=270ms	cpu_proc=100ms	cpu_gui=120ms	peak100ms=70ms	ok
+a6-3k filter r3 't'	wall=280ms	cpu_proc=110ms	cpu_gui=100ms	peak100ms=70ms	ok
+a6-3k filter r3 'c'	wall=275ms	cpu_proc=110ms	cpu_gui=100ms	peak100ms=70ms	ok
+a6-3k filter r3 'h'	wall=271ms	cpu_proc=110ms	cpu_gui=110ms	peak100ms=60ms	ok
+a6-3k worker_rss_kb=46428,93860
+a6-3k gui_rss_kb=95568
+BOARD_GUI_DONE

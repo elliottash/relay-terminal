@@ -1,0 +1,36 @@
+== turnbench b round 1  root=/home/elliott/relay-perf/src  load=0.10
+python 3.14.4  loadavg (0.1708984375, 0.169921875, 0.3203125)  turns=300 tools=False deltas=3
+turns 0-0: wall=   12.0 ms  ask->req=   10.4 ms  last->done=    1.1 ms  req_bytes=   25060  msgs=2
+turns 1-9: wall=    8.0 ms  ask->req=    5.6 ms  last->done=    1.1 ms  req_bytes=   28312  msgs=12
+turns 10-49: wall=    7.1 ms  ask->req=    4.8 ms  last->done=    1.3 ms  req_bytes=   44805  msgs=56
+turns 50-99: wall=    6.9 ms  ask->req=    5.0 ms  last->done=    1.3 ms  req_bytes=   71531  msgs=146
+turns 100-199: wall=   11.3 ms  ask->req=    8.1 ms  last->done=    1.7 ms  req_bytes=  115162  msgs=238
+turns 200-299: wall=   14.7 ms  ask->req=   10.7 ms  last->done=    2.5 ms  req_bytes=  173362  msgs=436
+total wall 7.0 s, worker CPU 7.75 s, Pss 140.1 MiB -> /tmp/rx/wb/b1/turns-300.json
+== turnbench a round 1  root=/home/elliott/relay-perf/src2  load=0.17
+python 3.14.4  loadavg (0.2373046875, 0.18408203125, 0.32421875)  turns=300 tools=False deltas=3
+turns 0-0: wall=   12.7 ms  ask->req=   11.1 ms  last->done=   -1.6 ms  req_bytes=   27732  msgs=2
+turns 1-9: wall=    2.7 ms  ask->req=    1.4 ms  last->done=    1.0 ms  req_bytes=   28540  msgs=10
+turns 10-49: wall=    2.8 ms  ask->req=    1.5 ms  last->done=    0.8 ms  req_bytes=   44805  msgs=54
+turns 50-99: wall=    4.3 ms  ask->req=    2.4 ms  last->done=    1.3 ms  req_bytes=   72112  msgs=140
+turns 100-199: wall=    5.9 ms  ask->req=    3.3 ms  last->done=    1.9 ms  req_bytes=  115744  msgs=278
+turns 200-299: wall=    8.5 ms  ask->req=    5.1 ms  last->done=    2.4 ms  req_bytes=  173944  msgs=478
+total wall 4.2 s, worker CPU 4.04 s, Pss 30.2 MiB -> /tmp/rx/wb/a1/turns-300.json
+== turnbench b round 2  root=/home/elliott/relay-perf/src  load=0.24
+python 3.14.4  loadavg (0.35498046875, 0.21142578125, 0.33203125)  turns=300 tools=False deltas=3
+turns 0-0: wall=   17.2 ms  ask->req=   15.3 ms  last->done=    1.5 ms  req_bytes=   25060  msgs=2
+turns 1-9: wall=    7.9 ms  ask->req=    6.4 ms  last->done=    1.1 ms  req_bytes=   28312  msgs=10
+turns 10-49: wall=    5.7 ms  ask->req=    4.4 ms  last->done=    0.9 ms  req_bytes=   44805  msgs=60
+turns 50-99: wall=    6.8 ms  ask->req=    5.0 ms  last->done=    1.2 ms  req_bytes=   71531  msgs=146
+turns 100-199: wall=    9.1 ms  ask->req=    6.3 ms  last->done=    1.9 ms  req_bytes=  115744  msgs=276
+turns 200-299: wall=   12.1 ms  ask->req=    8.6 ms  last->done=    2.5 ms  req_bytes=  173944  msgs=476
+total wall 7.0 s, worker CPU 7.45 s, Pss 146.6 MiB -> /tmp/rx/wb/b2/turns-300.json
+== turnbench a round 2  root=/home/elliott/relay-perf/src2  load=0.35
+python 3.14.4  loadavg (0.48681640625, 0.2412109375, 0.34130859375)  turns=300 tools=False deltas=3
+turns 0-0: wall=   17.3 ms  ask->req=   15.5 ms  last->done=   -1.7 ms  req_bytes=   27732  msgs=2
+turns 1-9: wall=    2.6 ms  ask->req=    1.3 ms  last->done=    1.1 ms  req_bytes=   28540  msgs=10
+turns 10-49: wall=    3.0 ms  ask->req=    1.6 ms  last->done=    0.8 ms  req_bytes=   45510  msgs=44
+turns 50-99: wall=    4.2 ms  ask->req=    2.5 ms  last->done=    1.0 ms  req_bytes=   71655  msgs=120
+turns 100-199: wall=    6.3 ms  ask->req=    3.6 ms  last->done=    1.5 ms  req_bytes=  115285  msgs=238
+turns 200-299: wall=    9.8 ms  ask->req=    5.8 ms  last->done=    2.2 ms  req_bytes=  173485  msgs=438
+total wall 4.2 s, worker CPU 4.06 s, Pss 30.0 MiB -> /tmp/rx/wb/a2/turns-300.json

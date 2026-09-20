@@ -1,0 +1,44 @@
+== ipc b5  load=0.11
+input_mode=(oer)|
+WARNING: chip OCR read "(oer)|"; provider is the loopback stub either way, run validated afterwards from its GUI CPU
+clk_tck=100 relay_pid=1420990 display=:210 load=0.15 1.87 2.59
+--- /tmp/rx/tr/out/ipc-b5.ipc/worker2gui.jsonl  messages=1137 bytes=1873890
+message                         n     bytes      avg   share
+tool_result                    20    672842    33642   35.9%
+tool_output                    20    664500    33225   35.5%
+presets                         6    446830    74471   23.8%
+delta                        1009     51768       51    2.8%
+configured                      2      9494     4747    0.5%
+tool_started                   20      7291      364    0.4%
+turn_summary                    2      6456     3228    0.3%
+requests                        6      4732      788    0.3%
+route                          12      3608      300    0.2%
+agents                          2      2000     1000    0.1%
+queue_changed                   8      1023      127    0.1%
+context                         6       840      140    0.0%
+session_summary                 1       419      419    0.0%
+app_catalog_updated             4       404      101    0.0%
+status                          6       366       61    0.0%
+queued                          2       304      152    0.0%
+== ipc a5  load=0.15
+input_mode=(oer)|
+WARNING: chip OCR read "(oer)|"; provider is the loopback stub either way, run validated afterwards from its GUI CPU
+clk_tck=100 relay_pid=1425098 display=:210 load=0.21 1.57 2.44
+--- /tmp/rx/tr/out/ipc-a5.ipc/worker2gui.jsonl  messages=1137 bytes=548388
+message                         n     bytes      avg   share
+presets                         6    446830    74471   81.5%
+delta                        1009     51768       51    9.4%
+tool_result                    20     10002      500    1.8%
+configured                      2      9552     4776    1.7%
+tool_started                   20      7291      364    1.3%
+turn_summary                    2      6456     3228    1.2%
+requests                        6      4732      788    0.9%
+route                          12      3608      300    0.7%
+agents                          2      2000     1000    0.4%
+tool_output                    20      1780       89    0.3%
+queue_changed                   8      1023      127    0.2%
+context                         6       840      140    0.2%
+session_summary                 1       419      419    0.1%
+app_catalog_updated             4       404      101    0.1%
+status                          6       366       61    0.1%
+queued                          2       304      152    0.1%

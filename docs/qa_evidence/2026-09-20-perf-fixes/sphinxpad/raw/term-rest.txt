@@ -1,0 +1,90 @@
+a5 pid=1387720 win=2097159 load=0.49
+a5 warmup ok
+a5 geom wall_s=0.005 GUI_cpu_s=0.08 rss_kb=119036 load=0.45
+a5 cat50_1 wall_s=1.546 pty_cpu_s=1.52 GUI_cpu_s=0.40 rss_kb=139756 load=0.42
+a5 cat50_2 wall_s=1.549 pty_cpu_s=1.54 QXcbEventQueue_cpu_s=0.01 GUI_cpu_s=0.37 rss_kb=139860 load=0.42
+a5 cat50_3 wall_s=1.626 pty_cpu_s=1.60 QXcbEventQueue_cpu_s=0.01 GUI_cpu_s=0.44 rss_kb=139936 load=0.54
+a5 statx            relay-1387720              1,169      syscalls:sys_enter_statx                                              
+a5 statx   QXcbEventQueue-1387722                  0      syscalls:sys_enter_statx                                              
+a5 statx  Thread (pooled)-1387723                  0      syscalls:sys_enter_statx                                              
+a5 statx  Thread (pooled)-1387724                  0      syscalls:sys_enter_statx                                              
+a5 statx  Thread (pooled)-1387725                  0      syscalls:sys_enter_statx                                              
+a5 statx  Thread (pooled)-1387726                  0      syscalls:sys_enter_statx                                              
+a5 statx  QDBusConnection-1387727      <not counted>      syscalls:sys_enter_statx                                              
+a5 statx            relay-1387731                  0      syscalls:sys_enter_statx                                              
+a5 statx  Thread (pooled)-1387739                  0      syscalls:sys_enter_statx                                              
+a5 statx  Thread (pooled)-1387740                  0      syscalls:sys_enter_statx                                              
+a5 statx  Thread (pooled)-1387741                  0      syscalls:sys_enter_statx                                              
+a5 statx  Thread (pooled)-1387742                  0      syscalls:sys_enter_statx                                              
+a5 statx  Thread (pooled)-1387743                  0      syscalls:sys_enter_statx                                              
+a5 statx  Thread (pooled)-1387744                  0      syscalls:sys_enter_statx                                              
+a5 statx  Thread (pooled)-1387745                  0      syscalls:sys_enter_statx                                              
+a5 statx  Thread (pooled)-1387746                  0      syscalls:sys_enter_statx                                              
+a5 statx        4.003210666 seconds time elapsed
+a5 cat50_statx wall_s=3.202 pty_cpu_s=3.18 QXcbEventQueue_cpu_s=0.01 GUI_cpu_s=0.74 rss_kb=139928 load=0.58
+a5 cat50_paint wall_s=3.203 pty_cpu_s=3.18 QXcbEventQueue_cpu_s=0.01 GUI_cpu_s=0.65 rss_kb=140012 load=0.77
+a5 paints                156      probe_relay:p_a5                                                      
+a5 paints              5,583      probe_relay:r_a5                                                      
+a5 paints        4.003560158 seconds time elapsed
+a5 seq_1 wall_s=2.126 pty_cpu_s=2.12 GUI_cpu_s=0.35 rss_kb=140012 load=1.03
+a5 scrollback pss_before_kb=73467 pss_after_kb=73468 delta_kb=1
+a5 seq_2 wall_s=2.112 pty_cpu_s=2.08 QXcbEventQueue_cpu_s=0.01 GUI_cpu_s=0.36 rss_kb=140012 load=1.03
+a5 seq_3 wall_s=2.157 pty_cpu_s=2.15 GUI_cpu_s=0.33 rss_kb=140032 load=0.95
+a5 final rss_kb=140032 pss_kb=73488
+b6 pid=1388913 win=2097159 load=0.82
+b6 warmup ok
+b6 geom wall_s=0.006 GUI_cpu_s=0.13 rss_kb=79244 load=0.75
+b6 cat50_1 wall_s=1.788 pty_cpu_s=1.74 QXcbEventQueue_cpu_s=0.01 GUI_cpu_s=0.84 rss_kb=111464 load=0.75
+b6 cat50_2 wall_s=1.774 pty_cpu_s=1.74 GUI_cpu_s=0.74 rss_kb=111472 load=0.69
+b6 cat50_3 wall_s=1.855 pty_cpu_s=1.84 QXcbEventQueue_cpu_s=0.02 GUI_cpu_s=0.81 rss_kb=111472 load=0.80
+b6 statx            relay-1388913             19,847      syscalls:sys_enter_statx                                              
+b6 statx   QXcbEventQueue-1388915                  0      syscalls:sys_enter_statx                                              
+b6 statx  QDBusConnection-1388916      <not counted>      syscalls:sys_enter_statx                                              
+b6 statx            relay-1388920                  0      syscalls:sys_enter_statx                                              
+b6 statx  Thread (pooled)-1388927                  0      syscalls:sys_enter_statx                                              
+b6 statx  Thread (pooled)-1388928                  0      syscalls:sys_enter_statx                                              
+b6 statx  Thread (pooled)-1388929                  0      syscalls:sys_enter_statx                                              
+b6 statx  Thread (pooled)-1388930                  0      syscalls:sys_enter_statx                                              
+b6 statx        4.004147043 seconds time elapsed
+b6 cat50_statx wall_s=3.681 pty_cpu_s=3.62 QXcbEventQueue_cpu_s=0.01 GUI_cpu_s=1.53 rss_kb=111472 load=1.13
+b6 paints                473      probe_relay:p_b6                                                      
+b6 paints             18,467      probe_relay:r_b6                                                      
+b6 paints        4.004156015 seconds time elapsed
+b6 cat50_paint wall_s=3.764 pty_cpu_s=3.71 QXcbEventQueue_cpu_s=0.01 GUI_cpu_s=1.54 rss_kb=111480 load=1.12
+b6 seq_1 wall_s=3.903 pty_cpu_s=3.89 QXcbEventQueue_cpu_s=0.01 GUI_cpu_s=0.45 rss_kb=111480 load=1.02
+b6 scrollback pss_before_kb=66134 pss_after_kb=66132 delta_kb=-2
+b6 seq_2 wall_s=3.839 pty_cpu_s=3.83 QXcbEventQueue_cpu_s=0.01 GUI_cpu_s=0.43 rss_kb=111560 load=0.94
+b6 seq_3 wall_s=3.847 pty_cpu_s=3.82 GUI_cpu_s=0.48 rss_kb=111564 load=1.03
+b6 final rss_kb=111564 pss_kb=66216
+a6 pid=1390191 win=2097159 load=0.93
+a6 warmup ok
+a6 geom wall_s=0.006 GUI_cpu_s=0.08 rss_kb=79680 load=0.86
+a6 cat50_1 wall_s=1.598 GUI_cpu_s=0.38 pty_cpu_s=1.58 rss_kb=100680 load=0.79
+a6 cat50_2 wall_s=1.622 GUI_cpu_s=0.41 QXcbEventQueue_cpu_s=0.01 pty_cpu_s=1.60 rss_kb=100696 load=0.79
+a6 cat50_3 wall_s=1.711 GUI_cpu_s=0.46 pty_cpu_s=1.69 rss_kb=100696 load=0.97
+a6 statx            relay-1390191              1,205      syscalls:sys_enter_statx                                              
+a6 statx   QXcbEventQueue-1390193                  0      syscalls:sys_enter_statx                                              
+a6 statx  QDBusConnection-1390194      <not counted>      syscalls:sys_enter_statx                                              
+a6 statx            relay-1390198                  0      syscalls:sys_enter_statx                                              
+a6 statx  Thread (pooled)-1390205                  0      syscalls:sys_enter_statx                                              
+a6 statx  Thread (pooled)-1390206                  0      syscalls:sys_enter_statx                                              
+a6 statx  Thread (pooled)-1390207                  0      syscalls:sys_enter_statx                                              
+a6 statx  Thread (pooled)-1390208                  0      syscalls:sys_enter_statx                                              
+a6 statx        4.003754664 seconds time elapsed
+a6 cat50_statx wall_s=3.384 GUI_cpu_s=0.82 QXcbEventQueue_cpu_s=0.01 pty_cpu_s=3.36 rss_kb=100696 load=0.97
+a6 paints                170      probe_relay:p_a6                                                      
+a6 paints              6,594      probe_relay:r_a6                                                      
+a6 paints        4.004496399 seconds time elapsed
+a6 cat50_paint wall_s=3.387 GUI_cpu_s=0.78 QXcbEventQueue_cpu_s=0.01 pty_cpu_s=3.36 rss_kb=100748 load=1.21
+a6 seq_1 wall_s=2.301 GUI_cpu_s=0.38 QXcbEventQueue_cpu_s=0.01 pty_cpu_s=2.29 rss_kb=100748 load=1.12
+a6 scrollback pss_before_kb=55372 pss_after_kb=55372 delta_kb=0
+a6 seq_2 wall_s=2.261 GUI_cpu_s=0.36 pty_cpu_s=2.23 rss_kb=100748 load=1.35
+a6 seq_3 wall_s=2.293 GUI_cpu_s=0.37 pty_cpu_s=2.29 rss_kb=100748 load=1.32
+a6 final rss_kb=100748 pss_kb=55372
+b5 grid=156x38x load=1.02
+b5 pss_kb empty=52605 after1=84474 after2=84482   rss_kb empty=119000 after1=150924 after2=150932
+b5 per_scrollback_line_bytes=3263
+a5 grid=156x38x load=0.73
+a5 pss_kb empty=52681 after1=55371 after2=55411   rss_kb empty=119036 after1=121768 after2=121808
+a5 per_scrollback_line_bytes=275
+TERM_DONE

@@ -1,0 +1,170 @@
+bench file: /home/elliott/relay-perf/src2/src/Pane.h (15990 lines, 1002350 bytes)  load=2.05
+--- xcb pb qt5 rep1
+QINFO  : ConversationsTest::searchKeystrokeCost() collapsed rows: 35.7 ms GUI CPU per key, 36.1 ms wall per key
+QINFO  : ConversationsTest::searchKeystrokeCost() unfolded rows: 129.3 ms GUI CPU per key, 129.9 ms wall per key
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), cold: 10 ms GUI CPU to first paint, 11 ms in all
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), warm: 4 ms GUI CPU to first paint, 4 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), cold: 102 ms GUI CPU to first paint, 103 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), warm: 107 ms GUI CPU to first paint, 108 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), cold: 195 ms GUI CPU to first paint, 195 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), warm: 188 ms GUI CPU to first paint, 188 ms in all
+--- xcb pb qt5 rep2
+QINFO  : ConversationsTest::searchKeystrokeCost() collapsed rows: 35.8 ms GUI CPU per key, 36.3 ms wall per key
+QINFO  : ConversationsTest::searchKeystrokeCost() unfolded rows: 133.7 ms GUI CPU per key, 134.2 ms wall per key
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), cold: 10 ms GUI CPU to first paint, 11 ms in all
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), warm: 4 ms GUI CPU to first paint, 4 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), cold: 108 ms GUI CPU to first paint, 109 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), warm: 111 ms GUI CPU to first paint, 111 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), cold: 205 ms GUI CPU to first paint, 205 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), warm: 191 ms GUI CPU to first paint, 192 ms in all
+--- xcb pb qt6 rep1
+QINFO  : ConversationsTest::searchKeystrokeCost() collapsed rows: 41.1 ms GUI CPU per key, 41.5 ms wall per key
+QINFO  : ConversationsTest::searchKeystrokeCost() unfolded rows: 149.5 ms GUI CPU per key, 149.8 ms wall per key
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), cold: 18 ms GUI CPU to first paint, 18 ms in all
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), warm: 3 ms GUI CPU to first paint, 3 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), cold: 80 ms GUI CPU to first paint, 81 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), warm: 82 ms GUI CPU to first paint, 82 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), cold: 151 ms GUI CPU to first paint, 151 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), warm: 146 ms GUI CPU to first paint, 146 ms in all
+--- xcb pb qt6 rep2
+QINFO  : ConversationsTest::searchKeystrokeCost() collapsed rows: 42.0 ms GUI CPU per key, 42.1 ms wall per key
+QINFO  : ConversationsTest::searchKeystrokeCost() unfolded rows: 152.5 ms GUI CPU per key, 152.7 ms wall per key
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), cold: 18 ms GUI CPU to first paint, 18 ms in all
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), warm: 3 ms GUI CPU to first paint, 3 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), cold: 80 ms GUI CPU to first paint, 80 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), warm: 82 ms GUI CPU to first paint, 83 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), cold: 152 ms GUI CPU to first paint, 152 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), warm: 147 ms GUI CPU to first paint, 147 ms in all
+--- xcb pa qt5 rep1
+QINFO  : ConversationsTest::searchKeystrokeCost() collapsed rows: 4.3 ms GUI CPU per key, 4.4 ms wall per key
+QINFO  : ConversationsTest::searchKeystrokeCost() unfolded rows: 13.1 ms GUI CPU per key, 13.1 ms wall per key
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), cold: 12 ms GUI CPU to first paint, 13 ms in all
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), warm: 5 ms GUI CPU to first paint, 6 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), cold: 44 ms GUI CPU to first paint, 44 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), warm: 34 ms GUI CPU to first paint, 34 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), cold: 47 ms GUI CPU to first paint, 48 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), warm: 39 ms GUI CPU to first paint, 39 ms in all
+--- xcb pa qt5 rep2
+QINFO  : ConversationsTest::searchKeystrokeCost() collapsed rows: 4.4 ms GUI CPU per key, 4.5 ms wall per key
+QINFO  : ConversationsTest::searchKeystrokeCost() unfolded rows: 13.8 ms GUI CPU per key, 14.0 ms wall per key
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), cold: 12 ms GUI CPU to first paint, 12 ms in all
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), warm: 5 ms GUI CPU to first paint, 5 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), cold: 30 ms GUI CPU to first paint, 31 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), warm: 30 ms GUI CPU to first paint, 30 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), cold: 44 ms GUI CPU to first paint, 45 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), warm: 36 ms GUI CPU to first paint, 37 ms in all
+--- xcb pa qt6 rep1
+QINFO  : ConversationsTest::searchKeystrokeCost() collapsed rows: 4.1 ms GUI CPU per key, 4.3 ms wall per key
+QINFO  : ConversationsTest::searchKeystrokeCost() unfolded rows: 15.1 ms GUI CPU per key, 15.3 ms wall per key
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), cold: 20 ms GUI CPU to first paint, 20 ms in all
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), warm: 4 ms GUI CPU to first paint, 5 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), cold: 31 ms GUI CPU to first paint, 32 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), warm: 33 ms GUI CPU to first paint, 33 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), cold: 44 ms GUI CPU to first paint, 44 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), warm: 36 ms GUI CPU to first paint, 37 ms in all
+--- xcb pa qt6 rep2
+QINFO  : ConversationsTest::searchKeystrokeCost() collapsed rows: 4.1 ms GUI CPU per key, 4.3 ms wall per key
+QINFO  : ConversationsTest::searchKeystrokeCost() unfolded rows: 15.6 ms GUI CPU per key, 15.8 ms wall per key
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), cold: 20 ms GUI CPU to first paint, 21 ms in all
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), warm: 8 ms GUI CPU to first paint, 9 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), cold: 33 ms GUI CPU to first paint, 34 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), warm: 32 ms GUI CPU to first paint, 32 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), cold: 43 ms GUI CPU to first paint, 43 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), warm: 35 ms GUI CPU to first paint, 36 ms in all
+--- offscreen pb qt5 rep1
+QWARN  : ConversationsTest::searchKeystrokeCost() This plugin does not support propagateSizeHints()
+QWARN  : ConversationsTest::searchKeystrokeCost() This plugin does not support propagateSizeHints()
+QINFO  : ConversationsTest::searchKeystrokeCost() collapsed rows: 35.5 ms GUI CPU per key, 35.5 ms wall per key
+QINFO  : ConversationsTest::searchKeystrokeCost() unfolded rows: 121.9 ms GUI CPU per key, 121.9 ms wall per key
+QWARN  : FilePanesTests::openCost() This plugin does not support propagateSizeHints()
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), cold: 11 ms GUI CPU to first paint, 11 ms in all
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), warm: 3 ms GUI CPU to first paint, 4 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), cold: 112 ms GUI CPU to first paint, 112 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), warm: 113 ms GUI CPU to first paint, 113 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), cold: 207 ms GUI CPU to first paint, 208 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), warm: 204 ms GUI CPU to first paint, 204 ms in all
+--- offscreen pb qt5 rep2
+QWARN  : ConversationsTest::searchKeystrokeCost() This plugin does not support propagateSizeHints()
+QWARN  : ConversationsTest::searchKeystrokeCost() This plugin does not support propagateSizeHints()
+QINFO  : ConversationsTest::searchKeystrokeCost() collapsed rows: 35.6 ms GUI CPU per key, 35.6 ms wall per key
+QINFO  : ConversationsTest::searchKeystrokeCost() unfolded rows: 121.8 ms GUI CPU per key, 121.8 ms wall per key
+QWARN  : FilePanesTests::openCost() This plugin does not support propagateSizeHints()
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), cold: 10 ms GUI CPU to first paint, 11 ms in all
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), warm: 3 ms GUI CPU to first paint, 4 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), cold: 107 ms GUI CPU to first paint, 108 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), warm: 110 ms GUI CPU to first paint, 111 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), cold: 200 ms GUI CPU to first paint, 201 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), warm: 198 ms GUI CPU to first paint, 199 ms in all
+--- offscreen pb qt6 rep1
+QWARN  : ConversationsTest::searchKeystrokeCost() This plugin does not support propagateSizeHints()
+QWARN  : ConversationsTest::searchKeystrokeCost() This plugin does not support propagateSizeHints()
+QINFO  : ConversationsTest::searchKeystrokeCost() collapsed rows: 42.4 ms GUI CPU per key, 42.4 ms wall per key
+QINFO  : ConversationsTest::searchKeystrokeCost() unfolded rows: 155.8 ms GUI CPU per key, 155.7 ms wall per key
+QWARN  : FilePanesTests::openCost() This plugin does not support propagateSizeHints()
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), cold: 18 ms GUI CPU to first paint, 18 ms in all
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), warm: 3 ms GUI CPU to first paint, 3 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), cold: 82 ms GUI CPU to first paint, 82 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), warm: 84 ms GUI CPU to first paint, 84 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), cold: 157 ms GUI CPU to first paint, 157 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), warm: 150 ms GUI CPU to first paint, 151 ms in all
+--- offscreen pb qt6 rep2
+QWARN  : ConversationsTest::searchKeystrokeCost() This plugin does not support propagateSizeHints()
+QWARN  : ConversationsTest::searchKeystrokeCost() This plugin does not support propagateSizeHints()
+QINFO  : ConversationsTest::searchKeystrokeCost() collapsed rows: 42.9 ms GUI CPU per key, 42.9 ms wall per key
+QINFO  : ConversationsTest::searchKeystrokeCost() unfolded rows: 160.9 ms GUI CPU per key, 160.9 ms wall per key
+QWARN  : FilePanesTests::openCost() This plugin does not support propagateSizeHints()
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), cold: 18 ms GUI CPU to first paint, 18 ms in all
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), warm: 3 ms GUI CPU to first paint, 3 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), cold: 83 ms GUI CPU to first paint, 83 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), warm: 84 ms GUI CPU to first paint, 85 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), cold: 156 ms GUI CPU to first paint, 156 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), warm: 151 ms GUI CPU to first paint, 151 ms in all
+--- offscreen pa qt5 rep1
+QWARN  : ConversationsTest::searchKeystrokeCost() This plugin does not support propagateSizeHints()
+QWARN  : ConversationsTest::searchKeystrokeCost() This plugin does not support propagateSizeHints()
+QINFO  : ConversationsTest::searchKeystrokeCost() collapsed rows: 4.0 ms GUI CPU per key, 4.0 ms wall per key
+QINFO  : ConversationsTest::searchKeystrokeCost() unfolded rows: 12.4 ms GUI CPU per key, 12.4 ms wall per key
+QWARN  : FilePanesTests::openCost() This plugin does not support propagateSizeHints()
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), cold: 12 ms GUI CPU to first paint, 13 ms in all
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), warm: 5 ms GUI CPU to first paint, 6 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), cold: 31 ms GUI CPU to first paint, 31 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), warm: 31 ms GUI CPU to first paint, 32 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), cold: 44 ms GUI CPU to first paint, 44 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), warm: 37 ms GUI CPU to first paint, 38 ms in all
+--- offscreen pa qt5 rep2
+QWARN  : ConversationsTest::searchKeystrokeCost() This plugin does not support propagateSizeHints()
+QWARN  : ConversationsTest::searchKeystrokeCost() This plugin does not support propagateSizeHints()
+QINFO  : ConversationsTest::searchKeystrokeCost() collapsed rows: 3.8 ms GUI CPU per key, 3.8 ms wall per key
+QINFO  : ConversationsTest::searchKeystrokeCost() unfolded rows: 11.7 ms GUI CPU per key, 11.6 ms wall per key
+QWARN  : FilePanesTests::openCost() This plugin does not support propagateSizeHints()
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), cold: 12 ms GUI CPU to first paint, 13 ms in all
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), warm: 5 ms GUI CPU to first paint, 5 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), cold: 31 ms GUI CPU to first paint, 32 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), warm: 31 ms GUI CPU to first paint, 32 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), cold: 44 ms GUI CPU to first paint, 44 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), warm: 38 ms GUI CPU to first paint, 38 ms in all
+--- offscreen pa qt6 rep1
+QWARN  : ConversationsTest::searchKeystrokeCost() This plugin does not support propagateSizeHints()
+QWARN  : ConversationsTest::searchKeystrokeCost() This plugin does not support propagateSizeHints()
+QINFO  : ConversationsTest::searchKeystrokeCost() collapsed rows: 4.0 ms GUI CPU per key, 3.9 ms wall per key
+QINFO  : ConversationsTest::searchKeystrokeCost() unfolded rows: 15.0 ms GUI CPU per key, 14.9 ms wall per key
+QWARN  : FilePanesTests::openCost() This plugin does not support propagateSizeHints()
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), cold: 20 ms GUI CPU to first paint, 20 ms in all
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), warm: 4 ms GUI CPU to first paint, 4 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), cold: 32 ms GUI CPU to first paint, 32 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), warm: 33 ms GUI CPU to first paint, 33 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), cold: 45 ms GUI CPU to first paint, 45 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), warm: 37 ms GUI CPU to first paint, 37 ms in all
+--- offscreen pa qt6 rep2
+QWARN  : ConversationsTest::searchKeystrokeCost() This plugin does not support propagateSizeHints()
+QWARN  : ConversationsTest::searchKeystrokeCost() This plugin does not support propagateSizeHints()
+QINFO  : ConversationsTest::searchKeystrokeCost() collapsed rows: 4.0 ms GUI CPU per key, 3.9 ms wall per key
+QINFO  : ConversationsTest::searchKeystrokeCost() unfolded rows: 14.9 ms GUI CPU per key, 14.8 ms wall per key
+QWARN  : FilePanesTests::openCost() This plugin does not support propagateSizeHints()
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), cold: 19 ms GUI CPU to first paint, 19 ms in all
+QINFO  : FilePanesTests::openCost() 300 lines (7695 B), warm: 4 ms GUI CPU to first paint, 4 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), cold: 31 ms GUI CPU to first paint, 31 ms in all
+QINFO  : FilePanesTests::openCost() 15830 lines (419239 B), warm: 32 ms GUI CPU to first paint, 33 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), cold: 43 ms GUI CPU to first paint, 43 ms in all
+QINFO  : FilePanesTests::openCost() 15990 lines (1002350 B), warm: 36 ms GUI CPU to first paint, 36 ms in all
+PANES_BENCH_DONE

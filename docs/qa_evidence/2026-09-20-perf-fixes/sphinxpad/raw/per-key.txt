@@ -1,0 +1,72 @@
+== b5-1 (/home/elliott/relay-perf/build/relay)
+   idle 4 s        {'sys_enter_statx': 421, 'sys_enter_faccessat': 0, 'sys_enter_openat': 148}
+   30 keys in 4 s  {'sys_enter_statx': 7177, 'sys_enter_faccessat': 0, 'sys_enter_openat': 478}
+   per key press   sys_enter_faccessat        0.0
+   per key press   sys_enter_openat           11.0
+   per key press   sys_enter_statx            225.2
+== a5-1 (/home/elliott/relay-perf/build2-qt5/relay)
+   idle 4 s        {'sys_enter_statx': 230, 'sys_enter_faccessat': 0, 'sys_enter_openat': 98}
+   30 keys in 4 s  {'sys_enter_statx': 297, 'sys_enter_faccessat': 0, 'sys_enter_openat': 98}
+   per key press   sys_enter_faccessat        0.0
+   per key press   sys_enter_openat           0.0
+   per key press   sys_enter_statx            2.2
+== b6-1 (/home/elliott/relay-perf/build-qt6/relay)
+   idle 4 s        {'sys_enter_statx': 420, 'sys_enter_faccessat': 0, 'sys_enter_openat': 148}
+   30 keys in 4 s  {'sys_enter_statx': 7177, 'sys_enter_faccessat': 0, 'sys_enter_openat': 478}
+   per key press   sys_enter_faccessat        0.0
+   per key press   sys_enter_openat           11.0
+   per key press   sys_enter_statx            225.2
+== a6-1 (/home/elliott/relay-perf/build2-qt6/relay)
+   idle 4 s        {'sys_enter_statx': 230, 'sys_enter_faccessat': 0, 'sys_enter_openat': 98}
+   30 keys in 4 s  {'sys_enter_statx': 297, 'sys_enter_faccessat': 0, 'sys_enter_openat': 98}
+   per key press   sys_enter_faccessat        0.0
+   per key press   sys_enter_openat           0.0
+   per key press   sys_enter_statx            2.2
+== b5-2 (/home/elliott/relay-perf/build/relay)
+   idle 4 s        {'sys_enter_statx': 420, 'sys_enter_faccessat': 0, 'sys_enter_openat': 148}
+   30 keys in 4 s  {'sys_enter_statx': 7177, 'sys_enter_faccessat': 0, 'sys_enter_openat': 478}
+   per key press   sys_enter_faccessat        0.0
+   per key press   sys_enter_openat           11.0
+   per key press   sys_enter_statx            225.2
+== a5-2 (/home/elliott/relay-perf/build2-qt5/relay)
+   idle 4 s        {'sys_enter_statx': 230, 'sys_enter_faccessat': 0, 'sys_enter_openat': 98}
+   30 keys in 4 s  {'sys_enter_statx': 297, 'sys_enter_faccessat': 0, 'sys_enter_openat': 98}
+   per key press   sys_enter_faccessat        0.0
+   per key press   sys_enter_openat           0.0
+   per key press   sys_enter_statx            2.2
+== b6-2 (/home/elliott/relay-perf/build-qt6/relay)
+   idle 4 s        {'sys_enter_statx': 420, 'sys_enter_faccessat': 0, 'sys_enter_openat': 148}
+   30 keys in 4 s  {'sys_enter_statx': 7177, 'sys_enter_faccessat': 0, 'sys_enter_openat': 478}
+   per key press   sys_enter_faccessat        0.0
+   per key press   sys_enter_openat           11.0
+   per key press   sys_enter_statx            225.2
+== a6-2 (/home/elliott/relay-perf/build2-qt6/relay)
+   idle 4 s        {'sys_enter_statx': 230, 'sys_enter_faccessat': 0, 'sys_enter_openat': 98}
+   30 keys in 4 s  {'sys_enter_statx': 297, 'sys_enter_faccessat': 0, 'sys_enter_openat': 98}
+   per key press   sys_enter_faccessat        0.0
+   per key press   sys_enter_openat           0.0
+   per key press   sys_enter_statx            2.2
+== b5-3 (/home/elliott/relay-perf/build/relay)
+   idle 4 s        {'sys_enter_statx': 420, 'sys_enter_faccessat': 0, 'sys_enter_openat': 148}
+   30 keys in 4 s  {'sys_enter_statx': 7177, 'sys_enter_faccessat': 0, 'sys_enter_openat': 478}
+   per key press   sys_enter_faccessat        0.0
+   per key press   sys_enter_openat           11.0
+   per key press   sys_enter_statx            225.2
+== a5-3 (/home/elliott/relay-perf/build2-qt5/relay)
+   idle 4 s        {'sys_enter_statx': 230, 'sys_enter_faccessat': 0, 'sys_enter_openat': 98}
+   30 keys in 4 s  {'sys_enter_statx': 297, 'sys_enter_faccessat': 0, 'sys_enter_openat': 98}
+   per key press   sys_enter_faccessat        0.0
+   per key press   sys_enter_openat           0.0
+   per key press   sys_enter_statx            2.2
+== b6-3 (/home/elliott/relay-perf/build-qt6/relay)
+   idle 4 s        {'sys_enter_statx': 420, 'sys_enter_faccessat': 0, 'sys_enter_openat': 148}
+   30 keys in 4 s  {'sys_enter_statx': 7177, 'sys_enter_faccessat': 0, 'sys_enter_openat': 478}
+   per key press   sys_enter_faccessat        0.0
+   per key press   sys_enter_openat           11.0
+   per key press   sys_enter_statx            225.2
+== a6-3 (/home/elliott/relay-perf/build2-qt6/relay)
+   idle 4 s        {'sys_enter_statx': 230, 'sys_enter_faccessat': 0, 'sys_enter_openat': 98}
+   30 keys in 4 s  {'sys_enter_statx': 297, 'sys_enter_faccessat': 0, 'sys_enter_openat': 98}
+   per key press   sys_enter_faccessat        0.0
+   per key press   sys_enter_openat           0.0
+   per key press   sys_enter_statx            2.2
