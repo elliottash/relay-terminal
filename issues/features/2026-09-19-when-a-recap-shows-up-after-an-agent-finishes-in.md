@@ -7,7 +7,7 @@ implemented_by: glm/glm-5.3
 priority: 1
 rank: zzzzzzzzzzzzzy
 created: '2026-09-19'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-20-recap-finished-at/], related: [], github: null}
+links: {plans: [], commits: [192bf4c0], evidence: [docs/qa_evidence/2026-09-20-recap-finished-at/], related: [], github: null}
 ---
 # when a recap shows up after an agent finishes, include at the beginning, finishe…
 

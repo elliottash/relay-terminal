@@ -93,3 +93,6 @@ drive attempt tripped over it (`run-first-attempt.log`).
 
 <!-- relay:entry 20260920T054200Z-m8 author=agent kind=event model=glm-5.3 -->
 - ✦ agent moved this card · Executing → Needs verification · landed, evidence under docs/qa_evidence/2026-09-20-recap-finished-at/
+
+<!-- relay:entry 20260920T054700Z-n2 author=agent kind=event model=glm-5.3 -->
+- ✦ agent landed this card · 192bf4c0 "recap: the block opens with [end of message] / finished at HH:MM (#MVGR)" · evidence docs/qa_evidence/2026-09-20-recap-finished-at/ · in needs-verification
