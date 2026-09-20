@@ -4315,7 +4315,11 @@ private:
             hint(QStringLiteral("effort.mouse"), relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("agent.effortUp"))
                  + QStringLiteral(" / ") + Keymap::instance().shortcutText(QStringLiteral("agent.effortDown")), QStringLiteral("raise / lower effort")));
         });
-        m_effortBox->hide();   // owner, 2026-09-17: effort shows on the model chip's tooltip, not as a third picker
+        // Visible again (owner, 2026-09-20): the picker dialog picks a model only, so this box is
+        // the level's mouse control — Alt+E drops it open. It hid from 2026-09-17 ("effort shows on
+        // the model chip's tooltip, not as a third picker") until then; refreshSessionControls
+        // shows it whenever the model has levels and hides it when it has none.
+        m_effortBox->setToolTip(QStringLiteral("Reasoning level for this pane (Alt+E opens it; Alt+. / Alt+, step)"));
         row->addWidget(m_effortBox);
     }
 
@@ -4334,6 +4338,7 @@ private:
             for (const QString &level : levels) m_effortBox->addItem(effortLabel(level), level);
         }
         m_effortBox->setCurrentIndex(std::max(0, m_effortBox->findData(nearestEffort(levels, m_effort))));
+        m_effortBox->setVisible(!levels.isEmpty());   // no knob, no box
         m_planChip->setVisible(m_agentMode == QStringLiteral("plan"));
         updateContextLabel();
     }
