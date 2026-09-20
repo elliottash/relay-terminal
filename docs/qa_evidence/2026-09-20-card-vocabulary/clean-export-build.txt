@@ -1,0 +1,25 @@
+[ 94%] Linking CXX static library librelay-board.a
+[ 94%] Built target relay-subagents_autogen
+[ 94%] Building CXX object CMakeFiles/relay-subagents.dir/src/SubagentTranscript.cpp.o
+[ 94%] Building CXX object CMakeFiles/relay-subagents.dir/relay-subagents_autogen/mocs_compilation.cpp.o
+[ 94%] Building CXX object CMakeFiles/relay-subagents.dir/src/SubagentsPanel.cpp.o
+[ 96%] Building CXX object CMakeFiles/relay-subagents.dir/src/JobsPanel.cpp.o
+[ 96%] Built target relay-board
+[ 96%] Linking CXX static library librelay-subagents.a
+[ 96%] Built target relay-subagents
+[ 96%] Built target relay_autogen_timestamp_deps
+[ 98%] Automatic MOC for target relay
+[ 98%] Built target relay_autogen
+[ 98%] Building CXX object CMakeFiles/relay.dir/src/TurnTranscript.cpp.o
+[ 98%] Building CXX object CMakeFiles/relay.dir/src/main.cpp.o
+[100%] Building CXX object CMakeFiles/relay.dir/src/BackendFactory.cpp.o
+[100%] Building CXX object CMakeFiles/relay.dir/src/SkillsDialog.cpp.o
+[100%] Building CXX object CMakeFiles/relay.dir/src/EngineBackend.cpp.o
+[100%] Building CXX object CMakeFiles/relay.dir/relay_autogen/mocs_compilation.cpp.o
+[100%] Building CXX object CMakeFiles/relay.dir/src/Theme.cpp.o
+[100%] Building CXX object CMakeFiles/relay.dir/src/AgentUi.cpp.o
+[100%] Building CXX object CMakeFiles/relay.dir/src/RemoteShare.cpp.o
+[100%] Linking CXX executable relay
+Numbering this build of relay
+2026-09-20.11H.01
+[100%] Built target relay
