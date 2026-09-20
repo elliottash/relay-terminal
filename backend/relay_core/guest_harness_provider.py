@@ -643,6 +643,11 @@ class HarnessProvider:
         # `usage_limits` event's words (`windows`, `status`?, `updated_at`); {} until it says.
         self.usage_limits: dict = {}
         self._stall_timeout = float(stall_timeout)
+        # What this harness is sent in place of its first prompt, once: a fresh session started in
+        # the middle of a conversation — a plan turn on a High-list guest (protocol 13.7) — needs
+        # the rules and the transcript so far, which the last user message alone does not carry.
+        # A string, or a callable given the conversation and returning the prompt; None once used.
+        self.opening = None
         self._agent = None
         self._asker = _Asker()
         self._closed = False
@@ -704,6 +709,9 @@ class HarnessProvider:
             # caller already reads "" as "no title / no summary / nothing compacted".
             return {"role": "assistant", "content": ""}
         prompt, attachments = last_user_message(messages)
+        opening, self.opening = self.opening, None
+        if opening is not None:
+            prompt = opening(messages) if callable(opening) else str(opening)
         if not prompt and not attachments:
             raise ProviderError("There is nothing to send to the guest: the last message has no text.")
         record = getattr(agent, "_turn_record", None) if agent is not None else None

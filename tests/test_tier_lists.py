@@ -24,9 +24,12 @@ GLM = PRESETS['glm']
 CONFIG = ProviderConfig(GLM.base_url, GLM.model, 'pane-key', dict(GLM.extra))
 
 
-def resolver(keys, tiers=None, config=CONFIG, preset_id='glm', roles=None):
+def resolver(keys, tiers=None, config=CONFIG, preset_id='glm', roles=None, guests=()):
+    """``guests`` are the guest ids whose harness "runs here": the check is injected so no test
+    ever finds the real claude or codex on this machine's PATH (protocol 29: no test starts one)."""
     return RoleResolver(config, preset_id, roles or {}, tiers=validate_tiers(tiers),
-                        key_lookup=lambda preset: keys.get(preset, ''), main_effort='high')
+                        key_lookup=lambda preset: keys.get(preset, ''), main_effort='high',
+                        guest_check=lambda guest_id: guest_id in guests)
 
 
 class Refuser:
@@ -115,20 +118,60 @@ class ResolutionTests(unittest.TestCase):
         made = resolver({}, {'high': [{'preset': 'glm', 'model': 'glm-5.3-flash'}]})
         self.assertEqual(made.resolve('planning').config.extra['reasoning_effort'], 'low')
 
-    def test_a_guest_is_skipped_outside_main(self):
-        tiers = {tier: [{'preset': 'guest:claude', 'model': 'fable', 'effort': 'max'},
-                        {'preset': 'kimi', 'model': 'kimi-k3', 'effort': 'max'}]
-                 for tier in ('high', 'flash', 'lite')}
-        made = resolver({'kimi': 'k'}, tiers)
-        for role in ('planning', 'flash', 'chores'):
-            with self.subTest(role=role):
-                self.assertEqual(made.resolve(role).preset_id, 'kimi')
-                self.assertIsNone(made.resolve(role).note)   # a guest is not a missing key
-        summary = made.tier_summary()
-        self.assertEqual([e['usable'] for e in summary['flash']['list']], [False, True])
-        # ... and a tier that lists nothing but a guest has nothing to run on: Main.
-        alone = resolver({}, {'flash': [{'preset': 'guest:claude', 'model': 'fable'}]})
+    GUESTED = {tier: [{'preset': 'guest:claude', 'model': 'fable', 'effort': 'max'},
+                      {'preset': 'kimi', 'model': 'kimi-k3', 'effort': 'max'}]
+               for tier in ('high', 'flash', 'lite')}
+
+    def test_a_guest_is_skipped_in_flash_and_lite(self):
+        """A side call or a per-turn swap cannot be handed to a harness: in Flash and Lite a guest
+        is passed over silently, whether or not it runs here, and a list of nothing but guests
+        has nothing to run on (Main)."""
+        for guests in ((), ('claude',)):
+            made = resolver({'kimi': 'k'}, self.GUESTED, guests=guests)
+            for role in ('flash', 'chores'):
+                with self.subTest(role=role, guests=guests):
+                    self.assertEqual(made.resolve(role).preset_id, 'kimi')
+                    self.assertIsNone(made.resolve(role).note)   # a guest is not a missing key
+            summary = made.tier_summary()
+            self.assertEqual([e['usable'] for e in summary['flash']['list']], [False, True])
+            self.assertEqual([e['usable'] for e in summary['lite']['list']], [False, True])
+        alone = resolver({}, {'flash': [{'preset': 'guest:claude', 'model': 'fable'}]}, guests=('claude',))
         self.assertTrue(alone.resolve('flash').is_main)
+
+    def test_a_guest_whose_harness_runs_here_serves_the_high_tier(self):
+        """Owner, 2026-09-20: "claude and codex weren't showing up under 'high' models" — and
+        "for codex planning you pick xhigh". The first usable entry of the High list may be a
+        guest: planning resolves to it, on the harness scheme, at its level in its own words."""
+        made = resolver({'kimi': 'k'}, self.GUESTED, guests=('claude',))
+        planning = made.resolve('planning')
+        self.assertEqual((planning.preset_id, planning.config.base_url, planning.config.model,
+                          planning.effort, planning.tier, planning.source),
+                         ('guest:claude', 'harness://claude', 'fable', 'max', 'high', 'default'))
+        self.assertEqual(planning.config.api_key, '')
+        self.assertIsNone(planning.note)
+        self.assertIs(made.planning_target(), planning)
+        # The GUI greys nothing here: the guest is usable in High, and in Main, and nowhere else.
+        summary = made.tier_summary()
+        self.assertEqual(summary['high']['preset'], 'guest:claude')
+        self.assertEqual([e['usable'] for e in summary['high']['list']], [True, True])
+        # Asked to plan without the guests (the harness would not start): the entry below it.
+        without = made.planning_target(guests=False)
+        self.assertEqual((without.preset_id, without.effort), ('kimi', 'max'))
+
+    def test_a_guest_that_cannot_run_here_is_skipped_in_high_without_a_key_note(self):
+        made = resolver({'kimi': 'k'}, self.GUESTED, guests=())
+        planning = made.resolve('planning')
+        self.assertEqual(planning.preset_id, 'kimi')
+        self.assertIn('guest that cannot run here', planning.note)
+        summary = made.tier_summary()
+        self.assertEqual([e['usable'] for e in summary['high']['list']], [False, True])
+        # A High list of nothing but a guest that cannot run: Main, as any list with nothing usable.
+        alone = resolver({}, {'high': [{'preset': 'guest:codex', 'effort': 'xhigh'}]})
+        self.assertTrue(alone.resolve('planning').is_main)
+        self.assertIsNone(alone.planning_target())
+        # Main keeps saying a guest is usable there: it is where a guest serves a pane.
+        listed = resolver({}, {'main': [{'preset': 'guest:codex'}]})
+        self.assertEqual([e['usable'] for e in listed.tier_summary()['main']['list']], [True])
 
     def test_empty_lists_change_nothing(self):
         bare, listed = resolver({'openrouter': 'k'}), resolver({'openrouter': 'k'}, {'main': [{'preset': 'kimi'}]})
@@ -190,6 +233,17 @@ class ChainTests(unittest.TestCase):
         # No level implied on High either: the entry means the same first or reached by a failover.
         self.assertEqual((high.effort, high.config.extra['reasoning_effort']), (None, 'high'))
         self.assertIsNone(made.fallback_candidate({'preset': 'guest:claude', 'model': 'fable'}, 'main', {'glm'}))
+        # Nor on High, even when its harness runs here: a turn under way is never moved onto one.
+        runs = resolver({'kimi': 'k'}, guests=('claude',))
+        self.assertIsNone(runs.fallback_candidate({'preset': 'guest:claude', 'model': 'fable'}, 'high', {'glm'}))
+
+    def test_a_guest_entry_matches_the_guest_whatever_model_the_cli_reported(self):
+        # A plan turn on a guest walks the High list from the entry after the guest: the entry
+        # said "fable", the CLI reported claude-fable-5-1 once started.
+        high = [{'preset': 'guest:claude', 'model': 'fable'}, {'preset': 'kimi', 'model': 'kimi-k3'}]
+        made = resolver({'kimi': 'k'}, {'high': high}, guests=('claude',))
+        self.assertEqual(made.failover_chain('high', 'guest:claude', 'claude-fable-5-1'), [high[1]])
+        self.assertEqual(made.failover_chain('high', 'guest:claude', ''), [high[1]])
 
 
 # ----- turns ----------------------------------------------------------------------------------
@@ -380,10 +434,15 @@ LISTING = [{'id': 'z-ai/glm-5.3', 'efforts': ['low'], 'price_completion_per_mtok
            {'id': 'openai/gpt-5.6-terra', 'efforts': ['low'], 'price_completion_per_mtok': 12.0},
            {'id': 'openai/gpt-5.6-luna', 'efforts': [], 'price_completion_per_mtok': 1.2},
            {'id': 'minimax/minimax-m3', 'efforts': [], 'price_completion_per_mtok': 3.0}]
-GUESTS = [{'id': 'guest:claude', 'harness': True, 'logged_in': None,
+GUESTS = [{'id': 'guest:claude', 'harness': True, 'logged_in': None, 'guest': 'claude',
+           'efforts': ['low', 'medium', 'high', 'xhigh', 'max'],
            'models': [{'id': 'fable', 'default_effort': None}, {'id': 'opus'}]},
           {'id': 'guest:codex', 'harness': True, 'logged_in': False, 'models': []},      # signed out
           {'id': 'guest:other', 'harness': False, 'logged_in': True, 'models': []}]     # no adapter here
+CODEX = {'id': 'guest:codex', 'harness': True, 'logged_in': True, 'guest': 'codex',
+         'efforts': ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+         'models': [{'id': 'gpt-5.5-codex', 'efforts': ['low', 'medium', 'high', 'xhigh'],
+                     'default_effort': 'medium'}]}
 
 
 def pairs(entries):
@@ -407,23 +466,48 @@ class DefaultsTests(unittest.TestCase):
                           ('minimax', 'MiniMax-M3', None), ('openai', 'gpt-6-astra', 'high'),
                           ('kimi', 'kimi-k3', 'high'), ('custom:acme', 'acme-1', None),
                           ('relay-free', 'relay-main', 'medium')])
-        # The same models at their top level; no guest (a guest never serves a per-turn swap).
+        # The same models at their top level, the usable guest among them at its own top word
+        # (a plan turn runs through its harness, 13.7): Claude Code's is the last it lists.
         self.assertEqual(pairs(plain['high']),
-                         [('glm-coding', 'glm-5.3', 'max'), ('minimax', 'MiniMax-M3', None),
-                          ('openai', 'gpt-6-astra', 'max'), ('kimi', 'kimi-k3', 'max'),
-                          ('custom:acme', 'acme-1', None), ('relay-free', 'relay-main', 'medium')])
+                         [('guest:claude', 'fable', 'max'), ('glm-coding', 'glm-5.3', 'max'),
+                          ('minimax', 'MiniMax-M3', None), ('openai', 'gpt-6-astra', 'max'),
+                          ('kimi', 'kimi-k3', 'max'), ('custom:acme', 'acme-1', None),
+                          ('relay-free', 'relay-main', 'medium')])
+        # Flash and Lite say their lowest level outright (owner, 2026-09-20: Lite is "with no
+        # reasoning"), and leave it out only for a model with no knob at all.
         self.assertEqual(pairs(plain['flash']),
                          [('glm-coding', 'glm-5.3-flash', 'low'), ('minimax', 'MiniMax-M2.7-highspeed', None),
-                          ('openai', 'gpt-5.6-terra', 'medium'), ('kimi', 'kimi-k2.7-code-highspeed', None),
+                          ('openai', 'gpt-5.6-terra', 'low'), ('kimi', 'kimi-k2.7-code-highspeed', None),
                           ('relay-free', 'relay-flash', 'low')])
         # Lite only where the provider has one of its own: GLM, Kimi and MiniMax borrow OpenRouter's.
-        self.assertEqual(pairs(plain['lite']), [('openai', 'gpt-5.6-luna', 'low'), ('relay-free', 'relay-lite', None)])
+        self.assertEqual(pairs(plain['lite']), [('openai', 'gpt-5.6-luna', 'low'), ('relay-free', 'relay-lite', 'low')])
         self.assertEqual(pairs(plain['local']), [('local:bonsai', 'bonsai-2-27b', None)])
         # Every entry is one `tiers` takes back unchanged.
         with mock.patch('relay_core.roles._preset', side_effect=lambda p: PRESETS.get(p) or mock.Mock()), \
                 mock.patch('relay_core.roles._is_local_endpoint', return_value=True):
             self.assertEqual(validate_tiers(plain), {t: e for t, e in plain.items() if e})
         json.dumps(plain)
+
+    def test_codex_plans_at_xhigh_when_its_model_offers_it_else_at_its_last_level(self):
+        # Owner, 2026-09-20: "for codex planning you pick xhigh, not max". With the subscriptions,
+        # ahead of pay-as-you-go, as in Main.
+        high = pairs(self.defaults(self.USABLE, guests=[CODEX])['plain']['high'])
+        self.assertEqual(high[:3], [('glm-coding', 'glm-5.3', 'max'), ('guest:codex', 'gpt-5.5-codex', 'xhigh'),
+                                    ('minimax', 'MiniMax-M3', None)])
+        main = pairs(self.defaults(self.USABLE, guests=[CODEX])['plain']['main'])
+        self.assertIn(('guest:codex', 'gpt-5.5-codex', 'medium'), main)      # Main: its own default
+        capped = dict(CODEX, models=[{'id': 'gpt-5.5-mini', 'efforts': ['low', 'medium', 'high']}])
+        high = pairs(self.defaults(self.USABLE, guests=[capped])['plain']['high'])
+        self.assertIn(('guest:codex', 'gpt-5.5-mini', 'high'), high)
+        # A guest whose model names no levels falls back to the row's; none at all means no level.
+        bare = dict(CODEX, models=[{'id': 'gpt-5.5-codex'}])
+        self.assertIn(('guest:codex', 'gpt-5.5-codex', 'xhigh'), pairs(self.defaults(self.USABLE, guests=[bare])['plain']['high']))
+        none = dict(CODEX, efforts=[], models=[{'id': 'gpt-5.5-codex'}])
+        self.assertIn(('guest:codex', 'gpt-5.5-codex', None), pairs(self.defaults(self.USABLE, guests=[none])['plain']['high']))
+        # ... and a signed-out or harness-less guest is in neither list.
+        both = self.defaults(self.USABLE, guests=GUESTS)['plain']
+        self.assertNotIn('guest:codex', [e['preset'] for e in both['main'] + both['high']])
+        self.assertNotIn('guest:other', [e['preset'] for e in both['main'] + both['high']])
 
     def test_without_an_openrouter_key_the_two_are_the_same(self):
         both = self.defaults(self.USABLE, guests=GUESTS)
@@ -443,14 +527,19 @@ class DefaultsTests(unittest.TestCase):
                          [('openrouter', 'z-ai/glm-5.3', 'max'), ('openrouter', 'minimax/minimax-m3', None)])
         # Flash: glm's is cheap; terra is $12; minimax m2.7 and kimi k2.7 have no price here, and
         # an unknown price is kept in Flash and Lite (and was left out of Main and High above).
+        # A Flash or Lite twin says "low" like the rest of its list.
         self.assertEqual(pairs(routed['flash'][len(plain['flash']):]),
-                         [('openrouter', 'z-ai/glm-5.3-flash', None), ('openrouter', 'minimax/minimax-m2.7', None),
-                          ('openrouter', 'moonshotai/kimi-k2.7-code', None)])
-        # Lite starts with the model Relay already runs chores on, ahead of the providers' own.
-        self.assertEqual(pairs(routed['lite'])[0], ('openrouter', 'google/gemini-3.8-flash', None))
-        self.assertEqual(pairs(routed['lite'])[0][:2], P._LITE_VIA_OPENROUTER[:2])
-        self.assertIn(('openrouter', 'google/gemini-3.5-flash-lite', None), pairs(routed['lite']))
-        self.assertEqual(pairs(routed['lite'])[-1], ('openrouter', 'openai/gpt-5.6-luna', None))
+                         [('openrouter', 'z-ai/glm-5.3-flash', 'low'), ('openrouter', 'minimax/minimax-m2.7', 'low'),
+                          ('openrouter', 'moonshotai/kimi-k2.7-code', 'low')])
+        # Lite starts with Gemini 3.5 Flash-Lite at low (owner, 2026-09-20: "I thought it's 3.5
+        # flash lite with no reasoning"), ahead of the providers' own, and names it once.
+        self.assertEqual(pairs(routed['lite'])[0], ('openrouter', 'google/gemini-3.5-flash-lite', 'low'))
+        self.assertEqual(pairs(routed['lite'])[0][:2], P.LITE_LIST_FIRST)
+        self.assertEqual([e for e in pairs(routed['lite']) if e[1] == 'google/gemini-3.5-flash-lite'],
+                         [('openrouter', 'google/gemini-3.5-flash-lite', 'low')])
+        self.assertNotIn('google/gemini-3.8-flash', [e[1] for e in pairs(routed['lite'])])
+        self.assertTrue(all(e[2] == 'low' for e in pairs(routed['lite'])[:-1]))
+        self.assertEqual(pairs(routed['lite'])[-1], ('openrouter', 'openai/gpt-5.6-luna', None))  # no knob
 
     def test_an_unknown_price_keeps_a_twin_out_of_main_and_high(self):
         routed = self.defaults(['glm-coding', 'openrouter'], listing=[])['openrouter']

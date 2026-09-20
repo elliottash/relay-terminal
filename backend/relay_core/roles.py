@@ -19,7 +19,7 @@ from dataclasses import dataclass, replace
 from .presets import (EFFORTS, PRESETS, TIER_LABELS, TIERS, apply_effort, effort_style, match_preset,
                       model_efforts, model_extra, openrouter_twin, provider_tier_model, tier_default,
                       tier_fallbacks, validate_effort, validate_tier)
-from .provider import ProviderConfig
+from .provider import MIN_OUTPUT_TOKENS, ProviderConfig
 from . import customproviders, hosted, localmodels
 
 
@@ -250,12 +250,42 @@ def validate_roles(raw) -> dict[str, dict]:
 
 MAX_TIER_ENTRIES = 32
 GUEST_PRESET_PREFIX = "guest:"      # guest_harness_provider.PRESET_PREFIX, not imported: it pulls in the guest stack
+GUEST_BASE_SCHEME = "harness://"    # guest_harness_provider.BASE_SCHEME, likewise
+# The output budget a guest's config carries, for the context arithmetic only
+# (guest_harness_provider._guest_max_tokens): the guest decides its own reply length.
+GUEST_MAX_TOKENS = max(MIN_OUTPUT_TOKENS, 32_768)
+# The tiers a guest entry may serve (protocol 13.7): Main as a pane's own agent, High for a plan
+# turn, which starts the guest's harness for that one turn (`Agent._begin_plan_turn`). Flash, Lite
+# and Local are side calls and per-turn swaps of a running conversation, which a harness — a whole
+# agent of its own, with its own transcript — cannot be handed mid-way.
+GUEST_TIERS = ("main", "high")
 
 
 def is_guest_preset(preset_id) -> bool:
     """Whether a preset id names a guest harness (Claude Code, Codex; protocol 29.3)."""
     return isinstance(preset_id, str) and preset_id.startswith(GUEST_PRESET_PREFIX) \
         and len(preset_id) > len(GUEST_PRESET_PREFIX)
+
+
+def guest_id_of(preset_id) -> str:
+    """`"codex"` for `"guest:codex"`; "" for anything that is not a guest preset."""
+    return preset_id[len(GUEST_PRESET_PREFIX):] if is_guest_preset(preset_id) else ""
+
+
+def guest_runnable(guest_id: str) -> bool:
+    """Whether this guest's harness can be started here: the adapter imports, the CLI is on PATH,
+    and it has not said it is signed out (protocol 29.3). The default `guest_check` of a
+    RoleResolver; imported lazily because the guest stack is heavy and most resolvers never ask.
+    Any failure is "cannot run", never an error out of a role resolution."""
+    if not guest_id:
+        return False
+    try:
+        from . import guest_harness_provider as ghp
+        return bool(ghp.adapter_available(guest_id)
+                    and (ghp.installations().get(guest_id) or {}).get("installed")
+                    and ghp.login_status(guest_id) is not False)
+    except Exception:
+        return False
 
 
 def validate_tiers(raw) -> dict[str, list[dict]]:
@@ -430,7 +460,7 @@ class RoleResolver:
 
     def __init__(self, main_config: ProviderConfig, main_preset_id: str | None = None,
                  roles: dict | None = None, *, key_lookup=None, main_effort: str | None = None,
-                 tiers: dict | None = None):
+                 tiers: dict | None = None, guest_check=None):
         from . import keystore
         self.main_config = main_config
         main = match_preset(main_config.base_url, main_config.model)
@@ -438,6 +468,10 @@ class RoleResolver:
         self.roles = dict(roles or {})
         self.tiers = dict(tiers or {})
         self.key_lookup = key_lookup or keystore.lookup
+        # Whether a guest's harness can run here (`guest_runnable`), the guest counterpart of the
+        # key lookup: what makes a `guest:` entry of the High list usable. Tests inject it, so
+        # nothing here ever looks for a real claude or codex on PATH.
+        self.guest_check = guest_check or guest_runnable
         self.main_effort = main_effort
         self._cache: dict[str, Resolved] = {}
         self.warnings: list[str] = []
@@ -533,16 +567,28 @@ class RoleResolver:
             effort = None           # a model with no effort knob (Kimi's high-speed ones): not sent
         return preset_id, base_url, model, extra, effort
 
-    def _tier_entries(self, tier: str) -> list[tuple[str | None, str, str, dict, str | None]]:
+    @staticmethod
+    def _guest_target(entry: dict) -> tuple[str, str, str, dict, str | None]:
+        """(preset, base_url, model, extra, effort) for a `guest:` entry: the harness scheme for a
+        base URL, the entry's model ("" is the guest's own default) and its level in the guest's
+        own words. No key, no extras — a guest turn is a process on a pipe, not a request body."""
+        preset_id = entry["preset"]
+        return (preset_id, GUEST_BASE_SCHEME + guest_id_of(preset_id), entry.get("model") or "", {},
+                entry.get("effort"))
+
+    def _tier_entries(self, tier: str, guests: bool = True) -> list[tuple[str | None, str, str, dict, str | None]]:
         """The (preset, base_url, model, extra, effort) candidates of one tier, in order: the
         user's list when there is one (protocol 13.7), otherwise the one built-in default — the
         default provider's row of TIER_DEFAULTS, or the first saved endpoint for Local. [] when
-        there is neither. Guest entries are left out: a guest harness can be a pane's own agent,
-        never a per-turn swap or a side call, and Main is the only list that may name one."""
+        there is neither. A guest entry is a candidate only in the tiers a guest may serve
+        (GUEST_TIERS: High, where a plan turn starts its harness for the turn) and only while
+        ``guests`` is asked for; elsewhere it is left out, because a Flash or Lite call is a side
+        call or a per-turn swap of a running conversation, which a harness cannot take."""
         listed = [entry for entry in self.tiers.get(tier) or []
-                  if not is_guest_preset(entry.get("preset"))]
+                  if not is_guest_preset(entry.get("preset")) or (guests and tier in GUEST_TIERS)]
         if listed:
-            return [self._list_target(entry, tier) for entry in listed]
+            return [self._guest_target(entry) if is_guest_preset(entry.get("preset"))
+                    else self._list_target(entry, tier) for entry in listed]
         if self.tiers.get(tier):
             return []               # a list of nothing but guests: nothing this tier can run on
         if tier == "local":
@@ -576,15 +622,28 @@ class RoleResolver:
                             effort, source, tier="high")
         return self._main(role, tier="high")
 
-    def _tier(self, role: str, tier: str, source: str, effort: str | None = None) -> Resolved:
+    def _guest(self, role: str, preset_id: str, base_url: str, model: str, effort: str | None,
+               source: str, tier: str) -> Resolved:
+        """A `guest:` entry of the High list as a role's model (protocol 13.7): a config on the
+        harness scheme that `Agent._begin_plan_turn` starts the guest from, at the entry's level in
+        the guest's own words. Not `config.validate()`d, for the reason
+        `guest_harness_provider.config_for_preset` gives: there is no endpoint and no key here."""
+        config = ProviderConfig(base_url, model, "", {}, GUEST_MAX_TOKENS)
+        return Resolved(role, config, preset_id, effort, source, tier=tier)
+
+    def _tier(self, role: str, tier: str, source: str, effort: str | None = None,
+              guests: bool = True) -> Resolved:
         """A tier's model for one role: the **first usable entry** of the tier's list, at that
         entry's level (protocol 13.7) — usable meaning a stored key, a model server on this machine
-        or Relay Free where it works. With no list the tier is its one built-in default.
+        or Relay Free where it works, or, for a guest entry of the High list, a harness that can
+        run here (`guest_check`). With no list the tier is its one built-in default.
 
         A tier with nothing usable steps one tier towards Main (Lite → Flash → Main); the Main tier
         is the pane's own model, so this never hard-fails. High with no list is the main model at
         max reasoning (_high_default); with one it is resolved like any other tier, and a list
-        with nothing usable steps straight down to Main."""
+        with nothing usable steps straight down to Main. ``guests=False`` resolves as if the High
+        list had no guest entries: where a plan turn goes when the guest it resolved to could not
+        be started after all (`planning_target`)."""
         validate_tier(tier)
         if tier == "main":
             # The pane's own model, whatever `tiers.main` lists: that list is the order a failing
@@ -595,28 +654,38 @@ class RoleResolver:
         for candidate in tier_fallbacks(tier):
             if candidate == "main":
                 break
-            entries = self._tier_entries(candidate)
+            entries = self._tier_entries(candidate, guests)
             if not entries and not self.tiers.get(candidate):
                 break               # no list and no built-in default: nothing further down either
+            guest_skipped = False
             for skipped, (preset_id, base_url, model, extra, tier_effort) in enumerate(entries):
-                try:
-                    resolved = self._build(role, preset_id, base_url, model, extra,
-                                           effort if effort is not None else tier_effort, source,
-                                           candidate)
-                except ValueError:
-                    if len(entries) == 1:
-                        raise           # the one-model form has always said what is wrong with it
-                    continue            # one bad entry must not cost the list the ones below it
-                if resolved.source == "fallback":
-                    continue            # no key for that provider: the next entry, then the next tier
+                level = effort if effort is not None else tier_effort
+                if is_guest_preset(preset_id):
+                    # A guest of the High list: usable when its harness runs here. Skipped
+                    # otherwise, and the level is kept as written — it is the guest's own word.
+                    if not self.guest_check(guest_id_of(preset_id)):
+                        guest_skipped = True
+                        continue
+                    resolved = self._guest(role, preset_id, base_url, model, level, source, candidate)
+                else:
+                    try:
+                        resolved = self._build(role, preset_id, base_url, model, extra, level, source,
+                                               candidate)
+                    except ValueError:
+                        if len(entries) == 1:
+                            raise           # the one-model form has always said what is wrong with it
+                        continue            # one bad entry must not cost the list the ones below it
+                    if resolved.source == "fallback":
+                        continue            # no key for that provider: the next entry, then the next tier
                 if candidate != tier:
                     # Expected and harmless: a Lite/Flash model on a provider with no key steps towards
                     # Main. Shown inline by the roles modal, never raised as a protocol warning.
                     resolved.note = (f"No stored key for the {TIER_LABELS[tier]} model; "
                                      f"using {TIER_LABELS[candidate]}.")
                 elif skipped:
+                    why = "no stored key, or a guest that cannot run here" if guest_skipped else "no stored key"
                     resolved.note = (f"The first {skipped} of the {TIER_LABELS[tier]} list cannot be "
-                                     f"used right now (no stored key); using {model}.")
+                                     f"used right now ({why}); using {model or preset_id}.")
                 return resolved
         if tier == "local":
             # Nothing set up rather than no key, and Local is not a step on the ladder: it falls
@@ -670,7 +739,8 @@ class RoleResolver:
         it (`hosted.available`); there is no pane-wide switch for it any more. A model server on
         this machine is allowed for the same reason: the user ranked it, so its answers are what
         they asked for. A guest harness or an unknown id is not a provider this resolver can
-        build, and gets None: a guest can be a pane's own agent, never a per-turn swap. A missing
+        build, and gets None: a guest serves a pane, or a plan turn from its first step
+        (`planning_target`), and is never where a turn already under way is moved to. A missing
         model means the provider's own model for the tier the turn is on.
 
         None here means "skip this entry", never an error: a stale entry (a key since deleted, an
@@ -738,10 +808,13 @@ class RoleResolver:
         if not preset_id or entry.get("preset") != preset_id:
             return False
         named = entry.get("model") or ""
+        if is_guest_preset(preset_id):
+            # A guest entry is the guest: what it runs is what the CLI reported once started
+            # ("claude-fable-5-1" for an entry that said "fable"), so the name is matched loosely
+            # and an entry without one matches whatever it runs.
+            return not named or not model or named == model or named in model
         if named:
             return named == model
-        if is_guest_preset(preset_id):
-            return True             # a guest entry without a model is the guest, whatever it runs
         try:
             return self._list_target(entry, tier)[2] == model
         except KeyError:
@@ -843,14 +916,27 @@ class RoleResolver:
             self.warnings.append(resolved.warning)
         return resolved
 
-    def planning_target(self) -> Resolved | None:
+    def planning_target(self, guests: bool = True) -> Resolved | None:
         """Where a plan-mode turn goes when the planning role is not the main agent (owner, 2026-09-19).
 
         None means plan turns stay on the pane's own model: nothing is configured, and the High
         tier's default (the main model at max reasoning) either cannot move the provider's effort
         knob or the pane's effort is already max.
+
+        A `guest:` entry of the High list resolves here like any other (protocol 13.7): the agent
+        starts that guest's harness for the turn. ``guests=False`` is the agent's second ask when
+        the harness would not start: the same resolution with the guest entries left out, so the
+        turn goes where it would have gone without them.
         """
-        resolved = self.resolve("planning")
+        if guests:
+            resolved = self.resolve("planning")
+        else:
+            entry = self.roles.get("planning")
+            if entry and not entry.get("tier"):
+                resolved = self.resolve("planning")     # pinned to an endpoint: never a guest
+            else:
+                resolved = self._tier("planning", "high", "configured" if entry else "default",
+                                      (entry or {}).get("effort"), guests=False)
         return None if resolved.is_main else resolved
 
     def vision_target(self) -> Resolved | None:
@@ -929,14 +1015,18 @@ class RoleResolver:
 
     def _list_summary(self, tier: str) -> list[dict]:
         """A tier's stored list with ``usable`` per entry: a stored key, a local endpoint or
-        Relay Free where it works — and, for a guest, being in the Main list, the only one a
-        guest can serve. One key lookup per preset, however many entries name it."""
+        Relay Free where it works — and, for a guest, being in the Main list, or in the High list
+        with a harness that runs here (GUEST_TIERS). One key lookup per preset, however many
+        entries name it."""
         known: dict[str, bool] = {}
         out = []
         for entry in self.tiers.get(tier) or []:
             preset_id = entry.get("preset")
             if is_guest_preset(preset_id):
-                usable = tier == "main"
+                if preset_id not in known:
+                    known[preset_id] = tier == "main" or (tier == "high"
+                                                          and bool(self.guest_check(guest_id_of(preset_id))))
+                usable = known[preset_id]
             elif preset_id:
                 if preset_id not in known:
                     known[preset_id] = bool(localmodels.find(preset_id)) or self.has_key(preset_id)

@@ -602,10 +602,36 @@ GUEST_MODEL_ALIASES = {"fable": "claude-fable-5-1", "opus": "claude-opus-5",
 _MAIN_GROUP_ORDER = {"guest": 0, "subscription": 0, "payg": 1, "aggregator": 1, "custom": 1,
                      "included": 2}
 
+# What the openrouter default puts first in the Lite list (owner, 2026-09-20: "I thought it's 3.5
+# flash lite with no reasoning"): the cheapest Gemini, at its lowest level. Not `_LITE_VIA_OPENROUTER`,
+# which is the built-in Lite row a pane resolves to with no list at all and is left as it was.
+LITE_LIST_FIRST = ("openrouter", "google/gemini-3.5-flash-lite")
+
 
 def _top_level(levels: list[str]) -> str | None:
     """The highest level of a model's own list, which is what High runs a model at: max where the
     provider has one, "high" on Gemini, "medium" on Relay Free, None with no knob at all."""
+    return levels[-1] if levels else None
+
+
+def _low_level(preset_id: str, model: str) -> str | None:
+    """The lowest level a model offers, which is what every Flash and Lite entry of the default
+    lists says outright (owner, 2026-09-20: the lite list is "with no reasoning"): "low" on every
+    provider with a knob, None only for a model with none (Kimi's high-speed ones). Explicit so the
+    GUI shows a level rather than a blank; a model the catalog does not name gets its provider's."""
+    levels = model_efforts(preset_id, model)
+    if levels is None:
+        preset = PRESETS.get(preset_id)
+        levels = effort_levels(preset.effort_style) if preset is not None else []
+    return levels[0] if levels else None
+
+
+def _guest_top_level(guest_id: str, levels: list[str]) -> str | None:
+    """A guest's top level for the High list, in the CLI's own words (protocol 29.3): Claude Code's
+    last ("max"); Codex's "xhigh" when the model offers it (owner, 2026-09-20: "for codex planning
+    you pick xhigh, not max"), else its last. None when the guest names no levels."""
+    if guest_id == "codex" and "xhigh" in levels:
+        return "xhigh"
     return levels[-1] if levels else None
 
 
@@ -634,18 +660,22 @@ def tier_list_defaults(usable, *, local=(), custom=(), guests=(), listing=None) 
 
     plain — `main`: each provider's Main-tier model; subscriptions (and guests) first, then
     pay-as-you-go, Relay Free last; by INTELLIGENCE descending within a group, unknown last; each
-    at the provider's own default level. `high`: the same models at their top level, without the
-    guests (a guest serves a pane, never a per-turn swap). `flash` / `lite`: each provider's Flash
-    model, and its Lite model when that is on the provider itself. `local`: the saved endpoints.
+    at the provider's own default level. `high`: the same models at their top level, the guests
+    included at theirs in the CLI's own words (_guest_top_level: a plan turn runs through the
+    guest's harness, protocol 13.7). `flash` / `lite`: each provider's Flash model, and its Lite
+    model when that is on the provider itself, every entry at the model's lowest level
+    (_low_level; owner, 2026-09-20: Lite is "with no reasoning"). `local`: the saved endpoints.
 
     openrouter — the plain lists, then, only with an `openrouter` key, the OpenRouter twins of each
     list's models *after all of them*, cost-sensitive ones only
-    (OPENROUTER_TWIN_MAX_COMPLETION_USD_PER_MTOK). `lite` starts with the OpenRouter model Relay
-    already runs chores on (_LITE_VIA_OPENROUTER), ahead of the providers' own: chores and
-    transcription are where the owner wants OpenRouter first. Without the key the two are equal.
+    (OPENROUTER_TWIN_MAX_COMPLETION_USD_PER_MTOK), a Flash or Lite twin at "low" where the listing
+    says it takes a level. `lite` starts with LITE_LIST_FIRST (Gemini 3.5 Flash-Lite through
+    OpenRouter, at low), ahead of the providers' own: chores and transcription are where the owner
+    wants OpenRouter first. Without the key the two are equal.
     """
     usable = [p for p in PRESETS if p in set(usable)]             # PRESETS order, built-ins only
     ranked: list[tuple[tuple, str, str, str | None, bool]] = []    # (sort key, preset, model, effort, guest)
+    guest_top: dict[str, str | None] = {}                          # preset -> its High level
     order = 0
     for row in guests:
         if not (isinstance(row, dict) and row.get("harness") and row.get("logged_in") is not False
@@ -655,6 +685,11 @@ def tier_list_defaults(usable, *, local=(), custom=(), guests=(), listing=None) 
         model = first.get("id") or ""
         score = INTELLIGENCE.get(GUEST_MODEL_ALIASES.get(model, model))
         ranked.append(((0, -(score or -1), order), row["id"], model, first.get("default_effort") or None, True))
+        levels = first.get("efforts") if isinstance(first.get("efforts"), list) else None
+        if not levels:
+            levels = row.get("efforts") if isinstance(row.get("efforts"), list) else []
+        guest_id = row.get("guest") if isinstance(row.get("guest"), str) else row["id"].split(":", 1)[-1]
+        guest_top[row["id"]] = _guest_top_level(guest_id, [l for l in levels if isinstance(l, str)])
         order += 1
     for preset_id in usable:
         preset = PRESETS[preset_id]
@@ -673,6 +708,7 @@ def tier_list_defaults(usable, *, local=(), custom=(), guests=(), listing=None) 
     high = []
     for _, preset_id, model, effort, guest in ranked:
         if guest:
+            high.append(_list_entry(preset_id, model, guest_top.get(preset_id)))
             continue
         levels = model_efforts(preset_id, model)
         high.append(_list_entry(preset_id, model, _top_level(levels) if levels is not None else None))
@@ -682,8 +718,7 @@ def tier_list_defaults(usable, *, local=(), custom=(), guests=(), listing=None) 
             entry = tier_default(preset_id, tier)
             if entry is None or entry[0] != preset_id:
                 continue              # Lite through OpenRouter is OpenRouter's row, not this one's
-            made = _list_entry(preset_id, entry[1],
-                               infer_effort(PRESETS[preset_id].effort_style, entry[2]))
+            made = _list_entry(preset_id, entry[1], _low_level(preset_id, entry[1]))
             if made not in out:
                 out.append(made)
     plain = {"main": main, "high": high, "flash": flash, "lite": lite,
@@ -695,8 +730,17 @@ def tier_list_defaults(usable, *, local=(), custom=(), guests=(), listing=None) 
             from . import openrouter_catalog      # here, not at the top: it imports this module
             listing = openrouter_catalog.rows()
         live = {row["id"]: row for row in listing if isinstance(row, dict) and isinstance(row.get("id"), str)}
-        first = _list_entry(_LITE_VIA_OPENROUTER[0], _LITE_VIA_OPENROUTER[1], None)
-        routed["lite"] = [first] + [entry for entry in routed["lite"] if entry != first]
+
+        def twin_low(slug: str) -> str | None:
+            # "low" for a twin that takes a level: the listing's word first, the catalog's otherwise.
+            efforts = (live.get(slug) or {}).get("efforts")
+            if not isinstance(efforts, list):
+                efforts = model_efforts("openrouter", slug)
+            return None if efforts == [] else "low"
+
+        first = _list_entry(LITE_LIST_FIRST[0], LITE_LIST_FIRST[1], twin_low(LITE_LIST_FIRST[1]))
+        routed["lite"] = [first] + [entry for entry in routed["lite"]
+                                    if (entry["preset"], entry["model"]) != LITE_LIST_FIRST]
         for tier in ("main", "high", "flash", "lite"):
             have = {(entry["preset"], entry["model"]) for entry in routed[tier]}
             for entry in plain[tier]:
@@ -710,10 +754,12 @@ def tier_list_defaults(usable, *, local=(), custom=(), guests=(), listing=None) 
                 if price is not None and price > OPENROUTER_TWIN_MAX_COMPLETION_USD_PER_MTOK:
                     continue
                 have.add(("openrouter", slug))
-                # High runs the twin at max too, unless the listing says it takes no level.
+                # High runs the twin at max too, unless the listing says it takes no level; a
+                # Flash or Lite twin says "low" outright, like every entry of those two lists.
                 takes_level = (live.get(slug) or {}).get("efforts") != []
                 routed[tier].append(_list_entry("openrouter", slug,
-                                                "max" if tier == "high" and takes_level else None))
+                                                "max" if tier == "high" and takes_level else
+                                                twin_low(slug) if tier in ("flash", "lite") else None))
     return {"plain": plain, "openrouter": routed}
 
 

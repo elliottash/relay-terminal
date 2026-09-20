@@ -506,6 +506,35 @@ class TurnTests(unittest.TestCase):
             provider.complete([{"role": "user", "content": "go"}], [], lambda e: None, cancel)
         self.assertEqual(harness.interrupts, 1)
 
+    def test_an_opening_replaces_the_first_prompt_once(self):
+        """A fresh session started mid-conversation (a plan turn on a High-list guest, 13.7) is
+        handed an opening in place of its first prompt — built from the conversation when the call
+        is made — and only that once; the last message's images still travel with it."""
+        harness, provider = build([{"events": [], "result": ("one", "end", {})},
+                                   {"events": [], "result": ("two", "end", {})}])
+        seen = []
+
+        def opening(messages):
+            seen.append(len(messages))
+            return "RULES + transcript + " + messages[-1]["content"][0]["text"]
+
+        provider.opening = opening
+        messages = [{"role": "user", "content": "first"},
+                    {"role": "assistant", "content": "ok"},
+                    {"role": "user", "content": content_parts("now plan", [{"media_type": "image/png", "raw": PNG}])}]
+        provider.complete(messages, [], lambda e: None, threading.Event())
+        self.assertEqual(seen, [3])
+        self.assertEqual(harness.sent[0]["prompt"], "RULES + transcript + now plan")
+        self.assertEqual(harness.sent[0]["attachments"][0]["kind"], "image")
+        self.assertIsNone(provider.opening)
+        provider.complete(messages + [{"role": "user", "content": "and then"}], [], lambda e: None, threading.Event())
+        self.assertEqual(harness.sent[1]["prompt"], "and then")
+        # A plain string is taken as it is.
+        harness2, provider2 = build([{"events": [], "result": ("", "end", {})}])
+        provider2.opening = "verbatim"
+        provider2.complete([{"role": "user", "content": "ignored"}], [], lambda e: None, threading.Event())
+        self.assertEqual(harness2.sent[0]["prompt"], "verbatim")
+
     def test_a_side_call_never_reaches_the_guest(self):
         """A pane title, a summary or compaction must not spend a guest turn (29.3 deviation note)."""
         events, agent, provider = run_turn(

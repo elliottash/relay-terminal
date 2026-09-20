@@ -15,10 +15,13 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).parent))
 
 from relay_core import agent as agent_module                                    # noqa: E402
+from relay_core import guest_harness_provider as ghp                            # noqa: E402
 from relay_core.agent import Agent                                             # noqa: E402
+from relay_core.guest_harness import HarnessNotAvailable                       # noqa: E402
 from relay_core.presets import PRESETS                                         # noqa: E402
 from relay_core.provider import ProviderConfig, ProviderError                                 # noqa: E402
-from relay_core.roles import RoleResolver                                      # noqa: E402
+from relay_core.roles import RoleResolver, validate_tiers                      # noqa: E402
+from guest_harness_fake import FakeHarness, ev                                 # noqa: E402
 from test_images import RecordingProvider                                      # noqa: E402
 
 KIMI = ProviderConfig("https://api.moonshot.ai/v1", "kimi-k3", "key", {"reasoning_effort": "high"}, 8192)
@@ -59,9 +62,12 @@ class RefusingPlanner(TrackedProvider):
         return super().complete(messages, tools, emit, cancel)
 
 
-def resolver(main: ProviderConfig, preset_id: str, roles=None):
-    """A RoleResolver with every provider's key present, so nothing falls back for lack of a key."""
-    return RoleResolver(main, preset_id, roles or {}, key_lookup=lambda preset: "key")
+def resolver(main: ProviderConfig, preset_id: str, roles=None, tiers=None, guests=()):
+    """A RoleResolver with every provider's key present, so nothing falls back for lack of a key.
+    ``guests`` are the guest ids whose harness "runs here" — injected, so no test ever finds the
+    real claude or codex on PATH and starts it (protocol 29)."""
+    return RoleResolver(main, preset_id, roles or {}, key_lookup=lambda preset: "key",
+                        tiers=validate_tiers(tiers), guest_check=lambda guest_id: guest_id in guests)
 
 
 class PlanTurnTests(unittest.TestCase):
@@ -80,14 +86,14 @@ class PlanTurnTests(unittest.TestCase):
         patch.start()
         self.addCleanup(patch.stop)
 
-    def build(self, config, preset_id, roles=None):
+    def build(self, config, preset_id, roles=None, tiers=None, guests=()):
         self.events: list = []
         return Agent(config, self.temp.name, self.events.append, preset_id=preset_id,
-                     roles=resolver(config, preset_id, roles), track_requests=False,
+                     roles=resolver(config, preset_id, roles, tiers, guests), track_requests=False,
                      todo_tool=False, completion_check=False)
 
-    def plan_agent(self, config=KIMI, preset_id="kimi", roles=None):
-        agent = self.build(config, preset_id, roles)
+    def plan_agent(self, config=KIMI, preset_id="kimi", roles=None, tiers=None, guests=()):
+        agent = self.build(config, preset_id, roles, tiers, guests)
         agent.set_mode("plan")
         return agent
 
@@ -313,6 +319,189 @@ class PlanTurnTests(unittest.TestCase):
         self.assertNotIn("plan_route", self.kinds())
         self.assertEqual(self.served_configs()[-1][1], {})
         self.assertIs(agent.provider, original)
+
+
+GLM = PRESETS["glm-coding"]
+GLM_CONFIG = ProviderConfig(GLM.base_url, GLM.model, "key", dict(GLM.extra), 8192)
+PLAN_TEXT = "# Split the widget\n\n## Goal\n\nTwo files.\n\n1. Move it.\n2. Test it.\n"
+
+
+class GuestPlanTurnTests(PlanTurnTests):
+    """A `guest:` entry of the High list serves a plan turn through its harness (protocol 13.7;
+    owner, 2026-09-20: "claude and codex weren't showing up under 'high' models"). Everything runs
+    on the scripted FakeHarness: no test starts a real claude or codex."""
+
+    HIGH = {"high": [{"preset": "guest:codex", "model": "", "effort": "xhigh"}]}
+
+    def harness(self, script=None, **kwargs):
+        kwargs.setdefault("guest", "codex")
+        kwargs.setdefault("session_id", "cx-1")
+        kwargs.setdefault("model", "gpt-5.5-codex")
+        made = FakeHarness(script if script is not None else
+                           [{"events": [ev("delta", text=PLAN_TEXT)], "result": (PLAN_TEXT, "end", {})}],
+                           **kwargs)
+        patch = mock.patch.object(ghp, "make_harness", return_value=made)
+        patch.start()
+        self.addCleanup(patch.stop)
+        return made
+
+    def glm_planner(self, tiers=None):
+        agent = self.plan_agent(GLM_CONFIG, "glm-coding", tiers=tiers or self.HIGH, guests=("codex",))
+        agent.messages.append({"role": "user", "content": "earlier: look at widget.py", "relay_kind": "prompt"})
+        agent.messages.append({"role": "assistant", "content": "",
+                               "tool_calls": [{"id": "c0", "type": "function",
+                                               "function": {"name": "read_file", "arguments": '{"path": "widget.py"}'}}]})
+        agent.messages.append({"role": "tool", "tool_call_id": "c0", "content": "def widget(): pass"})
+        agent.messages.append({"role": "assistant", "content": "It is one function."})
+        return agent
+
+    def test_a_plan_turn_on_a_glm_pane_runs_through_codex_and_comes_back(self):
+        harness = self.harness()
+        agent = self.glm_planner()
+        own = agent.provider
+        agent.ask("plan splitting the widget")
+        self.assertEqual(self.events[-1]["event"], "done")
+        # Started for the turn: in the pane's workspace, read-only, at the entry's level in codex's
+        # own word, on the guest's own model (the entry named none).
+        self.assertEqual(harness.starts, [{"cwd": self.temp.name, "model": None, "resume": None, "fork": False,
+                                           "permissions": agent_module.PLAN_GUEST_PERMISSIONS, "effort": "xhigh"}])
+        self.assertEqual(agent_module.PLAN_GUEST_PERMISSIONS, "deny")
+        # The route says where the turn went and where it comes back to, guest and all.
+        route = self.event("plan_route")
+        self.assertEqual((route["model"], route["preset"], route["base_url"], route["effort"], route["guest"],
+                          route["guest_session"], route["from_model"], route["from_preset"]),
+                         ("gpt-5.5-codex", "guest:codex", "harness://codex", "xhigh", "codex", "cx-1",
+                          "glm-5.3", "glm-coding"))
+        self.assertEqual(route["text"], f"Plan mode · this turn runs on gpt-5.5-codex (Codex), "
+                                        f"then back to glm-5.3 ({GLM.label}).")
+        self.assertIn("Plan turn · gpt-5.5-codex (Codex)", [e["text"] for e in self.events if e["event"] == "status"])
+        # The harness took one prompt: the plan rules in its own terms, the conversation so far
+        # (the user's words, the tools Relay's agent called, their results) and the request.
+        self.assertEqual(len(harness.sent), 1)
+        sent = harness.sent[0]["prompt"]
+        self.assertTrue(sent.startswith("PLAN MODE."))
+        self.assertIn("do not modify the workspace", sent)
+        self.assertIn("reply with the complete implementation plan as Markdown", sent)
+        self.assertIn("User:\nearlier: look at widget.py", sent)
+        self.assertIn("(called read_file {\"path\": \"widget.py\"})", sent)
+        self.assertIn("Tool result:\ndef widget(): pass", sent)
+        self.assertIn("Assistant:\nIt is one function.", sent)
+        self.assertTrue(sent.endswith("The request to plan:\n\nplan splitting the widget"), sent[-120:])
+        self.assertNotIn("write_plan", sent)              # Relay's plan note is not the guest's
+        self.assertNotIn("[Relay context", sent)
+        # Its reply is the plan: saved exactly as write_plan saves one, and said so.
+        written = self.event("plan_written")
+        self.assertEqual((written["title"], written["guest"]), ("Split the widget", "codex"))
+        self.assertTrue(written["path"].startswith(str(agent.plans_dir)))
+        self.assertEqual(Path(written["path"]).read_text(), PLAN_TEXT)
+        self.assertEqual(agent.plan_path, written["path"])
+        self.assertEqual(agent.messages[-1], {"role": "assistant", "content": PLAN_TEXT})
+        # The pane's own model was never asked, and the pane is back on it, the guest ended.
+        self.assertEqual(self.served_configs(), [])
+        ended = self.event("plan_route_ended")
+        self.assertEqual((ended["model"], ended["was"], ended["was_preset"]), ("glm-5.3", "gpt-5.5-codex", "guest:codex"))
+        self.assertEqual(ended["text"], f"Back to glm-5.3 ({GLM.label}).")
+        self.assertIs(agent.provider, own)
+        self.assertFalse(agent._injected_provider)
+        self.assertEqual((agent.config.model, agent.config.base_url, agent.effort),
+                         ("glm-5.3", GLM.base_url, "high"))
+        self.assertIsNone(agent.preset is None or None)
+        self.assertEqual(agent.preset.id, "glm-coding")
+        self.assertTrue(harness.closed)
+        self.assertIsNone(agent._planning)
+        # ... and the next plan turn starts a fresh session (one harness per plan turn).
+        second = self.harness(session_id="cx-2")
+        agent.ask("plan it again")
+        self.assertEqual(self.events[-1]["event"], "done")
+        self.assertEqual(len(second.starts), 1)
+        self.assertTrue(second.closed)
+        self.assertEqual(self.kinds().count("plan_route"), 2)
+        self.assertEqual(self.served_configs(), [])
+
+    def test_a_build_turn_never_starts_the_guest(self):
+        harness = self.harness()
+        agent = self.build(GLM_CONFIG, "glm-coding", tiers=self.HIGH, guests=("codex",))
+        agent.ask("do it")
+        self.assertEqual(self.events[-1]["event"], "done")
+        self.assertEqual(harness.starts, [])
+        self.assertEqual(self.served_configs()[-1][0], "glm-5.3")
+
+    def test_a_guest_that_will_not_start_is_said_and_the_turn_plans_without_it(self):
+        harness = self.harness(start_error=HarnessNotAvailable("codex is not installed."))
+        tiers = {"high": [{"preset": "guest:codex", "effort": "xhigh"},
+                          {"preset": "kimi", "model": "kimi-k3", "effort": "max"}]}
+        agent = self.glm_planner(tiers)
+        agent.ask("plan splitting the widget")
+        self.assertEqual(self.events[-1]["event"], "done")
+        self.assertTrue(harness.closed)
+        status = next(e["text"] for e in self.events if e["event"] == "status" and "could not start" in e["text"])
+        self.assertIn("Codex could not start for this plan turn", status)
+        self.assertIn("not installed", status)
+        self.assertIn("planning without it", status)
+        # The entry below the guest served the turn, as a plan turn, and the pane came back.
+        route = self.event("plan_route")
+        self.assertEqual((route["model"], route["preset"], route["effort"]), ("kimi-k3", "kimi", "max"))
+        self.assertNotIn("guest", route)
+        self.assertEqual([c[0] for c in self.served_configs()], ["kimi-k3"])
+        self.assertIsNotNone(self.event("plan_route_ended"))
+        self.assertEqual(agent.config.model, "glm-5.3")
+        self.assertIsNone(self.event("plan_written"))
+        # With nothing below it: no route at all, the pane's own model plans.
+        self.harness(start_error=HarnessNotAvailable("codex is not installed."))
+        agent = self.glm_planner()
+        agent.ask("plan splitting the widget")
+        self.assertEqual(self.events[-1]["event"], "done")
+        self.assertIsNone(self.event("plan_route"))
+        self.assertEqual([c[0] for c in self.served_configs()], ["kimi-k3", "glm-5.3"])
+
+    def test_a_guest_whose_turn_fails_hands_the_plan_back_to_the_pane(self):
+        # The harness answered the turn with an error: 15.2.3 as for any planning model that is
+        # not answering — the routing ends, the guest with it, and the pane's own model plans.
+        harness = self.harness([{"events": [], "raise": HarnessNotAvailable("codex crashed.")}])
+        agent = self.glm_planner()
+        agent.ask("plan splitting the widget")
+        self.assertEqual(self.events[-1]["event"], "done")
+        dropped = next(e for e in self.events if e["event"] == "provider_retry")
+        self.assertEqual((dropped["reason"], dropped["from_model"], dropped["to_model"]),
+                         ("route_dropped", "gpt-5.5-codex", "glm-5.3"))
+        self.assertEqual(dropped["text"], f"Planning model gpt-5.5-codex (Codex) is not answering; "
+                                          f"continuing on glm-5.3 ({GLM.label}).")
+        self.assertTrue(harness.closed)
+        self.assertEqual([c[0] for c in self.served_configs()], ["glm-5.3"])
+        self.assertIsNone(self.event("plan_written"))
+        self.assertEqual(agent.config.model, "glm-5.3")
+
+    def test_an_empty_reply_writes_no_plan(self):
+        self.harness([{"events": [], "result": ("", "end", {})}])
+        agent = self.glm_planner()
+        agent.ask("plan splitting the widget")
+        self.assertEqual(self.events[-1]["event"], "done")
+        self.assertIsNone(self.event("plan_written"))
+        self.assertIsNone(agent.plan_path)
+
+    def test_a_pane_that_is_itself_a_guest_keeps_todays_behaviour(self):
+        # An injected provider (a guest pane) is never replaced: the pane's own harness serves the
+        # plan turn, no second harness is started, and no route is announced.
+        pane = FakeHarness([{"events": [ev("delta", text="the plan")], "result": ("the plan", "end", {})}],
+                           guest="claude", session_id="cl-1", model="claude-fake")
+        pane.start(cwd=self.temp.name)
+        provider = ghp.HarnessProvider(ProviderConfig("harness://claude", "claude-fake", "", {}, 32_768),
+                                       pane, "claude")
+        other = self.harness()
+        self.events = []
+        agent = Agent(provider.config, self.temp.name, self.events.append, preset_id="guest:claude",
+                      provider=provider, roles=resolver(provider.config, "guest:claude", tiers=self.HIGH,
+                                                        guests=("codex", "claude")),
+                      track_requests=False, todo_tool=False, completion_check=False)
+        ghp.attach(agent, provider)
+        agent.set_mode("plan")
+        agent.ask("plan this")
+        self.assertEqual(self.events[-1]["event"], "done")
+        self.assertEqual(other.starts, [])
+        self.assertEqual(len(pane.sent), 1)
+        self.assertNotIn("plan_route", self.kinds())
+        self.assertIsNone(self.event("plan_written"))       # the pane's own guest: 29.3 as before
+        self.assertIs(agent.provider, provider)
 
 
 if __name__ == "__main__":

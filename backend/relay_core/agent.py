@@ -34,8 +34,9 @@ from .attachments import format_block as format_attachments
 from .attachments import image_block, images as image_attachments, replace_images
 from .checkpoints import CheckpointStore
 from .context import DEFAULT_THRESHOLD, ContextTracker
-from .planning import (PLAN_BLOCKED_TOOLS, PLAN_MODE_NOTE, WRITE_PLAN_SPEC, validate_mode, validate_plan_args,
-                       write_plan)
+from .planning import (PLAN_BLOCKED_TOOLS, PLAN_MODE_NOTE, WRITE_PLAN_SPEC, guest_plan_prompt, plan_from_reply,
+                       validate_mode, validate_plan_args, write_plan)
+from .roles import guest_id_of, is_guest_preset
 from .presets import (apply_effort, context_window_for, effort_style, infer_effort,
                       model_supports_vision, resolve_preset, tier_default, validate_effort)
 from .program_input import DEFAULT_MAX_WRITES, clip_screen, validate_grant
@@ -89,6 +90,11 @@ MAX_STALL_RETRIES = 1
 # reached the user. A reasoning model can spend the whole budget thinking and deliver neither text
 # nor a tool call; failing the turn there throws away every tool result already in it.
 MAX_TRUNCATION_RETRIES = 1
+# The posture a guest harness is started with for a plan turn (protocol 13.7): plan mode writes
+# nothing, and a guest has no tool of Relay's to refuse a write through, so the refusal is the
+# guest's own — codex's read-only sandbox, claude's permission prompts declined
+# (guest_harness.PERMISSIONS "deny"). Reads and read-only commands within it are the investigation.
+PLAN_GUEST_PERMISSIONS = "deny"
 
 _log = logs.get("agent")
 
@@ -175,6 +181,13 @@ def _provider_name(model: str, preset) -> str:
     if preset is None:
         return model
     return preset.label if preset.hosted else f"{model} ({preset.label})"
+
+
+def _guest_label(preset_id) -> str:
+    """How a guest preset is named to a person ("Codex"), for the plan-route notes. Imported
+    lazily: the guest stack is heavy and only a plan turn on a guest ever asks."""
+    from . import guest_harness_provider
+    return guest_harness_provider.guest_name(preset_id) or guest_id_of(preset_id) or "the guest"
 
 
 def _host(base_url: str) -> str:
@@ -1830,6 +1843,8 @@ class Agent:
                 self.emit(self.context_event())
                 calls = message.get("tool_calls", [])
                 if not calls:
+                    # A plan turn on a High-list guest (13.7): the guest's reply is its plan.
+                    self._save_guest_plan(record, message.get("content"))
                     # Monologue (card #2CZP): the same answer again, with no action taken. It can only
                     # reach the threshold through the completion checks below — they are the one thing
                     # that keeps a turn without tool calls going — so the nudge is sent inside that
@@ -1999,10 +2014,34 @@ class Agent:
         """
         if not swap["adopted"]:
             return
-        self.provider = self._hook_preempt(_with_first_token(_provider_for(target.config, self.stall_timeout_s),
-                                                             self.first_token_timeout_s))
+        guest = swap.get("guest")
+        if guest is not None and guest.config is not target.config:
+            # The turn is moving off the harness this route started (the next entry of the High
+            # list, `_next_plan_model`): that guest's part is over, and its process with it.
+            self._end_route_guest(swap)
+            guest = None
+        if guest is not None:
+            # A plan turn on a High-list guest (protocol 13.7): the harness `_begin_plan_turn`
+            # started serves the turn, bound to this agent for the turn id and the per-call
+            # records its events carry, the way a guest pane's provider is.
+            guest.bind(self)
+            self.provider = guest
+        else:
+            self.provider = self._hook_preempt(_with_first_token(_provider_for(target.config, self.stall_timeout_s),
+                                                                 self.first_token_timeout_s))
         self.effort = None
         self._adopt_model(target.config, swap["to_preset"])
+
+    def _end_route_guest(self, swap: dict) -> None:
+        """End the guest harness a plan route started, if one is up: its session was for this
+        turn only (protocol 13.7), so nothing keeps the process once the turn leaves it."""
+        guest = swap.pop("guest", None)
+        if guest is None:
+            return
+        swap.pop("to_name", None)
+        guest.close()
+        logs.event(_log, "plan_guest_ended", session=self.session_id, turn=swap.get("turn_id"),
+                   guest=guest.guest_id, model=guest.config.model)
 
     @staticmethod
     def _preset_id(preset) -> str | None:
@@ -2018,12 +2057,13 @@ class Agent:
         vendor (Z.AI's standard API and its Coding Plan) serve the same model id and the note has
         to say which one the turn is spending.
         """
-        return (_provider_name(swap["model"], swap["to_preset"]),
+        return (swap.get("to_name") or _provider_name(swap["model"], swap["to_preset"]),
                 _provider_name(swap["back_to"], swap["preset"]))
 
     def _route_back(self, swap: dict) -> None:
         """Undo `_route_to`: the pane's own provider, model, dialect, window and effort, exactly as
-        `_end_failover` restores its own."""
+        `_end_failover` restores its own. A guest harness the route started is ended first."""
+        self._end_route_guest(swap)
         if not self._injected_provider:
             self.provider = swap["provider"]
         if swap.get("adopted"):
@@ -2099,30 +2139,97 @@ class Agent:
         nothing to swap and no event is sent, exactly like an image the main model can read.
         """
         target = self.roles.planning_target() if self.roles is not None else None
-        if target is None or (target.config.model == self.config.model
-                              and target.config.base_url == self.config.base_url
-                              and target.config.extra == self.config.extra):
+        guest = None
+        if target is not None and is_guest_preset(target.preset_id) and not self._injected_provider:
+            # A `guest:` entry of the High list (protocol 13.7): Claude Code or Codex plans this
+            # turn through its own harness, started here for the turn. One that will not start
+            # is said, and the turn goes where it would have gone without the guest entries.
+            guest = self._start_plan_guest(turn_id, target)
+            if guest is None:
+                target = self.roles.planning_target(guests=False)
+        if target is None or is_guest_preset(target.preset_id) and guest is None \
+                or (target.config.model == self.config.model
+                    and target.config.base_url == self.config.base_url
+                    and target.config.extra == self.config.extra):
             return None
         swap = self._route_swap(turn_id, target)
+        if guest is not None:
+            swap["guest"] = guest
+            swap["guest_preset"] = target.preset_id
+            label = _guest_label(target.preset_id)
+            swap["to_name"] = f"{target.config.model} ({label})" if target.config.model else label
         self._planning = swap
         self._route_to(swap, target)
         from_model = swap["back_to"]
         logs.event(_log, "plan_route", session=self.session_id, turn=turn_id,
                    from_model=from_model, to_model=target.config.model,
-                   host=_host(target.config.base_url), effort=target.effort, source=target.source)
+                   host=_host(target.config.base_url), effort=target.effort, source=target.source,
+                   guest=guest.guest_id if guest is not None else "")
         to_name, back_name = self._route_names(swap)
         if target.config.model != from_model:
             text = f"Plan mode · this turn runs on {to_name}, then back to {back_name}."
         else:
             text = (f"Plan mode · this turn runs on {to_name} at "
                     f"{target.effort or 'max'} reasoning.")
-        self.emit({"event": "plan_route", "turn_id": turn_id, "model": target.config.model,
-                   "from_model": from_model, "preset": target.preset_id,
-                   "from_preset": self._preset_id(swap["preset"]),
-                   "base_url": target.config.base_url, "source": target.source,
-                   "effort": target.effort, "scope": "turn", "text": text})
+        event = {"event": "plan_route", "turn_id": turn_id, "model": target.config.model,
+                 "from_model": from_model, "preset": target.preset_id,
+                 "from_preset": self._preset_id(swap["preset"]),
+                 "base_url": target.config.base_url, "source": target.source,
+                 "effort": target.effort, "scope": "turn", "text": text}
+        if guest is not None:
+            event["guest"] = guest.guest_id
+            event["guest_session"] = guest.session_id
+        self.emit(event)
         self.emit({"event": "status", "text": f"Plan turn · {to_name}"})
         return swap
+
+    def _start_plan_guest(self, turn_id: str, target):
+        """Start the guest a plan turn resolved to (protocol 13.7), for this turn only.
+
+        A fresh harness session in the pane's workspace, on the entry's model and at its level in
+        the guest's own words, read-only (PLAN_GUEST_PERMISSIONS). The guest knows nothing of the
+        conversation, so its first prompt is built when the turn's first call is made
+        (`HarnessProvider.opening`): the plan rules in its own terms, the transcript so far and
+        the request (`planning.guest_plan_prompt`); its reply is the plan (`_save_guest_plan`).
+        Returns the provider, or None — with a `status` saying why — when the guest would not
+        start; the caller then plans without it.
+        """
+        from . import guest_harness_provider as ghp
+        preset_id = target.preset_id
+        label = _guest_label(preset_id)
+        request = {"guest": {"model": target.config.model or None, "effort": target.effort or None,
+                             "permissions": PLAN_GUEST_PERMISSIONS}}
+        try:
+            provider = ghp.start_provider(preset_id, request, str(self.executor.workspace.root),
+                                          self.stall_timeout_s, config=target.config)
+        except ValueError as exc:
+            logs.event(_log, "plan_guest_unavailable", level_name="error", session=self.session_id,
+                       turn=turn_id, guest=guest_id_of(preset_id), error=str(exc)[:200])
+            self.emit({"event": "status",
+                       "text": f"{label} could not start for this plan turn ({exc}); planning without it."})
+            return None
+        prompt = (self._turn_ctx or {}).get("prompt", "")
+        provider.opening = lambda messages: guest_plan_prompt(messages, prompt, label,
+                                                              (CONTEXT_OPEN, CONTEXT_CLOSE))
+        return provider
+
+    def _save_guest_plan(self, record: dict, text) -> None:
+        """A plan turn served by a guest ended with its reply: that reply is the plan, saved
+        exactly as `write_plan` saves one (the same file, the same `plan_written`), because the
+        guest has no such tool to call. Nothing is saved from an empty reply."""
+        swap = self._planning
+        if swap is None or swap.get("guest") is None:
+            return
+        plan = plan_from_reply(text)
+        if plan is None:
+            return
+        title, content = plan
+        path = write_plan(self.plans_dir, title, content)
+        self.plan_path = str(path)
+        logs.event(_log, "plan_written", session=self.session_id, turn=record["turn_id"],
+                   guest=swap["guest"].guest_id, path=str(path))
+        self.emit({"event": "plan_written", "path": str(path), "title": title,
+                   "guest": swap["guest"].guest_id})
 
     def _end_plan_turn(self) -> None:
         """Put the pane's own provider back after a plan turn. Always runs, however the turn ended
@@ -2131,11 +2238,13 @@ class Agent:
         swap, self._planning = self._planning, None
         if not swap:
             return
+        # A guest matches no Preset object; its id is the swap's (`_begin_plan_turn`).
+        was_preset = self._preset_id(swap["to_preset"]) or swap.get("guest_preset")
         self._route_back(swap)
         back_name = self._route_names(swap)[1]
         self.emit({"event": "plan_route_ended", "turn_id": swap["turn_id"], "model": swap["back_to"],
                    "preset": self._preset_id(swap["preset"]), "was": swap["model"],
-                   "was_preset": self._preset_id(swap["to_preset"]),
+                   "was_preset": was_preset,
                    "text": f"Back to {back_name}."})
         self.emit({"event": "status", "text": f"Back to {back_name}"})
 
@@ -2306,7 +2415,8 @@ class Agent:
         chain = getattr(self.roles, "failover_chain", None)
         if not callable(chain):
             return False
-        failed_preset = self.preset.id if self.preset else ""
+        # A guest serving the turn matches no Preset (`self.preset` is None): its id is the swap's.
+        failed_preset = self.preset.id if self.preset else swap.get("guest_preset", "") if swap.get("guest") else ""
         failed_host = _host(self.config.base_url)
         try:
             if "chain" not in swap:
@@ -2333,7 +2443,7 @@ class Agent:
         if target is None:
             return False
         from_model = self.config.model
-        from_name = _provider_name(from_model, self.preset)
+        from_name = self._route_names(swap)[0]
         self._ensure_no_open_response(record["turn_id"], "failover")
         self._close_thinking(record)
         # A Main failover later in this turn must not offer the model that just refused.

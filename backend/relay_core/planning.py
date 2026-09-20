@@ -33,6 +33,124 @@ WRITE_PLAN_SPEC = {"type": "function", "function": {
         "required": ["title", "content"], "additionalProperties": False}}}
 
 
+# ----- a plan turn on a guest harness (protocol 13.7, owner 2026-09-20) --------------------------
+# A `guest:` entry of the High list (Claude Code, Codex) serves a plan turn by starting the guest's
+# harness for that one turn. The guest has none of Relay's tools — no `ask_user`, no `write_plan` —
+# and none of the conversation, so its first prompt carries the rules in its own terms, the
+# transcript so far, and the request; its reply *is* the plan, and the agent saves it exactly as
+# `write_plan` would have (`Agent._save_guest_plan`).
+GUEST_PLAN_NOTE = """PLAN MODE. You are joining this conversation for one planning turn. Investigate before proposing changes: read files, list directories and run read-only commands, but do not modify the workspace (no edits, installs, git commits, deletions, or writes of any kind), and do not ask questions — where something is genuinely ambiguous, state the assumption you are making in the plan.
+When you understand the task, reply with the complete implementation plan as Markdown and nothing else: a first line `# <short title>`, then the goal, findings with exact file paths, numbered steps, risks, and how to verify. The user reviews and edits the plan before anything is executed."""
+# How much of the transcript the guest is shown, most recent first to be kept: enough for a plan
+# to know what was already tried, and far below any guest's first-prompt limit.
+MAX_GUEST_TRANSCRIPT_CHARS = 48_000
+MAX_GUEST_TOOL_RESULT_CHARS = 1_500
+_OMITTED = "[… earlier conversation omitted …]"
+
+
+def _message_text(content) -> str:
+    """The text of a message whose content is a string or OpenAI content parts (images dropped)."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(part["text"] for part in content
+                         if isinstance(part, dict) and part.get("type") == "text"
+                         and isinstance(part.get("text"), str))
+    return ""
+
+
+def strip_context_blocks(text: str, open_marker: str, close_marker: str) -> str:
+    """A user message without the notes Relay prepends to it (the plan-mode note, the terminal
+    context): they are about Relay's own tools and this turn, not something the user typed."""
+    out = text
+    while open_marker and open_marker in out:
+        start = out.index(open_marker)
+        end = out.find(close_marker, start)
+        if end < 0:
+            break
+        out = out[:start] + out[end + len(close_marker):]
+    return out.strip()
+
+
+def guest_plan_prompt(messages: list[dict], prompt: str, guest_name: str = "",
+                      context_markers: tuple[str, str] = ("", "")) -> str:
+    """The first prompt a guest's fresh session is sent for a plan turn.
+
+    ``messages`` is the pane's conversation; the transcript is everything before the user message
+    that carries this turn's ``prompt`` (matched by `relay_kind: "prompt"`, last one), rendered as
+    labelled turns — the user's words with Relay's notes stripped, the assistant's text and the
+    tools it called, tool results cut to a bounded excerpt — and capped from the front so the most
+    recent part is what survives. ``context_markers`` are the lines Relay wraps its notes in
+    (`agent.CONTEXT_OPEN` / `CONTEXT_CLOSE`), passed in because this module does not import the agent.
+    """
+    open_marker, close_marker = context_markers
+    history = list(messages or [])
+    for index in range(len(history) - 1, -1, -1):
+        message = history[index]
+        if isinstance(message, dict) and message.get("role") == "user" \
+                and message.get("relay_kind") == "prompt":
+            history = history[:index]
+            break
+    lines: list[str] = []
+    for message in history:
+        if not isinstance(message, dict):
+            continue
+        role = message.get("role")
+        if role == "user":
+            text = strip_context_blocks(_message_text(message.get("content")), open_marker, close_marker)
+            if text:
+                lines.append(f"User:\n{text}")
+        elif role == "assistant":
+            text = _message_text(message.get("content")).strip()
+            calls = []
+            for call in message.get("tool_calls") or []:
+                function = call.get("function") if isinstance(call, dict) else None
+                if isinstance(function, dict):
+                    args = function.get("arguments")
+                    args = args if isinstance(args, str) else ""
+                    calls.append(f"(called {function.get('name') or 'a tool'} {args[:200]})".rstrip())
+            if text or calls:
+                lines.append("Assistant:\n" + "\n".join(([text] if text else []) + calls))
+        elif role == "tool":
+            text = _message_text(message.get("content")).strip()
+            if text:
+                cut = text[:MAX_GUEST_TOOL_RESULT_CHARS]
+                lines.append("Tool result:\n" + cut + (" […]" if len(text) > len(cut) else ""))
+    transcript = "\n\n".join(lines)
+    if len(transcript) > MAX_GUEST_TRANSCRIPT_CHARS:
+        transcript = _OMITTED + "\n\n" + transcript[-MAX_GUEST_TRANSCRIPT_CHARS:]
+    parts = [GUEST_PLAN_NOTE]
+    if transcript:
+        parts.append("The conversation so far in this session"
+                     + (f" (the assistant was Relay's own agent, not {guest_name})" if guest_name else "")
+                     + ":\n\n" + transcript)
+    parts.append("The request to plan:\n\n" + (prompt or "").strip())
+    return "\n\n".join(parts)
+
+
+def plan_from_reply(text) -> tuple[str, str] | None:
+    """(title, content) read off a guest's plan-turn reply, or None when the reply holds no plan.
+
+    The title is the first `# ` heading; a reply with none is still a plan (the guest wrote prose)
+    and gets a title from its first non-empty line. An empty reply is not one.
+    """
+    if not isinstance(text, str) or not text.strip():
+        return None
+    title = ""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("# "):
+            title = stripped[2:].strip()
+            break
+    if not title:
+        title = next((line.strip().lstrip("#").strip() for line in text.splitlines() if line.strip()), "Plan")
+    title = " ".join(title.split())[:MAX_TITLE] or "Plan"
+    content = text.strip()
+    if len(content.encode("utf-8")) > MAX_PLAN_BYTES:
+        content = content.encode("utf-8")[:MAX_PLAN_BYTES].decode("utf-8", "ignore")
+    return title, content
+
+
 def validate_mode(mode) -> str:
     if mode not in MODES:
         raise ValueError('mode must be "build" or "plan".')

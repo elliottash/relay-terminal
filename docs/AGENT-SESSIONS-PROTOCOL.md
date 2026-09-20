@@ -964,7 +964,7 @@ presets … then advanced options, which would then reveal the specific actions"
 
 | Tier | Used for | Where it comes from |
 |---|---|---|
-| `high` | plan mode (`planning`), and any role pinned to it | the first usable entry of `tiers.high`, else the pane's own model at `max` reasoning |
+| `high` | plan mode (`planning`), and any role pinned to it | the first usable entry of `tiers.high` — a `guest:` entry starts that guest's harness for the plan turn (v4.4, below) — else the pane's own model at `max` reasoning |
 | `main` | agent turns, subagents, Switchboard threads | the pane's own model (`configure` / `set_model`); `tiers.main` is only the order a failing turn walks |
 | `flash` | terminal use, fast panes, summaries, suggestions | the first usable entry of `tiers.flash`, else `TIER_DEFAULTS[<main preset>]["flash"]` |
 | `lite` | chores and the request audit | the first usable entry of `tiers.lite`, else `TIER_DEFAULTS[<main preset>]["lite"]` |
@@ -1016,11 +1016,22 @@ built-in default**: `high` is the pane's own model at `max`, `flash` / `lite` th
 order the helper agent leaves a guest by (`leave_guest`, 30.7). It supersedes the `fallbacks` option
 (12.1), which is still accepted and **is** the Main chain whenever no `tiers.main` list was sent.
 
-**Guests.** A `guest:<id>` entry (Claude Code, Codex; 29.3) is usable **only in `main`**: a guest can be
-a pane's own agent, never a per-turn swap or a side call, so in `high`, `flash`, `lite` and `local` it is
-skipped — at resolution and at failover alike, without a note, because it is not a missing key. In
-`main` it holds its place (the GUI's default model, and the point a walk starts after when the pane is
-that guest) and is never a failover *target*: a turn cannot be moved onto a harness mid-way.
+**Guests.** A `guest:<id>` entry (Claude Code, Codex; 29.3) is usable in **`main` and `high`** and
+nowhere else (`roles.GUEST_TIERS`). In `main` it holds its place (the GUI's default model, and the point
+a walk starts after when the pane is that guest). In `high` (v4.4, 2026-09-20; owner: "claude and codex
+weren't showing up under 'high' models", and "for codex planning you pick xhigh") it is **usable when its
+harness runs here** — the adapter imports, the CLI is on PATH and has not said it is signed out
+(`roles.guest_runnable`, the guest counterpart of the key lookup) — and a plan turn that resolves to it
+**starts that guest's harness for the turn** (13.11): a fresh session in the pane's workspace, at the
+entry's level in the guest's own words, ended when the turn is over, and the pane's own model comes back
+as after any plan route. A guest whose harness cannot run is skipped for the entry below, and the tier's
+`note` says so ("… cannot be used right now (no stored key, or a guest that cannot run here)"). In
+`flash`, `lite` and `local` a guest is skipped at resolution and at failover alike, without a note,
+because it is not a missing key: those tiers are side calls (a title, a summary, the audit) and per-turn
+swaps of a conversation already under way, and a harness is a whole agent of its own with its own
+transcript — it can take a turn from its first step, never one half-way through. For the same reason a
+guest is **never a failover target** on any list, `high` included (15.2.2): a turn cannot be moved onto
+a harness mid-way.
 
 **The High tier** (v3.9, 2026-09-20; owner: "there needs to be a 'high' default on top of main, used by
 the planner by default") sits above Main and is listed first in `tier_defaults.tiers`, so the roles modal
@@ -1064,8 +1075,8 @@ directly (`presets.tier_fallbacks("local") == ("local", "main")`) with the note
 `{tier: {tier, label, model, preset, base_url, effort, source, using?, note?, list}}`, where `source` is
 `default` or `configured`, `using` is the tier actually serving it after any step-down, and `list`
 (v3.10) is the tier's stored list, `[{preset, model, effort, usable}]` — `usable` is whether that entry
-can take a call right now (for a guest: whether it is in `main`), so the GUI can grey what resolution
-and failover will skip. Each role in `roles` gains `tier` (the tier it came from, or `null` for `vision`
+can take a call right now (for a guest: `true` in `main`; in `high`, whether its harness runs here,
+v4.4; `false` elsewhere), so the GUI can grey what resolution and failover will skip. Each role in `roles` gains `tier` (the tier it came from, or `null` for `vision`
 / `route_assist`) and an optional `note`. No key material appears in any of it.
 
 **The two defaults** (v3.10). The `presets` event carries `tier_list_defaults`
@@ -1082,10 +1093,15 @@ buttons only apply one of them and send it back as `tiers`:
   subscriptions too — each on the first model of its own list), then pay-as-you-go (the aggregator and
   keyed custom providers with it), Relay Free last; within a group by `INTELLIGENCE` descending, unknown
   last; each at the provider's own default level (absent where it has none). `high`: the same models at
-  the top level each offers (`max`; `high` on Gemini; `medium` on Relay Free), without the guests.
-  `flash`: each provider's Flash-tier model. `lite`: each provider's Lite-tier model **when it is on
-  that provider** (GLM, Kimi and MiniMax borrow OpenRouter's, so they add none). `local`: the saved
-  endpoints.
+  the top level each offers (`max`; `high` on Gemini; `medium` on Relay Free), the usable guests among
+  them in the same place as in `main` (v4.4: a plan turn runs through the guest's harness) at their
+  own top word — Claude Code's the last its `efforts` list names (`max`); Codex's `xhigh` when its
+  model offers it, else the last (`presets._guest_top_level`). `flash`: each provider's Flash-tier
+  model. `lite`: each provider's Lite-tier model **when it is on that provider** (GLM, Kimi and MiniMax
+  borrow OpenRouter's, so they add none). Every `flash` and `lite` entry says its **lowest level
+  outright** (`low`; owner, 2026-09-20: Lite is "with no reasoning"), so the GUI never shows a blank
+  level; only a model with no knob at all (Kimi's high-speed ones, MiniMax's) carries none
+  (`presets._low_level`). `local`: the saved endpoints.
 - **`openrouter`** (owner: "openrouter twins are after the subscription models, and are cost sensitive;
   the openrouter one is most important for chores and transcription") — the plain lists, and then,
   **only when the `openrouter` preset has a key**, the OpenRouter twins (`OPENROUTER_TWINS`) of each
@@ -1094,9 +1110,13 @@ buttons only apply one of them and send it back as `tiers`:
   `presets.OPENROUTER_TWIN_MAX_COMPLETION_USD_PER_MTOK` = **$3.00 per million tokens** (on 2026-09-20:
   `z-ai/glm-5.3` at $2.86 and `minimax/minimax-m3` at $1.20 are in; `moonshotai/kimi-k3` at $8.50,
   `openai/gpt-6-astra` and `anthropic/claude-opus-5` are out). A twin whose price is unknown (no listing
-  fetched yet) is left out of `main` and `high` and kept in `flash` and `lite`. `lite` **starts with**
-  the OpenRouter model Relay already runs chores on (`google/gemini-3.8-flash`,
-  `presets._LITE_VIA_OPENROUTER`), ahead of the providers' own. Without the key the two are identical.
+  fetched yet) is left out of `main` and `high` and kept in `flash` and `lite`. A `flash` or `lite` twin
+  says `low` like the rest of its list, unless the listing says the model takes no level. `lite`
+  **starts with** Gemini 3.5 Flash-Lite through OpenRouter at `low` (`google/gemini-3.5-flash-lite`,
+  `presets.LITE_LIST_FIRST`; owner, 2026-09-20: "I thought it's 3.5 flash lite with no reasoning"),
+  ahead of the providers' own. That is the *list's* first entry only: the built-in Lite row a pane
+  resolves to with no list at all (`presets._LITE_VIA_OPENROUTER`, `google/gemini-3.8-flash`) is
+  unchanged. Without the key the two are identical.
 
 The prices arrive with OpenRouter's listing, so the worker's unasked `presets` push when that lands
 (13.8) carries a `tier_list_defaults` that may have gained twins the first answer could not price.
@@ -1315,7 +1335,7 @@ New events:
 
 | Event | When | Fields |
 |---|---|---|
-| `plan_route` | a plan-mode turn starts on the planning role's model | `turn_id`, `model`, `from_model`, `preset`, `from_preset`, `base_url`, `source`, `effort`, `scope: "turn"`, `text` |
+| `plan_route` | a plan-mode turn starts on the planning role's model | `turn_id`, `model`, `from_model`, `preset`, `from_preset`, `base_url`, `source`, `effort`, `scope: "turn"`, `text`; on a guest (v4.4) also `guest`, `guest_session` |
 | `plan_route_ended` | that turn is over, whatever ended it | `turn_id`, `model` (back to this), `preset`, `was`, `was_preset`, `text` |
 
 Both come **before** the turn's terminal event, so `done` / `error` / `cancelled` stay last, and each is
@@ -1327,6 +1347,35 @@ resolution source (13.4): `default` for the built-in default, `configured` for a
 prints: it names the serving model when it is not the pane's own, and otherwise says the pane's model
 runs at `max` reasoning. Both ends of both notes name **model plus preset label**, and so do the two
 `status` lines, which is the one shape all three of Relay's turn swaps share (15.2.2).
+
+**A plan turn on a guest** (v4.4, 2026-09-20; 13.7). When the High list's first usable entry is a
+`guest:` entry and the pane's own agent is an ordinary provider, `Agent._begin_plan_turn` starts that
+guest's harness for the turn (`guest_harness_provider.start_provider`, the same start a guest pane
+gets): a **fresh session** in the pane's workspace, on the entry's model (none named: the guest's own
+default) and at the entry's `effort` in the guest's own words (`xhigh` to codex, `max` to claude), with
+the **read-only posture** `agent.PLAN_GUEST_PERMISSIONS` (`"deny"`: codex's read-only sandbox, claude's
+permission prompts declined) — plan mode writes nothing, and a guest has no tool of Relay's for
+`_prepare` to refuse a write through. The harness takes a prompt, not a conversation, so it is handed
+**one opening prompt** in place of the last user message (`HarnessProvider.opening`, built when the
+turn's first call is made): `planning.GUEST_PLAN_NOTE` — the plan rules in the guest's own terms (no
+`ask_user`, no `write_plan`: state assumptions, reply with the plan) — then **the transcript so far**
+(`planning.guest_plan_prompt`: the user's words with Relay's context notes stripped, the assistant's
+text and the tools it called, tool results cut to 1,500 characters, the whole capped at 48,000
+characters from the front), then the request. Its tool calls stream into the fold as a guest pane's do
+(29.1), and **its reply is the plan**: the agent saves it exactly as `write_plan` would — the first
+`# ` line the title, the file in the plans directory, the same `plan_written` event, plus `guest` — so
+Execute works on it as on any plan; an empty reply writes none. The turn is a plan route like any
+other: `plan_route` carries `preset: "guest:<id>"`, `base_url: "harness://<id>"`, `guest` and
+`guest_session`, both notes name the model plus the guest ("gpt-5.5-codex (Codex)"), and
+`plan_route_ended` — the harness ended with it — puts the pane back. A guest that **will not start**
+(not installed, an effort it does not take) is said on a `status` ("Codex could not start for this
+plan turn (…); planning without it.") and the turn plans as if the High list had no guest entries
+(`RoleResolver.planning_target(guests=False)`): the entry below, or the pane's own model with no route.
+A guest whose turn **fails** is a planning model that is not answering (15.2.3): `route_dropped`, the
+harness ended, the pane's own model finishes the turn. A pane whose own agent *is* a guest (an injected
+provider) is unchanged: its harness serves the plan turn as 29.3 always had it, and no second harness
+is started. Tests: `tests/test_plan_turns.py` (`GuestPlanTurnTests`, on the scripted fake harness) and
+`tests/test_tier_lists.py`.
 
 **The swap is a model change, not a swapped socket**, on the same terms as a failover's (15.2.2): the
 conversation is converted to the planning model's reasoning dialect (`adapt_history`), and the context
@@ -1851,14 +1900,15 @@ OpenRouter where the user opted that model in, and then nowhere: the turn fails.
 |---|---|---|
 | a pane's own turn (Main), and a subagent's | `tiers.main`; with none sent, the `fallbacks` option (12.1) | the entry **after** the pane's current `(preset, model)` when the list names it — the entries above were ranked higher and the user chose not to be on them — else **the top**: a model picked by hand, off the list, falls back to the Main list from the top |
 | a pane on a Flash or Local model (`RoleResolver.turn_tier`: the list that names it, else the provider's own tier table) | `tiers.flash` / `tiers.local`; with none sent, the Main list as above | the same rule |
-| a plan turn (High) | `tiers.high` | the entry after the one the turn is running on. With the list spent — or none sent, High's default being the pane's own model — the routing is dropped and the turn finishes on the pane's own model (15.2.3), and only if that fails too does the Main list start |
+| a plan turn (High) | `tiers.high` | the entry after the one the turn is running on — after the guest entry, for a turn that started on a guest's harness (13.7, v4.4; a guest entry matches the guest whatever model its CLI reported), onto ordinary providers only: the harness is ended as the turn leaves it, and a guest is never a target. With the list spent — or none sent, High's default being the pane's own model — the routing is dropped and the turn finishes on the pane's own model (15.2.3), and only if that fails too does the Main list start |
 | a side call on a tiered role (`flash` / `lite` / `local` / `high`: summaries, suggestions, chores, the audit, the loop check) | that tier's list, when one was sent | the entry after the one it resolved to; then the call fails as it always did, with its own model's error. No list, or a role pinned to its own endpoint: no chain |
 
 Each entry is asked once, at **its own level** when it names one (the pane's level otherwise, in the
 new provider's words), and never one
 without a stored key, one already tried this turn, one whose endpoint has the same hostname as a
 preset already tried (Z.AI's standard API and its Coding Plan are two keys for one service, and a
-service that is down is down for both), or a guest harness; such an entry is skipped silently for
+service that is down is down for both), or a guest harness (it serves a turn from its first step —
+a pane's, or a plan turn's, 13.7 — never one under way); such an entry is skipped silently for
 the one below it. A step that has already streamed part of an answer is never moved either, for
 the reason 15.2 gives: that text is on the user's screen and a second provider would write a
 second answer under it.
