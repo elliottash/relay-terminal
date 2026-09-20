@@ -1,7 +1,7 @@
 ---
 id: SXF1
 type: work
-status: executing
+status: needs-verification
 assignee: agent
 implemented_by: deepseek/deepseek-v4.1-flash
 session: dc5c54ef-dc70-4eaa-8564-ebd061b9126b
@@ -73,8 +73,10 @@ Surfaces: the Keymap descriptions of `agent.interrupt` / `agent.continue`, the `
 - Note for whoever lands next on `src/Pane.h`: this commit was held for the `--confirm` review because other live sessions hold the path, and its hunks were all this card's; the working tree still carries their uncommitted work untouched.
 
 ## Tests
-- `ctest --test-dir build -R continueturn` — four cases on the header-only rule (`src/ContinueTurn.h`): an empty box with an idle agent continues; text in the box never does; a busy agent never does; a busy agent with text never does. land.py's build gate ran this same case in the exact landing tree before the swap.
-- `unittest:tests.test_conv_index.HelperTests.test_turn_left_open_reads_only_the_checkpoint_stamps` — the cut-off predicate behind `state_loaded {turn_open}`, from the card's worker half (`backend/relay_core/conv_index.py`).
-- `unittest:tests.test_conv_index.HelperTests.test_unfinished_reads_checkpoints_messages_and_todos` — the same file's `session_unfinished`, which now ORs that predicate in.
-- `unittest:tests.test_sessions.SessionTests.test_resume_reports_a_turn_left_open` — `resume` carries `turn_open` in `state_loaded` (`backend/relay_core/agent.py`).
-- `manual: docs/qa_evidence/2026-09-20-ctrl-enter-always/` — the Xvfb drive against the landed build: an ordinary finished turn (D), typed text (F), the step limit (A), the `/continue` hint (H) and a busy agent (G).
+- `ctest -R continueturn` — tests/continueturn_test.cpp
+- `tests/test_conv_index.py::HelperTests::test_turn_left_open_reads_only_the_checkpoint_stamps`
+- `tests/test_conv_index.py::HelperTests::test_unfinished_reads_checkpoints_messages_and_todos`
+- `tests/test_sessions.py::SessionTests::test_resume_reports_a_turn_left_open`
+- `manual: docs/qa_evidence/2026-09-20-ctrl-enter-always/`
+
+The first is the rule itself (`src/ContinueTurn.h`, header-only): an empty box with an idle agent continues, text in the box never does, a busy agent never does, a busy agent with text never does. land.py's build gate ran that case in the exact landing tree before the swap. The next three are the worker half this card landed earlier (`backend/relay_core/conv_index.py`, `backend/relay_core/agent.py`): the cut-off predicate, `session_unfinished` ORing it in, and `resume`'s `state_loaded {turn_open}`. The manual entry is the Xvfb drive against the landed build — an ordinary finished turn (D), typed text (F), the step limit (A), the `/continue` hint (H) and a busy agent (G).

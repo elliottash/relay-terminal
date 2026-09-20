@@ -176,3 +176,12 @@ Owner, in the terminal pane: "ctrl+enter in an empty prompt should always send a
 
 <!-- relay:entry 20260920T234605Z-j0 author=agent kind=event model=deepseek/deepseek-v4.1-flash pane=4ebfcd2d turn=17696e58a6664868a01d40f294d6b917/de3a2e6f9a404dbb8efb638f780c4c55 -->
 - ✦ agent updated this card · replaced `## Tests`
+
+<!-- relay:entry 20260920T234819Z-e6 author=agent kind=event model=deepseek/deepseek-v4.1-flash pane=4ebfcd2d turn=17696e58a6664868a01d40f294d6b917/de3a2e6f9a404dbb8efb638f780c4c55 -->
+- ✦ agent updated this card · replaced `## Tests`
+
+<!-- relay:entry 20260920T234836Z-zb author=agent kind=event model=deepseek/deepseek-v4.1-flash pane=4ebfcd2d turn=17696e58a6664868a01d40f294d6b917/de3a2e6f9a404dbb8efb638f780c4c55 -->
+- ✦ agent moved this card · unchanged · Owner's rule landed in e7b1e4be: Ctrl+Enter on an empty prompt box always sends the agent prompt Continue (the limit/cut-off gate is gone). Live Xvfb check ALL PASS — an ordinary finished turn continues, typed text is still sent as itself, the limit case still works, /continue still teaches Ctrl+Return, a busy agent still sends nothing; evidence in docs/qa_evidence/2026-09-20-ctrl-enter-always/, tests_check clean, ctest -R continueturn and the three worker tests green. · evidence docs/qa_evidence/2026-09-20-ctrl-enter-always/ · implemented_by deepseek/deepseek-v4.1-flash
+
+<!-- relay:entry 20260920T234840Z-5y author=agent kind=event model=deepseek/deepseek-v4.1-flash pane=4ebfcd2d turn=17696e58a6664868a01d40f294d6b917/de3a2e6f9a404dbb8efb638f780c4c55 -->
+- ✦ agent moved this card · Executing → Needs verification · Landed e7b1e4be + evidence ad14646d: Ctrl+Enter on an empty prompt box always sends Continue (the limit/cut-off gate is gone). Live Xvfb check ALL PASS, tests_check clean, ctest -R continueturn and the three worker tests green. · evidence docs/qa_evidence/2026-09-20-ctrl-enter-always/ · implemented_by deepseek/deepseek-v4.1-flash
