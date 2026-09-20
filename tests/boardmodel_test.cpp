@@ -262,6 +262,10 @@ private slots:
     void anEmptyBoardStillShowsThePageAgentBecauseThatIsWhereTheSurveyRuns();
     void theAskKeyFocusesTheComposerAndACardGoesBackFirst();
     void theModelBoxSitsInTheComposerRowWithTheMicAndTheContextChip();
+    // The panel outside the Switchboard (#FEJQ): one worker, four panels.
+    void aHelperTagsWhatItSendsWithItsPaneAndTakesOnlyThatPanesEvents();
+    void aHelperOpensAsOneRowThatExpandsIntoTheWholePanel();
+    void anAnswersOptionAndSessionLinksResolveIntoThePane();
 };
 
 void BoardModelTests::categoryFoldersComeFromTheConfig()
@@ -3382,6 +3386,146 @@ void BoardModelTests::theModelBoxSitsInTheComposerRowWithTheMicAndTheContextChip
     box->setCurrentIndex(0);
     emit box->activated(0);
     QVERIFY(!picked.isEmpty());
+}
+
+// ---------------------------------------------------------------------------- the helper panel
+//
+// One helper worker serves a whole tab (#FEJQ), so every panel in it sees every turn event and
+// exactly one of them may take it. The pane's name is what decides: it rides out on what the
+// panel sends — the worker picks the brief from it — and it comes back on what the worker
+// streams.
+void BoardModelTests::aHelperTagsWhatItSendsWithItsPaneAndTakesOnlyThatPanesEvents()
+{
+    relay::HelperChatPanel panel(relay::helperpane::sessions());
+    QList<QJsonObject> sent;
+    panel.onSend = [&sent](const QJsonObject &message) { sent << message; };
+
+    auto *composer = panel.findChild<QPlainTextEdit *>(QStringLiteral("boardChatComposer"));
+    QVERIFY(composer);
+    composer->setPlainText(QStringLiteral("which sessions touched Pane.h?"));
+    QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+    QApplication::sendEvent(composer, &enter);
+    QCOMPARE(sent.size(), 1);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_chat"));
+    QCOMPARE(sent.last().value("pane").toString(), QStringLiteral("sessions"));
+
+    // The board's own answer, streaming in the same tab. Not this panel's, and not in its log.
+    QVERIFY(!panel.handleEvent(QStringLiteral("delta"),
+                               QJsonObject{{"chat", true}, {"pane", "switchboard"},
+                                           {"turn_id", "chat-1"}, {"text", "84 open cards."}}));
+    // An untagged event is the board's too: that is what the worker sent before there were other
+    // panes, and the Switchboard is the panel that was there then.
+    QVERIFY(!panel.handleEvent(QStringLiteral("delta"),
+                               QJsonObject{{"chat", true}, {"turn_id", "chat-1"},
+                                           {"text", "84 open cards."}}));
+    QVERIFY(panel.handleEvent(QStringLiteral("delta"),
+                              QJsonObject{{"chat", true}, {"pane", "sessions"},
+                                          {"turn_id", "chat-2"}, {"text", "Four of them."}}));
+    auto *log = panel.findChild<QTextBrowser *>(QStringLiteral("boardChatLog"));
+    QVERIFY(log);
+    QTRY_VERIFY(log->toPlainText().contains(QStringLiteral("Four of them.")));
+    QVERIFY(!log->toPlainText().contains(QStringLiteral("84 open cards.")));
+
+    // The Switchboard's panel is the other side of the same rule, and its extras are its own.
+    relay::BoardChatPanel board;
+    QCOMPARE(board.pane(), QStringLiteral("switchboard"));
+    QVERIFY(board.handleEvent(QStringLiteral("delta"),
+                              QJsonObject{{"chat", true}, {"turn_id", "chat-1"},
+                                          {"text", "84 open cards."}}));
+    QVERIFY(!board.handleEvent(QStringLiteral("delta"),
+                               QJsonObject{{"chat", true}, {"pane", "sessions"},
+                                           {"turn_id", "chat-2"}, {"text", "Four of them."}}));
+    QVERIFY(board.findChild<QToolButton *>(QStringLiteral("boardChatCheck")));
+    QVERIFY(!panel.findChild<QToolButton *>(QStringLiteral("boardChatCheck")));
+    QVERIFY(!panel.findChild<QWidget *>(QStringLiteral("boardChatSurvey")));
+}
+
+// Collapsed by default outside the Switchboard (owner, 2026-09-20): the board's 320 px of log
+// plus composer is most of a small pane, so a helper is one row until it is asked for.
+void BoardModelTests::aHelperOpensAsOneRowThatExpandsIntoTheWholePanel()
+{
+    relay::HelperChatPanel panel(relay::helperpane::options());
+    panel.setAskShortcut(QStringLiteral("options.ask"), QStringLiteral("Ctrl+/"));
+    panel.resize(420, 260);
+    panel.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&panel));
+
+    QVERIFY(panel.collapsed());
+    auto *ask = panel.findChild<QToolButton *>(QStringLiteral("boardChatAsk"));
+    auto *body = panel.findChild<QWidget *>(QStringLiteral("boardChatBody"));
+    auto *keys = panel.findChild<QLabel *>(QStringLiteral("boardChatAskKeys"));
+    QVERIFY(ask && body && keys);
+    QVERIFY(ask->isVisible());
+    QVERIFY(!body->isVisible());
+    QCOMPARE(keys->text(), QStringLiteral("Ctrl+/"));       // the key line says how to get here
+    QCOMPARE(panel.findChild<QLabel *>(QStringLiteral("boardChatHead"))->text(),
+             QStringLiteral("Options helper"));
+
+    ask->click();
+    QVERIFY(!panel.collapsed());
+    QVERIFY(body->isVisible());
+    QVERIFY(!ask->isVisible());
+    QVERIFY(panel.composerHasFocus());                      // the row said Ask; the cursor is there
+
+    // The log is sized to the pane it is in, not to the board's list page.
+    auto *log = panel.findChild<QTextBrowser *>(QStringLiteral("boardChatLog"));
+    QVERIFY(log);
+    QVERIFY2(log->maximumHeight() < 320,
+             qPrintable(QStringLiteral("log %1 px").arg(log->maximumHeight())));
+    QVERIFY(log->maximumHeight() >= 3 * QFontMetrics(log->font()).lineSpacing());
+
+    // Folded back, and nothing is lost: the draft is still in the box when it opens again.
+    auto *composer = panel.findChild<QPlainTextEdit *>(QStringLiteral("boardChatComposer"));
+    QVERIFY(composer);
+    composer->setPlainText(QStringLiteral("half a question"));
+    panel.findChild<QToolButton *>(QStringLiteral("boardChatFold"))->click();
+    QVERIFY(panel.collapsed());
+    QVERIFY(ask->isVisible());
+    panel.focusComposer();                                  // the pane's ask key, from anywhere
+    QVERIFY(!panel.collapsed());
+    QCOMPARE(panel.draft(), QStringLiteral("half a question"));
+
+    // The Switchboard's panel is its page and has neither the row nor the fold.
+    relay::BoardChatPanel board;
+    QVERIFY(!board.collapsed());
+    QVERIFY(!board.findChild<QToolButton *>(QStringLiteral("boardChatAsk")));
+    QVERIFY(!board.findChild<QToolButton *>(QStringLiteral("boardChatFold")));
+}
+
+// An answer that names a thing the app can show is one click from showing it (#FEJQ). `card:`
+// was already there; `option:` and `session:` are the two the helper answers with.
+void BoardModelTests::anAnswersOptionAndSessionLinksResolveIntoThePane()
+{
+    relay::HelperChatPanel panel(relay::helperpane::options());
+    QString section, row, session, card;
+    panel.onOpenOption = [&section, &row](const QString &s, const QString &r) {
+        section = s;
+        row = r;
+    };
+    panel.onOpenSession = [&session](const QString &id) { session = id; };
+    panel.onOpenCard = [&card](const QString &id) { card = id; };
+
+    auto *log = panel.findChild<QTextBrowser *>(QStringLiteral("boardChatLog"));
+    QVERIFY(log);
+    emit log->anchorClicked(QUrl(QStringLiteral("option:agent/allow_writes")));
+    QCOMPARE(section, QStringLiteral("agent"));
+    QCOMPARE(row, QStringLiteral("allow_writes"));
+    emit log->anchorClicked(QUrl(QStringLiteral("session:0f3a-11d2")));
+    QCOMPARE(session, QStringLiteral("0f3a-11d2"));
+    emit log->anchorClicked(QUrl(QStringLiteral("card:K7Q2")));
+    QCOMPARE(card, QStringLiteral("K7Q2"));
+
+    // Written with an authority instead — a model spells a link either way — and the same thing
+    // has to arrive. A section on its own reveals the section.
+    section.clear();
+    row.clear();
+    emit log->anchorClicked(QUrl(QStringLiteral("option://agent/allow_writes")));
+    QCOMPARE(section, QStringLiteral("agent"));
+    QCOMPARE(row, QStringLiteral("allow_writes"));
+    section.clear();
+    emit log->anchorClicked(QUrl(QStringLiteral("option:voice")));
+    QCOMPARE(section, QStringLiteral("voice"));
+    QVERIFY(row.isEmpty());
 }
 
 QTEST_MAIN(BoardModelTests)

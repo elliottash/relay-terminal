@@ -7,6 +7,7 @@
 #include "ToolLabel.h"
 #include "Voice.h"
 
+#include <QApplication>
 #include <QCheckBox>
 #include <QIcon>
 #include <QDesktopServices>
@@ -707,6 +708,13 @@ void HelperChatPanel::applyCollapsed()
 {
     if (m_askRow != nullptr)
         m_askRow->setVisible(m_collapsed);
+    // Folding with the cursor still in the composer: hand the focus to the row that replaces it
+    // first. Qt hands it on itself when the widget holding it hides, and it does that as a Tab —
+    // and a Tab onto the ask row means "open the panel", which would unfold what was just folded.
+    // The ask row is already visible here, so the focus lands where the eye is.
+    if (m_collapsed && m_ask != nullptr && m_body != nullptr
+        && m_body->isAncestorOf(QApplication::focusWidget()))
+        m_ask->setFocus(Qt::OtherFocusReason);
     if (m_body != nullptr)
         m_body->setVisible(!m_collapsed);
     if (!m_collapsed)
@@ -1141,9 +1149,22 @@ bool HelperChatPanel::eventFilter(QObject *object, QEvent *event)
             onHint(m_askHint, m_askKeys);
     }
     // A collapsed panel expands on focus as well as on a click (#FEJQ): Tab reaching the ask row
-    // is the keyboard saying the same thing the click says, and it lands in the composer.
-    if (object == m_ask && event->type() == QEvent::FocusIn)
-        expand();
+    // is the keyboard saying the same thing the click says, and it lands in the composer. Only a
+    // *deliberate* focus, though — Qt hands the first focusable child the focus when the pane is
+    // shown or the window is activated, and a panel that unfolded itself on every show would
+    // never be collapsed at all.
+    if (object == m_ask && event->type() == QEvent::FocusIn) {
+        switch (static_cast<QFocusEvent *>(event)->reason()) {
+        case Qt::TabFocusReason:
+        case Qt::BacktabFocusReason:
+        case Qt::MouseFocusReason:
+        case Qt::ShortcutFocusReason:
+            expand();
+            break;
+        default:
+            break;
+        }
+    }
     return QWidget::eventFilter(object, event);
 }
 
