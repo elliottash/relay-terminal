@@ -31,3 +31,12 @@ the eight recommendations (recorded in `## Decisions`); the card moves to execut
 Opus subagents on disjoint files — desktop always-on (C++), sidecar always-on (Python), deploy and
 icons, phone inbox/offline queue/notification switches. Wave 2 after they land: connect tokens,
 and the pane view's Stop / Recap / question rows / admit-from-phone. Wave 3: the headless drive.
+
+<!-- relay:entry 20260920T224500Z-c1 author=claude-code kind=progress -->
+### Claude Code · 2026-09-20 22:45
+Phase 1.4 landed (`80706293`, `38cf319b`): `rendezvous/deploy.sh` (export from a rev, rollback copy,
+restart, health and per-file sha check, `--check`, `--rollback`, `--install-unit`), run twice
+against elliott-main-1; join.relay-terminal.ai now serves exactly main (24 files match). PNG,
+maskable and apple-touch icons from the one `app/icon.svg`; `tests/test_web_manifest.py` (12).
+The previous hand deploy had stripped trailing newlines from every served file. The push icon line
+in `app/sw.js` was routed to the phone-app agent, who owns that file.
