@@ -8267,7 +8267,17 @@ private:
                     QPointer<QWidget> guard(leaf);
                     // The conversation info button (ⓘ, card #Y63Z), first in an agent pane's row.
                     if (dynamic_cast<Pane *>(leaf)) {
-                        if (auto *row = qobject_cast<QHBoxLayout *>(chrome->layout())) {
+                        // The button row is the chrome's own layout while it is one row, and the
+                        // first row inside the column once the share button hangs below it
+                        // (2026-09-20). Casting only chrome->layout() found nothing after that move,
+                        // and the i-button silently went. Take either shape so the order the two
+                        // land in does not matter.
+                        QHBoxLayout *row = qobject_cast<QHBoxLayout *>(chrome->layout());
+                        if (!row)
+                            if (auto *column = qobject_cast<QVBoxLayout *>(chrome->layout()))
+                                if (column->count() > 0)
+                                    row = qobject_cast<QHBoxLayout *>(column->itemAt(0)->layout());
+                        if (row) {
                             auto *info = new relay::sessioninfo::InfoButton;
                             info->setObjectName(QStringLiteral("paneChromeButton"));
                             info->setProperty("action", QStringLiteral("agent.info"));
