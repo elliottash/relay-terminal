@@ -840,12 +840,16 @@ QWidget *SettingsPane::settingRow(const SettingRow &row) {
         box->addWidget(host);
         if (wordless) box->addStretch(1);
         constexpr int kWordsWant = 300;   // narrower than this beside the buttons, and they go below
-        line->onResized = [box, text, host](int width) {
+        // The block goes back to the slot it came from, not to the end of the row: a first, narrow
+        // resize moved it under the words and the wide one that followed appended it after the
+        // trailing stretch, which is how a lone "+ add a model…" ended up at the right edge.
+        const int slot = box->indexOf(host);
+        if (!wordless) line->onResized = [box, text, host, slot](int width) {
             const bool below = width - host->sizeHint().width() - 90 < kWordsWant;
             if (below == host->property("below").toBool()) return;
             host->setProperty("below", below);
             if (below) { box->removeWidget(host); text->addSpacing(4); text->addWidget(host, 0, Qt::AlignLeft); }
-            else { text->removeWidget(host); box->addWidget(host); }
+            else { text->removeWidget(host); box->insertWidget(slot, host); }
         };
         if (first) entry.activate = [first] { first->click(); };
         break;
