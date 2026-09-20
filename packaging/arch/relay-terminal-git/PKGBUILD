@@ -44,6 +44,9 @@ check() {
 }
 
 package() {
+  # `cmake --install` byte-compiles the staged backend (#TZWF): the installed tree is root-owned,
+  # so without the __pycache__ in the package every worker start recompiles 65 modules. Do not
+  # strip it from $pkgdir.
   DESTDIR="$pkgdir" cmake --install build
   install -Dm644 relay-terminal/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

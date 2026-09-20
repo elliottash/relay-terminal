@@ -403,8 +403,8 @@ class Session:
     # ----- HTTP -------------------------------------------------------------------------
     def _opener_(self):
         if self._opener is None:
-            from .provider import NoRedirect
-            self._opener = urllib.request.build_opener(NoRedirect())
+            from .provider import shared_opener
+            self._opener = shared_opener()      # the process's one opener (#TZWF)
         return self._opener
 
     def _post(self, path: str, payload: dict) -> dict:

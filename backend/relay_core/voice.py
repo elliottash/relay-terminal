@@ -152,8 +152,8 @@ def _post(url: str, data: bytes, key: str, content_type: str, opener=None) -> di
                "Authorization": "Bearer " + key}
     request = urllib.request.Request(url, data=data, headers=headers, method="POST")
     # Never follow a redirect: it would carry the Authorization header somewhere else.
-    from .provider import NoRedirect
-    build = opener or urllib.request.build_opener(NoRedirect()).open
+    from .provider import shared_opener
+    build = opener or shared_opener().open
     try:
         with build(request, timeout=TIMEOUT_S) as response:
             raw = response.read(MAX_RESPONSE + 1)

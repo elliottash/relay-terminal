@@ -16,6 +16,33 @@ for f in /usr/bin/relay /usr/share/relay/backend/worker.py /usr/share/relay/shel
 done
 [[ -x /usr/share/relay/scripts/relay-open ]] || { echo "relay-open is not executable" >&2; exit 1; }
 
+step "backend bytecode (#TZWF)"
+# The installed tree is root-owned, so the worker can never write __pycache__ itself: without the
+# install rule's compileall every worker start recompiles 65 modules (259 ms to ready instead of
+# 71, nine times over for a three-tab session). The .pyc must be hash-based and name its installed
+# path, so no mtime and no staging directory can decide whether it is used.
+pycache=/usr/share/relay/backend/relay_core/__pycache__
+pyc=$(ls "$pycache"/provider.*.pyc 2>/dev/null | head -n 1) ||:
+[[ -n ${pyc:-} ]] || { echo "no $pycache: the package ships no bytecode" >&2; exit 1; }
+python3 - "$pyc" <<'PY'
+import importlib.util, marshal, sys
+raw = open(sys.argv[1], "rb").read()
+assert raw[:4] == importlib.util.MAGIC_NUMBER, "the .pyc was built by another Python"
+flags = int.from_bytes(raw[4:8], "little")
+assert flags & 1, f"the .pyc is not hash-based (flags {flags})"
+name = marshal.loads(raw[16:]).co_filename
+assert name == "/usr/share/relay/backend/relay_core/provider.py", name
+print(f"ok {sys.argv[1]} (hash-based, {name})")
+PY
+python3 - <<'PY'
+import importlib.util, pathlib, sys
+missing = [str(p) for p in pathlib.Path("/usr/share/relay/backend").rglob("*.py")
+           if not pathlib.Path(importlib.util.cache_from_source(str(p))).exists()]
+if missing:
+    sys.exit("not compiled: " + ", ".join(missing[:5]))
+print("ok every installed backend module has its bytecode")
+PY
+
 step "relay --version / --help"
 QT_QPA_PLATFORM=offscreen relay --version
 help=$(QT_QPA_PLATFORM=offscreen relay --help); head -n 5 <<<"$help"

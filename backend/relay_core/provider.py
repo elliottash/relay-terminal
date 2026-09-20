@@ -442,6 +442,45 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         hard_close(fp)
         raise ProviderError("Provider redirected the request. Check the configured base URL.")
 
+
+# One opener per process, not one per request (#TZWF, measured by the #PF4K profile).
+# `build_opener` constructs an `HTTPSHandler` whatever the scheme, `HTTPSHandler.__init__` calls
+# `ssl.create_default_context()`, and that parses the machine's whole CA bundle: 11.8 ms of CPU
+# every time, even for `http://127.0.0.1` where no TLS is used at all — 52.5 % of the worker's CPU
+# under py-spy, paid again by every side call, and on CPython 3.14 it is also 109 MiB of heap the
+# interpreter never gives back over a 300-turn conversation.
+#
+# The handlers hold no per-request state and an `SSLContext` is safe to share, so the same opener
+# serves the model call, the title call and the summary call on whatever thread each runs on; the
+# per-call `timeout=` and the stall watchdog are unchanged, because both live on the request, not
+# on the opener. What this does change: `build_opener` reads the proxy environment when it is
+# built, so `http_proxy`/`https_proxy`/`no_proxy` are now read once per process rather than once
+# per request. Nothing observable moves — the worker's environment is fixed when the GUI spawns it
+# — but a test that edits `os.environ` mid-process would need `reset_shared_openers()`.
+_openers: dict[bool, urllib.request.OpenerDirector] = {}
+_openers_lock = threading.Lock()
+
+
+def shared_opener(*, proxies: bool = True) -> urllib.request.OpenerDirector:
+    """The process-wide opener: `NoRedirect`, and optionally no proxy at all.
+
+    `proxies=False` is what a probe of a model server on this machine wants (localmodels.py): an
+    `http_proxy` in the environment must not be asked about `127.0.0.1`.
+    """
+    with _openers_lock:
+        opener = _openers.get(proxies)
+        if opener is None:
+            handlers = [NoRedirect()] if proxies else [NoRedirect(), urllib.request.ProxyHandler({})]
+            opener = _openers[proxies] = urllib.request.build_opener(*handlers)
+        return opener
+
+
+def reset_shared_openers() -> None:
+    """Drop the cached openers, so the next request reads the proxy environment again. Tests."""
+    with _openers_lock:
+        _openers.clear()
+
+
 @dataclass
 class ProviderConfig:
     base_url: str
@@ -741,7 +780,7 @@ class ChatProvider:
             headers["Authorization"] = "Bearer " + self.config.api_key
         request = urllib.request.Request(self.config.base_url.rstrip("/") + "/chat/completions",
                                          data=data, headers=headers, method="POST")
-        opener = urllib.request.build_opener(NoRedirect())
+        opener = shared_opener()
         watchdog = None
         try:
             # DNS, TLS and the headers; every streamed chunk after them is covered by the watchdog.

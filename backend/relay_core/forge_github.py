@@ -197,8 +197,8 @@ class GitHubProvider(ForgeProvider):
     # ---- transport ------------------------------------------------------------
     def _opener_(self):
         if self._opener is None:
-            from .provider import NoRedirect
-            self._opener = urllib.request.build_opener(NoRedirect())
+            from .provider import shared_opener
+            self._opener = shared_opener()      # the process's one opener (#TZWF)
         return self._opener
 
     def _url(self, path: str, query: dict | None = None) -> str:

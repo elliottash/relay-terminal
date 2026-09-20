@@ -8,8 +8,10 @@ import threading
 import time
 import unittest
 import urllib.error
+import urllib.request
 from unittest import mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from relay_core import provider as provider_module
 from relay_core.provider import (CONNECT_TIMEOUT, MAX_OUTPUT_TOKENS, ChatProvider, ProviderConfig,
                                  ProviderError, ProviderStalled, ProviderTruncated, Cancelled, ProviderPreempted,
                                  validate_stall_timeout)
@@ -264,6 +266,95 @@ class HTTPTests(unittest.TestCase):
         with self.assertRaises(ProviderError) as ctx: self.complete('/error')
         self.assertNotIn('SECRET_ECHO', str(ctx.exception))
         self.assertIn('401', str(ctx.exception))
+
+
+class SharedOpenerTests(unittest.TestCase):
+    """The urllib opener is built once per process, not once per request (#TZWF).
+
+    `build_opener` makes an `HTTPSHandler` whatever the scheme, and `HTTPSHandler.__init__` parses
+    the machine's whole CA store — 11.8 ms and, on CPython 3.14, heap that is never returned. It
+    used to happen on every model call and every side call, including calls to 127.0.0.1.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+            def do_POST(self):
+                self.rfile.read(int(self.headers['Content-Length']))
+                self.send_response(200); self.send_header('Content-Type', 'text/event-stream'); self.end_headers()
+                self.wfile.write(event({'content': 'OK'}) + event(finish='stop') + b'data: [DONE]\n\n')
+        cls.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True); cls.thread.start()
+        cls.base = f'http://127.0.0.1:{cls.server.server_port}/v1'
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown(); cls.server.server_close(); cls.thread.join()
+
+    def setUp(self):
+        provider_module.reset_shared_openers()
+        self.addCleanup(provider_module.reset_shared_openers)
+
+    def counted(self, requests: int) -> tuple[int, int]:
+        """(openers built, CA stores parsed) for `requests` completions through the stub."""
+        import ssl
+        openers, certs = [], []
+        real_build, real_load = urllib.request.build_opener, ssl.SSLContext.load_default_certs
+        def build(*handlers):
+            openers.append(1); return real_build(*handlers)
+        def load(self, *args, **kwargs):
+            certs.append(1); return real_load(self, *args, **kwargs)
+        with mock.patch.object(urllib.request, 'build_opener', build), \
+             mock.patch.object(ssl.SSLContext, 'load_default_certs', load):
+            for _ in range(requests):
+                provider = ChatProvider(ProviderConfig(self.base, 'test-model', 'TEST_SECRET'))
+                result = provider.complete([{'role': 'user', 'content': 'hi'}], [], lambda x: None,
+                                           threading.Event())
+                self.assertEqual(result['content'], 'OK')
+        return len(openers), len(certs)
+
+    def test_the_ca_store_is_parsed_once_however_many_requests_are_made(self):
+        self.assertEqual(self.counted(5), (1, 1))
+        # …and not again for the next five: the opener outlives the provider objects.
+        self.assertEqual(self.counted(5), (0, 0))
+
+    def test_one_opener_serves_every_caller(self):
+        from relay_core import customproviders, localmodels
+        first = provider_module.shared_opener()
+        self.assertIs(provider_module.shared_opener(), first)
+        self.assertIs(customproviders.shared_opener(), first)
+        self.assertIs(localmodels.shared_opener(proxies=False),
+                      provider_module.shared_opener(proxies=False))
+        self.assertIsNot(provider_module.shared_opener(proxies=False), first)
+        for opener in (first, provider_module.shared_opener(proxies=False)):
+            self.assertTrue(any(isinstance(h, provider_module.NoRedirect) for h in opener.handlers))
+
+    def test_a_local_probe_still_goes_nowhere_near_a_proxy(self):
+        with mock.patch.dict(os.environ, {'http_proxy': 'http://127.0.0.1:9/'}):
+            provider_module.reset_shared_openers()
+            direct = provider_module.shared_opener(proxies=False)
+            proxied = provider_module.shared_opener()
+        self.assertFalse(any(isinstance(h, urllib.request.ProxyHandler) for h in direct.handlers))
+        self.assertTrue(any(isinstance(h, urllib.request.ProxyHandler) for h in proxied.handlers))
+        # The environment is read when the opener is built, so a caller that changes it resets.
+        with mock.patch.dict(os.environ):
+            for name in ('http_proxy', 'HTTP_PROXY', 'https_proxy', 'HTTPS_PROXY', 'all_proxy', 'ALL_PROXY'):
+                os.environ.pop(name, None)
+            provider_module.reset_shared_openers()
+            self.assertFalse(any(isinstance(h, urllib.request.ProxyHandler)
+                                 for h in provider_module.shared_opener().handlers))
+
+    def test_threads_sharing_the_opener_get_the_same_one(self):
+        # The worker runs the model call and its side calls on different threads.
+        seen, done = [], threading.Barrier(4)
+        def grab():
+            done.wait(); seen.append(provider_module.shared_opener())
+        threads = [threading.Thread(target=grab) for _ in range(3)]
+        for t in threads: t.start()
+        done.wait()
+        for t in threads: t.join()
+        self.assertEqual(len(set(id(o) for o in seen)), 1)
 
 
 class DeadlineTests(unittest.TestCase):

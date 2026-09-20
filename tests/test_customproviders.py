@@ -261,7 +261,8 @@ class LoopbackTests(Case):
                 seen["auth"] = request.get_header("Authorization")
                 raise OSError("down")
 
-        with mock.patch.object(C.urllib.request, "build_opener", lambda *a: Opener()):
+        # The opener is built once per process now (#TZWF), so the probe is given one here.
+        with mock.patch.object(C, "shared_opener", lambda **kw: Opener()):
             self.assertIsNone(REAL_FETCH("http://localhost:4000/v1", "sk-x"))
             self.assertIsNone(seen["auth"])
             self.assertIsNone(REAL_FETCH("https://llm.example.com/v1", "sk-x"))

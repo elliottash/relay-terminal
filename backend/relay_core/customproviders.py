@@ -37,7 +37,7 @@ from pathlib import Path
 
 from . import keystore
 from .presets import DEFAULT_CONTEXT_WINDOW, Preset, effort_levels, openrouter_twin
-from .provider import NoRedirect, loopback_http
+from .provider import loopback_http, shared_opener
 
 PREFIX = "custom:"
 ENV_PATH = "RELAY_CUSTOM_PROVIDERS"
@@ -304,7 +304,7 @@ def fetch_models(base_url: str, api_key: str, *, timeout: float = PROBE_TIMEOUT_
     if api_key and not loopback_http(base_url):
         headers["Authorization"] = f"Bearer {api_key}"
     request = urllib.request.Request(base_url.rstrip("/") + "/models", headers=headers, method="GET")
-    opener = urllib.request.build_opener(NoRedirect())
+    opener = shared_opener()                       # one per process, not one per probe (#TZWF)
     try:
         with opener.open(request, timeout=timeout) as response:
             if response.status != 200:

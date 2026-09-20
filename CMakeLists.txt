@@ -506,6 +506,33 @@ if(RELAY_BUILD_APP)
     # remote/, rendezvous/ and app/ are the phone-sharing sidecar, its relay and the web client.
     install(DIRECTORY backend shell remote rendezvous app DESTINATION ${CMAKE_INSTALL_DATADIR}/relay
         PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE)
+    # Byte-compile what was just installed (#TZWF). The sources above are copied without the
+    # developer's own __pycache__ (its .pyc name the checkout, not the install), and the installed
+    # tree is root-owned, so the user's worker cannot write one either: CPython then silently
+    # recompiles all 65 modules on every start — 259 ms to `ready` instead of 71 ms, for each of
+    # the nine workers a three-tab session spawns. Compiling here makes the cache part of the
+    # package, so it is removed with it and no stale .pyc can be left behind.
+    #
+    # `unchecked-hash` rather than the default timestamp mode: a .pyc validated against the
+    # source's mtime is only as good as whatever the packager, dpkg or tar did to that mtime, and
+    # a hash the loader does not re-check costs nothing at import. What invalidates it is
+    # reinstalling — the package replaces the .py and the .pyc together. Editing an installed .py
+    # in place does not, which is the trade: do that in a checkout, not under ${CMAKE_INSTALL_DATADIR}.
+    # -s/-p rewrite the path baked into each .pyc from the staging directory (DESTDIR, or CPack's
+    # temporary prefix) to where the files will actually be, so a traceback names the real file.
+    install(CODE "
+        set(_relay_staged \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/relay\")
+        set(_relay_final \"${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/relay\")
+        message(STATUS \"Byte-compiling \${_relay_staged}\")
+        execute_process(COMMAND \"${Python3_EXECUTABLE}\" -m compileall -q -f
+                                --invalidation-mode unchecked-hash
+                                -s \"\${_relay_staged}\" -p \"\${_relay_final}\"
+                                \"\${_relay_staged}/backend\" \"\${_relay_staged}/remote\"
+                                \"\${_relay_staged}/rendezvous\"
+                        RESULT_VARIABLE _relay_pyc)
+        if(NOT _relay_pyc EQUAL 0)
+            message(FATAL_ERROR \"compileall failed (\${_relay_pyc}): the installed backend would recompile itself at every worker start\")
+        endif()")
     install(DIRECTORY data/theme DESTINATION ${CMAKE_INSTALL_DATADIR}/relay)
     install(FILES org.relayterminal.Relay.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
     install(DIRECTORY data/icons/hicolor DESTINATION ${CMAKE_INSTALL_DATADIR}/icons)

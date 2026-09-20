@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .presets import Preset
-from .provider import LOCAL_HOSTS, NoRedirect, loopback_http
+from .provider import LOCAL_HOSTS, loopback_http, shared_opener
 
 PREFIX = "local:"
 SERVERS = ("llamacpp", "ollama", "lmstudio", "vllm", "openai-compatible")
@@ -334,7 +334,8 @@ def _get(url: str, timeout: float, body: dict | None = None):
     if data is not None:
         headers["Content-Type"] = "application/json"
     request = urllib.request.Request(url, data=data, headers=headers, method="POST" if data else "GET")
-    opener = urllib.request.build_opener(NoRedirect(), urllib.request.ProxyHandler({}))
+    # One per process, not one per probe (#TZWF); no proxy for a server on this machine.
+    opener = shared_opener(proxies=False)
     try:
         with opener.open(request, timeout=timeout) as response:
             status, raw = response.status, response.read(MAX_PROBE_BODY + 1)
