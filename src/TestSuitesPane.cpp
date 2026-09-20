@@ -171,9 +171,11 @@ public:
                                                "shows up");
             case ColP95: return QStringLiteral("95th-percentile duration — sorts by p95");
             case ColRuns: return QStringLiteral("Executions in the retained window, since this test's "
-                                                "source last changed");
+                                                "source last changed — no sort of its own; the "
+                                                "Display menu holds all five");
             case ColLastRun: return QStringLiteral("When it last ran — sorts by that");
-            case ColCards: return QStringLiteral("The cards whose ## Tests section names this test");
+            case ColCards: return QStringLiteral("The cards whose ## Tests section names this test — "
+                                                 "no sort of its own; the Display menu holds all five");
             default: return {};
             }
         }
