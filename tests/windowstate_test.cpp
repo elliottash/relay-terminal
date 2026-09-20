@@ -182,6 +182,11 @@ private slots:
         // A subagent pane (#WD83) is its tabs' text; with no tabs there is nothing to bring back.
         QVERIFY(isUsableNode(QJsonObject{{"subagents", QJsonObject{{"owner", "p1"}, {"tabs", QJsonArray{QJsonObject{{"id", "a1"}}}}}}}));
         QVERIFY(!isUsableNode(QJsonObject{{"subagents", QJsonObject{{"owner", "p1"}, {"tabs", QJsonArray{}}}}}));
+        // The Options/Actions pane node (card #XAME) needs nothing but the object: an empty one
+        // restores the default Options pane.
+        QVERIFY(isUsableNode(QJsonObject{{"settings", QJsonObject{{"mode", "actions"}, {"search", "theme"}}}}));
+        QVERIFY(isUsableNode(QJsonObject{{"settings", QJsonObject{}}}));
+        QVERIFY(!isUsableNode(QJsonObject{{"settings", "options"}}));
         QVERIFY(!isUsableNode(QJsonObject{}));
         QVERIFY(!isUsableNode(QJsonObject{{"subagent", QJsonObject{}}}));
         QVERIFY(!isUsableNode(QJsonObject{{"explorer", QJsonObject{}}}));   // no path

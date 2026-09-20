@@ -1,0 +1,70 @@
+{
+    "saved": 1789931198,
+    "version": 1,
+    "windows": [
+        {
+            "current": 0,
+            "geometry": [
+                0,
+                0,
+                1500,
+                900
+            ],
+            "screen": "screen",
+            "tabs": [
+                {
+                    "node": {
+                        "children": [
+                            {
+                                "children": [
+                                    {
+                                        "pane": {
+                                            "agent_mode": "build",
+                                            "agent_role": "main",
+                                            "cwd": "/tmp/tmp.mSYiGpqMoZ/work",
+                                            "effort": "high",
+                                            "engine_core": "libvterm",
+                                            "input_mode": "auto",
+                                            "model": "relay-main",
+                                            "preset": "relay-free",
+                                            "scrollback": "c3a1fd80-623d-4944-9bbb-7b208b855987",
+                                            "session_id": "a2abfb2f52654d629e8289e6d508a276",
+                                            "workspace": "/tmp/tmp.mSYiGpqMoZ/work"
+                                        }
+                                    },
+                                    {
+                                        "settings": {
+                                            "mode": "actions",
+                                            "row": "theme.reload",
+                                            "search": "theme"
+                                        }
+                                    }
+                                ],
+                                "sizes": [
+                                    426,
+                                    426
+                                ],
+                                "split": "v"
+                            },
+                            {
+                                "settings": {
+                                    "mode": "options",
+                                    "tab": "models"
+                                }
+                            }
+                        ],
+                        "sizes": [
+                            785,
+                            702
+                        ],
+                        "split": "h"
+                    },
+                    "tab_id": "tee574e7ddfbe"
+                }
+            ],
+            "titles": [
+                "work (4)  ·  cpu 00% · mem 00%"
+            ]
+        }
+    ]
+}

@@ -16,6 +16,12 @@
 // (prompt-history/<id>.txt, src/PromptHistory.h), which is why the two stores are pruned
 // together.
 //         | {"explorer"|"preview"|"plan": {"path": "..."}}
+//         | {"settings": {"mode": "options"|"actions", "tab"?, "search"?, "row"?}}
+//
+// The `settings` node is the Actions pane or the Options pane (card #XAME): which it was, the
+// section tab it was reading, its search text and its highlighted row, so a reopened window puts
+// the pane back where it was. The Switchboard's `board` node and the subagent pane's `subagents`
+// node are declared where they are restored (RelayWindow::buildNode).
 //
 // This header holds the parts that do not need a window: reading and writing the file, clamping a
 // window onto a screen that still exists, falling back when a directory is gone, and dropping

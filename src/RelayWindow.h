@@ -6078,6 +6078,21 @@ private:
             QTimer::singleShot(0, tool, [guard, owner] { if (auto *w = windowOf(guard)) w->linkRestoredSubagentPane(guard, owner); });
             return tool;
         }
+        if (node.contains(QStringLiteral("settings"))) {   // card #XAME: Options or Actions, back where it was read
+            const QJsonObject saved = node.value(QStringLiteral("settings")).toObject();
+            const auto mode = saved.value(QStringLiteral("mode")).toString() == QStringLiteral("actions")
+                                  ? relay::SettingsPane::Mode::Actions : relay::SettingsPane::Mode::Options;
+            ToolPane *tool = createSettingsPane(mode);
+            const QString tab = saved.value(QStringLiteral("tab")).toString();
+            const QString search = saved.value(QStringLiteral("search")).toString();
+            const QString row = saved.value(QStringLiteral("row")).toString();
+            if (!tab.isEmpty()) tool->settings()->showTab(tab);
+            if (!search.isEmpty()) tool->settings()->setSearch(search);
+            // A row is revealed only when no search was on: revealOption() clears the search, and
+            // with one the row was a result line, not a section row.
+            if (!tab.isEmpty() && !row.isEmpty() && search.isEmpty()) tool->settings()->revealOption(tab, row);
+            return tool;
+        }
         if (node.contains(QStringLiteral("plan"))) {
             const QString path = node.value(QStringLiteral("plan")).toObject().value(QStringLiteral("path")).toString();
             if (QFileInfo::exists(path)) return createToolPane(ToolPane::Kind::Plan, path);

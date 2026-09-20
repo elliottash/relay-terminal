@@ -427,7 +427,9 @@ public:
     }
     relay::BoardView *board() const { return m_board; }
 
-    // The Actions pane or the Options pane (src/SettingsPane.h; its mode says which). Transient: not saved with the layout (node() is empty).
+    // The Actions pane or the Options pane (src/SettingsPane.h; its mode says which). Saved with
+    // the layout (card #XAME): the mode, the section tab, the search text and the row in view, so
+    // a reopened window puts the pane back where it was read.
     ToolPane(relay::SettingsPane *view, const QString &cwd) : m_kind(Kind::Settings), m_settingsView(view), m_subagentCwd(cwd) {
         setObjectName(QStringLiteral("pane"));
         setAttribute(Qt::WA_StyledBackground);
@@ -505,7 +507,22 @@ public:
         // next event; `owner` is the owner's scrollback id, the key the subagent pane uses too.
         if (m_kind == Kind::Internals)
             return {{"internals", QJsonObject{{"cwd", m_subagentCwd}, {"owner", property("internalsOwner").toString()}}}};
-        if (m_turn || m_diff || m_settingsView || m_hosted) return {};
+        // The Actions pane or the Options pane (card #XAME): enough to put the reader back where
+        // it was — the mode, the section tab, the search and the highlighted row. visibleRowIds()
+        // is m_rows in order, so currentRow() indexes it.
+        if (m_settingsView) {
+            QJsonObject saved{{QStringLiteral("mode"), m_settingsView->mode() == relay::SettingsPane::Mode::Actions
+                                                          ? QStringLiteral("actions") : QStringLiteral("options")}};
+            const QString tab = m_settingsView->currentTab();
+            if (!tab.isEmpty() && tab != relay::SettingsPane::actionsTabId()) saved.insert(QStringLiteral("tab"), tab);
+            const QString search = m_settingsView->search();
+            if (!search.isEmpty()) saved.insert(QStringLiteral("search"), search);
+            const QStringList rows = m_settingsView->visibleRowIds();
+            const int current = m_settingsView->currentRow();
+            if (current >= 0 && current < rows.size()) saved.insert(QStringLiteral("row"), rows.at(current));
+            return {{QStringLiteral("settings"), saved}};
+        }
+        if (m_turn || m_diff || m_hosted) return {};
         if (m_plan) return {{"plan", QJsonObject{{"path", path()}}}};
         return {{m_explorer ? "explorer" : "preview", QJsonObject{{"path", path()}}}};
     }

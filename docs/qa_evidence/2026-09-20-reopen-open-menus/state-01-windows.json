@@ -1,0 +1,54 @@
+{
+    "saved": 1789931167,
+    "version": 1,
+    "windows": [
+        {
+            "current": 0,
+            "geometry": [
+                0,
+                0,
+                1500,
+                900
+            ],
+            "screen": "screen",
+            "tabs": [
+                {
+                    "node": {
+                        "children": [
+                            {
+                                "pane": {
+                                    "agent_mode": "build",
+                                    "agent_role": "main",
+                                    "cwd": "/tmp/tmp.mSYiGpqMoZ/work",
+                                    "effort": "high",
+                                    "engine_core": "libvterm",
+                                    "input_mode": "auto",
+                                    "model": "relay-main",
+                                    "preset": "relay-free",
+                                    "scrollback": "c3a1fd80-623d-4944-9bbb-7b208b855987",
+                                    "session_id": "231b2243d5de419592253b991cf4f2d0",
+                                    "workspace": "/tmp/tmp.mSYiGpqMoZ/work"
+                                }
+                            },
+                            {
+                                "settings": {
+                                    "mode": "options",
+                                    "tab": "models"
+                                }
+                            }
+                        ],
+                        "sizes": [
+                            602,
+                            357
+                        ],
+                        "split": "h"
+                    },
+                    "tab_id": "tee574e7ddfbe"
+                }
+            ],
+            "titles": [
+                "work (3)  ·  cpu 00% · mem 00%"
+            ]
+        }
+    ]
+}
