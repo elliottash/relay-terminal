@@ -117,10 +117,18 @@ The GUI row was corrected with them: Options › Agent's "Prompt profile" hint s
 and 8 tools on a local or small-window model" and now names the Lite tier and stops promising a
 fixed tool count (`src/RelayWindow.h`).
 
-## One failure that is not this change
+## One failure that is not this change — and is now on `main`
 
-`tests/test_system_prompt.py::SizeTests::test_the_board_policy_block_stays_tiered` fails in the
-shared checkout (3,893 B against a 3,072 B budget). It is another session's **uncommitted**
-`backend/relay_core/board_policy.md` (5,567 B in the tree against 4,512 B at the tip): the same test
-passes on a clean export of the tip and fails on that export as soon as the working copy of
-`board_policy.md` is dropped into it. Nothing here touches that file.
+`tests/test_system_prompt.py::SizeTests::test_the_board_policy_block_stays_tiered` fails: the
+Switchboard policy block is **3,893 bytes against its 3,072-byte budget**. It is not this change.
+`fdb662d6` ("one section per stage: the card body schema", #Z4HR) added rule 10 — the eleven-line
+`## Issue` / `## Decisions` / … section schema — to `backend/relay_core/board_policy.md`, which grew
+from 4,512 to 5,567 bytes on disk. The test fails on a clean export of `f8becbb1`, the commit before
+this one, and passes on a clean export of the tip before `fdb662d6`. Nothing here touches that file.
+
+The budget is decision 8's own: the policy block is what has to be read *before* a board tool is
+called, and 3 KB was the line drawn when it was tiered. Rule 10 is a card-body schema, which is
+`board_update_card`'s and the `deliver` skill's subject rather than something the model needs before
+its first call — so the fix is probably to move it there, as decision 8 moved the other rules. That
+is #Z4HR's call, not this session's, and it costs every board turn about 520 tokens (and every short
+board turn a fifth of its whole prompt) until it is made.
