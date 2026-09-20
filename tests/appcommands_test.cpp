@@ -511,6 +511,35 @@ private Q_SLOTS:
         QVERIFY(!orphan.value(QStringLiteral("message")).toString().isEmpty());
     }
 
+    // Owner decision 6: a row an agent changed "carries a marker until the person touches it".
+    // Pressing Undo *is* touching it, so the mark goes; an agent undoing its own change is still
+    // the agent changing the row, so there the mark stays and says what the undo made it.
+    void undoByHandClearsTheMarkAndUndoByTheAgentKeepsIt() {
+        const QJsonObject set{{QStringLiteral("id"), QStringLiteral("r1")},
+                              {QStringLiteral("command"), QStringLiteral("set_option")},
+                              {QStringLiteral("row"), QStringLiteral("option:thinking")},
+                              {QStringLiteral("value"), false}};
+        QString change = run(set).value(QStringLiteral("change_id")).toString();
+        QVERIFY(!change.isEmpty());
+        QVERIFY(relay::SettingsPane::agentChangeNote(QStringLiteral("option:thinking"))
+                    .startsWith(QStringLiteral("changed by the agent")));
+
+        // The person, through the notification's Undo.
+        QVERIFY(app.undoFromNotification(relay::AppCommands::undoActionId(change)));
+        QCOMPARE(state.thinking, true);
+        QVERIFY(relay::SettingsPane::agentChangeNote(QStringLiteral("option:thinking")).isEmpty());
+
+        // The agent, through app_undo: the row is still one an agent is holding.
+        change = run(set).value(QStringLiteral("change_id")).toString();
+        const QJsonObject undone = run({{QStringLiteral("id"), QStringLiteral("r2")},
+                                        {QStringLiteral("command"), QStringLiteral("undo")},
+                                        {QStringLiteral("change_id"), change}});
+        QVERIFY(undone.value(QStringLiteral("ok")).toBool());
+        QCOMPARE(state.thinking, true);
+        QVERIFY(relay::SettingsPane::agentChangeNote(QStringLiteral("option:thinking"))
+                    .contains(QStringLiteral("off \u2192 on")));
+    }
+
     void anUnknownCommandIsRefusedRatherThanIgnored() {
         const QJsonObject result = run({{QStringLiteral("id"), QStringLiteral("r1")},
                                         {QStringLiteral("command"), QStringLiteral("launch_rockets")}});

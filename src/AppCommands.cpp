@@ -443,6 +443,11 @@ QString AppCommands::changeIdOfAction(const QString &actionId) {
     return actionId.startsWith(QStringLiteral("appundo:")) ? actionId.mid(8) : QString();
 }
 
+// Who the change log names when the *person* is the one who acted: the default `who` of undo()
+// and what the notification's Undo button passes. An agent's own `app_undo` carries its pane
+// token or "helper" instead, which is what tells the two apart.
+static const QString kYou = QStringLiteral("you");
+
 bool AppCommands::undo(const QString &changeId, const QString &who, QString *error,
                        QJsonValue *previous, QJsonValue *value) {
     using namespace appcommands;
@@ -477,9 +482,16 @@ bool AppCommands::undo(const QString &changeId, const QString &who, QString *err
     m_changes.append(entry);
     while (m_changes.size() > kMaxChanges) m_changes.removeFirst();
 
-    // The row's marker goes back to what the undo made it, and the notification that offered the
-    // Undo says it was taken rather than offering it again.
-    SettingsPane::markAgentChanged(original.key, valueText(before), valueText(entry.value));
+    // The row's marker. An agent undoing its own change is still the agent changing the row, so
+    // the mark stays and says what the undo made it. A **person** pressing Undo has answered the
+    // mark — that is what "until the person touches it" means (owner decision 6) — so it goes.
+    // Leaving it there had the pane say "changed by the agent just now: on → off" about a revert
+    // the person had just performed by hand, which is the one thing the marker must never do.
+    if (who == kYou)
+        SettingsPane::clearAgentChanged(original.key);
+    else
+        SettingsPane::markAgentChanged(original.key, valueText(before), valueText(entry.value));
+    // The notification that offered the Undo says it was taken rather than offering it again.
     if (!original.noteId.isEmpty())
         NotificationCenter::instance().amend(original.noteId,
             QStringLiteral("Undone: %1").arg(original.label),
