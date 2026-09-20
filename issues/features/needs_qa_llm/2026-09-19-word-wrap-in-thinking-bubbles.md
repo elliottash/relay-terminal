@@ -1,10 +1,12 @@
 ---
 id: EH98
 type: work
-status: inbox
+status: needs-qa-llm
+assignee: agent
+implemented_by: kimi/kimi-k3
 rank: zzzzzzzzzi
 created: '2026-09-19'
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {plans: [], commits: [121fd9a1, b6521ebc], evidence: [docs/qa_evidence/2026-09-20-word-wrap-in-thinking-bubbles/], related: [R2WQ], github: null}
 ---
 # word wrap in thinking bubbles
 
@@ -39,3 +41,47 @@ text is not wrapping at word boundaries in the agebt thinking bubble. that shoul
 
 - `./scripts/test.sh` and `ctest --test-dir build` — the new and extended cases above, plus the existing invariants (`contentExpandsAndWrapsToTheWidth`'s space-free line is unchanged; cap tests' `row.size() <= cells` holds since rows only get shorter).
 - Live under Xvfb with an isolated `XDG_CONFIG_HOME` (WARP.md): stream a turn's reasoning in a narrow pane — the `▸ ✦ thinking…` fold's rows break between words, and resizing narrower/wider re-wraps at word boundaries.
+
+## Implementation
+
+Executed 2026-09-20 by a Relay agent pane (`kimi/kimi-k3`). The plan above was written against
+the 2026-09-19-afternoon tree; before this execution ran, **#R2WQ** had landed its task a4
+("one word-aware break rule, used everywhere … tool-call detail stops breaking mid-word as a
+side effect") as `121fd9a1` + `b6521ebc` — its diagnosis names this card's fault verbatim, and
+its fix covers both wrap points the plan names. **#EH98 therefore needed no code delta.** At the
+landing tip (`15aafa59d28d`):
+
+- `relay::wrapFoldLines()` (`engine/TerminalBackend.h`) and `FoldLayer::layout()`
+  (`engine/view/FoldLayer.cpp`) both build their rows from `relay::wrap::rows()`
+  (`src/WordWrap.cpp:76`) — break before a word that would cross the edge, overlong words break
+  at the edge, edge spaces open no row.
+- The comments and `docs/ENGINE.md` already describe the word-aware rule; no "hard wrap"
+  wording remains.
+- `scripts/relay-build` is clean and the existing suites that pin the behaviour pass
+  (`wordwrap`, `calllines`, `markdown`, `relay-engine-tests`) — the run is in
+  `docs/qa_evidence/2026-09-20-word-wrap-in-thinking-bubbles/README.md`.
+
+One deviation from the plan's letter: a space that would cross the edge is *dropped* rather than
+kept at a row's end, so joined painted rows do not round-trip — but `FoldLayer::lineText()` and
+the copy path still return the logical line whole, and the owner-visible result (rows break
+between words) is as planned. The implementing model of the code is `glm/glm-5.3` (#R2WQ); this
+card's executing session (`kimi/kimi-k3`) only verified and documented. No new tests were added,
+per the owner at execution ("no tests, just deliver"); the owner also confirmed scope on
+2026-09-20.
+
+## QA checklist
+
+- [ ] Stream a turn's reasoning in a narrow pane: the `▸ ✦ thinking…` fold's rows break between
+      words; no row ends mid-word.
+- [ ] Make the pane narrower and wider again: the fold re-wraps at word boundaries each time.
+- [ ] Once the turn settles, open the fold by hand: the settled (18-row cap) fold also breaks at
+      words, and the "… N more/earlier lines" note reads sensibly.
+- [ ] Expand a tool call whose detail has long prose or a long command: rows break at a space
+      where one is available; a space-free overlong row still breaks at the edge.
+- [ ] Copy across a wrapped fold line: the logical line comes back whole, without the indent.
+- [ ] `relay-wordwrap-tests`, `relay-calllines-tests`, `relay-engine-tests` green.
+- [ ] Both cores if a ghostty build is at hand (`RELAY_ENGINE_WITH_GHOSTTY=ON` — off in the
+      executing session's build dir; the same open row #R2WQ left).
+- [ ] Verifier family: the code is `glm/glm-5.3`'s (#R2WQ) and the executing session
+      `kimi/kimi-k3` — prefer a verifier outside both families
+      (`scripts/relay-board.py verifier EH98`).
