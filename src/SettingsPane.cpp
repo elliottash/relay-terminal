@@ -2,6 +2,7 @@
 #include "SettingsPane.h"
 
 #include "HelperChat.h"
+#include "SettingsCache.h"   // a write here drops the hot-path settings cache (#057J)
 
 #include <QApplication>
 #include <QCheckBox>
@@ -209,6 +210,11 @@ void SettingsWatch::listen(QObject *context, std::function<void()> changed) {
 }
 
 void SettingsWatch::notify() {
+    // Before anything else, and before the delivery is collapsed away: the values read on hot
+    // paths are cached (card #057J) and a write has just happened, so the cache is stale from this
+    // instant. Dropping it here rather than in the delivery below means a setting changed in
+    // Options is in effect for the very next reader, not for the next turn of the event loop.
+    relay::settings::invalidate();
     if (m_scheduled) return;            // one delivery for a burst: a page reset writes many rows
     m_scheduled = true;
     QTimer::singleShot(0, [this] {

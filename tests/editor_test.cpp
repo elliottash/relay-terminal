@@ -9,6 +9,7 @@
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QTest>
+#include <QTimer>
 #include <QTextBlock>
 #include <QTextCursor>
 #include <QTextLayout>
@@ -270,6 +271,41 @@ private Q_SLOTS:
         editor.remember(QStringLiteral("a reply"));
         QCOMPARE(editor.history(), QStringList{QStringLiteral("a reply")});
         QVERIFY(!QFile::exists(path));
+    }
+    // Card #057J: the caret is painted only for the box that has the keyboard, so the blink timer
+    // may not run while it has not — every visible composer used to repaint twice a second for
+    // nothing, focused or not, for as long as Relay was open.
+    void theCaretBlinksOnlyForTheFocusedBox() {
+        // In a host, as a composer is in its pane: hiding the box then has the shape a tab change
+        // has, rather than a whole window coming and going.
+        QWidget host; host.resize(400, 120);
+        auto &editor = *new RichEditor(&host);
+        editor.setGeometry(0, 0, 400, 80);
+        editor.setCaretColor(QColor(Qt::red));
+        auto blink = [&editor] {
+            const QList<QTimer *> timers = editor.findChildren<QTimer *>();
+            return timers.isEmpty() ? nullptr : timers.first();
+        };
+        QVERIFY(blink());
+        QVERIFY2(!blink()->isActive(), "a box that has never had focus must not blink");
+        host.show();
+        editor.setFocus();
+        QTRY_VERIFY(editor.hasFocus());
+        QVERIFY(blink()->isActive());
+        editor.clearFocus();
+        QVERIFY2(!blink()->isActive(), "the blink must stop when the keyboard goes elsewhere");
+        editor.setFocus();
+        QTRY_VERIFY(editor.hasFocus());
+        QVERIFY(blink()->isActive());
+        // Hidden (the pane's tab went to the back): no repaints and no wakeups. Qt takes the
+        // keyboard off a widget it hides, so showEvent's restart is the belt to focusInEvent's
+        // braces; what matters here is that the blink comes back with the box.
+        editor.hide();
+        QVERIFY(!blink()->isActive());
+        editor.show();
+        editor.setFocus();
+        QTRY_VERIFY(editor.hasFocus());
+        QVERIFY(blink()->isActive());
     }
     void upInsideMultilineTextMovesCursor() {
         RichEditor editor; editor.remember(QStringLiteral("git status"));

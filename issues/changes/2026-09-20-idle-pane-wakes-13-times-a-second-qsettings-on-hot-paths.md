@@ -1,9 +1,9 @@
 ---
 id: 057J
 type: work
-status: planned
+status: executing
 labels: [bug, performance]
-assignee: null
+assignee: claude-code
 rank: m3
 created: '2026-09-20'
 source: 'Claude Code in the owner''s terminal, 2026-09-20 — found by the #PF4K profilers'

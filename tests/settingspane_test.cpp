@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SettingsPane.h"
 #include "LocalModelsSettings.h"
+#include "SettingsCache.h"
 
 #include <QApplication>
 #include <QDir>
@@ -1157,6 +1158,32 @@ private slots:
         relay::SettingsWatch::instance().notify();
         QTest::qWait(30);                            // nothing to deliver to: no dangling callback
         QVERIFY(true);
+    }
+
+    // Card #057J: the settings read per key, per event and per poll are cached, and the watch is
+    // what drops that cache. So using a control in Options has to put the new value in front of
+    // every one of those readers at once — otherwise a toggle would take effect at the next start.
+    void aSettingChangedInOptionsIsInEffectAtOnce() {
+        State state;
+        const QString key = QStringLiteral("test/hot_path_value");
+        QSettings().setValue(key, true);
+        relay::settings::invalidate();
+        QVERIFY(relay::settings::boolValue(key, false));
+
+        SettingsPane pane(SettingsPane::Mode::Options, [&] { return catalog(&state); },
+                          [&] { return actions(&state); });
+        pane.show();
+        auto *check = pane.findChild<QCheckBox *>();
+        QVERIFY(check);
+        // What a row's writer does, before the pane says the value changed.
+        QSettings().setValue(key, false);
+        QVERIFY2(relay::settings::boolValue(key, false),
+                 "the cached value is stale until somebody says so — that is what makes this test mean something");
+        check->click();
+        QVERIFY2(!relay::settings::boolValue(key, false),
+                 "a control in Options must drop the hot-path cache the moment it writes");
+        QSettings().remove(key);
+        relay::settings::invalidate();
     }
 };
 

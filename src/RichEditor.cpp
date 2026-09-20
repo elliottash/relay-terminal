@@ -9,7 +9,9 @@
 #include <QDateTime>
 #include <QDropEvent>
 #include <QFileInfo>
+#include <QFocusEvent>
 #include <QFontDatabase>
+#include <QHideEvent>
 #include <QInputMethodEvent>
 #include <QKeyEvent>
 #include <QList>
@@ -18,6 +20,7 @@
 #include <QPaintEvent>
 #include <QPalette>
 #include <QRegularExpression>
+#include <QShowEvent>
 #include <QSyntaxHighlighter>
 #include <QTextBlock>
 #include <QTextCharFormat>
@@ -217,11 +220,47 @@ void RichEditor::setCaretColor(const QColor &color) {
             connect(m_caretBlink, &QTimer::timeout, this, [this] { m_caretOn = !m_caretOn; viewport()->update(); });
         }
         m_caretOn = true;
-        m_caretBlink->start();
+        // Only while this box has the keyboard: paintEvent draws nothing without focus, so a
+        // blink that runs anyway is a repaint of every visible composer twice a second for
+        // nothing (card #057J). TerminalView does the same with its own blink timer.
+        if (hasFocus()) m_caretBlink->start(); else m_caretBlink->stop();
     } else if (m_caretBlink) {
         m_caretBlink->stop();
     }
     viewport()->update();
+}
+
+void RichEditor::focusInEvent(QFocusEvent *event) {
+    QPlainTextEdit::focusInEvent(event);
+    // The caret is drawn only for the focused box, so the blink lives exactly as long as the
+    // focus does (card #057J, as engine/view/TerminalView.cpp does for the terminal's cursor).
+    if (m_caretBlink && m_caret.isValid()) {
+        m_caretOn = true;
+        m_caretBlink->start();
+        viewport()->update();
+    }
+}
+
+void RichEditor::focusOutEvent(QFocusEvent *event) {
+    QPlainTextEdit::focusOutEvent(event);
+    if (m_caretBlink) m_caretBlink->stop();
+}
+
+void RichEditor::hideEvent(QHideEvent *event) {
+    QPlainTextEdit::hideEvent(event);
+    // A hidden widget does not repaint, but it does still wake the process every 500 ms.
+    if (m_caretBlink) m_caretBlink->stop();
+}
+
+void RichEditor::showEvent(QShowEvent *event) {
+    QPlainTextEdit::showEvent(event);
+    // Coming back from a background tab: the box can still hold the keyboard, and no focus event
+    // is sent when the tab is shown again — without this the caret would stay where hideEvent
+    // left it and never blink again.
+    if (m_caretBlink && m_caret.isValid() && hasFocus()) {
+        m_caretOn = true;
+        m_caretBlink->start();
+    }
 }
 
 void RichEditor::paintEvent(QPaintEvent *event) {

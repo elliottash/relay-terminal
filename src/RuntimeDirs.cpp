@@ -86,6 +86,18 @@ qint64 newestMtime(const QString &path, const struct stat &dirInfo) {
 
 }  // namespace
 
+bool DirStamp::changed(const QString &path) {
+    struct stat info;
+    if (::stat(QFile::encodeName(path).constData(), &info) != 0) { m_seen = false; return false; }
+    if (m_seen && info.st_ino == m_inode
+        && info.st_mtim.tv_sec == m_mtime.tv_sec && info.st_mtim.tv_nsec == m_mtime.tv_nsec)
+        return false;
+    m_seen = true;
+    m_inode = info.st_ino;
+    m_mtime = info.st_mtim;
+    return true;
+}
+
 Owner self() {
     Owner owner;
     const qint64 pid = qint64(::getpid());

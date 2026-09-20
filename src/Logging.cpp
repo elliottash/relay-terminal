@@ -2,6 +2,7 @@
 #include "Logging.h"
 
 #include "CrashLog.h"   // the crash report's copy in this file follows the level set here
+#include "SettingsCache.h"   // level() is asked on every line, from every thread (#057J)
 
 #include <QDateTime>
 #include <QDir>
@@ -74,11 +75,16 @@ QString filePath() {
 }
 
 Level level() {
-    return parse(QSettings().value(QStringLiteral("logging/level"), QStringLiteral("info")).toString());
+    // Read through the hot-path cache (card #057J): write() asks on every line, including the
+    // lines whose level is then dropped, and a QSettings construction per line was 9.6 % of the
+    // GUI thread's cycles in a tool-heavy turn. The cache is dropped whenever a setting is
+    // written — by setLevel() below, and by SettingsWatch for the Options row.
+    return parse(relay::settings::stringValue(QStringLiteral("logging/level"), QStringLiteral("info")));
 }
 
 void setLevel(const QString &name) {
     QSettings().setValue(QStringLiteral("logging/level"), levelName(parse(name)));
+    relay::settings::invalidate();   // the next line written is filtered at the new level
 }
 
 QString levelName(Level value) {

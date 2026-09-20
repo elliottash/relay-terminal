@@ -56,6 +56,11 @@ public:
 protected:
     void paintEvent(QPaintEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
+    // The caret blinks only while this box has the keyboard and is on screen (card #057J).
+    void focusInEvent(QFocusEvent *event) override;
+    void focusOutEvent(QFocusEvent *event) override;
+    void hideEvent(QHideEvent *event) override;
+    void showEvent(QShowEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
     void inputMethodEvent(QInputMethodEvent *event) override;
     void insertFromMimeData(const QMimeData *source) override;

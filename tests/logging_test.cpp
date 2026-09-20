@@ -29,7 +29,7 @@ private slots:
     }
 
     void init() {
-        QSettings().setValue(QStringLiteral("logging/level"), QStringLiteral("info"));
+        relay::log::setLevel(QStringLiteral("info"));
         QDir(relay::log::directory()).removeRecursively();
     }
 
@@ -47,14 +47,14 @@ private slots:
     }
 
     void levelFiltersAndOffWritesNothing() {
-        QSettings().setValue(QStringLiteral("logging/level"), QStringLiteral("error"));
+        relay::log::setLevel(QStringLiteral("error"));
         relay::log::info(QStringLiteral("event type=agent_started"));
         relay::log::error(QStringLiteral("event type=error msg=\"boom\""));
         const QString body = read(relay::log::filePath());
         QVERIFY(!body.contains(QStringLiteral("agent_started")));
         QVERIFY(body.contains(QStringLiteral("boom")));
 
-        QSettings().setValue(QStringLiteral("logging/level"), QStringLiteral("off"));
+        relay::log::setLevel(QStringLiteral("off"));
         QFile::remove(relay::log::filePath());
         relay::log::error(QStringLiteral("event type=error"));
         QVERIFY(!QFile::exists(relay::log::filePath()));

@@ -35,8 +35,35 @@
 #include <QDir>
 #include <QString>
 
+#include <sys/stat.h>
+
 namespace relay {
 namespace runtimedirs {
+
+// A directory as a poll last saw it, so a poll does not list a directory that has not changed
+// (card #057J). Pane::pollGuestEvents() asks 12.5 times a second, per pane, whether the guest
+// event spool in its runtime directory holds anything, and it holds nothing unless a guest agent
+// is running in that pane: QDir::exists() + entryList() on an empty directory costs 13.3 µs and
+// three system calls, a bare stat() 0.45 µs and one.
+//
+// Creating, renaming or removing a file inside a directory bumps that directory's mtime, so
+// nothing can appear in it without changed() saying so on the very next look.
+class DirStamp {
+public:
+    // True when the directory may hold something different from the last look — on the first
+    // look, when its mtime moved, and when it is a different directory wearing the same path (a
+    // pane that was given a fresh runtime dir: a new inode). A path that cannot be stat'd is not
+    // a change and is forgotten, so it reports a change again when it comes back.
+    //
+    // Stamp *then* list: the mtime recorded is the one from before the caller reads the
+    // directory, so a file that appears while it is being read is still seen at the next look.
+    bool changed(const QString &path);
+
+private:
+    bool m_seen = false;
+    ino_t m_inode = 0;
+    timespec m_mtime{};
+};
 
 // The owner file's name inside a runtime directory, and the format version on its first line.
 inline QString ownerFileName() { return QStringLiteral("owner"); }

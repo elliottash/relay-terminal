@@ -7317,6 +7317,15 @@ private:
             QList<relay::usage::Sample> usage;
             bool remote = false, terminal = false;
             ps::TypeStyle firstType;
+            // Walking /proc for every pane in every tab at 2.5 Hz was 3.7 % of the idle profile
+            // (card #057J). Only the tab in front has chips on screen and only a window that is
+            // not minimised shows them; everything else that reads these numbers — the tab's own
+            // label and the Sessions pane's tag — prints the 5 s average and takes it once every
+            // kTabUpdateMs. So a tab nobody is looking at is measured on that clock instead, which
+            // gives the label exactly the figure it would have had. The front tab is unchanged.
+            const bool front = i == m_tabs->currentIndex() && !isMinimized();
+            const qint64 sampledAt = m_tabUsage.value(page).sampledAtMs;
+            const bool sample = front || sampledAt == 0 || now - sampledAt >= relay::usage::kTabUpdateMs;
             for (QWidget *leaf : leavesIn(page)) {
                 auto *pane = dynamic_cast<Pane *>(leaf);
                 if (!pane) {
@@ -7327,8 +7336,9 @@ private:
                 PaneChrome *chrome = chromeOf(pane);
                 if (!chrome) continue;
                 // The pane's resource meter (issue #D03W) is sampled here so every pane is
-                // measured over the same interval this poll keeps.
-                pane->refreshUsage();
+                // measured over the same interval this poll keeps — one interval for the tab,
+                // whichever clock the tab is on (see `sample` above).
+                if (sample) pane->refreshUsage();
                 chrome->setUsage(pane->usageSample());
                 const ps::Facts facts = pane->statusFacts();
                 const bool watched = focused && i == m_tabs->currentIndex() && leaf == m_activeLeaf;
@@ -7370,7 +7380,10 @@ private:
             QString usageText = previousText;
             if (meters && terminal) {
                 TabUsageState &state = m_tabUsage[page];
-                state.window.add(summed, now);
+                // Only a fresh reading goes into the window: a hidden tab's sample is already the
+                // mean over the 5 s it covers, and pouring the same one in twelve times over would
+                // make the label an average of a repeat rather than of an interval.
+                if (sample) { state.window.add(summed, now); state.sampledAtMs = now; }
                 if (state.labelledAtMs == 0
                     || now - state.labelledAtMs >= relay::usage::kTabUpdateMs)
                     usageText = relay::usage::tabSuffix(state.window.average());
@@ -7433,6 +7446,10 @@ private:
         relay::usage::RollingMean window;
         QString text;          // the suffix the tab is labelled with ("" when there is none)
         qint64 labelledAtMs = 0;
+        // When this tab's panes were last measured (card #057J). The tab in front is measured on
+        // every poll, because its chips are on screen; a tab behind it is measured on the label's
+        // own clock, which is the only thing that reads it.
+        qint64 sampledAtMs = 0;
     };
 
     // Draw every tab's icon for the step the wall clock is in now (owner, 2026-09-19: one cadence).

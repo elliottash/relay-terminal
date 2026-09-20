@@ -43,6 +43,7 @@
 #include "TurnTranscript.h"
 #include "ModelSettings.h"
 #include "SettingsPane.h"   // SettingsWatch: a late presets event can change what an open Options pane shows
+#include "SettingsCache.h"  // the settings read per key, per event and per poll (#057J)
 #include "SkillsDialog.h"
 #include "SubagentTranscript.h"
 #include "SubagentsPanel.h"
@@ -107,6 +108,7 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QPointer>
+#include <QGuiApplication>   // applicationState(): the poll slows when Relay is not in front (#057J)
 #include <QProcess>
 #include <QSysInfo>
 #include <QProcessEnvironment>
@@ -515,6 +517,10 @@ public:
         connect(relay::theme::notifier(), &relay::theme::Notifier::themeChanged, this,
                 [this] { m_paneState.changed(); });
         qApp->installEventFilter(this);
+        // Relay came to the front or went behind another application: the poll's rate follows
+        // (card #057J), and it follows now rather than on the next tick, which while quiet is
+        // 400 ms away.
+        connect(qApp, &QGuiApplication::applicationStateChanged, this, [this](Qt::ApplicationState) { tunePoll(); });
         QTimer::singleShot(5000, this, [this] {
             if (!m_seenShell && m_backend) {
                 setNative(true);
@@ -1785,8 +1791,13 @@ private:
     QString guestAnswersDir() const { return m_runtime.filePath(guestAnswersDirName()); }
 
     void pollGuestEvents() {
-        QDir spool(guestEventsDir());
-        if (!spool.exists()) return;
+        // Gated on the spool directory's own mtime (card #057J), the way pollShell() gates
+        // state.json below: this runs 12.5 times a second in every pane and the directory is
+        // empty unless a guest agent is running in that pane, which is the rare case. Writing an
+        // event bumps the directory's mtime, so it still lands on the very next tick.
+        const QString dir = guestEventsDir();
+        if (!m_guestSpool.changed(dir)) return;
+        QDir spool(dir);
         const QStringList names = spool.entryList(QStringList{QStringLiteral("*.json")}, QDir::Files, QDir::Name);
         int handled = 0;
         for (const QString &name : names) {
@@ -3400,6 +3411,10 @@ protected:
             placeToast();
         if ((event->type() == QEvent::WindowActivate || event->type() == QEvent::WindowDeactivate) && object == window())
             noteWindowActivation(event->type() == QEvent::WindowActivate);
+        // Minimised or restored: whether anyone can see this pane is what the shell poll's rate is
+        // tuned on (card #057J), so it is re-tuned on the event rather than on the next tick —
+        // coming back from the taskbar must not wait out a 400 ms quiet tick.
+        if (event->type() == QEvent::WindowStateChange && object == window()) tunePoll();
         // Pane title (issue JRWQ): double click names this pane by hand; Esc leaves it alone.
         if (object == m_titleLabel && event->type() == QEvent::MouseButtonDblClick) {
             beginRename();
@@ -4436,7 +4451,10 @@ private:
     // ----- thinking, turn summaries, tool outputs, routing assist, skills (protocol 11) --------
     // Off by default: a tool call is one line that counts its output, and a click unfolds the whole
     // of it under that line (#TK9C). On, the stream prints under the line as it arrives.
-    static bool showToolOutput() { return QSettings().value(QStringLiteral("agent/show_tool_output"), false).toBool(); }
+    // Asked on every tool_output and every tool_started event, so it is read through the hot-path
+    // cache (card #057J): a QSettings construction per event was 5 % of the GUI thread's cycles in
+    // a tool-heavy turn. Options drops the cache when it writes the row.
+    static bool showToolOutput() { return relay::settings::boolValue(QStringLiteral("agent/show_tool_output"), false); }
 
     // The command a RUN COMMAND preview was built from, for the wrong-mode hint alone: its heading
     // and the notes every tool preview carries, dropped. Nothing else reads a preview any more
@@ -5863,7 +5881,11 @@ private:
     // misheard word is fixed before anything runs. Recording is a capture tool the desktop already
     // has (src/Voice.cpp); the worker does the transcribing with an OpenRouter key of its own.
 public:
-    static bool voiceEnabled() { return QSettings().value(QStringLiteral("voice/enabled"), true).toBool(); }
+    // Read by the application-wide event filter on every key press *and* release, so both this and
+    // voiceHoldKey() below go through the hot-path cache (card #057J): the two QSettings between
+    // them cost 417 statx and 170 faccessat per key event, about 1.2 ms on the GUI thread, times
+    // the number of open panes.
+    static bool voiceEnabled() { return relay::settings::boolValue(QStringLiteral("voice/enabled"), true); }
     static QString voiceModel() {
         const QString value = QSettings().value(QStringLiteral("voice/model")).toString();
         return value.isEmpty() ? QStringLiteral("google/gemini-3.5-flash-lite") : value;
@@ -5875,16 +5897,26 @@ public:
     // The hold key, defaulted once from the keyboard layout: Right Alt is AltGr wherever the layout
     // types with it, and a key that types é must not also start recording.
     static QString voiceHoldKey() {
-        QSettings settings;
-        const QString stored = settings.value(QStringLiteral("voice/hold_key")).toString();
+        const QString stored = relay::settings::stringValue(QStringLiteral("voice/hold_key"));
         if (relay::voice::holdKeys().contains(stored)) return stored;
-        QString layouts;
-        QFile file(QStringLiteral("/etc/default/keyboard"));
-        if (file.exists() && file.size() < 64 * 1024 && file.open(QIODevice::ReadOnly | QIODevice::Text))
-            layouts = QString::fromUtf8(file.readAll());
-        // Derived, not stored: Options › Voice reads "voice/hold_key exists" as "the user chose
-        // one", so writing the default here marked every fresh install as customised.
-        return relay::voice::defaultHoldKey(relay::voice::layoutsFromKeyboardConfig(layouts));
+        // The derived answer is kept until a setting is written (card #057J). It is not a settings
+        // read but a file read, and this runs on every key press and release: /etc/default/keyboard
+        // was being opened per keystroke. The layout cannot change under a running X session
+        // without a restart, and the generation covers the case that matters — somebody choosing a
+        // hold key in Options, after which the branch above answers anyway.
+        static quint64 derivedAt = 0;
+        static QString derived;
+        if (const quint64 now = relay::settings::generation(); now != derivedAt) {
+            QString layouts;
+            QFile file(QStringLiteral("/etc/default/keyboard"));
+            if (file.exists() && file.size() < 64 * 1024 && file.open(QIODevice::ReadOnly | QIODevice::Text))
+                layouts = QString::fromUtf8(file.readAll());
+            // Derived, not stored: Options › Voice reads "voice/hold_key exists" as "the user chose
+            // one", so writing the default here marked every fresh install as customised.
+            derived = relay::voice::defaultHoldKey(relay::voice::layoutsFromKeyboardConfig(layouts));
+            derivedAt = now;
+        }
+        return derived;
     }
 
     // The microphone chip and the palette action: start, or finish a recording that is running.
@@ -13058,7 +13090,9 @@ private:
         const QString text = m_editor->toPlainText();
         QString remainder;
         const QTextCursor cursor = m_editor->textCursor();
-        if (QSettings().value(QStringLiteral("composer/history_suggestions"), true).toBool()
+        // Through the hot-path cache (#057J): this runs on every cursor move in the prompt box,
+        // which is every keystroke typed into it.
+        if (relay::settings::boolValue(QStringLiteral("composer/history_suggestions"), true)
             && m_modeValue != QStringLiteral("agent") && !text.trimmed().isEmpty() && !text.contains('\n')
             && cursor.atEnd() && !cursor.hasSelection() && !(m_atList && m_atList->isVisible()) && !text.startsWith('@')
             && !(m_slashList && m_slashList->isVisible()) && !slashCommandFor(text)) {
@@ -14928,9 +14962,35 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
     // five times less often; it is back to the fast rate the moment it is shown or given work.
     static constexpr int kPollFastMs = 80, kPollQuietMs = 400;
     void tunePoll() {
-        const bool quiet = !isVisible() && !m_loading && !m_activeValid && m_entries.isEmpty();
+        // Nobody can see this pane: it is in a background tab, or its window is minimised, or
+        // Relay is not the application in front (card #057J). isVisible() alone stays true for an
+        // iconified window's children, so a minimised Relay used to poll at the full rate all
+        // afternoon — the profile measured no change at all across an unmap. Both of the extra
+        // tests read Qt state that is already cached, and the state-change events that make them
+        // true or false call tunePoll() themselves, so coming back is instant rather than one
+        // slow tick late.
+        const bool watched = isVisible() && !isWindowMinimized() && applicationIsInFront();
+        const bool quiet = !watched && !m_loading && !m_activeValid && m_entries.isEmpty();
         const int wanted = quiet ? kPollQuietMs : kPollFastMs;
         if (m_poll.interval() != wanted) m_poll.setInterval(wanted);
+    }
+
+    // Whether the window holding this pane is iconified. A pane with no window yet (it is being
+    // built) is not minimised — it is about to be shown.
+    bool isWindowMinimized() const {
+        const QWidget *top = window();
+        return top && top->isMinimized();
+    }
+
+    // Is Relay the application in front? Only once the platform has said it was, at least once:
+    // a bare X server with no window manager — which is what the headless tests and the profiler's
+    // harness run under — never focuses anything, so its answer is "inactive" for ever, and reading
+    // that as "nobody is looking" would slow every pane in a session where somebody is.
+    static bool applicationIsInFront() {
+        static bool everActive = false;
+        const bool active = QGuiApplication::applicationState() == Qt::ApplicationActive;
+        if (active) everActive = true;
+        return active || !everActive;
     }
 
     void pollShell() {
@@ -15458,6 +15518,9 @@ private:
     bool m_scrollbackReplayed = false;
     // state.json as pollShell() last read it, so an unchanged file is not read again.
     bool m_stateSeen = false; ino_t m_stateInode = 0; off_t m_stateSize = 0; timespec m_stateMtime{};
+    // The guest-events spool directory as pollGuestEvents() last listed it, for the same reason
+    // (#057J): a directory whose mtime has not moved holds what it held, which is nothing.
+    relay::runtimedirs::DirStamp m_guestSpool;
     QString m_shellSequence, m_shellPath, m_pendingHash, m_pendingCommand, m_pendingSubmit, m_previewId, m_submittedDraft;
     // The guest's live facts and the queue of permission questions the shims are waiting on
     // (GT7X, 26.3/26.4). The events themselves are files in guest-events/, deleted as they are

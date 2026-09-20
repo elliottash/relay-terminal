@@ -266,6 +266,42 @@ private slots:
         QCOMPARE(QDir(root.path()).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size(), 0);
     }
 
+    // Card #057J: the guest event spool is listed only when it has changed. Every case the poll
+    // meets — nothing there, an event written, an event taken away, the directory replaced.
+    void aDirectoryStampReportsOnlyRealChanges() {
+        QTemporaryDir root;
+        QVERIFY(root.isValid());
+        const QString spool = root.path() + QStringLiteral("/guest-events");
+        QVERIFY(QDir().mkpath(spool));
+        DirStamp stamp;
+        QVERIFY2(stamp.changed(spool), "the first look is always a change: nothing has been seen");
+        QVERIFY2(!stamp.changed(spool), "an untouched directory must not be listed again");
+        QVERIFY(!stamp.changed(spool));
+
+        // An event arrives: a file created in a directory bumps that directory's mtime, which is
+        // the whole basis of the gate. The poll sees it on its very next tick.
+        QFile event(spool + QStringLiteral("/0001-statusline.json"));
+        QVERIFY(event.open(QIODevice::WriteOnly));
+        event.write("{}\n");
+        event.close();
+        QVERIFY(stamp.changed(spool));
+        QVERIFY(!stamp.changed(spool));
+
+        // pollGuestEvents() deletes each event it has handled, which is a change of its own — so
+        // the tick after a burst looks again, and finds the rest of it.
+        QVERIFY(QFile::remove(spool + QStringLiteral("/0001-statusline.json")));
+        QVERIFY(stamp.changed(spool));
+        QVERIFY(!stamp.changed(spool));
+
+        // A pane given a fresh runtime directory: same path, different inode. The contents are
+        // somebody else's, so they have to be read.
+        QVERIFY(QDir(spool).removeRecursively());
+        QVERIFY2(!stamp.changed(spool), "a directory that is not there is not a change");
+        QVERIFY(QDir().mkpath(spool));
+        QVERIFY(stamp.changed(spool));
+        QVERIFY(!stamp.changed(spool));
+    }
+
     void aMissingOrUnreadableRootIsHarmless() {
         QTemporaryDir root;
         QVERIFY(root.isValid());

@@ -110,10 +110,19 @@ target_include_directories(relay-modelsettings PUBLIC src)
 target_link_libraries(relay-modelsettings PUBLIC ${RELAY_QT}::Widgets)
 target_compile_options(relay-modelsettings PRIVATE -Wall -Wextra -Wpedantic)
 
+# A setting read on a hot path — per key, per event, per poll, per paint (card #057J). Plain
+# QtCore and no dependency on anything else here, so the libraries that hold those paths
+# (relay-logging, relay-paneusage) can read a setting without pulling in a window.
+add_library(relay-settingscache STATIC src/SettingsCache.cpp src/SettingsCache.h)
+target_include_directories(relay-settingscache PUBLIC src)
+target_link_libraries(relay-settingscache PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-settingscache PRIVATE -Wall -Wextra -Wpedantic)
+
 add_library(relay-settings STATIC src/SettingsPane.cpp src/SettingsPane.h)
 target_include_directories(relay-settings PUBLIC src)
 # relay-helperchat: Options and Actions carry the helper agent's panel, collapsed (#FEJQ).
-target_link_libraries(relay-settings PUBLIC relay-helperchat ${RELAY_QT}::Widgets)
+# relay-settingscache: SettingsWatch::notify() is what drops the hot-path cache (#057J).
+target_link_libraries(relay-settings PUBLIC relay-helperchat relay-settingscache ${RELAY_QT}::Widgets)
 target_compile_options(relay-settings PRIVATE -Wall -Wextra -Wpedantic)
 
 # The agent drives the app (card #FEJQ, protocol §30): the catalog the window sends its workers,
@@ -214,7 +223,8 @@ target_compile_options(relay-fileindex PRIVATE -Wall -Wextra -Wpedantic)
 # level and redaction rules can be tested without a window.
 add_library(relay-logging STATIC src/Logging.cpp src/Logging.h src/CrashLog.cpp src/CrashLog.h)
 target_include_directories(relay-logging PUBLIC src)
-target_link_libraries(relay-logging PUBLIC ${RELAY_QT}::Core)
+# relay-settingscache: level() is read on every log line, from every thread (#057J).
+target_link_libraries(relay-logging PUBLIC relay-settingscache ${RELAY_QT}::Core)
 target_compile_options(relay-logging PRIVATE -Wall -Wextra -Wpedantic)
 
 # Prompt-box-only input: where a submitted line goes, when "Take control" is offered, and how
@@ -320,7 +330,8 @@ target_compile_options(relay-panestatus PRIVATE -Wall -Wextra -Wpedantic)
 # process trees, turned into CPU / memory percentages. QtCore only, so tests need no window.
 add_library(relay-paneusage STATIC src/PaneUsage.cpp src/PaneUsage.h)
 target_include_directories(relay-paneusage PUBLIC src)
-target_link_libraries(relay-paneusage PUBLIC ${RELAY_QT}::Core)
+# relay-settingscache: metersEnabled() is read by the 400 ms status poll, once per pane (#057J).
+target_link_libraries(relay-paneusage PUBLIC relay-settingscache ${RELAY_QT}::Core)
 target_compile_options(relay-paneusage PRIVATE -Wall -Wextra -Wpedantic)
 
 # SSH and mosh sessions (card #S5SH, docs/SSH-AND-MOSH.md): which host a login reached, per
@@ -573,6 +584,9 @@ if(BUILD_TESTING)
     target_link_libraries(relay-appcommands-tests PRIVATE relay-appcommands ${RELAY_QT}::Test)
     add_test(NAME appcommands COMMAND relay-appcommands-tests)
     set_tests_properties(appcommands PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-settingscache-tests tests/settingscache_test.cpp)
+    target_link_libraries(relay-settingscache-tests PRIVATE relay-settingscache relay-logging relay-paneusage ${RELAY_QT}::Test)
+    add_test(NAME settingscache COMMAND relay-settingscache-tests)
     add_executable(relay-settings-tests tests/settingspane_test.cpp)
     target_link_libraries(relay-settings-tests PRIVATE relay-settings relay-localmodels ${RELAY_QT}::Test)
     # The Local models section is placed by RelayWindow::settingsSections(), which needs a whole

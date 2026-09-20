@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PaneUsage.h"
 
+#include "SettingsCache.h"   // metersEnabled() is on the status poll, once per pane (#057J)
+
 #include <QDir>
 #include <QFile>
 #include <QSet>
-#include <QSettings>
 #include <QStringList>
 
 #include <algorithm>
@@ -456,7 +457,11 @@ QString memoryNote()
 
 bool metersEnabled()
 {
-    return QSettings().value(QStringLiteral("appearance/pane_usage"), true).toBool();
+    // Read through the hot-path cache (card #057J): the 400 ms status poll asks once for the
+    // window and once more for every pane in it, and a QSettings construction each time was
+    // 75 statx a second at one idle pane, for one boolean. Options drops the cache when it
+    // writes the row, so the toggle still takes effect on the next poll.
+    return relay::settings::boolValue(QStringLiteral("appearance/pane_usage"), true);
 }
 
 void RollingMean::add(const Sample &sample, qint64 atMs)
