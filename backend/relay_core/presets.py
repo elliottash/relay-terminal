@@ -65,14 +65,18 @@ DEFAULT_MAX_OUTPUT = 32_768
 # OpenRouter-style slug is matched on its last segment, so "google/gemini-3.8-flash" counts as Gemini.
 #
 # GLM-5.3 is text-only and Z.AI's image model is GLM-5.3-Flash; that is exactly why a turn carrying
-# an image on GLM swaps to Flash for that turn and back afterwards (roles.VISION_DEFAULTS). Kimi's
-# coding models, MiniMax M3 and DeepSeek are text-only, so an image turn there needs a configured
-# vision model and is otherwise refused with a message instead of being sent and rejected.
+# an image on GLM swaps to Flash for that turn and back afterwards (roles.VISION_DEFAULTS). Kimi K3
+# and the K2.5+ models read images (OpenRouter lists text+image input for kimi-k3, kimi-k2.7-code,
+# kimi-k2.6 and kimi-k2.5; kimi-k2, kimi-k2-0905 and kimi-k2-thinking are text-only, which the
+# "kimi-k2." prefix keeps out). MiniMax M3 and DeepSeek are text-only, so an image turn there needs
+# a configured vision model and is otherwise refused with a message instead of being sent and
+# rejected.
 VISION_MODELS: tuple[str, ...] = (
     "gpt-", "chatgpt-", "o3", "o4",                              # OpenAI: the GPT family reads images
     "claude-",                                                   # Anthropic: Claude 3 and later
     "gemini-",                                                   # Google: the Gemini family
     "glm-5.3-flash", "glm-4.5v", "glm-4.6v", "glm-5v",           # Z.AI: the Flash and V models
+    "kimi-k3", "kimi-k2.",                                       # Moonshot: K3 and K2.5+ read images
     "qwen-vl", "qwen2-vl", "qwen3-vl", "pixtral", "llava", "minimax-vl",
     "kimi-latest", "moonshot-v1-8k-vision", "moonshot-v1-32k-vision", "moonshot-v1-128k-vision",
 )

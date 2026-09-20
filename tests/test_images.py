@@ -27,6 +27,8 @@ JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 20
 GLM = ProviderConfig("https://api.z.ai/api/paas/v4", "glm-5.3", "key",
                      {"thinking": {"type": "enabled"}, "reasoning_effort": "high"}, 8192)
 KIMI = ProviderConfig("https://api.moonshot.ai/v1", "kimi-k3", "key", {"reasoning_effort": "high"}, 8192)
+# MiniMax M3 is text-only, so it stands in wherever a test needs a model that cannot read images.
+MINIMAX = ProviderConfig("https://api.minimax.io/v1", "MiniMax-M3", "key", {}, 8192)
 OPENAI = ProviderConfig("https://api.openai.com/v1", "gpt-6-astra", "key", {"reasoning_effort": "high"}, 8192)
 
 
@@ -191,14 +193,24 @@ class VisionCapabilityTests(unittest.TestCase):
         self.assertFalse(presets.PRESETS["glm"].vision)
         self.assertFalse(presets.PRESETS["glm-coding"].vision)
 
+    def test_kimi_k3_and_the_k25_models_read_images(self):
+        # Card #W56B: the allowlist pre-dated K3 and had every Kimi model as text-only.
+        self.assertTrue(presets.model_supports_vision("kimi-k3"))
+        self.assertTrue(presets.model_supports_vision("moonshotai/kimi-k3"))
+        self.assertTrue(presets.model_supports_vision("kimi-k2.6"))
+        self.assertFalse(presets.model_supports_vision("kimi-k2-thinking"))
+        self.assertFalse(presets.model_supports_vision("kimi-k2-0905"))
+        self.assertTrue(presets.PRESETS["kimi"].vision)
+        self.assertFalse(presets.PRESETS["kimi-code"].vision)   # the "k3" id is unverified
+
     def test_openrouter_style_slugs_match_on_their_last_segment(self):
         self.assertTrue(presets.model_supports_vision("google/gemini-3.8-flash"))
         self.assertFalse(presets.model_supports_vision("deepseek/deepseek-v4.1-flash"))
 
     def test_presets_report_their_image_support(self):
-        for preset_id in ("openai", "anthropic", "gemini"):
+        for preset_id in ("openai", "anthropic", "gemini", "kimi"):
             self.assertTrue(presets.PRESETS[preset_id].to_dict()["vision"], preset_id)
-        for preset_id in ("kimi", "kimi-code", "minimax", "openrouter"):
+        for preset_id in ("kimi-code", "minimax", "openrouter"):
             self.assertFalse(presets.PRESETS[preset_id].to_dict()["vision"], preset_id)
 
     def test_the_vision_role_defaults_to_glm_flash_on_glm_and_to_nothing_elsewhere(self):
@@ -258,6 +270,17 @@ class ImageTurnTests(unittest.TestCase):
         self.assertNotIn("vision_route", self.kinds())        # nothing to say: no swap happened
         self.assertEqual(self.events[-1]["event"], "done")
 
+    def test_an_image_reaches_kimi_k3_directly_with_no_vision_model_set(self):
+        # Card #W56B: kimi-k3 reads images, so the turn must not be refused or routed away.
+        agent = self.build(KIMI, "kimi")
+        agent.ask("what is this?", attachments=self.attachment())
+        model, messages = RecordingProvider.served[-1]
+        self.assertEqual(model, "kimi-k3")
+        self.assertIsInstance(messages[-1]["content"], list)
+        self.assertIsNone(self.event("vision_unavailable"))
+        self.assertNotIn("vision_route", self.kinds())
+        self.assertEqual(self.events[-1]["event"], "done")
+
     # ----- GLM: swap to Flash for the turn, then back --------------------------------
     def test_glm_swaps_to_glm_53_flash_for_an_image_turn_and_says_so(self):
         agent = self.build(GLM, "glm")
@@ -291,11 +314,11 @@ class ImageTurnTests(unittest.TestCase):
 
     # ----- no vision anywhere: refuse with a message ---------------------------------
     def test_a_preset_without_vision_and_no_vision_model_refuses_with_a_message(self):
-        agent = self.build(KIMI, "kimi")
+        agent = self.build(MINIMAX, "minimax")
         agent.ask("what is this?", attachments=self.attachment())
         refusal = self.event("vision_unavailable")
         self.assertIsNotNone(refusal)
-        self.assertIn("kimi-k3", refusal["text"])
+        self.assertIn("MiniMax-M3", refusal["text"])
         self.assertIn("Vision model", refusal["text"])
         error = self.events[-1]
         self.assertEqual(error["event"], "error")
@@ -304,7 +327,7 @@ class ImageTurnTests(unittest.TestCase):
         self.assertEqual(RecordingProvider.served, [])
 
     def test_a_refused_image_turn_leaves_no_image_in_the_conversation(self):
-        agent = self.build(KIMI, "kimi")
+        agent = self.build(MINIMAX, "minimax")
         agent.ask("what is this?", attachments=self.attachment())
         self.assertFalse(transport.has_images(agent.messages))
         prompt = [m for m in agent.messages if m.get("relay_kind") == "prompt"][-1]
@@ -359,7 +382,7 @@ class ImageTurnTests(unittest.TestCase):
         # Dropping back would only hand the pictures to a model that refuses them, which is why the
         # turn was routed at all: the vision provider's failure is reported as before.
         self.refusing({"gpt-6-astra"})
-        agent = self.build(KIMI, "kimi", {"vision": {"preset": "openai", "model": "gpt-6-astra"}})
+        agent = self.build(MINIMAX, "minimax", {"vision": {"preset": "openai", "model": "gpt-6-astra"}})
         agent.ask("what is this?", attachments=self.attachment())
         self.assertEqual([model for model, _ in RecordingProvider.served], ["gpt-6-astra"])
         self.assertEqual(self.events[-1]["event"], "error")
