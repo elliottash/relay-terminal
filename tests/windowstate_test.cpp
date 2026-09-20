@@ -13,6 +13,8 @@
 #include <QtTest>
 
 using namespace relay::windowstate;
+// The conversation's own store (card #0TJ9) has read()/write() of its own, so it stays qualified.
+namespace st = relay::sessiontext;
 
 namespace {
 
@@ -494,6 +496,111 @@ private slots:
         removeAllScrollback();
         QVERIFY(readScrollback(kept).isEmpty());
         QVERIFY(!QDir(scrollbackDirectory()).exists());
+    }
+
+    // ----- relay::sessiontext: the same text, keyed by the conversation (card #0TJ9) -----------
+
+    // Ids become file names, so the shapes the two worlds really use are the only ones accepted:
+    // 32 lowercase hex for a Relay session, a canonical UUID for a guest.
+    void sessionTextIdsAreValidated() {
+        QVERIFY(st::isSessionId(QStringLiteral("0123456789abcdef0123456789abcdef")));
+        for (const QString &bad : {QStringLiteral("0123456789ABCDEF0123456789ABCDEF"),   // upper case
+                                   QStringLiteral("0123456789abcdef0123456789abcde"),    // 31
+                                   QStringLiteral("0123456789abcdef0123456789abcdefa"),  // 33
+                                   QStringLiteral("../../../etc/passwd"), QString()})
+            QVERIFY2(!st::isSessionId(bad), qPrintable(bad));
+
+        QVERIFY(st::isGuestId(QStringLiteral("b5493c85-d25a-47ed-ad9b-88580e43772a")));       // claude
+        QVERIFY(st::isGuestId(QStringLiteral("01A0BEC2-618A-7B52-A64F-F926497799F2")));       // codex, upper case
+        for (const QString &bad : {QStringLiteral("b5493c85d25a47edad9b88580e43772a"),    // no dashes
+                                   QStringLiteral("b5493c85-d25a-47ed-ad9b-88580e43772"), // short
+                                   QStringLiteral("b5493c85-d25a-47ed-ad9b-88580e4377zz"),
+                                   QStringLiteral("../b5493c85-d25a-47ed-ad9b-88580e437"), QString()})
+            QVERIFY2(!st::isGuestId(bad), qPrintable(bad));
+
+        QVERIFY(st::isGuestSource(QStringLiteral("claude")));
+        QVERIFY(st::isGuestSource(QStringLiteral("codex")));
+        for (const QString &bad : {QStringLiteral("Claude"), QStringLiteral("agent"),
+                                   QStringLiteral(".."), QString()})
+            QVERIFY2(!st::isGuestSource(bad), qPrintable(bad));
+    }
+
+    // A path is only built from a validated id and an absolute directory with no `..` in it, so
+    // nothing here can be pointed outside the sessions tree.
+    void sessionTextPaths() {
+        DataHome data;
+        QVERIFY(data.valid());
+        const QString id = QStringLiteral("0123456789abcdef0123456789abcdef");
+        const QString dir = QStringLiteral("/home/u/.local/share/relay/sessions");
+        QCOMPARE(st::sessionPath(dir, id), dir + QLatin1Char('/') + id + QStringLiteral(".scrollback.txt"));
+        QCOMPARE(st::rewoundPath(dir, id, 3), dir + QLatin1Char('/') + id + QStringLiteral(".rewound-3.scrollback.txt"));
+        QVERIFY(st::rewoundPath(dir, id, 0).isEmpty());
+        QVERIFY(st::rewoundPath(dir, id, 10000).isEmpty());
+        QVERIFY(st::sessionPath(QStringLiteral("relative/sessions"), id).isEmpty());
+        QVERIFY(st::sessionPath(QStringLiteral("/home/u/../../etc"), id).isEmpty());
+        QVERIFY(st::sessionPath(QString(), id).isEmpty());
+        QVERIFY(st::sessionPath(dir, QStringLiteral("nope")).isEmpty());
+
+        const QString guest = QStringLiteral("b5493c85-d25a-47ed-ad9b-88580e43772a");
+        QCOMPARE(st::guestPath(QStringLiteral("claude"), guest),
+                 st::guestDirectory() + QStringLiteral("/claude/") + guest + QStringLiteral(".scrollback.txt"));
+        QVERIFY(st::guestDirectory().endsWith(QStringLiteral("/relay/sessions/guests")));
+        QVERIFY(st::guestPath(QStringLiteral("gemini"), guest).isEmpty());
+        QVERIFY(st::guestPath(QStringLiteral("claude"), QStringLiteral("../x")).isEmpty());
+    }
+
+    // Round trip, the shared caps, and the empty-file rule — the per-pane store's contract, under
+    // the conversation's name.
+    void sessionTextRoundTrip() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString id = QStringLiteral("0123456789abcdef0123456789abcdef");
+        const QString path = st::sessionPath(QDir(dir.path()).absolutePath(), id);
+        QVERIFY(!path.isEmpty());
+
+        QVERIFY(st::write(path, QStringList{QStringLiteral("first"), QStringLiteral("héllo"), QString()}));
+        QCOMPARE(st::read(path), (QStringList{QStringLiteral("first"), QStringLiteral("héllo")}));
+        QCOMPARE(QFile::permissions(path) & (QFile::ReadGroup | QFile::WriteGroup | QFile::ReadOther | QFile::WriteOther),
+                 QFile::Permissions());
+
+        // Past the line cap: the newest lines are what comes back.
+        QStringList many;
+        for (int i = 0; i < relay::windowstate::kScrollbackMaxLines + 40; ++i) many << QStringLiteral("line %1").arg(i);
+        QVERIFY(st::write(path, many));
+        const QStringList back = st::read(path);
+        QCOMPARE(back.size(), relay::windowstate::kScrollbackMaxLines);
+        QCOMPARE(back.constLast(), many.constLast());
+
+        // An emptied conversation leaves no file to be replayed next time.
+        QVERIFY(st::write(path, QStringList{QString(), QStringLiteral("  ")}));
+        QVERIFY(!QFile::exists(path));
+        QVERIFY(st::read(path).isEmpty());
+        QVERIFY(st::read(QString()).isEmpty());
+        QString error;
+        QVERIFY(!st::write(QString(), QStringList{QStringLiteral("x")}, &error));
+        QVERIFY(!error.isEmpty());
+    }
+
+    // What a delete of the conversation has to take with it: the text and every rewound branch.
+    void sessionTextSidecarsAreListed() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = QDir(dir.path()).absolutePath();
+        const QString id = QStringLiteral("0123456789abcdef0123456789abcdef");
+        const QString other = QStringLiteral("fedcba9876543210fedcba9876543210");
+        QVERIFY(st::write(st::sessionPath(root, id), QStringList{QStringLiteral("text")}));
+        QVERIFY(st::write(st::rewoundPath(root, id, 1), QStringList{QStringLiteral("undone once")}));
+        QVERIFY(st::write(st::rewoundPath(root, id, 2), QStringList{QStringLiteral("undone twice")}));
+        QVERIFY(st::write(st::sessionPath(root, other), QStringList{QStringLiteral("someone else")}));
+
+        const QStringList found = st::sidecars(root, id);
+        QCOMPARE(found.size(), 3);
+        QVERIFY(found.contains(st::sessionPath(root, id)));
+        QVERIFY(found.contains(st::rewoundPath(root, id, 1)));
+        QVERIFY(found.contains(st::rewoundPath(root, id, 2)));
+        QVERIFY(!found.contains(st::sessionPath(root, other)));
+        QCOMPARE(st::read(st::rewoundPath(root, id, 2)), QStringList{QStringLiteral("undone twice")});
+        QVERIFY(st::sidecars(root, QStringLiteral("bad")).isEmpty());
     }
 };
 

@@ -275,14 +275,18 @@ QStringList clampScrollback(QStringList lines, int maxLines, qint64 maxBytes) {
     return first == 0 ? lines : lines.mid(first);
 }
 
-bool writeScrollback(const QString &id, const QStringList &lines, QString *error) {
+namespace {
+
+// The file side of both stores: the per-pane one below and the per-session one in
+// `relay::sessiontext`, which saves the same text under a different name (card #0TJ9). One copy,
+// so the two can never drift apart on permissions, clamping or the empty-file rule.
+bool writeScrollbackFile(const QString &path, const QStringList &lines, QString *error) {
     auto fail = [error](const QString &text) {
         if (error) *error = text;
         return false;
     };
     if (error) error->clear();
-    const QString path = scrollbackPath(id);
-    if (path.isEmpty()) return fail(QStringLiteral("No writable place for this pane's scrollback."));
+    if (path.isEmpty()) return fail(QStringLiteral("No writable place for this scrollback."));
     const QStringList kept = clampScrollback(lines);
     if (kept.isEmpty()) {
         // Nothing to bring back: leaving the previous file would restore stale output.
@@ -304,8 +308,7 @@ bool writeScrollback(const QString &id, const QStringList &lines, QString *error
     return true;
 }
 
-QStringList readScrollback(const QString &id, int maxLines) {
-    const QString path = scrollbackPath(id);
+QStringList readScrollbackFile(const QString &path, int maxLines) {
     if (path.isEmpty()) return {};
     QFile file(path);
     if (!file.exists() || !file.open(QIODevice::ReadOnly)) return {};
@@ -314,6 +317,21 @@ QStringList readScrollback(const QString &id, int maxLines) {
     QStringList lines = QString::fromUtf8(file.read(kScrollbackMaxBytes + 1)).split(QLatin1Char('\n'));
     if (!lines.isEmpty() && lines.constLast().isEmpty()) lines.removeLast();   // the trailing newline
     return clampScrollback(lines, std::min(maxLines, kScrollbackMaxLines), kScrollbackMaxBytes);
+}
+
+}  // namespace
+
+bool writeScrollback(const QString &id, const QStringList &lines, QString *error) {
+    const QString path = scrollbackPath(id);
+    if (path.isEmpty()) {
+        if (error) *error = QStringLiteral("No writable place for this pane's scrollback.");
+        return false;
+    }
+    return writeScrollbackFile(path, lines, error);
+}
+
+QStringList readScrollback(const QString &id, int maxLines) {
+    return readScrollbackFile(scrollbackPath(id), maxLines);
 }
 
 namespace {
@@ -359,4 +377,92 @@ void removeAllScrollback() {
 }
 
 }  // namespace windowstate
+
+// ----- the terminal text of a conversation (card #0TJ9) ---------------------------------------
+
+namespace sessiontext {
+namespace {
+
+bool isHex(const QString &text, int from, int count, bool anyCase) {
+    if (from + count > text.size()) return false;
+    for (int i = from; i < from + count; ++i) {
+        const ushort u = text.at(i).unicode();
+        const bool lower = (u >= '0' && u <= '9') || (u >= 'a' && u <= 'f');
+        if (!(lower || (anyCase && u >= 'A' && u <= 'F'))) return false;
+    }
+    return true;
+}
+
+// A directory Relay may put a sidecar in: absolute, and nothing that could climb out of it. The
+// path comes from the worker, not from the user, but it becomes a file name here and a session
+// directory carrying `..` would write outside the sessions tree.
+bool isUsableDirectory(const QString &directory) {
+    if (directory.isEmpty() || !QDir::isAbsolutePath(directory)) return false;
+    const QString clean = QDir::cleanPath(directory);
+    return clean == directory || clean + QLatin1Char('/') == directory;
+}
+
+}  // namespace
+
+bool isSessionId(const QString &id) { return id.size() == 32 && isHex(id, 0, 32, false); }
+
+bool isGuestId(const QString &id) {
+    if (id.size() != 36) return false;
+    for (int dash : {8, 13, 18, 23})
+        if (id.at(dash) != QLatin1Char('-')) return false;
+    return isHex(id, 0, 8, true) && isHex(id, 9, 4, true) && isHex(id, 14, 4, true)
+           && isHex(id, 19, 4, true) && isHex(id, 24, 12, true);
+}
+
+bool isGuestSource(const QString &source) {
+    return source == QLatin1String("claude") || source == QLatin1String("codex");
+}
+
+QString sessionPath(const QString &sessionDir, const QString &id) {
+    if (!isUsableDirectory(sessionDir) || !isSessionId(id)) return {};
+    return QDir::cleanPath(sessionDir) + QLatin1Char('/') + id + QStringLiteral(".scrollback.txt");
+}
+
+QString rewoundPath(const QString &sessionDir, const QString &id, int n) {
+    if (n < 1 || n > 9999 || !isUsableDirectory(sessionDir) || !isSessionId(id)) return {};
+    return QDir::cleanPath(sessionDir) + QLatin1Char('/') + id
+           + QStringLiteral(".rewound-%1.scrollback.txt").arg(n);
+}
+
+QString guestDirectory() {
+    const QString data = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+    if (data.isEmpty()) return {};
+    return data + QStringLiteral("/relay/sessions/guests");
+}
+
+QString guestPath(const QString &source, const QString &id) {
+    const QString dir = guestDirectory();
+    if (dir.isEmpty() || !isGuestSource(source) || !isGuestId(id)) return {};
+    return dir + QLatin1Char('/') + source + QLatin1Char('/') + id + QStringLiteral(".scrollback.txt");
+}
+
+bool write(const QString &path, const QStringList &lines, QString *error) {
+    if (path.isEmpty()) {
+        if (error) *error = QStringLiteral("No writable place for this conversation's terminal text.");
+        return false;
+    }
+    return windowstate::writeScrollbackFile(path, lines, error);
+}
+
+QStringList read(const QString &path, int maxLines) {
+    return windowstate::readScrollbackFile(path, maxLines);
+}
+
+QStringList sidecars(const QString &sessionDir, const QString &id) {
+    const QString text = sessionPath(sessionDir, id);
+    if (text.isEmpty()) return {};
+    QStringList found;
+    if (QFileInfo::exists(text)) found << text;
+    const auto rewound = QDir(QDir::cleanPath(sessionDir))
+                             .entryInfoList({id + QStringLiteral(".rewound-*.scrollback.txt")}, QDir::Files, QDir::Name);
+    for (const QFileInfo &file : rewound) found << file.absoluteFilePath();
+    return found;
+}
+
+}  // namespace sessiontext
 }  // namespace relay

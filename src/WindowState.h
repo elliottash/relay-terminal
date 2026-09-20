@@ -175,4 +175,61 @@ int pruneScrollback(const QStringList &keep);
 void removeAllScrollback();
 
 }  // namespace windowstate
+
+// ----- the terminal text of a *conversation* (card #0TJ9) --------------------------------------
+//
+// `windowstate`'s store above is keyed by pane: it is what "reopen where I left off" needs, and
+// nothing else can use it. A pane that leaves the layout has its file pruned at the next layout
+// write, so opening that conversation from the sessions manager days later found nothing — the
+// owner's report, and the two layers measured in
+// `docs/qa_evidence/2026-09-20-session-resume-scrollback/`.
+//
+// So a conversation's terminal text is saved beside the conversation, under the session's own id,
+// and lives exactly as long as the session does. Same format as the per-pane store — plain UTF-8
+// lines, the same `clampScrollback` caps, `QSaveFile`, 0600, directories 0700 — because a reader
+// should not have to care which store a block of text came out of:
+//
+//   Relay session   <session_dir>/<session_id>.scrollback.txt
+//   what a rewind   <session_dir>/<session_id>.rewound-<n>.scrollback.txt
+//     undid                       (n is the `rewound_n` of the worker's `rewound` event)
+//   guest session   <data>/relay/sessions/guests/<source>/<id>.scrollback.txt
+//
+// A guest (claude, codex) has no Relay session directory of its own, and Relay never writes inside
+// `~/.claude` or `~/.codex`, so its sidecar lives in Relay's own tree — `guest-meta.json` is the
+// precedent. `<session_dir>` arrives from the worker (`session_configured`, or a sessions-manager
+// row's `session_dir`), so it is Relay's own path, but every id that becomes a file name is
+// validated first: a Relay id is 32 lowercase hex (backend `sessions.SESSION_ID`), a guest id is a
+// canonical UUID (both `claude` and `codex` name their transcripts with one), and the source is
+// exactly `claude` or `codex`. Anything else is refused and nothing is written.
+namespace sessiontext {
+
+// 32 lowercase hex, the shape `relay_core.sessions.new_id()` mints and `check_id` enforces.
+bool isSessionId(const QString &id);
+// 8-4-4-4-12 hex, either case: `~/.claude/projects/<slug>/<uuid>.jsonl` and codex's
+// `rollout-<stamp>-<uuid>.jsonl` both end in one, and that is what the guest rows carry.
+bool isGuestId(const QString &id);
+// The two guest sources Relay knows (protocol 26.7). Exactly these, lower-case.
+bool isGuestSource(const QString &source);
+
+// `<sessionDir>/<id>.scrollback.txt`, empty unless `sessionDir` is an absolute path with no `..`
+// in it and `id` is a session id.
+QString sessionPath(const QString &sessionDir, const QString &id);
+// `<sessionDir>/<id>.rewound-<n>.scrollback.txt` for n in [1, 9999]; empty otherwise.
+QString rewoundPath(const QString &sessionDir, const QString &id, int n);
+// `<data>/relay/sessions/guests`. Empty when no data location is available.
+QString guestDirectory();
+// `<guestDirectory()>/<source>/<id>.scrollback.txt`; empty for an unknown source or id.
+QString guestPath(const QString &source, const QString &id);
+
+// Atomic, 0600, parent directory created 0700; the lines are clamped by `clampScrollback` first,
+// and empty content removes the file rather than leaving stale text behind. False with *error set
+// when the path is unusable — which is also what an unvalidated id gets, since it yields no path.
+bool write(const QString &path, const QStringList &lines, QString *error = nullptr);
+// The saved lines, oldest first; empty when there is no file. Reads only the file's tail.
+QStringList read(const QString &path, int maxLines = windowstate::kScrollbackMaxLines);
+// Every sidecar of one session: its text file and its `rewound-<n>` files. What a delete has to
+// take with it, and what a test asserts over.
+QStringList sidecars(const QString &sessionDir, const QString &id);
+
+}  // namespace sessiontext
 }  // namespace relay
