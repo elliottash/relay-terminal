@@ -2296,6 +2296,9 @@ private:
                     });
                 ask.aliases = QStringLiteral("claude codex guest permissions approval ask bypass yolo tools sandbox");
                 ask.indent = 1;
+                // One line like the models above it (owner, 2026-09-20): the explanation is the hover.
+                ask.tooltip = ask.detail;
+                ask.detail.clear();
                 models.rows << ask;
             }
         }
