@@ -697,16 +697,24 @@ def session_todos(data: dict) -> list[dict]:
     return rows[:MAX_TODOS]
 
 
+def turn_left_open(data: dict) -> bool:
+    """Whether the session's last turn was cut off: the last checkpoint has no `ended` stamp,
+    in a session whose checkpoints carry one at all — a session saved before that field existed
+    never counts as cut off on its own. This is the pure checkpoint predicate; the worker adds
+    it to `state_loaded` as `turn_open` so a restored pane knows it may continue the turn.
+    """
+    items = _checkpoint_items(data)
+    return bool(items) and any(item.get("ended") is not None for item in items) and items[-1].get("ended") is None
+
+
 def session_unfinished(data: dict) -> bool:
     """Whether the session looks like it was left mid-flight. True when any of:
 
-    * the last checkpoint has no `ended` stamp, in a session whose checkpoints carry one at all
-      (a session saved before that field existed never counts as unfinished on its own);
+    * the last checkpoint has no `ended` stamp (`turn_left_open`);
     * the last message is a user or tool message — nothing answered it;
     * a todo is still pending, in progress or blocked.
     """
-    items = _checkpoint_items(data)
-    if items and any(item.get("ended") is not None for item in items) and items[-1].get("ended") is None:
+    if turn_left_open(data):
         return True
     messages = [m for m in (data.get("messages") or []) if isinstance(m, dict)]
     if messages and messages[-1].get("role") in ("user", "tool"):

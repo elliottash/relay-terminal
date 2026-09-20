@@ -285,6 +285,27 @@ class SessionTests(Base):
         other.ask('third')
         self.assertEqual(SessionStore(self.sessions).listing()[0]['turns'], 3)
 
+    def test_resume_reports_a_turn_left_open(self):
+        """`state_loaded` carries `turn_open` so a restored pane may offer Continue (#SXF1).
+
+        A turn Relay was killed mid-flight is in the session file with its last checkpoint
+        unfinished; one that ended — or a session from before the `ended` field — is not.
+        """
+        agent = self.agent(ScriptedProvider())
+        agent.ask('Fix the login bug')
+        agent.ask('Now add a test')
+        path = self.sessions / f"{agent.session_id}.json"
+        self.assertFalse(self.agent(ScriptedProvider(name='B')).resume(agent.session_id)['turn_open'])
+        saved = json.loads(path.read_text())
+        saved['checkpoints']['items'][-1].pop('ended')   # as a kill mid-turn leaves the file
+        path.write_text(json.dumps(saved))
+        self.assertTrue(self.agent(ScriptedProvider(name='C')).resume(agent.session_id)['turn_open'])
+        old = json.loads(path.read_text())
+        for item in old['checkpoints']['items']:
+            item.pop('ended', None)    # a session saved before the field existed
+        path.write_text(json.dumps(old))
+        self.assertFalse(self.agent(ScriptedProvider(name='D')).resume(agent.session_id)['turn_open'])
+
     def test_a_running_turn_is_written_so_it_can_be_found(self):
         """The file the sessions list and the full-text index are built from appears mid-turn.
 

@@ -176,6 +176,23 @@ class HelperTests(unittest.TestCase):
             item.pop("ended", None)
         self.assertFalse(conv_index.session_unfinished(old))
 
+    def test_turn_left_open_reads_only_the_checkpoint_stamps(self):
+        # The pure cut-off predicate behind `state_loaded {turn_open}` (#SXF1): the last
+        # checkpoint lacks `ended`, in a session that carries the field at all.
+        self.assertFalse(conv_index.turn_left_open(session(extra_turn="and then")))   # every turn ended
+        stopped = session(extra_turn="and then")        # turn 1 closed, turn 2 never did
+        stopped["checkpoints"]["items"][-1].pop("ended")
+        self.assertTrue(conv_index.turn_left_open(stopped))
+        # A user message nothing answered is the *messages* arm of session_unfinished, not this.
+        waiting = session(extra_turn="and then")
+        waiting["messages"].append({"role": "user", "content": "and then?"})
+        self.assertFalse(conv_index.turn_left_open(waiting))
+        # A session from before `ended` existed never counts as cut off on its own.
+        old = session(extra_turn="and then", ended=False)
+        for item in old["checkpoints"]["items"]:
+            item.pop("ended", None)
+        self.assertFalse(conv_index.turn_left_open(old))
+
     def test_session_files_lists_written_paths_newest_first(self):
         data = session(files=["/tmp/alpha/a.py", "/tmp/alpha/b.py"], extra_turn="more")
         data["checkpoints"]["items"][1]["files"] = {"/tmp/alpha/c.py": {"before": None, "after": "x"},

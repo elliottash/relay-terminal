@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import context as compaction
+from . import conv_index
 from . import logs
 from . import route_assist
 from . import titles as session_titles
@@ -2508,9 +2509,11 @@ class Agent:
             raise ValueError("Sessions are not stored for this pane.")
         with self._lock:
             data = self.store.load(check_session_id(session_id))
+            turn_open = conv_index.turn_left_open(data)  # read before _apply_session replaces the checkpoint list
             self._apply_session(data, keep_id=True)
             return {"event": "state_loaded", "session_id": self.session_id, "turns": self.turns,
-                    "model": data.get("model"), "title": self.title, "open_requests": self.requests.open_count()}
+                    "model": data.get("model"), "title": self.title, "open_requests": self.requests.open_count(),
+                    "turn_open": turn_open}
 
     def _apply_session(self, data: dict, keep_id: bool) -> None:
         messages = validate_messages(data.get("messages"))
