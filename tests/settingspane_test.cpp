@@ -18,7 +18,10 @@
 #include <QSpinBox>
 #include <QTabBar>
 #include <QStackedWidget>
+#include <QPlainTextEdit>
 #include <QTest>
+#include <QTextBrowser>
+#include <QToolButton>
 
 using relay::ActionItem;
 using relay::SettingRow;
@@ -1057,6 +1060,91 @@ private slots:
             QVERIFY(combo);
             QCOMPARE(combo->currentData().toString(), QStringLiteral("light"));
         }
+    }
+
+    // ----- the helper agent's panel (card #FEJQ, protocol §30.7) -------------------------------
+    //
+    // "When you are in options, actions, or sessions, you have a helper agent, same as the
+    // switchboard agent" (owner). One panel at the foot of the pane, collapsed to a single row,
+    // whose pane name follows the mode — Options and Actions are one widget, so the helper's
+    // brief must follow the mode the way the pane's own title does.
+    void theHelperPanelFollowsTheModeAndAsksAsTheOptionsPane() {
+        State state;
+        SettingsPane pane(SettingsPane::Mode::Options, [&] { return catalog(&state); },
+                          [&] { return actions(&state); });
+        QList<QJsonObject> sent;
+        pane.onHelperSend = [&sent](const QJsonObject &message) { sent << message; };
+        pane.nextHelperRequestId = [] { return QStringLiteral("options-1"); };
+        pane.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&pane));
+
+        // The panel is there, and it is one row until it is asked for.
+        auto *panel = pane.findChild<QWidget *>(QStringLiteral("boardChatPanel"));
+        auto *ask = pane.findChild<QToolButton *>(QStringLiteral("boardChatAsk"));
+        auto *body = pane.findChild<QWidget *>(QStringLiteral("boardChatBody"));
+        QVERIFY(panel && ask && body);
+        QVERIFY(panel->isVisible());
+        QVERIFY(ask->isVisible());
+        QVERIFY(!body->isVisible());
+        QCOMPARE(pane.findChild<QLabel *>(QStringLiteral("boardChatHead"))->text(),
+                 QStringLiteral("Options helper"));
+
+        // Asking: the row opens, the cursor lands in the box, and the message carries this pane.
+        ask->click();
+        QVERIFY(body->isVisible());
+        auto *composer = pane.findChild<QPlainTextEdit *>(QStringLiteral("boardChatComposer"));
+        QVERIFY(composer && composer->hasFocus());
+        composer->setPlainText(QStringLiteral("where do I turn thinking off?"));
+        QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+        QApplication::sendEvent(composer, &enter);
+        QCOMPARE(sent.size(), 1);
+        QCOMPARE(sent.last().value(QStringLiteral("type")).toString(), QStringLiteral("board_chat"));
+        QCOMPARE(sent.last().value(QStringLiteral("pane")).toString(), QStringLiteral("options"));
+        QCOMPARE(sent.last().value(QStringLiteral("id")).toString(), QStringLiteral("options-1"));
+
+        // The same pane in Actions mode is the Actions helper, and asks as `actions`. The log is
+        // not thrown away by the swap: it is one conversation with one worker.
+        pane.setMode(SettingsPane::Mode::Actions);
+        QCOMPARE(pane.findChild<QLabel *>(QStringLiteral("boardChatHead"))->text(),
+                 QStringLiteral("Actions helper"));
+        pane.focusHelper();
+        composer = pane.findChild<QPlainTextEdit *>(QStringLiteral("boardChatComposer"));
+        QVERIFY(composer);
+        composer->setPlainText(QStringLiteral("which action clears the queue?"));
+        QApplication::sendEvent(composer, &enter);
+        QCOMPARE(sent.size(), 2);
+        QCOMPARE(sent.last().value(QStringLiteral("pane")).toString(), QStringLiteral("actions"));
+
+        // The answer streams back only when it is tagged with this pane; the board's own does not.
+        pane.helperEvent(QStringLiteral("delta"),
+                         QJsonObject{{QStringLiteral("chat"), true},
+                                     {QStringLiteral("pane"), QStringLiteral("switchboard")},
+                                     {QStringLiteral("turn_id"), QStringLiteral("t1")},
+                                     {QStringLiteral("text"), QStringLiteral("84 open cards.")}});
+        pane.helperEvent(QStringLiteral("delta"),
+                         QJsonObject{{QStringLiteral("chat"), true},
+                                     {QStringLiteral("pane"), QStringLiteral("actions")},
+                                     {QStringLiteral("turn_id"), QStringLiteral("t2")},
+                                     {QStringLiteral("text"), QStringLiteral("Clear queued prompts.")}});
+        auto *log = pane.findChild<QTextBrowser *>(QStringLiteral("boardChatLog"));
+        QVERIFY(log);
+        QTRY_VERIFY(log->toPlainText().contains(QStringLiteral("Clear queued prompts.")));
+        QVERIFY(!log->toPlainText().contains(QStringLiteral("84 open cards.")));
+
+        // An `option:<section>/<row>` link in an answer is this pane's own business: it reveals
+        // the row, switching back to Options to do it, rather than asking the window for a pane.
+        emit log->anchorClicked(QUrl(QStringLiteral("option:general/option:thinking")));
+        QCOMPARE(pane.mode(), SettingsPane::Mode::Options);
+        QCOMPARE(pane.currentTab(), QStringLiteral("general"));
+        QCOMPARE(pane.visibleRowIds().value(pane.currentRow()), QStringLiteral("option:thinking"));
+
+        // A pane whose window never wired the helper shows no ask row at all: a row that sends
+        // nowhere is worse than no row.
+        SettingsPane unwired(SettingsPane::Mode::Options, [&] { return catalog(&state); },
+                             [&] { return actions(&state); });
+        unwired.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&unwired));
+        QVERIFY(!unwired.findChild<QWidget *>(QStringLiteral("boardChatPanel"))->isVisible());
     }
 
     void theWatchForgetsAPaneThatHasClosed() {

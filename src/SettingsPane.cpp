@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SettingsPane.h"
 
+#include "HelperChat.h"
+
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
@@ -20,6 +22,7 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSettings>
+#include <QShowEvent>
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSpinBox>
@@ -253,6 +256,36 @@ SettingsPane::SettingsPane(Mode mode, std::function<QList<SettingsSection>()> se
     m_footer->setObjectName(QStringLiteral("settingsFooter"));
     m_footer->setTextFormat(Qt::PlainText);
     layout->addWidget(m_footer);
+
+    // The helper agent's panel (#FEJQ), under the footer and collapsed to one "Ask about this
+    // pane" row: the same panel the Switchboard carries, asking the same per-tab worker. Its pane
+    // name follows the mode — Options and Actions are one widget — so the worker's brief is about
+    // whichever of the two is on screen, while the conversation stays one.
+    m_helper = new HelperChatPanel(m_mode == Mode::Actions ? helperpane::actions()
+                                                           : helperpane::options());
+    m_helper->onSend = [this](const QJsonObject &message) {
+        if (onHelperSend) onHelperSend(message);
+    };
+    m_helper->nextRequestId = [this] {
+        return nextHelperRequestId ? nextHelperRequestId() : QString();
+    };
+    m_helper->onHint = [this](const QString &id, const QString &keys) {
+        if (onHelperHint) onHelperHint(id, keys);
+    };
+    // `option:<section>/<row>` in an answer is this pane's own: the helper was asked about a
+    // setting and answers with the way to it, so the link reveals the row here rather than asking
+    // the window to open a second Options pane.
+    m_helper->onOpenOption = [this](const QString &section, const QString &row) {
+        revealOption(section, row);
+    };
+    m_helper->onOpenCard = [this](const QString &id) {
+        if (onHelperOpenCard) onHelperOpenCard(id);
+    };
+    m_helper->onOpenFile = [this](const QString &path) {
+        if (onHelperOpenFile) onHelperOpenFile(path);
+    };
+    m_helper->setAskShortcut(QStringLiteral("options.ask"), QString());
+    layout->addWidget(m_helper, 0);
     applyMode();
 
     connect(m_tabs, &QTabBar::currentChanged, this, [this](int index) {
@@ -298,6 +331,11 @@ void SettingsPane::applyMode() {
 void SettingsPane::setMode(Mode mode) {
     if (mode == m_mode) return;
     m_mode = mode;
+    // The helper is about the pane in front of you, and the pane has just become the other one:
+    // from here the worker is asked with `pane: "actions"` rather than `"options"` and picks the
+    // other brief (§30.7). The log stays — it is one conversation with one agent.
+    if (m_helper)
+        m_helper->setPane(mode == Mode::Actions ? helperpane::actions() : helperpane::options());
     m_wantedTab.clear();
     {
         const QSignalBlocker blocker(m_search);
@@ -921,6 +959,44 @@ void SettingsPane::keyPressEvent(QKeyEvent *event) {
         return;
     }
     QWidget::keyPressEvent(event);
+}
+
+void SettingsPane::showEvent(QShowEvent *event) {
+    QWidget::showEvent(event);
+    // An ask row that does nothing is worse than no ask row (the Sessions pane's rule, and the ⓘ
+    // view's `onAskOwner`), so the panel is there only once the window has given it somewhere to
+    // send. By the time the pane is on screen the wiring has happened or it never will.
+    if (m_helper) m_helper->setVisible(bool(onHelperSend));
+}
+
+// ----- the helper agent's panel (#FEJQ) --------------------------------------------------------
+//
+// The pane holds no worker of its own: what the panel sends goes out through `onHelperSend` and
+// what the worker answers comes back through `helperEvent`, the same seam the Sessions pane keeps
+// (src/Conversations.cpp) so the window wires both panes with the same lines.
+
+void SettingsPane::helperEvent(const QString &type, const QJsonObject &event) {
+    if (m_helper) m_helper->handleEvent(type, event);
+}
+
+void SettingsPane::setHelperPresets(const QJsonArray &presets) {
+    if (m_helper) m_helper->setPresets(presets);
+}
+
+void SettingsPane::addHelperComposerWidget(QWidget *widget) {
+    if (m_helper) m_helper->addComposerWidget(widget);
+}
+
+void SettingsPane::setHelperShortcut(const QString &hintId, const QString &keys) {
+    if (m_helper) m_helper->setAskShortcut(hintId, keys);
+}
+
+void SettingsPane::focusHelper() {
+    if (m_helper) m_helper->expand();
+}
+
+void SettingsPane::helperDraft(const QString &text) {
+    if (m_helper) m_helper->prefill(text);
 }
 
 // ----- public surface ------------------------------------------------------------------------------

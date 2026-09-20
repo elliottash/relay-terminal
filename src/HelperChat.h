@@ -106,6 +106,12 @@ public:
                              QWidget *parent = nullptr);
 
     QString pane() const { return m_pane; }
+    // Options and Actions are one widget in two modes (src/SettingsPane.h), and the panel at its
+    // foot follows the mode rather than being rebuilt: the conversation is one (§30.7), so a
+    // swap must not throw away a log somebody has just read, or strand a turn that is running.
+    // Only the embedded panes move this way — the Switchboard's extras are built from its name,
+    // so a panel that is, or would become, the board's is left alone.
+    void setPane(const QString &pane);
 
     // ---- wiring ---------------------------------------------------------------------------
     // A worker protocol message: `board_chat`, `board_chat_cancel`, `board_chat_queue_*`,
@@ -229,7 +235,7 @@ private:
     // ---- the context-left chip (`context` events, tagged `chat: true`) ----------------------
     void updateContextChip(const QJsonObject &event);
 
-    const QString m_pane;                    // "switchboard" | "options" | "actions" | "sessions"
+    QString m_pane;                          // "switchboard" | "options" | "actions" | "sessions"
     bool isBoard() const { return m_pane == helperpane::switchboard(); }
     QString m_workspace;
     QJsonArray m_presets;

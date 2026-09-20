@@ -109,7 +109,8 @@ target_compile_options(relay-modelsettings PRIVATE -Wall -Wextra -Wpedantic)
 
 add_library(relay-settings STATIC src/SettingsPane.cpp src/SettingsPane.h)
 target_include_directories(relay-settings PUBLIC src)
-target_link_libraries(relay-settings PUBLIC ${RELAY_QT}::Widgets)
+# relay-helperchat: Options and Actions carry the helper agent's panel, collapsed (#FEJQ).
+target_link_libraries(relay-settings PUBLIC relay-helperchat ${RELAY_QT}::Widgets)
 target_compile_options(relay-settings PRIVATE -Wall -Wextra -Wpedantic)
 
 # The agent drives the app (card #FEJQ, protocol §30): the catalog the window sends its workers,

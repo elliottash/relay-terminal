@@ -766,6 +766,21 @@ void HelperChatPanel::collapse()
     applyCollapsed();
 }
 
+// The mode swapped under the panel (Options ↔ Actions, src/SettingsPane.cpp). Only the name
+// changes: the head says where the panel is, the composer's placeholders ask about this pane, and
+// from the next message on the worker picks the other brief. The log is left alone — it is one
+// conversation with one worker (§30.7), and the turns already in it were answers to this person.
+void HelperChatPanel::setPane(const QString &pane)
+{
+    if (pane.isEmpty() || pane == m_pane || isBoard() || pane == helperpane::switchboard())
+        return;
+    m_pane = pane;
+    if (m_composer != nullptr)
+        m_composer->setPlaceholders(askPlaceholders(m_pane));
+    setRunning(m_running);      // redraws the head, which is the only thing that named the pane
+    updateAskRow();
+}
+
 void HelperChatPanel::setAskShortcut(const QString &hintId, const QString &keys)
 {
     m_askHint = hintId;

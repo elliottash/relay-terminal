@@ -32,6 +32,7 @@
 //  * JetBrains Find Action (Ctrl+Shift+A) and VS Code's palette: a flat list with keys, recent
 //    first, separate from Settings. Taken: that separation.
 #include <QHash>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QList>
 #include <QPair>
@@ -44,12 +45,15 @@
 class QLabel;
 class QLineEdit;
 class QScrollArea;
+class QShowEvent;
 class QStackedWidget;
 class QTabBar;
 class QHBoxLayout;
 class QVBoxLayout;
 
 namespace relay {
+
+class HelperChatPanel;   // the helper agent's panel, embedded at the bottom of the pane (#FEJQ)
 
 // One row of a settings section. The caller supplies the reader (the current value fields) and
 // the writer, so QSettings stays the single source of truth.
@@ -229,9 +233,46 @@ public:
     // headless — the same reason resetRow() takes its `ask`.
     static void setFolderChooser(std::function<QString(QWidget *parent, const QString &start)> chooser);
 
+    // ----- the helper agent's panel (card #FEJQ, protocol §30.7) -------------------------------
+    //
+    // "When you are in options, actions, or sessions, you have a helper agent, same as the
+    // switchboard agent" (owner). It is the Switchboard's own panel, at the foot of the pane and
+    // collapsed to one "Ask about this pane" row, asking the **tab's** helper worker with
+    // `pane: "options"` or `pane: "actions"` — whichever mode the pane is in, since Options and
+    // Actions are one widget and the panel follows setMode().
+    //
+    // The seam is the Sessions pane's, name for name (src/Conversations.h), so the window wires
+    // both panes with the same lines. The pane itself never talks to a worker: what the panel
+    // sends leaves through `onHelperSend` and what the worker answers arrives through
+    // `helperEvent`, so the pane is still testable with no process behind it.
+    std::function<void(const QJsonObject &message)> onHelperSend;
+    std::function<QString()> nextHelperRequestId;
+    // An answer's links into the app. An option row is this pane's own business and is revealed
+    // here; a card and a file belong to the window, which wires these.
+    std::function<void(const QString &cardId)> onHelperOpenCard;
+    std::function<void(const QString &path)> onHelperOpenFile;
+    std::function<void(const QString &id, const QString &keys)> onHelperHint;   // shortcut hints
+
+    // A worker event for the panel: the `chat: true` turn events and the `board_chat_*` answers.
+    // The panel takes only the ones tagged with its own pane, so handing it everything is safe.
+    void helperEvent(const QString &type, const QJsonObject &event);
+    // The provider rows the `presets` event carries, for the composer's microphone offer.
+    void setHelperPresets(const QJsonArray &presets);
+    // The model box, built by the window (it reads the catalog and the settings) and reparented
+    // into the panel's composer strip, exactly as the Switchboard's is.
+    void addHelperComposerWidget(QWidget *widget);
+    // The key that opens the panel, in the window's live Keymap wording, for the collapsed row's
+    // key line and the hint a mouse click teaches (WARP.md's standing rule).
+    void setHelperShortcut(const QString &hintId, const QString &keys);
+    // Open the helper and put the cursor in it — the pane's ask key, and what a click on the row
+    // does. `helperDraft` prefills it without sending, the Check-finding pattern.
+    void focusHelper();
+    void helperDraft(const QString &text);
+
 protected:
     bool eventFilter(QObject *object, QEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
+    void showEvent(QShowEvent *event) override;
 
 private:
     struct Row {                    // one focusable line on screen
@@ -264,6 +305,7 @@ private:
     QScrollArea *m_results = nullptr;
     QLabel *m_footer = nullptr;
     QHBoxLayout *m_header = nullptr;
+    HelperChatPanel *m_helper = nullptr;   // the foot of the pane (#FEJQ)
     QStringList m_tabIds;
     QString m_wantedTab;
     QString m_shownTab;             // the last tab onSectionShown was told about
