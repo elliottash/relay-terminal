@@ -56,24 +56,43 @@ QString TaskSummary::progress(bool alwaysSuffix) const {
 
 bool RequestLedgerModel::handle(const QJsonObject &event) {
     const QString type = event.value(QStringLiteral("event")).toString();
+    // Every branch below that returns true has changed one of the three lists the task walk is
+    // derived from, and none of them is reached twice for one event, so this is the one place the
+    // cache has to be dropped (#PPR4).
+    invalidateDerived();
     if (type == QStringLiteral("requests")) {
-        // A different ledger (new chat, resume, rewind): ids went back or an id now means another text.
         const QJsonArray incoming = event.value(QStringLiteral("items")).toArray();
-        int newMax = 0;
-        bool other = false;
-        for (const auto &value : incoming) {
-            const QJsonObject item = value.toObject();
-            const QString id = item.value(QStringLiteral("id")).toString();
-            newMax = std::max(newMax, requestNumber(id));
-            const auto seen = m_seenPreview.constFind(id);
-            if (seen != m_seenPreview.constEnd() && *seen != item.value(QStringLiteral("text_preview")).toString()) other = true;
+        // Protocol 12.11 (#PPR4): `delta` means the event carries only the entries that changed,
+        // and `removed` the ones that left. The worker applies the "is this another ledger?" test
+        // below before it trims, so a delta is never the first sight of a ledger and the test is
+        // not applied to a partial list here — where a status change to R5 in a ledger of two
+        // hundred would read as ids going backwards.
+        const bool delta = event.value(QStringLiteral("delta")).toBool();
+        if (!delta) {
+            // A different ledger (new chat, resume, rewind): ids went back or an id now means another text.
+            int newMax = 0;
+            bool other = false;
+            for (const auto &value : incoming) {
+                const QJsonObject item = value.toObject();
+                const QString id = item.value(QStringLiteral("id")).toString();
+                newMax = std::max(newMax, requestNumber(id));
+                const auto seen = m_seenPreview.constFind(id);
+                if (seen != m_seenPreview.constEnd() && *seen != item.value(QStringLiteral("text_preview")).toString()) other = true;
+            }
+            if (other || newMax < m_maxSeen) { resetBatches(); m_requests.clear(); m_todos.clear(); m_openTodos = 0; }
         }
-        if (other || newMax < m_maxSeen) { resetBatches(); m_requests.clear(); m_todos.clear(); m_openTodos = 0; }
-        const QList<LedgerRequest> previous = m_requests;
+        // Where each entry is now, so the loop below is one lookup per entry rather than a scan of
+        // the whole ledger (it was O(entries²) in QString comparisons, and the ledger is capped at
+        // two hundred — #PPR4).
+        QHash<QString, int> at;
         QHash<QString, QString> fetched;   // keep verbatim text already fetched
-        for (const auto &request : std::as_const(m_requests)) if (!request.text.isEmpty()) fetched.insert(request.id, request.text);
-        m_requests.clear();
-        for (const auto &value : event.value(QStringLiteral("items")).toArray()) {
+        for (int i = 0; i < m_requests.size(); ++i) {
+            at.insert(m_requests.at(i).id, i);
+            if (!m_requests.at(i).text.isEmpty()) fetched.insert(m_requests.at(i).id, m_requests.at(i).text);
+        }
+        const QList<LedgerRequest> previous = m_requests;
+        if (!delta) m_requests.clear();
+        for (const auto &value : incoming) {
             const QJsonObject item = value.toObject();
             LedgerRequest request;
             request.id = item.value(QStringLiteral("id")).toString();
@@ -93,18 +112,30 @@ bool RequestLedgerModel::handle(const QJsonObject &event) {
             request.attachments = strings(item.value(QStringLiteral("attachments")));
             for (const auto &flag : item.value(QStringLiteral("audit")).toArray())
                 request.auditQuotes << flag.toObject().value(QStringLiteral("quote")).toString();
-            m_requests << request;
-        }
-        // A re-ask or requeue keeps the entry and gives it a new queue item while it is still
-        // delivered from before: it waits in the queue until its turn_id changes.
-        for (auto &request : m_requests) {
-            const auto before = std::find_if(previous.cbegin(), previous.cend(), [&](const LedgerRequest &r) { return r.id == request.id; });
-            if (before != previous.cend()) {
-                request.waiting = before->waiting;
-                if (!request.queueItem.isEmpty() && request.queueItem != before->queueItem) request.waiting = true;
-                if (request.turnId != before->turnId) request.waiting = false;
+            // A re-ask or requeue keeps the entry and gives it a new queue item while it is still
+            // delivered from before: it waits in the queue until its turn_id changes. An entry a
+            // delta does not carry has not changed, so its flag stands as it was worked out here.
+            const int was = at.value(request.id, -1);
+            if (was >= 0 && was < previous.size()) {
+                const LedgerRequest &before = previous.at(was);
+                request.waiting = before.waiting;
+                if (!request.queueItem.isEmpty() && request.queueItem != before.queueItem) request.waiting = true;
+                if (request.turnId != before.turnId) request.waiting = false;
             }
             if (request.status != QStringLiteral("open")) request.waiting = false;
+            if (!delta) m_requests << request;
+            else if (was >= 0 && was < m_requests.size()) m_requests[was] = request;
+            else { at.insert(request.id, m_requests.size()); m_requests << request; }
+        }
+        if (delta) {
+            // The entries that left: the ledger was replaced, or they fell off the end of the
+            // newest two hundred. Removing from the front keeps the rest in the worker's order.
+            QSet<QString> gone;
+            for (const auto &value : event.value(QStringLiteral("removed")).toArray()) gone.insert(value.toString());
+            if (!gone.isEmpty())
+                m_requests.erase(std::remove_if(m_requests.begin(), m_requests.end(),
+                                                [&](const LedgerRequest &r) { return gone.contains(r.id); }),
+                                 m_requests.end());
         }
         m_total = event.value(QStringLiteral("total")).toInt(m_requests.size());
         m_open = event.value(QStringLiteral("open")).toInt();
@@ -156,6 +187,7 @@ bool RequestLedgerModel::handle(const QJsonObject &event) {
 }
 
 void RequestLedgerModel::clear() {
+    invalidateDerived();
     m_requests.clear(); m_todos.clear(); m_counts.clear();
     m_total = m_open = m_openTodos = 0;
     resetBatches();
@@ -192,7 +224,21 @@ bool RequestLedgerModel::turnRunning() const {
 //     or re-asked/requeued and not delivered again) or while another turn runs, else Unfinished.
 //   A request whose todos are all settled but which is open again also counts itself.
 // Relay-origin requests (requires_completion false) are not tasks; their todos are.
-QList<TaskItem> RequestLedgerModel::deriveAll() const {
+const QList<TaskItem> &RequestLedgerModel::deriveAll() const {
+    if (!m_derivedValid) { m_derived = buildAll(); m_derivedValid = true; ++m_derivations; }
+    return m_derived;
+}
+
+const QList<TaskItem> &RequestLedgerModel::deriveTasks() const {
+    if (!m_derivedTasksValid) {
+        m_derivedTasks.clear();
+        for (const auto &task : deriveAll()) if (task.todo) m_derivedTasks << task;
+        m_derivedTasksValid = true;
+    }
+    return m_derivedTasks;
+}
+
+QList<TaskItem> RequestLedgerModel::buildAll() const {
     const bool running = turnRunning();
     QList<TaskItem> out;
     const QList<LedgerTodo> todos = allTodos();
@@ -248,11 +294,6 @@ QList<TaskItem> RequestLedgerModel::deriveAll() const {
 // The user-facing task list: the model's todos only. A request is never a task — the ledger is
 // internal (it links todos, survives compaction and drives re-asks), and showing a prompt as a
 // task made every turn report "Tasks 1/1" for having ended normally.
-QList<TaskItem> RequestLedgerModel::deriveTasks() const {
-    QList<TaskItem> out;
-    for (const auto &task : deriveAll()) if (task.todo) out << task;
-    return out;
-}
 
 // Batches. The current task list is everything since all tasks were last settled:
 //  1. New requests are taken in id order. A request with requires_completion starts a new batch

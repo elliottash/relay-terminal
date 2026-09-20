@@ -389,6 +389,7 @@ existing events keep their fields and meaning. Deviations from the research sket
 | `approvals_ask` | string[] | `[]` | capabilities that draw an approval ask before the call runs (27.6) |
 | `approvals_chosen` | bool | false | the first-launch choice is answered; until it is, the built-in cautious set asks (27.6) |
 | `stream_tool_output` | bool | true | put the *text* of a tool's output on the wire. False sends the counts instead — 81 % fewer bytes in a tool-heavy turn — and the fold still fetches the whole of it (23.10). Not an agent option: it applies with no agent configured, and a `configure` that omits it restores the default |
+| `requests_delta` | bool | false | send the `requests` event as the entries that *changed*, with `removed` beside them, rather than the newest 200 every time — 96 % of the worker→GUI bytes of a long conversation (12.11). Not an agent option, same rule as the row above |
 
 **The turn limits are a fuse, not the stop (owner, 2026-09-20, card `#2CZP`).** Both defaults now
 sit at their own clamp maxima — the clamps are unchanged, 1–500 and 1–2000 — because people leave an
@@ -729,6 +730,41 @@ model gets a note saying the request is unfinished and to continue it differentl
 
 The GUI prints both events in the pane (`RequestLedgerModel::loopLine`, and `limitLine` for the
 stop); `tests/requests_test.cpp` covers those lines.
+
+### 12.11 `requests_delta` — the entries that changed, not the ledger (v4.1, 2026-09-20)
+
+The `requests` event of 12.3 carries the newest 200 entries and is emitted after **every** ledger
+change — three times in an ordinary turn. At about 400 bytes an entry that is a quarter of a
+megabyte a turn once a conversation is 200 turns old, for a list that changed by one entry. Measured
+on a 250-turn stub conversation (`docs/qa_evidence/2026-09-20-perf-fixes/growth/`) it was **96 % of
+all worker→GUI bytes**, growing from 2 KB at turn 1 to 143 KB at turn 120, and it is most of why a
+turn cost half as much again at turn 225 as at turn 25 (card `#PPR4`, finding 3 of the profile).
+
+**Option.** `configure` and `set_agent_options` accept `requests_delta` (bool, default **false**),
+listed in 12.1. Like `stream_tool_output` (23.10) it is the pane's switch rather than the agent's:
+it trims what leaves the process and nothing else, so every observer inside the worker still sees
+the whole list, and it applies with no agent configured. A `configure` that omits it restores the
+default; turning it on, either way, makes the next event a whole one.
+
+**With it on**, a `requests` event gains two fields:
+
+| Field | Meaning |
+|---|---|
+| `delta` | `true`: `items` holds only the entries that changed since the last `requests` event on this connection |
+| `removed` | ids that were listed before and are not now — the ledger was replaced, or they fell off the end of the newest 200 |
+
+`total`, `open` and `counts` are sent whole every time. An event **without** `delta` is the whole
+list, exactly as before, and the worker sends one whenever it is not sure the receiver has the
+ledger: the first event of a connection, the reply to the `requests` command (which carries `id`),
+and any list that is *another* ledger — an id whose `text_preview` changed, or a highest id that
+went backwards, which is the test a GUI applies for a new chat, a load, a resume or a rewind.
+Deciding that in the worker is the point: the receiver must never apply it to a partial list, where
+a status change to `R5` in a ledger of two hundred would read as the ids going backwards.
+
+**Receiving.** Replace the entries named, drop the ones in `removed`, leave the rest alone — an
+entry that is not sent has not changed, so anything derived from it (the GUI's `waiting` flag)
+stands. Backend: `backend/relay_core/request_stream.py`, applied in `worker.py`'s `emit`; GUI:
+`RequestLedgerModel::handle`; tests: `tests/test_request_stream.py` and `tests/requests_test.cpp`.
 
 ## 13. Model roles (v1.3, 2026-09-17; `planning` added v3.4, 2026-09-19)
 

@@ -14,7 +14,7 @@ from relay_core import (__version__, board_protocol, customproviders, hosted, ke
                         observe_protocol, roles as model_roles, session_protocol, skills, voice)
 from relay_core.agent import Agent, validate_turn_options
 from relay_core import activity_tools, agents_defs, app_tools, guest_harness_provider, openrouter_catalog
-from relay_core import tool_stream
+from relay_core import request_stream, tool_stream
 from relay_core.subagents import SubagentFactory, SubagentManager
 from relay_core.keybindings import KeybindingCatalog
 from relay_core.presets import PRESETS, tier_list_defaults
@@ -59,10 +59,18 @@ def main():
     # manager, the session titler) and every stored result the fold fetches sees the full event,
     # because this is the last thing that happens before the bytes leave the process.
     stream_tool_output = [True]
+    # Protocol 12.11 (card #PPR4): whether the `requests` event carries the whole ledger or only
+    # the entries that changed. Same shape and same place as the switch above — it trims the wire
+    # and nothing else, so every observer in this process still sees the full list. The state it
+    # keeps is per connection, which is what this closure is.
+    requests_delta = [False]
+    requests_stream = request_stream.RequestStream()
 
     def emit(obj: dict):
         if not stream_tool_output[0]:
             obj = tool_stream.counted(obj)
+        if requests_delta[0]:
+            obj = requests_stream.trim(obj)
         with output_lock:
             sys.stdout.write(json.dumps(obj, ensure_ascii=False) + "\n")
             sys.stdout.flush()
@@ -227,6 +235,12 @@ def main():
                 # default back rather than whatever the last pane asked for.
                 stream_tool_output[0] = (tool_stream.validate(request["stream_tool_output"])
                                          if request.get("stream_tool_output") is not None else True)
+                # Protocol 12.11, the same rule: stated in full by every `configure`, and the
+                # ledger this connection has sent so far is forgotten, because a `configure`
+                # replaces the conversation the entries belonged to.
+                requests_delta[0] = (request_stream.validate(request["requests_delta"])
+                                     if request.get("requests_delta") is not None else False)
+                requests_stream.reset()
                 options = session_protocol.agent_options(request, workspace)
                 options["board"] = board.agent_tools(board_workspace, request)
                 # Protocol 30.2: the `app` block, or None for a GUI that sent none — then this
@@ -486,8 +500,14 @@ def main():
                 # this process, so it applies with no agent configured and to the very next event.
                 if "stream_tool_output" in request:
                     stream_tool_output[0] = tool_stream.validate(request["stream_tool_output"])
+                # Protocol 12.11: likewise the pane's own switch. Turning it on starts from a whole
+                # list, so the GUI is never left merging into a ledger it was not sent.
+                if "requests_delta" in request:
+                    requests_delta[0] = request_stream.validate(request["requests_delta"])
+                    requests_stream.reset()
                 fields = subagents.set_options(request.get("max_auto_turns"))
                 fields["stream_tool_output"] = stream_tool_output[0]
+                fields["requests_delta"] = requests_delta[0]
                 agent = turns.agent
                 changed_models = False
                 if agent is not None:

@@ -133,12 +133,29 @@ public:
     // "may be unaddressed: R3 “…”" for request_audit (empty when nothing was flagged).
     static QString auditLine(const QJsonObject &event);
 
+    // How many times the task walk below has been run since this model was made. The invariant it
+    // exists for is that it is once per event that changes the ledger, whatever the ledger's size
+    // and however many times the chip, the tooltip and the turn-end line ask for it (#PPR4);
+    // tests/requests_test.cpp asserts it over a ledger that grows to two hundred entries.
+    int derivations() const { return m_derivations; }
+
 private:
     void changed() { if (onChanged) onChanged(); }
     void resetBatches();
     void updateBatches();
-    QList<TaskItem> deriveAll() const;               // todos + request pseudo-tasks, for batching only
-    QList<TaskItem> deriveTasks() const;             // todos with outcomes, batch unset
+    // Both are derived from `m_requests`, `m_todos` and `m_retainedTodos` and from nothing else, so
+    // they are worked out once per event that changes one of those and handed out by reference
+    // after that. They used to be rebuilt by every caller: one ledger event ran the walk six to
+    // eight times, and each walk built a TaskItem — five QStrings — for every one of the two
+    // hundred listed requests, which is where a turn's allocator churn came from late in a long
+    // conversation (#PPR4).
+    const QList<TaskItem> &deriveAll() const;        // todos + request pseudo-tasks, for batching only
+    const QList<TaskItem> &deriveTasks() const;      // todos with outcomes, batch unset
+    QList<TaskItem> buildAll() const;
+    void invalidateDerived() { m_derivedValid = false; m_derivedTasksValid = false; }
+    mutable QList<TaskItem> m_derived, m_derivedTasks;
+    mutable bool m_derivedValid = false, m_derivedTasksValid = false;
+    mutable int m_derivations = 0;
     QList<LedgerRequest> m_requests;
     QList<LedgerTodo> m_todos;
     QHash<QString, LedgerTodo> m_retainedTodos;      // settled todos no longer in the list

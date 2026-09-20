@@ -65,6 +65,77 @@ private slots:
         QVERIFY(!model.handle(json("{'event':'done'}")));
     }
 
+    // Protocol 12.11 (#PPR4): with `requests_delta` the worker sends only the entries that
+    // changed, with `removed` beside them. What the model holds afterwards has to be what the
+    // whole list would have left it holding — entries it was not sent included.
+    void aDeltaReplacesWhatItNamesAndKeepsTheRest() {
+        RequestLedgerModel model;
+        QVERIFY(model.handle(json(kRequests)));
+        QCOMPARE(model.requests().size(), 4);
+        // R2 settles and R5 arrives; R1 falls off the end of the listed window.
+        QVERIFY(model.handle(json(
+            "{'event':'requests','delta':true,'total':5,'open':1,'removed':['R1'],"
+            " 'counts':{'open':1,'in_progress':0,'done':2,'deferred':1},"
+            " 'items':[{'id':'R2','text_preview':'also update the docs','source':'steer','origin':'user',"
+            "           'requires_completion':true,'status':'done','reason':null,'turn_id':'q1','turn':1,"
+            "           'todo_ids':['T2'],'attachments':['/w/a.txt'],'audit':[]},"
+            "          {'id':'R5','text_preview':'ship it','source':'ask','origin':'user',"
+            "           'requires_completion':true,'status':'open','reason':null,'turn_id':null,'turn':null,"
+            "           'todo_ids':[],'attachments':[],'audit':[]}]}")));
+        QStringList ids;
+        for (const auto &request : model.requests()) ids << request.id;
+        QCOMPARE(ids, (QStringList{QStringLiteral("R2"), QStringLiteral("R3"), QStringLiteral("R4"), QStringLiteral("R5")}));
+        QCOMPARE(model.find(QStringLiteral("R2"))->status, QStringLiteral("done"));
+        // Untouched entries keep everything the full events worked out for them.
+        QCOMPARE(model.find(QStringLiteral("R3"))->reason, QStringLiteral("needs owner input"));
+        QCOMPARE(model.find(QStringLiteral("R2"))->attachments, QStringList{QStringLiteral("/w/a.txt")});
+        QCOMPARE(model.total(), 5);
+        QCOMPARE(model.count(QStringLiteral("done")), 2);
+        // A whole list after a delta still replaces, and its "another ledger" test still runs: the
+        // worker sends one whenever the ids start again.
+        QVERIFY(model.handle(json(
+            "{'event':'requests','total':1,'open':1,'counts':{'open':1},"
+            " 'items':[{'id':'R1','text_preview':'a new chat','source':'ask','origin':'user',"
+            "           'requires_completion':true,'status':'open','reason':null,'turn_id':null,'turn':null,"
+            "           'todo_ids':[],'attachments':[],'audit':[]}]}")));
+        QCOMPARE(model.requests().size(), 1);
+        QCOMPARE(model.requests().first().preview, QStringLiteral("a new chat"));
+    }
+
+    // #PPR4: what a ledger event costs must not grow with the ledger. The walk that derives the
+    // task list is the expensive part — a TaskItem, five QStrings, per listed request — and the
+    // pane's chip, its tooltip, the state and the turn-end line each used to run it again. It runs
+    // once per event now, whatever the size of the ledger and whoever asks.
+    void aLedgerEventDerivesTheTaskListOnce() {
+        RequestLedgerModel model;
+        model.onChanged = [&] {
+            // Everything Pane::updateWorkChip() and the turn-end line read, as they read it.
+            model.hasTasks();
+            model.summary();
+            model.earlierSummary();
+            model.chipText();
+            model.chipState();
+            model.chipToolTip();
+            model.turnEndLine();
+            model.tasks();
+        };
+        for (int n = 1; n <= 200; ++n) {
+            QJsonArray items;
+            for (int i = 1; i <= n; ++i)
+                items << QJsonObject{{"id", QStringLiteral("R%1").arg(i)},
+                                     {"text_preview", QStringLiteral("ask number %1").arg(i)},
+                                     {"source", "ask"}, {"origin", "user"}, {"requires_completion", true},
+                                     {"status", i == n ? QStringLiteral("in_progress") : QStringLiteral("done")},
+                                     {"turn_id", QStringLiteral("q%1").arg(i)}, {"turn", i},
+                                     {"todo_ids", QJsonArray{}}, {"attachments", QJsonArray{}}, {"audit", QJsonArray{}}};
+            QVERIFY(model.handle(QJsonObject{{"event", "requests"}, {"items", items},
+                                             {"total", n}, {"open", 1},
+                                             {"counts", QJsonObject{{"open", 1}}}}));
+        }
+        QCOMPARE(model.requests().size(), 200);
+        QCOMPARE(model.derivations(), 200);
+    }
+
     // The complaint this split fixes: typing one ask used to show "Tasks 0/1" → "Tasks 1/1" with
     // the user's own command as the task text. With no todos there is no task list and no chip.
     void aPromptIsNeverATask() {
