@@ -142,6 +142,7 @@ private slots:
     void aSignalRowOpensItsPageAndEachActionSendsItsMessage();
     void theBoardAsksForTheSignalsWhenItOpens();
     void aRefusalLandsOnThePagesErrorLine();
+    void aPromotionIsAnnouncedOnceAndOnlyWhenItIsNew();
     void whichSignalFoldsAreOpenRidesTheLayoutNode();
     void aPromotedCardsPageWearsTheSignalStrip();
 };
@@ -596,6 +597,71 @@ void SignalsTests::aRefusalLandsOnThePagesErrorLine()
     view.handleEvent(QJsonObject{{"event", "error"}, {"id", "someone-else-1"},
                                  {"code", "board_claimed_elsewhere"}, {"text", "not ours"}});
     QVERIFY(page->error().isEmpty());
+}
+
+// `signals_changed` carries **every** promoted signal whose card is still open, on every change
+// (`signals.summary`), so the pane's notice has to be made of the ones that are new — otherwise it
+// announces the same card again whenever any signal anywhere moves. R12 lets a promotion reach a
+// human unasked; the existence of a card promoted last week is not one.
+void SignalsTests::aPromotionIsAnnouncedOnceAndOnlyWhenItIsNew()
+{
+    SignalsState state;
+    QJsonObject promoted = signalJson(QStringLiteral("ctest:panelayout"), QStringLiteral("broken"),
+                                      QStringLiteral("open"), 4);
+    promoted.insert(QStringLiteral("card"), QStringLiteral("K7Q2"));
+    QJsonObject other = signalJson(QStringLiteral("ctest:themes"), QStringLiteral("broken"),
+                                   QStringLiteral("open"), 2);
+
+    // The first event a view ever takes announces nothing: the pane is catching up, not being
+    // told that something happened.
+    state.take(QStringLiteral("signals_changed"), changed({promoted, other}, {}, 0, {promoted}));
+    QCOMPARE(state.promoted().size(), 1);
+    QVERIFY(state.newlyPromoted().isEmpty());
+
+    // An unrelated change — another signal's count going up — carries the same promoted list, and
+    // says nothing new.
+    QJsonObject grown = signalJson(QStringLiteral("ctest:themes"), QStringLiteral("broken"),
+                                   QStringLiteral("open"), 3);
+    state.take(QStringLiteral("signals_changed"), changed({promoted, grown}, {}, 0, {promoted}));
+    QCOMPARE(state.promoted().size(), 1);
+    QVERIFY(state.newlyPromoted().isEmpty());
+
+    // A second promotion is new, and it alone.
+    QJsonObject second = signalJson(QStringLiteral("ctest:themes"), QStringLiteral("broken"),
+                                    QStringLiteral("open"), 3);
+    second.insert(QStringLiteral("card"), QStringLiteral("M4P8"));
+    state.take(QStringLiteral("signals_changed"),
+               changed({promoted, second}, {}, 0, {promoted, second}));
+    QCOMPARE(state.promoted().size(), 2);
+    QCOMPARE(state.newlyPromoted().size(), 1);
+    QCOMPARE(state.newlyPromoted().first().key, QStringLiteral("ctest:themes"));
+    QCOMPARE(state.newlyPromoted().first().card, QStringLiteral("M4P8"));
+
+    // And a signal whose card changed — the first was deleted, say — is new again.
+    QJsonObject recard = promoted;
+    recard.insert(QStringLiteral("card"), QStringLiteral("Z9X1"));
+    state.take(QStringLiteral("signals_changed"),
+               changed({recard, second}, {}, 0, {recard, second}));
+    QCOMPARE(state.newlyPromoted().size(), 1);
+    QCOMPARE(state.newlyPromoted().first().card, QStringLiteral("Z9X1"));
+
+    // The pane says it once. The notice is the view's only unasked word about a promotion.
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.handleEvent(opened({card(QStringLiteral("AAA1"), QStringLiteral("inbox"))}));
+    view.handleEvent(changed({promoted}, {}, 0, {promoted}));
+    QVERIFY(!view.notice().contains(QStringLiteral("K7Q2")));   // the catch-up event
+    view.handleEvent(changed({promoted, second}, {}, 0, {promoted, second}));
+    QVERIFY(view.notice().contains(QStringLiteral("M4P8")));
+    QVERIFY(view.notice().contains(QStringLiteral("ctest:themes")));
+    // An unrelated change afterwards leaves the board silent about it. A notice stays up for a
+    // while, so what is under test is that nothing is *posted*: put another notice up first, and
+    // it is still the one on screen afterwards.
+    view.handleEvent(QJsonObject{{"event", "signals_written"}, {"kind", "claim"},
+                                 {"key", "ctest:themes"}});
+    QVERIFY(view.notice().contains(QStringLiteral("Claimed")));
+    view.handleEvent(changed({promoted, second, other}, {}, 0, {promoted, second}));
+    QVERIFY(view.notice().contains(QStringLiteral("Claimed")));
+    QVERIFY(!view.notice().contains(QStringLiteral("M4P8")));
 }
 
 void SignalsTests::whichSignalFoldsAreOpenRidesTheLayoutNode()

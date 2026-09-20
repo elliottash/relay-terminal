@@ -5064,8 +5064,10 @@ void BoardView::handleEvent(const QJsonObject &event)
         }
         rebuild();
         // A promotion is one of the two things R12 lets reach a human unasked: the card is in the
-        // inbox, and the notice says which signal opened it.
-        for (const board::Signal &promoted : m_signalsState.promoted()) {
+        // inbox, and the notice says which signal opened it. Only the ones that were not promoted
+        // a moment ago — the event carries every promoted signal on every change, so `promoted()`
+        // would announce the same card again whenever any signal anywhere moved.
+        for (const board::Signal &promoted : m_signalsState.newlyPromoted()) {
             if (promoted.card.isEmpty())
                 continue;
             showNotice(QStringLiteral("#%1 opened from the signal %2")

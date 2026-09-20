@@ -294,10 +294,17 @@ bool SignalsState::take(const QString &type, const QJsonObject &event)
 {
     if (type != QStringLiteral("signals_changed") && type != QStringLiteral("signals"))
         return false;
+    // What was promoted a moment ago, key -> card, so the event's `promoted` list — which is
+    // every promoted signal, every time — can be read for the ones that are new.
+    QMap<QString, QString> wasPromoted;
+    for (const Signal &signal : std::as_const(m_promoted))
+        wasPromoted.insert(signal.key, signal.card);
+    const bool first = !m_seen;
     m_seen = true;
     m_open.clear();
     m_dismissed.clear();
     m_promoted.clear();
+    m_newPromoted.clear();
     m_byKey.clear();
     m_pending = event.value(QStringLiteral("pending_count")).toInt();
     QList<Signal> open;
@@ -320,8 +327,11 @@ bool SignalsState::take(const QString &type, const QJsonObject &event)
     }
     for (const QJsonValue &value : event.value(QStringLiteral("promoted")).toArray()) {
         const Signal signal = Signal::fromJson(value.toObject());
-        if (!signal.key.isEmpty())
-            m_promoted << signal;
+        if (signal.key.isEmpty())
+            continue;
+        m_promoted << signal;
+        if (!first && wasPromoted.value(signal.key) != signal.card)
+            m_newPromoted << signal;
     }
     // One list, one order (R11), and then one rule on top of it: **a group is followed by the keys
     // it names**, wherever the sort put it, so a run of twenty failures with one fingerprint reads
@@ -362,6 +372,7 @@ void SignalsState::clear()
     m_open.clear();
     m_dismissed.clear();
     m_promoted.clear();
+    m_newPromoted.clear();
     m_byKey.clear();
     m_pending = 0;
     m_seen = false;

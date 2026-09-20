@@ -138,9 +138,18 @@ public:
     // The worker's own counts, which include what this state does not draw (`pending` that has
     // not opened, dismissals that have expired out of the list).
     int pendingCount() const { return m_pending; }
-    // The promoted signals the last event carried, for the notice ("#K7Q2 opened from
-    // ctest:panelayout"). Empty on every event that promoted nothing.
+    // Every promoted signal whose card is still open, as the event carries them — the whole list
+    // on every event, so a row can link to its card.
     const QList<Signal> &promoted() const { return m_promoted; }
+    // The ones that were **not** promoted a moment ago: a signal this state had no card for, or
+    // had a different card for. This, and not `promoted()`, is what a notice is made of — the
+    // list above repeats itself on every change, so a notice drawn from it would announce the
+    // same card again every time any signal anywhere moved.
+    //
+    // Empty on the first event a state ever takes: a pane that has just opened is catching up,
+    // not being told that something happened. R12 lets a *promotion* reach a human unasked; the
+    // existence of a card promoted last week is not one.
+    const QList<Signal> &newlyPromoted() const { return m_newPromoted; }
     bool isEmpty() const { return m_open.isEmpty() && m_dismissed.isEmpty(); }
     // Whether an event has ever arrived. A board whose worker is too old to send signals draws no
     // row at all — which is the same as a board with no signals, and is meant to be.
@@ -152,7 +161,7 @@ public:
     QList<Row> rows(bool open, bool dismissedOpen) const;
 
 private:
-    QList<Signal> m_open, m_dismissed, m_promoted;
+    QList<Signal> m_open, m_dismissed, m_promoted, m_newPromoted;
     QMap<QString, Signal> m_byKey;
     int m_pending = 0;
     bool m_seen = false;
