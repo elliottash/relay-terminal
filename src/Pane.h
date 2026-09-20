@@ -4542,6 +4542,12 @@ private:
         // would otherwise pay for a turn's worth of output before the first toggle.
         m_toolStreamSent = int(needsToolOutputText());
         request.insert(QStringLiteral("stream_tool_output"), m_toolStreamSent != 0);
+        // Protocol 12.11 (#PPR4): the request ledger travels as the entries that changed. This
+        // side keeps the list it has been sent (relay::RequestLedgerModel), so there is nothing to
+        // weigh up — it is always on, and stated on every configure because a fresh worker starts
+        // on the default. It was 96 % of the worker→GUI bytes of a long conversation: the whole
+        // ledger, up to two hundred entries, three times a turn.
+        request.insert(QStringLiteral("requests_delta"), true);
         request.insert(QStringLiteral("instructions"), QJsonObject{
             {"files", QJsonArray::fromStringList(settings.value(QStringLiteral("instructions/files")).toStringList())},
             {"project_auto", settings.value(QStringLiteral("instructions/project_auto"), true).toBool()}});
