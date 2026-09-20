@@ -90,7 +90,8 @@ keeps what it was set to across a provider switch, and the GUI shows it as the l
 
 - A checkpoint is recorded at the start of each user turn: `{turn, prompt_preview, time, message_index}`, and stamped with `ended` (wall clock) when the turn reaches any end state (done, cancelled, error, limit). `time`/`ended` are what a recap's span is computed from; sessions saved before this version have no `ended`, and fall back to turn starts. Before any agent file write (`write_file` or `edit_file`), the file's previous bytes (or "absent") are saved under the session's checkpoint store, keyed by turn.
 - `checkpoints` → `checkpoints {items: [{turn, prompt_preview, time, files: [paths]}]}`.
-- `rewind {turn, restore: "conversation"|"files"|"both"}` → restores; files changed since (hash mismatch) are skipped and reported. Event `rewound {turn, restored_files: [...], conflicts: [...], note}`. Shell side effects are never undone; the note says so.
+- `rewind {turn, restore: "conversation"|"files"|"both"}` → restores; files changed since (hash mismatch) are skipped and reported. Event `rewound {turn, restored_files: [...], conflicts: [...], note, rewound_n}`. Shell side effects are never undone; the note says so.
+- **What a rewind undid is kept** (#0TJ9): before the cut the worker appends one record to `<session_dir>/<id>.rewound.jsonl` — `{n, at, turn, restore, epoch, prompt, messages, restored_files, conflicts}`, where `messages` is exactly what leaves the live conversation. `n` is 1-based, counts up for the life of the session and is never reused; the newest 20 records are kept. `rewound_n` on the event is that `n` — absent or null when nothing was written (`restore: "files"`, or no session store) — and the GUI names `<id>.rewound-<n>.scrollback.txt`, the terminal text that rewind undid, after it. Both files are indexed (14.1).
 - `fork {turn?}` → `fork_state {state}` where `state` is an opaque JSON object (messages up to `turn`, model, effort, mode, instructions). GUI starts a new pane and sends `load_state {state}` → `state_loaded {session_id, turns}`.
 - Sessions auto-save after every turn to `session_dir/<session_id>.json` (title = first prompt preview, updated time, model, turns).
 - `sessions` → `sessions {items: [{id, title, updated, turns, model}]}`; `resume {id}` → `state_loaded`, followed by a `recap {text}` event. `state_loaded` on `resume` carries `turn_open` (bool): the session's last checkpoint has no `ended` stamp — the turn was cut off mid-flight, and the pane may offer Continue (`agent.continue` / empty-box Ctrl+Enter). False for a completed session, a session with no checkpoints, and one saved before `ended` existed (the guard lives in `conv_index.turn_left_open`).
@@ -1237,7 +1238,7 @@ plan restore then goes back to the pane's own.
 A planning model whose provider will not answer no longer fails the turn: the routing ends and the
 rest of the turn runs on the pane's own model (15.2.3).
 
-## 14. Conversation list and full-text search (v1.4, 2026-09-17; v2.8, 2026-09-18)
+## 14. Conversation list and full-text search (v1.4, 2026-09-17; v2.8, 2026-09-18; v4.1, 2026-09-20)
 
 Backend: `backend/relay_core/conv_index.py` (the index) with command handlers in
 `session_protocol.py` and the autosave hook in `sessions.py`; GUI: `src/Conversations.{h,cpp}`
@@ -1262,10 +1263,15 @@ many in `backfilled`. **Version 4** (2026-09-19) adds `raw_cwd` and the guest ta
 itself against so it can write only the turns that were added instead of deleting and re-inserting
 every row of the conversation. It is the one migration that asks for no re-read — each conversation
 fills its own fingerprint at its next save, and until it does it costs one full re-index.
+**Version 6** (2026-09-20, #0TJ9) adds the two sidecar kinds below and the `session_sidecars`
+table; it adds no column, and it is migrated the way v3 was — every agent and subagent row is
+marked `indexed_version = 0` so the next `reconcile()` reads each conversation's sidecars once and
+reports how many in `backfilled`.
 Any other mismatch wipes
 it. The first conversation command a worker handles runs `reconcile()`: sessions and threads
 missing from the index or newer on disk are indexed, rows whose file is gone are dropped (one
-`stat` and one small meta read per session, a few ms when nothing changed). Before this,
+listing per session folder, one `stat` per file and one small meta read per session, a few ms when
+nothing changed). Before this,
 sessions saved before the index existed or with it off were never found.
 
 | Table | Holds |
@@ -1273,15 +1279,50 @@ sessions saved before the index existed or with it off were never found.
 | `conversations` | one row per conversation: `session_id`, `source` (`agent`/`terminal`/`subagent`), `workspace`, `project`, `title`, `custom_title` (rename), `model`, `preset`, `created`, `updated`, `turns`, `open_requests`, `session_dir`, `pinned`; v2: `owner_session`, `parent_thread`, `agent_id`, `agent_type`, `spawn_turn`, `status`, `models` (JSON list), `tokens`, `cost`, `file_mtime`; v3: `summary`, `first_prompt`, `last_prompt`, `files` (JSON list), `files_count`, `has_edits`, `branch`, `unfinished`, `mode`, `todos` (JSON list), `indexed_version`; v4: `raw_cwd`; v5: `entry_count`, `entry_digest` (the incremental-write fingerprint) |
 | `entries` | one row per indexed piece of text: `session_id`, `turn`, `seq`, `kind`, `time`, `status`, `text`, in conversation order — a turn added to a conversation therefore appends, which is what lets an autosave write only its rows (#TZWF) |
 | `entries_fts` | FTS5 (`unicode61 remove_diacritics 2`) over `entries.text`, external content, kept in step by triggers |
+| `session_sidecars` | v6: `session_id`, `stamp` — the names, sizes and mtimes of a conversation's sidecar files as they were when their rows were written, so an unchanged one is never read again |
 
 `kind` is `title` or `summary` (v3: what the conversation is, not something inside it),
 `prompt`, `reply`, `tool_call`, `tool_output` (agent threads) or `command`,
-`command_output` (terminal history). User prompts are indexed from the **checkpoints**, so they
+`command_output` (terminal history), or, since v6, `terminal_text` and `rewound` (below). User
+prompts are indexed from the **checkpoints**, so they
 survive compaction, which rewrites the message list; replies, tool calls and capped tool output
 come from the messages. Context blocks Relay writes into a user message
 (`[Relay context: …]`) are not indexed: they are not something the user typed. Text is capped at
 8000 characters for prompts and 4000 for everything else, and a session contributes at most
 20000 entries.
+
+**The sidecars (v6, #0TJ9).** A conversation is more than its message list: there is the terminal
+text the pane showed, and there is what a rewind threw away. Both are files the **GUI and the
+worker write and the index only reads** — the index is a cache, so nothing may live only in it:
+
+| File | Holds | Indexed as |
+|---|---|---|
+| `<session_dir>/<id>.scrollback.txt` | the terminal text the pane showed for that session; plain UTF-8, at most 5 000 lines / 512 KiB, written by the GUI when a pane's session changes and at quit | `terminal_text`, in ~40-line chunks, turn 0 |
+| `<session_dir>/<id>.rewound.jsonl` | one record per rewind, newest 20 kept, written by the worker (section 5): `{n, at, turn, restore, epoch, prompt, messages, restored_files, conflicts}` | `rewound`, one entry per dropped message, at the record's `turn` |
+| `<session_dir>/<id>.rewound-<n>.scrollback.txt` | the terminal text rewind `n` undid, written by the GUI on the `rewound` event | `rewound`, chunked, at the same turn |
+| `sessions/guests/<source>/<id>.scrollback.txt` | the same saved terminal text for a **guest** session | `terminal_text` |
+
+A guest has no Relay session directory — Relay never writes inside `~/.claude` or `~/.codex`
+(26.7) — so its one sidecar lives in Relay's own tree, the way `guest-meta.json` does.
+`sessions/guests/` is therefore **not** a workspace-digest directory, and nothing that walks
+`sessions/*/` treats it as one. Guests have no rewound files.
+
+A dropped message is rendered exactly as the session's own are: the prompt, the reply, `name
+{arguments}` per tool call, then the tool output, with Relay's context blocks left out. A
+truncated last line of the jsonl — a crash mid-append — is skipped, not an error.
+
+Both kinds are **searchable and rank below every kind of message text** (14.2): a word the user
+typed is a better answer than the same word scrolling past in the terminal or sitting in a turn
+that was thrown away. Neither counts as a message: they are out of `turns`, `first_prompt`,
+`last_prompt`, the `overview` and the list snippet, and an autosave neither writes nor deletes
+them, so the incremental write above leaves them where they are.
+
+`reconcile()` lists each session folder **once** and the sidecars come back from that same listing
+with their size and mtime — the GUI writes the scrollback at quit, *after* the last autosave, so
+the session JSON is not what says a sidecar moved. `session_sidecars` records what was read, so an
+unchanged sidecar is never opened and a changed one costs only itself, not a re-read of the session
+JSON. Measured on the owner's store (331 workspace folders, 688 conversations, 119 MB index): the
+one v6 backfill pass 3.7 s for 670 sidecars, every pass after it 16–17 ms.
 
 `SessionStore.save` refreshes the session's rows on **every autosave**, so the index follows the
 conversation without a separate crawl. A turn that is still running writes its session too (at most
@@ -1331,6 +1372,7 @@ FTS5; what is left is the free text. A value may be quoted (`file:"my file.py"`)
 | `has:tasks` | open requests |
 | `has:edits` | the session wrote a file |
 | `has:summary` | it has a summary |
+| `has:rewound` | a rewind of it was kept (v6): the conversation has `rewound` entries |
 | `is:pinned` | pinned |
 | `is:unfinished` | `unfinished` (14.1) |
 | `in:terminal`, `in:agent` | that `source` only |
@@ -1350,8 +1392,10 @@ typed into the box reaches FTS5 or SQLite as syntax.
 
 **Ranking.** `sort: "relevance"` orders by the **best kind** a conversation matched first —
 `title` > `summary` > user `prompt` (and terminal `command`) > assistant `reply` > `tool_call` >
-`tool_output` / `command_output` — then by how many entries matched, then by `updated`. A title
-hit therefore beats any number of tool-output hits. A title or summary match is a match line like
+`tool_output` / `command_output` > `rewound` > `terminal_text` — then by how many entries matched,
+then by `updated`. A title
+hit therefore beats any number of tool-output hits, and a hit in a message beats any number in
+saved terminal text or in a rewound turn. A title or summary match is a match line like
 any other, with `kind: "title"` / `"summary"` and `turn: 0`, so it leads the `matches` list. A
 rename re-writes the title entry, so a conversation is findable under its new name at once.
 
@@ -1444,6 +1488,13 @@ entries are not messages, so `items` leaves them out; `overview` carries the sum
 `query`, every entry that matches carries `line` and `ranges`, and `match_count` is how many
 entries matched — this is also how Ctrl+F counts matches in the pane's own conversation.
 
+Since v6, `rewound` entries **are** listed, at the turn they were dropped from and after that
+turn's messages, so the preview shows what a rewind undid where it happened; the GUI labels them
+as rewound. Saved `terminal_text` is **not** listed by default — it is a pane's whole history and
+would bury the conversation it belongs to — unless the query matched inside it, and then the
+matching chunks are appended with their `line` and `ranges`, so a search hit found in saved
+terminal text can be read where it was found. Neither kind reaches `overview`.
+
 `overview` (v3) is the inline preview the session-manager pane draws before the transcript. It is
 built from the conversation's own row and a handful of its entries, so opening a preview never
 reads a session file back off disk:
@@ -1463,10 +1514,13 @@ captured output.
 ### 14.5 `conversation_delete`, `conversation_rename`, `conversation_pin`
 
 - `conversation_delete {session_id, id?}` → `conversation_deleted {session_id, files, indexed}`.
-  For an agent conversation it removes `<id>.json`, `<id>.meta.json`, the `<id>.blobs/` checkpoint
+  For an agent conversation it removes `<id>.json`, `<id>.meta.json`, the three sidecars of 14.1
+  (`<id>.scrollback.txt`, `<id>.rewound.jsonl`, every `<id>.rewound-*.scrollback.txt`), the
+  `<id>.blobs/` checkpoint
   pre-images **and** the index rows; deleting the conversation the pane is showing also starts a
   fresh one (`reset`). For a `term-…` id only the index rows go: the shell's own history file is
-  never touched.
+  never touched. For a guest row the transcript is still the guest's and stays, but
+  `sessions/guests/<source>/<id>.scrollback.txt` is Relay's own file and goes with the row.
 - `conversation_rename {session_id, title}` → `conversation_renamed {session_id, title}`. An empty
   title restores the generated one. Since v2 the rename is kept in the session's own
   `<id>.meta.json` (`custom_title`), or in the thread file for a thread, and the index mirrors it:
@@ -1492,8 +1546,10 @@ indexed.
 ### 14.7 `index_rebuild`
 
 `index_rebuild {id?}` drops every agent conversation and subagent thread and rebuilds them from the
-session JSON files and `<id>.threads/*.json` under `$XDG_DATA_HOME/relay/sessions`, on a background
-thread. Terminal history has no file to rebuild from and is kept. → `index_rebuilt {sessions,
+session JSON files, their sidecars (14.1) and `<id>.threads/*.json` under
+`$XDG_DATA_HOME/relay/sessions`, on a background
+thread. Terminal history has no file to rebuild from and is kept; so are the guest rows, and their
+saved terminal text with them. → `index_rebuilt {sessions,
 threads, entries, reclaimed, ms, conversations, bytes, schema_version, path}`. `reclaimed` is the
 bytes a `VACUUM` gave back, and it is 0 unless the file is at least a tenth free and there are at
 least 16 MB of it: a rebuild is the only place Relay vacuums, because it is asked for by hand and
