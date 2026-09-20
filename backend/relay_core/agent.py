@@ -601,6 +601,9 @@ class Agent:
         self._last_usage = None
         # When the session file was last written; _autosave_soon throttles the mid-turn ones.
         self._last_save = 0.0
+        # A title or summary whose save was left to the other cheap call of its cadence point
+        # (set_title/set_summary, #GMCF); _flush_paired_save writes it if that call saves nothing.
+        self._paired_save = False
         # Protocol 11: per-turn tool results, thinking time and transcript for the last MAX_TURN_LOG turns.
         self.turn_log: OrderedDict[str, dict] = OrderedDict()
         self._turn_record = None
@@ -2923,7 +2926,16 @@ class Agent:
                     self.title, self.title_source = text, "model"
                 self.title_turn = self.turns
                 self._title_stale = False
-        self.autosave()
+            paired = source == "model" and self._summary_running
+        if paired:
+            # The summary call this one started beside (maybe_title -> maybe_summary) is still out.
+            # Its set_summary() saves the session moments from now and carries this title with it:
+            # one whole-file write for the pair instead of two (#GMCF). `title_turn` travels in the
+            # same file as the title, so the gap cannot leave the two disagreeing - and if that call
+            # comes back empty and saves nothing, _flush_paired_save() writes this.
+            self._paired_save = True
+        else:
+            self.autosave()
         return self.title_event()
 
     def title_due(self) -> bool:
@@ -2948,17 +2960,19 @@ class Agent:
         """Apply a claimed refresh. Returns the `session_title` event to emit, or None."""
         with self._lock:
             self._title_running = False
+        event = None
         if text:
-            return self.set_title(text, "model")
-        if claim.get("first") and self.title:
+            event = self.set_title(text, "model")
+        elif claim.get("first") and self.title:
             # No model, or the call failed: today's first-prompt title names the pane, and the
             # cadence moves on so a dead provider is not asked again after every turn.
             with self._lock:
                 if self.title_source != "user":
                     self.title_turn = claim.get("turns") or self.turns
                     self._title_stale = False
-            return self.title_event()
-        return None
+            event = self.title_event()
+        self._flush_paired_save()
+        return event
 
     # ----- session summary ----------------------------------------------------------------
     def summary_event(self) -> dict:
@@ -2978,9 +2992,16 @@ class Agent:
             self.summary_turn = self.turns
             self.summary_time = time.time()
             self._summary_stale = False
-        self.autosave()
+            paired = self._title_running
+        if paired:
+            # The title call of the same cadence point is still out and will save this summary with
+            # its own result; see set_title (#GMCF).
+            self._paired_save = True
+        else:
+            self.autosave()
         if self.store is not None:
-            # autosave() has just written the same field to the meta file; this is the index row.
+            # The save above (or the one the title call is about to make) writes the same field to
+            # the meta file; this is the index row.
             self.store.note_summary(self.session_id, cleaned, meta=False)
         return self.summary_event()
 
@@ -3015,7 +3036,20 @@ class Agent:
             with self._lock:
                 self.summary_turn = max(self.summary_turn, int(claim.get("turns") or self.turns))
                 self._summary_stale = False
+        self._flush_paired_save()
         return event
+
+    def _flush_paired_save(self) -> None:
+        """Write a title or summary that was left for the other cheap call of its cadence point.
+
+        set_title/set_summary hand their save to whichever of the pair comes back last, so that one
+        file write carries both (#GMCF). When that one comes back empty it saves nothing at all, so
+        whatever is still waiting is written here, once both calls are done.
+        """
+        with self._lock:
+            owed = self._paired_save and not (self._title_running or self._summary_running)
+        if owed:
+            self.autosave()
 
     def refresh_branch(self) -> str:
         """The workspace's checked-out branch, re-read from .git/HEAD (no git process, worktrees
@@ -3309,6 +3343,7 @@ class Agent:
 
     def autosave(self) -> None:
         self._last_save = time.monotonic()
+        self._paired_save = False       # whatever was waiting for a save is in this one
         if self.store is None or (self.turns == 0 and not self.store.path(self.session_id).exists()):
             return
         try:

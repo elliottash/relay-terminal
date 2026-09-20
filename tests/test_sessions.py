@@ -1,15 +1,19 @@
 """Agent sessions: model/effort switching, context and compaction, checkpoints, rewind, fork,
 sessions and recaps, plan mode, attachments. Fake providers only; no network."""
+import builtins
 import json
 import os
 import re
+import subprocess
+import sys
 import tempfile
 import threading
 import time
 import unittest
 from pathlib import Path
 
-from relay_core import attachments, checkpoints, planning, suggestions
+from relay_core import agent as agent_module
+from relay_core import attachments, checkpoints, planning, sessions as session_files, suggestions
 from relay_core.agent import Agent
 from relay_core.context import SUMMARY_MARKER, ContextTracker, limit_tokens
 from relay_core.provider import ProviderConfig
@@ -493,6 +497,182 @@ class SessionTests(Base):
         self.assertEqual(len(list(self.sessions.glob(f'{other}*'))), 3)
         with self.assertRaises(ValueError):
             store.delete(mine)
+
+
+class SaveCostTests(Base):
+    """What a turn costs the session store, in whole files written and read (#GMCF).
+
+    The profile counted 5.8 opens of a session's own files per turn: every save wrote both files
+    and read the meta file back twice — once in read_meta, once in conv_index.read_user_fields —
+    for bytes the same process had written itself a moment earlier.
+    """
+
+    def cost(self, run):
+        """Run `run()`, counting writes through the store's one writer and reads of its files."""
+        counts = {'session_write': 0, 'meta_write': 0, 'session_read': 0, 'meta_read': 0}
+        write, opener = session_files._atomic_text, builtins.open
+
+        def counted_write(path, text):
+            counts['meta_write' if str(path).endswith('.meta.json') else 'session_write'] += 1
+            return write(path, text)
+
+        def counted_open(file, *args, **kwargs):
+            # _atomic_text and write_user_fields write through os.fdopen, so anything reaching
+            # here for one of these files is a read.
+            name = str(file)
+            if name.startswith(str(self.sessions)):
+                counts['meta_read' if name.endswith('.meta.json') else
+                       'session_read' if name.endswith('.json') else 'other'] = \
+                    counts.get('meta_read' if name.endswith('.meta.json') else
+                               'session_read' if name.endswith('.json') else 'other', 0) + 1
+            return opener(file, *args, **kwargs)
+
+        session_files._atomic_text, builtins.open = counted_write, counted_open
+        try:
+            run()
+        finally:
+            session_files._atomic_text, builtins.open = write, opener
+        return counts
+
+    def test_a_turn_with_three_tool_calls_reads_nothing_back(self):
+        """Every durability point in the turn still writes the conversation; the meta file is
+        written only when the sessions list would show something different, and is never read."""
+        provider = ScriptedProvider([
+            text('warmed'),
+            tools_msg(call('run_command', {'command': 'printf a'}, 'c1'),
+                      call('run_command', {'command': 'printf b'}, 'c2'),
+                      call('run_command', {'command': 'printf c'}, 'c3')),
+            text('done')])
+        agent = self.agent(provider)
+        agent.ask('warm the store up')          # the first save of a session does read the file
+        saved = agent_module.MID_TURN_SAVE_S
+        agent_module.MID_TURN_SAVE_S = 0.0      # as a turn long enough to be worth saving behaves
+        try:
+            counts = self.cost(lambda: agent.ask('three tools please'))
+        finally:
+            agent_module.MID_TURN_SAVE_S = saved
+        # The seven durability points of the turn: the user's message, the assistant message that
+        # asked for the tools, each of the three tool results, the final message, and the turn's end.
+        self.assertEqual(counts['session_write'], 7)
+        # Nothing the listing shows changes between one tool result and the next.
+        self.assertLess(counts['meta_write'], counts['session_write'])
+        self.assertEqual(counts['meta_read'], 0)
+        self.assertEqual(counts['session_read'], 0)
+
+    def test_the_first_save_of_a_session_reads_the_meta_file_once(self):
+        """The cache is per session and starts empty, so a store that has not written this meta
+        file reads it — and conv_index reads it for the user fields. Twice in all, once each."""
+        agent = self.agent(ScriptedProvider())
+        counts = self.cost(lambda: agent.ask('first turn'))
+        self.assertEqual(counts['meta_read'], 2)
+
+    def test_a_rename_made_elsewhere_survives_the_next_autosave(self):
+        """The cache is only trusted while `<id>.meta.json` is byte for byte the one this store
+        wrote: the session manager renames and pins through the same file."""
+        agent = self.agent(ScriptedProvider())
+        agent.ask('one')
+        store = SessionStore(self.sessions)
+        store.set_user_fields(agent.session_id, custom_title='Named by hand', pinned=True)
+        agent.ask('two')
+        meta = json.loads((self.sessions / f'{agent.session_id}.meta.json').read_text())
+        self.assertEqual(meta['custom_title'], 'Named by hand')
+        self.assertTrue(meta['pinned'])
+        self.assertEqual(SessionStore(self.sessions).listing()[0]['title'], 'Named by hand')
+
+    def test_a_title_and_a_summary_of_one_cadence_point_share_a_save(self):
+        """maybe_title() starts both cheap calls at once. Whichever comes back last saves the
+        session; the other leaves its field for that save instead of writing the file itself."""
+        agent = self.agent(ScriptedProvider())
+        agent.ask('one')
+        title_claim, summary_claim = agent.claim_title(), agent.claim_summary(force=True)
+        self.assertIsNotNone(title_claim)
+        self.assertIsNotNone(summary_claim)
+        counts = self.cost(lambda: (agent.release_title('A Short Name', title_claim),
+                                    agent.release_summary('What happened, in a sentence.', summary_claim)))
+        self.assertEqual(counts['session_write'], 1)
+        data = json.loads((self.sessions / f'{agent.session_id}.json').read_text())
+        self.assertEqual(data['title'], 'A Short Name')
+        self.assertEqual(data['summary'], 'What happened, in a sentence.')
+
+    def test_a_paired_title_is_written_when_the_summary_call_comes_back_empty(self):
+        """The call that was going to carry it saves nothing: _flush_paired_save writes it."""
+        agent = self.agent(ScriptedProvider())
+        agent.ask('one')
+        title_claim, summary_claim = agent.claim_title(), agent.claim_summary(force=True)
+        agent.release_title('A Short Name', title_claim)
+        self.assertNotEqual(json.loads((self.sessions / f'{agent.session_id}.json').read_text())['title'],
+                            'A Short Name')
+        agent.release_summary('', summary_claim)
+        self.assertEqual(json.loads((self.sessions / f'{agent.session_id}.json').read_text())['title'],
+                         'A Short Name')
+
+
+KILLED_TURN = '''
+import json, os, sys
+sys.path.insert(0, %r)
+from relay_core import agent as agent_module
+from relay_core.agent import Agent
+from relay_core.provider import ProviderConfig
+
+agent_module.MID_TURN_SAVE_S = 0.0      # as a turn long enough to be worth saving behaves
+POINT, ROOT, SESSIONS = sys.argv[1], sys.argv[2], sys.argv[3]
+
+
+class Killer:
+    """Dies at one of the three points a turn must have reached the disk by."""
+    def __init__(self):
+        self.calls = 0
+
+    def complete(self, messages, tools, emit, cancel):
+        self.calls += 1
+        if (POINT, self.calls) in (('user', 1), ('tool', 2)):
+            os.kill(os.getpid(), 9)
+        if self.calls == 1:
+            return {'role': 'assistant', 'content': '', 'tool_calls': [
+                {'id': 'c1', 'type': 'function', 'function': {
+                    'name': 'run_command', 'arguments': json.dumps({'command': 'printf SIDE-EFFECT'})}}]}
+        return {'role': 'assistant', 'content': 'THE FINAL ANSWER'}
+
+
+agent = Agent(ProviderConfig('http://127.0.0.1:12345/v1', 'mock', ''), ROOT, lambda event: None,
+              provider=Killer(), session_dir=SESSIONS)
+print(agent.session_id, flush=True)
+agent.ask('THE PROMPT the user typed')
+os.kill(os.getpid(), 9)
+'''
+
+
+class CrashDurabilityTests(Base):
+    """kill -9 at each point of a turn that must survive it (#GMCF).
+
+    The saves this card coalesces are the ones that change nothing; these three change something,
+    so the conversation on disk has to hold it even when the worker never gets to run again.
+    """
+
+    def killed_at(self, point):
+        script = Path(self.temp.name) / 'turn.py'
+        script.write_text(KILLED_TURN % str(Path(__file__).resolve().parent.parent / 'backend'))
+        child = subprocess.run([sys.executable, str(script), point, str(self.root), str(self.sessions)],
+                               capture_output=True, text=True, timeout=120)
+        self.assertEqual(child.returncode, -9, child.stderr[-2000:])
+        session_id = child.stdout.strip().splitlines()[0]
+        return json.loads((self.sessions / f'{session_id}.json').read_text())
+
+    def test_the_users_message_is_on_disk_before_the_request_goes_out(self):
+        saved = self.killed_at('user')
+        self.assertIn('THE PROMPT the user typed', [m.get('content') for m in saved['messages']])
+
+    def test_a_finished_tool_call_survives(self):
+        """Tools have side effects, so a result that exists in the world exists in the file."""
+        saved = self.killed_at('tool')
+        tools = [m for m in saved['messages'] if m.get('role') == 'tool']
+        self.assertEqual(len(tools), 1)
+        self.assertIn('SIDE-EFFECT', tools[0]['content'])
+
+    def test_the_final_message_survives(self):
+        saved = self.killed_at('final')
+        self.assertEqual(saved['messages'][-1]['content'], 'THE FINAL ANSWER')
+        self.assertEqual(saved['turns'], 1)
 
 
 class PlanModeTests(Base):

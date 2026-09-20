@@ -150,6 +150,41 @@ def _atomic_json(path: Path, data: dict) -> None:
     _atomic_text(path, json.dumps(data, ensure_ascii=False))
 
 
+def _meta_stamp(path: Path):
+    """(inode, mtime_ns, size) of a meta file, or None when there is none.
+
+    The cheap "these are still the bytes this process wrote" test: every writer of
+    ``<id>.meta.json`` — save() below, conv_index.write_user_fields — puts it there with
+    os.replace, so anyone else's write lands as a new inode with a new timestamp.
+    """
+    try:
+        status = os.stat(path)
+    except OSError:
+        return None
+    return (status.st_ino, status.st_mtime_ns, status.st_size)
+
+
+def _meta_unchanged(fresh: dict, written: dict) -> bool:
+    """Whether two meta bodies say the same thing. `updated` is the clock, not news: it moves at
+    every save, and the listing reads it from the next save that does change something."""
+    if fresh.keys() != written.keys():
+        return False
+    return all(value == written[key] for key, value in fresh.items() if key != "updated")
+
+
+def _user_fields_after(user: dict, meta: dict) -> dict:
+    """What conv_index.read_user_fields would read back out of the meta file save() has just
+    written: the fields it read, with this session's own summary on top — the one thing save()
+    puts there that did not come from the file. Cached so the next save need not open it to find
+    out (#GMCF).
+    """
+    summary = meta.get("summary") or ""
+    if summary == (user.get("summary") or ""):
+        return user
+    return {**user, "summary": summary, "custom_title": user.get("custom_title"),
+            "pinned": bool(user.get("pinned"))}
+
+
 def read_meta(directory: str | Path, session_id: str) -> dict:
     """``<id>.meta.json`` as a dict; empty when it is missing or unreadable.
 
@@ -172,6 +207,12 @@ class SessionStore:
             raise ValueError("session_dir must be an absolute path.")
         # None: open the shared index lazily on the first save. False: never index (tests, RELAY_INDEX=off).
         self._index = index
+        # Per session id, what the last save() wrote to `<id>.meta.json`: its stamp, its body, and
+        # the user fields that body reads back as. A save used to open and parse that file twice
+        # for bytes it had written itself a moment earlier (#GMCF); with this it opens it only
+        # when somebody else has been there. A pane's store holds one session, so the dict stays
+        # tiny; a store handed a stream of ids (the session manager) drops it rather than grow.
+        self._wrote: dict[str, dict] = {}
 
     def index(self):
         """The conversation index, or None when it is off, elsewhere, or could not be opened.
@@ -203,26 +244,50 @@ class SessionStore:
 
     def save(self, data: dict) -> None:
         session_id = check_id(data["id"])
+        meta_path = self.directory / f"{session_id}.meta.json"
+        wrote = self._wrote.get(session_id)
+        stamp = _meta_stamp(meta_path)
+        mine = wrote is not None and stamp is not None and stamp == wrote["stamp"]
+        # The conversation itself is written every time it is asked for, and #GMCF left it that
+        # way: every save of a turn carries something a crash must not take with it, and a save
+        # that truly carries nothing is rare enough that recognising one — re-serialising the
+        # session to compare it with the file — measured as dear as the write it would have saved
+        # (docs/qa_evidence/2026-09-20-perf-fixes/saves). What is skippable is below: the two
+        # reads of the small file beside it, and the write of that file when it has no news.
         _atomic_json(self.path(session_id), data)
         meta = {key: data.get(key) for key in ("id", "title", "created", "updated", "turns", "model", "preset",
                                                "open_requests", "models", "usage",
                                                # the agent-written summary and the workspace's branch
                                                "summary", "summary_turn", "branch")}
         # The turn a summary written elsewhere covered; the summary itself comes back below.
-        kept = read_meta(self.directory, session_id)
+        # A title or pin the user set in the session manager lives here, not in the index (a cache),
+        # and so does a summary written while nobody had the session open; an autosave from the pane
+        # must not drop either. Both used to be a fresh open and parse of the same small file, twice
+        # per save, of bytes this store had written itself (#GMCF): when the file is still exactly
+        # the one the last save left, what was read out of it then is what is in it now.
+        if mine:
+            kept, user = wrote["meta"], wrote["user"]
+        else:
+            kept = read_meta(self.directory, session_id)
+            user = conv_index.read_user_fields(self.directory, session_id)
         for key in ("summary_turn", "branch"):
             if not meta.get(key) and kept.get(key):
                 meta[key] = kept[key]
-        # A title or pin the user set in the session manager lives here, not in the index (a cache),
-        # and so does a summary written while nobody had the session open; an autosave from the pane
-        # must not drop either.
-        user = conv_index.read_user_fields(self.directory, session_id)
         meta.update({k: v for k, v in user.items() if v})
         # This worker holds the session, so its own summary is the newer one (conv_index's
         # index_session_file merges in the same order).
         if data.get("summary"):
             meta["summary"] = data["summary"]
-        _atomic_json(self.directory / f"{session_id}.meta.json", meta)
+        if not (mine and _meta_unchanged(meta, wrote["meta"])):
+            # Otherwise nothing the sessions list reads out of this file has changed since the last
+            # save wrote it, and the only difference would be a newer `updated` — which the next
+            # save that does change something carries (#GMCF). A turn running a batch of tools
+            # saves the conversation after each result but writes this file once.
+            _atomic_json(meta_path, meta)
+            if len(self._wrote) >= 8:
+                self._wrote.clear()     # a pane's store holds one session; more means a throwaway
+            self._wrote[session_id] = {"stamp": _meta_stamp(meta_path), "meta": meta,
+                                       "user": _user_fields_after(user, meta)}
         index = self.index()
         if index is not None:
             # The index is a cache: a failure here must never lose the conversation.
@@ -339,6 +404,7 @@ class SessionStore:
     def delete(self, session_id: str) -> dict:
         """Remove a session, its metadata, its sidecars, its checkpoint blobs and its index rows."""
         session_id = check_id(session_id)
+        self._wrote.pop(session_id, None)
         removed = 0
         for name in (f"{session_id}.json", f"{session_id}.meta.json"):
             try:
