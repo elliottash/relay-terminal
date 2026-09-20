@@ -1,9 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Failover (card #G9VE): a turn whose provider keeps failing continues on another one.
 
-Everything here is offline: the pane's provider is a stub that fails the way the test wants,
-the failover targets are stubs behind a patched ``agent._provider_for``, and the roles resolver
-hands out fake keys, so no request ever leaves the process.
+Where it continues is the Options › Models priority list below the pane's own model, in order —
+the ``fallbacks`` option (owner, 2026-09-20) — then the same model on OpenRouter where the user
+opted in, and then nothing: there is no catalog chain after the list and no pane-wide Relay Free
+switch. Everything here is offline: the pane's provider is a stub that fails the way the test
+wants, the failover targets are stubs behind a patched ``agent._provider_for``, and the roles
+resolver hands out fake keys, so no request ever leaves the process.
 """
 import json
 import os
@@ -24,6 +27,11 @@ from relay_core.subagents import SubagentFactory
 MAIN = PRESETS['glm']
 CONFIG = ProviderConfig(MAIN.base_url, MAIN.model, 'pane-key')
 FLASH = ProviderConfig(MAIN.base_url, 'glm-5.3-flash', 'pane-key')   # this provider's Flash model
+# Priority-list entries, as the GUI sends them: a preset id and the model the user ranked there
+# (an empty model is the preset's own).
+KIMI = [{'preset': 'kimi', 'model': ''}]
+OPENAI_MINI = {'preset': 'openai', 'model': 'gpt-6-mini'}
+RELAY_FREE = {'preset': 'relay-free', 'model': 'relay-main'}
 
 
 class Refuser:
@@ -97,65 +105,11 @@ class Recorder:
         return {'role': 'assistant', 'content': 'from the spare'}
 
 
-class CandidateTests(unittest.TestCase):
-    def test_keyed_presets_then_relay_free_in_catalog_order(self):
-        with mock.patch('relay_core.hosted.available', return_value=True):
-            found = resolver({'kimi': 'k', 'openai': 'k'}).failover_candidates(
-                'main', {'glm'}, allow_hosted=True)
-        self.assertEqual([r.preset_id for r in found], ['kimi', 'openai', 'relay-free'])
-        self.assertEqual([r.config.model for r in found], ['kimi-k3', 'gpt-6-astra', 'relay-main'])
-        self.assertTrue(all(r.config.api_key or r.config.hosted for r in found))
-        self.assertTrue(found[2].config.hosted)                     # Relay Free, always last
+class FallbackCandidateTests(unittest.TestCase):
+    """`RoleResolver.fallback_candidate`: one entry of the Options › Models priority list (owner,
+    2026-09-20), built on the same terms as any candidate."""
 
-    def test_a_flash_pane_fails_over_within_flash(self):
-        with mock.patch('relay_core.hosted.available', return_value=False):
-            found = resolver({'kimi': 'k'}).failover_candidates('flash', {'glm'})
-        self.assertEqual([(r.preset_id, r.config.model) for r in found], [('kimi', 'kimi-k2.7-code-highspeed')])
-
-    def test_two_keys_for_one_service_are_one_provider(self):
-        # glm and glm-coding are two plans on api.z.ai: a host that is down is down for both, so
-        # trying the second is a wasted move, not a failover.
-        with mock.patch('relay_core.hosted.available', return_value=False):
-            found = resolver({'glm-coding': 'k', 'kimi': 'k'}).failover_candidates('main', {'glm'})
-        self.assertEqual([r.preset_id for r in found], ['kimi'])
-        with mock.patch('relay_core.hosted.available', return_value=False):
-            found = resolver({'glm': 'k', 'kimi': 'k'}).failover_candidates('main', {'glm-coding'})
-        self.assertEqual([r.preset_id for r in found], ['kimi'])
-
-    def test_a_hostname_the_caller_names_is_skipped_like_a_tried_preset(self):
-        # The pane's own endpoint may match no preset at all, so its host cannot be expressed as a
-        # preset id: `hosts` is how the agent says "this one is already down".
-        with mock.patch('relay_core.hosted.available', return_value=False):
-            found = resolver({'glm': 'k', 'glm-coding': 'k', 'kimi': 'k'}).failover_candidates(
-                'main', set(), {'API.Z.AI'})
-        self.assertEqual([r.preset_id for r in found], ['kimi'])
-        with mock.patch('relay_core.hosted.available', return_value=False):
-            found = resolver({'glm': 'k', 'kimi': 'k'}).failover_candidates('main', set(), ())
-        self.assertEqual([r.preset_id for r in found], ['kimi', 'glm'])
-
-    def test_relay_free_is_left_out_unless_the_pane_allows_it(self):
-        # Owner, 2026-09-19: every other candidate is a provider the user set up with a key they
-        # stored; Relay's hosted service is not, so it is opt-in.
-        with mock.patch('relay_core.hosted.available', return_value=True):
-            off = resolver({'kimi': 'k'}).failover_candidates('main', {'glm'})
-            on = resolver({'kimi': 'k'}).failover_candidates('main', {'glm'}, allow_hosted=True)
-            alone = resolver({}).failover_candidates('main', {'glm'})
-        self.assertEqual([r.preset_id for r in off], ['kimi'])
-        self.assertEqual([r.preset_id for r in on], ['kimi', 'relay-free'])
-        self.assertEqual(alone, [])          # nothing at all rather than Relay Free by the back door
-
-    def test_no_key_no_candidate_and_the_tried_ones_are_not_returned(self):
-        with mock.patch('relay_core.hosted.available', return_value=False):
-            self.assertEqual(resolver({}).failover_candidates('main', {'glm'}), [])
-            found = resolver({'kimi': 'k', 'openai': 'k'}).failover_candidates('main', {'glm', 'kimi'})
-        self.assertEqual([r.preset_id for r in found], ['openai'])
-
-
-class RankedFallbackCandidateTests(unittest.TestCase):
-    """`RoleResolver.fallback_candidate`: the model ranked second in Options › Models, tried first
-    (owner, 2026-09-20), on the same terms as any candidate."""
-
-    def test_the_ranked_fallback_is_built_on_the_same_terms_as_a_candidate(self):
+    def test_an_entry_is_built_on_the_same_terms_as_a_candidate(self):
         made = resolver({'kimi': 'k', 'openai': 'k'})
         with mock.patch('relay_core.hosted.available', return_value=False):
             found = made.fallback_candidate({'preset': 'openai', 'model': 'gpt-6-mini'}, 'main', {'glm'})
@@ -175,17 +129,19 @@ class RankedFallbackCandidateTests(unittest.TestCase):
             self.assertIsNone(made.fallback_candidate(None, 'main', {'glm'}))
             self.assertIsNone(made.fallback_candidate({'model': 'kimi-k3'}, 'main', {'glm'}))
 
-    def test_relay_free_as_the_ranked_fallback_is_still_gated_by_the_option(self):
+    def test_relay_free_is_an_entry_like_any_other_while_this_worker_can_use_it(self):
+        # No pane-wide switch any more (owner, 2026-09-20): the user put it in the list. What still
+        # gates it is whether this worker can talk to the gateway at all.
         with mock.patch('relay_core.hosted.available', return_value=True):
-            made = resolver({})
-            off = made.fallback_candidate({'preset': 'relay-free', 'model': 'relay-main'}, 'main', {'glm'})
-            on = made.fallback_candidate({'preset': 'relay-free', 'model': 'relay-main'}, 'main', {'glm'},
-                                         allow_hosted=True)
-        self.assertIsNone(off)
+            on = resolver({}).fallback_candidate(RELAY_FREE, 'main', {'glm'})
+        with mock.patch('relay_core.hosted.available', return_value=False):
+            off = resolver({}).fallback_candidate(RELAY_FREE, 'main', {'glm'})
         self.assertTrue(on.config.hosted)
+        self.assertEqual((on.preset_id, on.config.model), ('relay-free', 'relay-main'))
+        self.assertIsNone(off)
 
-    def test_a_model_server_on_this_machine_may_be_the_ranked_fallback(self):
-        # Unlike the catalog chain, which never offers a local endpoint: the user ranked it.
+    def test_a_model_server_on_this_machine_may_be_an_entry(self):
+        # The user ranked it, so its answers are what they asked for.
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / 'local-models.json'
             path.write_text(json.dumps({'endpoints': [{'id': 'local:bonsai', 'label': 'Bonsai',
@@ -200,8 +156,8 @@ class RankedFallbackCandidateTests(unittest.TestCase):
 
 class OpenRouterTwinCandidateTests(unittest.TestCase):
     """`RoleResolver.openrouter_twin_candidate`: the same model on OpenRouter (owner, 2026-09-20),
-    tried after the ranked fallback and before the catalog chain, on the same terms as any
-    candidate. Whether the user opted that model in is the agent's question, not the resolver's."""
+    tried after the priority list and last of all, on the same terms as any candidate. Whether
+    the user opted that model in is the agent's question, not the resolver's."""
 
     def test_the_twin_is_built_on_the_same_terms_as_a_candidate(self):
         made = resolver({'openrouter': 'k', 'kimi': 'k'})
@@ -237,23 +193,23 @@ class FailoverTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def agent(self, *, provider=None, failover=True, failover_hosted=False, roles=None,
-              config=CONFIG, preset_id='glm', fallback=None, effort=None, failover_openrouter=None):
+    def agent(self, *, provider=None, failover=True, roles=None, config=CONFIG, preset_id='glm',
+              fallbacks=None, fallback=None, effort=None, failover_openrouter=None, **extra):
         return Agent(config, self.temp.name, self.events.append, provider=provider,
-                     preset_id=preset_id, failover=failover, failover_hosted=failover_hosted,
+                     preset_id=preset_id, failover=failover, fallbacks=fallbacks,
                      fallback=fallback, roles=roles, effort=effort,
-                     failover_openrouter=failover_openrouter)
+                     failover_openrouter=failover_openrouter, **extra)
 
     def retries(self):
         """The moves, not the closing "back to the pane's own model" note."""
         return [e for e in self.events if e['event'] == 'provider_retry'
                 and e['reason'] != 'failover_ended']
 
-    def test_a_failing_provider_hands_the_turn_to_a_keyed_preset(self):
+    def test_a_failing_provider_hands_the_turn_to_the_first_entry_of_the_list(self):
         self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 429 for glm-5.3.'))
         spare = Answerer()
         self.stubs['kimi-k3'] = spare
-        agent = self.agent(roles=resolver({'kimi': 'k'}))
+        agent = self.agent(roles=resolver({'kimi': 'k'}), fallbacks=KIMI)
         agent.ask('hello')
         self.assertEqual([e['event'] for e in self.events[-1:]], ['done'])
         retry = next(e for e in self.retries() if e['reason'] == 'failover')
@@ -266,15 +222,15 @@ class FailoverTests(unittest.TestCase):
         self.assertEqual(agent.config.model, MAIN.model)
         self.assertIs(agent.provider, self.stubs[MAIN.model])
 
-    def test_the_ranked_fallback_is_tried_before_the_catalog_order(self):
-        # Kimi would be first by the catalog's order; the user ranked OpenAI's gpt-6-mini second
-        # in Options › Models (owner, 2026-09-20), so that is where the turn goes.
+    def test_the_lists_order_is_the_order_whatever_the_catalogs(self):
+        # Kimi comes first in PRESETS; the user ranked OpenAI's gpt-6-mini above it in Options ›
+        # Models (owner, 2026-09-20), so that is where the turn goes.
         self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 429 for glm-5.3.'))
         self.stubs['kimi-k3'] = Answerer()
         spare = Answerer()
         self.stubs['gpt-6-mini'] = spare
         agent = self.agent(roles=resolver({'kimi': 'k', 'openai': 'k'}),
-                           fallback={'preset': 'openai', 'model': 'gpt-6-mini'})
+                           fallbacks=[OPENAI_MINI, *KIMI])
         agent.ask('hello')
         self.assertEqual(self.events[-1]['event'], 'done')
         moved = next(e for e in self.retries() if e['reason'] == 'failover')
@@ -282,21 +238,54 @@ class FailoverTests(unittest.TestCase):
         self.assertEqual((spare.calls, self.stubs['kimi-k3'].calls), (1, 0))
         self.assertEqual(agent.config.model, MAIN.model)          # for that turn only, as ever
 
-    def test_when_the_ranked_fallback_fails_too_the_catalog_order_follows(self):
+    def test_when_the_first_entry_fails_too_the_second_follows(self):
         self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503 for glm-5.3.'))
         self.stubs['gpt-6-mini'] = Refuser(ProviderError('Provider HTTP 503 for gpt-6-mini.'))
         self.stubs['kimi-k3'] = Answerer()
         agent = self.agent(roles=resolver({'kimi': 'k', 'openai': 'k'}),
-                           fallback={'preset': 'openai', 'model': 'gpt-6-mini'})
+                           fallbacks=[OPENAI_MINI, *KIMI])
         agent.ask('hello')
         self.assertEqual(self.events[-1]['event'], 'done')
-        self.assertEqual([(e['attempt'], e['to_model']) for e in self.retries()],
-                         [(1, 'gpt-6-mini'), (2, 'kimi-k3')])
+        self.assertEqual([(e['attempt'], e['max_attempts'], e['to_model']) for e in self.retries()],
+                         [(1, 2, 'gpt-6-mini'), (2, 2, 'kimi-k3')])
         self.assertEqual(self.stubs['gpt-6-mini'].calls, 1)      # asked once, like any provider
 
-    def test_a_ranked_fallback_that_cannot_take_the_turn_leaves_the_old_order(self):
+    def test_a_keyed_preset_the_list_does_not_name_is_never_asked(self):
+        # The list is the whole of where a turn may go (owner, 2026-09-20): no catalog chain
+        # after it. Kimi has a key and is not named, so the turn fails rather than land there.
+        self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503 for glm-5.3.'))
+        self.stubs['kimi-k3'] = Answerer()
+        for fallbacks in ([], [OPENAI_MINI]):
+            with self.subTest(fallbacks=fallbacks):
+                self.events.clear()
+                self.stubs['gpt-6-mini'] = Refuser(ProviderError('Provider HTTP 503 for gpt-6-mini.'))
+                agent = self.agent(roles=resolver({'kimi': 'k', 'openai': 'k'}), fallbacks=fallbacks)
+                agent.ask('hello')
+                self.assertEqual(self.events[-1]['event'], 'error')
+                self.assertIn('503', self.events[-1]['text'])
+                self.assertEqual([e['to_model'] for e in self.retries()],
+                                 ['gpt-6-mini'] if fallbacks else [])
+                self.assertEqual(self.stubs['kimi-k3'].calls, 0)
+
+    def test_the_list_is_walked_as_far_as_it_goes(self):
+        # "As many as you want, according to priority": four entries, the first three down.
+        down = ProviderError('Provider HTTP 503.')
+        self.stubs[MAIN.model] = Refuser(down)
+        for model in ('gpt-6-mini', 'kimi-k3', 'claude-opus-5'):
+            self.stubs[model] = Refuser(down)
+        self.stubs['MiniMax-M3'] = Answerer()
+        agent = self.agent(roles=resolver({'openai': 'k', 'kimi': 'k', 'anthropic': 'k', 'minimax': 'k'}),
+                           fallbacks=[OPENAI_MINI, *KIMI, {'preset': 'anthropic', 'model': 'claude-opus-5'},
+                                      {'preset': 'minimax', 'model': 'MiniMax-M3'}])
+        agent.ask('hello')
+        self.assertEqual(self.events[-1]['event'], 'done')
+        self.assertEqual([(e['attempt'], e['max_attempts'], e['to_model']) for e in self.retries()],
+                         [(1, 4, 'gpt-6-mini'), (2, 4, 'kimi-k3'), (3, 4, 'claude-opus-5'), (4, 4, 'MiniMax-M3')])
+        self.assertEqual(agent.config.model, MAIN.model)
+
+    def test_an_entry_that_cannot_take_the_turn_is_skipped_for_the_next(self):
         # Itself, another key on the failing host, a preset with no stored key, a guest harness:
-        # each is skipped silently and the catalog's order stands.
+        # each is skipped silently and the entry below it is tried.
         for fallback in ({'preset': 'glm', 'model': 'glm-5.3'},
                          {'preset': 'glm-coding', 'model': 'glm-5.3'},
                          {'preset': 'openai', 'model': 'gpt-6-mini'},
@@ -306,13 +295,14 @@ class FailoverTests(unittest.TestCase):
                 self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503 for glm-5.3.'))
                 self.stubs['kimi-k3'] = Answerer()
                 self.stubs['gpt-6-mini'] = Answerer()
-                agent = self.agent(roles=resolver({'kimi': 'k', 'glm-coding': 'k'}), fallback=fallback)
+                agent = self.agent(roles=resolver({'kimi': 'k', 'glm-coding': 'k'}),
+                                   fallbacks=[fallback, *KIMI])
                 agent.ask('hello')
                 self.assertEqual(self.events[-1]['event'], 'done')
                 self.assertEqual([e['to_model'] for e in self.retries()], ['kimi-k3'])
                 self.assertEqual(self.stubs['gpt-6-mini'].calls, 0)
 
-    def test_the_ranked_fallback_runs_at_the_panes_effort(self):
+    def test_an_entry_runs_at_the_panes_effort(self):
         self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503 for glm-5.3.'))
         seen = {}
 
@@ -322,16 +312,15 @@ class FailoverTests(unittest.TestCase):
                 seen['extra'] = dict(agent.config.extra)
                 return super().complete(messages, tools, emit, cancel)
         self.stubs['gpt-6-mini'] = Effortful()
-        agent = self.agent(roles=resolver({'openai': 'k'}), effort='high',
-                           fallback={'preset': 'openai', 'model': 'gpt-6-mini'})
+        agent = self.agent(roles=resolver({'openai': 'k'}), effort='high', fallbacks=[OPENAI_MINI])
         agent.ask('hello')
         self.assertEqual(self.events[-1]['event'], 'done')
         self.assertEqual(seen['effort'], 'high')
         self.assertIn('high', json.dumps(seen['extra']))           # said in OpenAI's own words
 
-    def test_a_model_the_user_opted_in_continues_on_its_openrouter_twin_before_the_catalog(self):
-        # Kimi is first by the catalog's order and has a key; the user ticked "fall back to the
-        # same model on OpenRouter" for glm-5.3 (owner, 2026-09-20), so that is where the turn goes.
+    def test_a_model_the_user_opted_in_continues_on_its_openrouter_twin_after_the_list(self):
+        # The list is empty and Kimi, keyed, is not on it; the user ticked "fall back to the same
+        # model on OpenRouter" for glm-5.3 (owner, 2026-09-20), so that is where the turn goes.
         self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 429 for glm-5.3.'))
         self.stubs['kimi-k3'] = Answerer()
         twin = Answerer()
@@ -349,21 +338,36 @@ class FailoverTests(unittest.TestCase):
                                         f'the same model through OpenRouter (z-ai/glm-5.3 ({router})).')
         self.assertEqual(agent.config.model, MAIN.model)          # for that turn only, as ever
 
-    def test_the_ranked_fallback_still_goes_before_the_twin_and_the_catalog_after_it(self):
+    def test_the_whole_list_goes_before_the_twin_and_the_turn_fails_after_it(self):
+        # The order, exactly (owner, 2026-09-20): every entry of the list, then the twin, then
+        # stop. Anthropic has a key and is not named: it is never asked.
+        down = ProviderError('Provider HTTP 503.')
         self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503 for glm-5.3.'))
-        self.stubs['gpt-6-mini'] = Refuser(ProviderError('Provider HTTP 503 for gpt-6-mini.'))
-        self.stubs['z-ai/glm-5.3'] = Refuser(ProviderError('Provider HTTP 503 for z-ai/glm-5.3.'))
-        self.stubs['kimi-k3'] = Answerer()
-        agent = self.agent(roles=resolver({'kimi': 'k', 'openai': 'k', 'openrouter': 'k'}),
-                           fallback={'preset': 'openai', 'model': 'gpt-6-mini'},
-                           failover_openrouter=['glm-5.3'])
-        agent.FAILOVER_PROVIDERS = 3
+        for model in ('gpt-6-mini', 'kimi-k3', 'z-ai/glm-5.3'):
+            self.stubs[model] = Refuser(down)
+        self.stubs['claude-opus-5'] = Answerer()
+        agent = self.agent(roles=resolver({'kimi': 'k', 'openai': 'k', 'openrouter': 'k', 'anthropic': 'k'}),
+                           fallbacks=[OPENAI_MINI, *KIMI], failover_openrouter=['glm-5.3'])
         agent.ask('hello')
-        self.assertEqual(self.events[-1]['event'], 'done')
-        self.assertEqual([(e['attempt'], e['to_model']) for e in self.retries()],
-                         [(1, 'gpt-6-mini'), (2, 'z-ai/glm-5.3'), (3, 'kimi-k3')])
-        # OpenRouter was asked once, as the twin; the catalog chain does not ask it again.
-        self.assertEqual(self.stubs['z-ai/glm-5.3'].calls, 1)
+        self.assertEqual(self.events[-1]['event'], 'error')
+        self.assertTrue(self.events[-1]['text'].startswith(f'{MAIN.model} failed; '), self.events[-1]['text'])
+        self.assertEqual([(e['attempt'], e['max_attempts'], e['to_model']) for e in self.retries()],
+                         [(1, 3, 'gpt-6-mini'), (2, 3, 'kimi-k3'), (3, 3, 'z-ai/glm-5.3')])
+        self.assertEqual([self.stubs[m].calls for m in ('gpt-6-mini', 'kimi-k3', 'z-ai/glm-5.3')], [1, 1, 1])
+        self.assertEqual(self.stubs['claude-opus-5'].calls, 0)
+        self.assertEqual(agent.config.model, MAIN.model)
+
+    def test_the_twin_is_tried_once_even_when_the_list_names_openrouter(self):
+        # OpenRouter in the list is asked there, and the twin does not ask it again.
+        self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503 for glm-5.3.'))
+        self.stubs['deepseek/deepseek-v4.1-flash'] = Refuser(ProviderError('Provider HTTP 503.'))
+        self.stubs['z-ai/glm-5.3'] = Answerer()
+        agent = self.agent(roles=resolver({'openrouter': 'k'}),
+                           fallbacks=[{'preset': 'openrouter', 'model': ''}], failover_openrouter=['glm-5.3'])
+        agent.ask('hello')
+        self.assertEqual(self.events[-1]['event'], 'error')
+        self.assertEqual([e['to_model'] for e in self.retries()], ['deepseek/deepseek-v4.1-flash'])
+        self.assertEqual(self.stubs['z-ai/glm-5.3'].calls, 0)
 
     def test_the_twin_is_off_by_default_and_opted_in_per_model(self):
         for opted in (None, [], ['glm-5.3-flash'], ['z-ai/glm-5.3']):
@@ -372,7 +376,7 @@ class FailoverTests(unittest.TestCase):
                 self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503 for glm-5.3.'))
                 self.stubs['kimi-k3'] = Answerer()
                 self.stubs['z-ai/glm-5.3'] = Answerer()
-                agent = self.agent(roles=resolver({'kimi': 'k', 'openrouter': 'k'}),
+                agent = self.agent(roles=resolver({'kimi': 'k', 'openrouter': 'k'}), fallbacks=KIMI,
                                    failover_openrouter=opted)
                 agent.ask('hello')
                 self.assertEqual(self.events[-1]['event'], 'done')
@@ -381,16 +385,17 @@ class FailoverTests(unittest.TestCase):
 
     def test_a_twin_that_cannot_take_the_turn_is_skipped_silently(self):
         # No OpenRouter key stored; the failing provider is OpenRouter itself; a model with no
-        # twin (a Kimi Code alias): each leaves the catalog order as it was.
+        # twin (a Kimi Code alias): each leaves the list as the whole of it. The twin is tried
+        # after the list, so the list here holds one entry that cannot take the turn either.
         kimi_code = PRESETS['kimi-code']
         cases = (
-            ('no key', CONFIG, 'glm', {'kimi': 'k'}, ['glm-5.3'], 'kimi-k3'),
+            ('no key', CONFIG, 'glm', {'kimi': 'k'}, ['glm-5.3'], 'kimi', 'kimi-k3'),
             ('openrouter itself', ProviderConfig(PRESETS['openrouter'].base_url, 'glm-5.3', 'pane-key'),
-             'openrouter', {'kimi': 'k', 'openrouter': 'k'}, ['glm-5.3'], 'kimi-k3'),
+             'openrouter', {'kimi': 'k', 'openrouter': 'k'}, ['glm-5.3'], 'kimi', 'kimi-k3'),
             ('no twin', ProviderConfig(kimi_code.base_url, 'kimi-for-coding', 'pane-key'),
-             'kimi-code', {'glm': 'k', 'openrouter': 'k'}, ['kimi-for-coding'], 'glm-5.3'),
+             'kimi-code', {'glm': 'k', 'openrouter': 'k'}, ['kimi-for-coding'], 'glm', 'glm-5.3'),
         )
-        for name, config, preset_id, keys, opted, expected in cases:
+        for name, config, preset_id, keys, opted, spare, expected in cases:
             with self.subTest(name):
                 self.events.clear()
                 self.stubs.clear()
@@ -398,7 +403,7 @@ class FailoverTests(unittest.TestCase):
                 self.stubs['z-ai/glm-5.3'] = Answerer()
                 self.stubs[expected] = Answerer()
                 agent = self.agent(config=config, preset_id=preset_id, roles=resolver(keys, config, preset_id),
-                                   failover_openrouter=opted)
+                                   fallbacks=[{'preset': spare, 'model': expected}], failover_openrouter=opted)
                 agent.ask('hello')
                 self.assertEqual(self.events[-1]['event'], 'done')
                 self.assertEqual([e['to_model'] for e in self.retries()], [expected])
@@ -425,7 +430,8 @@ class FailoverTests(unittest.TestCase):
         error = ProviderError('Provider HTTP 503 for everyone.')
         stubs = {MAIN.model: Refuser(error), 'kimi-k3': Refuser(error), 'gpt-6-astra': Refuser(error)}
         self.stubs.update(stubs)
-        agent = self.agent(roles=resolver({'kimi': 'k', 'openai': 'k'}))
+        agent = self.agent(roles=resolver({'kimi': 'k', 'openai': 'k'}),
+                           fallbacks=[*KIMI, {'preset': 'openai', 'model': ''}])
         agent.ask('hello')
         self.assertEqual(self.events[-1]['event'], 'error')
         self.assertIn('503', self.events[-1]['text'])
@@ -436,7 +442,7 @@ class FailoverTests(unittest.TestCase):
     def test_the_option_off_keeps_the_pane_provider(self):
         self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 429 for glm-5.3.'))
         self.stubs['kimi-k3'] = Answerer()
-        agent = self.agent(failover=False, roles=resolver({'kimi': 'k'}))
+        agent = self.agent(failover=False, roles=resolver({'kimi': 'k'}), fallbacks=KIMI)
         agent.ask('hello')
         self.assertEqual(self.events[-1]['event'], 'error')
         self.assertEqual(self.retries(), [])
@@ -445,7 +451,7 @@ class FailoverTests(unittest.TestCase):
     def test_a_stalled_provider_fails_over_but_a_truncated_step_does_not(self):
         self.stubs[MAIN.model] = Refuser(ProviderStalled(60.0))
         self.stubs['kimi-k3'] = Answerer()
-        agent = self.agent(roles=resolver({'kimi': 'k'}))
+        agent = self.agent(roles=resolver({'kimi': 'k'}), fallbacks=KIMI)
         agent.ask('hello')
         self.assertEqual([e['event'] for e in self.events[-1:]], ['done'])
         self.assertEqual(self.stubs[MAIN.model].calls, 2)      # the stall retry, then the move
@@ -454,7 +460,7 @@ class FailoverTests(unittest.TestCase):
         self.events.clear()
         self.stubs[MAIN.model] = Refuser(ProviderTruncated('length', 8192))
         self.stubs['kimi-k3'] = Answerer()
-        agent = self.agent(roles=resolver({'kimi': 'k'}))
+        agent = self.agent(roles=resolver({'kimi': 'k'}), fallbacks=KIMI)
         agent.ask('hello')
         self.assertEqual(self.events[-1]['event'], 'error')
         self.assertFalse(any(e['reason'] == 'failover' for e in self.retries()))
@@ -472,17 +478,21 @@ class FailoverTests(unittest.TestCase):
         self.events.clear()
         self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 500.'))
         agent = self.agent(provider=Refuser(ProviderError('Provider HTTP 500.')),
-                           roles=resolver({'kimi': 'k'}))
+                           roles=resolver({'kimi': 'k'}), fallbacks=KIMI)
         agent.ask('hello')
         self.assertEqual(self.events[-1]['event'], 'error')
         self.assertEqual(self.retries(), [])
 
-    def test_a_flash_pane_fails_over_to_a_flash_model(self):
+    def test_a_flash_pane_fails_over_to_the_entrys_model(self):
+        # The entry names the model (the GUI sends the one the user ranked), so a Flash pane goes
+        # where the list says; the tier it carries is the record and the effort, not the lookup.
         flash = 'glm-5.3-flash'
         self.stubs[flash] = Refuser(ProviderError('Provider HTTP 429.'))
         spare = Answerer()
         self.stubs['kimi-k2.7-code-highspeed'] = spare
-        agent = self.agent(roles=resolver({'kimi': 'k'}), config=FLASH)
+        agent = self.agent(roles=resolver({'kimi': 'k'}), config=FLASH,
+                           fallbacks=[{'preset': 'kimi', 'model': 'kimi-k2.7-code-highspeed'}])
+        self.assertEqual(agent._failover_tier(), 'flash')
         agent.ask('hello')
         self.assertEqual([e['event'] for e in self.events[-1:]], ['done'])
         self.assertEqual(spare.calls, 1)
@@ -496,7 +506,7 @@ class FailoverTests(unittest.TestCase):
         # under it. The same rule the stall retry follows (protocol 15.2).
         self.stubs[MAIN.model] = Streamer(ProviderError('Provider HTTP 500 mid-stream.'))
         self.stubs['kimi-k3'] = Answerer()
-        agent = self.agent(roles=resolver({'kimi': 'k'}))
+        agent = self.agent(roles=resolver({'kimi': 'k'}), fallbacks=KIMI)
         agent.ask('hello')
         self.assertEqual(self.events[-1]['event'], 'error')
         self.assertEqual(self.retries(), [])
@@ -505,7 +515,7 @@ class FailoverTests(unittest.TestCase):
         self.events.clear()
         self.stubs[MAIN.model] = Streamer(ProviderError('Provider HTTP 500.'), kind='thinking_delta')
         self.stubs['kimi-k3'] = Answerer()
-        agent = self.agent(roles=resolver({'kimi': 'k'}))
+        agent = self.agent(roles=resolver({'kimi': 'k'}), fallbacks=KIMI)
         agent.ask('hello')
         self.assertEqual(self.events[-1]['event'], 'done')
         self.assertEqual(self.stubs['kimi-k3'].calls, 1)
@@ -530,7 +540,7 @@ class FailoverTests(unittest.TestCase):
 
         self.stubs[MAIN.model] = Half()
         self.stubs['kimi-k3'] = Answerer()
-        agent = self.agent(roles=resolver({'kimi': 'k'}))
+        agent = self.agent(roles=resolver({'kimi': 'k'}), fallbacks=KIMI)
         agent.ask('hello')
         answered['n'] = self.stubs['kimi-k3'].calls
         self.assertEqual(self.events[-1]['event'], 'done')
@@ -540,7 +550,7 @@ class FailoverTests(unittest.TestCase):
         stub = OpenRefuser(ProviderError('Provider HTTP 429.'), self.events)
         self.stubs[MAIN.model] = stub
         self.stubs['kimi-k3'] = Answerer()
-        agent = self.agent(roles=resolver({'kimi': 'k'}))
+        agent = self.agent(roles=resolver({'kimi': 'k'}), fallbacks=KIMI)
         agent.ask('hello')
         self.assertGreaterEqual(stub.cancels, 1)
         kinds = [e['event'] for e in self.events]
@@ -551,7 +561,7 @@ class FailoverTests(unittest.TestCase):
     def test_the_note_lands_after_the_thinking_block_it_interrupts(self):
         self.stubs[MAIN.model] = Streamer(ProviderError('Provider HTTP 500.'), kind='thinking_delta')
         self.stubs['kimi-k3'] = Answerer()
-        agent = self.agent(roles=resolver({'kimi': 'k'}))
+        agent = self.agent(roles=resolver({'kimi': 'k'}), fallbacks=KIMI)
         agent.ask('hello')
         kinds = [e['event'] for e in self.events]
         moved = next(i for i, e in enumerate(self.events)
@@ -561,7 +571,7 @@ class FailoverTests(unittest.TestCase):
     def test_the_restore_is_announced_before_the_terminal_event(self):
         self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 429.'))
         self.stubs['kimi-k3'] = Answerer()
-        agent = self.agent(roles=resolver({'kimi': 'k'}))
+        agent = self.agent(roles=resolver({'kimi': 'k'}), fallbacks=KIMI)
         agent.ask('hello')
         kinds = [e['event'] for e in self.events]
         back = next(i for i, e in enumerate(self.events)
@@ -583,7 +593,7 @@ class FailoverTests(unittest.TestCase):
         self.stubs[preset.model] = Refuser(ProviderError('Provider HTTP 429.'))
         self.stubs['kimi-k3'] = Answerer()
         agent = self.agent(roles=resolver({'kimi': 'k'}, config, 'openrouter'),
-                           config=config, preset_id='openrouter')
+                           config=config, preset_id='openrouter', fallbacks=KIMI)
         self.assertEqual(agent._failover_tier(), 'main')
         agent.ask('hello')
         self.assertEqual(self.events[-1]['event'], 'done')
@@ -597,7 +607,7 @@ class FailoverTests(unittest.TestCase):
         self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 429.'))
         spare = Recorder()
         self.stubs['kimi-k3'] = spare
-        agent = self.agent(roles=resolver({'kimi': 'k'}))
+        agent = self.agent(roles=resolver({'kimi': 'k'}), fallbacks=KIMI)
         spare.agent_ref = lambda: agent
         agent.messages.append({'role': 'assistant', 'content': '',
                                'tool_calls': [{'id': 'c0', 'type': 'function',
@@ -632,7 +642,7 @@ class FailoverTests(unittest.TestCase):
                 return {'role': 'assistant', 'content': 'from the spare'}
 
         self.stubs['kimi-k3'] = Switcher()
-        agent = self.agent(roles=resolver({'kimi': 'k'}))
+        agent = self.agent(roles=resolver({'kimi': 'k'}), fallbacks=KIMI)
         agent.ask('hello')
         self.assertEqual(seen['deferred']['applies'], 'turn_end')
         self.assertIsNone(seen['at_step'])                      # not while the swap is in force
@@ -650,7 +660,8 @@ class FailoverTests(unittest.TestCase):
         self.stubs['kimi-k3'] = Answerer()
         agent = self.agent(roles=resolver({'glm': 'k', 'glm-coding': 'k', 'kimi': 'k'},
                                           config, None),
-                           config=config, preset_id=None)
+                           config=config, preset_id=None,
+                           fallbacks=[{'preset': 'glm', 'model': ''}, {'preset': 'glm-coding', 'model': ''}, *KIMI])
         self.assertIsNone(agent.preset)
         with mock.patch('relay_core.hosted.available', return_value=False):
             agent.ask('hello')
@@ -665,8 +676,9 @@ class FailoverTests(unittest.TestCase):
         self.stubs[FLASH.model] = Refuser(error)
         self.stubs['kimi-k2.7-code-highspeed'] = Refuser(error)
         self.stubs['gpt-5.6-terra'] = Answerer()
-        agent = self.agent(roles=resolver({'kimi': 'k', 'openai': 'k'}, FLASH, 'glm'),
-                           config=FLASH)
+        agent = self.agent(roles=resolver({'kimi': 'k', 'openai': 'k'}, FLASH, 'glm'), config=FLASH,
+                           fallbacks=[{'preset': 'kimi', 'model': 'kimi-k2.7-code-highspeed'},
+                                      {'preset': 'openai', 'model': 'gpt-5.6-terra'}])
         with mock.patch.object(Agent, '_failover_tier', autospec=True,
                                side_effect=Agent._failover_tier) as tier:
             with mock.patch('relay_core.hosted.available', return_value=False):
@@ -692,7 +704,7 @@ class FailoverTests(unittest.TestCase):
                 return {'role': 'assistant', 'content': 'from the spare'}
 
         self.stubs['kimi-k3'] = Saver()
-        agent = self.agent(roles=resolver({'kimi': 'k'}))
+        agent = self.agent(roles=resolver({'kimi': 'k'}), fallbacks=KIMI)
         agent.ask('hello')
         self.assertEqual(self.events[-1]['event'], 'done')
         self.assertEqual(saved['model'], MAIN.model)
@@ -707,7 +719,7 @@ class FailoverTests(unittest.TestCase):
         self.stubs['kimi-k3'] = Refuser(ProviderError('Provider HTTP 503 for kimi-k3.'))
         self.stubs['relay-main'] = Refuser(spent)
         with mock.patch('relay_core.hosted.available', return_value=True):
-            agent = self.agent(roles=resolver({'kimi': 'k'}), failover_hosted=True)
+            agent = self.agent(roles=resolver({'kimi': 'k'}), fallbacks=[*KIMI, RELAY_FREE])
             agent.ask('hello')
         failed = self.events[-1]
         self.assertEqual(failed['event'], 'error')
@@ -727,7 +739,7 @@ class FailoverTests(unittest.TestCase):
         self.stubs[hosted_preset.model] = Refuser(spent)
         self.stubs['kimi-k3'] = Refuser(ProviderError('Provider HTTP 503 for kimi-k3.'))
         agent = self.agent(roles=resolver({'kimi': 'k'}, config, 'relay-free'),
-                           config=config, preset_id='relay-free')
+                           config=config, preset_id='relay-free', fallbacks=KIMI)
         agent.ask('hello')
         failed = self.events[-1]
         self.assertEqual(failed['code'], 'quota_exhausted')
@@ -740,7 +752,7 @@ class FailoverTests(unittest.TestCase):
         # pane's status bar and its transcript disagreed about where the turn was.
         self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 429.'))
         self.stubs['kimi-k3'] = Answerer()
-        agent = self.agent(roles=resolver({'kimi': 'k'}))
+        agent = self.agent(roles=resolver({'kimi': 'k'}), fallbacks=KIMI)
         agent.ask('hello')
         glm, kimi = PRESETS['glm'].label, PRESETS['kimi'].label
         moved = next(e for e in self.retries() if e['reason'] == 'failover')
@@ -755,8 +767,8 @@ class FailoverTests(unittest.TestCase):
     def test_a_resolver_that_raises_is_logged_and_the_turn_fails_on_its_own_error(self):
         self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 429.'))
         roles = resolver({'kimi': 'k'})
-        with mock.patch.object(type(roles), 'failover_candidates', side_effect=KeyError('local:bonsai')):
-            agent = self.agent(roles=roles)
+        with mock.patch.object(type(roles), 'fallback_candidate', side_effect=KeyError('local:bonsai')):
+            agent = self.agent(roles=roles, fallbacks=KIMI)
             with self.assertLogs('relay.agent', level='ERROR') as caught:
                 agent.ask('hello')
         self.assertEqual(self.events[-1]['event'], 'error')
@@ -784,16 +796,16 @@ class RoutedStepTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def plan_agent(self, keys):
+    def plan_agent(self, keys, fallbacks=KIMI):
         agent = Agent(CONFIG, self.temp.name, self.events.append, preset_id='glm',
-                      roles=resolver(keys, roles=self.PLANNER))
+                      roles=resolver(keys, roles=self.PLANNER), fallbacks=fallbacks)
         agent.set_mode('plan')
         return agent
 
     def reasons(self):
         return [e['reason'] for e in self.events if e['event'] == 'provider_retry']
 
-    def test_the_pane_model_is_tried_before_anyone_elses_and_then_the_chain(self):
+    def test_the_pane_model_is_tried_before_anyone_elses_and_then_the_list(self):
         down = ProviderError('Provider HTTP 503.')
         self.stubs['gpt-6-astra'] = Refuser(down)      # the pinned planning model
         self.stubs[MAIN.model] = Refuser(down)         # the pane's own, tried next
@@ -814,7 +826,7 @@ class RoutedStepTests(unittest.TestCase):
         down = ProviderError('Provider HTTP 503 for the planner.')
         self.stubs['gpt-6-astra'] = Refuser(down)
         self.stubs[MAIN.model] = Refuser(down)
-        agent = self.plan_agent({'openai': 'k'})       # OpenAI is the only other keyed preset
+        agent = self.plan_agent({'openai': 'k'}, [{'preset': 'openai', 'model': ''}])   # and the list names it
         agent.ask('plan this')
         self.assertEqual(self.events[-1]['event'], 'error')
         self.assertEqual(self.reasons(), ['route_dropped'])
@@ -831,8 +843,9 @@ class RoutedStepTests(unittest.TestCase):
         self.assertEqual(self.stubs[MAIN.model].calls, 0)
 
 
-class HostedFallbackTests(unittest.TestCase):
-    """Relay Free is a failover target only where the pane allows it (owner, 2026-09-19)."""
+class RelayFreeInTheListTests(unittest.TestCase):
+    """Relay Free is a failover target when the priority list names it, and only then (owner,
+    2026-09-20): the pane-wide `failover_hosted` switch of 2026-09-19 is gone."""
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -844,82 +857,87 @@ class HostedFallbackTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def agent(self, *, roles=None, config=CONFIG, preset_id='glm', failover_hosted=False):
+    def agent(self, *, roles=None, config=CONFIG, preset_id='glm', fallbacks=None, **extra):
         return Agent(config, self.temp.name, self.events.append, preset_id=preset_id,
-                     roles=roles, failover_hosted=failover_hosted)
+                     roles=roles, fallbacks=fallbacks, **extra)
 
     def retries(self):
         return [e for e in self.events if e['event'] == 'provider_retry'
                 and e['reason'] != 'failover_ended']
 
-    def hosted_config(self):
-        return ProviderConfig(PRESETS['relay-free'].base_url, 'relay-main', '', {}, hosted=True)
-
-    def test_a_pane_on_its_own_key_never_lands_on_relay_free_by_default(self):
+    def test_unnamed_it_is_never_a_target_even_with_nothing_else_to_try(self):
         self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503 for glm-5.3.'))
         self.stubs['relay-main'] = Answerer()
-        with mock.patch('relay_core.hosted.available', return_value=True):
-            agent = self.agent(roles=resolver({}))
-            agent.ask('hello')
-        self.assertEqual(self.events[-1]['event'], 'error')
-        self.assertEqual(self.retries(), [])
-        self.assertEqual(self.stubs['relay-main'].calls, 0)
-        self.assertFalse(agent.options()['failover_hosted'])
+        for fallbacks in ([], [OPENAI_MINI]):           # nothing, or an entry with no key
+            with self.subTest(fallbacks=fallbacks):
+                self.events.clear()
+                with mock.patch('relay_core.hosted.available', return_value=True):
+                    agent = self.agent(roles=resolver({}), fallbacks=fallbacks)
+                    agent.ask('hello')
+                self.assertEqual(self.events[-1]['event'], 'error')
+                self.assertEqual(self.retries(), [])
+                self.assertEqual(self.stubs['relay-main'].calls, 0)
+        self.assertNotIn('failover_hosted', agent.options())
 
-    def test_with_the_option_on_the_turn_continues_on_relays_hosted_service(self):
+    def test_named_in_the_list_the_turn_continues_on_relays_hosted_service(self):
         self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503 for glm-5.3.'))
         spare = Answerer()
         self.stubs['relay-main'] = spare
         with mock.patch('relay_core.hosted.available', return_value=True):
-            agent = self.agent(roles=resolver({}), failover_hosted=True)
+            agent = self.agent(roles=resolver({}), fallbacks=[RELAY_FREE])
             agent.ask('hello')
         self.assertEqual(self.events[-1]['event'], 'done')
         self.assertEqual(spare.calls, 1)
         moved = next(e for e in self.retries() if e['reason'] == 'failover')
         self.assertEqual((moved['to_model'], moved['to_preset']), ('relay-main', 'relay-free'))
-        # The note says what it is, not just which model: this is the target they had to allow.
+        # The note says what it is, not just which model: this is Relay's own service.
         self.assertIn("continuing this turn on Relay's hosted service", moved['text'])
         self.assertEqual(agent.config.model, MAIN.model)
 
-    def test_a_keyed_preset_is_still_tried_first_and_named_as_itself(self):
+    def test_it_takes_the_place_the_user_gave_it(self):
+        for fallbacks, expected in (([RELAY_FREE, *KIMI], ['relay-main']),
+                                    ([*KIMI, RELAY_FREE], ['kimi-k3'])):
+            with self.subTest(fallbacks=fallbacks):
+                self.events.clear()
+                self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503 for glm-5.3.'))
+                self.stubs['kimi-k3'] = Answerer()
+                self.stubs['relay-main'] = Answerer()
+                with mock.patch('relay_core.hosted.available', return_value=True):
+                    agent = self.agent(roles=resolver({'kimi': 'k'}), fallbacks=fallbacks)
+                    agent.ask('hello')
+                self.assertEqual(self.events[-1]['event'], 'done')
+                self.assertEqual([e['to_model'] for e in self.retries()], expected)
+
+    def test_named_but_unusable_here_it_is_skipped_for_the_next_entry(self):
+        # `hosted.available` is False when python3-cryptography is missing: the row is unusable,
+        # so the entry is skipped the way a keyless preset is.
         self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503 for glm-5.3.'))
         self.stubs['kimi-k3'] = Answerer()
         self.stubs['relay-main'] = Answerer()
-        with mock.patch('relay_core.hosted.available', return_value=True):
-            agent = self.agent(roles=resolver({'kimi': 'k'}), failover_hosted=True)
+        with mock.patch('relay_core.hosted.available', return_value=False):
+            agent = self.agent(roles=resolver({'kimi': 'k'}), fallbacks=[RELAY_FREE, *KIMI])
             agent.ask('hello')
         self.assertEqual(self.events[-1]['event'], 'done')
+        self.assertEqual([e['to_model'] for e in self.retries()], ['kimi-k3'])
         self.assertEqual(self.stubs['relay-main'].calls, 0)
-        moved = next(e for e in self.retries() if e['reason'] == 'failover')
-        self.assertNotIn('hosted service', moved['text'])
 
-    def allow_hosted_seen(self, *, config=CONFIG, preset_id='glm', failover_hosted=False):
-        """What the agent asked the resolver for, with the chain stubbed out."""
-        self.stubs[config.model] = Refuser(ProviderError('Provider HTTP 503.'))
-        roles = resolver({'kimi': 'k'}, config=config, preset_id=preset_id)
-        seen = []
-
-        def record(tier, exclude, hosts=(), *, allow_hosted=False):
-            seen.append(allow_hosted)
-            return []
-
-        with mock.patch.object(roles, 'failover_candidates', record):
-            agent = self.agent(roles=roles, config=config, preset_id=preset_id,
-                               failover_hosted=failover_hosted)
+    def test_an_older_guis_failover_hosted_is_accepted_and_ignored(self):
+        # A GUI from before the list still sends the switch. It must neither refuse the configure
+        # nor put Relay Free back into the chain.
+        self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503 for glm-5.3.'))
+        self.stubs['relay-main'] = Answerer()
+        with mock.patch('relay_core.hosted.available', return_value=True):
+            agent = self.agent(roles=resolver({}), fallbacks=[], failover_hosted=True)
+            agent.set_options({'failover_hosted': True})
             agent.ask('hello')
-        return seen
-
-    def test_the_pane_decides_once_and_a_hosted_pane_has_nothing_to_opt_into(self):
-        self.assertEqual(self.allow_hosted_seen(), [False])
-        self.assertEqual(self.allow_hosted_seen(failover_hosted=True), [True])
-        # A pane already running on Relay Free is already sending this conversation through the
-        # gateway, so the option it would be asked to tick is one it has answered by being there.
-        self.assertEqual(self.allow_hosted_seen(config=self.hosted_config(), preset_id='relay-free'),
-                         [True])
+        self.assertEqual(self.events[-1]['event'], 'error')
+        self.assertEqual(self.stubs['relay-main'].calls, 0)
+        self.assertEqual(validate_turn_options({'failover_hosted': True}), {})
+        self.assertEqual(validate_turn_options({'failover_hosted': 'yes'}), {})
 
 
 class SubagentFailoverTests(unittest.TestCase):
-    """A subagent follows the pane's chain (owner, 2026-09-19).
+    """A subagent follows the pane's list (owner, 2026-09-19; the list since 2026-09-20).
 
     `subagents.py` used to build its `Agent` with no roles resolver at all, and `_begin_failover`
     refuses every move without one — so a subagent whose provider kept failing simply failed, and
@@ -951,22 +969,22 @@ class SubagentFailoverTests(unittest.TestCase):
     def moves(self):
         return [e for e in self.events if e['event'] == 'provider_retry' and e['reason'] == 'failover']
 
-    def test_a_subagent_continues_on_the_next_keyed_preset(self):
+    def test_a_subagent_continues_down_the_panes_list(self):
         self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503 for glm-5.3.'))
         spare = Answerer()
         self.stubs['kimi-k3'] = spare
-        sub = self.subagent(self.factory({'kimi': 'k'},
-                                         main=SimpleNamespace(failover=True, failover_hosted=False)))
+        sub = self.subagent(self.factory({'kimi': 'k'}, main=SimpleNamespace(failover=True, fallbacks=KIMI)))
         sub.ask('go')
         self.assertEqual(self.events[-1]['event'], 'done')
         self.assertEqual(spare.calls, 1)
         self.assertEqual([e['to_model'] for e in self.moves()], ['kimi-k3'])
 
-    def test_a_flash_subagent_fails_over_within_flash(self):
+    def test_a_flash_subagent_follows_the_list_like_a_flash_pane(self):
         self.stubs['glm-5.3-flash'] = Refuser(ProviderError('Provider HTTP 429.'))
         spare = Answerer()
         self.stubs['kimi-k2.7-code-highspeed'] = spare
-        sub = self.subagent(self.factory({'kimi': 'k'}), model='flash')
+        main = SimpleNamespace(failover=True, fallbacks=[{'preset': 'kimi', 'model': 'kimi-k2.7-code-highspeed'}])
+        sub = self.subagent(self.factory({'kimi': 'k'}, main=main), model='flash')
         self.assertEqual(sub.config.model, 'glm-5.3-flash')
         sub.ask('go')
         self.assertEqual(self.events[-1]['event'], 'done')
@@ -977,38 +995,40 @@ class SubagentFailoverTests(unittest.TestCase):
         self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503.'))
         self.stubs['kimi-k3'] = Answerer()
         self.stubs['relay-main'] = Answerer()
-        off = SimpleNamespace(failover=False, failover_hosted=False)
+        off = SimpleNamespace(failover=False, fallbacks=KIMI)
         sub = self.subagent(self.factory({'kimi': 'k'}, main=off))
         self.assertFalse(sub.failover)
         sub.ask('go')
         self.assertEqual(self.events[-1]['event'], 'error')
         self.assertEqual(self.moves(), [])
         self.assertEqual(self.stubs['kimi-k3'].calls, 0)
-        # And Relay Free is the pane's decision there too, not a second one hidden in a subagent.
+        # And Relay Free is the pane's list's decision there too, not a second one hidden in a
+        # subagent: unnamed it is never a target, named it is.
         self.events.clear()
         self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503.'))
-        sub = self.subagent(self.factory({}, main=SimpleNamespace(failover=True, failover_hosted=False)))
-        self.assertFalse(sub.failover_hosted)
+        sub = self.subagent(self.factory({}, main=SimpleNamespace(failover=True, fallbacks=[])))
+        self.assertEqual(sub.fallbacks, [])
         with mock.patch('relay_core.hosted.available', return_value=True):
             sub.ask('go')
         self.assertEqual(self.events[-1]['event'], 'error')
         self.assertEqual(self.stubs['relay-main'].calls, 0)
         self.events.clear()
         self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503.'))
-        sub = self.subagent(self.factory({}, main=SimpleNamespace(failover=True, failover_hosted=True)))
+        sub = self.subagent(self.factory({}, main=SimpleNamespace(failover=True, fallbacks=[RELAY_FREE])))
         with mock.patch('relay_core.hosted.available', return_value=True):
             sub.ask('go')
         self.assertEqual(self.events[-1]['event'], 'done')
         self.assertEqual(self.stubs['relay-main'].calls, 1)
 
-    def test_it_follows_the_panes_ranked_fallback(self):
+    def test_it_follows_the_panes_list_in_the_panes_order(self):
         self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503.'))
         self.stubs['kimi-k3'] = Answerer()
         self.stubs['gpt-6-mini'] = Answerer()
-        main = SimpleNamespace(failover=True, failover_hosted=False,
-                               fallback={'preset': 'openai', 'model': 'gpt-6-mini'})
+        main = SimpleNamespace(failover=True, fallbacks=[OPENAI_MINI, *KIMI])
         sub = self.subagent(self.factory({'kimi': 'k', 'openai': 'k'}, main=main))
-        self.assertEqual(sub.fallback, main.fallback)
+        self.assertEqual(sub.fallbacks, main.fallbacks)
+        # A pane double that says nothing about it: an empty list, as for the pane.
+        self.assertEqual(self.subagent(self.factory({}, main=SimpleNamespace(failover=True))).fallbacks, [])
         sub.ask('go')
         self.assertEqual(self.events[-1]['event'], 'done')
         self.assertEqual([e['to_model'] for e in self.moves()], ['gpt-6-mini'])
@@ -1018,7 +1038,7 @@ class SubagentFailoverTests(unittest.TestCase):
         self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503.'))
         self.stubs['kimi-k3'] = Answerer()
         self.stubs['z-ai/glm-5.3'] = Answerer()
-        main = SimpleNamespace(failover=True, failover_hosted=False, failover_openrouter=['glm-5.3'])
+        main = SimpleNamespace(failover=True, failover_openrouter=['glm-5.3'])
         sub = self.subagent(self.factory({'kimi': 'k', 'openrouter': 'k'}, main=main))
         self.assertEqual(sub.failover_openrouter, ['glm-5.3'])
         sub.ask('go')
@@ -1032,8 +1052,7 @@ class SubagentFailoverTests(unittest.TestCase):
         # The tests' own provider factory, and a guest harness: its owner decides what serves.
         injected = Refuser(ProviderError('Provider HTTP 503.'))
         self.stubs['kimi-k3'] = Answerer()
-        sub = self.subagent(self.factory({'kimi': 'k'},
-                                         main=SimpleNamespace(failover=True, failover_hosted=False),
+        sub = self.subagent(self.factory({'kimi': 'k'}, main=SimpleNamespace(failover=True, fallbacks=KIMI),
                                          provider_factory=lambda config: injected))
         sub.ask('go')
         self.assertEqual(self.events[-1]['event'], 'error')
@@ -1045,25 +1064,41 @@ class SubagentFailoverTests(unittest.TestCase):
 class OptionTests(unittest.TestCase):
     def test_failover_is_a_boolean_turn_option(self):
         self.assertEqual(validate_turn_options({'failover': True}), {'failover': True})
-        self.assertEqual(validate_turn_options({'failover_hosted': True}), {'failover_hosted': True})
         self.assertEqual(validate_turn_options({}), {})
-        for key in ('failover', 'failover_hosted'):
-            for bad in ('yes', 1):
-                with self.assertRaises(ValueError):
-                    validate_turn_options({key: bad})
+        for bad in ('yes', 1):
+            with self.assertRaises(ValueError):
+                validate_turn_options({'failover': bad})
 
-    def test_the_ranked_fallback_is_a_preset_and_model_pair_or_nothing(self):
-        # {"preset", "model"} is kept; a missing model is the preset's own; anything else is None,
-        # never an error — rank 2 of the priority list is whatever the GUI has, and a row it
-        # cannot express must not refuse the whole configure.
-        self.assertEqual(validate_turn_options({'fallback': {'preset': 'openai', 'model': 'gpt-6-mini'}}),
-                         {'fallback': {'preset': 'openai', 'model': 'gpt-6-mini'}})
-        self.assertEqual(validate_turn_options({'fallback': {'preset': ' kimi '}}),
-                         {'fallback': {'preset': 'kimi', 'model': ''}})
-        self.assertEqual(validate_turn_options({'fallback': None}), {'fallback': None})
-        for bad in ('openai', 3, [], {}, {'model': 'gpt-6-mini'}, {'preset': ''}, {'preset': 7}):
-            self.assertEqual(validate_turn_options({'fallback': bad}), {'fallback': None}, bad)
-        self.assertNotIn('fallback', validate_turn_options({}))
+    def test_the_list_is_ordered_preset_and_model_pairs(self):
+        # Each {"preset", "model"} is kept in order; a missing model is the preset's own; an
+        # entry that is not that shape is dropped and a value that is not a list is the empty
+        # list — never an error: the priority list is whatever the GUI has, and a row it cannot
+        # express must not refuse the whole configure.
+        self.assertEqual(validate_turn_options({'fallbacks': [OPENAI_MINI, {'preset': ' kimi '}]}),
+                         {'fallbacks': [OPENAI_MINI, {'preset': 'kimi', 'model': ''}]})
+        self.assertEqual(validate_turn_options({'fallbacks': [OPENAI_MINI, 'kimi', {}, {'preset': ''}, None,
+                                                              {'model': 'x'}, {'preset': 7}, OPENAI_MINI]}),
+                         {'fallbacks': [OPENAI_MINI]})                      # bad entries and the repeat dropped
+        for bad in (None, 'openai', 3, {}, {'preset': 'openai'}, True):
+            self.assertEqual(validate_turn_options({'fallbacks': bad}), {'fallbacks': []}, bad)
+        self.assertEqual(validate_turn_options({'fallbacks': []}), {'fallbacks': []})
+        self.assertNotIn('fallbacks', validate_turn_options({}))
+        # `fallback` singular, the one-entry shape of 2026-09-20 morning, is a one-element list —
+        # and `fallbacks` wins when a GUI sends both.
+        self.assertEqual(validate_turn_options({'fallback': OPENAI_MINI}), {'fallbacks': [OPENAI_MINI]})
+        self.assertEqual(validate_turn_options({'fallback': None}), {'fallbacks': []})
+        self.assertEqual(validate_turn_options({'fallback': {'model': 'x'}}), {'fallbacks': []})
+        self.assertEqual(validate_turn_options({'fallback': OPENAI_MINI, 'fallbacks': KIMI}), {'fallbacks': KIMI})
+        self.assertEqual(validate_turn_options({'fallback': OPENAI_MINI, 'fallbacks': []}), {'fallbacks': []})
+
+    def test_the_agent_reads_the_singular_shape_too(self):
+        with tempfile.TemporaryDirectory() as temp:
+            agent = Agent(CONFIG, temp, lambda e: None, preset_id='glm', provider=Answerer(),
+                          fallback=OPENAI_MINI)
+            self.assertEqual(agent.fallbacks, [OPENAI_MINI])
+            agent = Agent(CONFIG, temp, lambda e: None, preset_id='glm', provider=Answerer(),
+                          fallback=OPENAI_MINI, fallbacks=KIMI)
+            self.assertEqual(agent.fallbacks, KIMI)
 
     def test_the_openrouter_opt_in_is_a_list_of_model_ids_or_nothing(self):
         # Per model, off by default (owner, 2026-09-20): a list of ids is kept, trimmed and
@@ -1084,19 +1119,17 @@ class OptionTests(unittest.TestCase):
             self.assertTrue(agent.options()['failover'])         # on until the user says otherwise
             agent.set_options({'failover': False})
             self.assertFalse(agent.options()['failover'])
-            # Relay Free as a fallback is the other way round: off until the user ticks it.
-            self.assertFalse(agent.options()['failover_hosted'])
-            agent.set_options({'failover_hosted': True})
-            self.assertTrue(agent.options()['failover_hosted'])
-            # The ranked fallback: none until Options › Models has a rank 2, changed between turns,
-            # and null clears it.
-            self.assertIsNone(agent.options()['fallback'])
-            agent.set_options({'fallback': {'preset': 'openai', 'model': 'gpt-6-mini'}})
-            self.assertEqual(agent.options()['fallback'], {'preset': 'openai', 'model': 'gpt-6-mini'})
+            # The priority list: empty until Options › Models has a second row, changed between
+            # turns, and null clears it.
+            self.assertEqual(agent.options()['fallbacks'], [])
+            agent.set_options({'fallbacks': [OPENAI_MINI, *KIMI]})
+            self.assertEqual(agent.options()['fallbacks'], [OPENAI_MINI, *KIMI])
             agent.set_options({'failover': True})                 # says nothing about it: kept
-            self.assertEqual(agent.fallback, {'preset': 'openai', 'model': 'gpt-6-mini'})
-            agent.set_options({'fallback': None})
-            self.assertIsNone(agent.options()['fallback'])
+            self.assertEqual(agent.fallbacks, [OPENAI_MINI, *KIMI])
+            agent.set_options({'fallback': OPENAI_MINI})          # the singular shape still lands
+            self.assertEqual(agent.options()['fallbacks'], [OPENAI_MINI])
+            agent.set_options({'fallbacks': None})
+            self.assertEqual(agent.options()['fallbacks'], [])
             # The OpenRouter opt-in: nothing until a model is ticked, and a list of ids after.
             self.assertEqual(agent.options()['failover_openrouter'], [])
             agent.set_options({'failover_openrouter': ['glm-5.3-flash']})

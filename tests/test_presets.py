@@ -7,6 +7,7 @@ reads the C++ source as text.
 import json
 import re
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from relay_core import presets as P
@@ -252,7 +253,7 @@ class TierTableTests(unittest.TestCase):
         self.assertEqual(sorted(r for r, t in model_roles.ROLE_TIERS.items() if t == "flash"),
                          ["flash", "suggestions", "summaries", "terminal_use"])
         self.assertEqual(sorted(r for r, t in model_roles.ROLE_TIERS.items() if t == "lite"),
-                         ["audit", "chores"])
+                         ["audit", "chores", "loop_check"])
         # Command routing is its own override, never moved by the Lite row.
         self.assertIsNone(model_roles.ROLE_TIERS["route_assist"])
         self.assertEqual(model_roles.ROUTE_ASSIST_DEFAULT[1], "google/gemini-3.5-flash-lite")
@@ -281,6 +282,13 @@ class ModelCatalogTests(unittest.TestCase):
     """One list of models per provider row (owner, 2026-09-20): MODEL_CATALOG and catalog_rows()."""
 
     ROW_KEYS = {"id", "label", "tier", "efforts", "intelligence", "openrouter"}
+
+    def setUp(self):
+        # The `openrouter` row also carries OpenRouter's live listing when this machine has fetched
+        # one (openrouter_catalog.py, tests/test_openrouter_catalog.py); here the table is the subject.
+        patcher = mock.patch("relay_core.openrouter_catalog.rows", return_value=[])
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     @staticmethod
     def tiers_naming(target: str, model: str) -> set:

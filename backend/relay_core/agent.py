@@ -146,11 +146,11 @@ def _pending_window(pending: dict) -> int:
 
 
 def validate_fallback(value) -> dict | None:
-    """The `fallback` request option: `{"preset": <preset id>, "model": <model id>}`, or None.
+    """One entry of the `fallbacks` option: `{"preset": <preset id>, "model": <model id>}`, or None.
 
     Anything that is not that shape — not a dict, no preset, a preset that is not a string — is
-    None rather than an error: the GUI sends whatever sits at rank 2 of the priority list, and a
-    row it cannot express must not refuse the whole configure. A missing or empty model means the
+    None rather than an error: the GUI sends whatever sits in the priority list, and a row it
+    cannot express must not refuse the whole configure. A missing or empty model means the
     preset's own model. Whether the preset can actually take a turn (a stored key, not the failing
     host) is decided at the failover, not here: keys come and go between turns.
     """
@@ -162,6 +162,25 @@ def validate_fallback(value) -> dict | None:
     model = value.get("model")
     model = model.strip() if isinstance(model, str) else ""
     return {"preset": preset.strip(), "model": model}
+
+
+def validate_fallbacks(value) -> list[dict]:
+    """The `fallbacks` request option: the Options › Models priority list below the pane's own
+    model, in order (owner, 2026-09-20), as a list of `{"preset", "model"}`.
+
+    A failover walks this list top to bottom, so order is the meaning. Anything that is not a
+    list is the empty list, and an entry `validate_fallback` cannot read is dropped — never an
+    error, for the reason it gives. An entry repeated lower down is dropped too: a provider is
+    asked once per turn, so the repeat could never be reached.
+    """
+    if not isinstance(value, (list, tuple)):
+        return []
+    out: list[dict] = []
+    for item in value:
+        entry = validate_fallback(item)
+        if entry is not None and entry not in out:
+            out.append(entry)
+    return out
 
 
 def validate_failover_openrouter(value) -> list[str]:
@@ -194,17 +213,24 @@ def validate_turn_options(request: dict) -> dict:
             if type(value) is not int or not low <= value <= high:
                 raise ValueError(f"{key} must be an integer from {low} to {high}.")
             out[key] = value
-    for key in ("completion_check", "audit_requests", "todo_tool", "failover", "failover_hosted"):
+    for key in ("completion_check", "audit_requests", "todo_tool", "failover"):
         if request.get(key) is not None:
             if type(request[key]) is not bool:
                 raise ValueError(f"{key} must be a boolean.")
             out[key] = request[key]
-    # The model ranked second in Options › Models, tried first when a turn fails over (owner,
-    # 2026-09-20). Present-but-null clears it, which is why this is not `.get(...) is not None`.
-    if "fallback" in request:
-        out["fallback"] = validate_fallback(request["fallback"])
+    # `failover_hosted` (2026-09-19 to 2026-09-20) was the pane-wide "Relay Free may be a
+    # fallback" switch. Relay Free is now a fallback only when the priority list names it, so an
+    # older GUI's value is accepted and ignored rather than refused.
+    # The priority list below the pane's own model, tried in order when a turn fails over (owner,
+    # 2026-09-20). Present-but-null or a non-list clears it, which is why this is not
+    # `.get(...) is not None`. `fallback` singular, the one-entry shape of 2026-09-20 morning, is
+    # still read as a one-element list; `fallbacks` wins when both are sent.
+    if "fallbacks" in request:
+        out["fallbacks"] = validate_fallbacks(request["fallbacks"])
+    elif "fallback" in request:
+        out["fallbacks"] = validate_fallbacks([request["fallback"]])
     # The models that may continue on their OpenRouter twin (owner, 2026-09-20): a list of ids,
-    # present-but-null or an unusable shape clears it, like `fallback`.
+    # present-but-null or an unusable shape clears it, like `fallbacks`.
     if "failover_openrouter" in request:
         out["failover_openrouter"] = validate_failover_openrouter(request["failover_openrouter"])
     if request.get("stall_timeout_s") is not None:
@@ -407,7 +433,7 @@ class Agent:
                  stall_timeout_s: float = DEFAULT_STALL_TIMEOUT,
                  first_token_timeout_s: float = 0.0, failover: bool = True,
                  failover_hosted: bool = False, fallback: dict | None = None,
-                 failover_openrouter=None,
+                 fallbacks=None, failover_openrouter=None,
                  roles=None, board=None, app=None, security_options: dict | None = None,
                  approval_options: dict | None = None):
         self.emit = emit
@@ -422,21 +448,18 @@ class Agent:
         self.first_token_timeout_s = validate_first_token_timeout(first_token_timeout_s)
         # Whether a turn whose provider keeps failing may continue on another one (card #G9VE).
         self.failover = failover
-        # Whether Relay Free may be one of those providers (owner, 2026-09-19). Off by default and
-        # separate from `failover`: a pane running on the user's own key has chosen that provider,
-        # and moving its conversation onto Relay's hosted service — a different company's terms,
-        # a shared allowance — is a decision only the user can make. Keyed presets of the same tier
-        # are tried whatever this says; Relay Free is added to the chain only with this on, or for
-        # a pane that is already running on the hosted service and so has nothing left to opt into.
-        self.failover_hosted = failover_hosted
-        # The model ranked second in Options › Models — `{"preset", "model"}` or None — which a
-        # failover tries before the catalog's order (owner, 2026-09-20): rank 2 is where `/swap`
-        # goes, and the user put it there to be the one that takes over.
-        self.fallback = validate_fallback(fallback)
+        # The Options › Models priority list below the pane's own model, in order — a list of
+        # `{"preset", "model"}` — which is the whole of where a failover may go (owner,
+        # 2026-09-20): "the 2nd model is the main fallback, but there are multiple, as many as
+        # you want, according to priority". There is no catalog chain after it and no pane-wide
+        # Relay Free switch: Relay Free is a fallback when the list names it. `fallback`
+        # singular is the one-entry shape from earlier the same day, kept for older callers, and
+        # `failover_hosted` is accepted and ignored for the same reason.
+        self.fallbacks = validate_fallbacks(fallbacks) or validate_fallbacks([fallback])
         # The model ids the user opted in to "the same model on OpenRouter" (owner, 2026-09-20),
-        # tried after the ranked fallback and before the catalog chain — but only when the model
-        # that failed is one of them. Empty by default: it spends the OpenRouter key at
-        # pay-as-you-go rates, which is a per-model decision, not a pane-wide one.
+        # tried after the list — but only when the model that failed is one of them. Empty by
+        # default: it spends the OpenRouter key at pay-as-you-go rates, which is a per-model
+        # decision, not a pane-wide one.
         self.failover_openrouter = validate_failover_openrouter(failover_openrouter)
         self._injected_provider = provider is not None
         self.provider = provider or self._hook_preempt(_provider_for(config, self.stall_timeout_s))
@@ -678,7 +701,7 @@ class Agent:
                 "todo_tool": self.todo_tool, "stall_timeout_s": self.stall_timeout_s,
                 "first_token_timeout_s": self.first_token_timeout_s,
                 "max_program_writes": self.max_program_writes, "failover": self.failover,
-                "failover_hosted": self.failover_hosted, "fallback": self.fallback,
+                "fallbacks": [dict(entry) for entry in self.fallbacks],
                 "failover_openrouter": list(self.failover_openrouter)}
 
     def _apply_stall_timeout(self) -> None:
@@ -1891,17 +1914,16 @@ class Agent:
             self.context.invalidate()
 
     # ----- model call, stall retry (issue SQAM) and failover (card #G9VE) ----------------
-    FAILOVER_PROVIDERS = 2        # besides the pane's own, however long the turn runs
-
     def _model_call(self, record: dict, ctx: dict, step: int) -> dict:
         """One model call, on another provider when this one will not answer (card #G9VE).
 
         Everything the failing provider can do for itself happens inside: the transport's six
         retries of a refused request (card #VMZP), then the stall and truncation retries below.
-        Only when it still fails does the turn move — the next keyed preset of the same tier,
-        then Relay Free where the pane allows it, each asked once — and `_end_failover` puts the
-        pane's own provider back when the turn ends. A truncated step is a budget problem, not a
-        provider that will not answer, so it is never failed over.
+        Only when it still fails does the turn move — down the Options › Models priority list
+        (`fallbacks`) in order, then to the same model on OpenRouter where the user opted in, each
+        asked once — and `_end_failover` puts the pane's own provider back when the turn ends. A
+        truncated step is a budget problem, not a provider that will not answer, so it is never
+        failed over.
 
         A step running on a *routed* model (plan mode's, or an image turn's vision model) takes one
         step back before any of that: the routing ends and the rest of the turn runs on the pane's
@@ -1995,14 +2017,6 @@ class Agent:
         self.emit({"event": "status", "text": f"{failed_name} failed · continuing on {own_name}"})
         return True
 
-    def _on_hosted(self) -> bool:
-        """Whether this pane is already running on Relay's hosted service (owner, 2026-09-19).
-
-        Such a pane has nothing left to opt into, so Relay Free stays in its failover chain with
-        the option off: the conversation is already going through the gateway.
-        """
-        return bool(self.config.hosted or (self.preset is not None and self.preset.hosted))
-
     def _begin_failover(self, exc: Exception, record: dict, step: int) -> bool:
         """Move this turn to the next failover provider. False when there is nowhere to go.
 
@@ -2032,40 +2046,44 @@ class Agent:
                     # tier table instead - a Flash turn on a provider with no Flash of its own
                     # would answer "main" and finish the turn on a Main model.
                     "tier": self._failover_tier(),
-                    # Whether Relay Free is in the chain, decided once for the same reason as the
-                    # tier: by the second move `self.config` is a spare provider's, and a spare
-                    # that happened to be hosted would answer "yes" for a pane that never opted in.
-                    "allow_hosted": self.failover_hosted or self._on_hosted(),
-                    # Hostnames already asked, the pane's own first. `failover_candidates` derives
-                    # them from the preset ids it is given, which says nothing about a pane on a
-                    # base URL that matches no preset (`self.preset is None`) - and that pane's own
-                    # host is exactly the one a failover must not hand the turn back to.
+                    # The priority list, read once: a set_agent_options that lands mid-turn
+                    # changes the next turn's order, not this walk's. `next` is how far down it
+                    # the walk has gone. The twin comes after the last entry, once, and only for
+                    # the model that failed first (`from_model`), which is why it is decided here
+                    # and not against whichever spare is serving by the second move.
+                    "fallbacks": [dict(entry) for entry in self.fallbacks], "next": 0,
+                    "twin": self.config.model in self.failover_openrouter,
+                    # How many moves this turn can make at most, for the notes: every entry of
+                    # the list, plus the twin when the failed model was opted in.
+                    "max_attempts": len(self.fallbacks)
+                                    + (1 if self.config.model in self.failover_openrouter else 0),
+                    # Hostnames already asked, the pane's own first. The preset ids in `tried` say
+                    # nothing about a pane on a base URL that matches no preset (`self.preset is
+                    # None`) - and that pane's own host is exactly the one a failover must not
+                    # hand the turn back to.
                     "hosts": {_host(self.config.base_url)}
                              | {host for _, host in self._dropped_routes if host},
-                    # What the turn's error says if the chain also fails: the model that failed
+                    # What the turn's error says if the list also runs out: the model that failed
                     # first, its exception, and the names of the providers tried after it.
                     "from_model": self.config.model, "first_error": exc, "names": []}
-        if swap["switches"] >= self.FAILOVER_PROVIDERS:
-            return False
         try:
-            # The model the user ranked second (Options › Models, the `fallback` option) goes
-            # first, on the same terms as any candidate; when it has no key, is the failing host,
-            # or has already been asked this turn, the catalog's order stands unchanged.
-            target = self.roles.fallback_candidate(self.fallback, swap["tier"], swap["tried"],
-                                                   swap["hosts"], allow_hosted=swap["allow_hosted"])
-            # Then the same model on OpenRouter (owner, 2026-09-20), for a model the user opted in
-            # by id — the pane's own model, `from_model`, not whichever spare is serving by the
-            # second move. The resolver checks the rest: a twin exists, the OpenRouter key is
-            # stored, and the failing host is not openrouter.ai itself.
-            twin = False
-            if target is None and swap["from_model"] in self.failover_openrouter:
+            # Down the list in the user's order (owner, 2026-09-20). Each entry is built on the
+            # same terms as any candidate, and one that cannot take the turn — no key, the failing
+            # host, a preset already asked, a guest — is skipped silently for the next.
+            target, twin = None, False
+            while target is None and swap["next"] < len(swap["fallbacks"]):
+                entry = swap["fallbacks"][swap["next"]]
+                swap["next"] += 1
+                target = self.roles.fallback_candidate(entry, swap["tier"], swap["tried"], swap["hosts"])
+            # Then the same model on OpenRouter, for a model the user opted in by id, and then
+            # nothing: the list is the whole of where a turn may go. The resolver checks the rest:
+            # a twin exists, the OpenRouter key is stored, and the failing host is not
+            # openrouter.ai itself.
+            if target is None and swap["twin"]:
+                swap["twin"] = False
                 target = self.roles.openrouter_twin_candidate(swap["from_model"], swap["tier"],
                                                               swap["tried"], swap["hosts"])
                 twin = target is not None
-            if target is None:
-                candidates = self.roles.failover_candidates(swap["tier"], swap["tried"], swap["hosts"],
-                                                            allow_hosted=swap["allow_hosted"])
-                target = candidates[0] if candidates else None
         except Exception as bad:                            # a failover must never break the turn
             logs.event(_log, "provider_failover_unavailable", level_name="error",
                        session=self.session_id, turn=record["turn_id"], step=step,
@@ -2116,7 +2134,7 @@ class Agent:
                    to_model=target.config.model, to_preset=target.preset_id or "",
                    host=_host(target.config.base_url), error=str(exc)[:160])
         self.emit({"event": "provider_retry", "turn_id": record["turn_id"], "reason": "failover",
-                   "attempt": swap["switches"], "max_attempts": self.FAILOVER_PROVIDERS,
+                   "attempt": swap["switches"], "max_attempts": swap["max_attempts"],
                    "from_model": from_model, "to_model": target.config.model,
                    "to_preset": target.preset_id or "", "step": step, "text": text})
         self.emit({"event": "status",
@@ -2136,7 +2154,7 @@ class Agent:
         self._adopt_model(swap["config"], swap["preset"], swap["window"])
         back = _provider_name(swap["config"].model, swap["preset"])
         self.emit({"event": "provider_retry", "turn_id": swap["turn_id"], "reason": "failover_ended",
-                   "attempt": swap["switches"], "max_attempts": self.FAILOVER_PROVIDERS,
+                   "attempt": swap["switches"], "max_attempts": swap["max_attempts"],
                    "from_model": swap.get("last_model", ""), "from_preset": swap.get("last_preset", ""),
                    "to_model": swap["config"].model,
                    "to_preset": swap["preset"].id if swap["preset"] else "",

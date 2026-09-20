@@ -137,22 +137,19 @@ class SubagentFactory:
         self.main_agent = main_agent
 
     def failover_options(self) -> dict:
-        """The failover switches, and the ranked fallback, a new subagent inherits from the pane
-        (owner, 2026-09-19).
+        """The failover switch, the priority list and the OpenRouter opt-in a new subagent
+        inherits from the pane (owner, 2026-09-19).
 
         A subagent is a turn of the pane's work on the pane's providers, so a provider that will
-        not answer must not be the end of it any more than it is for the pane; and Relay Free is
-        the pane's decision there too, not a second one hidden inside a subagent.
+        not answer must not be the end of it any more than it is for the pane; and where the turn
+        may go is the pane's list (owner, 2026-09-20) — Relay Free included, when the list names
+        it — not a second decision hidden inside a subagent.
         """
         main = self.main_agent
         if main is None:
             return {}
         return {"failover": bool(getattr(main, "failover", True)),
-                "failover_hosted": bool(getattr(main, "failover_hosted", False)),
-                # And the model the user ranked second (owner, 2026-09-20): it is the pane's
-                # first spare, so it is the subagent's too — as are the models they opted in to
-                # continue on their OpenRouter twin.
-                "fallback": getattr(main, "fallback", None),
+                "fallbacks": list(getattr(main, "fallbacks", None) or []),
                 "failover_openrouter": getattr(main, "failover_openrouter", None)}
 
     def base(self) -> tuple[ProviderConfig, str | None]:

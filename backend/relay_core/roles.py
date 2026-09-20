@@ -520,79 +520,24 @@ class RoleResolver:
         return self._main(role)
 
     # ----- failover (card #G9VE) ----------------------------------------------------------
-    def failover_candidates(self, tier: str, exclude, hosts=(), *, allow_hosted: bool = False) -> list[Resolved]:
-        """Providers a failing turn may move to: the tier's own model on every other keyed preset,
-        in the catalog's order, and Relay Free last of all when the pane may use it (owner,
-        2026-09-19).
+    def fallback_candidate(self, fallback, tier: str, exclude, hosts=()) -> Resolved | None:
+        """One entry of the Options › Models priority list as a failover target (owner,
+        2026-09-20), or None when it cannot take this turn.
 
-        The order inside the keyed presets is `PRESETS`' own — there is nothing to rank them by,
-        since Relay cannot know which of the user's keys is healthy — and only Relay Free's place
-        is deliberate: it is the included allowance, so it is spent only when nothing else answers.
-
-        ``exclude`` is the preset ids already tried this turn, the failing provider first: each
-        provider is asked once, after its own transport retries. A preset whose endpoint has the
-        same hostname as one already tried is skipped too: Z.AI's standard API and its Coding Plan
-        are two keys for one service, and a service that is down is down for both. ``hosts`` names
-        those hostnames directly, for the caller that knows one no preset id can express — a pane on
-        a base URL of its own matches no preset, and handing its turn straight back to the same host
-        under a preset's key is the one move this rule exists to stop. A preset without
-        a stored key never appears, because a turn must not start spending a key the user did not
-        choose, and neither does a local endpoint: it is not a keyed preset, and its answers are the
-        deterministic kind a failover would only repeat.
-
-        ``allow_hosted`` is the "Allow Relay Free as a fallback" option (owner, 2026-09-19), and it
-        gates Relay Free alone. Spending a key the user stored on another of their own providers is
-        a move inside what they already set up; sending the conversation to Relay's hosted service
-        instead is not — another company's terms, a shared allowance — so a pane on the user's own
-        key never lands there unless they said it may. A pane already running on Relay Free has
-        nothing left to opt into, and its caller passes True.
-        """
-        tier = validate_tier(tier)
-        # High has no per-provider row: it is every other provider's Main model at max reasoning.
-        effort = "max" if tier == "high" else None
-        skip_hosts = {_hostname(PRESETS[p].base_url) for p in exclude if p in PRESETS}
-        skip_hosts |= {(h or "").lower() for h in hosts}
-        skip_hosts.discard("")
-        out: list[Resolved] = []
-        for preset_id, preset in PRESETS.items():
-            if preset_id in exclude or preset.hosted:
-                continue
-            if _hostname(preset.base_url) in skip_hosts:
-                continue
-            if not self.has_key(preset_id):
-                continue
-            model, extra = ((preset.model, dict(preset.extra)) if tier == "main"
-                            else provider_tier_model(preset_id, tier))
-            resolved = self._build("main", preset_id, preset.base_url, model, extra, effort,
-                                   "failover", tier)
-            if resolved.source != "fallback":
-                out.append(resolved)
-        if allow_hosted and PRESETS[hosted.PRESET_ID].id not in exclude and hosted.available():
-            preset = PRESETS[hosted.PRESET_ID]
-            model, extra = provider_tier_model(preset.id, tier)
-            resolved = self._build("main", preset.id, preset.base_url, model, extra, effort,
-                                   "failover", tier)
-            if resolved.source != "fallback":
-                out.append(resolved)
-        return out
-
-    def fallback_candidate(self, fallback, tier: str, exclude, hosts=(), *,
-                           allow_hosted: bool = False) -> Resolved | None:
-        """The model the user ranked second in Options › Models, as the first failover target
-        (owner, 2026-09-20), or None when it cannot take this turn.
-
-        ``fallback`` is the request option of the same name: ``{"preset", "model"}``, the preset
-        id and the model id the user put at rank 2 — the pair `/swap` goes to. It is tried before
-        `failover_candidates`' catalog order, on the same terms as any candidate: the key comes
-        from the same lookup, the failing preset and its hostname are skipped (a fallback that
-        names the pane's own provider, or another key on the same host, is nothing to move to),
-        and Relay Free is still gated by ``allow_hosted``. A model server on this machine is
-        allowed here, unlike in the catalog chain: the user ranked it, so its answers are what
+        ``fallback`` is one element of the ``fallbacks`` option: ``{"preset", "model"}``, a preset
+        id and the model id the user ranked below the pane's own — the list `/swap` walks. The
+        agent tries the entries in the user's order and this builds each one on the same terms as
+        any candidate: the key comes from the same lookup, the failing preset and its hostname are
+        skipped (an entry that names the pane's own provider, or another key on the same host, is
+        nothing to move to), and so is a preset already asked this turn. Relay Free is a target
+        only when the list names it — the user put it there — and only while this worker can use
+        it (`hosted.available`); there is no pane-wide switch for it any more. A model server on
+        this machine is allowed for the same reason: the user ranked it, so its answers are what
         they asked for. A guest harness or an unknown id is not a provider this resolver can
         build, and gets None. A missing model means the preset's own.
 
-        None here means "the old order stands", never an error: a stale fallback (a key since
-        deleted, an endpoint since removed) must not cost the turn its other spares.
+        None here means "skip this entry", never an error: a stale entry (a key since deleted, an
+        endpoint since removed) must not cost the turn the entries below it.
         """
         if not isinstance(fallback, dict):
             return None
@@ -602,7 +547,7 @@ class RoleResolver:
         preset = _preset(preset_id)
         if preset is None:
             return None
-        if preset.hosted and not allow_hosted:
+        if preset.hosted and not hosted.available():
             return None
         skip_hosts = {_hostname(PRESETS[p].base_url) for p in exclude if p in PRESETS}
         skip_hosts |= {(h or "").lower() for h in hosts}
@@ -621,8 +566,8 @@ class RoleResolver:
         return None if resolved.source == "fallback" else resolved
 
     def openrouter_twin_candidate(self, model, tier: str, exclude, hosts=()) -> Resolved | None:
-        """The same model on OpenRouter (owner, 2026-09-20), as the failover target after the
-        ranked fallback and before the catalog chain, or None when it cannot take this turn.
+        """The same model on OpenRouter (owner, 2026-09-20), as the failover target after every
+        entry of the priority list — and the last one — or None when it cannot take this turn.
 
         ``model`` is the id that failed — the pane's own, not whatever spare is serving by the
         second move — and `presets.openrouter_twin` says which OpenRouter slug serves it; a model

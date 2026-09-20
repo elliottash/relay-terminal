@@ -202,7 +202,9 @@ PRESETS: dict[str, Preset] = {p.id: p for p in [
            provider="minimax", plan="token plan", max_output=131_072),
     # https://openrouter.ai/api/v1/models (fetched 2026-09-17): deepseek/deepseek-v4.1-flash exists,
     # a non-flash deepseek/deepseek-v4.1 does not.
-    Preset("openrouter", "openrouter · deepseek v4.1 flash", "https://openrouter.ai/api/v1",
+    # Titled "openrouter" alone (owner, 2026-09-20): the model is one of hundreds the router serves,
+    # not the preset's name, and its catalog is the live listing (openrouter_catalog.py).
+    Preset("openrouter", "openrouter", "https://openrouter.ai/api/v1",
            "deepseek/deepseek-v4.1-flash", {}, 1_048_576, "openrouter", "aggregator",
            "https://openrouter.ai/keys", "One key for every model; also Relay's router and chores model.",
            # DeepSeek documents 384,000 output, but an aggregator picks the endpoint and the caps
@@ -463,16 +465,27 @@ def catalog_rows(preset_id) -> list[dict]:
     model on OpenRouter" toggle only where there is one. An id with no catalog — a local endpoint, a
     guest, an unknown id — gets [] (a local endpoint's list is the probe's, protocol 28; a guest's
     is its own).
+
+    `openrouter` is the one preset whose list does not end with the table above (owner,
+    2026-09-20): after its built-in tier rows come OpenRouter's own live listing
+    (openrouter_catalog.py — fetched on a background thread, cached for a day), every model not
+    already named, in the listing's order, so the id box completes against what the router
+    actually serves. Those rows carry `context_window` as well; the built-in ones do not.
     """
     preset = PRESETS.get(preset_id) if isinstance(preset_id, str) else None
     if preset is None:
         return []
     default = effort_levels(preset.effort_style)
-    return [{"id": row["id"], "label": row["label"], "tier": row["tier"],
-             "efforts": list(default if row["efforts"] is None else row["efforts"]),
-             "intelligence": INTELLIGENCE.get(row["id"]),
-             "openrouter": openrouter_twin(row["id"])}
-            for row in MODEL_CATALOG.get(preset_id, [])]
+    out = [{"id": row["id"], "label": row["label"], "tier": row["tier"],
+            "efforts": list(default if row["efforts"] is None else row["efforts"]),
+            "intelligence": INTELLIGENCE.get(row["id"]),
+            "openrouter": openrouter_twin(row["id"])}
+           for row in MODEL_CATALOG.get(preset_id, [])]
+    if preset_id == "openrouter":
+        from . import openrouter_catalog          # here, not at the top: it imports this module
+        known = {row["id"] for row in out}
+        out.extend(row for row in openrouter_catalog.rows() if row["id"] not in known)
+    return out
 
 
 def validate_tier(tier) -> str:

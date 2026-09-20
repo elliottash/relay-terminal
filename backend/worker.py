@@ -13,7 +13,7 @@ from pathlib import Path
 from relay_core import (__version__, board_protocol, hosted, keystore, keytest, localmodels, logs,
                         observe_protocol, roles as model_roles, session_protocol, skills, voice)
 from relay_core.agent import Agent, validate_turn_options
-from relay_core import activity_tools, agents_defs, app_tools, guest_harness_provider
+from relay_core import activity_tools, agents_defs, app_tools, guest_harness_provider, openrouter_catalog
 from relay_core.subagents import SubagentFactory, SubagentManager
 from relay_core.keybindings import KeybindingCatalog
 from relay_core.presets import PRESETS
@@ -111,6 +111,10 @@ def main():
         # says "included"; `available` (cryptography imports) is what makes the row usable,
         # and `quota` is the last allowance seen, null before the first exchange.
         relay_free = {"has_stored_key": False, "key_source": "included", **hosted.status()}
+        # OpenRouter's live model list is the `openrouter` row's catalog (owner, 2026-09-20):
+        # served from the day-old cache now, fetched on its own thread once per process when
+        # that is stale, and re-pushed below when the fetch lands. Never on this thread.
+        openrouter_catalog.start_refresh()
         emit({"event": "presets", "id": request_id, "warp_default": keystore.warp_default_preset(),
               "tier_defaults": model_roles.tier_catalog(), "role_actions": model_roles.action_catalog(),
               "presets": [{**p.to_dict(), **(relay_free if p.hosted else
@@ -129,6 +133,10 @@ def main():
     # 29.3), and nothing re-asks — so the worker pushes a fresh `presets` when it does, and
     # Options' Codex row turns from the text field into the dropdown on its own.
     guest_harness_provider.set_catalog_listener(lambda: emit_presets())
+    # The same for OpenRouter's listing: the first `presets` answer carries whatever the cache
+    # held, and the fetch that lands after it pushes a fresh one, so the id box completes against
+    # the live list without a re-ask.
+    openrouter_catalog.set_listener(lambda: emit_presets())
 
     emit({"event": "ready", "version": __version__})
     while True:

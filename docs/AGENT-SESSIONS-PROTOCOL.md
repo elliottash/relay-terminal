@@ -364,10 +364,10 @@ existing events keep their fields and meaning. Deviations from the research sket
 | `audit_requests` | bool | false | flag-only audit side call after each finished turn (12.6) |
 | `todo_tool` | bool | true | offer `update_todos` and its prompt rules to the model |
 | `failover` | bool | true | a turn whose provider keeps failing continues on another one (15.2.2) |
-| `failover_hosted` | bool | false | Relay Free may be one of those providers (15.2.2) |
-| `fallback` | `{preset, model}` \| null | null | the model ranked second in Options › Models, tried first when a turn fails over (15.2.2); null or an unusable shape means no ranked fallback |
-| `failover_openrouter` | string[] | `[]` | model ids that may continue on the same model through OpenRouter when they fail (15.2.2), tried after the ranked fallback; per model and off by default, since it spends the OpenRouter key at pay-as-you-go rates. Null or an unusable shape means none |
-| `approvals_ask` | string[] | `[]` | capabilities that draw an approval card before the call runs (27.6) |
+| `fallbacks` | `[{preset, model}, …]` | `[]` | the Options › Models priority list below the pane's own model, in order: where a failing turn goes, first entry first (15.2.2). Relay Free is a target only when it is in the list. Null or a non-list means an empty list; an entry that is not `{preset, model}` is dropped. `fallback` (singular, one `{preset, model}` or null, 2026-09-20 morning) is still read as a one-element list; `fallbacks` wins when both are sent |
+| `failover_openrouter` | string[] | `[]` | model ids that may continue on the same model through OpenRouter when they fail (15.2.2), tried after the whole list; per model and off by default, since it spends the OpenRouter key at pay-as-you-go rates. Null or an unusable shape means none |
+| `failover_hosted` | bool | — | **retired 2026-09-20**: the pane-wide "Relay Free may be a fallback" switch. Accepted from an older GUI and ignored; put Relay Free in `fallbacks` instead |
+| `approvals_ask` | string[] | `[]` | capabilities that draw an approval ask before the call runs (27.6) |
 | `approvals_chosen` | bool | false | the first-launch choice is answered; until it is, the built-in cautious set asks (27.6) |
 
 **The turn limits are a fuse, not the stop (owner, 2026-09-20, card `#2CZP`).** Both defaults now
@@ -390,8 +390,8 @@ pane's policy, at spawn and whenever it changes.
 read at every step boundary) and `agent_options` gains them when an agent is configured (without one, only
 `max_auto_turns`/`wakeups` as before). Invalid values → `error`, nothing changed. Subagents keep their definition's `max_steps`, get
 `max(24, 3 × max_steps)` tool calls and no ledger or todos; of the switches above they follow only
-`failover`, `failover_hosted`, `fallback` and `failover_openrouter`, read from the pane when each
-subagent starts (15.2.2).
+`failover`, `fallbacks` and `failover_openrouter`, read from the pane when each subagent starts
+(15.2.2).
 
 ### 12.2 Turn limits (G1)
 
@@ -959,6 +959,21 @@ there is none — the GUI offers the per-model "fall back to the same model on O
 itself and of Relay Free never do. A guest row's own `models` (29.3) carries the same `id` / `label` / `efforts`
 keys, so one model box reads both; a local endpoint's preset row carries `models: []`, because its
 list is the probe's (28, `{id, context_window, tools, thinking}`) and it serves one model per row.
+
+The `openrouter` row's `models` does not stop at the table (owner, 2026-09-20): after its built-in
+tier rows come OpenRouter's own live listing, every model `https://openrouter.ai/api/v1/models`
+(no key) names that the table does not, in the listing's order, so the id box completes against
+what the router serves. `openrouter_catalog.py` fetches it **once per worker process, on a
+background thread, never on the protocol thread**, and caches the parsed rows at
+`$XDG_CACHE_HOME/relay/openrouter-models.json` for 24 hours: the first `presets` answer carries
+whatever the cache holds (a stale cache is still served), the fetch runs only when that is stale,
+and when it lands the worker pushes a fresh `presets` unasked, the way it does when the codex
+catalogue lands (29.3). A fetch that fails leaves what was there and is logged at debug;
+`RELAY_OPENROUTER_CATALOG=off` never fetches. A live row is `{id, label, tier: null, efforts,
+intelligence: null, openrouter: null, context_window}` — `label` is the API's name lower-cased,
+`efforts` is the openrouter style's levels, or `[]` for a model whose `supported_parameters` has
+no `reasoning`, and `context_window` is the listing's `context_length`. The preset itself is
+labelled plain `openrouter` since the same day: the model is one of hundreds, not the row's name.
 
 Since v2.9 (2026-09-18) every row also carries `hosted` (`true` only for Relay Free, 13.9). The Relay
 Free row differs from the others in four fields: `has_stored_key` is always `false` and `key_source`
@@ -1541,14 +1556,16 @@ short by the single largest request of the turn.
 #### 15.2.2 A provider that still fails: the turn moves to another one
 
 When a provider fails a step even after those retries (a stall included; a truncated step is a
-budget problem, not a provider that will not answer), the agent continues the turn on the next
-provider that can run it without setup: the same tier's model — Main or Flash — on every other
-preset with a stored key, then Relay Free where the pane allows it. Each is asked once, at most two besides the pane's own,
-and never a provider without a stored key, a local endpoint, one already tried this turn, or one
-whose endpoint has the same hostname as a preset already tried (Z.AI's standard API and its Coding
-Plan are two keys for one service, and a service that is down is down for both). A step that has
-already streamed part of an answer is never moved either, for the reason 15.2 gives: that text is
-on the user's screen and a second provider would write a second answer under it.
+budget problem, not a provider that will not answer), the agent continues the turn **down the
+Options › Models priority list** — the `fallbacks` option (12.1), the rows the user ranked below
+the pane's own model, in their order — then on the same model through OpenRouter where the user
+opted that model in, and then nowhere: the turn fails. Each entry is asked once, and never one
+without a stored key, one already tried this turn, one whose endpoint has the same hostname as a
+preset already tried (Z.AI's standard API and its Coding Plan are two keys for one service, and a
+service that is down is down for both), or a guest harness; such an entry is skipped silently for
+the one below it. A step that has already streamed part of an answer is never moved either, for
+the reason 15.2 gives: that text is on the user's screen and a second provider would write a
+second answer under it.
 
 The move is a model change, not a swapped socket: the failed provider's response is closed first,
 the conversation is converted to the new provider's reasoning dialect (`adapt_history`), and the
@@ -1581,46 +1598,51 @@ prefixed with what else was tried ("glm-5.3 failed; kimi-k3 (Kimi · K3) and Rel
 and carries `code`/`resets_at` only when that first failure had them: a spare provider's spent
 allowance is not what this pane should offer a key for (13.9).
 
-**Relay Free is opt-in as a target** (owner, 2026-09-19). Every other candidate is a provider the
-user set up themselves, with a key they chose to store; Relay's hosted service is not — it is
-another company's terms and a shared allowance — so a pane running on the user's own key never
-lands there unless they said it may. The switch is `failover_hosted` (12.1), **off** by default,
-from Options › Models › "Allow Relay Free as a fallback when my own provider keeps failing", right
-under the failover toggle. Keyed presets of the same tier are tried whatever it says.
-`RoleResolver.failover_candidates(..., allow_hosted=)` is where it lands, and the agent decides the
-value once per turn, with the pane's own tier, so a hosted spare cannot widen the chain on the
-second move. A pane already running on Relay Free passes `True`: it has nothing left to opt into.
-When the turn does move there the note says so plainly — "… keeps failing; continuing this turn on
-Relay's hosted service (Relay Free)." — because that is the one target the user had to allow.
+**The priority list is the whole of where a turn may go** (owner, 2026-09-20: "the 2nd model is
+the main fallback, but there are multiple, as many as you want, according to priority"). The GUI
+sends the rows below the pane's own model as `fallbacks` (12.1), `[{"preset", "model"}, …]` in
+rank order, and the agent reads the list once when the turn's first move is decided (a
+`set_agent_options` that lands mid-turn changes the next turn's order). For each entry in turn
+`RoleResolver.fallback_candidate` builds that preset at that model, at the pane's effort (High is
+max), on the same terms as any candidate: the same key lookup, never the failing preset or another
+key on its host, never a preset already asked this turn. A saved local endpoint is allowed (the
+user ranked it), a guest harness never is; an entry that cannot take the turn is skipped silently
+for the next. The entry names the model, so a Flash pane goes to whatever the user ranked, not to
+"the same tier on another provider": the tier it carries is the effort and the record. Until
+2026-09-20 there was a catalog chain after the ranked model — the same tier on every other keyed
+preset in `PRESETS` order — and it is gone: a keyed preset the list does not name is never asked.
+`max_attempts` on the `provider_retry` note is the list's length plus one when the twin below
+applies.
 
-**The ranked fallback goes first** (owner, 2026-09-20). Rank 2 of the Options › Models priority
-list — the model `/swap` goes to — arrives as the `fallback` option (12.1), `{"preset", "model"}`,
-and `RoleResolver.fallback_candidate` tries that preset at that model, at the pane's effort, before
-the catalog order above, on the same terms as any candidate: the same key lookup, never the failing
-preset or another key on its host, Relay Free still gated by `failover_hosted`. A saved local
-endpoint is allowed here (the user ranked it), a guest harness never is; a fallback that cannot take
-the turn is skipped silently and the old order stands. Subagents inherit it with the two switches.
+**Relay Free is a target when the list names it, and only then** (owner, 2026-09-20). It used to be
+gated by a pane-wide switch, `failover_hosted` (2026-09-19: "Allow Relay Free as a fallback when my
+own provider keeps failing"), because Relay's hosted service is another company's terms and a shared
+allowance rather than a key the user stored. The list is that consent now — the user put the row
+where they wanted it — so the switch is retired: an older GUI's `failover_hosted` is accepted and
+ignored, and a `relay-free` entry is built like any other while this worker can use the gateway at
+all (`hosted.available`). When the turn does move there the note still says so plainly — "… keeps
+failing; continuing this turn on Relay's hosted service (Relay Free)." — because it is Relay's own
+service and not another of the user's providers.
 
-**Then the same model on OpenRouter, per model the user opts in** (owner, 2026-09-20). The order of
-a failover is: the ranked fallback, then the same model through OpenRouter, then the catalog chain
-of keyed presets, then Relay Free when allowed. The second step is `failover_openrouter` (12.1), a
-list of model ids — off by default and ticked per model, because OpenRouter bills pay-as-you-go and
-a failing subscription must not quietly start gpt-6 calls there, while glm-5.3-flash there is
-exactly what one might want. When the model that failed (the pane's own, not whichever spare is
-serving by the second move) is in that list, `presets.openrouter_twin` names the slug that serves
-it (`OPENROUTER_TWINS`, every entry verified against `openrouter.ai/api/v1/models`; a model with no
+**Then the same model on OpenRouter, per model the user opts in, and then stop** (owner,
+2026-09-20). The order of a failover is exactly: every entry of `fallbacks`, then the same model
+through OpenRouter, then the turn fails. The second step is `failover_openrouter` (12.1), a list of
+model ids — off by default and ticked per model, because OpenRouter bills pay-as-you-go and a
+failing subscription must not quietly start gpt-6 calls there, while glm-5.3-flash there is exactly
+what one might want. When the model that failed (the pane's own, not whichever spare is serving by
+the second move) is in that list, `presets.openrouter_twin` names the slug that serves it
+(`OPENROUTER_TWINS`, every entry verified against `openrouter.ai/api/v1/models`; a model with no
 listing has no twin) and `RoleResolver.openrouter_twin_candidate` builds the `openrouter` preset at
 that slug, at the pane's effort in OpenRouter's own words, on the same terms as any candidate: the
 stored OpenRouter key through the same lookup, never when OpenRouter has already been asked this
-turn, and never when the failing host is openrouter.ai itself. Once tried it counts as the
-`openrouter` preset for the rest of the chain. The note says what it is — "… keeps failing;
-continuing this turn on the same model through OpenRouter (z-ai/glm-5.3 (openrouter · …))." —
-and subagents inherit the list with the other switches.
+turn (an `openrouter` entry in the list counts), and never when the failing host is openrouter.ai
+itself. The note says what it is — "… keeps failing; continuing this turn on the same model through
+OpenRouter (z-ai/glm-5.3 (openrouter))." — and subagents inherit the list with the switch.
 
-**Subagents fail over too, following the parent's chain** (owner, 2026-09-19). `subagents.py` builds
-each subagent's `Agent` with the pane's role resolver, its preset and both switches above, read from
-the pane when the subagent starts, so a Flash subagent whose provider keeps failing continues within
-Flash exactly as a Flash pane does. Before this it built one *without* a resolver, and
+**Subagents fail over too, following the parent's list** (owner, 2026-09-19). `subagents.py` builds
+each subagent's `Agent` with the pane's role resolver, its preset, `failover`, `fallbacks` and
+`failover_openrouter`, read from the pane when the subagent starts, so a Flash subagent whose
+provider keeps failing goes down the same list a Flash pane does. Before this it built one *without* a resolver, and
 `_begin_failover` refuses every move without one, so a subagent never failed over at all. An
 injected provider is still never replaced — a guest harness, or a test's factory — because
 `Agent._injected_provider` refuses the swap the same way it refuses `set_model`'s. Side calls (a
