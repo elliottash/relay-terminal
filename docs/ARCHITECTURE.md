@@ -1505,8 +1505,10 @@ record and nothing else) and the declined ones (Undo).
   Switchboard agent or appends a plain comment. A `QFileSystemWatcher` on the board folder (the
   one the `board` event named, else `projects::boardDirOf()`) turns any write — this window, a pane
   agent, an editor, a `git pull` — into one debounced `board_refresh`.
-- **`src/BoardChat.{h,cpp}`**: `relay::BoardChatPanel`, the **page agent's** panel at the bottom
-  of the list page (card #8YQ9, protocol 19.18) — the conversation about the whole board, for the
+- **`src/BoardChat.{h,cpp}`**: `relay::BoardChatPanel`, the **helper's** panel — at the bottom of
+  the list page here, and the same widget behind the "Ask about this pane" row in Options, Actions
+  and Sessions (card #FEJQ, "The helper system" below), the board's subclass adding the survey, the
+  queue and the whole-board buttons (card #8YQ9, protocol 19.18 and 30.7) — the conversation about the whole board, for the
   questions that are about the board rather than one card. A log of the conversation, the
   worker-side FIFO queue drawn in delivery order, and a composer whose Enter sends and whose
   second prompt *queues* rather than being refused (#N8VK's rule, the same as a terminal pane's).
@@ -1518,9 +1520,10 @@ record and nothing else) and the declined ones (Undo).
   Ctrl+/ puts the keyboard there from anywhere on the board, the pair of `/` for the filter.
   It holds no process: `BoardView` feeds it the `chat` block of the `board` event and every
   `chat: true` turn event, exactly as it feeds a card thread `card_id` events.
-- **`src/BoardWorker.{h,cpp}`**: one `backend/worker.py` per **window**, configured with
+- **`src/BoardWorker.{h,cpp}`**: one `backend/worker.py` per **tab**, configured with
   `agent_role: "switchboard"`, so card threads never enter a pane's conversation. It is started
-  lazily on the first open and answers every `board_*` message of protocol 17.
+  lazily on the first ask and answers every `board_*` message of protocol 17. It is the tab's
+  helper, not the board's alone: "The helper system" below.
 
 Opening: **Ctrl+Shift+S** (`board.open`) splits it in beside the anchor pane, focuses the one the
 tab already has, or, pressed on it, returns to the last terminal pane. Also the palette
@@ -1551,6 +1554,63 @@ every agent card write prints one line in the pane that caused it.
 
 Plans and memories are card types, not work cards: the Plans tab has its own statuses
 (draft → approved → executing → done) and the Memory tab is one list per topic.
+
+### The helper system: one agent per tab, in four panes
+
+Card #FEJQ (owner, 2026-09-20), protocol section 30. The Switchboard's page agent, the helper in
+Options, Actions and Sessions, and an agent's power to change a setting or run an action are one
+system: one worker per tab, one panel, one tool set.
+
+**The worker is the tab's.** `RelayWindow` keeps a `BoardWorker` per **tab**, keyed by the tab's
+persistent id — the one that restores its panes — and configured with that tab's workspace, not one
+per window and not one per attached project. Switchboards are per tab, so the same project open in
+two tabs gets two helpers with two conversations over **one** set of board files; only the
+conversation and its queue are the tab's own, and each is persisted per (project, tab) so a restart
+brings a tab's helper back with its own history. It starts on the first ask rather than when the
+tab opens, and a tab with no project gets a board-less instance: the app tools, no board tools.
+Closing the tab stops it.
+
+**One panel, four places.** `relay::BoardChatPanel` (`src/BoardChat.{h,cpp}`) is the surface: a log,
+the worker-side queue in delivery order, and a composer whose second prompt queues rather than being
+refused. The Switchboard keeps a subclass of it for the survey, the queue and Check/Clean up;
+Options, Actions and Sessions embed it **collapsed** behind one "Ask about this pane" row, because
+the board's 320 px of log plus composer is most of a small pane. Each ask carries a `pane` name
+(`switchboard`, `options`, `actions`, `sessions`) that picks the brief in front of the turn, and
+every event of the answer carries it back, so the panel that asked draws the reply and the others
+do not. The conversation is one across all four.
+
+**`AppTools`, on every agent.** `backend/relay_core/app_tools.py` is to the app what `board_tools.py`
+is to the board: attached as `agent.app` beside `agent.board`, on the helper worker and on every
+pane agent alike. `app_option_list` / `_get` / `_set`, `app_action_list` / `_run`,
+`app_sessions_search`, `app_open`, `app_changes` and `app_undo`. What differs between a pane agent
+and the helper is the brief and the catalog's markers, never the tool list. The reads are answered
+by the worker on its own — from the catalog the GUI sent, or, for sessions, the protocol-14 index,
+which the Sessions pane itself never queries — so a question about the app costs no round trip.
+
+**The catalog and the round trip.** `RelayWindow` already builds both catalogs for the Options and
+Actions panes (`settingsSections()` → `SettingRow`, `searchableActions()` → `ActionItem`); it now
+ships them in `configure`'s `app` block and resends them with `app_catalog` on every change, as the
+keybindings catalog has always done. Rows carry `settable` (every value row except a secret) and
+actions carry `agent_safe` (opt-in, "undoable in one click"), and one toggle in Options › Agent —
+"Agents may change options and run actions" — gates the whole write side for the helper and the pane
+agents together. A write or a navigation is an `app_command` event the pane forwards to
+`RelayWindow` the way `onOpenCard` is forwarded; it executes through the same entry points a key
+would (`openSettingsPane`, `SettingsPane::revealOption`, `openSessions`, `openBoardCard`, the row's
+own writer, the `ActionItem`'s `run()`) and answers `app_command_result` with what actually
+happened, so the tool result in the transcript is the outcome rather than the request.
+
+**The change log is the GUI's.** Every successful write becomes an entry with a `change_id`, which
+the result carries back to the agent; the notification reads `Agent changed <label>: <before> →
+<after> · Undo` and the Undo is `RelayWindow`'s own operation over that entry — it works with no
+agent in the loop, after the worker has stopped and after the conversation is gone. An option row an
+agent changed is marked in the Options pane until the person touches it. `app_changes` and
+`app_undo` are the agent's view of the same log, a convenience rather than the mechanism.
+
+**Info and Activity have no helper.** Those panes are about the pane's own agent, so that agent gets
+two read tools instead — `session_info` over its live session and `activity {turns?, turn?,
+slowest?}`, a windowed digest of its own turns, tool calls and timings, never the whole ledger — and
+each pane gets an Ask row that prefills the owning pane's composer and focuses it, the Check-finding
+draft pattern.
 
 ## 11. Agent backend
 
@@ -1661,7 +1721,7 @@ because every tiered role follows a tier:
 
 | Tier | Roles | Default |
 |---|---|---|
-| Main | `main`, `subagent`, `switchboard` | the pane's own model |
+| Main | `main`, `subagent`, `switchboard` (labelled "Helper agent") | the pane's own model |
 | Flash | `terminal_use`, `flash`, `summaries`, `suggestions` | `TIER_DEFAULTS[<main preset>]["flash"]` |
 | Lite | `chores`, `audit` | `TIER_DEFAULTS[<main preset>]["lite"]` |
 | Local | `local` | the first endpoint in the local registry; no provider preset, so
@@ -2811,7 +2871,7 @@ of the platform and of the engine itself.
 | `src/WindowManagerImpl.h` | the `WindowManager` members that need the complete `RelayWindow`: opening and restoring windows, and reading and writing the saved layout. Included after `RelayWindow.h` |
 | `src/RichEditor.*` | composer editor |
 | `src/FilePanes.*` | explorer and preview widgets |
-| `src/BoardModel.*`, `src/BoardPane.*`, `src/BoardWorker.*` | the Switchboard: card rows, tabs, columns, filters; the pane and card detail; the per-window Switchboard worker |
+| `src/BoardModel.*`, `src/BoardPane.*`, `src/BoardWorker.*` | the Switchboard: card rows, tabs, columns, filters; the pane and card detail; the per-tab helper worker that serves the board and the Options, Actions and Sessions helpers |
 | `src/BoardWorkspace.*` | which project's Switchboard a pane is looking at: the walk up to `/`, trying every folder of `projects::boardFolders()` (`.switchboard/board.yaml`, `switchboard/board.yaml`, `issues/board.yaml`) at each level |
 | `src/Projects.*` | which project a pane is in (`candidateFor`, a filesystem walk with no `git` subprocess), where its board folder is or would be, and the removable registry of known projects in `state/projects.json` |
 | `src/Theme.*` | live tokens, palette, stylesheet, the theme switch |
@@ -2843,7 +2903,7 @@ of the platform and of the engine itself.
 | `remote/`, `rendezvous/`, `app/` | the remote protocol and its Noise handshake, the ciphertext-only relay, and the phone's web client (`docs/REMOTE-PROTOCOL.md`) |
 | `shell/integration.bash`, `shell/event.py` | Bash bridge |
 | `backend/worker.py` | worker protocol loop |
-| `backend/relay_core/` | `router`, `provider`, `presets` (providers and the Main/Flash/Lite tiers), `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keytest` (the keys modal's Test button), `keybindings`, `skills`, `roles` (model roles), `titles` (pane titles and session summaries), `voice` (transcription), `program_input` (the agent typing into the visible pane), `conv_index` (conversation index and search), `logs` (rotating `worker.log`), `board` (card format), `board_tools` (the `board_*` agent tools and their guardrails), `board_protocol` (the Switchboard messages), `aliases` and `alias_import` (saved commands and prompts, and importing Warp workflows and shell aliases) |
+| `backend/relay_core/` | `router`, `provider`, `presets` (providers and the Main/Flash/Lite tiers), `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keytest` (the keys modal's Test button), `keybindings`, `skills`, `roles` (model roles), `titles` (pane titles and session summaries), `voice` (transcription), `program_input` (the agent typing into the visible pane), `conv_index` (conversation index and search), `logs` (rotating `worker.log`), `board` (card format), `board_tools` (the `board_*` agent tools and their guardrails), `board_protocol` (the Switchboard messages), `app_tools` (the `app_*` tools: the options and actions catalogs, the command round trip, the session search), `aliases` and `alias_import` (saved commands and prompts, and importing Warp workflows and shell aliases) |
 | `scripts/` | `build.sh`, `test.sh`, `relay-open`, `relay-agent.py` |
 | `src/EngineBackend.*` | the `TerminalBackend` implementation over `engine/` |
 | `src/TerminalBackends.*`, `src/BackendFactory.cpp` | per-pane engine selection and the factory |

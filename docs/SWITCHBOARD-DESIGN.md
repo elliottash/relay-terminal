@@ -619,6 +619,27 @@ enter in teh top row thing makes the title, not the issue content."* Evidence:
   empty save leaves the card exactly as the field made it. The field no longer stays open for a
   burst of cards; `n` reopens it.
 
+### 4.13 The page agent's panel is the helper surface (#FEJQ, owner 2026-09-20)
+
+The panel at the bottom of the list page — the page agent's log, its worker-side queue and the
+composer that queues rather than refusing (`relay::BoardChatPanel`, `src/BoardChat.{h,cpp}`, card
+#8YQ9, protocol 19.18) — is now **one instance of a surface the app has four of**. The others are
+in Options, Actions and Sessions, where the same widget sits collapsed behind one "Ask about this
+pane" row and expands on it: the board's 320 px of log plus composer is most of a small pane, and
+those panes are read first and asked about second. The Switchboard keeps a subclass for what only
+it has — the survey (19.18), the queue drawn in delivery order, and the Clean up and Check buttons
+in the panel's row (4.8).
+
+All four talk to **one worker per tab** (protocol 30.7), so a question about the board and the next
+one about a setting are consecutive turns of the same agent: each ask carries a `pane` name that
+picks the brief, and every event of the answer carries it back, so the panel that asked draws the
+reply. The agent's tools are the board's (section 6.1) plus the `app_*` tools — read or change an
+option, run a safe action, search the session manager, open any of the four panes at a section, a
+row, a query or a card — with every change announced as `Agent changed <label>: <before> → <after>
+· Undo` and undoable without an agent (protocol 30.6). The `switchboard` model role keeps its name
+and its model box, and is labelled **"Helper agent"**; each panel's header says where it is
+("Switchboard agent", "Options helper", "Sessions helper").
+
 ## 5. Referencing cards from the terminal
 
 - **Picker.** In agent or auto mode, `#` at the start or after a space, followed by a character, opens a card picker
