@@ -869,6 +869,15 @@ if(BUILD_TESTING)
     add_test(NAME boardpane COMMAND relay-boardpane-tests)
     set_tests_properties(boardpane PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+    # The card's `## Tests` strip and its Check (#7BM4): the strip appears only for a card that
+    # lists tests, Check sends one `tests_check`, the answer's findings and actions are drawn as
+    # the worker sent them, and a refused move offers the gate's Override. Its own executable
+    # rather than more of boardpane_test.cpp, which several sessions hold at once.
+    add_executable(relay-cardtests-tests tests/cardtests_test.cpp)
+    target_link_libraries(relay-cardtests-tests PRIVATE relay-board ${RELAY_QT}::Test)
+    add_test(NAME cardtests COMMAND relay-cardtests-tests)
+    set_tests_properties(cardtests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
     add_executable(relay-boardfilter-tests tests/boardfilter_test.cpp)
     target_link_libraries(relay-boardfilter-tests PRIVATE relay-board ${RELAY_QT}::Test)
     add_test(NAME boardfilter COMMAND relay-boardfilter-tests)

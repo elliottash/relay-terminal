@@ -22,6 +22,7 @@
 #include <QFrame>
 #include <QHash>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QJsonArray>
 #include <QKeyEvent>
 #include <QLabel>
@@ -1719,6 +1720,52 @@ public:
         m_verifyLine->hide();
         layout->addWidget(m_verifyLine);
 
+        // The `## Tests` strip (#7BM4): what the card says proves it, when it was last checked,
+        // and the one button that checks it again. Placed exactly where the verify line is —
+        // above the body rather than inside it — because the body is one Markdown document the
+        // card renders in one go, and a widget cannot live inside a QTextBrowser. On screen only
+        // for a card that has the section at all: on any other card it would be a control for a
+        // list that is not there.
+        m_testsStrip = new QWidget(this);
+        m_testsStrip->setObjectName(QStringLiteral("boardTestsStrip"));
+        auto *testsBox = new QVBoxLayout(m_testsStrip);
+        testsBox->setContentsMargins(0, 0, 0, 0);
+        testsBox->setSpacing(4);
+        auto *testsHead = new QHBoxLayout;
+        testsHead->setSpacing(6);
+        m_testsLine = new QLabel(m_testsStrip);
+        m_testsLine->setObjectName(QStringLiteral("boardTestsLine"));
+        m_testsLine->setWordWrap(true);
+        m_testsLine->setTextFormat(Qt::RichText);
+        m_testsLine->setTextInteractionFlags(Qt::NoTextInteraction);
+        testsHead->addWidget(m_testsLine, 1);
+        m_testsCheck = new QPushButton(QStringLiteral("Check"), m_testsStrip);
+        m_testsCheck->setObjectName(QStringLiteral("boardTestsCheck"));
+        m_testsCheck->setFocusPolicy(Qt::NoFocus);
+        m_testsCheck->setToolTip(QStringLiteral("Check the tests this card names: which are gone, "
+                                                "have never run, are skipped for ever, flaky or "
+                                                "slow. It runs nothing."));
+        testsHead->addWidget(m_testsCheck, 0);
+        testsBox->addLayout(testsHead);
+        m_testsFindings = new QWidget(m_testsStrip);
+        m_testsFindings->setObjectName(QStringLiteral("boardTestsFindings"));
+        m_testsFindingsBox = new QVBoxLayout(m_testsFindings);
+        m_testsFindingsBox->setContentsMargins(0, 0, 0, 0);
+        m_testsFindingsBox->setSpacing(2);
+        m_testsFindings->hide();
+        testsBox->addWidget(m_testsFindings);
+        m_testsActions = new QWidget(m_testsStrip);
+        m_testsActions->setObjectName(QStringLiteral("boardTestsActions"));
+        m_testsActionsBox = new QHBoxLayout(m_testsActions);
+        m_testsActionsBox->setContentsMargins(0, 0, 0, 0);
+        m_testsActionsBox->setSpacing(6);
+        m_testsActionsBox->addStretch(1);
+        m_testsActions->hide();
+        testsBox->addWidget(m_testsActions);
+        m_testsStrip->hide();
+        layout->addWidget(m_testsStrip);
+        connect(m_testsCheck, &QPushButton::clicked, this, [this] { checkTests(); });
+
         m_doc = new QTextBrowser(this);
         m_doc->setObjectName(QStringLiteral("boardCardDocument"));
         m_doc->setOpenLinks(false);      // a relative link would otherwise replace the card
@@ -2062,6 +2109,89 @@ public:
     // and is actually on this machine.
     bool hasVerifier() const { return !board::verifyRunner(m_qa).isEmpty(); }
 
+    // ---- the `## Tests` strip and its Check (#7BM4) ----------------------------------------
+    //
+    // Whether the card lists the tests that prove it. `sections` arrives with the card, so this
+    // is the same question `hasPlan()` asks, about the other machine-read section.
+    bool hasTests() const
+    {
+        return m_sections.contains(QStringLiteral("Tests"), Qt::CaseInsensitive);
+    }
+    // One `tests_*` request for the tab's board worker (protocol 31.1); the view stamps it with
+    // a request id and sends it. The GUI never writes the card itself: Check's dated block and
+    // the lines "Add the tests this card's commits touched" appends are both the worker's
+    // writes, so an agent's check and the owner's leave the same artefact.
+    std::function<void(const QJsonObject &message)> onTestsRequest;
+
+    // Press Check. Silent about its own progress beyond the button's label: the answer is a
+    // deterministic fold over discovery and history, so it comes back in well under a second.
+    void checkTests()
+    {
+        if (m_id.isEmpty() || !onTestsRequest || !hasTests())
+            return;
+        m_testsCheck->setEnabled(false);
+        m_testsCheck->setText(QStringLiteral("Checking…"));
+        onTestsRequest(QJsonObject{{QStringLiteral("type"), QStringLiteral("tests_check")},
+                                   {QStringLiteral("card"), m_id}});
+    }
+
+    // A `tests_check` answer (31.2): the findings as clickable rows and at most three action
+    // buttons, in the shape the helper panel's own findings list uses. Empty findings are one
+    // short sentence and nothing else — the card's Check is silent when nothing moved.
+    void showCheck(const QJsonObject &event)
+    {
+        m_testsCheck->setEnabled(true);
+        m_testsCheck->setText(QStringLiteral("Check"));
+        if (!hasTests())
+            return;
+        clearCheck();
+        m_checkFiles = event.value(QStringLiteral("files")).toObject();
+        m_checkIds = event.value(QStringLiteral("ids")).toArray();
+        m_checkFailing = event.value(QStringLiteral("failing")).toArray();
+        const QJsonArray findings = event.value(QStringLiteral("findings")).toArray();
+        auto *head = new QLabel(m_testsFindings);
+        head->setObjectName(QStringLiteral("boardTestsFinding"));
+        head->setWordWrap(true);
+        if (findings.isEmpty()) {
+            head->setText(QStringLiteral("<span style=\"color:%1\">Check: nothing moved — every "
+                                         "test this card names is collected, has run and "
+                                         "passed.</span>").arg(theme::TextMuted.name()));
+            m_testsFindingsBox->addWidget(head);
+            m_testsFindings->show();
+            showTests();
+            return;
+        }
+        head->setText(QStringLiteral("<span style=\"color:%1\">Check · %2 finding%3</span>")
+                          .arg(theme::TextMuted.name())
+                          .arg(findings.size())
+                          .arg(findings.size() == 1 ? QString() : QStringLiteral("s")));
+        m_testsFindingsBox->addWidget(head);
+        for (const QJsonValue &value : findings)
+            addFindingRow(value.toObject());
+        m_testsFindings->show();
+        for (const QJsonValue &value : event.value(QStringLiteral("actions")).toArray())
+            addActionButton(value.toString());
+        m_testsActions->setVisible(m_testsActionsBox->count() > 1);
+        showTests();
+    }
+
+    // A `tests_suggest` answer: the worker has appended what it found (or said why it found
+    // nothing). The card re-reads itself from `board_changed`, so the strip only says what
+    // happened in the line it already owns.
+    void showSuggest(const QJsonObject &event)
+    {
+        const QString message = event.value(QStringLiteral("message")).toString();
+        if (message.isEmpty())
+            return;
+        auto *row = new QLabel(m_testsFindings);
+        row->setObjectName(QStringLiteral("boardTestsFinding"));
+        row->setWordWrap(true);
+        row->setText(QStringLiteral("<span style=\"color:%1\">%2</span>")
+                         .arg(theme::TextMuted.name(), message.toHtmlEscaped()));
+        m_testsFindingsBox->addWidget(row);
+        m_testsFindings->show();
+    }
+
     // Delete (#CYM9): hand the card to the view, which asks the one confirm every path asks
     // (asking here too would double-confirm: button -> onDelete -> deleteCard -> a second
     // dialog nobody answered). Not while a turn runs on the card — the worker would only
@@ -2230,6 +2360,13 @@ public:
         showVerify();
         m_openFile->setEnabled(!m_path.isEmpty());
         m_body = board::bodyWithoutTitle(card.value(QStringLiteral("body")).toString(), title);
+        // The Tests strip (#7BM4). A different card starts with no findings on screen: a check
+        // answers about one card, and carrying its rows to the next one would be a lie about a
+        // card nobody has checked. The same card re-read (the worker wrote the dated block, or
+        // someone edited the section) keeps them and picks up the new header line.
+        if (!sameCard)
+            clearCheck();
+        showTests();
 
         const int shownBefore = int(m_entries.size());
         m_entries.clear();
@@ -2719,6 +2856,228 @@ private:
         fitButtons();
     }
 
+    // ---- the `## Tests` strip (#7BM4) ------------------------------------------------------
+
+    //: What the card's `## Tests` section says, read out of the body the card arrived with.
+    struct TestsSummary {
+        int listed = 0;       // lines that name a test, before the first `### Check` block
+        QString stamp;        // the newest `### Check <YYYY-MM-DD HH:MM>`, "" when never checked
+        QString verdict;      // that block's first line — "no findings", or the first finding
+    };
+
+    // The section, read the way the format defines it (SWITCHBOARD-FORMAT, protocol 31.5): one
+    // test per Markdown list line, then the worker's dated `### Check` blocks. The count is the
+    // list lines before the first block, so a check never inflates the number of tests a card
+    // is said to name. The worker is the authority on which of those lines really name a test —
+    // this is the header line over a section the reader can see for themselves.
+    static TestsSummary readTests(const QString &body)
+    {
+        TestsSummary out;
+        static const QRegularExpression heading(QStringLiteral("^##[ \\t]+(.+?)[ \\t]*$"),
+                                                QRegularExpression::MultilineOption);
+        int start = -1, end = body.size();
+        QRegularExpressionMatchIterator headings = heading.globalMatch(body);
+        while (headings.hasNext()) {
+            const QRegularExpressionMatch match = headings.next();
+            if (start >= 0) {
+                end = match.capturedStart();
+                break;
+            }
+            if (match.captured(1).trimmed().compare(QStringLiteral("Tests"),
+                                                    Qt::CaseInsensitive) == 0)
+                start = match.capturedEnd();
+        }
+        if (start < 0)
+            return out;
+        const QString section = body.mid(start, end - start);
+        static const QRegularExpression check(
+            QStringLiteral("^###[ \\t]+Check[ \\t]+(\\d{4}-\\d{2}-\\d{2}[ \\t]+\\d{2}:\\d{2})[ \\t]*$"),
+            QRegularExpression::MultilineOption);
+        int listEnd = section.size();
+        QRegularExpressionMatchIterator blocks = check.globalMatch(section);
+        while (blocks.hasNext()) {
+            const QRegularExpressionMatch match = blocks.next();
+            if (out.stamp.isEmpty())
+                listEnd = match.capturedStart();
+            out.stamp = match.captured(1).simplified();
+            out.verdict.clear();
+            const QStringList rest = section.mid(match.capturedEnd()).split(QLatin1Char('\n'));
+            for (const QString &line : rest) {
+                const QString text = line.trimmed();
+                if (text.isEmpty())
+                    continue;
+                if (text.startsWith(QStringLiteral("###")))
+                    break;
+                out.verdict = text;
+                break;
+            }
+        }
+        if (out.verdict.startsWith(QLatin1Char('-')) || out.verdict.startsWith(QLatin1Char('*')))
+            out.verdict = out.verdict.mid(1).trimmed();
+        const QStringList lines = section.left(listEnd).split(QLatin1Char('\n'));
+        for (const QString &line : lines) {
+            const QString text = line.trimmed();
+            if (text.size() < 2)
+                continue;
+            const QChar bullet = text.at(0);
+            if (bullet != QLatin1Char('-') && bullet != QLatin1Char('*') && bullet != QLatin1Char('+'))
+                continue;
+            if (!text.mid(1).trimmed().isEmpty())
+                ++out.listed;
+        }
+        return out;
+    }
+
+    // The strip's own line, and whether the strip is there at all.
+    void showTests()
+    {
+        const bool has = hasTests();
+        m_testsStrip->setVisible(has);
+        if (!has) {
+            clearCheck();
+            return;
+        }
+        const TestsSummary summary = readTests(m_body);
+        QString text = QStringLiteral("<span style=\"color:%1\">Tests</span>&nbsp;%2 listed")
+                           .arg(theme::TextMuted.name())
+                           .arg(summary.listed);
+        if (summary.stamp.isEmpty()) {
+            // Amber is "a human should look at this" everywhere in Relay, and a card whose tests
+            // nobody has checked is exactly that — it is the state the gate refuses to land.
+            text += QStringLiteral(" <span style=\"color:%1\">· never checked</span>")
+                        .arg(theme::Warning.name());
+        } else {
+            text += QStringLiteral(" <span style=\"color:%1\">· checked %2</span>")
+                        .arg(theme::TextMuted.name(), summary.stamp.toHtmlEscaped());
+            if (!summary.verdict.isEmpty()) {
+                const bool clean = summary.verdict.startsWith(QStringLiteral("no findings"),
+                                                              Qt::CaseInsensitive);
+                QString verdict = summary.verdict;
+                if (verdict.size() > 110)
+                    verdict = verdict.left(109) + QChar(0x2026);
+                text += QStringLiteral(" <span style=\"color:%1\">· %2</span>")
+                            .arg(clean ? theme::TextMuted.name() : theme::Warning.name(),
+                                 verdict.toHtmlEscaped());
+            }
+        }
+        m_testsLine->setText(text);
+        m_testsCheck->setEnabled(!m_id.isEmpty() && m_testsCheck->text() == QStringLiteral("Check"));
+    }
+
+    // Put the last answer away: a new card, or a card with the section gone, must not be read
+    // under someone else's findings.
+    void clearCheck()
+    {
+        while (QLayoutItem *item = m_testsFindingsBox->takeAt(0)) {
+            delete item->widget();
+            delete item;
+        }
+        m_testsFindings->hide();
+        while (m_testsActionsBox->count() > 1) {        // 0 is the stretch that right-aligns them
+            QLayoutItem *item = m_testsActionsBox->takeAt(1);
+            delete item->widget();
+            delete item;
+        }
+        m_testsActions->hide();
+        m_checkFiles = QJsonObject();
+        m_checkIds = QJsonArray();
+        m_checkFailing = QJsonArray();
+    }
+
+    // One finding: severity, the test, the message — the helper panel's findings shape
+    // (HelperChatPanel::showFindings), and a click on a test whose source the worker named
+    // opens that file through the card's own opener.
+    void addFindingRow(const QJsonObject &finding)
+    {
+        const QString test = finding.value(QStringLiteral("test")).toString();
+        const QString severity = finding.value(QStringLiteral("severity")).toString();
+        const QString message = finding.value(QStringLiteral("message")).toString();
+        const QColor ink = severity == QStringLiteral("failure")   ? theme::Error
+                           : severity == QStringLiteral("warning") ? theme::Warning
+                                                                   : theme::TextMuted;
+        auto *row = new QLabel(m_testsFindings);
+        row->setObjectName(QStringLiteral("boardTestsFinding"));
+        row->setWordWrap(true);
+        row->setTextFormat(Qt::RichText);
+        // Links only, no text selection: theme::polishWindow() renames every selectable QLabel
+        // to `cwd`, which would take these rows out of their own stylesheet rules (m_meta and
+        // the helper panel's findings carry the same comment).
+        row->setTextInteractionFlags(Qt::LinksAccessibleByMouse);
+        const QString file = m_checkFiles.value(test).toString();
+        const QString name = test.isEmpty() ? QStringLiteral("this card") : test;
+        const QString head =
+                file.isEmpty()
+                    ? QStringLiteral("<span style=\"color:%1\">%2 · %3</span>")
+                          .arg(ink.name(), severity.toHtmlEscaped(), name.toHtmlEscaped())
+                    : QStringLiteral("<a href=\"%1\" style=\"color:%2;text-decoration:none\">%3 · "
+                                     "%4</a>")
+                          .arg(file.toHtmlEscaped(), ink.name(), severity.toHtmlEscaped(),
+                               name.toHtmlEscaped());
+        row->setText(head + QStringLiteral(" · %1").arg(message.toHtmlEscaped()));
+        if (!file.isEmpty()) {
+            row->setCursor(Qt::PointingHandCursor);
+            row->setToolTip(QStringLiteral("Open %1").arg(file));
+            connect(row, &QLabel::linkActivated, this, [this](const QString &path) {
+                if (onOpenPath)
+                    onOpenPath(path);
+            });
+        }
+        m_testsFindingsBox->addWidget(row);
+    }
+
+    // At most three, exactly the ones the worker offered: the check decides what can be done
+    // about what it found, and the strip does not invent a fourth.
+    void addActionButton(const QString &label)
+    {
+        if (label.isEmpty() || m_testsActionsBox->count() >= 4)
+            return;
+        auto *button = new QPushButton(label, m_testsActions);
+        button->setObjectName(QStringLiteral("boardReplyButton"));
+        button->setFocusPolicy(Qt::NoFocus);
+        button->setProperty("testsAction", label);
+        connect(button, &QPushButton::clicked, this, [this, label] { runTestsAction(label); });
+        m_testsActionsBox->addWidget(button);
+    }
+
+    void runTestsAction(const QString &label)
+    {
+        if (m_id.isEmpty())
+            return;
+        if (label.startsWith(QStringLiteral("Run these"))) {
+            if (m_checkIds.isEmpty() || !onTestsRequest) {
+                showError(QStringLiteral("Nothing in #%1's `## Tests` resolves to a test this "
+                                         "machine can run.").arg(m_id));
+                return;
+            }
+            onTestsRequest(QJsonObject{{QStringLiteral("type"), QStringLiteral("tests_run")},
+                                       {QStringLiteral("ids"), m_checkIds}});
+            return;
+        }
+        if (label.startsWith(QStringLiteral("Add the tests"))) {
+            if (onTestsRequest)
+                onTestsRequest(QJsonObject{{QStringLiteral("type"), QStringLiteral("tests_suggest")},
+                                           {QStringLiteral("card"), m_id}});
+            return;
+        }
+        if (label.startsWith(QStringLiteral("Open the failing one"))) {
+            const QString id = m_checkFailing.isEmpty() ? QString()
+                                                        : m_checkFailing.first().toString();
+            const QString file = m_checkFiles.value(id).toString();
+            if (file.isEmpty() || !onOpenPath) {
+                showError(QStringLiteral("The failing test's source is not known here: the "
+                                         "worker did not name a file for %1.")
+                              .arg(id.isEmpty() ? QStringLiteral("it") : id));
+                return;
+            }
+            onOpenPath(file);
+            return;
+        }
+        // Anything else the worker offers — today, "Remove the tests that are gone" — edits the
+        // section by hand, and the card is never rewritten from here: it goes into the reply box
+        // as a request for the agent, the way the helper panel's findings draft a fix.
+        restoreReply(QStringLiteral("%1 in #%2's `## Tests` section.").arg(label, m_id));
+    }
+
     // Two short lines of facts under the pickers, keys muted, the file a link that opens it.
     static QString metaText(const QJsonObject &front, const QJsonArray &tasks, const QString &path,
                             bool sessionLive = true)
@@ -3160,6 +3519,19 @@ private:
     PriorityFlagButton *m_flag = nullptr;   // the card page's priority flag (#DPJB)
     QLabel *m_ref = nullptr, *m_title = nullptr, *m_meta = nullptr, *m_error = nullptr;
     QLabel *m_verifyLine = nullptr;   // the cross-provider QA recommendation (#T71W)
+    // The `## Tests` strip (#7BM4): the header line, the Check button, the findings rows the
+    // last `tests_check` drew, and the action buttons it offered. `m_checkFiles`,
+    // `m_checkIds` and `m_checkFailing` are that answer's three machine keys (31.2), kept so
+    // the buttons act on what was actually found rather than re-deriving it from the body.
+    QWidget *m_testsStrip = nullptr;
+    QLabel *m_testsLine = nullptr;
+    QPushButton *m_testsCheck = nullptr;
+    QWidget *m_testsFindings = nullptr;
+    QVBoxLayout *m_testsFindingsBox = nullptr;
+    QWidget *m_testsActions = nullptr;
+    QHBoxLayout *m_testsActionsBox = nullptr;
+    QJsonObject m_checkFiles;
+    QJsonArray m_checkIds, m_checkFailing;
     QComboBox *m_status = nullptr, *m_tab = nullptr;
     QToolButton *m_close = nullptr, *m_toPrompt = nullptr, *m_openFile = nullptr, *m_edit = nullptr;
     QToolButton *m_delete = nullptr;
@@ -3300,6 +3672,18 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     m_noticeUndo->setCursor(Qt::PointingHandCursor);
     m_noticeUndo->setFocusPolicy(Qt::NoFocus);
     noticeLayout->addWidget(m_noticeUndo);
+    // The Check gate's one way through (#7BM4): on screen only for a move the gate refused, and
+    // it asks for the reason before it re-sends, because the reason is what makes the override
+    // a decision on the card rather than a click nobody can account for.
+    m_noticeOverride = new QToolButton(m_notice);
+    m_noticeOverride->setObjectName(QStringLiteral("boardTextButton"));
+    m_noticeOverride->setText(QStringLiteral("Override…"));
+    m_noticeOverride->setToolTip(QStringLiteral("Move it anyway, with a reason that goes on the "
+                                                "card's thread as a decision"));
+    m_noticeOverride->setCursor(Qt::PointingHandCursor);
+    m_noticeOverride->setFocusPolicy(Qt::NoFocus);
+    m_noticeOverride->hide();
+    noticeLayout->addWidget(m_noticeOverride);
     auto *dismiss = new QToolButton(m_notice);
     dismiss->setObjectName(QStringLiteral("boardTextButton"));
     dismiss->setText(QStringLiteral("×"));
@@ -3313,6 +3697,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     connect(m_noticeTimer, &QTimer::timeout, m_notice, &QWidget::hide);
     connect(dismiss, &QToolButton::clicked, m_notice, &QWidget::hide);
     connect(m_noticeUndo, &QToolButton::clicked, this, [this] { undoLast(); });
+    connect(m_noticeOverride, &QToolButton::clicked, this, [this] { overrideGatedMove(); });
 
     m_splitter = new QSplitter(Qt::Horizontal, this);
     m_splitter->setChildrenCollapsible(false);
@@ -3651,6 +4036,9 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     };
     m_detail->onExecute = [this](const QString &note) { executeCard(note); };
     m_detail->onVerify = [this](const QString &note) { verifyCard(note); };
+    // The Tests strip's Check and its three actions (#7BM4, protocol 31.1): the card builds the
+    // request, the view stamps it with a request id and puts it on the board worker's stdin.
+    m_detail->onTestsRequest = [this](const QJsonObject &message) { send(message); };
     m_detail->onModeHint = [this](const QString &mode) {
         if (!onHint)
             return;
@@ -4446,8 +4834,47 @@ void BoardView::send(QJsonObject message)
 {
     if (!message.contains(QStringLiteral("id")))
         message.insert(QStringLiteral("id"), nextRequestId());
+    // Every move is remembered against its request id, because the only thing that can answer a
+    // Check-gate refusal (#7BM4) is the move that was refused: the notice's Override… re-sends
+    // this exact message with a reason on it. Bounded, and the four senders — the picker, a
+    // drag, a tab change and Execute — all come through here, so none of them has to remember
+    // anything itself.
+    if (message.value(QStringLiteral("type")).toString() == QStringLiteral("board_move")) {
+        if (m_pendingMoves.size() >= 32)
+            m_pendingMoves.clear();
+        m_pendingMoves.insert(message.value(QStringLiteral("id")).toString(), message);
+    }
     if (onSend)
         onSend(message);
+}
+
+// Override… on the gate notice: one line of reason, then the same move again with `override` on
+// it. An empty answer (or Cancel) leaves the card where it is — the gate's whole point is that
+// getting past it is deliberate and recorded.
+void BoardView::overrideGatedMove()
+{
+    if (m_gatedMove.isEmpty())
+        return;
+    QJsonObject move = m_gatedMove;
+    m_gatedMove = QJsonObject();
+    bool answered = false;
+    const QString card = move.value(QStringLiteral("card")).toString();
+    const QString reason = QInputDialog::getText(
+            this, QStringLiteral("Override the tests check"),
+            QStringLiteral("Why is #%1 ready to move although its tests do not prove it?\n"
+                           "The reason is quoted on the card's thread.").arg(card),
+            QLineEdit::Normal, QString(), &answered).trimmed();
+    if (!answered || reason.isEmpty()) {
+        m_notice->hide();
+        return;
+    }
+    move.remove(QStringLiteral("id"));                  // a fresh id: this is a second request
+    move.insert(QStringLiteral("override"), reason);
+    const QString id = nextRequestId();
+    move.insert(QStringLiteral("id"), id);
+    m_pendingNotes.insert(id, QStringLiteral("Moved #%1 with the tests check overridden")
+                                  .arg(card));
+    send(move);
 }
 
 void BoardView::reload()
@@ -4485,13 +4912,15 @@ QString BoardView::notice() const
     return m_notice->isHidden() ? QString() : m_noticeText->text();
 }
 
-void BoardView::showNotice(const QString &text, bool error, const QString &undoWriteId)
+void BoardView::showNotice(const QString &text, bool error, const QString &undoWriteId,
+                           bool canOverride)
 {
     m_noticeText->setText(text);
     m_notice->setProperty("error", error);
     m_notice->style()->unpolish(m_notice);
     m_notice->style()->polish(m_notice);
     m_noticeUndo->setVisible(!undoWriteId.isEmpty());
+    m_noticeOverride->setVisible(canOverride);
     m_notice->show();
     placeNotice();
     m_noticeTimer->start(error ? 12000 : 10000);
@@ -4839,6 +5268,29 @@ void BoardView::handleEvent(const QJsonObject &event)
             m_detail->appendEntry(event);
         return;
     }
+    // The Tests strip's two answers (#7BM4, protocol 31.2). Routed by the *card*, not by the
+    // request id: a check the pane's own agent ran on the open card is about the card on screen
+    // and belongs under it, and a check about another card is not this strip's news.
+    if (type == QStringLiteral("tests_check") || type == QStringLiteral("tests_suggest")) {
+        if (!detailOpen()
+            || event.value(QStringLiteral("card")).toString() != m_detail->cardId())
+            return;
+        if (type == QStringLiteral("tests_check"))
+            m_detail->showCheck(event);
+        else
+            m_detail->showSuggest(event);
+        return;
+    }
+    // A run the strip's "Run these" started: the Test suites pane is where a run is watched, so
+    // here only its ending is worth a line — and only when this pane asked for it.
+    if (type == QStringLiteral("tests_run") && mine) {
+        const QString state = event.value(QStringLiteral("state")).toString();
+        const QString message = event.value(QStringLiteral("message")).toString();
+        if ((state == QStringLiteral("finished") || state == QStringLiteral("error"))
+            && !message.isEmpty())
+            showNotice(message, state == QStringLiteral("error"));
+        return;
+    }
     if (type == QStringLiteral("board_problems")) {
         const QJsonArray items = event.value(QStringLiteral("items")).toArray();
         // A check this pane asked for — the panel's Check button, or a section header's warning
@@ -5027,6 +5479,16 @@ void BoardView::handleEvent(const QJsonObject &event)
         if (!m_searchRequest.isEmpty() && requestId == m_searchRequest) {
             m_searchRequest.clear();
             m_searchSupported = false;
+            return;
+        }
+        // The Check gate (#7BM4): the move was refused because the tests this card names do not
+        // prove it. The refusal is the board's news, not the card's — a drag from a column is
+        // refused the same way — so it goes in the notice bar, with the one affordance that gets
+        // past it: Override…, which asks for the reason in a line and re-sends the same move
+        // with it. The worker quotes that reason into a `decision` entry on the thread.
+        if (event.value(QStringLiteral("code")).toString() == QStringLiteral("tests_gate")) {
+            m_gatedMove = m_pendingMoves.value(requestId);
+            showNotice(text, true, QString(), !m_gatedMove.isEmpty());
             return;
         }
         // The card was written by someone else between the read and the save. Nothing was
@@ -6863,6 +7325,7 @@ void BoardView::showCleanupProgress(const QString &step)
     m_notice->style()->unpolish(m_notice);
     m_notice->style()->polish(m_notice);
     m_noticeUndo->setVisible(false);
+    m_noticeOverride->setVisible(false);
     m_notice->show();
     placeNotice();
     m_noticeTimer->stop();      // it goes when the run does, not on a timer

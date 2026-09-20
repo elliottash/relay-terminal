@@ -333,7 +333,12 @@ private:
     void verifyCard(const QString &note);
     void send(QJsonObject message);
     QString nextRequestId();
-    void showNotice(const QString &text, bool error, const QString &undoWriteId = QString());
+    // `canOverride` puts the Check gate's "Override…" on the notice (#7BM4): it is there only
+    // for a move the worker refused because the card's `## Tests` do not prove it yet.
+    void showNotice(const QString &text, bool error, const QString &undoWriteId = QString(),
+                    bool canOverride = false);
+    // Ask for the reason and re-send the refused move with `override` on it.
+    void overrideGatedMove();
     void placeNotice();
     void watchIssues();
     // The card files worth a watch of their own (#N5JJ): the one the page is open on, its
@@ -486,6 +491,12 @@ private:
     QFrame *m_notice = nullptr;
     QLabel *m_noticeText = nullptr;
     QToolButton *m_noticeUndo = nullptr;
+    // The Check gate (#7BM4): the button on the refusal notice, the moves this pane has sent
+    // (by request id, so a refusal can find the one it answers), and the refused move itself,
+    // waiting for a reason.
+    QToolButton *m_noticeOverride = nullptr;
+    QHash<QString, QJsonObject> m_pendingMoves;
+    QJsonObject m_gatedMove;
     QTimer *m_noticeTimer = nullptr;
     QLabel *m_empty = nullptr;
     QLabel *m_keys = nullptr;

@@ -808,7 +808,8 @@ QPlainTextEdit#boardReplyEditor { background: transparent; border: none; padding
    row above the chat box"), so the row is on the page's ground and wears the panel's Check/Clean
    up face — one look for every no-typing action over a prompt box. */
 QWidget#boardCardActions { background: transparent; }
-QPushButton#boardReplyButton, QFrame#boardEdit QPushButton#primary { padding: 4px 12px; }
+QPushButton#boardReplyButton, QPushButton#boardTestsCheck,
+QFrame#boardEdit QPushButton#primary { padding: 4px 12px; }
 /* While a turn runs: the line that names it in the agent's colour, and the button that ends it.
    The stop is quiet until the pointer is on it, then it is the error colour — it is the only
    control on the card that throws work away (#VZ69). */
