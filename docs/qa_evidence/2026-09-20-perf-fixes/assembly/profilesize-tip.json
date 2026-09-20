@@ -1,0 +1,86 @@
+{
+ "full": {
+  "prompt_bytes": 12546,
+  "tools_bytes": 23197,
+  "tools": 23,
+  "prompt_tokens": 2921,
+  "tools_tokens": 5913,
+  "total_tokens": 8834,
+  "cold": [
+   {
+    "wall_s": 9.71,
+    "prompt_n": 9096,
+    "prompt_ms": 9549.3
+   },
+   {
+    "wall_s": 9.69,
+    "prompt_n": 9096,
+    "prompt_ms": 9662.9
+   },
+   {
+    "wall_s": 9.83,
+    "prompt_n": 9096,
+    "prompt_ms": 9787.1
+   }
+  ],
+  "warm": [
+   {
+    "wall_s": 0.23,
+    "prompt_n": 23,
+    "prompt_ms": 192.4
+   },
+   {
+    "wall_s": 0.25,
+    "prompt_n": 23,
+    "prompt_ms": 213.1
+   },
+   {
+    "wall_s": 0.24,
+    "prompt_n": 23,
+    "prompt_ms": 199.6
+   }
+  ]
+ },
+ "short": {
+  "prompt_bytes": 3028,
+  "tools_bytes": 3140,
+  "tools": 8,
+  "prompt_tokens": 710,
+  "tools_tokens": 802,
+  "total_tokens": 1512,
+  "cold": [
+   {
+    "wall_s": 2.05,
+    "prompt_n": 1774,
+    "prompt_ms": 1935.7
+   },
+   {
+    "wall_s": 1.96,
+    "prompt_n": 1774,
+    "prompt_ms": 1955.4
+   },
+   {
+    "wall_s": 1.95,
+    "prompt_n": 1774,
+    "prompt_ms": 1936.8
+   }
+  ],
+  "warm": [
+   {
+    "wall_s": 0.2,
+    "prompt_n": 23,
+    "prompt_ms": 196.4
+   },
+   {
+    "wall_s": 0.2,
+    "prompt_n": 23,
+    "prompt_ms": 189.6
+   },
+   {
+    "wall_s": 0.2,
+    "prompt_n": 23,
+    "prompt_ms": 189.8
+   }
+  ]
+ }
+}

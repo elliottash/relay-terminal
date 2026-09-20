@@ -23,8 +23,8 @@ To compare two versions of the prompt, one flag apart:
     scripts/eval-requests.py --preset local:bonsai --profile short --scenarios 1,2,8
 
 `--system-file` / `--todo-rules-file` replace `agent.SYSTEM` and `todos.RULES` before the Agent is
-built; `--profile short` is the drafted short profile of section 3.2 (its SYSTEM, no todo tool, its
-eight tools) so A and B differ by that flag alone. `--context '{"terminal_handoff": "agent"}'` puts a
+built; `--profile short` is the landed short profile (#GMCF decision 7: its SYSTEM, no todo tool, its
+eight tools), passed as the `prompt_profile` agent option, so A and B differ by that flag alone. `--context '{"terminal_handoff": "agent"}'` puts a
 Relay context block on the first message, which is how the rules that moved out of SYSTEM and into the
 per-turn notes (ssh, program driving, run_in_terminal) can be exercised at all.
 
@@ -95,7 +95,7 @@ class Stub:
     its own user-role reminders at the end of a turn (memory note "QA stub provider gotchas").
     """
 
-    def __init__(self, screens: list[dict] | None = None, delay: float = 0.3):
+    def __init__(self, delay: float = 0.3):
         # A model call takes seconds; a scripted one takes microseconds, and a turn that ends before
         # the scenario's steer is typed exercises the queue path instead of the steer path. The
         # delay is what keeps scenarios 3, 4 and 9 testing what they were written to test.
@@ -105,7 +105,6 @@ class Stub:
         self.done: set[str] = set()             # actions already taken, so a resent step does not repeat
         self.merged: set[str] = set()           # steers already folded into the todo they refine
         self.listed = False
-        self.screens = list(screens or [])
 
     @staticmethod
     def _refinement(asked: list[tuple[str | None, str]]) -> tuple[str, str] | None:
@@ -283,9 +282,9 @@ class Run:
         self.agent = Agent(config, str(workspace), self.sup.agent_emit, preset_id=preset_id, todo_tool=todo_tool,
                            provider=stub, session_dir=str(workspace.parent / "sessions"), **agent_kw)
         if tool_specs is not None:
-            # The short profile's eight tools (section 3.2). A harness override, not a product
-            # setting: `prompt_profile` is decision 7 and is not landed. Dispatch is unaffected —
-            # the executor still knows every tool; this is only what the request advertises.
+            # A harness override of the tool list, for a `--system-file` run that is not the landed
+            # profile. Dispatch is unaffected — the executor still knows every tool; this is only
+            # what the request advertises.
             self.agent.tools = lambda: list(tool_specs)
         self.sup.set_agent(self.agent)
 
@@ -562,7 +561,7 @@ def main() -> int:
                         help="replace agent.SYSTEM with this file, so an A/B run is one flag apart")
     parser.add_argument("--todo-rules-file", default=None, metavar="PATH", help="replace todos.RULES")
     parser.add_argument("--profile", choices=("full", "short"), default="full",
-                        help="short: the drafted local-tier profile (its SYSTEM, no todo tool, its 8 tools)")
+                        help="short: the landed local-tier profile (prompt_profile=short: its SYSTEM, no todo tool, 8 tools)")
     parser.add_argument("--context", default=None, metavar="JSON",
                         help='a Relay context block for the first message, e.g. \'{"terminal_handoff": "agent"}\'')
     args = parser.parse_args()
@@ -574,9 +573,13 @@ def main() -> int:
     tool_specs = None
     system_file = args.system_file
     todo_tool = not args.no_todos
+    profile_kw = {}
     if args.profile == "short":
-        system_file = system_file or str(DRAFTS / "SYSTEM.short.txt")
-        tool_specs = json.loads((DRAFTS / "tools.short.json").read_text(encoding="utf-8"))
+        # The landed short profile (#GMCF decision 7, `relay_core.prompt_profiles`): its own
+        # SYSTEM, no todo tool, its eight tools. Passed as the agent option the GUI passes, so A
+        # and B differ by the product's own switch and not by anything this harness invented.
+        # `--system-file` still wins, for trying a text that is not the landed one.
+        profile_kw = {"prompt_profile": "short"}
         todo_tool = False
     if system_file:
         agent_module.SYSTEM = Path(system_file).read_text(encoding="utf-8").rstrip("\n")
@@ -594,9 +597,9 @@ def main() -> int:
             ws = Path(temp) / "ws"
             ws.mkdir()
             kw = {"context_window": 16_000} if number == 6 else {}
-            stub = Stub(PASSWORD_SCREENS if number == 12 else None, args.stub_delay) if args.stub else None
+            stub = Stub(args.stub_delay) if args.stub else None
             run = Run(args.preset, ws, out / f"{label}-scenario{number}.jsonl", todo_tool,
-                      stub=stub, tool_specs=tool_specs, **kw)
+                      stub=stub, tool_specs=tool_specs, **profile_kw, **kw)
             if context is not None and number not in (11, 12):
                 run.sup.submit("Acknowledge this context in one line.", "now", context=context)
                 run.idle(args.timeout)

@@ -112,3 +112,46 @@ that its tool list still starts with the one before it.
 
 Deferral is off on the Local tier and under the short profile (every load re-prefills there,
 proposal 4.1) and off for a group this pane has nothing wired up for.
+
+# Re-measured at the tip, and the Local tier's own A/B
+
+Decisions 1, 2, 3, 8 and 9 all landed while this work was going on, so the numbers above are each
+true of the tree they were taken on and none of them is the whole saving. `profilesize-tip.json` is
+the same `profilesize.py` run again at `f86266da`, where every decision of the proposal is in:
+
+| | full (with the groups deferred) | short |
+|---|---|---|
+| system prompt | 12,546 B / 2,921 tok | 3,028 B / 710 tok |
+| tool JSON | 23,197 B / 5,913 tok (23 tools) | 3,140 B / 802 tok (8 tools) |
+| before the first user word | **8,834 tokens** | **1,512 tokens** (−83 %) |
+| cold prefill | 9,096 tokens, **9.5–9.8 s** | 1,774 tokens, **1.94–1.96 s** |
+| warm | 0.19–0.21 s | 0.19–0.20 s |
+
+Against the proposal's starting point — 14,544 tokens and 18.5 s for a pane with a board — the full
+profile is now 8,834 tokens and 9.6 s, and the short one 1,512 tokens and 1.95 s.
+
+**The Local tier's A/B (section 5), on the owner's own model, no key and no cost.** Three scenarios
+that the short profile has to keep passing — a five-ask prompt, an edit-and-rename, and a single
+simple ask — run against `local:bonsai` on both profiles:
+
+```
+scripts/eval-requests.py --preset local:bonsai --profile short --scenarios 1,2,8
+scripts/eval-requests.py --preset local:bonsai --profile full  --scenarios 1,2,8
+```
+
+| Scenario | short | full |
+|---|---|---|
+| 1 (five files in one prompt) | 5/5, 43.0 s | 5/5, 27.0 s |
+| 2 (fix, rename, append) | 3/3, 50.0 s | 3/3, 49.5 s |
+| 8 (one simple ask, no list) | 1/1, 11.5 s | 1/1, 16.0 s |
+
+`eval-local-bonsai-short-summary.json` and `eval-local-bonsai-full-summary.json` are the runs. Both
+profiles complete every check, so the short profile loses nothing the deterministic checks can see;
+the wall-clock column is not a fair latency comparison because other sessions were using the same
+llama.cpp slot throughout (the prefill numbers in the table above, taken from the server's own
+`timings`, are). What the full run does show is `no_list_nudges: 1` in all three scenarios — the
+27B model never writes a todo list and has to be nudged — which is the evidence behind the short
+profile dropping the todo tool.
+
+What this A/B does **not** answer is decision 8's sub-question, "can this model file a card": no
+scenario here asks for one. The Local tier keeps no board tools until someone writes that scenario.

@@ -31,8 +31,6 @@ from __future__ import annotations
 
 import copy
 
-from . import skills as skills_mod
-
 #: The setting: `auto` picks per model, the other two pin it.
 PROFILES = ("auto", "full", "short")
 DEFAULT_PROFILE = "auto"
@@ -120,24 +118,11 @@ def resolve(setting: str, *, preset=None, context_window: int | None = None) -> 
 def skill_names(index) -> str:
     """One line naming every skill, and nothing about what they do.
 
-    `/name` and "use my X skill" have to keep working (the owner's 2026-09-18 report was a skill
-    that could not be *found*), and a name is all `load_skill` needs. Capped like the catalogue's
-    own names-only trailer, so a huge library cannot push the prompt back up.
+    `SkillIndex.names_line` is the text — the same line decision 3 gives a subagent, capped the
+    same way — so the two profiles that cannot afford the catalogue say it in one voice and a
+    change to it reaches both.
     """
-    names = sorted(getattr(index, "skills", {}) or {})
-    if not names:
-        return ""
-    kept, used = [], 0
-    for name in names:
-        cost = len(name.encode("utf-8")) + 2
-        if used + cost > skills_mod.MAX_NAMES_BYTES:
-            break
-        kept.append(name)
-        used += cost
-    dropped = len(names) - len(kept)
-    more = f" (and {dropped} more; ask the user for their names)" if dropped else ""
-    return ("Skills the user has, by name; load one with load_skill before following it: "
-            + ", ".join(kept) + more + ".")
+    return index.names_line().strip("\n") if index is not None else ""
 
 
 def system_prompt(*, workspace: str, skills=None, instructions: str = "") -> str:

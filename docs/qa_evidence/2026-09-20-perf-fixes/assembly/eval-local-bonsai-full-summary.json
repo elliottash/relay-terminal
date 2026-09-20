@@ -1,0 +1,89 @@
+{
+  "preset": "local:bonsai",
+  "model": "bonsai-2-27b",
+  "todo_tool": true,
+  "profile": "full",
+  "system_file": null,
+  "todo_rules_file": null,
+  "scenarios": {
+    "1": {
+      "asks": 5,
+      "completed": 5,
+      "checks": {
+        "a": true,
+        "b": true,
+        "c": true,
+        "d": true,
+        "e": true
+      },
+      "elapsed_s": 27.0,
+      "ledger": [
+        {
+          "id": "R1",
+          "source": "ask",
+          "status": "done",
+          "reason": null,
+          "text": "Please do all five: 1) create a.txt containing alpha 2) create b.txt containing bravo 3) create c.txt containing charlie"
+        }
+      ],
+      "todos": [],
+      "todo_calls": 0,
+      "no_list_nudges": 1,
+      "todo_items": 0,
+      "completion_checks": 0,
+      "limits": 0,
+      "silent_drops": 0
+    },
+    "2": {
+      "asks": 3,
+      "completed": 3,
+      "checks": {
+        "fix.txt": true,
+        "renamed": true,
+        "readme": true
+      },
+      "elapsed_s": 49.5,
+      "ledger": [
+        {
+          "id": "R1",
+          "source": "ask",
+          "status": "done",
+          "reason": null,
+          "text": "create fix.txt containing fixed, and also rename old.txt to new.txt, oh and add a line saying updated at the end of READ"
+        }
+      ],
+      "todos": [],
+      "todo_calls": 0,
+      "no_list_nudges": 1,
+      "todo_items": 0,
+      "completion_checks": 0,
+      "limits": 0,
+      "silent_drops": 0
+    },
+    "8": {
+      "asks": 1,
+      "completed": 1,
+      "checks": {
+        "answer.txt": true
+      },
+      "wrote_no_list": true,
+      "elapsed_s": 16.0,
+      "ledger": [
+        {
+          "id": "R1",
+          "source": "ask",
+          "status": "done",
+          "reason": null,
+          "text": "Create answer.txt containing just the number that README.md says is the answer."
+        }
+      ],
+      "todos": [],
+      "todo_calls": 0,
+      "no_list_nudges": 1,
+      "todo_items": 0,
+      "completion_checks": 0,
+      "limits": 0,
+      "silent_drops": 0
+    }
+  }
+}
