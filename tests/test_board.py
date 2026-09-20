@@ -351,6 +351,42 @@ class ThreadTests(TempBoardTest):
         with self.assertRaises(B.BoardError):
             self.board.append_thread("K7Q2", "x", kind="gossip")
 
+    def test_an_append_replaces_the_file_so_a_directory_watch_sees_it(self):
+        # #N5JJ: the Switchboard pane holds a QFileSystemWatcher on the board's *directories*,
+        # and a directory watch fires when an entry is created, renamed or removed — not when an
+        # existing file grows. The append was `O_APPEND` until 2026-09-20, so about two of every
+        # three thread writes never reached the pane. It writes a temporary file and renames it
+        # in now, which is a directory change, and the inode is what proves it.
+        self.board.append_thread("K7Q2", "first")
+        path = self.board.thread_path("K7Q2")
+        before = path.stat().st_ino
+        self.board.append_thread("K7Q2", "second")
+        self.assertNotEqual(path.stat().st_ino, before)
+        self.assertEqual([e.text for e in self.board.thread("K7Q2")], ["first", "second"])
+
+    def test_concurrent_appends_keep_every_entry(self):
+        # The lock moved from the file to the threads directory with that change: `os.replace`
+        # gives the path a new inode, so a lock on the old one would stop excluding anybody.
+        import threading as T
+        errors: list[BaseException] = []
+
+        def write(n: int) -> None:
+            try:
+                for i in range(6):
+                    self.board.append_thread("K7Q2", f"writer {n} entry {i}")
+            except BaseException as exc:                     # pragma: no cover - a real failure
+                errors.append(exc)
+
+        threads = [T.Thread(target=write, args=(n,)) for n in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(errors, [])
+        entries = self.board.thread("K7Q2")
+        self.assertEqual(len(entries), 24)
+        self.assertEqual(len({e.entry_id for e in entries}), 24)
+
     def test_private_threads_live_under_the_private_root(self):
         self.board.append_thread("K7Q2", "secret", private=True)
         self.assertTrue((self.root / ".private" / "threads" / "K7Q2.md").exists())

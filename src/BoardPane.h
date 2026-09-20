@@ -222,6 +222,7 @@ protected:
     bool eventFilter(QObject *object, QEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
+    void showEvent(QShowEvent *event) override;
 
 private:
     void buildChrome(QVBoxLayout *layout);
@@ -286,6 +287,14 @@ private:
     void showNotice(const QString &text, bool error, const QString &undoWriteId = QString());
     void placeNotice();
     void watchIssues();
+    // The card files worth a watch of their own (#N5JJ): the one the page is open on, its
+    // thread, and the cards an agent is executing while the watch budget lasts. A directory
+    // watch does not fire on an in-place write, and a watched file is dropped the moment it is
+    // replaced, so this is called again after every fire and whenever the open card changes.
+    void watchCardFiles();
+    // One debounced `board_refresh` because the pane is being looked at again (#N5JJ): on show,
+    // and when the focus arrives. What a directory watch missed is picked up here.
+    void catchUp();
     // Ask the worker about the filter's plain words (#7M6E). Debounced by `m_searchTimer`;
     // `startSearch` restarts it, `sendSearch` is what fires. Nothing is sent for a filter with
     // no plain words in it — the scoped terms are answered here, from the rows.

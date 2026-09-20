@@ -3965,6 +3965,15 @@ void BoardView::buildQuickAdd(QVBoxLayout *layout)
     });
 }
 
+namespace {
+// How many inotify watches this pane may hold, and how many of them may go on single files
+// (#N5JJ). The board's own folders come first — 11 of them on this repo's board — and the file
+// watches take what is left up to their own budget, so a board with hundreds of status folders
+// can never spend the whole allowance on cards.
+constexpr int kMaxWatched = 200;
+constexpr int kMaxWatchedFiles = 32;
+}  // namespace
+
 // Watch the board folder and its subfolders. A card write anywhere (this window, a pane agent, a
 // collaborator's merge) becomes one debounced board_refresh, which the worker answers with the
 // rows that actually changed.
@@ -3994,13 +4003,68 @@ void BoardView::watchIssues()
     }
     QStringList wanted{root};
     QDirIterator it(root, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-    while (it.hasNext() && wanted.size() < 200)
+    while (it.hasNext() && wanted.size() < kMaxWatched)
         wanted << it.next();
     const QStringList known = m_watcher->directories();
     QStringList fresh;
     for (const QString &path : wanted)
         if (!known.contains(path))
             fresh << path;
+    if (!fresh.isEmpty())
+        m_watcher->addPaths(fresh);
+    watchCardFiles();
+}
+
+// The few card files worth a watch of their own (#N5JJ).
+//
+// A directory watch fires when an entry is created, renamed or removed, never when an existing
+// file's content changes. Every writer Relay owns replaces its files now, which a directory watch
+// does see — but a guest CLI, an editor or a script that writes in place is still invisible, and
+// the two files where that matters most are the card the page is open on and its thread. The
+// cards an agent is executing get one each while there is room: they are the ones being written
+// while the pane is being watched.
+//
+// A watched file is dropped by QFileSystemWatcher the moment it is replaced, which is exactly
+// what every write here does, so this re-adds what has gone — the refresh timer calls it after
+// every fire, and the card page's own open and close call it directly.
+void BoardView::watchCardFiles()
+{
+    if (!m_watcher || m_root.isEmpty())
+        return;
+    const QString threads = m_root + QStringLiteral("/threads/");
+    const QString privateThreads = m_root + QStringLiteral("/.private/threads/");
+    QStringList wanted;
+    const auto want = [&](const QString &id) {
+        const board::Card *card = m_model.card(id);
+        if (!card || wanted.size() >= kMaxWatchedFiles)
+            return;
+        if (!card->path.isEmpty())
+            wanted << m_workspace + QLatin1Char('/') + card->path;
+        wanted << (card->isPrivate ? privateThreads : threads) + id + QStringLiteral(".md");
+    };
+    if (detailOpen())
+        want(m_detail->cardId());
+    // Then whatever is being worked on, while the budget lasts. Ordered by id so the set is
+    // stable between calls and the watcher is not churned for nothing.
+    QStringList executing;
+    for (const QString &id : m_model.allIds())
+        if (const board::Card *card = m_model.card(id);
+            card && card->status == QStringLiteral("in-progress"))
+            executing << id;
+    executing.sort();
+    for (const QString &id : executing)
+        want(id);
+
+    const QStringList known = m_watcher->files();
+    QStringList fresh, stale;
+    for (const QString &path : wanted)
+        if (!known.contains(path) && QFileInfo::exists(path))
+            fresh << path;
+    for (const QString &path : known)
+        if (!wanted.contains(path))
+            stale << path;
+    if (!stale.isEmpty())
+        m_watcher->removePaths(stale);
     if (!fresh.isEmpty())
         m_watcher->addPaths(fresh);
 }
@@ -4256,6 +4320,7 @@ void BoardView::handleEvent(const QJsonObject &event)
         if (hadFocus)
             focusInput();
         showProblems(event.value(QStringLiteral("problems")).toArray());
+        watchCardFiles();   // which cards are executing is only known once the rows are in (#N5JJ)
         if (onTitleChanged)
             onTitleChanged(title());
         return;
@@ -4290,6 +4355,7 @@ void BoardView::handleEvent(const QJsonObject &event)
         // a card whose body now holds them has to join the list, and one whose body no longer
         // does has to leave it (#7M6E). Debounced, so a storm of writes is one search.
         startSearch();
+        watchCardFiles();   // a card that started or stopped executing changes what is watched
         if (onTitleChanged)
             onTitleChanged(title());
         // A card that is open stays in step with its file; other cards' changes leave it alone.
@@ -4339,6 +4405,7 @@ void BoardView::handleEvent(const QJsonObject &event)
                 tabs << qMakePair(item.id, item.title);
         m_detail->setChoices(statuses, tabs);
         m_detail->show(event);
+        watchCardFiles();   // the open card and its thread get a watch each (#N5JJ)
         // Turns run per card (19.16), so the card you open may already be working: give it back
         // its strip, the answer so far and the step it is on. A card with no turn is idle, even
         // if the one you came from is still planning.
@@ -5120,6 +5187,27 @@ void BoardView::resizeEvent(QResizeEvent *event)
     placeNotice();
 }
 
+// Catch up when the pane is looked at again (#N5JJ).
+//
+// A directory watch misses an in-place write, and Relay's own writers all replace their files
+// now — but a guest CLI, an editor or a script need not, and a tab that was in the background
+// will have missed whatever inotify coalesced away. So the pane asks once when it is shown and
+// once when the focus arrives, debounced through the same 400 ms timer as a watcher fire.
+// Not a poll: #057J is taking idle wakeups out of Relay, and a refresh that finds nothing is
+// about 6 ms of worker with the parse cache behind it (#7M6E), which is only worth spending when
+// somebody is actually reading the board.
+void BoardView::showEvent(QShowEvent *event)
+{
+    QWidget::showEvent(event);
+    catchUp();
+}
+
+void BoardView::catchUp()
+{
+    if (m_open && m_refresh)
+        m_refresh->start();
+}
+
 // Wide enough, the open card sits beside the list; in a narrow pane it takes the whole pane
 // (the list comes back when it closes) instead of squeezing the rows to a sliver.
 void BoardView::updateDetailLayout()
@@ -5493,6 +5581,7 @@ void BoardView::closeDetail()
     m_follow->stop();
     m_detail->hide();
     updateDetailLayout();
+    watchCardFiles();   // the card that was open no longer needs a watch of its own (#N5JJ)
     focusInput();
 }
 
@@ -5890,6 +5979,9 @@ bool BoardView::eventFilter(QObject *object, QEvent *event)
         && static_cast<QFocusEvent *>(event)->reason() == Qt::MouseFocusReason && onHint) {
         onHint(QStringLiteral("board.filter"), QStringLiteral("Esc"));
     }
+    // Coming back to the pane is when what the watcher missed is worth asking about (#N5JJ).
+    if ((object == m_filter || object == m_list) && event->type() == QEvent::FocusIn)
+        catchUp();
     if (event->type() != QEvent::KeyPress)
         return QWidget::eventFilter(object, event);
     auto *key = static_cast<QKeyEvent *>(event);

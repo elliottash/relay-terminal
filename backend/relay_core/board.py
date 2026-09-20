@@ -946,6 +946,44 @@ def atomic_write(path: Path, text: str, mode: int | None = None) -> str:
     return _atomic_write(path, text, mode)
 
 
+def append_to_thread(path: Path, add: Callable[[bytes], tuple[str, object]]) -> object:
+    """Add to a thread file **by replacing it**, under the threads directory's own lock.
+
+    `add` is handed the file's current bytes (empty for a file that is not there yet) and returns
+    the text to add and whatever the caller wants back; it runs under the lock, so it can choose
+    entry ids against what is actually on disk.
+
+    This was an `O_APPEND` write under a lock on the file itself until 2026-09-20.  That kept
+    every entry, including across a `merge=union` git merge — but a `QFileSystemWatcher`
+    **directory** watch, which is what the Switchboard pane holds, does not fire when an existing
+    file grows.  About two of every three thread writes therefore never reached the pane: 21 of 60
+    in a one-write-a-second storm (#N5JJ).  Writing a temporary file and `os.replace`-ing it in
+    creates and renames a directory entry, which the watch does see, and is what every other
+    writer in this file already does (`_atomic_write`).
+
+    The lock is on the threads **directory**, not on the file: `os.replace` gives the path a new
+    inode, so a lock held on the old one would stop excluding anybody the moment the first writer
+    landed its rename, and two appends could then each drop the other's entry.  A directory is one
+    inode that no writer here replaces.  It is one lock for all of a board's threads, which costs
+    nothing: an append is a read, a render and a rename.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock = os.open(path.parent, os.O_RDONLY)
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        body = path.read_bytes() if path.exists() else b""
+        text, result = add(body)
+        prefix = ""
+        if body:
+            tail = body[-2:]
+            prefix = "\n\n" if not tail.endswith(b"\n") else ("\n" if not tail.endswith(b"\n\n") else "")
+        _atomic_write(path, body.decode("utf-8", "replace") + prefix + text)
+    finally:
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        os.close(lock)
+    return result
+
+
 def _atomic_write(path: Path, text: str, mode: int | None = None) -> str:
     data = text.encode("utf-8")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1147,35 +1185,21 @@ class Board:
     def append_thread(self, card_id: str, text: str, author: str = "owner",
                       kind: str = "comment", private: bool = False,
                       when: datetime | None = None, **attrs) -> ThreadEntry:
-        """Append one self-contained entry.  `O_APPEND` under `flock`, so two
-        processes (and a `merge=union` git merge) both keep every entry."""
+        """Append one self-contained entry, atomically, so two processes (and a `merge=union`
+        git merge) all keep every entry — see `append_to_thread`."""
         if kind not in ENTRY_KINDS:
             raise BoardError(f"unknown thread entry kind {kind!r}")
         path = self.thread_path(card_id, private)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        attributes = {"author": author, "kind": kind,
-                      **{k: str(v) for k, v in attrs.items() if v is not None}}
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
-            size = os.lseek(fd, 0, os.SEEK_END)
-            prefix = ""
-            last = None
-            if size:
-                with open(path, "rb") as check:
-                    body = check.read()
-                ids = [e.entry_id for e in parse_thread(body.decode("utf-8", "replace"))]
-                last = max(ids) if ids else None
-                tail = body[-2:]
-                prefix = "\n\n" if not tail.endswith(b"\n") else ("\n" if not tail.endswith(b"\n\n") else "")
+
+        def add(body: bytes) -> tuple[str, ThreadEntry]:
+            ids = [e.entry_id for e in parse_thread(body.decode("utf-8", "replace"))]
             # Under the lock, so the id is chosen against what is actually on disk.
-            entry = ThreadEntry(next_entry_id(last, when), attributes, text)
-            os.write(fd, (prefix + entry.render()).encode("utf-8"))
-            os.fsync(fd)
-        finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-            os.close(fd)
-        return entry
+            attributes = {"author": author, "kind": kind,
+                          **{k: str(v) for k, v in attrs.items() if v is not None}}
+            entry = ThreadEntry(next_entry_id(max(ids) if ids else None, when), attributes, text)
+            return entry.render(), entry
+
+        return append_to_thread(path, add)
 
     def thread(self, card_id: str, private: bool = False) -> list[ThreadEntry]:
         path = self.thread_path(card_id, private)
@@ -2638,31 +2662,17 @@ def carry_thread(board: "Board", src_id: str, dst_id: str, *, src_private: bool 
     entries = sorted(board.thread(src_id, src_private), key=lambda e: e.entry_id)
     if not entries:
         return 0
-    path = board.thread_path(dst_id, dst_private)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        size = os.lseek(fd, 0, os.SEEK_END)
-        prefix = ""
-        last = None
-        if size:
-            body = path.read_bytes()
-            ids = [e.entry_id for e in parse_thread(body.decode("utf-8", "replace"))]
-            last = max(ids) if ids else None
-            tail = body[-2:]
-            prefix = "\n\n" if not tail.endswith(b"\n") else ("\n" if not tail.endswith(b"\n\n") else "")
+    def add(body: bytes) -> tuple[str, int]:
+        ids = [e.entry_id for e in parse_thread(body.decode("utf-8", "replace"))]
+        last = max(ids) if ids else None
         blocks = []
         for entry in entries:
             last = next_entry_id(last)
             attrs = {**entry.attrs, "from": src_id.upper(), "orig": entry.entry_id}
             blocks.append(ThreadEntry(last, attrs, entry.text).render())
-        os.write(fd, (prefix + "\n".join(blocks)).encode("utf-8"))
-        os.fsync(fd)
-    finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        os.close(fd)
-    return len(entries)
+        return "\n".join(blocks), len(entries)
+
+    return append_to_thread(board.thread_path(dst_id, dst_private), add)
 
 
 def merge_cards(board: "Board", into: Card, sources: Sequence[Card], *, reason: str,

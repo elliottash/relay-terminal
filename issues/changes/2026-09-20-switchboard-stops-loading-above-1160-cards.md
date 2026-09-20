@@ -7,7 +7,7 @@ assignee: claude-code
 rank: m1
 created: '2026-09-20'
 source: 'Claude Code in the owner''s terminal, 2026-09-20 — found by the #PF4K profilers'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-20-perf-profile/, docs/qa_evidence/2026-09-20-perf-fixes/board/], related: [PF4K], github: null}
+links: {plans: [], commits: [682e8f7a], evidence: [docs/qa_evidence/2026-09-20-perf-profile/, docs/qa_evidence/2026-09-20-perf-fixes/board/], related: [PF4K], github: null}
 ---
 # The Switchboard stops loading above ~1,160 cards; full card text rides on every row
 
