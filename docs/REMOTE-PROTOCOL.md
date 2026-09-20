@@ -420,6 +420,16 @@ cwd.
 and `compose` spend the owner's provider key, and `history_get` and `tool_output_get` are cheap to
 ask for and expensive to answer.
 
+**A client paces itself inside those budgets, and a `rate_limited` is its own bug to fix.** One
+request of a kind in flight at a time, wants that turn up meanwhile merged into the next one
+rather than sent beside it, and the request sized for what the reader needs rather than repeated
+— closing a scrollback seam asks for the whole gap up to the 200-row cap, not a page of it. A
+refusal is logged and backed off from, never drawn: a person watching an agent type can do
+nothing about a client asking too often, and putting "too many of those; slow down." under their
+composer says the desktop is failing when the client is. The measured case is #3H5T: a phone
+chasing the seam once per screen frame sent 188 `history_get` in five seconds and showed the
+reader 121 refusals.
+
 **(security) `keys`, `paste` and `line` are refused while the pane is at a password prompt.** When
 `relay::input::secretPrompt` is true for a pane, `secret_input` (§6.7) is the only accepted input;
 everything else gets `error {code: "not_permitted"}`. Otherwise a `full` device without the password
