@@ -262,6 +262,31 @@ class SizeTests(PromptFixture):
         self.assertIn('- beta: Draw a flame graph of a slow test run.', section)
         self.assertNotIn('and here is even more of it', section)
 
+    def test_the_tool_list_carries_no_per_user_catalogue(self):
+        """A schema is the same for every user, or it is paid for on every request and caches nothing.
+
+        `set_keybinding` was the exception: 9,960 B of the user's own 92 actions and their current
+        keys, rewritten whenever one was rebound (#GMCF decision 1). The catalogues live in tool
+        *results* now — `app_action_list` — so this pins the shape and not only the bytes, and the
+        budget is the pane's whole tool list: 16.4 KB, where it was 25.9 KB.
+        """
+        agent = self.agent(board=False)
+        specs = agent.tools()
+        self.assertIn('set_keybinding', [s['function']['name'] for s in specs])
+        catalog = agent.executor.keybindings
+        self.assertGreater(len(catalog.actions), 50, 'the fixture is not carrying a real registry')
+        text = json.dumps(specs, ensure_ascii=False)
+        listed = [action.id for action in catalog.actions.values() if action.id in text]
+        self.assertLessEqual(len(listed), 1, f'the tool list names actions: {listed}')
+        for action in catalog.actions.values():
+            for key in action.keys:
+                self.assertNotIn(f'[{key}]', text, f'{action.id}\'s keys are in the tool list')
+        for spec in specs:
+            self.assertLess(len(json.dumps(spec, ensure_ascii=False).encode('utf-8')), 3 * 1024,
+                            f'{spec["function"]["name"]} is bigger than any schema should be')
+        size = len(text.encode('utf-8'))
+        self.assertLess(size, 17 * 1024 + 512, f'the pane tool list grew to {size} bytes')
+
 
 if __name__ == '__main__':
     unittest.main()
