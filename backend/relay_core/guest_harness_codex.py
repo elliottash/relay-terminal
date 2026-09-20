@@ -772,6 +772,13 @@ class CodexHarness:
             "output_tokens": max(int(total.get("outputTokens") or 0)
                                  - int(base.get("outputTokens") or 0), 0),
         }
+        # What the prefix cache saved this turn, the same way as the two above: `tokenUsage.total`
+        # is cumulative over the thread, so the turn's share is the rise since its baseline. Its
+        # `cachedInputTokens` is part of `inputTokens`, as OpenAI counts them (#GMCF decision 5).
+        for source, target in (("cachedInputTokens", "cached_input_tokens"),
+                               ("cacheWriteInputTokens", "cache_write_input_tokens")):
+            if source in total:
+                data[target] = max(int(total.get(source) or 0) - int(base.get(source) or 0), 0)
         if self._model:
             data["model"] = self._model
         window = state.get("modelContextWindow")

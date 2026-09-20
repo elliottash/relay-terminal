@@ -435,6 +435,33 @@ class TurnTests(unittest.TestCase):
         self.assertNotIn("guest_context_window", plain)
         self.assertEqual(ghp.guest_context(plain), {})
 
+    def test_both_guests_report_their_prefix_cache_in_the_same_two_fields(self):
+        """#GMCF decision 5, and the one place the two guests disagree about what `input` means.
+
+        The numbers are the recorded fixtures: guest_harness_claude/hello.jsonl's `result.usage`
+        and guest_harness_codex/ok-turn.jsonl's `thread/tokenUsage/updated`.
+        """
+        # claude, through _usage_event: Anthropic's `input_tokens` is the UNCACHED part, so the
+        # prompt is completed here to mean what every other provider's prompt_tokens means.
+        claude = ghp.relay_usage({"input_tokens": 10, "output_tokens": 71,
+                                  "cache_read_input_tokens": 13689,
+                                  "cache_creation_input_tokens": 7624})
+        self.assertEqual(claude["cached_tokens"], 13689)
+        self.assertEqual(claude["cache_write_tokens"], 7624)
+        self.assertEqual(claude["prompt_tokens"], 10 + 13689 + 7624)
+        self.assertEqual(claude["total_tokens"], claude["prompt_tokens"] + 71)
+        # codex, through _usage_for: `inputTokens` already counts the cached part inside itself.
+        codex = ghp.relay_usage({"input_tokens": 13312, "output_tokens": 5,
+                                 "cached_input_tokens": 11136, "cache_write_input_tokens": 0})
+        self.assertEqual(codex["cached_tokens"], 11136)
+        self.assertEqual(codex["cache_write_tokens"], 0)
+        self.assertEqual(codex["prompt_tokens"], 13312)
+        # A harness that says nothing about a cache leaves both off, as `cost` already does.
+        plain = ghp.relay_usage({"input_tokens": 5, "output_tokens": 1})
+        self.assertNotIn("cached_tokens", plain)
+        self.assertNotIn("cache_write_tokens", plain)
+        self.assertEqual(plain["prompt_tokens"], 5)
+
     def test_a_pane_that_is_not_on_a_guest_has_no_guest_context(self):
         script = [{"events": [ev("usage", input_tokens=1, output_tokens=1)],
                    "result": ("ok", "end", {})}]

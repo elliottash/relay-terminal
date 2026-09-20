@@ -370,6 +370,17 @@ class PlainTurnTest(HarnessCase):
         self.assertEqual(usage["context_tokens"], 13317)
         self.assertEqual(usage["context_pct"], round(100.0 * 13317 / 258400, 1))
 
+    def test_usage_carries_what_the_prefix_cache_saved(self):
+        """#GMCF decision 5: codex's own `cachedInputTokens`, the turn's share of it."""
+        harness, _, _ = self.started("ok-turn.jsonl")
+        harness.send("Reply with the single word ok.", emit=self.emit, cancel=threading.Event())
+        usage = self.only("usage")[0]
+        # `tokenUsage.total` for the first turn of the thread, so the baseline is nothing.
+        self.assertEqual(usage["cached_input_tokens"], 11136)
+        self.assertEqual(usage["cache_write_input_tokens"], 0)
+        # It is part of `inputTokens`, not extra to it (13312 input, of which 11136 were cached).
+        self.assertLess(usage["cached_input_tokens"], usage["input_tokens"])
+
     def test_started_is_announced_once_and_again_after_a_model_switch(self):
         entries = load("ok-turn.jsonl")
         models = load("models.jsonl")

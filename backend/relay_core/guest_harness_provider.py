@@ -38,7 +38,7 @@ from .guest_harness import (HARNESS_GUESTS, HarnessError, HarnessNotAvailable, H
                             TOOL_NAMES, chunk_tool_output, map_tool_name, validate_effort,
                             validate_permissions)
 from .provider import (DEFAULT_STALL_TIMEOUT, Cancelled, ProviderConfig, ProviderError,
-                       message_images)
+                       cache_counts, message_images)
 
 _log = logs.get("guest_harness")
 
@@ -1189,6 +1189,17 @@ def relay_usage(data) -> dict:
             usage[target] = value
     if not usage:
         return {}
+    # The prefix cache, in the one pair of names the `usage` event uses (#GMCF decision 5). Both
+    # guests cache: codex reports `cachedInputTokens`, claude `cache_read_input_tokens`.
+    cache = cache_counts(data)
+    usage.update(cache)
+    # Anthropic's `input_tokens` is the *uncached* part of the prompt, where OpenAI's (and codex's)
+    # `prompt_tokens` counts the cached part inside itself. Relay reports one number, so the claude
+    # harness's is completed here — otherwise "in 18 (38,991 cached)" reads as nonsense and the
+    # session totals under-count every cached guest turn by the size of its prefix.
+    if "cache_read_input_tokens" in data or "cache_creation_input_tokens" in data:
+        usage["prompt_tokens"] = (usage.get("prompt_tokens", 0) + cache.get("cached_tokens", 0)
+                                  + cache.get("cache_write_tokens", 0))
     usage["total_tokens"] = usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
     cost = data.get("cost_usd")
     if isinstance(cost, (int, float)) and not isinstance(cost, bool) and cost >= 0:

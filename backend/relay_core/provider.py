@@ -173,6 +173,78 @@ def response_closed(response) -> bool:
     except (OSError, ValueError, AttributeError):
         return True
 
+# --- the prefix cache, as a number (#GMCF decision 5) -------------------------------------------
+# Every provider here reports OpenAI's `prompt_tokens` / `completion_tokens`, and every one that
+# caches a prefix reports the hit under a name of its own. The `usage` event carries one pair —
+# `cached_tokens` (the part of `prompt_tokens` the provider served from its cache) and
+# `cache_write_tokens` (what this request put into it, where a provider counts that separately) —
+# so the Activity pane and `session_info` can say whether the assembly order of PROPOSAL.md § 4.2
+# is actually being cached, per provider, instead of assuming it.
+#
+# A key the provider did not report is ABSENT, never 0: "this provider says nothing about caching"
+# and "nothing was cached this time" are different answers, and the two displays say so differently
+# (the same rule `cost` already follows in sessions.add_usage).
+#
+#   usage.prompt_tokens_details.cached_tokens   OpenAI, OpenRouter, Moonshot (kimi), Z.AI (glm),
+#                                               Gemini's OpenAI layer, llama.cpp (local:*)
+#   usage.prompt_cache_hit_tokens               DeepSeek
+#   usage.cache_read_input_tokens               Anthropic's own names — what the Messages API and
+#   usage.cache_creation_input_tokens           the claude guest harness report
+#   usage.cached_input_tokens                   codex's app-server, mapped by the codex harness
+#   usage.cache_write_input_tokens
+#   timings.cache_n                             llama.cpp, beside `usage` in the same object rather
+#                                               than inside it; the fallback for a build older than
+#                                               the one that added prompt_tokens_details (b10706
+#                                               sends both, and they agree).
+CACHE_READ_KEYS = ("cached_tokens", "prompt_cache_hit_tokens", "cache_read_input_tokens",
+                   "cached_input_tokens")
+CACHE_WRITE_KEYS = ("cache_creation_input_tokens", "cache_write_input_tokens",
+                    "cache_creation_tokens")
+
+
+def _token_count(value) -> int | None:
+    """A token count a provider reported, or None for anything that is not one."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return int(value) if value >= 0 else None
+
+
+def cache_counts(usage, timings=None) -> dict:
+    """`{cached_tokens?, cache_write_tokens?}` out of one provider `usage` object.
+
+    `timings` is the sibling llama.cpp puts beside `usage` in the same response (or final stream
+    chunk); it is only read when `usage` itself said nothing about the cache.
+    """
+    out: dict = {}
+    if not isinstance(usage, dict):
+        usage = {}
+    details = usage.get("prompt_tokens_details")
+    sources = (usage, details) if isinstance(details, dict) else (usage,)
+    for keys, name in ((CACHE_READ_KEYS, "cached_tokens"), (CACHE_WRITE_KEYS, "cache_write_tokens")):
+        for source in sources:
+            for key in keys:
+                count = _token_count(source.get(key))
+                if count is not None:
+                    out[name] = count
+                    break
+            if name in out:
+                break
+    if "cached_tokens" not in out and isinstance(timings, dict):
+        count = _token_count(timings.get("cache_n"))
+        if count is not None:
+            out["cached_tokens"] = count
+    return out
+
+
+def with_cache_counts(usage: dict, timings=None) -> dict:
+    """The `usage` object as it goes on the wire: what the provider sent, plus the normalised pair.
+
+    A copy, because the caller's object is the provider's own and is logged as it arrived.
+    """
+    counts = cache_counts(usage, timings)
+    return {**usage, **counts} if counts else usage
+
+
 def _reasoning_text(part: dict) -> str:
     """Displayable reasoning in a streamed delta or a complete message.
 
@@ -811,7 +883,8 @@ class ChatProvider:
                     if choices[0].get("finish_reason") in {"length", "content_filter"}:
                         raise ProviderError("Provider stopped before completing its response; no partial tools were executed.")
                     if isinstance(obj.get("usage"), dict):
-                        emit({"event": "usage", "usage": obj["usage"]})
+                        emit({"event": "usage",
+                              "usage": with_cache_counts(obj["usage"], obj.get("timings"))})
                     message = choices[0].get("message", {})
                     if self.config.local:
                         message = self._tidy_local(message, tools, choices[0].get("finish_reason"))
@@ -1163,6 +1236,9 @@ class ChatProvider:
         finish_reason = None
         reasoning_announced = False
         usage = None
+        # llama.cpp's `timings` rides beside `usage` in the same chunk, and carries `cache_n` when
+        # the build is older than the one that added `prompt_tokens_details` (#GMCF decision 5).
+        usage_timings = None
         event_lines: list[str] = []
         event_size = 0
         thinking_started = None
@@ -1211,6 +1287,7 @@ class ChatProvider:
                 raise ProviderError("Provider reported a streaming error. No partial tool call was executed.")
             if isinstance(obj.get("usage"), dict):
                 usage = obj["usage"]
+                usage_timings = obj.get("timings")
                 self._note_progress(True)
             choices = obj.get("choices", [])
             if not choices:
@@ -1220,6 +1297,7 @@ class ChatProvider:
             # Kimi reports usage inside the final choice unless stream_options is sent.
             if isinstance(choice.get("usage"), dict) and usage is None:
                 usage = choice["usage"]
+                usage_timings = obj.get("timings")
                 self._note_progress(True)
             if choice.get("finish_reason"):
                 self._note_progress(True)
@@ -1289,7 +1367,7 @@ class ChatProvider:
         # dropping them leaves the session total and the context tracker short by the largest request
         # of the turn (owner report, 2026-09-18).
         if usage is not None:
-            emit({"event": "usage", "usage": usage})
+            emit({"event": "usage", "usage": with_cache_counts(usage, usage_timings)})
         if not got_done and finish_reason not in {"stop", "tool_calls"}:
             raise ProviderError("Provider stream ended unexpectedly; partial tools were not executed.")
         if finish_reason in {"length", "content_filter"}:

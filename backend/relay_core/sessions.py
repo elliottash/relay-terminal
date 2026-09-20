@@ -80,6 +80,10 @@ def validate_messages(messages) -> list[dict]:
 # ----- usage totals and models (session info, card #Y63Z) -----------------------------------
 
 USAGE_KEYS = ("prompt_tokens", "completion_tokens", "total_tokens", "requests")
+# Reported by some providers and not others, so they are summed only once one of them does: a
+# missing key is "not reported", not zero. `cost` is OpenRouter's; the two cache counters are
+# `provider.cache_counts()`'s normalisation of everyone's spelling (#GMCF decision 5).
+OPTIONAL_USAGE_KEYS = ("cached_tokens", "cache_write_tokens")
 
 
 def empty_usage() -> dict:
@@ -91,6 +95,9 @@ def add_usage(totals: dict, usage: dict) -> dict:
 
     Only what the provider reported is counted; nothing is estimated. `cost` appears only once a
     provider reports one (OpenRouter's `usage.cost`), so a missing key means "not reported", never 0.
+    `cached_tokens` / `cache_write_tokens` follow the same rule: a provider that says nothing about
+    its prefix cache leaves them off the totals entirely, and the displays say "not reported by this
+    provider" rather than claiming nothing was cached.
     """
     if not isinstance(usage, dict):
         return totals
@@ -103,6 +110,10 @@ def add_usage(totals: dict, usage: dict) -> dict:
         total = sum(v for v in (prompt, completion) if isinstance(v, int) and not isinstance(v, bool))
     totals["total_tokens"] = totals.get("total_tokens", 0) + max(0, total)
     totals["requests"] = totals.get("requests", 0) + 1
+    for key in OPTIONAL_USAGE_KEYS:
+        value = usage.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            totals[key] = totals.get(key, 0) + value
     cost = usage.get("cost")
     if isinstance(cost, (int, float)) and not isinstance(cost, bool) and cost >= 0:
         totals["cost"] = round(totals.get("cost", 0.0) + float(cost), 6)
@@ -114,6 +125,9 @@ def load_usage(value) -> dict:
     totals = empty_usage()
     if isinstance(value, dict):
         for key in USAGE_KEYS:
+            if isinstance(value.get(key), int) and not isinstance(value.get(key), bool) and value[key] >= 0:
+                totals[key] = value[key]
+        for key in OPTIONAL_USAGE_KEYS:
             if isinstance(value.get(key), int) and not isinstance(value.get(key), bool) and value[key] >= 0:
                 totals[key] = value[key]
         if isinstance(value.get("cost"), (int, float)) and not isinstance(value.get("cost"), bool):

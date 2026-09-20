@@ -79,6 +79,25 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(totals["prompt_tokens"], 150)
         self.assertEqual(sessions.load_usage({"total_tokens": -5, "requests": "x"}), sessions.empty_usage())
 
+    def test_cached_tokens_are_summed_only_once_a_provider_reports_them(self):
+        """#GMCF decision 5: the prefix cache is a number, and "not reported" is not zero."""
+        totals = sessions.empty_usage()
+        sessions.add_usage(totals, {"prompt_tokens": 100, "completion_tokens": 20})
+        self.assertNotIn("cached_tokens", totals)
+        self.assertNotIn("cache_write_tokens", totals)
+        # llama.cpp / OpenAI shape: a hit, then a miss that is a reported 0 and still counts.
+        sessions.add_usage(totals, {"prompt_tokens": 100, "completion_tokens": 5, "cached_tokens": 90})
+        sessions.add_usage(totals, {"prompt_tokens": 100, "completion_tokens": 5, "cached_tokens": 0})
+        self.assertEqual(totals["cached_tokens"], 90)
+        self.assertNotIn("cache_write_tokens", totals)      # OpenAI-shape providers count no writes
+        sessions.add_usage(totals, {"prompt_tokens": 10, "cached_tokens": 7, "cache_write_tokens": 3})
+        self.assertEqual((totals["cached_tokens"], totals["cache_write_tokens"]), (97, 3))
+        sessions.add_usage(totals, {"cached_tokens": True, "cache_write_tokens": -1})   # junk
+        self.assertEqual((totals["cached_tokens"], totals["cache_write_tokens"]), (97, 3))
+        # Read back from a session file, and absent there when it was absent when saved.
+        self.assertEqual(sessions.load_usage(totals)["cached_tokens"], 97)
+        self.assertNotIn("cached_tokens", sessions.load_usage({"prompt_tokens": 5}))
+
     def test_agent_records_usage_and_models_in_the_session_file(self):
         with tempfile.TemporaryDirectory() as temp:
             from test_sessions import ScriptedProvider

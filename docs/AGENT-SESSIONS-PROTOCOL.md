@@ -77,6 +77,21 @@ keeps what it was set to across a provider switch, and the GUI shows it as the l
 ## 4. Context and compaction
 
 - After every model response the worker emits `context {used_tokens, window, percent, threshold, estimated: bool}` (provider `usage` when present, else an estimate).
+- Every provider call that reports one emits `usage {usage}` first. `usage` is the provider's own
+  object, forwarded whole, plus two fields Relay normalises out of it (v2.10, 2026-09-20, #GMCF
+  decision 5):
+  **`cached_tokens`**, the part of `prompt_tokens` the provider served from its prefix cache, and
+  **`cache_write_tokens`**, what this request put into that cache where the provider counts writes
+  separately. Both are **absent when the provider reports nothing about caching** — a provider that
+  is silent is not a provider that cached nothing, and the displays say so differently — while a
+  reported miss is `0` and is kept. The shapes read, in this order: `prompt_tokens_details.cached_tokens`
+  (OpenAI, OpenRouter, Moonshot, Z.AI, Gemini's OpenAI layer, llama.cpp), `prompt_cache_hit_tokens`
+  (DeepSeek), `cache_read_input_tokens` / `cache_creation_input_tokens` (Anthropic's names, and the
+  claude guest harness), `cached_input_tokens` / `cache_write_input_tokens` (the codex harness), and
+  `timings.cache_n` beside `usage` in the same object (llama.cpp builds without `prompt_tokens_details`).
+  A guest harness reports the pair the same way (29.3); Anthropic counts its cache reads *outside*
+  `input_tokens`, so the claude harness's `prompt_tokens` is completed to include them and means what
+  every other provider's does.
 - `context` message → same event on demand.
 - Every path that replaces the conversation emits the new one's `context` too: `load_state`,
   `resume`, a conversation `rewind`, `set_model` and `reset` (new conversation: `/new`, deleting the
@@ -4249,9 +4264,11 @@ with `source: "subagent"`.
 ### 25.2 Usage and models in the session file
 
 The session file (and `<id>.meta.json`) gains `models` (every model the conversation ran on, in
-first-use order), `usage` (`{prompt_tokens, completion_tokens, total_tokens, requests, cost?}`, the
+first-use order), `usage` (`{prompt_tokens, completion_tokens, total_tokens, requests, cost?,
+cached_tokens?, cache_write_tokens?}`, the
 sums of the provider's own `usage` reports; `cost` only once a provider reports one, e.g.
-OpenRouter's `usage.cost`, so its absence means "not reported", never zero) and `instructions`
+OpenRouter's `usage.cost`, so its absence means "not reported", never zero — and the two cache
+counters of section 4 follow the same rule) and `instructions`
 (the instruction files loaded). Thread files carry the same `usage` and `models` for the
 subagent. Nothing is estimated.
 
@@ -5431,7 +5448,7 @@ guest's:
 | `tool_result` | `{call_id, tool, output, ok, diff?, ms?}` | `tool_result` (with `diff`, section 23) |
 | `approval` | `{id, kind: command\|patch\|tool\|other, detail}` | `question` (Allow / Deny, scoped) |
 | `question` | `{id, questions: [...]}` | `question` (section 27) |
-| `usage` | `{input_tokens, output_tokens, context_pct?, context_tokens?, context_window?, cost_usd?, model?}` | `context` |
+| `usage` | `{input_tokens, output_tokens, context_pct?, context_tokens?, context_window?, cost_usd?, model?}`, plus either guest's own cache counters (`cache_read_input_tokens` / `cache_creation_input_tokens` from claude, `cached_input_tokens` / `cache_write_input_tokens` from codex) | `context`, and `usage` with the normalised pair of section 4 |
 | `notice` | `{text}` | `status` |
 | `done` | `{text, stop_reason}` | (the turn's answer) |
 | `error` | `{text, code?}` | `error` |

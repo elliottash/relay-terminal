@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from relay_core import provider as provider_module
 from relay_core.provider import (CONNECT_TIMEOUT, MAX_OUTPUT_TOKENS, ChatProvider, ProviderConfig,
                                  ProviderError, ProviderStalled, ProviderTruncated, Cancelled, ProviderPreempted,
-                                 validate_stall_timeout)
+                                 cache_counts, validate_stall_timeout)
 
 
 def event(delta=None, finish=None):
@@ -883,3 +883,116 @@ class OpenRouterReasoningTests(unittest.TestCase):
         self.assertFalse(any(e.get('text') == 'thinking hard' for e in events if e['event'] == 'delta'))
         self.assertIn({'event': 'thinking_delta', 'text': 'thinking hard'}, events)
         self.assertTrue(any(e.get('event') == 'status' for e in events))
+
+
+class CacheCountsTests(unittest.TestCase):
+    """The prefix cache, out of each shape a preset can report it in (#GMCF decision 5).
+
+    Every sample below is the real thing: the llama.cpp ones were recorded from
+    `local:bonsai` (llama.cpp b10706) on 2026-09-20 and are in
+    docs/qa_evidence/2026-09-20-perf-fixes/cachetok/; the rest are the field names the
+    providers' own documentation gives, as PROPOSAL.md § 4.3 lists them.
+    """
+
+    def test_openai_shape(self):
+        # OpenAI, OpenRouter, Moonshot (kimi), Z.AI (glm), Gemini's OpenAI layer, llama.cpp.
+        usage = {'prompt_tokens': 58, 'completion_tokens': 8, 'total_tokens': 66,
+                 'prompt_tokens_details': {'cached_tokens': 54}}
+        self.assertEqual(cache_counts(usage), {'cached_tokens': 54})
+
+    def test_deepseek_shape(self):
+        usage = {'prompt_tokens': 1200, 'completion_tokens': 40,
+                 'prompt_cache_hit_tokens': 1088, 'prompt_cache_miss_tokens': 112}
+        self.assertEqual(cache_counts(usage), {'cached_tokens': 1088})
+
+    def test_anthropic_shape_carries_the_write_count_too(self):
+        # tests/fixtures/guest_harness_claude/hello.jsonl, `result.usage`.
+        usage = {'input_tokens': 10, 'output_tokens': 71,
+                 'cache_creation_input_tokens': 7624, 'cache_read_input_tokens': 13689}
+        self.assertEqual(cache_counts(usage),
+                         {'cached_tokens': 13689, 'cache_write_tokens': 7624})
+
+    def test_codex_shape(self):
+        # tests/fixtures/guest_harness_codex/ok-turn.jsonl, as the harness maps it.
+        usage = {'input_tokens': 13312, 'output_tokens': 5,
+                 'cached_input_tokens': 11136, 'cache_write_input_tokens': 0}
+        self.assertEqual(cache_counts(usage),
+                         {'cached_tokens': 11136, 'cache_write_tokens': 0})
+
+    def test_llama_cpp_timings_are_the_fallback_and_never_override_usage(self):
+        # A build older than the one that added prompt_tokens_details reports only `timings`.
+        self.assertEqual(cache_counts({'prompt_tokens': 58}, {'cache_n': 54, 'prompt_n': 4}),
+                         {'cached_tokens': 54})
+        # b10706 sends both, and `usage` is the one that is read.
+        both = cache_counts({'prompt_tokens': 58, 'prompt_tokens_details': {'cached_tokens': 54}},
+                            {'cache_n': 54})
+        self.assertEqual(both, {'cached_tokens': 54})
+
+    def test_a_provider_that_says_nothing_reports_nothing(self):
+        # Never zero-for-unknown: "this provider does not report caching" is its own answer.
+        self.assertEqual(cache_counts({'prompt_tokens': 58, 'completion_tokens': 8}), {})
+        self.assertEqual(cache_counts({'prompt_tokens_details': {}}, None), {})
+        self.assertEqual(cache_counts(None), {})
+        # A cache that missed reports 0, which is a number and is kept.
+        self.assertEqual(cache_counts({'prompt_tokens_details': {'cached_tokens': 0}}),
+                         {'cached_tokens': 0})
+
+    def test_nonsense_counts_are_not_counts(self):
+        for bad in (True, -1, 'lots', None, {'n': 1}):
+            self.assertEqual(cache_counts({'prompt_tokens_details': {'cached_tokens': bad}}), {})
+
+
+class UsageEventCacheTests(unittest.TestCase):
+    """The counts reach the `usage` event from both the streaming and the whole-body paths."""
+
+    def setUp(self):
+        self.provider = ChatProvider(ProviderConfig('http://127.0.0.1:1234/v1', 'mock', ''))
+        self.events = []
+
+    def usage_of(self, data):
+        self.provider._stream(io.BytesIO(data), self.events.append, threading.Event())
+        return [e['usage'] for e in self.events if e['event'] == 'usage'][-1]
+
+    def test_a_streamed_final_chunk_carries_both_shapes(self):
+        # The exact last chunk local:bonsai sends (llama.cpp b10706), second turn of a pair.
+        final = ('data: ' + json.dumps({
+            'choices': [], 'usage': {'completion_tokens': 8, 'prompt_tokens': 58, 'total_tokens': 66,
+                                     'prompt_tokens_details': {'cached_tokens': 54}},
+            'timings': {'cache_n': 54, 'prompt_n': 4}}) + '\n\n').encode()
+        usage = self.usage_of(event({'content': 'hi'}) + event(finish='stop') + final + b'data: [DONE]\n\n')
+        self.assertEqual(usage['cached_tokens'], 54)
+        self.assertNotIn('cache_write_tokens', usage)
+        # What the provider sent is still there, untouched.
+        self.assertEqual(usage['prompt_tokens_details'], {'cached_tokens': 54})
+
+    def test_timings_alone_still_report_the_cache(self):
+        final = ('data: ' + json.dumps({
+            'choices': [], 'usage': {'prompt_tokens': 58, 'completion_tokens': 8},
+            'timings': {'cache_n': 54}}) + '\n\n').encode()
+        usage = self.usage_of(event({'content': 'hi'}) + event(finish='stop') + final + b'data: [DONE]\n\n')
+        self.assertEqual(usage['cached_tokens'], 54)
+
+    def test_a_provider_without_a_cache_adds_no_key(self):
+        final = ('data: ' + json.dumps({'choices': [],
+                                        'usage': {'prompt_tokens': 58, 'completion_tokens': 8}}) + '\n\n').encode()
+        usage = self.usage_of(event({'content': 'hi'}) + event(finish='stop') + final + b'data: [DONE]\n\n')
+        self.assertNotIn('cached_tokens', usage)
+
+    def test_the_whole_body_path_reports_it_too(self):
+        # A non-streamed answer: llama.cpp puts `timings` beside `usage` there as well.
+        body = json.dumps({'choices': [{'message': {'content': 'hi'}, 'finish_reason': 'stop'}],
+                           'usage': {'prompt_tokens': 58, 'completion_tokens': 8,
+                                     'prompt_tokens_details': {'cached_tokens': 54}},
+                           'timings': {'cache_n': 54}}).encode()
+        message = email.message.Message()
+        message['Content-Type'] = 'application/json'
+        response = io.BytesIO(body)
+        response.headers = message
+        response.__enter__ = lambda self=response: self
+        response.__exit__ = lambda *args: False
+        with mock.patch.object(ChatProvider, '_open', return_value=response), \
+             mock.patch.object(ChatProvider, '_watch_for_stall', return_value=None):
+            self.provider.complete([{'role': 'user', 'content': 'hi'}], [], self.events.append,
+                                   threading.Event())
+        usage = [e['usage'] for e in self.events if e['event'] == 'usage'][-1]
+        self.assertEqual(usage['cached_tokens'], 54)
