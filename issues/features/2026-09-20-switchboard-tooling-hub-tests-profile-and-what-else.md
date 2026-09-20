@@ -8,7 +8,7 @@ assignee: claude-code
 rank: zzzzzzzzzzzzzzzy
 created: '2026-09-20'
 source: 'owner, Claude Code session, 2026-09-20'
-links: {plans: [], commits: [c8b0a8d2, 912ab11a, eb0a9b76, 4ac7b57d, 71355e7a, db035cfd, 5e306871, 8ad92248, 6348ebef, 6bb87f04, cf7d1a5f, 97a019fc, 0152697f, f56a6ea0, 432a17f0, a10bb2a4, fd45d116, f86266da, b81c861a, fd7a9a71, 936bc28a, 4818709e, 2bd23344, e34b1df6, 21f5b001, 20c4e29e], evidence: [docs/qa_evidence/2026-09-20-test-suites-pane/, docs/qa_evidence/2026-09-20-card-tests-check/, docs/qa_evidence/2026-09-20-profile-button/], related: [R9G7, SDXE, PF4K], github: null}
+links: {plans: [], commits: [c8b0a8d2, 912ab11a, eb0a9b76, 4ac7b57d, 71355e7a, db035cfd, 5e306871, 8ad92248, 6348ebef, 6bb87f04, cf7d1a5f, 97a019fc, 0152697f, f56a6ea0, 432a17f0, a10bb2a4, fd45d116, f86266da, b81c861a, fd7a9a71, 936bc28a, 4818709e, 2bd23344, e34b1df6, 21f5b001, 20c4e29e], evidence: [docs/qa_evidence/2026-09-20-test-suites-pane/, docs/qa_evidence/2026-09-20-card-tests-check/, docs/qa_evidence/2026-09-20-profile-button/, docs/qa_evidence/2026-09-20-switchboard-tooling-hub/HUMAN-QA.md], related: [R9G7, SDXE, PF4K, YZ8G, 561P], github: null}
 ---
 # Switchboard as the project's tooling hub: a Tests section with Check, a Test suites pane, a Profile button, and what else fits
 
@@ -222,6 +222,19 @@ three phases touch no file that #R9G7 (deliver workflow) currently holds.
 - [x] Card: `## Tests` section strip, Check button, dated `### Check` block, three actions, verification gate <!-- t:q5 -->
 - [x] Profile: scripts/relay-profile, button, streamed run, table pane, evidence under qa_evidence <!-- t:ea -->
 - [x] Docs and QA: SWITCHBOARD-DESIGN §4.14, VALIDATION inventory pointer, protocol §31, QA checklist <!-- t:em -->
+
+## Tests
+- `ctest -R testsuites` — tests/testsuites_test.cpp
+- `ctest -R cardtests` — tests/cardtests_test.cpp
+- `ctest -R profilepane` — tests/profilepane_test.cpp
+- `ctest -R windowstate` — tests/windowstate_test.cpp
+- `tests/test_test_probe.py`
+- `tests/test_test_history.py`
+- `tests/test_junit_runner.py`
+- `tests/test_tests_protocol.py`
+- `tests/test_profile_protocol.py`
+- `tests/test_relay_profile.py`
+- manual: docs/qa_evidence/2026-09-20-switchboard-tooling-hub/HUMAN-QA.md
 
 ## QA checklist
 Implementer's checks (Claude Fable 5.1 orchestrating Opus subagents, 2026-09-20). Each line names
