@@ -6,7 +6,7 @@ no prompt is ever submitted. `drive.sh [build-dir]` reproduces every shot.
 | shot | what it shows |
 |---|---|
 | implementer-a-box-open.png | the pane's model box open: `glm-5.3 (main)` / `glm-5.3-flash (flash)` role rows, then one row per catalog model in rank order, lower-case, `model · provider`; then `more models…` and `⚙ customize…` |
-| implementer-b-picker.png | Ctrl+Shift+M: the picker — filter, sort menu (priority), columns model · provider · reasoning · intelligence · tok/s · left; the current row bold and selected; the reasoning buttons (low · high · max) for it; ☆ favorite, customize…, use, cancel |
+| implementer-b-picker.png | Ctrl+Alt+M: the picker — filter, sort menu (priority), columns model · provider · reasoning · intelligence · tok/s · left; the current row bold and selected; the reasoning column is the level the pane would run at after the pick (the lists' entry, else the pane's own), not a control — the level is the composer's level box (Alt+E); ☆ favorite, customize…, use, cancel |
 | implementer-c-picker-filter.png | `flash` typed: one flat list of the two matching rows, the first selected |
 | implementer-d-picker-sort.png | the sort menu open (priority, a to z, intelligence, speed, most used, subscription left) |
 | implementer-e-options.png | `/models`: Options › Models — the providers group: only providers with a key (ordered by intelligence), Relay Free, OpenRouter always, Claude Code and Codex with `change login` / `test`; the rest behind `+ add provider` |
