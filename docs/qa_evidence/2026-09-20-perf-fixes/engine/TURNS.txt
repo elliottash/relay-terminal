@@ -1,0 +1,14 @@
+# before: 250 turns, GUI-thread CPU per turn in groups of 50
+turns      gui_cpu_s  ms_per_turn
+   1-50         3.03       61.8
+  51-100        3.16       64.5
+ 101-150        3.36       68.6
+ 151-200        3.66       74.7
+ 201-250        3.83       78.2
+# after: 250 turns, GUI-thread CPU per turn in groups of 50
+turns      gui_cpu_s  ms_per_turn
+   1-50         3.06       62.4
+  51-100        3.00       61.2
+ 101-150        3.32       67.8
+ 151-200        3.54       72.2
+ 201-250        3.85       78.6

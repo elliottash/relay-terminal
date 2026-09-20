@@ -1,0 +1,36 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 841  of event 'armv8_pmuv3_0/cycles/P'
+# Event count (approx.): 4633661091
+#
+# Overhead  Symbol                                                                                                                                                                                                             IPC   [IPC Coverage]
+# ........  .................................................................................................................................................................................................................  ....................
+#
+     9.69%  [.] 0x00000000003da2a4                                                                                                                                                                                             -      -            
+     3.85%  [k] 0xffffc5937790db78                                                                                                                                                                                             -      -            
+     3.39%  [k] 0xffffc5937651ca58                                                                                                                                                                                             -      -            
+     3.13%  [.] 0x00000000005788f8                                                                                                                                                                                             -      -            
+     2.87%  [k] 0xffffc59376504ec0                                                                                                                                                                                             -      -            
+     2.56%  [.] qHash(QString const&, unsigned int)                                                                                                                                                                            -      -            
+     2.13%  [k] 0xffffc59376a49504                                                                                                                                                                                             -      -            
+     2.04%  [.] operator==(QString const&, QString const&)                                                                                                                                                                     -      -            
+     1.77%  [.] statx                                                                                                                                                                                                          -      -            
+     1.76%  [.] malloc                                                                                                                                                                                                         -      -            
+     1.69%  [.] QByteArray::indexOf(char, int) const                                                                                                                                                                           -      -            
+     1.64%  [.] QListWidgetItem::~QListWidgetItem()                                                                                                                                                                            -      -            
+     1.57%  [.] _int_free                                                                                                                                                                                                      -      -            
+     1.41%  [.] QWidget::window() const                                                                                                                                                                                        -      -            
+     1.21%  [.] _int_malloc                                                                                                                                                                                                    -      -            
+     1.10%  [.] __GI___access                                                                                                                                                                                                  -      -            
+     1.07%  [.] __aarch64_ldadd4_acq_rel                                                                                                                                                                                       -      -            
+     1.06%  [.] 0x0000000000071ef8                                                                                                                                                                                             -      -            
+     0.98%  [k] 0xffffc59376508e60                                                                                                                                                                                             -      -            
+     0.88%  [.] QFileInfo::~QFileInfo()                                                                                                                                                                                        -      -            
+     0.77%  [.] 0x0000000000582604                                                                                                                                                                                             -      -            
+     0.12%  [.] relay::LibVtermCore::Impl::walkLinkRows(QString const&, long long, long long, std::vector<relay::LibVtermCore::Impl::CachedRun, std::allocator<relay::LibVtermCore::Impl::CachedRun> >*, unsigned int*) const  -      -            
+     0.11%  [.] relay::LibVtermCore::Impl::walkLinkRows(QString const&, long long, long long, std::vector<relay::LibVtermCore::Impl::CachedRun, std::allocator<relay::LibVtermCore::Impl::CachedRun> >*, unsigned int*) const                                                               -      -            
+     0.07%  [.] relay::FoldLayer::retainAnchored(QSet<QString> const&)                                                                                                                                                                                                                      -      -            
+     0.06%  [.] relay::LibVtermCore::hyperlinkRuns(QString const&) const                                                                                                                                                                                                                    -      -            
