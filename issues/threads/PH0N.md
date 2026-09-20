@@ -60,3 +60,14 @@ still cut to the invite for guests (tested). Found on the way: a restarted rende
 hub's token and the old loop re-dialled with it forever (4401). Phase 1.1 and 1.2 are complete.
 Running: connect tokens (1.3), the pane view's Stop / Recap / question rows / admit (2.6), the
 inbox / offline queue / notification switches (2.5, 2.7, 2.8).
+
+<!-- relay:entry 20260921T001000Z-f1 author=claude-code kind=progress -->
+### Claude Code · 2026-09-21 00:10
+Phases 2.5, 2.7, 2.8 landed (`e97c5fc8`): inbox status chips with "needs you" first and the app
+badge; a prompt or Stop sent while the socket is down is kept and sent once on resume (real-drop
+test); reconnect on `pageshow` and `online`; notifications as two switches ("When an agent finishes
+or fails" = agent_finished, failed, plan; "When something needs me" = waiting_input, password);
+tapping a notification opens that pane; the push carries Relay's icon; on iOS outside the
+installed app the settings say to add to the Home Screen first. Found and fixed: Stop vanished the
+moment the socket dropped. Missing wire field `updated` on the GUI's `pane` message is being added
+by the orchestrator (`src/RemoteShare.cpp`) so "running · 3m" is exact.
