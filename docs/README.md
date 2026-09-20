@@ -10,6 +10,7 @@ Start with [ARCHITECTURE.md](ARCHITECTURE.md) for how Relay works today and
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Process model, panes, keyboard, routing, inline agent output, control, file panes, agent backend, keys, isolation, packaging layout, engine interface |
 | [ROADMAP.md](ROADMAP.md) | Goals, decisions already made, near/mid/longer-term work with issue links, non-goals |
 | [CRASH-DIAGNOSIS.md](CRASH-DIAGNOSIS.md) | What to do when Relay dies: telling a crash from a quit, the `gui_crash` report in relay.log and `worker-faults.log`, `scripts/relay-debug`, reproducing it outside the app, and why this machine keeps no cores |
+| [PROFILING.md](PROFILING.md) | Machine setup for the test-suites and profiling tooling (`scripts/relay-tooling-setup`), the second runner on sphinxpad (`scripts/relay-remote-tests`), the three profile targets by hand (build, Python tests, app), viewing a profile without QtWebEngine, and where results go |
 | [VALIDATION.md](VALIDATION.md) | Test inventory, what was verified live, what was not, QA lane status |
 | [RELEASING.md](RELEASING.md) | How to cut a Linux beta: `.deb`s, AUR, checksums, GitHub Pages, version scheme |
 | [QUEUE-INTERRUPT.md](QUEUE-INTERRUPT.md) | Agent prompt queue and interrupt protocol; design for queuing shell commands |
@@ -46,6 +47,7 @@ Start with [ARCHITECTURE.md](ARCHITECTURE.md) for how Relay works today and
 | [REMOTE-AND-MULTIPLAYER-DESIGN.md](REMOTE-AND-MULTIPLAYER-DESIGN.md) | Warp Remote Control, Blink, sshx and others compared; the phone-first design, phases, threat model and owner decisions behind `#W5N2` |
 | [OPENCODE-NOTES.md](OPENCODE-NOTES.md) | What Relay's agent could adopt from opencode, ranked |
 | [SWITCHBOARD-AESTHETIC.md](SWITCHBOARD-AESTHETIC.md) | Proposal: the switchboard aesthetic inside Relay — design only, nothing implemented (`#8E4Q`) |
+| [SWITCHBOARD-TOOLING-RESEARCH.md](SWITCHBOARD-TOOLING-RESEARCH.md) | The Switchboard as the project's tooling hub (#7BM4): test explorers and test analytics, what "stale", "slow" and "flaky" mean and how they are measured, profiling shapes and what is feasible on these machines, how seven agent products surface verification, and a ranked list of other tooling that fits a board of cards |
 | [RESEARCH.md](RESEARCH.md) | Historical: primary sources checked for the first build (KonsolePart, Qt editor, Warp licensing, Kimi and Z.AI endpoints) |
 
 ## Evidence

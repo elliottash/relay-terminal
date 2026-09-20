@@ -1,0 +1,178 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Set a machine up for Relay's test-suites and profiling tooling (card #7BM4), or say what is
+# missing. It is the same script on every runner: spark (aarch64, Ubuntu 24.04) and sphinxpad
+# (x86_64, Ubuntu 26.04) were both set up with it, over ssh for the second:
+#
+#   scripts/relay-tooling-setup                 # check only: a table, then the smoke tests
+#   scripts/relay-tooling-setup --install       # install what is missing, then check
+#   ssh sphinxpad.local 'bash -s -- --install' < scripts/relay-tooling-setup
+#
+# What it installs, and nothing else:
+#   apt (needs passwordless sudo; skipped with a sentence when sudo asks for a password):
+#       linux-tools (perf), hotspot, heaptrack, hyperfine, clang, ninja-build
+#   into ~/.local (no root):
+#       py-spy                      uv tool / pipx / a private venv, whichever exists
+#       FlameGraph's perl scripts   stackcollapse-perf.pl, flamegraph.pl
+#       speedscope's static bundle  the flame-graph viewer, opened in the system browser
+#       ClangBuildAnalyzer          built from source, only where clang is present
+#
+# What it deliberately does NOT do: it never touches kernel.perf_event_paranoid. Both machines
+# ship it at 4 and `sudo -n perf` works on both, so the tools run perf through sudo and hand the
+# output file back to the user; a system-wide sysctl is the owner's call, not a setup script's.
+# It never edits a shell profile either: everything lands in ~/.local/bin, which is already on PATH.
+set -uo pipefail
+
+install=0
+for a in "$@"; do
+    case $a in
+        --install) install=1 ;;
+        -h|--help) sed -n '3,24p' "${BASH_SOURCE[0]:-$0}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) echo "relay-tooling-setup: unknown argument $a" >&2; exit 2 ;;
+    esac
+done
+
+share=$HOME/.local/share/relay-tooling
+bin=$HOME/.local/bin
+mkdir -p "$share" "$bin"
+export PATH="$bin:$PATH"
+have() { command -v "$1" >/dev/null 2>&1; }
+say() { printf '%s\n' "$*"; }
+sudo_ok=0; sudo -n true 2>/dev/null && sudo_ok=1
+
+SPEEDSCOPE_VERSION=1.22.2
+SPEEDSCOPE_URL=https://github.com/jlfwong/speedscope/releases/download/v$SPEEDSCOPE_VERSION/speedscope-$SPEEDSCOPE_VERSION.zip
+
+# ------------------------------------------------------------------------------ install
+if (( install )); then
+    # --- apt
+    want=()
+    have perf      || want+=(linux-tools-common "linux-tools-$(uname -r)")
+    have hotspot   || want+=(hotspot)
+    have heaptrack || want+=(heaptrack)
+    have hyperfine || want+=(hyperfine)
+    have clang     || want+=(clang)
+    have ninja     || want+=(ninja-build)
+    have unzip     || want+=(unzip)
+    have git       || want+=(git)
+    if (( ${#want[@]} )); then
+        if (( sudo_ok )); then
+            # One package per call: a release that has dropped one of them (26.04 has no
+            # `hotspot`) must not take the others down with it.
+            : >"$share/apt.log"
+            for pkg in "${want[@]}"; do
+                if sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$pkg" \
+                       >>"$share/apt.log" 2>&1; then say "apt: installed $pkg"
+                else say "apt: $pkg is not installable here (see $share/apt.log)"; fi
+            done
+        else
+            say "apt: sudo asks for a password here, so these were not installed: ${want[*]}"
+        fi
+    fi
+
+    # --- py-spy
+    if ! have py-spy; then
+        if have uv; then uv tool install py-spy >"$share/py-spy.log" 2>&1
+        elif have pipx; then pipx install py-spy >"$share/py-spy.log" 2>&1
+        else python3 -m venv "$share/venv" >"$share/py-spy.log" 2>&1 \
+              && "$share/venv/bin/pip" install -q py-spy >>"$share/py-spy.log" 2>&1 \
+              && ln -sf "$share/venv/bin/py-spy" "$bin/py-spy"
+        fi
+        have py-spy || say "py-spy: install failed; see $share/py-spy.log (stdlib cProfile is the fallback)"
+    fi
+
+    # --- FlameGraph
+    if [[ ! -x $share/FlameGraph/flamegraph.pl ]]; then
+        git clone -q --depth 1 https://github.com/brendangregg/FlameGraph "$share/FlameGraph" \
+            || say "FlameGraph: clone failed"
+    fi
+    for s in flamegraph.pl stackcollapse-perf.pl stackcollapse.pl difffolded.pl; do
+        [[ -x $share/FlameGraph/$s ]] && ln -sf "$share/FlameGraph/$s" "$bin/$s"
+    done
+
+    # --- speedscope (static bundle; scripts/relay-speedscope opens a profile in it)
+    if [[ ! -f $share/speedscope/index.html ]]; then
+        tmp=$(mktemp -d)
+        if curl -fsSL -m 120 -o "$tmp/s.zip" "$SPEEDSCOPE_URL" && unzip -q "$tmp/s.zip" -d "$tmp"; then
+            rm -rf "$share/speedscope"; mv "$tmp/speedscope" "$share/speedscope"
+        else
+            say "speedscope: download failed ($SPEEDSCOPE_URL)"
+        fi
+        rm -rf "$tmp"
+    fi
+
+    # --- ClangBuildAnalyzer (only useful with clang: it reads -ftime-trace output)
+    if have clang && ! have ClangBuildAnalyzer; then
+        src=$share/ClangBuildAnalyzer
+        [[ -d $src ]] || git clone -q --depth 1 https://github.com/aras-p/ClangBuildAnalyzer "$src"
+        if cmake -S "$src" -B "$src/build" -DCMAKE_BUILD_TYPE=Release >"$share/cba.log" 2>&1 \
+           && cmake --build "$src/build" -j >>"$share/cba.log" 2>&1; then
+            ln -sf "$src/build/ClangBuildAnalyzer" "$bin/ClangBuildAnalyzer"
+        else
+            say "ClangBuildAnalyzer: build failed; see $share/cba.log"
+        fi
+    fi
+fi
+
+# ------------------------------------------------------------------------------ check
+say "== $(hostname) · $(uname -m) · $(. /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-?}") · $(nproc) cores"
+missing=0
+row() {  # row <tool> <needed|optional> <what for>
+    local p; p=$(command -v "$1" 2>/dev/null || true)
+    if [[ -n $p ]]; then printf '  %-22s ok       %s\n' "$1" "$3"
+    else printf '  %-22s MISSING  %s (%s)\n' "$1" "$3" "$2"; [[ $2 == needed ]] && missing=$((missing+1)); fi
+}
+row python3               needed   "unittest runs, the JUnit writer, cProfile"
+row cmake                 needed   "configure; ctest --output-junit needs 3.21+"
+row ctest                 needed   "C++ suites and their JUnit XML"
+row ninja                 needed   "the profiled build dir: .ninja_log gives per-target times"
+row perf                  needed   "app profile target (run as sudo -n perf)"
+row py-spy                needed   "Python tests profile target, no root"
+row stackcollapse-perf.pl needed   "perf script -> folded stacks"
+row flamegraph.pl         optional "SVG flame graph without a browser"
+row hotspot               optional "native Qt viewer for perf.data"
+row heaptrack             optional "heap profile target"
+row hyperfine             optional "compare a command across two commits"
+row clang                 optional "-ftime-trace: per-header, per-template build report"
+row ClangBuildAnalyzer    optional "ranks the -ftime-trace output"
+if [[ -f $share/speedscope/index.html ]]; then printf '  %-22s ok       %s\n' speedscope "flame-graph viewer ($share/speedscope)"
+else printf '  %-22s MISSING  %s\n' speedscope "flame-graph viewer (optional)"; fi
+say "  perf_event_paranoid=$(cat /proc/sys/kernel/perf_event_paranoid 2>/dev/null) · ptrace_scope=$(cat /proc/sys/kernel/yama/ptrace_scope 2>/dev/null) · sudo: $([[ $sudo_ok == 1 ]] && echo passwordless || echo 'asks for a password')"
+
+# --- smoke tests: each proves a whole path works, not that a binary exists
+say "-- smoke tests"
+work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
+fail=0
+t() { if "$@" >"$work/out" 2>&1; then say "  pass  $label"; else say "  FAIL  $label"; sed 's/^/        /' "$work/out" | tail -5; fail=$((fail+1)); fi; }
+
+label="ctest can write JUnit XML (cmake >= 3.21)"
+t bash -c 'v=$(cmake --version | sed -n "1s/[^0-9]*\([0-9]*\)\.\([0-9]*\).*/\1 \2/p"); set -- $v; (( $1 > 3 || ($1 == 3 && $2 >= 21) ))'
+
+cat >"$work/spin.py" <<'PY'
+import time
+def burn(n):
+    t = time.time(); x = 0
+    while time.time() - t < n: x += 1
+    return x
+burn(1.2)
+PY
+label="py-spy records a Python child into speedscope JSON, no root"
+t bash -c "py-spy record --format speedscope -o '$work/py.json' -- python3 '$work/spin.py' && grep -q burn '$work/py.json'"
+
+label="stdlib cProfile fallback"
+t bash -c "python3 -m cProfile -o '$work/c.prof' '$work/spin.py' && python3 -c \"import pstats; pstats.Stats('$work/c.prof')\""
+
+# Recording needs root (paranoid=4); reading does not. perf refuses, even under sudo, a file
+# that neither root nor the caller owns, so the file is chowned and read as the user.
+label="sudo -n perf record -> chown -> perf script -> folded stacks"
+t bash -c "cd '$work' && sudo -n perf record -q -g -o '$work/perf.data' -- python3 '$work/spin.py' && sudo -n chown \$(id -u) '$work/perf.data' && perf script -i '$work/perf.data' 2>/dev/null | stackcollapse-perf.pl > '$work/folded' && test -s '$work/folded'"
+
+if have clang; then
+    printf 'int main(){return 0;}\n' >"$work/h.cpp"
+    label="clang -ftime-trace writes a trace"
+    t bash -c "cd '$work' && clang++ -ftime-trace -c h.cpp -o h.o && test -s h.json"
+fi
+
+say "-- $missing needed tool(s) missing, $fail smoke test(s) failed"
+(( missing == 0 && fail == 0 ))

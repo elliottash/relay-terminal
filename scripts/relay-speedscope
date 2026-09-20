@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""Open a profile in the local speedscope bundle, offline.
+
+    scripts/relay-speedscope tests.speedscope.json     # py-spy --format speedscope
+    scripts/relay-speedscope app.folded                # perf script | stackcollapse-perf.pl
+    scripts/relay-speedscope build.trace.json          # ninjatracing / clang -ftime-trace
+    scripts/relay-speedscope --print-url profile.json  # print the URL, open nothing
+
+Relay has no QtWebEngine, so the flame graph is the one view that leaves the app: the table of
+functions is drawn natively, and this opens the rest in the system browser. Nothing is uploaded —
+the bundle is the static one `scripts/relay-tooling-setup` put in ~/.local/share/relay-tooling,
+and the profile reaches it the way speedscope's own CLI does it: a small JavaScript file beside
+the profile that calls `speedscope.loadFileFromBase64`, named in the page's `#localProfilePath=`.
+A `file://` page may not fetch a JSON file, but it may load a script.
+"""
+import base64
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import urllib.parse
+from pathlib import Path
+
+BUNDLE = Path(os.environ.get("RELAY_SPEEDSCOPE_DIR",
+                             Path.home() / ".local/share/relay-tooling/speedscope"))
+
+
+def main(argv: list[str]) -> int:
+    args = [a for a in argv if not a.startswith("--")]
+    print_only = "--print-url" in argv
+    if "-h" in argv or "--help" in argv:
+        print(__doc__.strip())
+        return 0
+    if len(args) != 1:
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    profile = Path(args[0])
+    index = BUNDLE / "index.html"
+    if not index.is_file():
+        print(f"relay-speedscope: no bundle at {BUNDLE}; run scripts/relay-tooling-setup --install",
+              file=sys.stderr)
+        return 127
+    try:
+        data = profile.read_bytes()
+    except OSError as err:
+        print(f"relay-speedscope: {err}", file=sys.stderr)
+        return 1
+    # Kept, not deleted: the browser reads it after this process has exited.
+    out = Path(tempfile.mkdtemp(prefix="relay-speedscope-")) / "profile.js"
+    out.write_text("speedscope.loadFileFromBase64(%s, %s)\n"
+                   % (json.dumps(profile.name), json.dumps(base64.b64encode(data).decode())))
+    url = f"file://{urllib.parse.quote(str(index))}#localProfilePath={urllib.parse.quote(str(out))}"
+    print(url)
+    if print_only:
+        return 0
+    opener = "xdg-open" if sys.platform.startswith("linux") else "open"
+    try:
+        subprocess.Popen([opener, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    except OSError as err:
+        print(f"relay-speedscope: could not start {opener}: {err}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

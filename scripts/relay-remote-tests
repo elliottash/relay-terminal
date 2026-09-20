@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Build and test one commit on another machine, and bring the results back (card #7BM4).
+#
+#   scripts/relay-remote-tests                          # main, on sphinxpad.local, Qt auto
+#   scripts/relay-remote-tests --qt 6                   # the Qt the 26.04 .deb ships
+#   scripts/relay-remote-tests --rev 3825b994 -R board  # one commit, only ctest names matching
+#   scripts/relay-remote-tests --build-only             # just the build and its .ninja_log
+#   scripts/relay-remote-tests --host other.local --jobs 4
+#
+# Why it exists: this desktop is aarch64, Ubuntu 24.04, g++ 13 and Qt 5; the laptop is x86_64,
+# Ubuntu 26.04, g++ 15 / clang and both Qts — the platform the package is built for. A test that
+# is green here says nothing about there. Every execution the Test suites pane stores carries a
+# `host`, so both machines' runs sit side by side in one history.
+#
+# What it does, in order:
+#   1. `git archive <rev>` — the committed tree, never the working tree, which holds every other
+#      session's uncommitted code (CLAUDE.md, "what gets built is what would land").
+#   2. rsync it to <host>:~/relay-ci/src by checksum and WITHOUT timestamps: `git archive` stamps
+#      every file with the commit time, so carrying mtimes would rebuild everything on every commit.
+#   3. Configure once (Ninja, RelWithDebInfo — the generator matters: .ninja_log is the build
+#      profile), build, run ctest with --output-junit, and the Python suite through
+#      `scripts/test.sh --junit` when the exported tree has that flag.
+#   4. Fetch <host>:~/relay-ci/results/<run>/ into the board's private root:
+#      <board>/.private/tests/incoming/<host>-<run>/ {ctest.xml, unittest.xml, meta.json,
+#      ninja_log, build.log, ctest.log}.  Gitignored; the history store ingests from there.
+#
+# Tests there run with RELAY_KEYRING=off, QT_QPA_PLATFORM=offscreen and every XDG dir and TMPDIR
+# under a short fresh /tmp path (108-byte socket limit), so they touch nothing of the owner's.
+# The exit status is the tests' own; results are fetched either way.
+set -uo pipefail
+
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+host=sphinxpad.local rev=main qt=AUTO regex= jobs=1 build_only=0 out=
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --host) host=$2; shift 2 ;;
+        --rev) rev=$2; shift 2 ;;
+        --qt) qt=$2; shift 2 ;;
+        -R|--regex) regex=$2; shift 2 ;;
+        --jobs) jobs=$2; shift 2 ;;
+        --out) out=$2; shift 2 ;;
+        --build-only) build_only=1; shift ;;
+        -h|--help) sed -n '3,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) echo "relay-remote-tests: unknown argument $1" >&2; exit 2 ;;
+    esac
+done
+[[ $qt =~ ^(AUTO|auto|5|6)$ ]] || { echo "relay-remote-tests: --qt is 5, 6 or auto" >&2; exit 2; }
+qt=${qt^^}
+[[ $jobs =~ ^[0-9]+$ && $regex != *\'* ]] || { echo "relay-remote-tests: bad --jobs or -R" >&2; exit 2; }
+
+commit=$(git -C "$root" rev-parse --verify "$rev^{commit}") || exit 2
+run=$(date -u +%Y%m%dT%H%M%SZ)-${commit:0:8}
+board=
+for d in .switchboard switchboard issues; do [[ -f $root/$d/board.yaml ]] && { board=$root/$d; break; }; done
+[[ -n $out ]] || out=${board:-$root/build}/.private/tests/incoming/${host%%.*}-$run
+
+stage=$(mktemp -d); trap 'rm -rf "$stage"' EXIT
+git -C "$root" archive "$commit" | tar -x -C "$stage" || exit 1
+echo "relay-remote-tests: $commit -> $host:~/relay-ci (run $run)"
+ssh -o BatchMode=yes "$host" 'mkdir -p ~/relay-ci/src ~/relay-ci/results' || exit 1
+rsync -rlpc --delete "$stage/" "$host:relay-ci/src/" || exit 1
+
+build=build; [[ $qt == AUTO ]] || build=build-qt$qt
+ssh -o BatchMode=yes "$host" "bash -s -- '$run' '$commit' '$qt' '$build' '$regex' '$jobs' '$build_only'" <<'REMOTE'
+set -uo pipefail
+run=$1 commit=$2 qt=$3 build=$4 regex=$5 jobs=$6 build_only=$7
+cd ~/relay-ci; res=$PWD/results/$run; mkdir -p "$res"
+started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+if [[ ! -f $build/CMakeCache.txt ]]; then
+    cmake -S src -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DRELAY_QT_MAJOR="$qt" \
+        >"$res/configure.log" 2>&1 || { echo "configure failed; see configure.log"; tail -20 "$res/configure.log"; exit 3; }
+fi
+t0=$(date +%s)
+cmake --build "$build" -j"$(nproc)" >"$res/build.log" 2>&1; build_rc=$?
+build_s=$(( $(date +%s) - t0 ))
+cp "$build/.ninja_log" "$res/ninja_log" 2>/dev/null
+ctest_rc=0 py_rc=0 py=skipped
+if (( build_rc != 0 )); then
+    echo "build failed after ${build_s}s"; grep -m5 -E "error|FAILED" "$res/build.log"
+elif (( ! build_only )); then
+    iso=$(mktemp -d /tmp/rci-XXXXXX); chmod 700 "$iso"
+    for v in XDG_RUNTIME_DIR XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME XDG_CACHE_HOME TMPDIR; do
+        mkdir -p "$iso/$v"; chmod 700 "$iso/$v"; export "$v=$iso/$v"
+    done
+    export RELAY_KEYRING=off QT_QPA_PLATFORM=offscreen RELAY_LOCAL_MODELS="$iso/local-models.json"
+    sel=(-E '^backend-and-bash$'); [[ -n $regex ]] && sel+=(-R "$regex")
+    ctest --test-dir "$build" "${sel[@]}" -j"$jobs" --timeout 600 --output-junit "$res/ctest.xml" \
+        >"$res/ctest.log" 2>&1; ctest_rc=$?
+    tail -4 "$res/ctest.log"
+    if [[ -z $regex ]] && grep -q -- '--junit' src/scripts/test.sh; then
+        ( cd src && scripts/test.sh --junit "$res/unittest.xml" ) >"$res/unittest.log" 2>&1; py_rc=$?; py=ran
+        tail -3 "$res/unittest.log"
+    fi
+    rm -rf "$iso"
+fi
+cat >"$res/meta.json" <<META
+{"run_id": "$run", "commit": "$commit", "host": "$(hostname)", "arch": "$(uname -m)",
+ "os": "$(. /etc/os-release; echo "$PRETTY_NAME")", "qt": "$qt", "build_dir": "$build",
+ "started": "$started", "finished": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "build_seconds": $build_s,
+ "build_rc": $build_rc, "ctest_rc": $ctest_rc, "unittest": "$py", "unittest_rc": $py_rc}
+META
+(( build_rc == 0 && ctest_rc == 0 && py_rc == 0 ))
+REMOTE
+rc=$?
+mkdir -p "$out" && rsync -a "$host:relay-ci/results/$run/" "$out/" && echo "relay-remote-tests: results in $out"
+exit $rc
