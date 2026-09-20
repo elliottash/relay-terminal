@@ -169,6 +169,9 @@ public:
     void openSignal(const QString &key);
     void closeSignal();
     bool signalOpen() const;
+    // The `## Signal` section of the open card, as its strip shows it; empty on a card that has
+    // none — which is every card but a promoted signal's (plan step 6).
+    QString cardSignalStrip() const;
     // Which section's fold row the selection is standing on, or empty. A fold row is not a card,
     // so `selectedCard()` is empty while it is selected and every card action is inert — and a
     // card selected by any other path wins, which is what keeps the two from both being set.

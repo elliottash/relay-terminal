@@ -1678,6 +1678,29 @@ public:
         pickers->addStretch();
         layout->addLayout(pickers);
 
+        // The machine's own block on a promoted card (#AQ6X): the card's `## Signal` section, as a
+        // bordered strip rather than a heading in the middle of the body. The signal owns those
+        // words and rewrites them on every state change, so they are not the owner's text to read
+        // in sequence — they are the state of the fault the card was opened for, and they belong
+        // over the card, beside its pickers, not inside its prose. (Under the verify line is where
+        // #7BM4's `## Tests` strip goes; the two sit one above the other, each on its own card.)
+        m_signalStrip = new QFrame(this);
+        m_signalStrip->setObjectName(QStringLiteral("boardEdit"));
+        auto *signalBox = new QVBoxLayout(m_signalStrip);
+        signalBox->setContentsMargins(8, 6, 8, 6);
+        signalBox->setSpacing(2);
+        auto *signalHint = new QLabel(QStringLiteral("Signal — the machine's own words, rewritten "
+                                                     "on every change"), m_signalStrip);
+        signalHint->setObjectName(QStringLiteral("boardEditHint"));
+        signalBox->addWidget(signalHint);
+        m_signalStripText = new QLabel(m_signalStrip);
+        m_signalStripText->setWordWrap(true);
+        m_signalStripText->setObjectName(QStringLiteral("boardSignalSection"));
+        m_signalStripText->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+        m_signalStrip->hide();
+        signalBox->addWidget(m_signalStripText);
+        layout->addWidget(m_signalStrip);
+
         m_meta = new QLabel(this);
         m_meta->setWordWrap(true);
         m_meta->setTextFormat(Qt::RichText);
@@ -2020,6 +2043,9 @@ public:
     QString status() const { return m_statusValue; }
     bool hasPlan() const { return m_sections.contains(QStringLiteral("Plan"), Qt::CaseInsensitive); }
     bool hasAcceptance() const { return !m_front.value(QStringLiteral("acceptance")).toString().trimmed().isEmpty(); }
+    // The `## Signal` section this card is showing as a strip (#AQ6X), or empty on a card that has
+    // none — which is every card but a promoted signal's.
+    QString signalStrip() const { return m_signalStrip->isHidden() ? QString() : m_signalSection; }
     bool busy() const { return m_busy; }
     // The worker's `qa` block for this card, as it arrived (#T71W). Empty for a card it sent none
     // for — an old worker, or a card with no `implemented_by` yet.
@@ -2216,6 +2242,15 @@ public:
         // place. A list that only grew keeps every one where it sealed.
         if (int(m_entries.size()) < shownBefore)
             m_sealed.clear();
+        // The `## Signal` strip (#AQ6X): read from the body the card arrived with, so a card that
+        // stops being a promotion — the section removed — loses the strip at its next read.
+        m_signalSection = board::signalSectionOf(card.value(QStringLiteral("body")).toString());
+        m_signalStripText->setText(m_signalSection);
+        // The block and its frame are shown and hidden together, so "is the strip up?" has one
+        // answer whichever of the two is asked — including by a test, which cannot ask a widget
+        // whose parent is hidden whether it is itself.
+        m_signalStripText->setVisible(!m_signalSection.isEmpty());
+        m_signalStrip->setVisible(!m_signalSection.isEmpty());
         render(sameCard ? Scroll::Keep : Scroll::Top);
         m_loading = false;
     }
@@ -3171,6 +3206,10 @@ private:
     QString m_busyMode;               // "discuss" or "plan" while a turn runs
     QString m_progress;               // what this card's turn is doing now (19.16)
     QString m_executeArmed;           // the card that was warned it has no plan or acceptance
+    // The promoted card's `## Signal` strip (#AQ6X) and the section it is showing.
+    QFrame *m_signalStrip = nullptr;
+    QLabel *m_signalStripText = nullptr;
+    QString m_signalSection;
     int m_threadTotal = 0;
     bool m_loading = false, m_busy = false, m_editing = false;
 };
@@ -5637,6 +5676,11 @@ void BoardView::closeSignal()
 bool BoardView::signalOpen() const
 {
     return m_signalDetail && !m_signalDetail->isHidden();
+}
+
+QString BoardView::cardSignalStrip() const
+{
+    return m_detail->signalStrip();
 }
 
 QString BoardView::paneClaimToken() const

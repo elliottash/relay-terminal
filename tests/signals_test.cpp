@@ -17,6 +17,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QtTest>
@@ -141,9 +142,7 @@ private slots:
     void aSignalRowOpensItsPageAndEachActionSendsItsMessage();
     void aRefusalLandsOnThePagesErrorLine();
     void whichSignalFoldsAreOpenRidesTheLayoutNode();
-    // The `## Signal` strip on a promoted card's page is `theSignalSectionOfAPromotedCardsBody`
-    // above until the strip itself lands: three other sessions are editing the card page's
-    // constructor right now (#7BM4's `## Tests` strip among them), so the strip goes in on its own.
+    void aPromotedCardsPageWearsTheSignalStrip();
 };
 
 // The order is the research's R11: a group (one cause, one item) before the keys it stands for,
@@ -590,6 +589,50 @@ void SignalsTests::whichSignalFoldsAreOpenRidesTheLayoutNode()
     // An unknown key in a saved node is ignored rather than opening something at random.
     back.setOpenSignals(QJsonArray{QStringLiteral("nonsense")});
     QVERIFY(back.rows().at(relay::board::rowOfSignalFold(back.rows())).collapsed);
+}
+
+// The promoted card wears the machine's own block as a strip on its page, the way #7BM4's
+// `## Tests` strip does: the card and the signal are two views of one fault, and the card has to
+// say so without the owner opening the signal.
+void SignalsTests::aPromotedCardsPageWearsTheSignalStrip()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({card(QStringLiteral("K7Q2"), QStringLiteral("inbox"))}));
+    view.selectCard(QStringLiteral("K7Q2"));
+    view.openSelected();
+    QString request;
+    for (const QJsonObject &message : sent)
+        if (message.value(QStringLiteral("type")).toString() == QStringLiteral("board_card_get"))
+            request = message.value(QStringLiteral("id")).toString();
+
+    const auto arrived = [&request](const QString &body, const QJsonArray &sections) {
+        return QJsonObject{{"event", "board_card"}, {"id", request}, {"card_id", "K7Q2"},
+                           {"title", "panelayout fails"}, {"status", "inbox"}, {"tab", "bugs"},
+                           {"hash", "h1"}, {"path", "issues/changes/2026-09-20-panelayout.md"},
+                           {"body", body}, {"issue", "the test fails"},
+                           {"issue_heading", "Issue"}, {"sections", sections},
+                           {"thread", QJsonArray{}}, {"thread_total", 0}};
+    };
+    view.handleEvent(arrived(QStringLiteral("## Issue\nthe test fails\n\n## Signal\n"
+                                            "- key: `ctest:panelayout`\n- failures: 4\n"),
+                             QJsonArray{"Issue", "Signal"}));
+    QVERIFY(view.detailOpen());
+    QCOMPARE(view.cardSignalStrip(),
+             QStringLiteral("- key: `ctest:panelayout`\n- failures: 4"));
+    // The strip is a row in the page, not a floating thing over it, and it is what the section
+    // says — the machine rewrites those words, so nothing here interprets them.
+    QLabel *block = view.findChild<QLabel *>(QStringLiteral("boardSignalSection"));
+    QVERIFY(block);
+    QVERIFY(!block->isHidden());
+    QCOMPARE(block->text(), QStringLiteral("- key: `ctest:panelayout`\n- failures: 4"));
+
+    // A card that is not a promotion has no strip, and one that stops being a promotion loses it
+    // at its next read.
+    view.handleEvent(arrived(QStringLiteral("## Issue\nthe test fails\n"), QJsonArray{"Issue"}));
+    QCOMPARE(view.cardSignalStrip(), QString());
+    QVERIFY(block->isHidden());
 }
 
 QTEST_MAIN(SignalsTests)
