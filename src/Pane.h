@@ -9,6 +9,8 @@
 #include "AppPaths.h"
 #include "CopyOnSelect.h"
 #include "CurrentTextComboBox.h"
+#include "ModelCatalog.h"
+#include "ModelPicker.h"
 #include "Keymap.h"
 #include "Isolation.h"
 
@@ -910,7 +912,7 @@ public:
         send({{"type", "cancel"}}); clearFix();
         status(QStringLiteral("Stopping. Commands that already ran may have changed files; a network read can take up to its timeout to stop."));
     }
-    void selectModel(const QString &id) {
+    void selectModel(const QString &id, const QString &model = QString()) {
         // "role:" is a Main/Flash row, "gear:" the model options modal, and "serving:" the model
         // this one turn is running on (an image, plan mode's own role, or a failover): none of them
         // is a preset to switch to. The first two are acted on where the box is built
@@ -936,14 +938,16 @@ public:
         // A full configure starts a new conversation, which a running turn cannot have.
         if (!m_configured || preset.isEmpty()) {
             if (m_agentBusy) { status(QStringLiteral("Stop the current agent turn before configuring a new provider.")); changed(); return; }
-            configurePreset(id, true); return;
+            configurePreset(id, true, model); return;
         }
         // Switch the provider, keeping the conversation. Allowed while a turn runs (issue 3ES1): the
         // worker lets the request in flight finish on the old model and sends the next one to this
         // model; `model_changed` says which, and `model_applied` marks the moment in the transcript.
+        // `model`: a catalog entry other than the preset's own default model (owner, 2026-09-20:
+        // "glm-5.3 flash" on the same key is a row of its own). Empty is the preset's model.
         QJsonObject request{{"type", "set_model"}, {"preset", id}, {"use_stored_key", true},
               {"base_url", preset.value(QStringLiteral("base_url")).toString()},
-              {"model", preset.value(QStringLiteral("model")).toString()},
+              {"model", model.isEmpty() ? preset.value(QStringLiteral("model")).toString() : model},
               {"extra", preset.value(QStringLiteral("extra")).toObject()},
               {"max_tokens", QSettings().value(QStringLiteral("provider/max_tokens"), 0).toInt()}};
         // A guest preset (29.3): what the harness is started with — the permission mode, and a
@@ -951,6 +955,7 @@ public:
         if (const QJsonObject guest = takeGuestRequest(id); !guest.isEmpty()) request.insert(QStringLiteral("guest"), guest);
         send(request);
         rememberPreset(id);
+        if (!model.isEmpty()) QSettings().setValue(QStringLiteral("provider/model"), model);
         rememberPresetBeforeGuest(id);
         m_currentPreset = id; changed();
     }
@@ -996,8 +1001,51 @@ public:
         changed();
     }
     void openProviderDialog() { configure(); }
-    // Ctrl+Shift+M (agent.model) and /model with no argument: the model picker for this pane.
-    void openModelPicker() { runSlashCommand(QStringLiteral("model"), QString()); }
+    // ----- the model catalog (owner, 2026-09-20) ---------------------------------------------
+    // Every model of every preset row the worker sent, as relay::models entries; what the user
+    // checked and ranked lives in QSettings under models/*. The box, the picker, /model <name> and
+    // /swap all read this and all switch through selectEntry, so a pick is one thing.
+    relay::models::Catalog modelCatalog() const { return relay::models::catalogFrom(m_presets); }
+    // The entry this pane runs on: its preset and the model the worker last reported (a guest's
+    // own model while a guest answers). Before the worker names one, the preset's Main model.
+    QString currentEntryKey() const {
+        if (m_currentPreset.isEmpty()) return QString();
+        const QString guest = guestOfPreset(m_currentPreset);
+        const QString model = !guest.isEmpty() && !m_guestModel.isEmpty() ? m_guestModel : m_model;
+        if (!model.isEmpty()) return relay::models::Catalog::keyFor(m_currentPreset, model);
+        const relay::models::Catalog catalog = modelCatalog();
+        if (const auto *main = catalog.tierEntry(m_currentPreset, QStringLiteral("main"))) return main->key;
+        const QList<relay::models::Entry> rows = catalog.ofPreset(m_currentPreset);
+        return rows.isEmpty() ? QString() : rows.first().key;
+    }
+    // Ctrl+Shift+M (agent.model), /model with no argument, and the box's "more models…" row.
+    void openModelPicker() {
+        relay::ModelPicker::Context context;
+        context.catalog = modelCatalog();
+        context.currentKey = currentEntryKey();
+        context.currentEffort = m_effort;
+        const relay::ModelPick pick = relay::pickModel(this, context, [this] {
+            if (onOpenOptions) onOpenOptions(QStringLiteral("models"));
+        });
+        if (!pick.accepted) return;
+        selectEntry(pick.key, pick.effort);
+        focusInput();
+    }
+    // One door for every pick of a catalog entry. The level is the one the pick named, else the
+    // one remembered for that entry (models/effort/<key>), else the pane keeps its own.
+    void selectEntry(const QString &key, const QString &effort = QString()) {
+        QString preset, model;
+        if (!relay::models::Catalog::splitKey(key, &preset, &model)) return;
+        const QString level = effort.isEmpty() ? relay::models::curation::effortFor(key) : effort;
+        if (const QString guest = guestOfPreset(preset); !guest.isEmpty()) {
+            if (preset != m_currentPreset || model != m_guestModel) pickGuest(guest, model);
+        } else if (preset != m_currentPreset) {
+            leaveGuest([this, preset, model] { selectModel(preset, model); });
+        } else if (model != m_model) {
+            setMainModel(model);
+        }
+        if (!level.isEmpty() && level != m_effort && efforts().contains(level)) setEffort(level);
+    }
     // The pane's provider settings follow a model switch as a whole (card WFJM): the provider dialog
     // reads `provider/base|model|extra` as its defaults, and they used to keep the first preset's
     // endpoint after every chip or /model switch.
@@ -4299,6 +4347,16 @@ private:
         if (type == QStringLiteral("turn_summary")) {
             const QString turn = event.value(QStringLiteral("turn_id")).toString();
             m_turnSummaries.insert(turn, event);
+            {
+                // The picker's speed sort (owner, 2026-09-20): tokens per second as this pane
+                // saw them — answer and thinking characters over four, across the whole turn,
+                // tool time included. A proxy, not the provider's own count, and only from a
+                // turn long enough to mean something.
+                const qint64 ms = event.value(QStringLiteral("elapsed_ms")).toVariant().toLongLong();
+                const qint64 chars = m_turnText.size() + event.value(QStringLiteral("thinking_chars")).toVariant().toLongLong();
+                if (ms >= 2000 && chars >= 400)
+                    relay::models::curation::noteSpeed(currentEntryKey(), (chars / 4.0) / (ms / 1000.0));
+            }
             m_turnOrder.removeAll(turn); m_turnOrder.append(turn);
         while (m_turnOrder.size() > 50) {
             const QString old = m_turnOrder.takeFirst();
@@ -7146,7 +7204,8 @@ private:
             // The card `?` shows in an empty prompt box. `/help` is what people type when they do
             // not know `?` yet, and it is where an unknown command points them (issue #Q4SD).
             {QStringLiteral("help"), QString(), QStringLiteral("The keys and prefixes Relay answers to (same as ?)")},
-            {QStringLiteral("model"), QStringLiteral("[name]"), QStringLiteral("Switch model, keeping the conversation")},
+            {QStringLiteral("model"), QStringLiteral("[name]"), QStringLiteral("Switch model, keeping the conversation; alone, the picker (same as Ctrl+Shift+M)")},
+            {QStringLiteral("swap"), QString(), QStringLiteral("Swap to the fallback model, or back to the main one")},
             {QStringLiteral("main"), QString(), QStringLiteral("Run this pane on the Main model")},
             {QStringLiteral("flash"), QString(), QStringLiteral("Run this pane on the Flash model (same as Alt+F)")},
             {QStringLiteral("local"), QString(), QStringLiteral("Run this pane on a model served on this machine")},
@@ -7464,8 +7523,8 @@ private:
             // Claude Code and Codex are models here too (26.9): `/model codex`, `/model claude`.
             // The rows offered are the presets — which now include the guests the worker can run
             // as this pane's agent (29.4) — plus the guests only the Tier B launch answers for.
-            const QStringList guests = tierBGuests();
-            if (!args.isEmpty()) {
+            if (args.isEmpty()) { openModelPicker(); return; }
+            {
                 // `/model claude opus`: a model named with the guest, which only its harness can
                 // honour. Every installed guest is matched here, Tier A or Tier B, so the name
                 // always reaches pickGuest rather than a preset whose label happens to contain it.
@@ -7478,23 +7537,42 @@ private:
                         return;
                     }
                 }
+                // A catalog entry (owner, 2026-09-20): its key, its model id, or words of its
+                // label and provider — the same match the picker's filter makes, shown rows first.
+                const relay::models::Catalog catalog = modelCatalog();
+                const QList<relay::models::Entry> rows = relay::models::shown(catalog);
+                auto exact = [&](const relay::models::Entry &entry) {
+                    return entry.key.compare(args, Qt::CaseInsensitive) == 0 || entry.model.compare(args, Qt::CaseInsensitive) == 0
+                        || entry.label.compare(args, Qt::CaseInsensitive) == 0;
+                };
+                for (const auto &entry : rows) if (exact(entry)) { selectEntry(entry.key); return; }
+                for (const auto &entry : catalog.entries) if (entry.usable && exact(entry)) { selectEntry(entry.key); return; }
+                for (const auto &entry : rows) if (relay::models::matches(entry, args)) { selectEntry(entry.key); return; }
                 for (const auto &model : std::as_const(m_stored)) {
                     if (model.first.compare(args, Qt::CaseInsensitive) == 0 || model.second.contains(args, Qt::CaseInsensitive)) {
                         leaveGuest([this, id = model.first] { selectModel(id); });
                         return;
                     }
                 }
-                status(QStringLiteral("No stored model matches “%1”.").arg(args));
+                status(QStringLiteral("No model matches “%1”. /model opens the picker.").arg(args));
                 return;
             }
-            QList<relay::agentui::PickerRow> rows;
-            for (const auto &model : std::as_const(m_stored)) rows << relay::agentui::PickerRow{{model.second, model.first == m_currentPreset && m_guest.isEmpty() ? QStringLiteral("current") : QString()}, model.first, model.first};
-            for (const QString &id : guests) rows << relay::agentui::PickerRow{{guestDisplayName(id), id == m_guest ? QStringLiteral("current") : QString()}, QStringLiteral("guest:") + id, id};
-            const auto result = relay::agentui::pick(this, QStringLiteral("Model"), QStringLiteral("Switch this pane's model. The conversation is kept."),
-                                                     {QStringLiteral("Model"), QString()}, rows, {{QStringLiteral("use"), QStringLiteral("Use"), true}});
-            if (result.row < 0) return;
-            if (result.row >= m_stored.size()) modelBoxPicked(QStringLiteral("guest:") + guests.at(result.row - m_stored.size()));
-            else leaveGuest([this, id = m_stored.at(result.row).first] { selectModel(id); });
+        } else if (name == QStringLiteral("swap")) {
+            // Owner (card #DC4J): "/swap … immediately swaps to your default fallback (or back to
+            // your first choice provider if you are on the fallback)". Rank 1 and rank 2 of the
+            // priority list in Options › Models. A switch lands at once even mid-retry (7824689d).
+            const relay::models::Catalog catalog = modelCatalog();
+            const relay::models::Entry main = relay::models::mainDefault(catalog);
+            const relay::models::Entry fallback = relay::models::fallback(catalog);
+            if (fallback.key.isEmpty()) {
+                status(QStringLiteral("No fallback model yet: rank a second model in Options › Models (/models)."));
+                return;
+            }
+            const QString current = currentEntryKey();
+            const relay::models::Entry &target = current == fallback.key ? main : fallback;
+            if (current == target.key) { status(QStringLiteral("Already on %1.").arg(target.displayName())); return; }
+            selectEntry(target.key);
+            status(QStringLiteral("Swapped to %1%2.").arg(target.displayName(), &target == &fallback ? QStringLiteral(" (the fallback)") : QStringLiteral(" (the main model)")));
         } else if (name == QStringLiteral("main") || name == QStringLiteral("flash")
                    || name == QStringLiteral("local")) {
             // The pane's own agent, not the tier table: /flash runs this conversation on the Flash
@@ -10397,9 +10475,22 @@ private:
         // (the pane's agent role). Both are handled before selectModel, which only knows presets.
         if (data == QStringLiteral("gear:modelOptions")) {
             refreshPickers();   // put the box back on the pane's model: the gear is not a choice
-            openRolesDialog();
-            hint(QStringLiteral("model.options.mouse"),
-                 QStringLiteral("Tip: Options › Models opens the same modals"));
+            if (onOpenOptions) onOpenOptions(QStringLiteral("models")); else openRolesDialog();
+            hint(QStringLiteral("model.options.mouse"), QStringLiteral("Tip: /models opens Options › Models from the prompt box"));
+            return;
+        }
+        if (data == QStringLiteral("gear:picker")) {
+            refreshPickers();
+            openModelPicker();
+            hint(QStringLiteral("model.picker.mouse"),
+                 relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("agent.model")), QStringLiteral("the model picker")));
+            return;
+        }
+        // A catalog entry (owner, 2026-09-20): a provider and one of its models.
+        if (data.startsWith(QStringLiteral("entry:"))) {
+            selectEntry(data.mid(6));
+            focusInput();
+            hint(QStringLiteral("model.mouse"), QStringLiteral("Tip: /model switches models from the prompt box"));
             return;
         }
         if (data.startsWith(QStringLiteral("role:"))) {
@@ -10553,11 +10644,19 @@ private:
             m_modelBox->addItem(roleRowText(role), QStringLiteral("role:") + role);
             if (role == m_agentRole) liveIndex = m_modelBox->count() - 1;
         }
-        // The rest of the presets follow the role rows, in stored order — the pane's own preset
-        // is the main row already, so it is not repeated here.
-        for (const auto &model : std::as_const(m_stored))
-            if (model.first != m_currentPreset)
-                m_modelBox->addItem(conciseModel(model.first, model.second), model.first);
+        // The catalog's shown entries follow the role rows, in rank order (owner, 2026-09-20): one
+        // row per model, not per provider, so "glm-5.3 flash" sits beside "glm-5.3". The pane's
+        // own entry is the main row already, so it is not repeated. A guest the worker cannot run
+        // headless is not an entry here: its Tier B row comes below.
+        {
+            const relay::models::Catalog catalog = modelCatalog();
+            const QString currentKey = currentEntryKey();
+            for (const relay::models::Entry &entry : relay::models::shown(catalog)) {
+                if (entry.key == currentKey) continue;
+                if (entry.guest && !guestHarnessUsable(guestOfPreset(entry.preset))) continue;
+                m_modelBox->addItem(entry.displayName(), QStringLiteral("entry:") + entry.key);
+            }
+        }
         if (liveIndex >= 0) m_modelBox->setCurrentIndex(liveIndex);
         // Guest agents (26.9): Claude Code and Codex, when installed, as rows like any model — no
         // tier, no key, no worker, so they are offered in a pane with no provider at all. The row
@@ -10578,10 +10677,12 @@ private:
                 if (id == liveGuest) m_modelBox->setCurrentIndex(m_modelBox->count() - 1);
             }
         }
-        // Last entry: the model options modal (default provider, Main/Flash/Lite, per-job overrides).
-        // It stays reachable with no stored key, which is exactly when it is needed most.
+        // Last: the picker (every model with filter, sort and reasoning level — the same dialog
+        // Ctrl+Shift+M opens) and Options › Models (providers, the checklist, the order). Both stay
+        // reachable with no stored key, which is exactly when they are needed most.
         m_modelBox->insertSeparator(m_modelBox->count());
-        m_modelBox->addItem(QString(QChar(0x2699)) + QStringLiteral("  Model options…"),
+        m_modelBox->addItem(QStringLiteral("more models…"), QStringLiteral("gear:picker"));
+        m_modelBox->addItem(QString(QChar(0x2699)) + QStringLiteral("  customize…"),
                             QStringLiteral("gear:modelOptions"));
         m_modelBox->setEnabled(true);
         // The model actually serving the turn, when it is not the pane's own (C5): plan mode's
@@ -10951,7 +11052,7 @@ private:
         });
     }
 
-    // "glm-5.3", not "Z.AI · GLM-5.3 · Coding Plan": the model id from the worker's preset list,
+    // "glm-5.3", not "z.ai · glm-5.3 · coding plan": the model id from the worker's preset list,
     // which is what a person recognises. Falls back to the preset label.
     QString conciseModel(const QString &presetId, const QString &label) const {
         for (const auto &item : m_presets) {
@@ -11846,15 +11947,16 @@ private:
     }
 
     // Configure a built-in preset using its key from the keyring. The key never enters this process.
-    void configurePreset(const QString &id, bool announce) {
+    void configurePreset(const QString &id, bool announce, const QString &modelOverride = QString()) {
         const auto preset = presetById(id);
         if (preset.isEmpty()) return;
         if (m_workspace.isEmpty()) m_workspace = QDir::currentPath();
         QSettings settings;
         const int tokens = settings.value(QStringLiteral("provider/max_tokens"), 0).toInt();
+        const QString model = modelOverride.isEmpty() ? preset.value(QStringLiteral("model")).toString() : modelOverride;
         settings.setValue("provider/preset", id);
         settings.setValue("provider/base", preset.value(QStringLiteral("base_url")).toString());
-        settings.setValue("provider/model", preset.value(QStringLiteral("model")).toString());
+        settings.setValue("provider/model", model);
         settings.setValue("provider/extra", QString::fromUtf8(QJsonDocument(preset.value(QStringLiteral("extra")).toObject()).toJson(QJsonDocument::Compact)));
         rememberPresetBeforeGuest(id);
         m_apiKey.clear(); m_configured = false; m_configuring = true; m_currentPreset = id; changed();
@@ -11864,7 +11966,7 @@ private:
         // so none can leave without its board block.
         QJsonObject request = withSessionFields(QJsonObject{{"type", "configure"}, {"preset", id}, {"use_stored_key", true},
               {"base_url", preset.value(QStringLiteral("base_url")).toString()},
-              {"model", preset.value(QStringLiteral("model")).toString()},
+              {"model", model},
               {"extra", preset.value(QStringLiteral("extra")).toObject()}, {"max_tokens", tokens},
               {"api_key", QString()}, {"workspace", m_workspace}, {"keybindings", Keymap::instance().catalog()}});
         // A guest preset (29.3): the harness is started with this — `permissions`, and `model`,
@@ -12123,6 +12225,7 @@ private:
         prompt.handoff = entry.agent && entry.handoff;
         if (!entry.fix) { m_subagents.clearFinished(); m_jobs.clearFinished(); }   // finished rows linger until a new user turn
         QJsonObject request{{"type", "ask"}, {"text", entry.text}, {"when", when}};
+        relay::models::curation::noteUse(currentEntryKey());   // the picker's "recent" and "most used"
         if (!entry.attachments.isEmpty()) request.insert(QStringLiteral("attachments"), entry.attachments);
         if (!entry.cards.isEmpty()) request.insert(QStringLiteral("cards"), entry.cards);
         if (const QJsonArray skills = skillsFor(entry.text); !skills.isEmpty()) request.insert(QStringLiteral("skills"), skills);
@@ -14911,18 +15014,18 @@ private:
         static const PresetRow presets[] = {
             // Mirrors backend/relay_core/presets.py; tests/test_presets.py fails if the two drift.
             {"custom", "Custom / current settings", "", "", ""},
-            {"relay-free", "Relay Free", "https://api.relay-terminal.ai/v1", "relay-main", "{}"},
-            {"kimi", "Kimi · K3", "https://api.moonshot.ai/v1", "kimi-k3", "{\"reasoning_effort\":\"high\"}"},
-            {"kimi-code", "Kimi Code · K3", "https://api.kimi.ai/coding/v1", "k3", "{\"reasoning_effort\":\"high\"}"},
-            {"glm", "Z.AI · GLM-5.3 · standard API", "https://api.z.ai/api/paas/v4", "glm-5.3",
+            {"relay-free", "relay free", "https://api.relay-terminal.ai/v1", "relay-main", "{}"},
+            {"kimi", "kimi · k3", "https://api.moonshot.ai/v1", "kimi-k3", "{\"reasoning_effort\":\"high\"}"},
+            {"kimi-code", "kimi code · k3", "https://api.kimi.ai/coding/v1", "k3", "{\"reasoning_effort\":\"high\"}"},
+            {"glm", "z.ai · glm-5.3 · standard api", "https://api.z.ai/api/paas/v4", "glm-5.3",
              "{\"thinking\":{\"type\":\"enabled\"},\"reasoning_effort\":\"high\"}"},
-            {"glm-coding", "Z.AI · GLM-5.3 · Coding Plan", "https://api.z.ai/api/coding/paas/v4", "glm-5.3",
+            {"glm-coding", "z.ai · glm-5.3 · coding plan", "https://api.z.ai/api/coding/paas/v4", "glm-5.3",
              "{\"thinking\":{\"type\":\"enabled\"},\"reasoning_effort\":\"high\"}"},
-            {"minimax", "MiniMax · M3 · Coding/Token Plan", "https://api.minimax.io/v1", "MiniMax-M3", "{}"},
-            {"openrouter", "OpenRouter · DeepSeek V4.1 Flash", "https://openrouter.ai/api/v1", "deepseek/deepseek-v4.1-flash", "{}"},
-            {"openai", "OpenAI · GPT-6 Astra", "https://api.openai.com/v1", "gpt-6-astra", "{\"reasoning_effort\":\"high\"}"},
-            {"anthropic", "Anthropic · Claude Opus 5", "https://api.anthropic.com/v1", "claude-opus-5", "{}"},
-            {"gemini", "Google · Gemini 3.1 Pro", "https://generativelanguage.googleapis.com/v1beta/openai",
+            {"minimax", "minimax · m3 · coding/token plan", "https://api.minimax.io/v1", "MiniMax-M3", "{}"},
+            {"openrouter", "openrouter · deepseek v4.1 flash", "https://openrouter.ai/api/v1", "deepseek/deepseek-v4.1-flash", "{}"},
+            {"openai", "openai · gpt-6 astra", "https://api.openai.com/v1", "gpt-6-astra", "{\"reasoning_effort\":\"high\"}"},
+            {"anthropic", "anthropic · claude opus 5", "https://api.anthropic.com/v1", "claude-opus-5", "{}"},
+            {"gemini", "google · gemini 3.1 pro", "https://generativelanguage.googleapis.com/v1beta/openai",
              "gemini-3.1-pro-preview", "{\"reasoning_effort\":\"high\"}"},
         };
         auto *preset = new QComboBox;
