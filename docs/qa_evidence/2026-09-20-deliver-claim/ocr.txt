@@ -1,0 +1,17 @@
+fixture card: QS6C
+04 card front matter session: ed536111-72bb-49fc-9d16-96de7b85f2d2 (chip ed536111)
+04 card status: executing
+04 card assignee: agent
+04 thread entry: Claimed (ed536111)
+04 the card page shows the chip ed536111: yes
+04 the card page labels it 'session': yes
+05 the row reads: | #QS6C Alpha voice mode + agent| @ed536111 2026-09-20 2026-09-20
+05 the row shows the whole chip ed536111: yes
+05 the live chip leaves 'closed' off, the pane being open: yes
+06 the row reads: | #QS6C Alpha voice mode +agent| &2 Ged536111 closed 2026-09-20 2026-09-20
+06 the row's chip keeps the token and says 'closed': yes
+06 the Switchboard is still the pane on screen: yes
+07 the card page's chip says 'closed' too: yes
+07 and still shows the token ed536111: yes
+relay still alive at the end: yes
+no gui_crash in relay.log
