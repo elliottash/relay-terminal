@@ -1,0 +1,460 @@
+--- 01-panel-buttons.png
+#82 Switchboard @ KR x
+6 open Filter — any word in the card, label:bug, status:done, folder:changes, @agent, waiting:me Follow Main—stub > + Newcard(n)
+(INBOX DISCUSSING (PLANNING (PLANNED QJEXECUTING QPNEEDS VERIFICATION QJNEEDS QA MVERIFIED MOONE wo
+4.2 problems - 2026-09-20-broken-card-with-no-id.md - no id in front matter
+~ CARD CREATED UPDATED
+y INBOX 2
+© #4182 Voice input in the composer 2026-09-20 2026-09-20
+© #C3D4 Dictate a prompt with the mic 2026-09-20 2026-09-20
+y DISCUSSING 1
+© #€5F6 Vertical tabs on the left 2026-09-20 2026-09-20
+> PLANNING ©
+> PLANNED ©
+y EXECUTING 2
+© #678 Fold the thinking trace 2026-09-20 2026-09-20
+© #N2M3 Stray front matter field 2026-09-20 2026-09-20
+y NEEDS VERIFICATION 1
+| © #291 Equalize pane sizes 2026-09-20 2026-09-20
+> NEEDS QA ©
+Switchboard agent Check Clean up
+‘Ask about the board itself — what is where, what duplicates what, how to reorganize it. Enter sends; a second prompt queues behind the first.
+Ask about the board — Enter sends, a second prompt queues Q
+Enter open eedit pplan xexecute vverify nnew +/-+foldsection Alt+Shift+t! reorder Alt+Shift+-— status mmove /orEscfilter t#ID to prompt y copy
+
+--- 02-answer-streaming.png
+#82 Switchboard @ KR x
+6 open Filter — any word in the card, label:bug, status:done, folder:changes, @agent, waiting:me Follow Main—stub > + Newcard(n)
+(INBOX DISCUSSING (PLANNING (PLANNED QJEXECUTING QPNEEDS VERIFICATION QJNEEDS QA MVERIFIED MOONE wo
+4.2 problems - 2026-09-20-broken-card-with-no-id.md - no id in front matter
+~ CARD CREATED UPDATED
+y INBOX 2
+| © A182 Voice input in the composer 2026-09-20 2026-09-20
+© #C3D4 Dictate a prompt with the mic 2026-09-20 2026-09-20
+y DISCUSSING 1
+© #€5F6 Vertical tabs on the left 2026-09-20 2026-09-20
+y PLANNING ©
+y PLANNED ©
+y EXECUTING 2
+© #678 Fold the thinking trace 2026-09-20 2026-09-20
+© #N2M3 Stray front matter field 2026-09-20 2026-09-20
+y NEEDS VERIFICATION 1
+© #39K1 Equalize pane sizes 2026-09-20 2026-09-20
+Switchboard agent - 0:07 Check Clean up
+You
+which cards are duplicates of each other?
++ AGENT
+Looking at the board as a whole, the two cards that overlap
++ Switchboard agent x Stop |
+Ask about the board — Enter sends, a second prompt queues 7
+Enter open eedit pplan xexecute vverify nnew +/-+foldsection Alt+Shift+t! reorder Alt+Shift+-— status mmove /orEscfilter t#ID to prompt y copy
+
+--- 03-second-prompt-queued.png
+#82 Switchboard B RK x
+6 open Filter — any word in the card, label:bug, status:done, folder:changes, @agent, waiting:me Follow Main—stub > + Newcard(n)
+(INBOX DISCUSSING (PLANNING (PLANNED QJEXECUTING QPNEEDS VERIFICATION QJNEEDS QA MVERIFIED MOONE wo
+4.2 problems - 2026-09-20-broken-card-with-no-id.md - no id in front matter
+~ CARD CREATED UPDATED
+y INBOX 2
+| © A182 Voice input in the composer 2026-09-20 2026-09-20
+© #C3D4 Dictate a prompt with the mic 2026-09-20 2026-09-20
+y DISCUSSING 1
+© #€5F6 Vertical tabs on the left 2026-09-20 2026-09-20
+y PLANNING ©
+y PLANNED ©
+y EXECUTING 2
+© #678 Fold the thinking trace 2026-09-20 2026-09-20
+© #N2M3 Stray front matter field 2026-09-20 2026-09-20
+Switchboard agent - 0:11 Check Clean up
+You
+which cards are duplicates of each other?
++ AGENT
+Looking at the board as a whole, the two cards that overlap are **#A1B2 Voice input in the
++ AGENT
+composer** and **#C3D4 Dictate a prompt
++ Switchboard agent x Stop |
+1 prompt waiting
+4. then sort the inbox by rank x
+Ask about the board — Enter sends, a second prompt queues 7
+Enter open eedit pplan xexecute vverify nnew +/-+foldsection Alt+Shift+t! reorder Alt+Shift+-— status mmove /orEscfilter t#ID to prompt y copy
+
+--- 04-send-reads-stop.png
+#82 Switchboard B RK x
+6 open Filter — any word in the card, label:bug, status:done, folder:changes, @agent, waiting:me Follow Main—stub > + Newcard(n)
+(INBOX DISCUSSING (PLANNING (PLANNED QJEXECUTING QPNEEDS VERIFICATION QJNEEDS QA MVERIFIED MOONE wo
+4.2 problems - 2026-09-20-broken-card-with-no-id.md - no id in front matter
+~ CARD CREATED UPDATED
+y INBOX 2
+| © A182 Voice input in the composer 2026-09-20 2026-09-20
+© #C3D4 Dictate a prompt with the mic 2026-09-20 2026-09-20
+y DISCUSSING 1
+© #€5F6 Vertical tabs on the left 2026-09-20 2026-09-20
+y PLANNING ©
+y PLANNED ©
+y EXECUTING 2
+© #678 Fold the thinking trace 2026-09-20 2026-09-20
+Switchboard agent - 0:16 Check Clean up
+You
+which cards are duplicates of each other?
++ AGENT
+Looking at the board as a whole, the two cards that overlap are #A1B2 Voice input in the composer and **#C3D4 Dictate a prompt
++ AGENT
+with the mic**, They are the
++ Switchboard agent x Stop |
+2 prompts waiting
+4. then sort the inbox by rank Wale
+2. and label the two voice cards 4) ly) [x
+Ask about the board — Enter sends, a second prompt queues 0 stop ]
+Enter open eedit pplan xexecute vverify nnew +/-+foldsection Alt+Shift+t! reorder Alt+Shift+-— status mmove /orEscfilter t#ID to prompt y copy
+
+--- 05-stopped-queue-carries-on.png
+#82 Switchboard B RK x
+6 open Filter — any word in the card, label:bug, status:done, folder:changes, @agent, waiting:me Follow Main—stub > + Newcard(n)
+(INBOX DISCUSSING (PLANNING (PLANNED QJEXECUTING QPNEEDS VERIFICATION QJNEEDS QA MVERIFIED MOONE wo
+| 42 problems - 2026-09-20-broken-card-with-no-id.md - no id in front matter |
+~ CARD CREATED UPDATED
+y INBOX 2
+#4182 Voice input in the composer | + agent | 2026-09-20 2026-09-20
+#C3D4 Dictate a prompt with the mic (+ agent | 2026-09-20 2026-09-20
+y DISCUSSING 1
+¥#E5F6 Vertical tabs on the left (+ agent | 2026-09-20 2026-09-20
+y PLANNING ©
+y PLANNED ©
+y EXECUTING 2
+#67H8 Fold the thinking trace (+ agent | 2026-09-20 2026-09-20
+Switchboard agent - 0:02 Check Clean up
+Looking at the board as a whole, the two cards that overlap are #A1B2 Voice input in the composer and #C3D4 Dictate a prompt with the mic.
+They are the same feature written twice: one asks for a microphone in the composer, the other for dictation from the composer. Both sit in Inbox,
+both are unranked against each other, and neither carries a plan yet, so merging them loses nothing. I would keep #41B2 as the surviving card, since
+its title names the surface rather than the gesture, and fold #C3D4's issue text in under a Duplicate of line. The rest of the board reads cleanly:
+#£5F6 is a layout question in Discussing, #G7H8 and #N2MB are the two cards in Executing, and #J9K1 is waiting for verification. Say the word and I
+will merge the two voice (cancelled)
++ AGENT
+Sorted by rank in my head: #41B2, #C3D4, then the card with no id — which the board's
++ Switchboard agent Requesting model - step 1/256 x Stop |
+2 prompts waiting
+4. then sort the inbox by rank a) ly) &
+2. and label the two voice cards 4) ly) [x
+Ask about the board — Enter sends, a second prompt queues a { Stop )
+Enter open eedit pplan xexecute vverify nnew +/-+foldsection Alt+Shift+t! reorder Alt+Shift+-— status mmove /orEscfilter t#ID to prompt y copy
+
+--- 05b-queue-stale-while-draining.png
+#82 Switchboard @ KR x
+6 open Filter — any word in the card, label:bug, status:done, folder:changes, @agent, waiting:me Follow Main—stub > + Newcard(n)
+(INBOX DISCUSSING (PLANNING (PLANNED QJEXECUTING QPNEEDS VERIFICATION QJNEEDS QA MVERIFIED MOONE wo
+4.2 problems - 2026-09-20-broken-card-with-no-id.md - no id in front matter |
+~ CARD CREATED UPDATED
+y INBOX 2
+| © A182 Voice input in the composer 2026-09-20 2026-09-20
+© #C3D4 Dictate a prompt with the mic 2026-09-20 2026-09-20
+y DISCUSSING 1
+© #€5F6 Vertical tabs on the left 2026-09-20 2026-09-20
+y PLANNING ©
+y PLANNED ©
+y EXECUTING 2
+© #67H8 Fold the thinking trace 2026-09-20 2026-09-20
+© #N2M3 Stray front matter field 2026-09-20 2026-09-20
+y NEEDS VERIFICATION 1
+© #39K1 Equalize pane sizes 2026-09-20 2026-09-20
+> NEEDS QA 0
+Switchboard agent Check Clean up
+will merge the two voice (cancelled)
+You
+then sort the inbox by rank
++ AGENT
+Sorted by rank in my head: #4182, #C3D4, then the card with no id — which the board's own Check will tell you about.
+Ask about the board — Enter sends, a second prompt queues ~) oS ae
+Enter open eedit pplan xexecute vverify nnew +/-+foldsection Alt+Shift+t! reorder Alt+Shift+-— status mmove /orEscfilter t#ID to prompt y copy
+
+--- 06-check-findings.png
+#82 Switchboard @ KR x
+6 open Filter — any word in the card, label:bug, status:done, folder:changes, @agent, waiting:me Follow Main—stub > + Newcard(n)
+(INBOX DISCUSSING (PLANNING (PLANNED QJEXECUTING QPNEEDS VERIFICATION QJNEEDS QA MVERIFIED MOONE wo
+4.2 problems - 2026-09-20-broken-card-with-no-id.md - no id in front matter |
+~ CARD CREATED UPDATED
+y INBOX 2
+| © A182 Voice input in the composer 2026-09-20 2026-09-20
+#C3D4 Dictate a prompt with the mic 2026-09-20 2026-09-20
+y DISCUSSING 1
+#£5F6 Vertical tabs on the left 2026-09-20 2026-09-20
+y PLANNING ©
+y PLANNED ©
+y EXECUTING 2
+#67H8 Fold the thinking trace 2026-09-20 2026-09-20
+#2M3 Stray front matter field 2026-09-20 2026-09-20
+Switchboard agent Check Clean up
+‘Check: 2 problems x
+error - 2026-09-20-broken-card-with-no-id.md - no id in front matter
+error - 2026-09-20-stray-front-matter-field.md - unknown front matter field(s) for a work card: urgency
+will merge the two voice (cancelled)
+You
+then sort the inbox by rank
++ AGENT
+Sorted by rank in my head: #4182, #C3D4, then the card with no id — which the board's own Check will tell you about.
+Ask about the board — Enter sends, a second prompt queues ~) oS ae
+Enter open eedit pplan xexecute vverify nnew +/-+foldsection Alt+Shift+t! reorder Alt+Shift+-— status mmove /orEscfilter t#ID to prompt y copy
+
+--- 07-executing-header-hover-triage.png
+#82 Switchboard @ KR x
+6 open Filter — any word in the card, label:bug, status:done, folder:changes, @agent, waiting:me Follow Main—stub > + Newcard(n)
+(INBOX DISCUSSING (PLANNING (PLANNED QJEXECUTING QPNEEDS VERIFICATION QJNEEDS QA MVERIFIED MOONE wo
+4.2 problems - 2026-09-20-broken-card-with-no-id.md - no id in front matter |
+~ CARD CREATED UPDATED
+y INBOX 2
+| © A182 Voice input in the composer 2026-09-20 2026-09-20
+© #C3D4 Dictate a prompt with the mic 2026-09-20 2026-09-20
+y DISCUSSING 1
+© #€5F6 Vertical tabs on the left 2026-09-20 2026-09-20
+y PLANNING ©
+y PLANNED ©
+y EXECUTING 2 At
+© #67H8 Fold the thinking trace 3-20
+© s#i2M3 Stray front matter field 3-20
+y NEEDS VERIFICATION 1
+Switchboard agent Check Clean up
+‘Check: 2 problems x
+error - 2026-09-20-broken-card-with-no-id.md - no id in front matter
+error - 2026-09-20-stray-front-matter-field.md - unknown front matter field(s) for a work card: urgency
+will merge the two voice (cancelled)
+You
+then sort the inbox by rank
++ AGENT
+Sorted by rank in my head: #4182, #C3D4, then the card with no id — which the board's own Check will tell you about.
+Ask about the board — Enter sends, a second prompt queues ~) oS ae
+Enter open eedit pplan xexecute vverify nnew +/-+foldsection Alt+Shift+t! reorder Alt+Shift+-— status mmove /orEscfilter t#ID to prompt y copy
+
+--- 08-triage-findings-scoped.png
+#82 Switchboard @ KR x
+6 open Filter — any word in the card, label:bug, status:done, folder:changes, @agent, waiting:me Follow Main—stub > + Newcard(n)
+(INBOX DISCUSSING (PLANNING (PLANNED QJEXECUTING QPNEEDS VERIFICATION QJNEEDS QA MVERIFIED MOONE wo
+4.2 problems - 2026-09-20-broken-card-with-no-id.md - no id in front matter |
+~ CARD CREATED UPDATED
+y INBOX 2
+| © #a182 Voice input in the composer 2026-09-20 2026-09-20
+#C3D4 Dictate a prompt with the mic 2026-09-20 2026-09-20
+y DISCUSSING 1
+#£5F6 Vertical tabs on the left 2026-09-20 2026-09-20
+y PLANNING ©
+y PLANNED ©
+y EXECUTING 2
+#67H8 Fold the thinking trace 2026-09-20 2026-09-20
+#2M3 Stray front matter field 2026-09-20 2026-09-20
+y NEEDS VERIFICATION 1
+Switchboard agent Check Clean up
+Triage - Executing: 1 problem x
+error - 2026-09-20-stray-front-matter-field.md - unknown front matter field(s) for a work card: urgency
+will merge the two voice (cancelled)
+You
+then sort the inbox by rank
++ AGENT
+Sorted by rank in my head: #4182, #C3D4, then the card with no id — which the board's own Check will tell you about.
+Ask about the board — Enter sends, a second prompt queues ~) oS ae
+Enter open eedit pplan xexecute vverify nnew +/-+foldsection Alt+Shift+t! reorder Alt+Shift+-— status mmove /orEscfilter t#ID to prompt y copy
+
+--- 09-finding-drafts-into-composer.png
+#82 Switchboard B RK x
+6 open Filter — any word in the card, label:bug, status:done, folder:changes, @agent, waiting:me Follow Main—stub > + Newcard(n)
+(INBOX GJDISCUSSING EB PLANNING (JPLANNED GJ EXECUTING (NEEDS VERIFICATION QJNEEDS QA GPVERIFIED BOONE
+| 42 problems - 2026-09-20-broken-card-with-no-id.md - no id in front matter |
+~ CARD CREATED UPDATED
+y INBOX 2
+| © A182 Voice input in the composer 2026-09-20 2026-09-20
+#C304 Dictate a prompt with the mic + agent | 2026-09-20 2026-09-20
+y DISCUSSING 1
+#£5F6 Vertical tabs on the left + agent | 2026-09-20 2026-09-20
+y PLANNING ©
+y PLANNED ©
+y EXECUTING 2
+#6748 Fold the thinking trace + agent | 2026-09-20 2026-09-20
+#N2N3_ Stray front matter field + agent | 2026-09-20 2026-09-20
+y NEEDS VERIFICATION 1
+Switchboard agent Check Clean up
+Triage - Executing: 1 problem x
+error - 2026-09-20-stray-front-matter-field.md - unknown front matter field(s) for a work card: urgency
+will merge the two voice (cancelled)
+You
+then sort the inbox by rank
++ AGENT
+Sorted by rank in my head: #4182, #C3D4, then the card with no id — which the board's own Check will tell you about.
+Fix features/2026-09-20-stray-front-matter-field.md: unknown front matter field(s) for a work
+card: urgency — please fix this card. OD 93% left
+Enter open eedit pplan xexecute vverify nnew +/-+foldsection Alt+Shift+t! reorder Alt+Shift+-— status mmove /orEscfilter t#ID to prompt y copy
+
+--- 10-composer-mic-and-context-chip.png
+Fix features/2026-09-20-stray-front-matter-field.md: unknown front matter field(s) for a work —
+card: urgency — please fix this card. Oo 93% left [ Send |
+
+--- 11-project-picker-init-here.png
+>* © proj (2) - cpu 00% - mem 00% © newproj (2) - cpu00%-mem00% = + oO 4E RB Se —~ OX
+© newproj @s8 Rr x #8 Projects SB KR x
+ini opens 3 =
+
+BO mo expan! ep acento (Una CAEEY9 GE HID Eo Drs tiapraserer ars nimaetn=s ect }
+~/proj $ + Initialize new project here _~/newproj
+
+d_ /tmp/q8/hi
+
+Spare i AT) proj ~/proj - opened its Switchboard - 8 min ago
+
+Shell commands or agent prompts... ? for hel At
+
+BEDE (RL) p ame 1 t choose - Enter attaches this tab, or initializes a project here - Esc closes
+~/newproj © 100% left stub-local(main) » | % Close) {Attach
+
+--- 12-fresh-board-panel-hidden-BUG.png
+#8 Switchboard @ KR x
+O° O° O° O° O° O°
+INBOX DISCUSSING PLANNING PLANNED EXECUTING NEEDS VERIF...
+No cards yet.
+Press n or click "+ New card” to add the first one.
+
+--- 13-survey-proposals-and-import.png
+#2 switchboard B RK x
+1 open | Filter — any word in the card, label:bug, statu... || FollowMain—stub +) + New card (n)
+(INBOX GPDISCUSSING [PLANNING (PLANNED (J EXECUTING (NEEDS VERIFICATION (NEEDS QA
+
+QVERIFIED BOONE g
+. CARD CREATED UPDATED
+> INBOX 1
+> DISCUSSING 0
+> PLANNING ©
+> PLANNED 0
+> EXECUTING 0
+> NEEDS VERIFICATION 0
+» NEEDS QA 0
+> VERIFIED ©
+Switchboard agent Check Clean up
+Survey - newproj x
+Found 2 items in 1 tracker already in this project.
+‘An import would create 2 cards. Untick anything Relay should leave where it is:
+Write the README — checklist: TODO.md
+Add a licence header to every source file — checklist: TODO.md
+Import 2 cards
+You
+‘Survey the project: what is already tracked here, and what should become cards?
++ AGENT
+This project was just given a Switchboard, so here is what it already tracks.
+Found: one tracker — TODO.md, with two items: Write the README and Add a licence header to every
+source file. An import would create two cards, one per item, each carrying the source key that stops it
+being imported twice.
+Taft alnnar Dalou Pines nat fniich the neniact mam fllac: tha care thi In tha hosed folrtar hacisa them
+Ask about the board — Enter sends it 93% left
+Enter open eedit pplan xexecute vverify nnew +/+ foldsection Alt+Shift+t! reorder Alt+Shift+—— statu:
+
+--- 14-one-proposal-ticked.png
+#2 switchboard B RK x
+1 open | Filter — any word in the card, label:bug, statu... || FollowMain—stub +) + New card (n)
+(INBOX GPDISCUSSING [PLANNING (PLANNED (J EXECUTING (NEEDS VERIFICATION (NEEDS QA
+
+QVERIFIED BOONE g
+. CARD CREATED UPDATED
+> INBOX 1
+> DISCUSSING 0
+> PLANNING ©
+> PLANNED 0
+> EXECUTING 0
+> NEEDS VERIFICATION 0
+» NEEDS QA 0
+> VERIFIED ©
+Switchboard agent Check Clean up
+Survey - newproj x
+Found 2 items in 1 tracker already in this project.
+‘An import would create 2 cards. Untick anything Relay should leave where it is:
+Write the README — checklist: TODO.md
+‘Add a licence header to every source file — checklist: TODO.md
+Import 1 card
+You
+‘Survey the project: what is already tracked here, and what should become cards?
++ AGENT
+This project was just given a Switchboard, so here is what it already tracks.
+Found: one tracker — TODO.md, with two items: Write the README and Add a licence header to every
+source file. An import would create two cards, one per item, each carrying the source key that stops it
+being imported twice.
+Taft alnnar Dalou Pines nat fniich the neniact mam fllac: tha care thi In tha hosed folrtar hacisa them
+Ask about the board — Enter sends it 93% left
+Enter open eedit pplan xexecute vverify nnew +/+ foldsection Alt+Shift+t! reorder Alt+Shift+—— statu:
+
+--- 15-imported-card-created.png
+#2 switchboard B RK x
+2 open | Filter — any word in the card, label:bug, statu... || FollowMain—stub +) + New card (n)
+(INBOX GPDISCUSSING [PLANNING (PLANNED (J EXECUTING (NEEDS VERIFICATION (NEEDS QA
+QVERIFIED BOONE g
+checklist |) imported |) todo
+. CARD CREATED UPDATED
+y INBOX 1
+#S4TY Seed card so the board is not empty (+ agent | 2026-09-20 2026-09-20
+y DISCUSSING 1
+| © #51N8 Write the README imported checklist. todo ®3 2026-09-19 2026-09-20
+> PLANNING ©
+> PLANNED 0
+> EXECUTING 0
+> NEEDS VERIFICATION 0
+» NEEDS QA 0
+> VERIFIED ©
+> DONE 0
+Switchboard agent Check Clean up
+You
+‘Survey the project: what is already tracked here, and what should become cards?
++ AGENT
+This project was just given a Switchboard, so here is what it already tracks.
+Found: one tracker — TODO.md, with two items: Write the README and Add a licence header to every
+source file. An import would create two cards, one per item, each carrying the source key that stops it
+being imported twice.
+Taft alnnar Dalou Pines nat fniich the neniact mam fllac: tha care thi In tha hosed folrtar hacisa them
+Ask about the board — Enter sends it 93% left
+Enter open eedit pplan xexecute vverify nnew +/+ foldsection Alt+Shift+t! reorder Alt+Shift+—— statu:
+
+--- 16-ctrl-slash-opens-actions-BUG.png
+>+ © proj(3) - cpu00%-memo0% x + 2 Oo @=e@je -o x
+© proj @ es & « | 4 Actions = & x | 8% switchboard eR x
+T id eS
+0 run a command as auministra ' :
+
+; 6 open Filter — any word in the card, label:bug, status:done, fold... Follow Main—stub >) + Newcard (n
+tor (user “root"), use “sudo < Search actions & ¥ ‘9 )
+GOES". a cor coer (INBOX GJDISCUSSING [J PLANNING (PLANNED (EXECUTING (NEEDS VERIFICATION (NEEDS QA
+See “man sudo root" for detai
+ee a nae QVERIFIED MOONE og
+~/proj $ CORE = SoUD 4.2 problems - 2026-09-20-broken-card-with-no-id.md - no id in front matter
+
+Relay Free ee
+~ CARD CREATED UPDATED
+This pane; starts a new conversation
+y INBOX 2
+¥ Stub a
+Tope RIOT EERE © #4182 Voice input in the composer 2026-09-20 2026-09-20
+© #C3D4 Dictate a prompt with the mic 2026-09-20 2026-09-20
+Claude Code Prompt agen
+This pane; starts a new conversation » pIscussINe 1
+Codex © #€5F6 Vertical tabs on the left 2026-09-20 2026-09-20
+This pane; starts a new conversation
+5 > PLANNING ©
+Flash agent for this pane alter
+OFF stub > PLANNED ©
+Local agent for this pane
+Ginanin y EXECUTING 2
+© #678 Fold the thinking trace 2026-09-20 2026-09-20
+INPUT MODE - AUTO
+y © #N2M3 Stray front matter field 2026-09-20 2026-09-20
+‘Commands to the terminal, everything ODE A
+else to the agent
+| © #39K1 Equalize pane sizes 2026-09-20 2026-09-20
+Terminal
+‘Always the terminal; the agent fixes > NEEDS QA 0
+failures ee
+posit Switchboard agent Check Clean up
+Always the agent
+‘Ask about the board itself — what is where, what duplicates what, how to reorganize it. Enter sends; a second prompt
+Toggle terminal / agent input, ‘queues behind the first.
+From the prompt box
+Voice transcription
+Record and transcribe into the prompt box
++ hold Right alt (AltGr on many layouts)
+very action and its keys. You pressed Ctrl+/.
+REASONING EFFORT - THIS
+MODEL HAS NO REASONING
+c 4 7 . SETTING
+‘ommands or prompts~ aus evitte Ask about the board — Enter sends, a second prompt queues a
+~iproj | | 100% stul v o_o
+itmove - Enterruns - Esc closes Enter open eedit pplan xexecute vverify nnew +/-+foldsection Alt+Shiftet! reorder Alt+Shift+-— status _mmove
+

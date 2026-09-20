@@ -1,13 +1,13 @@
 ---
 id: 8YQ9
 type: work
-status: executing
+status: needs-verification
 labels: [feature, switchboard]
 assignee: agent
 rank: zzzzzzzz
 created: '2026-09-19'
 source: pane 1, 2026-09-18
-links: [1AXN, KH72, 59b7b190, 6a541562, 2d0d4279, 04b0db90]
+links: [1AXN, KH72, 59b7b190, 6a541562, 2d0d4279, 04b0db90, 0c9cd894, 28b56483]
 ---
 # Switchboard page agent (switchboard-as-context) + new-project survey, clean-up and per-section triage buttons
 
@@ -22,7 +22,7 @@ add an agent to the switchboard main page, which will use the switchboard as con
 - [x] Decide which model role drives it (see #KH72 model roles — a Switchboard role already exists there) <!-- t:q9 -->
 - [x] Clickable problems: invalid cards (and the notice at the top) are clickable; clicking pre-fills the switchboard agent's composer with a fix request (draft-for-confirmation, never auto-run) <!-- t:c6 -->
 - [x] Message queueing in the switchboard agent, same semantics as the main terminal panes (#N8VK FIFO / QueueSubmit): a second prompt queues while a turn runs; queued messages shown visibly with the same queue UI as the terminal panes <!-- t:1p -->
-- [ ] Composer parity with the main panes: model selection, microphone for voice transcription, and the context-left indicator (main composer row already has all three — src/Pane.h "context left / model / microphone"); survey for anything else missing. **Microphone and context-left are in** (2d0d4279); **model selection is not** — `m_modelBox` is #BRD3's live uncommitted work in the same file, so it is not on main and cannot be moved from here (the land gate builds the tree it would commit). The panel has the seam, `BoardChatPanel::addComposerWidget`, and the reparent is one line for whoever lands #BRD3. <!-- t:6m s=blocked -->
+- [x] Composer parity with the main panes: model selection, microphone for voice transcription, and the context-left indicator (main composer row already has all three — src/Pane.h "context left / model / microphone"); survey for anything else missing. **Done**: microphone and context-left in 2d0d4279; the model box came with #BRD3's 0a7a43d7, which took the seam `BoardChatPanel::addComposerWidget` left for it, and 28b56483 stopped the filter row reserving width for the two widgets that had left it. Nothing else was found missing. <!-- t:6m -->
 - [x] New-project survey: runs on the new board, as the agent's opening turn (so the picker path #916B gets one too — init skips the import offer). Reuse `project_probe.probe()` + `board_import.propose()`, report the probe's `hints` as what Relay leaves alone, no writes until the user confirms. <!-- t:7r -->
 - [x] GitHub issues corpus: for a `.git` repository the agent offers to look on github.com for that repo's issues and bring them in — `project_probe` resolves `primary` (upstream over origin) and `forge`. Offer only, never auto-sync. **Done** (04b0db90): #GDQN has landed, so the survey's "Look for issues on GitHub" button sends `forge_sync_plan {repo}` — a dry run that by protocol (19.14) writes to neither side — and reports what a sync would do, always saying nothing was written. `forge_sync_run` is never sent from here: that is #ZKR0's surface, and the card says offer only. <!-- t:qt -->
 
@@ -72,3 +72,47 @@ add an agent to the switchboard main page, which will use the switchboard as con
 - `python3 -m pytest tests/test_board_chat.py -q` (and `test_board_protocol.py`; its ForgeSync failure is #GDQN's in-flight work, not ours).
 - Live under Xvfb with an isolated `XDG_CONFIG_HOME`, against a **copy** of a fixture board (never the real tracker), evidence in `docs/qa_evidence/2026-09-20-switchboard-page-agent/`: a streaming answer, a queued second prompt with its row, Stop, triage on one section, a problem click pre-filling the draft, the mic with a key, the moved Clean up, and the survey on a board created through the picker's "Initialize new project here" (#916B's path) — import ticked, cards created, `survey-state.json` settled to done.
 - Build through `scripts/relay-build`; land with `scripts/land.py begin/commit`; the card moves to `needs-verification` with the evidence path and a QA checklist in the same commit.
+
+## QA checklist
+
+Evidence: `docs/qa_evidence/2026-09-20-switchboard-page-agent/` (live Xvfb run, isolated
+`XDG_*`/`TMPDIR` under `/tmp/q8`, `RELAY_KEYRING=off`, a stub provider, against a **copy** of a
+fixture board — the real `issues/` was never opened). Read its README first: it is the
+implementer's own run, it found three defects, and all three were fixed in `0c9cd894` **after**
+the screenshots were taken. The shots marked `-BUG` are the record of the defect, not of the
+build you are checking.
+
+- [x] `ctest --test-dir build -R '^board$'` — 73 pass. Three fail (`executeHandsTheCardToAPane…`,
+      `theExecuteTaskCarriesTheBoardsConventions`, `theVerifyTaskIsTheQaChecklist…`) and one
+      `boardsections` case fails: **all four fail identically on a clean `HEAD` export** built in
+      `/tmp`, so they are not this card's. Worth someone's card — the Execute/Verify brief text
+      has drifted from its assertions.
+- [x] `python3 -m unittest test_board_chat` (from `tests/`, with `backend` and `tests` on
+      `PYTHONPATH`; there is no pytest on this machine) — 45 pass.
+- [x] `scripts/relay-build` clean, and every commit went through `land.py`'s build gate, which
+      compiles the exact tree it puts on `main`.
+- [ ] **Re-run the three fixed defects against the current build** — this is the main thing asked
+      of the verifier, because the evidence predates the fixes:
+      1. Initialize a project with no board (picker → "Initialize new project here"). The page
+         agent's panel must be **on screen** on the empty board, and the survey's proposals and
+         Import button with it. Before `0c9cd894` the panel was absent and the survey was
+         unreachable — and the marker is one-shot, so it was never offered again.
+      2. Press **`a`** on the board: the composer takes the keyboard. (`Ctrl+/` is
+         `help.shortcuts` and opens the Actions palette — that is correct, not a regression.)
+      3. The microphone chip in the composer row is a **microphone**, not a box.
+- [ ] Queueing: a second prompt typed while a turn runs is accepted and appears as a queue row;
+      when it starts, the row goes at once (not when the turn ends). × and ▲▼ send
+      `board_chat_queue_remove` / `_move`. Stop ends the turn and the queue survives.
+- [ ] A running answer is drawn as **one** `✦ AGENT` block, including while a second prompt is
+      queued behind it.
+- [ ] Check and a section header's ⚠: findings listed, and a click puts a fix request **in the
+      composer without sending it** (owner: "draft you confirm"). The problems banner does the
+      same. A scoped check must not rewrite the banner.
+- [ ] Clean up is in the panel's button row and not in the filter row, and still previews first.
+- [ ] Composer parity: model box, microphone and context-left chip in the one row (the box came
+      with #BRD3's `0a7a43d7`); a pick still reaches a **live** conversation — change the model
+      mid-conversation and check the next turn answers on the new one (`6a541562`).
+- [ ] The survey's "Look for issues on GitHub" on a real GitHub repo: it reports what a sync would
+      do and says nothing was written. It must **never** send `forge_sync_run` — that is #ZKR0.
+      With no credential it should say so rather than show a raw error.
+- [ ] Nothing of the page agent reaches an open card's thread.

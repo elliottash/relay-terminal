@@ -1,0 +1,11 @@
+2026-09-20T03:44:31.849Z INFO relay.gui gui_start version=0.1.0 build=2026-09-19.23H.06 pid=2122221 level=info
+2026-09-20T03:44:31.917Z INFO relay.gui worker_start pane=195f6a34 workspace_set=1
+2026-09-20T03:44:32.006Z INFO relay.gui event type=ready pane=195f6a34
+2026-09-20T03:44:32.051Z INFO relay.gui event type=configured pane=195f6a34 model=stub
+2026-09-20T03:44:46.825Z INFO relay.gui board_state pane=195f6a34 board=/tmp/q8/home/proj/.switchboard state=ready
+2026-09-20T03:52:49.689Z INFO relay.gui worker_start pane=78e9fc31 workspace_set=1
+2026-09-20T03:52:49.789Z INFO relay.gui event type=ready pane=78e9fc31
+2026-09-20T03:52:49.820Z INFO relay.gui event type=configured pane=78e9fc31 model=stub
+2026-09-20T03:53:12.972Z INFO relay.gui project init here pane=78e9fc31 project=/tmp/q8/home/newproj
+2026-09-20T03:53:12.990Z INFO relay.gui board_state pane=78e9fc31 board=/tmp/q8/home/newproj/.switchboard state=uninitialized
+2026-09-20T03:53:13.011Z INFO relay.gui board_state pane=78e9fc31 board=/tmp/q8/home/newproj/.switchboard state=ready

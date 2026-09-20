@@ -1,0 +1,16 @@
+[
+  {
+    "code": "missing_id",
+    "path": "features/2026-09-20-broken-card-with-no-id.md",
+    "message": "no id in front matter",
+    "severity": "error",
+    "fixable": false
+  },
+  {
+    "code": "unknown_field",
+    "path": "features/2026-09-20-stray-front-matter-field.md",
+    "message": "unknown front matter field(s) for a work card: urgency",
+    "severity": "error",
+    "fixable": false
+  }
+]
