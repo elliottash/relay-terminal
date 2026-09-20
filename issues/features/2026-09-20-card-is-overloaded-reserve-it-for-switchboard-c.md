@@ -1,13 +1,15 @@
 ---
 id: VQ8T
 type: work
-status: executing
+status: needs-verification
 labels: [feature, switchboard, docs]
 assignee: claude-code
 rank: m
 created: '2026-09-20'
 source: 'conversation, 2026-09-20'
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {plans: [], commits: [9e1b10ae, 820c667b, c1880026, e010a064, 2b21edbc, e71be553,
+  ee3569bd, 79c4e751, 44698c60], evidence: [docs/qa_evidence/2026-09-20-card-vocabulary/],
+  related: [], github: null}
 ---
 # "card" is overloaded: reserve it for Switchboard cards, rename the ask and the help popup
 
@@ -91,7 +93,25 @@ Switchboard chip and index a few hundred lines below. That file takes its own cl
 than sharing one with the docs.
 
 ## Tasks
-- [ ] identifier and test-class renames, plus the three user-visible strings <!-- t:x1 -->
-- [ ] reword the ask-sense comments in `src/` and `backend/` <!-- t:x2 -->
-- [ ] reword the ask-sense prose in `docs/`, and retire "turn cards" <!-- t:x3 -->
-- [ ] the naming rule in `WARP.md` <!-- t:x4 -->
+- [x] identifier and test-class renames, plus the three user-visible strings <!-- t:x1 -->
+- [x] reword the ask-sense comments in `src/` and `backend/` <!-- t:x2 -->
+- [x] reword the ask-sense prose in `docs/`, and retire "turn cards" <!-- t:x3 -->
+- [x] the naming rule in `WARP.md` <!-- t:x4 -->
+- [x] the guest harness, missed in the first pass <!-- t:x5 -->
+
+## QA checklist
+- `WARP.md` has a "Words" section defining card, ask, popup, turn and model card, and banning the
+  bare spec citation.
+- A blocking question in a terminal pane still works: the numbered options appear, a number
+  answers, `0` and Esc skip. The footer reads "Answer 1-4 · a number or the word itself" with no
+  mention of a card.
+- An approval (Options › Security, tick an action) still stops the turn and takes Allow / Allow
+  for session / Always / Deny. Esc does not deny it.
+- `?` in an empty prompt box still opens the cheat-sheet popup, and `/help` opens the same one.
+- A guest session (claude or codex) raising an approval still draws it and still routes the answer
+  back: `approval_ask` replaced `approval_card`.
+- `grep -rn 'cardTakesRemoteLine\|unreadableCard\|toggleHelpCard\|approval_card' src backend
+  tests app docs --include='*.py' --include='*.h' --include='*.cpp' --include='*.js' --include='*.md'`
+  returns only the frozen QA script under `docs/qa_evidence/2026-09-19-claude-codex-guest-integration/`.
+- Switchboard behaviour is untouched: cards still open, `#` still references one, `/card` still
+  files one.
