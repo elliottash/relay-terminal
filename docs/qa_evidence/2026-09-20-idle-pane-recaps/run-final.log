@@ -1,0 +1,191 @@
+display :172
+Save at 912 655 (dialog 650x527 at 415,147)
+>* © work - cpu00%-mem00% x + O\4 eG 2 - 0 x
+© work @s8 Rr x
+<
+
+To run a command as administrator (user root"), use “sudo <command>".
+See "man sudo root" for details.
+
+run the ga turns|
+
+‘itmp/tmp.Stlostukmh/work — © 100%left —_relay-qa-stub(main) v
+
+--- shot 01-agent-ready above ---
+>+ © work - cpu00%-mem 00% x +
+
+x
+© Turndone auto x
+ang <
+To run a command as administrator (user “root"), use "sudo <command>".
+See "man sudo root" for details.
+elliott@spark-dec9: /tmp/tmp.StIos1ukmh/work$
+. run the ga turnsturn 2
+» relay-qa-stub
+Turn done.
+LE
+» relay-qa-stub
+Turn done.
+SL
+» relay-qa-stub
+Turn done.
+Ready |
+Bhell commands or agent prompts... 2? for help auto
+
+Amp/tmp.Stiostukmh/work — © 100% left relay-qa-stub (main) -v
+
+--- shot 02-three-turns above ---
+PASS: 02 three stub turns completed
+>+ © work - cpu00%-mem 00% x +
+
+© Turndone auto
+
+<
+To run a command as administrator (user root"), use “sudo <command>".
+See "man sudo root" for details.
+
+elliott@spark-dcc9:/tmp/tmp.StIoslukmh/work$
+
+> relay-qa-stub
+Turn done.
+
+turn 3
+
+> relay-qa-stub
+Turn done.
+
+turn 4
+
+> relay-qa-stub
+Turn done.
+
+Bhell commands or agent prompts... 2? for help auto
+
+Amp/tmp.Stiostukmh/work — © 100% left relay-qa-stub (main) -v
+
+--- shot 03 above ---
+PASS: 03 no recap while the pane is watched
+>+ © work - cpu00%-mem 00% x © work - cpu 00%-mem 00% +
+
+© Turndone auto
+
+To run a command as administrator (user root"), use “sudo <command>".
+See "man sudo root" for details.
+
+elliott@spark-dcc9: /tmp/tmp.StIos1ukmh/work$
+
+run the ga turnsturn 2
+
+> relay-qa-stub
+Turn done.
+
+turn 3
+
+> relay-qa-stub
+Turn done.
+
+turn 4
+
+> relay-qa-stub
+Turn done.
+
+[end of message]
+finished at 08:08
+
+Recap - 08:08 + 08:08 - <Im
+
+Three stub turns ran while the pane sat idle and unwatched. Nothing is unverified
+
+Bhell commands or agent prompts... 2? for help auto
+
+Amp/tmp.Stiostukmh/work — © 100% left relay-qa-stub (main) -v
+
+--- shot 04-tab-away-recap above ---
+PASS: 04 the idle recap opens with the marker
+PASS: 04 the idle recap states the finish time
+PASS: 04 the idle recap header is in the pane
+>+ © work - cpu00%-mem 00% x © work - cpu 00%-mem 00% +
+
+© Turndone auto
+
+To run a command as administrator (user root"), use “sudo <command>".
+See "man sudo root" for details.
+
+elliott@spark-dcc9: /tmp/tmp.StIos1ukmh/work$
+
+run the ga turnsturn 2
+
+> relay-qa-stub
+Turn done.
+
+turn 3
+
+> relay-qa-stub
+Turn done.
+
+turn 4
+
+> relay-qa-stub
+Turn done.
+
+[end of message]
+finished at 08:08
+
+Recap - 08:08 + 08:08 - <Im
+
+Three stub turns ran while the pane sat idle and unwatched. Nothing is unverified
+
+Bhell commands or agent prompts... 2? for help auto
+
+Amp/tmp.Stiostukmh/work — © 100% left relay-qa-stub (main) -v
+
+--- shot 05 above ---
+PASS: 05 still exactly one recap without new work
+>+ © work (2) - cpu00%-mem00% x © work - cpu 00% - mem 00% +
+
+© Turndone auto ‘Atmp/tmp.Stlostukmh/work [GY wi
+
+elliott@spark-dcc9:/tmp/tmp.StIoslukmh/work$
+
+> relay-qa-stub
+Turn done.
+3
+
+turn
+
+> relay-qa-stub
+Turn done.
+
+> relay-qa-stub
+Turn done.
+
+[end of message]
+
+finished at 08:08
+
+Recap - 08:08 + 08:08 - <Im
+
+Three stub turns ran while the pane sat idle and unwatched. Nothing is
+unverified.
+
+turn four
+
+> relay-qa-stub
+Turn done.
+
+[end of message]
+
+finished at 08:09
+
+Recap - 08:08 + 08:09 - <Im
+
+Three stub turns ran while the pane sat idle and unwatched. Nothing is
+unverified.
+
+Shell commands or agent prompts. 2? for help au
+
+imp/tmp.Stlostukmh/work © 100% left relay-qa-stub (main) ¥
+--- shot 06 (left pane crop) above ---
+PASS: 06 the unwatched split pane got its second recap
+fails=0
+PASS
