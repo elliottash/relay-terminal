@@ -795,9 +795,20 @@ QComboBox#boardPicker { padding: 2px 26px 2px 8px; min-height: 18px; }
 QLabel#boardCardMeta { color: @text; font-size: 9.5pt; }
 QTextBrowser#boardCardDocument { background: @surface; color: @text; border: 1px solid @border; border-radius: 8px; padding: 0; }
 QLabel#boardCardError { color: @error; }
-QFrame#boardReply { background: @surface; border: 1px solid @border; border-radius: 8px; }
-QPlainTextEdit#boardReplyEditor { background: transparent; border: none; padding: 2px; }
-QPushButton#boardReplyButton, QFrame#boardReply QPushButton#primary { padding: 4px 12px; }
+/* The card page's reply box is the same component as the helper panel's and as a terminal pane's
+   (owner, 2026-09-20: "the card agent looks a lot better" — so the other two were made to match
+   it, and it was finished into the pane's shape): one rounded frame, an accent border while the
+   cursor is in it, a borderless editor in the prompt font, and one chip strip under the text.
+   Same radius and same ground as `QFrame#boardChatBox` above, so the list page and the card page
+   are visibly one thing. */
+QFrame#boardReply { background: @surface; border: 1px solid @border; border-radius: 10px; }
+QFrame#boardReply[relayActive="true"] { background: @raised; border: 1px solid @accentBorder; }
+QPlainTextEdit#boardReplyEditor { background: transparent; border: none; padding: 2px 4px; font-family: "@mono"; font-size: 11pt; }
+/* Plan, Execute and Verify are above the box now, not in it (owner: "put buttons like that in a
+   row above the chat box"), so the row is on the page's ground and wears the panel's Check/Clean
+   up face — one look for every no-typing action over a prompt box. */
+QWidget#boardCardActions { background: transparent; }
+QPushButton#boardReplyButton, QFrame#boardEdit QPushButton#primary { padding: 4px 12px; }
 /* While a turn runs: the line that names it in the agent's colour, and the button that ends it.
    The stop is quiet until the pointer is on it, then it is the error colour — it is the only
    control on the card that throws work away (#VZ69). */

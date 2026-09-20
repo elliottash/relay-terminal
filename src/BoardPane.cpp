@@ -1580,6 +1580,49 @@ public:
         m_error->hide();
         layout->addWidget(m_error);
 
+        // ---- the actions, in a row of their own above the box ---------------------------------
+        //
+        // Owner, 2026-09-20: "move those buttons out of there (plan / execute / etc), because
+        // they actually dont do anything in the chat box. can we instead put buttons like that in
+        // a row above the chat box. they are actions the agent can take that dont require typing.
+        // we put the 'clean up' button there for the main switchboard agent, for example." So the
+        // rule is the same one the helper panel keeps: what needs no typing sits above the box,
+        // and the box holds the text and the chips that qualify it. Nothing else changes — Plan
+        // and Execute still read whatever is in the reply box as their note, and their keys are
+        // still `p`, `x` and `v`.
+        m_actionRow = new QWidget(this);
+        m_actionRow->setObjectName(QStringLiteral("boardCardActions"));
+        auto *buttons = new QHBoxLayout(m_actionRow);
+        m_buttonRow = buttons;
+        buttons->setContentsMargins(0, 0, 0, 0);
+        buttons->setSpacing(6);
+        buttons->addStretch(1);
+        // Discuss and Comment have no buttons (owner, #VZ69: "remove comment / discuss buttons. i
+        // would say you just press enter in the prompt box to discuss / comment"). They are what
+        // the box itself does — Enter discusses, Ctrl+Shift+Enter only comments — and the
+        // placeholder in it says so. What is left on the row is the three things that are *not*
+        // typing into the box: Plan, and the two that leave the board.
+        m_plan = new QPushButton(QStringLiteral("Plan (p)"), m_actionRow);
+        m_plan->setObjectName(QStringLiteral("boardReplyButton"));
+        m_execute = new QPushButton(QStringLiteral("Execute (x)"), m_actionRow);
+        m_execute->setObjectName(QStringLiteral("boardExecute"));
+        // Verify (#T71W): the QA lane's counterpart of Execute — it also leaves the board for a
+        // pane, so it wears the same outline, and it is on screen only while the card is in a QA
+        // lane and the worker has said who should check it.
+        m_verify = new QPushButton(QStringLiteral("Verify (v)"), m_actionRow);
+        m_verify->setObjectName(QStringLiteral("boardExecute"));
+        m_verify->hide();
+        for (QPushButton *button : {m_plan, m_execute, m_verify}) {
+            button->setFocusPolicy(Qt::NoFocus);   // Tab stays between the reply box and the card
+            button->setProperty("fullLabel", button->text());   // what fitButtons() shortens from
+        }
+        buttons->addWidget(m_plan);
+        buttons->addWidget(m_execute);
+        buttons->addWidget(m_verify);
+        layout->addWidget(m_actionRow);
+        // setModeTips() is called once the box below is built: it writes the busy strip's words
+        // too, and that strip is part of the box.
+
         auto *reply = new QFrame(this);
         m_replyFrame = reply;
         reply->setObjectName(QStringLiteral("boardReply"));
@@ -1622,36 +1665,18 @@ public:
                                   QStringLiteral("Reply — Enter discusses, Ctrl+Enter plans"),
                                   QStringLiteral("Reply to this card…"), QStringLiteral("Reply…")});
         m_reply->setAutoHeight(2, 8);
+        m_reply->setFrameShape(QFrame::NoFrame);   // the frame around it is the box (see the qss)
         replyLayout->addWidget(m_reply);
-        auto *buttons = new QHBoxLayout;
-        m_buttonRow = buttons;
-        buttons->setSpacing(6);
-        buttons->addStretch(1);
-        // Discuss and Comment have no buttons (owner, #VZ69: "remove comment / discuss buttons. i
-        // would say you just press enter in the prompt box to discuss / comment"). They are what
-        // the box itself does — Enter discusses, Ctrl+Shift+Enter only comments — and the
-        // placeholder above says so. What is left on the row is the three things that are *not*
-        // typing into the box: Plan, and the two that leave the board.
-        m_plan = new QPushButton(QStringLiteral("Plan (p)"), reply);
-        m_plan->setObjectName(QStringLiteral("boardReplyButton"));
-        m_execute = new QPushButton(QStringLiteral("Execute (x)"), reply);
-        m_execute->setObjectName(QStringLiteral("boardExecute"));
-        // Verify (#T71W): the QA lane's counterpart of Execute — it also leaves the board for a
-        // pane, so it wears the same outline, and it is on screen only while the card is in a QA
-        // lane and the worker has said who should check it.
-        m_verify = new QPushButton(QStringLiteral("Verify (v)"), reply);
-        m_verify->setObjectName(QStringLiteral("boardExecute"));
-        m_verify->hide();
-        for (QPushButton *button : {m_plan, m_execute, m_verify}) {
-            button->setFocusPolicy(Qt::NoFocus);   // Tab stays between the reply box and the card
-            button->setProperty("fullLabel", button->text());   // what fitButtons() shortens from
-        }
-        buttons->addWidget(m_plan);
-        buttons->addWidget(m_execute);
-        buttons->addWidget(m_verify);
-        setModeTips();
-        replyLayout->addLayout(buttons);
+        // The chip strip: the model box, alone and right-aligned, where a pane's chips are and
+        // where the helper panel's are. Everything that used to share this row is on the action
+        // row above now, so the box below the text says one thing — which model answers.
+        m_chipRow = new QHBoxLayout;
+        m_chipRow->setContentsMargins(2, 0, 2, 0);
+        m_chipRow->setSpacing(6);
+        m_chipRow->addStretch(1);
+        replyLayout->addLayout(m_chipRow);
         layout->addWidget(reply);
+        setModeTips();
 
         m_render = new QTimer(this);
         m_render->setSingleShot(true);
@@ -1765,16 +1790,18 @@ public:
     // the page agent's composer, where a card cannot see it — but a card's Discuss and Plan run on
     // the very same `switchboard` role, so the page that runs them is the last place the model
     // should be invisible. The view owns the box and fills it from the one state both boxes read
-    // (BoardView::rebuildModelBox); the page only gives it its place on the strip and its share of
-    // the row's width. Right-aligned under the reply box, left of the three buttons, which is the
-    // shape of every other composer strip in Relay.
+    // (BoardView::rebuildModelBox); the page only gives it its place on the strip.
+    //
+    // Alone on that strip since 2026-09-20: Plan, Execute and Verify moved to the action row
+    // above the box, so what is left inside the frame is the text and the one chip that
+    // qualifies it — the shape of every other prompt box in Relay.
     void setModelBox(QComboBox *box)
     {
-        if (box == nullptr || m_buttonRow == nullptr)
+        if (box == nullptr || m_chipRow == nullptr)
             return;
         m_modelBox = box;
         box->setParent(m_replyFrame);
-        m_buttonRow->insertWidget(1, box);   // 0 is the stretch that right-aligns the row
+        m_chipRow->insertWidget(1, box);   // 0 is the stretch that right-aligns the strip
         fitButtons();
     }
 
@@ -2152,8 +2179,13 @@ public:
     // progress line stays up for minutes, so it has to be placed clear of them.
     int controlsHeight() const
     {
-        const QFrame *bottom = m_editFrame->isHidden() ? m_replyFrame : m_editFrame;
+        const QWidget *bottom = m_editFrame->isHidden() ? static_cast<QWidget *>(m_replyFrame)
+                                                        : static_cast<QWidget *>(m_editFrame);
         int height = bottom->isHidden() ? 0 : bottom->height();
+        // The actions sit above the box and are part of it (owner, 2026-09-20), so a notice that
+        // clears "the controls" has to clear them too.
+        if (m_actionRow != nullptr && !m_actionRow->isHidden())
+            height += m_actionRow->height() + 6;
         if (!m_error->isHidden())
             height += m_error->height() + 6;   // the refusal line belongs to them
         return height;
@@ -2189,6 +2221,7 @@ public:
             m_doc->hide();
             m_editFrame->show();
             m_replyFrame->hide();
+            m_actionRow->hide();     // the actions belong to the box; they go down with it
             m_edit->setEnabled(false);
             m_error->hide();
         }
@@ -2215,6 +2248,7 @@ public:
         m_editFrame->hide();
         m_doc->show();
         m_replyFrame->show();
+        m_actionRow->show();
         m_edit->setEnabled(true);
         m_error->hide();
         m_doc->setFocus();
@@ -2261,6 +2295,16 @@ protected:
 
     bool eventFilter(QObject *object, QEvent *event) override
     {
+        // The accent border a pane's prompt box wears while that pane is live. Here it is the box
+        // the cursor is in, exactly as on the helper panel — the two are the same component and
+        // read the same `relayActive` property. Repolished by hand: a dynamic property does not
+        // restyle itself.
+        if (object == m_reply && m_replyFrame != nullptr
+            && (event->type() == QEvent::FocusIn || event->type() == QEvent::FocusOut)) {
+            m_replyFrame->setProperty("relayActive", event->type() == QEvent::FocusIn);
+            m_replyFrame->style()->unpolish(m_replyFrame);
+            m_replyFrame->style()->polish(m_replyFrame);
+        }
         if (object == m_reply && event->type() == QEvent::KeyPress
             && static_cast<QKeyEvent *>(event)->key() == Qt::Key_Escape) {
             if (onEscape)
@@ -2404,23 +2448,21 @@ private:
         return at > 0 && label.endsWith(QLatin1Char(')')) ? label.left(at) : label;
     }
 
-    // The reply row carries each key in its label (#QG60: "Execute (x)"). Three of those do not
+    // The action row carries each key in its label (#QG60: "Execute (x)"). Three of those do not
     // fit a narrow card — CardDetail's own minimum width lets the layout squeeze a button below its
     // size hint, and the label then paints cut off at both ends — so when the row is tight the keys
     // drop out of the labels first, the way a card row drops its decorative badges before its
     // meaning (board::fitBadges). Only while the card is actually on screen: a width nothing has
     // laid out yet says nothing about what fits.
     //
-    // The model box shares the row (#BRD3), and it is the one thing on it that can give width
-    // back: it is QSizePolicy::Maximum, so the layout shrinks it towards its "MM" minimum before
-    // it touches anything else, while a QPushButton can only be clipped. So the box's *natural*
-    // width is what the keys are measured against — the keys go first, and only then does the box
-    // start to squeeze — and what has to fit at the far end is three short labels beside a box at
-    // its minimum, which is still true at the ~350 px pane where the list is hidden and the card
-    // has the whole width.
+    // The buttons left the box on 2026-09-20 and the model box stayed, so the two no longer share
+    // a width: the row above shortens its own labels, and the box below squeezes on its own strip
+    // (QSizePolicy::Maximum, so the layout takes it towards its "MM" minimum rather than clipping
+    // it). The order the owner sees at a ~350 px pane is unchanged — the labels shed their keys
+    // before anything is cut, and the box is the last thing to give.
     void fitButtons()
     {
-        if (!isVisible() || !m_replyFrame || m_replyFrame->isHidden())
+        if (!isVisible() || !m_actionRow || m_actionRow->isHidden())
             return;
         const QList<QPushButton *> row{m_plan, m_execute, m_verify};
         const int spacing = 6, margins = 16;
@@ -2435,11 +2477,7 @@ private:
             button->setText(was);
             ++shown;
         }
-        if (m_modelBox != nullptr && !m_modelBox->isHidden()) {
-            wide += m_modelBox->sizeHint().width();
-            ++shown;
-        }
-        const bool keys = wide + qMax(0, shown - 1) * spacing <= m_replyFrame->width() - margins;
+        const bool keys = wide + qMax(0, shown - 1) * spacing <= m_actionRow->width() - margins;
         for (QPushButton *button : row) {
             const QString label = button->property("fullLabel").toString();
             if (label.isEmpty())
@@ -2932,10 +2970,14 @@ private:
     QTextBrowser *m_doc = nullptr;
     RichEditor *m_reply = nullptr;
     QPushButton *m_plan = nullptr, *m_execute = nullptr, *m_verify = nullptr;
-    // The strip under the reply box: the stretch that right-aligns it, the model box, then the
-    // three buttons (#BRD3). The box is the view's — this page holds it only to place it and to
-    // count its width in fitButtons().
+    // The row **above** the reply box (owner, 2026-09-20): a stretch, then the three actions that
+    // need no typing. It is a widget of its own so it can be hidden with the box it belongs to,
+    // and so fitButtons() has a width to measure against.
+    QWidget *m_actionRow = nullptr;
     QHBoxLayout *m_buttonRow = nullptr;
+    // The chip strip **inside** the box, under the editor: a stretch and the model box (#BRD3),
+    // which is the view's — this page holds it only to place it.
+    QHBoxLayout *m_chipRow = nullptr;
     QComboBox *m_modelBox = nullptr;
     // The strip over the reply box while a turn runs: "✦ Switchboarding · planning…" and the ✕ that
     // stops it (#VZ69). Hidden the rest of the time.

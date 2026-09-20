@@ -3794,8 +3794,8 @@ void BoardModelTests::theCardPageCarriesTheSameModelBoxAsTheListPage()
     QCOMPARE(page->focusPolicy(), Qt::TabFocus);
     QCOMPARE(page->sizePolicy().horizontalPolicy(), QSizePolicy::Maximum);
 
-    // On the reply strip and nowhere else, right-aligned: a stretch, the box, then Plan, Execute
-    // and Verify, in that order. The buttons stay off the tab ring.
+    // Alone on the box's chip strip, right-aligned: a stretch, then the box, and nothing else —
+    // the shape of every other prompt box in Relay (owner, 2026-09-20).
     auto *reply = view.findChild<QFrame *>(QStringLiteral("boardReply"));
     QVERIFY(reply && reply->isAncestorOf(page));
     QLayout *strip = nullptr;
@@ -3805,16 +3805,30 @@ void BoardModelTests::theCardPageCarriesTheSameModelBoxAsTheListPage()
     QVERIFY(strip);
     QVERIFY(strip->itemAt(0)->spacerItem() != nullptr);
     QCOMPARE(strip->indexOf(page), 1);
+    QCOMPARE(strip->count(), 2);
+
+    // And the three buttons are **out** of the box, in a row directly above it, in that order
+    // (owner, 2026-09-20: "move those buttons out of there (plan / execute / etc) … can we
+    // instead put buttons like that in a row above the chat box"). They stay off the tab ring.
     QPushButton *plan = button(view, QStringLiteral("Plan"));
     QPushButton *execute = button(view, QStringLiteral("Execute"));
     QPushButton *verify = button(view, QStringLiteral("Verify"));
     QVERIFY(plan && execute && verify);
-    QVERIFY(strip->indexOf(page) < strip->indexOf(plan));
-    QVERIFY(strip->indexOf(plan) < strip->indexOf(execute));
-    QVERIFY(strip->indexOf(execute) < strip->indexOf(verify));
-    QCOMPARE(plan->focusPolicy(), Qt::NoFocus);
-    QCOMPARE(execute->focusPolicy(), Qt::NoFocus);
-    QCOMPARE(verify->focusPolicy(), Qt::NoFocus);
+    for (QPushButton *item : {plan, execute, verify}) {
+        QVERIFY2(!reply->isAncestorOf(item), qPrintable(item->text() + QStringLiteral(" is in the box")));
+        QCOMPARE(item->focusPolicy(), Qt::NoFocus);
+    }
+    auto *actions = view.findChild<QWidget *>(QStringLiteral("boardCardActions"));
+    QVERIFY(actions && actions->isAncestorOf(plan) && actions->isAncestorOf(execute)
+            && actions->isAncestorOf(verify));
+    QLayout *row = actions->layout();
+    QVERIFY(row && row->itemAt(0)->spacerItem() != nullptr);   // right-aligned, as the strip is
+    QVERIFY(row->indexOf(plan) < row->indexOf(execute));
+    QVERIFY(row->indexOf(execute) < row->indexOf(verify));
+    auto *detail = view.findChild<QWidget *>(QStringLiteral("boardDetail"));
+    QVERIFY(detail);
+    QVERIFY2(actions->mapTo(detail, QPoint(0, 0)).y() < reply->mapTo(detail, QPoint(0, 0)).y(),
+             "the actions are above the box they belong to");
 
     // The worker's two events, taken once by the one state and drawn into both boxes: the same
     // rows, in the same order, on the same current one. The guest harness and the keyless
@@ -3875,10 +3889,12 @@ void BoardModelTests::theCardPageCarriesTheSameModelBoxAsTheListPage()
     QVERIFY(!page->toolTip().contains(QStringLiteral("Disabled while the agent is working")));
 }
 
-// The box shares the reply strip with Plan, Execute and Verify, and it is the only thing on it
-// that can give width back — QSizePolicy::Maximum against three buttons a layout can only clip.
-// At the ~350 px pane where the list is hidden and the card has the whole width, all three
-// buttons are still whole; what gives is the box.
+// Narrow, the two rows still hold their shape. The buttons are above the box now, so the row
+// they share is their own: it sheds the keys out of the labels before anything is clipped, the
+// way a card row drops its decorative badges before its meaning. The box is on its own strip,
+// where it is the only thing that can give width back (QSizePolicy::Maximum against a layout
+// that can only clip a QPushButton), so it is the last thing to squeeze. At the ~350 px pane
+// where the list is hidden and the card has the whole width, everything is still whole.
 void BoardModelTests::theCardsModelBoxGivesTheRowItsWidthBackBeforeAButtonIsClipped()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
@@ -3894,12 +3910,18 @@ void BoardModelTests::theCardsModelBoxGivesTheRowItsWidthBackBeforeAButtonIsClip
 
     QComboBox *page = cardModelBox(view);
     auto *reply = view.findChild<QFrame *>(QStringLiteral("boardReply"));
-    QVERIFY(page && reply);
+    auto *actions = view.findChild<QWidget *>(QStringLiteral("boardCardActions"));
+    QVERIFY(page && reply && actions);
+    // The pane the owner actually uses when the list is hidden and the card has the whole width.
+    // Resized twice: the first narrow resize is clamped while the layout re-reads the minimums of
+    // a page that was laid out wide, and the second is what a splitter's drag would give anyway.
+    view.resize(350, 700);
+    QCoreApplication::processEvents();
     view.resize(350, 700);
     QTRY_VERIFY(view.width() == 350);
     QCoreApplication::processEvents();
 
-    // Every button whole — its own size hint, and both edges inside the strip.
+    // Every button whole — its own size hint, and both edges inside its row.
     const QList<QPushButton *> row{button(view, QStringLiteral("Plan")),
                                    button(view, QStringLiteral("Execute"))};
     for (QPushButton *item : row) {
@@ -3908,26 +3930,39 @@ void BoardModelTests::theCardsModelBoxGivesTheRowItsWidthBackBeforeAButtonIsClip
         QVERIFY2(item->width() >= item->sizeHint().width(),
                  qPrintable(QStringLiteral("%1 is %2 px wide, hint %3")
                                 .arg(item->text()).arg(item->width()).arg(item->sizeHint().width())));
-        const QPoint left = item->mapTo(reply, QPoint(0, 0));
-        QVERIFY2(left.x() >= 0 && left.x() + item->width() <= reply->width(),
-                 qPrintable(QStringLiteral("%1 spans %2..%3 in a %4 px strip")
+        const QPoint left = item->mapTo(actions, QPoint(0, 0));
+        QVERIFY2(left.x() >= 0 && left.x() + item->width() <= actions->width(),
+                 qPrintable(QStringLiteral("%1 spans %2..%3 in a %4 px row")
                                 .arg(item->text()).arg(left.x())
-                                .arg(left.x() + item->width()).arg(reply->width())));
+                                .arg(left.x() + item->width()).arg(actions->width())));
     }
-    // And the keys came out of the labels first, the way a narrow row has always shed them.
-    QCOMPARE(button(view, QStringLiteral("Plan"))->text(), QStringLiteral("Plan"));
-    QCOMPARE(button(view, QStringLiteral("Execute"))->text(), QStringLiteral("Execute"));
 
-    // The box is what gave the room: squeezed under its own hint, still on the row, still usable.
+    // The keys are still in the labels: with the row to themselves the buttons fit a 350 px card,
+    // which is what moving them off the box's strip bought.
+    QCOMPARE(button(view, QStringLiteral("Plan"))->text(), QStringLiteral("Plan (p)"));
+    QCOMPARE(button(view, QStringLiteral("Execute"))->text(), QStringLiteral("Execute (x)"));
+
+    // And the box, alone on its strip, is whole here too — it no longer has to give the buttons
+    // their width back at the size the owner works at.
     QVERIFY(!page->isHidden());
-    QVERIFY2(page->width() < page->sizeHint().width(),
+    QVERIFY2(page->width() >= page->sizeHint().width(),
              qPrintable(QStringLiteral("box %1 px, hint %2")
                             .arg(page->width()).arg(page->sizeHint().width())));
-    QVERIFY2(page->width() >= page->minimumSizeHint().width(),
-             qPrintable(QStringLiteral("box %1 px, minimum %2")
-                            .arg(page->width()).arg(page->minimumSizeHint().width())));
     const QPoint boxAt = page->mapTo(reply, QPoint(0, 0));
     QVERIFY(boxAt.x() >= 0 && boxAt.x() + page->width() <= reply->width());
+
+    // The shortening rule itself, on a row narrower than its own labels — a larger desktop font
+    // is what reaches this in the wild. The keys come out of the labels first, and the box, on
+    // its own strip now, is untouched by what the row does.
+    const int boxWas = page->width();
+    actions->setFixedWidth(150);
+    view.resize(351, 700);            // a resize of the page is what re-fits the row
+    QCoreApplication::processEvents();
+    QTRY_COMPARE(button(view, QStringLiteral("Plan"))->text(), QStringLiteral("Plan"));
+    QCOMPARE(button(view, QStringLiteral("Execute"))->text(), QStringLiteral("Execute"));
+    QCOMPARE(page->width(), boxWas);
+    actions->setMinimumWidth(0);
+    actions->setMaximumWidth(QWIDGETSIZE_MAX);
 
     // Wide again, and the keys come back.
     view.resize(1100, 700);
