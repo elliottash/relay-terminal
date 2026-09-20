@@ -14,6 +14,7 @@
 #include <QScrollBar>
 #include <QStyleOptionToolButton>
 #include <QTextBrowser>
+#include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -33,6 +34,25 @@ QString link(const QString &path, const QList<QPair<QString, QString>> &query, c
     const QString href = QString::fromLatin1(kScheme) + QLatin1Char(':') + path
                        + (parts.isEmpty() ? QString() : QLatin1Char('?') + parts.join(QLatin1Char('&')));
     return QStringLiteral("<a href=\"%1\">%2</a>").arg(href.toHtmlEscaped(), label);
+}
+
+// The standing line under the body; InfoView::flashHint() borrows it for a moment.
+QString standingHint() {
+    return QStringLiteral("Links open subagent threads · Alt+Left back · F5 refresh · Esc closes · Alt+I opens this");
+}
+
+// A copyable id (#YQC3): the id itself and the ⧉ icon (U+29C9, two joined squares — the standard
+// copy sign) share one relay-info:copy href, so a click on either puts the whole id on the
+// clipboard. An empty id renders no href and no icon. The icon is muted and a notch smaller, so
+// it reads as a button rather than text.
+QString copyableId(const QString &id, const QString &what) {
+    if (id.isEmpty()) return QString();
+    const QList<QPair<QString, QString>> query{{QStringLiteral("text"), id}, {QStringLiteral("what"), what}};
+    const int body = QApplication::font().pointSize();   // -1 when the font is pixel-based
+    const int small = body > 3 ? qMax(body - 2, 7) : 9;
+    const QString icon = QStringLiteral("<span class=m style=\"font-size:%1pt\">⧉</span>").arg(small);
+    return link(QStringLiteral("copy"), query, QStringLiteral("<code>%1</code>").arg(esc(id))) + QStringLiteral(" ")
+         + link(QStringLiteral("copy"), query, icon);
 }
 
 QString when(double epoch, const QDateTime &now) {
@@ -147,7 +167,7 @@ QString sessionHtml(const QJsonObject &info, const QDateTime &now) {
     html += row(QStringLiteral("Cost"), costHtml(usage));
     const QString sessionId = info.value(QStringLiteral("session_id")).toString();
     const QString file = info.value(QStringLiteral("file")).toString();
-    QString sessionCell = QStringLiteral("<code>%1</code>").arg(esc(sessionId));
+    QString sessionCell = copyableId(sessionId, QStringLiteral("session id"));
     if (!file.isEmpty())
         sessionCell += QStringLiteral("<br>") + (info.value(QStringLiteral("file_exists")).toBool(true)
             ? link(QStringLiteral("file"), {{QStringLiteral("path"), file}}, esc(file))
@@ -242,7 +262,7 @@ QString threadHtml(const QJsonObject &info, const QDateTime &now) {
     const int runs = info.value(QStringLiteral("runs")).toInt();
     if (runs > 1) html += row(QStringLiteral("Runs"), QStringLiteral("%1 <span class=m>(resumed by messages)</span>").arg(runs));
     const QString file = info.value(QStringLiteral("file")).toString();
-    QString idCell = QStringLiteral("<code>%1</code>").arg(esc(info.value(QStringLiteral("thread_id")).toString()));
+    QString idCell = copyableId(info.value(QStringLiteral("thread_id")).toString(), QStringLiteral("thread id"));
     if (!file.isEmpty()) idCell += QStringLiteral("<br>") + link(QStringLiteral("file"), {{QStringLiteral("path"), file}}, esc(file));
     html += row(QStringLiteral("Thread"), idCell);
     html += QStringLiteral("</table><h3>History</h3>");
@@ -384,9 +404,14 @@ InfoView::InfoView(QWidget *parent) : QWidget(parent) {
     connect(m_body, &QTextBrowser::anchorClicked, this, [this](const QUrl &url) { linkActivated(url); });
     layout->addWidget(m_body, 1);
     // Alt+I is the fast path since 2026-09-18; /status and /info still open it (docs/ARCHITECTURE.md).
-    auto *hint = new QLabel(QStringLiteral("Links open subagent threads · Alt+Left back · F5 refresh · Esc closes · Alt+I opens this"));
-    hint->setObjectName(QStringLiteral("dialogHint"));
-    layout->addWidget(hint);
+    m_hint = new QLabel(standingHint());
+    m_hint->setObjectName(QStringLiteral("dialogHint"));
+    layout->addWidget(m_hint);
+    // A copy (#YQC3) borrows the line for two seconds; restarting the timer keeps a second copy's
+    // full two seconds even when it lands inside the first one's.
+    m_hintTimer = new QTimer(this);
+    m_hintTimer->setSingleShot(true);
+    connect(m_hintTimer, &QTimer::timeout, this, [this] { m_hint->setText(standingHint()); });
     updateHeader();
 }
 
@@ -456,6 +481,11 @@ void InfoView::updateHeader() {
     m_title->setText(title);
 }
 
+void InfoView::flashHint(const QString &message) {
+    m_hint->setText(message);
+    m_hintTimer->start(2000);
+}
+
 QString InfoView::paneTitle() const {
     if (m_current.isEmpty()) return QStringLiteral("Conversation info");
     if (m_current.value(QStringLiteral("kind")).toString() == QLatin1String("thread"))
@@ -478,6 +508,11 @@ void InfoView::linkActivated(const QUrl &url) {
     else if (what == QLatin1String("session")) showSession(value("id"), value("dir"));
     else if (what == QLatin1String("live")) { if (onOpenLive) onOpenLive(value("agent"), value("thread")); }
     else if (what == QLatin1String("file")) { if (onOpenFile) onOpenFile(value("path")); }
+    else if (what == QLatin1String("copy")) {
+        QApplication::clipboard()->setText(value("text"));
+        flashHint(value("what").isEmpty() ? QStringLiteral("Copied to the clipboard")
+                                          : QStringLiteral("Copied %1 to the clipboard").arg(value("what")));
+    }
 }
 
 bool InfoView::eventFilter(QObject *object, QEvent *event) {

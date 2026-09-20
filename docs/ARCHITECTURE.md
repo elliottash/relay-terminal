@@ -1634,7 +1634,9 @@ pane's header row, `/status` or `/info`, beside that pane, one per pane. It rend
 cost, the session file, times, turns, instructions, and the history — the turns in order with each
 subagent thread as a link at the turn that started it. A thread link shows that thread's own
 history in the same view with "↑ owner session" (and "↑ parent thread"); a thread the worker still
-holds also links to `RelayWindow::openSubagentTab`. `ToolPane` hosts both views through
+holds also links to `RelayWindow::openSubagentTab`. The Session id (and the Thread id on a
+thread page) and the ⧉ icon beside it share a `copy` link that puts the id on the clipboard,
+with a "Copied …" flash on the pane's bottom hint line. `ToolPane` hosts both views through
 `relay::PaneView` (`src/PaneView.h`): a title, focus and the header inset.
 
 ### Model roles and the Main / Flash / Lite / Local tiers

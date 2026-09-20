@@ -5,7 +5,9 @@
 #include "SessionInfo.h"
 
 #include <QAction>
+#include <QApplication>
 #include <QCheckBox>
+#include <QClipboard>
 #include <QComboBox>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -343,6 +345,24 @@ private slots:
         QCOMPARE(query.value(QStringLiteral("dir")), QStringLiteral("/data/relay/sessions/d&x"));
         QCOMPARE(query.value(QStringLiteral("id")), QString(32, QLatin1Char('b')));
 
+        // Copy (#YQC3): the id itself and the ⧉ icon share one href; it round-trips the exact id.
+        auto firstCopyHref = [](const QString &html) -> QString {
+            const int at = html.indexOf(QStringLiteral("relay-info:copy?"));
+            return at < 0 ? QString()
+                          : html.mid(at, html.indexOf(QLatin1Char('"'), at) - at)
+                                    .replace(QStringLiteral("&amp;"), QStringLiteral("&"));
+        };
+        QCOMPARE(html.count(QStringLiteral("<a href=\"relay-info:copy?text=%1&amp;what=session%20id\">").arg(QString(32, QLatin1Char('a')))), 2);
+        QVERIFY(html.contains(QStringLiteral("⧉")));
+        const QString sessionCopy = firstCopyHref(html);
+        QVERIFY(!sessionCopy.isEmpty());
+        QCOMPARE(linkQuery(QUrl(sessionCopy)).value(QStringLiteral("text")), QString(32, QLatin1Char('a')));
+        QCOMPARE(linkQuery(QUrl(sessionCopy)).value(QStringLiteral("what")), QStringLiteral("session id"));
+        // A session with no id yet has no dead copy link.
+        QJsonObject noId(info);
+        noId.remove(QStringLiteral("session_id"));
+        QVERIFY(!renderInfo(noId, now).contains(QStringLiteral("relay-info:copy")));
+
         QJsonObject threadInfo{{QStringLiteral("kind"), QStringLiteral("thread")}, {QStringLiteral("thread_id"), QString(32, QLatin1Char('b'))},
                                {QStringLiteral("agent_id"), QStringLiteral("a1")}, {QStringLiteral("title"), QStringLiteral("Find it")},
                                {QStringLiteral("owner_session"), QString(32, QLatin1Char('a'))}, {QStringLiteral("owner_title"), QStringLiteral("Index work")},
@@ -352,6 +372,12 @@ private slots:
         const QString threadHtml = renderInfo(threadInfo, now);
         QVERIFY(threadHtml.contains(QStringLiteral("↑ owner session: “Index work”")));
         QVERIFY(threadHtml.indexOf(QStringLiteral("↑ owner session")) < threadHtml.indexOf(QStringLiteral("the task")));
+        // The thread page's Thread id copies the same way (#YQC3).
+        QCOMPARE(threadHtml.count(QStringLiteral("<a href=\"relay-info:copy?text=%1&amp;what=thread%20id\">").arg(QString(32, QLatin1Char('b')))), 2);
+        const QString threadCopy = firstCopyHref(threadHtml);
+        QVERIFY(!threadCopy.isEmpty());
+        QCOMPARE(linkQuery(QUrl(threadCopy)).value(QStringLiteral("text")), QString(32, QLatin1Char('b')));
+        QCOMPARE(linkQuery(QUrl(threadCopy)).value(QStringLiteral("what")), QStringLiteral("thread id"));
         QCOMPARE(compactNumber(812), QStringLiteral("812"));
         QCOMPARE(compactNumber(1300000), QStringLiteral("1.3M"));
     }
@@ -373,6 +399,13 @@ private slots:
         view.setInfo({{QStringLiteral("id"), asked.first().value(QStringLiteral("id"))}, {QStringLiteral("kind"), QStringLiteral("session")},
                       {QStringLiteral("title"), QStringLiteral("Stale")}});
         QCOMPARE(view.paneTitle(), QStringLiteral("Info · Mine"));
+        // Copy (#YQC3): a copy link puts its text on the clipboard and borrows the hint line.
+        auto *hintLabel = view.findChild<QLabel *>(QStringLiteral("dialogHint"));
+        QVERIFY(hintLabel);
+        QMetaObject::invokeMethod(view.findChild<QTextBrowser *>(), "anchorClicked",
+                                  Q_ARG(QUrl, QUrl(QStringLiteral("relay-info:copy?text=abc&what=session%20id"))));
+        QCOMPARE(QApplication::clipboard()->text(), QStringLiteral("abc"));
+        QCOMPARE(hintLabel->text(), QStringLiteral("Copied session id to the clipboard"));
         view.back();
         QVERIFY(!asked.last().contains(QStringLiteral("thread_id")));
         bool closed = false;

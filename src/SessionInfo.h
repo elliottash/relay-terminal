@@ -19,6 +19,7 @@
 class QLabel;
 class QTextBrowser;
 class QToolButton;
+class QTimer;
 class QUrl;
 
 namespace relay::sessioninfo {
@@ -35,7 +36,8 @@ protected:
 };
 
 // The `session_info` event as HTML for the view's text browser. Links use the relay-info: scheme
-// (thread?id=&dir=&owner=, session?id=&dir=, live?agent=&thread=, file?path=). Pure; unit tested.
+// (thread?id=&dir=&owner=, session?id=&dir=, live?agent=&thread=, file?path=, copy?text=&what=).
+// Pure; unit tested.
 QString renderInfo(const QJsonObject &info, const QDateTime &now);
 // "41.2k", "1.3M", "812"
 QString compactNumber(qint64 value);
@@ -81,11 +83,15 @@ private:
     void navigate(const QJsonObject &request, bool push);
     void linkActivated(const QUrl &url);
     void updateHeader();
+    // Show a transient message on the standing hint line, which restores itself two seconds later.
+    void flashHint(const QString &message);
 
     QLabel *m_title = nullptr;
     QToolButton *m_back = nullptr, *m_refresh = nullptr;
     QWidget *m_inset = nullptr;
     QTextBrowser *m_body = nullptr;
+    QLabel *m_hint = nullptr;         // the standing line under the body; flashHint() borrows it
+    QTimer *m_hintTimer = nullptr;    // single shot: brings the standing text back after a flash
     QList<QJsonObject> m_stack;        // requests, oldest first; the last one is on screen
     QJsonObject m_current;             // the last event shown
     QString m_pendingId;
