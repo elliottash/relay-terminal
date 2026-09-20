@@ -1922,6 +1922,12 @@ public:
 
         // A click is the slow path: each says its key once (WARP.md hint rule).
         connect(m_plan, &QPushButton::clicked, this, [this] {
+            // Already in a pane's hands (#48S3): the click reveals that pane — not a second plan.
+            if (panePlanning()) {
+                if (onFocusPane)
+                    onFocusPane(m_sessionToken);
+                return;
+            }
             if (onModeHint)
                 onModeHint(QStringLiteral("plan"));
             plan();
@@ -1939,6 +1945,12 @@ public:
             execute();
         });
         connect(m_verify, &QPushButton::clicked, this, [this] {
+            // Already in a verifier pane's hands (#48S3): the click reveals that pane.
+            if (paneVerifying()) {
+                if (onFocusPane)
+                    onFocusPane(m_sessionToken);
+                return;
+            }
             if (onModeHint)
                 onModeHint(QStringLiteral("verify"));
             verify();
@@ -2235,6 +2247,11 @@ public:
     // with it as the owner's note; an empty box is fine — the card is the brief.
     void plan()
     {
+        if (panePlanning()) {          // `p` on a card a pane is planning reveals it (#48S3)
+            if (onFocusPane)
+                onFocusPane(m_sessionToken);
+            return;
+        }
         if (m_id.isEmpty() || m_editing || m_busy || !onReply)
             return;
         const QString text = m_reply->toPlainText().trimmed();
@@ -2250,6 +2267,11 @@ public:
     // be working from the issue text alone. The second press (or `x`) goes ahead.
     void execute()
     {
+        if (paneExecuting()) {         // `x` on a card a pane is executing reveals it (#48S3)
+            if (onFocusPane)
+                onFocusPane(m_sessionToken);
+            return;
+        }
         if (m_id.isEmpty() || m_editing || !onExecute)
             return;
         if (m_busy) {
@@ -2277,18 +2299,37 @@ public:
     // changes no status — the card stays in its QA lane until the verifier's verdict moves it —
     // and there is nothing to arm: the checklist on the card is the brief, and a card with no
     // recommendation says so rather than opening a pane on nobody.
-    // The card is in a pane's hands right now (#48S3): a session token whose pane is still
-    // open, and a status that still says the pane is building the card. Once the card lands
-    // (Needs verification) or the pane closes, the claim is only a record again.
+    // The card is in a pane's hands right now (#48S3): a session token whose pane is still open,
+    // and a status that still says the pane is working on it. Once the card moves on or the pane
+    // closes, the claim is only a record again. Execute, Plan and Verify each ask about their own
+    // status, so their buttons name the pane instead of offering a second hand-off.
+    bool paneInStatus(const QStringList &statuses) const
+    {
+        return m_sessionLive && statuses.contains(m_statusValue);
+    }
     bool paneExecuting() const
     {
-        return m_sessionLive
-            && (m_statusValue == QStringLiteral("executing")
-                || m_statusValue == QStringLiteral("in-progress"));
+        return paneInStatus({QStringLiteral("executing"),
+                             QStringLiteral("in-progress")});
+    }
+    bool panePlanning() const
+    {
+        return paneInStatus({QStringLiteral("planning")});
+    }
+    // A verifier pane claims the card in one of the QA lanes; Needs verification itself is the
+    // card landed with nobody checking yet.
+    bool paneVerifying() const
+    {
+        return m_sessionLive && m_statusValue.startsWith(QStringLiteral("needs-qa"));
     }
 
     void verify()
     {
+        if (paneVerifying()) {         // `v` on a card a pane is verifying reveals it (#48S3)
+            if (onFocusPane)
+                onFocusPane(m_sessionToken);
+            return;
+        }
         if (m_id.isEmpty() || m_editing || !onVerify)
             return;
         if (m_busy) {
@@ -2797,10 +2838,24 @@ private:
     // "Relaying · …" line.
     void setModeTips()
     {
-        m_plan->setEnabled(!m_busy);
-        m_plan->setToolTip(QStringLiteral("The agent reads the code and writes the card's plan; it "
-                                          "changes no code and no other card. Anything typed goes "
-                                          "with it (p, or Ctrl+Enter)"));
+        if (panePlanning()) {
+            // A pane is already planning the card (#48S3): the button names it and the click
+            // reveals the pane instead of starting a second plan.
+            const QString label =
+                QStringLiteral("Planning (%1)").arg(m_sessionToken.left(8));
+            m_plan->setText(label);
+            m_plan->setProperty("fullLabel", label);
+            m_plan->setEnabled(true);
+            m_plan->setToolTip(QStringLiteral("A pane is already planning this card — "
+                                              "the click reveals it"));
+        } else {
+            m_plan->setText(QStringLiteral("Plan (p)"));
+            m_plan->setProperty("fullLabel", QStringLiteral("Plan (p)"));
+            m_plan->setEnabled(!m_busy);
+            m_plan->setToolTip(QStringLiteral("The agent reads the code and writes the card's plan; it "
+                                              "changes no code and no other card. Anything typed goes "
+                                              "with it (p, or Ctrl+Enter)"));
+        }
         m_delete->setEnabled(!m_busy);
         if (paneExecuting()) {
             // A pane already holds the card (#48S3): the button names it — the same eight
@@ -2820,7 +2875,21 @@ private:
             m_execute->setToolTip(QStringLiteral("Hand the card to a new terminal pane beside the board: "
                                                  "its agent builds it, and the card moves to In progress (x)"));
         }
-        m_verify->setEnabled(!m_busy && hasVerifier());
+        if (paneVerifying()) {
+            // A verifier pane already holds the card (#48S3): the button names it and the click
+            // reveals the pane instead of opening a second verifier.
+            const QString label =
+                QStringLiteral("Verifying (%1)").arg(m_sessionToken.left(8));
+            m_verify->setText(label);
+            m_verify->setProperty("fullLabel", label);
+            m_verify->setEnabled(true);
+            m_verify->setToolTip(QStringLiteral("A pane is already verifying this card — "
+                                                "the click reveals it"));
+        } else {
+            m_verify->setText(QStringLiteral("Verify (v)"));
+            m_verify->setProperty("fullLabel", QStringLiteral("Verify (v)"));
+            m_verify->setEnabled(!m_busy && hasVerifier());
+        }
         const bool planning = m_busyMode == QStringLiteral("plan");
         m_busyLabel->setText(planning ? QStringLiteral("✦ Switchboarding · planning…")
                                       : QStringLiteral("✦ Switchboarding · discussing…"));

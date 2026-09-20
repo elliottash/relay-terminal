@@ -69,7 +69,24 @@ class BoardExecuteTests : public QObject {
 
 private slots:
     void theButtonNamesTheExecutingPaneAndRevealsIt();
+    void thePlanButtonNamesThePlanningPaneAndRevealsIt();
+    void theVerifyButtonNamesTheVerifyingPaneAndRevealsIt();
 };
+
+// The one open-card button whose label starts with `prefix` — Execute and Verify share the
+// `boardExecute` object name, and the Plan button shares `boardReplyButton` with others, so the
+// text is what tells them apart.
+static QPushButton *actionButton(const relay::BoardView &view, const QString &prefix)
+{
+    for (QPushButton *button : view.findChildren<QPushButton *>()) {
+        if (button->objectName() != QStringLiteral("boardExecute")
+            && button->objectName() != QStringLiteral("boardReplyButton"))
+            continue;
+        if (button->text().startsWith(prefix))
+            return button;
+    }
+    return nullptr;
+}
 
 void BoardExecuteTests::theButtonNamesTheExecutingPaneAndRevealsIt()
 {
@@ -116,6 +133,80 @@ void BoardExecuteTests::theButtonNamesTheExecutingPaneAndRevealsIt()
     button = openCard(QStringLiteral("EX33"), QStringLiteral("needs-verification"), true);
     QVERIFY(button);
     QCOMPARE(button->text(), QStringLiteral("Execute (x)"));
+}
+
+// The Plan button in the same states (#48S3): while a pane is planning the card it names the pane
+// and reveals it; a closed pane's claim is a record again.
+void BoardExecuteTests::thePlanButtonNamesThePlanningPaneAndRevealsIt()
+{
+    const QString token = QStringLiteral("abcdef1234567890");
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    QString revealed;
+    view.onFocusPane = [&revealed](const QString &pane) { revealed = pane; };
+
+    const auto openCard = [&](const QString &id, const QString &status, bool paneOpen) {
+        view.handleEvent(opened({row(id, QStringLiteral("inbox"))}));
+        view.selectCard(id);
+        view.openSelected();
+        QJsonObject answer = cardArrived(id, status, token);
+        answer.insert(QStringLiteral("id"), sent.last().value(QStringLiteral("id")));
+        view.paneExists = [paneOpen](const QString &) { return paneOpen; };
+        view.handleEvent(answer);
+        return actionButton(view, QStringLiteral("Plan"));
+    };
+
+    QPushButton *button = openCard(QStringLiteral("PL41"), QStringLiteral("planning"), true);
+    QVERIFY(button);
+    QCOMPARE(button->text(), QStringLiteral("Planning (abcdef12)"));
+    button->click();
+    QCOMPARE(revealed, token);
+
+    revealed.clear();
+    button = openCard(QStringLiteral("PL42"), QStringLiteral("planning"), false);
+    QVERIFY(button);
+    QCOMPARE(button->text(), QStringLiteral("Plan (p)"));
+    button->click();
+    QVERIFY(revealed.isEmpty());
+}
+
+// The Verify button in the same states (#48S3): a verifier pane claims the card in one of the QA
+// lanes, and while its pane is open the button names it and reveals it — with or without a
+// recommended verifier, which only matters for opening a new one.
+void BoardExecuteTests::theVerifyButtonNamesTheVerifyingPaneAndRevealsIt()
+{
+    const QString token = QStringLiteral("abcdef1234567890");
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    QString revealed;
+    view.onFocusPane = [&revealed](const QString &pane) { revealed = pane; };
+
+    const auto openCard = [&](const QString &id, const QString &status, bool paneOpen) {
+        view.handleEvent(opened({row(id, QStringLiteral("inbox"))}));
+        view.selectCard(id);
+        view.openSelected();
+        QJsonObject answer = cardArrived(id, status, token);
+        answer.insert(QStringLiteral("id"), sent.last().value(QStringLiteral("id")));
+        view.paneExists = [paneOpen](const QString &) { return paneOpen; };
+        view.handleEvent(answer);
+        return actionButton(view, QStringLiteral("Verif"));
+    };
+
+    QPushButton *button = openCard(QStringLiteral("VQ51"), QStringLiteral("needs-qa-llm"), true);
+    QVERIFY(button);
+    QVERIFY(button->isVisibleTo(button->parentWidget()));
+    QCOMPARE(button->text(), QStringLiteral("Verifying (abcdef12)"));
+    button->click();
+    QCOMPARE(revealed, token);
+
+    revealed.clear();
+    button = openCard(QStringLiteral("VQ52"), QStringLiteral("needs-qa-llm"), false);
+    QVERIFY(button);
+    QCOMPARE(button->text(), QStringLiteral("Verify (v)"));
+    button->click();
+    QVERIFY(revealed.isEmpty());
 }
 
 QTEST_MAIN(BoardExecuteTests)
