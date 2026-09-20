@@ -50,3 +50,13 @@ all" (turns the switch off; the sidecar has no drop-devices message). `start` no
 `always` and `address`; `remote_state` is parsed. #WMXN fixed on the way (`reason: "manual"`).
 Found and fixed: a SIGSEGV at quit whenever a pane was shared (`~RelayWindow` now disconnects
 from `RemoteShare`). Sidecar half still running.
+
+<!-- relay:entry 20260920T234500Z-e1 author=claude-code kind=progress -->
+### Claude Code · 2026-09-20 23:45
+Sidecar half landed (`8e1e740f`): `start.always` brings the service up at the chosen address and
+keeps it there (register again before every retry, 1 s → 60 s jittered backoff, never moves on its
+own); `remote_state` on every change; owner devices counted, guests never; auto-published panes
+still cut to the invite for guests (tested). Found on the way: a restarted rendezvous forgot the
+hub's token and the old loop re-dialled with it forever (4401). Phase 1.1 and 1.2 are complete.
+Running: connect tokens (1.3), the pane view's Stop / Recap / question rows / admit (2.6), the
+inbox / offline queue / notification switches (2.5, 2.7, 2.8).
