@@ -798,7 +798,11 @@ Default window shortcuts:
 
 The session manager (`/resume`, `agent.resume`), titled "Sessions", is Ctrl+Shift+Y, Warp's key for
 its conversations menu. It was Ctrl+Shift+M for one day (2026-09-19) until the owner gave M to the
-model picker (`agent.model`, 2026-09-20: "models are more central than sessions").
+model picker (`agent.model`, 2026-09-20: "models are more central than sessions"). The key is a
+**toggle** (owner, 2026-09-20): pressed again with the manager focused it closes the pane, as Esc
+does; pressed while the focus is elsewhere it brings the open manager forward instead, so the key
+never closes a pane the user is not looking at (`RelayWindow::toggleSessionsPane`). The slash
+commands stay plain openers — they are typed in a pane's prompt box, which is never the manager.
 
 The ⓘ view (`agent.info`, `/status`, `/info`) is **Alt+I** (owner, 2026-09-18). Alt+I is the mnemonic
 and it is free: no preset table binds any Alt+letter, so all four presets inherit it (the konsole
@@ -1678,8 +1682,9 @@ The GUI side is `src/Conversations.{h,cpp}`: the **session manager pane**
 cards #CCKY, #R6J0), which replaced both the conversation dialog and the resume picker, and the
 Ctrl+F find bar, which searches the terminal through `TerminalBackend::find()` and counts matches
 in the pane's conversation with `conversation_get {query}`. `/resume`, `/conversations`,
-Ctrl+Shift+Y and the palette rows all reach `RelayWindow::openSessionsFor(pane, query)`: one
-manager per tab, bound to the pane that asked (its queries go to that pane's worker). Its
+Ctrl+Shift+Y and the palette rows all reach `RelayWindow::openSessionsFor(pane, query)` (the key and
+`conversations.open` through `toggleSessionsPane`, which closes the manager when it already has the
+focus): one manager per tab, bound to the pane that asked (its queries go to that pane's worker). Its
 **Project** chooser beside the Kind filter (#916B) lists the projects Relay knows, fed by the window
 from the registry (`setKnownProjects`), and asks the worker with `project` / `outside_projects`
 (protocol 14.3) — the index answers by workspace folder — rather than filtering rows client-side. Enter resumes

@@ -1144,12 +1144,12 @@ private:
             hint(QStringLiteral("rewind.code.mouse"), QStringLiteral("Tip: /rewind-code in the prompt box restores the agent's file changes"));
         }
         else if (id == QStringLiteral("agent.fork")) pane->requestFork();
-        else if (id == QStringLiteral("agent.resume")) pane->openResume();
+        else if (id == QStringLiteral("agent.resume")) toggleSessionsPane(pane);
         // The key (Alt+I), the ⓘ button, the Actions pane and /status all land here. Nothing is
         // taught from here: this is also the keyboard path, and the two slow paths teach the key
         // themselves (the button below in syncChrome, the Actions pane through runFromSettings).
         else if (id == QStringLiteral("agent.info")) pane->openInfo();
-        else if (id == QStringLiteral("conversations.open")) pane->openConversations();
+        else if (id == QStringLiteral("conversations.open")) toggleSessionsPane(pane);
         else if (id == QStringLiteral("find.inView")) pane->openFindInView();
         else if (id == QStringLiteral("agent.recap")) pane->requestRecap();
         else if (id == QStringLiteral("agent.requests")) pane->toggleRequests();
@@ -4064,7 +4064,7 @@ public:
     }
     // ----- the session manager pane and the ⓘ pane (cards #R6J0, #Y63Z) ------------------------
     // One session manager per tab, bound to the pane that opened it: its queries go to that pane's
-    // worker and Enter resumes there. /resume, /conversations, Ctrl+Shift+M (agent.resume) and
+    // worker and Enter resumes there. /resume, /conversations, Ctrl+Shift+Y (agent.resume) and
     // conversations.open all come here through Pane::openConversations.
     using SessionsTabFactory = std::function<QWidget *(RelayWindow *window)>;
     struct SessionsTab { QString id, label; SessionsTabFactory make; };
@@ -4090,6 +4090,22 @@ public:
         Pane *owner = m_active;
         if (!owner) { const auto panes = panesIn(m_tabs->currentWidget()); owner = panes.isEmpty() ? nullptr : panes.first(); }
         if (owner) openSessionsFor(owner, query, tab);
+    }
+
+    // The key is a toggle: Ctrl+Shift+Y opens the session manager, and pressing it again with the
+    // manager focused closes it, the way Esc does (owner, 2026-09-20; Warp's Ctrl+Shift+Y closes
+    // its conversations menu too). Pressed while the focus is elsewhere it brings the open manager
+    // forward and rebinds it to the pane that asked, rather than closing a pane the user is not
+    // looking at. `/resume` and `/conversations` are openers, not toggles: they are typed in the
+    // prompt box of a pane, which is never the manager.
+    void toggleSessionsPane(Pane *owner) {
+        if (!owner) return;
+        ToolPane *tool = sessionsPaneIn(pageOf(owner));
+        if (tool && (m_activeLeaf == tool || tool->isAncestorOf(QApplication::focusWidget()))) {
+            closeSessionsPane(tool, owner);
+            return;
+        }
+        owner->openResume();   // opens it, or brings the open one forward and rebinds it here
     }
 
     void openSessionsFor(Pane *owner, const QString &query, const QString &tab = QString()) {

@@ -36,7 +36,7 @@ Sources:
 | palette.open | Ctrl+Shift+P | W1 Toggle Command Palette |
 | terminal.native | F12 | none in Warp. Kept Relay default: an F-key still works inside programs |
 | terminal.interrupt | — | Warp uses contextual Ctrl+C (W4). Unbound: Ctrl+C already reaches the shell |
-| agent.resume | Ctrl+Shift+Y | W5 Conversations menu. Relay's own default again since 2026-09-20 (it was Ctrl+Shift+M for one day; M is now `agent.model`, the model picker) |
+| agent.resume | Ctrl+Shift+Y | W5 Conversations menu. Relay's own default again since 2026-09-20 (it was Ctrl+Shift+M for one day; M is now `agent.model`, the model picker). A toggle: pressed again with the Sessions pane focused it closes it, and from anywhere else it brings it forward |
 | agent.newChat | — | Warp's own new-conversation keys are taken: Ctrl+Shift+Enter is Relay's send-to-terminal key, Ctrl+Shift+N is window.new |
 | agent.stop | — | Warp: Ctrl+C while the agent responds (W4). Left unbound (same reason as interrupt) |
 | agent.provider | — | none (a Settings page in Warp) |
