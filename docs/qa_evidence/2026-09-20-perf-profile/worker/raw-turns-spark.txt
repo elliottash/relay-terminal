@@ -1,0 +1,43 @@
+# spark: 300-turn stub conversation, clean export vs prototype
+
+$ python3 turnbench.py <root> 300
+
+-- clean export ccb31a8e
+python 3.12.3  loadavg (1.86865234375, 1.36572265625, 1.95654296875)  turns=300 tools=False deltas=3
+turns 0-0: wall=   46.4 ms  ask->req=   44.4 ms  last->done=    1.6 ms  req_bytes=   24984  msgs=2
+turns 1-9: wall=   14.9 ms  ask->req=   13.5 ms  last->done=    1.0 ms  req_bytes=   28236  msgs=12
+turns 10-49: wall=   15.7 ms  ask->req=   13.9 ms  last->done=    1.2 ms  req_bytes=   44148  msgs=62
+turns 50-99: wall=   16.6 ms  ask->req=   14.7 ms  last->done=    1.5 ms  req_bytes=   70874  msgs=152
+turns 100-199: wall=   18.7 ms  ask->req=   15.7 ms  last->done=    2.3 ms  req_bytes=  115086  msgs=302
+turns 200-299: wall=   21.0 ms  ask->req=   16.9 ms  last->done=    3.1 ms  req_bytes=  173868  msgs=498
+total wall 11.2 s, worker CPU 15.97 s, Pss 37.3 MiB -> /tmp/claude-1000/pf4k/worker/turns-300.json
+
+-- shared opener only (srcA)
+python 3.12.3  loadavg (1.95947265625, 1.39306640625, 1.96240234375)  turns=300 tools=False deltas=3
+turns 0-0: wall=   42.4 ms  ask->req=   40.4 ms  last->done=   -2.0 ms  req_bytes=   27656  msgs=2
+turns 1-9: wall=    3.4 ms  ask->req=    1.7 ms  last->done=    1.4 ms  req_bytes=   28464  msgs=10
+turns 10-49: wall=    3.0 ms  ask->req=    1.5 ms  last->done=    0.9 ms  req_bytes=   44729  msgs=54
+turns 50-99: wall=    3.8 ms  ask->req=    2.1 ms  last->done=    1.1 ms  req_bytes=   72036  msgs=140
+turns 100-199: wall=    6.2 ms  ask->req=    3.8 ms  last->done=    1.6 ms  req_bytes=  115668  msgs=278
+turns 200-299: wall=    7.8 ms  ask->req=    4.7 ms  last->done=    2.4 ms  req_bytes=  173868  msgs=478
+total wall 6.9 s, worker CPU 6.69 s, Pss 27.2 MiB -> /tmp/claude-1000/pf4k/worker/turns-300.json
+
+-- shared opener + write(json.dumps) (srcfix)
+python 3.12.3  loadavg (2.443359375, 1.5029296875, 1.9951171875)  turns=300 tools=False deltas=3
+turns 0-0: wall=   31.3 ms  ask->req=   29.8 ms  last->done=   -1.5 ms  req_bytes=   27656  msgs=2
+turns 1-9: wall=    2.0 ms  ask->req=    1.1 ms  last->done=    0.6 ms  req_bytes=   28464  msgs=10
+turns 10-49: wall=    2.7 ms  ask->req=    1.5 ms  last->done=    0.7 ms  req_bytes=   44729  msgs=54
+turns 50-99: wall=    3.6 ms  ask->req=    2.1 ms  last->done=    1.1 ms  req_bytes=   72036  msgs=140
+turns 100-199: wall=    5.8 ms  ask->req=    3.4 ms  last->done=    1.7 ms  req_bytes=  115668  msgs=278
+turns 200-299: wall=    7.8 ms  ask->req=    4.7 ms  last->done=    2.5 ms  req_bytes=  173868  msgs=478
+total wall 5.7 s, worker CPU 5.49 s, Pss 27.4 MiB -> /tmp/claude-1000/pf4k/worker/turns-300.json
+
+-- clean export, RELAY_INDEX=off
+python 3.12.3  loadavg (2.30126953125, 1.5029296875, 1.990234375)  turns=300 tools=False deltas=3
+turns 0-0: wall=   29.6 ms  ask->req=   27.3 ms  last->done=    2.0 ms  req_bytes=   24984  msgs=2
+turns 1-9: wall=   15.1 ms  ask->req=   13.5 ms  last->done=    1.0 ms  req_bytes=   28236  msgs=12
+turns 10-49: wall=   15.6 ms  ask->req=   13.9 ms  last->done=    1.1 ms  req_bytes=   44148  msgs=62
+turns 50-99: wall=   16.6 ms  ask->req=   14.3 ms  last->done=    1.4 ms  req_bytes=   70874  msgs=148
+turns 100-199: wall=   19.0 ms  ask->req=   15.9 ms  last->done=    2.2 ms  req_bytes=  115086  msgs=294
+turns 200-299: wall=   20.6 ms  ask->req=   16.8 ms  last->done=    3.1 ms  req_bytes=  172704  msgs=502
+total wall 9.0 s, worker CPU 14.09 s, Pss 37.9 MiB -> /tmp/claude-1000/pf4k/worker/turns-300.json

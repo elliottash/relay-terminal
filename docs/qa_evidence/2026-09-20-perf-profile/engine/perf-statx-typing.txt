@@ -1,0 +1,121 @@
+# syscalls:sys_enter_statx call graph while typing 59 characters into the prompt box
+   100.00%  relay    libc.so.6      [.] statx
+            |
+            ---_start
+               __libc_start_main_impl (inlined)
+               call_init (inlined)
+               __libc_start_call_main
+               main
+               QCoreApplication::exec()
+               QEventLoop::exec(QFlags<QEventLoop::ProcessEventsFlag>)
+               QEventDispatcherGlib::processEvents(QFlags<QEventLoop::ProcessEventsFlag>)
+               g_main_context_iteration
+               0xf9a578a51ae8
+               0xf9a5789ef90c
+               |          
+               |--97.27%--0xf9a5750d3c8c
+               |          QWindowSystemInterface::sendWindowSystemEvents(QFlags<QEventLoop::ProcessEventsFlag>)
+               |          QGuiApplicationPrivate::processKeyEvent(QWindowSystemInterfacePrivate::KeyEvent*)
+               |          QCoreApplication::notifyInternal2(QObject*, QEvent*)
+               |          QApplicationPrivate::notify_helper(QObject*, QEvent*)
+               |          |          
+               |          |--80.94%--0xf9a57a9683d0
+               |          |          QCoreApplication::notifyInternal2(QObject*, QEvent*)
+               |          |          QApplication::notify(QObject*, QEvent*)
+               |          |          QApplicationPrivate::notify_helper(QObject*, QEvent*)
+               |          |          |          
+               |          |          |--73.48%--QCoreApplicationPrivate::sendThroughApplicationEventFilters(QObject*, QEvent*)
+               |          |          |          eventFilter (inlined)
+               |          |          |          |          
+               |          |          |          |--41.99%--voiceHoldKey (inlined)
+               |          |          |          |          |          
+               |          |          |          |          |--31.49%--operator() (inlined)
+               |          |          |          |          |          QString (inlined)
+               |          |          |          |          |          QSettings::QSettings(QSettings::Scope, QObject*)
+               |          |          |          |          |          0xf9a579d672d8
+               |          |          |          |          |          0xf9a579d66fec
+               |          |          |          |          |          |          
+               |          |          |          |          |          |--14.70%--0xf9a579d6677c
+               |          |          |          |          |          |          QFileInfo::lastModified() const
+               |          |          |          |          |          |          QFileInfo::fileTime(QFileDevice::FileTime) const
+               |          |          |          |          |          |          0xf9a579d7250c
+               |          |          |          |          |          |          statx
+               |          |          |          |          |          |          
+               |          |          |          |          |          |--14.70%--0xf9a579d6676c
+               |          |          |          |          |          |          QFileInfo::size() const
+               |          |          |          |          |          |          0xf9a579d7250c
+               |          |          |          |          |          |          statx
+               |          |          |          |          |          |          
+               |          |          |          |          |           --2.10%--0xf9a579d66a90
+               |          |          |          |          |                     QFileInfo::size() const
+               |          |          |          |          |                     0xf9a579d7250c
+               |          |          |          |          |                     statx
+               |          |          |          |          |          
+               |          |          |          |          |--4.20%--QIODevice::readAll()
+               |          |          |          |          |          |          
+               |          |          |          |          |          |--2.10%--QFSFileEngine::isSequential() const
+               |          |          |          |          |          |          0xf9a579d3533c
+               |          |          |          |          |          |          0xf9a579d6e484
+               |          |          |          |          |          |          0xf9a579d711e0
+               |          |          |          |          |          |          statx
+               |          |          |          |          |          |          
+               |          |          |          |          |           --2.10%--QFileDevice::size() const
+               |          |          |          |          |                     0xf9a579d34a90
+               |          |          |          |          |                     0xf9a579d6e484
+               |          |          |          |          |                     0xf9a579d711e0
+               |          |          |          |          |                     statx
+               |          |          |          |          |          
+               |          |          |          |          |--2.10%--QFileDevice::size() const
+               |          |          |          |          |          0xf9a579d34a90
+               |          |          |          |          |          0xf9a579d6e4a0
+               |          |          |          |          |          0xf9a579d7250c
+               |          |          |          |          |          statx
+               |          |          |          |          |          
+               |          |          |          |          |--2.10%--QFile::open(QFlags<QIODevice::OpenModeFlag>)
+               |          |          |          |          |          QFSFileEngine::open(QFlags<QIODevice::OpenModeFlag>)
+               |          |          |          |          |          0xf9a579d6da74
+               |          |          |          |          |          0xf9a579d711e0
+               |          |          |          |          |          statx
+               |          |          |          |          |          
+               |          |          |          |           --2.10%--QFile::exists() const
+               |          |          |          |                     QFSFileEngine::fileFlags(QFlags<QAbstractFileEngine::FileFlag>) const
+               |          |          |          |                     0xf9a579d7289c
+               |          |          |          |                     statx
+               |          |          |          |          
+               |          |          |           --31.49%--voiceEnabled (inlined)
+               |          |          |                     operator() (inlined)
+               |          |          |                     QString (inlined)
+               |          |          |                     QSettings::QSettings(QSettings::Scope, QObject*)
+               |          |          |                     0xf9a579d672d8
+               |          |          |                     0xf9a579d66fec
+               |          |          |                     |          
+               |          |          |                     |--14.70%--0xf9a579d6677c
+               |          |          |                     |          QFileInfo::lastModified() const
+               |          |          |                     |          QFileInfo::fileTime(QFileDevice::FileTime) const
+               |          |          |                     |          0xf9a579d7250c
+               |          |          |                     |          statx
+               |          |          |                     |          
+               |          |          |                     |--14.70%--0xf9a579d6676c
+               |          |          |                     |          QFileInfo::size() const
+               |          |          |                     |          0xf9a579d7250c
+               |          |          |                     |          statx
+               |          |          |                     |          
+               |          |          |                      --2.10%--0xf9a579d66a90
+               |          |          |                                QFileInfo::size() const
+               |          |          |                                0xf9a579d7250c
+               |          |          |                                statx
+               |          |          |          
+               |          |           --7.46%--QFrame::event(QEvent*)
+               |          |                     QWidget::event(QEvent*)
+               |          |                     keyPressEvent (inlined)
+               |          |                     QPlainTextEdit::keyPressEvent(QKeyEvent*)
+               |          |                     QWidgetTextControl::processEvent(QEvent*, QPointF const&, QWidget*)
+               |          |                     0xf9a57ab115c0
+               |          |                     QTextCursor::insertText(QString const&)
+               |          |                     QTextCursor::insertText(QString const&, QTextCharFormat const&)
+               |          |                     QTextDocumentPrivate::finishEdit()
+               |          |                     |          
+               |          |                     |--3.73%--QTextDocument::cursorPositionChanged(QTextCursor const&)
+               |          |                     |          0xf9a579e305bc
+               |          |                     |          0xf9a57ab09574
+               |          |                     |          0xf9a579e30568

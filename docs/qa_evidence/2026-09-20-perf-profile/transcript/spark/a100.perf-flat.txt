@@ -1,0 +1,40 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 250  of event 'armv8_pmuv3_0/cycles/P'
+# Event count (approx.): 1066067849
+#
+# Overhead  Command          Shared Object                   Symbol                                                                                                                                                 
+# ........  ...............  ..............................  .......................................................................................................................................................
+#
+    10.28%  relay            relay                           [.] vterm_state_convert_color_to_rgb
+     9.08%  relay            relay                           [.] relay::Line::cellCodepoints(relay::Cell const&, std::__cxx11::basic_string<char32_t, std::char_traits<char32_t>, std::allocator<char32_t> >*) const
+     3.28%  relay            libQt5Gui.so.5.15.13            [.] QFontEngine::subPixelPositionForX(QFixed) const
+     2.99%  relay            libQt5Core.so.5.15.13           [.] QCoreApplicationPrivate::sendThroughApplicationEventFilters(QObject*, QEvent*)
+     2.47%  relay            libQt5Gui.so.5.15.13            [.] 0x0000000000389050
+     2.12%  relay            relay                           [.] relay::TerminalView::paintRow(QPainter&, int, relay::Line const&, int)::{lambda(int)#1}::operator()(int) const
+     1.66%  relay            relay                           [.] relay::TerminalView::resolve(unsigned int, bool) const
+     1.62%  relay            [kernel.kallsyms]               [k] 0xffffc59377921484
+     1.58%  relay            [kernel.kallsyms]               [k] 0xffffc59376509238
+     1.40%  relay            relay                           [.] Pane::pollShell()
+     1.31%  relay            libc.so.6                       [.] malloc
+     1.28%  relay            relay                           [.] Pane::logEvent(QString const&, QJsonObject const&)
+     1.17%  relay            libQt5Gui.so.5.15.13            [.] 0x000000000038918c
+     1.16%  relay            relay                           [.] relay::TerminalView::glyphFor(int, char32_t)
+     1.13%  relay            relay                           [.] relay::LibVtermCore::Impl::convertCell(VTermScreenCell const&, relay::Line*, relay::Cell*) const
+     1.09%  relay            relay                           [.] relay::LibVtermCore::atGround() const
+     1.02%  relay            libc.so.6                       [.] cfree@GLIBC_2.17
+     1.02%  relay            relay                           [.] relay::TerminalView::paintRow(QPainter&, int, relay::Line const&, int)
+     1.01%  relay            libc.so.6                       [.] _int_malloc
+     0.95%  relay            relay                           [.] relay::(anonymous namespace)::logicalRowAt(relay::ViewportFrame const&, int, relay::(anonymous namespace)::LogicalRow*) [clone .constprop.0]
+     0.94%  relay            [kernel.kallsyms]               [k] 0xffffc59376528034
+     0.93%  relay            libQt5Gui.so.5.15.13            [.] 0x00000000003893a0
+     0.92%  relay            libQt5Core.so.5.15.13           [.] 0x0000000000310480
+     0.83%  relay            libglib-2.0.so.0.8000.0         [.] 0x0000000000060464
+
+
+# Samples: 189  of event 'armv8_pmuv3_1/cycles/P'
+# Event count (approx.): 946875783
+#

@@ -1,0 +1,9 @@
+# out/links2.samples.tsv  rate=100.0/s  bucket=5.0s  samples=116
+t_s	gui_cpu%	proc_cpu%	worker%	rss_MB	cs/s	ms_per_delta
+   0.0	    7.6	     7.6	   1.1	  152.4	   285	   0.755
+   5.4	    6.6	     7.2	   1.8	  152.6	   308	   0.660
+  10.4	    6.9	     7.3	   1.8	  153.0	   307	   0.693
+  15.5	    8.1	     8.5	   1.4	  153.6	   308	   0.806
+  20.6	    2.2	     2.2	   3.4	  158.1	    41	   0.219
+  25.6	    0.7	     0.7	   2.8	  158.1	    19	   0.069
+# TOTAL gui_cpu_s=1.63 proc_cpu_s=1.70 rss_start_MB=152.1 rss_end_MB=158.1 span_s=28.5

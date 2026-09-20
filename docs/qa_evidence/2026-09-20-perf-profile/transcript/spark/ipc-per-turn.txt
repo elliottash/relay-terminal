@@ -1,0 +1,37 @@
+#PF4K transcript: the worker <-> GUI channel for one 20 000-char prose turn and one turn of
+# 20 run_command calls whose output is 2 000 lines (156 KB) each.  Captured by putting a
+# python3 shim on PATH that tees both directions of backend/worker.py's stdio (drive.sh IPC=1).
+
+--- worker2gui.jsonl  messages=1122 bytes=1642216
+message                       n     bytes      avg   share
+delta                      1009     51768       51    3.2%
+tool_started                 20      7391      369    0.5%
+tool_output                  20    664500    33225   40.5%
+tool_result                  20    672082    33604   40.9%
+route                         8      2439      304    0.1%
+requests                      6      4729      788    0.3%
+queue_changed                 6       843      140    0.1%
+status                        6       366       61    0.0%
+context                       6       840      140    0.1%
+presets                       3    223517    74505   13.6%
+app_catalog_updated           2       202      101    0.0%
+queued                        2       304      152    0.0%
+agent_started                 2       232      116    0.0%
+turn_summary                  2      6136     3068    0.4%
+done                          2       166       83    0.0%
+agent_finished                2       178       89    0.0%
+ready                         1        39       39    0.0%
+aliases                       1       125      125    0.0%
+configured                    1      4789     4789    0.3%
+agents                        1      1000     1000    0.1%
+
+--- gui2worker.jsonl  messages=17 bytes=211998
+message                       n     bytes      avg   share
+route                         8      9128     1141    4.3%
+app_catalog                   2    128818    64409   60.8%
+ask                           2       369      184    0.2%
+presets                       1        19       19    0.0%
+aliases                       1        80       80    0.0%
+configure                     1     73310    73310   34.6%
+agents_list                   1        23       23    0.0%
+program_state                 1       251      251    0.1%

@@ -1,0 +1,33 @@
+# sphinxpad memory
+
+## one idle configured worker, 30 s
+idle 30s  configured=True
+  Pss 24.8 MiB   Rss 37.8 MiB   Private_Dirty 23.8 MiB   threads 2
+  CPU used while idle: 0 ms over 30s
+  nr_switches: 20099 -> 20099
+  nr_voluntary_switches: 20097 -> 20097
+--- syscalls while alive (whole process lifetime, incl. startup):
+
+## tracemalloc across 300 stub turns, CLEAN EXPORT
+python 3.14.4  loadavg 0.39
+ turns   Pss MiB  traced MiB  peak MiB  gc objects
+     1      37.1        0.63      0.80       34072
+    10      44.5        0.64      1.22       34179
+    50      75.5        0.81      1.71       36963
+   100      86.6        0.94      2.22       38707
+   200     141.9        1.43      3.65       44172
+   300     146.4        1.76      4.04       49027
+
+top allocation sites at the end:
+
+## the same with the shared-opener fix (srcfix)
+python 3.14.4  loadavg 0.53
+ turns   Pss MiB  traced MiB  peak MiB  gc objects
+     1      28.8        0.64      1.05       34193
+    10      29.6        0.66      1.05       34504
+    50      31.1        0.81      1.30       36867
+   100      32.7        0.94      1.64       38763
+   200      35.1        1.20      2.28       42900
+   300      37.2        1.45      3.23       46665
+
+top allocation sites at the end:

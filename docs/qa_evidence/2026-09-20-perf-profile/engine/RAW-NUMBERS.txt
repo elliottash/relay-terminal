@@ -1,0 +1,73 @@
+All runs: 3x unless noted, load average recorded with each line.
+
+== spark: headless core throughput (relay-engine-bench, libvterm, 100x30, 10k scrollback, 50 MB base64)
+RelWithDebInfo -O2 -g -fno-omit-frame-pointer (the #PF4K build):
+  37.4 / 36.4 / 37.1 MiB/s   maxrss 81.5 MB (60.5 MB right after loading the input)
+Release -O3, same source, same machine, same input (built to price the build flags):
+  46.6 / 47.1 / 47.1 MiB/s   maxrss 81.5 MB
+2026-09-17 baseline (Release -O3, 100x30): 43.9 / 45.1 / 45.6 MiB/s on a 200 MB file.
+
+== spark: real relay pane, 1400x900 Xvfb, grid 132x30, libvterm core
+cat 50 MB base64          wall 1.395/1.363/1.364  pty 1.35/1.31/1.32  GUI 0.95/0.96/1.13  peakRSS 183 MB
+  same, colour-links OFF  wall 1.309/1.266/1.286  pty 1.26/1.24/1.24  GUI 0.75/0.80/0.87  peakRSS 173 MB
+cat 20 MB SGR torture     wall 0.142/0.164/0.117  pty 0.11/0.14/0.12  GUI 0.37/0.41/0.37
+cat 20 MB CJK+emoji       wall 0.379/0.352/0.380  pty 0.35/0.33/0.36  GUI 0.75/0.79/0.86
+seq 1 2000000             wall 2.043/2.073/2.103  pty 2.04/2.07/2.09  GUI 0.63/0.51/0.53
+yes ... | head -n 2000000 wall 2.318/2.336        pty 2.30/2.33       GUI 0.67/0.67
+ls --color=always -R /usr wall 3.638 (cold cache) / 1.464   pty 1.21/0.96  GUI 1.49/0.93
+
+== spark: same pane maximised on a 2600x1500 Xvfb, grid 280x71
+cat 4 x 50 MB base64      wall 7.810/7.864 (25.6 MiB/s)  pty 7.63/7.64  GUI 4.13/4.32  peakRSS 230 MB
+cat 4 x 50 MB at 132x30   wall 5.432 (36.8 MiB/s)        pty 5.24       GUI 2.86       peakRSS 176 MB
+
+== spark: frames (uprobes on TerminalView::paintEvent and ::paintRow)
+flood, 132x30, 4 s window:      590 paintEvent, 589 pullFrame        -> 147 fps
+flood, 280x71, 4 s window:      240 paintEvent                       ->  60 fps
+20 keystrokes echoing, 6 s:      30 paintEvent,  30 paintRow         -> 1 row painted per frame
+same with one relay://call/ fold anchor on screen:
+                                 16 paintEvent,  77 paintRow         -> 4.8 rows per frame
+
+== spark: interactive latency (perf uprobe on paintEvent, CLOCK_MONOTONIC, 20 samples)
+key -> first paint  min 8.5  p50 10.6  p90 11.6  max 12.2 ms
+  (8.5 9.1 8.8 8.9 9.0 9.3 9.4 10.2 10.4 10.5 10.6 10.7 10.8 10.9 10.9 10.9 11.1 11.4 11.6 12.2)
+
+== spark: scrolling a 10 000-line scrollback (GUI-thread CPU only)
+Shift+PgUp x40, no search          4.00 / 3.00 / 3.50 ms per page (30 rows)
+Shift+PgDn x40, no search          3.25 / 4.00 / 3.25 ms per page
+Shift+PgUp x30, search active (15 695 matches, ~10 highlights/row)   3.00 ms per page
+Shift+PgDn x30, search active                                        4.00 ms per page
+wheel up x60 / down x60            2.00 ms per step
+
+== spark: resize with a 10 000-line scrollback (whole-process CPU)
+window 1400->1000->1400->900->1400 px:  20 / 30 / 20 / 20 ms each
+20 rapid resize steps (900->1395 px):   60 ms total, 2.04 s wall
+
+== spark: pointer hover over a screen full of paths
+423 one-cell mousemove steps: 0.060 s GUI CPU -> 0.141 ms per hovered cell
+filesystem syscalls in the same window: 826 statx, 401 faccessat, 392 readlinkat (392 steps)
+
+== spark: syscalls per keystroke in the prompt box (perf stat, tracepoints)
+30 keystrokes over 4 s:  12 970 statx, 5 244 faccessat
+idle 4 s baseline:          460 statx,   144 faccessat
+-> 417 statx + 170 faccessat per key event
+
+== spark: memory of one terminal pane (smaps_rollup, kB)
+empty pane                         Rss 145260  Pss 38640  Private_Dirty 28652
+after 10 000 lines of ~80 chars    Rss 173284  Pss 66354  Private_Dirty 56084
+after another 200 000 lines        Rss 175304  Pss 66614  Private_Dirty 58040
+-> 27.7 MB of Pss for a full 10 000-line scrollback = 2.8 kB per line at 132 columns
+   (132 cells x 20 B Cell + the Line object; the cells vector keeps grid-width capacity)
+
+== sphinxpad: i7-1365U, 12 threads, Ubuntu 26.04, AC=1, governor=performance, load 0.3-1.2
+   same 1400x900 Xvfb, same window geometry, libvterm core, Release-style default build
+                          Qt5 (default configure)            Qt6 (what the .deb ships)
+cat 50 MB base64  wall    1.945 / 1.886 / 1.924              1.796 / 1.774 / 1.791
+                  GUI     1.05 / 0.92 / 0.83                 0.85 / 0.76 / 0.74
+                  pty     1.90 / 1.85 / 1.90                 1.75 / 1.75 / 1.76
+cat 20 MB SGR     wall    0.152 / 0.155 / 0.155              0.158 / 0.148 / 0.173
+cat 20 MB CJK     wall    0.477 / 0.442 / 0.451              0.442 / 0.433 / 0.447
+seq 1 2000000     wall    3.733 / 3.776 / 3.679              3.673 / 3.776 / 3.768
+ls --color -R /usr wall   6.923 (cold) / 2.007               2.122 / 2.029
+peak RSS at startup       118 732 kB                         79 860 kB
+Pss after all scenarios    89 875 kB                         75 085 kB
+Private_Dirty              56 632 kB                         59 040 kB

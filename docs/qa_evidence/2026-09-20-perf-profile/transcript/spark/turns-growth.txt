@@ -1,0 +1,14 @@
+# 300 agent turns typed back to back (reply: "ok."), spark.  Cost per turn against how far
+# into the conversation it is.  About 50 turns land in each 10 s window.
+t_s   gui_cpu%  ms_per_turn  rss_MB
+    0     32.3         65.4   153.3
+   10     33.9         68.0   154.5
+   20     36.4         73.4   155.4
+   30     38.0         77.2   156.2
+   40     43.0         86.2   157.1
+   50     32.1         65.0   158.2
+   61      0.3          0.6   158.2
+   71      0.4          0.8   158.2
+   81      0.4          0.8   158.2
+
+total: 21.87 s of GUI-thread CPU for 300 turns = 73 ms/turn; RSS 152.3 -> 158.2 MB (20 KB/turn)

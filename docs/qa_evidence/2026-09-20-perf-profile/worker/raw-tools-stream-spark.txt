@@ -1,0 +1,32 @@
+# Tool wrapper and streaming
+
+## spark: tool wrapper (toolbench.py, workspace = the repo checkout)
+workspace /home/elliott/repos/relay-terminal
+run_command 'true'                :    0.96 ms wall    0.45 ms worker CPU
+bare subprocess /bin/bash -c true :    1.25 ms wall
+run_command 'echo hi'             :    1.63 ms wall
+run_command producing   1 MiB      :       5 ms wall       2 ms worker CPU  result 32768 chars, omitted 1015808  tool_output events 2  maxRSS 24->27 MiB
+run_command producing  10 MiB      :      15 ms wall      11 ms worker CPU  result 32768 chars, omitted 10452992  tool_output events 3  maxRSS 27->29 MiB
+run_command producing  50 MiB      :      32 ms wall      28 ms worker CPU  result 32768 chars, omitted 52396032  tool_output events 4  maxRSS 29->31 MiB
+read_file engine/view/TerminalView.cpp (116 KiB):    0.26 ms
+list_directory .                  :    0.08 ms
+rg via run_command (repo-wide)    :    9.63 ms
+grep -r via run_command           : 2529.35 ms
+loadavg (1.474609375, 1.42431640625, 1.7939453125)
+
+## spark: streaming (streambench.py <root> 2000 deltas, 12 chars each)
+deltas=2000 chars=12 rate=max/s  loadavg=1.47
+  turn wall 38 ms, provider streamed for 16 ms
+  worker CPU 40 ms  =>  20 us per delta
+  worker stdout: 2012 events, 88792 bytes  (1.01 events and 44.4 bytes per delta)
+  events: [('delta', 2000), ('requests', 3), ('queue_changed', 2), ('queued', 1), ('agent_started', 1), ('status', 1), ('context', 1), ('turn_summary', 1)]
+deltas=2000 chars=12 rate=100.0/s  loadavg=1.65
+  turn wall 20018 ms, provider streamed for 19990 ms
+  worker CPU 370 ms  =>  185 us per delta
+  worker stdout: 2012 events, 88795 bytes  (1.01 events and 44.4 bytes per delta)
+  events: [('delta', 2000), ('requests', 3), ('queue_changed', 2), ('queued', 1), ('agent_started', 1), ('status', 1), ('context', 1), ('turn_summary', 1)]
+deltas=2000 chars=12 rate=1000.0/s  loadavg=1.84
+  turn wall 2030 ms, provider streamed for 1999 ms
+  worker CPU 170 ms  =>  85 us per delta
+  worker stdout: 2012 events, 88794 bytes  (1.01 events and 44.4 bytes per delta)
+  events: [('delta', 2000), ('requests', 3), ('queue_changed', 2), ('queued', 1), ('agent_started', 1), ('status', 1), ('context', 1), ('turn_summary', 1)]

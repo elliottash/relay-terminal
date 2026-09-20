@@ -1,0 +1,50 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 72  of event 'armv8_pmuv3_0/cycles/P'
+# Event count (approx.): 40274600
+#
+# Overhead  Command         Shared Object                                                Symbol                                                         
+# ........  ..............  ...........................................................  ...............................................................
+#
+     7.16%  python3         python3.12                                                   [.] _PyEval_EvalFrameDefault
+     5.61%  python3         python3.12                                                   [.] 0x0000000000114d54
+     4.96%  python3         python3.12                                                   [.] 0x000000000012d71c
+     4.53%  python3         bpf_prog_842c464592f1eb54_tracepoint_raw_syscalls_sys_enter  [k] bpf_prog_842c464592f1eb54_tracepoint_raw_syscalls_sys_enter
+     3.86%  python3         python3.12                                                   [.] PyCMethod_New
+     3.33%  python3         python3.12                                                   [.] PyLong_FromLong
+     2.88%  python3         python3.12                                                   [.] 0x00000000000f18c4
+     2.71%  python3         python3.12                                                   [.] 0x00000000000c76d4
+     2.47%  python3         python3.12                                                   [.] 0x0000000000115c70
+     2.35%  python3         python3.12                                                   [.] 0x00000000001943f0
+     2.26%  python3         [kernel.kallsyms]                                            [k] handle_pte_fault
+     2.25%  python3         python3.12                                                   [.] _PyObject_MakeTpCall
+     2.13%  python3         python3.12                                                   [.] 0x00000000001959c0
+     2.07%  python3         python3.12                                                   [.] 0x00000000000f18e4
+     1.94%  python3         python3.12                                                   [.] 0x0000000000115ac0
+     1.90%  python3         python3.12                                                   [.] 0x00000000001b4080
+     1.88%  python3         python3.12                                                   [.] 0x0000000000153cc4
+     1.84%  python3         python3.12                                                   [.] 0x000000000010a6c8
+     1.81%  python3         python3.12                                                   [.] _Py_hashtable_get
+     1.80%  python3         [kernel.kallsyms]                                            [k] __memcg_slab_post_alloc_hook
+     1.78%  python3         python3.12                                                   [.] _PyObject_GenericGetAttrWithDict
+     1.77%  python3         python3.12                                                   [.] PyObject_Free
+     1.75%  python3         [kernel.kallsyms]                                            [k] lookup_fast
+     1.75%  python3         [kernel.kallsyms]                                            [k] __arch_copy_to_user
+     1.74%  python3         python3.12                                                   [.] 0x000000000019cb78
+     1.73%  python3         python3.12                                                   [.] 0x00000000000f6eac
+     1.73%  python3         python3.12                                                   [.] 0x000000000010b784
+     1.73%  python3         libc.so.6                                                    [.] memcmp
+     1.73%  python3         libc.so.6                                                    [.] __libc_calloc
+     1.72%  python3         [kernel.kallsyms]                                            [k] __pi_copy_page
+     1.72%  python3         libcrypto.so.3                                               [.] OBJ_nid2sn
+     1.72%  python3         libcrypto.so.3                                               [.] 0x00000000000e5bdc
+     1.71%  python3         python3.12                                                   [.] PyObject_VectorcallMethod
+     1.71%  python3         [kernel.kallsyms]                                            [k] alloc_pages_mpol
+     1.71%  python3         [kernel.kallsyms]                                            [k] el0_svc
+     1.71%  python3         python3.12                                                   [.] 0x00000000000f7208
+     1.71%  python3         libcrypto.so.3                                               [.] OPENSSL_LH_insert
+     1.71%  python3         python3.12                                                   [.] 0x000000000012e360
+     1.71%  python3         python3.12                                                   [.] PyObject_Malloc

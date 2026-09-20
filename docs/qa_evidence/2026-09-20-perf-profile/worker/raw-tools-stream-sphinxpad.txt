@@ -1,0 +1,32 @@
+# sphinxpad
+
+## tool wrapper
+workspace /home/elliott/relay-perf/src
+run_command 'true'                :    1.00 ms wall    0.37 ms worker CPU
+bare subprocess /bin/bash -c true :    0.76 ms wall
+run_command 'echo hi'             :    1.05 ms wall
+run_command producing   1 MiB      :       5 ms wall       2 ms worker CPU  result 32768 chars, omitted 1015808  tool_output events 1  maxRSS 28->31 MiB
+run_command producing  10 MiB      :      17 ms wall      11 ms worker CPU  result 32768 chars, omitted 10452992  tool_output events 1  maxRSS 31->33 MiB
+run_command producing  50 MiB      :      47 ms wall      32 ms worker CPU  result 32768 chars, omitted 52396032  tool_output events 1  maxRSS 33->36 MiB
+read_file engine/view/TerminalView.cpp (116 KiB):    0.22 ms
+list_directory .                  :    0.05 ms
+rg via run_command (repo-wide)    :    6.13 ms
+grep -r via run_command           :   41.40 ms
+loadavg (0.21142578125, 0.3466796875, 0.84765625)
+
+## streaming
+deltas=2000 chars=12 rate=max/s  loadavg=0.21
+  turn wall 44 ms, provider streamed for 12 ms
+  worker CPU 40 ms  =>  20 us per delta
+  worker stdout: 2012 events, 88792 bytes  (1.01 events and 44.4 bytes per delta)
+  events: [('delta', 2000), ('requests', 3), ('queue_changed', 2), ('queued', 1), ('agent_started', 1), ('status', 1), ('context', 1), ('turn_summary', 1)]
+deltas=2000 chars=12 rate=100.0/s  loadavg=0.15
+  turn wall 20003 ms, provider streamed for 19991 ms
+  worker CPU 340 ms  =>  170 us per delta
+  worker stdout: 2012 events, 88795 bytes  (1.01 events and 44.4 bytes per delta)
+  events: [('delta', 2000), ('requests', 3), ('queue_changed', 2), ('queued', 1), ('agent_started', 1), ('status', 1), ('context', 1), ('turn_summary', 1)]
+deltas=2000 chars=12 rate=1000.0/s  loadavg=0.15
+  turn wall 2016 ms, provider streamed for 1999 ms
+  worker CPU 190 ms  =>  95 us per delta
+  worker stdout: 2012 events, 88790 bytes  (1.01 events and 44.4 bytes per delta)
+  events: [('delta', 2000), ('requests', 3), ('queue_changed', 2), ('queued', 1), ('agent_started', 1), ('status', 1), ('context', 1), ('turn_summary', 1)]

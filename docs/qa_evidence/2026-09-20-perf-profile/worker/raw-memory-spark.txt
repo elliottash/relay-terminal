@@ -1,0 +1,38 @@
+# Memory: idle workers, a 3-tab/6-pane session, and growth across 300 turns
+
+## one idle configured worker (idle.py <root> 60 --configure), spark
+idle 60s  configured=True
+  Pss 21.1 MiB   Rss 31.3 MiB   Private_Dirty 20.7 MiB   threads 2
+  CPU used while idle: 0 ms over 60s
+  nr_switches: 20755 -> 20755
+  nr_voluntary_switches: 20754 -> 20754
+--- syscalls while alive (whole process lifetime, incl. startup):
+
+## nine idle configured workers (6 panes + 3 tab board workers), spark
+9 workers spawned and configured in 0.16 s
+total: Pss=193.1 MiB  Rss=286.0 MiB  Private_Dirty=190.6 MiB   (Pss/worker 21.5 MiB)
+loadavg (1.40966796875, 1.33349609375, 1.828125)
+
+## tracemalloc across 300 stub turns (memgrow.py), spark — WITH the shared-opener fix (srcfix)
+python 3.12.3  loadavg 1.40
+ turns   Pss MiB  traced MiB  peak MiB  gc objects
+     1      24.6        0.42      0.58       29299
+    10      25.2        0.45      0.70       29572
+    50      26.3        0.60      0.94       31749
+   100      27.9        0.73      1.25       33467
+   200      30.5        0.98      2.05       37114
+   300      33.6        1.23      2.63       40791
+
+top allocation sites at the end:
+
+## the same 300 turns on the CLEAN EXPORT (srcmem = clean export + the memstat hook only), spark
+python 3.12.3  loadavg 1.81
+ turns   Pss MiB  traced MiB  peak MiB  gc objects
+     1      32.7        0.42      0.55       29175
+    10      37.2        0.43      0.72       29170
+    50      42.1        0.57      0.98       31334
+   100      47.3        0.72      1.30       33398
+   200      49.1        0.97      1.86       37024
+   300      50.7        1.21      2.56       40574
+
+top allocation sites at the end:

@@ -1,0 +1,31 @@
+# conv_index against a READ-ONLY COPY of the owner's store (spark)
+# the copy: sqlite3 backup of ~/.local/share/relay/index.db + cp -r of sessions/; the originals were never opened for writing.
+
+store: 668 session files, 54.5 MB
+
+update_session (one autosave) by session-file size:
+         5 KiB      2 messages  turns=1  ->     0.26 ms
+        56 KiB     35 messages  turns=1  ->     2.57 ms
+       182 KiB     86 messages  turns=1  ->     5.95 ms
+       487 KiB    192 messages  turns=3  ->    16.77 ms
+      1574 KiB    594 messages  turns=5  ->    46.14 ms
+
+full rebuild: 667 sessions in 1.6 s  (2 ms each), db 37.9 MB, peak RSS 42 MiB (was 30)
+
+queries against the copy of the live index:
+  ''                            1.28 ms
+  'relay'                      76.37 ms
+  'board_tools'                59.27 ms
+  'profile performance'         1.46 ms
+loadavg (1.31689453125, 1.39453125, 1.7900390625)
+
+## space in the live index
+index.db: 119.6 MB page_count 29198 freelist 7689 pages of 4096 B
+  entries                   44.1 MB
+  entries_fts_data          39.3 MB
+  entries_by_session         3.1 MB
+  entries_fts_docsize        0.7 MB
+  conversations              0.5 MB
+  guest_files                0.2 MB
+rows: 863 conversations, 58848 entries
+VACUUM: 87.3 MB in 0.3 s

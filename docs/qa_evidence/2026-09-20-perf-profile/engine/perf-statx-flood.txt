@@ -1,0 +1,69 @@
+# syscalls:sys_enter_statx call graph during a flood (spark, 132x30)
+   100.00%  relay    libc.so.6      [.] statx
+            |
+            ---_start
+               __libc_start_main_impl (inlined)
+               call_init (inlined)
+               __libc_start_call_main
+               main
+               QCoreApplication::exec()
+               QEventLoop::exec(QFlags<QEventLoop::ProcessEventsFlag>)
+               QEventDispatcherGlib::processEvents(QFlags<QEventLoop::ProcessEventsFlag>)
+               g_main_context_iteration
+               0xf9a578a51ae8
+               0xf9a5789ef90c
+               |          
+               |--91.22%--0xf9a579e597fc
+               |          QCoreApplicationPrivate::sendPostedEvents(QObject*, int, QThreadData*)
+               |          QCoreApplication::notifyInternal2(QObject*, QEvent*)
+               |          QApplicationPrivate::notify_helper(QObject*, QEvent*)
+               |          QWidget::event(QEvent*)
+               |          |          
+               |           --90.75%--0xf9a57a914620
+               |                     QWidgetPrivate::drawWidget(QPaintDevice*, QRegion const&, QPoint const&, QFlags<QWidgetPrivate::DrawWidgetFlag>, QPainter*, QWidgetRepaintManager*)
+               |                     QWidgetPrivate::sendPaintEvent(QRegion const&)
+               |                     QCoreApplication::notifyInternal2(QObject*, QEvent*)
+               |                     QApplicationPrivate::notify_helper(QObject*, QEvent*)
+               |                     QWidget::event(QEvent*)
+               |                     paintEvent (inlined)
+               |                     paintRow (inlined)
+               |                     restLinkColumns (inlined)
+               |                     currentDirectory (inlined)
+               |                     QFileInfo::symLinkTarget() const
+               |                     0xf9a579d75b94
+               |                     0xf9a579d7250c
+               |                     statx
+               |          
+               |--6.32%--0xf9a579e58860
+               |          QTimerInfoList::activateTimers()
+               |          QCoreApplication::notifyInternal2(QObject*, QEvent*)
+               |          QApplicationPrivate::notify_helper(QObject*, QEvent*)
+               |          QObject::event(QEvent*)
+               |          QTimer::timeout(QTimer::QPrivateSignal)
+               |          0xf9a579e305bc
+               |          |          
+               |          |--2.55%--pollProgram (inlined)
+               |          |          |          
+               |          |           --1.21%--updateOpaqueProgram (inlined)
+               |          |          
+               |          |--2.13%--refreshPaneStatus (inlined)
+               |          |          |          
+               |          |           --1.05%--usageSample (inlined)
+               |          |                     Sample (inlined)
+               |          |                     refreshUsage (inlined)
+               |          |          
+               |           --1.30%--pollShell (inlined)
+               |          
+                --2.46%--0xf9a579e588a4
+                          QTimerInfoList::activateTimers()
+                          QCoreApplication::notifyInternal2(QObject*, QEvent*)
+                          QApplicationPrivate::notify_helper(QObject*, QEvent*)
+                          QObject::event(QEvent*)
+                          QTimer::timeout(QTimer::QPrivateSignal)
+                          0xf9a579e305bc
+                          |          
+                           --2.21%--refreshPaneStatus (inlined)
+                                     |          
+                                      --1.22%--usageSample (inlined)
+                                                Sample (inlined)
+                                                refreshUsage (inlined)

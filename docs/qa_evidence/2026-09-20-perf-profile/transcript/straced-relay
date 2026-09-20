@@ -1,0 +1,5 @@
+#!/bin/sh
+# #PF4K transcript: run Relay under strace, filtered to the calls that would block the GUI thread.
+exec strace -f --seccomp-bpf -tt -T -o "$STRACE_OUT" \
+    -e trace=openat,fsync,fdatasync,sync_file_range,rename,unlink,statx,newfstatat,execve,clone,clone3,vfork,wait4 \
+    /tmp/claude-1000/pf4k/build/relay "$@"

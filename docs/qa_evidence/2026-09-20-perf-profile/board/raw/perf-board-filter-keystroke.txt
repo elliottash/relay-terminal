@@ -1,0 +1,48 @@
+     8.68%  relay           libQt5Core.so.5.15.13     [.] 0x0000000000135634
+     4.87%  relay           libQt5Core.so.5.15.13     [.] 0x0000000000135628
+     3.40%  relay           libQt5Core.so.5.15.13     [.] 0x0000000000135614
+     3.25%  relay           libQt5Core.so.5.15.13     [.] 0x00000000001355e0
+     2.98%  relay           libQt5Core.so.5.15.13     [.] 0x00000000001355f4
+     2.92%  relay           libQt5Gui.so.5.15.13      [.] 0x0000000000582604
+     2.84%  relay           libQt5Core.so.5.15.13     [.] operator==(QString const&, QString const&)
+     2.52%  QXcbEventQueue  [kernel.kallsyms]         [k] _raw_spin_unlock_irqrestore
+     2.24%  relay           libQt5Gui.so.5.15.13      [.] QTextEngine::shapeTextWithHarfbuzzNG(QScriptItem const&, unsigned short const*, int, QFontEngine*, QVector<unsigned int> const&, bool, bool) const
+     1.91%  relay           libQt5Gui.so.5.15.13      [.] 0x0000000000388fb4
+     1.73%  relay           libc.so.6                 [.] __aarch64_cas4_acq
+     1.70%  relay           libQt5Core.so.5.15.13     [.] 0x0000000000135608
+     1.69%  relay           libc.so.6                 [.] _int_free
+     1.55%  QXcbEventQueue  libc.so.6                 [.] __aarch64_cas4_acq
+     1.44%  QXcbEventQueue  libc.so.6                 [.] pthread_mutex_lock@@GLIBC_2.17
+     1.38%  relay           libQt5Widgets.so.5.15.13  [.] 0x000000000044d030
+     1.32%  QXcbEventQueue  libQt5XcbQpa.so.5.15.13   [.] QWaitCondition::wakeOne()@plt
+     1.26%  QXcbEventQueue  [kernel.kallsyms]         [k] __futex_hash
+     1.26%  QXcbEventQueue  [kernel.kallsyms]         [k] wake_up_q
+     1.21%  relay           libQt5Core.so.5.15.13     [.] 0x0000000000135638
+     1.19%  relay           libfontconfig.so.1.12.1   [.] 0x000000000001f800
+     1.15%  relay           libharfbuzz.so.0.60830.0  [.] 0x000000000000cb60
+     1.06%  relay           libfontconfig.so.1.12.1   [.] 0x00000000000209e8
+     0.95%  QXcbEventQueue  [kernel.kallsyms]         [k] invoke_syscall
+     0.95%  QXcbEventQueue  [kernel.kallsyms]         [k] skb_free_head
+     0.95%  QXcbEventQueue  libc.so.6                 [.] __poll
+     0.77%  relay           libQt5Core.so.5.15.13     [.] QString::reallocData(unsigned int, bool)
+     0.72%  relay           libQt5Widgets.so.5.15.13  [.] 0x00000000001bd1f4
+     6.07%  relay           libQt5Core.so.5.15.13                    [.] 0x0000000000135644
+     4.77%  relay           libQt5Core.so.5.15.13                    [.] 0x0000000000135634
+     4.62%  relay           libQt5Core.so.5.15.13                    [.] 0x0000000000135628
+     4.35%  relay           libQt5Gui.so.5.15.13                     [.] 0x0000000000582604
+     3.44%  relay           libQt5Core.so.5.15.13                    [.] 0x0000000000135614
+     2.83%  relay           libQt5Core.so.5.15.13                    [.] 0x00000000001355f4
+     1.66%  relay           libc.so.6                                [.] __aarch64_swp4_rel
+     1.51%  relay           libc.so.6                                [.] __aarch64_cas4_acq
+     1.26%  relay           relay                                    [.] __aarch64_ldadd4_acq_rel
+     1.25%  relay           libQt5Core.so.5.15.13                    [.] 0x0000000000135630
+     1.20%  relay           libc.so.6                                [.] malloc
+     0.98%  relay           libQt5Core.so.5.15.13                    [.] 0x00000000001355e0
+     0.95%  relay           libQt5Core.so.5.15.13                    [.] QtPrivate::findString(QStringView, long long, QStringView, Qt::CaseSensitivity)
+     0.88%  relay           libQt5Core.so.5.15.13                    [.] operator==(QString const&, QString const&)
+     0.87%  relay           libQt5Core.so.5.15.13                    [.] 0x0000000000135610
+     0.81%  relay           libQt5Gui.so.5.15.13                     [.] 0x00000000005788f8
+     0.78%  relay           libharfbuzz.so.0.60830.0                 [.] 0x00000000000c90d4
+     0.78%  relay           libQt5Core.so.5.15.13                    [.] 0x0000000000135624
+     0.73%  relay           libQt5Gui.so.5.15.13                     [.] 0x00000000005788f4
+     0.71%  relay           libfontconfig.so.1.12.1                  [.] 0x000000000000b108

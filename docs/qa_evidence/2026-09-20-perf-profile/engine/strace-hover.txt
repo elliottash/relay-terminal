@@ -1,0 +1,12 @@
+# 4-5 filesystem syscalls per hovered cell, sweeping the pointer over a screen of paths
+# (392 xdotool mousemove steps, one cell apart, 0.71 s)
+    826 statx
+    401 faccessat
+    392 readlinkat
+     14 newfstatat
+
+# one hover position, verbatim:
+26703 12:57:08.422286 readlinkat(AT_FDCWD, "/proc/26814/cwd", "/tmp/claude-1000/pf4k/engine/wor"..., 256) = 33
+26703 12:57:08.422379 statx(AT_FDCWD, "/proc/26814/cwd", AT_STATX_SYNC_AS_STAT|AT_NO_AUTOMOUNT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFDIR|0775, stx_size=4096, ...}) = 0
+26703 12:57:08.422457 faccessat(AT_FDCWD, "/usr/include/c++/13/version", F_OK) = 0
+26703 12:57:08.422496 statx(AT_FDCWD, "/usr/include/c++/13/version", AT_STATX_SYNC_AS_STAT|AT_NO_AUTOMOUNT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0644, stx_size=12620, ...}) = 0

@@ -1,0 +1,39 @@
+# perf, 280x71, same input, spark
+
+## pty thread
+    18.42%  relay    relay                  [.] relay::LibVtermCore::Impl::convertCell(VTermScreenCell const&, relay::Line*, relay::Cell*) const
+    11.40%  relay    relay                  [.] sb_pushline_from_row
+     9.33%  relay    relay                  [.] on_text
+     7.95%  relay    relay                  [.] putglyph
+     5.90%  relay    relay                  [.] erase_internal
+     5.24%  relay    relay                  [.] std::vector<relay::Cell, std::allocator<relay::Cell> >::_M_default_append(unsigned long)
+     4.27%  relay    [kernel.kallsyms]      [k] __schedule
+     4.20%  relay    relay                  [.] decode_utf8
+     4.01%  relay    relay                  [.] relay::LibVtermCore::Impl::pushLine(int, VTermScreenCell const*, VTermLineInfo const*, void*)
+     3.40%  relay    relay                  [.] relay_extends
+     2.57%  relay    relay                  [.] damagerect
+     2.17%  relay    relay                  [.] putglyph
+     1.61%  relay    [kernel.kallsyms]      [k] el0_svc
+     1.04%  relay    relay                  [.] vterm_unicode_width
+
+## GUI thread
+     6.15%  relay    libQt5Gui.so.5.15.13            [.] 0x0000000000389198
+     3.53%  relay    libQt5Gui.so.5.15.13            [.] 0x0000000000389194
+     3.40%  relay    relay                           [.] relay::TerminalView::paintRow(QPainter&, int, relay::Line const&, int)::{lambda(int)#1}::operator()(int) const
+     2.60%  relay    relay                           [.] relay::TerminalView::resolve(unsigned int, bool) const
+     2.22%  relay    libQt5Gui.so.5.15.13            [.] 0x00000000005788f8
+     2.10%  relay    relay                           [.] relay::LibVtermCore::Impl::convertCell(VTermScreenCell const&, relay::Line*, relay::Cell*) const
+     2.05%  relay    libc.so.6                       [.] malloc
+     2.02%  relay    relay                           [.] relay::TerminalView::glyphFor(int, char32_t)
+     1.92%  relay    libQt5Gui.so.5.15.13            [.] 0x00000000005788f4
+     1.76%  relay    relay                           [.] relay::TerminalView::paintRow(QPainter&, int, relay::Line const&, int)
+     1.55%  relay    libQt5Gui.so.5.15.13            [.] 0x00000000003891a0
+     1.49%  relay    libQt5Gui.so.5.15.13            [.] 0x000000000038905c
+     1.31%  relay    relay                           [.] __aarch64_ldadd4_acq_rel
+     1.31%  relay    libQt5Gui.so.5.15.13            [.] 0x0000000000389060
+     1.19%  relay    [kernel.kallsyms]               [k] __d_lookup_rcu
+     1.17%  relay    libQt5Gui.so.5.15.13            [.] QColor::operator==(QColor const&) const
+     1.16%  relay    libQt5Gui.so.5.15.13            [.] 0x0000000000389064
+     1.09%  relay    libc.so.6                       [.] _int_malloc
+     1.09%  relay    libQt5Core.so.5.15.13           [.] 0x00000000003da2a4
+     1.05%  relay    libQt5Gui.so.5.15.13            [.] 0x0000000000389058

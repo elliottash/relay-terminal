@@ -1,0 +1,46 @@
+# strace -f -c, whole life of one relay process: startup + one 50 MB cat + quit (spark)
+% time     seconds  usecs/call     calls    errors syscall
+------ ----------- ----------- --------- --------- -------------------
+ 92.03   68.073673        4077     16694       682 futex
+  5.52    4.080784        1602      2546         5 ppoll
+  0.82    0.606202       14097        43        18 wait4
+  0.65    0.477598         165      2885         2 write
+  0.33    0.243306           2     87566     64599 statx
+  0.16    0.121926           3     39185     38368 faccessat
+  0.09    0.064706           3     18350        21 read
+  0.07    0.053321           3     16619       388 newfstatat
+  0.06    0.045991        9198         5         1 waitid
+  0.04    0.026981           5      5312       781 openat
+  0.03    0.023446           3      6464           mprotect
+  0.03    0.020870           2      7518       177 ioctl
+  0.03    0.020408         680        30           clone
+  0.03    0.019738         789        25           execve
+  0.02    0.015012           3      4751         7 close
+  0.02    0.012266           5      2091           mmap
+  0.01    0.010546           1      6432       688 readlinkat
+  0.01    0.007676          10       766        25 recvmsg
+  0.01    0.006487           5      1222           munmap
+  0.01    0.006318           6      1028           getdents64
+  0.01    0.004498           2      1840           fstat
+  0.00    0.003690           6       610           rt_sigprocmask
+  0.00    0.003586           1      3025           sched_yield
+
+# syscall counts in the 1.8 s window of the cat itself (from the timestamped trace)
+17405 calls total:
+   6355 statx
+   5132 faccessat
+   4639 readlinkat
+    777 newfstatat
+    495 <...
+
+statx targets in that window (numbers masked):
+   4611 /proc/N/cwd
+    537 N N:N:N.N statx(N, 
+    146 /tmp/claude-N/pfNk/engine/h/cfg/RelayTerminal.conf
+    146 /home/elliott/.config/kdedefaults/RelayTerminal/relay.conf
+    146 /home/elliott/.config/kdedefaults/RelayTerminal.conf
+    146 /etc/xdg/xdg-plasma/RelayTerminal/relay.conf
+    146 /etc/xdg/xdg-plasma/RelayTerminal.conf
+    146 /etc/xdg/RelayTerminal/relay.conf
+    146 /etc/xdg/RelayTerminal.conf
+     81 N N:N:N.N <... statx resumed>NxffffdNbN) = -N ENOENT (No such file or directory)

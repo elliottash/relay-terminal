@@ -1,0 +1,26 @@
+== a100
+# TOTAL gui_cpu_s=1.84 proc_cpu_s=1.88 rss_start_MB=115.5 rss_end_MB=120.7 span_s=28.7
+== a1000
+# TOTAL gui_cpu_s=0.84 proc_cpu_s=0.86 rss_start_MB=115.2 rss_end_MB=120.5 span_s=18.7
+== md
+# TOTAL gui_cpu_s=2.04 proc_cpu_s=2.06 rss_start_MB=115.6 rss_end_MB=128.6 span_s=42.5
+== think
+# TOTAL gui_cpu_s=0.77 proc_cpu_s=0.77 rss_start_MB=115.6 rss_end_MB=116.1 span_s=42.8
+== tools
+# TOTAL gui_cpu_s=8.84 proc_cpu_s=8.93 rss_start_MB=115.6 rss_end_MB=124.9 span_s=172.7
+== idle
+# TOTAL gui_cpu_s=4.31 proc_cpu_s=4.34 rss_start_MB=115.4 rss_end_MB=115.4 span_s=892.8
+== q6-a100
+# TOTAL gui_cpu_s=1.79 proc_cpu_s=1.85 rss_start_MB=77.8 rss_end_MB=83.5 span_s=28.8
+== q6-a1000
+# TOTAL gui_cpu_s=0.86 proc_cpu_s=0.88 rss_start_MB=77.6 rss_end_MB=83.3 span_s=18.7
+== q6-md
+# TOTAL gui_cpu_s=2.11 proc_cpu_s=2.13 rss_start_MB=77.7 rss_end_MB=92.4 span_s=42.6
+== q6-tools
+# TOTAL gui_cpu_s=9.24 proc_cpu_s=9.48 rss_start_MB=77.5 rss_end_MB=88.0 span_s=172.6
+== configure
+-- Relay: building against Qt5
+-- Relay: PDF preview disabled (Qt5 Pdf not found)
+-- Relay: building against Qt6
+-- Relay: PDF preview disabled (Qt6 Pdf not found)
+-- Build files have been written to: /home/elliott/relay-perf/build-qt6

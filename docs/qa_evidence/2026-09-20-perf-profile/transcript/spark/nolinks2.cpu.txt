@@ -1,0 +1,9 @@
+# out/nolinks2.samples.tsv  rate=100.0/s  bucket=5.0s  samples=119
+t_s	gui_cpu%	proc_cpu%	worker%	rss_MB	cs/s	ms_per_delta
+   0.0	    6.7	     7.3	   1.8	  152.3	   280	   0.672
+   5.1	    7.5	     7.7	   1.6	  152.4	   308	   0.752
+  10.1	    6.1	     6.5	   1.4	  152.8	   311	   0.611
+  15.2	    5.9	     6.5	   1.4	  153.4	   311	   0.591
+  20.3	    2.6	     2.6	   3.9	  158.1	    62	   0.257
+  25.3	    0.6	     0.3	   1.8	  158.1	    19	   0.059
+# TOTAL gui_cpu_s=1.48 proc_cpu_s=1.56 rss_start_MB=152.0 rss_end_MB=158.1 span_s=28.7

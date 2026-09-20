@@ -1,0 +1,33 @@
+     7.20%  libc.so.6                            [.] unlink_chunk.isra.0
+     7.01%  libc.so.6                            [.] malloc_consolidate
+     6.82%  libQt5Core.so.5.15.13                [.] 0x00000000003da2a4
+     5.26%  libc.so.6                            [.] _int_free
+     3.45%  libQt5Widgets.so.5.15.13             [.] 0x00000000003b316c
+     2.31%  libQt5Widgets.so.5.15.13             [.] 0x00000000003b425c
+     2.15%  [kernel.kallsyms]                    [k] fdget
+     1.88%  libc.so.6                            [.] cfree@GLIBC_2.17
+     1.81%  libQt5Core.so.5.15.13                [.] QHashData::free_helper(void (*)(QHashData::Node*))
+     1.74%  libQt5Core.so.5.15.13                [.] QFileInfo::~QFileInfo()
+     1.55%  libQt5Widgets.so.5.15.13             [.] 0x00000000003b4264
+     1.46%  libQt5Gui.so.5.15.13                 [.] QTextDocumentPrivate::split(int)
+     1.44%  libQt5Widgets.so.5.15.13             [.] 0x00000000003b4350
+     1.43%  libQt5Core.so.5.15.13                [.] QHashData::nextNode(QHashData::Node*)
+     1.37%  [kernel.kallsyms]                    [k] _raw_spin_unlock_irqrestore
+     1.25%  libQt5Gui.so.5.15.13                 [.] 0x0000000000273ce4
+     1.12%  [kernel.kallsyms]                    [k] __d_lookup_rcu
+     1.09%  libc.so.6                            [.] _int_malloc
+     1.04%  libQt5Gui.so.5.15.13                 [.] QTextDocumentPrivate::insertBlock(QChar, int, int, int, QTextUndoCommand::Operation)
+    15.66%  libQt5Gui.so.5.15.13                 [.] 0x0000000000582604
+     7.00%  libKF5SyntaxHighlighting.so.5.115.0  [.] KSyntaxHighlighting::AbstractHighlighter::highlightLine(QStringView, KSyntaxHighlighting::State const&)
+     5.63%  libKF5SyntaxHighlighting.so.5.115.0  [.] 0x000000000003d1f4
+     2.05%  libc.so.6                            [.] __aarch64_swp4_rel
+     1.93%  libQt5Core.so.5.15.13                [.] 0x00000000003da2a4
+     1.49%  libQt5Gui.so.5.15.13                 [.] QTextFormat::operator=(QTextFormat const&)
+     1.26%  libQt5Gui.so.5.15.13                 [.] QTextBlock::position() const
+     1.25%  libc.so.6                            [.] malloc
+     1.25%  libc.so.6                            [.] _int_malloc
+     1.21%  libQt5Gui.so.5.15.13                 [.] QTextDocumentPrivate::setCharFormat(int, int, QTextCharFormat const&, QTextDocumentPrivate::FormatChangeMode)
+     1.11%  libc.so.6                            [.] _int_free
+     1.04%  libQt5Gui.so.5.15.13                 [.] QTextDocumentPrivate::split(int)
+     1.04%  libQt5Gui.so.5.15.13                 [.] QTextFormat::~QTextFormat()
+     1.03%  libQt5Core.so.5.15.13                [.] 0x0000000000135528

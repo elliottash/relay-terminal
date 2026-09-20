@@ -1,0 +1,151 @@
+#PF4K — board area, raw measurement log (spark and sphinxpad)
+Every GUI number is the median of three unless it says otherwise.  `cpu_gui` is the GUI
+thread's utime+stime over the action, from /proc/<pid>/task/<pid>/stat; `last` is when the
+pane's pixels stopped changing (harness/act.py).
+
+=========================================================================================
+1. relay-board.py, wall/user/sys seconds, three runs
+-----------------------------------------------------------------------------------------
+spark      340  check            0.10/0.09/0.00  0.12/0.11/0.01  0.10/0.09/0.01
+spark      340  index --stdout   0.13/0.11/0.01  0.13/0.12/0.01  0.11/0.10/0.00
+spark      340  policy --stdout  0.04/0.04/0.00  0.03/0.02/0.00  0.04/0.03/0.01
+spark     3000  check            0.69/0.66/0.03  0.68/0.65/0.02  0.70/0.66/0.03
+spark     3000  index --stdout   0.82/0.77/0.05  0.79/0.74/0.04  0.80/0.76/0.04
+spark     3000  policy --stdout  0.03/0.02/0.00  0.03/0.02/0.00  0.03/0.03/0.00
+sphinxpad  340  check            0.10/0.09/0.01  0.11/0.10/0.00  0.10/0.09/0.00
+sphinxpad  340  index --stdout   0.10/0.09/0.00  0.10/0.09/0.01  0.11/0.10/0.00
+sphinxpad 3000  check            0.62/0.60/0.02  0.64/0.61/0.02  0.63/0.60/0.02
+sphinxpad 3000  index --stdout   0.61/0.57/0.03  0.61/0.57/0.04  0.60/0.57/0.03
+
+Bare `python3 -c "from relay_core import board"` on spark: 0.04 s wall.  So `check` at 340
+cards is ~70 ms of actual work and `policy` is interpreter startup and nothing else.
+
+Parse primitives (best of 3, spark / sphinxpad not taken separately):
+  spark  340  card_paths 10.5 ms | cards() 34.4 | check() 71.7 | all threads 42.6 | tasks() 38.8
+  spark 3000  card_paths 96.7 ms | cards() 318.0 | check() 641.9 | all threads 384.3 | tasks() 354.9
+
+cProfile, 3000 cards (tottime order, top entries):
+  check:  re.search 0.075, pathlib.__init__ 0.074, re.match 0.072, board._split_flow 0.071,
+          board._parse_scalar 0.054, board.parse_yaml cum 0.478
+  index:  pathlib.__init__ 0.126, pathlib._parse_path 0.097, pathlib._str_normcase 0.082,
+          pathlib.with_segments 0.080 ... pathlib.relative_to **cum 1.170 of 2.256**
+          (28,504 calls for 3,000 cards)
+There is no PyYAML anywhere: board.py has its own parse_yaml (board.py:435).
+
+=========================================================================================
+2. The board worker (backend/worker.py), driven directly — harness/refresh.py
+-----------------------------------------------------------------------------------------
+                       board_open        payload      board_refresh (no change)   worker RSS
+spark      337 cards      303 ms         2.43 MB            179 ms                  48 MB
+spark     3000 cards     2022 ms        21.63 MB           1596 ms                 177 MB
+sphinxpad  337 cards      283 ms         2.43 MB            158 ms                  55 MB
+sphinxpad 3000 cards     1773 ms        21.63 MB           1440 ms                 185 MB
+
+`board_refresh` costs the same whether nothing changed or one card did (1 upsert).
+
+Payload composition (harness/payload.py), identical shape at both sizes:
+  337 cards, 2,431,294 B total, 7,215 B/card
+    text 92.6%  (6,682 B/card)   path 1.0%   title 0.9%   implemented_by 0.5%
+    everything else together < 2%,  non-card fields 2.9%
+  3000 cards, 21,634,664 B total, 7,212 B/card — same split to the decimal.
+
+Measured sizes: 337 -> 2,431,294 B; 1200 -> 8,596,942 B; 3000 -> 21,634,664 B.
+Least squares over those three: 7,211 B/card + 1.2 KB.  8 MiB is reached at ~1,163 cards.
+
+=========================================================================================
+3. The Switchboard pane in the app
+-----------------------------------------------------------------------------------------
+spark: aarch64, 20 cores, Qt 5.15.13, Xvfb 1600x1000, load average 0.8-2.1 during the runs.
+sphinxpad: x86_64 i7-1365U, 12 threads, on AC, governor=performance, load 0.4-1.0.
+           Qt5 = ~/relay-perf/build (the default configure); Qt6 = ~/relay-perf/build-qt6.
+
+                             spark Qt5          sphinx Qt5        sphinx Qt6
+board.open 340 COLD       457 ms / 160 gui   508 ms / 170 gui   632 ms / 240 gui
+   (+ worker CPU)              270 ms             300 ms             350 ms
+expand NEEDS QA (239)     119 ms /  20 gui   125 ms /  10 gui   132 ms /  10 gui
+filter keystroke, plain    30-50 ms gui       20-40 ms gui       60-80 ms gui
+filter keystroke, scoped    0-10 ms gui         -                  -
+open card #8YQ9 (42
+  thread entries)         200 ms / 120 gui        -                  -
+reorder (Alt+Shift+Down)   55 ms /  10 gui        -                  -
+
+board.open 1200 cards and 3000 cards: the pane stays on "Loading the Switchboard…"
+indefinitely on **both** machines and on both Qt versions.  Screenshots in raw/.
+
+Filter keystrokes, spark, sections collapsed vs the 239-card section expanded: 30-50 ms
+either way — recreating the QListWidgetItems is not what costs.
+Filter keystrokes, spark, plain word vs `status:`-scoped term:
+  plain 'z' x4:    40, 30, 30, 20 ms gui
+  'status:' tail:  10, 0, 10, 0 ms gui     <- the same widget work, no full-text scan
+
+perf during 40 backspace/retype cycles in the filter box (raw/perf-board-filter-keystroke.txt):
+~22% of the relay thread in one unexported libQt5Core cluster at +0x1355e0..+0x135638
+(the case-insensitive string search), then QString::operator==, text shaping, malloc.
+
+Watches: 12 inotify watches on the GUI process, 11 of them the board's directories
+(find ws340/issues -type d = 11).  Directories only, capped at 200, 400 ms debounce.
+
+Refresh storm, spark, 340 cards, one write per second for 60 s (harness/storm.sh):
+  idle baseline, board open, 20 s:  gui 100 ms, worker 0 ms
+  storm 60 s:  gui 880 ms (1.4% of a core), worker 3,830 ms (6.2% of a core)
+  Only ~21 of the 60 writes reached the pane: QFileSystemWatcher watches directories, so
+  an append to an existing card or a `touch` of BOARD.md often does not fire.  At the
+  measured 179 ms per refresh, a board where every write did fire would cost the worker
+  ~45% of a core at one write per second, and ~4x a core at 3,000 cards.
+
+=========================================================================================
+4. Sessions pane, the owner's real store (READ-ONLY copy: 863 conversations, 58,863
+   entries, 115 MB index.db, 333 session dirs, 71 MB) — spark
+-----------------------------------------------------------------------------------------
+open the pane                     cpu_gui 430 ms   (pane reports "0 ms" for its own query)
+"Search all projects"             204 ms to paint, cpu_gui 180 ms, pane reports 4 ms
+search-as-you-type, 11 keys       100-190 ms cpu_gui each, 300-900 ms wall
+                                  pane reports 40 ms for the query itself
+same box, query matching nothing   10-20 ms cpu_gui
+same box, query matching 100 rows  140-160 ms cpu_gui
+VmRSS with the pane open and 100 rows listed: 149 MB (155 MB peak)
+
+perf while typing (raw/perf-sessions-keystroke.txt), relay thread:
+  QUnicodeTools::initCharAttributes 2.59, QTextLine::layout_helper 2.19,
+  QTextEngine::shapeText 1.33, harfbuzz 1.34+1.21, QTextDocument internals.
+  No SQLite frames at all.
+
+=========================================================================================
+5. File panes — spark, src/Pane.h, 15,830 lines, 780 KB
+-----------------------------------------------------------------------------------------
+open as .h, cold      1,965 ms to paint, cpu_gui 860 ms, VmRSS 149 -> 207 MB (+58 MB)
+open as .h, warm        688 ms to paint, cpu_gui 650 ms
+same bytes as .txt      169 ms to paint, cpu_gui 130 ms      <- no syntax definition matches
+  => KSyntaxHighlighting costs ~520 ms of the 650 ms warm figure, 4x the document load.
+PageDown x5             0-10 ms cpu_gui each
+Ctrl+End (to line 15830) 20 ms cpu_gui
+20 wheel clicks          60 ms cpu_gui total (3 ms each)
+configure.log: "Relay: file preview syntax highlighting enabled (KF5SyntaxHighlighting)"
+
+perf during the open (raw/perf-filepane-open.txt): malloc_consolidate 7.0,
+unlink_chunk 7.2, _int_free 5.3, QTextDocumentPrivate::split 1.5, ::insertBlock 1.0,
+QFileInfo::~QFileInfo 1.7, plus 15.7% in one libQt5Gui text-engine address.
+
+=========================================================================================
+6. Options and Options › Models — spark, cpu_gui, three opens each
+-----------------------------------------------------------------------------------------
+Options open    240, 50, 80 ms        Options close    250, 220, 220 ms
+Models open     140, 170, 150 ms      Models close     150, 140, 150 ms
+Models does not get cheaper with repetition.  perf (raw/perf-models-open.txt) is diffuse:
+QCss::StyleSelector::selectorMatches 1.16, QMetaObject::indexOfProperty 1.46, text layout,
+malloc, statx/link_path_walk — widget construction under a stylesheet, no single hotspot.
+
+=========================================================================================
+Harness notes for whoever repeats this
+-----------------------------------------------------------------------------------------
+* An isolated XDG_RUNTIME_DIR makes the pane's agent worker exit code 1 ("Failed to reset
+  failed state of unit relay-pane-…-agent-1.scope").  `ln -s /run/user/$(id -u)/bus
+  $XDG_RUNTIME_DIR/bus` fixes it; harness/env.sh does that.
+* A fresh profile opens the welcome dialog and the Approvals pane over whatever is under
+  test.  harness/env.sh writes instructions/onboarded, security/approvals_chosen.
+* There is no window manager on these Xvfb displays: `xdotool windowactivate` fails,
+  `xdotool windowfocus --sync` works.
+* Hashing a window region needs the right XWD offsets: bytes_per_line is word 12 (0-based)
+  and the pixels start at header_size + ncolors*12, not at header_size.  Getting this
+  wrong makes an idle window look like it repaints at 50 Hz — it does not.
+* sphinxpad has no `xwd`; `import -window <id> xwd:-` writes the same format (act.py picks).

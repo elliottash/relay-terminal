@@ -1,0 +1,50 @@
+# Startup, memory, index and tools — raw output
+
+## worker spawn -> {"event":"ready"}  (startup.py)
+
+spark, warm __pycache__:
+run 1: ready_wall=86.4 ms  child_cpu(total incl exit)=99.6 ms  maxrss=30.8 MiB
+run 2: ready_wall=66.6 ms  child_cpu(total incl exit)=76.9 ms  maxrss=30.8 MiB
+run 3: ready_wall=83.9 ms  child_cpu(total incl exit)=94.0 ms  maxrss=30.8 MiB
+run 4: ready_wall=69.0 ms  child_cpu(total incl exit)=81.0 ms  maxrss=30.8 MiB
+run 5: ready_wall=71.1 ms  child_cpu(total incl exit)=83.5 ms  maxrss=30.8 MiB
+median ready_wall = 71.1 ms   min = 66.6 ms  max = 86.4 ms
+python 3.12.3  loadavg (1.70703125, 1.443359375, 1.93310546875)
+
+spark, source tree read-only (no __pycache__ can be written) — the shipped-install case:
+run 1: ready_wall=71.2 ms  child_cpu(total incl exit)=83.4 ms  maxrss=30.8 MiB
+run 2: ready_wall=69.4 ms  child_cpu(total incl exit)=81.6 ms  maxrss=30.9 MiB
+run 3: ready_wall=68.3 ms  child_cpu(total incl exit)=78.4 ms  maxrss=30.9 MiB
+run 4: ready_wall=67.3 ms  child_cpu(total incl exit)=78.2 ms  maxrss=30.9 MiB
+median ready_wall = 69.4 ms   min = 67.3 ms  max = 71.2 ms
+python 3.12.3  loadavg (1.70703125, 1.443359375, 1.93310546875)
+
+spark, lazy board_import/forge_*/project_probe prototype (srclazy), warm:
+median ready_wall = 78.3 ms   min = 64.3 ms  max = 80.5 ms
+python 3.12.3  loadavg (1.70703125, 1.443359375, 1.93310546875)
+
+spark, source tree read-only, __pycache__ removed (the shipped-install case: /usr/local/share/relay is root-owned):
+run 1: ready_wall=243.8 ms  child_cpu(total incl exit)=256.0 ms  maxrss=39.5 MiB
+run 2: ready_wall=259.0 ms  child_cpu(total incl exit)=273.4 ms  maxrss=39.9 MiB
+run 3: ready_wall=266.2 ms  child_cpu(total incl exit)=278.8 ms  maxrss=39.9 MiB
+run 4: ready_wall=245.1 ms  child_cpu(total incl exit)=258.1 ms  maxrss=40.0 MiB
+run 5: ready_wall=263.6 ms  child_cpu(total incl exit)=278.5 ms  maxrss=40.0 MiB
+median ready_wall = 259.0 ms   min = 243.8 ms  max = 266.2 ms
+python 3.12.3  loadavg (1.7587890625, 1.4619140625, 1.93359375)
+
+same tree after 'python3 -m compileall -q backend' (writable once, then read-only):
+run 1: ready_wall=67.8 ms  child_cpu(total incl exit)=78.3 ms  maxrss=30.8 MiB
+run 2: ready_wall=80.8 ms  child_cpu(total incl exit)=90.7 ms  maxrss=30.8 MiB
+run 3: ready_wall=80.7 ms  child_cpu(total incl exit)=90.9 ms  maxrss=30.8 MiB
+run 4: ready_wall=70.6 ms  child_cpu(total incl exit)=82.7 ms  maxrss=30.8 MiB
+run 5: ready_wall=66.8 ms  child_cpu(total incl exit)=76.7 ms  maxrss=30.8 MiB
+median ready_wall = 70.6 ms   min = 66.8 ms  max = 80.8 ms
+python 3.12.3  loadavg (1.7587890625, 1.4619140625, 1.93359375)
+# lazy-import prototype: median of 11 starts, warm cache, spark
+src: median ready_wall = 82.7 ms   min = 72.3 ms  max = 94.5 ms
+srclazy: median ready_wall = 63.1 ms   min = 61.9 ms  max = 84.5 ms
+src: median ready_wall = 69.8 ms   min = 66.4 ms  max = 91.5 ms
+srclazy: median ready_wall = 77.7 ms   min = 62.5 ms  max = 89.4 ms
+import worker:   77.4 ms child CPU (median of 15),   73.4 ms best   -- clean export
+import worker:   71.9 ms child CPU (median of 15),   69.7 ms best   -- lazy board_import/forge_github/forge_sync/project_probe
+loadavg (1.291015625, 1.376953125, 1.88671875)

@@ -1,0 +1,80 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+# comm: relay
+#
+# Total Lost Samples: 0
+#
+# Samples: 808  of event 'armv8_pmuv3_0/cycles/P'
+# Event count (approx.): 4634710921
+#
+# Children      Self  Shared Object                Symbol                                                                                                                                                                                                                                                                        
+# ........  ........  ...........................  ..............................................................................................................................................................................................................................................................................
+#
+    99.79%     0.00%  libQt5Core.so.5.15.13        [.] QCoreApplication::exec()
+    99.79%     0.00%  libc.so.6                    [.] __libc_start_call_main
+    99.79%     0.00%  libc.so.6                    [.] __libc_start_main_impl (inlined)
+    99.79%     0.00%  libc.so.6                    [.] call_init (inlined)
+    99.79%     0.00%  relay                        [.] _start
+    99.79%     0.00%  relay                        [.] main
+    99.57%     0.00%  libQt5Core.so.5.15.13        [.] QEventLoop::exec(QFlags<QEventLoop::ProcessEventsFlag>)
+    99.34%     0.00%  libQt5Core.so.5.15.13        [.] QEventDispatcherGlib::processEvents(QFlags<QEventLoop::ProcessEventsFlag>)
+    99.22%     0.00%  libglib-2.0.so.0.8000.0      [.] g_main_context_iteration
+    97.27%     0.00%  libglib-2.0.so.0.8000.0      [.] 0x0000f7c8a3c81ae8
+    96.89%     0.00%  libglib-2.0.so.0.8000.0      [.] 0x0000f7c8a3c1f90c
+    96.79%     0.00%  libQt5Core.so.5.15.13        [.] QCoreApplication::notifyInternal2(QObject*, QEvent*)
+    94.57%     0.00%  libQt5Widgets.so.5.15.13     [.] QApplicationPrivate::notify_helper(QObject*, QEvent*)
+    59.04%     0.00%  libQt5Core.so.5.15.13        [.] QCoreApplicationPrivate::sendPostedEvents(QObject*, int, QThreadData*)
+    59.04%     0.00%  libQt5Core.so.5.15.13        [.] 0x0000f7c8a50897fc
+    58.09%     0.00%  libQt5Widgets.so.5.15.13     [.] QWidget::event(QEvent*)
+    55.13%     0.12%  libQt5Widgets.so.5.15.13     [.] QWidgetPrivate::drawWidget(QPaintDevice*, QRegion const&, QPoint const&, QFlags<QWidgetPrivate::DrawWidgetFlag>, QPainter*, QWidgetRepaintManager*)
+    55.13%     0.00%  libQt5Widgets.so.5.15.13     [.] 0x0000f7c8a5b44678
+    52.49%     0.26%  libQt5Widgets.so.5.15.13     [.] QWidgetPrivate::paintSiblingsRecursive(QPaintDevice*, QList<QObject*> const&, int, QRegion const&, QPoint const&, QFlags<QWidgetPrivate::DrawWidgetFlag>, QPainter*, QWidgetRepaintManager*)
+    42.46%     0.00%  libQt5Widgets.so.5.15.13     [.] QWidgetPrivate::sendPaintEvent(QRegion const&)
+    33.84%     0.00%  libQt5Core.so.5.15.13        [.] 0x0000f7c8a50605bc
+    25.92%     0.00%  libQt5Core.so.5.15.13        [.] 0x0000f7c8a5089b08
+    25.43%     0.00%  libQt5Core.so.5.15.13        [.] QSocketNotifier::activated(QSocketDescriptor, QSocketNotifier::Type, QSocketNotifier::QPrivateSignal)
+    25.43%     0.00%  libQt5Core.so.5.15.13        [.] QSocketNotifier::event(QEvent*)
+    25.43%     0.00%  libQt5Core.so.5.15.13        [.] 0x0000f7c8a4f80ba8
+    25.43%     0.00%  libQt5Core.so.5.15.13        [.] 0x0000f7c8a5060568
+    24.60%     0.00%  libQt5Core.so.5.15.13        [.] QProcess::readyReadStandardOutput(QProcess::QPrivateSignal)
+    24.60%     0.00%  libQt5Core.so.5.15.13        [.] 0x0000f7c8a4f8059c
+    24.37%     0.00%  relay                        [.] operator() (inlined)
+    24.36%     0.00%  relay                        [.] paintEvent (inlined)
+    20.39%     0.00%  relay                        [.] paintRow (inlined)
+    16.65%     0.00%  relay                        [.] handle (inlined)
+    11.94%     0.00%  libQt5Core.so.5.15.13        [.] QTimerInfoList::activateTimers()
+    11.89%     0.00%  [kernel.kallsyms]            [.] 0xffffc59375ec1e98
+    11.89%     0.00%  [kernel.kallsyms]            [.] 0xffffc5937790e320
+    10.82%     0.00%  [kernel.kallsyms]            [.] 0xffffc59375ee731c
+    10.82%     0.00%  [kernel.kallsyms]            [.] 0xffffc59375ee7438
+    10.82%     0.00%  [kernel.kallsyms]            [.] 0xffffc5937790db80
+    10.44%     0.00%  [kernel.kallsyms]            [.] 0xffffc59375ee7240
+    10.42%     0.12%  libQt5Widgets.so.5.15.13     [.] QWidgetPrivate::paintBackground(QPainter*, QRegion const&, QFlags<QWidgetPrivate::DrawWidgetFlag>) const
+     9.59%     0.00%  libQt5Core.so.5.15.13        [.] QSettings::QSettings(QSettings::Scope, QObject*)
+     9.39%     0.00%  libQt5Widgets.so.5.15.13     [.] 0x0000f7c8a5be3c0c
+     9.37%     0.00%  libQt5Core.so.5.15.13        [.] QObject::event(QEvent*)
+     9.24%     0.00%  libQt5Core.so.5.15.13        [.] QTimer::timeout(QTimer::QPrivateSignal)
+     9.12%     0.00%  libQt5Core.so.5.15.13        [.] 0x0000f7c8a5088860
+     9.01%     0.00%  relay                        [.] restLinkColumns (inlined)
+     8.50%     0.00%  libQt5Gui.so.5.15.13         [.] QRasterPaintEngine::fill(QVectorPath const&, QBrush const&)
+     7.59%     0.00%  libQt5Gui.so.5.15.13         [.] 0x0000f7c8a56c749c
+     7.28%     0.00%  libQt5Widgets.so.5.15.13     [.] 0x0000f7c8a5bdb338
+     7.10%     0.00%  libQt5Core.so.5.15.13        [.] QJsonDocument::fromJson(QByteArray const&, QJsonParseError*)
+     6.98%     0.00%  libQt5Core.so.5.15.13        [.] 0x0000f7c8a50c5678
+     6.85%     0.00%  libQt5Core.so.5.15.13        [.] 0x0000f7c8a50c4078
+     6.62%     0.13%  libQt5Gui.so.5.15.13         [.] QRasterPaintEngine::drawCachedGlyphs(int, unsigned int const*, QFixedPoint const*, QFontEngine*)
+     6.47%     0.00%  libQt5Widgets.so.5.15.13     [.] 0x0000f7c8a5bdb1e4
+     6.27%     0.00%  relay                        [.] pullFrame (inlined)
+     5.19%     0.00%  libQt5Gui.so.5.15.13         [.] QRasterPaintEngine::alphaPenBlt(void const*, int, int, int, int, int, int, bool)
+     5.09%     0.00%  libQt5Gui.so.5.15.13         [.] 0x0000f7c8a5699614
+     5.03%     0.00%  relay                        [.] QString (inlined)
+     5.03%     0.00%  relay                        [.] operator() (inlined)
+     5.03%     0.00%  relay                        [.] showToolOutput (inlined)
+     4.99%     0.00%  relay                        [.] resolveFoldAnchors (inlined)
+     4.99%     0.00%  libQt5Core.so.5.15.13        [.] 0x0000f7c8a4f972d8
+     4.96%     0.00%  libQt5Core.so.5.15.13        [.] 0x0000f7c8a4f96fec
+     4.83%     0.00%  relay                        [.] operator() (inlined)
+     4.74%     0.00%  libQt5Gui.so.5.15.13         [.] 0x0000f7c8a569911c
+     4.67%     4.35%  libQt5Core.so.5.15.13        [.] QString::append(QChar)
+     4.67%     0.00%  libQt5Gui.so.5.15.13         [.] QPainter::drawGlyphRun(QPointF const&, QGlyphRun const&)
+     4.45%     0.00%  libQt5Gui.so.5.15.13         [.] QRasterPaintEngine::drawStaticTextItem(QStaticTextItem*)

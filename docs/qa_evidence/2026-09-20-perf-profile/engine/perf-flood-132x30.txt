@@ -1,0 +1,65 @@
+# perf, 132x30, cat of 4x50MB base64, spark, RelWithDebInfo+fp, libvterm core
+
+## pty thread (parse + scrollback)
+    14.13%  relay    relay                    [.] on_text
+    13.29%  relay    relay                    [.] relay::LibVtermCore::Impl::convertCell(VTermScreenCell const&, relay::Line*, relay::Cell*) const
+    11.07%  relay    relay                    [.] putglyph
+     8.23%  relay    relay                    [.] sb_pushline_from_row
+     6.07%  relay    relay                    [.] decode_utf8
+     5.24%  relay    [kernel.kallsyms]        [k] __schedule
+     5.06%  relay    relay                    [.] relay_extends
+     4.23%  relay    relay                    [.] erase_internal
+     3.45%  relay    relay                    [.] damagerect
+     3.11%  relay    relay                    [.] putglyph
+     2.95%  relay    relay                    [.] std::vector<relay::Cell, std::allocator<relay::Cell> >::_M_default_append(unsigned long)
+     1.94%  relay    relay                    [.] relay::LibVtermCore::Impl::pushLine(int, VTermScreenCell const*, VTermLineInfo const*, void*)
+     1.78%  relay    [kernel.kallsyms]        [k] el0_svc
+     1.39%  relay    relay                    [.] vterm_unicode_width
+     1.20%  relay    libc.so.6                [.] __sched_yield
+     0.78%  relay    [kernel.kallsyms]        [k] _raw_spin_unlock_irqrestore
+     0.71%  relay    [kernel.kallsyms]        [k] copy_from_read_buf
+     0.69%  relay    relay                    [.] vterm_unicode_is_combining
+     0.69%  relay    [kernel.kallsyms]        [k] do_sched_yield
+     0.67%  relay    [kernel.kallsyms]        [k] __pi_memcpy_generic
+
+## GUI thread (paint)
+     7.27%  relay    libQt5Gui.so.5.15.13                 [.] 0x0000000000389198
+     4.53%  relay    libQt5Gui.so.5.15.13                 [.] 0x0000000000389194
+     2.23%  relay    libc.so.6                            [.] malloc
+     1.92%  relay    libQt5Gui.so.5.15.13                 [.] 0x00000000003891a0
+     1.91%  relay    relay                                [.] relay::TerminalView::paintRow(QPainter&, int, relay::Line const&, int)::{lambda(int)#1}::operator()(int) const
+     1.86%  relay    relay                                [.] relay::TerminalView::glyphFor(int, char32_t)
+     1.77%  relay    libQt5Gui.so.5.15.13                 [.] 0x00000000005788f8
+     1.44%  relay    relay                                [.] relay::TerminalView::resolve(unsigned int, bool) const
+     1.40%  relay    libQt5Core.so.5.15.13                [.] 0x00000000003da2a4
+     1.38%  relay    relay                                [.] relay::TerminalView::paintRow(QPainter&, int, relay::Line const&, int)
+     1.38%  relay    libQt5Gui.so.5.15.13                 [.] 0x00000000005788f4
+     1.29%  relay    libQt5Gui.so.5.15.13                 [.] 0x0000000000389064
+     1.28%  relay    libQt5Gui.so.5.15.13                 [.] 0x000000000038905c
+     1.27%  relay    libQt5Gui.so.5.15.13                 [.] QFontEngine::subPixelPositionForX(QFixed) const
+     1.24%  relay    relay                                [.] __aarch64_ldadd4_acq_rel
+     1.15%  relay    relay                                [.] relay::LibVtermCore::Impl::convertCell(VTermScreenCell const&, relay::Line*, relay::Cell*) const
+     1.04%  relay    [kernel.kallsyms]                    [k] __d_lookup_rcu
+     1.04%  relay    libQt5Gui.so.5.15.13                 [.] 0x0000000000389188
+     1.03%  relay    libQt5Gui.so.5.15.13                 [.] 0x0000000000389058
+     0.92%  relay    [kernel.kallsyms]                    [k] el0_svc
+     0.85%  relay    libQt5Gui.so.5.15.13                 [.] 0x0000000000389060
+     0.85%  relay    libQt5XcbQpa.so.5.15.13              [.] 0x00000000000a51c4
+     0.80%  relay    libQt5Gui.so.5.15.13                 [.] QColor::operator==(QColor const&) const
+     0.75%  relay    libQt5Gui.so.5.15.13                 [.] 0x000000000038918c
+     0.74%  relay    libc.so.6                            [.] _int_free
+     0.70%  relay    libQt5Gui.so.5.15.13                 [.] QRasterPaintEngine::alphaPenBlt(void const*, int, int, int, int, int, int, bool)
+     0.70%  relay    libQt5Gui.so.5.15.13                 [.] 0x0000000000389370
+     0.67%  relay    libQt5XcbQpa.so.5.15.13              [.] 0x00000000000a518c
+     0.67%  relay    libQt5Core.so.5.15.13                [.] QtPrivate::qustrchr(QStringView, unsigned short)
+     0.66%  relay    libQt5Core.so.5.15.13                [.] QString::resize(int)
+     0.59%  relay    [kernel.kallsyms]                    [k] _raw_spin_unlock_irqrestore
+     0.57%  relay    libc.so.6                            [.] cfree@GLIBC_2.17
+     0.56%  relay    relay                                [.] relay::(anonymous namespace)::logicalRowAt(relay::ViewportFrame const&, int, relay::(anonymous namespace)::LogicalRow*) [clone .constprop.0]
+     0.55%  relay    libQt5Gui.so.5.15.13                 [.] QRasterPaintEngine::drawCachedGlyphs(int, unsigned int const*, QFixedPoint const*, QFontEngine*)
+     0.55%  relay    relay                                [.] vterm_screen_get_cell
+     0.54%  relay    [kernel.kallsyms]                    [k] link_path_walk
+     0.51%  relay    libQt5Gui.so.5.15.13                 [.] 0x00000000003891fc
+     0.51%  relay    libc.so.6                            [.] _int_malloc
+     0.50%  relay    libQt5XcbQpa.so.5.15.13              [.] 0x00000000000dbd1c
+     0.65%  relay    libQt5Gui.so.5.15.13          [.] 0x0000000000389198
