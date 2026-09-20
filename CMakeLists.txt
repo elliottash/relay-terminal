@@ -86,6 +86,10 @@ target_compile_options(relay-projectpicker PRIVATE -Wall -Wextra -Wpedantic)
 # Folder explorer and file preview panes: plain Qt, with optional syntax highlighting and PDF.
 # The two provider modals (API keys, model roles): a static library so the roles dialog's lists can be
 # tested headlessly, exactly like the settings pane below.
+add_library(relay-modelcatalog STATIC src/ModelCatalog.cpp src/ModelCatalog.h)
+target_include_directories(relay-modelcatalog PUBLIC src)
+target_link_libraries(relay-modelcatalog PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-modelcatalog PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-modelsettings STATIC src/ModelSettings.cpp src/ModelSettings.h)
 target_include_directories(relay-modelsettings PUBLIC src)
 target_link_libraries(relay-modelsettings PUBLIC ${RELAY_QT}::Widgets)
@@ -452,7 +456,7 @@ if(RELAY_BUILD_APP)
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
     target_link_libraries(relay PRIVATE relay-closedlist relay-localmodels relay-projects relay-escapees)
-    target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-queuesubmit relay-logging relay-voice relay-images relay-titles relay-panestatus relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::DBus ${RELAY_QT}::Network)
+    target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-modelcatalog relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-queuesubmit relay-logging relay-voice relay-images relay-titles relay-panestatus relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::DBus ${RELAY_QT}::Network)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -497,6 +501,9 @@ if(BUILD_TESTING)
     add_executable(relay-prompthistory-tests tests/prompthistory_test.cpp)
     target_link_libraries(relay-prompthistory-tests PRIVATE relay-prompthistory ${RELAY_QT}::Test)
     add_test(NAME prompthistory COMMAND relay-prompthistory-tests)
+    add_executable(relay-modelcatalog-tests tests/modelcatalog_test.cpp)
+    target_link_libraries(relay-modelcatalog-tests PRIVATE relay-modelcatalog ${RELAY_QT}::Test)
+    add_test(NAME modelcatalog COMMAND relay-modelcatalog-tests)
     add_executable(relay-modelsettings-tests tests/modelsettings_test.cpp)
     target_link_libraries(relay-modelsettings-tests PRIVATE relay-modelsettings ${RELAY_QT}::Test)
     add_test(NAME modelsettings COMMAND relay-modelsettings-tests)
