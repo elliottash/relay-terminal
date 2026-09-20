@@ -60,7 +60,8 @@ add_library(relay-helperchat STATIC src/HelperChat.cpp src/HelperChat.h
     src/HelperModelBox.cpp src/HelperModelBox.h
     src/CurrentTextComboBox.h)   # the box itself, shared with the terminal pane
 target_include_directories(relay-helperchat PUBLIC src)
-target_link_libraries(relay-helperchat PUBLIC relay-editor relay-toollabel relay-voice ${RELAY_QT}::Widgets)
+# relay-modelrows: the helper's box draws the terminal pane's rows, from the one builder (#PK5Q).
+target_link_libraries(relay-helperchat PUBLIC relay-editor relay-toollabel relay-voice relay-modelrows ${RELAY_QT}::Widgets)
 target_compile_options(relay-helperchat PRIVATE -Wall -Wextra -Wpedantic)
 
 # Switchboard pane: the card board, its detail view and the per-window Switchboard worker.
@@ -103,6 +104,13 @@ add_library(relay-modelcatalog STATIC src/ModelCatalog.cpp src/ModelCatalog.h)
 target_include_directories(relay-modelcatalog PUBLIC src)
 target_link_libraries(relay-modelcatalog PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-modelcatalog PRIVATE -Wall -Wextra -Wpedantic)
+# The rows of the model box (#PK5Q): one list for the terminal pane's box and for the helper
+# agent's four. Its own library because relay-helperchat needs the rows and must not link the
+# picker dialog to get them — the dialog a helper's "more models…" opens is the window's.
+add_library(relay-modelrows STATIC src/ModelRows.cpp src/ModelRows.h)
+target_include_directories(relay-modelrows PUBLIC src)
+target_link_libraries(relay-modelrows PUBLIC relay-modelcatalog ${RELAY_QT}::Widgets)
+target_compile_options(relay-modelrows PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-modelpicker STATIC src/ModelPicker.cpp src/ModelPicker.h)
 target_include_directories(relay-modelpicker PUBLIC src)
 target_link_libraries(relay-modelpicker PUBLIC relay-modelcatalog ${RELAY_QT}::Widgets)
@@ -500,7 +508,7 @@ if(RELAY_BUILD_APP)
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
     target_link_libraries(relay PRIVATE relay-closedlist relay-localmodels relay-projects relay-escapees relay-appcommands)
-    target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-modelcatalog relay-modelpicker relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-queuesubmit relay-logging relay-voice relay-images relay-titles relay-panestatus relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::DBus ${RELAY_QT}::Network)
+    target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-modelcatalog relay-modelrows relay-modelpicker relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-queuesubmit relay-logging relay-voice relay-images relay-titles relay-panestatus relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::DBus ${RELAY_QT}::Network)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -576,6 +584,11 @@ if(BUILD_TESTING)
     target_link_libraries(relay-modelpicker-tests PRIVATE relay-modelpicker ${RELAY_QT}::Test)
     add_test(NAME modelpicker COMMAND relay-modelpicker-tests)
     set_tests_properties(modelpicker PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # The one list both model boxes draw (#PK5Q): the rows, their order and what a pick means.
+    add_executable(relay-modelrows-tests tests/modelrows_test.cpp)
+    target_link_libraries(relay-modelrows-tests PRIVATE relay-modelrows ${RELAY_QT}::Test)
+    add_test(NAME modelrows COMMAND relay-modelrows-tests)
+    set_tests_properties(modelrows PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-modelcatalog-tests tests/modelcatalog_test.cpp)
     target_link_libraries(relay-modelcatalog-tests PRIVATE relay-modelcatalog ${RELAY_QT}::Test)
     add_test(NAME modelcatalog COMMAND relay-modelcatalog-tests)
