@@ -29,3 +29,7 @@ Recommendation: 1, 4, 5, 7 first (no wording of yours changes; 7 is what makes t
 <!-- relay:entry 20260920T202117Z-c6 author=claude-code kind=decision -->
 ### Claude Code · 2026-09-20 20:21
 Decision 1 closed: the owner, shown the lazy-worker mapping (`docs/qa_evidence/2026-09-20-perf-fixes/spawn/LAZY-WORKER-MAPPING.md`), said "yes, i want workers per pane". Workers stay one per pane, started at pane creation as today; nothing changes. The mapping stays as the record of why a lazy start is not a memory fix here.
+
+<!-- relay:entry 20260920T202624Z-c7 author=claude-code kind=decision -->
+### Claude Code · 2026-09-20 20:26
+The owner on the nine distillation decisions: "1-9 all seem good to me". Implementers: text (2, 3, 6), board policy (8), assembly then short profile then on-demand tools (4, 7, 9), cached-token counts (5); 1 was already in progress.
