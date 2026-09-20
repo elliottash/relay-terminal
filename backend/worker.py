@@ -101,6 +101,10 @@ def main():
     turns = TurnSupervisor(turn_emit)
     subagents.turns = turns
     board.turns = turns
+    # Signal threads (#AQ6X step 7b): a failing check nobody is on is picked up as a subagent of
+    # this worker, so the Switchboard's half needs the manager. One line rather than a constructor
+    # argument because `board` is built before `subagents.configure` has anything to configure.
+    board.subagents = subagents
 
     def model_changed(agent):
         # Subagents that inherit the main model follow a set_model switch.

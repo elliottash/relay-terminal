@@ -45,7 +45,7 @@ TESTS_TYPES = ("tests_list", "tests_run", "tests_stop", "tests_history", "tests_
                # Protocol 32 (#AQ6X): the signals are folded out of the same run history and
                # driven from the same handler, so they arrive through the same door.
                "signals_list", "signals_claim", "signals_release", "signals_dismiss",
-               "signals_promote")
+               "signals_promote", "signals_config")
 
 #: The Profile button's two requests (section 31.9, #7BM4 phase 5), spelled out here for the same
 #: reason: `profile_protocol` pulls in `jobs`, and a worker whose owner never presses Profile
@@ -400,6 +400,11 @@ class BoardCommands:
         #: either of them is a different helper, so the conversation is let go and the next ask
         #: adopts that tab's own.
         self._helper_key: tuple[str, str] | None = None
+        #: This worker's `SubagentManager`, set by `backend/worker.py` (#AQ6X step 7b). It is what
+        #: a **signal thread** runs on: a failing check nobody is on becomes a subagent of this
+        #: worker, notified and listed in Sessions, rather than a turn inside the user's pane.
+        #: None in a test and in any worker that has no subagents — no manager, no pickup.
+        self.subagents = None
 
     # ---- wiring ---------------------------------------------------------------
     def configure(self, workspace: str | None, request: dict | None = None) -> dict | None:
@@ -1468,9 +1473,39 @@ class BoardCommands:
         cached = getattr(self, "_tests_cache", None)
         if cached is None or cached[0] != key:
             from . import tests_protocol as TP
-            cached = (key, TP.TestsCommands(tools.board.repo, tools.board.root, self._send))
+            commands = TP.TestsCommands(tools.board.repo, tools.board.root, self._send)
+            # #AQ6X step 7b: how this project's signal threads are started. Only the *worker's*
+            # instance gets it — the agent's own (`board_tools._tests`) is built elsewhere and
+            # must not start background agents from inside a tool call.
+            commands.spawn_agent = self._spawn_signal_thread
+            cached = (key, commands)
             self._tests_cache = cached
         return cached[1]
+
+    def _spawn_signal_thread(self, task: str, description: str):
+        """Start one signal thread on this worker's subagents (#AQ6X step 7b).
+
+        `(thread_id, agent_id, session_id, done_event)`, or None when this worker cannot run one —
+        no manager, subagents not configured yet, or the live ceiling reached. Each of those is a
+        reason to leave the signal unclaimed for the next fold, not an error: `SignalThreads`
+        treats None exactly that way.
+
+        `background=False` is deliberate and is the whole difference from an `agent` tool call.
+        A background subagent's result is handed to the main agent and can wake a turn
+        (`subagents._handoff_locked`); a signal thread reports to nobody — it fixed the test or it
+        did not, and the *check* says which. So it runs with no waiter and no handoff, and what
+        the person sees is the notification and the Sessions row, which is decision 9's "visible".
+        """
+        manager = self.subagents
+        if manager is None:
+            return None
+        from . import signal_threads as ST
+        try:
+            sub = manager.spawn({"subagent_type": ST.THREAD_AGENT_TYPE, "background": False,
+                                 "description": description, "prompt": task})
+        except (ValueError, TypeError, OSError):
+            return None                      # not configured, or too many already live
+        return sub.thread_id, sub.id, sub.owner_session or "", sub.done
 
     def _tests_gate(self, request: dict, rid) -> bool:
         """The Check gate on leaving `needs-verification` (#7BM4).  True when it refused.

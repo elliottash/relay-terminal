@@ -1030,6 +1030,10 @@ DEFAULT_CONFIG = {
                 "needs-qa", "done"],
     "agent": {"autonomy": "auto", "max_creates_per_turn": 5},
     "memory": {"autonomy": "auto"},
+    # Signals (#AQ6X decision 9): `auto_work` is whether a failing check nobody is on starts its
+    # own agent thread.  The owner's "yes by default, but its optional", so a board that predates
+    # the key behaves as if it were true (`relay_core.signal_threads.AUTO_WORK_DEFAULT`).
+    "signals": {"auto_work": True},
 }
 
 CONFIG_TEXT = """\
@@ -1042,6 +1046,7 @@ tabs: [{id: features, folder: features}, {id: bugs, folder: changes},
 columns: [inbox, discussing, planning, planned, executing, needs-verification, needs-qa, done]
 agent: {autonomy: auto, max_creates_per_turn: 5}
 memory: {autonomy: auto}
+signals: {auto_work: true}
 """
 
 #: The folder a board is kept in, hidden first.  Owner's decision, 2026-09-19: a new board is
@@ -2890,7 +2895,7 @@ def _relative_link(from_path: Path, to_path: Path) -> str:
 
 
 CONFIG_KEY_ORDER = ("version", "tabs", "columns", "column_statuses", "column_titles", "labels",
-                    "agent", "memory")
+                    "agent", "memory", "signals")
 CONFIG_HEADER = "# Switchboard configuration. Format: docs/SWITCHBOARD-FORMAT.md\n"
 
 _FLOW_UNSAFE_RE = re.compile(r"[,:\[\]{}]")

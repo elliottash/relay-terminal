@@ -995,7 +995,11 @@ class SignalProtocolTest(TestsProtocolTest):
         self.assertTrue(events)
         self.assertEqual([row["key"] for row in events[-1]["open"]], ["ctest:beta"])
         self.assertEqual(set(events[-1]) - {"event"},
-                         {"open", "dismissed", "pending_count", "dismissed_count", "promoted"})
+                         {"open", "dismissed", "pending_count", "dismissed_count", "promoted",
+                          # The worker's own two, beside the fold's (#AQ6X step 7b): the board's
+                          # `signals.auto_work`, and the signal threads running right now — which
+                          # is how a pane that opened after one started can still draw its chip.
+                          "auto_work", "threads"})
         before = len(self.changed())
         self.send(type="tests_list")                          # nothing changed: nothing re-sent
         self.assertEqual(len(self.changed()), before)

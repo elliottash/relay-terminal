@@ -71,7 +71,7 @@ from . import test_probe as P
 #: their own because the fold they read is driven from this one: every execution a signal is made
 #: of passes through `ingest_incoming` and `_execute`, and nothing else ever writes one.
 SIGNALS_TYPES = frozenset({"signals_list", "signals_claim", "signals_release",
-                           "signals_dismiss", "signals_promote"})
+                           "signals_dismiss", "signals_promote", "signals_config"})
 
 #: The requests this class answers.  `board_protocol.TYPES` includes them and delegates here.
 TYPES = frozenset({"tests_list", "tests_run", "tests_stop", "tests_history", "tests_check",
@@ -226,6 +226,12 @@ class TestsCommands:
         self.pane_token = pane_token or None
         self._signals_sent: dict | None = None
         self._tools = None
+        #: How a signal thread is started (#AQ6X step 7b).  Set by whoever built this instance and
+        #: has a `SubagentManager` — `board_protocol._tests()` in the worker, a fake in a test, and
+        #: nothing at all for the agent's own tool instance, which must not start background work.
+        #: `(task, description) -> (thread_id, agent_id, session_id, done_event) | None`.
+        self.spawn_agent: Callable[[str, str], tuple | None] | None = None
+        self._threads = None
 
     # ---- collaborators ---------------------------------------------------------
     @property
@@ -304,6 +310,9 @@ class TestsCommands:
 
     def shutdown(self) -> None:
         """Stop whatever is running; the worker is going."""
+        threads = self._threads
+        if threads is not None:
+            threads.stop_all()      # each signal thread says `stopped` once, and frees its key
         run = self._run
         if run is not None and not run.finished.is_set():
             run.cancel.set()
@@ -692,6 +701,11 @@ class TestsCommands:
             run.opened = [key for key, signal in signals.items()
                           if signal.state == "open" and signal.opened_run in
                           (run.run_id, f"{run.run_id}{RERUN_SUFFIX}")]
+        # Unasked pickup (#AQ6X step 7b, decision 9), last of all and before the payload: a thread
+        # claims its key, so refolding after one has started is what makes the board's chip name
+        # the thread in the same event rather than a refresh later.
+        if self.pick_up_signals(signals):
+            signals = self.signal_state(discovered=discovered, executions=executions)
         if emit:
             self.emit_signals(signals=signals)
         return signals
@@ -748,6 +762,14 @@ class TestsCommands:
         if signals is None:
             signals = self.signal_state()
         payload = S.summary(signals.values(), session=self.pane_token or "")
+        # #AQ6X step 7b: the setting the Options row writes, and the threads running right now —
+        # the GUI reads the second one so a chip on a thread's claim can say `live` after a
+        # restart, when it has seen no `signal_thread started` event of its own.
+        payload["auto_work"] = self.signals_auto_work()[0]
+        threads = self.signal_threads()
+        payload["threads"] = [{"key": t.key, "thread_id": t.thread_id,
+                               "session_id": t.session_id}
+                              for t in (threads.running() if threads is not None else [])]
         if rid is None and payload == self._signals_sent:
             return payload
         self._signals_sent = payload
@@ -764,6 +786,8 @@ class TestsCommands:
         from . import signals as S
         if kind == "signals_list":
             return self.emit_signals(request.get("id"))
+        if kind == "signals_config":
+            return self.write_signals_config(request)
         action = kind.split("_", 1)[1]
         key = str(request.get("key") or "").strip()
         signals = self.signal_state()
@@ -810,6 +834,166 @@ class TestsCommands:
         self.emit({"event": "signals_written", **_rid(request.get("id")), **written})
         self.fold_signals()
         return written
+
+    # ---- signal threads (#AQ6X step 7b, decision 9) ----------------------------
+    def signals_auto_work(self) -> tuple[bool, str]:
+        """`(auto_work, autonomy)` from this board's `board.yaml` — the two gates on a pickup.
+
+        A board that cannot be read at all answers the defaults rather than refusing to work:
+        `signals.auto_work` absent means true (the owner's "yes by default"), and the autonomy of
+        a board with no config is the one `DEFAULT_CONFIG` gives it.  A project with no
+        Switchboard has nothing to fold and nothing to work, and says so with `autonomy: off`.
+        """
+        from . import signal_threads as ST
+        board = self.board()
+        if board is None:
+            return False, "off"
+        try:
+            config = board.config()
+        except (B.BoardError, OSError, ValueError):         # pragma: no cover - unreadable yaml
+            return ST.AUTO_WORK_DEFAULT, "auto"
+        agent = config.get("agent") if isinstance(config.get("agent"), dict) else {}
+        return ST.auto_work(config), str(agent.get("autonomy") or "auto")
+
+    def signal_threads(self):
+        """This project's `SignalThreads`, made on first use; None when nothing can spawn one.
+
+        The agent's own `TestsCommands` instance (`board_tools._tests`) has no `spawn_agent`, and
+        that is the point: a tool call must not quietly start three background agents.  Only the
+        worker's instance, which `board_protocol._tests()` wires, picks anything up.
+        """
+        if self.spawn_agent is None:
+            return None
+        if self._threads is None:
+            from . import signal_threads as ST
+            self._threads = ST.SignalThreads(
+                self._spawn_signal_thread, self.emit,
+                claim=self._signal_thread_claim, release=self._signal_thread_release)
+        return self._threads
+
+    def pick_up_signals(self, signals: dict) -> list:
+        """Start a thread on every orphan this fold is allowed to, and say which.
+
+        Never raises into the fold: a pickup that cannot start is a signal left where it was.
+        """
+        threads = self.signal_threads()
+        if threads is None:
+            return []
+        from . import signal_threads as ST
+        auto, autonomy = self.signals_auto_work()
+        board = self.board()
+        folder = board.root.name if board is not None else ""
+        try:
+            return threads.start_due(
+                signals.values(),
+                lambda signal: ST.task_text(signal, project=str(self.project),
+                                            board_folder=folder),
+                auto_work_on=auto, autonomy=autonomy)
+        except Exception:                                    # pragma: no cover - defensive
+            return []
+
+    def _signal_thread_claim(self, key: str, token: str) -> None:
+        from . import signals as S
+        S.append_event({"action": "claim", "key": key, "session": token}, self.signals_path())
+
+    def _signal_thread_release(self, key: str, token: str, reason: str) -> None:
+        from . import signals as S
+        S.append_event({"action": "release", "key": key, "session": token, "reason": reason},
+                       self.signals_path())
+
+    def _spawn_signal_thread(self, task: str, description: str):
+        """Start the subagent and arrange to hear that it ended.  `(thread, agent, session)`.
+
+        The watcher is one daemon thread per pickup, waiting on the subagent's own `done` event —
+        the same event `agent_wait` waits on.  Nothing in the worker polls, and a subagent that
+        never finishes simply never posts its second notification, which is what a thread that is
+        still working should look like.
+        """
+        spawned = self.spawn_agent(task, description)
+        if not spawned:
+            return None
+        thread_id, agent_id, session_id, done = (list(spawned) + [None] * 4)[:4]
+        if done is not None:
+            threading.Thread(target=self._await_signal_thread, args=(str(thread_id or ""), done),
+                             name=f"relay-signal-thread-{agent_id}", daemon=True).start()
+        return str(thread_id or ""), str(agent_id or ""), str(session_id or "")
+
+    def _await_signal_thread(self, thread_id: str, done) -> None:
+        try:
+            done.wait()
+            self.signal_thread_ended(thread_id)
+        except Exception:                                    # pragma: no cover - defensive
+            pass
+
+    def signal_thread_ended(self, thread_id: str) -> dict | None:
+        """One signal thread's agent has stopped: say how it went, and free the key.
+
+        The **check's** verdict decides, not the agent's report (`SignalThreads.outcome_for`).  A
+        thread that ran to the end with the signal still open and still unpromoted has given up
+        whether it said so or not, so the card is written here — that is promotion trigger (a) of
+        R9, and leaving it out would let an agent close a fault by going quiet.
+        """
+        from . import signal_threads as ST
+        from . import signals as S
+        threads = self.signal_threads()
+        if threads is None:
+            return None
+        key = threads.key_of(thread_id)
+        if not key:
+            return None
+        signals = self.signal_state()
+        signal = signals.get(key)
+        outcome = ST.SignalThreads.outcome_for(signal)
+        card = signal.card if signal is not None else ""
+        if outcome == "stopped" and signal is not None and signal.state == "open":
+            card = self._promote_gave_up(key) or card
+            if card:
+                outcome = "gave-up"
+        finished = threads.finish(thread_id, outcome=outcome, card=card,
+                                  reason=S.GAVE_UP if outcome == "gave-up" else outcome)
+        self.fold_signals()
+        return finished.event("finished") if finished is not None else None
+
+    def _promote_gave_up(self, key: str) -> str:
+        """The bug card for a signal its thread could not fix, or "" (the cap, or no board)."""
+        from . import signals as S
+        tools = self._board_tools()
+        if tools is None:
+            return ""
+        try:
+            result = tools.promote_signal(key, S.GAVE_UP)
+        except Exception:                                    # pragma: no cover - the cap refuses
+            return ""
+        return str(result.get("card") or "")
+
+    def write_signals_config(self, request: dict) -> dict:
+        """`signals_config {auto_work}` (§32.2): the Options row, written into `board.yaml`.
+
+        One flag, through `board.write_config` like every other board setting, and the answer is a
+        `signals_written {kind: "config"}` followed by the state event — so a second Switchboard
+        pane on the same project learns the new value without asking.
+        """
+        from . import signal_threads as ST
+        rid = request.get("id")
+        on = request.get("auto_work")
+        out = {"kind": "config"}
+        def refuse(message: str, code: str = "signal_refused") -> dict:
+            self.emit({"event": "signals_written", **_rid(rid), **out,
+                       "error": message, "code": code})
+            return {**out, "error": message, "code": code}
+        if not isinstance(on, bool):
+            return refuse("signals_config needs `auto_work`: true or false.")
+        board = self.board()
+        if board is None:
+            return refuse("This project has no Switchboard to configure.")
+        try:
+            B.write_config(board, ST.with_auto_work(board.config(), on))
+        except (B.BoardError, OSError, ValueError) as exc:
+            return refuse(f"board.yaml could not be written ({exc}).")
+        out["auto_work"] = on
+        self.emit({"event": "signals_written", **_rid(rid), **out})
+        self.fold_signals()
+        return out
 
     # ---- the needs-verification gate -------------------------------------------
     def gate_move(self, card_id, status) -> dict | None:
