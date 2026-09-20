@@ -1,0 +1,10 @@
+store: 668 session files, 54.5 MB; 12 appended turns per session
+
+one autosave of a conversation that just grew by a turn:
+         5 KiB      2 messages  ->  median   0.33 ms   (first   0.26, last   0.44)
+        56 KiB     35 messages  ->  median   0.42 ms   (first   0.30, last   0.49)
+       182 KiB     86 messages  ->  median   0.53 ms   (first   0.43, last   0.76)
+       487 KiB    192 messages  ->  median   0.93 ms   (first   0.85, last   0.99)
+      1574 KiB    594 messages  ->  median   2.08 ms   (first   3.09, last   2.17)
+
+loadavg (2.75390625, 3.6640625, 3.146484375)

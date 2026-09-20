@@ -1,0 +1,20 @@
+=== nopyc (read-only tree, as an installed backend is)
+run 1: ready_wall=264.3 ms  child_cpu(total incl exit)=280.0 ms  maxrss=40.1 MiB
+run 2: ready_wall=250.4 ms  child_cpu(total incl exit)=263.0 ms  maxrss=40.1 MiB
+run 3: ready_wall=261.1 ms  child_cpu(total incl exit)=273.6 ms  maxrss=40.1 MiB
+run 4: ready_wall=249.8 ms  child_cpu(total incl exit)=262.6 ms  maxrss=40.1 MiB
+run 5: ready_wall=283.1 ms  child_cpu(total incl exit)=298.1 ms  maxrss=40.1 MiB
+run 6: ready_wall=262.5 ms  child_cpu(total incl exit)=276.9 ms  maxrss=40.2 MiB
+run 7: ready_wall=271.2 ms  child_cpu(total incl exit)=285.7 ms  maxrss=40.2 MiB
+median ready_wall = 262.5 ms   min = 249.8 ms  max = 283.1 ms
+python 3.12.3  loadavg (7.10205078125, 5.349609375, 3.93603515625)
+=== withpyc (read-only tree, as an installed backend is)
+run 1: ready_wall=81.0 ms  child_cpu(total incl exit)=91.0 ms  maxrss=30.8 MiB
+run 2: ready_wall=81.5 ms  child_cpu(total incl exit)=92.2 ms  maxrss=30.8 MiB
+run 3: ready_wall=75.1 ms  child_cpu(total incl exit)=89.2 ms  maxrss=30.9 MiB
+run 4: ready_wall=74.6 ms  child_cpu(total incl exit)=88.9 ms  maxrss=30.9 MiB
+run 5: ready_wall=68.3 ms  child_cpu(total incl exit)=79.0 ms  maxrss=30.9 MiB
+run 6: ready_wall=68.7 ms  child_cpu(total incl exit)=79.1 ms  maxrss=30.9 MiB
+run 7: ready_wall=72.2 ms  child_cpu(total incl exit)=85.3 ms  maxrss=30.9 MiB
+median ready_wall = 74.6 ms   min = 68.3 ms  max = 81.5 ms
+python 3.12.3  loadavg (7.10205078125, 5.349609375, 3.93603515625)

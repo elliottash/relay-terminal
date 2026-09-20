@@ -80,7 +80,10 @@ from pathlib import Path
 # v4 (2026-09-19, GT7X): `raw_cwd` (the working directory a guest transcript names, as written —
 # what `claude -r` has to be run in), the `guest_forgotten` and `guest_files` tables, and the
 # `guest-meta.json` store beside the database. v1/v2/v3 all migrate in place.
-SCHEMA_VERSION = 4
+# v5 (2026-09-20, #TZWF): `entry_count` and `entry_digest` — what an autosave compares itself
+# against to write only the turns that were added instead of the whole conversation again. v4
+# migrates in place and the two columns fill themselves at the next save of each conversation.
+SCHEMA_VERSION = 5
 MAX_TEXT = 4000              # per-entry cap for replies and tool output
 MAX_PROMPT = 8000            # per-entry cap for user prompts
 MAX_SUMMARY = 4000           # per-conversation cap for a summary
@@ -92,6 +95,11 @@ MAX_LIMIT = 200
 MAX_FACET_VALUES = 30
 MAX_ENTRIES_PER_SESSION = 20000
 MAX_COMMANDS = 500           # terminal commands accepted in one `terminal_history` message
+# When a rebuild is worth following with a VACUUM: one page in this many must be free, and there
+# must be at least this many bytes of them. Below either, rewriting a 100 MB file to give back a
+# few pages is not a trade (#TZWF).
+VACUUM_FREE_IN = 10
+VACUUM_MIN_BYTES = 16 * 1024 * 1024
 OVERVIEW_TURNS = 3
 OVERVIEW_TEXT = 400
 OVERVIEW_FILES = 12
@@ -139,7 +147,9 @@ CREATE TABLE IF NOT EXISTS conversations(
     models       TEXT NOT NULL DEFAULT '[]',
     tokens       INTEGER NOT NULL DEFAULT 0,
     cost         REAL,
-    file_mtime   REAL
+    file_mtime   REAL,
+    entry_count  INTEGER NOT NULL DEFAULT 0,
+    entry_digest TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS conversations_by_owner ON conversations(owner_session);
 CREATE TABLE IF NOT EXISTS entries(
@@ -225,6 +235,10 @@ V3_COLUMNS = (("summary", "TEXT NOT NULL DEFAULT ''"), ("first_prompt", "TEXT NO
 # Columns added by v4 (GT7X). `raw_cwd` is filled by the next guest reconcile; an agent row never
 # has one (its `workspace` is already the directory Relay runs it in).
 V4_COLUMNS = (("raw_cwd", "TEXT NOT NULL DEFAULT ''"),)
+# Columns added by v5 (#TZWF): how many entry rows of this conversation are indexed and the rolling
+# digest of them (`entry_digests`). A row migrated from v4 has `''` for the digest, which says
+# "unknown" and costs it one full re-index at its next save — no reconcile is needed for these.
+V5_COLUMNS = (("entry_count", "INTEGER NOT NULL DEFAULT 0"), ("entry_digest", "TEXT NOT NULL DEFAULT ''"))
 MAX_MATCHES_LIMIT = 20
 THREAD_KIND = "relay_subagent_thread"
 # The guest rows' `<id>.meta.json` (see the module docstring): one file beside the database for
@@ -541,10 +555,18 @@ def turn_for(marks: list[tuple[int, int]], index: int) -> int:
 
 
 def session_entries(data: dict) -> list[dict]:
-    """Index rows for one saved session: {turn, seq, kind, time, text}.
+    """Index rows for one saved session: {turn, seq, kind, time, text}, in conversation order.
 
     User prompts come from the checkpoints (they survive compaction, which rewrites `messages`);
-    replies, tool calls and capped tool output come from the messages themselves.
+    replies, tool calls and capped tool output come from the messages themselves. They are read in
+    that order and then sorted back into the order they happened — turn by turn, and inside a turn
+    the order the messages are in.
+
+    That ordering is what makes a turn added to a conversation an *append* (#TZWF): the rows of
+    every earlier turn keep the `seq` they were given, so `update_session` can write the new
+    turn's rows and leave the rest where they are. Reading the checkpoints first and numbering as
+    it went put every prompt in the index before every reply, and one new turn then renumbered
+    half the conversation.
     """
     rows: list[dict] = []
     seen: set[tuple[int, str, str]] = set()
@@ -595,6 +617,12 @@ def session_entries(data: dict) -> list[dict]:
                 add(turn, "tool_call", f"{function.get('name') or 'tool'} {arguments}", updated)
         elif role == "tool":
             add(turn, "tool_output", str(content or ""), updated)
+    # Back into conversation order (see the docstring). The sort is stable and keyed on the number
+    # each row was given as it was read, so the messages of a turn keep the order they are in and
+    # the turn's prompt — read first, from the checkpoint — stays in front of them.
+    rows.sort(key=lambda row: (row["turn"], row["seq"]))
+    for number, row in enumerate(rows, 1):
+        row["seq"] = number
     return rows
 
 
@@ -741,6 +769,31 @@ def _derived(data: dict) -> dict:
             "todos": json.dumps(todos, ensure_ascii=False)}
 
 
+def entry_digests(rows: list[dict], indexed: int) -> tuple[str, str]:
+    """`(digest of the first `indexed` rows, digest of all of them)`, in one pass over `rows`.
+
+    This is what tells a save that only added turns from one that rewrote the conversation
+    (#TZWF). It is a chain — each row's digest covers every row before it — so a rewind, a fork,
+    a compaction that renumbers the turns, an edited prompt, anything at all inside the part that
+    is already indexed changes the prefix and the save falls back to the full rewrite. It covers a
+    row's identity and its text but deliberately not its `time`, which `session_entries` fills
+    from the session's `updated` for every reply row and so moves at every save.
+
+    The prefix is `""` when `indexed` is past the end of `rows` (the conversation shrank), which
+    matches no stored digest.
+    """
+    running = hashlib.sha256()
+    prefix = ""
+    for index, row in enumerate(rows):
+        if index == indexed:
+            prefix = running.hexdigest()
+        running.update(f"{row['turn']}\0{row['seq']}\0{row['kind']}\0".encode("utf-8"))
+        running.update(str(row["text"]).encode("utf-8", "surrogatepass"))
+        running.update(b"\0")
+    whole = running.hexdigest()
+    return (whole if indexed == len(rows) else prefix), whole
+
+
 def header_entries(title: str, summary: str) -> list[dict]:
     """The searchable `title` and `summary` entries of a conversation (turn 0, before its text)."""
     rows = []
@@ -810,7 +863,7 @@ class ConversationIndex:
         except sqlite3.DatabaseError:
             version = None
         self.migrated_from = None
-        if version in (1, 2, 3) and version < SCHEMA_VERSION:
+        if version in (1, 2, 3, 4) and version < SCHEMA_VERSION:
             try:
                 self._migrate(db, version)
                 self.migrated_from = version
@@ -854,16 +907,18 @@ class ConversationIndex:
 
     @staticmethod
     def _migrate(db, version: int) -> None:
-        """v1/v2/v3 -> v4 in place, because terminal-history rows have no file to be rebuilt from —
-        and, since v4, neither have the guest rows.
+        """v1/v2/v3/v4 -> v5 in place, because terminal-history rows have no file to be rebuilt
+        from — and, since v4, neither have the guest rows.
 
         v1 -> v2 adds the thread columns and moves user titles and pins to the session files, where
         they are safe from a cache wipe. v2 -> v3 adds the overview columns; they stay empty until
         the next `reconcile()`, which re-reads every row whose `indexed_version` is behind. v3 -> v4
-        adds `raw_cwd`, which the next guest reconcile fills the same way.
+        adds `raw_cwd`, which the next guest reconcile fills the same way. v4 -> v5 adds the
+        incremental-index fingerprint, which every conversation fills itself at its next save, so
+        it is the one migration that does not ask for a re-read.
         """
         columns = {row[1] for row in db.execute("PRAGMA table_info(conversations)").fetchall()}
-        for name, kind in V2_COLUMNS + V3_COLUMNS + V4_COLUMNS:
+        for name, kind in V2_COLUMNS + V3_COLUMNS + V4_COLUMNS + V5_COLUMNS:
             if name not in columns:
                 db.execute(f"ALTER TABLE conversations ADD COLUMN {name} {kind}")
         if version < 2:
@@ -873,7 +928,10 @@ class ConversationIndex:
                 if row["session_dir"]:
                     write_user_fields(Path(row["session_dir"]), row["session_id"],
                                       custom_title=row["custom_title"], pinned=bool(row["pinned"]))
-        db.execute("UPDATE conversations SET indexed_version=0 WHERE source IN ('agent', 'subagent')")
+        if version < 4:
+            # The columns v2, v3 and v4 added are backfilled by re-reading the session files; v5's
+            # are not, so a database that is only one version behind is spared the whole re-index.
+            db.execute("UPDATE conversations SET indexed_version=0 WHERE source IN ('agent', 'subagent')")
         db.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)", (str(SCHEMA_VERSION),))
         db.commit()
 
@@ -1082,6 +1140,38 @@ class ConversationIndex:
         return self._run(work)
 
     # ----- writing ---------------------------------------------------------------------
+    @staticmethod
+    def _entries_to_write(db, session_id: str, rows: list[dict], indexed: int,
+                          stored_digest: str) -> tuple[list[dict], str]:
+        """Delete the entry rows this save replaces; return the body rows it must insert, and the
+        digest to store beside them.
+
+        The common case is an autosave of a conversation that grew by a turn: what is indexed is a
+        prefix of what the session now holds, so only that turn's rows are written, along with the
+        header rows (the title and the summary, which a save can change). Everything else — a
+        rewind, a fork, a compaction that renumbered the turns, a prompt edited in place, or a
+        database whose entries went missing under a row that stayed — falls back to deleting the
+        conversation's rows and writing them all, and ends with exactly what a rebuild from scratch
+        writes. Before #TZWF every save did that: 46 ms on the owner's largest session, on the
+        turn's own thread, against ~0.3 ms for the incremental write.
+
+        The caller is never asked whether it appended: `entry_digests` decides from the text.
+        """
+        prefix, whole = entry_digests(rows, indexed)
+        extend = bool(stored_digest) and indexed <= len(rows) and prefix == stored_digest
+        if extend:
+            # The digest guards the session's text; this guards the table. The header rows are the
+            # only others a conversation owns, so the total may exceed the indexed body rows by at
+            # most a title and a summary — anything else means the rows are not what is recorded.
+            total = db.execute("SELECT COUNT(*) FROM entries WHERE session_id=?",
+                               (session_id,)).fetchone()[0]
+            extend = indexed <= total <= indexed + len(HEADER_KINDS)
+        if extend:
+            db.execute(f"DELETE FROM entries WHERE session_id=? AND kind IN ({_HEADER_SQL})", (session_id,))
+            return rows[indexed:], whole
+        db.execute("DELETE FROM entries WHERE session_id=?", (session_id,))
+        return rows, whole
+
     def update_session(self, data: dict, session_dir: str | Path | None = None) -> int:
         """Index (or re-index) one saved session. Returns the number of entries written."""
         session_id = str(data.get("id") or "")
@@ -1097,38 +1187,49 @@ class ConversationIndex:
         derived = _derived(data)
 
         def work(db):
-            keep = db.execute("SELECT custom_title, pinned, summary FROM conversations WHERE session_id=?",
-                              (session_id,)).fetchone()
-            # The session files hold user titles and pins (since v2); an older caller that does not
-            # pass them keeps what the row had.
-            previous_summary = (keep["summary"] if keep else "") or ""
-            if "custom_title" in data or "pinned" in data:
-                keep = {"custom_title": data.get("custom_title") or None, "pinned": 1 if data.get("pinned") else 0}
-            # A summary set while the session was not loaded (set_summary, or the meta file) is not
-            # in this autosave's JSON: keep it rather than lose it to a save that never had one.
-            summary = derived["summary"] or previous_summary
-            db.execute("DELETE FROM entries WHERE session_id=?", (session_id,))
-            tokens, cost = _usage_tokens(data)
-            db.execute(
-                "INSERT OR REPLACE INTO conversations(session_id, source, workspace, project, title, custom_title,"
-                " model, preset, created, updated, turns, open_requests, session_dir, pinned, models, tokens, cost,"
-                " summary, first_prompt, last_prompt, files, files_count, has_edits, branch, unfinished, mode,"
-                " todos, indexed_version)"
-                " VALUES(?,'agent',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (session_id, workspace, project_name(workspace), title,
-                 keep["custom_title"] if keep else None,
-                 str(data.get("model") or ""), str(data.get("preset") or ""),
-                 data.get("created"), data.get("updated") or time.time(),
-                 int(data.get("turns") or 0), int(data.get("open_requests") or 0),
-                 str(session_dir or ""), int(keep["pinned"]) if keep else 0, _models(data), tokens, cost,
-                 summary, derived["first_prompt"], derived["last_prompt"], derived["files"],
-                 derived["files_count"], derived["has_edits"], derived["branch"], derived["unfinished"],
-                 derived["mode"], derived["todos"], SCHEMA_VERSION))
-            written = header_entries((keep["custom_title"] if keep else None) or title, summary) + rows
-            db.executemany(
-                "INSERT INTO entries(session_id, turn, seq, kind, time, text) VALUES(?,?,?,?,?,?)",
-                [(session_id, row["turn"], row["seq"], row["kind"], row["time"], row["text"]) for row in written])
-            db.commit()
+            # What is indexed is read and rewritten under one write lock (#TZWF): two workers may
+            # save the same conversation — the pane that holds it, and any worker reconciling the
+            # store — and a check-then-append that read outside the transaction could append what
+            # the other one had just appended.
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                keep = db.execute("SELECT custom_title, pinned, summary, entry_count, entry_digest"
+                                  " FROM conversations WHERE session_id=?", (session_id,)).fetchone()
+                # The session files hold user titles and pins (since v2); an older caller that does not
+                # pass them keeps what the row had.
+                previous_summary = (keep["summary"] if keep else "") or ""
+                indexed = int(keep["entry_count"] or 0) if keep else 0
+                stored_digest = (keep["entry_digest"] or "") if keep else ""
+                if "custom_title" in data or "pinned" in data:
+                    keep = {"custom_title": data.get("custom_title") or None, "pinned": 1 if data.get("pinned") else 0}
+                # A summary set while the session was not loaded (set_summary, or the meta file) is not
+                # in this autosave's JSON: keep it rather than lose it to a save that never had one.
+                summary = derived["summary"] or previous_summary
+                added, digest = self._entries_to_write(db, session_id, rows, indexed, stored_digest)
+                tokens, cost = _usage_tokens(data)
+                db.execute(
+                    "INSERT OR REPLACE INTO conversations(session_id, source, workspace, project, title, custom_title,"
+                    " model, preset, created, updated, turns, open_requests, session_dir, pinned, models, tokens, cost,"
+                    " summary, first_prompt, last_prompt, files, files_count, has_edits, branch, unfinished, mode,"
+                    " todos, indexed_version, entry_count, entry_digest)"
+                    " VALUES(?,'agent',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (session_id, workspace, project_name(workspace), title,
+                     keep["custom_title"] if keep else None,
+                     str(data.get("model") or ""), str(data.get("preset") or ""),
+                     data.get("created"), data.get("updated") or time.time(),
+                     int(data.get("turns") or 0), int(data.get("open_requests") or 0),
+                     str(session_dir or ""), int(keep["pinned"]) if keep else 0, _models(data), tokens, cost,
+                     summary, derived["first_prompt"], derived["last_prompt"], derived["files"],
+                     derived["files_count"], derived["has_edits"], derived["branch"], derived["unfinished"],
+                     derived["mode"], derived["todos"], SCHEMA_VERSION, len(rows), digest))
+                written = header_entries((keep["custom_title"] if keep else None) or title, summary) + added
+                db.executemany(
+                    "INSERT INTO entries(session_id, turn, seq, kind, time, text) VALUES(?,?,?,?,?,?)",
+                    [(session_id, row["turn"], row["seq"], row["kind"], row["time"], row["text"]) for row in written])
+                db.commit()
+            except BaseException:
+                db.rollback()       # never leave the write lock held by a half-written save
+                raise
             return len(rows)
         return self._run(work)
 
@@ -1308,26 +1409,35 @@ class ConversationIndex:
         runs = data.get("runs") if type(data.get("runs")) is int else 1
 
         def work(db):
-            keep = db.execute("SELECT custom_title, pinned FROM conversations WHERE session_id=?", (thread_id,)).fetchone()
-            if "custom_title" in data or "pinned" in data:
-                keep = {"custom_title": data.get("custom_title") or None, "pinned": 1 if data.get("pinned") else 0}
-            db.execute("DELETE FROM entries WHERE session_id=?", (thread_id,))
-            db.execute(
-                "INSERT OR REPLACE INTO conversations(session_id, source, workspace, project, title, custom_title,"
-                " model, preset, created, updated, turns, open_requests, session_dir, pinned, owner_session,"
-                " parent_thread, agent_id, agent_type, spawn_turn, status, models, tokens, cost, file_mtime,"
-                " indexed_version)"
-                " VALUES(?,'subagent',?,?,?,?,?,'',?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (thread_id, workspace, project_name(workspace), title, keep["custom_title"] if keep else None,
-                 str(data.get("model") or ""), data.get("created"), data.get("updated") or time.time(),
-                 max(1, runs), str(session_dir or ""), int(keep["pinned"]) if keep else 0, owner, parent,
-                 str(data.get("agent_id") or ""), str(data.get("type") or ""), spawn_turn,
-                 str(data.get("status") or ""), _models(data), tokens, cost, file_mtime, SCHEMA_VERSION))
-            written = header_entries((keep["custom_title"] if keep else None) or title, "") + rows
-            db.executemany(
-                "INSERT INTO entries(session_id, turn, seq, kind, time, text) VALUES(?,?,?,?,?,?)",
-                [(thread_id, row["turn"], row["seq"], row["kind"], row["time"], row["text"]) for row in written])
-            db.commit()
+            db.execute("BEGIN IMMEDIATE")            # as in update_session (#TZWF)
+            try:
+                keep = db.execute("SELECT custom_title, pinned, entry_count, entry_digest FROM conversations"
+                                  " WHERE session_id=?", (thread_id,)).fetchone()
+                indexed = int(keep["entry_count"] or 0) if keep else 0
+                stored_digest = (keep["entry_digest"] or "") if keep else ""
+                if "custom_title" in data or "pinned" in data:
+                    keep = {"custom_title": data.get("custom_title") or None, "pinned": 1 if data.get("pinned") else 0}
+                added, digest = self._entries_to_write(db, thread_id, rows, indexed, stored_digest)
+                db.execute(
+                    "INSERT OR REPLACE INTO conversations(session_id, source, workspace, project, title, custom_title,"
+                    " model, preset, created, updated, turns, open_requests, session_dir, pinned, owner_session,"
+                    " parent_thread, agent_id, agent_type, spawn_turn, status, models, tokens, cost, file_mtime,"
+                    " indexed_version, entry_count, entry_digest)"
+                    " VALUES(?,'subagent',?,?,?,?,?,'',?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (thread_id, workspace, project_name(workspace), title, keep["custom_title"] if keep else None,
+                     str(data.get("model") or ""), data.get("created"), data.get("updated") or time.time(),
+                     max(1, runs), str(session_dir or ""), int(keep["pinned"]) if keep else 0, owner, parent,
+                     str(data.get("agent_id") or ""), str(data.get("type") or ""), spawn_turn,
+                     str(data.get("status") or ""), _models(data), tokens, cost, file_mtime, SCHEMA_VERSION,
+                     len(rows), digest))
+                written = header_entries((keep["custom_title"] if keep else None) or title, "") + added
+                db.executemany(
+                    "INSERT INTO entries(session_id, turn, seq, kind, time, text) VALUES(?,?,?,?,?,?)",
+                    [(thread_id, row["turn"], row["seq"], row["kind"], row["time"], row["text"]) for row in written])
+                db.commit()
+            except BaseException:
+                db.rollback()
+                raise
             return len(rows)
         return self._run(work)
 
@@ -1456,7 +1566,32 @@ class ConversationIndex:
         self._run(lambda db: (db.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('rebuilt', ?)",
                                          (str(time.time()),)), db.commit())[0])
         return {"sessions": sessions, "threads": threads, "entries": entries,
+                "reclaimed": self._run(self._vacuum_if_fragmented),
                 "ms": int((time.time() - started) * 1000)}
+
+    @staticmethod
+    def _vacuum_if_fragmented(db) -> int:
+        """Give back the free pages, if there are enough of them to be worth it. Bytes reclaimed.
+
+        The delete-and-reinsert that #TZWF replaced left a third of the owner's 119.6 MB index as
+        freelist — the incremental write stops that growing, but it does not return what is
+        already there, and only a VACUUM can. It rewrites the whole file, so it happens **here**
+        and nowhere else: a rebuild is asked for by hand, already takes a second, and
+        `index_rebuild` runs it on a background thread (`session_protocol._background`), never on
+        a turn. A VACUUM that cannot run — no room for the copy it makes — leaves the database
+        exactly as it was, so it is reported as nothing reclaimed rather than failing the rebuild.
+        """
+        try:
+            page_size = db.execute("PRAGMA page_size").fetchone()[0]
+            pages = db.execute("PRAGMA page_count").fetchone()[0]
+            free = db.execute("PRAGMA freelist_count").fetchone()[0]
+            if not pages or free * VACUUM_FREE_IN < pages or free * page_size < VACUUM_MIN_BYTES:
+                return 0
+            db.commit()                      # VACUUM cannot run inside a transaction
+            db.execute("VACUUM")
+            return free * page_size
+        except (sqlite3.DatabaseError, OSError):
+            return 0
 
     def record_commands(self, workspace: str, items: list[dict]) -> int:
         """Append Relay-run terminal commands for a workspace. Returns the number of rows added."""

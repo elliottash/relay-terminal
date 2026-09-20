@@ -1,0 +1,18 @@
+   300      42.5        1.23      2.56       40766
+
+top allocation sites at the end:
+      0.15 MiB      900 obj  /tmp/claude-1000/pf4k/worker/srcmem/backend/relay_core/requests.py:64
+      0.14 MiB      300 obj  /tmp/claude-1000/pf4k/worker/srcmem/backend/relay_core/provider.py:1224
+      0.08 MiB      600 obj  /tmp/claude-1000/pf4k/worker/srcmem/backend/relay_core/checkpoints.py:50
+      0.06 MiB     1200 obj  /tmp/claude-1000/pf4k/worker/srcmem/backend/relay_core/checkpoints.py:51
+      0.05 MiB      457 obj  /tmp/claude-1000/pf4k/worker/srcmem/backend/relay_core/conv_index.py:563
+      0.05 MiB     1037 obj  <frozen importlib._bootstrap_external>:753
+      0.04 MiB       60 obj  /tmp/claude-1000/pf4k/worker/srcmem/backend/relay_core/skills.py:133
+      0.04 MiB      609 obj  /usr/lib/python3.12/pathlib.py:404
+      0.03 MiB      266 obj  /usr/lib/python3.12/urllib/request.py:1316
+      0.02 MiB        1 obj  /tmp/claude-1000/pf4k/worker/srcmem/backend/relay_core/logs.py:188
+      0.02 MiB      150 obj  /tmp/claude-1000/pf4k/worker/srcmem/backend/relay_core/agent.py:1214
+      0.02 MiB        1 obj  /tmp/claude-1000/pf4k/worker/srcmem/backend/relay_core/agent.py:738
+      0.02 MiB      301 obj  /usr/lib/python3.12/uuid.py:336
+      0.02 MiB      309 obj  /usr/lib/python3.12/json/decoder.py:353
+      0.02 MiB      414 obj  /tmp/claude-1000/pf4k/worker/srcmem/backend/relay_core/localtext.py:63

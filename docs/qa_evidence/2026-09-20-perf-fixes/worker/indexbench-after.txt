@@ -1,0 +1,17 @@
+store: 668 session files, 54.5 MB
+
+update_session (one autosave) by session-file size:
+         5 KiB      2 messages  turns=1  ->     0.23 ms
+        56 KiB     35 messages  turns=1  ->     0.25 ms
+       182 KiB     86 messages  turns=1  ->     0.41 ms
+       487 KiB    192 messages  turns=3  ->     0.87 ms
+      1574 KiB    594 messages  turns=5  ->     2.00 ms
+
+full rebuild: 667 sessions in 1.6 s  (2 ms each), db 36.9 MB, peak RSS 42 MiB (was 30)
+
+queries against the copy of the live index:
+  ''                            1.34 ms
+  'relay'                      73.66 ms
+  'board_tools'                55.29 ms
+  'profile performance'         1.43 ms
+loadavg (3.90576171875, 3.94775390625, 3.21826171875)

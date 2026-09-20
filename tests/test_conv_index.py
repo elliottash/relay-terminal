@@ -784,7 +784,11 @@ class MigrationTests(unittest.TestCase):
         """Turn the database back into an older one: drop the columns that version did not have
         (and, below v3, the header entries it did not write)."""
         db = sqlite3.connect(str(path))
-        dropped = conv_index.V4_COLUMNS if version >= 3 else conv_index.V3_COLUMNS + conv_index.V4_COLUMNS
+        dropped = conv_index.V5_COLUMNS
+        if version < 4:
+            dropped += conv_index.V4_COLUMNS
+        if version < 3:
+            dropped += conv_index.V3_COLUMNS
         for name, _kind in dropped:
             db.execute(f"ALTER TABLE conversations DROP COLUMN {name}")
         if version < 3:
@@ -812,6 +816,32 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual("", items["a" * 32]["raw_cwd"])
         self.assertEqual("main", items["a" * 32]["branch"], "the v3 columns are still there")
         self.assertEqual(set(), index.forgotten())
+
+    def test_a_v4_index_gains_the_fingerprint_without_a_re_index(self):
+        """v5 adds `entry_count`/`entry_digest` (#TZWF). Unlike every version before it, nothing
+        has to be re-read to fill them: each conversation writes its own at its next save, so the
+        migration leaves `indexed_version` alone and the next reconcile finds nothing to do."""
+        self.write(session("a" * 32, workspace="/tmp/alpha", branch="main"))
+        index = ConversationIndex(self.root / "index.db")
+        index.rebuild(self.root / "sessions")
+        index.record_commands("/tmp/alpha", [{"command": "rg needle", "status": 0}])
+        index.close()
+        self.downgrade(self.root / "index.db", version=4)
+
+        index = ConversationIndex(self.root / "index.db")
+        self.addCleanup(index.close)
+        self.assertEqual(index.migrated_from, 4)
+        self.assertFalse(index.recovered, "migrated, not wiped")
+        items = {item["session_id"]: item for item in index.search("", scope="all")["items"]}
+        self.assertIn("term-" + conv_index.workspace_digest("/tmp/alpha"), items)
+        self.assertEqual("main", items["a" * 32]["branch"], "the v3 columns are still there")
+        self.assertEqual(index.reconcile(self.root / "sessions")["backfilled"], 0)
+        # The first save of each conversation fills the fingerprint, and the next one is cheap.
+        index.update_session(session("a" * 32, workspace="/tmp/alpha", branch="main"), self.sessions)
+        row = index._db.execute("SELECT entry_count, entry_digest FROM conversations"
+                                " WHERE session_id=?", ("a" * 32,)).fetchone()
+        self.assertGreater(row["entry_count"], 0)
+        self.assertTrue(row["entry_digest"])
 
     def test_a_v2_index_is_migrated_and_reconcile_backfills_the_new_columns(self):
         data = session("a" * 32, workspace="/tmp/alpha", branch="main", summary="the summary",
@@ -1320,6 +1350,209 @@ class ProtocolTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"RELAY_INDEX": "off"}):
             commands = SessionCommands(self.sup, self.rec)
             self.assertRaises(ValueError, commands.handle, "conversations", {"query": "x"})
+
+
+def conversation(turns: int, session_id="g" * 32, *, updated=2000.0, reword=None, epoch=0) -> dict:
+    """A session of `turns` question/answer turns, as the autosave writes it.
+
+    `reword` is `{turn: text}` for a turn whose prompt changed where it stands — an edit inside
+    the conversation rather than at its end.
+    """
+    messages: list[dict] = []
+    items: list[dict] = []
+    for turn in range(1, turns + 1):
+        prompt = (reword or {}).get(turn, f"question {turn} about capybaras")
+        items.append({"turn": turn, "prompt": prompt, "prompt_preview": prompt[:20],
+                      "time": 1000.0 + turn, "locations": {str(epoch): len(messages) + 1},
+                      "files": {}, "ended": 1005.0 + turn})
+        messages += [{"role": "user", "content": prompt},
+                     {"role": "assistant", "content": f"answer {turn} about wombats"}]
+    return {"version": 1, "kind": "relay_session", "id": session_id, "title": "Growing",
+            "created": 900.0, "updated": updated, "workspace": "/tmp/alpha", "model": "glm-5",
+            "preset": "glm", "effort": "high", "mode": "build", "turns": turns, "epoch": epoch,
+            "messages": messages, "snapshots": {}, "checkpoints": {"items": items},
+            "requests": {"items": []}, "todos": {"items": []}, "plan_path": None,
+            "open_requests": 0}
+
+
+class IncrementalIndexTests(unittest.TestCase):
+    """An autosave writes the turns that were added, not the whole conversation again (#TZWF).
+
+    Every save used to `DELETE FROM entries WHERE session_id=?` and insert every row back — 46 ms
+    on the owner's largest session, on the turn's own thread, and the churn that left a third of
+    his index file as free pages. What decides is the rolling digest of the rows already indexed
+    (`entry_digests`), never the caller: anything but a pure extension falls back to the rewrite.
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.index = ConversationIndex(self.root / "index.db")
+        self.addCleanup(self.index.close)
+
+    def entries(self, session_id="g" * 32):
+        return self.index._db.execute(
+            "SELECT id, turn, seq, kind, time, text FROM entries WHERE session_id=? ORDER BY id",
+            (session_id,)).fetchall()
+
+    def contents(self, index=None, session_id="g" * 32):
+        """The rows as a rebuild would have to reproduce them: everything but the row id."""
+        db = (index or self.index)._db
+        return sorted(tuple(row)[1:] for row in db.execute(
+            "SELECT id, turn, seq, kind, time, text FROM entries WHERE session_id=?", (session_id,)))
+
+    def fts_is_consistent(self):
+        # FTS5's own check that its index matches the content table, which is `entries`.
+        self.index._db.execute("INSERT INTO entries_fts(entries_fts) VALUES('integrity-check')")
+
+    def changes(self, data):
+        """Rows the save touched, FTS shadow rows included — what the work is proportional to."""
+        before = self.index._db.total_changes
+        self.index.update_session(data, self.root)
+        return self.index._db.total_changes - before
+
+    def forget_the_fingerprint(self):
+        """What a v4 row looks like after the migration: the next save rewrites everything."""
+        self.index._db.execute("UPDATE conversations SET entry_count=0, entry_digest=''")
+        self.index._db.commit()
+
+    def test_a_grown_conversation_writes_only_its_new_turns(self):
+        self.index.update_session(conversation(20), self.root)
+        before = {row["id"]: tuple(row) for row in self.entries()}
+        self.assertEqual(len([r for r in before.values() if r[3] in ("prompt", "reply")]), 40)
+        grown = conversation(21, updated=3000.0)
+        incremental = self.changes(grown)
+        after = {row["id"]: tuple(row) for row in self.entries()}
+        # The 40 rows that were already there are the same rows: same ids, same seq, same text —
+        # and the same `time`, which a body row now takes from the save that indexed it rather
+        # than from the latest save of the conversation.
+        for row_id, row in before.items():
+            if row[3] in ("prompt", "reply"):
+                self.assertEqual(after.get(row_id), row)
+        self.assertEqual(len([r for r in after.values() if r[3] in ("prompt", "reply")]), 42)
+        # …and the whole rewrite it replaces, on the same data, costs several times as much.
+        self.forget_the_fingerprint()
+        rewrite = self.changes(grown)
+        self.assertLess(incremental * 5, rewrite, (incremental, rewrite))
+        self.fts_is_consistent()
+        self.assertEqual(len(self.index.search("question 21", scope="all")["items"]), 1)
+        self.assertEqual(len(self.index.search("wombats", scope="all")["items"]), 1)
+
+    def test_a_rewind_falls_back_and_leaves_what_a_rebuild_from_scratch_writes(self):
+        self.index.update_session(conversation(20), self.root)
+        rewound = conversation(8, updated=5000.0)
+        self.index.update_session(rewound, self.root)
+        fresh = ConversationIndex(self.root / "fresh.db")
+        self.addCleanup(fresh.close)
+        fresh.update_session(rewound, self.root)
+        self.assertEqual(self.contents(), self.contents(fresh))
+        self.fts_is_consistent()
+        self.assertEqual(self.index.search("question 20", scope="all")["items"], [])
+        self.assertEqual(len(self.index.search("question 8", scope="all")["items"]), 1)
+
+    def test_a_prompt_edited_where_it_stands_is_not_taken_for_an_appended_turn(self):
+        self.index.update_session(conversation(12), self.root)
+        edited = conversation(12, updated=5000.0, reword={5: "question 5 about narwhals"})
+        self.index.update_session(edited, self.root)
+        fresh = ConversationIndex(self.root / "fresh.db")
+        self.addCleanup(fresh.close)
+        fresh.update_session(edited, self.root)
+        self.assertEqual(self.contents(), self.contents(fresh))
+        self.assertEqual(len(self.index.search("narwhals", scope="all")["items"]), 1)
+        self.assertNotIn("question 5 about capybaras", [row["text"] for row in self.entries()])
+        self.fts_is_consistent()
+
+    def test_a_compaction_that_renumbers_the_turns_falls_back(self):
+        self.index.update_session(conversation(14), self.root)
+        compacted = conversation(14, updated=5000.0, epoch=1)
+        for item in compacted["checkpoints"]["items"]:         # the epoch moved the messages
+            item["locations"]["1"] = max(1, item["locations"]["1"] - 6)
+        compacted["messages"] = compacted["messages"][6:]
+        self.index.update_session(compacted, self.root)
+        fresh = ConversationIndex(self.root / "fresh.db")
+        self.addCleanup(fresh.close)
+        fresh.update_session(compacted, self.root)
+        self.assertEqual(self.contents(), self.contents(fresh))
+        self.fts_is_consistent()
+
+    def test_entries_lost_under_a_row_that_stayed_are_written_again(self):
+        # The digest says "a pure extension"; the table says the rows are not there. The table wins.
+        self.index.update_session(conversation(10), self.root)
+        self.index._db.execute("DELETE FROM entries WHERE session_id=? AND turn > 4", ("g" * 32,))
+        self.index._db.commit()
+        self.index.update_session(conversation(11, updated=5000.0), self.root)
+        fresh = ConversationIndex(self.root / "fresh.db")
+        self.addCleanup(fresh.close)
+        fresh.update_session(conversation(11, updated=5000.0), self.root)
+        self.assertEqual(self.contents(), self.contents(fresh))
+        self.fts_is_consistent()
+
+    def test_a_row_indexed_before_the_fingerprint_existed_re_indexes_itself_once(self):
+        self.index.update_session(conversation(30), self.root)
+        self.forget_the_fingerprint()
+        rewritten = self.changes(conversation(31, updated=5000.0))       # everything, once
+        incremental = self.changes(conversation(32, updated=6000.0))     # then only the new turn
+        self.assertLess(incremental * 5, rewritten, (incremental, rewritten))
+        self.fts_is_consistent()
+
+    def test_the_digest_covers_a_row_s_identity_and_text_but_not_its_time(self):
+        rows = conv_index.session_entries(conversation(4))
+        prefix, whole = conv_index.entry_digests(rows, len(rows))
+        self.assertEqual(prefix, whole)
+        self.assertEqual(conv_index.entry_digests(rows, 2)[0], conv_index.entry_digests(rows[:2], 2)[1])
+        moved = [{**row, "time": (row["time"] or 0) + 99} for row in rows]
+        self.assertEqual(conv_index.entry_digests(moved, len(rows))[1], whole)
+        changed = [{**row} for row in rows]
+        changed[1]["text"] += "!"
+        self.assertNotEqual(conv_index.entry_digests(changed, len(rows))[1], whole)
+        # Growing the conversation leaves the digest of what is already indexed alone.
+        self.assertEqual(conv_index.entry_digests(conv_index.session_entries(conversation(9)),
+                                                  len(rows))[0], whole)
+        # A conversation that shrank has no prefix to match.
+        self.assertEqual(conv_index.entry_digests(rows, len(rows) + 1)[0], "")
+
+    def test_a_rebuild_gives_back_the_free_pages_when_there_are_enough_of_them(self):
+        for n in range(30):
+            self.index.update_session(conversation(20, session_id=f"{n:032d}"), self.root)
+        # No session files to rebuild from, so the rebuild drops the rows and frees their pages.
+        self.assertEqual(self.index.rebuild(self.root / "sessions")["reclaimed"], 0,
+                         "a few megabytes of freelist are not worth rewriting the file")
+        pages = self.index._db.execute("PRAGMA page_count").fetchone()[0]
+        self.assertGreater(self.index._db.execute("PRAGMA freelist_count").fetchone()[0], 0)
+        with mock.patch.object(conv_index, "VACUUM_MIN_BYTES", 0), \
+             mock.patch.object(conv_index, "VACUUM_FREE_IN", 1000):
+            report = self.index.rebuild(self.root / "sessions")
+        self.assertGreater(report["reclaimed"], 0)
+        self.assertEqual(self.index._db.execute("PRAGMA freelist_count").fetchone()[0], 0)
+        self.assertLess(self.index._db.execute("PRAGMA page_count").fetchone()[0], pages)
+        self.fts_is_consistent()
+
+    def test_a_subagent_thread_is_written_the_same_way(self):
+        thread = {"kind": conv_index.THREAD_KIND, "id": "t" * 32, "owner_session": "g" * 32,
+                  "workspace": "/tmp/alpha", "description": "Find the pelican", "updated": 2000.0,
+                  "messages": [{"role": "user", "content": "task one"},
+                               {"role": "assistant", "content": "did one"}]}
+        for extra in range(9):
+            thread["messages"] += [{"role": "user", "content": f"more {extra}"},
+                                   {"role": "assistant", "content": f"done {extra}"}]
+        self.index.update_thread(thread, self.root)
+        before = {row["id"]: tuple(row) for row in self.entries("t" * 32)}
+        grown = {**thread, "updated": 3000.0,
+                 "messages": thread["messages"] + [{"role": "user", "content": "task two"},
+                                                   {"role": "assistant", "content": "did two"}]}
+        mark = self.index._db.total_changes
+        self.index.update_thread(grown, self.root)
+        incremental = self.index._db.total_changes - mark
+        after = {row["id"]: tuple(row) for row in self.entries("t" * 32)}
+        for row_id, row in before.items():
+            if row[3] != "title":
+                self.assertEqual(after.get(row_id), row)
+        self.forget_the_fingerprint()
+        mark = self.index._db.total_changes
+        self.index.update_thread(grown, self.root)
+        self.assertLess(incremental * 3, self.index._db.total_changes - mark)
+        self.fts_is_consistent()
 
 
 if __name__ == "__main__":

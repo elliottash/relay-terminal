@@ -1154,7 +1154,12 @@ files), because terminal-history rows have no file to be rebuilt from. **Version
 adds the overview columns below and is migrated the same way: the columns are added empty and
 every agent and subagent row is marked `indexed_version = 0`, which is what the next
 `reconcile()` notices — it re-reads those rows once, whatever their mtime says, and reports how
-many in `backfilled`. Any other mismatch wipes
+many in `backfilled`. **Version 4** (2026-09-19) adds `raw_cwd` and the guest tables the same way.
+**Version 5** (2026-09-20, #TZWF) adds `entry_count` and `entry_digest`: what an autosave compares
+itself against so it can write only the turns that were added instead of deleting and re-inserting
+every row of the conversation. It is the one migration that asks for no re-read — each conversation
+fills its own fingerprint at its next save, and until it does it costs one full re-index.
+Any other mismatch wipes
 it. The first conversation command a worker handles runs `reconcile()`: sessions and threads
 missing from the index or newer on disk are indexed, rows whose file is gone are dropped (one
 `stat` and one small meta read per session, a few ms when nothing changed). Before this,
@@ -1162,8 +1167,8 @@ sessions saved before the index existed or with it off were never found.
 
 | Table | Holds |
 |---|---|
-| `conversations` | one row per conversation: `session_id`, `source` (`agent`/`terminal`/`subagent`), `workspace`, `project`, `title`, `custom_title` (rename), `model`, `preset`, `created`, `updated`, `turns`, `open_requests`, `session_dir`, `pinned`; v2: `owner_session`, `parent_thread`, `agent_id`, `agent_type`, `spawn_turn`, `status`, `models` (JSON list), `tokens`, `cost`, `file_mtime`; v3: `summary`, `first_prompt`, `last_prompt`, `files` (JSON list), `files_count`, `has_edits`, `branch`, `unfinished`, `mode`, `todos` (JSON list), `indexed_version` |
-| `entries` | one row per indexed piece of text: `session_id`, `turn`, `seq`, `kind`, `time`, `status`, `text` |
+| `conversations` | one row per conversation: `session_id`, `source` (`agent`/`terminal`/`subagent`), `workspace`, `project`, `title`, `custom_title` (rename), `model`, `preset`, `created`, `updated`, `turns`, `open_requests`, `session_dir`, `pinned`; v2: `owner_session`, `parent_thread`, `agent_id`, `agent_type`, `spawn_turn`, `status`, `models` (JSON list), `tokens`, `cost`, `file_mtime`; v3: `summary`, `first_prompt`, `last_prompt`, `files` (JSON list), `files_count`, `has_edits`, `branch`, `unfinished`, `mode`, `todos` (JSON list), `indexed_version`; v4: `raw_cwd`; v5: `entry_count`, `entry_digest` (the incremental-write fingerprint) |
+| `entries` | one row per indexed piece of text: `session_id`, `turn`, `seq`, `kind`, `time`, `status`, `text`, in conversation order — a turn added to a conversation therefore appends, which is what lets an autosave write only its rows (#TZWF) |
 | `entries_fts` | FTS5 (`unicode61 remove_diacritics 2`) over `entries.text`, external content, kept in step by triggers |
 
 `kind` is `title` or `summary` (v3: what the conversation is, not something inside it),
@@ -1386,7 +1391,10 @@ indexed.
 `index_rebuild {id?}` drops every agent conversation and subagent thread and rebuilds them from the
 session JSON files and `<id>.threads/*.json` under `$XDG_DATA_HOME/relay/sessions`, on a background
 thread. Terminal history has no file to rebuild from and is kept. → `index_rebuilt {sessions,
-threads, entries, ms, conversations, bytes, schema_version, path}`.
+threads, entries, reclaimed, ms, conversations, bytes, schema_version, path}`. `reclaimed` is the
+bytes a `VACUUM` gave back, and it is 0 unless the file is at least a tenth free and there are at
+least 16 MB of it: a rebuild is the only place Relay vacuums, because it is asked for by hand and
+runs off the turn thread (#TZWF).
 
 ### 14.8 Notes and deviations
 

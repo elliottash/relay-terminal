@@ -1,0 +1,9 @@
+VACUUM on a COPY of the owner's index.db (never the original; sizes only, no content read):
+
+  before: 119.6 MB, freelist 31.5 MB (7689 pages)
+  after:   87.3 MB, freelist  0.0 MB; reported reclaimed 31.5 MB in 254 ms
+  FTS5 integrity-check after the vacuum: ok
+
+Command (from /tmp/claude-1000/pf4k/fix/worker):
+  cp /tmp/claude-1000/pf4k/worker/store/index.db vacuum.db
+  python3 -c "... ConversationIndex._vacuum_if_fragmented(db) ..."

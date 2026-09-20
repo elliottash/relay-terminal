@@ -1,0 +1,8 @@
+python 3.12.3  loadavg (7.1982421875, 4.71630859375, 3.61572265625)  turns=300 tools=False deltas=3
+turns 0-0: wall=   34.5 ms  ask->req=   32.9 ms  last->done=   -2.5 ms  req_bytes=   27660  msgs=2
+turns 1-9: wall=    1.8 ms  ask->req=    1.0 ms  last->done=    0.5 ms  req_bytes=   28468  msgs=10
+turns 10-49: wall=    3.0 ms  ask->req=    1.6 ms  last->done=    0.7 ms  req_bytes=   44733  msgs=38
+turns 50-99: wall=    3.8 ms  ask->req=    2.2 ms  last->done=    1.1 ms  req_bytes=   71583  msgs=120
+turns 100-199: wall=    7.1 ms  ask->req=    4.0 ms  last->done=    1.7 ms  req_bytes=  115213  msgs=238
+turns 200-299: wall=    8.4 ms  ask->req=    5.1 ms  last->done=    2.3 ms  req_bytes=  173413  msgs=438
+total wall 4.5 s, worker CPU 4.38 s, Pss 27.4 MiB -> /tmp/claude-1000/pf4k/fix/worker/turns-300.json
