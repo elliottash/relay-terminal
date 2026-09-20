@@ -5,7 +5,7 @@ status: done
 labels: [bug, switchboard]
 rank: zzzzzzzzzzzzzzr
 created: '2026-09-19'
-links: {plans: [], commits: [], evidence: [], related: [BVK1], github: null}
+links: {plans: [], commits: [02d65e5f], evidence: [], related: [BVK1], github: null}
 ---
 # card id BVL1 is not Crockford base32; check always reports an error
 

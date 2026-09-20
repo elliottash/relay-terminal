@@ -10,3 +10,6 @@ The bevel card's id is now **#BVK1** (K in place of the excluded L, so it still 
 `python3 scripts/relay-board.py check`: 306 cards, **0 errors**, down from 1. The remaining `task_missing_marker` warning on the pane-buttons card is pre-existing and not part of this.
 
 The three evidence and thread files that mention BVL1 (`docs/qa_evidence/2026-09-18-pane-buttons-brighter-outline/README.md`, `docs/qa_evidence/2026-09-20-switchboard-sections/README.md`, `issues/threads/3XZV.md`) are left as they are: they record what was true when they were written.
+
+<!-- relay:entry 20260920T032444Z-k3 author=agent kind=event model=claude-opus-5 -->
+- ✦ agent updated this card · links.commits: [] → ["02d65e5f"]
