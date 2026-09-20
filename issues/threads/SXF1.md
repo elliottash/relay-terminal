@@ -147,3 +147,6 @@ Owner reported during execution: "sometimes it still says 'type a prompt first'"
 
 <!-- relay:entry 20260920T053539Z-9w author=agent kind=event model=glm-5.3 pane=5822ded8 turn=0feb685b80de4da58a4644ed44f89145/0d0f0dedafd44b489c226e8d8ffaa178 -->
 - ✦ agent moved this card · Executing → Needs verification · All three plan surfaces landed (d9cde605, 472ae1a2, 78416e39) and the live Xvfb check passes every case: limit stop, kill-and-restart, and the teaching hint; targeted tests green in the current tree. · evidence docs/qa_evidence/2026-09-20-ctrl-enter-continue/ · implemented_by glm/glm-5.3
+
+<!-- relay:entry 20260920T053628Z-v8 author=agent kind=event model=glm-5.3 pane=5822ded8 turn=0feb685b80de4da58a4644ed44f89145/0d0f0dedafd44b489c226e8d8ffaa178 -->
+- ✦ agent updated this card · links: {"commits": ["d9cde60524af4b8def16916aa505875d321299de", "472ae1a210a4e0577d690c… → {"commits": ["d9cde60524af4b8def16916aa505875d321299de", "472ae1a210a4e0577d690c…
