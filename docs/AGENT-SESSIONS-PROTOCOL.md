@@ -5360,11 +5360,13 @@ is the user being late, not an error. An `id` the pane cannot draw an ask for (n
 questions) is answered at once with empty `answers`, so a malformed event costs the turn its
 answers and not its life.
 
-An ask is drawn by the **desktop pane only**. `question` and `question_closed` are in
-`FORWARDED_EVENTS` (docs/REMOTE-PROTOCOL.md section 6.4) but no web client draws them and they are
-not in `GUEST_EVENTS`, so a phone, a tablet or a share participant sees the question only as the
-text the desktop printed into the mirrored terminal, never as an ask of its own. It can still be
-answered from there, by the desktop's own rule (owner, 2026-09-19): the line is **routed first**,
+An ask is drawn by the desktop pane and, since 2026-09-21 (#PH0N), by the owner's own paired
+devices: `question` and `question_closed` are in `FORWARDED_EVENTS` (docs/REMOTE-PROTOCOL.md
+section 6.4) and `app/pane.js` draws them as a row above the prompt box, one button per choice plus
+Skip, for `agent` and `full` devices (a `view` device sees the row without buttons). They are not
+in `GUEST_EVENTS`, so a share participant still sees the question only as the text the desktop
+printed into the mirrored terminal. A line typed on a device while its row is up answers the ask
+agent-bound; otherwise a remote line follows the desktop's own rule (owner, 2026-09-19): it is **routed first**,
 and the ask takes it only when the route is the agent (`relay::input::askTakesRemoteLine`,
 decided in `Pane::takeRemoteRoute`). A line the router reads as a command runs in the shell, so an
 unanswered ask no longer locks a paired device out of the terminal — `Pane::submitRemote` used to
