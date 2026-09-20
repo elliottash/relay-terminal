@@ -19,3 +19,6 @@ Questions for the owner, each with a recommendation (detail in docs/SIGNALS-RESE
 
 <!-- relay:entry 20260920T195746Z-8f author=agent kind=decision -->
 Owner, in the terminal, on the twelve questions: "6 -- i think yes by default, but its optional.OK to all the others". All recommendations accepted except agent pickup of unclaimed signals, which is on by default and optional (thread question 9; it was numbered 6 in the terminal summary). Recorded in the card's Decisions. Next: a plan, once #7BM4 step 1 has fixed the run-history format.
+
+<!-- relay:entry 20260920T195828Z-31 author=agent kind=decision -->
+Owner, on unasked pickup (decision 9): "and you get a notification that you can click on to open the agent thread, and those go into the sessions manger". So a pickup is its own agent thread, announced by a clickable notification that is amended with the outcome, and listed in the Sessions manager. Recorded under decision 9.
