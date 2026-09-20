@@ -111,8 +111,9 @@ class ConfigureProviderTests(unittest.TestCase):
     def test_a_missing_key_names_the_provider(self):
         with self.assertRaises(ValueError) as ctx:
             S.provider_config({"preset": "openai", "use_stored_key": True})
-        self.assertIn("OpenAI", str(ctx.exception))
-        self.assertIn("openai", str(ctx.exception))
+        # The row's label (lower-case since 2026-09-20) and its preset id, so the user can find it.
+        self.assertIn(PRESETS["openai"].label, str(ctx.exception))
+        self.assertIn("(openai)", str(ctx.exception))
 
     def test_a_missing_key_for_a_custom_endpoint_names_its_host(self):
         with self.assertRaises(ValueError) as ctx:

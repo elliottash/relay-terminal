@@ -105,8 +105,10 @@ class Preset:
     group: str = "payg"
     key_url: str = ""          # where the user gets a key; shown as a hint, never fetched
     note: str = ""             # one line under the row in the keys modal
-    # The company, not the model: the roles modal picks a *provider*, and "Kimi · K3" read as if the
+    # The company, not the model: the roles modal picks a *provider*, and "kimi · k3" read as if the
     # tier were pinned to K3. `plan` tells two presets of the same provider apart when both are listed.
+    # Every label, provider and plan is lower-case (owner, 2026-09-20, Warp style): the GUI shows
+    # them as they are and never re-cases them.
     provider: str = ""
     plan: str = ""
     # A model server on this machine (localmodels.py): no key, plain HTTP to a loopback host. Never
@@ -134,7 +136,10 @@ class Preset:
                 "effort_note": effort_note(self.effort_style), "group": self.group,
                 "key_url": self.key_url, "note": self.note, "vision": self.vision,
                 "provider": self.provider or self.label.split(" · ")[0], "plan": self.plan,
-                "local": self.local, "server": self.server, "hosted": self.hosted}
+                "local": self.local, "server": self.server, "hosted": self.hosted,
+                # The per-model catalog (MODEL_CATALOG below): [] for a local endpoint, whose one
+                # served model is `model` and whose own list comes from the probe (protocol 28).
+                "models": catalog_rows(self.id)}
 
 
 GLM_EXTRA = {"thinking": {"type": "enabled"}, "reasoning_effort": "high"}
@@ -148,11 +153,11 @@ PRESETS: dict[str, Preset] = {p.id: p for p in [
     # ask works with no key. The gateway (gateway/) speaks the OpenAI shape, names its models after
     # the tiers, and caps reasoning at medium per role (EFFORT_MAP["relay"] mirrors the cap, so the
     # picker offers Low and Medium). The context window is the gateway's input cap, not a model's.
-    Preset("relay-free", "Relay Free", "https://api.relay-terminal.ai/v1", "relay-main",
+    Preset("relay-free", "relay free", "https://api.relay-terminal.ai/v1", "relay-main",
            {"reasoning_effort": "medium"},
            1_000_000, "relay", "included", "https://relay-terminal.ai/free.html",
            "Included with Relay, no API key. Prompts go to Relay's hosted service, then to the model provider.",
-           provider="Relay", plan="Included", hosted=True,
+           provider="relay", plan="included", hosted=True,
            # The gateway owns the real cap and applies it per role, clamping rather than refusing
            # (`min(max_tokens, role.max_output_tokens)` in gateway/validate.py). This is the cap it
            # serves the Main role, the one a pane's turns run on: 16,000
@@ -162,72 +167,72 @@ PRESETS: dict[str, Preset] = {p.id: p for p in [
            # Server-side and remotely configurable, so this tracks the shipped config, not a
            # provider's published limit like the rows above.
            max_output=16_000),
-    Preset("kimi", "Kimi · K3", "https://api.moonshot.ai/v1", "kimi-k3", {"reasoning_effort": "high"},
+    Preset("kimi", "kimi · k3", "https://api.moonshot.ai/v1", "kimi-k3", {"reasoning_effort": "high"},
            1_048_576, "kimi", "payg", "https://platform.kimi.ai/console/api-keys",
            "Moonshot platform, pay-as-you-go.",
            # max_completion_tokens: 131,072 by default, up to the whole window
            # (https://platform.kimi.ai/docs/guide/kimi-k3-quickstart).
-           provider="Kimi", plan="Pay-as-you-go", max_output=131_072),
+           provider="kimi", plan="pay-as-you-go", max_output=131_072),
     # Kimi Code subscription (https://www.kimi.com/code/docs/en/): OpenAI-compatible base
     # https://api.kimi.ai/coding/v1; model ids k3, k3-256k, kimi-for-coding, kimi-for-coding-highspeed.
-    Preset("kimi-code", "Kimi Code · K3", "https://api.kimi.ai/coding/v1", "k3", {"reasoning_effort": "high"},
+    Preset("kimi-code", "kimi code · k3", "https://api.kimi.ai/coding/v1", "k3", {"reasoning_effort": "high"},
            1_048_576, "kimi", "subscription", "https://www.kimi.com/code/console",
            "Kimi Code subscription key (not a Moonshot platform key).",
-           provider="Kimi", plan="Coding Plan", max_output=131_072),
-    Preset("glm", "Z.AI · GLM-5.3 · standard API", "https://api.z.ai/api/paas/v4", "glm-5.3", GLM_EXTRA,
+           provider="kimi", plan="coding plan", max_output=131_072),
+    Preset("glm", "z.ai · glm-5.3 · standard api", "https://api.z.ai/api/paas/v4", "glm-5.3", GLM_EXTRA,
            1_000_000, "glm", "payg", "https://z.ai/manage-apikey/apikey-list",
            "Z.AI open platform, pay-as-you-go.",
            # Output 128K (https://docs.z.ai/guides/llm/glm-5.3).
-           provider="Z.AI (GLM)", plan="standard API", max_output=131_072),
+           provider="z.ai (glm)", plan="standard api", max_output=131_072),
     # https://docs.z.ai/devpack/quick-start lists the Coding Plan's OpenAI base verbatim.
-    Preset("glm-coding", "Z.AI · GLM-5.3 · Coding Plan", "https://api.z.ai/api/coding/paas/v4", "glm-5.3", GLM_EXTRA,
+    Preset("glm-coding", "z.ai · glm-5.3 · coding plan", "https://api.z.ai/api/coding/paas/v4", "glm-5.3", GLM_EXTRA,
            1_000_000, "glm", "subscription", "https://z.ai/manage-apikey/apikey-list",
            "GLM Coding Plan subscription; subscribe at z.ai/subscribe.",
-           provider="Z.AI (GLM)", plan="Coding Plan", max_output=131_072),
+           provider="z.ai (glm)", plan="coding plan", max_output=131_072),
     # MiniMax renamed the Coding Plan to the Token Plan and it shares the pay-as-you-go base URL; only the
     # key differs and the two kinds of key are not interchangeable.
     # https://platform.minimax.io/docs/token-plan/other-tools.md, .../token-plan/quickstart
     # Models: https://platform.minimax.io/docs/api-reference/api-overview (MiniMax-M3, M2.7,
     # MiniMax-M2.7-highspeed, M2.5, M2.1, …). M3 is 1,000,000 tokens; the M2.x family is 204,800.
-    Preset("minimax", "MiniMax · M3 · Coding/Token Plan", "https://api.minimax.io/v1", "MiniMax-M3", {},
+    Preset("minimax", "minimax · m3 · coding/token plan", "https://api.minimax.io/v1", "MiniMax-M3", {},
            1_000_000, "none", "subscription", "https://platform.minimax.io/user-center/payment/token-plan",
            "MiniMax Coding Plan is now the Token Plan; the same base URL serves both key kinds.",
            # Recommended output limit 131,072, hard maximum 524,288, and input plus output must fit
            # the window (https://platform.minimax.io/docs/guides/text-generation).
-           provider="MiniMax", plan="Token Plan", max_output=131_072),
+           provider="minimax", plan="token plan", max_output=131_072),
     # https://openrouter.ai/api/v1/models (fetched 2026-09-17): deepseek/deepseek-v4.1-flash exists,
     # a non-flash deepseek/deepseek-v4.1 does not.
-    Preset("openrouter", "OpenRouter · DeepSeek V4.1 Flash", "https://openrouter.ai/api/v1",
+    Preset("openrouter", "openrouter · deepseek v4.1 flash", "https://openrouter.ai/api/v1",
            "deepseek/deepseek-v4.1-flash", {}, 1_048_576, "openrouter", "aggregator",
            "https://openrouter.ai/keys", "One key for every model; also Relay's router and chores model.",
            # DeepSeek documents 384,000 output, but an aggregator picks the endpoint and the caps
            # differ across them (OpenRouter's DeepInfra route for Kimi K3 allows 16,384), so this
            # one keeps the conservative fallback rather than a number one route may refuse.
-           provider="OpenRouter", max_output=DEFAULT_MAX_OUTPUT),
+           provider="openrouter", max_output=DEFAULT_MAX_OUTPUT),
     # https://developers.openai.com/api/docs/api-reference/chat/create
-    Preset("openai", "OpenAI · GPT-6 Astra", "https://api.openai.com/v1", "gpt-6-astra",
+    Preset("openai", "openai · gpt-6 astra", "https://api.openai.com/v1", "gpt-6-astra",
            {"reasoning_effort": "high"}, 1_050_000, "openai", "payg",
            "https://platform.openai.com/api-keys", "Pay-as-you-go OpenAI API key (not a ChatGPT login).",
            # 1,050,000 context, 128,000 output (https://developers.openai.com/api/docs/models/gpt-6-astra).
-           provider="OpenAI (ChatGPT)", plan="Pay-as-you-go", max_output=128_000),
+           provider="openai (chatgpt)", plan="pay-as-you-go", max_output=128_000),
     # https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk — the OpenAI-compatible
     # layer lives at https://api.anthropic.com/v1 and accepts the key as an Authorization: Bearer header.
     # It ignores reasoning_effort, so Relay sends no effort parameters to it.
-    Preset("anthropic", "Anthropic · Claude Opus 5", "https://api.anthropic.com/v1", "claude-opus-5", {},
+    Preset("anthropic", "anthropic · claude opus 5", "https://api.anthropic.com/v1", "claude-opus-5", {},
            1_000_000, "none", "payg", "https://console.anthropic.com/settings/keys",
            "Anthropic's OpenAI-compatible endpoint; effort is the model's own default.",
            # 1M context, 128k max output (https://platform.claude.com/docs/en/models/opus-5/overview);
            # the 300k output beta is the Message Batches API, not this one.
-           provider="Anthropic (Claude)", plan="Pay-as-you-go", max_output=131_072),
+           provider="anthropic (claude)", plan="pay-as-you-go", max_output=131_072),
     # https://ai.google.dev/gemini-api/docs/openai — base URL is .../v1beta/openai (stored without the
     # trailing slash because Relay appends /chat/completions).
-    Preset("gemini", "Google · Gemini 3.1 Pro", "https://generativelanguage.googleapis.com/v1beta/openai",
+    Preset("gemini", "google · gemini 3.1 pro", "https://generativelanguage.googleapis.com/v1beta/openai",
            "gemini-3.1-pro-preview", {"reasoning_effort": "high"}, 1_048_576, "gemini", "payg",
            "https://aistudio.google.com/apikey", "Gemini API key from AI Studio.",
            # "1M / 64k" — the same window as GLM-5.3 and half the output cap, which is why Relay
            # reads this per model instead of as a share of the window
            # (https://ai.google.dev/gemini-api/docs/gemini-3).
-           provider="Google (Gemini)", plan="Pay-as-you-go", max_output=65_536),
+           provider="google (gemini)", plan="pay-as-you-go", max_output=65_536),
 ]}
 
 # --- Main / Flash / Lite tiers (docs/AGENT-SESSIONS-PROTOCOL.md section 13.7) ----------------------
@@ -288,6 +293,110 @@ TIER_DEFAULTS: dict[str, dict[str, tuple[str, str, dict]]] = {
 
 # Recommended default-provider pairings shown in the roles modal.
 RECOMMENDED = (("glm-coding", "openrouter"), ("kimi-code", "openrouter"))
+
+# --- the per-model catalog ---------------------------------------------------------------------
+# What a provider row can be set to, one row per model, keyed by preset id (owner, 2026-09-20): the
+# model box lists these instead of a free text field, the way a guest row's own `models` already
+# does (guest_harness_provider.py, protocol 29.3). Every model id here is one the repo already
+# names — TIER_DEFAULTS, the comments beside each preset, docs/ARCHITECTURE.md, or the codex
+# catalogue (#E516) — and nothing was invented: a model the provider serves but nothing here
+# mentions is left out until somebody verifies it, rather than offered and refused.
+#
+# Row shape, as `catalog_rows()` hands it to the GUI:
+#   id           the model id the API takes (for OpenRouter, the slug)
+#   label        lower-case display name ("glm-5.3 flash")
+#   tier         main | flash | lite | None — the tier this model is the built-in default for. A
+#                tier that points at another preset (Lite via OpenRouter) puts its row on the
+#                *target* preset, so "google/gemini-3.8-flash" is a lite row of `openrouter`. A
+#                model two tiers name (DeepSeek on OpenRouter) carries the first in PROVIDER_TIERS
+#                order; a model no tier names carries None.
+#   efforts      the Relay levels this model accepts, or None for "whatever the preset's effort
+#                style offers" (effort_levels). The value the GUI sees is always a list.
+#   intelligence INTELLIGENCE[id], or None.
+#
+# `efforts` is only ever narrowed below what the preset offers: Kimi documents reasoning_effort
+# for kimi-k3 alone (the TIER_DEFAULTS comment above), so its other models carry [], exactly as
+# their tier entries carry no effort field.
+MODEL_CATALOG: dict[str, list[dict]] = {
+    "relay-free": [
+        {"id": "relay-main", "label": "relay main", "tier": "main", "efforts": None},
+        {"id": "relay-flash", "label": "relay flash", "tier": "flash", "efforts": None},
+        {"id": "relay-lite", "label": "relay lite", "tier": "lite", "efforts": None},
+    ],
+    "kimi": [
+        {"id": "kimi-k3", "label": "kimi k3", "tier": "main", "efforts": None},
+        {"id": "kimi-k2.7-code-highspeed", "label": "kimi k2.7 code highspeed", "tier": "flash", "efforts": []},
+    ],
+    # https://www.kimi.com/code/docs/en/ — k3, k3-256k, kimi-for-coding, kimi-for-coding-highspeed.
+    "kimi-code": [
+        {"id": "k3", "label": "k3", "tier": "main", "efforts": None},
+        {"id": "k3-256k", "label": "k3 256k", "tier": None, "efforts": None},
+        {"id": "kimi-for-coding", "label": "kimi for coding", "tier": None, "efforts": []},
+        {"id": "kimi-for-coding-highspeed", "label": "kimi for coding highspeed", "tier": "flash", "efforts": []},
+    ],
+    "glm": [
+        {"id": "glm-5.3", "label": "glm-5.3", "tier": "main", "efforts": None},
+        {"id": "glm-5.3-flash", "label": "glm-5.3 flash", "tier": "flash", "efforts": None},
+    ],
+    "glm-coding": [
+        {"id": "glm-5.3", "label": "glm-5.3", "tier": "main", "efforts": None},
+        {"id": "glm-5.3-flash", "label": "glm-5.3 flash", "tier": "flash", "efforts": None},
+    ],
+    # https://platform.minimax.io/docs/api-reference/api-overview — no effort knob on any of them.
+    "minimax": [
+        {"id": "MiniMax-M3", "label": "minimax m3", "tier": "main", "efforts": None},
+        {"id": "MiniMax-M2.7", "label": "minimax m2.7", "tier": None, "efforts": None},
+        {"id": "MiniMax-M2.7-highspeed", "label": "minimax m2.7 highspeed", "tier": "flash", "efforts": None},
+        {"id": "MiniMax-M2.5", "label": "minimax m2.5", "tier": None, "efforts": None},
+    ],
+    "openrouter": [
+        {"id": "deepseek/deepseek-v4.1-flash", "label": "deepseek v4.1 flash", "tier": "main", "efforts": None},
+        {"id": "google/gemini-3.8-flash", "label": "gemini 3.8 flash", "tier": "lite", "efforts": None},
+        {"id": "google/gemini-3.5-flash-lite", "label": "gemini 3.5 flash-lite", "tier": "lite", "efforts": None},
+    ],
+    # The four codex-cli 0.155.1 lists first (#E516); every one takes reasoning_effort.
+    "openai": [
+        {"id": "gpt-6-astra", "label": "gpt-6 astra", "tier": "main", "efforts": None},
+        {"id": "gpt-5.6-sol", "label": "gpt-5.6 sol", "tier": None, "efforts": None},
+        {"id": "gpt-5.6-terra", "label": "gpt-5.6 terra", "tier": "flash", "efforts": None},
+        {"id": "gpt-5.6-luna", "label": "gpt-5.6 luna", "tier": "lite", "efforts": None},
+    ],
+    # https://platform.claude.com/docs/en/models/overview — the compat layer has no effort knob.
+    "anthropic": [
+        {"id": "claude-opus-5", "label": "claude opus 5", "tier": "main", "efforts": None},
+        {"id": "claude-sonnet-5", "label": "claude sonnet 5", "tier": "flash", "efforts": None},
+        {"id": "claude-haiku-4-5", "label": "claude haiku 4.5", "tier": "lite", "efforts": None},
+        {"id": "claude-fable-5-1", "label": "claude fable 5.1", "tier": None, "efforts": None},
+    ],
+    "gemini": [
+        {"id": "gemini-3.1-pro-preview", "label": "gemini 3.1 pro", "tier": "main", "efforts": None},
+        {"id": "gemini-3.8-flash", "label": "gemini 3.8 flash", "tier": "flash", "efforts": None},
+        {"id": "gemini-3.5-flash-lite", "label": "gemini 3.5 flash-lite", "tier": "lite", "efforts": None},
+    ],
+}
+
+# Seeded by the owner from the Artificial Analysis index; edited by hand. Keyed by model id; None
+# until a number is entered, and the GUI shows nothing for None rather than a zero.
+INTELLIGENCE: dict[str, int | None] = {
+    row["id"]: None for rows in MODEL_CATALOG.values() for row in rows
+}
+
+
+def catalog_rows(preset_id) -> list[dict]:
+    """The catalog rows of a preset with `efforts` resolved and `intelligence` filled in.
+
+    `efforts` of None becomes the levels the preset's effort style offers, so the GUI always gets a
+    list and never has to know about styles. An id with no catalog — a local endpoint, a guest, an
+    unknown id — gets [] (a local endpoint's list is the probe's, protocol 28; a guest's is its own).
+    """
+    preset = PRESETS.get(preset_id) if isinstance(preset_id, str) else None
+    if preset is None:
+        return []
+    default = effort_levels(preset.effort_style)
+    return [{"id": row["id"], "label": row["label"], "tier": row["tier"],
+             "efforts": list(default if row["efforts"] is None else row["efforts"]),
+             "intelligence": INTELLIGENCE.get(row["id"])}
+            for row in MODEL_CATALOG.get(preset_id, [])]
 
 
 def validate_tier(tier) -> str:

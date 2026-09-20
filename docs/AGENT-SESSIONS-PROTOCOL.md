@@ -818,14 +818,25 @@ them). An OAuth login is not an API key and is never imported: Claude Code and C
 OAuth by default, and those tokens do not work on the OpenAI-compatible endpoints Relay talks to.
 
 The `presets` event gains, per preset, `group` (`subscription` / `aggregator` / `payg`), `key_url` (where
-the user gets a key), `note`, `provider` (the company: "Kimi", "Z.AI (GLM)", "OpenAI (ChatGPT)"…) and
-`plan` ("Coding Plan", "Pay-as-you-go", … — empty when the provider has one entry), and `key_source`
+the user gets a key), `note`, `provider` (the company: "kimi", "z.ai (glm)", "openai (chatgpt)"…) and
+`plan` ("coding plan", "pay-as-you-go", … — empty when the provider has one entry), and `key_source`
 (`env` / `keyring` / `""`), so the modal can show
 "From RELAY_OPENROUTER_API_KEY" and refuse to offer Remove for something it cannot remove. The event also
 gains `tier_defaults` (13.7) and `role_actions` — the Advanced list, one row per job — so the GUI never
 keeps a second copy of the backend's tables. The keys modal lists a preset per plan and so uses `label`
-("Kimi · K3"); the roles modal chooses a *provider* and uses `provider`, adding `· <plan>` only when two
-presets of the same company are both offered.
+("kimi · k3"); the roles modal chooses a *provider* and uses `provider`, adding `· <plan>` only when two
+presets of the same company are both offered. Since 2026-09-20 `label`, `provider` and `plan` are
+lower-case (Warp style) and the GUI shows them as they are.
+
+Since 2026-09-20 every cloud preset row also carries `models`: the models that row can be set to, as
+`[{id, label, tier, efforts, intelligence}]` from `presets.MODEL_CATALOG` — `id` is what the API
+takes, `label` is lower-case, `tier` is `main` / `flash` / `lite` for a model the tier table (13.7)
+names on that preset (a Lite that points at OpenRouter puts its row on `openrouter`) and `null`
+otherwise, `efforts` is the Relay levels that model accepts (already resolved: `["low", "medium"]`
+on Relay Free, `[]` where there is no effort knob), and `intelligence` is the owner's hand-entered
+index or `null`. A guest row's own `models` (29.3) carries the same `id` / `label` / `efforts`
+keys, so one model box reads both; a local endpoint's preset row carries `models: []`, because its
+list is the probe's (28, `{id, context_window, tools, thinking}`) and it serves one model per row.
 
 Since v2.9 (2026-09-18) every row also carries `hosted` (`true` only for Relay Free, 13.9). The Relay
 Free row differs from the others in four fields: `has_stored_key` is always `false` and `key_source`

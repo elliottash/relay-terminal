@@ -107,7 +107,7 @@ class PresetTableTests(unittest.TestCase):
         # on it before any key is stored.
         self.assertEqual(P.GROUPS[0], "included")
         self.assertEqual(P.GROUP_LABELS["included"], "Included")
-        self.assertEqual((free.group, free.provider, free.plan), ("included", "Relay", "Included"))
+        self.assertEqual((free.group, free.provider, free.plan), ("included", "relay", "included"))
         self.assertEqual(free.base_url, "https://api.relay-terminal.ai/v1")
         self.assertEqual(free.key_url, "https://relay-terminal.ai/free.html")
         # Medium reasoning and below (owner, 2026-09-18): the picker offers Low and Medium, the
@@ -137,9 +137,9 @@ class PresetTableTests(unittest.TestCase):
 
     def test_every_preset_names_its_company_and_its_plan(self):
         # The roles modal picks a provider, so it shows the company, never the preset's model name.
-        expected = {"relay-free": "Relay", "kimi": "Kimi", "kimi-code": "Kimi", "glm": "Z.AI (GLM)",
-                    "glm-coding": "Z.AI (GLM)", "minimax": "MiniMax", "openrouter": "OpenRouter",
-                    "openai": "OpenAI (ChatGPT)", "anthropic": "Anthropic (Claude)", "gemini": "Google (Gemini)"}
+        expected = {"relay-free": "relay", "kimi": "kimi", "kimi-code": "kimi", "glm": "z.ai (glm)",
+                    "glm-coding": "z.ai (glm)", "minimax": "minimax", "openrouter": "openrouter",
+                    "openai": "openai (chatgpt)", "anthropic": "anthropic (claude)", "gemini": "google (gemini)"}
         self.assertEqual({p.id: p.to_dict()["provider"] for p in P.PRESETS.values()}, expected)
         # Two presets of one company are told apart by their plan, so neither can be nameless.
         shared = {name for name in expected.values() if list(expected.values()).count(name) > 1}
@@ -258,6 +258,101 @@ class TierTableTests(unittest.TestCase):
         self.assertEqual(sorted(catalog["providers"]), sorted(P.PRESETS))
 
 
+class ModelCatalogTests(unittest.TestCase):
+    """One list of models per provider row (owner, 2026-09-20): MODEL_CATALOG and catalog_rows()."""
+
+    ROW_KEYS = {"id", "label", "tier", "efforts", "intelligence"}
+
+    @staticmethod
+    def tiers_naming(target: str, model: str) -> set:
+        """Every tier, in any provider's table, whose entry is (target, model)."""
+        return {tier for table in P.TIER_DEFAULTS.values()
+                for tier, entry in table.items() if entry[:2] == (target, model)}
+
+    def test_every_preset_has_a_catalog_and_every_catalog_names_a_preset(self):
+        self.assertEqual(sorted(P.MODEL_CATALOG), sorted(P.PRESETS))
+        for preset_id, rows in P.MODEL_CATALOG.items():
+            with self.subTest(preset_id):
+                self.assertGreaterEqual(len(rows), 1)
+                # The preset's own default model is always one of its rows.
+                self.assertIn(P.PRESETS[preset_id].model, [row["id"] for row in rows])
+
+    def test_ids_are_unique_within_a_preset(self):
+        for preset_id, rows in P.MODEL_CATALOG.items():
+            ids = [row["id"] for row in rows]
+            self.assertEqual(len(ids), len(set(ids)), preset_id)
+            for row in rows:
+                self.assertTrue(row["id"].strip() and row["label"].strip(), (preset_id, row))
+
+    def test_tier_rows_match_tier_defaults(self):
+        # Every model a tier names has a row on the *target* preset, marked with a tier that names
+        # it: Z.AI's Lite is Gemini 3.8 Flash on OpenRouter, so that row is a lite row of openrouter.
+        for provider, table in P.TIER_DEFAULTS.items():
+            for tier, (target, model, _) in table.items():
+                with self.subTest(f"{provider}.{tier}"):
+                    row = next((r for r in P.MODEL_CATALOG[target] if r["id"] == model), None)
+                    self.assertIsNotNone(row, (target, model))
+                    self.assertIn(row["tier"], self.tiers_naming(target, model))
+        # And a row's tier is never a claim no table makes.
+        for preset_id, rows in P.MODEL_CATALOG.items():
+            for row in rows:
+                named = self.tiers_naming(preset_id, row["id"])
+                if row["tier"] is None:
+                    self.assertEqual(named, set(), (preset_id, row["id"]))
+                else:
+                    self.assertIn(row["tier"], P.PROVIDER_TIERS)
+        # Two tiers naming one model (DeepSeek on OpenRouter) keep the first in PROVIDER_TIERS order.
+        deepseek = next(r for r in P.MODEL_CATALOG["openrouter"] if r["id"] == "deepseek/deepseek-v4.1-flash")
+        self.assertEqual(deepseek["tier"], "main")
+        self.assertEqual(self.tiers_naming("openrouter", "deepseek/deepseek-v4.1-flash"), {"main", "flash"})
+
+    def test_every_label_provider_and_plan_is_lower_case(self):
+        # Warp style (owner, 2026-09-20): the GUI shows these as they are and never re-cases them.
+        for preset in P.PRESETS.values():
+            for text in (preset.label, preset.provider, preset.plan):
+                self.assertEqual(text, text.lower(), preset.id)
+        for preset_id, rows in P.MODEL_CATALOG.items():
+            for row in rows:
+                self.assertEqual(row["label"], row["label"].lower(), (preset_id, row["id"]))
+        self.assertEqual(P.PRESETS["glm-coding"].label, "z.ai · glm-5.3 · coding plan")
+        self.assertEqual(P.PRESETS["relay-free"].label, "relay free")
+
+    def test_catalog_rows_resolve_efforts_and_carry_intelligence(self):
+        for preset_id, preset in P.PRESETS.items():
+            with self.subTest(preset_id):
+                rows = P.catalog_rows(preset_id)
+                self.assertEqual([r["id"] for r in rows], [r["id"] for r in P.MODEL_CATALOG[preset_id]])
+                offered = P.effort_levels(preset.effort_style)
+                for row, raw in zip(rows, P.MODEL_CATALOG[preset_id]):
+                    self.assertEqual(set(row), self.ROW_KEYS)
+                    self.assertIsInstance(row["efforts"], list)
+                    # None means the preset's style; a list only ever narrows what it offers.
+                    self.assertEqual(row["efforts"], offered if raw["efforts"] is None else raw["efforts"])
+                    self.assertTrue(set(row["efforts"]) <= set(offered), (preset_id, row["id"]))
+                    self.assertIn(row["id"], P.INTELLIGENCE)
+                    self.assertEqual(row["intelligence"], P.INTELLIGENCE[row["id"]])
+                    self.assertIn(row["intelligence"], (None, *range(0, 101)))
+        # Resolved, not the style's name: the GUI never has to know about styles.
+        self.assertEqual(P.catalog_rows("relay-free")[0]["efforts"], ["low", "medium"])
+        self.assertEqual(P.catalog_rows("anthropic")[0]["efforts"], [])
+        # Kimi documents reasoning_effort for K3 alone, so its high-speed rows carry no levels.
+        by_id = {r["id"]: r for r in P.catalog_rows("kimi-code")}
+        self.assertEqual(by_id["k3"]["efforts"], ["low", "high", "max"])
+        self.assertEqual(by_id["kimi-for-coding-highspeed"]["efforts"], [])
+        # An id with no catalog — a local endpoint, a guest, nonsense — is [] and never raises.
+        for other in ("local:bonsai", "guest:codex", "", None, 7):
+            self.assertEqual(P.catalog_rows(other), [])
+
+    def test_the_presets_event_carries_the_catalog(self):
+        # to_dict() is what the worker's `presets` event sends per row, so `models` rides on it.
+        for preset_id, preset in P.PRESETS.items():
+            self.assertEqual(preset.to_dict()["models"], P.catalog_rows(preset_id), preset_id)
+        json.dumps([p.to_dict() for p in P.PRESETS.values()])
+        # The same three keys a guest row's models already carry (29.3), so one GUI reads both.
+        for row in P.PRESETS["openai"].to_dict()["models"]:
+            self.assertTrue({"id", "label", "efforts"} <= set(row))
+
+
 class GuiMirrorTests(unittest.TestCase):
     """The advanced provider dialog in src/Pane.h keeps its own copy of the preset table."""
 
@@ -265,8 +360,10 @@ class GuiMirrorTests(unittest.TestCase):
         source = (ROOT / "src/Pane.h").read_text(encoding="utf-8")
         block = source.split("// Mirrors backend/relay_core/presets.py", 1)[1].split("};", 1)[0]
         rows = re.findall(r'\{"([a-z0-9-]+)",\s*"([^"]*)",\s*"([^"]*)",\s*"([^"]*)",', block)
-        mirrored = {row[0]: (row[1], row[2], row[3]) for row in rows if row[0] != "custom"}
-        expected = {p.id: (p.label, p.base_url, p.model) for p in P.PRESETS.values()}
+        # Labels are compared case-insensitively: presets.py went lower-case on 2026-09-20 (Warp
+        # style) and the C++ mirror's casing belongs to the GUI session; endpoint and model are exact.
+        mirrored = {row[0]: (row[1].lower(), row[2], row[3]) for row in rows if row[0] != "custom"}
+        expected = {p.id: (p.label.lower(), p.base_url, p.model) for p in P.PRESETS.values()}
         self.assertEqual(mirrored, expected)
 
     def test_one_serving_model_state_feeds_the_picker(self):
