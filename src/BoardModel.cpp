@@ -710,8 +710,10 @@ QList<Badge> badges(const Card &card, bool showStatus, bool sessionLive)
         out << Badge{Badge::Status, shortNames.value(card.status, statusTitle(card.status))};
     }
     // Who checked it, on the row itself (#T71W): in the Verified section every row has one, so
-    // the section header cannot say it and the badge must.
-    if (!card.verifiedBy.isEmpty())
+    // the section header cannot say it and the badge must. A card the agent closed itself is
+    // stamped with its own signature (#93WR) and wears no tick: nobody checked it, and the row
+    // that folds it says so instead.
+    if (!card.verifiedBy.isEmpty() && !selfClosed(card))
         out << Badge{Badge::Verified, QStringLiteral("✓ ") + signatureLabel(card.verifiedBy)};
     for (const QString &label : card.labels)
         out << Badge{Badge::Label, label};
@@ -888,7 +890,7 @@ int stepRow(const QList<Row> &rows, int from, int delta)
     if (delta == 0)
         return from;
     for (int i = from + delta; i >= 0 && i < rows.size(); i += delta)
-        if (rows.at(i).kind == Row::Card)
+        if (rows.at(i).kind == Row::Card || rows.at(i).kind == Row::Fold)
             return i;
     return -1;
 }
@@ -907,6 +909,16 @@ int rowOfSection(const QList<Row> &rows, const QString &columnId)
 {
     for (int i = 0; i < rows.size(); ++i)
         if (rows.at(i).kind == Row::Section && rows.at(i).columnId == columnId)
+            return i;
+    return -1;
+}
+
+int rowOfFold(const QList<Row> &rows, const QString &columnId)
+{
+    if (columnId.isEmpty())
+        return -1;
+    for (int i = 0; i < rows.size(); ++i)
+        if (rows.at(i).kind == Row::Fold && rows.at(i).columnId == columnId)
             return i;
     return -1;
 }
@@ -946,6 +958,22 @@ Card Card::fromJson(const QJsonObject &object)
 bool Card::closed() const
 {
     return status == QStringLiteral("done") || status == QStringLiteral("dropped");
+}
+
+// The agent closed its own card (#93WR): done, stamped, and stamped by whoever implemented it.
+// The comparison is on the trimmed signature — the worker writes the same string into both
+// fields, and a stray space is not a second model.
+bool selfClosed(const Card &card)
+{
+    const QString verified = card.verifiedBy.trimmed();
+    return card.status == QStringLiteral("done") && !verified.isEmpty()
+           && verified == card.implementedBy.trimmed();
+}
+
+QString selfClosedTitle(int count)
+{
+    return count == 1 ? QStringLiteral("1 closed by the agent")
+                      : QStringLiteral("%1 closed by the agent").arg(count);
 }
 
 bool Card::parked() const
@@ -1058,7 +1086,11 @@ QSet<QString> sectionIdsOf(const QList<Column> &sections)
 QString sectionForCard(const Card &card, const QMap<QString, QString> &index,
                        const QSet<QString> &ids)
 {
-    if (card.status == QStringLiteral("done") && !card.verifiedBy.trimmed().isEmpty())
+    // Verified is for a card another model checked. A card the agent closed itself carries a
+    // `verified_by` too (#93WR) — its own signature — so it falls through to Done, where the fold
+    // row puts it away.
+    if (card.status == QStringLiteral("done") && !card.verifiedBy.trimmed().isEmpty()
+        && !selfClosed(card))
         return verifiedSection();
     if (card.closed())
         return doneSection();
@@ -1314,7 +1346,8 @@ int Model::hiddenCount(const QSet<QString> &hidden) const
     return total;
 }
 
-QList<Row> Model::rows(const QSet<QString> &collapsed, const QSet<QString> &hidden) const
+QList<Row> Model::rows(const QSet<QString> &collapsed, const QSet<QString> &hidden,
+                       const QSet<QString> &selfClosedOpen) const
 {
     const bool filtered = !m_filter.trimmed().isEmpty() || !m_labelFilter.isEmpty();
     const QList<Column> list = sections();
@@ -1351,14 +1384,37 @@ QList<Row> Model::rows(const QSet<QString> &collapsed, const QSet<QString> &hidd
         // A section that collects several statuses (Waiting, Needs QA, Done) names each card's
         // exact one; the one whose status is the section's own repeats nothing.
         const bool multi = column.statuses.size() > 1;
-        for (const Card &card : cards) {
+        const auto cardRow = [&column, multi](const Card &card) {
             Row row;
             row.kind = Row::Card;
             row.columnId = column.id;
             row.cardId = card.id;
             row.showStatus = multi && card.status != column.id;
-            out << row;
+            return row;
+        };
+        // The cards the agent closed itself come out of the run of rows and stand behind one fold
+        // row at the end of the section (#93WR). The section header's count still holds them: it
+        // says how many cards the section has, and folding is presentation.
+        QList<Card> folded;
+        for (const Card &card : cards) {
+            if (!filtered && selfClosed(card)) {
+                folded << card;
+                continue;
+            }
+            out << cardRow(card);
         }
+        if (folded.isEmpty())
+            continue;
+        Row fold;
+        fold.kind = Row::Fold;
+        fold.columnId = column.id;
+        fold.count = int(folded.size());
+        fold.title = selfClosedTitle(fold.count);
+        fold.collapsed = !selfClosedOpen.contains(column.id);
+        out << fold;
+        if (!fold.collapsed)
+            for (const Card &card : folded)
+                out << cardRow(card);
     }
     return out;
 }

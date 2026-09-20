@@ -94,6 +94,10 @@ QStringList sketch(const QList<Row> &rows)
         if (row.kind == Row::Section)
             out << QStringLiteral("# %1 %2%3").arg(row.columnId).arg(row.count)
                        .arg(row.collapsed ? QStringLiteral(" folded") : QString());
+        else if (row.kind == Row::Fold)
+            // The self-closed fold row (#93WR): "~ done 3" open, "~ done 3 folded" put away.
+            out << QStringLiteral("~ %1 %2%3").arg(row.columnId).arg(row.count)
+                       .arg(row.collapsed ? QStringLiteral(" folded") : QString());
         else
             out << row.cardId;
     }
@@ -249,6 +253,9 @@ private slots:
     void aDoneCardWithASignatureSitsInVerifiedAndTheRestStayInDone();
     void aSignatureReadsAsItsModelAndItsHarness();
     void nothingIsMovedIntoVerifiedAndMovingOutIsOrdinary();
+    // The cards the agent closed itself, folded into one row of the done list (#93WR)
+    void aSelfClosedCardIsDoneAndStampedByWhoeverImplementedIt();
+    void theSelfClosedCardsOfASectionFoldIntoOneRow();
     void theBriefsAskForTheExactModelAndTheGuestHarness();
     void relayFreeSaysWhyItCannotVerifyAndAWeakPickWarns();
     // The Switchboard page agent's panel (#8YQ9, protocol 19.18)
@@ -3877,6 +3884,129 @@ void BoardModelTests::aHelperOpensAsOneRowThatExpandsIntoTheWholePanel()
     QVERIFY(!board.collapsed());
     QVERIFY(!board.findChild<QToolButton *>(QStringLiteral("boardChatAsk")));
     QVERIFY(!board.findChild<QToolButton *>(QStringLiteral("boardChatFold")));
+}
+
+// ---- the cards the agent closed itself (#93WR, owner 2026-09-20) -------------------------------
+//
+// "medium folding seems like a no brainer": a card the agent finished and closed itself is
+// ordinary work in the done lane, and the board folds it rather than giving it a type of its own.
+// The marker is the stamp — `verified_by` equal to `implemented_by` — and `board::selfClosed` is
+// the only place that rule is written.
+
+void BoardModelTests::aSelfClosedCardIsDoneAndStampedByWhoeverImplementedIt()
+{
+    const auto card = [](const char *status, const char *implemented, const char *verified) {
+        QJsonObject json = row("K7Q2", QString::fromUtf8(status), "features");
+        json.insert("implemented_by", QString::fromUtf8(implemented));
+        json.insert("verified_by", QString::fromUtf8(verified));
+        return Card::fromJson(json);
+    };
+    using relay::board::selfClosed;
+    // Done, and both stamps are the one signature: the agent closed its own card.
+    QVERIFY(selfClosed(card("done", "anthropic/claude-opus-5", "anthropic/claude-opus-5")));
+    // A stray space is not a second model.
+    QVERIFY(selfClosed(card("done", "anthropic/claude-opus-5 ", "anthropic/claude-opus-5")));
+    // Neither empty field says anything about who closed the card, so neither is a match.
+    QVERIFY(!selfClosed(card("done", "", "")));
+    QVERIFY(!selfClosed(card("done", "anthropic/claude-opus-5", "")));
+    QVERIFY(!selfClosed(card("done", "", "anthropic/claude-opus-5")));
+    // Two different models is the cross-provider check the Verified section is for.
+    QVERIFY(!selfClosed(card("done", "anthropic/claude-opus-5", "openai/codex")));
+    // And an open card is not self-closed however its stamps read.
+    QVERIFY(!selfClosed(card("in-progress", "anthropic/claude-opus-5", "anthropic/claude-opus-5")));
+    QVERIFY(!selfClosed(card("dropped", "anthropic/claude-opus-5", "anthropic/claude-opus-5")));
+
+    // It falls into Done, not Verified: nobody else checked it, and it wears no tick either.
+    Model model;
+    model.setConfig(config());
+    QJsonObject own = row("K7Q2", "done", "features");
+    own.insert("implemented_by", "anthropic/claude-opus-5");
+    own.insert("verified_by", "anthropic/claude-opus-5");
+    QJsonObject checked = row("M3XJ", "done", "features");
+    checked.insert("implemented_by", "anthropic/claude-opus-5");
+    checked.insert("verified_by", "openai/codex");
+    model.reset(rows({own, checked}));
+    QCOMPARE(model.sectionOf(*model.card("K7Q2")), QStringLiteral("done"));
+    QCOMPARE(model.sectionOf(*model.card("M3XJ")), QStringLiteral("verified"));
+    const auto names = [](const QList<relay::board::Badge> &list) {
+        QStringList out;
+        for (const relay::board::Badge &badge : list)
+            out << badge.text;
+        return out;
+    };
+    QVERIFY(!names(relay::board::badges(*model.card("K7Q2"), false))
+                 .contains(QStringLiteral("✓ Claude Opus 5")));
+    QVERIFY(names(relay::board::badges(*model.card("M3XJ"), false))
+                .contains(QStringLiteral("✓ Codex")));
+
+    QCOMPARE(relay::board::selfClosedTitle(1), QStringLiteral("1 closed by the agent"));
+    QCOMPARE(relay::board::selfClosedTitle(12), QStringLiteral("12 closed by the agent"));
+}
+
+void BoardModelTests::theSelfClosedCardsOfASectionFoldIntoOneRow()
+{
+    Model model;
+    model.setConfig(config());
+    const auto own = [](const char *id, const char *rank) {
+        QJsonObject json = row(QString::fromUtf8(id), "done", "features", QString::fromUtf8(rank));
+        json.insert("implemented_by", "anthropic/claude-opus-5");
+        json.insert("verified_by", "anthropic/claude-opus-5");
+        return json;
+    };
+    // Two ordinary closed cards and three the agent closed itself, all in Done.
+    model.reset(rows({row("AAA1", "done", "features", "a"), row("BBB2", "dropped", "features", "b"),
+                      own("CCC3", "c"), own("DDD4", "d"), own("EEE5", "e"),
+                      row("OPEN1", "ready", "features", "f")}));
+
+    // Folded by default: the two ordinary rows, then one row standing for the three.
+    QStringList shown = sketch(model.rows({}));
+    QCOMPARE(shown.mid(shown.indexOf("# done 5")),
+             (QStringList{"# done 5", "AAA1", "BBB2", "~ done 3 folded"}));
+    // The header's count is honest: five cards are in the section, three of them behind the row.
+    const QList<Row> list = model.rows({});
+    const int header = relay::board::rowOfSection(list, QStringLiteral("done"));
+    QCOMPARE(list.at(header).count, 5);
+    const int fold = relay::board::rowOfFold(list, QStringLiteral("done"));
+    QVERIFY(fold > header);
+    QCOMPARE(list.at(fold).count, 3);
+    QCOMPARE(list.at(fold).title, QStringLiteral("3 closed by the agent"));
+    QCOMPARE(list.at(fold).cardId, QString());
+    // Its cards are nowhere else in the list, and the row is not one of them.
+    QCOMPARE(relay::board::rowOfCard(list, QStringLiteral("CCC3")), -1);
+    QCOMPARE(relay::board::cardsInSection(list, QStringLiteral("done")),
+             (QStringList{"AAA1", "BBB2"}));
+
+    // Opened: the same row, and its cards under it as ordinary card rows.
+    shown = sketch(model.rows({}, {}, {QStringLiteral("done")}));
+    QCOMPARE(shown.mid(shown.indexOf("# done 5")),
+             (QStringList{"# done 5", "AAA1", "BBB2", "~ done 3", "CCC3", "DDD4", "EEE5"}));
+    QCOMPARE(relay::board::cardsInSection(model.rows({}, {}, {QStringLiteral("done")}),
+                                          QStringLiteral("done")),
+             (QStringList{"AAA1", "BBB2", "CCC3", "DDD4", "EEE5"}));
+    // Another section's key does nothing to this one.
+    QVERIFY(sketch(model.rows({}, {}, {QStringLiteral("ready")})).contains("~ done 3 folded"));
+
+    // A section whose every card is self-closed is the header and the fold row, never an empty
+    // section.
+    Model all;
+    all.setConfig(config());
+    all.reset(rows({own("CCC3", "c"), own("DDD4", "d")}));
+    const QStringList only = sketch(all.rows({}));
+    QCOMPARE(only.mid(only.indexOf("# done 2")), (QStringList{"# done 2", "~ done 2 folded"}));
+
+    // A filter shows what it matched: a matching self-closed card is an ordinary row and there is
+    // no fold row left to hide it, exactly as a section is not folded while a filter is active.
+    model.setFilter(QStringLiteral("CCC3"));
+    QCOMPARE(sketch(model.rows({})), (QStringList{"# done 1", "CCC3"}));
+    model.setFilter(QStringLiteral("card"));
+    shown = sketch(model.rows({}));
+    QVERIFY(!shown.contains("~ done 3 folded"));
+    QCOMPARE(shown.mid(shown.indexOf("# done 5")),
+             (QStringList{"# done 5", "AAA1", "BBB2", "CCC3", "DDD4", "EEE5"}));
+    model.setFilter(QString());
+
+    // A folded section says nothing about its fold row: its cards are all put away.
+    QCOMPARE(sketch(model.rows({QStringLiteral("done")})).last(), QStringLiteral("# done 5 folded"));
 }
 
 // An answer that names a thing the app can show is one click from showing it (#FEJQ). `card:`

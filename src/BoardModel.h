@@ -64,6 +64,20 @@ struct Card {
     QString folder() const;
 };
 
+// ---- self-closed cards (#93WR) ---------------------------------------------------------------
+//
+// The agent finished a small piece of work and closed the card itself, with no verifier: the
+// status is `done`, the worker stamped `verified_by` on that close, and the signature it stamped
+// is the one that implemented the card (policy v3's *medium* tier,
+// `backend/relay_core/board_policy.md`). That is the whole definition and it lives here alone, so
+// the section a card falls into, the badge it wears and the row that folds it cannot disagree.
+// Empty stamps are not a match — an unset field says nothing about who closed the card — and a
+// card in any other status is not one however its stamps read.
+bool selfClosed(const Card &card);
+
+// The fold row's own words: "1 closed by the agent", "12 closed by the agent".
+QString selfClosedTitle(int count);
+
 // A section of the list: one status, or the several a lane collects. The first status is where a
 // drop lands.
 struct Column {
@@ -263,13 +277,17 @@ QPair<QString, QString> placement(const QStringList &order, const QString &movin
 // or one card. The view paints these and holds nothing else, so what the list shows is decided
 // here and can be tested without a widget.
 struct Row {
-    enum Kind { Section, Card };
+    // `Fold` is the row that is neither a card nor a section (#93WR): the self-closed cards of
+    // one section, put away behind "N closed by the agent" at the end of that section's cards.
+    // Its own cards follow it when it is open, as ordinary card rows.
+    enum Kind { Section, Card, Fold };
     Kind kind = Card;
-    QString columnId;         // both kinds: the section this row belongs to
-    QString title;            // Section: the status name
+    QString columnId;         // every kind: the section this row belongs to
+    QString title;            // Section: the status name. Fold: "3 closed by the agent"
     QString cardId;           // Card: the card
-    int count = 0;            // Section: how many cards it holds, after the filter
-    bool collapsed = false;   // Section: its cards are not in the list
+    int count = 0;            // Section: how many cards it holds, after the filter.
+                              // Fold: how many self-closed cards it stands for
+    bool collapsed = false;   // Section, Fold: its cards are not in the list
     bool showStatus = false;  // Card: its section holds several statuses, so the row names this one
 };
 
@@ -282,13 +300,15 @@ QStringList cardsInSection(const QList<Row> &rows, const QString &columnId);
 // inside it, counted in card rows.
 QPair<QString, int> dropTarget(const QList<Row> &rows, int beforeRow);
 
-// The next card row at or past `from` in direction `delta`, skipping section headers; -1 when
-// there is none, so Up/Down walks the whole list across section breaks and stops at its ends.
+// The next selectable row at or past `from` in direction `delta`, skipping section headers; -1
+// when there is none, so Up/Down walks the whole list across section breaks and stops at its
+// ends. A fold row is selectable — Enter and →/← work on it — so the walk stops there too.
 int stepRow(const QList<Row> &rows, int from, int delta);
 
-// The row index of a card, or of a section header, or -1.
+// The row index of a card, of a section header, or of a section's fold row (#93WR); -1 for none.
 int rowOfCard(const QList<Row> &rows, const QString &cardId);
 int rowOfSection(const QList<Row> &rows, const QString &columnId);
+int rowOfFold(const QList<Row> &rows, const QString &columnId);
 
 // The section that holds the closed cards. It is always the last one, and the pane folds it by
 // default: done is a status, not a place (owner decision, 2026-09-18).
@@ -354,7 +374,13 @@ public:
     // A section in `hidden` (its checkbox at the top of the list page is unticked) is left out
     // header and all, whether or not a filter is active: the two compose. So do the label chips:
     // a card the ticked labels rule out is off the page exactly as though the text filter had.
-    QList<Row> rows(const QSet<QString> &collapsed, const QSet<QString> &hidden = {}) const;
+    // `selfClosedOpen` holds the sections whose "N closed by the agent" row is open (#93WR): the
+    // self-closed cards of a section are one fold row at the end of its cards, and only a section
+    // in this set draws them as ordinary rows under it. Nothing folds while a filter is active,
+    // here as for a section header: a search that hid its own matches would be a search that does
+    // nothing, so a matching self-closed card is an ordinary row and there is no fold row at all.
+    QList<Row> rows(const QSet<QString> &collapsed, const QSet<QString> &hidden = {},
+                    const QSet<QString> &selfClosedOpen = {}) const;
 
     // ---- filtering
     void setFilter(const QString &text);
