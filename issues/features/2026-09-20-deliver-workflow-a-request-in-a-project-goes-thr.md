@@ -7,7 +7,7 @@ assignee: agent
 rank: i1
 created: '2026-09-20'
 source: pane, 2026-09-20
-links: {plans: [], commits: [d97bcf24, 5fc80e33, 6a8575f4, be5d9ec1, a1ec6290, baae6a63, a7746e2d, a5e0dfbb, d52916e4, ca6ebaad, fec0fd71, 7bd892f2, c82f171d, 4bedd4f1], evidence: [docs/qa_evidence/2026-09-20-deliver-claim], related: [], github: null}
+links: {plans: [], commits: [d97bcf24, 5fc80e33, 6a8575f4, be5d9ec1, a1ec6290, baae6a63, a7746e2d, a5e0dfbb, d52916e4, ca6ebaad, fec0fd71, 7bd892f2, c82f171d, 4bedd4f1, 61296f15, e54d1e5f, cd8e7dfa], evidence: [docs/qa_evidence/2026-09-20-deliver-claim], related: [], github: null}
 ---
 # Deliver workflow: a request in a project goes through a card; sessions claim cards visibly; /deliver
 
@@ -35,7 +35,14 @@ so if i want to activate the workflow manually, should it be /deliver?
 - [x] GUI: `session` chip on card rows and detail, link reveals the pane, Execute records the session, Pane sends its token
 - [x] Guest path: generated POLICY.md, CLAUDE.md/AGENTS.md paragraph at board init, applied to this repo
 
+## Decisions (2026-09-20, later)
+- "auto-release on "done" and on "closed"": a claim is dropped when the card moves to done/dropped (same write) and when its pane closes (the worker's shutdown branch) or moves to another project. Landed cd8e7dfa.
+- Three tiers, owner "go": small (no card), medium (claimed, closed by the agent), large (full workflow). Policy v3, e54d1e5f.
+
 ## QA checklist
+- [ ] Close a claimed card (done or dropped): its `session` is gone and the thread line says "session xxxxxxxx released".
+- [ ] Close the pane that holds a claimed executing card: within about a second the Switchboard row loses the chip and the thread has "Released (xxxxxxxx) · the pane closed".
+- [ ] A one-line fix asked in a pane gets no card; a two-turn change gets a card the agent closes to done itself; `/deliver` on the same request lands in needs-verification.
 
 - [ ] In a project with a board, ask a pane agent for a small code change: it checks the code and `board_list` first, then `board_claim`s (or creates and claims) a card before editing, and the reply names `#ID`.
 - [ ] Ask a question ("what does X do?"): no card is created or claimed.
