@@ -1084,6 +1084,7 @@ private:
             if (!file.isEmpty()) openPath(file, 0, m_activeLeaf);
         }
         else if (id == QStringLiteral("board.open")) toggleBoardPane();
+        else if (id == QStringLiteral("notifications.jump")) jumpToNotification();   // #NQP9
         else if (id == QStringLiteral("project.pick")) openProjectPicker(m_active, QString());
         else if (id == QStringLiteral("palette.open")) toggleSettingsPane(true);
         else if (id == QStringLiteral("keybindings.reload")) Keymap::instance().reload();
@@ -4461,6 +4462,60 @@ public:
         });
     }
 
+    // Where a notification's `source` points: a pane session token, or `board:<workspace>#<id>`
+    // for a Switchboard card (#NQP9). Tokens go to the manager as they always did; a board
+    // source finds an open Switchboard on that workspace — this window's first, then any other
+    // window's, which is raised — or opens one here beside whatever is active, and lands on the
+    // card. The focus moves only because the user asked: posting (createBoardPane above) never
+    // calls into here.
+    void openNotificationSource(const QString &source) {
+        if (!source.startsWith(QStringLiteral("board:"))) { m_manager->focusPane(source); return; }
+        const QString rest = source.mid(6);
+        const int cut = rest.lastIndexOf(QLatin1Char('#'));
+        if (cut <= 0) return;
+        const QString workspace = rest.left(cut);
+        const QString id = rest.mid(cut + 1);
+        QList<RelayWindow *> order{this};
+        for (QWidget *top : QApplication::topLevelWidgets())
+            if (auto *w = dynamic_cast<RelayWindow *>(top); w && w != this) order.append(w);
+        for (RelayWindow *w : order) {
+            ToolPane *tool = boardPaneFor(w, workspace);
+            if (!tool) continue;
+            if (w != this) { w->raise(); w->activateWindow(); }
+            w->revealBoardCard(tool, id);
+            return;
+        }
+        // No window is showing that board: one beside the active leaf here, the way
+        // toggleBoardPane places a first Switchboard.
+        auto *tool = createBoardPane(workspace);
+        QWidget *anchor = m_activeLeaf ? m_activeLeaf.data() : static_cast<QWidget *>(m_active.data());
+        if (anchor) insertBeside(anchor, tool, Qt::Horizontal, false);
+        else if (QWidget *page = m_tabs->currentWidget(); page && page->layout()) page->layout()->addWidget(tool);
+        revealBoardCard(tool, id);
+    }
+
+    // The Switchboard pane in `w` that shows `workspace`, if it has one (any tab of it).
+    static ToolPane *boardPaneFor(RelayWindow *w, const QString &workspace) {
+        if (!w) return nullptr;
+        for (int i = 0; i < w->m_tabs->count(); ++i)
+            for (QWidget *leaf : w->leavesIn(w->m_tabs->widget(i)))
+                if (auto *tool = dynamic_cast<ToolPane *>(leaf);
+                    tool && tool->board() && tool->board()->workspace() == workspace)
+                    return tool;
+        return nullptr;
+    }
+
+    // Select and open a card in a board pane, and keep asking while its rows are still loading
+    // (waitForBoardCard). Used by openNotificationSource and openBoardCard's paths.
+    void revealBoardCard(ToolPane *tool, const QString &id) {
+        if (!tool || !tool->board()) return;
+        tool->board()->selectCard(id);
+        tool->board()->openSelected();
+        setActiveLeaf(tool);
+        focusLeaf(tool);
+        if (!tool->board()->model().card(id)) waitForBoardCard(tool, id, 0);
+    }
+
     // The directory the Switchboard is looked for from: the pane that asked, and nothing else.
     // The Switchboard is per project, so the answer may only come from the active pane — the
     // terminal's own directory first, because `workspace()` is frozen when the pane is made and a
@@ -4739,6 +4794,24 @@ public:
             if (guest) pane->startGuestBoardTask(runnerId, task, card);
             else pane->startBoardTask(task, card);
             w->updateTitles();
+        };
+        // A card turn ended (#NQP9): a Plan that finished or failed gets one bell entry, so the
+        // user can leave the board alone — posting only, never a focus move, which is the card's
+        // "don't instantly move the active pane there" half. Discuss turns and cancellations
+        // stay quiet: they ended by asking the user, who is already looking. The source names
+        // the board root and the card, so the jump key and a popup click can find the card.
+        view->onTurnEnded = [guard, workspace](const QString &card, const QString &mode, const QString &outcome) {
+            if (mode != QStringLiteral("plan")) return;
+            if (outcome != QStringLiteral("done") && outcome != QStringLiteral("error")) return;
+            relay::BoardView *view = guard ? guard->board() : nullptr;
+            const relay::board::Card *row = view ? view->model().card(card) : nullptr;
+            const bool failed = outcome == QStringLiteral("error");
+            relay::NotificationCenter::instance().post(
+                QStringLiteral("%1: #%2").arg(failed ? QStringLiteral("Plan failed")
+                                                     : QStringLiteral("Plan ready"), card),
+                row ? row->title : QString(),
+                failed ? relay::NotificationCenter::kindError : relay::NotificationCenter::kindSuccess,
+                QStringLiteral("board:%1#%2").arg(workspace, card));
         };
         view->onHint = [guard](const QString &id, const QString &keys) {
             auto *w = windowOf(guard);
@@ -5823,7 +5896,16 @@ private:
         right->installEventFilter(this);
         m_tabs->setCornerWidget(right, Qt::TopRightCorner);
 
-        connect(&relay::NotificationCenter::instance(), &relay::NotificationCenter::changed, this, [this] { updateBell(); });
+        connect(&relay::NotificationCenter::instance(), &relay::NotificationCenter::changed, this, [this] {
+            updateBell();
+            // A fresh post redefines "most recent", so the next jump starts at the newest — unless
+            // a walk is running already (the reset timer is active), which stays stable so
+            // markSeen's own changed() cannot fold the walk back onto itself (#NQP9).
+            if (!m_notificationJumpReset.isActive()) m_notificationJumpIndex = 0;
+        });
+        m_notificationJumpReset.setSingleShot(true);
+        m_notificationJumpReset.setInterval(4000);
+        connect(&m_notificationJumpReset, &QTimer::timeout, this, [this] { m_notificationJumpIndex = 0; });
         updateBell();
         updateChromeState();
         syncChromeButtons();
@@ -5926,11 +6008,38 @@ private:
     void toggleNotifications() {
         if (!m_notifications) {
             m_notifications = new NotificationsPopup(this);
-            m_notifications->onOpenSource = [this](const QString &token) { m_manager->focusPane(token); };
+            m_notifications->onOpenSource = [this](const QString &source) {
+                openNotificationSource(source);
+                // The row is the mouse path; the key is the faster one, and the standing hint
+                // rule says the slow path teaches it (#NQP9).
+                hint(QStringLiteral("notifications.jump.mouse"),
+                     relay::ShortcutHints::nextTime(
+                         Keymap::instance().shortcutText(QStringLiteral("notifications.jump"))));
+            };
         }
         if (m_notifications->isVisible()) { m_notifications->hide(); return; }
         m_notifications->popUpUnder(m_bell);
         updateBell();
+    }
+
+    // notifications.jump (#NQP9): go to the newest notification's pane — a Switchboard card for a
+    // `board:` source. Pressing it again within the window walks to the next older entry; a fresh
+    // post, or a pause longer than the reset timer, starts over at the newest. Entries without a
+    // source cannot be gone to and are stepped over.
+    void jumpToNotification() {
+        QList<relay::Notification> jumpable;
+        for (const relay::Notification &note : relay::NotificationCenter::instance().entries())
+            if (!note.source.isEmpty()) jumpable.append(note);
+        if (jumpable.isEmpty()) { notice(QStringLiteral("No notifications.")); return; }
+        if (m_notificationJumpIndex < 0 || m_notificationJumpIndex >= jumpable.size())
+            m_notificationJumpIndex = 0;   // walked past the oldest: wrap to the newest
+        const relay::Notification note = jumpable.at(m_notificationJumpIndex);
+        openNotificationSource(note.source);
+        // markSeen() before the increment: its changed() resets the index first (unless a walk is
+        // running, see the connection in buildWindowChrome), and then ++ picks the next one down.
+        relay::NotificationCenter::instance().markSeen(note.id);
+        ++m_notificationJumpIndex;
+        m_notificationJumpReset.start();
     }
 
     void toggleMaximize() {
@@ -7079,6 +7188,10 @@ private:
     // The tool-pane buttons, by the pane type each owns (relay::panestatus::toolButtons()).
     QHash<QString, QPointer<ChromeButton>> m_toolButtons;
     QPointer<NotificationsPopup> m_notifications;
+    // The walking state of notifications.jump (#NQP9): which entry of the newest-first list the
+    // next press goes to, and the single-shot timer that ends a walk (~4 s).
+    int m_notificationJumpIndex = 0;
+    QTimer m_notificationJumpReset;
     Qt::Edges m_manualEdges;
     QPoint m_manualFrom;
     QRect m_manualGeometry;

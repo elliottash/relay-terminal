@@ -2,35 +2,23 @@
      edit the card files and regenerate. -->
 # Board
 
-305 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+314 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
-## Features (188)
+## Features (193)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
-| `#87HB` | [The parts of tmux worth having in Relay itself](features/2026-09-18-tmux-like-features-in-relay.md) | inbox |  |  |  |
-| `#5PY9` | [new convo had incorrect context remaining](features/2026-09-19-new-convo-had-incorrect-context-remaining.md) | inbox |  |  | [5](threads/5PY9.md) |
-| `#Y2JW` | [new /models command.](features/2026-09-19-new-models-command.md) | inbox |  |  | [4](threads/Y2JW.md) |
-| `#20XA` | [move "join a shared session" icon to the right of the settings button.](features/2026-09-19-move-join-a-shared-session-icon-to-the-right-of.md) | inbox |  |  | [4](threads/20XA.md) |
-| `#SFZC` | [common-word folder names get highlighted in agent messages](features/2026-09-19-common-word-folder-names-get-highlighted-in-agen.md) | inbox |  |  | [5](threads/SFZC.md) |
-| `#NQP9` | [when board is done planning, send a notification, but dont instantly move the ac…](features/2026-09-19-when-board-is-done-planning-send-a-notification.md) | inbox |  |  | [6](threads/NQP9.md) |
-| `#FEJQ` | [allow agents to control the relay app, and add helper agents in the options, ses…](features/2026-09-19-allow-agents-to-control-the-relay-app-and-add-he.md) | inbox |  |  | [6](threads/FEJQ.md) |
-| `#YZ8G` | [systematic QA skilling needed](features/2026-09-19-systematic-qa-skilling-needed.md) | inbox |  |  | [3](threads/YZ8G.md) |
-| `#5KMQ` | [lite triage of new issues](features/2026-09-19-lite-triage-of-new-issues.md) | inbox |  |  | [4](threads/5KMQ.md) |
-| `#C7PF` | [when pane is executing a card, put the # tag in the pane header](features/2026-09-19-when-pane-is-executing-a-card-put-the-tag-in-the.md) | inbox |  |  | [6](threads/C7PF.md) |
-| `#HKAP` | [after "execute" in a card, change "execute" to "executing"](features/2026-09-19-after-execute-in-a-card-change-execute-to-execut.md) | inbox |  |  | [6](threads/HKAP.md) |
-| `#0TJ9` | [when i accessed a convo in the session manager, i couldnt scroll back](features/2026-09-19-when-i-accessed-a-convo-in-the-session-manager-i.md) | inbox |  |  | [1](threads/0TJ9.md) |
-| `#Y2BA` | [allow pressing new card multiple times, it splits the second "new card" pane ver…](features/2026-09-19-allow-pressing-new-card-multiple-times-it-splits.md) | inbox |  |  | [1](threads/Y2BA.md) |
-| `#B9V4` | [bug: when i switched models from claude to glm, it stopped relaying and i had to…](features/2026-09-19-bug-when-i-switched-models-from-claude-to-glm-it.md) | inbox |  |  | [3](threads/B9V4.md) |
-| `#YQC3` | [feature: add a "copy to clipboard" button next to the session id in the pane inf…](features/2026-09-19-feature-add-a-copy-to-clipboard-button-next-to-t.md) | inbox |  |  | [1](threads/YQC3.md) |
-| `#BXCN` | [when you do the "auto-organize panes", make the switchboard wide enough to allow…](features/2026-09-19-when-you-do-the-auto-organize-panes-make-the-swi.md) | inbox |  |  | [3](threads/BXCN.md) |
-| `#K3TY` | [in plan mode, the terminal agent or switchboard agent should plan orchestration…](features/2026-09-19-in-plan-mode-the-terminal-agent-or-switchboard-a.md) | inbox |  |  | [4](threads/K3TY.md) |
-| `#CYM9` | [switchboard needs a delete button for issues](features/2026-09-19-switchboard-needs-a-delete-button-for-issues.md) | inbox |  |  | [3](threads/CYM9.md) |
-| `#MVGR` | [when a recap shows up after an agent finishes, include at the beginning, finishe…](features/2026-09-19-when-a-recap-shows-up-after-an-agent-finishes-in.md) | inbox |  |  | [3](threads/MVGR.md) |
-| `#3F8V` | [switchboard tests support agent](features/2026-09-19-switchboard-tests-support-agent.md) | inbox |  |  | [3](threads/3F8V.md) |
-| `#8NCF` | [bug? agent often isnt assigning a summary title to the pane header.](features/2026-09-19-bug-agent-often-isnt-assigning-a-summary-title-t.md) | inbox |  |  | [1](threads/8NCF.md) |
+| `#87HB` | [The parts of tmux worth having in Relay itself](features/2026-09-18-tmux-like-features-in-relay.md) | inbox |  |  | [1](threads/87HB.md) |
+| `#0TJ9` | [when i accessed a convo in the session manager, i couldnt scroll back](features/2026-09-19-when-i-accessed-a-convo-in-the-session-manager-i.md) | inbox |  |  | [3](threads/0TJ9.md) |
+| `#Y2BA` | [allow pressing new card multiple times, it splits the second "new card" pane ver…](features/2026-09-19-allow-pressing-new-card-multiple-times-it-splits.md) | inbox |  |  | [2](threads/Y2BA.md) |
+| `#8NCF` | [bug? agent often isnt assigning a summary title to the pane header.](features/2026-09-19-bug-agent-often-isnt-assigning-a-summary-title-t.md) | inbox |  |  | [3](threads/8NCF.md) |
 | `#8E4Q` | [How far the switchboard aesthetic goes inside the app](features/2026-09-17-switchboard-aesthetic.md) | discussing |  | 3/7 |  |
 | `#KKYC` | [Clicking a folder: open the explorer or navigate there?](features/2026-09-18-clicking-a-folder-opens-or-navigates.md) | discussing | owner |  |  |
+| `#SFZC` | [common-word folder names get highlighted in agent messages](features/2026-09-19-common-word-folder-names-get-highlighted-in-agen.md) | discussing |  |  | [11](threads/SFZC.md) |
+| `#FEJQ` | [allow agents to control the relay app, and add helper agents in the options, ses…](features/2026-09-19-allow-agents-to-control-the-relay-app-and-add-he.md) | discussing |  |  | [8](threads/FEJQ.md) |
+| `#YZ8G` | [systematic QA skilling needed](features/2026-09-19-systematic-qa-skilling-needed.md) | discussing |  |  | [14](threads/YZ8G.md) |
+| `#5KMQ` | [lite triage of new issues](features/2026-09-19-lite-triage-of-new-issues.md) | discussing |  |  | [9](threads/5KMQ.md) |
+| `#3F8V` | [switchboard tests support agent](features/2026-09-19-switchboard-tests-support-agent.md) | discussing |  |  | [5](threads/3F8V.md) |
 | `#2Y96` | [The agent's file sandbox is the tab's project, or the directory the pane is in, and never the directory Relay was launched from](features/2026-09-19-agent-sandbox-follows-the-tab-project.md) | planned |  |  | [9](threads/2Y96.md) |
 | `#TVE1` | [Group tabs and the conversation list by project](features/2026-09-19-group-tabs-and-conversations-by-project.md) | planned |  | 0/4 |  |
 | `#ZKR0` | [The Switchboard shows the GitHub sync: the plan before the first run, progress, and conflicts](features/2026-09-19-github-sync-in-the-switchboard.md) | planned |  | 0/7 |  |
@@ -45,11 +33,27 @@
 | `#4QM4` | [Measure the author x reviewer matrix: for Claude-made bugs, is Kimi or GLM the better reviewer?](features/2026-09-19-measure-the-author-x-reviewer-matrix-for-claude.md) | planned |  | 0/9 | [2](threads/4QM4.md) |
 | `#25XG` | [Refused tool calls keep the ✗ but render in neutral ink, not red](features/2026-09-19-refused-tool-calls-keep-the-but-render-in-neutra.md) | planned |  |  | [5](threads/25XG.md) |
 | `#736Y` | [check /plan behavior when you type text after.](features/2026-09-19-check-plan-behavior-when-you-type-text-after.md) | planned |  |  | [1](threads/736Y.md) |
+| `#B9V4` | [bug: when i switched models from claude to glm, it stopped relaying and i had to…](features/2026-09-19-bug-when-i-switched-models-from-claude-to-glm-it.md) | planned |  |  | [9](threads/B9V4.md) |
+| `#YQC3` | [feature: add a "copy to clipboard" button next to the session id in the pane inf…](features/2026-09-19-feature-add-a-copy-to-clipboard-button-next-to-t.md) | planned |  |  | [12](threads/YQC3.md) |
+| `#K3TY` | [in plan mode, the terminal agent or switchboard agent should plan orchestration…](features/2026-09-19-in-plan-mode-the-terminal-agent-or-switchboard-a.md) | planned |  |  | [15](threads/K3TY.md) |
+| `#MVGR` | [when a recap shows up after an agent finishes, include at the beginning, finishe…](features/2026-09-19-when-a-recap-shows-up-after-an-agent-finishes-in.md) | planned |  |  | [9](threads/MVGR.md) |
+| `#3ZAP` | [in the switchboard, make it where if you click on hash tags, it copies them to c…](features/2026-09-19-in-the-switchboard-make-it-where-if-you-click-on.md) | planned |  |  | [7](threads/3ZAP.md) |
+| `#TJBC` | [line spacing adjustment](features/2026-09-19-line-spacing-adjustment.md) | planned |  |  | [14](threads/TJBC.md) |
+| `#MJG6` | [relay-to-relay messages seems not to be working](features/2026-09-19-relay-to-relay-messages-seems-not-to-be-working.md) | planned |  |  | [10](threads/MJG6.md) |
+| `#Y2JW` | [Curate which models show in the picker (/models command)](features/2026-09-19-new-models-command.md) | ready |  |  | [19](threads/Y2JW.md) |
 | `#97EG` | [Join a shared pane with a meeting code and a PIN](features/2026-09-18-join-with-meeting-code-and-pin.md) | executing | agent | 5/6 | [7](threads/97EG.md) |
 | `#3KB7` | [A Security section in Options, gathering what the agent may reach](features/2026-09-19-a-security-section-in-options.md) | executing | agent | 7/10 | [2](threads/3KB7.md) |
-| `#8YQ9` | [Switchboard page agent (switchboard-as-context) + new-project survey, clean-up and per-section triage buttons](features/2026-09-19-switchboard-page-agent-switchboard-as-context-cl.md) | executing | agent | 0/9 | [36](threads/8YQ9.md) |
-| `#SXF1` | [ctrl + enter to continue](features/2026-09-19-ctrl-enter-to-continue.md) | executing | agent |  | [15](threads/SXF1.md) |
-| `#BRD3` | [show the model selector in the switchboad agent](features/2026-09-19-show-the-model-selector-in-the-switchboad-agent.md) | executing | agent |  | [9](threads/BRD3.md) |
+| `#20XA` | [move "join a shared session" icon to the right of the settings button.](features/2026-09-19-move-join-a-shared-session-icon-to-the-right-of.md) | executing | agent |  | [25](threads/20XA.md) |
+| `#SXF1` | [ctrl + enter to continue](features/2026-09-19-ctrl-enter-to-continue.md) | executing | agent |  | [20](threads/SXF1.md) |
+| `#HKAP` | [after "execute" in a card, change "execute" to "executing"](features/2026-09-19-after-execute-in-a-card-change-execute-to-execut.md) | executing | agent |  | [12](threads/HKAP.md) |
+| `#BXCN` | [when you do the "auto-organize panes", make the switchboard wide enough to allow…](features/2026-09-19-when-you-do-the-auto-organize-panes-make-the-swi.md) | executing | agent |  | [15](threads/BXCN.md) |
+| `#CYM9` | [switchboard needs a delete button for issues](features/2026-09-19-switchboard-needs-a-delete-button-for-issues.md) | executing | agent |  | [16](threads/CYM9.md) |
+| `#TTYB` | [alloe separate switchboards across tabs](features/2026-09-19-alloe-separate-switchboards-across-tabs.md) | executing | agent |  | [11](threads/TTYB.md) |
+| `#WT9V` | [Page agent asks its questions in chat text, not as amber question cards](features/2026-09-20-page-agent-asks-its-questions-in-chat-text-not-a.md) | executing | agent |  | [10](threads/WT9V.md) |
+| `#5PY9` | [new convo had incorrect context remaining](features/2026-09-19-new-convo-had-incorrect-context-remaining.md) | needs-verification | agent |  | [14](threads/5PY9.md) |
+| `#8YQ9` | [Switchboard page agent (switchboard-as-context) + new-project survey, clean-up and per-section triage buttons](features/2026-09-19-switchboard-page-agent-switchboard-as-context-cl.md) | needs-verification | agent | 9/9 | [42](threads/8YQ9.md) |
+| `#NQP9` | [when board is done planning, send a notification, but dont instantly move the ac…](features/2026-09-19-when-board-is-done-planning-send-a-notification.md) | needs-verification | agent |  | [15](threads/NQP9.md) |
+| `#C7PF` | [when pane is executing a card, put the # tag in the pane header](features/2026-09-19-when-pane-is-executing-a-card-put-the-tag-in-the.md) | needs-verification | agent |  | [14](threads/C7PF.md) |
 | `#T4BS` | [Share whole tab: a partner gets every pane in the tab, and each pane added to it](features/needs_qa_llm/2026-09-18-share-whole-tab.md) | needs-qa-llm | agent |  |  |
 | `#JQ7R` | [Join someone's shared session from Relay itself: /join CODE, then the PIN](features/needs_qa_llm/2026-09-18-join-a-shared-session-from-relay.md) | needs-qa-llm | agent |  |  |
 | `#803C` | [One "new pane" button: a pane on the right, placed by dragging](features/needs_qa_llm/2026-09-18-one-new-pane-button.md) | needs-qa-llm | agent |  |  |
@@ -174,6 +178,7 @@
 | `#Z2VT` | [Switchboard: sort by clicking the list's column headers, and reorder the sections in the gear](features/needs_qa_llm/2026-09-19-switchboard-sort-by-clicking-the-list-s-column-h.md) | needs-qa-llm |  |  | [4](threads/Z2VT.md) |
 | `#PFNS` | [Switchboard filter bar: full text search](features/needs_qa_llm/2026-09-19-switchboard-filter-bar-full-text-search.md) | needs-qa-llm |  |  | [6](threads/PFNS.md) |
 | `#EH98` | [word wrap in thinking bubbles](features/needs_qa_llm/2026-09-19-word-wrap-in-thinking-bubbles.md) | needs-qa-llm | agent |  | [13](threads/EH98.md) |
+| `#BRD3` | [show the model selector in the switchboad agent](features/needs_qa_llm/2026-09-19-show-the-model-selector-in-the-switchboad-agent.md) | needs-qa-llm | agent |  | [13](threads/BRD3.md) |
 | `#WXT6` | [Edit diffs fold under the row, collapsed by default](features/needs_qa_llm/2026-09-19-edit-diffs-fold-under-the-row-collapsed-by-defau.md) | needs-qa-llm |  |  | [6](threads/WXT6.md) |
 | `#K9X6` | [in the switchboard main page, press esc to get to the filter bar](features/needs_qa_llm/2026-09-19-in-the-switchboard-main-page-press-esc-to-get-to.md) | needs-qa-llm | agent |  | [9](threads/K9X6.md) |
 | `#EV45` | [session manager column sorting](features/needs_qa_llm/2026-09-19-session-manager-column-sorting.md) | needs-qa-llm | agent |  | [17](threads/EV45.md) |
@@ -181,9 +186,9 @@
 | `#8G7E` | [Ctrl+Alt+arrow past the page's edge moves the pane into a column or row of its own](features/needs_qa_llm/2026-09-19-ctrl-alt-arrow-past-the-page-s-edge-moves-the-pa.md) | needs-qa-llm |  |  | [4](threads/8G7E.md) |
 | `#A0SF` | [dragging a pane onto the tab pane can be done on an existing tab or a new tab](features/needs_qa_llm/2026-09-19-dragging-a-pane-onto-the-tab-pane-can-be-done-on.md) | needs-qa-llm | agent |  | [13](threads/A0SF.md) |
 | `#JDC5` | [Tab headers lose the theme swatch and the ⧉ detach button](features/needs_qa_llm/2026-09-19-tab-headers-lose-the-theme-swatch-and-the-detach.md) | needs-qa-llm |  |  | [12](threads/JDC5.md) |
-| `#0Z13` | [remove the cap on number of agents in the switchboard](features/needs_qa_llm/2026-09-19-remove-the-cap-on-number-of-agents-in-the-switch.md) | needs-qa-llm | agent | 6/6 | [6](threads/0Z13.md) |
+| `#0Z13` | [remove the cap on number of agents in the switchboard](features/needs_qa_llm/2026-09-19-remove-the-cap-on-number-of-agents-in-the-switch.md) | needs-qa-llm | agent | 6/6 | [7](threads/0Z13.md) |
 | `#E516` | [add model selection in codex options](features/needs_qa_llm/2026-09-19-add-model-selection-in-codex-options.md) | needs-qa-llm | agent |  | [13](threads/E516.md) |
-| `#3XZV` | [improve switchboard sections](features/needs_qa_llm/2026-09-19-dont-require-that-new-switchboard-sections-colle.md) | needs-qa-llm | agent |  | [18](threads/3XZV.md) |
+| `#3XZV` | [improve switchboard sections](features/needs_qa_llm/2026-09-19-dont-require-that-new-switchboard-sections-colle.md) | needs-qa-llm | agent |  | [21](threads/3XZV.md) |
 | `#VKFV` | [switchboard improvements](features/needs_qa_llm/2026-09-19-switchboard-improvements.md) | needs-qa-llm | agent |  | [14](threads/VKFV.md) |
 | `#76DJ` | [Closing a QA card needs a verdict, not a different model family](features/needs_qa_llm/2026-09-19-closing-a-qa-card-needs-a-verdict-not-a-differen.md) | needs-qa-llm |  |  | [6](threads/76DJ.md) |
 | `#SSRQ` | [MCP server support](features/deferred/2026-09-17-mcp-support.md) | deferred |  |  | [1](threads/SSRQ.md) |
@@ -197,7 +202,7 @@
 | `#KH72` | [Model roles in settings: main, fast, terminal-use, subagent, Switchboard, chores, vision](features/done/2026-09-17-model-roles-and-fast-agent.md) | dropped | agent |  | [1](threads/KH72.md) |
 | `#JM2M` | [A pane's share of the machine: CPU and memory in the header chip and the tab](features/done/2026-09-19-a-pane-s-share-of-the-machine-cpu-and-memory-in.md) | dropped |  |  | [1](threads/JM2M.md) |
 
-## Bugs (115)
+## Bugs (119)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
@@ -205,13 +210,16 @@
 | `#E6XC` | [board_update_card can never match #SP4N and #5PY9: their file hashes are not 64 characters](changes/2026-09-19-board-update-card-can-never-match-sp4n-and-5py9.md) | inbox |  |  | [1](threads/E6XC.md) |
 | `#QAJQ` | [tabProjectChip stylesheet sits under the 9pt font floor (buttonfit fails at HEAD)](changes/2026-09-19-tabprojectchip-stylesheet-sits-under-the-9pt-fon.md) | inbox |  |  | [2](threads/QAJQ.md) |
 | `#T9K3` | [buttonfit: theme stylesheet 8.5pt under the 9pt floor](changes/2026-09-19-buttonfit-theme-stylesheet-8-5pt-under-the-9pt-f.md) | inbox |  |  | [2](threads/T9K3.md) |
-| `#5C4Z` | [bug: dragging cards between sections didnt work](changes/2026-09-19-bug-dragging-cards-between-sections-didnt-work.md) | inbox |  |  | [4](threads/5C4Z.md) |
+| `#5C4Z` | [bug: dragging cards between sections didnt work](changes/2026-09-19-bug-dragging-cards-between-sections-didnt-work.md) | inbox |  |  | [6](threads/5C4Z.md) |
+| `#ZGF5` | [board_busy from the page agent's own turn is shown as "already working on" the running cards](changes/2026-09-20-board-busy-from-the-page-agent-s-own-turn-is-sho.md) | inbox |  |  | [2](threads/ZGF5.md) |
 | `#W8PC` | [A pane drew one theme's palette on another theme's ground](changes/2026-09-19-a-pane-drew-one-themes-palette-on-anothers.md) | discussing | owner |  |  |
 | `#09HE` | [`cd..` reads as a sentence: the router calls a mistyped command an agent request and drops its note](changes/2026-09-19-cd-reads-as-a-sentence-the-router-calls-a-mistyp.md) | discussing |  |  | [6](threads/09HE.md) |
+| `#VN69` | [Malformed tool-call JSON leaks into a card thread's agent reply](changes/2026-09-20-malformed-tool-call-json-leaks-into-a-card-threa.md) | planning |  |  | [4](threads/VN69.md) |
 | `#9MYY` | [TerminalView hot paths: linkAt rebuild per hover cell, colorsFor twice per cell, a11y allText](changes/2026-09-17-terminalview-hot-paths-linkat-rebuild-per-hover.md) | planned |  |  | [2](threads/9MYY.md) |
 | `#BVK1` | [The bevel stylesheet still keys the pane's button row on a property nothing sets](changes/2026-09-19-the-bevel-stylesheet-still-keys-the-pane-row-on.md) | planned | agent |  |  |
 | `#40SN` | [A failed configure shows only "Protocol error (NameError)." and the pane never recovers](changes/2026-09-19-configure-protocol-error-nameerror-opaque.md) | planned | agent | 0/5 |  |
 | `#K3RT` | [Inline output other than your own line still keeps the colours it was printed in](changes/2026-09-19-inline-output-other-than-your-own-line-does-not.md) | planned | agent |  | [4](threads/K3RT.md) |
+| `#2MF1` | [#3XZV's stage-move thread entry breaks two board_ask protocol tests (bisected to 4f5acd43)](changes/2026-09-20-3xzv-s-stage-move-thread-entry-breaks-two-board.md) | needs-verification | agent |  | [15](threads/2MF1.md) |
 | `#JN7X` | [The Switchboard is the board of the project a pane is in, not one global board](changes/needs_qa_llm/2026-09-18-switchboard-is-per-project-not-global.md) | needs-qa-llm | agent |  | [1](threads/JN7X.md) |
 | `#1BK1` | [PageUp / PageDown scroll the terminal from the prompt box](changes/needs_qa_llm/2026-09-17-composer-page-scroll.md) | needs-qa-llm | agent |  |  |
 | `#M2C1` | [The model box does nothing when you pick anything that is not a provider](changes/needs_qa_llm/2026-09-18-model-dropdown-selection.md) | needs-qa-llm | agent |  |  |
@@ -314,6 +322,7 @@
 | `#JXWT` | [Ctrl+E then Ctrl+arrow should place the pane (Ctrl still held)](changes/needs_qa_llm/2026-09-19-ctrl-e-then-ctrl-arrow-should-place-the-pane-ctr.md) | needs-qa-llm |  |  | [4](threads/JXWT.md) |
 | `#XEMH` | [Remote browser-peer tests fail: named export Rrp not found (app/rrp.js seen as CommonJS)](changes/done/2026-09-18-remote-browser-peer-tests-fail-named-export-rrp.md) | done |  |  | [1](threads/XEMH.md) |
 | `#GMSC` | [Missing tests/paneusage_test.cpp breaks cmake generate for the whole tree](changes/done/2026-09-19-missing-tests-paneusage-test-cpp-breaks-cmake-ge.md) | done |  |  | [1](threads/GMSC.md) |
+| `#1KXX` | [card id BVL1 is not Crockford base32; check always reports an error](changes/done/2026-09-19-card-id-bvl1-is-not-crockford-base32-check-alway.md) | done |  |  | [4](threads/1KXX.md) |
 | `#72NR` | [Per-pane 80 ms shell poll re-parses state.json and probes /proc every tick](changes/done/2026-09-17-per-pane-80-ms-shell-poll-re-parses-state-json-a.md) | dropped |  |  | [3](threads/72NR.md) |
 | `#DJX7` | [land.py's name gate cannot land a card move in one commit (rename collapse)](changes/done/2026-09-19-land-py-s-name-gate-cannot-land-a-card-move-in-o.md) | dropped |  |  | [4](threads/DJX7.md) |
 
@@ -321,5 +330,5 @@
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
-| `#265N` | [Cleanup audit follow-ups: judgment-call dead code, deprecated spike alias, unscanned areas](planning/2026-09-17-cleanup-audit-follow-ups-judgment-call-dead-code.md) | planned |  | 0/7 | [3](threads/265N.md) |
+| `#265N` | [Cleanup audit follow-ups: judgment-call dead code, deprecated spike alias, unscanned areas](planning/2026-09-17-cleanup-audit-follow-ups-judgment-call-dead-code.md) | planning |  | 0/7 | [5](threads/265N.md) |
 | `#XZZB` | [Improve the options (Settings) menu](planning/needs_qa_llm/2026-09-17-improve-the-options-settings-menu.md) | needs-qa-llm |  |  | [6](threads/XZZB.md) |

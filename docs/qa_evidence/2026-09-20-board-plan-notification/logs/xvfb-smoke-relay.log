@@ -1,0 +1,6 @@
+2026-09-20T05:14:00.155Z INFO relay.gui gui_start version=0.1.0 build=2026-09-20.01H.01 pid=2385858 level=info
+2026-09-20T05:14:00.261Z INFO relay.gui worker_start pane=7bed5b78 workspace_set=1
+2026-09-20T05:14:00.334Z INFO relay.gui event type=ready pane=7bed5b78
+2026-09-20T05:14:00.594Z INFO relay.gui event type=configured pane=7bed5b78 model=kimi-k3
+2026-09-20T05:14:10.106Z INFO relay.gui gui_quit reason=signal pid=2385858 uptime_s=9 build=2026-09-20.01H.01
+2026-09-20T05:14:10.107Z ERROR relay.gui worker_exit pane=7bed5b78 code=15 crashed=1

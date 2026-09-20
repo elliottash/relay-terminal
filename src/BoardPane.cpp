@@ -3902,6 +3902,7 @@ void BoardView::handleEvent(const QJsonObject &event)
         }
         if (type == QStringLiteral("done") || type == QStringLiteral("error")
             || type == QStringLiteral("cancelled")) {
+            const QString endedMode = turn.mode;   // read before the turn is dropped
             m_cardTurns.remove(card);
             syncModelBoxEnabled();
             m_list->viewport()->update();       // the row stops saying it is working
@@ -3913,6 +3914,9 @@ void BoardView::handleEvent(const QJsonObject &event)
                 showNotice(QStringLiteral("#%1: %2").arg(card, event.value(QStringLiteral("text")).toString()),
                            true);
             }
+            // The bell learns the turn ended even when the board is not the pane being looked at
+            // (#NQP9); the view itself posts nothing and moves no focus.
+            if (onTurnEnded) onTurnEnded(card, endedMode, type);
             return;
         }
     }

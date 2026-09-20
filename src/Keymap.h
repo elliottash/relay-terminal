@@ -241,6 +241,16 @@ private:
         add("closed.restore", "pane", "Restore the last closed pane, tab or window", {QStringLiteral("Ctrl+Shift+Z")});
         add("closed.list", "pane", "Recently closed: the last 25 panes, tabs and windows, any of them reopened", {});
         add("windows.fresh", "window", "Start a fresh window set (forget the saved window layout)", {});
+        // Jump to the newest notification's pane (#NQP9): 1 is the newest entry, again within the
+        // window walks to the 2nd, and so on. Ctrl+Shift because a program that owns the terminal
+        // must not swallow it (actsInsidePrograms) — the moment a bell entry matters is exactly
+        // when the user is heads-down somewhere else. No letter is left: every Ctrl+Shift letter
+        // is bound (M went to agent.resume on 2026-09-19, after the card's plan picked it) or
+        // reserved (C/V copy and paste, Q quits other terminals, U is the input method's Unicode
+        // entry, D/P/Y are claimed in the preset tables), so the digit counts the walk: 1, 2, 3…
+        // Free in the default table and all four presets.
+        add("notifications.jump", "window", "Go to the newest notification's pane (again for the next older)",
+            {QStringLiteral("Ctrl+Shift+1")});
         add("palette.open", "palette", "Actions: every action and its keys, in a filterable list (again to close it)", {QStringLiteral("Ctrl+Shift+A")});
         // One key opens and closes the explorer (issue #D60R). Ctrl+B is VS Code's sidebar key and
         // is free in all four Relay presets; Ctrl+Shift+B is the twin a program cannot swallow.

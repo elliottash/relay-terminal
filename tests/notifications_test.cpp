@@ -62,6 +62,29 @@ private Q_SLOTS:
         QCOMPARE(centre.unseen(), 0);
     }
 
+    void markSeenOneEntry() {
+        // #NQP9: notifications.jump marks the entry it lands on, so the badge drops one at a
+        // time rather than the popup's markAllSeen clearing the lot.
+        auto &centre = NotificationCenter::instance();
+        QSignalSpy changed(&centre, &NotificationCenter::changed);
+        const QString first = centre.post(QStringLiteral("One"));
+        const QString second = centre.post(QStringLiteral("Two"));
+        QCOMPARE(centre.unseen(), 2);
+        centre.markSeen(first);
+        QCOMPARE(changed.count(), 3);              // two posts and the one mark
+        QCOMPARE(centre.unseen(), 1);              // the badge drops by one, not to zero
+        QVERIFY(!centre.entries().first().seen);   // "Two", the newest, still unread
+        QVERIFY(centre.entries().last().seen);     // "One", the entry jumped to
+        centre.markSeen(first);                    // already seen: no changed
+        QCOMPARE(changed.count(), 3);
+        centre.markSeen(QStringLiteral("no-such-id"));
+        QCOMPARE(changed.count(), 3);
+        QCOMPARE(centre.unseen(), 1);
+        centre.markSeen(second);
+        QCOMPARE(centre.unseen(), 0);
+        QCOMPARE(changed.count(), 4);
+    }
+
     void oldestEntriesAreDropped() {
         auto &centre = NotificationCenter::instance();
         for (int i = 0; i < NotificationCenter::kMaxEntries + 5; ++i)

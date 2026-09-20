@@ -48,6 +48,9 @@ public:
     int unseen() const;
 
     void markAllSeen();
+    // One entry — the one a jump landed on (#NQP9) — rather than every entry the popup saw.
+    // Emits changed only when the entry actually turned seen.
+    void markSeen(const QString &id);
     void remove(const QString &id);
     void clear();
 

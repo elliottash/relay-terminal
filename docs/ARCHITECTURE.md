@@ -501,6 +501,24 @@ pane's session token, so clicking it
 calls `WindowManager::focusPane()` → `RelayWindow::revealPane()` and lands on that pane in
 whatever window it now lives.
 
+One source beside the pane token (#NQP9): `board:<workspace>#<card-id>` names a Switchboard card.
+It is posted by the `onTurnEnded` wiring in `RelayWindow::createBoardPane` when a card's Plan turn
+ends — "Plan ready: #ID" or "Plan failed: #ID", with the card title as the body; discuss turns and
+cancellations post nothing, and nothing on the posting path ever moves focus (the card's "don't
+instantly move the active pane" rule). `RelayWindow::openNotificationSource` routes a clicked (or
+jumped-to) entry: tokens go to `WindowManager::focusPane()` as before, a `board:` source goes to an
+open Switchboard on that workspace — this window's first, then any other window's, which is raised
+— or opens one beside the active leaf; both land through `revealBoardCard`, which selects and opens
+the card and retries while its rows load (`waitForBoardCard`).
+
+`notifications.jump` (Ctrl+Shift+1 — the digit counts the walk, because every Ctrl+Shift letter is
+bound or reserved; the chord acts while a program owns the terminal, `actsInsidePrograms`) goes to
+the newest entry's source. A second press within ~4 s (`RelayWindow::m_notificationJumpReset`)
+walks to the next older entry; a pause, or a fresh post, starts over at the newest. The entry it
+lands on is marked seen on its own (`NotificationCenter::markSeen`, beside `markAllSeen`), so the
+badge drops one at a time; entries with no source are stepped over. The popup's row is the mouse
+path and teaches the key through the `notifications.jump.mouse` hint.
+
 ### Reopen where I left off (saved window layout)
 
 `src/WindowState.h` + `WindowManager`. Relay keeps one layout file per user,

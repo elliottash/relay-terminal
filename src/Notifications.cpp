@@ -50,6 +50,15 @@ void NotificationCenter::markAllSeen() {
     if (any) Q_EMIT changed();
 }
 
+void NotificationCenter::markSeen(const QString &id) {
+    for (Notification &note : m_entries) {
+        if (note.id != id || note.seen) continue;
+        note.seen = true;
+        Q_EMIT changed();
+        return;
+    }
+}
+
 void NotificationCenter::remove(const QString &id) {
     for (int i = 0; i < m_entries.size(); ++i) {
         if (m_entries.at(i).id != id) continue;
