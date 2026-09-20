@@ -19,6 +19,7 @@
 // Pure: QtCore, QColor and the three parsers this shares with the other surfaces (ToolLabel,
 // DiffView, MarkdownAnsi). No widget, no theme — the colours arrive in a Palette the caller fills
 // from the live theme tokens.
+#include "MarkdownAnsi.h"      // MarkdownStream renders through it, a chunk at a time
 #include "TerminalBackend.h"   // relay::FoldSpan, relay::FoldLine
 #include "ToolLabel.h"
 
@@ -260,6 +261,38 @@ QVector<FoldLine> foldForNote(const QString &text, const Palette &palette);
 // FoldOptions fields because this is the only fold that has an end worth keeping (#K48R).
 QVector<FoldLine> foldForMarkdown(const QString &markdown, const Palette &palette,
                                   const FoldOptions &options, int cells = 0, bool tail = false);
+
+// The same rendering for a block that is still arriving, done once per character instead of once
+// per flush (#PPR4). The Activity pane re-rendered the whole reasoning block — up to 400 000
+// characters of Markdown — four times a second while it streamed, and wrote all of it into its
+// document again each time.
+//
+// Feed the block's *new* text and take two things: what `feed()` returns has settled and is never
+// drawn again, and `tail()` is the short run of rows after it — the line still being written, a
+// table the renderer is still holding, and the trailing blank rows a finished render trims — which
+// the caller redraws each time. Their concatenation is always exactly what `foldForMarkdown()`
+// returns for everything fed so far, with no width, no cap and no link row (the pane passes none);
+// tests/calllines_test.cpp checks that against a corpus split at every offset.
+class MarkdownStream {
+public:
+    explicit MarkdownStream(const Palette &palette);
+
+    // Renders the next chunk and returns the rows it settled, oldest first.
+    QVector<FoldLine> feed(const QString &text);
+    // The rows after the settled ones, rendered from what the renderer is still holding back.
+    QVector<FoldLine> tail() const;
+    // Has any row settled? False while the block is still short enough to be taken back whole —
+    // which is what tells the caller to say "nothing yet" rather than draw an empty fold.
+    bool settled() const { return m_settled; }
+
+private:
+    Palette m_palette;
+    MarkdownAnsi m_renderer;
+    FoldSpan m_span;                 // the attribute state the last chunk ended in
+    QVector<FoldLine> m_pending;     // rows that may still change; the last is the open line
+    bool m_ink = false;              // a span with something other than whitespace has arrived
+    bool m_settled = false;
+};
 
 // Control characters and escape sequences out of stored output: a fold row is text, and the view
 // paints it; an ANSI escape left in it would be drawn as mojibake.

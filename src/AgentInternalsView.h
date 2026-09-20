@@ -42,6 +42,7 @@
 #include <QVector>
 #include <QWidget>
 #include <functional>
+#include <memory>
 
 class QLabel;
 class QPlainTextEdit;
@@ -140,7 +141,13 @@ private:
     void append(const QString &text, Ink ink, bool bold = false);
     void appendFoldLines(const QVector<FoldLine> &lines, int indent);
     void ensureLineStart() { if (!m_atLineStart) append(QStringLiteral("\n"), Ink::Muted); }
-    void endThinking() { m_thinkingKey.clear(); }
+    // The reasoning block, drawn where setThinking() decided to draw it: the settled rows appended
+    // once and only the tail after them redrawn (#PPR4).
+    void drawThinking(const QString &turnId, const QString &key, const QString &text, bool done,
+                      qint64 elapsedMs);
+    // A block held while the pane was hidden goes in before anything else can print under it.
+    void flushHeldThinking();
+    void endThinking();
     QString rowText(const ToolCall &call) const;
     void drawRow(ToolCall &call);
     void rewriteLine(ToolCall &call, const QString &text, Ink ink);
@@ -185,7 +192,28 @@ private:
     QString m_turnId;                 // the turn the last rule was drawn for
     QString m_thinkingKey;            // the block being rewritten in place, empty when none is
     QTextCursor m_thinkingAt;         // where that block starts
-    int m_thinkingChars = 0;
+    // The block streams in: only what has settled is written, and only the rows after it are
+    // redrawn per flush (#PPR4). The stream renders forward, so a `text` that is not a
+    // continuation of what it has already drawn — the 400 000-character window sliding past the
+    // block's start — takes the block down and renders it again.
+    std::unique_ptr<calllines::MarkdownStream> m_stream;
+    QString m_streamTurn;             // the turn the open block belongs to
+    QString m_streamFed;              // the body the stream has already been given
+    QString m_streamHead;             // the header row as it is drawn now
+    QTextCursor m_streamHeadAt;       // that row, so the end of the block can rewrite it in place
+    QTextCursor m_streamTailAt;       // where the redrawn rows start; everything after it is the tail
+    bool m_streamDrewRows = false;    // anything but "(nothing yet)" is under the header
+    // What setThinking() was given while the pane was hidden: a hidden pane draws nothing at all,
+    // and this is written the moment it is shown, or the moment anything else has to print under
+    // it — which is what keeps the log in the order things happened.
+    struct HeldThinking {
+        bool live = false;
+        QString turnId, key, text;
+        bool done = false;
+        qint64 elapsedMs = 0;
+    };
+    HeldThinking m_held;
+    bool m_everShown = false;
     QString m_lastNote;
     QVector<QPair<QString, int>> m_blocks;   // (turn, position) of each reasoning block, for the link
     QElapsedTimer m_liveTick;                // last redraw of the running row's line counter

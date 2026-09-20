@@ -443,18 +443,34 @@ QColor markdownFg(int sgr, const Palette &palette) {
     }
 }
 
+// Everything a FoldSpan can say, apart from the words themselves.
+bool sameInk(const FoldSpan &a, const FoldSpan &b) {
+    return a.fg == b.fg && a.bg == b.bg && a.bold == b.bold && a.italic == b.italic
+        && a.underline == b.underline && a.dim == b.dim && a.link == b.link && a.sgr == b.sgr;
+}
+
 // The renderer's ANSI into spans, one FoldLine per line. Only what a FoldSpan can say survives —
 // bold, dim, italic, underline and the foreground; anything else the renderer emitted is dropped.
 // Attributes carry across a newline exactly as they would on a grid, and MarkdownAnsi re-states
 // each line's whole style at its start, so a line's first sequence lands as its own.
-void appendMarkdown(QVector<FoldLine> &out, const QString &ansi, const Palette &palette) {
+// `carry` is the attribute state the chunk ends in. The whole-text caller passes none and gets a
+// fresh one; MarkdownStream hands the same one back chunk after chunk, which is what makes a block
+// rendered in pieces come out identical to the same block rendered at once (#PPR4).
+void appendMarkdown(QVector<FoldLine> &out, const QString &ansi, const Palette &palette,
+                    FoldSpan *carry = nullptr) {
     if (out.isEmpty()) out << FoldLine{};
-    FoldSpan span;
+    FoldSpan own;
+    FoldSpan &span = carry ? *carry : own;
     QString text;
     const auto flush = [&] {
         if (text.isEmpty()) return;
         span.text = text;
-        out.last().spans << span;
+        // A sequence that changes nothing a FoldSpan can say — and a chunk boundary, when the
+        // block is rendered a piece at a time (#PPR4) — must not leave two spans where the whole
+        // text would have left one: the same ink carries on in the span already there.
+        QVector<FoldSpan> &spans = out.last().spans;
+        if (!spans.isEmpty() && sameInk(spans.last(), span)) spans.last().text += text;
+        else spans << span;
         text.clear();
     };
     for (int at = 0; at < ansi.size(); ++at) {
@@ -623,6 +639,51 @@ QVector<FoldLine> foldForMarkdown(const QString &markdown, const Palette &palett
     const FoldLine links = linkRow(palette, options);
     if (!links.spans.isEmpty()) out << links;
     return out;
+}
+
+// ----- the same rendering, a chunk at a time (#PPR4) -------------------------------------------
+
+MarkdownStream::MarkdownStream(const Palette &palette) : m_palette(palette) {}
+
+QVector<FoldLine> MarkdownStream::feed(const QString &text) {
+    if (text.isEmpty()) return {};
+    if (m_pending.isEmpty()) m_pending << FoldLine{};
+    appendMarkdown(m_pending, m_renderer.feed(text), m_palette, &m_span);
+    // Nothing settles before the block has ink: a block that is all whitespace renders as nothing
+    // at all (foldForMarkdown returns {} for it), and only the next character can say whether this
+    // is such a block. Until then every row stays in the tail, where it can still be taken back.
+    if (!m_ink) {
+        for (const FoldLine &line : std::as_const(m_pending))
+            for (const FoldSpan &span : line.spans)
+                if (!span.text.trimmed().isEmpty()) { m_ink = true; break; }
+        if (!m_ink) return {};
+        while (!m_pending.isEmpty() && m_pending.first().spans.isEmpty()) m_pending.removeFirst();
+    }
+    // The last row is the line still being written, and the empty rows above it may yet turn out
+    // to be the block's trailing blanks, which a finished render trims: both stay in the tail.
+    int settled = m_pending.size() - 1;
+    while (settled > 0 && m_pending.at(settled - 1).spans.isEmpty()) --settled;
+    const QVector<FoldLine> out = m_pending.mid(0, settled);
+    m_pending.remove(0, settled);
+    if (!out.isEmpty()) m_settled = true;
+    return out;
+}
+
+QVector<FoldLine> MarkdownStream::tail() const {
+    QVector<FoldLine> out = m_pending;
+    if (out.isEmpty()) out << FoldLine{};
+    MarkdownAnsi rest = m_renderer;   // a copy: finish() empties and resets the renderer
+    FoldSpan span = m_span;
+    appendMarkdown(out, rest.finish(), m_palette, &span);
+    while (!out.isEmpty() && out.last().spans.isEmpty()) out.removeLast();
+    if (m_settled) return out;
+    // Still nothing settled, so the whole block is here and the two rules foldForMarkdown ends on
+    // apply to all of it: leading empty rows go, and a block with no ink in it is nothing.
+    while (!out.isEmpty() && out.first().spans.isEmpty()) out.removeFirst();
+    for (const FoldLine &line : std::as_const(out))
+        for (const FoldSpan &s : line.spans)
+            if (!s.text.trimmed().isEmpty()) return out;
+    return {};
 }
 
 }  // namespace relay::calllines

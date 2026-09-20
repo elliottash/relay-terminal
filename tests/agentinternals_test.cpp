@@ -51,6 +51,48 @@ private slots:
         QCOMPARE(view.plainText().count(QStringLiteral("✦ thought for")), 2);
     }
 
+    // #PPR4: the block is drawn a chunk at a time now, so what 2 000 deltas leave behind has to be
+    // what one call with the whole text leaves behind — the same rows, the same header, once.
+    void reasoningStreamedInDeltasReadsAsOneRender() {
+        const QString text = QStringLiteral("First the **plan**\n\n- read the file\n- fix it\n\n"
+                                            "```py\ndef f():\n    return 1\n```\n\nthen the code\n");
+        AgentInternalsView streamed;
+        streamed.beginTurn("t1", "think");
+        for (int at = 1; at <= text.size(); ++at)
+            streamed.setThinking("t1", "thinking", text.left(at), false, 0);
+        streamed.setThinking("t1", "thinking", text, true, 4200);
+        AgentInternalsView whole;
+        whole.beginTurn("t1", "think");
+        whole.setThinking("t1", "thinking", text, true, 4200);
+        QCOMPARE(streamed.plainText(), whole.plainText());
+        QCOMPARE(streamed.plainText().count(QStringLiteral("✦ thought for 4 s")), 1);
+    }
+
+    // A hidden pane renders nothing at all, and what it held keeps its place in the log: the row
+    // that ends the block still comes after it (#PPR4).
+    void aBlockHeldWhileHiddenKeepsItsPlace() {
+        AgentInternalsView view;
+        view.show();     // it has been on screen, so from here a hidden pane holds its work
+        view.beginTurn("t1", "think");
+        view.hide();
+        view.setThinking("t1", "thinking", "alpha", false, 0);
+        view.setThinking("t1", "thinking", "alpha beta", true, 1000);
+        view.toolStarted(json("{'call_id':'c1','turn_id':'t1','tool':'run_command',"
+                              " 'label':{'kind':'run','running':'running pytest','title':'ran pytest'}}"));
+        const QString text = view.plainText();
+        QVERIFY(text.contains(QStringLiteral("alpha beta")));
+        QCOMPARE(text.count(QStringLiteral("✦ thought for 1 s")), 1);
+        QVERIFY(text.indexOf(QStringLiteral("alpha beta")) < text.indexOf(QStringLiteral("running pytest")));
+        // And a second block held behind the first is still its own block, in order.
+        view.hide();
+        view.setThinking("t1", "thinking-2", "gamma", true, 2000);
+        view.setThinking("t1", "thinking-3", "delta", true, 3000);
+        view.show();
+        const QString after = view.plainText();
+        QVERIFY(after.indexOf(QStringLiteral("gamma")) < after.indexOf(QStringLiteral("delta")));
+        QCOMPARE(after.count(QStringLiteral("✦ thought for")), 3);
+    }
+
     void aToolCallIsOneRowRunningThenSettled() {
         AgentInternalsView view;
         view.beginTurn("t1", "run the tests");

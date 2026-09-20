@@ -188,6 +188,8 @@ void AgentInternalsView::updateAskRow() {
 
 void AgentInternalsView::showEvent(QShowEvent *event) {
     QWidget::showEvent(event);
+    m_everShown = true;
+    flushHeldThinking();   // what streamed while the pane was hidden (#PPR4)
     updateAskRow();   // the window wires onAskOwner after the view is built
 }
 
@@ -242,6 +244,7 @@ void AgentInternalsView::appendFoldLines(const QVector<FoldLine> &lines, int ind
 // ----- turns ----------------------------------------------------------------------------------
 
 void AgentInternalsView::beginTurn(const QString &turnId, const QString &request) {
+    flushHeldThinking();
     if (turnId.isEmpty() || turnId == m_turnId) return;
     m_turnId = turnId;
     ++m_turns;
@@ -284,51 +287,124 @@ void AgentInternalsView::setThinking(const QString &turnId, const QString &block
                                      bool done, qint64 elapsedMs) {
     touchTurn();
     const QString key = blockKey.isEmpty() ? turnId : blockKey;
+    // A hidden pane — another tab, a splitter dragged shut — renders nothing at all (#PPR4). The
+    // block is held whole, because every call carries the whole block; a block of another key
+    // arriving means the held one has ended, so that one is drawn first and keeps its place.
+    if (m_everShown && !isVisible()) {
+        if (m_held.live && m_held.key != key) flushHeldThinking();
+        m_held = {true, turnId, key, text, done, elapsedMs};
+        return;
+    }
+    drawThinking(turnId, key, text, done, elapsedMs);
+}
+
+// Only what is new. The rows the stream has settled are appended once and never touched again;
+// the short tail after them — the line still being written, a table still open — is taken down and
+// drawn again. The header row is rewritten in place, and only when its words change.
+void AgentInternalsView::drawThinking(const QString &turnId, const QString &key, const QString &text,
+                                      bool done, qint64 elapsedMs) {
     const QString body = text.right(kThinkingChars);
     const QString head = !done      ? QStringLiteral("✦ thinking…")
                        : elapsedMs > 0 ? QStringLiteral("✦ thought for %1 s").arg(std::max<qint64>(1, (elapsedMs + 500) / 1000))
                        : elapsedMs < 0 ? QStringLiteral("✦ reasoning so far in this turn")
                                        : QStringLiteral("✦ thinking stopped");
-    relay::calllines::FoldOptions options;
-    options.maxLines = 100000;   // uncapped on purpose: this pane is where the whole block lives
-    const QVector<FoldLine> rendered = relay::calllines::foldForMarkdown(body, palette(), options);
-
+    QTextDocument *document = m_log->document();
     const bool follow = pinned();
-    if (m_thinkingKey == key && !m_thinkingAt.isNull()) {
-        // Replace the block where it stands. Nothing has printed under it — a tool row or a turn
-        // ends the block — so the selection can run to the end of the document.
-        QTextCursor cursor(m_log->document());
+    const bool open = m_thinkingKey == key && !m_thinkingAt.isNull();
+    if (open && (!m_stream || !body.startsWith(m_streamFed))) {
+        // The same block, but not a continuation of what is drawn: take the drawing down and
+        // render it again from the start. Nothing has printed under it — a tool row or a turn ends
+        // the block — so the selection can run to the end of the document.
+        QTextCursor cursor(document);
         cursor.setPosition(m_thinkingAt.position());
-        cursor.setPosition(std::min(m_thinkingAt.position() + m_thinkingChars,
-                                    m_log->document()->characterCount() - 1),
-                           QTextCursor::KeepAnchor);
+        cursor.setPosition(document->characterCount() - 1, QTextCursor::KeepAnchor);
         cursor.removeSelectedText();
-    } else {
-        ensureLineStart();
-        m_thinkingKey = key;
-        m_thinkingAt = QTextCursor(m_log->document());
-        m_thinkingAt.setPosition(m_log->document()->characterCount() - 1);
-        m_thinkingAt.setKeepPositionOnInsert(true);   // the block is written at this position: stay before it
-        m_blocks.append({turnId, m_thinkingAt.position()});
-        while (m_blocks.size() > 200) m_blocks.removeFirst();
+        m_stream.reset();
     }
-    const int before = m_log->document()->characterCount();
-    append(head + QLatin1Char('\n'), Ink::Muted, true);
-    if (rendered.isEmpty()) append(QStringLiteral("  (nothing yet)\n"), Ink::Muted);
-    else appendFoldLines(rendered, 2);
-    m_thinkingChars = m_log->document()->characterCount() - before;
+    if (!m_stream) {
+        if (!open) {
+            ensureLineStart();
+            m_thinkingKey = key;
+            m_thinkingAt = QTextCursor(document);
+            m_thinkingAt.setPosition(document->characterCount() - 1);
+            m_thinkingAt.setKeepPositionOnInsert(true);   // the block is written at this position: stay before it
+            m_blocks.append({turnId, m_thinkingAt.position()});
+            while (m_blocks.size() > 200) m_blocks.removeFirst();
+        }
+        m_stream = std::make_unique<relay::calllines::MarkdownStream>(palette());
+        m_streamTurn = turnId;
+        m_streamFed.clear();
+        m_streamTailAt = QTextCursor();
+        m_streamDrewRows = false;
+        const int at = document->characterCount() - 1;
+        append(head + QLatin1Char('\n'), Ink::Muted, true);
+        m_streamHead = head;
+        m_streamHeadAt = QTextCursor(document);
+        m_streamHeadAt.setPosition(std::min(at, document->characterCount() - 1));
+    } else if (head != m_streamHead) {
+        QTextCursor cursor(m_streamHeadAt);
+        cursor.movePosition(QTextCursor::StartOfBlock);
+        cursor.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
+        QTextCharFormat format;
+        format.setForeground(inkColor(Ink::Muted));
+        format.setFontWeight(QFont::Bold);
+        const int start = cursor.selectionStart();
+        cursor.insertText(head, format);
+        m_streamHeadAt.setPosition(start);
+        m_streamHead = head;
+    }
+    // Everything after the mark is what the last flush drew and this one draws again; a cursor
+    // rather than a character count, so the log trimming itself at kMaxBlocks cannot move it.
+    if (!m_streamTailAt.isNull()) {
+        QTextCursor cursor(document);
+        cursor.setPosition(std::min(m_streamTailAt.position(), document->characterCount() - 1));
+        cursor.setPosition(document->characterCount() - 1, QTextCursor::KeepAnchor);
+        cursor.removeSelectedText();
+    }
+    const QVector<FoldLine> settled = m_stream->feed(body.mid(m_streamFed.size()));
+    m_streamFed = body;
+    if (!settled.isEmpty()) { appendFoldLines(settled, 2); m_streamDrewRows = true; }
+    m_streamTailAt = QTextCursor(document);
+    m_streamTailAt.setPosition(document->characterCount() - 1);
+    m_streamTailAt.setKeepPositionOnInsert(true);
+    const QVector<FoldLine> tail = m_stream->tail();
+    if (!tail.isEmpty()) appendFoldLines(tail, 2);
+    else if (!m_streamDrewRows) append(QStringLiteral("  (nothing yet)\n"), Ink::Muted);
     if (done) endThinking();
     if (follow) pin();
     updateAskRow();   // "Last turn · 42 s" while the turn is still thinking
 }
 
+void AgentInternalsView::flushHeldThinking() {
+    if (!m_held.live) return;
+    const HeldThinking held = m_held;
+    m_held = HeldThinking{};   // cleared first: drawThinking() must not come back here
+    drawThinking(held.turnId, held.key, held.text, held.done, held.elapsedMs);
+}
+
+// The block is closed: the next delta of this turn starts one of its own, and what is drawn stays
+// where it is.
+void AgentInternalsView::endThinking() {
+    m_thinkingKey.clear();
+    m_stream.reset();
+    m_streamFed.clear();
+    m_streamHead.clear();
+    m_streamTailAt = QTextCursor();
+    m_streamDrewRows = false;
+}
+
+// The three readers below answer about what is drawn, so a block held while the pane was hidden
+// has to be drawn first. That is a write, and they are const because everything they say about the
+// log is: hence the cast, in these three places and nowhere else (#PPR4).
 bool AgentInternalsView::hasThinking(const QString &turnId) const {
+    const_cast<AgentInternalsView *>(this)->flushHeldThinking();
     for (const auto &block : m_blocks)
         if (block.first == turnId) return true;
     return false;
 }
 
 void AgentInternalsView::showThinking(const QString &turnId) {
+    flushHeldThinking();
     int position = -1;
     for (const auto &block : m_blocks)
         if (block.first == turnId) position = block.second;
@@ -341,6 +417,7 @@ void AgentInternalsView::showThinking(const QString &turnId) {
 }
 
 void AgentInternalsView::note(const QString &text) {
+    flushHeldThinking();
     if (text.isEmpty() || text == m_lastNote) return;
     m_lastNote = text;
     endThinking();
@@ -349,7 +426,19 @@ void AgentInternalsView::note(const QString &text) {
 }
 
 void AgentInternalsView::refreshTheme() {
+    flushHeldThinking();
     m_log->setFont(theme::legible(QFontDatabase::systemFont(QFontDatabase::FixedFont), theme::BodyPt));
+    // A fold row's colours are in its spans, so what is already written keeps the theme it was
+    // written in — every row in this log does. The block still streaming is the exception: it used
+    // to be re-rendered whole on every flush, so a theme switch recoloured it, and it still is,
+    // once, here. This is the only place a settled row is drawn again (#PPR4).
+    // A block that has ended is closed by endThinking(), so an open stream is always one that is
+    // still coming: its header stays "✦ thinking…" and the end will rewrite it as it would anyway.
+    if (m_stream && !m_thinkingKey.isEmpty()) {
+        const QString key = m_thinkingKey, turn = m_streamTurn, body = m_streamFed;
+        m_stream.reset();   // not a continuation: drawThinking() takes the block down and redraws it
+        drawThinking(turn, key, body, false, 0);
+    }
 }
 
 // ----- one row per tool call (§ 23, card #TK9C) ------------------------------------------------
@@ -411,6 +500,7 @@ void AgentInternalsView::forgetCalls() {
 }
 
 void AgentInternalsView::toolStarted(const QJsonObject &event) {
+    flushHeldThinking();   // the block this row ends goes in above it, whatever the pane was doing
     const QString callId = event.value(QStringLiteral("call_id")).toString();
     const QString turnId = event.value(QStringLiteral("turn_id")).toString();
     const toollabel::Label label = toollabel::fromEvent(event);
@@ -454,6 +544,7 @@ void AgentInternalsView::toolOutput(int lines) {
 }
 
 void AgentInternalsView::toolResult(const QJsonObject &event) {
+    flushHeldThinking();
     const QString callId = event.value(QStringLiteral("call_id")).toString();
     const QString turnId = event.value(QStringLiteral("turn_id")).toString();
     const toollabel::Label label = toollabel::fromEvent(event);
@@ -597,12 +688,16 @@ void AgentInternalsView::toggleToolCall(int index) {
 }
 
 QStringList AgentInternalsView::toolLines() const {
+    const_cast<AgentInternalsView *>(this)->flushHeldThinking();
     QStringList out;
     for (const ToolCall &call : m_calls) out << rowText(call);
     return out;
 }
 
-QString AgentInternalsView::plainText() const { return m_log->toPlainText(); }
+QString AgentInternalsView::plainText() const {
+    const_cast<AgentInternalsView *>(this)->flushHeldThinking();
+    return m_log->toPlainText();
+}
 
 bool AgentInternalsView::eventFilter(QObject *object, QEvent *event) {
     if (object == m_log->viewport() && event->type() == QEvent::MouseButtonRelease) {

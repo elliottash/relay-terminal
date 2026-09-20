@@ -63,6 +63,24 @@ QStringList textsOf(const QVector<FoldLine> &lines) {
     return out;
 }
 
+// Rows with everything a FoldSpan can say about them, so a comparison is about the ink as well as
+// the words — and so a failure prints which row differs (#PPR4).
+QString describe(const QVector<FoldLine> &lines) {
+    QStringList out;
+    for (const FoldLine &line : lines) {
+        QStringList spans;
+        for (const relay::FoldSpan &span : line.spans)
+            spans << QStringLiteral("[%1|%2%3%4%5|%6|%7|%8]")
+                         .arg(span.text, span.bold ? QStringLiteral("b") : QString(),
+                              span.dim ? QStringLiteral("d") : QString(),
+                              span.italic ? QStringLiteral("i") : QString(),
+                              span.underline ? QStringLiteral("u") : QString(),
+                              span.fg.name(QColor::HexArgb), span.bg.name(QColor::HexArgb), span.link);
+        out << spans.join(QString());
+    }
+    return out.join(QStringLiteral("\n"));
+}
+
 }  // namespace
 
 class CallLinesTests : public QObject {
@@ -749,6 +767,59 @@ private slots:
             for (const relay::FoldSpan &span : row.spans)
                 if (span.underline && span.fg == palette().link) sawLinkInk = true;
         QVERIFY(sawLinkInk);
+    }
+
+    // #PPR4: the Activity pane renders a reasoning block a chunk at a time instead of rendering
+    // the whole of it four times a second. What it draws — the settled rows plus the tail — has to
+    // be what foldForMarkdown() would have given it, span for span, at every split of the input.
+    void aStreamedBlockRendersExactlyAsAWholeOne() {
+        const QStringList corpus{
+            QStringLiteral("Plain prose with **Problem:** a label, `code` and a [link](https://x/y).\n"),
+            QStringLiteral("# Heading\n\n- one\n- two\n  - nested\n\n1. first\n2. second\n"),
+            QStringLiteral("Before\n\n```python\ndef f(x):\n    return x * 2\n```\n\nAfter the fence\n"),
+            QStringLiteral("| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |\n\ntext after the table\n"),
+            QStringLiteral("\n\n   \n\nleading blanks, then ink, then trailing\n\n\n"),
+            QStringLiteral("   \n \n"),            // nothing but whitespace: renders as nothing
+            QStringLiteral("no newline at the end"),
+            QStringLiteral("an unfinished ```fence\nthat never closes\n"),
+        };
+        FoldOptions options;
+        options.maxLines = 100000;   // what the Activity pane passes
+        for (const QString &text : corpus) {
+            const QVector<FoldLine> whole = foldForMarkdown(text, palette(), options);
+            for (int cut = 0; cut <= text.size(); ++cut) {
+                MarkdownStream stream(palette());
+                QVector<FoldLine> rows = stream.feed(text.left(cut));
+                rows += stream.feed(text.mid(cut));
+                rows += stream.tail();
+                QCOMPARE(describe(rows), describe(whole));
+            }
+            // And a delta of one character at a time, which is the shape a stream really has.
+            MarkdownStream stream(palette());
+            QVector<FoldLine> rows;
+            for (int at = 0; at < text.size(); ++at) rows += stream.feed(text.mid(at, 1));
+            rows += stream.tail();
+            QCOMPARE(describe(rows), describe(whole));
+        }
+    }
+
+    // The point of it: the work of a flush is the new text, not the block. Rendering 200 KB in
+    // 2 000 deltas must not render 200 KB two thousand times, so the rows a flush settles are the
+    // rows its own chunk produced — and the tail it redraws is a handful.
+    void aStreamedBlockSettlesEachRowOnce() {
+        QString text;
+        for (int i = 0; i < 2000; ++i) text += QStringLiteral("line %1 of the agent's reasoning\n").arg(i);
+        FoldOptions options;
+        options.maxLines = 100000;
+        MarkdownStream stream(palette());
+        int settled = 0, tailRows = 0;
+        for (int at = 0; at < text.size(); at += 100) {
+            settled += stream.feed(text.mid(at, 100)).size();
+            tailRows = std::max<int>(tailRows, stream.tail().size());
+        }
+        const int tail = stream.tail().size();
+        QCOMPARE(settled + tail, int(foldForMarkdown(text, palette(), options).size()));
+        QVERIFY2(tailRows <= 2, qPrintable(QString::number(tailRows)));
     }
 };
 
