@@ -414,6 +414,65 @@ private slots:
         QVERIFY(closed);
     }
 
+    // The Ask row at the foot of the ⓘ pane (#FEJQ). This pane has no helper agent of its own:
+    // the row drafts a question about the figures on screen into the owning pane's composer and
+    // sends nothing. src/AskRow.h holds the wording, which the Activity pane's row shares.
+    void infoViewAskRowDraftsAboutTheSessionOnScreen() {
+        using namespace relay::sessioninfo;
+        InfoView view;
+        relay::askrow::AskRow *row = view.askRow();
+        QVERIFY(row != nullptr);
+        QVERIFY(row->isHidden());                 // no composer wired: no row at all
+
+        QStringList drafted;
+        QList<QJsonObject> asked;
+        view.onAskOwner = [&drafted](const QString &text) { drafted << text; };
+        view.onRequest = [&asked](const QJsonObject &request) { asked << request; };
+        view.show();
+        QVERIFY(!row->isHidden());
+        QVERIFY(!row->available());               // the figures have not arrived yet
+
+        view.showLiveSession();
+        QCOMPARE(asked.size(), 1);
+        view.setInfo({{QStringLiteral("id"), asked.last().value(QStringLiteral("id"))},
+                      {QStringLiteral("kind"), QStringLiteral("session")}, {QStringLiteral("live"), true},
+                      {QStringLiteral("title"), QStringLiteral("Mine")},
+                      {QStringLiteral("context"), QJsonObject{{QStringLiteral("used_tokens"), 41200},
+                                                              {QStringLiteral("window"), 200000},
+                                                              {QStringLiteral("percent"), 20.6}}}});
+        QVERIFY(row->available());
+        QCOMPARE(row->chipLabels(), QStringList({QStringLiteral("Context · 20.6%"),
+                                                 QStringLiteral("What it has done"),
+                                                 QStringLiteral("Costliest turn")}));
+        // The chip, the page and the question all say the same figures.
+        QVERIFY(row->draftAt(0).contains(QStringLiteral("20.6%")));
+        QVERIFY(row->draftAt(0).contains(QStringLiteral("41.2k / 200.0k")));
+        row->chips().at(0)->click();
+        QCOMPARE(drafted, QStringList{row->draftAt(0)});
+        row->chips().at(2)->click();
+        QCOMPARE(drafted.size(), 2);
+        QCOMPARE(drafted.last(), relay::askrow::costliestTurnQuestion());
+        QCOMPARE(asked.size(), 1);                // a draft asked the worker nothing
+
+        // A subagent thread is somebody else's session: the pane's agent cannot answer for it.
+        view.showThread(QString(32, QLatin1Char('b')), QStringLiteral("/d"), QString(32, QLatin1Char('a')));
+        view.setInfo({{QStringLiteral("id"), asked.last().value(QStringLiteral("id"))},
+                      {QStringLiteral("kind"), QStringLiteral("thread")}, {QStringLiteral("live"), true},
+                      {QStringLiteral("agent_id"), QStringLiteral("a1")}, {QStringLiteral("title"), QStringLiteral("Find it")}});
+        QVERIFY(!row->available());
+        QVERIFY(row->chips().first()->toolTip().contains(QStringLiteral("subagent thread")));
+        row->chips().at(0)->click();
+        QCOMPARE(drafted.size(), 2);              // a disabled chip drafts nothing
+
+        // A saved session from the manager is not this pane's either, and says so differently.
+        view.showSession(QString(32, QLatin1Char('c')), QStringLiteral("/d"));
+        view.setInfo({{QStringLiteral("id"), asked.last().value(QStringLiteral("id"))},
+                      {QStringLiteral("kind"), QStringLiteral("session")}, {QStringLiteral("live"), false},
+                      {QStringLiteral("title"), QStringLiteral("Theirs")}});
+        QVERIFY(!row->available());
+        QVERIFY(row->chips().first()->toolTip().contains(QStringLiteral("saved session")));
+    }
+
     // ----- the list's own helpers (cards #R6J0, #CCKY) ------------------------------------------
 
     void dateGroups() {

@@ -12,6 +12,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QScrollBar>
+#include <QShowEvent>
 #include <QStyleOptionToolButton>
 #include <QTextBrowser>
 #include <QTimer>
@@ -403,6 +404,14 @@ InfoView::InfoView(QWidget *parent) : QWidget(parent) {
     relay::installCopyOnSelect(m_body);
     connect(m_body, &QTextBrowser::anchorClicked, this, [this](const QUrl &url) { linkActivated(url); });
     layout->addWidget(m_body, 1);
+    // The Ask row (#FEJQ). It sits between the page and the standing key line, so the last thing
+    // under the figures is the offer to ask about them. The draft is handed up to the window,
+    // which puts it in the owning pane's composer; this view sends nothing itself.
+    m_ask = new relay::askrow::AskRow(QStringLiteral("Ask the agent about this session"),
+                                      QStringLiteral("drafts a question in the terminal's prompt box · nothing is sent"));
+    m_ask->onAsk = [this](const QString &text) { if (onAskOwner) onAskOwner(text); };
+    m_ask->hide();   // until the window has wired onAskOwner; updateAskRow() decides from then on
+    layout->addWidget(m_ask);
     // Alt+I is the fast path since 2026-09-18; /status and /info still open it (docs/ARCHITECTURE.md).
     m_hint = new QLabel(standingHint());
     m_hint->setObjectName(QStringLiteral("dialogHint"));
@@ -479,6 +488,57 @@ void InfoView::updateHeader() {
     m_back->setVisible(m_stack.size() > 1);
     QString title = paneTitle();
     m_title->setText(title);
+    updateAskRow();
+}
+
+// The Ask row (#FEJQ). `onAskOwner` is a plain callback the window assigns, like onClose and
+// onOpenFile, so there is no setter to notice it arriving: the row is decided again wherever what
+// it would say can have moved — every navigation and every answer go through updateHeader(), and
+// a view wired after it was built catches up when the pane shows it.
+//
+// The chips carry the figures the page is showing, because the question and the screen have to
+// agree; and they are only live on the pane's own session, because the pane's agent is the one
+// that will answer and it can answer only for itself.
+void InfoView::updateAskRow() {
+    if (!m_ask) return;
+    m_ask->setVisible(bool(onAskOwner));
+    if (!onAskOwner) return;
+
+    QVector<relay::askrow::Question> questions;
+    const QJsonObject context = m_current.value(QStringLiteral("context")).toObject();
+    if (context.contains(QStringLiteral("percent"))) {
+        const double percent = context.value(QStringLiteral("percent")).toDouble();
+        const qint64 used = context.value(QStringLiteral("used_tokens")).toVariant().toLongLong();
+        const qint64 window = context.value(QStringLiteral("window")).toVariant().toLongLong();
+        const QString usedOfWindow = window > 0 ? QStringLiteral("%1 / %2").arg(compactNumber(used), compactNumber(window))
+                                                : QString();
+        questions.append({QStringLiteral("Context · %1%").arg(percent, 0, 'f', 1),
+                          relay::askrow::contextQuestion(percent, usedOfWindow)});
+    }
+    questions.append({QStringLiteral("What it has done"), relay::askrow::summaryQuestion()});
+    questions.append({QStringLiteral("Costliest turn"), relay::askrow::costliestTurnQuestion()});
+    m_ask->setQuestions(questions);
+
+    const bool thread = m_current.value(QStringLiteral("kind")).toString() == QLatin1String("thread");
+    if (m_current.isEmpty())
+        m_ask->setAvailable(false, QStringLiteral("There is nothing to ask about yet: this page's "
+                                                  "figures have not arrived."));
+    else if (thread)
+        m_ask->setAvailable(false, QStringLiteral("This is a subagent thread, not the session in the "
+                                                  "pane this page belongs to, and that pane's agent "
+                                                  "can answer only for itself. Follow “↑ owner "
+                                                  "session” to ask about the session that started it."));
+    else if (!m_current.value(QStringLiteral("live")).toBool())
+        m_ask->setAvailable(false, QStringLiteral("This is a saved session, not the one running in "
+                                                  "the pane this page belongs to, and that pane's "
+                                                  "agent can answer only for itself."));
+    else
+        m_ask->setAvailable(true);
+}
+
+void InfoView::showEvent(QShowEvent *event) {
+    QWidget::showEvent(event);
+    updateAskRow();   // the window wires onAskOwner after the view is built
 }
 
 void InfoView::flashHint(const QString &message) {

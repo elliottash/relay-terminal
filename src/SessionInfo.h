@@ -6,6 +6,11 @@
 // A thread link opens that thread's own history in the same view, with a link back up to its
 // owner session. The data comes from the worker's `session_info` event (protocol section 25);
 // the view only asks for it (onRequest) and renders it, so it is testable without a pane.
+//
+// At the foot of the pane, the "Ask" row (#FEJQ): this pane has no helper agent of its own — it
+// is about the owning pane's agent, and that agent answers for it — so the row drafts a question
+// about what is on screen into that pane's prompt box. src/AskRow.h holds the wording.
+#include "AskRow.h"
 #include "PaneView.h"
 
 #include <QDateTime>
@@ -17,6 +22,7 @@
 #include <functional>
 
 class QLabel;
+class QShowEvent;
 class QTextBrowser;
 class QToolButton;
 class QTimer;
@@ -56,6 +62,11 @@ public:
     std::function<void(const QString &path)> onOpenFile;
     std::function<void()> onClose;          // Esc, or the pane chrome's ×
     std::function<void()> onTitleChanged;
+    // The Ask row's draft: the question goes into the owning pane's composer, at the cursor, and
+    // the composer takes focus (Pane::insertInComposer). A draft the person confirms, never a
+    // send. Left unset — a saved layout restoring a view with no owner, a test — the row is not
+    // shown at all; the view notices on its own, so the window has only to assign this.
+    std::function<void(const QString &text)> onAskOwner;
 
     // Start over on the pane's own session (the ⓘ button, /status).
     void showLiveSession();
@@ -75,14 +86,21 @@ public:
     void focusView() override;
     void setHeaderRightInset(int pixels) override;
     QJsonObject current() const { return m_current; }
+    // The Ask row, for the tests and for a QA screenshot. It has no Q_OBJECT, so findChild()
+    // cannot pick it out of the pane by type.
+    relay::askrow::AskRow *askRow() const { return m_ask; }
 
 protected:
     bool eventFilter(QObject *object, QEvent *event) override;
+    void showEvent(QShowEvent *event) override;
 
 private:
     void navigate(const QJsonObject &request, bool push);
     void linkActivated(const QUrl &url);
     void updateHeader();
+    // What the Ask row says, and whether it is shown at all: its chips carry the figures this view
+    // is showing, and they are only live while the view is on the pane's own session.
+    void updateAskRow();
     // Show a transient message on the standing hint line, which restores itself two seconds later.
     void flashHint(const QString &message);
 
@@ -90,6 +108,7 @@ private:
     QToolButton *m_back = nullptr, *m_refresh = nullptr;
     QWidget *m_inset = nullptr;
     QTextBrowser *m_body = nullptr;
+    relay::askrow::AskRow *m_ask = nullptr;   // the Ask row, between the body and the hint line
     QLabel *m_hint = nullptr;         // the standing line under the body; flashHint() borrows it
     QTimer *m_hintTimer = nullptr;    // single shot: brings the standing text back after a flash
     QList<QJsonObject> m_stack;        // requests, oldest first; the last one is on screen

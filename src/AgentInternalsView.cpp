@@ -13,6 +13,7 @@
 #include <QMouseEvent>
 #include <QPlainTextEdit>
 #include <QScrollBar>
+#include <QShowEvent>
 #include <QTextCharFormat>
 #include <QVBoxLayout>
 
@@ -104,6 +105,15 @@ AgentInternalsView::AgentInternalsView(QWidget *parent) : QWidget(parent) {
     m_log->viewport()->installEventFilter(this);
     m_log->installEventFilter(this);
     layout->addWidget(m_log, 1);
+    // The Ask row (#FEJQ), under the log. Its "Turn n" chip follows the text cursor, which a click
+    // on a tool row moves, so the turn it offers to ask about is the one the reader is reading.
+    m_ask = new relay::askrow::AskRow(QStringLiteral("Ask the agent about this activity"),
+                                      QStringLiteral("drafts a question in the terminal's prompt box · nothing is sent"));
+    m_ask->onAsk = [this](const QString &text) { if (onAskOwner) onAskOwner(text); };
+    m_ask->hide();   // until the window has wired onAskOwner; updateAskRow() decides from then on
+    layout->addWidget(m_ask);
+    connect(m_log, &QPlainTextEdit::cursorPositionChanged, this, [this] { updateAskRow(); });
+    m_clock.start();
     setHeader();
 }
 
@@ -126,6 +136,59 @@ void AgentInternalsView::setHeader() {
     parts << QStringLiteral("%1 tool call%2").arg(calls).arg(calls == 1 ? QString() : QStringLiteral("s"));
     parts << QStringLiteral("the terminal prints these again when you close this pane");
     m_status->setText(parts.join(QStringLiteral(" · ")));
+    updateAskRow();
+}
+
+// ----- the Ask row (#FEJQ) ----------------------------------------------------------------------
+//
+// This pane has no agent of its own: it draws one pane's agent working, and that agent is the one
+// that can say why a turn was slow. So a chip drafts the question into that pane's composer and
+// the person sends it — `onAskOwner` is the window's wire to Pane::insertInComposer, and until it
+// is set there is nowhere to draft to and the row is not drawn at all.
+//
+// The chips carry the figures the log is showing, because the question and the screen have to
+// agree, and the questions themselves come from src/AskRow.h, which the ⓘ pane's row shares.
+
+int AgentInternalsView::turnAtCursor() const {
+    if (m_turnMarks.isEmpty()) return -1;
+    const int block = m_log->textCursor().blockNumber();
+    int found = m_turnMarks.size() - 1;   // cursor untouched, view pinned: the newest turn
+    for (int at = 0; at < m_turnMarks.size(); ++at)
+        if (!m_turnMarks.at(at).at.isNull() && m_turnMarks.at(at).at.blockNumber() <= block) found = at;
+    return found;
+}
+
+void AgentInternalsView::updateAskRow() {
+    if (!m_ask) return;
+    m_ask->setVisible(bool(onAskOwner));
+    if (!onAskOwner) return;
+
+    QVector<relay::askrow::Question> questions;
+    if (!m_turnMarks.isEmpty()) {
+        const TurnMark &last = m_turnMarks.last();
+        const qint64 took = std::max<qint64>(0, last.lastMs - last.startMs);
+        questions.append({QStringLiteral("Last turn · %1").arg(relay::askrow::howLong(took)),
+                          relay::askrow::lastTurnQuestion(took)});
+    }
+    questions.append({QStringLiteral("Slowest tool calls"), relay::askrow::slowestToolsQuestion()});
+    // A third chip only when the reader has gone back up the log to another turn: on the newest
+    // turn it would ask the same thing as "Last turn", and two chips that draft the same question
+    // are one chip and a mistake.
+    const int selected = turnAtCursor();
+    if (selected >= 0 && selected < m_turnMarks.size() - 1) {
+        const TurnMark &mark = m_turnMarks.at(selected);
+        questions.append({QStringLiteral("Turn %1").arg(mark.number),
+                          relay::askrow::turnQuestion(mark.number, mark.request)});
+    }
+    m_ask->setQuestions(questions);
+    m_ask->setAvailable(!m_turnMarks.isEmpty(),
+                        QStringLiteral("There is nothing to ask about yet: this pane's agent has "
+                                       "not run a turn."));
+}
+
+void AgentInternalsView::showEvent(QShowEvent *event) {
+    QWidget::showEvent(event);
+    updateAskRow();   // the window wires onAskOwner after the view is built
 }
 
 bool AgentInternalsView::pinned() const {
@@ -187,10 +250,29 @@ void AgentInternalsView::beginTurn(const QString &turnId, const QString &request
     m_mergeHead = -1;
     ensureLineStart();
     const QString line = request.trimmed().section(QLatin1Char('\n'), 0, 0).left(200);
+    const int start = m_log->document()->characterCount() - 1;
     append(QStringLiteral("\n── ") + (line.isEmpty() ? QStringLiteral("agent turn") : line)
                + QStringLiteral(" ──\n"),
            Ink::Muted);
+    // What the Ask row needs to name this turn and time it. The cursor rides the rule's own block,
+    // so the log trimming itself at kMaxBlocks does not leave the mark pointing at somebody else.
+    TurnMark mark;
+    mark.number = m_turns;
+    mark.turnId = turnId;
+    mark.request = line;
+    mark.at = QTextCursor(m_log->document());
+    mark.at.setPosition(std::min(start, m_log->document()->characterCount() - 1));
+    mark.startMs = mark.lastMs = m_clock.elapsed();
+    m_turnMarks.append(mark);
+    while (m_turnMarks.size() > 200) m_turnMarks.removeFirst();
     setHeader();
+}
+
+// The turn that is running has done something: its clock reading moves to now, so "the last turn
+// took 42 s" is the time up to its last event rather than the time since its rule was drawn (a
+// turn that ended ten minutes ago must not still be counting).
+void AgentInternalsView::touchTurn() {
+    if (!m_turnMarks.isEmpty()) m_turnMarks.last().lastMs = m_clock.elapsed();
 }
 
 // ----- reasoning ------------------------------------------------------------------------------
@@ -200,6 +282,7 @@ void AgentInternalsView::beginTurn(const QString &turnId, const QString &request
 // so the next delta starts one of its own — the same rule the terminal's anchor follows.
 void AgentInternalsView::setThinking(const QString &turnId, const QString &blockKey, const QString &text,
                                      bool done, qint64 elapsedMs) {
+    touchTurn();
     const QString key = blockKey.isEmpty() ? turnId : blockKey;
     const QString body = text.right(kThinkingChars);
     const QString head = !done      ? QStringLiteral("✦ thinking…")
@@ -236,6 +319,7 @@ void AgentInternalsView::setThinking(const QString &turnId, const QString &block
     m_thinkingChars = m_log->document()->characterCount() - before;
     if (done) endThinking();
     if (follow) pin();
+    updateAskRow();   // "Last turn · 42 s" while the turn is still thinking
 }
 
 bool AgentInternalsView::hasThinking(const QString &turnId) const {
@@ -351,6 +435,7 @@ void AgentInternalsView::toolStarted(const QJsonObject &event) {
     forgetCalls();
     m_liveTick.invalidate();   // the new row's first counter draws at once
     drawRow(m_calls.last());
+    touchTurn();
     setHeader();
 }
 
@@ -364,6 +449,8 @@ void AgentInternalsView::toolOutput(const QString &text) {
     if (m_liveTick.isValid() && m_liveTick.elapsed() < 100) return;
     m_liveTick.restart();
     drawRow(call);
+    touchTurn();
+    updateAskRow();   // a command that runs for a minute is a minute the last turn is taking
 }
 
 void AgentInternalsView::toolResult(const QJsonObject &event) {
@@ -386,6 +473,7 @@ void AgentInternalsView::toolResult(const QJsonObject &event) {
             head.asked = false;
             if (head.expanded) toggleToolCall(m_mergeHead);
             drawRow(head);
+            touchTurn();
             setHeader();
             return;
         }
@@ -410,6 +498,7 @@ void AgentInternalsView::toolResult(const QJsonObject &event) {
     } else {
         m_mergeHead = -1;
     }
+    touchTurn();
     setHeader();
 }
 

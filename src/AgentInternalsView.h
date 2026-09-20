@@ -24,6 +24,12 @@
 //
 // It stays pinned to the bottom while output arrives; scrolling up unpins it, and End or reaching
 // the bottom pins it again.
+//
+// At the foot of the pane, the "Ask" row (#FEJQ): this pane has no helper agent of its own — it is
+// about the owning pane's agent, and that agent is the one that can say why a turn was slow — so
+// the row drafts a question about what is on screen into that pane's prompt box. src/AskRow.h
+// holds the wording, which the ⓘ pane's row shares.
+#include "AskRow.h"
 #include "CallLines.h"
 #include "PaneView.h"
 #include "ToolLabel.h"
@@ -39,6 +45,7 @@
 
 class QLabel;
 class QPlainTextEdit;
+class QShowEvent;
 
 namespace relay {
 
@@ -83,6 +90,11 @@ public:
     std::function<void(const QString &turnId, const QString &callId)> onOpenOutput;
     // A diff of more than 12 changed lines: the host opens a diff pane beside the terminal (§ 23.6).
     std::function<void(const QString &title, const QString &unifiedDiff)> onOpenDiff;
+    // The Ask row's draft: the question goes into the owning pane's composer, at the cursor, and
+    // the composer takes focus (Pane::insertInComposer). A draft the person confirms, never a
+    // send. Left unset the row is not shown at all; the view notices on its own, so the window has
+    // only to assign this.
+    std::function<void(const QString &text)> onAskOwner;
 
     // ----- for the pane header, the tests and the QA screenshots -------------------------------
     int toolRowCount() const { return int(m_calls.size()); }
@@ -91,9 +103,13 @@ public:
     // Folds one tool row open, or shut again (the mouse path, and the tests').
     void toggleToolCall(int index);
     QStringList toolLines() const;
+    // The Ask row, for the tests and for a QA screenshot. It has no Q_OBJECT, so findChild()
+    // cannot pick it out of the pane by type.
+    relay::askrow::AskRow *askRow() const { return m_ask; }
 
 protected:
     bool eventFilter(QObject *object, QEvent *event) override;
+    void showEvent(QShowEvent *event) override;
 
 private:
     enum class Ink { Text, Tool, Muted, Error, User };
@@ -132,10 +148,32 @@ private:
     bool pinned() const;
     void pin();
     void setHeader();
+    // What the Ask row says, and whether it is shown at all. Called wherever the figures on it can
+    // have moved: a turn, a tool event, and the text cursor landing in another turn.
+    void updateAskRow();
+    // The turn the reader is looking at: the last rule at or above the text cursor. With the
+    // cursor untouched — the usual case, the view pinned to the bottom — that is the newest turn.
+    int turnAtCursor() const;
+    // Every event of the turn that is running moves its clock on, so "the last turn took 42 s" is
+    // the time up to the last thing it did rather than the time since the rule was drawn.
+    void touchTurn();
+
+    // One turn's rule, for the Ask row. The number is this pane's own count — a pane opened mid
+    // conversation starts at 1 — so the request's first line travels with it and the agent can
+    // find the turn either way (askrow::turnQuestion says so in the question).
+    struct TurnMark {
+        int number = 0;
+        QString turnId, request;
+        QTextCursor at;                // the rule's block, so trimming the log does not move it
+        qint64 startMs = 0, lastMs = 0;   // both on m_clock
+    };
 
     QLabel *m_title = nullptr;
     QLabel *m_status = nullptr;
     QPlainTextEdit *m_log = nullptr;
+    relay::askrow::AskRow *m_ask = nullptr;
+    QVector<TurnMark> m_turnMarks;    // oldest first, capped like m_blocks
+    QElapsedTimer m_clock;            // started when the view is built; every mark reads it
     QVector<ToolCall> m_calls;
     toollabel::MergeRun m_merge;
     int m_mergeHead = -1;
