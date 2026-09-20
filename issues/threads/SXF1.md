@@ -150,3 +150,29 @@ Owner reported during execution: "sometimes it still says 'type a prompt first'"
 
 <!-- relay:entry 20260920T053628Z-v8 author=agent kind=event model=glm-5.3 pane=5822ded8 turn=0feb685b80de4da58a4644ed44f89145/0d0f0dedafd44b489c226e8d8ffaa178 -->
 - ✦ agent updated this card · links: {"commits": ["d9cde60524af4b8def16916aa505875d321299de", "472ae1a210a4e0577d690c… → {"commits": ["d9cde60524af4b8def16916aa505875d321299de", "472ae1a210a4e0577d690c…
+
+<!-- relay:entry 20260920T231202Z-52 author=agent kind=event model=deepseek/deepseek-v4.1-flash pane=dc5c54ef turn=17696e58a6664868a01d40f294d6b917/98decbcdc31d4c17a6332b55d5bfcd59 -->
+- ✦ agent claimed this card · Needs verification → Executing, implemented_by deepseek/deepseek-v4.1-flash, session dc5c54ef
+
+<!-- relay:entry 20260920T231202Z-gp author=agent kind=progress model=deepseek/deepseek-v4.1-flash pane=dc5c54ef turn=17696e58a6664868a01d40f294d6b917/98decbcdc31d4c17a6332b55d5bfcd59 pane_token=dc5c54ef-dc70-4eaa-8564-ebd061b9126b -->
+Claimed (dc5c54ef) · working on it from a terminal pane
+
+Owner changed the rule: Ctrl+Enter on an empty prompt box always sends the agent prompt "Continue" — dropping the limit/cut-off gate this card landed. Changing ContinueTurn.h's rule, the routing, the Keymap/doc wording and the test, then re-checking live.
+
+<!-- relay:entry 20260920T234458Z-pb author=agent kind=decision model=deepseek/deepseek-v4.1-flash pane=4ebfcd2d turn=17696e58a6664868a01d40f294d6b917/de3a2e6f9a404dbb8efb638f780c4c55 -->
+Owner, in the terminal pane: "ctrl+enter in an empty prompt should always send agent prompt 'continue'" — so the gate this card first landed is dropped: an empty prompt box with an idle agent sends `Continue` whatever the last turn did, not only after a limit stop or a cut-off restart. Text in the box and a busy agent are unchanged; a password prompt is the one exception (the masked field stands in for the prompt box there).
+
+<!-- relay:entry 20260920T234528Z-mk author=agent kind=event model=deepseek/deepseek-v4.1-flash pane=4ebfcd2d turn=17696e58a6664868a01d40f294d6b917/de3a2e6f9a404dbb8efb638f780c4c55 -->
+- ✦ agent updated this card · appended to `## Decisions`; replaced `## QA checklist`
+
+<!-- relay:entry 20260920T234532Z-2b author=agent kind=event model=deepseek/deepseek-v4.1-flash pane=4ebfcd2d turn=17696e58a6664868a01d40f294d6b917/de3a2e6f9a404dbb8efb638f780c4c55 -->
+- ✦ agent updated this card · appended to `## Execution Summary`
+
+<!-- relay:entry 20260920T234534Z-e5 author=agent kind=event model=deepseek/deepseek-v4.1-flash pane=4ebfcd2d turn=17696e58a6664868a01d40f294d6b917/de3a2e6f9a404dbb8efb638f780c4c55 -->
+- ✦ agent updated this card · appended to `## Tests`
+
+<!-- relay:entry 20260920T234536Z-hs author=agent kind=event model=deepseek/deepseek-v4.1-flash pane=4ebfcd2d turn=17696e58a6664868a01d40f294d6b917/de3a2e6f9a404dbb8efb638f780c4c55 -->
+- ✦ agent updated this card · links: {"commits": ["d9cde60524af4b8def16916aa505875d321299de", "472ae1a210a4e0577d690c… → {"commits": ["d9cde60524af4b8def16916aa505875d321299de", "472ae1a210a4e0577d690c…
+
+<!-- relay:entry 20260920T234605Z-j0 author=agent kind=event model=deepseek/deepseek-v4.1-flash pane=4ebfcd2d turn=17696e58a6664868a01d40f294d6b917/de3a2e6f9a404dbb8efb638f780c4c55 -->
+- ✦ agent updated this card · replaced `## Tests`

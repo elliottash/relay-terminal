@@ -1,12 +1,13 @@
 ---
 id: SXF1
 type: work
-status: needs-verification
+status: executing
 assignee: agent
-implemented_by: glm/glm-5.3
+implemented_by: deepseek/deepseek-v4.1-flash
+session: dc5c54ef-dc70-4eaa-8564-ebd061b9126b
 rank: zzzzzzzzz
 created: '2026-09-19'
-links: {commits: [d9cde60524af4b8def16916aa505875d321299de, 472ae1a210a4e0577d690ce6effcc396982c9cfc, 78416e396b1cf6db5eebe1b45efab4014de01fda, c55c2e0f5bd75fbd7c7115530784ba2c39534a1c], evidence: [docs/qa_evidence/2026-09-20-ctrl-enter-continue/], github: null, plans: [], related: []}
+links: {commits: [d9cde60524af4b8def16916aa505875d321299de, 472ae1a210a4e0577d690ce6effcc396982c9cfc, 78416e396b1cf6db5eebe1b45efab4014de01fda, c55c2e0f5bd75fbd7c7115530784ba2c39534a1c, e7b1e4be527c553403a71487c0b2e4c482e72ad5], evidence: [docs/qa_evidence/2026-09-20-ctrl-enter-continue/, docs/qa_evidence/2026-09-20-ctrl-enter-always/], github: null, plans: [], related: []}
 ---
 # ctrl + enter to continue
 
@@ -46,12 +47,34 @@ press ctrl + enter to continue, eg if you ran out of turns, or you closed and re
 - Live, under Xvfb with an isolated `XDG_CONFIG_HOME`: run a turn into the step limit, empty the box, Ctrl+Enter → it continues; kill Relay mid-turn, reopen (layout restore), Ctrl+Enter on the empty box → `Continue` is sent; `/continue` once → the "Next time: Ctrl+Enter on an empty prompt box" hint appears.
 
 ## QA checklist
-Verified by the implementer (see `docs/qa_evidence/2026-09-20-ctrl-enter-continue/README.md`); a verifier re-checks on a fresh build:
+Live-checked by the implementer (`docs/qa_evidence/2026-09-20-ctrl-enter-always/README.md`); a verifier re-checks on a fresh build:
 
-- [ ] Step-limit stop: empty prompt box, Ctrl+Enter → the prompt `Continue` is sent (no "Type a prompt first.").
-- [ ] Cut-off restart: kill Relay mid-turn (after the turn's first tool step, so the autosave wrote it), relaunch, wait for the "Session loaded" line → Ctrl+Enter on the empty box sends `Continue`.
-- [ ] By-design negatives: a normally finished turn, an Esc-stopped turn, and a turn killed before its first autosave all keep "Type a prompt first." — only stopped/cut-off turns continue.
-- [ ] Non-empty box unchanged: Ctrl+Enter sends now (and interrupts a busy agent), never continues.
-- [ ] Slow paths teach the key: `/continue`, the ▸ Continue link and the palette row name `Ctrl+Return`/`Ctrl+Enter` (the Keymap's first binding for the same key).
+- [ ] An ordinary finished turn: empty prompt box, Ctrl+Enter → the prompt `Continue` is sent, and no "Type a prompt first." status appears. (The owner's case, and the whole point of the change.)
+- [ ] The two cases the card first landed still work: a turn stopped at its step limit, and a pane restored from a session cut off mid-turn — empty box, Ctrl+Enter → `Continue`.
+- [ ] Non-empty box unchanged: Ctrl+Enter sends the typed text (and interrupts a busy agent with it), never `Continue`.
+- [ ] A busy agent with an empty box sends nothing: the pane keeps "Type a prompt first; Ctrl+Enter interrupts the agent with it."
+- [ ] The password-prompt exception: at a masked password prompt, Ctrl+Enter on the empty masked field starts no agent turn.
 - [ ] A remote pane's Ctrl+Enter send-now is unaffected (remote path untouched; spot-check).
 - [ ] A resumed guest-harness pane: Ctrl+Enter types `Continue` into the guest TUI as `/continue` does.
+- [ ] Slow paths still teach the key: `/continue`, the ▸ Continue link and the palette row name `Ctrl+Return`/`Ctrl+Enter`, and the hint reads "send Continue from an empty prompt box".
+
+## Decisions
+Owner, in the terminal pane, 2026-09-20: "ctrl+enter in an empty prompt should always send agent prompt 'continue'".
+
+Read as: an empty prompt box with an idle agent sends `Continue` **always** — the limit/cut-off gate this card first landed is dropped. The one place it does not apply is a masked password prompt, where the masked field stands in for the prompt box (the pane says "Not while a password prompt is open." and starts no turn).
+
+## Execution Summary
+The gate is gone. `relay::continueturn::sendNowContinues` (`src/ContinueTurn.h`) reads two facts — the box is empty, the agent is idle — and nothing else; the pane's `m_limitReached` / `m_turnCutOff` still decide the "▸ Continue" line a stopped turn prints, but no longer gate the key and are no longer passed to the rule. `Pane::interruptAgentWithPrompt` (`src/Pane.h`) sends `Continue` for every idle empty box, keeps the typed-text and busy branches as they were, and refuses at a masked password prompt, where the masked field stands in for the prompt box.
+
+Surfaces: the Keymap descriptions of `agent.interrupt` / `agent.continue`, the `/continue` slow-path hint (now "send Continue from an empty prompt box"), the palette row's comment, and the composer key table plus the Continue paragraph in `docs/ARCHITECTURE.md`.
+
+- Commit `e7b1e4be` (land.py, onto tip `25f54d1b`): the rule, the routing, the surfaces and the test.
+- Live check: `docs/qa_evidence/2026-09-20-ctrl-enter-always/` — Xvfb plus a mock provider on loopback, ALL PASS (the mock's log holds the `Continue` no typing produced after an ordinary turn).
+- Note for whoever lands next on `src/Pane.h`: this commit was held for the `--confirm` review because other live sessions hold the path, and its hunks were all this card's; the working tree still carries their uncommitted work untouched.
+
+## Tests
+- `ctest --test-dir build -R continueturn` — four cases on the header-only rule (`src/ContinueTurn.h`): an empty box with an idle agent continues; text in the box never does; a busy agent never does; a busy agent with text never does. land.py's build gate ran this same case in the exact landing tree before the swap.
+- `unittest:tests.test_conv_index.HelperTests.test_turn_left_open_reads_only_the_checkpoint_stamps` — the cut-off predicate behind `state_loaded {turn_open}`, from the card's worker half (`backend/relay_core/conv_index.py`).
+- `unittest:tests.test_conv_index.HelperTests.test_unfinished_reads_checkpoints_messages_and_todos` — the same file's `session_unfinished`, which now ORs that predicate in.
+- `unittest:tests.test_sessions.SessionTests.test_resume_reports_a_turn_left_open` — `resume` carries `turn_open` in `state_loaded` (`backend/relay_core/agent.py`).
+- `manual: docs/qa_evidence/2026-09-20-ctrl-enter-always/` — the Xvfb drive against the landed build: an ordinary finished turn (D), typed text (F), the step limit (A), the `/continue` hint (H) and a busy agent (G).

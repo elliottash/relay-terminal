@@ -1,0 +1,27 @@
+2026-09-20T23:42:51.630Z INFO relay.gui gui_start version=0.1.0 build=2026-09-20.19H.01 pid=2950983 level=info
+2026-09-20T23:42:51.657Z ERROR relay.gui qt category=default msg="QStandardPaths: wrong permissions on runtime directory /tmp/claude-1000/sxf1-always-live/run, 0775 instead of 0700"
+2026-09-20T23:42:51.660Z ERROR relay.gui qt category=default msg="QStandardPaths: wrong permissions on runtime directory /tmp/claude-1000/sxf1-always-live/run, 0775 instead of 0700"
+2026-09-20T23:42:51.678Z INFO relay.gui worker_start pane=65c46980 workspace_set=1
+2026-09-20T23:42:51.769Z INFO relay.gui event type=ready pane=65c46980
+2026-09-20T23:42:51.914Z INFO relay.gui event type=configured pane=65c46980 model=mock-opus
+2026-09-20T23:43:01.295Z INFO relay.gui event type=agent_started pane=65c46980 turn_id=0bbcce0f96cf4691bc1b8272e76e77ae
+2026-09-20T23:43:01.323Z INFO relay.gui event type=turn_summary pane=65c46980 turn_id=0bbcce0f96cf4691bc1b8272e76e77ae outcome=done ms=32
+2026-09-20T23:43:01.325Z INFO relay.gui event type=agent_finished pane=65c46980 outcome=done
+2026-09-20T23:43:07.936Z INFO relay.gui event type=agent_started pane=65c46980 turn_id=26fc4313ecf04261bdf7715916c3378a
+2026-09-20T23:43:07.948Z INFO relay.gui event type=turn_summary pane=65c46980 turn_id=26fc4313ecf04261bdf7715916c3378a outcome=done ms=3
+2026-09-20T23:43:07.949Z INFO relay.gui event type=agent_finished pane=65c46980 outcome=done
+2026-09-20T23:43:17.080Z INFO relay.gui event type=agent_started pane=65c46980 turn_id=0540c47875934382ae9d8389396d23bd
+2026-09-20T23:43:17.089Z INFO relay.gui event type=turn_summary pane=65c46980 turn_id=0540c47875934382ae9d8389396d23bd outcome=done ms=3
+2026-09-20T23:43:17.090Z INFO relay.gui event type=agent_finished pane=65c46980 outcome=done
+2026-09-20T23:43:24.283Z INFO relay.gui event type=agent_started pane=65c46980 turn_id=37820a5b84d24c7c851e077f81da425d
+2026-09-20T23:43:24.292Z INFO relay.gui event type=turn_summary pane=65c46980 turn_id=37820a5b84d24c7c851e077f81da425d outcome=done stop_reason=limit ms=9
+2026-09-20T23:43:24.292Z INFO relay.gui event type=agent_finished pane=65c46980 outcome=done stop_reason=limit
+2026-09-20T23:43:29.917Z INFO relay.gui event type=agent_started pane=65c46980 turn_id=26239be406244871aeb2cde75eb236ca
+2026-09-20T23:43:29.930Z INFO relay.gui event type=turn_summary pane=65c46980 turn_id=26239be406244871aeb2cde75eb236ca outcome=done ms=2
+2026-09-20T23:43:29.930Z INFO relay.gui event type=agent_finished pane=65c46980 outcome=done
+2026-09-20T23:43:37.184Z INFO relay.gui event type=agent_started pane=65c46980 turn_id=3cc6734a85764f7d8ab9c3d5cb17e3cb
+2026-09-20T23:43:37.198Z INFO relay.gui event type=turn_summary pane=65c46980 turn_id=3cc6734a85764f7d8ab9c3d5cb17e3cb outcome=done stop_reason=limit ms=9
+2026-09-20T23:43:37.198Z INFO relay.gui event type=agent_finished pane=65c46980 outcome=done stop_reason=limit
+2026-09-20T23:44:01.967Z INFO relay.gui event type=agent_started pane=65c46980 turn_id=470caffbe70841c399d3e12293ca80d7
+2026-09-20T23:44:15.588Z INFO relay.gui gui_quit reason=signal pid=2950983 uptime_s=83 build=2026-09-20.19H.01
+2026-09-20T23:44:16.634Z ERROR relay.gui worker_exit pane=65c46980 code=0 crashed=0
