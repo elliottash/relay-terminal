@@ -90,7 +90,7 @@ xdotool windowmove "$win" 0 0 windowsize "$win" $width $height
 xdotool windowfocus "$win"; sleep 3
 
 # The model box sits in the composer's right-hand chip strip (read off a probe of this layout).
-COMBO_X=${COMBO_X:-1260} COMBO_Y=${COMBO_Y:-845}
+COMBO_X=${COMBO_X:-1180} COMBO_Y=${COMBO_Y:-845}   # the model box; the level box sits right of it
 [[ ${PROBE_ONLY:-} == 1 ]] && { shot probe; echo "probe shot written"; exit 0; }
 
 # a. the box open
