@@ -1795,7 +1795,10 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   one flat list of entries keyed `<preset>|<model>`, and keeps what the user said about them in
   QSettings under `models/*`: shown, priority (rank 1 is Main and writes `provider/preset` +
   `provider/model` for new panes; rank 2 is the fallback, kept as `models/fallback/*` and sent as
-  the `fallback` request option so failover tries it first), custom ids, favorites, recent, sort,
+  the `fallback` request option so failover tries it first; `models/openrouter_fallback` is the
+  per-model opt-in sent as `failover_openrouter`, the model ids to continue on OpenRouter when
+  their own provider fails — off by default, per the owner: "you wouldn't want to start doing
+  gpt 6 calls at PAYG"), custom ids, favorites, recent, sort,
   a remembered reasoning level per entry, use counts and a tokens/s estimate. `src/ModelPicker.*`
   (`relay-modelpicker`, `tests/modelpicker_test.cpp`) is the dialog behind Ctrl+Shift+M
   (`agent.model`), `/model` alone and the box's "more models…": filter, sort menu, columns model ·

@@ -1817,7 +1817,10 @@ private:
         const qint64 now = QDateTime::currentSecsSinceEpoch();
         auto curated = [this] {
             refreshSettingsPanes();
-            for (Pane *each : allPanes()) each->modelsCurationChanged();
+            for (Pane *each : allPanes()) {
+                each->modelsCurationChanged();
+                each->agentOptionsChanged(QStringLiteral("models/fallback"));   // rank 2 reaches the worker now
+            }
         };
         auto str = [](const QJsonObject &object, const char *field) { return object.value(QLatin1String(field)).toString(); };
 
@@ -1946,6 +1949,26 @@ private:
                     curated();
                 };
                 models.rows << row;
+                if (!entry.openrouter.isEmpty() && !entry.guest && !entry.hosted) {
+                    // The same model on OpenRouter when this provider fails (owner, 2026-09-20):
+                    // off unless asked for, per model — a pay-as-you-go GPT-6 call nobody chose
+                    // is worse than a failed turn; a flash model is the case it is for.
+                    relay::SettingRow twin;
+                    twin.kind = relay::SettingRow::Toggle;
+                    twin.id = QStringLiteral("option:models/openrouter_fallback/") + entry.key;
+                    twin.label = QStringLiteral("    ↳ when it fails, continue on openrouter's %1").arg(entry.openrouter);
+                    twin.detail = QStringLiteral("The same model through your OpenRouter key, pay-as-you-go, for that turn only. "
+                                                 "Tried after the ranked fallback. Needs an OpenRouter key");
+                    twin.aliases = QStringLiteral("openrouter fallback failover twin ") + entry.model;
+                    twin.checked = relay::models::curation::openrouterFallback(entry.key);
+                    twin.reset = [key = entry.key, this] { relay::models::curation::setOpenrouterFallback(key, false); if (m_active) m_active->agentOptionsChanged(QStringLiteral("models/openrouter_fallback")); };
+                    twin.changed = twin.checked;
+                    twin.onToggle = [this, key = entry.key](bool on) {
+                        relay::models::curation::setOpenrouterFallback(key, on);
+                        if (m_active) m_active->agentOptionsChanged(QStringLiteral("models/openrouter_fallback"));
+                    };
+                    models.rows << twin;
+                }
                 if (entry.custom) {
                     relay::SettingRow remove;
                     remove.kind = relay::SettingRow::Buttons;

@@ -3095,6 +3095,7 @@ public:
             || key == QStringLiteral("agent/first_token_timeout_s")
             || key == QStringLiteral("agent/audit_requests")
             || key == QStringLiteral("agent/failover") || key == QStringLiteral("agent/failover_hosted")
+            || key.startsWith(QStringLiteral("models/"))   // the ranked fallback, the OpenRouter opt-ins
             || key.startsWith(QStringLiteral("security/"))) {
             if (m_configured) {
                 QJsonObject request{{"type", "set_agent_options"}};
@@ -4124,6 +4125,10 @@ private:
                 // because a pane on the user's own key never chose Relay's hosted service).
                 {"failover", settings.value(QStringLiteral("agent/failover"), true).toBool()},
                 {"failover_hosted", settings.value(QStringLiteral("agent/failover_hosted"), false).toBool()},
+                // The models the user wants tried as the same model on OpenRouter when their own
+                // provider fails (owner, 2026-09-20): per model, off by default. Always sent, so
+                // an emptied list reaches the worker as "none" rather than "unchanged".
+                {"failover_openrouter", QJsonArray::fromStringList(relay::models::curation::openrouterFallbackModels())},
                 // Rank 2 of Options › Models' priority list (owner, 2026-09-20): the model a failing
                 // turn is moved to first. Written by rememberFallback whenever the list or the
                 // catalog changes; null until there is a second ranked model.

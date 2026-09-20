@@ -214,6 +214,18 @@ private Q_SLOTS:
         QCOMPARE(curation::effortFor(QStringLiteral("glm-coding|glm-5.3")), QString());
     }
 
+    void openrouterFallbackIsPerModelAndOffByDefault() {
+        QVERIFY(curation::openrouterFallbackModels().isEmpty());
+        curation::setOpenrouterFallback(QStringLiteral("glm-coding|glm-5.3-flash"), true);
+        curation::setOpenrouterFallback(QStringLiteral("glm|glm-5.3-flash"), true);   // the same model on another plan
+        curation::setOpenrouterFallback(QStringLiteral("kimi-code|k3"), true);
+        QVERIFY(curation::openrouterFallback(QStringLiteral("kimi-code|k3")));
+        QVERIFY(!curation::openrouterFallback(QStringLiteral("glm-coding|glm-5.3")));
+        QCOMPARE(curation::openrouterFallbackModels(), (QStringList{QStringLiteral("glm-5.3-flash"), QStringLiteral("k3")}));
+        curation::setOpenrouterFallback(QStringLiteral("kimi-code|k3"), false);
+        QCOMPARE(curation::openrouterFallbackModels(), QStringList{QStringLiteral("glm-5.3-flash")});
+    }
+
     void sortRoundTrips() {
         QCOMPARE(curation::sort(), Sort::Priority);
         curation::setSort(Sort::Remaining);

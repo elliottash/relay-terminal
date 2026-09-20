@@ -43,6 +43,7 @@ struct Entry {
     QString tier;         // the tier this is the provider's default for: main | flash | lite | ""
     QStringList efforts;  // reasoning levels the model accepts; empty = no knob
     int intelligence = -1;   // the owner's ruling (presets.INTELLIGENCE); -1 unknown
+    QString openrouter;      // the same model's OpenRouter slug, when it has one (presets.OPENROUTER_TWINS)
     bool usable = false;     // a stored key, a local server, a runnable harness, Relay Free available
     bool guest = false, local = false, hosted = false, custom = false;
     // "<label> · <provider>" — one line for a row, a status bar, a tooltip.
@@ -114,6 +115,15 @@ void noteSpeed(const QString &key, double tokensPerSecond);
 
 QString effortFor(const QString &key);
 void setEffortFor(const QString &key, const QString &level);
+
+// Models the user wants tried on OpenRouter when their own provider fails (owner, 2026-09-20: off
+// by default — nobody wants surprise pay-as-you-go GPT-6 calls — and on per model, "glm 5.3
+// flash for example"). models/openrouter_fallback is the list of entry keys; what the worker
+// gets is their model ids.
+QStringList openrouterFallbackKeys();
+bool openrouterFallback(const QString &key);
+void setOpenrouterFallback(const QString &key, bool on);
+QStringList openrouterFallbackModels();   // model ids, for the request option
 
 Sort sort();
 void setSort(Sort sort);

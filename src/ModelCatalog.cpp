@@ -19,6 +19,7 @@ const QString kCustom = QStringLiteral("models/custom");
 const QString kFavorites = QStringLiteral("models/favorites");
 const QString kRecent = QStringLiteral("models/recent");
 const QString kSort = QStringLiteral("models/sort");
+const QString kOpenrouter = QStringLiteral("models/openrouter_fallback");
 constexpr int kRecentCap = 10;
 
 QString str(const QJsonObject &object, const char *field) { return object.value(QLatin1String(field)).toString(); }
@@ -149,6 +150,7 @@ Catalog catalogFrom(const QJsonArray &presets) {
             entry.tier = str(row, "tier");
             for (const auto &level : row.value(QStringLiteral("efforts")).toArray()) entry.efforts << level.toString();
             entry.intelligence = row.value(QStringLiteral("intelligence")).isDouble() ? row.value(QStringLiteral("intelligence")).toInt() : -1;
+            entry.openrouter = str(row, "openrouter");
             entry.usable = usable;
             entry.guest = guest;
             entry.local = local;
@@ -356,6 +358,23 @@ void setEffortFor(const QString &key, const QString &level) {
     if (key.isEmpty()) return;
     if (level.isEmpty()) QSettings().remove(perKey(QStringLiteral("effort"), key));
     else QSettings().setValue(perKey(QStringLiteral("effort"), key), level);
+}
+
+QStringList openrouterFallbackKeys() { return list(kOpenrouter); }
+bool openrouterFallback(const QString &key) { return openrouterFallbackKeys().contains(key); }
+void setOpenrouterFallback(const QString &key, bool on) {
+    QStringList keys = openrouterFallbackKeys();
+    keys.removeAll(key);
+    if (on) keys << key;
+    store(kOpenrouter, keys);
+}
+QStringList openrouterFallbackModels() {
+    QStringList models;
+    for (const QString &key : openrouterFallbackKeys()) {
+        QString preset, model;
+        if (Catalog::splitKey(key, &preset, &model) && !models.contains(model)) models << model;
+    }
+    return models;
 }
 
 Sort sort() { return sortFromId(QSettings().value(kSort).toString()); }
