@@ -1,0 +1,32 @@
+<!-- relay:entry 20260920T161118Z-e1 author=claude-code kind=question -->
+### Claude Code · 2026-09-20 16:11
+Five decisions before this is executable. Recommendation on each.
+
+**1. Memory first, or HQ first?**
+*Recommend memory first (stages 1 then 2 as filed).* A global memory nothing reads is the same
+nothing as a project memory nothing reads, and stage 2 is cheap once stage 1 works because `scope`
+and the directory already exist. The alternative is building HQ first so aliases and memory land in
+one shape, at the cost of shipping nothing that works for longer.
+
+**2. What decides that a memory applies to this turn?**
+*Recommend: `pinned` always in, plus `paths` globs matched against the workspace, with `topic`
+used for search only.* That uses the fields already declared and costs no model call. The
+alternatives are a retrieval step (a model or embedding picks), which is slower and unpredictable,
+or all-memories-always, which does not survive a board with fifty of them.
+
+**3. Does HQ absorb `~/.config/relay/relay.md`, or stay a sibling?**
+*Recommend sibling, unchanged.* HQ cannot own `~/.claude/CLAUDE.md`, `~/.warp/WARP.md` or
+`~/.codex/AGENTS.md`, which `instructions.py` already reads, so pulling only Relay's own file into
+HQ splits one concept across two places for no capability.
+
+**4. Is `scope: team` in or out?**
+*Recommend out for now, keep the value legal.* `docs/TASKS-AND-MEMORY-DESIGN.md:448-452` declares
+project | team | user. Project and user have obvious homes; team has no store, no sync and no
+sharing model, and inventing one here would be the largest part of the work.
+
+**5. What happens to the "loaded when it applies" label if stage 1 slips?**
+*Recommend changing the text now, in its own one-line commit.* `BoardModel.cpp:161` currently tells
+the user a memory card is in use. It is not. That is a false statement on screen today, independent
+of everything above.
+
+Status `discussing`, `waiting_on: owner`.
