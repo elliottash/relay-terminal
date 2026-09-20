@@ -16,7 +16,9 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QMouseEvent>
 #include <QPlainTextEdit>
+#include <QSettings>
 #include <QPushButton>
 #include <QTabBar>
 #include <QTest>
@@ -532,6 +534,49 @@ private slots:
         view.onClose = [&closed] { closed = true; };
         QTest::keyClick(view.findChild<QTextBrowser *>(), Qt::Key_Escape);
         QVERIFY(closed);
+    }
+
+    // A shaky click on the ⧉ copy button: once the pointer crosses into the next character
+    // QTextBrowser drops the anchor and selects the glyph instead, no anchorClicked fires, and
+    // copy-on-select then puts "⧉" itself on the clipboard. The view rescues a press-and-release
+    // that stay on the same copy link, so the clipboard still gets the id.
+    void infoViewShakyClickOnCopyStillCopiesTheId() {
+        using namespace relay::sessioninfo;
+        QSettings().setValue(QStringLiteral("terminal/copy_on_select"), true);
+        InfoView view;
+        QList<QJsonObject> asked;
+        view.onRequest = [&asked](const QJsonObject &request) { asked << request; };
+        view.showLiveSession();
+        QCOMPARE(asked.size(), 1);
+        view.setInfo({{QStringLiteral("id"), asked.last().value(QStringLiteral("id"))},
+                      {QStringLiteral("kind"), QStringLiteral("session")}, {QStringLiteral("live"), true},
+                      {QStringLiteral("session_id"), QString(32, QLatin1Char('a'))}});
+        view.resize(600, 400);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        auto *body = view.findChild<QTextBrowser *>();
+        QVERIFY(body);
+        const QTextCursor found = body->document()->find(QStringLiteral("⧉"));
+        QVERIFY(!found.isNull());
+        QTextCursor atStart(body->document()), atEnd(body->document());
+        atStart.setPosition(found.selectionStart());
+        atEnd.setPosition(found.selectionEnd());
+        const int left = body->cursorRect(atStart).left();
+        const int right = body->cursorRect(atEnd).left();
+        const int y = body->cursorRect(atStart).center().y();
+        QVERIFY(right - left > 4);
+        auto send = [&](QEvent::Type type, const QPoint &pos, Qt::MouseButton button, Qt::MouseButtons buttons) {
+            QMouseEvent event(type, pos, button, buttons, Qt::NoModifier);
+            QApplication::sendEvent(body->viewport(), &event);
+        };
+        send(QEvent::MouseButtonPress, QPoint(left + 1, y), Qt::LeftButton, Qt::LeftButton);
+        for (int x = left + 2; x < right; ++x)
+            send(QEvent::MouseMove, QPoint(x, y), Qt::NoButton, Qt::LeftButton);
+        send(QEvent::MouseButtonRelease, QPoint(right - 1, y), Qt::LeftButton, Qt::NoButton);
+        // The gesture really did turn into a selection — the bug's first step.
+        QVERIFY(body->textCursor().hasSelection());
+        QTRY_COMPARE(QApplication::clipboard()->text(), QString(32, QLatin1Char('a')));
+        QVERIFY(!body->textCursor().hasSelection());
     }
 
     // The Ask row at the foot of the ⓘ pane (#FEJQ). This pane has no helper agent of its own:
