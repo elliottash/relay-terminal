@@ -4076,7 +4076,7 @@ private:
         m_opaqueHint->hide();
         routeRow->addWidget(m_opaqueHint, 1);
         routeRow->addStretch(1);
-        buildSessionControls(routeRow);        // plan chip and the context chip, next to the model
+        buildSessionControls(routeRow);        // plan chip left, by the Switchboard chip; context chip by the model
         m_modelBox = new CurrentTextComboBox;
         m_modelBox->setObjectName(QStringLiteral("statusPicker"));
         m_modelBox->setAccessibleName(QStringLiteral("Agent model"));
@@ -4277,7 +4277,10 @@ private:
         m_planChip->setObjectName(QStringLiteral("planChip"));
         m_planChip->setToolTip(QStringLiteral("Plan mode: the agent investigates and writes a plan (Shift+Tab to leave)"));
         m_planChip->hide();
-        row->addWidget(m_planChip);
+        // At the strip's left, right after the Switchboard chip (owner, 2026-09-20: "this plan
+        // indicator should be at the left (just to the right of the issues button)"): plan mode
+        // is the pane's state, not a property of the model it sat beside on the right.
+        row->insertWidget(row->indexOf(m_workChip) + 1, m_planChip);
         m_ctxLabel = new QLabel;
         m_ctxLabel->setObjectName(QStringLiteral("stripChipLabel"));
         m_ctxLabel->setTextFormat(Qt::PlainText);
