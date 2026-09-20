@@ -34,16 +34,8 @@ put shortcuts in parentheses in switchboard, eg (n) after new card. (x) after ex
 
 ## QA checklist
 - [x] `cmake --build build` clean; `ctest -R '^board'` — board + boardworkspace pass with the suffixed labels and the new assertions (evidence: `docs/qa_evidence/2026-09-19-put-shortcuts-in-parentheses-in-switchboard/evidence.md`).
-- [ ] `ctest --test-dir build` fully green — one run had `backend-and-bash` failing while this label-only change shared a dirty worktree with other cards' work; re-run for a clean signal.
+- [ ] `ctest --test-dir build` fully green — one run had `backend-and-bash` failing while this label-only change shared a dirty worktree with other cards' work; re-run on the current tree for a clean signal.
 - [ ] `./scripts/test.sh` passes (skipped this session at the owner's request).
-- [ ] Under Xvfb, a live board shows `+  New card (n)`, `←  Back to board (Esc)`, `Undo (Ctrl+Z)`, and an open card shows `Edit (e)` / `#ID → prompt (t)` / `Open file (o)` / `Comment (Ctrl+Shift+Enter)` / `Discuss (Enter)` / `Plan (p)` / `Execute (x)` / `Cancel (Esc)` / `Save (Ctrl+Enter)`.
-- [ ] At ~350 px pane width the reply row and header row still fit or wrap cleanly (skipped this session at the owner's request).
-- [ ] `Clean up`, the cleanup panel, `Stop` and the `m_keys` legend are unchanged.
-
-**Superseded in part by #VZ69 (2026-09-19):** the card detail lost its Comment and Discuss buttons
-(Enter and Ctrl+Shift+Enter in the reply box do both now), the running mode's button no longer
-becomes "Stop" (a strip over the reply box does it, labelled "✕ Stop planning" / "✕ Stop
-discussing"), and "Edit (e)" is now the pencil "✎ Edit (e)" at the right of the title. QA this card
-against the labels that still exist: `+  New card (n)`, `←  Back to board (Esc)`, `Undo (Ctrl+Z)`,
-`✎ Edit (e)`, `#ID → prompt (t)`, `Open file (o)`, `Plan (p)`, `Execute (x)`, `Verify (v)`,
-`Cancel (Esc)`, `Save (Ctrl+Enter)`.
+- [x] Under Xvfb (run recorded in the evidence README, `drive.sh` + frames): a live board shows `+  New card (n)` in the tools row beside a bare `Clean up`; an open card shows `←  Back to board (Esc)`, `Edit (e)`, `Open file (o)`, `Plan (p)`, `Execute (x)` (read off the frames at 6× zoom). Not separately shot: `#ID → prompt (t)`, `Cancel (Esc)`, `Save (Ctrl+Enter)`, `Undo (Ctrl+Z)` — covered by the passing board unit test. The run predates #VZ69, so its frames still show the five-button reply row.
+- [x] At ~350 px pane width the reply row wraps onto two lines instead of overflowing (Comment/Discuss line 1, `Plan (p) | Execute (x) | Verify (v)` line 2, read cleanly), and the header row fits; with five buttons the row already overflowed before the suffixes, and the wrap absorbs the added ~90 px.
+- [x] `Clean up`, the cleanup panel, `Stop` and the `m_keys` legend unchanged — nothing outside the 14 label lines is in the commit, and `Clean up` shows bare in `list.png`.

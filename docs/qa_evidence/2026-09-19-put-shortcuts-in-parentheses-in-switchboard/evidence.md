@@ -49,3 +49,13 @@ the reply row reads `Comment (Ctrl+Shift+Enter)` / `Discuss (Enter)` / `Plan (p)
 The worktree shared another card's uncommitted edits in `src/BoardPane.cpp` (#T71W
 cross-provider QA); this commit was staged as `HEAD`'s `BoardPane.cpp` plus exactly the 14
 label lines, so the commit contains only #QG60.
+
+## GUI run (added the same day)
+
+`drive.sh` + `README.md` in this directory: Relay under Xvfb with an isolated HOME, a
+sandbox snapshot of this repo's board, `Ctrl+Shift+S` to open the Switchboard. The
+suffixed labels render live (`+  New card (n)` on the list, `←  Back to board (Esc)`,
+`Edit (e)`, `Open file (o)`, `Plan (p)`, `Execute (x)` on a card page), and at ~350 px the
+reply row wraps onto two lines instead of overflowing. Details, coordinates and the
+not-covered list are in the README.
+
