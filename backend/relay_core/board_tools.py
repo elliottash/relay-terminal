@@ -2797,6 +2797,26 @@ class BoardTools:
                          "close it, and the card cannot leave needs-verification while it is "
                          "open.")}
 
+    def promote_signal(self, key: str, reason: str = "") -> dict:
+        """File the bug card for one signal, for the fold that noticed it was due (R9).
+
+        Not a tool: the caller is `tests_protocol.fold_signals`, which has just recomputed the
+        state and found a signal the rules promote — the agent's own route is
+        `board_signals {action: promote}`.  A signal that is not open, or already has a card, is
+        a no-op rather than an error, because two folds may notice the same one; the cap is a
+        refusal and is returned as one, so the signal stays in the list.
+        """
+        S, signals = self._signal_state()
+        signal = signals.get(str(key or ""))
+        if signal is None or signal.state != "open" or signal.card:
+            return {"promoted": False, "key": str(key or "")}
+        path = S.default_path(self.board.repo, self.board.root)
+        try:
+            return self._signal_promote(S, signals, signal, path,
+                                        reason or signal.promote or "due")
+        except BoardToolError as exc:
+            return exc.to_result()
+
     def _signal_gate(self, card: B.Card, old_status: str, status: str) -> None:
         """Decision 6 and 8: refuse a move out of `needs-verification` under an open signal.
 

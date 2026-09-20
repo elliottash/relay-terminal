@@ -67,9 +67,15 @@ from . import jobs as J
 from . import test_history as H
 from . import test_probe as P
 
+#: The signal requests (protocol 32, card #AQ6X).  They live here rather than in a module of
+#: their own because the fold they read is driven from this one: every execution a signal is made
+#: of passes through `ingest_incoming` and `_execute`, and nothing else ever writes one.
+SIGNALS_TYPES = frozenset({"signals_list", "signals_claim", "signals_release",
+                           "signals_dismiss", "signals_promote"})
+
 #: The requests this class answers.  `board_protocol.TYPES` includes them and delegates here.
 TYPES = frozenset({"tests_list", "tests_run", "tests_stop", "tests_history", "tests_check",
-                   "tests_suggest"})
+                   "tests_suggest"}) | SIGNALS_TYPES
 
 #: The card section that lists what proves a card, and the statuses at which not having one is
 #: worth reporting: a card being worked, or waiting for a verifier, with no tests named is the
@@ -109,6 +115,9 @@ MAX_HISTORY_LIMIT = 500         # executions one `tests_history` may carry
 MAX_COMMITS = 20                # commits of a card read for their changed files
 MAX_CHANGED_FILES = 400
 MAX_SUGGESTED = 20           # lines one `tests_suggest` appends to a card
+#: Decision 3's re-run is a **separate** run in the store, so a fail-fail really is two
+#: consecutive failing executions and a fail-pass really is one tree disagreeing with itself.
+RERUN_SUFFIX = "-rerun"
 GIT_TIMEOUT = 20.0
 
 #: The runners a run can actually start.  `manual` is evidence a person records, so a row for
@@ -178,6 +187,11 @@ class _Run:
         self.finished = threading.Event()
         self.jobs: list = []
         self.stopped = False
+        #: The keys the re-run of decision 3 took, and the signal keys the fold that followed
+        #: this run put on the board — what `tests_run`'s result carries as `opened`, so the pane
+        #: that ran the tests learns in the same turn what its run broke.
+        self.rerun: list[str] = []
+        self.opened: list[str] = []
 
 
 # --------------------------------------------------------------------------- the handlers
@@ -194,7 +208,7 @@ class TestsCommands:
 
     def __init__(self, project, board_root=None, emit: Callable[[dict], None] | None = None,
                  jobs=None, *, build_dir=None, python: str | None = None,
-                 clock: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.time, pane_token: str | None = None):
         self.project = Path(os.path.abspath(Path(project).expanduser()))
         root = Path(board_root) if board_root is not None else B.board_folder(self.project)
         self.board_root = Path(root) if root is not None else None
@@ -205,6 +219,13 @@ class TestsCommands:
         self.clock = clock
         self._lock = threading.Lock()
         self._run: _Run | None = None
+        #: This pane's session token (19.19), when there is one.  A signal claim writes it
+        #: exactly as a card claim does, and the `run` line every run leaves in the signal log
+        #: carries it — which is how the verification gate of decision 8 knows *whose* run first
+        #: failed a key.  The Switchboard's own worker and a test have none.
+        self.pane_token = pane_token or None
+        self._signals_sent: dict | None = None
+        self._tools = None
 
     # ---- collaborators ---------------------------------------------------------
     @property
@@ -277,6 +298,8 @@ class TestsCommands:
         elif kind == "tests_suggest":
             self.emit_suggest(request.get("card"), request.get("id"),
                               apply=request.get("apply", True))
+        elif kind in SIGNALS_TYPES:
+            self.dispatch_signal(kind, request)
         return True
 
     def shutdown(self) -> None:
@@ -303,6 +326,12 @@ class TestsCommands:
         executions = H.read(self.store_path())
         index, without = self.card_index()
         records = H.records(discovered, executions, index)
+        # The fold runs after every ingest (#AQ6X step 4), and this is the only place that knows
+        # what the project still *collects* — so it is the only place `removed` can be decided.
+        try:
+            self.fold_signals(discovered=discovered, executions=executions)
+        except Exception:                                    # pragma: no cover - defensive
+            pass
         return {"project": str(self.project), "tests": records,
                 "summary": H.summary(records), "cards_without_tests": without}
 
@@ -446,14 +475,37 @@ class TestsCommands:
                             f"`tests/test_board.py::CardTests::test_roundtrip`."),
                 "severity": "warning"}],
                 "actions": ["Add the tests this card's commits touched"],
-                "ids": [], "files": {}, "failing": []}
+                "ids": [], "files": {}, "failing": [],
+                **self.signal_block(ident, card)}
         lines = section_lines(card.body, span)
         discovered = P.discover(self.project, build_dir=self.build_dir(build_dir))
         executions = H.read(self.store_path())
         index, _ = self.card_index()
         records = H.records(discovered, executions, index)
         result = H.check_card(lines, self.card_files(ident, card), records)
-        return {"card": ident, **result, **resolved_tests(lines, records)}
+        return {"card": ident, **result, **resolved_tests(lines, records),
+                **self.signal_block(ident, card, discovered=discovered, executions=executions)}
+
+    def signal_block(self, card_id: str, card, *, discovered=None, executions=None) -> dict:
+        """`{"blocks": […], "open_before": […]}` for one card (decision 8, #AQ6X step 5).
+
+        `blocks` are the signals this card is answerable for — the one it was promoted from, and
+        the ones first seen in a run by the pane that holds it — and they are what refuses the
+        move out of `needs-verification` (`board_tools._signal_gate`).  `open_before` is every
+        other open signal, listed so the person reading Check knows the tree was already red and
+        that it is not this card's doing.  A board with no signal store answers with two empty
+        lists, which reads as "nothing known", not as "nothing wrong".
+        """
+        try:
+            from . import signals as S
+            signals = self.signal_state(discovered=discovered, executions=executions)
+            blocks, before = S.blocking(signals.values(), card=card_id,
+                                        session=str((card.front.get("session") if card is not None
+                                                     else "") or ""))
+        except Exception:                                    # pragma: no cover - unreadable store
+            return {"blocks": [], "open_before": []}
+        return {"blocks": [s.to_dict() for s in blocks],
+                "open_before": [s.to_dict() for s in before]}
 
     def emit_check(self, card_id, rid=None) -> dict:
         """Answer one Check, and leave the dated block on the card that says it happened.
@@ -576,6 +628,180 @@ class TestsCommands:
         result["message"] = _suggest_sentence(result)
         self.emit({"event": "tests_suggest", **_rid(rid), **result})
         return result
+
+    # ---- signals (protocol 32, #AQ6X) ------------------------------------------
+    def signals_path(self) -> Path:
+        from . import signals as S
+        return S.default_path(self.project, self.board_root)
+
+    def signal_state(self, *, discovered=None, executions=None, now=None) -> dict:
+        """The fold, over this board's two private files.  Runs nothing and writes nothing.
+
+        `discovered` is taken in any of the three shapes `test_probe` and `test_history` pass
+        around — the whole `discover()` dict, its `tests` list, or plain ids — because a caller
+        that has just discovered is exactly the caller that has the dict, and a `removed` verdict
+        computed from the dict's *keys* would mark every signal removed.
+        """
+        from . import signals as S
+        rows = H.read(self.store_path()) if executions is None else executions
+        known = None
+        if discovered is not None:
+            if all(isinstance(item, str) for item in discovered) and not isinstance(
+                    discovered, dict):
+                known = [str(item) for item in discovered]
+            else:
+                known = [str(row.get("id") or "") for row in H._discovered_dicts(discovered)]
+        return S.fold(rows, S.read_events(self.signals_path()), now, discovered=known)
+
+    def fold_signals(self, *, discovered=None, executions=None, run: "_Run | None" = None,
+                     emit: bool = True) -> dict:
+        """Refold, promote what is due, refresh the promoted cards, and push `signals_changed`.
+
+        This is the one place the state is recomputed, and it is driven from the two places every
+        execution passes through — the ingest in `inventory()` and the end of a run in
+        `_execute` — so a signal cannot be a run behind what the store says.
+
+        Three things happen after the fold, in this order.  **Promotion** of the signals the rules
+        say are due (R9: persistent, or confirmed flaky; `gave-up` is promoted by the tool that
+        released it), which writes cards, so the state is folded again.  The machine-owned
+        `## Signal` **section** of every promoted card is rewritten in place, so a card never
+        disagrees with its signal.  And the payload goes out — but only when it *changed*: a
+        `tests_list` on a quiet board would otherwise re-send the same rows every refresh.
+        """
+        from . import signals as S
+        signals = self.signal_state(discovered=discovered, executions=executions)
+        if self._promote_due(signals):
+            signals = self.signal_state(discovered=discovered, executions=executions)
+        board = self.board()
+        if board is not None:
+            for signal in signals.values():
+                if signal.card:
+                    try:
+                        S.rewrite_section(board, signal)
+                    except (B.BoardError, OSError):        # pragma: no cover - unwritable board
+                        pass
+        if run is not None:
+            run.opened = [key for key, signal in signals.items()
+                          if signal.state == "open" and signal.opened_run in
+                          (run.run_id, f"{run.run_id}{RERUN_SUFFIX}")]
+        if emit:
+            self.emit_signals(signals=signals)
+        return signals
+
+    def _promote_due(self, signals: dict) -> list[str]:
+        """Write the bug card for every signal R9 says is due, up to the cap.  The keys written.
+
+        `board_tools` owns every card write, so this asks it rather than writing one itself; a
+        board that cannot be reached, or a refusal (the cap), leaves the signal in the fold, which
+        is exactly what the cap is for.
+        """
+        from . import signals as S
+        due = [s for s in S.sort_signals(signals.values())
+               if s.promote in ("persistent", "flaky") and not s.card]
+        if not due:
+            return []
+        room = S.MAX_PROMOTED_OPEN - len(S.promoted_open(signals.values()))
+        if room <= 0:
+            return []
+        tools = self._board_tools()
+        if tools is None:
+            return []
+        written: list[str] = []
+        for signal in due[:room]:
+            try:
+                result = tools.promote_signal(signal.key, signal.promote)
+            except Exception:                              # pragma: no cover - defensive
+                continue
+            if result.get("promoted"):
+                written.append(signal.key)
+        return written
+
+    def _board_tools(self):
+        """A `BoardTools` for the machine's own writes: no limits, no duplicate check, no model.
+
+        Made on first use and kept, because `_promote_due` may be reached from every run.  It is
+        deliberately not the pane's instance: this write is the fold's, it counts against no
+        turn's budget, and the card it makes is signed by nobody.
+        """
+        if self._tools is None:
+            board = self.board()
+            if board is None:
+                return None
+            from . import board_tools as BT
+            self._tools = BT.BoardTools(
+                board, autonomy="auto", enforce_limits=False, duplicate_check=False,
+                context=BT.ToolContext(actor="agent"), pane_token=self.pane_token,
+                state_path=self.project / ".relay" / "signals-rate.json")
+        return self._tools
+
+    def emit_signals(self, rid=None, *, signals: dict | None = None) -> dict:
+        """Push `signals_changed`.  With `rid` it is the answer to a `signals_list` request."""
+        from . import signals as S
+        if signals is None:
+            signals = self.signal_state()
+        payload = S.summary(signals.values(), session=self.pane_token or "")
+        if rid is None and payload == self._signals_sent:
+            return payload
+        self._signals_sent = payload
+        self.emit({"event": "signals_changed", **_rid(rid), **payload})
+        return payload
+
+    def dispatch_signal(self, kind: str, request: dict) -> dict:
+        """One `signals_*` request.  A refusal is the same event with `error` and `code`.
+
+        The GUI's path, not the agent's: a dismissal from here is the **owner's**, so all four
+        reasons and any expiry are allowed (decision 7) — the agent's two-reason, seven-day limit
+        lives in `board_tools.board_signals`, which is the model-facing door.
+        """
+        from . import signals as S
+        if kind == "signals_list":
+            return self.emit_signals(request.get("id"))
+        action = kind.split("_", 1)[1]
+        key = str(request.get("key") or "").strip()
+        signals = self.signal_state()
+        signal = signals.get(key)
+        def refuse(message: str, code: str) -> dict:
+            out = {"kind": action, "key": key, "error": message, "code": code}
+            self.emit({"event": "signals_written", **_rid(request.get("id")), **out})
+            return out
+        if not key:
+            return refuse(f"signals_{action} needs `key`: the signal's key.", "signal_refused")
+        if signal is None or signal.state in ("resolved", "removed"):
+            return refuse(f"There is no open signal {key!r}.", "signal_not_found")
+        path = self.signals_path()
+        written = {"kind": action, "key": key}
+        if action == "claim":
+            token = str(request.get("pane_token") or self.pane_token or "")
+            if signal.session and signal.session != token and not request.get("force"):
+                return refuse(f"{key} is held by another session ({signal.session[:8]}).",
+                              "board_claimed_elsewhere")
+            S.append_event({"action": "claim", "key": key, "session": token}, path)
+            written["session"] = token
+        elif action == "release":
+            S.append_event({"action": "release", "key": key,
+                            "reason": str(request.get("reason") or ""),
+                            "session": signal.session}, path)
+        elif action == "dismiss":
+            try:
+                dismissal = S.check_dismissal(request.get("reason"), request.get("comment"),
+                                              request.get("until"), by_agent=False)
+            except S.SignalError as exc:
+                return refuse(str(exc), exc.code)
+            S.append_event({"action": "dismiss", "key": key, "by": "owner", **dismissal}, path)
+            written.update(dismissal)
+        else:                                              # promote
+            tools = self._board_tools()
+            if tools is None:
+                return refuse("This project has no Switchboard to file a card on.",
+                              "signal_refused")
+            result = tools.promote_signal(key, "by hand")
+            if result.get("error"):
+                return refuse(str(result["error"]), str(result.get("code") or "signal_refused"))
+            if result.get("card"):
+                written["card"] = result["card"]
+        self.emit({"event": "signals_written", **_rid(request.get("id")), **written})
+        self.fold_signals()
+        return written
 
     # ---- the needs-verification gate -------------------------------------------
     def gate_move(self, card_id, status) -> dict | None:
@@ -745,11 +971,16 @@ class TestsCommands:
             self._emit_run(started, run_id=run.run_id)
             executions: list[H.Execution] = []
             commit = self.head_commit()
+            # Which *tree* this ran on, once per run (#AQ6X step 1): several sessions edit this
+            # checkout, so `commit` alone does not name the code under test.
+            tree = H.tree_digest_of(self.project)
             env = self._environment(tmp)
             if ctest and not run.cancel.is_set():
-                executions += self._run_ctest(run, ctest, repeat, build, tmp, env, commit)
+                executions += self._run_ctest(run, ctest, repeat, build, tmp, env, commit,
+                                              tree_digest=tree)
             if unit and not run.cancel.is_set():
-                executions += self._run_unittest(run, unit, repeat, tmp, env, commit)
+                executions += self._run_unittest(run, unit, repeat, tmp, env, commit,
+                                                 tree_digest=tree)
             # The JUnit files are the authority: anything the live output did not already report
             # is emitted here, so a pane that missed a line still ends with every verdict.
             for row in executions:
@@ -760,10 +991,19 @@ class TestsCommands:
                     run.done += 1
                 self._emit_progress(run, row.id, row.result, row.duration)
             self._store(executions)
+            self._note_run(run.run_id)
+            # Decision 3: a short failed set is re-run **once**, right now, so "open on the
+            # second consecutive failure" takes seconds instead of waiting for the next run.
+            executions += self._rerun_failures(run, executions, build, tmp, env, commit, tree,
+                                               repeat)
             run.state = "stopped" if run.stopped else "finished"
             self._emit_run({"state": run.state, "done": run.done, "total": run.total,
                             "message": self._finished_message(run, executions)},
                            run_id=run.run_id)
+            try:
+                self.fold_signals(run=run)
+            except Exception:                                # pragma: no cover - defensive
+                pass
         except Exception as exc:                             # pragma: no cover - belt and braces
             run.state = "error"
             run.message = f"The test run failed: {type(exc).__name__}: {str(exc)[:300]}"
@@ -779,6 +1019,64 @@ class TestsCommands:
             except Exception:                                # pragma: no cover - defensive
                 pass
             run.finished.set()
+
+    def _note_run(self, run_id: str) -> None:
+        """Leave one `run` line in the signal log: this run, and the pane whose it was.
+
+        An execution carries no pane token — the store is shared with every other producer — and
+        the verification gate of decision 8 needs to know whose run first failed a key.  One line
+        per run answers it, and a board with no signal store simply has none.
+        """
+        if not run_id:
+            return
+        try:
+            from . import signals as S
+            S.append_event({"action": "run", "run_id": run_id,
+                            "session": self.pane_token or ""}, self.signals_path())
+        except Exception:                                    # pragma: no cover - unwritable board
+            pass
+
+    def _rerun_failures(self, run: _Run, executions: Sequence[H.Execution], build: Path,
+                        tmp: Path, env: dict, commit: str, tree: str,
+                        repeat: int = 0) -> list[H.Execution]:
+        """Decision 3's one re-run of a short failed set, as its own run.  The rows it stored.
+
+        `signals.rerun_keys` decides: ten or fewer failures whose recorded p50 durations sum to a
+        minute.  Anything bigger stays `pending` and is answered by the next natural run, because
+        a button that quietly re-runs six minutes of tests is not a button anybody wants.
+
+        It is a **separate** `run_id` (`RERUN_SUFFIX`) so the fold reads it as a second execution
+        of each key: fail-fail is then two consecutive failures and opens the signal at once, and
+        fail-pass is one tree disagreeing with itself, which is the flaky mark (R4).
+
+        A run that asked for `repeat_until_fail` is left alone: it has already run each test
+        several times, and a re-run after it would say nothing new.
+        """
+        from . import signals as S
+        if run.stopped or run.cancel.is_set() or run.rerun or repeat:
+            return []                      # `repeat_until_fail` already ran them more than once
+        failed = [row.id for row in executions if row.result in S.FAILING]
+        if not failed:
+            return []
+        known = H.read(self.store_path(), ids=failed)
+        keys = S.rerun_keys(failed, list(known) + list(executions))
+        if not keys:
+            return []
+        run.rerun = keys
+        ctest, unit, _ = self._partition(keys)
+        run_id = f"{run.run_id}{RERUN_SUFFIX}"
+        folder = tmp / "rerun"
+        folder.mkdir(parents=True, exist_ok=True)
+        rows: list[H.Execution] = []
+        if ctest and not run.cancel.is_set():
+            rows += self._run_ctest(run, ctest, 0, build, folder, env, commit,
+                                    run_id=run_id, tree_digest=tree)
+        if unit and not run.cancel.is_set():
+            rows += self._run_unittest(run, unit, 0, folder, env, commit,
+                                       run_id=run_id, tree_digest=tree)
+        self._store(rows)
+        self._note_run(run_id)
+        return rows
 
     def _environment(self, tmp: Path) -> dict:
         """`scripts/test.sh`'s isolation, plus the offscreen platform and this project's backend.
@@ -804,7 +1102,8 @@ class TestsCommands:
         return env
 
     def _run_ctest(self, run: _Run, ids: list[str], repeat: int, build: Path, tmp: Path,
-                   env: dict, commit: str) -> list[H.Execution]:
+                   env: dict, commit: str, *, run_id: str = "",
+                   tree_digest: str = "") -> list[H.Execution]:
         """Every ctest id in **one** `ctest` invocation, with its JUnit file read at the end."""
         names = [value.split(":", 1)[1] for value in ids]
         pattern = "^(" + "|".join(re.escape(name) for name in names) + ")$"
@@ -814,10 +1113,12 @@ class TestsCommands:
         if repeat:
             parts += ["--repeat", f"until-fail:{repeat}"]
         self._run_command(run, " ".join(shlex.quote(p) for p in parts), env, live=True)
-        return H.ingest_junit(junit, runner=P.RUNNER_CTEST, commit=commit, run_id=run.run_id)
+        return H.ingest_junit(junit, runner=P.RUNNER_CTEST, commit=commit,
+                              run_id=run_id or run.run_id, tree_digest=tree_digest)
 
     def _run_unittest(self, run: _Run, ids: list[str], repeat: int, tmp: Path, env: dict,
-                      commit: str) -> list[H.Execution]:
+                      commit: str, *, run_id: str = "",
+                      tree_digest: str = "") -> list[H.Execution]:
         """Every unittest id in **one** `relay_core.junit_runner` invocation.
 
         `--repeat until-fail:N` has no equivalent in `unittest`, so the shell loops instead and
@@ -832,7 +1133,8 @@ class TestsCommands:
         if repeat:
             command = f"for _ in $(seq 1 {repeat}); do {command} || exit 1; done"
         self._run_command(run, command, env, live=False)
-        return H.ingest_junit(junit, runner=P.RUNNER_UNITTEST, commit=commit, run_id=run.run_id)
+        return H.ingest_junit(junit, runner=P.RUNNER_UNITTEST, commit=commit,
+                              run_id=run_id or run.run_id, tree_digest=tree_digest)
 
     def _run_command(self, run: _Run, command: str, env: dict, *, live: bool) -> None:
         """Start one command as a job and wait for it, streaming ctest's progress lines."""
@@ -893,11 +1195,17 @@ class TestsCommands:
     def _finished_message(run: _Run, executions: Sequence[H.Execution]) -> str:
         if run.stopped:
             return f"stopped after {run.done} of {run.total}"
-        counts = {"pass": 0, "fail": 0, "skip": 0}
+        # One line per *test*, not per execution: a key the re-run of decision 3 tried twice
+        # counts once, with its newest verdict, or a run of two tests would say "2 failed"
+        # because one of them failed twice.
+        newest: dict[str, H.Execution] = {}
         for row in executions:
+            newest[row.id] = row
+        counts = {"pass": 0, "fail": 0, "skip": 0}
+        for row in newest.values():
             counts["pass" if row.result == "pass" else
                    "skip" if row.result == "skip" else "fail"] += 1
-        seconds = sum(row.duration for row in executions)
+        seconds = sum(row.duration for row in newest.values())
         parts = [f"{counts['pass']} passed"]
         if counts["fail"]:
             parts.append(f"{counts['fail']} failed")
@@ -940,17 +1248,26 @@ class TestsCommands:
                 pass
             run.finished.wait(30)
         rows = H.read(self.store_path(), ids=list(run.ids))
-        mine = [row for row in rows if row.run_id == run.run_id]
+        # The re-run is its own `run_id` in the store (`RERUN_SUFFIX`) but the same answer here:
+        # the verdict the model needs is the *second* one, which is why the re-run happened.
+        ours = (run.run_id, f"{run.run_id}{RERUN_SUFFIX}")
+        mine = [row for row in rows if row.run_id in ours]
+        newest: dict[str, H.Execution] = {}
+        for row in mine:
+            newest[row.id] = row                             # the store is oldest first
         table = [{"id": row.id, "result": row.result, "duration": round(row.duration, 3),
                   **({"message": row.message[:500]} if row.message else {})}
-                 for row in sorted(mine, key=lambda r: r.id)]
+                 for row in sorted(newest.values(), key=lambda r: r.id)]
         counts = {"pass": 0, "fail": 0, "skip": 0}
-        for row in mine:
+        for row in newest.values():
             counts["pass" if row.result == "pass" else
                    "skip" if row.result == "skip" else "fail"] += 1
         return {"run_id": run.run_id, "state": "timed-out" if not completed else run.state,
                 "requested": len(run.ids), "ran": len(table), "counts": counts,
                 "tests": table, "skipped": list(run.skipped),
+                # What this run put on the board, so the pane that ran it learns in the same turn
+                # what it broke (#AQ6X step 7a) — and `rerun` says which keys were tried twice.
+                "opened": list(run.opened), "rerun": list(run.rerun),
                 "message": ("The run passed its timeout and was stopped."
                             if not completed else self._finished_message(run, []) or "")}
 
@@ -989,18 +1306,38 @@ def format_findings(result: dict) -> str:
     """A `tests_check` answer as the text an agent reads: one line per finding, then the actions."""
     findings = result.get("findings") or []
     card = result.get("card") or ""
+    signals = _signal_lines(result)
     if not findings:
-        return (f"#{card}: every test its `## Tests` section names is collected, has run, and is "
+        head = (f"#{card}: every test its `## Tests` section names is collected, has run, and is "
                 "neither flaky nor slow. Nothing to fix.")
+        return head + ("\n" + "\n".join(signals) if signals else "")
     lines = [f"#{card}: {len(findings)} finding{'' if len(findings) == 1 else 's'}."]
     for item in findings:
         test = item.get("test") or ""
         lines.append(f"- [{item.get('severity', 'notice')}] {item.get('verdict', '')}"
                      f"{f' · {test}' if test else ''}: {item.get('message', '')}")
+    lines += signals
     actions = result.get("actions") or []
     if actions:
         lines.append("Offered: " + "; ".join(str(a) for a in actions) + ".")
     return "\n".join(lines)
+
+
+def _signal_lines(result: dict) -> list[str]:
+    """The two signal lines Check adds (decision 8): what blocks this card, and what does not."""
+    blocks = result.get("blocks") or []
+    before = result.get("open_before") or []
+    lines = []
+    if blocks:
+        names = ", ".join(str(s.get("key") or "") for s in blocks[:5])
+        lines.append(f"- [error] signal: {len(blocks)} open signal(s) this pane's own runs "
+                     f"opened stop this card leaving needs-verification ({names}). A signal "
+                     "resolves by its check passing; board_signals lists and claims them.")
+    if before:
+        names = ", ".join(str(s.get("key") or "") for s in before[:5])
+        lines.append(f"- [notice] signal: {len(before)} signal(s) were open before this card "
+                     f"({names}); they do not block it.")
+    return lines
 
 
 def format_run(result: dict) -> str:

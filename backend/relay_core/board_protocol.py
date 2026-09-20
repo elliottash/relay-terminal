@@ -41,7 +41,11 @@ from .board_tools import (BOARD_STATES, CARD_MODES, PLAN_HEADING, BoardInit,
 #: the Test suites pane should not pay for them at start-up (#TZWF item 4). It is the same set
 #: as `tests_protocol.TYPES`, and `tests/test_tests_protocol.py` fails if the two drift.
 TESTS_TYPES = ("tests_list", "tests_run", "tests_stop", "tests_history", "tests_check",
-               "tests_suggest")
+               "tests_suggest",
+               # Protocol 32 (#AQ6X): the signals are folded out of the same run history and
+               # driven from the same handler, so they arrive through the same door.
+               "signals_list", "signals_claim", "signals_release", "signals_dismiss",
+               "signals_promote")
 
 #: The Profile button's two requests (section 31.9, #7BM4 phase 5), spelled out here for the same
 #: reason: `profile_protocol` pulls in `jobs`, and a worker whose owner never presses Profile

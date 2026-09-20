@@ -33,6 +33,7 @@ from relay_core import board as B                  # noqa: E402
 from relay_core import board_protocol as BP        # noqa: E402
 from relay_core import board_tools as BT           # noqa: E402
 from relay_core import test_history as H           # noqa: E402
+from relay_core import test_probe as P            # noqa: E402
 from relay_core import tests_protocol as TP        # noqa: E402
 
 BOARD_CONFIG = """\
@@ -479,7 +480,9 @@ class CheckTest(TestsProtocolTest):
         self.send(type="tests_check", card="AAA1", id="r9")
         event = self.of("tests_check")[0]
         self.assertEqual(set(event), {"event", "id", "card", "findings", "actions",
-                                      "ids", "files", "failing"})
+                                      "ids", "files", "failing",
+                                      # protocol 32 (#AQ6X step 5): what a signal says about it
+                                      "blocks", "open_before"})
         self.assertEqual(event["card"], "AAA1")
         self.assertEqual(len(event["findings"]), 1)
         finding = event["findings"][0]
@@ -901,6 +904,223 @@ class WiringTest(TestsProtocolTest):
         with self.assertRaises(ValueError) as caught:
             commands.dispatch({"type": "tests_check", "card": "AAA1"})
         self.assertIn("no Switchboard", str(caught.exception))
+
+
+# ------------------------------------------------------- signals (protocol 32, #AQ6X)
+
+class SignalProtocolTest(TestsProtocolTest):
+    """The `signals_*` messages, the fold after every ingest, the re-run rule and `opened`.
+
+    The fake `ctest` of this module fails `beta` every time, so a run of `beta` is how a signal
+    is opened here — end to end, through the same handler a pane drives.
+    """
+
+    def setUp(self):
+        super().setUp()
+        from relay_core import signals as S
+        self.S = S
+        self.tests.pane_token = "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
+
+    def signals(self):
+        return self.S.state(self.project, self.root)
+
+    def changed(self):
+        return self.of("signals_changed")
+
+    def written(self):
+        return self.of("signals_written")
+
+    # ---- the fold after a run --------------------------------------------------
+    def test_a_failing_run_opens_the_signal_at_once_because_the_failures_are_re_run(self):
+        self.send(type="tests_run", ids=["ctest:alpha", "ctest:beta"])
+        self.wait_for_run()
+        run = self.tests._run
+        self.assertEqual(run.rerun, ["ctest:beta"])           # decision 3: short set, re-run once
+        signal = self.signals()["ctest:beta"]
+        self.assertEqual(signal.state, "open")                # fail-fail is broken and opens now
+        self.assertEqual(signal.count, 2)
+        self.assertEqual(signal.kind, "broken")
+        self.assertNotIn("ctest:alpha", self.signals())
+        self.assertEqual(run.opened, ["ctest:beta"])
+
+    def test_the_re_run_is_its_own_run_in_the_store_and_carries_the_tree_digest(self):
+        self.send(type="tests_run", ids=["ctest:beta"])
+        self.wait_for_run()
+        rows = [r for r in H.read(self.tests.store_path()) if r.id == "ctest:beta"]
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[1].run_id, rows[0].run_id + TP.RERUN_SUFFIX)
+        # The project is not a git repository, so the digest is empty rather than wrong.
+        self.assertEqual({r.tree_digest for r in rows}, {""})
+
+    def test_a_run_that_repeated_is_not_re_run_again(self):
+        self.send(type="tests_run", ids=["ctest:beta"], repeat_until_fail=3)
+        self.wait_for_run()
+        self.assertEqual(self.tests._run.rerun, [])
+
+    def test_the_run_line_names_the_pane_so_the_gate_knows_whose_run_it_was(self):
+        self.send(type="tests_run", ids=["ctest:beta"])
+        self.wait_for_run()
+        runs = [e for e in self.S.read_events(self.tests.signals_path())
+                if e["action"] == "run"]
+        self.assertEqual({e["session"] for e in runs}, {self.tests.pane_token})
+        self.assertEqual(self.signals()["ctest:beta"].first_session, self.tests.pane_token)
+
+    def test_the_fold_pushes_signals_changed_once_per_change_and_not_again(self):
+        self.send(type="tests_run", ids=["ctest:beta"])
+        self.wait_for_run()
+        events = self.changed()
+        self.assertTrue(events)
+        self.assertEqual([row["key"] for row in events[-1]["open"]], ["ctest:beta"])
+        self.assertEqual(set(events[-1]) - {"event"},
+                         {"open", "pending_count", "dismissed_count", "promoted"})
+        before = len(self.changed())
+        self.send(type="tests_list")                          # nothing changed: nothing re-sent
+        self.assertEqual(len(self.changed()), before)
+
+    def test_the_ingest_of_another_machines_run_folds_signals_too(self):
+        # Two incoming folders, each with `beta` failing: two consecutive failing executions.
+        for name, run_id in (("sphinxpad-1", "remote-1"), ("sphinxpad-2", "remote-2")):
+            folder = self.incoming(name, run_id, results=())
+            (folder / "ctest.xml").write_text(
+                '<?xml version="1.0"?><testsuite name="ctest" tests="1">'
+                '<testcase classname="beta" name="beta" time="0.5">'
+                '<failure message="assertion failed">at line 12</failure></testcase>'
+                "</testsuite>", encoding="utf-8")
+        self.send(type="tests_list")
+        signal = self.signals()["ctest:beta"]
+        self.assertEqual(signal.state, "open")
+        self.assertEqual(signal.fingerprint, "assertion failed")
+
+    def test_a_key_that_left_discovery_is_removed_by_the_fold_that_knows_what_is_collected(self):
+        H.append([H.Execution(ts=f"2026-09-0{day}T10:00:00Z", id="ctest:vanished", result="fail",
+                              runner="ctest", run_id=f"r{day}", commit=f"c{day}")
+                  for day in (1, 2)], self.tests.store_path())
+        self.assertEqual(self.signals()["ctest:vanished"].state, "open")   # no discovery here
+        # `tests_list` discovers, and the fold it runs is the only one that can say `removed`:
+        # the fake ctest collects alpha, beta and slow, and never `vanished`.
+        self.send(type="tests_list")
+        folded = self.tests.signal_state(discovered=P.discover(self.project,
+                                                               build_dir=self.build))
+        self.assertEqual(folded["ctest:vanished"].state, "removed")
+
+    # ---- the five requests ----------------------------------------------------
+    def open_one(self):
+        self.send(type="tests_run", ids=["ctest:beta"])
+        self.wait_for_run()
+        self.events.clear()
+        return "ctest:beta"
+
+    def test_signals_list_answers_with_signals_changed_and_the_request_id(self):
+        key = self.open_one()
+        self.send(type="signals_list", id="r1")
+        event = self.changed()[-1]
+        self.assertEqual(event["id"], "r1")
+        self.assertEqual([row["key"] for row in event["open"]], [key])
+
+    def test_signals_claim_writes_the_panes_token_and_refuses_a_second_claimant(self):
+        key = self.open_one()
+        self.send(type="signals_claim", key=key, pane_token="pane-a")
+        self.assertEqual(self.written()[-1], {"event": "signals_written", "kind": "claim",
+                                              "key": key, "session": "pane-a"})
+        self.assertEqual(self.signals()[key].session, "pane-a")
+        self.send(type="signals_claim", key=key, pane_token="pane-b")
+        refused = self.written()[-1]
+        self.assertEqual(refused["code"], "board_claimed_elsewhere")
+        self.assertEqual(self.signals()[key].session, "pane-a")
+        self.send(type="signals_claim", key=key, pane_token="pane-b", force=True)
+        self.assertEqual(self.signals()[key].session, "pane-b")
+
+    def test_signals_release_frees_it_and_records_the_reason(self):
+        key = self.open_one()
+        self.send(type="signals_claim", key=key, pane_token="pane-a")
+        self.send(type="signals_release", key=key, reason="the user asked for something else")
+        self.assertEqual(self.written()[-1]["kind"], "release")
+        self.assertEqual(self.signals()[key].session, "")
+
+    def test_the_owners_dismissal_reaches_all_four_reasons_unlike_the_agents(self):
+        key = self.open_one()
+        self.send(type="signals_dismiss", key=key, reason="wont-fix",
+                  comment="the test is wrong", until="2027-01-01")
+        written = self.written()[-1]
+        self.assertEqual(written["kind"], "dismiss")
+        self.assertEqual(written["reason"], "wont-fix")
+        self.assertEqual(self.signals()[key].state, "dismissed")
+        self.assertEqual(self.changed()[-1]["dismissed_count"], 1)
+
+    def test_a_dismissal_with_no_expiry_is_refused_here_too(self):
+        key = self.open_one()
+        self.send(type="signals_dismiss", key=key, reason="wont-fix", comment="c")
+        self.assertEqual(self.written()[-1]["code"], "signal_until")
+        self.assertEqual(self.signals()[key].state, "open")
+
+    def test_signals_promote_writes_the_card_and_names_it_on_the_event(self):
+        key = self.open_one()
+        self.send(type="signals_promote", key=key)
+        written = self.written()[-1]
+        self.assertEqual(written["kind"], "promote")
+        self.assertTrue(written["card"])
+        card = self.board.card_by_id(written["card"])
+        self.assertEqual(card.front["links"]["signal"], key)
+        self.assertEqual(B.section_text(card.body, self.S.SIGNAL_HEADING).count("`ctest:beta`"), 1)
+        self.assertEqual([row["card"] for row in self.changed()[-1]["promoted"]],
+                         [written["card"]])
+
+    def test_an_unknown_or_resolved_key_is_refused_by_name(self):
+        for kind in ("signals_claim", "signals_release", "signals_dismiss", "signals_promote"):
+            with self.subTest(kind=kind):
+                self.send(type=kind, key="ctest:nothing")
+                self.assertEqual(self.written()[-1]["code"], "signal_not_found")
+                self.send(type=kind)
+                self.assertEqual(self.written()[-1]["code"], "signal_refused")
+
+    # ---- the verification gate (step 5) ---------------------------------------
+    def test_tests_check_separates_what_blocks_this_card_from_what_was_open_before(self):
+        key = self.open_one()
+        self.card("BBB1", "A card whose pane broke beta", "needs-verification",
+                  body="\n## Tests\n- `ctest -R alpha`\n")
+        card = self.board.card_by_id("BBB1")
+        card.set("session", self.tests.pane_token)
+        self.board.save(card)
+        result = self.tests.check_card("BBB1")
+        self.assertEqual([row["key"] for row in result["blocks"]], [key])
+        self.assertEqual(result["open_before"], [])
+        self.assertIn("stop this card leaving needs-verification", TP.format_findings(result))
+
+    def test_a_signal_another_pane_opened_is_listed_as_open_before_and_blocks_nothing(self):
+        key = self.open_one()
+        self.card("BBB2", "A card that did not break it", "needs-verification",
+                  body="\n## Tests\n- `ctest -R alpha`\n")
+        card = self.board.card_by_id("BBB2")
+        card.set("session", "some-other-pane")
+        self.board.save(card)
+        result = self.tests.check_card("BBB2")
+        self.assertEqual(result["blocks"], [])
+        self.assertEqual([row["key"] for row in result["open_before"]], [key])
+        self.assertIn("do not block it", TP.format_findings(result))
+
+    def test_a_card_with_no_tests_section_still_carries_the_two_lists(self):
+        self.open_one()
+        self.card("BBB3", "No tests named", "needs-verification")
+        result = self.tests.check_card("BBB3")
+        self.assertEqual(result["blocks"], [])
+        self.assertEqual(len(result["open_before"]), 1)
+
+    # ---- auto-promotion -------------------------------------------------------
+    def test_a_signal_that_has_failed_three_runs_over_a_day_is_promoted_by_the_fold(self):
+        H.append([H.Execution(ts=f"2026-09-0{day}T10:00:00Z", id="ctest:beta", result="fail",
+                              runner="ctest", run_id=f"r{day}", commit=f"c{day}",
+                              message="assertion failed")
+                  for day in (1, 2, 3)], self.tests.store_path())
+        signals = self.tests.fold_signals()
+        signal = signals["ctest:beta"]
+        self.assertTrue(signal.card, signal)
+        card = self.board.card_by_id(signal.card)
+        self.assertIn(self.S.SIGNAL_LABEL, card.front["labels"])
+        self.assertIn("assertion failed", card.body)
+        # …and folding again does not file a second card.
+        again = self.tests.fold_signals()
+        self.assertEqual(again["ctest:beta"].card, signal.card)
+
 
 
 if __name__ == "__main__":                                    # pragma: no cover
