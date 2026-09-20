@@ -110,7 +110,9 @@ logged as `runtime_sweep` only when something was removed or failed.
 Pane anatomy, top to bottom: the header (the pane title on the left, the terminal's directory
 on the right — the bare path, and nothing at all when the title already says that folder, #0STR;
 clicking the directory opens the explorer, and what the row does when it runs out of room is the
-give-way ladder below), an optional
+give-way ladder below; while the pane's agent turn works a Switchboard card its `#id` sits beside
+the title, clickable to open that card in the Switchboard, and it never gives way as the row
+narrows (#C7PF)), an optional
 banner (memory kill, restart), the terminal, the transcript panel (section 8), the composer
 frame (route label, input-mode picker, model picker, interrupt-shell button, Submit, editor,
 key hints). Overlays float over the terminal without resizing it (a resize makes the idle shell
@@ -126,8 +128,8 @@ that floor "…/x" says nothing a stub could be worth; (2) the title elides (Eli
 own floor; (3) the ssh chip is squeezed to its 150 px
 floor and then drops the `user@` for the host alone — that is what going *below* the floor buys —
 and below the host's own width elides the host; (4) the usage meter collapses to CPU alone (`cpu 12%`), with
-neither the memory half nor the separator; (5) nothing else gives: the subagent badge stays whole
-and the glyph stays, always. The live state's word was rung 3 between the title and the ssh chip
+neither the memory half nor the separator; (5) nothing else gives: the subagent badge and the
+card chip's `#id` (#C7PF) stay whole, and the glyph stays, always. The live state's word was rung 3 between the title and the ssh chip
 until card #0STR took it off the header altogether, and the rung went with it. Nothing is ever drawn as a partial glyph or cut mid-letter: each step
 either elides by whole glyphs or leaves its element out, and both labels are elided by hand rather
 than left to the layout, which clips a squeezed QLabel mid-glyph — that is how a crowded header came

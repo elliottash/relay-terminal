@@ -358,6 +358,7 @@ QLabel#route { color: @accent; font-family: "@mono"; }
 QLabel#paneTitle { color: @muted; font-weight: 600; }
 QLabel#paneTitle[relayActive="true"] { color: @text; }
 QLabel#paneCwd { color: @muted; font-size: 9pt; }
+QLabel#paneCardChip { color: @muted; font-size: 9pt; font-weight: 600; }
 QLabel#paneAuto { color: @muted; font-size: 9pt; border: 1px solid @border; border-radius: 4px; padding: 0 4px; }
 QLineEdit#paneTitleEdit { background: @surface; color: @text; border: 1px solid @accentBorder; border-radius: 4px; padding: 1px 6px; }
 

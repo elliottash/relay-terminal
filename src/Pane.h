@@ -3395,6 +3395,14 @@ private:
                                                     QStringLiteral("the file explorer")));
                 return true;
             }
+            // The card's #id beside the title (#C7PF): a click opens that card in the
+            // Switchboard, the same exchange the prompt box's work chip menu makes. A drag from
+            // it still moves the pane, exactly as a drag from the directory does.
+            if (m_headerPressOn == m_cardChip && m_cardChip && !cardChipCard().isEmpty()
+                && m_cardChip->rect().contains(m_cardChip->mapFromGlobal(mouse->globalPos()))) {
+                if (onOpenCard) onOpenCard(cardChipCard());
+                return true;
+            }
             return false;
         }
         case QEvent::KeyPress:
@@ -3456,6 +3464,17 @@ private:
         m_titleAuto = new QLabel(QStringLiteral("auto"));
         m_titleAuto->setObjectName(QStringLiteral("paneAuto"));
         m_titleAuto->setVisible(false);
+        // The card this pane's agent turn is working (#C7PF): its #id beside the title, from the
+        // moment the Switchboard's Execute hands the card over until the turn ends. A click opens
+        // the card (headerDragEvent, below); a drag still moves the pane, as from anywhere else
+        // in the row. refreshCardChip() decides whether it is up.
+        m_cardChip = new QLabel;
+        m_cardChip->setTextFormat(Qt::PlainText);
+        m_cardChip->setObjectName(QStringLiteral("paneCardChip"));
+        m_cardChip->setAccessibleName(QStringLiteral("Switchboard card being executed"));
+        m_cardChip->setCursor(Qt::PointingHandCursor);
+        m_cardChip->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
+        m_cardChip->hide();
         m_cwdLabel = new QLabel; m_cwdLabel->setTextFormat(Qt::PlainText);
         m_cwdLabel->setObjectName(QStringLiteral("paneCwd"));
         // Clicking the directory line opens it in the explorer pane.
@@ -3478,6 +3497,7 @@ private:
         headerRow->addWidget(m_titleLabel, 0);
         headerRow->addWidget(m_titleEdit, 1);
         headerRow->addWidget(m_titleAuto, 0);
+        headerRow->addWidget(m_cardChip, 0);
         headerRow->addStretch(1);
         headerRow->addWidget(m_cwdLabel, 0);
         m_headerWidget = header;
@@ -7790,6 +7810,7 @@ private:
         PendingPrompt prompt; prompt.text = pending->text;
         const QString requestId = QStringLiteral("ask-%1").arg(++m_askSerial);
         m_pendingPrompts.insert(requestId, prompt);
+        setTurnCards(pending->cards, requestId);   // it becomes a turn of its own: the chip follows (#C7PF)
         m_interruptPending = true;   // set before the stop, so agent_finished does not pause the queue
         send({{"type", "queue_unsteer"}, {"request", pending->requestId}, {"as_request", requestId}});
         status(QStringLiteral("Interrupting the current turn to send it now…"));
@@ -8106,6 +8127,56 @@ private:
         m_workCards.prepend(id);
         while (m_workCards.size() > 8) m_workCards.removeLast();
         updateWorkChip();
+        refreshCardChip();   // every attach path runs through here (#C7PF)
+    }
+
+    // ----- header card chip (#C7PF) ------------------------------------------------------------
+    // While this pane's agent turn works a Switchboard card — handed over by the Switchboard's
+    // Execute, attached to a prompt with `#id`, or carried by a steer — the header names it
+    // beside the title and a click opens it. The prompt box's work chip keeps the history of
+    // every card the pane touched; this one states what is happening now, so it goes when the
+    // turn ends. A card handed to a pane whose agent is not configured yet (startBoardTask
+    // parks it until then) is named from the moment it arrives.
+    QString cardChipCard() const { return !m_turnCard.isEmpty() ? m_turnCard : m_boardTaskCard; }
+
+    void refreshCardChip() {
+        if (!m_cardChip) return;
+        const QString id = cardChipCard();
+        if (id.isEmpty()) {
+            m_cardChip->hide();
+            updateHeader();   // the row's budget changes with the chip's whole width or absence
+            return;
+        }
+        m_cardChip->setText(QStringLiteral("#") + id);
+        // Every attached card, ids and titles, in the tooltip; the row itself says only the one.
+        const QStringList ids = !m_turnCard.isEmpty() ? m_turnCards : QStringList{m_boardTaskCard};
+        QStringList named;
+        for (const QString &cardId : ids) {
+            const relay::board::Card *card = m_cardIndex.card(cardId);
+            named << (card && !card->title.isEmpty() ? QStringLiteral("#%1 — %2").arg(cardId, card->title)
+                                                     : QStringLiteral("#%1").arg(cardId));
+        }
+        m_cardChip->setToolTip(named.join(QLatin1Char('\n'))
+                               + QStringLiteral("\n\nClick to open this card in the Switchboard"));
+        m_cardChip->show();
+        updateHeader();
+    }
+
+    // The cards the agent turn starting now carries (#C7PF): the first is the chip's #id, the
+    // rest ride in its tooltip. `ask` is the request id the turn was sent under; the worker
+    // answers it with a queue item id (`queued`), and the agent_finished carrying that item is
+    // the one that takes the chip down — so the finish of a turn an interrupting prompt has
+    // replaced, arriving after that prompt set its own cards, cannot take them off again.
+    void setTurnCards(const QJsonArray &cards, const QString &ask) {
+        m_turnCards.clear();
+        for (const QJsonValue &value : cards) {
+            const QString id = value.toObject().value(QStringLiteral("id")).toString();
+            if (!id.isEmpty() && !m_turnCards.contains(id)) m_turnCards.append(id);
+        }
+        m_turnCard = m_turnCards.value(0);
+        m_turnCardAsk = ask;
+        m_turnCardItem.clear();
+        refreshCardChip();
     }
 
     // The icon alone until there is something to show.
@@ -9096,6 +9167,7 @@ private:
         } else if (type == QStringLiteral("queued")) {
             const QString requestId = event.value(QStringLiteral("request_id")).toString();
             if (m_pendingPrompts.contains(requestId)) m_itemPrompts.insert(event.value(QStringLiteral("id")).toString(), m_pendingPrompts.take(requestId));
+            if (requestId == m_turnCardAsk) m_turnCardItem = event.value(QStringLiteral("id")).toString();   // the chip's turn has an item now (#C7PF)
         } else if (type == QStringLiteral("queue_changed")) {
             m_runningItem = event.value(QStringLiteral("running")).toString();
             m_queuePaused = event.value(QStringLiteral("paused")).toBool();
@@ -9168,6 +9240,13 @@ private:
             // Status glyphs (#XM0T): the window reads these to show done / failed / needs you
             // until the user has looked at the pane.
             ++m_finishSerial; m_lastOutcome = outcome;
+            // The header's card chip goes with the turn it named (#C7PF). Matched on the item so
+            // that only this turn's finish takes it down, never the finish of a turn an
+            // interrupting prompt has already replaced.
+            if (!m_turnCardItem.isEmpty() && event.value(QStringLiteral("id")).toString() == m_turnCardItem) {
+                m_turnCard.clear(); m_turnCards.clear(); m_turnCardAsk.clear(); m_turnCardItem.clear();
+                refreshCardChip();
+            }
             // What a phone is told (shareStatus, protocol 6.3) and what rings it
             // (remote/notify.py's `failed` trigger). "cancelled" is the user stopping their own
             // turn, which is not news to them.
@@ -9889,6 +9968,7 @@ public:
     // that was only just created runs it once its agent is configured.
     void startBoardTask(const QString &text, const QString &cardId) {
         m_boardTask = text; m_boardTaskCard = cardId;
+        refreshCardChip();   // the header names the card from the moment it is handed (#C7PF)
         if (m_configured) runBoardTask();
         else status(QStringLiteral("#%1 is handed to this pane; the agent starts on it when it is ready.").arg(cardId));
     }
@@ -11973,6 +12053,7 @@ private:
             context.insert(QStringLiteral("terminal_handoff"), ceiling);
         request.insert(QStringLiteral("context"), context);
         const QString requestId = sendPrompt(request, prompt);
+        setTurnCards(entry.cards, requestId);   // the header names the card this turn works (#C7PF)
         if (fromQueue) { m_active = entry; m_activeValid = true; m_activeRequest = requestId; }
     }
 
@@ -14905,6 +14986,7 @@ private:
     QString m_cwdText;   // the directory line in full; the label shows as much of it as fits
     // Pane title (issue JRWQ): the header line, its in-place editor and the "auto" badge.
     QLabel *m_titleLabel = nullptr, *m_titleAuto = nullptr;
+    QLabel *m_cardChip = nullptr;   // the running turn's #id in the header (#C7PF)
     QLineEdit *m_titleEdit = nullptr;
     QHBoxLayout *m_headerLayout = nullptr;
     QWidget *m_headerWidget = nullptr;
@@ -15225,6 +15307,12 @@ private:
     QToolButton *m_workChip = nullptr;
     QStringList m_workCards;     // cards this pane referenced or the agent changed, newest first
     QString m_boardTask, m_boardTaskCard;   // Execute's task, until the agent is configured (#XS6Q)
+    // The running agent turn's cards (#C7PF): the first is the header chip's #id, the rest ride
+    // in its tooltip. `m_turnCardAsk` is the request id the turn was sent under and
+    // `m_turnCardItem` the queue item the worker made of it, so the agent_finished that ends
+    // this turn — and only this turn — takes the chip down.
+    QString m_turnCard, m_turnCardAsk, m_turnCardItem;
+    QStringList m_turnCards;
     void runBoardTask() {
         if (m_boardTask.isEmpty()) return;
         QueueEntry entry;
@@ -15233,6 +15321,7 @@ private:
         entry.cards = QJsonArray{QJsonObject{{QStringLiteral("id"), m_boardTaskCard}}};
         noteWorkCard(m_boardTaskCard);
         m_boardTask.clear(); m_boardTaskCard.clear();
+        refreshCardChip();   // still parked in the queue: the chip waits for the turn (#C7PF)
         if (relay::queuesubmit::decide(queueSubmitState()) == relay::queuesubmit::Decision::StartNow) startAgentEntry(entry, false);
         else enqueue(entry);
     }
