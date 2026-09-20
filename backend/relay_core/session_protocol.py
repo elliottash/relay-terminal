@@ -327,13 +327,29 @@ class SessionCommands:
             self.follow_agent_guest(agent)
             self.on_model_changed(agent)
 
+        # A switch off a guest harness accepted while a turn runs lands through the Agent's
+        # `_land_switch`, never through `apply_now` above — and `set_model` cannot replace an
+        # injected provider. The landing therefore carries the same two steps `apply_now` takes:
+        # end the harness before the swap, then let the live-guest tail follow it (protocol 26.7).
+        # Without them the pane's config would name the new model while the old guest's harness
+        # still served the turn (card #B9V4).
+        def land_off_guest():
+            guest_harness_provider.detach(agent)
+
+        def landed(switched):
+            self.follow_agent_guest(switched)
+            self.on_model_changed(switched)
+
         def decide(idle: bool) -> dict:
             # Under the agent's model lock, so `model_changed` always precedes the `model_applied`
             # (or `model_switch_refused`) of the same switch.
             with agent._model_lock:
+                leaving_guest = guest_id is None and guest_harness_provider.agent_provider(agent) is not None
                 outcome = agent.request_model(config, preset_id, window, idle=idle, apply_now=apply_now,
                                               start_exclusive=lambda task: self.turns.start_exclusive_locked(
-                                                  "set_model", task))
+                                                  "set_model", task),
+                                              on_applied=landed if leaving_guest else None,
+                                              pre_land=land_off_guest if leaving_guest else None)
                 if outcome["applies"] == "refused":
                     if restart_guest and guest_provider is not None:
                         guest_provider.close()   # started for a switch that is not happening

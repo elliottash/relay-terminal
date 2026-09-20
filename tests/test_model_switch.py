@@ -15,6 +15,7 @@ from pathlib import Path
 from unittest import mock
 
 from relay_core.agent import Agent
+from relay_core.guest_harness_provider import HarnessProvider
 from relay_core.provider import Cancelled, ProviderConfig
 from relay_core.queue import TurnSupervisor
 from relay_core.session_protocol import SessionCommands
@@ -85,9 +86,12 @@ class ModelSwitchMidTurnTests(unittest.TestCase):
                         self.index(lambda e: e['event'] == 'model_applied'))
         self.assertLess(self.index(lambda e: e['event'] == 'model_applied'),
                         self.index(lambda e: e['event'] == 'done'))
-        # The conversation went across whole: the new model saw the tool result of the old one's call.
+        # The conversation went across whole: the new model saw the tool result of the old one's
+        # call, with the takeover note (#B9V4) after it saying the ask is still open.
         sent = agent.provider.requests[1][0]
-        self.assertEqual(sent[-1]['role'], 'tool')
+        self.assertEqual(sent[-2]['role'], 'tool')
+        self.assertEqual((sent[-1]['role'], sent[-1].get('relay_kind')), ('user', 'note'))
+        self.assertIn('the model was switched mid-task (old → new)', sent[-1]['content'])
         self.assertEqual(len(self.rec.of('model_applied')), 1)
 
     def test_two_switches_before_the_next_request_last_one_wins(self):
@@ -367,6 +371,76 @@ class ModelSwitchMidTurnTests(unittest.TestCase):
         self.assertEqual((agent.config.model, self.hooked), ('new', ['new']))
         self.assertEqual(self.rec.of('model_applied'), [])
 
+    # ----- a takeover must not read as a fresh start (card #B9V4) -------------------------
+    def test_the_model_taking_over_is_told_so_and_a_wrap_up_draws_the_completion_check(self):
+        # The report: claude was switched to glm mid-turn, the pane stopped relaying and the user
+        # had to type "continue". The conversation GLM inherited ended in claude's tool results,
+        # nothing said the ask was unfinished, and a first reply in plain text ended the turn.
+        seen, ref = [], []
+        step, gate, entered = self.blocked_first_step(ref, seen, tools_msg(call('list_directory', {'path': '.'})))
+
+        def wrap_up(_messages):
+            seen.append(ref[0].config.model)
+            return text('summarised what the previous model left')
+
+        def working(_messages):
+            seen.append(ref[0].config.model)
+            return text('still open, doing it')
+
+        def finished(_messages):
+            seen.append(ref[0].config.model)
+            return text('finished it now')
+
+        agent = self.make_agent(ScriptedProvider([step, wrap_up, working, finished]))
+        ref.append(agent)
+        self.sup.submit('look around', 'now')
+        self.assertTrue(entered.wait(5))
+        self.cmds.handle('set_model', {'base_url': 'http://127.0.0.1:2/v1', 'model': 'new'})
+        self.rec.wait(lambda e: e['event'] == 'model_changed')
+        gate.set()
+        self.rec.wait(lambda e: e['event'] == 'agent_finished')
+        self.assertEqual(seen, ['old', 'new', 'new', 'new'])   # the turn carried on, not ended
+        # The takeover note rides the new model's first request, after the old one's tool result.
+        takeover_request = agent.provider.requests[1][0]
+        self.assertEqual(takeover_request[-2]['role'], 'tool')
+        note = takeover_request[-1]
+        self.assertEqual((note['role'], note.get('relay_kind')), ('user', 'note'))
+        self.assertIn('the model was switched mid-task (old → new)', note['content'])
+        self.assertIn('still open', note['content'])
+        # A wrap-up in plain text does not end the turn: the completion check names the request.
+        checks = self.rec.of('completion_check')
+        self.assertEqual([c['reminder'] for c in checks], [1, 2])
+        self.assertTrue(all(c['open'] for c in checks))
+        self.assertEqual(checks[0]['open'][0]['id'], 'R1')
+        self.assertIn('completion check 1/2', agent.provider.requests[2][0][-1]['content'])
+        self.assertLess(self.index(lambda e: e['event'] == 'completion_check'),
+                        self.index(lambda e: e['event'] == 'done'))
+        self.assertEqual(self.rec.of('agent_finished')[-1]['outcome'], 'done')
+
+    def test_an_idle_switch_and_a_turn_end_landing_add_no_takeover_note(self):
+        seen, ref = [], []
+        step, gate, entered = self.blocked_first_step(ref, seen, text('answered without tools'))
+        agent = self.make_agent(ScriptedProvider([step, text('next turn')]))
+        ref.append(agent)
+        # Mid-turn ask, but the turn answers in plain text and ends before the landing: the switch
+        # lands at turn_end — a pane between turns, not a model taking over an unfinished ask.
+        self.sup.submit('quick question', 'now')
+        self.assertTrue(entered.wait(5))
+        self.cmds.handle('set_model', {'base_url': 'http://127.0.0.1:2/v1', 'model': 'new'})
+        gate.set()
+        applied = self.rec.wait(lambda e: e['event'] == 'model_applied')
+        self.assertEqual(applied['at'], 'turn_end')
+        self.assertEqual(self.rec.of('completion_check'), [])
+        self.sup.submit('next', 'now')
+        self.rec.wait(lambda e: e['event'] == 'agent_finished' and len(self.rec.of('agent_finished')) == 2)
+        # Idle, the same: applied at once, nothing added to any later turn.
+        self.cmds.handle('set_model', {'base_url': 'http://127.0.0.1:3/v1', 'model': 'later'})
+        self.rec.wait(lambda e: e['event'] == 'model_changed' and e['model'] == 'later')
+        self.sup.submit('one more', 'now')
+        self.rec.wait(lambda e: e['event'] == 'agent_finished' and len(self.rec.of('agent_finished')) == 3)
+        self.assertNotIn('switched mid-task', json.dumps(agent.messages))
+        self.assertEqual(len(self.rec.of('model_applied')), 1)
+
 
 class Server:
     """An OpenAI-compatible endpoint answering from a script; records every request body."""
@@ -405,7 +479,10 @@ class CrossProviderTests(unittest.TestCase):
         gate = threading.Event()
         a = Server(self, [{'role': 'assistant', 'content': '', 'reasoning': 'a-thoughts',
                            'tool_calls': [call('list_directory', {'path': '.'}, 'call_a1')]}], gate)
-        b = Server(self, [{'role': 'assistant', 'content': 'done on B'}])
+        # The wrap-up in plain text draws the completion check twice (#B9V4) before the turn ends.
+        b = Server(self, [{'role': 'assistant', 'content': 'done on B'},
+                          {'role': 'assistant', 'content': 'still working'},
+                          {'role': 'assistant', 'content': 'done on B'}])
         agent = self.make_agent(config=ProviderConfig(a.url, 'model-a', 'key-a', {'reasoning': {'effort': 'high'}}))
         self.sup.submit('look around', 'now')
         self.assertTrue(a.entered.wait(5))
@@ -414,13 +491,72 @@ class CrossProviderTests(unittest.TestCase):
         self.rec.wait(lambda e: e['event'] == 'agent_finished')
         self.assertEqual(self.rec.of('agent_finished')[-1]['outcome'], 'done')
         self.assertEqual([body['model'] for body in a.bodies], ['model-a'])
-        self.assertEqual([body['model'] for body in b.bodies], ['model-b'])
+        self.assertEqual([body['model'] for body in b.bodies], ['model-b'] * 3)
         assistant = next(m for m in b.bodies[0]['messages'] if m.get('tool_calls'))
         self.assertEqual(assistant['reasoning_content'], 'a-thoughts')
-        self.assertEqual(b.bodies[0]['messages'][-1]['role'], 'tool')
+        # The tool result, then the takeover note (#B9V4) naming the switch and the open ask.
+        self.assertEqual(b.bodies[0]['messages'][-2]['role'], 'tool')
+        self.assertIn('the model was switched mid-task (model-a → model-b)',
+                      b.bodies[0]['messages'][-1]['content'])
         applied = self.rec.of('model_applied')[0]
         self.assertTrue(applied['history_converted'])
         self.assertEqual((applied['from_model'], applied['model'], applied['preset']), ('model-a', 'model-b', 'kimi'))
+
+    def test_a_mid_turn_switch_off_a_guest_ends_the_harness_at_the_landing(self):
+        # Card #B9V4: `set_model` cannot replace an injected provider, so a deferred switch off a
+        # guest harness adopted the new config while the guest kept serving the pane. The landing
+        # now ends the harness first, as the idle path's apply_now always did.
+        class FakeHarness:
+            session_id = 'guest-session-1'
+            closed = False
+
+            def close(self):
+                self.closed = True
+
+        gate = threading.Event()
+        seen, ref = [], []
+        entered = threading.Event()
+
+        def step(_messages):
+            seen.append(ref[0].config.model)
+            entered.set()
+            gate.wait(5)
+            return tools_msg(call('list_directory', {'path': '.'}))
+
+        b = Server(self, [{'role': 'assistant', 'content': 'taken over, working'},
+                          {'role': 'assistant', 'content': 'still working'},
+                          {'role': 'assistant', 'content': 'done on the native model'}])
+        harness = FakeHarness()
+        guest = HarnessProvider(ProviderConfig('harness://claude', 'claude-guest', ''), harness, 'claude')
+        scripted = ScriptedProvider([step])
+        guest.complete = scripted.complete          # scripted turns; harness behaviour elsewhere
+        agent = self.make_agent(provider=guest, config=ProviderConfig('harness://claude', 'claude-guest', ''))
+        ref.append(agent)
+        self.sup.submit('look around', 'now')
+        self.assertTrue(entered.wait(5))
+        self.cmds.handle('set_model', {'preset': 'kimi', 'base_url': b.url, 'model': 'model-b',
+                                       'api_key': 'key-b'})
+        changed = self.rec.wait(lambda e: e['event'] == 'model_changed')
+        self.assertEqual((changed['applies'], changed['in_flight_model']), ('next_step', 'claude-guest'))
+        self.assertFalse(guest._closed)             # the request in flight finishes on the guest
+        gate.set()
+        self.rec.wait(lambda e: e['event'] == 'agent_finished')
+        # The harness ended at the landing, and the new provider — not the guest — served it.
+        self.assertTrue((guest._closed, harness.closed))
+        self.assertIsNot(agent.provider, guest)
+        self.assertEqual([body['model'] for body in b.bodies], ['model-b'] * 3)
+        applied = self.rec.wait(lambda e: e['event'] == 'model_applied')
+        self.assertEqual((applied['at'], applied['from_model'], applied['model'], applied['step']),
+                         ('step', 'claude-guest', 'model-b', 2))
+        self.assertEqual(len(self.rec.of('model_applied')), 1)
+        self.assertEqual(self.hooked, ['model-b'])
+        # The takeover note reached the native provider's first request, after the tool result.
+        messages = b.bodies[0]['messages']
+        self.assertEqual(messages[-2]['role'], 'tool')
+        self.assertIn('the model was switched mid-task (claude-guest → model-b)', messages[-1]['content'])
+        # A wrap-up in plain text did not end the turn: the completion check held it open.
+        self.assertEqual([c['reminder'] for c in self.rec.of('completion_check')], [1, 2])
+        self.assertEqual(self.rec.of('agent_finished')[-1]['outcome'], 'done')
 
 
 if __name__ == '__main__':

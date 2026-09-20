@@ -186,6 +186,7 @@ You do not automatically see terminal history or output. Ask for relevant output
 A command still running at its timeout comes back as a job you can read with command_output or end with stop_command; start a server or watcher with run_command background: true, and stop your jobs when you no longer need them.
 Keep the final response direct and describe what was actually verified.
 Format replies as Markdown; the terminal renders it: headings, **bold**, *italics*, `inline code` for commands, paths and identifiers, fenced code blocks with a language for code and multi-line commands, bulleted or numbered lists for steps, and tables for comparisons.
+When you name a folder, write it with a trailing `/` (`tests/`, `src/Pane.h`): a folder word in your reply links only when it carries a slash.
 Lead with the main point in bold when you finish, hit a problem, or need something from the user — **Done:**, **Problem:**, **Need:** labels — and the terminal colours those three.
 Keep it terminal-friendly: short paragraphs, no HTML, no images.
 The type_into_program tool types into the interactive program in the user's visible terminal pane; it is offered only for a turn in which the user handed you that program, and when it is absent you cannot type into their terminal and must say so instead of pretending.
@@ -750,7 +751,8 @@ class Agent:
     def request_model(self, config: ProviderConfig, preset_id: str | None = None,
                       context_window: int | None = None, *, idle: bool, apply_now: Callable,
                       start_exclusive: Callable, on_applied: Callable | None = None,
-                      fields: dict | None = None, refused_fields: Callable | None = None) -> dict:
+                      fields: dict | None = None, refused_fields: Callable | None = None,
+                      pre_land: Callable | None = None) -> dict:
         """One model switch, idle or mid-turn; returns what its `model_changed` says.
 
         Idle and fitting: ``apply_now()`` switches at once (``applies: "now"``). Idle but over the
@@ -769,21 +771,22 @@ class Agent:
                 return {"applies": "refused", "reason": fit["refuse"], "context_window": window}
             if not idle:
                 return self.defer_model(config, preset_id, context_window, on_applied=on_applied,
-                                        fields=fields, refused_fields=refused_fields)
+                                        fields=fields, refused_fields=refused_fields, pre_land=pre_land)
             if not fit["compacts"] or same:
                 self._pending_model = None
                 apply_now()
                 return {"applies": "now", "context_window": self.context.window}
             self._pending_model = {"config": config, "preset_id": preset_id, "window": context_window,
                                    "on_applied": on_applied, "fields": dict(fields or {}),
-                                   "refused_fields": refused_fields}
+                                   "refused_fields": refused_fields, "pre_land": pre_land}
             start_exclusive(lambda agent: agent.apply_pending_model(at="now"))
             return {"applies": "after_compaction", "in_flight_model": self.config.model,
                     "context_window": window, "will_compact": True}
 
     def defer_model(self, config: ProviderConfig, preset_id: str | None = None,
                     context_window: int | None = None, *, on_applied: Callable | None = None,
-                    fields: dict | None = None, refused_fields: Callable | None = None) -> dict:
+                    fields: dict | None = None, refused_fields: Callable | None = None,
+                    pre_land: Callable | None = None) -> dict:
         """Accept a set_model while a turn runs; it lands at the next step boundary.
 
         The request already in flight is never aborted: it finishes on the model it started on, and
@@ -795,6 +798,9 @@ class Agent:
         ``on_applied(agent)`` replaces `on_model_applied` for this switch (a role switch follows it
         differently from a set_model), ``fields`` are added to its `model_applied` event, and
         ``refused_fields()`` to its `model_switch_refused` event if it cannot land.
+        ``pre_land()`` runs under the model lock immediately before `set_model` swaps the provider
+        — the hook a switch off a guest harness uses to end it, as the idle path's `apply_now`
+        does (card #B9V4). Absent, a landing behaves exactly as before.
         """
         preset = resolve_preset(preset_id, config.base_url, config.model)
         window = context_window or context_window_for(preset)
@@ -812,7 +818,7 @@ class Agent:
                 return {"applies": "now", "context_window": self.context.window}
             self._pending_model = {"config": config, "preset_id": preset_id, "window": context_window,
                                    "on_applied": on_applied, "fields": dict(fields or {}),
-                                   "refused_fields": refused_fields}
+                                   "refused_fields": refused_fields, "pre_land": pre_land}
             # A routed turn (plan mode, or an image turn on its vision model) stays on the swapped
             # model to the end: the new model applies after it, and so does a turn that has failed
             # over — `_end_failover` would undo a step switch.
@@ -922,6 +928,12 @@ class Agent:
 
     def _land_switch(self, pending: dict, turn_id, step, at: str, *, compacted: bool) -> dict:
         """Under the model lock: make the switch and announce it."""
+        # First the landing's own step, if it has one: `set_model` cannot replace an injected
+        # provider, so a switch off a guest harness must end it here or the pane's config would
+        # name the new model while the guest still served the turn (card #B9V4).
+        pre_land = pending.get("pre_land")
+        if pre_land is not None:
+            pre_land()
         from_model = self.config.model
         from_style = self._effort_style()
         self.set_model(pending["config"], pending["preset_id"], pending["window"])
@@ -1255,7 +1267,7 @@ class Agent:
         record = self._begin_record(turn_id if isinstance(turn_id, str) and turn_id else f"t{_TURN_PREFIX}-{next(_TURN_COUNTER)}", prompt)
         turn_id = record["turn_id"]
         ctx = {"turn_id": turn_id, "requests": [], "opening": [], "todos_touched": False, "since_todos": 0,
-               "no_list_note": False}
+               "no_list_note": False, "takeover": False}
         self._turn_ctx = ctx
         if self.board is not None:
             # Switchboard write budgets are per turn (design 6.3).
@@ -1342,7 +1354,17 @@ class Agent:
                     ctx["no_list_note"] = True
                 # A model switched mid-turn takes over here, before the next request and before the
                 # compaction check, so a smaller window is checked against the conversation (3ES1).
-                self.apply_pending_model(turn_id, steps + 1, "step")
+                applied = self.apply_pending_model(turn_id, steps + 1, "step")
+                if applied is not None:
+                    # The takeover must not read as a fresh start (card #B9V4). The conversation the
+                    # new model inherits ends in the old one's tool results and nothing in it says
+                    # the ask is unfinished, so a first reply in plain text would end the turn and
+                    # the user would have to type "continue". Say it here — after the landing, so
+                    # `adapt_history` has already converted what came before — and mark the turn:
+                    # `_open_items` then counts its open requests too, which draws the completion
+                    # check on a wrap-up instead of ending the turn.
+                    ctx["takeover"] = True
+                    add({"role": "user", "content": self._takeover_note(applied), "relay_kind": "note"})
                 self._maybe_compact()
                 self.emit({"event": "status", "text": f"Requesting model · step {steps + 1}/{self.max_steps}"})
                 self._last_usage = None
@@ -2079,7 +2101,10 @@ class Agent:
     # ----- completion check, audit (items 5 and 8) --------------------------------------
     def _open_items(self, ctx: dict, final: bool = False) -> list[dict]:
         """Open requests and todos of this turn. Before the turn ends (final=False) a request only counts
-        when it has an open linked todo; at the end every unfinished request of the turn counts."""
+        when it has an open linked todo — except in a turn a model switch took over mid-flight
+        (``ctx["takeover"]``, card #B9V4), whose open requests count on their own, so the model that
+        takes over cannot end the turn with a wrap-up in plain text before the completion check has
+        had its say. At the end every unfinished request of the turn counts."""
         if not self.track_requests:
             return []
         turn_ids = set(ctx["requests"])
@@ -2090,7 +2115,8 @@ class Agent:
         linked = {rid for t in todos for rid in t["request_ids"]}
         out = []
         for item in self.requests.turn_requests(ctx["turn_id"]):
-            if item["status"] in REQUEST_OPEN and item["requires_completion"] and (final or item["id"] in linked):
+            if item["status"] in REQUEST_OPEN and item["requires_completion"] and (
+                    final or item["id"] in linked or ctx.get("takeover")):
                 out.append({"kind": "request", "id": item["id"], "status": item["status"],
                             "preview": " ".join(item["text"].split())[:OPEN_ITEM_PREVIEW]})
         out += [{"kind": "todo", "id": t["id"], "status": t["status"], "preview": t["text"][:OPEN_ITEM_PREVIEW],
@@ -2110,6 +2136,19 @@ class Agent:
                 "nothing from it ran. Reasoning is spent from that same budget. Think briefly this "
                 "time and take one small step - a single tool call, or a short answer - rather than "
                 "working the whole problem out in one response.]")
+
+    @staticmethod
+    def _takeover_note(applied: dict) -> str:
+        """What the model taking over mid-turn is told at the switch landing (card #B9V4).
+
+        Nothing else in the conversation says the ask is unfinished: the history ends in the
+        previous model's tool results, and a first reply that only summarises them would end the
+        turn, leaving the user to type "continue" to get the work going again.
+        """
+        return (f"[Relay note: the model was switched mid-task ({applied['from_model']} → "
+                f"{applied['model']}), and you are the model now serving this pane. The request above is "
+                "still open — continue it with your tools until it is done; do not merely summarise what "
+                "the previous model left.]")
 
     @staticmethod
     def _completion_reminder(open_items: list[dict], number: int) -> str:
