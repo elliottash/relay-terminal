@@ -370,7 +370,9 @@ class AskTests(ProtocolTest):
         appended = [e for e in events if e["event"] == "board_thread_appended"][0]
         self.assertEqual(appended["card_id"], card_id)
         self.assertEqual(appended["author"], "owner")
-        self.assertEqual([e.text for e in self.board.thread(card_id)][-1], "where should this run?")
+        self.assertEqual(self.asked(card_id).text, "where should this run?")
+        # #3XZV's stage lifecycle appends the move the question earned after it.
+        self.assertIn("the discussion started", self.board.thread(card_id)[-1].text)
         self.cards.agent(card_id).release()
         self.assertTrue(self.cards.wait())
 
@@ -484,7 +486,8 @@ class AskTests(ProtocolTest):
         self.assertEqual(refusal["card_id"], card_id)
         self.assertIn(f"#{card_id}", refusal["text"])
         # A refused ask leaves no trace on the card.
-        self.assertEqual([e.text for e in self.board.thread(card_id)][-1], "one")
+        self.assertEqual(self.asked(card_id).text, "one")
+        self.assertNotIn("two", [e.text for e in self.board.thread(card_id)])
         self.cards.agent(card_id).release()
         self.assertTrue(self.cards.wait())
 
