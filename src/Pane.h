@@ -11420,7 +11420,10 @@ private:
         // The model this pane is actually on, by its catalog label — not the preset's label, which
         // is its *default* model (owner report, 2026-09-20: the box said deepseek while the turn
         // went to meta/muse-spark-1.3 on the same key).
-        if (const relay::models::Entry *entry = modelCatalog().find(currentEntryKey()))
+        // The catalog must outlive the pointer into it: a temporary died at the end of the `if`
+        // condition and the label was read from freed memory (an Xvfb run crashed in malloc).
+        const relay::models::Catalog catalog = modelCatalog();
+        if (const relay::models::Entry *entry = catalog.find(currentEntryKey()))
             return entry->guest ? conciseModel(m_currentPreset, presetLabelOf(m_currentPreset)) : entry->label;
         const QString model = conciseModel(m_currentPreset, presetLabelOf(m_currentPreset));
         return model.isEmpty() ? m_model : model;
