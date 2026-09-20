@@ -479,6 +479,8 @@ if(RELAY_BUILD_APP)
         src/RelayMark.h
         src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h src/TurnTranscript.cpp src/TurnTranscript.h src/SkillsDialog.cpp src/SkillsDialog.h
         src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
+        # The Test suites pane (#7BM4): its own translation units, not included by main.cpp.
+        src/TestSuitesModel.cpp src/TestSuitesModel.h src/TestSuitesPane.cpp src/TestSuitesPane.h
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
     target_link_libraries(relay PRIVATE relay-closedlist relay-localmodels relay-projects relay-escapees relay-appcommands)
