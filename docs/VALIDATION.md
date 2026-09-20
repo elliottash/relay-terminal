@@ -237,7 +237,7 @@ accounts, quotas, billing or model behavior.
 | Workflow | Checks |
 |---|---|
 | `.github/workflows/ci.yml` `ubuntu-qt5` | Ubuntu 24.04 Qt5/KF5 build, all ctest groups, staged install layout, `desktop-file-validate`, `appstreamcli validate` |
-| `.github/workflows/ci.yml` `debian-qt6` | Debian 13 Qt6/KF6 build, ctest and `.deb` in a container (`packaging/deb/build-deb.sh`) |
+| `.github/workflows/ci.yml` `qt6` | Debian 13 (Qt 6.8) and Ubuntu 26.04 (Qt 6.10) Qt6/KF6 build, ctest and `.deb`, each in its container (`packaging/deb/build-deb.sh`) |
 | `.github/workflows/release.yml` | Per tag: `.deb` for Ubuntu 24.04, Debian 13, Ubuntu 26.04 on amd64 and arm64, each installed in a fresh container and smoke-tested (`packaging/smoke-installed.sh`: files, `--version`, worker `ready`, GUI start under Xvfb offscreen and xcb) |
 
 These workflows exist in the repository. Their results on GitHub were not checked when this

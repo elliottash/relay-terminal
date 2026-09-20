@@ -45,10 +45,19 @@ jobs:
           desktop-file-validate org.relayterminal.Relay.desktop
           appstreamcli validate --no-net packaging/org.relayterminal.Relay.metainfo.xml
 
-  debian-qt6:
-    name: Build and test (Debian 13, Qt6/KF6)
+  qt6:
+    # Two Qt6 lines, because they differ: Debian 13 has Qt 6.8 and Ubuntu 26.04 has Qt 6.10, which
+    # drops overloads 6.8 still takes. tests/wordwrap_test.cpp stopped compiling on 6.10 only, and
+    # nothing here noticed until a build on a 26.04 laptop did (#PF4K, d2923c9b).
+    name: Build and test (${{ matrix.name }}, Qt6/KF6)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {image: 'debian:trixie', name: 'Debian 13'}
+          - {image: 'ubuntu:26.04', name: 'Ubuntu 26.04'}
     steps:
       - uses: actions/checkout@v5
       - name: Cache the pinned Zig and the libghostty-vt build
@@ -56,11 +65,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: cache
-          key: ghostty-vt-debian:trixie-amd64-${{ hashFiles('engine/scripts/zig.sha256', 'engine/scripts/build-libghostty-vt.sh') }}
-      - name: Build, test and package in a debian:trixie container
+          key: ghostty-vt-${{ matrix.image }}-amd64-${{ hashFiles('engine/scripts/zig.sha256', 'engine/scripts/build-libghostty-vt.sh') }}
+      - name: Build, test and package in a ${{ matrix.image }} container
         run: |
           mkdir -p cache
           docker run --rm -v "$PWD:/src:ro" -v "$PWD/out:/out" -v "$PWD/cache:/cache" \
-            -e RELAY_CACHE_DIR=/cache debian:trixie \
+            -e RELAY_CACHE_DIR=/cache ${{ matrix.image }} \
             bash /src/packaging/deb/build-deb.sh /src /out
           ls -l out
