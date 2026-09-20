@@ -5485,6 +5485,14 @@ public:
             w->updateTitles();
             return pane->sessionToken();
         };
+        // And the card wears that token (#R9G7): the chip on the row and on the card page says
+        // which pane claimed it, and whether that pane is still here. The same lookup
+        // `onFocusPane`'s reveal uses, asked as each row is filled and each card page drawn — so a
+        // pane closed while the board is up reads as closed at the board's next redraw.
+        view->paneExists = [guard](const QString &token) {
+            auto *w = windowOf(guard);
+            return w && !token.isEmpty() && w->findPaneByToken(token) != nullptr;
+        };
         // Verify (#T71W): the same pane beside the board, but on the verifier the worker picked —
         // a different provider family from the one that implemented the card. A `preset:` runner
         // is an ordinary Relay agent started on that preset and handed the brief as a board task

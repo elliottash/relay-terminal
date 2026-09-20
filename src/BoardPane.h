@@ -83,6 +83,10 @@ public:
     // pane's session token — empty when no pane could be opened — so the hand-off note can name
     // and link it (#HKAP).
     std::function<QString(const QString &id, const QString &task)> onExecuteCard;
+    // Whether a pane with this session token is still open in this window (#R9G7). A claimed
+    // card wears its pane's token as a chip; a closed pane's chip says so and stops linking.
+    // Unset — a test, or a window that cannot look — means every token reads as live.
+    std::function<bool(const QString &token)> paneExists;
     // Verify (`v`, #T71W): open a terminal pane beside the board on `runner` — "guest:codex",
     // "guest:claude" or "preset:<id>", the verifier the worker recommends for this card — and hand
     // it `task`, the QA brief. The card keeps its QA status: only the verifier's verdict moves it.

@@ -200,6 +200,8 @@ private slots:
     void theRowListIsHeadersThenCards();
     void badgesSayWhatTheCardCarries();
     void aClaimedCardCarriesThePanesSession();
+    void aClaimedRowSaysWhichPaneHoldsItAndWhetherItIsStillOpen();
+    void theCardPageLinksTheClaimToThePaneAndMutesAClosedOne();
     void aRowDropsItsLeastImportantBadgesFirst();
     void theBodyLosesOnlyAHeadingThatRepeatsTheTitle();
     void threadEntriesSayHowLongAgo();
@@ -695,6 +697,89 @@ void BoardModelTests::aClaimedCardCarriesThePanesSession()
             > relay::board::badgeDropOrder(relay::board::Badge::Status));
     QVERIFY(relay::board::badgeDropOrder(relay::board::Badge::SessionClosed)
             < relay::board::badgeDropOrder(relay::board::Badge::Assignee));
+}
+
+// The claim on a row (#R9G7). The chip is a glyph and eight characters, which says nothing on its
+// own — the row's tooltip is where it is spelled out, and where the row says whether that pane is
+// still open. Liveness is the view's `paneExists`, which the window answers with its pane-by-token
+// lookup; unset — this test's first half, and any window that cannot look — reads every claim as
+// live, so a board with no window behind it never draws a card as abandoned.
+void BoardModelTests::aClaimedRowSaysWhichPaneHoldsItAndWhetherItIsStillOpen()
+{
+    const QString token = QStringLiteral("9f3a7c21d4e5b6a7");
+    QJsonObject claimed = row("K7Q2", "in-progress", "features");
+    claimed.insert(QStringLiteral("session"), token);
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.handleEvent(::opened({claimed, row("M3XJ", "inbox", "features")}));
+    view.setCollapsedSections(QJsonArray{});
+
+    QListWidget *list = listOf(view);
+    QVERIFY(list);
+    const auto tipOf = [list](const QString &cardId) {
+        for (int i = 0; i < list->count(); ++i)
+            if (list->item(i)->data(Qt::UserRole).toString() == cardId)
+                return list->item(i)->toolTip();
+        return QString();
+    };
+    QVERIFY(tipOf(QStringLiteral("K7Q2"))
+                .contains(QStringLiteral("Claimed by the pane \u29C9 9f3a7c21")));
+    QVERIFY(!tipOf(QStringLiteral("K7Q2")).contains(QStringLiteral("closed")));
+    QVERIFY(!tipOf(QStringLiteral("M3XJ")).contains(QStringLiteral("Claimed by")));   // nobody's
+
+    // The window is asked again on every refill rather than once when the board loads, so the pane
+    // that took the card closing while the board is up shows up at the list's next redraw.
+    QStringList asked;
+    view.paneExists = [&asked](const QString &t) {
+        asked << t;
+        return false;
+    };
+    view.rebuild();
+    QVERIFY(asked.contains(token));
+    QVERIFY(!asked.contains(QString()));         // an unclaimed row asks about nothing
+    QVERIFY(tipOf(QStringLiteral("K7Q2"))
+                .contains(QStringLiteral("Claimed by the pane \u29C9 9f3a7c21, which has closed")));
+}
+
+// The same chip on the card page (#R9G7), beside who the card is assigned to. While that pane is
+// open it is the `relay-pane:` anchor the thread's "Executing (xxxxxxxx)" entry already uses, so
+// one click reveals the pane through the same handler. Once the pane has gone the chip stays — the
+// claim is the record of who took the card — but says `closed`, is muted, and is not a link.
+void BoardModelTests::theCardPageLinksTheClaimToThePaneAndMutesAClosedOne()
+{
+    const QString token = QStringLiteral("9f3a7c21d4e5b6a7");
+    QJsonObject claimed = row("K7Q2", "in-progress", "features");
+    claimed.insert(QStringLiteral("session"), token);
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(::opened({claimed}));
+    view.setCollapsedSections(QJsonArray{});
+
+    QJsonObject page = card("K7Q2", "Voice mode", "the issue", QString(64, QLatin1Char('a')));
+    page.insert(QStringLiteral("front"), QJsonObject{{QStringLiteral("assignee"), QStringLiteral("agent")},
+                                                     {QStringLiteral("session"), token}});
+    openCard(view, sent, page);
+    QVERIFY(view.detailOpen());
+    auto *meta = view.findChild<QLabel *>(QStringLiteral("boardCardMeta"));
+    QVERIFY(meta);
+    QVERIFY(meta->text().contains(QStringLiteral("session")));
+    QVERIFY(meta->text().contains(QStringLiteral("href=\"relay-pane:9f3a7c21d4e5b6a7\"")));
+    QVERIFY(meta->text().contains(QStringLiteral("\u29C9 9f3a7c21")));
+
+    // The anchor is the thread's, so it reaches the thread's handler: reveal that pane.
+    QStringList revealed;
+    view.onFocusPane = [&revealed](const QString &t) { revealed << t; };
+    QVERIFY(QMetaObject::invokeMethod(meta, "linkActivated",
+                                      Q_ARG(QString, QStringLiteral("relay-pane:") + token)));
+    QCOMPARE(revealed, QStringList{token});
+
+    // The pane has gone: the token stays, with `closed`, and there is nothing left to click.
+    view.paneExists = [](const QString &) { return false; };
+    view.closeDetail();
+    sent.clear();
+    openCard(view, sent, page);
+    QVERIFY(meta->text().contains(QStringLiteral("\u29C9 9f3a7c21 closed")));
+    QVERIFY(!meta->text().contains(QStringLiteral("relay-pane:")));
 }
 
 void BoardModelTests::aRowDropsItsLeastImportantBadgesFirst()
@@ -2387,7 +2472,10 @@ void BoardModelTests::executeHandsTheCardToAPaneAndMovesItToExecuting()
     QVERIFY(!error->isHidden());
     QVERIFY(error->text().contains(QStringLiteral("no plan and no acceptance")));
 
-    // The second goes ahead: assignee (hash-checked), In progress, a note, then the pane.
+    // The second goes ahead, and the pane it opened makes the hand-off a **claim** (#R9G7): one
+    // `board_claim` instead of the three writes Execute sent by hand — the worker does the
+    // assignee, the move to Executing, the `session` field and the progress entry naming the pane
+    // in one write, so a second agent reading the board cannot catch the card half claimed.
     button(view, QStringLiteral("Execute"))->click();
     QCOMPARE(opened, 1);
     QCOMPARE(handedCard, QStringLiteral("K7Q2"));
@@ -2395,20 +2483,23 @@ void BoardModelTests::executeHandsTheCardToAPaneAndMovesItToExecuting()
     QStringList types;
     for (const QJsonObject &message : std::as_const(sent))
         types << message.value("type").toString();
-    QCOMPARE(types, (QStringList{"board_update", "board_move", "board_comment"}));
-    QCOMPARE(sent.at(0).value("base_hash").toString(), QString(64, QLatin1Char('a')));
-    QCOMPARE(sent.at(0).value("patch").toObject().value("fields").toObject().value("assignee").toString(),
-             QStringLiteral("agent"));
-    // The stage lifecycle (#3XZV, 4f5acd43): what Execute moves a card into is `executing`.
-    QCOMPARE(sent.at(1).value("status").toString(), QStringLiteral("executing"));
-    // The hand-off names the pane it landed in (#HKAP): its session token rides on the note and
-    // the first line reads "Executing (<its first 8 characters>)".
-    QCOMPARE(sent.at(2).value("pane_token").toString(), QStringLiteral("pane-session-token-0001"));
-    QVERIFY(sent.at(2).value("text").toString().startsWith(
-        QStringLiteral("Executing (pane-ses) · handed to a new terminal pane")));
+    QCOMPARE(types, (QStringList{"board_claim"}));
+    QCOMPARE(sent.at(0).value("card").toString(), QStringLiteral("K7Q2"));
+    // The pane it landed in (#HKAP, #R9G7): the token goes into the card's front matter, the
+    // Switchboard draws it as the chip that reveals the pane, and the worker's progress entry
+    // reads "Claimed (<its first 8 characters>)".
+    QCOMPARE(sent.at(0).value("pane_token").toString(), QStringLiteral("pane-session-token-0001"));
+    QVERIFY(sent.at(0).value("text").toString().isEmpty());   // nothing was typed under the buttons
     QVERIFY(error->isHidden());
 
-    // A card with a plan goes at once, and one already in progress and assigned is not rewritten.
+    // And the claim reports itself where the move used to: the pane says which card it took, as
+    // soon as the worker says the write landed.
+    view.handleEvent(QJsonObject{{"event", "board_written"}, {"id", sent.at(0).value("id")},
+                                 {"kind", "board_claim"}, {"card_id", "K7Q2"}, {"write_id", "w1"}});
+    QVERIFY2(view.notice().contains(QStringLiteral("Claimed #K7Q2")), qPrintable(view.notice()));
+
+    // A card with a plan goes at once, and the claim is the same one write whatever the card's
+    // status and assignee already say — it is the worker's job to write only what is missing.
     QJsonObject planned = card("K7Q2", "Voice mode", "the issue", QString(64, QLatin1Char('b')));
     planned.insert("status", "in-progress");
     planned.insert("sections", QJsonArray{"Issue", "Plan"});
@@ -2418,9 +2509,36 @@ void BoardModelTests::executeHandsTheCardToAPaneAndMovesItToExecuting()
     view.cardAction(QStringLiteral("execute"));
     QCOMPARE(opened, 2);
     QCOMPARE(sent.size(), 1);
-    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_comment"));
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_claim"));
     QCOMPARE(sent.last().value("pane_token").toString(), QStringLiteral("pane-session-token-0001"));
     QVERIFY(handedTask.contains(QStringLiteral("`## Plan`")));
+
+    // No pane — the window could open none — so there is nothing to claim the card for and the
+    // writes Execute has always made stand: the hash-checked assignee, the move to Executing, and
+    // a progress entry that names no pane because there is none to name.
+    view.onExecuteCard = [&](const QString &id, const QString &task) {
+        ++opened;
+        handedCard = id;
+        handedTask = task;
+        return QString();
+    };
+    openCard(view, sent, card("K7Q2", "Voice mode", "the issue", QString(64, QLatin1Char('c'))));
+    sent.clear();
+    view.cardAction(QStringLiteral("execute"));   // this card has no plan again, so it arms once
+    view.cardAction(QStringLiteral("execute"));
+    QCOMPARE(opened, 3);
+    types.clear();
+    for (const QJsonObject &message : std::as_const(sent))
+        types << message.value("type").toString();
+    QCOMPARE(types, (QStringList{"board_update", "board_move", "board_comment"}));
+    QCOMPARE(sent.at(0).value("base_hash").toString(), QString(64, QLatin1Char('c')));
+    QCOMPARE(sent.at(0).value("patch").toObject().value("fields").toObject().value("assignee").toString(),
+             QStringLiteral("agent"));
+    // The stage lifecycle (#3XZV, 4f5acd43): what Execute moves a card into is `executing`.
+    QCOMPARE(sent.at(1).value("status").toString(), QStringLiteral("executing"));
+    QVERIFY(!sent.at(2).contains(QStringLiteral("pane_token")));
+    QVERIFY(sent.at(2).value("text").toString().startsWith(
+        QStringLiteral("Execute · handed to a new terminal pane")));
 }
 
 void BoardModelTests::theExecuteTaskCarriesTheBoardsConventions()

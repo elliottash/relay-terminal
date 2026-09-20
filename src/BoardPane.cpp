@@ -148,6 +148,13 @@ QPair<QColor, QColor> badgeInk(board::Badge::Kind kind)
         // Brass, not amber: a card being private is a fact about it, not somebody waiting on you,
         // and amber means only the second (be81edb). Waiting above keeps the amber.
         return {theme::Tool, mix(theme::Tool, theme::Surface, 0.5)};
+    // The pane holding the card (#R9G7): the link colour, because on the card page the same chip
+    // *is* a link to that pane and the row should read as the same thing. Once the pane has gone
+    // the chip is muted like the rest of the history.
+    case board::Badge::Session:
+        return {theme::Link, mix(theme::Link, theme::Surface, 0.55)};
+    case board::Badge::SessionClosed:
+        return {theme::TextMuted, theme::Border};
     case board::Badge::Thread:
         return {theme::TextMuted, QColor()};
     default:
@@ -281,7 +288,11 @@ struct CardShape {
     int height = 0;
 };
 
-CardShape cardShape(const board::Card &card, bool showStatus, const QFont &font, int width)
+// `sessionLive` says whether the pane the card was claimed by is still open (#R9G7): it only
+// changes what the claim chip says, but it is measured with the rest of the badges, so it has to
+// be known before the row is laid out.
+CardShape cardShape(const board::Card &card, bool showStatus, const QFont &font, int width,
+                    bool sessionLive = true)
 {
     CardShape shape;
     const QFontMetrics metrics(font);
@@ -318,7 +329,7 @@ CardShape cardShape(const board::Card &card, bool showStatus, const QFont &font,
     const int cap = qMax(60, available / 4);
     QHash<QString, int> widths;
     QList<QPair<board::Badge, int>> measured;
-    for (const board::Badge &badge : board::badges(card, showStatus)) {
+    for (const board::Badge &badge : board::badges(card, showStatus, sessionLive)) {
         const int w = qMin(cap, badgeMetrics.horizontalAdvance(badge.text) + 12);
         widths.insert(badge.text, w);
         measured << qMakePair(badge, w);
@@ -391,6 +402,15 @@ public:
     // on screen is not necessarily one of them, so the list is where you see the others working.
     std::function<QString(const QString &)> turnMode;
 
+    // Whether the pane a card was claimed by is still open (#R9G7). Asked once per row as it is
+    // measured and once as it is painted, so the list picks a closing pane up at its next repaint
+    // rather than holding a stale answer; unset — a test — means every claim reads as live.
+    std::function<bool(const QString &)> paneExists;
+    bool sessionLive(const board::Card &card) const
+    {
+        return card.session.isEmpty() || !paneExists || paneExists(card.session);
+    }
+
     // The row's width comes from the list with room for its scrollbar kept whether or not the
     // scrollbar is showing: measured at one width and painted at another, the elision would be
     // computed for a row wider than the one drawn.
@@ -407,7 +427,8 @@ public:
         const board::Card *card = m_model->card(row->cardId);
         if (!card)
             return QSize(width, 0);
-        return QSize(width, cardShape(*card, row->showStatus, option.font, width).height);
+        return QSize(width, cardShape(*card, row->showStatus, option.font, width,
+                                     sessionLive(*card)).height);
     }
 
     void paint(QPainter *painter, const QStyleOptionViewItem &option,
@@ -471,7 +492,8 @@ public:
         const board::Card *card = m_model->card(row->cardId);
         if (!card)
             return QString();
-        const CardShape shape = cardShape(*card, row->showStatus, m_list->font(), rowWidth());
+        const CardShape shape = cardShape(*card, row->showStatus, m_list->font(), rowWidth(),
+                                          sessionLive(*card));
         for (const auto &placed : shape.badges)
             if (placed.first.kind == board::Badge::Label
                 && placed.second.translated(itemRect.topLeft()).contains(at))
@@ -548,7 +570,8 @@ private:
         const board::Card *card = m_model->card(row.cardId);
         if (!card)
             return;
-        const CardShape shape = cardShape(*card, row.showStatus, option.font, rect.width());
+        const CardShape shape = cardShape(*card, row.showStatus, option.font, rect.width(),
+                                          sessionLive(*card));
         const QPoint origin = rect.topLeft();
         const bool selected = option.state & QStyle::State_Selected;
         const bool hover = option.state & QStyle::State_MouseOver;
@@ -1607,6 +1630,13 @@ public:
         m_reply->installEventFilter(this);
         connect(m_meta, &QLabel::linkActivated, this, [this](const QString &link) {
             const QUrl url(link);
+            // The claim chip (#R9G7) is the thread's own `relay-pane:` anchor, so it goes to the
+            // same handler: a click on the session reveals the pane that took the card.
+            if (url.scheme() == QStringLiteral("relay-pane")) {
+                if (onFocusPane)
+                    onFocusPane(url.path());
+                return;
+            }
             if (url.scheme() == QStringLiteral("tag")) {   // the labels row copies (#3ZAP)
                 if (onCopyTag)
                     onCopyTag(url.path().isEmpty() ? url.host() : url.path());
@@ -1659,8 +1689,12 @@ public:
     // Verify (#T71W): hand the card to a terminal pane on the *recommended verifier*, which is a
     // different provider family from the one that implemented it. `note` is the reply box again.
     std::function<void(const QString &note)> onVerify;
-    // A `relay-pane:` anchor in the thread names a pane by session token (#HKAP).
+    // A `relay-pane:` anchor in the thread names a pane by session token (#HKAP). The card's
+    // own claim chip is the same anchor through the same handler (#R9G7).
     std::function<void(const QString &token)> onFocusPane;
+    // Whether the pane a card was claimed by is still open (#R9G7): read as the card is shown,
+    // so the page picks up a closed pane at its next re-read. Unset means live.
+    std::function<bool(const QString &token)> paneExists;
     // A label hashtag was clicked — a badge in the list, the meta's labels, or a `#tag` in the
     // card's own words or the thread (#3ZAP): copy `#tag` and say so.
     std::function<void(const QString &tag)> onCopyTag;
@@ -1872,7 +1906,10 @@ public:
         if (tab >= 0)
             m_tab->setCurrentIndex(tab);
         m_tab->setVisible(m_tab->count() > 1);
-        const QString meta = metaText(front, card.value(QStringLiteral("tasks")).toArray(), m_path);
+        const QString sessionToken = front.value(QStringLiteral("session")).toString().trimmed();
+        const QString meta = metaText(front, card.value(QStringLiteral("tasks")).toArray(), m_path,
+                                      sessionToken.isEmpty() || !paneExists
+                                          || paneExists(sessionToken));
         m_meta->setText(meta);
         m_meta->setVisible(!meta.isEmpty());
         m_qa = card.value(QStringLiteral("qa")).toObject();
@@ -2337,7 +2374,8 @@ private:
     }
 
     // Two short lines of facts under the pickers, keys muted, the file a link that opens it.
-    static QString metaText(const QJsonObject &front, const QJsonArray &tasks, const QString &path)
+    static QString metaText(const QJsonObject &front, const QJsonArray &tasks, const QString &path,
+                            bool sessionLive = true)
     {
         QStringList parts;
         const auto item = [](const QString &key, const QString &value) {
@@ -2375,6 +2413,23 @@ private:
                          .arg(theme::TextMuted.name(), shown.join(QStringLiteral(", ")));
         }
         add("assignee", QStringLiteral("assignee"));
+        // Which pane claimed the card (#R9G7), beside who it is assigned to: the same chip the
+        // row wears, and — while that pane is open — the same `relay-pane:` anchor the thread's
+        // "Executing (xxxxxxxx)" entry carries, in the link colour, so a click reveals the pane.
+        // A pane that has gone keeps its token, muted, with "closed" and no link: the claim is
+        // still the record of who took the card.
+        const QString session = front.value(QStringLiteral("session")).toString().trimmed();
+        if (!session.isEmpty()) {
+            const QString chip = board::sessionChip(session, sessionLive).toHtmlEscaped();
+            parts << QStringLiteral("<span style=\"color:%1\">session</span>&nbsp;%2")
+                         .arg(theme::TextMuted.name(),
+                              sessionLive
+                                  ? QStringLiteral("<a href=\"relay-pane:%1\" style=\"color:%2\">%3</a>")
+                                        .arg(QString::fromUtf8(QUrl::toPercentEncoding(session)),
+                                             theme::Link.name(), chip)
+                                  : QStringLiteral("<span style=\"color:%1\">%2</span>")
+                                        .arg(theme::TextMuted.name(), chip));
+        }
         add("waiting_on", QStringLiteral("waiting on"));
         add("milestone", QStringLiteral("milestone"));
         add("component", QStringLiteral("component"));
@@ -2927,6 +2982,12 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     delegate->turnMode = [this](const QString &cardId) {
         return m_cardTurns.value(cardId).mode;
     };
+    // Is the pane that claimed this card still open (#R9G7)? Asked as each row is drawn, so a
+    // pane closed while the board is up reads as closed at the list's next repaint; the window
+    // answers, and a view with no window behind it (a test) calls every claim live.
+    delegate->paneExists = [this](const QString &token) {
+        return !paneExists || paneExists(token);
+    };
     m_list->setItemDelegate(delegate);
     m_list->addRectOf = [delegate](int rowIndex, const QRect &itemRect) {
         return delegate->addRectOf(rowIndex, itemRect);
@@ -3081,6 +3142,9 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     m_detail->onFocusPane = [this](const QString &token) {
         if (onFocusPane && !token.isEmpty())
             onFocusPane(token);
+    };
+    m_detail->paneExists = [this](const QString &token) {
+        return !paneExists || paneExists(token);
     };
     m_detail->hasCard = [this](const QString &id) { return m_model.card(id) != nullptr; };
     m_detail->onCopyTag = [this](const QString &tag) { copyTag(tag); };
@@ -4405,14 +4469,26 @@ void BoardView::refill()
         }
         item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
         item->setData(kCardRole, row.cardId);
-        if (const board::Card *card = m_model.card(row.cardId))
-            item->setToolTip(QStringLiteral("%1 · %2\nPriority %3 — left-click raises the flag, "
-                                            "right-click lowers it.\n%4")
-                                 .arg(card->reference(), card->title,
-                                      card->priority > 0 ? QStringLiteral("+%1").arg(card->priority)
-                                      : card->priority < 0 ? QStringLiteral("−1")
-                                                           : QStringLiteral("0"),
-                                      card->path));
+        if (const board::Card *card = m_model.card(row.cardId)) {
+            QString tip = QStringLiteral("%1 · %2\nPriority %3 — left-click raises the flag, "
+                                         "right-click lowers it.\n%4")
+                              .arg(card->reference(), card->title,
+                                   card->priority > 0 ? QStringLiteral("+%1").arg(card->priority)
+                                   : card->priority < 0 ? QStringLiteral("−1")
+                                                        : QStringLiteral("0"),
+                                   card->path);
+            // The claim chip is eight characters of a session token (#R9G7), which says nothing
+            // on its own: the tooltip is where the row says what they are and whether that pane
+            // is still there. The chip itself is asked about here, as the row is filled, so a
+            // pane closed while the board is up reads as closed at the next refill.
+            if (!card->session.isEmpty()) {
+                const QString chip = board::sessionChip(card->session, true);
+                tip += (paneExists && !paneExists(card->session))
+                           ? QStringLiteral("\nClaimed by the pane %1, which has closed").arg(chip)
+                           : QStringLiteral("\nClaimed by the pane %1").arg(chip);
+            }
+            item->setToolTip(tip);
+        }
         if (row.cardId == m_selected) {
             m_list->setCurrentItem(item);
             item->setSelected(true);
@@ -4898,12 +4974,18 @@ void BoardView::cardAction(const QString &action)
         m_detail->execute();
 }
 
-// Execute (#XS6Q): the card goes to a terminal pane's agent. The board records the hand-off with
-// the writes it already has — assignee, In progress, a progress note in the thread — and the
-// window opens the pane (`onExecuteCard`), whose agent gets the card attached and the task text
-// that tells it the board's conventions (board::executeTask); the pane's session token comes
-// back and rides on the note, which then names the pane and links to it (#HKAP). Nothing here is
-// a model turn, so the Switchboard worker stays free for the next Discuss or Plan.
+// Execute (#XS6Q): the card goes to a terminal pane's agent. The window opens the pane
+// (`onExecuteCard`), whose agent gets the card attached and the task text that tells it the
+// board's conventions (board::executeTask), and the pane's session token comes back.
+//
+// With a token the board records the hand-off as a **claim** (#R9G7): one `board_claim` on the
+// worker, which is the three writes Execute used to send by hand — assignee agent, the move to
+// Executing, and the progress entry naming the pane — plus the `session` field in the card's
+// front matter, so the Switchboard shows who has the card and another agent reading the board
+// sees it is taken. Without a token the window could not open a pane, and the old three writes
+// stand: the card still records the hand-off, it just has no pane to name.
+//
+// Nothing here is a model turn, so the Switchboard worker stays free for the next Discuss or Plan.
 void BoardView::executeCard(const QString &note)
 {
     const QString card = m_detail->cardId();
@@ -4914,36 +4996,44 @@ void BoardView::executeCard(const QString &note)
         return;
     }
     const QJsonObject front = m_detail->front();
-    // In this order on the worker's stdin: the hash-checked update first, while the hash is the
-    // one the card was read at, then the move (which re-reads the file), then the note.
+    // Read before the pane is opened: opening one spins the event loop, and the update below is
+    // hash-checked against the version the card was read at.
+    const QString baseHash = m_detail->hash();
+    const QString status = m_detail->status();
+    // The pane opens before anything is written, because what is written names it (#HKAP): the
+    // claim, and the progress entry it makes, read "Claimed (<first 8 characters>) · …" and
+    // draw as a link that reveals that pane.
+    const QString paneToken = onExecuteCard(card, board::executeTask(card, m_detail->title(), m_detail->hasPlan(),
+                                                                     m_detail->hasAcceptance(), note));
+    if (!paneToken.isEmpty()) {
+        const QString id = nextRequestId();
+        m_pendingNotes.insert(id, QStringLiteral("Claimed #%1 · Execute").arg(card));
+        send({{QStringLiteral("type"), QStringLiteral("board_claim")}, {QStringLiteral("id"), id},
+              {QStringLiteral("card"), card}, {QStringLiteral("pane_token"), paneToken},
+              {QStringLiteral("text"), note}});
+        return;
+    }
+    // No pane: the writes Execute has always made, in this order on the worker's stdin — the
+    // hash-checked update first, then the move (which re-reads the file), then the note.
     if (front.value(QStringLiteral("assignee")).toString() != QStringLiteral("agent"))
         send({{QStringLiteral("type"), QStringLiteral("board_update")}, {QStringLiteral("id"), nextRequestId()},
-              {QStringLiteral("card"), card}, {QStringLiteral("base_hash"), m_detail->hash()},
+              {QStringLiteral("card"), card}, {QStringLiteral("base_hash"), baseHash},
               {QStringLiteral("patch"), QJsonObject{{QStringLiteral("fields"),
                                                      QJsonObject{{QStringLiteral("assignee"), QStringLiteral("agent")}}}}}});
-    if (m_detail->status() != QStringLiteral("executing")
-        && m_detail->status() != QStringLiteral("in-progress")) {
+    if (status != QStringLiteral("executing") && status != QStringLiteral("in-progress")) {
         const QString id = nextRequestId();
         m_pendingNotes.insert(id, QStringLiteral("Moved #%1 to Executing · Execute").arg(card));
         send({{QStringLiteral("type"), QStringLiteral("board_move")}, {QStringLiteral("id"), id},
               {QStringLiteral("card"), card}, {QStringLiteral("status"), QStringLiteral("executing")},
               {QStringLiteral("reason"), QStringLiteral("Execute: handed to a terminal pane")}});
     }
-    // The pane opens before the note is sent (#HKAP), because the note carries its session
-    // token: the entry then reads "Executing (<first 8 characters>) · …" and the thread draws it
-    // as a link that reveals that pane. Without a token — the window could not open a pane —
-    // the entry keeps the plain Execute wording, and the card still records the hand-off.
-    const QString paneToken = onExecuteCard(card, board::executeTask(card, m_detail->title(), m_detail->hasPlan(),
-                                                                     m_detail->hasAcceptance(), note));
-    const QString entry = paneToken.isEmpty()
-            ? QStringLiteral("Execute · handed to a new terminal pane beside the Switchboard, whose "
-                             "agent works on it and records its commits in `links.commits`.")
-            : QStringLiteral("Executing (%1) · handed to a new terminal pane beside the Switchboard, "
-                             "whose agent works on it and records its commits in `links.commits`.")
-                      .arg(paneToken.left(8));
+    // No pane to name, so no `pane_token` and nothing for the thread to link to: the plain
+    // Execute wording, which is what the entry said before panes were linked at all.
+    const QString entry =
+            QStringLiteral("Execute · handed to a new terminal pane beside the Switchboard, whose "
+                           "agent works on it and records its commits in `links.commits`.");
     send({{QStringLiteral("type"), QStringLiteral("board_comment")}, {QStringLiteral("card"), card},
           {QStringLiteral("kind"), QStringLiteral("progress")},
-          {QStringLiteral("pane_token"), paneToken},
           {QStringLiteral("text"), entry + (note.isEmpty() ? QString()
                                                            : QStringLiteral("\n\n") + note)}});
 }
