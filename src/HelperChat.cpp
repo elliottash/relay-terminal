@@ -153,20 +153,24 @@ QString linkTarget(const QUrl &url)
     return target;
 }
 
-// The header line: who this is, and — while it turns — how long it has been turning. The state
-// word stays out of the *pane's* header (owner, 2026-09-19, "Header and Activity decisions"); this
-// is the panel's own head, where a running clock is the whole point. `title` is where the panel
-// is (#FEJQ decision 4): one worker answers four panels, so the panel has to say which it is.
-void drawHead(QLabel *head, const QString &title, bool running, bool survey, qint64 seconds)
+// The busy strip's line: who is turning, how long it has been turning, and whether this is the
+// survey turn. The clock and the survey word rode on the head row's name label until 2026-09-20,
+// when the owner made every action row buttons and nothing else ("yes, lets do both left-aligned,
+// drop the label") — so they moved here, to the strip that already names the agent and is on
+// screen for exactly as long as there is a turn to time. `title` is where the panel is (#FEJQ
+// decision 4): one worker answers four panels, so the line has to say which it is. The state word
+// stays out of the *pane's* header (owner, 2026-09-19, "Header and Activity decisions"); this
+// strip is the panel's own, where a running clock is the whole point.
+void drawBusyLine(QLabel *label, const QString &title, bool running, bool survey, qint64 seconds)
 {
-    if (head == nullptr)
+    if (label == nullptr)
         return;
-    QString text = title;
+    QString text = QStringLiteral("✦ ") + title;
     if (running)
         text += QStringLiteral(" · ") + clockText(seconds);
     if (running && survey)
         text += QStringLiteral(" · survey");
-    head->setText(text);
+    label->setText(text);
 }
 
 // Markdown headings come out of QTextDocument at browser sizes (an H1 is ~2x the text), which
@@ -340,10 +344,10 @@ QString problemCount(int count)
 
 // ------------------------------------------------------------------------------- construction
 
-// Top to bottom: the **head row** — who this is, and the actions that need no typing (Check,
-// Clean up, the fold) — then whatever a Check turned up, then the survey's offer, then the
-// conversation, then the queue, then the **prompt box**: one frame holding the busy strip, the
-// editor and the chip strip, exactly as a terminal pane's is.
+// Top to bottom: the **head row** — the actions that need no typing (Check, Clean up), at the
+// left, with the fold at its right on a panel that folds — then whatever a Check turned up, then
+// the survey's offer, then the conversation, then the queue, then the **prompt box**: one frame
+// holding the busy strip, the editor and the chip strip, exactly as a terminal pane's is.
 //
 // That division is the owner's rule, given on 2026-09-20 of the card page's Plan and Execute and
 // applied to every prompt box in the app: "move those buttons out of there … because they
@@ -471,16 +475,31 @@ HelperChatPanel::HelperChatPanel(const QString &pane, QWidget *parent)
     layout->setContentsMargins(10, 8, 10, 8);
     layout->setSpacing(6);
 
-    // ---- the head row: the agent's name and clock, then the board-wide buttons ----------------
+    // ---- the head row: the actions that need no typing, at the left ---------------------------
+    //
+    // An action row is **left-aligned buttons and nothing else** (owner, 2026-09-20, of this row
+    // and the card page's: "the plan / execute buttons etc, would those work better at the left?"
+    // — "yes, lets do both left-aligned, drop the label"). So Check, Clean up and whatever else
+    // `addToolWidget` puts here start at the row's left edge and a stretch closes it.
+    //
+    // On the Switchboard the row is only that: the name label is gone, because the placeholder in
+    // the box already names the agent ("Ask the Switchboard agent — …") and the busy strip names
+    // it again while a turn runs — with the clock and the survey word that used to ride on the
+    // head (drawBusyLine). A panel that folds keeps its name, because there the head row is also
+    // the row you fold from and the pane it is in has nothing else that says which helper this is
+    // (#FEJQ decision 4); it has no actions of its own, so nothing is left-aligned away from it.
     auto *headRow = new QHBoxLayout;
     headRow->setSpacing(6);
-    m_head = new QLabel(this);
-    m_head->setObjectName(QStringLiteral("boardChatHead"));
-    headRow->addWidget(m_head, 0);
-    headRow->addStretch(1);
+    if (!isBoard()) {
+        m_head = new QLabel(this);
+        m_head->setObjectName(QStringLiteral("boardChatHead"));
+        m_head->setText(helperpane::title(m_pane));
+        headRow->addWidget(m_head, 0);
+    }
     m_toolRow = new QHBoxLayout;
     m_toolRow->setSpacing(6);
     headRow->addLayout(m_toolRow, 0);
+    headRow->addStretch(1);
     // The way back to one row, for a panel that has one (#FEJQ). At the end of the head, where a
     // pane's own chrome buttons are, and out of the tab order: the composer is what Shift+Tab
     // should reach from here, not the control that would throw the answer off screen.
@@ -640,12 +659,15 @@ HelperChatPanel::HelperChatPanel(const QString &pane, QWidget *parent)
     auto *busyRow = new QHBoxLayout(m_busy);
     busyRow->setContentsMargins(0, 0, 0, 0);
     busyRow->setSpacing(6);
-    // It says where it is, exactly as the head does: this strip is under the log of an Options or
-    // Sessions panel as often as under the board's, and "Switchboard agent" there was the one
-    // place the panel still called itself by the board's name (#FEJQ).
-    auto *busyLabel = new QLabel(QStringLiteral("✦ ") + helperpane::title(m_pane), m_busy);
-    busyLabel->setObjectName(QStringLiteral("boardChatBusyLabel"));
-    busyRow->addWidget(busyLabel, 0);
+    // It says where it is: this strip is under the log of an Options or Sessions panel as often
+    // as under the board's, and "Switchboard agent" there was the one place the panel still
+    // called itself by the board's name (#FEJQ).
+    // It says where it is, how long the turn has been running and — on the board — whether this
+    // is the survey turn: the head row above carries buttons only now (owner, 2026-09-20), so
+    // this line is where the clock lives.
+    m_busyLabel = new QLabel(m_busy);
+    m_busyLabel->setObjectName(QStringLiteral("boardChatBusyLabel"));
+    busyRow->addWidget(m_busyLabel, 0);
     // A page-agent turn reads the whole board before it says a word, and a panel that only said
     // "thinking…" for all of it read as stuck (owner, 2026-09-19, the same complaint that put this
     // line on a card and on the cleanup notice). Elided rather than wrapped: it is one row.
@@ -733,11 +755,7 @@ HelperChatPanel::HelperChatPanel(const QString &pane, QWidget *parent)
     auto *clock = new QTimer(this);
     clock->setObjectName(clockTimerName());
     clock->setInterval(1000);
-    QObject::connect(clock, &QTimer::timeout, this, [this] {
-        const double base = property(kClockBase).toDouble();
-        drawHead(m_head, helperpane::title(m_pane), m_running, m_surveyTurn,
-                 qint64(base) + (m_clock.isValid() ? m_clock.elapsed() / 1000 : 0));
-    });
+    QObject::connect(clock, &QTimer::timeout, this, [this] { drawBusy(); });
 
     updateVoiceChip();
     setRunning(false);
@@ -856,9 +874,9 @@ void HelperChatPanel::setPane(const QString &pane)
     m_pane = pane;
     if (m_composer != nullptr)
         m_composer->setPlaceholders(askPlaceholders(m_pane));
-    if (auto *busy = findChild<QLabel *>(QStringLiteral("boardChatBusyLabel")))
-        busy->setText(QStringLiteral("✦ ") + helperpane::title(m_pane));
-    setRunning(m_running);      // redraws the head
+    if (m_head != nullptr)
+        m_head->setText(helperpane::title(m_pane));
+    setRunning(m_running);      // redraws the busy line, which is what carries the name and clock
     updateAskRow();
 }
 
@@ -990,9 +1008,16 @@ void HelperChatPanel::setRunning(bool running)
         else
             clock->stop();
     }
+    drawBusy();
+}
+
+// The strip's own line, from the clock this panel keeps: `kClockBase` is what the worker had
+// already spent on the turn before this GUI saw it, `m_clock` measures from there.
+void HelperChatPanel::drawBusy()
+{
     const double base = property(kClockBase).toDouble();
-    drawHead(m_head, helperpane::title(m_pane), running, m_surveyTurn,
-             qint64(base) + (running && m_clock.isValid() ? m_clock.elapsed() / 1000 : 0));
+    drawBusyLine(m_busyLabel, helperpane::title(m_pane), m_running, m_surveyTurn,
+                 qint64(base) + (m_running && m_clock.isValid() ? m_clock.elapsed() / 1000 : 0));
 }
 
 void HelperChatPanel::setProgress(const QString &line)

@@ -3632,7 +3632,9 @@ void BoardModelTests::theModelBoxSitsInTheComposerRowWithTheMicAndTheContextChip
 
     // A pick still goes out the way #BRD3 wired it: the view writes no settings itself.
     QString picked;
-    view.onModelPick = [&picked](const QString &data) { picked = data; };
+    // false is "a real pick is on its way": the box keeps the row the click chose, and the
+    // window's `configured` event is what redraws it (src/BoardPane.h, onModelPick) — #WRWN.
+    view.onModelPick = [&picked](const QString &data) { picked = data; return false; };
     box->setCurrentIndex(0);
     emit box->activated(0);
     QVERIFY(!picked.isEmpty());
@@ -3699,13 +3701,39 @@ void BoardModelTests::theHelpersPromptBoxIsTheSameShapeAsAPanes()
              qPrintable(QStringLiteral("context centred at %1, microphone at %2")
                             .arg(chipMid).arg(micMid)));
 
-    // The actions that need no typing are on the head row above the box, not in it.
+    // The actions that need no typing are on the head row above the box, not in it — and that
+    // row is **left-aligned buttons and nothing else** (owner, 2026-09-20: "the plan / execute
+    // buttons etc, would those work better at the left?" — "yes, lets do both left-aligned, drop
+    // the label"). So Check comes first, at the row's own left edge, and the stretch is behind
+    // whatever `addToolWidget` has put there.
     auto *check = panel->findChild<QToolButton *>(QStringLiteral("boardChatCheck"));
     auto *cleanup = panel->findChild<QToolButton *>(QStringLiteral("boardCleanup"));
     QVERIFY(check && cleanup);
     QVERIFY(!box->isAncestorOf(check));
     QVERIFY(!box->isAncestorOf(cleanup));
     QVERIFY(check->mapTo(panel, QPoint(0, 0)).y() < box->mapTo(panel, QPoint(0, 0)).y());
+    QVERIFY2(check->mapTo(panel, QPoint(0, 0)).x() < panel->width() / 4,
+             qPrintable(QStringLiteral("Check at x=%1 in a %2 px panel")
+                            .arg(check->mapTo(panel, QPoint(0, 0)).x()).arg(panel->width())));
+    QVERIFY(check->mapTo(panel, QPoint(0, 0)).x() < cleanup->mapTo(panel, QPoint(0, 0)).x());
+    // The layout says the same thing and keeps saying it when a session adds a button: the tool
+    // row is the first thing on the head row, and the last thing on it is the stretch.
+    QLayout *tools = nullptr;
+    for (QLayout *candidate : panel->findChildren<QLayout *>())
+        if (candidate->indexOf(check) >= 0)
+            tools = candidate;
+    QVERIFY(tools);
+    QLayout *head = nullptr;
+    for (QLayout *candidate : panel->findChildren<QLayout *>())
+        for (int i = 0; i < candidate->count(); ++i)
+            if (candidate->itemAt(i)->layout() == tools)
+                head = candidate;
+    QVERIFY(head);
+    QCOMPARE(head->itemAt(0)->layout(), tools);
+    QVERIFY(head->itemAt(head->count() - 1)->spacerItem() != nullptr);
+    // And no name label on it: the box's placeholder names the agent, and so does the strip that
+    // carries the clock while a turn runs.
+    QVERIFY(!panel->findChild<QLabel *>(QStringLiteral("boardChatHead")));
 
     // No help sentence and no empty block: while the conversation is empty the log has no height
     // at all, and the box's placeholder is what says whose box it is.
@@ -3726,6 +3754,18 @@ void BoardModelTests::theHelpersPromptBoxIsTheSameShapeAsAPanes()
     QVERIFY(log->toPlainText().contains(QStringLiteral("Two.")));
     QVERIFY2(log->maximumHeight() <= 320,
              qPrintable(QStringLiteral("log %1 px").arg(log->maximumHeight())));
+
+    // Which is where the clock and the survey word went (owner, 2026-09-20): the busy strip says
+    // who is turning, for how long, and whether this is the survey turn — and it is on screen for
+    // exactly as long as there is a turn to time.
+    auto *busyLabel = panel->findChild<QLabel *>(QStringLiteral("boardChatBusyLabel"));
+    QVERIFY(busyLabel);
+    QCOMPARE(busyLabel->text(), QStringLiteral("\u2726 Switchboard agent"));
+    view.handleEvent(QJsonObject{{"event", "board_chat_state"},
+                                 {"chat", QJsonObject{{"running", true}, {"turn_id", "chat-9"},
+                                                      {"seconds", 42}, {"survey", true}}}});
+    QVERIFY(!busy->isHidden());
+    QCOMPARE(busyLabel->text(), QStringLiteral("\u2726 Switchboard agent \u00b7 0:42 \u00b7 survey"));
 }
 
 namespace {
@@ -3742,8 +3782,8 @@ QJsonObject presetsEvent()
                          {"model", "zai/glm-5.3"}, {"has_stored_key", true}},
              QJsonObject{{"id", "kimi"}, {"label", "Kimi"},
                          {"model", "moonshot/kimi-k3"}, {"has_stored_key", true}},
-             // A harness, not an endpoint, and a provider with no key: neither is offered, on
-             // either page — one state, one set of rows.
+             // A provider with no key is offered on neither page; the guest harness is a row on
+             // both, and picking it is refused in words (#PK5Q) — one state, one set of rows.
              QJsonObject{{"id", "guest:codex"}, {"label", "Codex"}, {"group", "guest"},
                          {"has_stored_key", true}},
              QJsonObject{{"id", "openai"}, {"label", "OpenAI"}, {"model", "openai/gpt-6"},
@@ -3807,9 +3847,10 @@ void BoardModelTests::theCardPageCarriesTheSameModelBoxAsTheListPage()
     QCOMPARE(strip->indexOf(page), 1);
     QCOMPARE(strip->count(), 2);
 
-    // And the three buttons are **out** of the box, in a row directly above it, in that order
-    // (owner, 2026-09-20: "move those buttons out of there (plan / execute / etc) … can we
-    // instead put buttons like that in a row above the chat box"). They stay off the tab ring.
+    // And the three buttons are **out** of the box, in a row directly above it, left-aligned and
+    // in the workflow's order (owner, 2026-09-20: "move those buttons out of there (plan /
+    // execute / etc) … can we instead put buttons like that in a row above the chat box", then
+    // "yes, lets do both left-aligned, drop the label"). They stay off the tab ring.
     QPushButton *plan = button(view, QStringLiteral("Plan"));
     QPushButton *execute = button(view, QStringLiteral("Execute"));
     QPushButton *verify = button(view, QStringLiteral("Verify"));
@@ -3822,9 +3863,15 @@ void BoardModelTests::theCardPageCarriesTheSameModelBoxAsTheListPage()
     QVERIFY(actions && actions->isAncestorOf(plan) && actions->isAncestorOf(execute)
             && actions->isAncestorOf(verify));
     QLayout *row = actions->layout();
-    QVERIFY(row && row->itemAt(0)->spacerItem() != nullptr);   // right-aligned, as the strip is
+    QVERIFY(row);
+    QCOMPARE(row->indexOf(plan), 0);                           // left-aligned: Plan starts the row
     QVERIFY(row->indexOf(plan) < row->indexOf(execute));
     QVERIFY(row->indexOf(execute) < row->indexOf(verify));
+    QVERIFY(row->itemAt(row->count() - 1)->spacerItem() != nullptr);   // the stretch is behind them
+    // Where they *land* is measured at the width the owner works at, in
+    // theCardsModelBoxGivesTheRowItsWidthBackBeforeAButtonIsClipped(): a card page opened on a
+    // 900 px view and never resized has not laid this row out yet, so its x positions here would
+    // be the buttons' unlaid-out defaults rather than the rule.
     auto *detail = view.findChild<QWidget *>(QStringLiteral("boardDetail"));
     QVERIFY(detail);
     QVERIFY2(actions->mapTo(detail, QPoint(0, 0)).y() < reply->mapTo(detail, QPoint(0, 0)).y(),
@@ -3842,38 +3889,52 @@ void BoardModelTests::theCardPageCarriesTheSameModelBoxAsTheListPage()
         pageRows << page->itemText(i) + QLatin1Char('=') + page->itemData(i).toString();
     }
     QCOMPARE(pageRows, listRows);
-    QVERIFY(!pageRows.join(QLatin1Char('\n')).contains(QStringLiteral("guest:codex")));
+    // A provider with no key is offered on neither page. The guest harness *is* a row on both —
+    // "the owner asked for the same list", and picking it is refused in words rather than being
+    // quietly missing (src/HelperModelBox.cpp, #PK5Q). This assertion said the opposite until
+    // 2026-09-20: it was written for the board's own row filter (#8YQ9), the helper's box became
+    // the pane's box in 3669df02, and nothing caught it because this file had not compiled since
+    // 28b56483 (#WRWN).
+    QVERIFY2(pageRows.join(QLatin1Char('\n')).contains(QStringLiteral("guest:codex")),
+             qPrintable(pageRows.join(QStringLiteral(" | "))));
     QVERIFY(!pageRows.join(QLatin1Char('\n')).contains(QStringLiteral("preset:openai")));
-    QCOMPARE(page->currentData().toString(), QStringLiteral("tier:flash"));
+    QCOMPARE(page->currentData().toString(), QStringLiteral("role:flash"));
     QCOMPARE(page->currentText(), list->currentText());
     QCOMPARE(page->toolTip(), list->toolTip());
 
     // A pick on the card page is the pick the list page would have sent — the same row's data,
-    // through the one onModelPick. The view writes no settings itself, here either.
+    // through the one onModelPick. The view writes no settings itself, here either. The rows are
+    // a terminal pane's rows since #PK5Q, so a pick arrives in the pane's own words
+    // (`role:<tier>`, `entry:<preset>|<model>`, `gear:…`), and the window answers **true** for a
+    // row that is not a choice — which is what puts the box back on the live row
+    // (RelayWindow::pickHelperModel). This stands in for the window, so it answers the same way.
     QStringList picks;
-    view.onModelPick = [&picks](const QString &data) { picks << data; };
-    const int provider = page->findData(QStringLiteral("preset:kimi"));
+    view.onModelPick = [&picks](const QString &data) {
+        picks << data;
+        return data.startsWith(QStringLiteral("gear:"));
+    };
+    const int provider = page->findData(QStringLiteral("entry:kimi|moonshot/kimi-k3"));
     QVERIFY(provider >= 0);
-    QCOMPARE(list->itemData(provider).toString(), QStringLiteral("preset:kimi"));
+    QCOMPARE(list->itemData(provider).toString(), QStringLiteral("entry:kimi|moonshot/kimi-k3"));
     page->setCurrentIndex(provider);
     emit page->activated(provider);
-    QCOMPARE(picks, QStringList{QStringLiteral("preset:kimi")});
+    QCOMPARE(picks, QStringList{QStringLiteral("entry:kimi|moonshot/kimi-k3")});
 
     // The worker answering the reconfigure redraws *both* boxes on the new role, so the list page
     // is never left naming the model the card page moved off.
     view.handleEvent(configuredEvent(QString()));
-    QCOMPARE(page->currentData().toString(), QStringLiteral("preset:glm-coding"));
-    QCOMPARE(list->currentData().toString(), QStringLiteral("preset:glm-coding"));
+    QCOMPARE(page->currentData().toString(), QStringLiteral("role:main"));
+    QCOMPARE(list->currentData().toString(), QStringLiteral("role:main"));
 
     // The gear is not a choice: it goes out like any other pick, and the box is put straight back
-    // on the live row rather than left showing "Model roles…".
+    // on the live row rather than left showing "customize…".
     picks.clear();
-    const int gear = page->findData(QStringLiteral("gear"));
+    const int gear = page->findData(QStringLiteral("gear:modelOptions"));
     QVERIFY(gear >= 0);
     page->setCurrentIndex(gear);
     emit page->activated(gear);
-    QCOMPARE(picks, QStringList{QStringLiteral("gear")});
-    QCOMPARE(page->currentData().toString(), QStringLiteral("preset:glm-coding"));
+    QCOMPARE(picks, QStringList{QStringLiteral("gear:modelOptions")});
+    QCOMPARE(page->currentData().toString(), QStringLiteral("role:main"));
 
     // A turn reconfigures nothing mid-flight, so while the card is working the box waits and says
     // why — on both pages, because the turn that blocks the configure is as likely to have been
@@ -3936,6 +3997,19 @@ void BoardModelTests::theCardsModelBoxGivesTheRowItsWidthBackBeforeAButtonIsClip
                                 .arg(item->text()).arg(left.x())
                                 .arg(left.x() + item->width()).arg(actions->width())));
     }
+
+    // Left-aligned, in the workflow's order, with the free space behind them (owner, 2026-09-20:
+    // "yes, lets do both left-aligned, drop the label"). Measured here because this is the one
+    // card-page test whose row has been through a resize and so has real geometry.
+    const int planAt = row.at(0)->mapTo(actions, QPoint(0, 0)).x();
+    const int executeAt = row.at(1)->mapTo(actions, QPoint(0, 0)).x();
+    QVERIFY2(planAt <= 1 && planAt < executeAt,
+             qPrintable(QStringLiteral("Plan at x=%1, Execute at x=%2, in a %3 px row")
+                            .arg(planAt).arg(executeAt).arg(actions->width())));
+    QVERIFY2(executeAt + row.at(1)->width() < actions->width(),
+             qPrintable(QStringLiteral("Execute ends at %1 in a %2 px row: nothing is left over "
+                                       "at the right, so the row is not left-aligned")
+                            .arg(executeAt + row.at(1)->width()).arg(actions->width())));
 
     // The keys are still in the labels: with the row to themselves the buttons fit a 350 px card,
     // which is what moving them off the box's strip bought.

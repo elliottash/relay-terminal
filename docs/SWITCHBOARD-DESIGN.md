@@ -763,8 +763,9 @@ reply. The agent's tools are the board's (section 6.1) plus the `app_*` tools �
 option, run a safe action, search the session manager, open any of the four panes at a section, a
 row, a query or a card — with every change announced as `Agent changed <label>: <before> → <after>
 · Undo` and undoable without an agent (protocol 30.6). The `switchboard` model role keeps its name
-and its model box, and is labelled **"Helper agent"**; each panel's header says where it is
-("Switchboard agent", "Options helper", "Sessions helper").
+and its model box, and is labelled **"Helper agent"**; a panel that folds says where it is on its
+head row ("Options helper", "Sessions helper"), and the Switchboard's — which is the page it is on
+— is named by its placeholder and by its busy strip instead (4.13a).
 
 ### 4.13a Every prompt box is the main pane's prompt box (#PBX1, owner 2026-09-20)
 
@@ -786,13 +787,24 @@ and every other box in the app is that control:
 - **Nothing else in the box.** An action that needs no typing goes in the row **above** it: Check
   and Clean up on the Switchboard's head row, Plan / Execute / Verify above the card's box, all
   wearing one face so every action row in the app reads the same.
+- **An action row is left-aligned buttons and nothing else** (owner, 2026-09-20: "the plan /
+  execute buttons etc, would those work better at the left?" — "yes, lets do both left-aligned,
+  drop the label"). The buttons start at the row's left edge and the space is behind them, in the
+  order the work is done: Plan, Execute, Verify on a card; Check, Clean up, Tests, Profile on the
+  Switchboard. The Switchboard's **"Switchboard agent" label is gone** from that row — the box's
+  placeholder names the agent, and the busy strip names it again while a turn runs, carrying the
+  turn clock and the `· survey` word that used to sit beside the label. A panel that folds
+  (Options, Actions, Sessions) has no actions on its head row, so it keeps its name there and the
+  fold control at the right; its own action row is the collapsed `? Helper Agent (Alt+Q)` row, at
+  the pane's bottom right.
 - **No help sentence and no reserved space.** The paragraph that used to stand over an empty
   conversation is gone; the placeholder names the agent instead ("Ask the Switchboard agent —
   Enter sends, a second prompt queues", "Ask the Options helper — …"), and the log is hidden
   outright until there is a conversation, then grows with its content up to its cap (320 px on the
   board, ~40 % of the pane elsewhere).
 
-Evidence: `docs/qa_evidence/2026-09-20-prompt-boxes-like-the-pane/`.
+Evidence: `docs/qa_evidence/2026-09-20-prompt-boxes-like-the-pane/`, and
+`docs/qa_evidence/2026-09-20-action-rows-left/` for the left-aligned rows.
 
 ### 4.14 The tool row is the project's tooling hub: Tests, Check and Profile (#7BM4, owner 2026-09-20)
 

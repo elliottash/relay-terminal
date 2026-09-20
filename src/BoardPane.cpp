@@ -1822,13 +1822,17 @@ public:
         // and the box holds the text and the chips that qualify it. Nothing else changes — Plan
         // and Execute still read whatever is in the reply box as their note, and their keys are
         // still `p`, `x` and `v`.
+        //
+        // **At the left**, and the row is buttons and nothing else (owner, 2026-09-20, of this row
+        // and the helper panel's: "the plan / execute buttons etc, would those work better at the
+        // left?" — "yes, lets do both left-aligned, drop the label"). So the stretch goes after
+        // them, and the reading order is the workflow: Plan, then Execute, then Verify.
         m_actionRow = new QWidget(this);
         m_actionRow->setObjectName(QStringLiteral("boardCardActions"));
         auto *buttons = new QHBoxLayout(m_actionRow);
         m_buttonRow = buttons;
         buttons->setContentsMargins(0, 0, 0, 0);
         buttons->setSpacing(6);
-        buttons->addStretch(1);
         // Discuss and Comment have no buttons (owner, #VZ69: "remove comment / discuss buttons. i
         // would say you just press enter in the prompt box to discuss / comment"). They are what
         // the box itself does — Enter discusses, Ctrl+Shift+Enter only comments — and the
@@ -1851,6 +1855,7 @@ public:
         buttons->addWidget(m_plan);
         buttons->addWidget(m_execute);
         buttons->addWidget(m_verify);
+        buttons->addStretch(1);
         layout->addWidget(m_actionRow);
         // setModeTips() is called once the box below is built: it writes the busy strip's words
         // too, and that strip is part of the box.

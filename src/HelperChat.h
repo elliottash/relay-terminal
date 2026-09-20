@@ -22,7 +22,7 @@
 // and the panel's own Check button exist only for `pane == "switchboard"`; `relay::BoardChatPanel`
 // (src/BoardChat.h) is that pane's name for this class and carries no code of its own. A subclass
 // that held them would have to reach into `setChatState`, `setRunning` and `settleTurn` — the
-// survey word is part of the head's clock line and the forge look is disabled while a turn runs —
+// survey word is part of the busy strip's line and the forge look is disabled while a turn runs —
 // so the seam would be three virtuals and a handful of protected members to save two `if`s.
 //
 // **Outside the Switchboard it opens collapsed** (owner, 2026-09-20): a single row at the pane's
@@ -217,6 +217,7 @@ private:
     void appendThinking(const QString &text);
     void finishThinking(qint64 ms);
     void setProgress(const QString &line);   // "reading Pane.h", the tool line of the turn
+    void drawBusy();                         // "✦ Switchboard agent · 0:42 · survey"
     void setRunning(bool running);
     void settleTurn(const QString &how);     // done / error / cancelled: fold into the history
     void send(QJsonObject message);
@@ -286,11 +287,15 @@ private:
     // The widgets. Object names are the qss hooks and what a test finds the panel by, and they
     // are the **same names in every pane** (`boardChatComposer`, `boardChatLog`, …): the board's
     // tests and the QA drivers find the panel by them, and a helper's panel is the same panel.
-    QLabel *m_head = nullptr;                // "Switchboard agent" / "Sessions helper" + the clock
+    // "Options helper" / "Sessions helper", on the head row of a panel that folds. The
+    // Switchboard's panel has no such label (owner, 2026-09-20: "drop the label"), so this is
+    // null there and every use of it is guarded.
+    QLabel *m_head = nullptr;
     QHBoxLayout *m_toolRow = nullptr;        // Clean up, Check: the actions that need no typing
     QToolButton *m_check = nullptr;
     QTextBrowser *m_log = nullptr;
     QWidget *m_busy = nullptr;               // the running strip: what it is doing, and Stop
+    QLabel *m_busyLabel = nullptr;           // "✦ Switchboard agent · 0:42 · survey" (see drawBusy)
     QLabel *m_busyWhat = nullptr;
     QToolButton *m_stop = nullptr;
     QWidget *m_queueBox = nullptr;           // one row per queued prompt, in delivery order
