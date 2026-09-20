@@ -1040,6 +1040,16 @@ class ClaimTests(BoardToolsTest):
         self.assertEqual(refused["field"], "session")
         self.assertNotIn("session", self.board.card_by_id(self.card_id).front)
 
+    def test_the_row_carries_the_session_so_the_board_shows_who_holds_the_card(self):
+        # `board_list`'s rows and the pane's rows are one builder (`_row`): the Switchboard draws
+        # the chip from this field, and an agent listing the board sees a card is taken.
+        rows = self.tools.run("board_list", {"query": ""})["cards"]
+        self.assertIsNone(next(r for r in rows if r["id"] == self.card_id)["session"])
+        self.tools.run("board_claim", {"id": self.card_id})
+        rows = self.tools.run("board_list", {"query": ""})["cards"]
+        self.assertEqual(next(r for r in rows if r["id"] == self.card_id)["session"],
+                         self.pane_token)
+
     def test_a_cleanup_cannot_claim_a_card(self):
         # A cleanup is the Switchboard worker tidying the whole board (19.9): no pane of its own,
         # and moving a card to Executing is not tidying.

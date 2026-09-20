@@ -1627,6 +1627,10 @@ class BoardTools:
                 # Who closed it out of the QA lane (#T71W). The row stays light on purpose: the
                 # `qa` recommendation is computed per card in `board_read`, not for every row.
                 "verified_by": card.front.get("verified_by"),
+                # Which pane holds the card (#R9G7): the Switchboard draws the token's first eight
+                # characters as a link to that pane, and an agent listing the board sees from the
+                # row alone that a card is taken.
+                "session": card.front.get("session"),
                 "tasks_total": len(tasks),
                 "tasks_done": sum(1 for task in tasks if task.done)}
 

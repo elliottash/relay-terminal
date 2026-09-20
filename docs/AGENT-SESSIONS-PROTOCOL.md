@@ -2149,7 +2149,10 @@ no table of its own.
 
 A **row** is `{id, title, type, status, section, tab, labels, assignee, waiting_on, rank, private,
 priority, path, thread_entries, tasks_done, tasks_total, created, updated, milestone, topic,
-implemented_by, text}` — enough to draw a card without reading the file. `section` (2026-09-20,
+implemented_by, verified_by, session, text}` — enough to draw a card without reading the file.
+`session` (2026-09-20, #R9G7) is the pane session token holding the card (19.19): the pane draws
+its first eight characters as a chip that reveals that pane, and an agent's `board_list` sees from
+the row alone that a card is taken. `section` (2026-09-20,
 #3XZV) is the manual section the card is parked in — the id of a configured column that collects
 nothing — or null for a card that sits in its status's own section. (Until 2026-09-18
 `board_tools._row` sent only the first eleven, so the pane's age and `☑ done/total` badges had
