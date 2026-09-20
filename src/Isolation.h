@@ -10,6 +10,7 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QRegularExpression>
+#include <QTimer>
 
 #include <algorithm>
 
@@ -26,19 +27,66 @@ namespace isolation {
 inline bool enabled() { return QSettings().value(QStringLiteral("isolation/enabled"), true).toBool(); }
 
 // systemd-run exists and the user manager accepts transient scopes; probed once per process.
+//
+// The probe is a subprocess, and it used to be run — and waited on for up to three seconds — from
+// the first pane's constructor, i.e. before the first window was shown. On a healthy machine
+// `systemd-run --user --scope --quiet -- true` answers in 0–10 ms, but on one whose `systemd --user`
+// or D-Bus is not answering that was three seconds of window-less Relay with nothing on screen to
+// say why (#GMCF, decision 5; startup finding 3a). So main() starts the probe before it builds
+// anything and nothing waits for it there; the first consumer blocks for at most kProbeWaitMs, and
+// a probe that has not answered by then leaves the answer *unknown*: that pane runs unisolated —
+// the same path a machine without systemd-run takes, "isolation unavailable" notice and all — and
+// the next pane picks up the late answer. Once answered it is cached for the process, as before.
+namespace detail {
+inline int &probeState() { static int state = -1; return state; }        // -1 unknown, 0 no, 1 yes
+inline QProcess *&probeProcess() { static QProcess *process = nullptr; return process; }
+inline bool &probeWaited() { static bool waited = false; return waited; }
+}
+
+inline constexpr int kProbeWaitMs = 300;       // a local systemd-run slower than this is not usable now
+inline constexpr int kProbeGiveUpMs = 10000;   // ...and one still silent after this never will be
+
+// Start the probe without waiting for it. Called from main() before the first window, and by
+// available() itself when nobody did (a test, a pane in a process with no GUI). A no-op once the
+// answer is in or a probe is already running.
+inline void beginProbe() {
+    if (detail::probeState() >= 0 || detail::probeProcess()) return;
+    const QString tool = QStandardPaths::findExecutable(QStringLiteral("systemd-run"));
+    if (tool.isEmpty()) { detail::probeState() = 0; return; }
+    auto *probe = new QProcess;
+    detail::probeProcess() = probe;
+    auto answer = [probe](int state) {
+        detail::probeState() = state;
+        if (detail::probeProcess() == probe) detail::probeProcess() = nullptr;
+        probe->deleteLater();
+    };
+    QObject::connect(probe, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), probe,
+                     [answer](int code, QProcess::ExitStatus exit) {
+        answer(exit == QProcess::NormalExit && code == 0 ? 1 : 0);
+    });
+    QObject::connect(probe, &QProcess::errorOccurred, probe, [answer](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart) answer(0);   // anything later still reaches finished()
+    });
+    // Nothing reaps a systemd-run that never returns, and the old code's timeout at least ended it.
+    // Same end, off the GUI thread: kill it, and the finished handler calls isolation unavailable.
+    QTimer::singleShot(kProbeGiveUpMs, probe, [probe] { if (probe->state() != QProcess::NotRunning) probe->kill(); });
+    probe->start(tool, {QStringLiteral("--user"), QStringLiteral("--scope"), QStringLiteral("--quiet"), QStringLiteral("--"), QStringLiteral("true")});
+}
+
 inline bool available() {
-    static int state = -1;
-    if (state < 0) {
-        state = 0;
-        const QString tool = QStandardPaths::findExecutable(QStringLiteral("systemd-run"));
-        if (!tool.isEmpty()) {
-            QProcess probe;
-            probe.start(tool, {QStringLiteral("--user"), QStringLiteral("--scope"), QStringLiteral("--quiet"), QStringLiteral("--"), QStringLiteral("true")});
-            if (probe.waitForFinished(3000) && probe.exitStatus() == QProcess::NormalExit && probe.exitCode() == 0) state = 1;
-            else probe.kill();
+    if (detail::probeState() < 0) {
+        beginProbe();
+        QProcess *probe = detail::probeProcess();
+        // Exactly one consumer ever blocks on an outstanding probe: a pane asks three times while
+        // it starts (the worker's environment, the worker's scope, the shell's scope), and three
+        // 300 ms waits each would be the freeze this exists to remove. Everyone after the first
+        // takes the unknown answer and runs unisolated until the event loop delivers the real one.
+        if (probe && !detail::probeWaited()) {
+            detail::probeWaited() = true;
+            probe->waitForFinished(kProbeWaitMs);   // emits finished(), so the handler above answers
         }
     }
-    return state == 1;
+    return detail::probeState() == 1;
 }
 
 // Total RAM / swap in bytes, from /proc/meminfo; 0 when it cannot be read.

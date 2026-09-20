@@ -1,0 +1,191 @@
+{
+ "before-slow": {
+  "summary": {
+   "window": {
+    "median": 3275.0,
+    "min": 3274.0,
+    "max": 3278.5,
+    "n": 3
+   },
+   "shell": {
+    "median": 3274.0,
+    "min": 3268.0,
+    "max": 3292.1,
+    "n": 3
+   },
+   "worker": {
+    "median": 3233.0,
+    "min": 3228.3,
+    "max": 3234.3,
+    "n": 3
+   },
+   "wready": {
+    "median": 3330.7,
+    "min": 3328.2,
+    "max": 3426.9,
+    "n": 3
+   }
+  },
+  "runs": [
+   {
+    "tag": "before-slow#0",
+    "pid": 1219087,
+    "load_before": "3.47",
+    "load_after": "3.43",
+    "wall0": 1789934555.3188574,
+    "worker": 3228.3,
+    "shell": 3268.0,
+    "window": 3275.0,
+    "wready": 3328.2
+   },
+   {
+    "tag": "before-slow#1",
+    "pid": 1221867,
+    "load_before": "3.43",
+    "load_after": "3.95",
+    "wall0": 1789934560.213012,
+    "worker": 3234.3,
+    "window": 3278.5,
+    "shell": 3292.1,
+    "wready": 3426.9
+   },
+   {
+    "tag": "before-slow#2",
+    "pid": 1224438,
+    "load_before": "3.95",
+    "load_after": "4.36",
+    "wall0": 1789934565.2570941,
+    "worker": 3233.0,
+    "window": 3274.0,
+    "shell": 3274.0,
+    "wready": 3330.7
+   }
+  ]
+ },
+ "after-slow": {
+  "summary": {
+   "window": {
+    "median": 564.8,
+    "min": 554.5,
+    "max": 576.8,
+    "n": 3
+   },
+   "shell": {
+    "median": 566.4,
+    "min": 556.9,
+    "max": 569.6,
+    "n": 3
+   },
+   "worker": {
+    "median": 524.1,
+    "min": 524.1,
+    "max": 537.5,
+    "n": 3
+   },
+   "wready": {
+    "median": 617.7,
+    "min": 611.8,
+    "max": 629.0,
+    "n": 3
+   }
+  },
+  "runs": [
+   {
+    "tag": "after-slow#0",
+    "pid": 1225361,
+    "load_before": "4.36",
+    "load_after": "4.36",
+    "wall0": 1789934570.2031198,
+    "worker": 537.5,
+    "shell": 569.6,
+    "window": 576.8,
+    "wready": 629.0
+   },
+   {
+    "tag": "after-slow#1",
+    "pid": 1225713,
+    "load_before": "4.36",
+    "load_after": "4.49",
+    "wall0": 1789934572.3983788,
+    "worker": 524.1,
+    "window": 554.5,
+    "shell": 566.4,
+    "wready": 611.8
+   },
+   {
+    "tag": "after-slow#2",
+    "pid": 1226095,
+    "load_before": "4.49",
+    "load_after": "4.49",
+    "wall0": 1789934574.6273472,
+    "worker": 524.1,
+    "shell": 556.9,
+    "window": 564.8,
+    "wready": 617.7
+   }
+  ]
+ },
+ "after-failing": {
+  "summary": {
+   "window": {
+    "median": 246.1,
+    "min": 245.1,
+    "max": 268.1,
+    "n": 3
+   },
+   "shell": {
+    "median": 245.1,
+    "min": 238.6,
+    "max": 282.8,
+    "n": 3
+   },
+   "worker": {
+    "median": 213.9,
+    "min": 212.3,
+    "max": 241.2,
+    "n": 3
+   },
+   "wready": {
+    "median": 315.4,
+    "min": 289.6,
+    "max": 328.0,
+    "n": 3
+   }
+  },
+  "runs": [
+   {
+    "tag": "after-failing#0",
+    "pid": 1226410,
+    "load_before": "4.49",
+    "load_after": "4.49",
+    "wall0": 1789934576.8597898,
+    "worker": 241.2,
+    "window": 268.1,
+    "shell": 282.8,
+    "wready": 328.0
+   },
+   {
+    "tag": "after-failing#1",
+    "pid": 1226706,
+    "load_before": "4.45",
+    "load_after": "4.45",
+    "wall0": 1789934578.8035822,
+    "worker": 213.9,
+    "shell": 238.6,
+    "window": 246.1,
+    "wready": 289.6
+   },
+   {
+    "tag": "after-failing#2",
+    "pid": 1226964,
+    "load_before": "4.45",
+    "load_after": "4.45",
+    "wall0": 1789934580.7091277,
+    "worker": 212.3,
+    "window": 245.1,
+    "shell": 245.1,
+    "wready": 315.4
+   }
+  ]
+ }
+}

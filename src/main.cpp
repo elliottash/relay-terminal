@@ -280,6 +280,12 @@ int main(int argc, char **argv) {
     QCoreApplication::setApplicationVersion(QStringLiteral(RELAY_VERSION));
     migrateFastRoleSettings();   // "fast" -> "flash", once, before anything reads these keys
     migrateOutputTokenCeiling(); // the old 32768 ceiling -> 0, "the model's own limit" (#Z79Y)
+    // Whether per-pane systemd scopes work here costs a subprocess to find out, and the first pane
+    // used to pay for it in its constructor — before any window existed, for up to three seconds on
+    // a machine whose systemd --user is not answering (#GMCF, decision 5). Ask now and do not wait:
+    // the answer is normally back long before the first pane asks, and a pane that asks too early
+    // starts unisolated rather than holding the window (src/Isolation.h).
+    if (isolation::enabled()) isolation::beginProbe();
     // From here on, stderr is no longer the only record: a launcher-started Relay keeps one too.
     relay::log::installMessageHandler();
     relay::buildinfo::capture();   // which build this process is, before a rebuild can move the file

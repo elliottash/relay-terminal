@@ -656,6 +656,12 @@ if(BUILD_TESTING)
     add_executable(relay-runtimedirs-tests tests/runtimedirs_test.cpp)
     target_link_libraries(relay-runtimedirs-tests PRIVATE relay-runtimedirs ${RELAY_QT}::Test)
     add_test(NAME runtimedirs COMMAND relay-runtimedirs-tests)
+    # The per-pane isolation probe (#GMCF): src/Isolation.h is header-only and part of the one
+    # relay translation unit, so the test includes it directly rather than through a library.
+    add_executable(relay-isolation-tests tests/isolation_test.cpp)
+    target_include_directories(relay-isolation-tests PRIVATE src)
+    target_link_libraries(relay-isolation-tests PRIVATE ${RELAY_QT}::Core ${RELAY_QT}::Test)
+    add_test(NAME isolation COMMAND relay-isolation-tests)
     # The IDE bridge's C++ rules (GT7X, 26.5), header-only beside the pane: which reply files the
     # GUI may write, and the shell environment a claude pane injects.
     add_executable(relay-guestbridge-tests tests/guestbridge_test.cpp)
