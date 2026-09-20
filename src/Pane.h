@@ -4485,10 +4485,20 @@ private:
         if (type == QStringLiteral("key_tested") || type == QStringLiteral("key_removed")
             || type == QStringLiteral("agent_tools_imported")) {
             if (m_keysDialog) m_keysDialog->handleEvent(event);
-            if (type == QStringLiteral("key_tested"))
-                status(event.value(QStringLiteral("ok")).toBool()
-                           ? QStringLiteral("Key works for ") + event.value(QStringLiteral("preset")).toString()
-                           : QStringLiteral("Key test failed: ") + event.value(QStringLiteral("error")).toString());
+            if (type == QStringLiteral("key_tested")) {
+                // A guest's test is its login (35dcb6c4): one turn through its harness, so the
+                // line names the tool and the model it answered on rather than a "key".
+                const QString preset = event.value(QStringLiteral("preset")).toString();
+                const QString guest = guestOfPreset(preset);
+                const bool ok = event.value(QStringLiteral("ok")).toBool();
+                if (!guest.isEmpty())
+                    status(ok ? QStringLiteral("%1 answered on %2").arg(guestDisplayName(guest), event.value(QStringLiteral("model")).toString())
+                              : guestDisplayName(guest) + QStringLiteral(": ") + event.value(QStringLiteral("error")).toString());
+                else
+                    status(ok ? QStringLiteral("Key works for ") + preset
+                              : QStringLiteral("Key test failed: ") + event.value(QStringLiteral("error")).toString());
+                if (!guest.isEmpty()) refreshPresets();   // logged_in on the row follows the test
+            }
             // Options › Models shows the same rows (owner, 2026-09-20): a removed key leaves the
             // provider unusable, so the fresh `presets` answer re-draws every Options pane.
             if (type == QStringLiteral("key_removed")) refreshPresets();
