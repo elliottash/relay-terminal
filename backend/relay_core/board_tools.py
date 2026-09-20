@@ -97,10 +97,12 @@ MAX_LIST_LIMIT = 50
 MAX_THREAD_ENTRIES = 50
 UNDO_SECONDS = 30
 
-#: Fields no agent write may touch.  `status` and `rank` belong to `board_move_card`;
-#: `source` is the provenance of the owner's own words; `private` would move the file
-#: between the git tree and the private root, which is the owner's decision.
-IMMUTABLE_FIELDS = frozenset({"id", "type", "created", "source", "rank", "status", "private"})
+#: Fields no agent write may touch.  `status`, `rank` and `section` belong to `board_move_card`
+#: (the last is where a card is parked, #3XZV); `source` is the provenance of the owner's own
+#: words; `private` would move the file between the git tree and the private root, which is the
+#: owner's decision.
+IMMUTABLE_FIELDS = frozenset({"id", "type", "created", "source", "rank", "status", "private",
+                              "section"})
 
 #: Sections an agent writes freely.  Anything else in a card body is owner text: it may
 #: still be rewritten (decision 12.3) but the old and new text go into the thread.
@@ -171,6 +173,9 @@ TOOL_SPECS = [
          "creation and return possible_duplicates; repeat the call with not_duplicate_of to override it.",
          {"tab": {"type": "string", "description": "Tab id from board.yaml (features, bugs, design, marketing, planning)."},
           "status": {"type": "string", "description": "inbox for raw capture, discussing when you need an answer, ready when agreed."},
+          "section": {"type": "string", "description": "Park the new card in this manual section (a "
+                                                    "column that collects nothing), instead of its "
+                                                    "status's own section."},
           "title": {"type": "string", "description": "One line, your words; becomes the card's `# ` heading."},
           "request": {"type": "string", "description": "The user's words verbatim. Do not paraphrase or tidy them."},
           "type": {"type": "string", "enum": list(B.CARD_TYPES), "description": "work (default), plan or memory."},
@@ -221,6 +226,10 @@ TOOL_SPECS = [
          "verdict section in the body — any pane may flip it once the verdict is there; Relay Free still may not.",
          {"id": _ID_ARG,
           "status": {"type": "string", "description": "Target status; the file moves into the matching state folder."},
+          "section": {"type": "string", "description": "Park the card in this manual section (a column "
+                                                      "that collects nothing) and leave its status "
+                                                      "alone; an empty string takes it out. The "
+                                                      "board's stage moves never touch it."},
           "tab": {"type": "string", "description": "Target tab id; the file moves into that category folder."},
           "before": {"type": "string", "description": "Id of the card this one should sit before in the column."},
           "after": {"type": "string", "description": "Id of the card this one should sit after in the column."},
@@ -302,7 +311,9 @@ CLEANUP_TOOL_SPECS = [
                               "description": "Which statuses each section collects, e.g. "
                                              "{\"needs-qa\": [\"needs-qa-llm\", \"needs-qa-human\"]}. "
                                              "Merging two sections is one section with both sets, the "
-                                             "other left out of columns. One status, one section."},
+                                             "other left out of columns. One status, one section. "
+                                             "An explicit empty list is a manual section, one you "
+                                             "fill by hand with board_move_card's `section`."},
           "column_titles": {"type": "object",
                             "description": "What a section is called, over an id that does not change, "
                                            "e.g. {\"ready\": \"Up next\"}. \"\" puts the name back."},
@@ -1463,6 +1474,23 @@ class BoardTools:
     def _tab_of(self, card: B.Card) -> str:
         return B.tab_of(self.board, card)
 
+    def _require_manual_section(self, section: str) -> None:
+        """Refuse unless `section` names a configured column that collects nothing (#3XZV).
+
+        Parking is for the sections a person fills by hand; a column with statuses of its own
+        is reached through `status`, and an unconfigured id would park the card nowhere.
+        """
+        config = self.board.config()
+        columns = [str(c) for c in (config.get("columns") or [])]
+        if section not in columns:
+            raise BoardToolError(
+                f"section {section!r} is not one of this board's sections: "
+                f"{', '.join(columns) or '(none configured)'}.")
+        if B.column_statuses_of(config, section):
+            raise BoardToolError(
+                f"the {section} section collects statuses, so a card is moved into it with "
+                "`status`; `section` parks a card in a section that collects nothing.")
+
     def _updated_at(self, card: B.Card) -> str | None:
         """When this card last changed on disk: the card file's mtime, or its thread file's if
         that is later (protocol 19.2 ``updated``, 2026-09-19). A git checkout moves mtimes too —
@@ -1489,6 +1517,7 @@ class BoardTools:
         # (found while rebuilding the pane as rows, 2026-09-18).
         tasks = card.tasks()
         return {"id": card.id, "title": card.title, "type": card.type, "status": card.status,
+                "section": card.front.get("section"),
                 "tab": self._tab_of(card), "labels": list(card.front.get("labels") or []),
                 "assignee": card.front.get("assignee"), "waiting_on": card.front.get("waiting_on"),
                 "rank": card.rank, "private": card.private, "priority": card.priority,
@@ -1679,8 +1708,8 @@ class BoardTools:
                                         private=card.private, **self.context.attrs())
 
     def _create(self, args: dict) -> dict:
-        allowed = {"tab", "status", "title", "request", "type", "labels", "source", "related",
-                   "not_duplicate_of"}
+        allowed = {"tab", "status", "section", "title", "request", "type", "labels", "source",
+                   "related", "not_duplicate_of"}
         if set(args) - allowed:
             raise BoardToolError(f"board_create_card takes {', '.join(sorted(allowed))}.")
         card_type = args.get("type") or "work"
@@ -1696,6 +1725,9 @@ class BoardTools:
                     B.MEMORY_FOLDER if card_type == "memory" else self._category_for_tab(args.get("tab")))
         labels = _string_list(args.get("labels"), "labels")
         related = [normalize_id(r, "related") for r in _string_list(args.get("related"), "related")]
+        section = str(args.get("section") or "").strip().lower()
+        if section:
+            self._require_manual_section(section)
 
         cards = self.board.cards()
         excused = {normalize_id(r, "not_duplicate_of") for r in _string_list(args.get("not_duplicate_of"), "not_duplicate_of")}
@@ -1720,6 +1752,8 @@ class BoardTools:
             links = dict(card.front.get("links") or {})
             links["related"] = related
             card.set("links", links)
+        if section:
+            card.set("section", section)
         try:
             path = B.write_new_card(self.board, card, category)
         except B.BoardError as exc:
@@ -1733,7 +1767,8 @@ class BoardTools:
                            f"{_column_label(status)} · {rel}", kind="event")
         summary = f"created · {_column_label(status)}"
         write_id = self._record("create", card, summary, None, size)
-        return {"id": card.id, "path": rel, "status": status, "tab": self._tab_of(card),
+        return {"id": card.id, "path": rel, "status": status, "section": section or None,
+                "tab": self._tab_of(card),
                 "hash": B.file_hash(path), "write_id": write_id, "created": True}
 
     def duplicates(self, title: str, request: str, cards: Sequence[B.Card] | None = None,
@@ -1787,8 +1822,8 @@ class BoardTools:
                 if key in IMMUTABLE_FIELDS:
                     raise BoardToolError(
                         f"{key} is not writable: id, type and created are the record, source is the "
-                        "user's own provenance, private moves the file, and status and rank are "
-                        "board_move_card's job.", code="board_refused", field=key)
+                        "user's own provenance, private moves the file, and status, rank and "
+                        "section are board_move_card's job.", code="board_refused", field=key)
                 if key not in writable:
                     raise BoardToolError(f"{key} is not a field of a {card.type} card; allowed: "
                                          f"{', '.join(sorted(writable))}.", code="board_refused", field=key)
@@ -1865,7 +1900,8 @@ class BoardTools:
                 "write_id": write_id, "logged_rewrites": [w for w, _, _ in rewrites]}
 
     def _move(self, args: dict) -> dict:
-        allowed = {"id", "status", "tab", "before", "after", "reason", "evidence", "implemented_by"}
+        allowed = {"id", "status", "section", "tab", "before", "after", "reason", "evidence",
+                   "implemented_by"}
         if set(args) - allowed:
             raise BoardToolError(f"board_move_card takes {', '.join(sorted(allowed))}.")
         card_id = normalize_id(args.get("id"))
@@ -1874,10 +1910,24 @@ class BoardTools:
         before_bytes = card.path.read_bytes()
         base_hash = B.file_hash(card.path)
         old_status, old_tab = card.status, self._tab_of(card)
+        old_section = str(card.front.get("section") or "")
         status = str(args.get("status")).strip().lower() if args.get("status") else old_status
         if status not in B.STATUS_FOLDER[card.type]:
             raise BoardToolError(f"unknown {card.type} status {args.get('status')!r}; use one of "
                                  f"{', '.join(B.STATUS_FOLDER[card.type])}.")
+        # `section` parks the card in a manual section — a column that collects nothing — and an
+        # empty string takes it out (#3XZV). Its status is left alone either way.
+        section_arg = args.get("section")
+        if section_arg is not None:
+            if not isinstance(section_arg, str):
+                raise BoardToolError("section must be a section id, or an empty string to take "
+                                     "the card out of one.")
+            if section_arg.strip():
+                self._require_manual_section(section_arg.strip().lower())
+                section_arg = section_arg.strip().lower()
+            else:
+                section_arg = ""
+        new_section = old_section if section_arg is None else section_arg
         tab = str(args.get("tab")).strip().lower() if args.get("tab") else old_tab
         category = (B.PLAN_FOLDER if card.type == "plan" else B.MEMORY_FOLDER if card.type == "memory"
                     else self._category_for_tab(tab))
@@ -1888,7 +1938,7 @@ class BoardTools:
         # the worker cannot know — a guest CLI writing through the bridge.
         mine = self.context.signature()
         stamped = ""
-        if mine and (status == "in-progress"
+        if mine and (status in ("in-progress", "executing", "needs-verification")
                      or (status in QA_STATUSES and old_status not in QA_STATUSES)):
             stamped = mine
             card.set("implemented_by", mine)
@@ -1934,6 +1984,10 @@ class BoardTools:
             card.set("links", links)
         if args.get("implemented_by") and not stamped:
             card.set("implemented_by", args["implemented_by"])
+        if section_arg == "":
+            card.drop("section")
+        elif section_arg is not None:
+            card.set("section", section_arg)
 
         card.set("status", status)
         rank = self._rank_for(card, status, args.get("before"), args.get("after"))
@@ -1953,6 +2007,9 @@ class BoardTools:
         parts = []
         if status != old_status:
             parts.append(f"{_column_label(old_status)} → {_column_label(status)}")
+        if new_section != old_section:
+            parts.append(f"parked in {_column_label(new_section)}" if new_section
+                         else f"out of {_column_label(old_section)}")
         if tab != old_tab:
             parts.append(f"tab {old_tab} → {tab}")
         if rank is not None and not parts:
@@ -1967,7 +2024,8 @@ class BoardTools:
             line += f" · verified_by {verified}"
         self._append(card, line, kind="event")
         write_id = self._record("move", card, summary, before_bytes, size, moved_from)
-        return {"id": card.id, "status": status, "tab": tab, "rank": card.rank,
+        return {"id": card.id, "status": status, "section": new_section or None, "tab": tab,
+                "rank": card.rank,
                 "path": str(card.path.relative_to(self.board.repo)),
                 "hash": B.file_hash(card.path), "moved": moved_from is not None,
                 "write_id": write_id, "summary": summary}
@@ -2002,6 +2060,54 @@ class BoardTools:
         write_id = self._record("priority", card, summary, before, size)
         return {"id": card.id, "priority": priority, "hash": B.file_hash(card.path),
                 "write_id": write_id, "summary": summary}
+
+    def stage_advance(self, card_id: str, event: str) -> dict | None:
+        """Move a work card one step along its stage lifecycle (#3XZV).
+
+        This is the board itself acting — the same standing as `set_priority`, not a tool the
+        model calls: it takes no `base_hash`, is not offered in `tool_specs`, and never refuses
+        loudly. A card that is not in the event's starting statuses (further along, closed, or
+        another type) is left exactly where it is and None comes back, so a caller can fire the
+        event on every path that meets it. A manual `section:` is never touched: a card parked
+        by hand stays parked while its stage moves underneath it.
+        """
+        step = STAGE_MOVES.get(event)
+        if step is None:
+            raise BoardToolError(f"unknown stage event {event!r}; use one of {', '.join(sorted(STAGE_MOVES))}.")
+        froms, to, why = step
+        card = self.board.card_by_id(normalize_id(card_id))
+        if card is None or card.type != "work" or card.status not in froms or not card.path:
+            return None
+        if event == "discussed":
+            # Only on the thread's first non-event entry; the event kinds a write itself makes
+            # (an event) never count.
+            if not any(e.kind != "event" for e in self.board.thread(card.id, card.private)):
+                return None
+        if event == "plan-written":
+            if not any(_heading_matches(h, PLAN_HEADING) for h in section_headings(card.body)):
+                return None
+        before_bytes = card.path.read_bytes()
+        base_hash = B.file_hash(card.path)
+        old_status = card.status
+        card.set("status", to)
+        rank = self._rank_for(card, to, None, None)
+        if rank is not None:
+            card.set("rank", rank)
+        category = self.board.category_of(card.path)
+        target = B.card_target_path(self.board, card, category)
+        moved_from = card.path if target is not None else None
+        if target is not None and target.exists():
+            raise BoardToolError(f"a different file already sits at {target.relative_to(self.board.repo)}.")
+        size = self._thread_size(card)
+        self.board.save(card, base_hash=base_hash)
+        if target is not None:
+            B.move_card_file(card, target)
+        self.writes_this_turn += 1
+        summary = f"{_column_label(old_status)} → {_column_label(to)} · {why}"
+        self._append(card, f"- ✦ {self.context.actor} moved this card · {summary}", kind="event")
+        write_id = self._record("move", card, summary, before_bytes, size, moved_from)
+        return {"id": card.id, "status": to, "hash": B.file_hash(card.path), "write_id": write_id,
+                "summary": summary}
 
     def _rank_for(self, card: B.Card, status: str, before, after) -> str | None:
         if before is None and after is None:
@@ -2050,6 +2156,9 @@ class BoardTools:
         entry = self._append(card, text, kind=kind)
         self.writes_this_turn += 1
         write_id = self._record("comment", card, f"{kind}: {text.splitlines()[0][:120]}", before, size)
+        # The stage move the comment makes (#3XZV): the thread's first non-event entry moves an
+        # inbox card to discussing. Relay's own move — inside, it is another write like this one.
+        self.stage_advance(card.id, "discussed")
         return {"id": card.id, "entry_id": entry.entry_id, "kind": kind, "write_id": write_id}
 
     # ---- cleanup-only writes ----------------------------------------------------
@@ -2185,8 +2294,10 @@ class BoardTools:
             if not columns:
                 raise BoardToolError("columns must name at least one section.")
             # An id outside the known list is allowed only when this board says what it collects:
-            # that is what makes an invented section possible without making a typo silent.
-            unknown = [c for c in columns if c not in B.COLUMN_IDS and not statuses.get(c)]
+            # that is what makes an invented section possible without making a typo silent. An
+            # explicit empty entry is a manual section — one that collects nothing on purpose
+            # (#3XZV) — and counts as said just the same.
+            unknown = [c for c in columns if c not in B.COLUMN_IDS and c not in statuses]
             if unknown:
                 raise BoardToolError(
                     f"unknown section(s) {', '.join(unknown)}: either name one of "
@@ -2394,10 +2505,12 @@ MAX_SECTION_TITLE = 40
 
 
 def _column_statuses(value) -> dict[str, list[str]]:
-    """`{section: [status, ...]}`, checked: known statuses, no empty section, nothing invented.
+    """`{section: [status, ...]}`, checked: known statuses, nothing invented.
 
     Merging two sections is writing one of them with both sets of statuses and dropping the
     other from `columns`, so this is the one place that decides what a section may collect.
+    An explicit empty list is a section that collects nothing — one a person fills by hand,
+    parking cards in it with `board_move_card {section}` (#3XZV) — and it is kept as written.
     """
     if not isinstance(value, dict):
         raise BoardToolError("column_statuses must be an object of section -> statuses.")
@@ -2408,10 +2521,12 @@ def _column_statuses(value) -> dict[str, list[str]]:
         column = _one_line(key, "a column_statuses key", 40).lower()
         if not _SECTION_ID_RE.fullmatch(column):
             raise BoardToolError(f"section id {column!r} must be lower-case letters, digits, - and _.")
-        statuses = _string_list(listed, f"column_statuses[{column}]")
-        if not statuses:
-            raise BoardToolError(f"section {column!r} must collect at least one status; to take a "
-                                 "section away, leave it out of columns instead.")
+        if not isinstance(listed, list) or not all(isinstance(s, str) for s in listed):
+            raise BoardToolError(f"column_statuses[{column}] must be an array of statuses.")
+        statuses = [s.strip() for s in listed if s.strip()]
+        if not listed:
+            out[column] = []          # a manual section: it collects nothing on purpose
+            continue
         unknown = [s for s in statuses if s not in B.ALL_STATUSES]
         if unknown:
             raise BoardToolError(f"unknown status(es) {', '.join(unknown)} in section {column!r}; "
@@ -2490,12 +2605,29 @@ def _column_label(status: str) -> str:
     #: `ready` reads as "ready to ship" on its own (owner, 2026-09-19), so the label the pane
     #: shows is "Ready to start" and a thread line says the same words as the section header.
     #: The status id is unchanged, here and on disk.
-    return {"inbox": "Inbox", "discussing": "Discussing", "ready": "Ready to start",
-            "in-progress": "In progress", "needs-qa-llm": "Needs QA (LLM)",
+    return {"inbox": "Inbox", "discussing": "Discussing", "planning": "Planning",
+            "planned": "Planned", "ready": "Ready to start",
+            "in-progress": "In progress", "needs-verification": "Needs verification",
+            "needs-qa-llm": "Needs QA (LLM)",
             "needs-qa-human": "Needs QA (human)", "needs-review": "Needs review",
             "needs-labels": "Needs labels", "needs-ab": "Needs A/B", "deferred": "Deferred",
             "done": "Done", "dropped": "Dropped", "draft": "Draft", "approved": "Approved",
             "executing": "Executing", "active": "Active", "retired": "Retired"}.get(status, status)
+
+
+#: The deterministic stage moves (#3XZV): what each stage event does to a work card's status.
+#: Relay makes the move at the event itself, not on a model's judgment, and each one writes an
+#: event entry to the thread saying why. The statuses a move starts *from* are listed — anywhere
+#: else the card is further along (or closed, or not a work card) and the event leaves it be.
+STAGE_MOVES = {
+    # the thread's first non-event entry: the owner asked, or an agent commented
+    "discussed": (("inbox",), "discussing", "the discussion started"),
+    # a Plan turn was started on the card
+    "plan-started": (("inbox", "discussing", "planning", "planned"), "planning",
+                     "a Plan turn started"),
+    # a Plan turn finished and left its `## Plan` on the card
+    "plan-written": (("inbox", "discussing", "planning"), "planned", "the plan is on the card"),
+}
 
 
 def _task_items(raw, card: B.Card) -> list[B.TaskItem]:

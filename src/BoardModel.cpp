@@ -31,8 +31,10 @@ QStringList stringList(const QJsonValue &value)
 int extraStatusRank(const QString &status)
 {
     static const QMap<QString, int> ranks{
-        {QStringLiteral("draft"), 1},    {QStringLiteral("approved"), 2},
-        {QStringLiteral("executing"), 3}, {QStringLiteral("active"), 4},
+        {QStringLiteral("planning"), 1}, {QStringLiteral("draft"), 2},
+        {QStringLiteral("approved"), 3}, {QStringLiteral("executing"), 4},
+        {QStringLiteral("active"), 5},   {QStringLiteral("planned"), 6},
+        {QStringLiteral("needs-verification"), 7},
         {QStringLiteral("deferred"), 8}, {QStringLiteral("retired"), 9}};
     return ranks.value(status, 5);
 }
@@ -90,10 +92,17 @@ QString statusTitle(const QString &status)
     static const QMap<QString, QString> names{
         {QStringLiteral("inbox"), QStringLiteral("Inbox")},
         {QStringLiteral("discussing"), QStringLiteral("Discussing")},
+        // The stage statuses of #3XZV: a card walks inbox → discussing → planning → planned →
+        // executing → needs verification → needs QA → done, and Relay makes each move at the
+        // event that earns it. The ids are new; `ready` and `in-progress` stay valid so an
+        // older board is untouched.
+        {QStringLiteral("planning"), QStringLiteral("Planning")},
+        {QStringLiteral("planned"), QStringLiteral("Planned")},
         // "Ready" alone was read as "ready to ship" (owner, 2026-09-19: "what does ready mean?
         // done or inbox?"). The status id stays `ready`, so no card file and no folder moves.
         {QStringLiteral("ready"), QStringLiteral("Ready to start")},
         {QStringLiteral("in-progress"), QStringLiteral("In progress")},
+        {QStringLiteral("needs-verification"), QStringLiteral("Needs verification")},
         {QStringLiteral("needs-review"), QStringLiteral("Needs review")},
         {QStringLiteral("needs-labels"), QStringLiteral("Needs labels")},
         {QStringLiteral("needs-ab"), QStringLiteral("Needs A/B")},
@@ -129,8 +138,13 @@ QString sectionMeaning(const QString &id)
         {QStringLiteral("inbox"), QStringLiteral("raw capture, not triaged yet")},
         {QStringLiteral("discussing"),
          QStringLiteral("an open question — waiting_on says who owes the answer")},
+        {QStringLiteral("planning"), QStringLiteral("a Plan turn is writing its plan")},
+        {QStringLiteral("planned"), QStringLiteral("the plan is written, not started")},
         {QStringLiteral("ready"), QStringLiteral("agreed and not started — anyone may pick it up")},
         {QStringLiteral("in-progress"), QStringLiteral("someone or some agent has it now")},
+        {QStringLiteral("executing"), QStringLiteral("the plan is being carried out")},
+        {QStringLiteral("needs-verification"),
+         QStringLiteral("built, waiting for its implementer's checklist to be checked")},
         {QStringLiteral("waiting"),
          QStringLiteral("built, and a check is owed: review, labels or an A/B")},
         {QStringLiteral("needs-review"), QStringLiteral("built, waiting to be read by a person")},
@@ -144,7 +158,6 @@ QString sectionMeaning(const QString &id)
         {QStringLiteral("done"), QStringLiteral("closed, with a Resolution — dropped cards too")},
         {QStringLiteral("draft"), QStringLiteral("a plan still being written")},
         {QStringLiteral("approved"), QStringLiteral("a plan you approved, not started")},
-        {QStringLiteral("executing"), QStringLiteral("a plan being worked through")},
         {QStringLiteral("active"), QStringLiteral("in use — loaded when it applies")},
         {QStringLiteral("retired"), QStringLiteral("kept for the record, never loaded")}};
     return meanings.value(id);
@@ -390,8 +403,10 @@ QString executeTask(const QString &id, const QString &title, bool hasPlan, bool 
                             "its own the right answer.")
           << QStringLiteral("- Post progress, questions and decisions on %1 with board_comment, "
                             "not only here.").arg(ref)
-          << QStringLiteral("- When it lands, move %1 to needs-qa-llm with the evidence path and a "
-                            "`## QA checklist`, as the Switchboard rules say.").arg(ref);
+          << QStringLiteral("- When it lands, move %1 to needs-verification with the evidence "
+                            "path and a `## QA checklist`, as the Switchboard rules say. Its "
+                            "verifier then moves it on to needs QA, or back to an earlier "
+                            "stage.").arg(ref);
     if (!note.trimmed().isEmpty())
         lines << QString() << QStringLiteral("The owner adds, verbatim:") << note.trimmed();
     return lines.join(QLatin1Char('\n'));
@@ -594,15 +609,23 @@ QString verifyLine(const QJsonObject &qa)
 }
 
 QString verifyTask(const QString &id, const QString &title, const QString &verifier,
-                   const QString &implementedBy, const QString &note)
+                   const QString &implementedBy, const QString &status, const QString &note)
 {
     const QString ref = QStringLiteral("#") + id;
+    // Which lane the card is in decides what the pass/fail moves are (#3XZV): from
+    // needs-verification a pass goes on to QA and a failure goes back a stage; from a QA lane
+    // a pass closes the card and a failure sends it back to be worked on again.
+    const bool verifying = status == QStringLiteral("needs-verification");
     QStringList lines;
     lines << QStringLiteral("Verify %1: %2").arg(ref, title) << QString();
-    QString who = QStringLiteral("The Switchboard card %1 is in a QA lane and you are its "
-                                 "verifier%2. ").arg(ref, verifier.trimmed().isEmpty()
-                                                              ? QString()
-                                                              : QStringLiteral(" (%1)").arg(verifier.trimmed()));
+    QString who = QStringLiteral("The Switchboard card %1 is in a %2 and you are its "
+                                 "verifier%3. ")
+                      .arg(ref,
+                           verifying ? QStringLiteral("verify lane (needs-verification)")
+                                     : QStringLiteral("QA lane"),
+                           verifier.trimmed().isEmpty()
+                               ? QString()
+                               : QStringLiteral(" (%1)").arg(verifier.trimmed()));
     who += implementedBy.trimmed().isEmpty()
                ? QStringLiteral("Somebody else implemented it; you check that work, you do not do it again.")
                : QStringLiteral("%1 implemented it; you check that work, you do not do it again.")
@@ -622,9 +645,17 @@ QString verifyTask(const QString &id, const QString &title, const QString &verif
                             "`qa-`, beside the implementer's.")
           << QStringLiteral("- Write a `## Verdict` section on %1 with board_update_card: what "
                             "passed, what failed, and what you ran it on.").arg(ref)
-          << QStringLiteral("- Then move %1 with board_move_card: to `done` when the checklist "
-                            "holds, or back to `in-progress` with the failures on the thread as a "
-                            "board_comment when it does not.").arg(ref)
+          << (verifying
+                  ? QStringLiteral("- Then move %1 with board_move_card: to `needs-qa-llm` when "
+                                   "the checklist holds — your `## Verdict` is what carries it "
+                                   "on to QA — or back to the stage the failure warrants "
+                                   "(`executing`, or earlier: `planned`, `planning`, "
+                                   "`discussing`) with the failures on the thread as a "
+                                   "board_comment.").arg(ref)
+                  : QStringLiteral("- Then move %1 with board_move_card: to `done` when the "
+                                   "checklist holds, or back to `executing` (or an earlier "
+                                   "stage) with the failures on the thread as a board_comment "
+                                   "when it does not.").arg(ref))
           << QStringLiteral("- Commit your evidence with %1 in the message and the trailer "
                             "`Verified-By: <vendor>/<your exact model id>` on its own line at the "
                             "end: lower case, the vendor of the *model* and the id you are "
@@ -860,6 +891,7 @@ Card Card::fromJson(const QJsonObject &object)
     card.title = object.value(QStringLiteral("title")).toString();
     card.type = object.value(QStringLiteral("type")).toString(QStringLiteral("work"));
     card.status = object.value(QStringLiteral("status")).toString();
+    card.section = object.value(QStringLiteral("section")).toString();
     card.tab = object.value(QStringLiteral("tab")).toString();
     card.assignee = object.value(QStringLiteral("assignee")).toString();
     card.waitingOn = object.value(QStringLiteral("waiting_on")).toString();
@@ -932,9 +964,9 @@ void Model::setConfig(const QJsonObject &config)
     m_columns = stringList(config.value(QStringLiteral("columns")));
     if (m_columns.isEmpty())
         m_columns = QStringList{QStringLiteral("inbox"), QStringLiteral("discussing"),
-                                QStringLiteral("ready"), QStringLiteral("in-progress"),
-                                QStringLiteral("waiting"), QStringLiteral("needs-qa"),
-                                QStringLiteral("done")};
+                                QStringLiteral("planning"), QStringLiteral("planned"),
+                                QStringLiteral("executing"), QStringLiteral("needs-verification"),
+                                QStringLiteral("needs-qa"), QStringLiteral("done")};
 
     const QJsonArray tabs = config.value(QStringLiteral("tabs")).toArray();
     bool haveMemory = false;
@@ -979,14 +1011,29 @@ QString verifiedSection()
 
 namespace {
 
+// Every section id, manual ones included: what a parked card's `section:` may name.
+QSet<QString> sectionIdsOf(const QList<Column> &sections)
+{
+    QSet<QString> out;
+    for (const Column &column : sections)
+        out.insert(column.id);
+    return out;
+}
+
 // Which section a card belongs in, given a status -> section index built once by the caller.
-// Verified is the one section a status does not name: it is `done` plus a signature.
-QString sectionForCard(const Card &card, const QMap<QString, QString> &index)
+// Verified is the one section a status does not name: it is `done` plus a signature. A manual
+// `section:` (#3XZV) wins over the status for as long as that column exists, so a card parked by
+// hand stays put while its stage moves underneath it; a removed section stops being in `ids`
+// and the card falls back to its status section on its own.
+QString sectionForCard(const Card &card, const QMap<QString, QString> &index,
+                       const QSet<QString> &ids)
 {
     if (card.status == QStringLiteral("done") && !card.verifiedBy.trimmed().isEmpty())
         return verifiedSection();
     if (card.closed())
         return doneSection();
+    if (!card.section.trimmed().isEmpty() && ids.contains(card.section.trimmed()))
+        return card.section.trimmed();
     return index.value(card.status);
 }
 
@@ -1002,18 +1049,25 @@ const Tab *Model::tab(const QString &id) const
 
 // The one list's sections. The configured columns come first in their configured order, then any
 // status they do not collect — a plan's Draft, a memory's Active, a Deferred card — so that one
-// list really does hold every card that is not closed. Done is always last.
+// list really does hold every card that is not closed. A column configured to collect nothing
+// (`column_statuses: {research: []}`) is kept as a manual section (#3XZV): cards land in it by
+// being parked there, not by their status. Done is always last.
 QList<Column> Model::sections() const
 {
     QList<Column> out;
     QSet<QString> collected;
     for (const QString &id : m_columns) {
-        QStringList statuses = m_columnStatuses.value(id);
-        if (statuses.isEmpty())
+        bool manual = false;
+        QStringList statuses;
+        if (m_columnStatuses.contains(id)) {
+            statuses = m_columnStatuses.value(id);
+            manual = statuses.isEmpty();   // an explicit []: a section filled by hand
+        } else {
             statuses = fallbackStatuses(id);
+        }
         statuses.removeAll(QStringLiteral("done"));
         statuses.removeAll(QStringLiteral("dropped"));
-        if (statuses.isEmpty())
+        if (statuses.isEmpty() && !manual)
             continue;                    // a configured Done column: it is the last section
         for (const QString &status : statuses)
             collected.insert(status);
@@ -1058,8 +1112,10 @@ QStringList Model::statusChoices() const
         return m_statusChoices;
     // An older worker sends no `all_statuses`: fall back to the work statuses, which are the
     // ones a section on this board can collect anyway.
-    return {QStringLiteral("inbox"), QStringLiteral("discussing"), QStringLiteral("ready"),
-            QStringLiteral("in-progress"), QStringLiteral("needs-review"),
+    return {QStringLiteral("inbox"), QStringLiteral("discussing"), QStringLiteral("planning"),
+            QStringLiteral("planned"), QStringLiteral("ready"), QStringLiteral("executing"),
+            QStringLiteral("in-progress"), QStringLiteral("needs-verification"),
+            QStringLiteral("needs-review"),
             QStringLiteral("needs-labels"), QStringLiteral("needs-ab"),
             QStringLiteral("needs-qa-llm"), QStringLiteral("needs-qa-human"),
             QStringLiteral("deferred"), QStringLiteral("done"), QStringLiteral("dropped")};
@@ -1086,7 +1142,8 @@ QMap<QString, QString> Model::sectionIndex(const QList<Column> &sections) const
 
 QString Model::sectionOf(const Card &card) const
 {
-    return sectionForCard(card, sectionIndex(sections()));
+    const QList<Column> list = sections();
+    return sectionForCard(card, sectionIndex(list), sectionIdsOf(list));
 }
 
 // ---------------------------------------------------------------------------- cards
@@ -1184,10 +1241,12 @@ QList<Card> Model::sorted(QList<Card> cards, bool closedSection) const
 
 QList<Card> Model::cards(const QString &columnId) const
 {
-    const QMap<QString, QString> index = sectionIndex(sections());
+    const QList<Column> list = sections();
+    const QMap<QString, QString> index = sectionIndex(list);
+    const QSet<QString> ids = sectionIdsOf(list);
     QList<Card> out;
     for (const Card &card : m_cards) {
-        const QString section = sectionForCard(card, index);
+        const QString section = sectionForCard(card, index, ids);
         if (section != columnId || section.isEmpty())
             continue;
         if (!shown(card))
@@ -1213,11 +1272,12 @@ int Model::hiddenCount(const QSet<QString> &hidden) const
     if (hidden.isEmpty())
         return 0;
     const QMap<QString, QString> index = sectionIndex(sections());
+    const QSet<QString> ids = sectionIdsOf(sections());
     int total = 0;
     for (const Card &card : m_cards) {
         if (card.closed() || !shown(card))
             continue;
-        const QString section = sectionForCard(card, index);
+        const QString section = sectionForCard(card, index, ids);
         if (!section.isEmpty() && hidden.contains(section))
             ++total;
     }
@@ -1229,11 +1289,12 @@ QList<Row> Model::rows(const QSet<QString> &collapsed, const QSet<QString> &hidd
     const bool filtered = !m_filter.trimmed().isEmpty() || !m_labelFilter.isEmpty();
     const QList<Column> list = sections();
     const QMap<QString, QString> index = sectionIndex(list);
+    const QSet<QString> ids = sectionIdsOf(list);
     QMap<QString, QList<Card>> grouped;
     for (const Card &card : m_cards) {
         if (!shown(card))
             continue;
-        const QString section = sectionForCard(card, index);
+        const QString section = sectionForCard(card, index, ids);
         if (section.isEmpty())
             continue;      // a status no section collects and that is not closed: nothing to show
         grouped[section] << card;

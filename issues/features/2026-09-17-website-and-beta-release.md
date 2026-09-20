@@ -1,7 +1,7 @@
 ---
 id: P4GP
 type: work
-status: ready
+status: planned
 labels: [feature]
 component: [gui]
 milestone: desktop-alpha

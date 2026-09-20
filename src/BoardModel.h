@@ -32,6 +32,11 @@ struct Card {
     // (#T71W). Empty on everything else, and that is what puts a `done` card in Verified rather
     // than in Done — the section is derived, not a status of its own.
     QString verifiedBy;
+    // The manual section this card is parked in (#3XZV): the id of a configured column that
+    // collects nothing. Empty everywhere else — the card sits in its status's own section. It
+    // wins over the status for as long as that column exists, so a parked card stays put while
+    // its stage moves underneath it, and the drop that takes it out clears it.
+    QString section;
     // The card's whole text — body, then each thread entry — sent by the worker (protocol 19.2
     // `text`, capped at 64 KiB there) so the filter's plain words search the whole card, not
     // only the title (owner, 2026-09-19: "switchboard filter bar should be full text search").
@@ -218,13 +223,16 @@ QString verifyLine(const QJsonObject &qa);
 // The card shows it in the amber that means "a human should look", never as an ordinary field.
 QString verifyNote(const QJsonObject &qa);
 
-// What the verifier's pane is handed when Verify is pressed on a card in a QA lane. The card
-// travels with it (`ask {cards: [id]}`) for a preset runner; a guest CLI gets this text alone as
-// its first prompt, so the brief says where to find the card as well as what to do with it.
-// `verifier` is the recommendation's label, `implementedBy` the card's signature, and `note`
-// whatever the owner had typed in the reply box, passed on verbatim.
+// What the verifier's pane is handed when Verify is pressed on a card in a verify lane —
+// `needs-verification`, the implementer's checklist being checked (#3XZV), or one of the QA
+// lanes after it. The card travels with it (`ask {cards: [id]}`) for a preset runner; a guest
+// CLI gets this text alone as its first prompt, so the brief says where to find the card as
+// well as what to do with it. `verifier` is the recommendation's label, `implementedBy` the
+// card's signature, `status` the lane the card is in (which is what the pass/fail moves are),
+// and `note` whatever the owner had typed in the reply box, passed on verbatim.
 QString verifyTask(const QString &id, const QString &title, const QString &verifier,
-                   const QString &implementedBy, const QString &note = QString());
+                   const QString &implementedBy, const QString &status = QString(),
+                   const QString &note = QString());
 
 // The body without its leading `# Title` line when that only repeats the title: the card
 // detail already shows the title in its header, so the heading would be said twice.

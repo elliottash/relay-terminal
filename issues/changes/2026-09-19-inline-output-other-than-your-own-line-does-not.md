@@ -1,7 +1,7 @@
 ---
 id: K3RT
 type: work
-status: ready
+status: planned
 labels: [bug, theme]
 component: [theme, terminal]
 workstream: terminal

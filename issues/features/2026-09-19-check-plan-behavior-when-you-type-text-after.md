@@ -1,7 +1,7 @@
 ---
 id: 736Y
 type: work
-status: ready
+status: planned
 rank: zzzzzzzy
 created: '2026-09-19'
 links: {plans: [], commits: [], evidence: [], related: [], github: null}

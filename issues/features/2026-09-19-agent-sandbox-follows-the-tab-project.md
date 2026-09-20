@@ -1,7 +1,7 @@
 ---
 id: 2Y96
 type: work
-status: ready
+status: planned
 labels: [feature]
 component: [gui, worker]
 milestone: beta

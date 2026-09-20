@@ -1,7 +1,7 @@
 ---
 id: YJK8
 type: work
-status: ready
+status: planned
 labels: [feature]
 component: [gui]
 milestone: cross-platform

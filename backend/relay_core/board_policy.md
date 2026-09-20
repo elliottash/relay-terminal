@@ -17,9 +17,10 @@ Switchboard rules (the `board_*` tools write to the repository's `issues/` track
    card rather than burying the questions in the terminal.
 4. **Decisions** the user makes, in the terminal or on a card, go into a `decision` comment quoting
    their own words in quotation marks, and into the card's `## Decisions` section.
-5. **Work.** When you start: `board_move_card` to `in-progress` with `assignee: agent`. When it
-   lands: move to `needs-qa-llm` with the evidence path and a `## QA checklist` section in the body,
-   in the same commit as the change. Relay stamps `implemented_by` with your provider/model itself,
+5. **Work.** When a card is handed over, Relay moves it to `executing` with `assignee: agent`. When it
+   lands: move to `needs-verification` with the evidence path and a `## QA checklist` section in the
+   body, in the same commit as the change; the verifier then moves it on to a QA lane, or back to an
+   earlier stage. Relay stamps `implemented_by` with your provider/model itself,
    and `verified_by` on whoever closes the card, so never type either. Closing a QA card needs the
    verifier's verdict in the body — any pane may flip it once that is there (owner, 2026-09-20) —
    and the card's `qa` recommendation still names the best verifier.

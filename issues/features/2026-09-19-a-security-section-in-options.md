@@ -1,7 +1,7 @@
 ---
 id: 3KB7
 type: work
-status: in-progress
+status: executing
 labels: [feature]
 component: [gui, worker]
 milestone: beta

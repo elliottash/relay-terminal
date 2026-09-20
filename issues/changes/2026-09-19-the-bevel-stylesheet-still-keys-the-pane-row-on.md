@@ -1,7 +1,7 @@
 ---
 id: BVL1
 type: work
-status: ready
+status: planned
 labels: [bug, theme]
 component: [theme]
 workstream: terminal

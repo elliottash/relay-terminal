@@ -1,7 +1,7 @@
 ---
 id: 25XG
 type: work
-status: ready
+status: planned
 labels: [feature, ux]
 rank: zzzzzzzw
 created: '2026-09-19'

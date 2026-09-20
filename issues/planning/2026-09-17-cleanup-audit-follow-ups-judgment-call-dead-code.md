@@ -1,7 +1,7 @@
 ---
 id: 265N
 type: work
-status: ready
+status: planned
 labels: [bug]
 rank: zzzi
 created: '2026-09-17'

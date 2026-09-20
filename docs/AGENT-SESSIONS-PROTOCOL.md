@@ -1973,9 +1973,11 @@ lists them (each names a `folder` or a `filter`), `columns` as the board configu
 `column_statuses` mapping each column to the statuses it collects, so the pane's column model needs
 no table of its own.
 
-A **row** is `{id, title, type, status, tab, labels, assignee, waiting_on, rank, private,
+A **row** is `{id, title, type, status, section, tab, labels, assignee, waiting_on, rank, private,
 priority, path, thread_entries, tasks_done, tasks_total, created, updated, milestone, topic,
-implemented_by, text}` — enough to draw a card without reading the file. (Until 2026-09-18
+implemented_by, text}` — enough to draw a card without reading the file. `section` (2026-09-20,
+#3XZV) is the manual section the card is parked in — the id of a configured column that collects
+nothing — or null for a card that sits in its status's own section. (Until 2026-09-18
 `board_tools._row` sent only the first eleven, so the pane's age and `☑ done/total` badges had
 nothing to draw; it now sends them all. `component` is not in the row: the card detail reads it
 from `front`.)
@@ -2012,9 +2014,9 @@ a reload. `rev` increases on every `board_changed`; a GUI that has missed revisi
 
 | Message | Reply |
 |---|---|
-| `board_create {id?, tab, status, text, title?, card_type?, labels?, source?, author?}` | `board_written` + `board_changed` |
+| `board_create {id?, tab, status, section?, text, title?, card_type?, labels?, source?, author?}` | `board_written` + `board_changed` |
 | `board_update {id?, card, base_hash, patch, author?}` | `board_written` + `board_changed` |
-| `board_move {id?, card, status?, tab?, before?, after?, reason?, evidence?, author?}` | `board_written` + `board_changed` |
+| `board_move {id?, card, status?, tab?, section?, before?, after?, reason?, evidence?, author?}` | `board_written` + `board_changed` |
 | `board_priority {id?, card, priority, author?}` | `board_written` + `board_changed` |
 | `board_comment {id?, card, text, kind?, author?}` | `board_written` + `board_changed` |
 | `board_undo {id?, write_id}` | `board_undone` + `board_changed` |
@@ -2025,7 +2027,11 @@ the number — and it is not an agent tool; an agent or a cleanup sets the same 
 `board_update_card`'s `fields`. The write is undoable like any other.
 
 `board_create` is quick add: `text` is stored **verbatim** as the card's `## Issue`, and the title
-is its first line (shortened) unless one is given. On a project with no Switchboard yet it answers
+is its first line (shortened) unless one is given. `section` (2026-09-20, #3XZV) parks the new
+card in a manual section — the quick-add field over one — and its status stays what `status` said.
+On `board_move`, `section` is the id of a manual section the card is parked in, leaving `status`
+alone; the empty string takes the card out (a drop on a status column sends exactly that), and the
+board's own stage moves never touch a parking place. On a project with no Switchboard yet it answers
 `board_init_request` first and lands once the user accepts (19.12); the other three name a card, so
 a project with no board has nothing for them and they answer the ordinary no-board error. `patch` holds the `board_update_card` arguments
 (`fields`, `title`, `append_section`, `replace_section`, `tasks`). `before`/`after` are the card ids
@@ -2315,7 +2321,8 @@ a cleanup runs (`board_busy`, text "… then start the plan."), with nothing wri
 
 **Execute** (no message). The pane (a) sends `board_update {patch: {fields: {assignee: "agent"}}}`
 against the hash the card was read at, unless it is already the agent's; (b) `board_move {status:
-"in-progress", reason: "Execute: handed to a terminal pane"}` unless it is there; (c)
+"executing", reason: "Execute: handed to a terminal pane"}` unless it is already there (or
+`in-progress`, on a board configured before the stage statuses; #3XZV); (c)
 `board_comment {kind: "progress", text: "Execute · handed to a new terminal pane …"}`, with the
 reply box's text appended as the owner's note; then (d) the window opens a terminal pane beside
 the board, in the board's workspace, on the main agent, and submits the task as that pane's first
@@ -2323,7 +2330,14 @@ the board, in the board's workspace, on the main agent, and submits the task as 
 plan) and thread tail as the 19.6 block even before the pane has its own board rows. The task text
 (`relay::board::executeTask`) names the card, says to set `implemented_by`, to put `#ID` in every
 commit message and add each commit's hash to `links.commits` with `board_update_card`, to post
-progress with `board_comment`, and to land in `needs-qa-llm` per the policy. Pane agents have the
+progress with `board_comment`, and to land in `needs-verification` per the policy (#3XZV): the
+verifier then moves it on to `needs-qa-llm`, or back to the stage the failure warrants. The stage
+moves up to that point are the board's own: `board_ask` moves an inbox card to `discussing` on the
+thread's first entry and to `planning` when a Plan turn starts, a finished Plan turn that left its
+`## Plan` moves the card to `planned`, and Verify is offered on `needs-verification` as well as the
+QA lanes (`relay::board::verifyTask` branches on the lane: from `needs-verification`, a pass goes
+to `needs-qa-llm` with the `## Verdict`; from a QA lane, a pass closes to `done` with the
+`Verified-By` trailer). Pane agents have the
 board tools whenever the workspace has a board (19.7), so this is the whole link-back mechanism:
 the commit message carries the id for `git log --grep '#ID'`, and the card carries the hashes.
 A card with neither a `## Plan` nor an `acceptance` asks once, on the card, before it goes.
@@ -2523,7 +2537,8 @@ ignored, so the older hand-typed `Claude Opus 5 (pane 2)` still reads as `anthro
 
 The **worker writes it**, from its own preset and model (`ToolContext.preset`/`.model`, set each
 turn by `Agent.sign_board`): `board_move_card` stamps `implemented_by` when a card enters
-`in-progress` or a QA lane, and `verified_by` when it leaves a QA lane to `done`. The agent's own
+`executing`, `in-progress`, `needs-verification` or a QA lane, and `verified_by` when it leaves a
+QA lane to `done`. The agent's own
 `implemented_by` argument is accepted only when the worker has no signature at all — a guest CLI
 writing through the bridge — and is otherwise overwritten, because a typed provider name is a
 guess and the worker's is not. Both fields are ordinary work-card front matter

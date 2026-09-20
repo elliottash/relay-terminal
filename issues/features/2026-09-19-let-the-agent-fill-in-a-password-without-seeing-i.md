@@ -1,7 +1,7 @@
 ---
 id: V2HM
 type: work
-status: ready
+status: planned
 labels: [feature]
 component: [gui, worker]
 milestone: desktop-alpha

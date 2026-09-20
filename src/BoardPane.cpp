@@ -1451,9 +1451,14 @@ public:
     // The worker's `qa` block for this card, as it arrived (#T71W). Empty for a card it sent none
     // for — an old worker, or a card with no `implemented_by` yet.
     QJsonObject qa() const { return m_qa; }
-    // Whether this card is in a QA lane at all: that, and a `qa` block, is what puts the verify
-    // line and its button on screen.
-    bool inQaLane() const { return m_statusValue.startsWith(QStringLiteral("needs-qa")); }
+    // Whether this card is in a verify lane at all (#3XZV): `needs-verification`, the
+    // implementer's checklist being checked, or one of the QA lanes after it. That, and a `qa`
+    // block, is what puts the verify line and its button on screen.
+    bool inVerifyLane() const
+    {
+        return m_statusValue == QStringLiteral("needs-verification")
+               || m_statusValue.startsWith(QStringLiteral("needs-qa"));
+    }
     // Whether there is something to open: the worker found a verifier that is not the implementer
     // and is actually on this machine.
     bool hasVerifier() const { return !board::verifyRunner(m_qa).isEmpty(); }
@@ -1513,9 +1518,9 @@ public:
                                      "before handing the card to a verifier.").arg(m_id));
             return;
         }
-        if (!inQaLane()) {
-            showError(QStringLiteral("#%1 is not in a QA lane yet, so there is nothing to verify. "
-                                     "Move it to Needs QA (LLM) when it lands.").arg(m_id));
+        if (!inVerifyLane()) {
+            showError(QStringLiteral("#%1 has not landed for verification yet. Move it to Needs "
+                                     "verification when it lands.").arg(m_id));
             return;
         }
         if (!hasVerifier()) {
@@ -2026,8 +2031,8 @@ private:
     // an answer to a question nobody has asked yet.
     void showVerify()
     {
-        const QString line = inQaLane() ? board::verifyLine(m_qa) : QString();
-        const QString note = inQaLane() ? board::verifyNote(m_qa) : QString();
+        const QString line = inVerifyLane() ? board::verifyLine(m_qa) : QString();
+        const QString note = inVerifyLane() ? board::verifyNote(m_qa) : QString();
         // Amber is "a human should look at this" everywhere in Relay, and that is exactly what a
         // missing verifier or a same-lineage one is. With a recommendation the line itself stays
         // in the fields' muted ink and only the warning is amber; with none, the whole line is.
@@ -2041,13 +2046,13 @@ private:
                         .arg(theme::Warning.name(), note.toHtmlEscaped());
         m_verifyLine->setText(html);
         m_verifyLine->setVisible(!html.isEmpty());
-        m_verify->setVisible(inQaLane());
+        m_verify->setVisible(inVerifyLane());
         m_verify->setEnabled(!m_busy && hasVerifier());
         const QString label = board::verifyLabel(m_qa);
         m_verify->setToolTip(hasVerifier()
                                  ? QStringLiteral("Hand the card to a new terminal pane on %1, from "
                                                   "a different provider family than the one that "
-                                                  "implemented it; it runs the QA checklist (v)")
+                                                  "implemented it; it runs the checklist (v)")
                                        .arg(label)
                                  : QStringLiteral("No verifier is available for this card: %1")
                                        .arg(!note.isEmpty() ? note
@@ -2730,9 +2735,16 @@ void BoardView::buildChrome(QVBoxLayout *layout)
         m_pendingNotes.insert(id, what == QStringLiteral("tab")
                                       ? QStringLiteral("Moved #%1 to %2").arg(card, board::tabTitle(value))
                                       : QStringLiteral("Moved #%1 to %2").arg(card, board::statusTitle(value)));
-        send({{QStringLiteral("type"), QStringLiteral("board_move")}, {QStringLiteral("id"), id},
-              {QStringLiteral("card"), card}, {what, value},
-              {QStringLiteral("reason"), QStringLiteral("changed in the Switchboard")}});
+        // A status pick is a move to a lane: it takes the card out of the manual section it may
+        // have been parked in (#3XZV). A tab pick leaves the parking alone.
+        QJsonObject move{{QStringLiteral("type"), QStringLiteral("board_move")},
+                         {QStringLiteral("id"), id},
+                         {QStringLiteral("card"), card},
+                         {what, value},
+                         {QStringLiteral("reason"), QStringLiteral("changed in the Switchboard")}};
+        if (what == QStringLiteral("status"))
+            move.insert(QStringLiteral("section"), QString());
+        send(move);
     };
     m_detail->onEdit = [this](const QJsonObject &patch, const QString &baseHash) {
         saveCardEdit(patch, baseHash);
@@ -3098,11 +3110,15 @@ void BoardView::buildQuickAdd(QVBoxLayout *layout)
             return;
         }
         const QString status = m_model.dropStatus(m_quickAddColumn);
-        send({{QStringLiteral("type"), QStringLiteral("board_create")},
-              {QStringLiteral("tab"), defaultCategory()},
-              {QStringLiteral("status"), status.isEmpty() ? QStringLiteral("inbox") : status},
-              {QStringLiteral("card_type"), QStringLiteral("work")},
-              {QStringLiteral("text"), text}});
+        QJsonObject create{{QStringLiteral("type"), QStringLiteral("board_create")},
+                           {QStringLiteral("tab"), defaultCategory()},
+                           {QStringLiteral("status"),
+                            status.isEmpty() ? QStringLiteral("inbox") : status},
+                           {QStringLiteral("card_type"), QStringLiteral("work")},
+                           {QStringLiteral("text"), text}};
+        if (status.isEmpty())
+            create.insert(QStringLiteral("section"), m_quickAddColumn);   // a manual section
+        send(create);
         field->clear();
     });
 }
@@ -3668,12 +3684,22 @@ QString BoardView::sectionTitle(const QString &columnId) const
     return board::statusTitle(columnId);
 }
 
-// Nothing is created straight into Done: a card gets there by being closed.
+// Nothing is created straight into Done: a card gets there by being closed. A manual section
+// takes them (#3XZV): a quick-add there is parked in it, its status still inbox.
 bool BoardView::sectionTakesNewCards(const QString &columnId) const
 {
-    const QString landing = m_model.dropStatus(columnId);
-    return !landing.isEmpty() && landing != QStringLiteral("done")
-           && landing != QStringLiteral("dropped");
+    if (columnId == board::verifiedSection() || columnId == board::doneSection())
+        return false;
+    const QList<board::Column> sections = m_model.sections();
+    for (const board::Column &section : sections) {
+        if (section.id != columnId)
+            continue;
+        const QString landing = section.statuses.value(0);
+        return !landing.isEmpty() ? (landing != QStringLiteral("done")
+                                     && landing != QStringLiteral("dropped"))
+                                  : true;   // collects nothing: a section filled by hand
+    }
+    return false;
 }
 
 void BoardView::selectRow(int index)
@@ -4053,8 +4079,15 @@ void BoardView::moveCard(const QString &id, const QString &columnId, const QStri
     }
     QString note;
     if (!status.isEmpty() && !sameSection) {
-        // Within its own section a card keeps its exact status (Needs QA stays LLM or human).
+        // Within its own section a card keeps its exact status (Needs QA stays LLM or human),
+        // and a move to a status section takes it out of the manual section it may have been
+        // parked in: an empty `section` is the unpark (#3XZV).
         message.insert(QStringLiteral("status"), status);
+        message.insert(QStringLiteral("section"), QString());
+        note = QStringLiteral("Moved #%1 to %2").arg(id, sectionTitle(columnId));
+    } else if (status.isEmpty() && !sameSection) {
+        // A manual section: the drop parks the card there and its status stays what it was.
+        message.insert(QStringLiteral("section"), columnId);
         note = QStringLiteral("Moved #%1 to %2").arg(id, sectionTitle(columnId));
     } else {
         note = QStringLiteral("Reordered #%1").arg(id);
@@ -4223,11 +4256,12 @@ void BoardView::executeCard(const QString &note)
               {QStringLiteral("card"), card}, {QStringLiteral("base_hash"), m_detail->hash()},
               {QStringLiteral("patch"), QJsonObject{{QStringLiteral("fields"),
                                                      QJsonObject{{QStringLiteral("assignee"), QStringLiteral("agent")}}}}}});
-    if (m_detail->status() != QStringLiteral("in-progress")) {
+    if (m_detail->status() != QStringLiteral("executing")
+        && m_detail->status() != QStringLiteral("in-progress")) {
         const QString id = nextRequestId();
-        m_pendingNotes.insert(id, QStringLiteral("Moved #%1 to In progress · Execute").arg(card));
+        m_pendingNotes.insert(id, QStringLiteral("Moved #%1 to Executing · Execute").arg(card));
         send({{QStringLiteral("type"), QStringLiteral("board_move")}, {QStringLiteral("id"), id},
-              {QStringLiteral("card"), card}, {QStringLiteral("status"), QStringLiteral("in-progress")},
+              {QStringLiteral("card"), card}, {QStringLiteral("status"), QStringLiteral("executing")},
               {QStringLiteral("reason"), QStringLiteral("Execute: handed to a terminal pane")}});
     }
     send({{QStringLiteral("type"), QStringLiteral("board_comment")}, {QStringLiteral("card"), card},
@@ -4276,7 +4310,8 @@ void BoardView::verifyCard(const QString &note)
     if (implementedBy.isEmpty())
         implementedBy = m_detail->front().value(QStringLiteral("implemented_by")).toString();
     onVerifyCard(card, runner,
-                 board::verifyTask(card, m_detail->title(), label, implementedBy, note));
+                 board::verifyTask(card, m_detail->title(), label, implementedBy,
+                                   m_detail->status(), note));
 }
 
 void BoardView::saveCardEdit(const QJsonObject &patch, const QString &baseHash)

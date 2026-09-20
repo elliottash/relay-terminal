@@ -1,7 +1,7 @@
 ---
 id: 9MYY
 type: work
-status: ready
+status: planned
 labels: [bug]
 rank: zzz
 created: '2026-09-17'

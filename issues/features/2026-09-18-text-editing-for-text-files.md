@@ -1,7 +1,7 @@
 ---
 id: 4TNY
 type: work
-status: ready
+status: planned
 labels: [feature]
 assignee: agent
 rank: zzzz111

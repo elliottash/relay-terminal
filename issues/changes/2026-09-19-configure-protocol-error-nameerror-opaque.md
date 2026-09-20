@@ -1,7 +1,7 @@
 ---
 id: 40SN
 type: work
-status: ready
+status: planned
 labels: [bug]
 component: [worker, gui]
 milestone: desktop-alpha

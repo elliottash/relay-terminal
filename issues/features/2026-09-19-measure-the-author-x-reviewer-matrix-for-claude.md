@@ -1,7 +1,7 @@
 ---
 id: 4QM4
 type: work
-status: ready
+status: planned
 labels: [feature, research, qa, switchboard]
 component: [worker]
 milestone: beta

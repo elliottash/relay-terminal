@@ -487,6 +487,13 @@ class BoardCommands:
                                   private=card.private, mode=session.mode,
                                   model=getattr(getattr(agent, "config", None), "model", None),
                                   turn=f"{getattr(agent, 'session_id', '')}/{turn_id}" if turn_id else None)
+        # The turn is the event (#3XZV): a Plan that finished and left its `## Plan` on the card
+        # has planned it. Swallowed on refusal for the same reason as the ask's own move.
+        if session.mode == "plan":
+            try:
+                tools.stage_advance(session.card_id, "plan-written")
+            except (BoardToolError, B.BoardError, OSError):
+                pass
         # A Discuss that edited the card, or a Plan that wrote its `## Plan`, changed the file:
         # the next question on it reseeds from that version (the seed hash no longer matches),
         # so the conversation never argues with a stale copy.
@@ -1141,7 +1148,8 @@ class BoardCommands:
                     "title": title, "request": text if isinstance(text, str) and text.strip() else title,
                     "type": request.get("card_type") or "work",
                     **({"labels": request["labels"]} if request.get("labels") else {}),
-                    **({"source": request["source"]} if request.get("source") else {})})
+                    **({"source": request["source"]} if request.get("source") else {}),
+                    **({"section": request["section"]} if request.get("section") else {})})
             elif kind == "board_update":
                 patch = request.get("patch")
                 if not isinstance(patch, dict):
@@ -1151,7 +1159,10 @@ class BoardCommands:
             elif kind == "board_move":
                 result = tools.run("board_move_card", {
                     "id": request.get("card"), "reason": request.get("reason") or "moved in the Switchboard",
-                    **{k: request[k] for k in ("status", "tab", "before", "after", "evidence") if request.get(k)}})
+                    # `section` rides along even when it is the empty string: that is how a drop
+                    # on a status column takes a card out of the manual section it was parked in.
+                    **{k: request[k] for k in ("status", "tab", "before", "after", "evidence", "section")
+                       if request.get(k) is not None}})
             elif kind == "board_priority":
                 # The flag click on a row (#VKFV): the owner at the keyboard, so no base_hash and
                 # no run() budget — BoardTools.set_priority is that path, with undo of its own.
@@ -1236,6 +1247,15 @@ class BoardCommands:
         said = text or "Plan this card."
         entry = tools.board.append_thread(card_id, said, author=str(request.get("author") or "owner"),
                                           kind="comment", private=card.private, mode=mode)
+        # The stage move the event makes (#3XZV): starting a Plan is `planning`, and any other
+        # first thread entry is `discussing`. The board's own bookkeeping must never block the
+        # ask, so a refusal here is swallowed and the turn runs from wherever the card is.
+        try:
+            tools.stage_advance(card_id, "plan-started" if mode == "plan" else "discussed")
+        except (BoardToolError, B.BoardError, OSError):
+            pass
+        card = tools.board.card_by_id(card_id) or card
+        card_hash = B.file_hash(card.path) if card.path else card_hash
         # This card's own conversation (19.16). It is seeded from the card file the first time
         # and whenever the file has changed since; a second question on an unchanged card
         # continues where it left off, which the single shared conversation could only do for

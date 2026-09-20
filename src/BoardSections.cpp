@@ -292,8 +292,10 @@ void SectionPlan::remove(const QString &id)
     const QStringList freed = m_rows.at(at).statuses;
     m_rows.removeAt(at);
     m_columns.removeAll(id);
-    m_changes << QStringLiteral("%1 taken away (%2 gets a section of its own)")
-                     .arg(was, joinTitles(freed));
+    m_changes << (freed.isEmpty()
+                      ? QStringLiteral("%1 taken away").arg(was)
+                      : QStringLiteral("%1 taken away (%2 gets a section of its own)")
+                            .arg(was, joinTitles(freed)));
     m_dirty = true;
 }
 
@@ -417,9 +419,8 @@ QString SectionPlan::addRefusal(const QString &name, const QStringList &statuses
         return QStringLiteral("A new section needs a name.");
     if (idFor(name).isEmpty())
         return QStringLiteral("A section's name needs a letter or a digit in it.");
-    if (statuses.isEmpty())
-        return QStringLiteral("A new section needs at least one status to collect — otherwise "
-                              "nothing would ever be in it.");
+    // No statuses picked is a manual section (#3XZV): one you fill by hand, parking cards in
+    // it with a drop. Nothing is ever in it until something is.
     const QStringList free = freeStatuses();
     for (const QString &status : statuses)
         if (!free.contains(status))
@@ -451,7 +452,9 @@ QString SectionPlan::add(const QString &name, const QStringList &statuses)
     const int done = m_columns.indexOf(doneSection());
     m_columns.insert(done < 0 ? m_columns.size() : done, row.id);
 
-    m_changes << QStringLiteral("%1 added, collecting %2").arg(row.name, joinTitles(statuses));
+    m_changes << (statuses.isEmpty()
+                      ? QStringLiteral("%1 added, a section you fill by hand").arg(row.name)
+                      : QStringLiteral("%1 added, collecting %2").arg(row.name, joinTitles(statuses)));
     m_dirty = true;
     return row.id;
 }
@@ -472,10 +475,12 @@ QJsonObject SectionPlan::message() const
     for (const QString &id : m_columns) {
         const Row *found = row(id);
         // A configured section that is not drawn is Done: it keeps whatever it had, which is the
-        // default, so it needs no override.
-        if (found == nullptr || found->statuses.isEmpty())
+        // default, so it needs no override. A manual section is drawn with no statuses, and its
+        // explicit empty list is the one thing that says it collects nothing — it must be
+        // written even though it is empty (#3XZV).
+        if (found == nullptr)
             continue;
-        if (found->statuses != defaultSectionStatuses(id))
+        if (found->statuses.isEmpty() || found->statuses != defaultSectionStatuses(id))
             statuses.insert(id, QJsonArray::fromStringList(found->statuses));
     }
     out.insert(QStringLiteral("column_statuses"), statuses);
@@ -682,12 +687,18 @@ void SectionEditor::rebuild()
         // name beside them ("Inbox  Inbox"), and the id is the thing a rename does not change —
         // which is the whole point of the column.
         auto *collects = new QLabel(row.statuses.isEmpty()
-                                        ? QStringLiteral("closed and signed")
+                                        ? (row.fixed ? QStringLiteral("closed and signed")
+                                                     : QStringLiteral("manual"))
                                         : row.statuses.join(QStringLiteral(", ")), line);
         collects->setObjectName(QStringLiteral("boardSectionStatuses"));
         collects->setToolTip(row.statuses.isEmpty()
-                                 ? QStringLiteral("Verified is `done` plus a signature: no status "
-                                                  "of its own, and nothing can be moved into it.")
+                                 ? (row.fixed
+                                        ? QStringLiteral("Verified is `done` plus a signature: no "
+                                                         "status of its own, and nothing can be "
+                                                         "moved into it.")
+                                        : QStringLiteral("A section you fill by hand: cards are "
+                                                         "parked in it with a drop and their "
+                                                         "status stays what it was (#3XZV)."))
                                  : QStringLiteral("The statuses this section collects: %1")
                                        .arg(joinTitles(row.statuses)));
         cells->addWidget(collects, 2);
@@ -773,13 +784,15 @@ void SectionEditor::rebuild()
     statuses->setText(m_pendingStatuses.isEmpty()
                           ? QStringLiteral("Collects…")
                           : joinTitles(m_pendingStatuses));
-    statuses->setEnabled(!free.isEmpty());
+    // Always enabled (#3XZV): picking none is a manual section, one you fill by hand, so the
+    // choice is live even when every status is already collected somewhere.
     statuses->setToolTip(free.isEmpty()
-                             ? QStringLiteral("Every status already belongs to a section. Take one "
+                             ? QStringLiteral("Every status already belongs to a section. Pick "
+                                              "none for a section you fill by hand, or take one "
                                               "away or merge two to free some up.")
                              : QStringLiteral("Which statuses the new section collects. A status "
                                               "belongs to one section, so only the free ones are "
-                                              "here."));
+                                              "here — pick none for a section you fill by hand."));
     if (!free.isEmpty()) {
         auto *menu = new QMenu(statuses);
         for (const QString &status : free) {

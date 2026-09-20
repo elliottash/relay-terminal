@@ -1,7 +1,7 @@
 ---
 id: ZKR0
 type: work
-status: ready
+status: planned
 labels: [feature]
 component: [gui]
 milestone: beta

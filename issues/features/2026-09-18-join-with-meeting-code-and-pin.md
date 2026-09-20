@@ -1,7 +1,7 @@
 ---
 id: 97EG
 type: work
-status: in-progress
+status: executing
 labels: [feature]
 component: [gui, worker]
 milestone: desktop-alpha

@@ -113,7 +113,7 @@ string everywhere. Front matter values are single-line; prose belongs in the bod
 
 Parsing preserves the front matter bytes: a card that is read and written back without a field
 change is byte-identical. The first field change re-emits the whole block in canonical order
-(`id, type, status, name, description, kind, topic, scope, private, labels, component, milestone,
+(`id, type, status, section, name, description, kind, topic, scope, private, labels, component, milestone,
 workstream, assignee, implemented_by, waiting_on, parent, blocked_by, aliases, paths, pinned,
 reviewed, author, supersedes, approved_by, goal, label_count, label_output, codebook, priority,
 rank, created, acceptance, source, links`, then any other key, sorted).
@@ -129,7 +129,7 @@ outside the range is clamped on every write.
 
 | Type | Extra fields | `status` | Folder |
 |---|---|---|---|
-| `work` (default) | `component`, `milestone`, `workstream`, `acceptance`, `implemented_by`, `verified_by`, `label_count`, `label_output`, `codebook` | `inbox`, `discussing`, `ready`, `in-progress`, `needs-review`, `needs-labels`, `needs-ab`, `needs-qa-llm`, `needs-qa-human`, `deferred`, `done`, `dropped` | `<category>/` plus the state subfolder |
+| `work` (default) | `component`, `milestone`, `workstream`, `acceptance`, `implemented_by`, `verified_by`, `label_count`, `label_output`, `codebook`, `section` | `inbox`, `discussing`, `planning`, `planned`, `ready`, `executing`, `in-progress`, `needs-verification`, `needs-review`, `needs-labels`, `needs-ab`, `needs-qa-llm`, `needs-qa-human`, `deferred`, `done`, `dropped` | `<category>/` plus the state subfolder |
 | `plan` | `approved_by`, `goal` | `draft`, `approved`, `executing`, `done`, `dropped` | `planning/`, `planning/done/` |
 | `memory` | `name`, `description`, `kind`, `topic`, `scope`, `paths`, `pinned`, `supersedes`, `reviewed`, `author` | `active`, `retired` | `memory/`, `memory/archive/` |
 | `alias` | `name`, `kind`, `shell` | `active`, `retired` | `aliases/`, `aliases/archive/` |
@@ -139,9 +139,24 @@ outside the range is clamped on every write.
   2026-09-19); the status id is unchanged, so no card file or folder moved. Every section's
   one-clause meaning lives in `board::sectionMeaning()` (`src/BoardModel.cpp`) and is what the
   header tooltips and the hide checkboxes show.
+- `planning`, `planned`, `executing` and `needs-verification` are the **stage statuses**
+  (2026-09-20, #3XZV): a card walks inbox → discussing → planning → planned → executing →
+  needs-verification → QA → done, and Relay makes each move itself at the event that earns it —
+  the thread's first entry, a Plan turn starting, a Plan turn leaving its `## Plan` on the card,
+  Execute being pressed, the executing agent landing the card, and the verifier's verdict.
+  Like `inbox`, none of them has a state subfolder: a stage move is a front-matter change, never
+  a file move. `ready`, `in-progress` and the waiting statuses stay valid, so a board configured
+  before them is untouched.
+- `section` (2026-09-20, #3XZV) is the id of the **manual section** a card is parked in: a
+  configured column that collects nothing (below). It wins over the card's status for as long
+  as that column exists — a parked card stays parked while its stage moves underneath it, and
+  its stage shows in the card detail rather than in the list. A drop on a status column is what
+  clears it, and `relay-board.py check` warns about a `section:` that names no configured
+  column (`dangling_section`) because those cards fall back to their status section.
 - `dropped` cards live in `done/` beside `done` ones.
 - `implemented_by` and `verified_by` are **signatures, not free text**, and Relay writes them: the
-  worker stamps `provider/model` from its own preset and model when a card enters `in-progress` or a
+  worker stamps `provider/model` from its own preset and model when a card enters `executing`,
+  `in-progress`, `needs-verification` or a
   QA lane, and again when it leaves a QA lane to `done` (card `#T71W`, protocol section 19.15). The
   provider segment is the *model's* vendor, never the aggregator that routed to it, so a card served
   `deepseek/deepseek-v4.1-flash` through OpenRouter reads `deepseek/deepseek-v4.1-flash` and a local
@@ -255,7 +270,7 @@ tabs: [{id: features, folder: features}, {id: bugs, folder: changes},
   {id: design, folder: design}, {id: marketing, folder: marketing},
   {id: planning, folder: planning},
   {id: deferred, filter: "status:deferred"}, {id: done, filter: "status:done,dropped"}]
-columns: [inbox, discussing, ready, in-progress, waiting, needs-qa, done]
+columns: [inbox, discussing, planning, planned, executing, needs-verification, needs-qa, done]
 agent: {autonomy: auto, max_creates_per_turn: 5}
 memory: {autonomy: auto}
 ```
@@ -267,15 +282,20 @@ the switch that tells Relay and the agents that this repository has a Switchboar
 optional keys say the rest:
 
 ```yaml
-columns: [inbox, discussing, ready, in-progress, needs-qa, done]
-column_statuses: {needs-qa: [needs-qa-llm, needs-qa-human, needs-review, needs-labels, needs-ab]}
-column_titles: {needs-qa: Checks, ready: Up next}
+columns: [inbox, discussing, planning, planned, executing, needs-verification, needs-qa, done, research]
+column_statuses: {research: []}
+column_titles: {needs-qa: Checks, research: Research}
 ```
 
 - `column_statuses:` is what a section collects, overriding the defaults in `board.COLUMN_STATUSES`
   — this is how two sections **merge** into one, and how a board **invents** a section of its own.
-  A column id outside `COLUMN_IDS` is only allowed when this key gives it statuses, so a typo is
+  A column id outside `COLUMN_IDS` is only allowed when this key names it, so a typo is
   still caught. **One status belongs to exactly one section**: two would draw the same card twice.
+- An **explicit empty list is a manual section** (2026-09-20, #3XZV): a section that collects
+  nothing and is filled by hand — `board_move_card {section: research}` parks a card in it (the
+  `section:` front-matter field above), a drop or a quick-add in the pane does the same, and the
+  card's status stays what it was. Removing the section from `columns:` leaves the parked cards'
+  `section:` dangling, which `check` reports as a warning.
 - `column_titles:` is what a section is *called*, over an id that does not change. Renaming is a
   display name and nothing else; `""` puts the Relay wording back. It may name a section that is
   not in `columns:` — a plan's `draft`, `deferred`, `verified`, `done` — because those sections

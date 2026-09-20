@@ -77,11 +77,28 @@ needing QA would live in two places. Deferred and Done are cross-category status
 |---|---|---|---|
 | Inbox | `inbox` | top | raw capture, untriaged |
 | Discussing | `discussing` | top | `waiting_on: owner \| agent \| <person>` badge |
+| Planning | `planning` | top | a Plan turn is writing its plan (#3XZV) |
+| Planned | `planned` | top | the plan is written, not started |
 | Ready | `ready` (legacy `open`) | top | agreed, not started |
+| Executing | `executing` | top | the plan is being carried out; collects plan cards too |
 | In progress | `in-progress` | top | `assignee` set (person or agent) |
+| Needs verification | `needs-verification` | top | built, waiting for its implementer's checklist to be checked |
 | Waiting | `needs-review`, `needs-labels`, `needs-ab` | `needs_review/` … | chip names the kind; not landing states (skill rule 6) |
 | Needs QA | `needs-qa-llm`, `needs-qa-human` | `needs_qa_llm/`, `needs_qa_human/` | two swimlanes, LLM and Human |
 | Done | collapsed (last 5) in category tabs | `done/` | resolution section required |
+
+**The stage sections are the defaults a new board gets** (2026-09-20, #3XZV): inbox, discussing,
+planning, planned, executing, needs-verification, needs-qa, done. The moves between them are made
+by Relay at the stage events, not left to an agent's judgment: inbox on entry; discussing on the
+thread's first entry; planning when a Plan turn starts; planned when a Plan turn leaves its
+`## Plan` on the card; executing when Execute is pressed; needs-verification when the executing
+agent lands the card; then QA on a passed verification, or an earlier stage back on a failed one.
+Old statuses and columns stay valid, so a board configured before them is untouched.
+
+**A section may collect nothing** (2026-09-20, #3XZV): `columns: […, research]` plus
+`column_statuses: {research: []}` is a manual section, filled by hand — a card is parked in it
+with `board_move_card {section: research}` or a drop, its `section:` front-matter field wins over
+its status while the column exists, and a drop on a status column is what takes it out.
 
 A QA reopen is not a status: the card returns to Ready with label `reopened` and the fault note appended.
 

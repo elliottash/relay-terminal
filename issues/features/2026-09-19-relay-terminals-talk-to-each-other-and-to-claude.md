@@ -1,7 +1,7 @@
 ---
 id: R5TC
 type: work
-status: ready
+status: planned
 labels: [feature]
 component: [gui, worker]
 milestone: beta
