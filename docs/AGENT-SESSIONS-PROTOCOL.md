@@ -6530,3 +6530,348 @@ folders fetched before the marker existed must not be counted a second time. A f
 - **Discovery is offline and bounded.** `ctest --show-only=json-v1` is the only subprocess, and
   the Python half is parsed with `ast` — nothing is imported, so a test module that would fail at
   import time is still listed, which is exactly when a card needs to know its tests exist.
+
+### 31.9 Profile: `profile_run`, `profile_stop`
+
+Card `#7BM4` phase 5, owner 2026-09-20: the Profile button on the Switchboard's tool row **asks
+which target** — "profile the project" is four different things in this repository — and the build
+target ships first. The two requests below go to the same board worker as the `tests_*` ones, and
+everything they do is `scripts/relay-profile` (docs/PROFILING.md), run through `jobs.JobTable` and
+streamed, in `board_cleanup`'s shape: request, `started`, `progress` lines, one end event.
+
+Backend: `backend/relay_core/profile_protocol.py` (`ProfileCommands`) over
+`backend/relay_core/profile_convert.py` (the arithmetic) and `scripts/relay-profile` (the tools);
+wired in `board_protocol.py` (`PROFILE_TYPES`, `BoardCommands._profile`). GUI:
+`src/ProfilePane.{h,cpp}`, opened from `RelayWindow::openProfileMenu`. Tests:
+`tests/test_profile_protocol.py`, `tests/test_relay_profile.py`, `tests/profilepane_test.cpp`.
+
+```
+{"type": "profile_run", "target": "build"|"build-remote"|"tests"|"app", "args": [...]}
+{"type": "profile_stop"}
+```
+
+`target` is one of four names, each a fixed argument vector — the request never carries a command —
+and the GUI's menu is the same four, from `relay::profile::profileTargets()`:
+
+| target | what it profiles | raw file |
+|---|---|---|
+| `build` | a Ninja build of `relay` in a directory of the tool's own, never the shared `build/` | `ninja_log`, `build.trace.json` |
+| `build-remote` | the committed tree built on the second runner (`relay-remote-tests --build-only`) | the same |
+| `tests` | `py-spy record` over `python3 -m unittest`, or `cProfile` where py-spy is missing | `tests.speedscope.json` |
+| `app` | Relay itself under `sudo -n perf record -g --call-graph dwarf` | `app.folded`, `app.perf.data` |
+
+`args` is optional and is checked **by name**: only `--stop-after`, `--rev`, `--target`, `--limit`,
+`--time-trace`, `--build-dir` and `--host` may be added, a bare argument is refused, and `--out` is
+the worker's own (`docs/qa_evidence/<date>-profile-<target>/`) so a request cannot write elsewhere.
+
+```
+{"event":"profile", "target", "state":"started"|"progress"|"finished"|"stopped"|"error",
+   "out"?, "command"?, "label"?, "line"?, "message"?, "summary"?: Summary, "id"?}
+```
+
+One event type for all five states, like `tests_run`. `progress` carries one `line` of the
+script's own output — the GUI streams those into the board's notice line, where a cleanup's
+progress goes. `finished` carries the `Summary`; `stopped` and `error` carry a sentence and no
+rows. `id` is echoed only when the request had one: no `profile` event spends the key on anything
+else, unlike `tests_run`.
+
+```
+Summary
+  kind        str    "build" (a compile-time table) or "profile" (a sampled one)
+  rows        [Row]  at most 25, sorted by self time, the heaviest first
+  total_rows  int    how many there were before the cap
+  wall        float  seconds: the build's elapsed time, or the profile's sampled total
+  steps|samples int  build steps, or samples taken
+  sum         float  build only: the summed step time, which `share` is a share of
+  line        str    the ready-made header, e.g. `904 steps · 4m 0s wall · 12m 0s of compile time · spark`
+  markdown    str    the `## Profile` block a card records — the table plus a dated heading
+  out         str    the evidence directory
+  flame       str    the raw file `scripts/relay-speedscope` opens, absolute
+  host, commit, started, finished, command, raw, tool_versions   from the run's `meta.json`
+
+Row
+  name        str    a function, or a build step's output file
+  file, line  str,int  where the function is, when the profiler said
+  self        float  seconds in it alone (a build step: its compile time)
+  total       float  seconds in it and what it called (a build step: the same number)
+  self_pct    float  share of the whole, by self time — the column the table is read by
+  total_pct   float
+```
+
+**Notes and deviations.**
+
+- **One run at a time**, refused with a sentence rather than queued: two builds in one build
+  directory, or two `perf record`s, are one wrong profile rather than two.
+- **The table before the flame graph.** Every profiling product settled on that independently
+  (`docs/SWITCHBOARD-TOOLING-RESEARCH.md` section 4.3), and Relay has no QtWebEngine, so the table
+  is drawn natively and the flame graph leaves the app through `scripts/relay-speedscope` — the
+  local static bundle, in the system browser, with nothing uploaded.
+- **Numbers are committed, samples are not.** The summary goes onto a card under `## Profile` and
+  the directory into `links.evidence`; the raw profile stays under `docs/qa_evidence/` and is
+  gitignored where it is large. This is the split github-action-benchmark, CodSpeed and Bencher
+  all use.
+- **`sudo -n` that wants a password is a sentence, not a failure.** `kernel.perf_event_paranoid`
+  is 4 on both runners and stays 4 (docs/PROFILING.md section 1); the app target records through
+  `sudo -n perf`, drops back to the user with `setpriv` so Relay is not profiled as root, and
+  hands the file back with `sudo -n chown` because perf refuses a `perf.data` that is neither
+  root's nor the caller's.
+
+## 32. Signals: the faults the machine tracks, opens and closes (v4.2, 2026-09-20)
+
+Card `#AQ6X`, decisions 1–12; `docs/SIGNALS-RESEARCH.md` R1–R13 is the reasoning and every
+threshold below cites it. A **signal** is one keyed item per failing check — a test today, a build
+failure and a `check` problem next, crashes and CI after that — that a machine opens on evidence and
+closes only when the check passes. It is not a card and it is not in git: it is the *fold* of two
+append-only files under the board's private root (`SWITCHBOARD-FORMAT.md` §5.1), so no occurrence is
+ever stored twice and nothing here contends on `land.py`.
+
+Backend: `backend/relay_core/signals.py` (the record, the fold, every constant) and
+`backend/relay_core/tests_protocol.py` (the messages and what drives the fold). The agent's door is
+`board_signals` in `board_tools.py`; a guest's is `scripts/relay-board.py signals`.
+
+### 32.1 The key, the states and the kinds
+
+The key is the source plus the check's own identity, and never the failure text:
+`ctest:<name>`, `unittest:<module.Class.test>`, `build:<target>`, `check:<code>:<path>`,
+`crash:<signal>:<frame>`, `ci:<workflow>:<job>`; a group is `group:<12 hex of its fingerprint>` and
+a red run is `run:<runner>`. The **fingerprint** — the message with timestamps, absolute paths, hex
+and numbers replaced by `%` — groups keys and says "this now fails differently"; it is an
+annotation, never part of the key.
+
+`state` is `pending` (seen failing once; shown to the pane whose run produced it, deleted without
+trace on the next pass), `open` (counted, claimable, and the only state that blocks anything),
+`resolved` (machine only), `dismissed` (a reason, a comment and a **required** expiry; occurrences
+keep counting underneath) or `removed` (the key left discovery, which is not a fix).
+`kind` is `broken`, `flaky`, `group`, `run` or `build`.
+
+### 32.2 What advances one
+
+*Consecutive executions of that key*, not runs: most runs here are `ctest -R` subsets, so a run that
+did not execute the key advances nothing. Neither do `skip`, `timeout`, or a key whose run had a
+failing `build:` — those are **not evaluated**.
+
+| Rule | Value | Constant | Why |
+|---|---|---|---|
+| open on the Nth consecutive failure | 2 for a test, 1 for a build, a `check` problem, a group or a red run | `OPEN_AFTER_FAILURES`, `DEBOUNCED_SOURCES` | R4; a shared checkout makes a first test failure as likely to be another session's half-saved edit |
+| resolve on N consecutive passes | 2 `broken`, 20 `flaky` | `RESOLVE_PASSES` | R5; TestGrid's two, Datadog's twenty |
+| the flakiness window | 21 executions | `FLAKE_WINDOW` | R4 |
+| `kind: flaky` | `test_history`'s own rule — a pass **and** a fail on one tree, or `flake_score >= FLAKE_FLAKY` — and it is sticky | — | R4, R2; the tree, not the commit, because several sessions share this checkout (`Execution.tree_digest`) |
+| `stale` | 7 days unseen, still open, re-run first | `STALE_DAYS` | R6; Relay can run the check, so it never closes on a timer |
+| reopen as `regressed`, keeping the count | inside 30 days; after it, a new signal whose `previous` names the old | `REGRESS_DAYS` | R8 |
+| retention of a resolved or removed signal | 30 days, then dropped from the fold | `RETENTION_DAYS` | R13, and R8 needs them kept that long |
+
+**One cause, one item**, in this order per run: a failing `build:<target>` inhibits every test in
+that run (`inhibited_by`); else a **red run** — more than `RED_RUN_FRACTION` (½) of at least
+`RED_RUN_MIN_EXECUTED` (10) executed keys failing — is one `run:<runner>` signal and nothing else;
+else `GROUP_MIN_KEYS` (3) keys sharing one fingerprint are one `group:` signal; and a run itemises at
+most `MAX_SIGNALS_PER_RUN` (10), the overflow rolling into that run's `run:` signal. A collapsed key
+stays `pending`, counted under its container. Those four numbers are guesses (R7), which is why they
+are named constants: tune them against the first month of `history.jsonl`.
+
+### 32.3 The re-run, and what a run tells the pane that made it
+
+After a run, failures that number `RERUN_MAX_FAILURES` (10) or fewer and whose *recorded* p50
+durations sum to `RERUN_MAX_SECONDS` (60 s) are re-run **once**, immediately, before the fold
+(decision 3) — as their own `run_id`, the first one plus `-rerun`, so the fold reads each as a second
+execution of the key. Fail-fail is then `broken` and opens in the same turn; fail-pass is one tree
+disagreeing with itself, which is the flaky mark. A bigger failed set stays `pending` and is answered
+by the next natural run, and a run that asked for `repeat_until_fail` is left alone.
+
+`tests_run`'s agent result (31.6) therefore gains two fields: `opened`, the signal keys this run put
+on the board, and `rerun`, the keys it tried twice. Its per-test table and its finished line count a
+test **once**, with its newest verdict.
+
+### 32.4 The fold, and when it runs
+
+`signals.fold(executions, events, now, discovered=…) -> {key: Signal}` is pure: no clock, no disk, no
+board, so every rule above is table-tested by passing a different `now`. The worker runs it in the
+two places every execution passes through — `tests_protocol.inventory()` (which `tests_list` answers
+with, and which ingests another machine's results first) and the end of `_execute`. Only the first
+knows what the project still *collects*, so it is the only one that can say `removed`.
+
+After each fold, in order: promote what R9 says is due; rewrite the machine-owned `## Signal` section
+of every promoted card in place; then push `signals_changed` — **only when the payload changed**, so
+a refresh on a quiet board re-sends nothing.
+
+### 32.5 Events
+
+| Event | Fields | Meaning |
+|---|---|---|
+| `signals_changed` | `open` and `dismissed` (signal objects, in the same order), `pending_count`, `dismissed_count`, `promoted` (the signal objects that have a card and are still open) | the state, after any fold or write. With `id`, it is the answer to `signals_list` |
+| `signals_written` | `kind` (`claim`\|`release`\|`dismiss`\|`promote`), `key`, `session?`, `card?`, `reason?`, `comment?`, `until?` | one write happened. A refusal is the same event with `error` and `code` instead |
+
+A signal object is `{key, source, kind, state, first_seen, last_seen, count, green_streak, runs,
+fingerprint, regressed, stale, version}` always, plus `excerpt`, `message`, `session`, `card`,
+`fixed_in`, `resolved_at`, `inhibited_by`, `group`, `members`, `previous`, `dismissed`
+(`{reason, comment, until, by, expired?}`), `promote`, `gave_up`, `first_session`, `first_run` and
+`opened_run` when each has a value — **absent rather than null**. The sort is R11's: signals this
+pane first saw, then regressed, then broken before flaky, then by count.
+
+`pending` signals are a **count and nothing more**. A signal seen failing once is in-loop feedback
+for the pane that ran it — which learns of it through `tests_run`'s `opened` in the same turn — and a
+list of them on a human surface is the flood this whole design exists to avoid. `dismissed` is sent
+as rows rather than a number because R12 hides them behind a toggle *with their expiry shown*, which
+a count cannot say.
+
+### 32.6 Requests (GUI → worker)
+
+| Request | Fields | Answer |
+|---|---|---|
+| `signals_list` | `id?` | `signals_changed` carrying that `id` |
+| `signals_claim` | `key`, `pane_token?`, `force?` | `signals_written {kind: "claim", session}`, or `board_claimed_elsewhere` |
+| `signals_release` | `key`, `reason?` | `signals_written {kind: "release"}` |
+| `signals_dismiss` | `key`, `reason`, `comment`, `until` | `signals_written {kind: "dismiss", reason, comment, until}` |
+| `signals_promote` | `key` | `signals_written {kind: "promote", card}` |
+
+They reach the board worker (30.7) through `board_protocol.TESTS_TYPES`, like the `tests_*` ones, and
+each write is followed by a fold and so by a `signals_changed`. Refusal codes: `signal_not_found`
+(there is no open signal by that key — one that is gone was fixed), `board_claimed_elsewhere`,
+`signal_reason`, `signal_comment`, `signal_until`, `signal_promote_cap`, `signal_refused`.
+
+**This is the owner's door**, so a dismissal here reaches all four reasons and any expiry
+(decision 7). The agent's limit lives on its own tool.
+
+### 32.7 The agent's tool, and the guest's command
+
+`board_signals {action: list|claim|release|dismiss|promote, key?, reason?, comment?, until?, force?}`
+— registered the way `board_claim` is. `claim` writes the pane token exactly as a card claim does and
+a second claimant gets the same `board_claimed_elsewhere` naming the holder; `release_claims` on pane
+close gives back the signals this pane held as well as its cards. `release` with reason `gave-up`
+files the bug card in the same call. `dismiss` is limited to `environmental` and `flaky-known`, with
+a comment and at most `AGENT_DISMISS_MAX_DAYS` (7) — `wont-fix`, `expected` and a longer expiry are
+the owner's. No action marks a signal fixed: the tool's own description says so, because a model that
+cannot close one by hand will run the test instead.
+
+A guest with no tools has `scripts/relay-board.py signals [list|claim|release|dismiss|promote] [KEY]`
+with `--as <name>` for the claim (a guest has no pane token), and the same limits, from the same
+module. `<board>/POLICY.md` carries the paragraph.
+
+### 32.8 Promotion, and the gate
+
+A signal becomes an ordinary `work` card — bugs tab, `inbox`, the failure excerpt **verbatim** as its
+`## Issue`, labels `bug` and `signal`, `links.signal` back to the key — when the agent holding it
+releases with `gave-up`, or it has failed in `PROMOTE_MIN_RUNS` (3) runs over `PROMOTE_MIN_HOURS`
+(24) with nobody holding it, or it is confirmed flaky (deflaking a test is a decision, not a repair).
+**Never age alone**, and at most `MAX_PROMOTED_OPEN` (5) promoted cards open at once — the overflow
+stays in the signal list (`signal_promote_cap`). The card carries a machine-owned `## Signal` section
+rewritten in place on every state change; it is generated, like `implemented_by`.
+
+**The signal wins over its card** (decision 6). `board_move_card` refuses to take a card out of
+`needs-verification` with code `board_signal_open` while a signal that card is answerable for is
+open, and `tests_check` says which those are (decision 8):
+
+- `blocks` — the signal this card was promoted from, and the signals **first seen in a run by the
+  pane holding this card**. The run's pane token comes from the `run` lines in the event log, which
+  exist because an execution carries none. Only these refuse the move.
+- `open_before` — every other open signal, listed so the reader knows the tree was already red. A
+  session answers for what its own work broke, not for the state of the tree it found.
+
+A dismissed signal never blocks, which is the owner's override, and closing or dropping a card
+resolves nothing: the signal stays open and may promote again after the 30-day window.
+
+### 32.9 Notes and deviations
+
+- **`run` is a sixth action in the log.** Card `#AQ6X` step 2 lists `claim|release|dismiss|promote|
+  note`. An execution has no pane token — the history store is shared with every other producer —
+  and decision 8 needs to know *whose* run first failed a key, so every run leaves one
+  `{action: "run", run_id, session}` line. Without it `blocks` cannot mean anything.
+- **A container opens on its first failure.** Two consecutive failures is a debounce against a
+  half-saved edit in a shared tree. Three keys with one fingerprint, a red run and a build failure
+  are already complete evidence, so `DEBOUNCED_SOURCES` names only the sources that wait.
+- **No `signals_*` writes are undoable.** The board's undo (19.11) is for card writes; a signal
+  action is a line in an append-only log, and the way to undo a claim is to release it.
+- **Nothing here notifies.** A signal opening or resolving raises no toast and writes no thread
+  entry (R12). The only things that reach a human surface unasked are a promotion and a dismissal
+  about to expire — and the unasked-pickup thread of decision 9, which is card `#AQ6X` phase 3.
+
+### 32.10 Signal threads: the unasked pickup (#AQ6X phase 3, decision 9)
+
+A signal nobody is on becomes its own agent thread. The owner's words are the whole specification:
+*"6 -- i think yes by default, but its optional"*, and *"you get a notification that you can click on
+to open the agent thread, and those go into the sessions manger"*. So a pickup is **visible**, it is
+**its own thread**, and it is listed where every other thread is. It is deliberately not a turn in
+whatever pane the user happens to be typing in: a background fix that stole the pane would be the
+opposite of visible.
+
+**In-loop first (7a).** `tests_run`'s result already carries `opened`, and its text now ends with
+those keys plus one sentence: a signal your own run opened is yours — claim it with `board_signals`,
+fix it in this turn before you report, re-run so it resolves, release with reason `gave-up` if you
+cannot. The `deliver` skill's Execute step says the same. No mechanism: the pane that ran the tests
+is the one agent that knows what it just changed.
+
+**Orphaned (7b)** is `open`, unclaimed, not dismissed, not promoted — and **unclaimed for longer than
+one fold**. That last clause is the honest form of "no live pane owns it". The log's `run` lines say
+which pane token a run belonged to (`first_session`), but a pane token belongs to another worker
+process: the board worker cannot ask whether that pane is still on screen, and a claim it cannot see
+is a claim it must not steal. What it can see is that the key went through a whole fold with nobody
+claiming it — and a fold ends every run, which is exactly when the pane that broke it was told the
+signal was its own. One fold of grace, then it is fair game; `first_session` still orders them, so an
+orphan whose own pane never claimed it goes *after* one that arrived with no pane at all. A promoted
+signal is a person's card and not a thread's to race, unless it `regressed`.
+
+**The limits** (`relay_core.signal_threads`): `MAX_SIGNAL_THREADS` (3) running per project;
+`board.yaml`'s `signals: {auto_work: …}`, **default true when the block or the key is absent** (the
+owner's "yes by default"); never at all when `agent.autonomy` is `off`; one thread per key; and a key
+a thread gave up on is not retried for `GAVE_UP_HOURS` (24) unless it regresses — a second agent
+re-reading the same failure the same hour is how a machine loops.
+
+**The claim is the worker's, under the thread's own id**, written before the thread's first step: the
+board's chip then names the thread rather than showing nothing for the minute the agent takes to get
+going, and two folds in a row cannot start two threads on one key. The thread releases it itself when
+it gives up (`relay-board.py signals release <key> --reason gave-up`, which promotes), and the worker
+releases it as a safety net when the thread ends still holding it.
+
+**The thread** is a subagent of the board worker (`subagents.spawn`, section 8) on the `signal`
+definition, with `background: false` — a background subagent's result is handed to the main agent and
+can wake a turn, and a signal thread reports to nobody. Its `description`, and so its title, is the
+signal's key; its thread file carries `signal: <key>`. Its task text names the key, the failure in
+the check's own words, the card when there is one, the three ways the run may end, and this
+checkout's rules (`scripts/land.py`, claim late, dry-run, `who` before touching a file,
+`scripts/relay-build`). It reaches the board through `scripts/relay-board.py signals`, because a
+subagent has `run_command` and never the `board_*` tools.
+
+**How it ends is the check's verdict, never the agent's report** — so the worker **runs the check**.
+A signal thread is a subagent with `run_command`: whatever `ctest` it ran was a subprocess in its own
+shell and landed in no store, so when it stops the fold has still seen nothing since the failure that
+opened the signal. `verify_signal` therefore runs that one key `RESOLVE_PASSES[kind]` times (twice for
+`broken`), recorded like any other run, and stops early on a failure — running a broken test again
+proves nothing. Then: `resolved` or `removed` is `fixed`, `dismissed` is `dismissed`, and a thread
+that ran out with the check still open **has given up whether it said so or not**, so the bug card is
+written then, which is promotion trigger (a). An agent must not be able to close a fault by going
+quiet. (The first live run of
+`docs/qa_evidence/2026-09-20-signal-threads/loop.py` came out `gave-up` on a test the thread had
+really fixed, which is what that run was for.) A key this project cannot run from here is left as it
+was: a verdict from a check that did not run is not a verdict.
+
+| Event | Fields | Meaning |
+|---|---|---|
+| `signal_thread` | `state` (`started`\|`finished`), `key`, `thread_id`, `session_id`, `outcome?` (`fixed`\|`gave-up`\|`dismissed`\|`stopped`, on `finished`), `card?` | Relay started, or finished, its own thread on a signal |
+
+`session_id` is the owner session the thread file is saved beside, which is what opens its history.
+`signals_changed` (32.5) gains two fields of the **worker's** rather than the fold's: `auto_work`
+(the board's setting) and `threads` (`[{key, thread_id, session_id}]`, the pickups running now) — the
+second so a pane that opened after a thread started can still draw its chip as live.
+
+| Request | Fields | Answer |
+|---|---|---|
+| `signals_config` | `auto_work` (bool) | `signals_written {kind: "config", auto_work}`, then `signals_changed` |
+
+The GUI's side: the `started` event posts one notification — "Working on `<key>`" with an **Open
+thread** button — and the `finished` event **amends that entry in place**, to "Fixed `<key>`
+(verified)", "Gave up on `<key>` — promoted to #ID", "Dismissed `<key>`: `<reason>`" or "Stopped
+working on `<key>`", in the kinds the board's Plan notice uses. One fault, one line in the bell. The
+button and the chip on the signal both open that thread's history, the same ⓘ view
+`SessionManager::onOpenThread` opens. A signal thread is a row in the Sessions manager whether or not
+"Subagent threads" is ticked — it is Relay's thread, not the user's — listed under its project rather
+than under the board worker's session, marked `⚑ signal`, titled with the key. Options › Agent ›
+Switchboard's "Work signals unasked" writes `signals_config`.
+
+**Deviations from card `#AQ6X` step 7.** Three, each recorded here because the card says otherwise:
+
+- The card says "no live session's run" owns it. The worker cannot know that, for the reason above,
+  so the rule is one fold of grace and the card's own fallback ("unclaimed for longer than one fold")
+  is what is implemented.
+- The card says "not promoted". A promoted signal that resolved and came back is a regression nobody
+  is on, and the card is the context the thread needs, so `regressed` is an exception.
+- The notification for `stopped` reads "Stopped working on `<key>`" rather than the card's bare
+  "Stopped": a line in the bell that names no fault cannot be acted on.
