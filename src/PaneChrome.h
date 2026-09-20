@@ -496,6 +496,7 @@ public:
         if (m_board) return {{"board", QJsonObject{{"workspace", m_board->workspace()},
                                                    {"collapsed", m_board->collapsedSections()},
                                                    {"hidden", m_board->hiddenSections()},
+                                                   {"labels", m_board->labelFilter()},
                                                    {"sort", m_board->sortOrder()}}}};
         if (m_subagent) return m_subagent->node();
         // The Activity pane (card #QT8C) comes back open beside its owner, empty until the

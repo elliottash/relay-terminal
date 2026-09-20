@@ -134,12 +134,10 @@ private slots:
     void searchRanksOpenCardsAndExactIdsFirst();
     void upsertAndRemoveKeepTheBoardInStep();
     void statusTitlesAreHumanReadable();
-    void everyStatusHasAMark();
     void everySectionSaysWhatItIsFor();
     void theRowListIsHeadersThenCards();
     void badgesSayWhatTheCardCarries();
     void aRowDropsItsLeastImportantBadgesFirst();
-    void cardAgesReadShort();
     void theBodyLosesOnlyAHeadingThatRepeatsTheTitle();
     void threadEntriesSayHowLongAgo();
     void placementNamesTheNeighboursOfTheSlot();
@@ -148,6 +146,10 @@ private slots:
     void theViewRendersOneListFromAnEvent();
     void theViewSendsAMoveWhenACardIsDropped();
     void theColumnHeaderSortsTheListWithinASection();
+    void aRowCarriesItsPriorityFlag();
+    void theFlagHeaderSortsByPriority();
+    void aFlagClickWritesBoardPriority();
+    void labelChipsKeepOnlyTheCardsThatCarryThem();
     void theColumnsNameTheOrdersAClickGoesThrough();
     void arrowsFoldASectionAndTheFoldIsSaved();
     void aSectionCheckboxTakesItsSectionOffThePageAndTheCountSaysSo();
@@ -503,23 +505,6 @@ void BoardModelTests::statusTitlesAreHumanReadable()
     QCOMPARE(relay::board::tabTitle(QStringLiteral("features")), QStringLiteral("Features"));
 }
 
-void BoardModelTests::everyStatusHasAMark()
-{
-    using relay::board::statusGlyph;
-    // One character each, so every row's title starts at the same x.
-    for (const char *status : {"inbox", "discussing", "ready", "in-progress", "needs-review",
-                               "needs-qa-llm", "needs-qa-human", "deferred", "done", "dropped",
-                               "draft", "approved", "executing", "active", "retired"}) {
-        const QString mark = statusGlyph(QString::fromLatin1(status));
-        QCOMPARE(mark.size(), 1);
-        QVERIFY2(mark != QStringLiteral("·"), status);   // not the fallback
-    }
-    // An unknown status still gets a mark rather than a hole in the row.
-    QCOMPARE(statusGlyph(QStringLiteral("invented")), QStringLiteral("·"));
-    QCOMPARE(statusGlyph(QStringLiteral("done")), QStringLiteral("✓"));
-    QCOMPARE(statusGlyph(QStringLiteral("dropped")), QStringLiteral("✗"));
-}
-
 void BoardModelTests::everySectionSaysWhatItIsFor()
 {
     using relay::board::sectionMeaning;
@@ -592,14 +577,6 @@ void BoardModelTests::badgesSayWhatTheCardCarries()
     QCOMPARE(all.at(3).kind, relay::board::Badge::Waiting);
     // In a section of one status, and on a plain card, there is nothing to repeat.
     QVERIFY(relay::board::badges(Card::fromJson(row("M3XJ", "ready", "features")), false).isEmpty());
-
-    // A row adds how old the card is, at the quiet end.
-    card.created = QStringLiteral("2026-09-15");
-    const QList<relay::board::Badge> onARow =
-        relay::board::rowBadges(card, true, QDate(2026, 9, 18));
-    QCOMPARE(onARow.size(), all.size() + 1);
-    QCOMPARE(onARow.last().kind, relay::board::Badge::Age);
-    QCOMPARE(onARow.last().text, QStringLiteral("3 d"));
 }
 
 void BoardModelTests::aRowDropsItsLeastImportantBadgesFirst()
@@ -610,7 +587,7 @@ void BoardModelTests::aRowDropsItsLeastImportantBadgesFirst()
         {Badge{Badge::Label, QStringLiteral("voice")}, 40},
         {Badge{Badge::Waiting, QStringLiteral("waiting: owner")}, 80},
         {Badge{Badge::Tasks, QStringLiteral("☑ 1/3")}, 40},
-        {Badge{Badge::Age, QStringLiteral("3 d")}, 30}};
+        {Badge{Badge::Thread, QStringLiteral("✎ 4")}, 30}};
     const auto kept = [&](int available) {
         QStringList out;
         for (const Badge &badge : fitBadges(measured, available, 5))
@@ -618,32 +595,16 @@ void BoardModelTests::aRowDropsItsLeastImportantBadgesFirst()
         return out;
     };
     // Everything fits: 40+80+40+30 plus three 5px gaps.
-    QCOMPARE(kept(205), (QStringList{"voice", "waiting: owner", "☑ 1/3", "3 d"}));
-    // Squeezed, the label goes first, then the age, then the tasks; `waiting:` is the last to go,
-    // because it is why the row is being read.
-    QCOMPARE(kept(160), (QStringList{"waiting: owner", "☑ 1/3", "3 d"}));
+    QCOMPARE(kept(205), (QStringList{"voice", "waiting: owner", "☑ 1/3", "✎ 4"}));
+    // Squeezed, the label goes first, then the thread count, then the tasks; `waiting:` is the
+    // last to go, because it is why the row is being read.
+    QCOMPARE(kept(160), (QStringList{"waiting: owner", "☑ 1/3", "✎ 4"}));
     QCOMPARE(kept(130), (QStringList{"waiting: owner", "☑ 1/3"}));
     QCOMPARE(kept(90), (QStringList{"waiting: owner"}));
     QCOMPARE(kept(10), QStringList());
     QVERIFY(fitBadges({}, 100, 5).isEmpty());
     QVERIFY(relay::board::badgeDropOrder(Badge::Label)
             < relay::board::badgeDropOrder(Badge::Waiting));
-}
-
-void BoardModelTests::cardAgesReadShort()
-{
-    using relay::board::cardAge;
-    const QDate today(2026, 9, 18);
-    QCOMPARE(cardAge(QStringLiteral("2026-09-18"), today), QStringLiteral("today"));
-    QCOMPARE(cardAge(QStringLiteral("2026-09-17"), today), QStringLiteral("1 d"));
-    QCOMPARE(cardAge(QStringLiteral("2026-09-05"), today), QStringLiteral("13 d"));
-    QCOMPARE(cardAge(QStringLiteral("2026-09-01"), today), QStringLiteral("2 w"));
-    QCOMPARE(cardAge(QStringLiteral("2026-05-01"), today), QStringLiteral("4 mo"));
-    QCOMPARE(cardAge(QStringLiteral("2023-09-18"), today), QStringLiteral("3 y"));
-    // A timestamp is accepted; a card with no `created`, or an unreadable one, shows no age.
-    QCOMPARE(cardAge(QStringLiteral("2026-09-17T10:00:00Z"), today), QStringLiteral("1 d"));
-    QVERIFY(cardAge(QString(), today).isEmpty());
-    QVERIFY(cardAge(QStringLiteral("last tuesday"), today).isEmpty());
 }
 
 void BoardModelTests::theBodyLosesOnlyAHeadingThatRepeatsTheTitle()
@@ -858,11 +819,128 @@ void BoardModelTests::theColumnHeaderSortsTheListWithinASection()
     QCOMPARE(sent.last().value(QStringLiteral("card")).toString(), QStringLiteral("AAA1"));
 }
 
+// The row's flag (#VKFV): −1…+3, 0 the default, and a value outside the range clamped on the way
+// in — the worker clamps what it sends, and this side clamps again so a stale row cannot paint a
+// colour that does not exist.
+void BoardModelTests::aRowCarriesItsPriorityFlag()
+{
+    using relay::board::Card;
+    QCOMPARE(Card::fromJson(row("K7Q2", "ready", "features")).priority, 0);
+    QJsonObject flagged = row("K7Q2", "ready", "features");
+    flagged.insert(QStringLiteral("priority"), -1);
+    QCOMPARE(Card::fromJson(flagged).priority, -1);
+    flagged.insert(QStringLiteral("priority"), 3);
+    QCOMPARE(Card::fromJson(flagged).priority, 3);
+    flagged.insert(QStringLiteral("priority"), 9);
+    QCOMPARE(Card::fromJson(flagged).priority, 3);
+    flagged.insert(QStringLiteral("priority"), -9);
+    QCOMPARE(Card::fromJson(flagged).priority, -1);
+}
+
+// The ⚑ cell over the flag column orders the flags high first, then low first, then hands the
+// list back to the board's own order — the same cycle every other column walks.
+void BoardModelTests::theFlagHeaderSortsByPriority()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.onSend = [](const QJsonObject &) {};
+    QJsonObject none = row("AAA1", "ready", "features", "i"), low = row("BBB2", "ready", "features", "j"),
+                high = row("CCC3", "ready", "features", "k"), mid = row("DDD4", "ready", "features", "l");
+    low.insert(QStringLiteral("priority"), -1);
+    high.insert(QStringLiteral("priority"), 3);
+    mid.insert(QStringLiteral("priority"), 1);
+    view.handleEvent(opened({none, low, high, mid}));
+    view.setCollapsedSections(QJsonArray{});
+
+    auto *flag = view.findChild<QToolButton *>(QStringLiteral("boardHeaderPriority"));
+    QVERIFY(flag);
+    QCOMPARE(view.sortOrder(), QStringLiteral("manual"));
+    QCOMPARE(relay::board::cardsInSection(view.rows(), QStringLiteral("ready")),
+             (QStringList{"AAA1", "BBB2", "CCC3", "DDD4"}));
+    // One glyph, no arrow: the accent alone says the priority sort is on.
+    QVERIFY(!flag->property("active").toBool());
+
+    flag->click();
+    QCOMPARE(view.sortOrder(), QStringLiteral("priority"));
+    QCOMPARE(relay::board::cardsInSection(view.rows(), QStringLiteral("ready")),
+             (QStringList{"CCC3", "DDD4", "AAA1", "BBB2"}));   // +3, +1, 0, −1
+    QVERIFY(flag->property("active").toBool());
+    flag->click();
+    QCOMPARE(view.sortOrder(), QStringLiteral("priority-low"));
+    QCOMPARE(relay::board::cardsInSection(view.rows(), QStringLiteral("ready")),
+             (QStringList{"BBB2", "AAA1", "DDD4", "CCC3"}));   // −1, 0, +1, +3
+    flag->click();
+    QCOMPARE(view.sortOrder(), QStringLiteral("manual"));
+}
+
+// A click on the flag writes `board_priority` (#VKFV): no base_hash — the whole patch is one
+// clamped integer — and the row moves at once, before the worker answers.
+void BoardModelTests::aFlagClickWritesBoardPriority()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({row("AAA1", "ready", "features")}));
+    view.setCollapsedSections(QJsonArray{});
+
+    view.setCardPriority(QStringLiteral("AAA1"), +1);
+    QCOMPARE(sent.size(), 1);
+    QCOMPARE(sent.last().value(QStringLiteral("type")).toString(), QStringLiteral("board_priority"));
+    QCOMPARE(sent.last().value(QStringLiteral("card")).toString(), QStringLiteral("AAA1"));
+    QCOMPARE(sent.last().value(QStringLiteral("priority")).toInt(), 1);
+    QCOMPARE(view.model().card(QStringLiteral("AAA1"))->priority, 1);   // optimistic
+
+    // Two more raises clamp at +3, and lowering walks back down to −1 and stops there.
+    view.setCardPriority(QStringLiteral("AAA1"), +1);
+    view.setCardPriority(QStringLiteral("AAA1"), +1);
+    view.setCardPriority(QStringLiteral("AAA1"), +1);
+    QCOMPARE(sent.last().value(QStringLiteral("priority")).toInt(), 3);
+    for (int i = 0; i < 6; ++i)
+        view.setCardPriority(QStringLiteral("AAA1"), -1);
+    QCOMPARE(sent.last().value(QStringLiteral("priority")).toInt(), -1);
+    QCOMPARE(view.model().card(QStringLiteral("AAA1"))->priority, -1);
+}
+
+// The label chips beside the section checkboxes (#VKFV): a card is on the page only when it
+// carries every ticked label, composing with the text filter the way `label:` terms do.
+void BoardModelTests::labelChipsKeepOnlyTheCardsThatCarryThem()
+{
+    Model model;
+    model.setConfig(config());
+    QJsonObject voice = row("K7Q2", "ready", "features");
+    voice.insert(QStringLiteral("labels"), QJsonArray{QStringLiteral("voice"), QStringLiteral("gui")});
+    QJsonObject gui = row("M3XJ", "inbox", "features");
+    gui.insert(QStringLiteral("labels"), QJsonArray{QStringLiteral("gui")});
+    model.reset(rows({voice, gui, row("DN01", "inbox", "features")}));
+    QCOMPARE(model.openCount(), 3);
+
+    const QSet<QString> folded;
+    model.setLabelFilter({QStringLiteral("gui")});
+    QCOMPARE(model.openCount(), 2);
+    QCOMPARE(relay::board::cardsInSection(model.rows(folded), QStringLiteral("inbox")),
+             (QStringList{"M3XJ"}));
+    // Ticking a second label is an AND, like a second `label:` term.
+    model.setLabelFilter({QStringLiteral("gui"), QStringLiteral("voice")});
+    QCOMPARE(model.openCount(), 1);
+    QCOMPARE(relay::board::cardsInSection(model.rows(folded), QStringLiteral("ready")),
+             (QStringList{"K7Q2"}));
+    // And it composes with the words: the filter box narrows inside what the chips kept.
+    model.setFilter(QStringLiteral("inbox"));
+    QCOMPARE(model.openCount(), 0);
+    QVERIFY(model.rows(folded).isEmpty());
+    model.setFilter(QString());
+    // A label nothing carries filters everything out, and unticking everything brings it back.
+    model.setLabelFilter({QStringLiteral("remote")});
+    QCOMPARE(model.openCount(), 0);
+    model.setLabelFilter({});
+    QCOMPARE(model.openCount(), 3);
+}
+
 // What each column's header is and what a click on it goes through: the pure half of the header, so
 // the cycle back to the board's own drag order is pinned down without a widget.
 void BoardModelTests::theColumnsNameTheOrdersAClickGoesThrough()
 {
     using namespace relay::board;
+    QCOMPARE(columnTitle(SortColumn::Priority), QStringLiteral("⚑"));
     QCOMPARE(columnTitle(SortColumn::Card), QStringLiteral("Card"));
     QCOMPARE(columnTitle(SortColumn::Created), QStringLiteral("Created"));
     QCOMPARE(columnTitle(SortColumn::Updated), QStringLiteral("Updated"));
@@ -876,19 +954,32 @@ void BoardModelTests::theColumnsNameTheOrdersAClickGoesThrough()
     QCOMPARE(nextColumnSort(SortColumn::Card, Sort::Manual), Sort::TitleAsc);
     QCOMPARE(nextColumnSort(SortColumn::Card, Sort::TitleAsc), Sort::TitleDesc);
     QCOMPARE(nextColumnSort(SortColumn::Card, Sort::TitleDesc), Sort::Manual);
+    // The flag's own cycle (#VKFV): high first, then low first, then the board's own order.
+    QCOMPARE(nextColumnSort(SortColumn::Priority, Sort::Manual), Sort::PriorityHigh);
+    QCOMPARE(nextColumnSort(SortColumn::Priority, Sort::PriorityHigh), Sort::PriorityLow);
+    QCOMPARE(nextColumnSort(SortColumn::Priority, Sort::PriorityLow), Sort::Manual);
+    QCOMPARE(sortId(Sort::PriorityHigh), QStringLiteral("priority"));
+    QCOMPARE(sortId(Sort::PriorityLow), QStringLiteral("priority-low"));
+    QCOMPARE(sortFromId(QStringLiteral("priority")), Sort::PriorityHigh);
+    QCOMPARE(sortFromId(QStringLiteral("priority-low")), Sort::PriorityLow);
     // A click on a column that is not the one sorting starts that column's own cycle.
     QCOMPARE(nextColumnSort(SortColumn::Card, Sort::RecentlyUpdated), Sort::TitleAsc);
     QCOMPARE(nextColumnSort(SortColumn::Created, Sort::TitleDesc), Sort::NewestFirst);
 
+    // The flag column sits left of Card, so every other column's index moved one to the right.
     QCOMPARE(sortColumnIndex(Sort::Manual), -1);
-    QCOMPARE(sortColumnIndex(Sort::TitleDesc), 0);
-    QCOMPARE(sortColumnIndex(Sort::OldestFirst), 1);
-    QCOMPARE(sortColumnIndex(Sort::OldestUpdated), 2);
+    QCOMPARE(sortColumnIndex(Sort::PriorityHigh), 0);
+    QCOMPARE(sortColumnIndex(Sort::PriorityLow), 0);
+    QCOMPARE(sortColumnIndex(Sort::TitleDesc), 1);
+    QCOMPARE(sortColumnIndex(Sort::OldestFirst), 2);
+    QCOMPARE(sortColumnIndex(Sort::OldestUpdated), 3);
     QVERIFY(sortAscending(Sort::OldestFirst));
     QVERIFY(sortAscending(Sort::OldestUpdated));
     QVERIFY(sortAscending(Sort::TitleAsc));
+    QVERIFY(sortAscending(Sort::PriorityLow));
     QVERIFY(!sortAscending(Sort::NewestFirst));
     QVERIFY(!sortAscending(Sort::RecentlyUpdated));
+    QVERIFY(!sortAscending(Sort::PriorityHigh));
     QVERIFY(!sortAscending(Sort::Manual));
 
     // A date column shows the date part of either spelling the worker sends, and nothing at all for

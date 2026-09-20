@@ -2700,8 +2700,9 @@ private:
             mouse.aliases = QStringLiteral("mouse drag click gestures pointer header grip rename explorer");
             mouse.label = QStringLiteral(
                 "With the mouse: drag a pane's header — or the ⠿ grip on an explorer, preview or Switchboard "
-                "pane — onto another pane's edge to move it there, or onto the tab bar to give it a tab of its "
-                "own; Esc during the drag puts it back. Double click a pane's title to rename it. Click the "
+                "pane — onto another pane's edge to move it there; onto a tab's label to move it into that "
+                "tab; or onto the tab bar's empty space to give it a tab of its own. Esc during the drag "
+                "puts it back. Double click a pane's title to rename it. Click the "
                 "folder line on the right of the header to open that folder in an explorer pane, and again to "
                 "close it. Ctrl+click a path, a URL or a “tool calls” line in the terminal to open it. Right "
                 "click in the terminal for Relay's menu.");
@@ -4627,10 +4628,12 @@ public:
     }
 
     ToolPane *createBoardPane(const QString &workspace, const QJsonArray &collapsed = {},
-                              const QJsonArray &hidden = {}, const QString &sort = QString()) {
+                              const QJsonArray &hidden = {}, const QString &sort = QString(),
+                              const QJsonArray &labels = {}) {
         auto *view = new relay::BoardView(workspace);
         if (!collapsed.isEmpty()) view->setCollapsedSections(collapsed);
         if (!hidden.isEmpty()) view->setHiddenSections(hidden);
+        if (!labels.isEmpty()) view->setLabelFilter(labels);
         // The sort the pane was saved with; empty (or unknown) leaves it Manual.
         if (!sort.isEmpty()) view->setSortOrder(sort);
         auto *tool = new ToolPane(view, workspace);
@@ -5012,7 +5015,8 @@ private:
             if (!relay::projects::boardDirOf(workspace).isEmpty()) {
                 ToolPane *tool = createBoardPane(workspace, board.value(QStringLiteral("collapsed")).toArray(),
                                                  board.value(QStringLiteral("hidden")).toArray(),
-                                                 board.value(QStringLiteral("sort")).toString());
+                                                 board.value(QStringLiteral("sort")).toString(),
+                                                 board.value(QStringLiteral("labels")).toArray());
                 // A restored Switchboard attaches its tab, unless the tab already has a project —
                 // the saved `project` on the tab wins, and a tab holds one. Queued, because
                 // buildNode() runs before the page the pane will live in exists.
@@ -6360,6 +6364,15 @@ private:
         return {leaf, Edge::Bottom};
     }
 
+    // Which tab of a tab-bar drop target the cursor is on: >= 0 is that tab's label — the pane
+    // joins that tab — and -1 is the bar's empty space or the new-tab button, which still give it
+    // a tab of its own (#A0SF).
+    static int tabBarIndexAt(const QPair<QWidget *, Edge> &target, const QPoint &global) {
+        if (target.second != Edge::TabBar) return -1;
+        auto *bar = static_cast<QTabBar *>(target.first);
+        return bar->tabAt(bar->mapFromGlobal(global));
+    }
+
     // ----- dragging a tool pane by its header -----------------------------------------------
     // Terminal panes carry their own handle (Pane::headerDragEvent, which knows exactly which
     // widgets its header is made of). The explorer, a file preview, a plan and the Switchboard do
@@ -6449,6 +6462,14 @@ private:
         case Edge::Right: rect.setLeft(rect.left() + rect.width() / 2); break;
         case Edge::Top: rect.setHeight(rect.height() / 2); break;
         case Edge::Bottom: rect.setTop(rect.top() + rect.height() / 2); break;
+        // Only the hovered label, so "into this tab" and "a tab of its own" read as two
+        // different targets before the release (#A0SF).
+        case Edge::TabBar:
+            if (const int tab = tabBarIndexAt(target, global); tab >= 0) {
+                const QRect label = static_cast<QTabBar *>(target.first)->tabRect(tab);
+                rect = QRect(target.first->mapTo(w->centralWidget(), label.topLeft()), label.size());
+            }
+            break;
         default: break;
         }
         m_dropZone->setGeometry(rect);
@@ -6480,9 +6501,27 @@ private:
         }();
         if (target.second == Edge::TabBar) {
             RelayWindow *w = windowOf(target.first);
-            if (w == this && leavesIn(pageOf(dragged)).size() <= 1) return;   // already its own tab here
+            // A label means "into that tab" (#A0SF); the bar's empty space and the new-tab
+            // button keep today's behaviour and give the pane a tab of its own.
+            QWidget *page = nullptr;
+            if (const int tab = tabBarIndexAt(target, global); tab >= 0) page = w->m_tabs->widget(tab);
+            if (page == pageOf(dragged)) return;   // dropped on the tab it already lives in
+            if (!page && w == this && leavesIn(pageOf(dragged)).size() <= 1) return;   // already its own tab here
             if (!takeLeaf(dragged)) return;
-            w->adoptLeafAsTab(dragged);
+            if (!page) {
+                w->adoptLeafAsTab(dragged);
+            } else {
+                // Dock beside the tab's first leaf, like a Right-edge drop into that page. Made
+                // current first: insertBeside sizes the newcomer from the page it lands in, and a
+                // page the QTabWidget keeps hidden has no size to give it yet.
+                w->m_tabs->setCurrentWidget(page);
+                const auto leaves = w->leavesIn(page);
+                if (leaves.isEmpty()) w->adoptLeafAsTab(dragged);
+                else w->insertBeside(leaves.first(), dragged, Qt::Horizontal, false);
+                w->m_tabs->setCurrentWidget(page);
+                w->setActiveLeaf(dragged); focusLeaf(dragged);
+                if (w != this) { w->raise(); w->activateWindow(); }
+            }
         } else {
             QPointer<QWidget> anchor(target.first);
             if (!takeLeaf(dragged) || !anchor) return;

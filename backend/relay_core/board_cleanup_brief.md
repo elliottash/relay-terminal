@@ -1,8 +1,12 @@
-<!-- Switchboard whole-board cleanup brief v1 (docs/AGENT-SESSIONS-PROTOCOL.md 19.9).
+<!-- Switchboard whole-board cleanup brief v2 (docs/AGENT-SESSIONS-PROTOCOL.md 19.9).
      Versioned here, beside board_policy.md, so evals can pin it and the owner can edit what
      the cleanup does without touching code.  It is sent as the *prompt* of the cleanup turn
      (relay_core.board_protocol.cleanup_prompt), not as part of the system prompt, so an
-     ordinary card chat never carries it.  Keep it concrete: it is the whole instruction. -->
+     ordinary card chat never carries it.  Keep it concrete: it is the whole instruction.
+
+     v2 (card #VKFV): step 5 now annotates labels — bug/feature plus the board's own area
+     labels — and *suggests* tags outside the vocabulary instead of writing them, because the
+     labels became a filter the pane draws. -->
 
 You are tidying the whole Switchboard in one pass, because the user pressed **Clean up the board**.
 
@@ -31,9 +35,15 @@ Doing less than asked and explaining why is a good outcome; a confident wrong me
    card whose work is done and QA'd belongs in `done` with a verdict; a card nobody is working on
    is not `in-progress`. Move it with `board_move_card` and put the evidence in `reason`. If you
    cannot tell, leave the status and note it in your reply.
-5. **Labels and ranks.** Every work card carries exactly one of `bug` or `feature` plus its obvious
-   area labels; fix the ones that are plainly wrong or missing with `board_update_card`. Fix a rank
-   only when it is missing or when a card is plainly in the wrong place in its section.
+5. **Labels and ranks.** Labels are a filter now: the pane draws one chip per label the board
+   carries, so a card the labels cannot find is a card the pane cannot show. Every *work* card
+   carries exactly one of `bug` or `feature`, and the area labels the board already uses
+   (`gui`, `voice`, `remote`, `switchboard`, … — the labels you see on other cards, never
+   invented words). Read the card, decide from what it asks for, and fix a plainly wrong or
+   missing label with `board_update_card`. A word that would be a good label but is not already
+   in the board's vocabulary is **suggested in your report, never written**: one "Suggested
+   tags" line, `#ID: word — why`, and the owner decides. Fix a rank only when it is missing or
+   when a card is plainly in the wrong place in its section.
 6. **Sections last, and rarely.** `board_sections` changes `issues/board.yaml` — the structure
    everyone sees. Merge two sections (drop a column) only when one of them has been empty for a
    while and its work has moved; split one (add a column) only when a section is so large that it
@@ -63,6 +73,7 @@ changelog. Make it a short list, no preamble:
 - **Merged**: `#A + #B → #A` and the one-line reason, per merge.
 - **Split**: `#C → #D, #E`, per split.
 - **Status**: `#F in-progress → needs-qa-llm (evidence docs/qa_evidence/…)`, per move.
-- **Labels / ranks**: one line, counts are enough.
+- **Labels / ranks**: how many cards you annotated (and what you took off), then one
+  **Suggested tags** line per proposed new label — `#ID: word — why` — or "none".
 - **Sections**: what changed in `board.yaml`, or "unchanged".
 - **Left alone**: the cards you were unsure about and why — this part matters most.

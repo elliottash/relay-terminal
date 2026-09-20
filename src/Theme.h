@@ -78,6 +78,17 @@ inline QColor BoardFace{0x17, 0x14, 0x0f};
 inline QColor BoardMetal{0xc8, 0xa4, 0x5c};
 inline QColor BoardMetalDim{0x6b, 0x56, 0x37};
 inline bool BoardMaterial = true;
+// The card row's priority flag (owner, card #VKFV: "priority -1 is yellow. +1 is white, +2 is
+// pale green, +3 is bright green"). Four tokens of the board's own material table, so a theme
+// answers for their legibility itself (tests/theme_test.cpp holds them to 3:1 on the face, the
+// non-text bar): the yellow is the theme's warning, the bright green its success, the pale green
+// that success half stepped toward the text, and the "white" the theme's own text — near-white
+// on every dark board the flag was designed on, and the theme's brightest legible ink on a light
+// one, where a literal white dot would vanish into the face.
+inline QColor BoardPriorityLow{0xe5, 0xc0, 0x7b};
+inline QColor BoardPriorityOne{0xe6, 0xe8, 0xec};
+inline QColor BoardPriorityTwo{0xb7, 0xda, 0xc1};
+inline QColor BoardPriorityThree{0x7e, 0xc8, 0x8c};
 
 // The composer's syntax colours (src/ShellHighlighter.cpp).
 inline QColor SyntaxCommand{0x3e, 0xc5, 0xf0};

@@ -76,6 +76,14 @@ palette = [
 face = "#17140f"
 metal = "#c8a45c"
 metal_dim = "#6b5637"
+# The priority flag on a card row (card #VKFV): −1 yellow, +1 white, +2 pale green, +3 bright
+# green. Out of this theme's own palette — the warning yellow, the text white, the success green,
+# and that green half stepped toward the text — and each held to 3:1 on the face by
+# tests/theme_test.cpp. A theme that names none gets the same derivation made for it.
+priority_low = "#e5c07b"
+priority_one = "#e6e8ec"
+priority_two = "#b7dac1"
+priority_three = "#7ec88c"
 
 [flags]
 # The board wears its materials. `false` gives the hairline form instead (SWITCHBOARD-AESTHETIC

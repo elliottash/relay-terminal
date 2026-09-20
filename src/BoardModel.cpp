@@ -177,6 +177,10 @@ QString sortId(Sort sort)
         return QStringLiteral("title");
     case Sort::TitleDesc:
         return QStringLiteral("title-desc");
+    case Sort::PriorityHigh:
+        return QStringLiteral("priority");
+    case Sort::PriorityLow:
+        return QStringLiteral("priority-low");
     case Sort::Manual:
         break;
     }
@@ -197,6 +201,10 @@ Sort sortFromId(const QString &id)
         return Sort::TitleAsc;
     if (id == QStringLiteral("title-desc"))
         return Sort::TitleDesc;
+    if (id == QStringLiteral("priority"))
+        return Sort::PriorityHigh;
+    if (id == QStringLiteral("priority-low"))
+        return Sort::PriorityLow;
     return Sort::Manual;
 }
 
@@ -215,6 +223,10 @@ QString sortTitle(Sort sort)
         return QStringLiteral("Title A→Z");
     case Sort::TitleDesc:
         return QStringLiteral("Title Z→A");
+    case Sort::PriorityHigh:
+        return QStringLiteral("Priority high first");
+    case Sort::PriorityLow:
+        return QStringLiteral("Priority low first");
     case Sort::Manual:
         break;
     }
@@ -224,6 +236,9 @@ QString sortTitle(Sort sort)
 QString columnTitle(SortColumn column)
 {
     switch (column) {
+    case SortColumn::Priority:
+        // The flag itself, on the flag's own column: the cell is one glyph wide (#VKFV).
+        return QStringLiteral("⚑");
     case SortColumn::Card:
         return QStringLiteral("Card");
     case SortColumn::Created:
@@ -237,6 +252,10 @@ QString columnTitle(SortColumn column)
 Sort nextColumnSort(SortColumn column, Sort current)
 {
     switch (column) {
+    case SortColumn::Priority:
+        if (current == Sort::PriorityHigh)
+            return Sort::PriorityLow;
+        return current == Sort::PriorityLow ? Sort::Manual : Sort::PriorityHigh;
     case SortColumn::Card:
         if (current == Sort::TitleAsc)
             return Sort::TitleDesc;
@@ -256,15 +275,18 @@ Sort nextColumnSort(SortColumn column, Sort current)
 int sortColumnIndex(Sort sort)
 {
     switch (sort) {
+    case Sort::PriorityHigh:
+    case Sort::PriorityLow:
+        return 0;
     case Sort::TitleAsc:
     case Sort::TitleDesc:
-        return 0;
+        return 1;
     case Sort::NewestFirst:
     case Sort::OldestFirst:
-        return 1;
+        return 2;
     case Sort::RecentlyUpdated:
     case Sort::OldestUpdated:
-        return 2;
+        return 3;
     case Sort::Manual:
         break;
     }
@@ -273,7 +295,8 @@ int sortColumnIndex(Sort sort)
 
 bool sortAscending(Sort sort)
 {
-    return sort == Sort::OldestFirst || sort == Sort::OldestUpdated || sort == Sort::TitleAsc;
+    return sort == Sort::OldestFirst || sort == Sort::OldestUpdated || sort == Sort::TitleAsc
+           || sort == Sort::PriorityLow;
 }
 
 QString dateCell(const QString &stamp)
@@ -626,34 +649,6 @@ QString verifyTask(const QString &id, const QString &title, const QString &verif
     return lines.join(QLatin1Char('\n'));
 }
 
-QString statusGlyph(const QString &status)
-{
-    static const QMap<QString, QString> marks{
-        // Open shapes are states nothing has been committed to yet…
-        {QStringLiteral("inbox"), QStringLiteral("○")},
-        {QStringLiteral("discussing"), QStringLiteral("◇")},
-        {QStringLiteral("draft"), QStringLiteral("○")},
-        // …a solid one is work that has been agreed or is running…
-        {QStringLiteral("ready"), QStringLiteral("◆")},
-        {QStringLiteral("approved"), QStringLiteral("◆")},
-        {QStringLiteral("in-progress"), QStringLiteral("▶")},
-        {QStringLiteral("executing"), QStringLiteral("▶")},
-        {QStringLiteral("active"), QStringLiteral("●")},
-        // …a half circle is waiting on somebody, a ringed one is in a QA lane…
-        {QStringLiteral("needs-review"), QStringLiteral("◐")},
-        {QStringLiteral("needs-labels"), QStringLiteral("◐")},
-        {QStringLiteral("needs-ab"), QStringLiteral("◐")},
-        {QStringLiteral("needs-qa"), QStringLiteral("◉")},
-        {QStringLiteral("needs-qa-llm"), QStringLiteral("◉")},
-        {QStringLiteral("needs-qa-human"), QStringLiteral("◉")},
-        // …and a dotted circle, a check or a cross is off the live board.
-        {QStringLiteral("deferred"), QStringLiteral("◌")},
-        {QStringLiteral("retired"), QStringLiteral("◌")},
-        {QStringLiteral("done"), QStringLiteral("✓")},
-        {QStringLiteral("dropped"), QStringLiteral("✗")}};
-    return marks.value(status, QStringLiteral("·"));
-}
-
 QList<Badge> badges(const Card &card, bool showStatus)
 {
     QList<Badge> out;
@@ -690,15 +685,6 @@ QList<Badge> badges(const Card &card, bool showStatus)
     return out;
 }
 
-QList<Badge> rowBadges(const Card &card, bool showStatus, const QDate &today)
-{
-    QList<Badge> out = badges(card, showStatus);
-    const QString age = cardAge(card.created, today);
-    if (!age.isEmpty())
-        out << Badge{Badge::Age, age};
-    return out;
-}
-
 int badgeDropOrder(Badge::Kind kind)
 {
     switch (kind) {
@@ -706,8 +692,6 @@ int badgeDropOrder(Badge::Kind kind)
         return 1;
     case Badge::Thread:
         return 2;
-    case Badge::Age:
-        return 3;
     case Badge::Tasks:
     case Badge::TasksDone:
         return 4;
@@ -794,28 +778,6 @@ QString entryAge(const QString &entryId, const QDateTime &now)
     const QLocale c = QLocale::c();
     return day.year() == today.year() ? c.toString(day, QStringLiteral("MMM d"))
                                       : c.toString(day, QStringLiteral("MMM d yyyy"));
-}
-
-QString cardAge(const QString &created, const QDate &today)
-{
-    if (created.isEmpty() || !today.isValid())
-        return QString();
-    // `created` is a date in the front matter, but a timestamp is accepted: take the date part.
-    const QDate day = QDate::fromString(created.left(10), Qt::ISODate);
-    if (!day.isValid())
-        return QString();
-    const qint64 days = day.daysTo(today);
-    if (days < 0)
-        return QStringLiteral("today");
-    if (days == 0)
-        return QStringLiteral("today");
-    if (days < 14)
-        return QStringLiteral("%1 d").arg(days);
-    if (days < 70)
-        return QStringLiteral("%1 w").arg(days / 7);
-    if (days < 730)
-        return QStringLiteral("%1 mo").arg(days / 30);
-    return QStringLiteral("%1 y").arg(days / 365);
 }
 
 QPair<QString, QString> placement(const QStringList &order, const QString &moving, int slot)
@@ -911,6 +873,7 @@ Card Card::fromJson(const QJsonObject &object)
     card.updated = object.value(QStringLiteral("updated")).toString();
     card.topic = object.value(QStringLiteral("topic")).toString();
     card.labels = stringList(object.value(QStringLiteral("labels")));
+    card.priority = qBound(-1, object.value(QStringLiteral("priority")).toInt(), 3);
     card.threadEntries = object.value(QStringLiteral("thread_entries")).toInt();
     card.tasksDone = object.value(QStringLiteral("tasks_done")).toInt();
     card.tasksTotal = object.value(QStringLiteral("tasks_total")).toInt();
@@ -1181,6 +1144,11 @@ QString sortTime(const Card &card, Sort sort)
 // between rebuilds.
 int sortCompare(const Card &a, const Card &b, Sort sort)
 {
+    if (sort == Sort::PriorityHigh || sort == Sort::PriorityLow) {
+        if (a.priority == b.priority)
+            return 0;
+        return (a.priority > b.priority) == (sort == Sort::PriorityHigh) ? -1 : 1;
+    }
     if (sort == Sort::TitleAsc || sort == Sort::TitleDesc) {
         const int byTitle = QString::compare(a.title, b.title, Qt::CaseInsensitive);
         if (byTitle == 0)
@@ -1222,7 +1190,7 @@ QList<Card> Model::cards(const QString &columnId) const
         const QString section = sectionForCard(card, index);
         if (section != columnId || section.isEmpty())
             continue;
-        if (!matches(card, m_filter))
+        if (!shown(card))
             continue;
         out << card;
     }
@@ -1233,7 +1201,7 @@ int Model::openCount() const
 {
     int total = 0;
     for (const Card &card : m_cards)
-        if (!card.closed() && matches(card, m_filter))
+        if (!card.closed() && shown(card))
             ++total;
     return total;
 }
@@ -1247,7 +1215,7 @@ int Model::hiddenCount(const QSet<QString> &hidden) const
     const QMap<QString, QString> index = sectionIndex(sections());
     int total = 0;
     for (const Card &card : m_cards) {
-        if (card.closed() || !matches(card, m_filter))
+        if (card.closed() || !shown(card))
             continue;
         const QString section = sectionForCard(card, index);
         if (!section.isEmpty() && hidden.contains(section))
@@ -1258,12 +1226,12 @@ int Model::hiddenCount(const QSet<QString> &hidden) const
 
 QList<Row> Model::rows(const QSet<QString> &collapsed, const QSet<QString> &hidden) const
 {
-    const bool filtered = !m_filter.trimmed().isEmpty();
+    const bool filtered = !m_filter.trimmed().isEmpty() || !m_labelFilter.isEmpty();
     const QList<Column> list = sections();
     const QMap<QString, QString> index = sectionIndex(list);
     QMap<QString, QList<Card>> grouped;
     for (const Card &card : m_cards) {
-        if (!matches(card, m_filter))
+        if (!shown(card))
             continue;
         const QString section = sectionForCard(card, index);
         if (section.isEmpty())
@@ -1327,6 +1295,19 @@ QStringList Model::allIds() const
 void Model::setFilter(const QString &text)
 {
     m_filter = text.trimmed();
+}
+
+// The text filter and the label chips ask their questions together: this is the one gate every
+// counting or listing query passes through, so a card the chips rule out is as absent as one the
+// words did (#VKFV).
+bool Model::shown(const Card &card) const
+{
+    if (!m_labelFilter.isEmpty()) {
+        for (const QString &label : m_labelFilter)
+            if (!containsCaseless(card.labels, label))
+                return false;
+    }
+    return matches(card, m_filter);
 }
 
 bool Model::matches(const Card &card, const QString &filter)

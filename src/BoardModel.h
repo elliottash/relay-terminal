@@ -40,6 +40,9 @@ struct Card {
     QString type = QStringLiteral("work");
     QStringList labels;
     int threadEntries = 0, tasksDone = 0, tasksTotal = 0;
+    // The row's flag (#VKFV): −1…+3, 0 unflagged. The worker clamps what it sends; this side
+    // clamps again so a hostile or stale row can never paint a colour that does not exist.
+    int priority = 0;
     bool isPrivate = false;
     bool unread = false;   // local, from QSettings; never in git
 
@@ -74,13 +77,13 @@ QString statusTitle(const QString &status);
 // How the cards inside each section are ordered (owner, 2026-09-19: "add sorting options,
 // especially by time"; then 2026-09-19: "change switchboard sorting from a sort button to adding
 // header columns that you click on ... and sorting is within section"). The sort is the list's
-// column header (below): a click on Card, Created or Updated orders the cards *inside every
+// column header (below): a click on Flag, Card, Created or Updated orders the cards *inside every
 // section* by that column. `Manual` is the board's own rank — the order drags and Alt+Shift+↑↓
 // write — and the closed sections stay newest first under it, as they always were. Any other
 // order takes the manual reorder off (a rank nobody can see is a rank nobody can write), so what
 // is on screen and what a drag would say never disagree.
 enum class Sort { Manual, NewestFirst, OldestFirst, RecentlyUpdated, OldestUpdated, TitleAsc,
-                  TitleDesc };
+                  TitleDesc, PriorityHigh, PriorityLow };
 // The id the pane's layout node keeps ("manual", "newest", "oldest", "updated", "updated-oldest",
 // "title", "title-desc") and back; an unknown id reads as Manual, so a saved pane survives a sort
 // being renamed away.
@@ -92,10 +95,10 @@ QString sortTitle(Sort sort);
 
 // ---- the list's columns (owner, 2026-09-19: "add a 'created' and 'updated' column") ----------
 //
-// The header row over the list, left to right: the card itself, then when it was created and when
-// it last changed. Each is a sort, and a click cycles that column's own orders and then back to
-// Manual, so the board's drag order is always one click away.
-enum class SortColumn { Card, Created, Updated };
+// The header row over the list, left to right: the priority flag, the card itself, then when it
+// was created and when it last changed. Each is a sort, and a click cycles that column's own
+// orders and then back to Manual, so the board's drag order is always one click away.
+enum class SortColumn { Priority, Card, Created, Updated };
 // "Card", "Created", "Updated" — the header's word for a column.
 QString columnTitle(SortColumn column);
 // The order a click on this column's header puts the list in, given the sort that is on.
@@ -128,14 +131,12 @@ QString tabTitle(const QString &id);
 // so no existing card file has to be rewritten.
 QString issueHeading();
 
-// The mark at the head of a card row (design 4.6): one character that says the status at a
-// glance, so a row is readable without reading its section header. Open shapes are early
-// states, solid ones are committed, a check or a cross is closed.
-QString statusGlyph(const QString &status);
+// The mark at the head of a card row was retired with the flag (owner, 2026-09-19, card #VKFV:
+// the glyphs "just reflect sections", so the column is the flag now). Nothing draws it.
 
 // One badge on a card row (design 4.2): what it says and how the pane colours it.
 struct Badge {
-    enum Kind { Label, Agent, Assignee, Waiting, Status, Tasks, TasksDone, Thread, Private, Age,
+    enum Kind { Label, Agent, Assignee, Waiting, Status, Tasks, TasksDone, Thread, Private,
                 Verified };
     Kind kind;
     QString text;
@@ -143,10 +144,6 @@ struct Badge {
 // The badges a card carries, in reading order. `showStatus` is for sections that collect several
 // statuses (Waiting, Needs QA, Done), where the exact one is otherwise invisible.
 QList<Badge> badges(const Card &card, bool showStatus);
-
-// The badges at the right of a card *row*: the card's badges plus how old it is, which a row has
-// room for where a card box did not. `today` dates the age.
-QList<Badge> rowBadges(const Card &card, bool showStatus, const QDate &today);
 
 // Which badge a narrow row gives up first: the lowest number goes first. Labels and the thread
 // count are pleasant to have; `waiting:` and the exact status are why the row is being read.
@@ -236,10 +233,6 @@ QString bodyWithoutTitle(const QString &body, const QString &title);
 // How long ago a thread entry was written, from its sortable id (`20260918T021603Z-tg`):
 // "just now", "12 min ago", "3 h ago", "yesterday", "Sep 16", or empty when the id has no time.
 QString entryAge(const QString &entryId, const QDateTime &now);
-
-// How old a card is, from its `created` date (`2026-09-17`, or an ISO timestamp): "today", "3 d",
-// "5 w", "4 mo", "2 y". Short, because it sits at the right end of a row; empty when unparsable.
-QString cardAge(const QString &created, const QDate &today);
 
 // Where a card lands in a section: `order` is the section's ids top to bottom (it may contain
 // `moving`), `slot` the insertion row counted in `order` *without* `moving`. Returns the id the
@@ -339,12 +332,18 @@ public:
     // `collapsed`. A section with no matches is left out while a filter is active, and nothing
     // is folded then — a search that hid its own matches would be a search that does nothing.
     // A section in `hidden` (its checkbox at the top of the list page is unticked) is left out
-    // header and all, whether or not a filter is active: the two compose.
+    // header and all, whether or not a filter is active: the two compose. So do the label chips:
+    // a card the ticked labels rule out is off the page exactly as though the text filter had.
     QList<Row> rows(const QSet<QString> &collapsed, const QSet<QString> &hidden = {}) const;
 
     // ---- filtering
     void setFilter(const QString &text);
     QString filter() const { return m_filter; }
+    // The label chips beside the section checkboxes (#VKFV): a card is on the page only when it
+    // carries every ticked label, composing with the text filter and the section checkboxes the
+    // way `label:` terms do. Labels compare case-insensitively, as the filter terms do.
+    void setLabelFilter(const QSet<QString> &labels) { m_labelFilter = labels; }
+    QSet<QString> labelFilter() const { return m_labelFilter; }
     // `label:voice status:ready folder:changes @agent waiting:me some words`; every term matches.
     static bool matches(const Card &card, const QString &filter);
     // Fuzzy ranking for the composer's `#` picker and the pane's search, best first.
@@ -355,6 +354,8 @@ private:
     QList<Card> sorted(QList<Card> cards, bool newestFirst) const;
     // status -> the section that collects it, built once per query.
     QMap<QString, QString> sectionIndex(const QList<Column> &sections) const;
+    // The text filter and the label chips together: what every gating query asks of a card.
+    bool shown(const Card &card) const;
 
     QList<Tab> m_tabs;
     QStringList m_columns;                       // configured work columns, in order
@@ -363,6 +364,7 @@ private:
     QStringList m_statusChoices;                 // every status a section may collect
     QMap<QString, Card> m_cards;                 // by id
     QString m_filter;
+    QSet<QString> m_labelFilter;
     Sort m_sort = Sort::Manual;
 };
 

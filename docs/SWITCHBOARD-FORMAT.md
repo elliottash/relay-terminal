@@ -115,13 +115,17 @@ Parsing preserves the front matter bytes: a card that is read and written back w
 change is byte-identical. The first field change re-emits the whole block in canonical order
 (`id, type, status, name, description, kind, topic, scope, private, labels, component, milestone,
 workstream, assignee, implemented_by, waiting_on, parent, blocked_by, aliases, paths, pinned,
-reviewed, author, supersedes, approved_by, goal, label_count, label_output, codebook, rank,
-created, acceptance, source, links`, then any other key, sorted).
+reviewed, author, supersedes, approved_by, goal, label_count, label_output, codebook, priority,
+rank, created, acceptance, source, links`, then any other key, sorted).
 
 ### 2.2 Fields
 
-Every type: `id`, `type`, `status`, `rank`, `created`, `labels`, `assignee`, `private`, `links`,
-`aliases`, `source`, `blocked_by`, `parent`, `waiting_on`.
+Every type: `id`, `type`, `status`, `priority`, `rank`, `created`, `labels`, `assignee`,
+`private`, `links`, `aliases`, `source`, `blocked_by`, `parent`, `waiting_on`.
+
+`priority` (2026-09-20, #VKFV) is the row's flag in the Switchboard: an integer from −1 to +3.
+It is written only when nonzero — a card with no flag carries no `priority` key — and a value
+outside the range is clamped on every write.
 
 | Type | Extra fields | `status` | Folder |
 |---|---|---|---|

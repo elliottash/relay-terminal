@@ -415,6 +415,30 @@ private Q_SLOTS:
         }
     }
 
+    // The Switchboard's priority flag (card #VKFV): a filled disc a person has to find on the
+    // board's face, so the bar is WCAG 1.4.11's 3:1 for a shape, not text's 4.5:1. The "white"
+    // of +1 is the theme's own text token (a literal white would vanish on a light face), so
+    // what this really pins down is that the derivation and every shipped theme agree.
+    void priorityFlagsReadOnTheBoardFace() {
+        const auto files = discoverThemeFiles({QStringLiteral("data/theme/themes")});
+        QVERIFY(files.size() >= 5);
+        for (auto it = files.constBegin(); it != files.constEnd(); ++it) {
+            const ThemeSpec spec = shipped(it.key());
+            const QColor face = spec.boardColor(QStringLiteral("face"));
+            for (const char *token : {"priority_low", "priority_one", "priority_two",
+                                      "priority_three"}) {
+                const QColor ink = spec.boardColor(QString::fromLatin1(token));
+                QVERIFY2(ink.isValid(),
+                         qPrintable(it.key() + QStringLiteral(": %1 is not set").arg(token)));
+                QVERIFY2(contrast(ink, face) >= 3.0,
+                         qPrintable(QStringLiteral("%1: %2 %3 on the face %4 is %5:1, needs 3:1")
+                                        .arg(it.key(), QString::fromLatin1(token), ink.name(),
+                                             face.name())
+                                        .arg(contrast(ink, face), 0, 'f', 2)));
+            }
+        }
+    }
+
     // The trap the owner's brief named: copper sits between amber (warning) and red (error).
     void copperStaysClearOfAmberAndRed() {
         const ThemeSpec spec = shipped(QStringLiteral("dark-copper"));
@@ -779,7 +803,7 @@ private Q_SLOTS:
             "[ui]\nbackground = \"#fdfdfb\"\nsurface = \"#f4f4f0\"\nsurface_raised = \"#e7e7e1\"\n"
             "border = \"#cfcfc8\"\nborder_strong = \"#8a8a82\"\ntext = \"#141414\"\n"
             "text_muted = \"#4f4f4a\"\naccent = \"#00558a\"\naccent_text = \"#ffffff\"\n"
-            "warning = \"#7a5200\"\nerror = \"#9a1b1b\"\n"
+            "warning = \"#7a5200\"\nerror = \"#9a1b1b\"\nsuccess = \"#1a6b3c\"\n"
             "[board]\nglow = \"#123456\"\n"),
             QStringLiteral("paper"), builtinDark(), &error);
         QVERIFY2(error.isEmpty(), qPrintable(error));

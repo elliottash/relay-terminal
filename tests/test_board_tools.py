@@ -488,6 +488,71 @@ class UpdateTests(BoardToolsTest):
 
 # --------------------------------------------------------------------------- move
 
+class PriorityTests(BoardToolsTest):
+    """The priority flag (card #VKFV): the pane's click path, and the agent's field."""
+
+    def card_front(self, card_id):
+        card = [c for c in self.board.cards() if c.id == card_id][0]
+        return card.front
+
+    def test_the_row_carries_the_flag(self):
+        card_id = self.create()
+        self.assertEqual(self.card_front(card_id).get("priority"), None)
+        self.set_priority_ok(card_id, 2)
+        rows = self.tools.run("board_list", {"status": "inbox"})["cards"]
+        self.assertEqual([r for r in rows if r["id"] == card_id][0]["priority"], 2)
+
+    def test_the_click_path_clamps_and_zero_clears_the_flag(self):
+        card_id = self.create()
+        result = self.tools.set_priority(card_id, 9)
+        self.assertEqual(result["priority"], 3)
+        self.assertEqual(self.card_front(card_id).get("priority"), 3)
+        result = self.tools.set_priority(card_id, -9)
+        self.assertEqual(result["priority"], -1)
+        self.assertEqual(self.card_front(card_id).get("priority"), -1)
+        result = self.tools.set_priority(card_id, 0)
+        self.assertEqual(result["priority"], 0)
+        self.assertNotIn("priority", self.card_front(card_id))
+        self.assertIn("cleared this card's priority flag", self.thread_text(card_id))
+
+    def test_a_bad_flag_is_refused_and_writes_nothing(self):
+        card_id = self.create()
+        with self.assertRaises(B.BoardError):
+            self.tools.set_priority(card_id, "high")
+
+    def test_a_flag_click_is_undoable(self):
+        card_id = self.create()
+        result = self.tools.set_priority(card_id, 3)
+        undone = self.tools.undo(result["write_id"])
+        self.assertEqual(undone["action"], "priority")
+        self.assertNotIn("priority", self.card_front(card_id))
+
+    def test_board_update_card_sets_the_flag_like_any_field(self):
+        card_id = self.create()
+        self.set_priority_ok(card_id, -1)
+        digest = self.tools.run("board_read", {"id": card_id})["hash"]
+        result = self.tools.run("board_update_card",
+                                {"id": card_id, "base_hash": digest,
+                                 "fields": {"priority": 2}})
+        self.assertNotIn("error", result, result)
+        self.assertEqual(self.card_front(card_id).get("priority"), 2)
+        digest = self.tools.run("board_read", {"id": card_id})["hash"]
+        result = self.tools.run("board_update_card",
+                                {"id": card_id, "base_hash": digest, "fields": {"priority": 0}})
+        self.assertNotIn("error", result, result)
+        self.assertNotIn("priority", self.card_front(card_id))
+        digest = self.tools.run("board_read", {"id": card_id})["hash"]
+        result = self.tools.run("board_update_card",
+                                {"id": card_id, "base_hash": digest, "fields": {"priority": "soon"}})
+        self.assertEqual(result["code"], "board_refused")
+        self.assertEqual(result["field"], "priority")
+
+    def set_priority_ok(self, card_id, priority):
+        result = self.tools.set_priority(card_id, priority)
+        self.assertNotIn("error", result, result)
+        return result
+
+
 class MoveTests(BoardToolsTest):
     def setUp(self):
         super().setUp()

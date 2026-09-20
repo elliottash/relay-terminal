@@ -331,6 +331,37 @@ class WriteTests(ProtocolTest):
 
 # ------------------------------------------------------- the Switchboard agent
 
+class PriorityWriteTests(ProtocolTest):
+    """`board_priority` (card #VKFV): the row's flag click, no base_hash, like a drag."""
+
+    def test_a_flag_click_writes_clamps_and_reports_the_change(self):
+        card_id = self.make_card()
+        events = self.send(type="board_priority", id="r1", card=card_id, priority=9)
+        written = self.of("board_written")
+        self.assertEqual(len(written), 1)
+        self.assertEqual(written[0]["kind"], "board_priority")
+        self.assertEqual(written[0]["priority"], 3)
+        self.assertTrue(self.of("board_changed"), events)
+        card = [c for c in self.board.cards() if c.id == card_id][0]
+        self.assertEqual(card.front.get("priority"), 3)
+
+    def test_a_flag_click_at_zero_clears_the_flag(self):
+        card_id = self.make_card()
+        self.send(type="board_priority", id="r1", card=card_id, priority=2)
+        self.send(type="board_priority", id="r2", card=card_id, priority=0)
+        card = [c for c in self.board.cards() if c.id == card_id][0]
+        self.assertNotIn("priority", card.front)
+
+    def test_a_bad_flag_comes_back_as_an_error_event(self):
+        card_id = self.make_card()
+        events = self.send(type="board_priority", id="r1", card=card_id, priority="high")
+        errors = self.of("error")
+        self.assertEqual(len(errors), 1)
+        self.assertIn("integer", errors[0]["text"])
+        card = [c for c in self.board.cards() if c.id == card_id][0]
+        self.assertNotIn("priority", card.front)
+
+
 class AskTests(ProtocolTest):
     def test_the_question_is_recorded_before_the_agent_sees_it(self):
         card_id = self.make_card()

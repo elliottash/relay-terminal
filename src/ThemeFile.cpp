@@ -202,6 +202,15 @@ QColor boardMetalDimFrom(const QColor &metal, const QColor &face) {
     return face.isValid() && metal.isValid() ? mix(metal, face, 0.5) : metal;
 }
 
+// The priority flag's colours (card #VKFV), for a theme that named none: the yellow is the
+// theme's own warning and the bright green its own success; the "white" is the theme's own text —
+// near-white on a dark board, the brightest ink a light board has, so the dot reads either way;
+// and the pale green is the success half stepped toward that text. tests/theme_test.cpp holds
+// all four to 3:1 on the face, the bar for a shape a person has to find.
+QColor boardPriorityTwoFrom(const QColor &success, const QColor &text) {
+    return mix(success, text, 0.55);
+}
+
 QColor redOrangeFrom(const QColor &red) {
     const QColor hsl = red.toHsl();
     const int saturation = qMax(hsl.hslSaturation(), 150);
@@ -225,7 +234,11 @@ QStringList syntaxTokenNames() {
 }
 
 QStringList boardTokenNames() {
-    return {QStringLiteral("face"), QStringLiteral("metal"), QStringLiteral("metal_dim")};
+    return {QStringLiteral("face"), QStringLiteral("metal"), QStringLiteral("metal_dim"),
+            // The card row's priority flag (card #VKFV): the yellow of −1, then the white, pale
+            // green and bright green of +1…+3.
+            QStringLiteral("priority_low"), QStringLiteral("priority_one"),
+            QStringLiteral("priority_two"), QStringLiteral("priority_three")};
 }
 
 QColor ThemeSpec::uiColor(const QString &token, const QColor &fallback) const {
@@ -348,6 +361,12 @@ const ThemeSpec &builtinDark() {
             {QStringLiteral("face"), QColor(0x17, 0x14, 0x0f)},
             {QStringLiteral("metal"), QColor(0xc8, 0xa4, 0x5c)},
             {QStringLiteral("metal_dim"), QColor(0x6b, 0x56, 0x37)},
+            // The flag's four (#VKFV), as relay-dark.toml's [board] spells them: this theme's own
+            // warning, text, success, and that success half stepped toward the text.
+            {QStringLiteral("priority_low"), QColor(0xe5, 0xc0, 0x7b)},
+            {QStringLiteral("priority_one"), QColor(0xe6, 0xe8, 0xec)},
+            {QStringLiteral("priority_two"), QColor(0xb7, 0xda, 0xc1)},
+            {QStringLiteral("priority_three"), QColor(0x7e, 0xc8, 0x8c)},
         };
         s.terminalBackground = QColor(15, 17, 21);
         s.terminalForeground = QColor(216, 220, 227);
@@ -516,6 +535,15 @@ ThemeSpec parseTheme(const QString &text, const QString &id, const ThemeSpec &fa
     deriveBoard(QStringLiteral("metal"), boardMetalFrom(spec.uiColor(QStringLiteral("tool")), boardFace));
     deriveBoard(QStringLiteral("metal_dim"),
                 boardMetalDimFrom(spec.boardColor(QStringLiteral("metal")), boardFace));
+    // The flag (#VKFV): the theme's own warning, text, success and the pale step between the
+    // last two, so a theme that never heard of the flag still paints four readable colours.
+    deriveBoard(QStringLiteral("priority_low"),
+                spec.uiColor(QStringLiteral("warning")));
+    deriveBoard(QStringLiteral("priority_one"), spec.uiColor(QStringLiteral("text")));
+    deriveBoard(QStringLiteral("priority_two"),
+                boardPriorityTwoFrom(spec.uiColor(QStringLiteral("success")),
+                                     spec.uiColor(QStringLiteral("text"))));
+    deriveBoard(QStringLiteral("priority_three"), spec.uiColor(QStringLiteral("success")));
 
     // Every composer colour a theme leaves out is one of its *own* ui colours — the mapping
     // src/Theme.cpp's adoptTokens() spells out. Done here, after `link` is settled, because

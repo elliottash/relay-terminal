@@ -205,7 +205,7 @@ Evidence: `docs/qa_evidence/2026-09-17-switchboard-ux/`.
 Supersedes 4.2's columns, 4.4's column keys and the tab row in 3. Evidence:
 `docs/qa_evidence/2026-09-18-switchboard-rows/`. Code: `src/BoardPane.cpp`, the layout-independent
 half in `src/BoardModel.cpp` (`Model::sections`, `Model::rows`, `dropTarget`, `stepRow`,
-`fitBadges`, `statusGlyph`, `cardAge`), styles in `src/Theme.cpp`.
+`fitBadges`, `badges`), styles in `src/Theme.cpp`.
 
 **Why.** With ~96 cards the Trello columns ran off the right edge and wasted the height: seven
 narrow strips, each scrolling on its own, and a card had to be hunted for. A single-owner tracker
@@ -241,24 +241,34 @@ the section list has a drag handle and ▲ ▼ buttons, moving one is one rewrit
 new order, and Verified and Done stay the last two — nothing moves past them and they do not move
 themselves (`SectionPlan::move` / `moveBefore`).
 
-**A row.** Status glyph, title (elided), `#ID`, then labels / `✦ agent` or assignee /
-`waiting: …` / `☑ done/total` / `✎ thread` / age, right-aligned. The table's two right-hand
+**A row.** The priority flag, then the `#ID`, then the title (elided), then labels / `✦ agent`
+or assignee / `waiting: …` / `☑ done/total` / `✎ thread`, right-aligned. The status glyph column
+is gone (owner, 2026-09-20, #VKFV: "those icons arent useful because they just reflect sections");
+its place is the **flag** — an empty ring at priority 0 (the default), a yellow disc at −1, white
+at +1, pale green at +2, bright green at +3, as `[board]` theme tokens — and a **left click on it
+raises the card's priority, a right click lowers it** (clamped at −1…+3; `board_priority`,
+protocol 19.3; Ctrl+Z undoes a click). While a turn runs on the card the flag is replaced by the
+agent's ✦, the one mark a running turn leaves on a row. The `#ID` moved with it (owner, #VKFV:
+"the # code as a second column before the title"): a fixed mono column the width of `#WWWW`, so
+every id lines up under the header whatever its title says. The table's two right-hand
 columns are **Created** and **Updated** (owner, 2026-09-19: "add a 'created' and 'updated'
-column"), each a fixed mono cell holding the date part of the card's `created`/`updated`
-(`2026-09-19`), with the badges to their left and the header's labels over them; a cell a card has
-nothing to say in stays blank, and both columns go when the pane is too narrow for them (the same
-question the header asks, so a label never outlives its cells). The title is owed 45% of the row
-(80–280 px) before a badge may have anything, no single badge may take more than a quarter of the
-width, and the badges that do not fit are dropped in order — labels, thread count, age, tasks,
-assignee, agent, private, status, `waiting:` — so a narrow pane loses decoration before it loses
-meaning (`board::fitBadges`, tested). At 390 px the title still elides rather than the row
-wrapping. The glyph set: `○` inbox/draft, `◇` discussing, `◆` ready/approved, `▶` in progress,
-`◐` a Waiting lane, `◉` a QA lane, `◌` deferred/retired, `✓` done, `✗` dropped, coloured by
-family (accent for running, warning for waiting, the agent violet for QA).
+column"; the age badge that sat left of Created went with the glyph, #VKFV — three date-like
+columns read as two too many), each a fixed mono cell holding the date part of the card's
+`created`/`updated` (`2026-09-19`), with the badges to their left and the header's labels over
+them; a cell a card has nothing to say in stays blank, and both columns go when the pane is too
+narrow for them (the same question the header asks, so a label never outlives its cells). The
+title is owed 45% of the row (80–280 px) before a badge may have anything, no single badge may
+take more than a quarter of the width, and the badges that do not fit are dropped in order —
+labels, thread count, tasks, assignee, agent, private, status, `waiting:` — so a narrow pane loses
+decoration before it loses meaning (`board::fitBadges`, tested). At 390 px the title still elides
+rather than the row wrapping.
 
 **Sorting.** The list's own column header (owner, 2026-09-19: "change switchboard sorting from a
 sort button to adding header columns that you click on ... and sorting is within section"): a row
-of cells over the list — **Card**, **Created**, **Updated** — each one a click. A click orders the
+of cells over the list — **⚑**, **Card**, **Created**, **Updated** — each one a click. The ⚑
+(#VKFV) is the priority flag's own cell, one glyph wide over the flag column: a click orders by
+**priority high first** (ties keep the section's own order), a second by **priority low first**,
+and the accent colour says it is on, because no arrow fits beside the glyph. A click orders the
 cards *inside every section* by that column, a second click turns that column round, and a third
 gives the board its own order back, so the drag order is always one click away and no control has
 to say which order is on: the cell that is on wears the arrow (`▲` for oldest first, A→Z and least
@@ -270,7 +280,7 @@ is later; an older worker sends none and those sorts fall back to `created`), an
 **Title Z→A**. Any order but Manual takes the manual reorder off — a drop inside the card's own
 section and Alt+Shift+↑↓ answer with a notice pointing back at the header, while drops *between*
 sections still move, because they write a status and not a place. The choice is saved with the
-window's layout (`{"board": {"workspace", "collapsed", "hidden", "sort"}}`) and each pane keeps its
+window's layout (`{"board": {"workspace", "collapsed", "hidden", "labels", "sort"}}`) and each pane keeps its
 own. The two date cells are the row's right-hand columns (below), and they go, labels and all,
 when the pane is too narrow to carry them.
 
@@ -316,11 +326,21 @@ request, a decision or a comment finds its card.
   still counted; an unticked one is not on the page. The count label says so
   (`62 of 84 open`), and the tooltip gives the number each box is holding. They wrap onto further
   lines in a narrow pane, so eight or nine sections fit at ~350 px.
-- **Both sets are saved with the window's layout**, side by side:
-  `{"board": {"workspace", "collapsed", "hidden"}}` (`BoardView::collapsedSections()` and
-  `hiddenSections()`).
+- **A chip per label, under the checkboxes** (owner, 2026-09-20, #VKFV: clean up annotates
+  `bug`/`feature`/area labels and "those should become a second set of filter next to the section
+  list"): one lower-case chip per label the board carries — every label on a card plus any the
+  board's own config names, rebuilt when that set changes. Ticking keeps only the cards that carry
+  **every** ticked label, exactly what `label:` terms do, composing with the text filter and the
+  section checkboxes; the count label switches to "N shown" as it does for the filter box. A label
+  that goes away while ticked simply stops filtering.
+- **All three sets are saved with the window's layout**, side by side:
+  `{"board": {"workspace", "collapsed", "hidden", "labels"}}` (`BoardView::collapsedSections()`,
+  `hiddenSections()` and `labelFilter()`).
 - **Clean up** (`#boardCleanup`) hands the board to the agent to tidy: merge or split sections and
-  cards, review statuses. Protocol 19.9; see 4.8.
+  cards, review statuses. Protocol 19.9; see 4.8. Since #VKFV its brief (v2) also annotates labels
+  — every work card gets `bug` or `feature` plus the area labels the board already uses — and
+  *suggests* a tag outside the vocabulary in its report instead of writing it, because the chips
+  turn every label into a filter.
 
 ### 4.8 The cleanup button: preview, then apply (2026-09-18)
 

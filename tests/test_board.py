@@ -151,6 +151,30 @@ class RankTests(unittest.TestCase):
 
 # ------------------------------------------------------------- cards / round trip
 
+class PriorityTests(TempBoardTest):
+    """The row's priority flag (card #VKFV): −1…+3, clamped on every write, absent at 0."""
+
+    def test_the_flag_clamps_into_range(self):
+        self.assertEqual(B.clamp_priority(0), 0)
+        self.assertEqual(B.clamp_priority(2), 2)
+        self.assertEqual(B.clamp_priority(-1), -1)
+        self.assertEqual(B.clamp_priority(9), 3)
+        self.assertEqual(B.clamp_priority(-9), -1)
+        self.assertEqual(B.clamp_priority("+2"), 2)
+
+    def test_a_bad_flag_is_refused(self):
+        for value in ("high", None, True, ""):
+            with self.assertRaises(B.BoardError):
+                B.clamp_priority(value)
+
+    def test_the_card_reads_its_flag_and_survives_a_broken_one(self):
+        card = self.card()
+        card.set("priority", 2)
+        self.assertEqual(B.Card.parse(card.to_text()).priority, 2)
+        broken = B.Card.parse(card.to_text().replace("priority: 2", 'priority: "soon"'))
+        self.assertEqual(broken.priority, 0)
+
+
 class CardTests(TempBoardTest):
     def test_round_trip_is_byte_identical(self):
         card = B.Card.parse(CARD)
@@ -495,7 +519,8 @@ class CheckTests(TempBoardTest):
         self.assertIn("duplicate_id", {p.code for p in self.board.check()})
 
     def test_unknown_field_and_bad_status(self):
-        self.good("K7Q2", priority="high")
+        # `priority` was this test's unknown field until it became a real one (card #VKFV).
+        self.good("K7Q2", urgency="high")
         write(self.root / "features" / "2026-09-17-b.md",
               "---\nid: M3XJ\ntype: work\nstatus: whenever\nrank: 0i\n---\n# B\n")
         codes = {p.code for p in self.board.check()}

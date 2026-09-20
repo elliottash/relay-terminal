@@ -285,6 +285,12 @@ void adoptTokens(const ThemeSpec &spec) {
     BoardFace = BoardMaterial ? spec.boardColor(QStringLiteral("face"), Surface) : Surface;
     BoardMetal = BoardMaterial ? spec.boardColor(QStringLiteral("metal"), Accent) : Accent;
     BoardMetalDim = BoardMaterial ? spec.boardColor(QStringLiteral("metal_dim"), Border) : Border;
+    // The flag's four (#VKFV) are colours, not material: a hairline board keeps the same ones a
+    // material one does, because "yellow" and "green" mean the same thing on either face.
+    BoardPriorityLow = spec.boardColor(QStringLiteral("priority_low"), BoardPriorityLow);
+    BoardPriorityOne = spec.boardColor(QStringLiteral("priority_one"), BoardPriorityOne);
+    BoardPriorityTwo = spec.boardColor(QStringLiteral("priority_two"), BoardPriorityTwo);
+    BoardPriorityThree = spec.boardColor(QStringLiteral("priority_three"), BoardPriorityThree);
 
     const auto syntax = [&spec](const char *name, const QColor &fallback) {
         return spec.syntaxColor(QString::fromLatin1(name), fallback);
@@ -674,6 +680,11 @@ QToolButton#boardBack:hover { color: @text; border-color: @border; background: @
    font is set here and in no pseudo-state rule, so sizeHint() measures what actually paints. */
 QCheckBox#boardSectionCheck { color: @muted; font-family: "@mono"; font-size: 9pt; spacing: 5px; padding: 0; }
 QCheckBox#boardSectionCheck::indicator { width: 11px; height: 11px; border-radius: 3px; }
+/* The label chips under the section boxes (card #VKFV): the same engraved mono, lower case where
+   the sections are upper, so the two rows read as two different questions. */
+QCheckBox#boardLabelCheck { color: @muted; font-family: "@mono"; font-size: 9pt; spacing: 4px; padding: 0; }
+QCheckBox#boardLabelCheck::indicator { width: 11px; height: 11px; border-radius: 3px; }
+QCheckBox#boardLabelCheck:hover { color: @text; }
 /* The list's column header (owner, 2026-09-19: "change switchboard sorting from a sort button to
    adding header columns that you click on"): the Card, Created and Updated cells a click sorts by.
    Engraved like the section headers they sit above — mono, upper case, letter-spaced, and the font
@@ -683,6 +694,11 @@ QWidget#boardColumnHeader { background: transparent; }
 QToolButton#boardHeaderCard, QToolButton#boardHeaderCreated, QToolButton#boardHeaderUpdated { color: @muted; background: transparent; border: none; border-radius: 4px; padding: 0; }
 QToolButton#boardHeaderCard:hover, QToolButton#boardHeaderCreated:hover, QToolButton#boardHeaderUpdated:hover { color: @text; }
 QToolButton#boardHeaderCard[active="true"], QToolButton#boardHeaderCreated[active="true"], QToolButton#boardHeaderUpdated[active="true"] { color: @accent; }
+/* The ⚑ over the flag column (card #VKFV): same cell styles as its neighbours, and the accent
+   alone carries the active state — the cell is one glyph wide, with no room for an arrow. */
+QToolButton#boardHeaderPriority { color: @muted; background: transparent; border: none; border-radius: 4px; padding: 0; }
+QToolButton#boardHeaderPriority:hover { color: @text; }
+QToolButton#boardHeaderPriority[active="true"] { color: @accent; }
 QListWidget#boardList { background: transparent; border: none; }
 QListWidget#boardList QScrollBar:vertical { width: 8px; margin: 0; }
 QLineEdit#boardQuickAdd { background: @raised; border-color: @accentBorder; }

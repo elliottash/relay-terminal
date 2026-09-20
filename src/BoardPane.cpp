@@ -74,7 +74,6 @@ constexpr int kAddWidth = 22;        // the `+` at the right of a section header
 // card's own id width, so the header over the list can answer the same question the rows do — a
 // header whose labels had gone while the cells were still drawn would be worse than no header.
 constexpr int kDateGap = 8;
-constexpr int kIdRoom = 52;
 // Below this width the open card takes the whole pane instead of squeezing the list.
 constexpr int kStackedWidth = 900;
 
@@ -144,7 +143,6 @@ QPair<QColor, QColor> badgeInk(board::Badge::Kind kind)
         // Brass, not amber: a card being private is a fact about it, not somebody waiting on you,
         // and amber means only the second (be81edb). Waiting above keeps the amber.
         return {theme::Tool, mix(theme::Tool, theme::Surface, 0.5)};
-    case board::Badge::Age:
     case board::Badge::Thread:
         return {theme::TextMuted, QColor()};
     default:
@@ -152,22 +150,28 @@ QPair<QColor, QColor> badgeInk(board::Badge::Kind kind)
     }
 }
 
-// The colour of a card row's status mark: muted where nothing is committed, the accent where
-// work is running, the warning colour where somebody is being waited on.
-QColor glyphInk(const QString &status)
+// The flag at the head of a card row (#VKFV): an empty ring when the card carries no priority —
+// unlit hardware, like the jack rings of an empty board — and a filled disc in the priority's
+// own colour otherwise. The colours are the board's material tokens (Theme.h), so a theme
+// switch recolours every flag and a light theme never paints white on cream.
+void drawPriorityFlag(QPainter &painter, const QRect &box, int priority)
 {
-    if (status == QStringLiteral("in-progress") || status == QStringLiteral("executing"))
-        return theme::Accent;
-    if (status.startsWith(QStringLiteral("needs-qa")))
-        return theme::Agent;
-    if (status.startsWith(QStringLiteral("needs-")))
-        return theme::Warning;
-    if (status == QStringLiteral("done"))
-        return theme::Success;
-    if (status == QStringLiteral("ready") || status == QStringLiteral("approved")
-        || status == QStringLiteral("active"))
-        return theme::Text;
-    return theme::TextMuted;
+    const QColor ink = priority < 0 ? theme::BoardPriorityLow
+                     : priority == 1 ? theme::BoardPriorityOne
+                     : priority == 2 ? theme::BoardPriorityTwo
+                     : priority >= 3 ? theme::BoardPriorityThree
+                                     : QColor();
+    const QPointF middle(box.center());
+    const QRectF circle(QPointF(middle.x() - 4.5, middle.y() - 4.5), QSizeF(9, 9));
+    if (ink.isValid()) {
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(ink);
+        painter.drawEllipse(circle);
+    } else {
+        painter.setPen(QPen(theme::BoardMetalDim, 1.2));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawEllipse(circle.adjusted(0.5, 0.5, -0.5, -0.5));
+    }
 }
 
 // The room the list keeps at its right: its frame plus the width a vertical scrollbar takes,
@@ -191,11 +195,19 @@ int dateColumnWidth(const QFont &font)
     return QFontMetrics(monoFont(font, 0.85)).horizontalAdvance(QStringLiteral("0000-00-00")) + 6;
 }
 
-// Whether a row `width` px wide can carry the two date columns at all: the glyph, an `#ID` and the
-// title's floor are owed their room first, and only then does the table get its right-hand columns.
+// The room the `#ID` column takes: "#WWWW" in the id's own mono — the widest id the format
+// allows — so every id lines up in one fixed column between the flag and the title (#VKFV).
+int idColumnWidth(const QFont &font)
+{
+    return QFontMetrics(monoFont(font, 0.85)).horizontalAdvance(QStringLiteral("#WWWW")) + kIdGap;
+}
+
+// Whether a row `width` px wide can carry the two date columns at all: the flag, the `#ID`
+// column and the title's floor are owed their room first, and only then does the table get its
+// right-hand columns.
 bool dateColumnsFit(const QFont &font, int width)
 {
-    const int keep = kRowPadX + kGlyphWidth + 4 + kTitleMin + kIdRoom + kDateGap
+    const int keep = kRowPadX + kGlyphWidth + 4 + idColumnWidth(font) + kTitleMin + kDateGap
                      + 2 * dateColumnWidth(font) + kDateGap + kRowPadX;
     return width >= keep;
 }
@@ -204,25 +216,27 @@ bool dateColumnsFit(const QFont &font, int width)
 // do not fit are already gone (board::fitBadges) and the title is elided into what is left, so a
 // narrow pane loses decoration before it loses meaning.
 struct CardShape {
-    QRect glyphRect, titleRect, idRect, createdRect, updatedRect;
+    QRect priorityRect, idRect, titleRect, createdRect, updatedRect;
     QString title, created, updated;
     bool dates = false;                 // the two date columns are on this row
     QList<QPair<board::Badge, QRect>> badges;
     int height = 0;
 };
 
-CardShape cardShape(const board::Card &card, bool showStatus, const QFont &font, int width,
-                    const QDate &today)
+CardShape cardShape(const board::Card &card, bool showStatus, const QFont &font, int width)
 {
     CardShape shape;
     const QFontMetrics metrics(font);
     const QFontMetrics badgeMetrics(smaller(font, 0.85));
-    const QFontMetrics idMetrics(monoFont(font, 0.85));
     shape.height = qMax(24, metrics.height() + 10);
 
+    // The flag column, then the `#ID` column, then the title (#VKFV): the id is a fixed column
+    // of its own now, so the ids of every row line up whatever the titles say.
     int x = kRowPadX;
-    shape.glyphRect = QRect(x, 0, kGlyphWidth, shape.height);
+    shape.priorityRect = QRect(x, 0, kGlyphWidth, shape.height);
     x += kGlyphWidth + 4;
+    shape.idRect = QRect(x, 0, idColumnWidth(font) - kIdGap, shape.height);
+    x += idColumnWidth(font);
 
     // The table's right-hand columns first: the badges and the title are what give way to them,
     // and the badges that no longer fit are dropped by board::fitBadges — a narrow pane loses
@@ -246,20 +260,19 @@ CardShape cardShape(const board::Card &card, bool showStatus, const QFont &font,
     const int cap = qMax(60, available / 4);
     QHash<QString, int> widths;
     QList<QPair<board::Badge, int>> measured;
-    for (const board::Badge &badge : board::rowBadges(card, showStatus, today)) {
+    for (const board::Badge &badge : board::badges(card, showStatus)) {
         const int w = qMin(cap, badgeMetrics.horizontalAdvance(badge.text) + 12);
         widths.insert(badge.text, w);
         measured << qMakePair(badge, w);
     }
-    const int idWidth = idMetrics.horizontalAdvance(card.reference()) + kIdGap;
     // What the title is owed before a badge may have anything: the rest of the row is decoration
     // next to knowing which card this is.
     const int titleFloor = qBound(kTitleMin, available * 45 / 100, 280);
     const QList<board::Badge> kept =
-        board::fitBadges(measured, qMax(0, available - titleFloor - idWidth - 12), kBadgeGap);
+        board::fitBadges(measured, qMax(0, available - titleFloor - 12), kBadgeGap);
 
     // Right to left from the row's right edge, prepending, so the order on screen ends up the
-    // reading order board::rowBadges returned.
+    // reading order board::badges returned.
     int right = contentRight;
     for (int i = int(kept.size()) - 1; i >= 0; --i) {
         const int w = widths.value(kept.at(i).text);
@@ -269,13 +282,12 @@ CardShape cardShape(const board::Card &card, bool showStatus, const QFont &font,
         right -= kBadgeGap;
     }
     const int titleEnd = shape.badges.isEmpty() ? contentRight : right + kBadgeGap - 10;
-    const int titleZone = qMax(30, titleEnd - x);
-    const int titleWidth = qMax(30, titleZone - idWidth);
-    shape.title = metrics.elidedText(card.title.isEmpty() ? QStringLiteral("(untitled)") : card.title,
+    const int titleWidth = qMax(30, titleEnd - x);
+    shape.title = metrics.elidedText(card.title.isEmpty() ? QStringLiteral("(untitled)")
+                                                          : card.title,
                                      Qt::ElideRight, titleWidth);
     const int drawn = qMin(titleWidth, metrics.horizontalAdvance(shape.title));
     shape.titleRect = QRect(x, 0, drawn, shape.height);
-    shape.idRect = QRect(x + drawn + kIdGap, 0, qMax(0, idWidth - kIdGap), shape.height);
     return shape;
 }
 
@@ -330,7 +342,7 @@ public:
         const board::Card *card = m_model->card(row->cardId);
         if (!card)
             return QSize(width, 0);
-        return QSize(width, cardShape(*card, row->showStatus, option.font, width, today()).height);
+        return QSize(width, cardShape(*card, row->showStatus, option.font, width).height);
     }
 
     void paint(QPainter *painter, const QStyleOptionViewItem &option,
@@ -361,12 +373,21 @@ public:
             .addRect.translated(itemRect.topLeft());
     }
 
+    // The flag at the left of a card row (#VKFV), given that row's rect: the box the ring or the
+    // disc is painted in, widened a little because it is a click target, not a mark.
+    QRect priorityRectOf(int rowIndex, const QRect &itemRect) const
+    {
+        const board::Row *row = rowAt(rowIndex);
+        if (!row || row->kind != board::Row::Card)
+            return QRect();
+        return cardShape(board::Card{}, false, m_list->font(), rowWidth())
+            .priorityRect.translated(itemRect.topLeft());
+    }
+
     // Nothing is created straight into Done: a card gets there by being closed.
     std::function<bool(const QString &columnId)> adds = [](const QString &) { return true; };
 
 private:
-    static QDate today() { return QDate::currentDate(); }
-
     const board::Row *rowAt(int index) const
     {
         return index >= 0 && index < m_rows->size() ? &m_rows->at(index) : nullptr;
@@ -423,7 +444,7 @@ private:
         const board::Card *card = m_model->card(row.cardId);
         if (!card)
             return;
-        const CardShape shape = cardShape(*card, row.showStatus, option.font, rect.width(), today());
+        const CardShape shape = cardShape(*card, row.showStatus, option.font, rect.width());
         const QPoint origin = rect.topLeft();
         const bool selected = option.state & QStyle::State_Selected;
         const bool hover = option.state & QStyle::State_MouseOver;
@@ -445,23 +466,29 @@ private:
         }
 
         painter->setFont(option.font);
-        // A card being planned or discussed right now wears the agent's mark in place of its
-        // status glyph, in the agent's colour: the one place the board shows that #B is working
-        // while you are reading #A.
+        // The flag column (#VKFV): an empty ring at 0, a yellow disc at −1 and white, pale green
+        // then bright green at +1…+3 — clickable, left to raise and right to lower. A card being
+        // planned or discussed right now wears the agent's mark over the flag instead, in the
+        // agent's colour: the one place the board shows that #B is working while you read #A.
         const QString working = turnMode ? turnMode(row.cardId) : QString();
-        painter->setPen(working.isEmpty() ? glyphInk(card->status) : theme::Agent);
-        painter->drawText(shape.glyphRect.translated(origin), Qt::AlignCenter,
-                          working.isEmpty() ? board::statusGlyph(card->status)
-                                            : QStringLiteral("✦"));
+        if (working.isEmpty()) {
+            drawPriorityFlag(*painter, shape.priorityRect.translated(origin), card->priority);
+        } else {
+            painter->setPen(theme::Agent);
+            painter->drawText(shape.priorityRect.translated(origin), Qt::AlignCenter,
+                              QStringLiteral("✦"));
+        }
 
-        painter->setPen(card->closed() ? theme::TextMuted : theme::Text);
-        painter->drawText(shape.titleRect.translated(origin), Qt::AlignLeft | Qt::AlignVCenter,
-                          shape.title);
-
+        // The `#ID` column before the title: mono and muted, one fixed column for every row.
         painter->setFont(monoFont(option.font, 0.85));
         painter->setPen(theme::TextMuted);
         painter->drawText(shape.idRect.translated(origin), Qt::AlignLeft | Qt::AlignVCenter,
                           card->reference());
+
+        painter->setFont(option.font);
+        painter->setPen(card->closed() ? theme::TextMuted : theme::Text);
+        painter->drawText(shape.titleRect.translated(origin), Qt::AlignLeft | Qt::AlignVCenter,
+                          shape.title);
 
         // The two date columns, in the same mono as the id: a column of dates reads as a column.
         // A cell the card has nothing to say in stays blank rather than wrong (board::dateCell).
@@ -562,10 +589,12 @@ private:
 
 // The header row over the list (owner, 2026-09-19: "change switchboard sorting from a sort
 // button to adding header columns that you click on", then "add a 'created' and 'updated'
-// column"): three cells — Card, Created, Updated — each one a sort of the cards *inside* every
-// section, with the arrow on the one that is on. A cell is placed with the same measurements the
-// row delegate draws its columns with, so a label sits exactly over the cells it names; the two
-// date cells and their labels go together when the pane is too narrow to carry them.
+// column", then the flag column #VKFV): four cells — ⚑, Card, Created, Updated — each one a sort
+// of the cards *inside* every section, with the arrow on the one that is on. A cell is placed
+// with the same measurements the row delegate draws its columns with, so a label sits exactly
+// over the cells it names; the two date cells and their labels go together when the pane is too
+// narrow to carry them. The ⚑ is the one cell too narrow for an arrow: the accent colour alone
+// says the priority sort is on.
 class ColumnHeader final : public QWidget {
 public:
     explicit ColumnHeader(QWidget *parent = nullptr) : QWidget(parent)
@@ -573,11 +602,14 @@ public:
         setObjectName(QStringLiteral("boardColumnHeader"));
         m_layout = new QHBoxLayout(this);
         m_layout->setSpacing(kDateGap);
-        const QList<board::SortColumn> columns{board::SortColumn::Card, board::SortColumn::Created,
+        const QList<board::SortColumn> columns{board::SortColumn::Priority, board::SortColumn::Card,
+                                               board::SortColumn::Created,
                                                board::SortColumn::Updated};
         for (const board::SortColumn column : columns) {
             auto *cell = new QToolButton(this);
-            cell->setObjectName(column == board::SortColumn::Card
+            cell->setObjectName(column == board::SortColumn::Priority
+                                    ? QStringLiteral("boardHeaderPriority")
+                                : column == board::SortColumn::Card
                                     ? QStringLiteral("boardHeaderCard")
                                 : column == board::SortColumn::Created
                                     ? QStringLiteral("boardHeaderCreated")
@@ -591,6 +623,11 @@ public:
                     onSort(column);
             });
             m_cell[int(column)] = cell;
+            // The ⚑ is placed by hand over the rows' flag column, left of the layout: a cell in
+            // the layout would push the Card label off the titles' left edge, and the layout's
+            // own spacing is the date columns', not the flag's.
+            if (column == board::SortColumn::Priority)
+                continue;
             m_layout->addWidget(cell);
             // The stretch sits between the card's own label and the two date columns, which are
             // the table's right-hand columns.
@@ -643,12 +680,12 @@ private:
         const int frame = m_list ? m_list->frameWidth() : 0;
         const int reserve = m_list ? rowReserve(m_list) : 0;
         const int rowWidth = m_list ? rowContentWidth(m_list) : width();
-        m_layout->setContentsMargins(frame + kRowPadX + kGlyphWidth + 4, 3,
-                                     qMax(0, reserve - frame) + kRowPadX, 3);
         const QFont base = font();
+        m_layout->setContentsMargins(frame + kRowPadX + kGlyphWidth + 4 + idColumnWidth(base), 3,
+                                     qMax(0, reserve - frame) + kRowPadX, 3);
         const bool dates = dateColumnsFit(base, rowWidth);
         const int column = dateColumnWidth(base);
-        for (int i = 0; i < 3; ++i) {
+        for (int i = 0; i < 4; ++i) {
             QToolButton *cell = m_cell[i];
             if (cell == nullptr)
                 continue;
@@ -656,8 +693,16 @@ private:
             QFont cellFont = monoFont(base, 0.85);
             cellFont.setLetterSpacing(QFont::PercentageSpacing, 106);
             cell->setFont(cellFont);
-            cell->setMinimumHeight(QFontMetrics(cellFont).height() + 6);
-            const bool date = i != int(board::SortColumn::Card);
+            const int cellHeight = QFontMetrics(cellFont).height() + 6;
+            cell->setMinimumHeight(cellHeight);
+            if (i == int(board::SortColumn::Priority)) {
+                // Over the rows' flag column (#VKFV): the box a row's ring sits in, at the rows'
+                // own left edge — placed by hand, vertically centred, because no layout holds it.
+                cell->setGeometry(QRect(frame + kRowPadX, qMax(3, (height() - cellHeight) / 2),
+                                        kGlyphWidth + 4, cellHeight));
+                continue;
+            }
+            const bool date = i >= int(board::SortColumn::Created);
             if (date)
                 cell->setFixedWidth(column);
             cell->setVisible(!date || dates);
@@ -668,13 +713,15 @@ private:
     void updateCells()
     {
         const int active = board::sortColumnIndex(m_sort);
-        for (int i = 0; i < 3; ++i) {
+        for (int i = 0; i < 4; ++i) {
             QToolButton *cell = m_cell[i];
             if (cell == nullptr)
                 continue;
             const board::SortColumn column = board::SortColumn(i);
             QString text = board::columnTitle(column).toUpper();
-            if (active == i)
+            // The ⚑ cell is one glyph wide: no arrow fits beside it, and the accent colour the
+            // active property turns on says the same thing.
+            if (active == i && column != board::SortColumn::Priority)
                 text += board::sortAscending(m_sort) ? QStringLiteral(" ▲") : QStringLiteral(" ▼");
             cell->setText(text);
             cell->setToolTip(cellTooltip(column, m_sort));
@@ -690,7 +737,9 @@ private:
     {
         const board::Sort first = board::nextColumnSort(column, board::Sort::Manual);
         const board::Sort second = board::nextColumnSort(column, first);
-        const QString what = column == board::SortColumn::Card
+        const QString what = column == board::SortColumn::Priority
+                                 ? QStringLiteral("the cards' priority flag")
+                             : column == board::SortColumn::Card
                                  ? QStringLiteral("the card's title")
                              : column == board::SortColumn::Created
                                  ? QStringLiteral("when the card was created")
@@ -706,7 +755,7 @@ private:
     }
 
     QHBoxLayout *m_layout = nullptr;
-    QToolButton *m_cell[3] = {nullptr, nullptr, nullptr};
+    QToolButton *m_cell[4] = {nullptr, nullptr, nullptr, nullptr};
     QListWidget *m_list = nullptr;
     board::Sort m_sort = board::Sort::Manual;
     bool m_ready = false;
@@ -739,7 +788,10 @@ public:
     std::function<void(const QString &, const QString &, const QString &, const QString &)> onDropped;
     std::function<void(bool)> onDragging;   // a drag from this list started (true) or ended
     std::function<void(const QString &columnId)> onToggleSection, onAddInSection;
-    std::function<QRect(int rowIndex, const QRect &itemRect)> addRectOf;
+    // A click on a row's flag: the card and the step, +1 for a left click and −1 for a right
+    // one (#VKFV). The pane clamps at −1…+3 and writes it through `board_priority`.
+    std::function<void(const QString &cardId, int step)> onPriority;
+    std::function<QRect(int rowIndex, const QRect &itemRect)> addRectOf, priorityRectOf;
     static QString dragging;
 
 protected:
@@ -766,6 +818,20 @@ protected:
 #endif
         const QModelIndex index = indexAt(at);
         const board::Row *row = rowAt(index.row());
+        // The flag at a card row's left end is a control (#VKFV), not a selection: a left click
+        // raises that card's priority and a right click lowers it. Neither ever moves the
+        // selection, so a burst of clicks walks one card's flag without losing the row the
+        // keyboard is on.
+        if (row && row->kind == board::Row::Card && priorityRectOf
+            && (event->button() == Qt::LeftButton || event->button() == Qt::RightButton)) {
+            const QRect flag = priorityRectOf(index.row(), visualRect(index));
+            if (flag.isValid() && flag.adjusted(-2, -2, 2, 2).contains(at)) {
+                if (onPriority)
+                    onPriority(row->cardId, event->button() == Qt::LeftButton ? 1 : -1);
+                event->accept();
+                return;
+            }
+        }
         if (row && row->kind == board::Row::Section && event->button() == Qt::LeftButton) {
             const QRect add = addRectOf ? addRectOf(index.row(), visualRect(index)) : QRect();
             if (add.isValid() && add.adjusted(-5, -5, 5, 5).contains(at)) {
@@ -2455,6 +2521,10 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     m_list->addRectOf = [delegate](int rowIndex, const QRect &itemRect) {
         return delegate->addRectOf(rowIndex, itemRect);
     };
+    m_list->priorityRectOf = [delegate](int rowIndex, const QRect &itemRect) {
+        return delegate->priorityRectOf(rowIndex, itemRect);
+    };
+    m_list->onPriority = [this](const QString &card, int step) { setCardPriority(card, step); };
     m_list->onToggleSection = [this](const QString &columnId) { toggleSection(columnId); };
     m_list->onAddInSection = [this](const QString &columnId) {
         if (onHint)
@@ -2750,6 +2820,20 @@ void BoardView::buildListTools(QVBoxLayout *layout)
     m_checksLayout = flow;
     toolsLayout->addWidget(m_checks);
 
+    // The label chips under them (#VKFV, owner: clean up annotates bug/feature/area labels and
+    // "those should become a second set of filter next to the section list"): one chip per
+    // label the board carries, wrapping the same way. Lower case, where the section boxes are
+    // engraved upper case, so the two rows never read as one.
+    m_labelChecks = new QWidget(tools);
+    m_labelChecks->setObjectName(QStringLiteral("boardLabelChecks"));
+    QSizePolicy labelPolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
+    labelPolicy.setHeightForWidth(true);
+    m_labelChecks->setSizePolicy(labelPolicy);
+    auto *labelFlow = new FlowLayout(m_labelChecks, 10, 3);
+    labelFlow->setContentsMargins(0, 0, 0, 0);
+    m_labelChecksLayout = labelFlow;
+    toolsLayout->addWidget(m_labelChecks);
+
     // The format problems belong to the list page too — they are about the cards it is showing —
     // and here they are under the tools rather than above them, where the pane's hover buttons
     // would cover the file name that fixes them.
@@ -2843,6 +2927,53 @@ void BoardView::buildCleanupPanel(QVBoxLayout *layout)
         if (onOpenFile && !url.path().isEmpty())
             onOpenFile(QDir(m_workspace).absoluteFilePath(url.path()));
     });
+}
+
+// The label chips follow the labels the board carries right now — every label on a card, plus
+// any the board's own config names — rather than a hard-coded list. Rebuilt only when that set
+// changes, so ticking one does not delete the chip under the pointer.
+void BoardView::syncLabelChecks()
+{
+    QStringList labels = m_model.allLabels();
+    for (const QJsonValue &value : m_config.value(QStringLiteral("labels")).toArray())
+        if (!value.toString().isEmpty() && !labels.contains(value.toString()))
+            labels << value.toString();
+    labels.sort();
+    if (labels == m_labelIds)
+        return;
+    m_labelIds = labels;
+    // A label that went away while its chip was ticked simply stops filtering.
+    m_labelPicked.intersect(QSet<QString>(labels.begin(), labels.end()));
+    m_model.setLabelFilter(m_labelPicked);
+    while (QLayoutItem *item = m_labelChecksLayout->takeAt(0)) {
+        delete item->widget();
+        delete item;
+    }
+    for (const QString &label : labels) {
+        auto *box = new QCheckBox(label, m_labelChecks);
+        box->setObjectName(QStringLiteral("boardLabelCheck"));
+        box->setChecked(m_labelPicked.contains(label));
+        box->setCursor(Qt::PointingHandCursor);
+        box->setFocusPolicy(Qt::NoFocus);
+        box->setToolTip(QStringLiteral("Only cards labelled %1 — tick more to narrow, untick to "
+                                       "broaden. Composes with the filter box and the section "
+                                       "checkboxes.").arg(label));
+        connect(box, &QCheckBox::toggled, this, [this, label](bool on) {
+            if (on)
+                m_labelPicked.insert(label);
+            else
+                m_labelPicked.remove(label);
+            m_model.setLabelFilter(m_labelPicked);
+            rebuild();
+            // The selection may have been in what just went away: stand on the first card left.
+            if (board::rowOfCard(m_rows, m_selected) < 0) {
+                const int first = board::stepRow(m_rows, -1, 1);
+                m_selected = first >= 0 ? m_rows.at(first).cardId : QString();
+            }
+        });
+        m_labelChecksLayout->addWidget(box);
+    }
+    m_labelChecks->setVisible(!labels.isEmpty());
 }
 
 // The pane's hover buttons take their room out of whichever row is on top for good, and in a
@@ -3468,9 +3599,10 @@ void BoardView::updateCounts()
     const int open = m_model.openCount();
     const int hidden = m_model.hiddenCount(m_hidden);
     QString text = QStringLiteral("%1 open").arg(open);
-    if (!m_model.filter().trimmed().isEmpty()) {
-        // With a filter set, what the rows say is the honest number: it counts the closed cards
-        // a `status:done` search turns up, which "open" never does.
+    if (!m_model.filter().trimmed().isEmpty() || !m_model.labelFilter().isEmpty()) {
+        // With a filter set — words or ticked label chips — what the rows say is the honest
+        // number: it counts the closed cards a `status:done` search turns up, which "open"
+        // never does.
         int matched = 0;
         for (const board::Row &row : std::as_const(m_rows))
             if (row.kind == board::Row::Card)
@@ -3599,8 +3731,13 @@ void BoardView::refill()
         item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
         item->setData(kCardRole, row.cardId);
         if (const board::Card *card = m_model.card(row.cardId))
-            item->setToolTip(QStringLiteral("%1 · %2\n%3").arg(card->reference(), card->title,
-                                                               card->path));
+            item->setToolTip(QStringLiteral("%1 · %2\nPriority %3 — left-click raises the flag, "
+                                            "right-click lowers it.\n%4")
+                                 .arg(card->reference(), card->title,
+                                      card->priority > 0 ? QStringLiteral("+%1").arg(card->priority)
+                                      : card->priority < 0 ? QStringLiteral("−1")
+                                                           : QStringLiteral("0"),
+                                      card->path));
         if (row.cardId == m_selected) {
             m_list->setCurrentItem(item);
             item->setSelected(true);
@@ -3626,6 +3763,7 @@ void BoardView::rebuild()
     }
     m_rebuildPending = false;
     syncSectionChecks();   // before the refill: the boxes decide which sections it puts in
+    syncLabelChecks();     // and the chips which labels it keeps
     refill();
     updateCounts();
 
@@ -3693,6 +3831,33 @@ void BoardView::syncColumnHeader()
         m_columnHeader->setSort(m_model.sort());
 }
 
+// One click on a row's flag (#VKFV): raise it (left) or lower it (right), clamped at −1…+3.
+// The row moves the moment it is clicked and the worker's `board_changed` settles it, exactly
+// like a drag; a click at 0 that lands on 0 is still sent, so the notice and the undo record
+// agree with what the file says.
+void BoardView::setCardPriority(QString id, int step)
+{
+    const board::Card *card = m_model.card(id);
+    if (!card)
+        return;
+    const int priority = qBound(-1, card->priority + step, 3);
+    board::Card updated = *card;
+    updated.priority = priority;
+    m_model.upsert(updated);
+    rebuild();
+    static const char *const names[5] = {"−1", "0", "+1", "+2", "+3"};
+    const QString requestId = nextRequestId();
+    m_pendingNotes.insert(requestId,
+                          priority == 0
+                              ? QStringLiteral("Cleared the flag on #%1").arg(id)
+                              : QStringLiteral("Flagged #%1 at %2").arg(
+                                    id, QString::fromLatin1(names[priority + 1])));
+    send({{QStringLiteral("type"), QStringLiteral("board_priority")},
+          {QStringLiteral("id"), requestId},
+          {QStringLiteral("card"), id},
+          {QStringLiteral("priority"), priority}});
+}
+
 void BoardView::toggleSection(QString columnId)
 {
     if (columnId.isEmpty())
@@ -3747,6 +3912,37 @@ QJsonArray BoardView::hiddenSections() const
     QStringList ids(m_hidden.begin(), m_hidden.end());
     ids.sort();
     return QJsonArray::fromStringList(ids);
+}
+
+// The label chips' ticked set, in the same shape and home in the layout node as the hidden
+// sections (#VKFV). A label the board no longer carries is kept harmlessly: it filters nothing
+// until a card wears it again.
+QJsonArray BoardView::labelFilter() const
+{
+    QStringList labels(m_labelPicked.begin(), m_labelPicked.end());
+    labels.sort();
+    return QJsonArray::fromStringList(labels);
+}
+
+void BoardView::setLabelFilter(const QJsonArray &state)
+{
+    m_labelPicked.clear();
+    for (const QJsonValue &value : state)
+        if (!value.toString().isEmpty())
+            m_labelPicked.insert(value.toString());
+    m_model.setLabelFilter(m_labelPicked);
+    // The chips exist only once the board's labels do; syncLabelChecks reads m_labelPicked when
+    // it builds them, and this keeps any that are already up in step.
+    if (m_labelChecksLayout) {
+        for (int i = 0; i < m_labelIds.size() && i < m_labelChecksLayout->count(); ++i) {
+            if (auto *box = qobject_cast<QCheckBox *>(m_labelChecksLayout->itemAt(i)->widget())) {
+                const QSignalBlocker block(box);
+                box->setChecked(m_labelPicked.contains(m_labelIds.at(i)));
+            }
+        }
+    }
+    if (m_open)
+        rebuild();
 }
 
 void BoardView::setHiddenSections(const QJsonArray &state)

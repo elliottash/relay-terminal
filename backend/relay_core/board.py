@@ -166,9 +166,12 @@ def initial_ranks(count: int) -> list[str]:
 
 CARD_TYPES = ("work", "plan", "memory", "alias")
 
-#: status -> state subfolder inside the category folder ("" = the category itself)
+#: status -> state subfolder inside the category folder ("" = the category itself).  The stage
+#: statuses of card #3XZV — `planning`, `planned`, `executing`, `needs-verification` — live in the
+#: category folder itself, like `inbox`: a stage move is a front-matter change, never a file move.
 WORK_STATUS_FOLDER = {
-    "inbox": "", "discussing": "", "ready": "", "in-progress": "",
+    "inbox": "", "discussing": "", "planning": "", "planned": "", "ready": "",
+    "executing": "", "in-progress": "", "needs-verification": "",
     "needs-qa-llm": "needs_qa_llm", "needs-qa-human": "needs_qa_human",
     "needs-review": "needs_review", "needs-labels": "needs_labels", "needs-ab": "needs_ab",
     "deferred": "deferred", "done": "done", "dropped": "done",
@@ -196,13 +199,17 @@ PRIVATE_FOLDER = ".private"
 BOARD_CONFIG = "board.yaml"
 BOARD_INDEX = "BOARD.md"
 
-COMMON_FIELDS = ("id", "type", "status", "rank", "created", "labels", "assignee", "private",
-                 "links", "aliases", "source", "blocked_by", "parent", "waiting_on")
+COMMON_FIELDS = ("id", "type", "status", "priority", "rank", "created", "labels", "assignee",
+                 "private", "links", "aliases", "source", "blocked_by", "parent", "waiting_on")
 #: `verified_by` is the signature of the model that closed the card out of a QA lane, stamped by
 #: the worker exactly as `implemented_by` is (card #T71W): the pair is the audit trail of who
 #: wrote a card and who passed it, and the reason a closed card can still be asked "who checked this?".
 WORK_FIELDS = ("component", "milestone", "workstream", "acceptance", "implemented_by",
-               "verified_by", "label_count", "label_output", "codebook")
+               "verified_by", "label_count", "label_output", "codebook",
+               # The manual section a card is parked in (#3XZV): the id of a configured column
+               # that collects no status. It wins over the status for as long as that column
+               # exists, and a move to a status column is what clears it.
+               "section")
 PLAN_FIELDS = ("approved_by", "goal")
 MEMORY_FIELDS = ("name", "description", "kind", "topic", "scope", "paths", "pinned",
                  "supersedes", "reviewed", "author")
@@ -219,11 +226,11 @@ ALLOWED_FIELDS = {
     "alias": set(COMMON_FIELDS) | set(ALIAS_FIELDS),
 }
 #: Emission order; anything else follows, sorted, so a new key is never dropped.
-FIELD_ORDER = ("id", "type", "status", "name", "description", "kind", "topic", "scope",
+FIELD_ORDER = ("id", "type", "status", "section", "name", "description", "kind", "topic", "scope",
                "private", "labels", "component", "milestone", "workstream", "assignee",
                "implemented_by", "verified_by", "waiting_on", "parent", "blocked_by", "aliases",
                "paths", "pinned", "reviewed", "author", "supersedes", "approved_by", "goal",
-               "label_count", "label_output", "codebook", "shell", "rank", "created",
+               "label_count", "label_output", "codebook", "shell", "priority", "rank", "created",
                "acceptance", "source", "links")
 
 TASK_HEADING = {"work": "Tasks", "plan": "Steps", "memory": "Tasks", "alias": "Tasks"}
@@ -614,6 +621,22 @@ def set_task_blockers(items: Sequence[TaskItem], blockers: Mapping[int, Sequence
 
 # ------------------------------------------------------------------------- cards
 
+#: The card's priority flag (card #VKFV): −1…+3, 0 the default. 0 is never written — a card
+#: with no flag carries no `priority` key, so the front matter of an unranked board stays clean.
+PRIORITY_MIN, PRIORITY_MAX = -1, 3
+
+
+def clamp_priority(value) -> int:
+    """`value` as a priority flag, clamped into −1…+3. Raises BoardError on a non-integer."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        try:
+            value = int(str(value).strip())
+        except (TypeError, ValueError):
+            raise BoardError(f"priority must be an integer from {PRIORITY_MIN} to {PRIORITY_MAX}, "
+                             f"not {value!r}") from None
+    return max(PRIORITY_MIN, min(PRIORITY_MAX, value))
+
+
 _FRONT_RE = re.compile(r"\A---\r?\n(.*?)(?:\r?\n)---[ \t]*\r?\n", re.S)
 _H1_RE = re.compile(r"^#[ \t]+(.*?)[ \t]*$", re.M)
 _MERGE_MARKER_RE = re.compile(r"^(<{7}|={7}|>{7})[ \t]*(\S.*)?$", re.M)
@@ -681,6 +704,15 @@ class Card:
     @property
     def rank(self) -> str:
         return str(self.front.get("rank") or "")
+
+    @property
+    def priority(self) -> int:
+        """The row's flag (#VKFV): −1…+3, 0 when unset or unparsable — a broken value in the
+        file must not take the board down, it reads as unflagged."""
+        try:
+            return clamp_priority(self.front.get("priority", 0))
+        except BoardError:
+            return 0
 
     @property
     def private(self) -> bool:
@@ -943,7 +975,8 @@ DEFAULT_CONFIG = {
              {"id": "planning", "folder": "planning"},
              {"id": "deferred", "filter": "status:deferred"},
              {"id": "done", "filter": "status:done,dropped"}],
-    "columns": ["inbox", "discussing", "ready", "in-progress", "waiting", "needs-qa", "done"],
+    "columns": ["inbox", "discussing", "planning", "planned", "executing", "needs-verification",
+                "needs-qa", "done"],
     "agent": {"autonomy": "auto", "max_creates_per_turn": 5},
     "memory": {"autonomy": "auto"},
 }
@@ -955,7 +988,7 @@ tabs: [{id: features, folder: features}, {id: bugs, folder: changes},
   {id: design, folder: design}, {id: marketing, folder: marketing},
   {id: planning, folder: planning},
   {id: deferred, filter: "status:deferred"}, {id: done, filter: "status:done,dropped"}]
-columns: [inbox, discussing, ready, in-progress, waiting, needs-qa, done]
+columns: [inbox, discussing, planning, planned, executing, needs-verification, needs-qa, done]
 agent: {autonomy: auto, max_creates_per_turn: 5}
 memory: {autonomy: auto}
 """
@@ -1204,6 +1237,18 @@ class Board:
         if unknown:
             problems.append(Problem("unknown_field", rel,
                                     f"unknown front matter field(s) for a {card.type} card: {', '.join(unknown)}"))
+        if "section" in card.front:
+            section = card.front.get("section")
+            if not isinstance(section, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", section):
+                problems.append(Problem("bad_section", rel,
+                                        f"section {section!r} must be a section id: lower-case letters, "
+                                        "digits, - and _"))
+            elif section not in [str(c) for c in (self.config().get("columns") or [])]:
+                # A removed manual section leaves its parked cards behind; they fall back to
+                # their status section until they are moved, and the warning says where.
+                problems.append(Problem("dangling_section", rel,
+                                        f"section {section!r} is not one of this board's columns; the "
+                                        "card shows in its status section", "warning"))
         if not card.title:
             problems.append(Problem("missing_title", rel, "no '# ' heading in the body"))
         problems.extend(self._check_tasks(card, rel, fix))
@@ -1366,9 +1411,10 @@ class Board:
         return path
 
 
-_STATUS_ORDER = ["inbox", "discussing", "ready", "draft", "approved", "executing", "in-progress",
-                 "needs-review", "needs-labels", "needs-ab", "needs-qa-llm", "needs-qa-human",
-                 "active", "deferred", "retired", "done", "dropped"]
+_STATUS_ORDER = ["inbox", "discussing", "planning", "planned", "ready", "draft", "approved",
+                 "executing", "in-progress", "needs-verification", "needs-review", "needs-labels",
+                 "needs-ab", "needs-qa-llm", "needs-qa-human", "active", "deferred", "retired",
+                 "done", "dropped"]
 
 
 def _status_order(card: Card) -> int:
@@ -1974,16 +2020,18 @@ MERGE_BODY_CAP = 8000
 
 #: The column ids a board may list in `board.yaml`'s `columns:` (the sections of the one
 #: list the pane draws).  Anything else is a typo, and a typo would silently hide a lane.
-COLUMN_IDS = ("inbox", "discussing", "ready", "in-progress", "waiting", "needs-qa",
-              "deferred", "done", "draft", "approved", "executing", "active", "retired")
+COLUMN_IDS = ("inbox", "discussing", "planning", "planned", "ready", "in-progress", "waiting",
+              "needs-verification", "needs-qa", "deferred", "done", "draft", "approved",
+              "executing", "active", "retired")
 
 #: Which statuses each of those columns collects when `board.yaml` does not say (design 3,
 #: "Tabs and columns").  A board that merges two sections, or invents one, overrides this per
 #: column in `column_statuses:`; `column_statuses_of()` is the one reader of both.
 COLUMN_STATUSES = {
-    "inbox": ["inbox"], "discussing": ["discussing"], "ready": ["ready"],
-    "in-progress": ["in-progress"],
+    "inbox": ["inbox"], "discussing": ["discussing"], "planning": ["planning"],
+    "planned": ["planned"], "ready": ["ready"], "in-progress": ["in-progress"],
     "waiting": ["needs-review", "needs-labels", "needs-ab"],
+    "needs-verification": ["needs-verification"],
     "needs-qa": ["needs-qa-llm", "needs-qa-human"],
     "done": ["done", "dropped"], "deferred": ["deferred"],
     # plan and memory columns
@@ -2001,10 +2049,12 @@ def column_statuses_of(config: dict, column: str) -> list[str]:
     `column_statuses:` in `board.yaml` first — that is how a board merges two sections into one
     or invents a section of its own — then the default map, and finally the column id read as a
     status of its own, which is what makes `columns: [inbox, ready]` mean what it looks like.
+    An explicit empty list is not "no entry": it is a section that collects nothing, one a
+    person fills by hand (#3XZV), and it comes back exactly that way.
     """
     configured = (config or {}).get("column_statuses") or {}
     listed = configured.get(column) if isinstance(configured, dict) else None
-    if isinstance(listed, list) and listed:
+    if isinstance(listed, list):
         return [str(s) for s in listed]
     return list(COLUMN_STATUSES.get(column) or [column])
 

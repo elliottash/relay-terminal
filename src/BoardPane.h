@@ -92,11 +92,17 @@ public:
     void setHiddenSections(const QJsonArray &state);
 
     // The order of the cards inside each section (board::Sort), as the id the layout node keeps:
-    // "manual", "newest", "oldest", "updated", "updated-oldest", "title" or "title-desc". Saved
-    // and restored with the folded set above, so a pane keeps its sort across restarts. Unknown
-    // ids read as Manual.
+    // "manual", "newest", "oldest", "updated", "updated-oldest", "title", "title-desc",
+    // "priority" or "priority-low". Saved and restored with the folded set above, so a pane keeps
+    // its sort across restarts. Unknown ids read as Manual.
     QString sortOrder() const { return board::sortId(m_model.sort()); }
     void setSortOrder(const QString &id);
+
+    // The labels whose chips beside the section checkboxes are ticked (#VKFV): a card is on the
+    // page only when it carries every one of them. Same shape and same home in the layout node
+    // as the hidden sections, saved and restored with them.
+    QJsonArray labelFilter() const;
+    void setLabelFilter(const QJsonArray &state);
 
     // ---- actions, also reachable from the palette and the keymap
     void quickAdd();
@@ -108,6 +114,11 @@ public:
     // Enter.
     void cardAction(const QString &action);
     void closeDetail();
+    // One click on a row's priority flag (#VKFV): `step` is +1 (left click) or −1 (right click),
+    // clamped at −1…+3, written through the `board_priority` message and shown at once. The id
+    // is by value on purpose: this rebuilds the list, and the caller passes a string owned by
+    // `m_rows`, which the rebuild replaces (the section handlers copy for the same reason).
+    void setCardPriority(QString id, int step);
     bool detailOpen() const;
     void focusFilter();
     // "Clean up" (protocol 19.9): hands the whole board to the agent to tidy — merge or split
@@ -162,6 +173,7 @@ private:
     void closeQuickAdd();
     // One checkbox per section the model has right now, rebuilt only when that set changes.
     void syncSectionChecks();
+    void syncLabelChecks();       // the label chips under them, ditto (#VKFV)
     void applyRightInset();         // keeps the pane's hover buttons off whichever row is on top
     // The pane's hover buttons take their room out of the top row for good, so in a narrow pane
     // the two buttons drop to a line of their own rather than eliding to "…".
@@ -246,6 +258,12 @@ private:
     QLayout *m_checksLayout = nullptr;
     QStringList m_checkIds;             // the sections the boxes stand for, in order
     QStringList m_checkTitles;          // and what they were called when the boxes were built
+    // The label chips under them (#VKFV): one per label the board carries, ticked to keep only
+    // the cards that have it. Rebuilt when the board's set of labels changes, like the boxes.
+    QWidget *m_labelChecks = nullptr;
+    QLayout *m_labelChecksLayout = nullptr;
+    QStringList m_labelIds;             // the labels the chips stand for, in order
+    QSet<QString> m_labelPicked;        // the ticked ones: every one must be on a shown card
     // The gear at the end of that row, and the page it opens in this pane.
     board::SectionEditor *m_sections = nullptr;
     bool m_sectionsOpen = false;
