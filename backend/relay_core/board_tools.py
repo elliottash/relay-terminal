@@ -109,8 +109,9 @@ AGENT_SECTIONS = frozenset({
     "notes", "tasks", "steps", "verdict", "qa verdict", "resolution", "decisions",
 })
 
-#: A card in a QA lane may only be closed by a different model family than the one that
-#: implemented it (design 6.4, "the independence rule").
+#: A card in a QA lane is closed with a verdict section in the body; any pane may flip it once
+#: the verdict is there (owner, 2026-09-20, card #76DJ: the verdict is the gate, not the
+#: closer's model family). Relay Free still may not verify (owner, 2026-09-19).
 QA_STATUSES = ("needs-qa-llm", "needs-qa-human")
 
 COMMENT_KINDS = ("note", "question", "decision", "evidence", "progress")
@@ -217,7 +218,7 @@ TOOL_SPECS = [
          "required and goes into the thread. Moving into needs-qa-llm or needs-qa-human requires an "
          "evidence path. Relay stamps `implemented_by` and `verified_by` with the pane's own "
          "provider/model, so you do not type them. Closing a card that is in a QA lane requires a "
-         "verdict section in the body, and the model closing it must not be the family that implemented it.",
+         "verdict section in the body — any pane may flip it once the verdict is there; Relay Free still may not.",
          {"id": _ID_ARG,
           "status": {"type": "string", "description": "Target status; the file moves into the matching state folder."},
           "tab": {"type": "string", "description": "Target tab id; the file moves into that category folder."},
@@ -340,7 +341,7 @@ def normalize_id(value, what: str = "id") -> str:
 
 
 def model_family(model: str | None) -> str:
-    """The vendor family of a model string, for the QA independence rule.
+    """The vendor family of a model string, for the `qa` recommendation block.
 
     One line since card #T71W: `relay_core.qa_verifiers.family` is the single table, so the
     signature form and the free-text form of the same model land on the same family
@@ -1908,13 +1909,8 @@ class BoardTools:
                     "Verifying is not available on Relay Free (owner's decision, 2026-09-19): "
                     "run QA on a provider key, on Codex or on Claude Code, and close it from there.",
                     code="board_refused", requires="independent_model")
-            closer = model_family(mine or self.context.model)
-            theirs = model_family(card.front.get("implemented_by"))
-            if closer and theirs and closer == theirs:
-                raise BoardToolError(
-                    f"QA independence: {card.front.get('implemented_by')} implemented this card, and "
-                    f"you are the same model family ({closer}). A different model has to close it.",
-                    code="board_refused", requires="independent_model")
+            # Any pane may close it once the verdict is there (owner, 2026-09-20, card #76DJ):
+            # the gate is the verifier's verdict on the card, not the closer's model family.
             # Who passed it, in the same canonical form as `implemented_by`.
             if status == "done" and mine:
                 verified = mine

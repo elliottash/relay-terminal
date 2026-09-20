@@ -199,8 +199,8 @@ BOARD_INDEX = "BOARD.md"
 COMMON_FIELDS = ("id", "type", "status", "rank", "created", "labels", "assignee", "private",
                  "links", "aliases", "source", "blocked_by", "parent", "waiting_on")
 #: `verified_by` is the signature of the model that closed the card out of a QA lane, stamped by
-#: the worker exactly as `implemented_by` is (card #T71W): the pair is the audit trail for the QA
-#: independence rule, and the reason a closed card can still be asked "who checked this?".
+#: the worker exactly as `implemented_by` is (card #T71W): the pair is the audit trail of who
+#: wrote a card and who passed it, and the reason a closed card can still be asked "who checked this?".
 WORK_FIELDS = ("component", "milestone", "workstream", "acceptance", "implemented_by",
                "verified_by", "label_count", "label_output", "codebook")
 PLAN_FIELDS = ("approved_by", "goal")

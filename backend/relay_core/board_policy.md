@@ -20,8 +20,9 @@ Switchboard rules (the `board_*` tools write to the repository's `issues/` track
 5. **Work.** When you start: `board_move_card` to `in-progress` with `assignee: agent`. When it
    lands: move to `needs-qa-llm` with the evidence path and a `## QA checklist` section in the body,
    in the same commit as the change. Relay stamps `implemented_by` with your provider/model itself,
-   and `verified_by` on whoever closes the card, so never type either; QA is run by the model the
-   card's `qa` recommendation names, which is never your own family.
+   and `verified_by` on whoever closes the card, so never type either. Closing a QA card needs the
+   verifier's verdict in the body — any pane may flip it once that is there (owner, 2026-09-20) —
+   and the card's `qa` recommendation still names the best verifier.
 6. **Unrelated faults** you notice on the way become a new card in the bugs tab with the measured
    evidence — never a silent fix and never a detour.
 7. **Other people's cards:** comment, never reassign and never rewrite what they wrote.

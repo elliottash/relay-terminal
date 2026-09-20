@@ -645,7 +645,7 @@ enter in teh top row thing makes the title, not the issue content."* Evidence:
   `scripts/relay-agent.py` on real providers. ~20 cases: three requests in one prompt; a question answered in-turn (no
   card); a duplicate; an owner decision in chat; implement and land; an unrelated fault; a person's card; a stale hash.
 - **Hard assertions** in CI with a stub model: no deletes, owner hashes unchanged, folder matches status, a thread event
-  per write, limits and the independence rule enforced.
+  per write, limits and the verdict-on-close contract enforced (owner, 2026-09-20, #76DJ).
 - **Judgment metrics** on live models: card precision/recall, verbatim quoting, question quality. The expected-card gold
   set is a `needs-labels` card with a codebook; "good enough to default on" is `needs-review` (skill rules 3–4).
   Results (sample sizes, policy, model ids) go to `docs/qa_evidence/<date>-board-evals/`; this repo dogfoods `auto`.
@@ -708,7 +708,8 @@ deletes converted paragraphs and logs a thread event per card. `TODO:` comments 
 - **Plans.** `/plan` in a card runs plan mode in the board worker; `plan_written` adds `links.plans` and a thread event;
   Execute runs in a chosen terminal pane with `cards: [{id}]`. `.relay/plans` is not gitignored; see question 4.
 - **QA lanes.** Same semantics; the Needs QA column is the lane. QA sweeps use `board_list {status: needs-qa-llm}` and
-  `board_move_card`, so the worker, not memory, enforces independence and the verdict contract.
+  `board_move_card`, so the worker, not memory, enforces the verdict contract (any pane may
+  close once the verdict is there — owner, 2026-09-20, #76DJ).
 
 ## 9. Protocol, components, format
 
@@ -796,7 +797,7 @@ where should transcription run? cheap is fine
 |---|---|---|
 | 0. Format | `board.py` parse/write/rank/id/thread append + tests; `relay-board.py check/index/migrate`; migrate 43 issues; README, `.gitattributes`, skill paragraph | M |
 | 1. MVP | agent tools + policy v1 + guardrails (M); `BoardPane` columns, tabs, drag/drop, quick add, keys, Ctrl+Shift+S, palette, hints (L); card detail with board worker thread (M); `#` picker, `ask.cards`, post-back, inline notes + Undo (M); protocol doc (S) | L |
-| 2. Trust | eval harness + 20 scenarios (M); scan/convert preview for issues and intake (M); filters/labels/search (S); independence enforcement, generated VALIDATION list (S); `suggest` proposals UI (S) | M–L |
+| 2. Trust | eval harness + 20 scenarios (M); scan/convert preview for issues and intake (M); filters/labels/search (S); verdict-on-close enforcement, generated VALIDATION list (S); `suggest` proposals UI (S) | M–L |
 | 3. Collaboration | front matter merge driver (M); conflict banner (S); TODO/NOTES/GitHub/Trello importers (M); transcript export (S); GitHub Issues two-way sync (L, maybe never) | L |
 
 Dogfood order: Phase 0 plus the agent tools and policy first (usable from terminal panes and by agents without the

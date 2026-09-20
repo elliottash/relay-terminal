@@ -145,8 +145,7 @@ Every type: `id`, `type`, `status`, `rank`, `created`, `labels`, `assignee`, `pr
   `anthropic/claude-opus-5-20260514 via claude-code`, falling back to `anthropic/claude-code` or
   `openai/codex` when the model cannot be seen. Free text in parentheses is allowed and ignored
   (`anthropic/claude-opus-5 (pane 2)`), which is how the hand-typed values written before 2026-09-19
-  keep working. The pair is what the QA independence rule reads, and what
-  `relay-board.py verifier <ID>` answers from. `verified_by` is never `relay-free/…`: verifying is
+  keep working. The pair is what `relay-board.py verifier <ID>` answers from. `verified_by` is never `relay-free/…`: verifying is
   not available on the free plan (owner, 2026-09-19), and a close signed by it is refused.
 - A **memory** card is one fact per file. `kind` is `convention | fact | lesson | reference |
   preference` (the memory design called this field `type`; it is `kind` here because `type` names

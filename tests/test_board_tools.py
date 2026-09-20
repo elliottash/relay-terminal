@@ -557,15 +557,18 @@ class MoveTests(BoardToolsTest):
         self.assertEqual(result["requires"], "verdict")
         self.assertEqual(self.board.card_by_id(self.card_id).status, "needs-qa-llm")
 
-    def test_the_same_model_family_may_not_close_what_it_implemented(self):
+    def test_the_same_model_family_closes_it_once_the_verdict_is_there(self):
+        # Owner, 2026-09-20 (#76DJ): the verdict is the gate, not the closer's model family.
         self._into_qa("anthropic/claude-opus-5")
         current = self.tools.run("board_read", {"id": self.card_id})["hash"]
         self.tools.run("board_update_card", {"id": self.card_id, "base_hash": current,
                                              "append_section": {"heading": "Verdict", "text": "pass"}})
         result = self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
                                                     "reason": "passed"})
-        self.assertEqual(result["requires"], "independent_model")
-        self.assertEqual(self.board.card_by_id(self.card_id).status, "needs-qa-llm")
+        self.assertNotIn("error", result)
+        card = self.board.card_by_id(self.card_id)
+        self.assertEqual(card.status, "done")
+        self.assertEqual(card.front["verified_by"], "anthropic/claude-opus-5")
 
     def test_a_different_model_family_closes_it_with_a_verdict(self):
         self._into_qa("openai/gpt-5")
@@ -661,8 +664,9 @@ class SignatureTests(BoardToolsTest):
         self.tools.run("board_update_card", {"id": self.card_id, "base_hash": current,
                                              "append_section": {"heading": "Verdict", "text": "pass"}})
 
-    def test_relay_free_is_judged_by_the_gateways_upstream_not_by_the_gateway(self):
-        # A card written on Relay Free (GLM-5.3 Flash today) may not be closed by GLM.
+    def test_relay_free_cards_close_like_any_other_once_verified(self):
+        # The signature stays `relay-free/…` (the upstream gateway never leaks in); since #76DJ
+        # (owner, 2026-09-20) the family that implemented may close it once the verdict is there.
         self.sign("relay-free", "relay-main")
         self.tools.run("board_move_card", {"id": self.card_id, "status": "needs-qa-llm",
                                            "reason": "landed", "evidence": "docs/qa_evidence/x/"})
@@ -670,9 +674,10 @@ class SignatureTests(BoardToolsTest):
                          "relay-free/relay-main")
         self.sign("glm-coding", "glm-5.3")
         self._with_verdict()
-        refused = self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
-                                                     "reason": "verified"})
-        self.assertEqual(refused["requires"], "independent_model")
+        result = self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
+                                                    "reason": "verified"})
+        self.assertNotIn("error", result)
+        self.assertEqual(self.board.card_by_id(self.card_id).front["verified_by"], "glm/glm-5.3")
 
     def test_relay_free_may_not_close_a_card_at_all(self):
         # Owner, 2026-09-19: verifying is not part of the free plan, whatever the upstream is.
