@@ -164,7 +164,10 @@ def initial_ranks(count: int) -> list[str]:
 
 # ------------------------------------------------------------- statuses and paths
 
-CARD_TYPES = ("work", "plan", "memory", "alias")
+#: Card #X7NB, owner 2026-09-20: there is no `plan` card type. A plan is the `## Plan`
+#: section of the work card it plans (protocol 19.10, design 12.4), and plan mode writes
+#: its own files under `<root>/.relay/plans`; neither is a card.
+CARD_TYPES = ("work", "memory", "alias")
 
 #: status -> state subfolder inside the category folder ("" = the category itself).  The stage
 #: statuses of card #3XZV — `planning`, `planned`, `executing`, `needs-verification` — live in the
@@ -176,22 +179,17 @@ WORK_STATUS_FOLDER = {
     "needs-review": "needs_review", "needs-labels": "needs_labels", "needs-ab": "needs_ab",
     "deferred": "deferred", "done": "done", "dropped": "done",
 }
-PLAN_STATUS_FOLDER = {
-    "draft": "", "approved": "", "executing": "", "done": "done", "dropped": "done",
-}
 MEMORY_STATUS_FOLDER = {"active": "", "retired": "archive"}
 #: Aliases (issue G8DK): saved commands and prompts, same two states as memory.
 ALIAS_STATUS_FOLDER = {"active": "", "retired": "archive"}
 
 STATUS_FOLDER: dict[str, dict[str, str]] = {
-    "work": WORK_STATUS_FOLDER, "plan": PLAN_STATUS_FOLDER, "memory": MEMORY_STATUS_FOLDER,
-    "alias": ALIAS_STATUS_FOLDER,
+    "work": WORK_STATUS_FOLDER, "memory": MEMORY_STATUS_FOLDER, "alias": ALIAS_STATUS_FOLDER,
 }
 
 #: Legacy header statuses from the pre-board tracker.
 LEGACY_STATUS = {"open": "ready", "needs-qa": "needs-qa-llm"}
 
-PLAN_FOLDER = "planning"
 MEMORY_FOLDER = "memory"
 ALIAS_FOLDER = "aliases"
 THREADS_FOLDER = "threads"
@@ -213,7 +211,6 @@ WORK_FIELDS = ("component", "milestone", "workstream", "acceptance", "implemente
                # that collects no status. It wins over the status for as long as that column
                # exists, and a move to a status column is what clears it.
                "section")
-PLAN_FIELDS = ("approved_by", "goal")
 MEMORY_FIELDS = ("name", "description", "kind", "topic", "scope", "paths", "pinned",
                  "supersedes", "reviewed", "author")
 #: An alias card (issue G8DK): `name` is what you type, `kind` is command or prompt,
@@ -224,7 +221,6 @@ ALIAS_FIELDS = ("name", "kind", "shell")
 
 ALLOWED_FIELDS = {
     "work": set(COMMON_FIELDS) | set(WORK_FIELDS),
-    "plan": set(COMMON_FIELDS) | set(PLAN_FIELDS),
     "memory": set(COMMON_FIELDS) | set(MEMORY_FIELDS),
     "alias": set(COMMON_FIELDS) | set(ALIAS_FIELDS),
 }
@@ -233,11 +229,11 @@ FIELD_ORDER = ("id", "type", "status", "section", "name", "description", "kind",
                "private", "labels", "component", "milestone", "workstream", "assignee",
                "implemented_by", "verified_by", "session", "waiting_on", "parent", "blocked_by",
                "aliases",
-               "paths", "pinned", "reviewed", "author", "supersedes", "approved_by", "goal",
+               "paths", "pinned", "reviewed", "author", "supersedes",
                "label_count", "label_output", "codebook", "shell", "priority", "rank", "created",
                "acceptance", "source", "links")
 
-TASK_HEADING = {"work": "Tasks", "plan": "Steps", "memory": "Tasks", "alias": "Tasks"}
+TASK_HEADING = {"work": "Tasks", "memory": "Tasks", "alias": "Tasks"}
 
 #: The section holding the user's own words about the card.  It was written `## Request`
 #: until 2026-09-18, when the owner asked for the plainer "Issue"; new and edited cards write
@@ -484,7 +480,7 @@ _ATTR_RE = re.compile(r"([a-z_]+)=([^\s>]+)")
 
 @dataclass
 class TaskItem:
-    """One `- [ ]` line of a card's `## Tasks` (or a plan's `## Steps`)."""
+    """One `- [ ]` line of a card's `## Tasks`."""
     item_id: str | None = None
     text: str = ""
     status: str = "open"
@@ -818,9 +814,7 @@ class Card:
         table = STATUS_FOLDER[self.type]
         if self.status not in table:
             raise BoardError(f"unknown {self.type} status {self.status!r}")
-        if self.type == "plan":
-            category = PLAN_FOLDER
-        elif self.type == "memory":
+        if self.type == "memory":
             category = MEMORY_FOLDER
         elif self.type == "alias":
             category = ALIAS_FOLDER
@@ -1075,7 +1069,7 @@ class Board:
 
     def category_folders(self) -> list[str]:
         folders = [str(t["folder"]) for t in self.tabs() if t.get("folder")]
-        for extra in (PLAN_FOLDER, MEMORY_FOLDER, ALIAS_FOLDER):
+        for extra in (MEMORY_FOLDER, ALIAS_FOLDER):
             if extra not in folders:
                 folders.append(extra)
         return folders
@@ -1520,9 +1514,7 @@ def tab_folders(board: "Board") -> dict[str, str]:
 
 
 def tab_of(board: "Board", card: Card) -> str:
-    """Which tab a card sits in.  Plans and memories are their own tabs, whatever the config."""
-    if card.type == "plan":
-        return "planning"
+    """Which tab a card sits in.  Memories are their own tab, whatever the config."""
     if card.type == "memory":
         return "memory"
     category = board.category_of(card.path) if card.path else ""
@@ -1815,9 +1807,7 @@ def _status_from_folder(board: Board, path: Path) -> str:
     if len(parts) < 2:
         return ""
     sub = parts[1] if len(parts) > 2 else ""
-    if parts[0] == PLAN_FOLDER:
-        table = PLAN_STATUS_FOLDER
-    elif parts[0] == MEMORY_FOLDER:
+    if parts[0] == MEMORY_FOLDER:
         table = MEMORY_STATUS_FOLDER
     elif parts[0] == ALIAS_FOLDER:
         table = ALIAS_STATUS_FOLDER
@@ -2108,8 +2098,8 @@ def _appendix(board: "Board") -> str:
                        "default**, so a bare `rg` over this project finds no cards at all and it "
                        "is easy to conclude there is no board. Use `rg --hidden`, or `grep -r`, "
                        "or read the files by path.") + "\n"
-    tab_bullet = _wrap(f"- This board's tabs are {tab_list}; plan cards are in `planning/`, "
-                       "memory cards in `memory/`.")
+    tab_bullet = _wrap(f"- This board's tabs are {tab_list}; memory cards are in `memory/`, "
+                       "alias cards in `aliases/`.")
     id_bullet = _wrap(f"- `id`: four characters of `{ID_ALPHABET}` with at least one letter, and "
                       f"not one this board already uses — check `{folder}/BOARD.md`.")
     lane_bullet = _wrap("4. Move the file only if the status you are moving to has a folder of its "
@@ -2486,7 +2476,8 @@ COLUMN_STATUSES = {
     "needs-verification": ["needs-verification"],
     "needs-qa": ["needs-qa-llm", "needs-qa-human"],
     "done": ["done", "dropped"], "deferred": ["deferred"],
-    # plan and memory columns
+    # memory columns; `draft` and `approved` are only a board.yaml written before #X7NB
+    # dropped the plan card type, and no card can carry either status now.
     "draft": ["draft"], "approved": ["approved"], "executing": ["executing"],
     "active": ["active"], "retired": ["retired"],
 }

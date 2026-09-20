@@ -1,0 +1,3 @@
+warning: changes/needs_qa_llm/2026-09-18-pane-buttons-brighter-outline.md: task_missing_marker: 5 item(s) have no <!-- t:id --> marker
+warning: features/2026-09-20-deliver-workflow-a-request-in-a-project-goes-thr.md: task_missing_marker: 3 item(s) have no <!-- t:id --> marker
+338 card(s) checked: 0 error(s), 2 warning(s)

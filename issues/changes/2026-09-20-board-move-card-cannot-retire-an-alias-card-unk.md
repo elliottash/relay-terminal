@@ -1,13 +1,13 @@
 ---
 id: W3KD
 type: work
-status: inbox
+status: needs-verification
 labels: [bug, switchboard]
-assignee: ''
+assignee: agent
 rank: m
 created: '2026-09-20'
 source: 'found while auditing card types for the owner, 2026-09-20'
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-20-drop-plan-cards/'], related: [X7NB], github: null}
 ---
 # board_move_card cannot retire an alias card: "unknown tab 'aliases'"
 
@@ -47,5 +47,15 @@ does it.
 active→retired→active round trip.
 
 ## Tasks
-- [ ] the `alias` branch at `board_tools.py:2038` and at `:2482` <!-- t:a1 -->
-- [ ] a round-trip test beside the memory one in `tests/test_board_tools.py` <!-- t:a2 -->
+- [x] the `alias` branch at `board_tools.py:2038` and at `:2482` <!-- t:a1 -->
+- [x] a round-trip test beside the memory one in `tests/test_board_tools.py` <!-- t:a2 -->
+
+## Implementer check
+Fixed in passing by #X7NB, 2026-09-20: both branches were the same two lines that carried the
+`plan` type's folder, so removing `plan` and adding `alias` was one edit. The branch is now
+`memory → memory/`, `alias → aliases/`, everything else through the tab, in `board_move_card`,
+`board_split_card` and `board_create_card` alike.
+
+## QA checklist
+- [ ] `board_move_card` moves a `type: alias` card from `issues/aliases/` to `issues/aliases/archive/` and back, with no "unknown tab 'aliases'" — `tests/test_board_tools.py:MoveTests.test_an_alias_card_is_retired_and_brought_back`, and the live run in `docs/qa_evidence/2026-09-20-drop-plan-cards/no-plan-card-type.txt`.
+- [ ] `board_create_card {type: "alias"}` still lands in `issues/aliases/`, and the board check is clean afterwards.

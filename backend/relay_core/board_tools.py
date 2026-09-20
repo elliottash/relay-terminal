@@ -159,7 +159,7 @@ TOOL_SPECS = [
          "that already has one updates it instead.",
          {"tab": {"type": "string", "description": "Tab id from board.yaml, e.g. features, bugs, design, planning."},
           "status": {"type": "string", "description": "Exact status, e.g. inbox, ready, in-progress, needs-qa-llm, done."},
-          "type": {"type": "string", "enum": list(B.CARD_TYPES), "description": "work (default view), plan or memory."},
+          "type": {"type": "string", "enum": list(B.CARD_TYPES), "description": "work (default view), memory or alias."},
           "labels": {"type": "array", "items": {"type": "string"},
                      "description": "Every label must be present, e.g. ['bug'] for the fault list."},
           "query": {"type": "string", "description": "Case-insensitive text matched against id, title and body."},
@@ -184,7 +184,7 @@ TOOL_SPECS = [
                                                     "status's own section."},
           "title": {"type": "string", "description": "One line, your words; becomes the card's `# ` heading."},
           "request": {"type": "string", "description": "The user's words verbatim. Do not paraphrase or tidy them."},
-          "type": {"type": "string", "enum": list(B.CARD_TYPES), "description": "work (default), plan or memory."},
+          "type": {"type": "string", "enum": list(B.CARD_TYPES), "description": "work (default), memory or alias."},
           "labels": {"type": "array", "items": {"type": "string"},
                      "description": "You choose these, not the user. Always exactly one of 'bug' "
                                     "(something built behaves wrongly) or 'feature' (something new "
@@ -216,7 +216,7 @@ TOOL_SPECS = [
           "replace_section": {"type": "object", "description": "Replace a `## ` section's body outright.",
                               "properties": {"heading": {"type": "string"}, "text": {"type": "string"}},
                               "required": ["heading", "text"], "additionalProperties": False},
-          "tasks": {"type": "array", "description": "Replace the `## Tasks` (or `## Steps`) checklist.",
+          "tasks": {"type": "array", "description": "Replace the `## Tasks` checklist.",
                     "items": {"type": "object", "properties": {
                         "text": {"type": "string"},
                         "status": {"type": "string", "enum": list(B.ITEM_STATUSES)},
@@ -1833,8 +1833,8 @@ class BoardTools:
         if status not in B.STATUS_FOLDER[card_type]:
             raise BoardToolError(f"unknown {card_type} status {args.get('status')!r}; use one of "
                                  f"{', '.join(B.STATUS_FOLDER[card_type])}.")
-        category = (B.PLAN_FOLDER if card_type == "plan" else
-                    B.MEMORY_FOLDER if card_type == "memory" else self._category_for_tab(args.get("tab")))
+        category = (B.MEMORY_FOLDER if card_type == "memory" else
+                    B.ALIAS_FOLDER if card_type == "alias" else self._category_for_tab(args.get("tab")))
         labels = _string_list(args.get("labels"), "labels")
         related = [normalize_id(r, "related") for r in _string_list(args.get("related"), "related")]
         section = str(args.get("section") or "").strip().lower()
@@ -2041,7 +2041,9 @@ class BoardTools:
                 section_arg = ""
         new_section = old_section if section_arg is None else section_arg
         tab = str(args.get("tab")).strip().lower() if args.get("tab") else old_tab
-        category = (B.PLAN_FOLDER if card.type == "plan" else B.MEMORY_FOLDER if card.type == "memory"
+        # A card of a type with a folder of its own ignores the tab: #W3KD, an alias card could
+        # not be retired at all because `aliases` is not a configured tab and the lookup is strict.
+        category = (B.MEMORY_FOLDER if card.type == "memory" else B.ALIAS_FOLDER if card.type == "alias"
                     else self._category_for_tab(tab))
 
         evidence = args.get("evidence")
@@ -2578,7 +2580,7 @@ class BoardTools:
                         f"Switchboard limit: {self.limit('max_creates_per_hour')} new cards per hour "
                         "for this workspace. Summarize the rest of the split in your reply.",
                         code="board_rate_limited", scope="hour")
-        category = (B.PLAN_FOLDER if card.type == "plan" else B.MEMORY_FOLDER if card.type == "memory"
+        category = (B.MEMORY_FOLDER if card.type == "memory" else B.ALIAS_FOLDER if card.type == "alias"
                     else self.board.category_of(card.path))
         size = self._thread_size(card)
         # `close` is `B.split_card` writing this card as `dropped` itself, the other path that does

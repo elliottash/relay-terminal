@@ -1,0 +1,23 @@
+CARD_TYPES            : ('work', 'memory', 'alias')
+'plan' in CARD_TYPES  : False
+PLAN_FOLDER attribute : False | PLAN_FIELDS: False | PLAN_STATUS_FOLDER: False
+STATUS_FOLDER keys    : ['alias', 'memory', 'work']
+TASK_HEADING          : {'work': 'Tasks', 'memory': 'Tasks', 'alias': 'Tasks'}
+
+check: unknown_type | type 'plan' is not one of ('work', 'memory', 'alias')
+
+create type=plan      : type must be one of work, memory, alias.
+
+work card in planning : work planning planning/2026-09-20-voice-mode.md
+CARD_MODES            : ('discuss', 'plan') | plan tools: ('board_list', 'board_read', 'board_update_card', 'board_comment')
+PLAN_HEADING          : Plan | 'plan' thread kind: True
+
+alias created         : aliases/2026-09-20-run-the-gui-checks.md
+move to retired       : ok
+alias now             : aliases/archive/2026-09-20-run-the-gui-checks.md
+move back to active   : ok
+alias now             : aliases/2026-09-20-run-the-gui-checks.md
+board check           : []
+
+issue body footer     : ['<!-- relay-sync -->', '<!-- relay-id: 7EY8 -->']
+_plan_links gone      : True

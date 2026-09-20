@@ -14,26 +14,25 @@ nothing touches the network outside a `plan()` or `run()`.
 | Syncs | Never syncs |
 |---|---|
 | shared **work** cards (`type: work`, outside `.private/`) | private cards (anything under the board's `.private/` root) |
-| their threads, bodies, labels, status, tab, assignee | plan cards (`type: plan`) and memory cards (`type: memory`) |
-| | alias cards, `board.yaml`, `BOARD.md`, the sync state itself |
+| their threads, bodies, labels, status, tab, assignee | memory cards (`type: memory`) and alias cards (`type: alias`) |
+| | `board.yaml`, `BOARD.md`, the sync state itself |
 
 Two independent mechanisms, because one of them is not enough:
 
 1. **The type filter.** `ForgeSync.shared_cards()` is the only source of anything that is rendered
-   into a request, so a private, plan or memory card's *words* are never in one.
+   into a request, so a private, memory or alias card's *words* are never in one.
 2. **The guard.** What could still slip out is a *mention*: a private card's title or id quoted in
-   a shared card's body, or a plan's title used as a link title. So every call the engine makes
+   a shared card's body. So every call the engine makes
    goes through `GuardedProvider`, one proxy in front of the provider, which scans every outgoing
    string (title, body, comment, label, assignee) against `PrivacyGuard` and raises
    `ForgePrivacyError` **before the request is made**. The card is reported as an error in the
    result and the run carries on with the others; nothing half-written is ever sent.
 
-The guard matches *identities* — the id of a private card, and the title (plus `name`,
-`description`, `goal`) of every card that must not sync — on word boundaries, case-insensitively.
+The guard matches *identities* — the id of a private card, and the title (plus `name` and
+`description`) of every card that must not sync — on word boundaries, case-insensitively.
 It deliberately does not match every sentence of a private body: two cards asking for the same
 thing in the same words are normal, and refusing that would make the sync useless without making
-it safer. A linked plan appears in an issue as its bare id (`` `#K7Q2` ``) and never as its title;
-a *private* plan is not even linked.
+it safer.
 
 ## 2. The mapping
 
@@ -49,10 +48,9 @@ a *private* plan is not even linked.
 | card id `#K7Q2` | `<!-- relay-id: K7Q2 -->` in the issue body, and `links.github: owner/repo#123` on the card |
 | thread entries — `comment`, `question`, `decision`, `note` by default (§8.1) | issue comments |
 | thread `event` entries | nothing — the issue already shows state changes as labels |
-| linked plan cards | a line of bare ids in the footer; plans themselves do not sync |
 
 **The footer.** Everything from `<!-- relay-sync -->` to the end of an issue body belongs to Relay
-(the plan links and the id marker) and is stripped before the body is compared with, or copied
+(the id marker) and is stripped before the body is compared with, or copied
 into, a card. A human may type freely above it.
 
 **Hidden markers** are HTML comments: GitHub drops them from the rendered page but keeps them in

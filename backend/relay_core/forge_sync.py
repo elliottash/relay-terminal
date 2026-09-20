@@ -9,9 +9,9 @@ executing.
 What never leaves the machine
 -----------------------------
 Only **shared work cards** sync.  Private cards (anything under the board's `.private/` root),
-plan cards and memory cards never do: `shared_cards()` is the only thing ever rendered into a
+memory cards and alias cards never do: `shared_cards()` is the only thing ever rendered into a
 request, so their words are never in one to begin with.  What could still slip through is a
-*mention* — a private card's title or id quoted in a shared card, a plan's title as a link — and
+*mention* — a private card's title or id quoted in a shared card — and
 that is caught in one place: every provider call the engine makes goes through `GuardedProvider`,
 which scans the outgoing strings against `PrivacyGuard` and raises `ForgePrivacyError` before a
 byte is sent.  The guard checks the text, not the call site, so a field added later cannot get
@@ -259,15 +259,15 @@ NAME_MIN = 5
 
 
 class PrivacyGuard:
-    """The one choke point: nothing that identifies a private, plan or memory card goes out.
+    """The one choke point: nothing that identifies a private, memory or alias card goes out.
 
     Built from the board once per run.  `scan()` is called on every string of every outgoing
     request by `GuardedProvider`, so a leak has to get past one function, not past every call
     site.  It refuses rather than redacts: a refusal is visible in the result, a redaction would
     quietly ship a half-written issue.
 
-    It guards **identities** — a private card's id, and the title (and `name`/`description`/
-    `goal`) of every card that must not sync — matched on word boundaries, case-insensitively.
+    It guards **identities** — a private card's id, and the title (and `name`/`description`)
+    of every card that must not sync — matched on word boundaries, case-insensitively.
     That is what "including as a link title" means, and it is what a body, a comment or a label
     can carry by accident.  Guarding every sentence of a private body instead would refuse a
     perfectly ordinary card that happens to repeat a line, so the *content* of a card that does
@@ -304,7 +304,7 @@ class PrivacyGuard:
                 add(card.title, f"{card.type} card #{card.id}")
             else:
                 continue
-            for key in ("name", "description", "goal"):
+            for key in ("name", "description"):
                 add(card.front.get(key), f"{card.type} card #{card.id}")
         self._patterns = [(re.compile(rf"(?<![0-9a-z]){re.escape(n)}(?![0-9a-z])"), source)
                           for n, source in self.names]
@@ -439,7 +439,7 @@ def strip_h1(body: str) -> str:
 
 
 def strip_footer(body: str) -> str:
-    """An issue body without the block Relay appends (plan links and the id marker)."""
+    """An issue body without the block Relay appends (the id marker)."""
     text = str(body or "").replace("\r\n", "\n").replace("\r", "\n")
     cut = text.find(FOOTER_MARKER)
     if cut >= 0:
@@ -511,25 +511,20 @@ def render_body(title: str, prose: str, tasks: Sequence[tuple[str, bool, str]],
     return f"# {title}\n\n{body}\n" if body else f"# {title}\n"
 
 
-def footer_for(card_id: str, plan_ids: Sequence[str] = ()) -> str:
-    """The block Relay owns at the foot of an issue body: plan links and the hidden card id."""
-    lines = [FOOTER_MARKER]
-    if plan_ids:
-        # A link, never a title: plan cards do not sync and their words stay here.
-        lines.append("Relay plan cards (not synced): " + ", ".join(f"`#{p}`" for p in plan_ids))
-    lines.append(f"<!-- relay-id: {card_id} -->")
-    return "\n".join(lines)
+def footer_for(card_id: str) -> str:
+    """The block Relay owns at the foot of an issue body: the hidden card id."""
+    return f"{FOOTER_MARKER}\n<!-- relay-id: {card_id} -->"
 
 
-def issue_body_with_footer(prose: str, card_id: str, plan_ids: Sequence[str] = ()) -> str:
-    block = footer_for(card_id, plan_ids)
+def issue_body_with_footer(prose: str, card_id: str) -> str:
+    block = footer_for(card_id)
     body = f"{prose}\n\n{block}\n" if prose else f"{block}\n"
     return body[:MAX_ISSUE_BODY]
 
 
-def issue_body_for(card: B.Card, plan_ids: Sequence[str] = ()) -> str:
+def issue_body_for(card: B.Card) -> str:
     """The issue body a card pushes: its own body without the title, plus the hidden footer."""
-    return issue_body_with_footer(normalize(strip_h1(card.body)), card.id or "", plan_ids)
+    return issue_body_with_footer(normalize(strip_h1(card.body)), card.id or "")
 
 
 @dataclass(frozen=True)
@@ -1393,8 +1388,7 @@ class ForgeSync:
         labels = self.issue_labels_for(fields)
         self.provider.ensure_labels(labels)
         assignees = [self.login_map[fields.assignee]] if fields.assignee in self.login_map else []
-        issue = self.provider.create_issue(fields.title, issue_body_for(card, _plan_links(self.board, card)),
-                                           labels, assignees)
+        issue = self.provider.create_issue(fields.title, issue_body_for(card), labels, assignees)
         if fields.status in CLOSING_STATUSES:
             issue = self.provider.update_issue(issue.number, state="closed",
                                                state_reason=CLOSING_STATUSES[fields.status])
@@ -1407,7 +1401,7 @@ class ForgeSync:
             changes["title"] = merged.title
         if {"prose", "tasks"} & set(push):
             pushed = B.Card(front=dict(card.front), body=render_body(merged.title, merged.prose, merged.tasks))
-            changes["body"] = issue_body_for(pushed, _plan_links(self.board, card))
+            changes["body"] = issue_body_for(pushed)
         if {"labels", "status", "tab"} & set(push):
             labels = self.issue_labels_for(merged)
             self.provider.ensure_labels(labels)
@@ -1437,8 +1431,7 @@ class ForgeSync:
         The issue is still found through `links.github`, but an issue without the marker is one
         a fresh clone would import as a second card, so it is repaired the moment it is noticed.
         """
-        body = issue_body_with_footer(strip_footer(issue.body), card.id or "",
-                                      _plan_links(self.board, card))
+        body = issue_body_with_footer(strip_footer(issue.body), card.id or "")
         updated = self.provider.update_issue(number, body=body)
         if updated is not None:
             entry = self.state.card(card.id)
@@ -1690,19 +1683,6 @@ def _linked_number(card: B.Card, repo: str) -> int | None:
     if match.group("repo") and repo and match.group("repo") != repo:
         return None
     return int(match.group("number"))
-
-
-def _plan_links(board: B.Board, card: B.Card) -> list[str]:
-    """The ids of the card's *shared* plan cards.  Ids only — a plan's words never leave."""
-    links = card.front.get("links")
-    values = links.get("plans") if isinstance(links, dict) else None
-    out = []
-    for value in values or []:
-        plan = board.card_by_id(str(value))
-        if plan is None or plan.private or _under_private(board, plan):
-            continue
-        out.append(str(value).upper())
-    return out
 
 
 def _comment_text(comment: Comment) -> str:

@@ -188,7 +188,7 @@ private slots:
     void sectionsAreTheConfiguredStatusesThenTheRest();
     void cardsLandInTheSectionOfTheirStatus();
     void closedCardsGoToTheDoneSectionAndParkedOnesToTheirOwn();
-    void plansAndMemoriesKeepTheirOwnStatuses();
+    void memoriesKeepTheirOwnStatuses();
     void rankOrdersASectionAndDoneIsNewestFirst();
     void timeSortsOrderEverySectionAlikeAndTheIdsRoundTrip();
     void theFilterLanguageMatchesEveryTerm();
@@ -280,7 +280,10 @@ void BoardModelTests::categoryFoldersComeFromTheConfig()
         ids << tab.id;
     // The pane no longer renders these; they are the folders a card's file can live in.
     QCOMPARE(ids, (QStringList{"features", "bugs", "planning", "deferred", "done", "memory"}));
-    QCOMPARE(model.tab(QStringLiteral("planning"))->type, QStringLiteral("plan"));
+    // #X7NB dropped the plan card type: `planning` is an ordinary folder of work cards, and
+    // `memory` is the one tab that is a card type of its own.
+    QCOMPARE(model.tab(QStringLiteral("planning"))->type, QStringLiteral("work"));
+    QCOMPARE(model.tab(QStringLiteral("memory"))->type, QStringLiteral("memory"));
     QCOMPARE(model.tab(QStringLiteral("planning"))->title, QStringLiteral("Plans"));
     QVERIFY(model.tab(QStringLiteral("deferred"))->isFilter());
     QVERIFY(!model.tab(QStringLiteral("features"))->isFilter());
@@ -341,21 +344,21 @@ void BoardModelTests::closedCardsGoToTheDoneSectionAndParkedOnesToTheirOwn()
     QCOMPARE(model.cards(relay::board::doneSection()).first().id, QStringLiteral("P9AB"));
 }
 
-void BoardModelTests::plansAndMemoriesKeepTheirOwnStatuses()
+void BoardModelTests::memoriesKeepTheirOwnStatuses()
 {
     Model model;
     model.setConfig(config());
-    QJsonObject plan = row("PL01", "approved", "planning");
-    plan.insert(QStringLiteral("type"), QStringLiteral("plan"));
     QJsonObject memory = row("ME01", "active", "memory");
     memory.insert(QStringLiteral("type"), QStringLiteral("memory"));
     memory.insert(QStringLiteral("topic"), QStringLiteral("conventions"));
-    model.reset(rows({row("K7Q2", "ready", "features"), plan, memory}));
+    QJsonObject planning = row("PL01", "planned", "planning");
+    model.reset(rows({row("K7Q2", "ready", "features"), planning, memory}));
 
     // Statuses no configured lane collects get a section each, so one list really does hold
-    // every open card whatever its type.
-    QCOMPARE(sectionIds(model).mid(6), (QStringList{"approved", "active", "verified", "done"}));
-    QCOMPARE(model.cards(QStringLiteral("approved")).first().id, QStringLiteral("PL01"));
+    // every open card whatever its type. A card in the `planning` folder is an ordinary work
+    // card (#X7NB): it sits in the section its work status names.
+    QCOMPARE(sectionIds(model).mid(6), (QStringList{"active", "planned", "verified", "done"}));
+    QCOMPARE(model.cards(QStringLiteral("planned")).first().id, QStringLiteral("PL01"));
     QCOMPARE(model.cards(QStringLiteral("active")).first().id, QStringLiteral("ME01"));
     QCOMPARE(model.openCount(), 3);
 }

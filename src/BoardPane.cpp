@@ -4390,8 +4390,12 @@ QStringList BoardView::columnIds() const
 
 QString BoardView::defaultCategory() const
 {
+    // The first work-card folder, which is what quick add files into. `planning` is skipped:
+    // until #X7NB it was tagged as a plan-card tab and so was never the default, and a card
+    // quick-added into a folder named after the Planning stage would read as already planned.
     for (const board::Tab &tab : m_model.tabs())
-        if (!tab.folder.isEmpty() && tab.type == QStringLiteral("work"))
+        if (!tab.folder.isEmpty() && tab.type == QStringLiteral("work")
+            && tab.id != QStringLiteral("planning"))
             return tab.id;
     return QStringLiteral("features");
 }

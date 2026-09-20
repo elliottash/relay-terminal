@@ -53,8 +53,8 @@ class SyncCase(unittest.TestCase):
             body = "\n".join(f"- [{'x' if done else ' '}] {text} <!-- t:{tid} -->"
                              for tid, done, text in tasks)
             card.body = card.body.rstrip("\n") + f"\n\n## Tasks\n{body}\n"
-        folder = {"work": tab and self.tab_folder(tab), "plan": B.PLAN_FOLDER,
-                  "memory": B.MEMORY_FOLDER}[card_type]
+        folder = {"work": tab and self.tab_folder(tab), "memory": B.MEMORY_FOLDER,
+                  "alias": B.ALIAS_FOLDER}[card_type]
         directory = self.board.base_for(private) / card.expected_folder(folder)
         directory.mkdir(parents=True, exist_ok=True)
         card.path = directory / B.card_filename(title)
@@ -719,11 +719,11 @@ class PrivacyTests(SyncCase):
         self.sync()
         self.assertEqual([i["title"] for i in self.gh.main.issues.values()], ["An ordinary card"])
 
-    def test_plan_and_memory_cards_are_never_issues(self):
-        self.card(title="Plan for the voice work", card_type="plan", status="draft", tab=None,
-                  labels=())
+    def test_memory_and_alias_cards_are_never_issues(self):
         self.card(title="Remember the keyring rule", card_type="memory", status="active",
                   tab=None, labels=())
+        self.card(title="Run the GUI checks", card_type="alias", status="active",
+                  tab=None, labels=(), name="gui-checks", kind="command")
         self.card(title="An ordinary card")
         self.sync()
         self.assertEqual([i["title"] for i in self.gh.main.issues.values()], ["An ordinary card"])
@@ -753,35 +753,26 @@ class PrivacyTests(SyncCase):
         self.assertEqual(self.gh.main.issues, {})
         self.assertTrue(any("private card" in e for e in result.errors), result.errors)
 
-    def test_no_comment_may_carry_a_plan_card_title(self):
-        plan = self.card(title="Plan for the voice work", card_type="plan", status="draft",
-                         tab=None, labels=())
+    def test_no_comment_may_carry_a_memory_card_title(self):
+        memory = self.card(title="Remember the keyring rule", card_type="memory",
+                           status="active", tab=None, labels=())
         card = self.card(title="An ordinary card")
         self.sync()
-        self.board.append_thread(card.id, f"following {plan.title}", author="owner", kind="note")
+        self.board.append_thread(card.id, f"following {memory.title}", author="owner", kind="note")
         result = self.engine().run(confirm_bulk=True)
         self.assertEqual(self.gh.comments_of(1), [])
         self.assertTrue(any("never leaves this machine" in e for e in result.errors), result.errors)
 
-    def test_a_linked_plan_appears_as_an_id_and_never_as_a_title(self):
-        plan = self.card(title="Plan for the voice work", card_type="plan", status="draft",
-                         tab=None, labels=())
+    def test_links_plans_is_inert_and_never_reaches_an_issue(self):
+        # Card #X7NB dropped the plan card type. `links.plans` stays in the schema — 331 cards
+        # carry `plans: []` — but nothing writes it and the sync no longer reads it.
         card = self.card()
-        card.set("links", {**card.front["links"], "plans": [plan.id]})
+        card.set("links", {**card.front["links"], "plans": ["M3XJ"]})
         B.atomic_write(card.path, card.to_text())
         self.sync()
         body = self.issue()["body"]
-        self.assertIn(f"`#{plan.id}`", body)
-        self.assertNotIn("Plan for the voice work", body)
-
-    def test_a_private_plan_is_not_even_linked(self):
-        plan = self.card(title="A private plan of ours", card_type="plan", status="draft",
-                         tab=None, labels=(), private=True)
-        card = self.card()
-        card.set("links", {**card.front["links"], "plans": [plan.id]})
-        B.atomic_write(card.path, card.to_text())
-        self.sync()
-        self.assertNotIn(plan.id, self.issue()["body"])
+        self.assertNotIn("M3XJ", body)
+        self.assertNotIn("plan cards", body)
 
     def test_the_guard_is_one_choke_point_every_write_passes(self):
         """Even a call the engine never makes today is refused by the same guard."""

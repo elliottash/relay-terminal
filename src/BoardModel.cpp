@@ -1009,11 +1009,11 @@ void Model::setConfig(const QJsonObject &config)
         tab.folder = item.value(QStringLiteral("folder")).toString();
         tab.filter = item.value(QStringLiteral("filter")).toString();
         tab.title = item.value(QStringLiteral("title")).toString(tabTitle(tab.id));
-        // Plans and memory are card types with their own statuses and view, not work columns
-        // (TASKS-AND-MEMORY-DESIGN section 9, "One object model").
-        if (tab.folder == QStringLiteral("planning"))
-            tab.type = QStringLiteral("plan");
-        else if (tab.folder == QStringLiteral("memory"))
+        // Memory is a card type with its own statuses and view, not work columns
+        // (TASKS-AND-MEMORY-DESIGN section 9, "One object model"). `planning` used to be
+        // tagged the same way, for a `plan` card type that #X7NB dropped: it is an ordinary
+        // work-card folder, and the cards in it are `type: work`.
+        if (tab.folder == QStringLiteral("memory"))
             tab.type = QStringLiteral("memory");
         haveMemory = haveMemory || tab.type == QStringLiteral("memory");
         m_tabs << tab;

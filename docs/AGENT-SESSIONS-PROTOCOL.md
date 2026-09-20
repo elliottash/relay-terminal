@@ -2537,8 +2537,9 @@ or `/`, `search_files` without a `path` is refused with the same "pass a narrowe
 A Discuss edit is `board_update_card` / `board_move_card` as before: hash-checked, a `rewrite`
 entry holding the old and the new title or `## Issue`, an event line per write, and the brief asks
 the agent to say in its reply what it changed. The plan is the card's own `## Plan` section —
-design 12.4, "plan mode writes the plan onto a card", rather than a separate `type: plan` card; a
-card whose `links.plans` names plan cards has them read as context. The scope ends on the turn's
+design 12.4, "plan mode writes the plan onto a card". There is no `type: plan` card: #X7NB
+dropped the type on 2026-09-20, and `links.plans` is an inert front-matter key that nothing
+writes and nothing reads as context. The scope ends on the turn's
 `done`, `error` or `cancelled`. **Busy** is 19.16's rule since 2026-09-19: turns on *different*
 cards run at the same time, a second turn on the *same* card is refused, and so is anything while
 a cleanup runs (`board_busy`, text "… then start the plan."), with nothing written.

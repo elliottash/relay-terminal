@@ -43,7 +43,6 @@ issues/POLICY.md               generated: the Switchboard's rules for an agent t
 issues/<category>/             features/ changes/ design/ marketing/ … = tabs
 issues/<category>/<state>/     needs_qa_llm/ needs_qa_human/ needs_review/ needs_labels/
                                needs_ab/ deferred/ done/
-issues/planning/               plan cards (type: plan), done ones in planning/done/
 issues/memory/                 memory cards (type: memory), retired ones in memory/archive/
 issues/aliases/                alias cards (type: alias), retired ones in aliases/archive/
 issues/threads/<ID>.md         one append-only thread per card
@@ -61,7 +60,7 @@ issues/.private/…              the private root: same layout, gitignored (issu
 the file into the state subfolder" rule still holds, so an agent working without Relay sees the QA
 lanes by path alone. `relay-board.py check` fails when the folder and the status disagree.
 
-A card file keeps the name it was created with (`YYYY-MM-DD-slug.md` for work and plan cards,
+A card file keeps the name it was created with (`YYYY-MM-DD-slug.md` for work cards,
 `<name>.md` for memory cards). Renaming is never required; the id, not the path, is the identity.
 
 ## 2. Card file
@@ -117,7 +116,7 @@ Parsing preserves the front matter bytes: a card that is read and written back w
 change is byte-identical. The first field change re-emits the whole block in canonical order
 (`id, type, status, section, name, description, kind, topic, scope, private, labels, component, milestone,
 workstream, assignee, implemented_by, verified_by, session, waiting_on, parent, blocked_by, aliases, paths, pinned,
-reviewed, author, supersedes, approved_by, goal, label_count, label_output, codebook, priority,
+reviewed, author, supersedes, label_count, label_output, codebook, priority,
 rank, created, acceptance, source, links`, then any other key, sorted).
 
 ### 2.2 Fields
@@ -132,7 +131,6 @@ outside the range is clamped on every write.
 | Type | Extra fields | `status` | Folder |
 |---|---|---|---|
 | `work` (default) | `component`, `milestone`, `workstream`, `acceptance`, `implemented_by`, `verified_by`, `session`, `label_count`, `label_output`, `codebook`, `section` | `inbox`, `discussing`, `planning`, `planned`, `ready`, `executing`, `in-progress`, `needs-verification`, `needs-review`, `needs-labels`, `needs-ab`, `needs-qa-llm`, `needs-qa-human`, `deferred`, `done`, `dropped` | `<category>/` plus the state subfolder |
-| `plan` | `approved_by`, `goal` | `draft`, `approved`, `executing`, `done`, `dropped` | `planning/`, `planning/done/` |
 | `memory` | `name`, `description`, `kind`, `topic`, `scope`, `paths`, `pinned`, `supersedes`, `reviewed`, `author` | `active`, `retired` | `memory/`, `memory/archive/` |
 | `alias` | `name`, `kind`, `shell` | `active`, `retired` | `aliases/`, `aliases/archive/` |
 
@@ -431,5 +429,5 @@ repository was edited. Suggested position: after "Header fields".)*
 > not in the body; the body stays the document a QA session reads. Checklist items in `## Tasks`
 > carry `<!-- t:xx -->` markers, and the checkbox wins over the marker. Cards are referenced as
 > `#K7Q2` and items as `#K7Q2.a3`. Run `scripts/relay-board.py check` before committing, and
-> `index` to regenerate `issues/BOARD.md`. `type: plan` and `type: memory` cards (in `planning/`
-> and `memory/`) use the same format. Repositories without `issues/board.yaml` are unaffected.
+> `index` to regenerate `issues/BOARD.md`. `type: memory` cards (in `memory/`) and `type: alias`
+> cards (in `aliases/`) use the same format. Repositories without `issues/board.yaml` are unaffected.

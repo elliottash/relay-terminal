@@ -252,14 +252,23 @@ class CreateTests(BoardToolsTest):
         self.assertIn("error", self.tools.run("board_create_card", {
             "tab": "features", "status": "inbox", "title": "T", "request": ""}))
 
-    def test_a_plan_card_and_a_memory_card_go_to_their_own_folders(self):
-        plan = self.create(type="plan", status="draft", title="Voice mode plan",
-                           request="how we will build voice mode")
+    def test_a_memory_card_and_an_alias_card_go_to_their_own_folders(self):
         memory = self.create(type="memory", status="active", title="Qt version",
                              request="this repo builds against Qt 6.4")
-        self.assertEqual(self.board.card_by_id(plan).path.parent, self.root / B.PLAN_FOLDER)
+        alias = self.create(type="alias", status="active", title="Run the GUI checks",
+                            request="xvfb-run ctest")
         self.assertEqual(self.board.card_by_id(memory).path.parent, self.root / B.MEMORY_FOLDER)
-        self.assertEqual(self.board.card_by_id(plan).type, "plan")
+        self.assertEqual(self.board.card_by_id(alias).path.parent, self.root / B.ALIAS_FOLDER)
+        self.assertEqual(self.board.card_by_id(alias).type, "alias")
+
+    def test_there_is_no_plan_card_type(self):
+        # Card #X7NB: the type is gone, so the tool refuses it by name.
+        self.assertNotIn("plan", B.CARD_TYPES)
+        error = self.tools.run("board_create_card", {
+            "type": "plan", "tab": "features", "status": "inbox", "title": "T",
+            "request": "r"})["error"]
+        self.assertIn("type must be one of", error)
+        self.assertNotIn("plan", error)
 
     def test_a_created_card_passes_the_format_check(self):
         self.create()
@@ -600,6 +609,25 @@ class MoveTests(BoardToolsTest):
     def test_a_move_to_another_tab_moves_the_category(self):
         self.tools.run("board_move_card", {"id": self.card_id, "tab": "bugs", "reason": "it is a bug"})
         self.assertEqual(self.board.card_by_id(self.card_id).path.parent, self.root / "changes")
+
+    def test_an_alias_card_is_retired_and_brought_back(self):
+        # Card #W3KD: `aliases` is not a configured tab, so an alias card fell through to the
+        # strict tab lookup and could not be moved at all — which meant it could never be
+        # retired. A card type with a folder of its own ignores the tab, as memory does.
+        alias = self.create(type="alias", status="active", title="Run the GUI checks",
+                            request="xvfb-run ctest")
+        self.assertEqual(self.board.card_by_id(alias).path.parent, self.root / B.ALIAS_FOLDER)
+        self.tools.run("board_move_card", {"id": alias, "status": "retired",
+                                           "reason": "not used any more"})
+        card = self.board.card_by_id(alias)
+        self.assertEqual(card.status, "retired")
+        self.assertEqual(card.path.parent, self.root / B.ALIAS_FOLDER / "archive")
+        self.tools.run("board_move_card", {"id": alias, "status": "active",
+                                           "reason": "wanted again"})
+        card = self.board.card_by_id(alias)
+        self.assertEqual(card.status, "active")
+        self.assertEqual(card.path.parent, self.root / B.ALIAS_FOLDER)
+        self.assertEqual([str(x) for x in self.board.check()], [])
 
     def test_a_reason_is_always_required(self):
         self.assertIn("reason", self.tools.run(
@@ -1063,10 +1091,11 @@ class ClaimTests(BoardToolsTest):
         self.assertEqual(self.board.card_by_id(self.card_id).status, "inbox")
 
     def test_only_a_work_card_is_claimed(self):
-        plan = self.tools.run("board_create_card", {
-            "tab": "planning", "status": "draft", "type": "plan", "title": "A plan",
-            "request": "plan the thing"})
-        self.assertIn("only a work card", self.tools.run("board_claim", {"id": plan["id"]})["error"])
+        memory = self.tools.run("board_create_card", {
+            "status": "active", "type": "memory", "title": "The keyring rule",
+            "request": "tests run with RELAY_KEYRING=off"})
+        self.assertIn("only a work card",
+                      self.tools.run("board_claim", {"id": memory["id"]})["error"])
 
 
 class ClaimPromptTests(BoardToolsTest):

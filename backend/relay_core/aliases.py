@@ -454,8 +454,8 @@ def local_root(workspace: str | os.PathLike | None) -> Path | None:
     """The project's Switchboard folder when it has one, else `<repo>/.relay`.
 
     The folder is the first of `board.BOARD_FOLDERS` this project has — `.switchboard/` on a board
-    created from 2026-09-19 on, then `switchboard/`, then `issues/`.  `.relay/` is the same fallback the
-    plan cards use in a project with no board (`docs/TASKS-AND-MEMORY-DESIGN.md` section 9), so a
+    created from 2026-09-19 on, then `switchboard/`, then `issues/`.  `.relay/` is the same fallback
+    plan mode's own plan files use in a project with no board (`<root>/.relay/plans`), so a
     project gets local aliases before it gets a board, and adopting a board later is a move, not
     a conversion.
     """

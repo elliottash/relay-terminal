@@ -309,12 +309,6 @@ class TaskTests(TempBoardTest):
         self.assertIn("## Tasks", card.body)
         self.assertEqual(len(card.tasks()), 1)
 
-    def test_plan_cards_use_a_steps_heading(self):
-        card = B.Card(front={"id": "K7Q2", "type": "plan"}, body="# P\n", dirty=True)
-        card.add_task("Read the code")
-        self.assertIn("## Steps", card.body)
-        self.assertEqual(card.tasks()[0].text, "Read the code")
-
     def test_unknown_marker_status_is_rejected(self):
         card = B.Card(front={"id": "K7Q2"},
                       body="# T\n\n## Tasks\n- [ ] x <!-- t:a3 s=sideways -->\n", dirty=True)
@@ -390,7 +384,7 @@ class ThreadTests(TempBoardTest):
         self.assertEqual(ids, sorted(ids))
 
 
-# -------------------------------------------------------------- plans and memory
+# --------------------------------------------------------- memory, aliases, types
 
 class IssueSectionTests(TempBoardTest):
     """The section holding the user's own words (owner, 2026-09-18: call it Issue, not Request)."""
@@ -411,22 +405,26 @@ class IssueSectionTests(TempBoardTest):
 
 
 class CardTypeTests(TempBoardTest):
-    def test_plan_card(self):
-        card = B.new_card("plan", "Voice mode plan", "draft", card_id="M3XJ",
-                          links={"cards": ["K7Q2"]})
-        card.path = write(self.root / "planning" / "2026-09-17-voice-mode.md", card.to_text())
-        card = B.Card.load(card.path)
-        self.assertEqual(card.type, "plan")
-        self.assertEqual(card.expected_folder(), "planning")
-        self.assertEqual(self.board.check(), [])
+    def test_there_is_no_plan_card_type(self):
+        # Card #X7NB, owner 2026-09-20: a plan is the `## Plan` section of the work card it
+        # plans (and plan mode's own files under `.relay/plans`), never a card of its own.
+        self.assertNotIn("plan", B.CARD_TYPES)
+        write(self.root / "planning" / "2026-09-17-voice-mode.md",
+              "---\nid: M3XJ\ntype: plan\nstatus: draft\n---\n# Voice mode plan\n")
+        problems = self.board.check()
+        self.assertEqual([p.code for p in problems], ["unknown_type"])
+        self.assertIn("type 'plan' is not one of", problems[0].message)
 
-    def test_plan_done_lives_in_planning_done(self):
-        card = B.new_card("plan", "Old plan", "done", card_id="M3XK")
-        write(self.root / "planning" / "done" / "2026-09-17-old.md", card.to_text())
+    def test_the_planning_folder_is_a_tab_of_work_cards(self):
+        # Only the plan *type*'s claim on `planning/` went with #X7NB: the folder is one of
+        # the board's ordinary category tabs, and `planning` is also a work card's stage.
+        card = B.new_card("work", "Voice mode", "planning", card_id="M3XK")
+        write(self.root / "planning" / "2026-09-17-voice-mode.md", card.to_text())
         self.assertEqual(self.board.check(), [])
-        write(self.root / "planning" / "2026-09-17-old.md", card.to_text())
-        codes = {p.code for p in self.board.check()}
-        self.assertIn("folder_status_mismatch", codes)
+        loaded = self.board.card_by_id("M3XK")
+        self.assertEqual(loaded.type, "work")
+        self.assertEqual(loaded.expected_folder("planning"), "planning")
+        self.assertEqual(B.tab_of(self.board, loaded), "planning")
 
     def test_memory_card_one_fact_per_file(self):
         card = B.new_card("memory", "Run GUI checks under Xvfb", "active", card_id="P4QT",

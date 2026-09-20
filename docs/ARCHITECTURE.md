@@ -1559,8 +1559,9 @@ From the terminal: `#` after a space opens a card picker in agent or auto mode (
 `#` stays a Bash comment), a resolved `#K7Q2` travels with the prompt as `ask {cards: […]}`, and
 every agent card write prints one line in the pane that caused it.
 
-Plans and memories are card types, not work cards: the Plans tab has its own statuses
-(draft → approved → executing → done) and the Memory tab is one list per topic.
+Memory is a card type, not a work card: the Memory tab is one list per topic. There is no
+plan card type — card #X7NB dropped it on 2026-09-20 — so `planning/` is an ordinary tab of
+work cards and a plan is the `## Plan` section of the card it plans.
 
 ### The helper system: one agent per tab, in four panes
 

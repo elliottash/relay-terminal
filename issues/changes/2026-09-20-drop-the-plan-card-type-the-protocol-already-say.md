@@ -1,13 +1,13 @@
 ---
 id: X7NB
 type: work
-status: inbox
+status: needs-verification
 labels: [feature, switchboard]
-assignee: ''
+assignee: agent
 rank: m
 created: '2026-09-20'
 source: 'conversation, 2026-09-20'
-links: {plans: [], commits: [], evidence: [], related: [VQ8T], github: null}
+links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-20-drop-plan-cards/'], related: [VQ8T, W3KD], github: null}
 ---
 # Drop the plan card type: the protocol already says plans live on the work card
 
@@ -69,9 +69,40 @@ checkout with twenty live sessions holding card files. After this card the key i
 populate it and nothing reads it. Retiring it is its own card and its own decision.
 
 ## Tasks
-- [ ] `board.py`: the type, its folders, fields and heading <!-- t:p1 -->
-- [ ] `board_tools.py`: the three `PLAN_FOLDER` branches <!-- t:p2 -->
-- [ ] `BoardModel.cpp`: the planning-tab type tag, without changing `defaultCategory` <!-- t:p3 -->
-- [ ] `forge_sync.py`: `_plan_links` and the footer line <!-- t:p4 -->
-- [ ] docs, including the false `links.plans` context claim <!-- t:p5 -->
-- [ ] tests, including one that refuses `type: plan` <!-- t:p6 -->
+- [x] `board.py`: the type, its folders, fields and heading <!-- t:p1 -->
+- [x] `board_tools.py`: the three `PLAN_FOLDER` branches <!-- t:p2 -->
+- [x] `BoardModel.cpp`: the planning-tab type tag, without changing `defaultCategory` <!-- t:p3 -->
+- [x] `forge_sync.py`: `_plan_links` and the footer line <!-- t:p4 -->
+- [x] docs, including the false `links.plans` context claim <!-- t:p5 -->
+- [x] tests, including one that refuses `type: plan` <!-- t:p6 -->
+
+## Implementer check
+Landed 2026-09-20. `plan` is gone from `CARD_TYPES`, with `PLAN_STATUS_FOLDER`, `PLAN_FOLDER`,
+`PLAN_FIELDS`, the `TASK_HEADING` entry, the `expected_folder` / `tab_of` / `_status_from_folder` /
+`card_paths` branches, the three `B.PLAN_FOLDER` branches in `board_tools.py`, the `type="plan"`
+tag on the `planning` tab in `BoardModel.cpp`, `forge_sync._plan_links` with its three call sites
+and the "Relay plan cards (not synced)" footer, and the doc lines.
+
+Two notes on the plan as written:
+
+- **`defaultCategory`.** The `type="plan"` tag was only ever read at `BoardPane.cpp:4391` to keep
+  the `planning` tab out of quick add's default. With the tag gone the tab is `type="work"`, so the
+  skip is now written there by name, with the history in a comment. Same answer as before on every
+  board (`features` is first in the default config); unchanged on a board that lists `planning`
+  first, which the tag was what protected.
+- **#W3KD fell out of the same two lines** and is fixed here: `board_move_card` and `board_split_card`
+  now send an `alias` card to `aliases/`, as they do a memory card, instead of the strict tab
+  lookup that made `unknown tab 'aliases'` and left an alias card impossible to retire. Covered by
+  `tests/test_board_tools.py:MoveTests.test_an_alias_card_is_retired_and_brought_back`.
+
+Out of scope, as the card says: `links.plans` stays in the schema (331 cards carry `plans: []`);
+it is now inert — nothing writes it and nothing reads it.
+
+## QA checklist
+- [ ] `"plan" not in board.CARD_TYPES`, and `PLAN_FOLDER` / `PLAN_FIELDS` / `PLAN_STATUS_FOLDER` are gone — `tests/test_board.py:CardTypeTests.test_there_is_no_plan_card_type`.
+- [ ] A card file declaring `type: plan` is refused with `unknown_type: type 'plan' is not one of ('work', 'memory', 'alias')`, and `board_create_card {type: "plan"}` answers "type must be one of work, memory, alias." — same test and `tests/test_board_tools.py:CreateTests.test_there_is_no_plan_card_type`.
+- [ ] Still there and still working: the `## Plan` section and `stage_advance`'s `plan-written`, the Plan turn mode (`CARD_MODES`, `CARD_MODE_BOARD_TOOLS["plan"]`, `PLAN_HEADING`), the `plan` thread-entry kind, the `planning/` tab holding `type: work` cards, and `<root>/.relay/plans`.
+- [ ] Quick add still files into `features`, not `planning` (`BoardView::defaultCategory`).
+- [ ] An alias card round-trips active → retired → active (#W3KD).
+- [ ] An issue body's footer carries only the `relay-id` marker; no "Relay plan cards (not synced)" line.
+- [ ] Regression: `tests.test_board tests.test_board_tools tests.test_forge_sync` (426) green, `ctest -R board` (4) green, `relay-board.py check` 0 errors. `tests.test_board_protocol` has 2 failures that also fail on a clean `git archive HEAD` export (another session's area, unrelated).

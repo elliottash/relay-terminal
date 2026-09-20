@@ -1,0 +1,14 @@
+Internal ctest changing into directory: /home/elliott/repos/relay-terminal/build
+Test project /home/elliott/repos/relay-terminal/build
+    Start 53: board
+1/4 Test #53: board ............................   Passed    1.60 sec
+    Start 54: boardsections
+2/4 Test #54: boardsections ....................   Passed    0.09 sec
+    Start 55: boardworkspace
+3/4 Test #55: boardworkspace ...................   Passed    0.02 sec
+    Start 56: boardpane
+4/4 Test #56: boardpane ........................   Passed    0.11 sec
+
+100% tests passed, 0 tests failed out of 4
+
+Total Test time (real) =   1.83 sec

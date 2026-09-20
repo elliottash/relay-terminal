@@ -177,8 +177,8 @@ there.
   audit trail is `issues/threads/<ID>.md`. Read both before you decide a card is the one you
   want — a title match is not a match.
 - This board's tabs are features → `features/`, bugs → `changes/`, design → `design/`, marketing
-  → `marketing/`, planning → `planning/`; plan cards are in `planning/`, memory cards in
-  `memory/`.
+  → `marketing/`, planning → `planning/`; memory cards are in `memory/`, alias cards in
+  `aliases/`.
 
 ### File a card — `board_create_card`
 

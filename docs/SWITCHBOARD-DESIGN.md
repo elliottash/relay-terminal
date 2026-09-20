@@ -80,7 +80,7 @@ needing QA would live in two places. Deferred and Done are cross-category status
 | Planning | `planning` | top | a Plan turn is writing its plan (#3XZV) |
 | Planned | `planned` | top | the plan is written, not started |
 | Ready | `ready` (legacy `open`) | top | agreed, not started |
-| Executing | `executing` | top | the plan is being carried out; collects plan cards too |
+| Executing | `executing` | top | the plan is being carried out |
 | In progress | `in-progress` | top | `assignee` set (person or agent) |
 | Needs verification | `needs-verification` | top | built, waiting for its implementer's checklist to be checked |
 | Waiting | `needs-review`, `needs-labels`, `needs-ab` | `needs_review/` … | chip names the kind; not landing states (skill rule 6) |

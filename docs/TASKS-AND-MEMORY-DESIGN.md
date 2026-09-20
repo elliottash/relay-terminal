@@ -436,7 +436,11 @@ Recommendations accepted for questions 1, 2, 3, 4, 7, 10 and 11. Changes:
   | plan | `issues/planning/` | Plans tab | draft → approved → executing → done / dropped |
   | memory | `issues/memory/` | Memory tab, grouped by topic | active / retired |
 
-  - **Plans** (`type: plan`) can be used without any other cards (the Plans tab alone). The body has the plan prose and
+  - **Plans** — *never built as a card type, and dropped on 2026-09-20 (card #X7NB): there is no `type: plan`.
+    A plan is the `## Plan` section of the work card it plans, and plan mode writes its own files under
+    `<root>/.relay/plans`. The `plan` row in the table above and the paragraph below are the original
+    design, kept as the record of what was proposed.*
+    Plans (`type: plan`) can be used without any other cards (the Plans tab alone). The body has the plan prose and
     a `## Steps` checklist (same item ids and markers as `## Tasks`). A step may point to a work card or one of its
     items, so a plan covers part of a card, one card or several; finishing a step updates its target and logs a thread
     event there. Cards list linked plans in `links.plans`; "Plan this" on a card creates a linked plan card; a step can
