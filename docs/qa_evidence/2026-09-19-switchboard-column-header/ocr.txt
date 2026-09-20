@@ -1,0 +1,17 @@
+01 header row:        Add service your and own on key to under the model Options provider; > Models Relay to keep keeps it request between metadata you and only. your ‘CARD CREATED UPDATED 
+01 'sort:' controls:  0
+01 dates in the cells: 0
+02 manual order:      Bravo Charlie Alpha 
+03 newest order:      Charlie Bravo Alpha 
+03 header row:        Add service your and own on key to under the model Options provider; > Models Relay to keep keeps it request between metadata you and only. your ‘CARD CREATED ¥ UPDATED 
+04 oldest order:      Alpha Bravo Charlie 
+04 header row:        Add service your and own on key to under the model Options provider; > Models Relay to keep keeps it request between metadata you and only. your ‘CARD CREATED &. UPDATED 
+05 updated order:     Alpha Bravo Charlie 
+05 header row:        Add service your and own on key to under the model Options provider; > Models Relay to keep keeps it request between metadata you and only. your ‘CARD CREATED UPDATED ¥ 
+06 notice says:       The list is sorted by recently updated, so reordering is off. Click that
+07 gear sweep on y=154: opened at x=800
+07 page intro:        To run a command as administrator (user "root"), use "sudo <command>". Sections are a view of the statuses: nothing here moves a card or changes one. A status no section
+07 rows (name,statuses,Merge…,buttons): Relay Free: this pane's prompts and tool context go to Relay's hosted = Ges ies Merges) (A) Iv)|Add your own key under Options » Models to keep it between you and your # Discussing discussing Merge... A VX|Ready tostart ready Merge... AW |x|# In progress in-progress Merge... A oY Xx|= waiting needs-review, needs-labels, needs-ab Merge... AW |x|Needs Qa needs-qa-lim, needs-qa-human Merge... AY |x|Verified closed and signed merge...| (a| (¥] [x|Done done, dropped merge...| (a| (¥] [x|
+07 footer:            nothing here moves a card or changes one. A status no section
+09 narrow header words: 2
+09 narrow dates:        0
