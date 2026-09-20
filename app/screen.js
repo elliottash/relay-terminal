@@ -64,11 +64,28 @@ function colorOf(packed) {
 // Rows per request. The protocol caps a page at 200; a phone screen holds far fewer, and a
 // smaller page reaches the reader sooner.
 const HISTORY_PAGE = 80;
+// The protocol's own cap on one page (section 6.5). Closing a seam asks for the whole gap up to
+// this, rather than a page at a time: what costs there is the round trip, not the rows.
+const HISTORY_CAP = 200;
 // Rows kept here. Reaching live drops the lot, so this only bounds one journey upward.
 const HISTORY_MAX = 2000;
 // Fetch the next page while the top is still this far away, so the rows are there before the
 // finger is.
 const PREFETCH_PX = 600;
+// No more than one `history_get` this often while the reader is up in the scrollback, where the
+// seam is in front of them and a page they are waiting for is a page they can see arrive.
+const HISTORY_INTERVAL = 250;
+// And no more than one this often while they are at the live end. Output scrolling pushes a row
+// off the screen on every frame, so the seam reopens on every frame, and asking the moment it is
+// open is asking once per frame: on a Pixel 8 watching a 20 000-character reply that was 188
+// requests in five seconds, 121 of them refused by the desktop's budget of 120 a minute (#3H5T).
+// The seam still closes — section 6.5 does not let a client paint a column with a hole in it, and
+// a reader who moves off the bottom gets the short cadence in `scrolled()` — it just stops
+// closing once per frame over a handful of rows nobody is looking at.
+const HISTORY_LIVE_INTERVAL = 1000;
+// After a `rate_limited` — this client asking faster than the desktop will answer, which is the
+// client's own bug and never the reader's business — wait this long before asking again.
+const HISTORY_BACKOFF = 2000;
 
 export class ScreenView {
   constructor(root) {
@@ -92,21 +109,42 @@ export class ScreenView {
     this.liveBase = null;        // absolute row of the live block's first line (frame `base`)
     this.more = true;            // is there anything older than historyTop
     this.pending = false;        // one request in flight at a time
+    this.askAfter = 0;           // earliest the next one may go out (Date.now), see HISTORY_INTERVAL
+    this.askTimer = null;        // a want that arrived inside that window, waiting to be merged
     this.behind = false;
+    this.needsFit = true;        // something may have moved under fit(); nothing else measures
+    this.fitCols = 0;            // the `cols` the current font size was measured for
     this.onNeedHistory = null;   // (beforeRow | null, count) => void
     this.onBehind = null;        // (behind) => void, for the "new output" affordance
     this.fit();
-    this._onResize = () => this.fit();
+    this._onResize = () => this.refit();
     this._onScroll = () => this.scrolled();
+    // A webfont arriving after the first paint changes the advance width, so the measured ratio
+    // goes with it.
+    this._onFonts = () => { this.ratio = 0; this.refit(); };
     window.addEventListener('resize', this._onResize);
     window.addEventListener('orientationchange', this._onResize);
     this.root.addEventListener('scroll', this._onScroll, { passive: true });
+    // The container can change size with the window standing still — app/viewport.js shrinking
+    // the terminal for an on-screen keyboard, the pane view laying out beside it — and before
+    // fit() cached anything, re-measuring on every frame hid that. The observer is what replaces
+    // it. It also fires once on observe, which is harmless: fit() finds the same width and writes
+    // nothing, so there is no loop.
+    if (window.ResizeObserver) {
+      this._observer = new ResizeObserver(this._onResize);
+      this._observer.observe(this.root);
+    }
+    if (document.fonts) document.fonts.addEventListener('loadingdone', this._onFonts);
   }
 
   destroy() {
     window.removeEventListener('resize', this._onResize);
     window.removeEventListener('orientationchange', this._onResize);
     this.root.removeEventListener('scroll', this._onScroll);
+    if (this._observer) this._observer.disconnect();
+    if (document.fonts) document.fonts.removeEventListener('loadingdone', this._onFonts);
+    if (this.askTimer) clearTimeout(this.askTimer);
+    this.askTimer = null;
   }
 
   // The host owns the size; we only scale the font so `cols` columns fit the screen.
@@ -116,7 +154,16 @@ export class ScreenView {
   // the start (style.css), which is what stops the grid being sized for a width it no longer has
   // and spilling into a horizontal scrollbar. Re-fitting is a no-op unless the size really moved,
   // because changing the font height under somebody who is reading would move their line.
+  //
+  // It measures only when something might have moved. Both reads below — `clientWidth` and
+  // `getComputedStyle` — make the browser resolve layout and style, and fit() runs on every frame
+  // the desktop sends, which made it the phone's top JS function at 22 % of non-idle JS through a
+  // streamed reply (#3H5T). Nothing it measures changes between two frames: the width moves on a
+  // resize, a rotation, a browser zoom or a page-font change, all of which arrive as events, and
+  // `refit()` is what they all call. `cols` is the one thing the desktop can change under us, so
+  // it is part of the key rather than an event.
   fit() {
+    if (!this.needsFit && this.fitCols === this.cols) return;
     const available = this.root.clientWidth || window.innerWidth;
     if (!available || !this.cols) return;
     // clientWidth counts the padding, and the padding is not the same on a phone as on a wider
@@ -129,9 +176,20 @@ export class ScreenView {
     const exact = ((available - inset - 2) / this.cols) / this.advance();
     const size = Math.max(6, Math.min(16, Math.floor(exact * 100) / 100));
     const text = `${size.toFixed(2)}px`;
+    this.needsFit = false;
+    this.fitCols = this.cols;
     if (text === this.grid.style.fontSize) return;
     this.grid.style.fontSize = text;
     this.grid.style.lineHeight = `${(size * 1.25).toFixed(2)}px`;
+  }
+
+  // Something that fit() reads may have moved: measure again now, and once. Everything that can
+  // change the answer goes through here — the window's own resize and orientation events, which
+  // is also how a browser zoom and a change of the page's font size arrive, the ResizeObserver
+  // for a container the window never hears about, and a webfont finishing.
+  refit() {
+    this.needsFit = true;
+    this.fit();
   }
 
   // The advance width of one monospace glyph as a fraction of the font size, measured in the
@@ -252,13 +310,19 @@ export class ScreenView {
   scrolled() {
     // Even at the bottom there may be a seam to close: the gap sits directly above the live
     // block, which is exactly what somebody at the bottom is looking at the edge of.
-    if (this.atBottom()) this.setBehind(false);
+    if (this.atBottom()) {
+      this.setBehind(false);
+    } else if (this.askAfter - Date.now() > HISTORY_INTERVAL) {
+      // Coming off the live end puts the seam in front of them; the slow cadence that applies
+      // while they are down there does not follow them up.
+      this.askAfter = Date.now() + HISTORY_INTERVAL;
+    }
     this.requestIfNeeded();
   }
 
-  // Is the reader close enough to the seam to see a hole in it? A small gap is closed whatever
-  // they are looking at, because it costs one request; a large one waits until they come down
-  // towards it, so a chatty shell cannot make the phone fetch rows nobody will read.
+  // Is the reader close enough to the seam to see a hole in it? A small gap is closed wherever
+  // they are looking above the live end, because it costs one request; a large one waits until
+  // they come down towards it, so a chatty shell cannot make the phone fetch rows nobody reads.
   nearSeam() {
     const gap = this.gapRows();
     if (gap === 0) return false;
@@ -269,13 +333,22 @@ export class ScreenView {
 
   requestIfNeeded() {
     if (this.pending || !this.onNeedHistory) return;
+    // One request at a time, and the question is only *asked* every HISTORY_INTERVAL. A want that
+    // arrives inside the window is not dropped — `askLater` brings it back, and by then the gap
+    // it asks about is one request rather than several (#3H5T). Everything below this line reads
+    // layout; above it is arithmetic, which is what keeps a frame cheap.
+    const wait = this.askAfter - Date.now();
+    if (wait > 0) { this.askLater(wait); return; }
+    // Watching the live end is the cheap cadence; reading up in the scrollback is the quick one.
+    this.askAfter = Date.now()
+      + (this.atBottom() ? HISTORY_LIVE_INTERVAL : HISTORY_INTERVAL);
     // The seam comes first: a hole in the middle of the column is worse than being a page short
     // of the top, and closing it is what keeps the row numbers honest.
     if (this.nearSeam()) {
       const bottom = this.historyBottom();
-      const want = Math.min(this.gapRows(), HISTORY_PAGE);
-      this.pending = true;
-      this.onNeedHistory(bottom + want, want);
+      // The whole gap in one request, not a page of it: the round trip is the cost.
+      const want = Math.min(this.gapRows(), HISTORY_CAP);
+      this.ask(bottom + want, want);
       return;
     }
     if (!this.more) return;
@@ -284,8 +357,40 @@ export class ScreenView {
     // holds, because the desktop's own view may be sitting back in its scrollback.
     if (this.historyTop !== null && this.root.scrollTop > PREFETCH_PX) return;
     const before = this.historyTop !== null ? this.historyTop : this.liveBase;
+    this.ask(before === null ? null : before, HISTORY_PAGE);
+  }
+
+  // One request goes out, and nothing else until it has been answered or refused.
+  ask(beforeRow, count) {
     this.pending = true;
-    this.onNeedHistory(before === null ? null : before, HISTORY_PAGE);
+    this.onNeedHistory(beforeRow, count);
+  }
+
+  // A want that turned up inside the interval, kept until it may go. One timer: the wants merge,
+  // because what the next request asks for is read off the gap as it stands then, not now.
+  askLater(ms) {
+    if (this.askTimer) return;
+    this.askTimer = setTimeout(() => {
+      this.askTimer = null;
+      this.requestIfNeeded();
+    }, ms);
+  }
+
+  // The desktop would not answer a `history_get`. `rate_limited` means this client asked faster
+  // than the budget in section 10.1 allows, which is ours to fix and not something to put under
+  // the reader's composer: back off and ask again. Any other refusal means the page is not
+  // coming, so stop asking until a drag asks for it.
+  refused(code) {
+    this.pending = false;
+    if (code === 'rate_limited') {
+      this.askAfter = Date.now() + HISTORY_BACKOFF;
+      // Asked for again when the back-off is up rather than whenever the next frame happens to
+      // arrive: a refusal at the end of a burst of output would otherwise leave the hole it was
+      // closing until something else moved.
+      this.askLater(HISTORY_BACKOFF);
+      return;
+    }
+    this.more = false;
   }
 
   // One `history` reply. Rows carry absolute numbers, so which end it belongs to, and what of it

@@ -1,0 +1,145 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!--
+  A bench for app/screen.js: the real ScreenView, in a real browser, with the desktop replaced by
+  this page.
+
+  It exists because what tests/test_web_screen.py asserts is *cost* — how many `history_get`s a
+  streamed reply provokes and how often `fit()` makes the browser resolve style and geometry — and
+  cost is only visible with a real frame loop and a real style engine behind it. Driving the
+  client's own page (app/index.html) would bring the whole app, its Noise link and a desktop along
+  with it, and tests/test_remote_browser.py already does that for the behaviour.
+
+  It lives under tests/ rather than app/ on purpose: app/ is what a phone downloads.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>screen.js bench</title>
+    <link rel="stylesheet" href="/app/style.css">
+    <style>
+      /* A phone-ish viewport with a scroll container of a fixed size: the numbers below are
+         counts of reads and requests, so the only thing the geometry has to do is hold still. */
+      html, body { margin: 0; height: 100%; background: #000; }
+      #terminal-pane { display: flex; flex-direction: column; height: 100%; width: 400px; }
+    </style>
+  </head>
+  <body>
+    <div id="terminal-pane"><div id="screen-wrap"></div></div>
+    <script type="module">
+      import { ScreenView } from '/app/screen.js';
+
+      const root = document.getElementById('screen-wrap');
+      // Every layout read the view makes on its container, counted. `getComputedStyle` resolves
+      // style and `clientWidth` flushes layout; doing either once per frame is finding 4 of #3H5T.
+      const counts = { style: 0, clientWidth: 0 };
+      const nativeStyle = window.getComputedStyle.bind(window);
+      window.getComputedStyle = (element, ...rest) => {
+        if (element === root) counts.style += 1;
+        return nativeStyle(element, ...rest);
+      };
+      const width = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth');
+      Object.defineProperty(root, 'clientWidth', {
+        configurable: true,
+        get() { counts.clientWidth += 1; return width.get.call(this); },
+      });
+
+      const ROWS = 24;
+      const COLS = 80;
+      const state = { view: null, base: 0, asks: [], answers: 0, refuse: null, delay: 5 };
+
+      // One numbered stream, as tests/test_remote_browser.py's ScrollbackSource does it: absolute
+      // row K reads `row-K`, so a hole or a repeat in the column is visible as a number.
+      const row = (screenRow, absolute) => ({ row: screenRow, segs: [[`row-${absolute}`, 0, 0, 0]] });
+      const live = () => Array.from({ length: ROWS }, (_, n) => row(n, state.base + n));
+
+      // The desktop's answer to one `history_get`, delivered a few milliseconds later the way the
+      // wire would. Rows carry their absolute number, which is what the view de-duplicates on.
+      function answer(beforeRow, count) {
+        if (!state.view) return;
+        if (state.refuse) { state.view.refused(state.refuse); return; }
+        const end = beforeRow === null ? state.base : Math.max(0, Math.min(beforeRow, state.base));
+        const want = Math.min(count, end);
+        const start = end - want;
+        state.answers += 1;
+        state.view.applyHistory({
+          t: 'history', from_row: start, total: state.base, more: start > 0,
+          lines: Array.from({ length: want }, (_, n) => row(start + n, start + n)),
+        });
+      }
+
+      // One more line of output: the live block moves down a row and every row on screen changes,
+      // which is what the desktop sends today — a scroll makes the whole frame `full` (#3H5T
+      // finding 1, which is a separate fix). `kind` chooses whether that arrives as the snapshot
+      // it is today or as the diff it should become.
+      function frame(kind) {
+        state.base += 1;
+        const message = { t: kind, pane: 'pane-1', base: state.base, history: state.base,
+                          cursor: { row: ROWS - 1, col: 0, visible: true }, lines: live() };
+        if (kind === 'screen_snapshot') Object.assign(message, { rows: ROWS, cols: COLS, alt: false });
+        state.view.apply(message);
+      }
+
+      function open(options = {}) {
+        if (state.view) state.view.destroy();
+        state.base = options.base ?? 2000;
+        state.asks = [];
+        state.answers = 0;
+        state.refuse = options.refuse ?? null;
+        state.delay = options.delay ?? 5;
+        state.view = new ScreenView(root);
+        state.view.onNeedHistory = (beforeRow, count) => {
+          state.asks.push({ before_row: beforeRow, count, at: Date.now() });
+          setTimeout(() => answer(beforeRow, count), state.delay);
+        };
+        frame('screen_snapshot');
+      }
+
+      // `frames` frames of output at `everyMs`, then the counters as they stand. The first page of
+      // scrollback has to be in before the count means anything — until then there is no seam to
+      // chase — so the caller resets with `zero()` once it has settled.
+      function stream(frames, everyMs, kind) {
+        return new Promise((done) => {
+          let n = 0;
+          const tick = setInterval(() => {
+            frame(kind || 'screen_snapshot');
+            n += 1;
+            if (n >= frames) { clearInterval(tick); done(true); }
+          }, everyMs);
+        });
+      }
+
+      function zero() {
+        counts.style = 0;
+        counts.clientWidth = 0;
+        state.asks = [];
+        state.answers = 0;
+      }
+
+      function report() {
+        const view = state.view;
+        return {
+          asks: state.asks.length,
+          answers: state.answers,
+          wanted: state.asks.map((ask) => ask.count),
+          style: counts.style,
+          clientWidth: counts.clientWidth,
+          gap: view.gapRows(),
+          more: view.more,
+          pending: view.pending,
+          held: view.history.length,
+          atBottom: view.atBottom(),
+          fontSize: view.grid.style.fontSize,
+          // The column as it is painted: history then live, by absolute number. A hole or a
+          // repeat in it means a cheaper client is also a wrong one.
+          column: [...root.querySelectorAll('.screen-history .screen-row, .screen-grid > .screen-row')]
+            .map((node) => parseInt(node.textContent.trim().split('-')[1], 10)),
+        };
+      }
+
+      window.screenHarness = { open, frame, stream, zero, report, state, counts,
+                               scrollTo: (top) => { root.scrollTop = top; } };
+      document.body.dataset.harnessReady = '1';
+    </script>
+  </body>
+</html>
