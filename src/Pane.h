@@ -1369,11 +1369,22 @@ public:
         const QList<relay::models::Entry> rows = catalog.ofPreset(m_currentPreset);
         return rows.isEmpty() ? QString() : rows.first().key;
     }
+    // The worker's `presets` rows as this pane holds them. The catalog they carry is the
+    // machine's, not this pane's: the same keys, the same models, whoever asked. A helper panel
+    // in a tab whose helper worker has not been asked anything yet borrows them, so its model box
+    // is the same list as this one rather than four rows and a gear (#PK5Q, §30.7).
+    QJsonArray presets() const { return m_presets; }
     // Alt+M (agent.modelBox): the quick pick — the model box drops open where it is.
     void openModelBox() {
         if (!m_modelBox) return;
         m_modelBox->setFocus(Qt::ShortcutFocusReason);
         m_modelBox->showPopup();
+    }
+    // Alt+E (agent.effortBox): the level box beside the model box drops open.
+    void openEffortBox() {
+        if (!m_effortBox || !m_effortBox->isVisible() || m_effortBox->count() == 0) { status(QStringLiteral("This model has no reasoning setting.")); return; }
+        m_effortBox->setFocus(Qt::ShortcutFocusReason);
+        m_effortBox->showPopup();
     }
     // Ctrl+Alt+M (agent.model), /model with no argument, and the box's "more models…" row.
     void openModelPicker() {

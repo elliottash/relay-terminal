@@ -1153,6 +1153,7 @@ private:
         else if (id == QStringLiteral("agent.flashAgent")) pane->toggleFlashAgent();   // model roles
         else if (id == QStringLiteral("agent.model")) pane->openModelPicker();          // Ctrl+Alt+M, /model
         else if (id == QStringLiteral("agent.modelBox")) pane->openModelBox();          // Alt+M
+        else if (id == QStringLiteral("agent.effortBox")) pane->openEffortBox();        // Alt+E
         else if (id == QStringLiteral("agent.modelOptions")) openSettingsPane(relay::SettingsPane::Mode::Options, QStringLiteral("models"));   // Ctrl+Shift+M, /models
         else if (id == QStringLiteral("agent.localAgent")) pane->toggleLocalAgent();   // /local
         else if (id == QStringLiteral("agent.planToggle")) pane->togglePlanMode();

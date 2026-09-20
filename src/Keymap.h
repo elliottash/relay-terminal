@@ -339,6 +339,9 @@ private:
         // the Switchboard's composer, an open card's reply box, and the panels in Options,
         // Actions and Sessions. It is the same control, so it answers the same keys.
         add("agent.modelBox", "agent", "Models: drop this prompt box's model box open (the quick pick)", {QStringLiteral("Alt+M")});
+        // E for effort (owner, 2026-09-20): the level box beside the model box drops open, the
+        // quick pick for the reasoning level the way Alt+M is for the model.
+        add("agent.effortBox", "agent", "Reasoning: drop this prompt box's level box open (the quick pick)", {QStringLiteral("Alt+E")});
         add("agent.model", "agent", "Models: the picker — every model with filter, sort and reasoning level (/model)", {QStringLiteral("Ctrl+Alt+M")});
         add("agent.modelOptions", "agent", "Model options: Options › Models — providers, which models the picker shows, their order (/models)", {QStringLiteral("Ctrl+Shift+M")});
         // No default key: /local in the prompt box is the fast path, and Alt+L is not worth

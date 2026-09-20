@@ -91,7 +91,8 @@ that conflict.
 | Ctrl+Shift+A | Actions: everything you can do now, with its keys, in a list you can filter (again to close) |
 | Ctrl+Shift+O | Options: what persists, a tab per section (again to close; also Ctrl+, and the gear) |
 | Ctrl+Shift+S | Switchboard: this repository's cards, threads and plans (again to close it) |
-| Alt+M, Ctrl+Alt+M | Models: drop the pane's model box open / the full picker with filter, sort and reasoning level (`/model`) |
+| Alt+M, Ctrl+Alt+M | Models: drop the pane's model box open / the full picker with filter and sort (`/model`) |
+| Alt+E | Reasoning: drop the pane's level box open (also Alt+. / Alt+, and `/effort`) |
 | Ctrl+Shift+M | Model options: Options › Models (`/models`) |
 | Ctrl+Shift+Y | Sessions: resume a saved session (`/resume`) |
 | Alt+A, Ctrl+Shift+X | Subagents: this pane's subagent tabs / stop all running subagents |

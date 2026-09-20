@@ -7,7 +7,7 @@
 #
 #   implementer-a-box-open.png    the model box open: role rows, then one row per catalog model
 #                                 in rank order, lower-case, then "more models…" and "customize…"
-#   implementer-b-picker.png      Ctrl+Shift+M: the picker — filter, sort menu, columns, the
+#   implementer-b-picker.png      Ctrl+Alt+M: the picker — filter, sort menu, columns, the
 #                                 reasoning buttons for the highlighted row, use / cancel
 #   implementer-c-picker-filter.png  "flash" typed: one flat list of the rows that match
 #   implementer-d-picker-sort.png the sort menu open
@@ -99,7 +99,7 @@ shot a-box-open
 k Escape; sleep 0.5
 
 # b. the picker
-k ctrl+shift+m; sleep 2
+k ctrl+alt+m; sleep 2
 shot b-picker
 # c. filtered
 xdotool type --delay 80 "flash"; sleep 1
