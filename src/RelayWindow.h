@@ -43,6 +43,7 @@
 #include "Isolation.h"        // the per-pane memory limits this page edits
 #include "EscapeeCaps.h"     // the opt-in cap on tmux and Chrome, which leave their pane (#Y4RX)
 #include "LocalModelsSettings.h"
+#include "RemoteSettings.h"   // Options › Remote: the always-on switch and the address (#PH0N)
 #include "ModelCatalog.h"      // Options › Models: providers, the checklist, the order (owner, 2026-09-20)
 #include "SubagentTranscript.h"
 #include "SubagentsPanel.h"
@@ -365,6 +366,21 @@ public:
             // reaches or leaves a tab that no hook below names — once a second while one is on.
             connect(&share, &relay::RemoteShare::tabSharesChanged, this, [this] { scheduleTabShareSync(); });
             connect(&share, &relay::RemoteShare::secondPassed, this, [this] { syncTabShares(); });
+            // Remote control as a service (#PH0N): while the switch is on, every pane with a
+            // screen is published as it appears — the same one-second backstop, for the same
+            // reason, and once more the moment the switch itself moves so that the panes already
+            // open are published too.
+            connect(&share, &relay::RemoteShare::secondPassed, this, [this] { syncAlwaysOnShares(); });
+            connect(&share, &relay::RemoteShare::alwaysOnChanged, this, [this](bool) {
+                m_autoShared.clear();
+                syncAlwaysOnShares();
+                updateRemotePlug();
+                refreshSettingsPanes();
+            });
+            connect(&share, &relay::RemoteShare::remoteStateChanged, this, [this] {
+                updateRemotePlug();
+                refreshSettingsPanes();   // Options › Remote is showing the state that has moved
+            });
         }
         // No toolbar: the tab bar starts at the top. Its actions live in the palette (Ctrl+Shift+A).
         Keymap::instance().listen(this, [this] { syncChromeButtons(); });
@@ -431,6 +447,12 @@ public:
     ~RelayWindow() override {
         qApp->removeEventFilter(this);
         stopBoardWorkers();
+        // The panes under this window are deleted after this body runs, and a shared pane's view
+        // dying makes RemoteShare emit into everything still connected to it — including this
+        // window's own slots, which then read a tab bar that is already half destroyed (SIGSEGV in
+        // refreshSharingPanes, QStackedLayout::widget). It was reachable before whenever a pane was
+        // shared at quit; with remote control on (#PH0N) every pane is shared, so it is every quit.
+        disconnect(&relay::RemoteShare::instance(), nullptr, this, nullptr);
     }
 
     // Build a tab from a saved tab. Returns false if no pane could be created. The tab is either
@@ -3546,6 +3568,10 @@ private:
                                 QStringLiteral("Voice needs one of its own, whatever model your panes run"),
                                 QStringLiteral("API keys…"), [this] { runAction(QStringLiteral("agent.modelKeys")); });
         sections << voice;
+
+        // Remote (#PH0N): one switch and the address it uses. The page is built where the
+        // settings live (src/RemoteSettings.cpp), so a test can read its rows without a window.
+        sections << remoteSection();
 
         relay::SettingsSection privacy;
         privacy.id = QStringLiteral("privacy");
@@ -7378,6 +7404,88 @@ private:
         }
     }
 
+    // ----- remote control: every pane published as it appears (#PH0N, phase 1.2) ---------------
+    // While the switch in Options › Remote is on, a pane with a screen is reachable by the phones
+    // the owner has paired from the moment it exists, with no share button pressed — that is what
+    // "all day, from the bus" means. Guests are untouched: the sidecar shows a guest only the panes
+    // their invite names. Withdrawing needs nothing here, because the share ends with the pane's
+    // view (RemoteShare::sharePane connects its destruction to stopSharing, which sends `unpane`).
+    //
+    // Silent on purpose: this is a service rather than something the person just did, and a toast
+    // per pane at every start would be the loudest thing in the window. The indicator in the
+    // chrome is what says it is on.
+    void syncAlwaysOnShares() {
+        relay::RemoteShare &share = relay::RemoteShare::instance();
+        if (!share.alwaysOn()) return;
+        QSet<QString> live;
+        for (Pane *pane : allPanes()) {
+            const QString token = pane->sessionToken();
+            if (token.isEmpty()) continue;
+            live.insert(token);
+            if (share.isSharing(token) || m_autoShared.contains(token)) continue;
+            // Remembered whether it worked or not: a pane with no screen to share must not be
+            // asked again every second, and one that fails because the sidecar is down would only
+            // fail the same way. The switch moving clears the set and tries the lot again.
+            m_autoShared.insert(token);
+            QString error;
+            pane->startSharing(QString(), &error);
+        }
+        m_autoShared.intersect(live);   // a closed pane's token is nobody's business
+    }
+
+    // What the plug and Options › Remote show. `remote_state` is the sidecar's own word and is
+    // taken as soon as it arrives; until it does, the switch is all this desktop knows.
+    relay::remotesettings::State shownRemoteState() const {
+        relay::RemoteShare &share = relay::RemoteShare::instance();
+        relay::remotesettings::State state = share.remoteState();
+        if (share.alwaysOn() && !state.on) {
+            state.on = true;
+            if (state.address.isEmpty()) state.address = relay::remotesettings::address();
+        }
+        return state;
+    }
+
+    // The dot on the join plug: the owner's phones that are connected right now (#PH0N). It is the
+    // bell's own badge, so one dot means one, and two means a pill with the number in it.
+    void updateRemotePlug() {
+        if (!m_connect) return;
+        const relay::remotesettings::State state = shownRemoteState();
+        m_connect->setBadge(state.online ? state.devices : 0);
+        m_connect->setToolTip(state.on ? relay::remotesettings::statusLine(state)
+                                       : QStringLiteral("Join a shared session"));
+    }
+
+    // "Disconnect all" (#PH0N, "forgot it was on"). The phones go and the service goes with them:
+    // the sidecar has no "keep running but drop the devices" line today, so this turns the switch
+    // off and says so, rather than pretending the two are different things.
+    void disconnectRemoteDevices() {
+        relay::RemoteShare::instance().setAlwaysOn(false);
+        refreshSettingsPanes();
+        notice(QStringLiteral("Remote control off — every phone is disconnected and nothing is "
+                              "published. Options › Remote turns it back on."), 8000);
+    }
+
+    // Options › Remote (#PH0N): the rows are relay::remotesettings::section(), and what they write
+    // goes through RemoteShare, which owns the sidecar and the panes.
+    relay::SettingsSection remoteSection() {
+        relay::remotesettings::SectionHooks hooks;
+        relay::RemoteShare &share = relay::RemoteShare::instance();
+        hooks.addresses = share.addresses();
+        hooks.state = shownRemoteState();
+        hooks.setAlwaysOn = [this](bool on) {
+            relay::RemoteShare::instance().setAlwaysOn(on);
+            // Queued: this runs from the switch's own signal, and the refresh below deletes it.
+            QTimer::singleShot(0, this, [this] { syncAlwaysOnShares(); refreshSettingsPanes(); });
+        };
+        hooks.setAddress = [this](const QString &value) {
+            relay::RemoteShare::instance().setRemoteAddress(value);
+            QTimer::singleShot(0, this, [this] { refreshSettingsPanes(); });
+        };
+        // Pairing is the share dialog's, where the QR and the five digits to compare already live.
+        hooks.pairPhone = [this] { runAction(QStringLiteral("pane.share")); };
+        return relay::remotesettings::section(hooks);
+    }
+
     void updateTitles() {
         // Layout changes all end here (split, close, move, adopt), so this is where a pane that
         // reached or left a tab shared whole is noticed at once rather than on the next second.
@@ -7804,6 +7912,15 @@ private:
         m_connect->setToolTip(QStringLiteral("Join a shared session"));
         connect(m_connect, &QToolButton::clicked, this, [this] {
             QMenu menu(this);
+            // Remote control's own line, first and not clickable (#PH0N): where this desktop is
+            // published, and how many of your phones are on it. "Disconnect all" is under it while
+            // it is on, because "I forgot it was on" needs an answer in one click, not in Options.
+            const relay::remotesettings::State remote = shownRemoteState();
+            QAction *line = menu.addAction(relay::remotesettings::statusLine(remote));
+            line->setEnabled(false);
+            if (remote.on)
+                menu.addAction(QStringLiteral("Disconnect all"), this, [this] { disconnectRemoteDevices(); });
+            menu.addSeparator();
             menu.addAction(QStringLiteral("Join with a code…"), this, [this] {
                 joinSharedSession();
                 hint(QStringLiteral("remote.join.button"),
@@ -7814,6 +7931,7 @@ private:
             menu.exec(m_connect->mapToGlobal(QPoint(0, m_connect->height())));
         });
         rightRow->addWidget(m_connect);
+        updateRemotePlug();
         if (!m_nativeFrame) {
             // The third hairline vanishes with the window buttons it parts the plug from.
             rightRow->addSpacing(4);
@@ -9174,6 +9292,9 @@ private:
     bool m_boardClosedByToggle = false;
     QPointer<Pane> m_active;
     bool m_tabShareSyncQueued = false;   // syncTabShares is coalesced to one pass per event loop
+    // Panes this window has already offered to the always-on share (#PH0N), so one that cannot be
+    // shared is not asked again on every tick. Cleared when the switch moves.
+    QSet<QString> m_autoShared;
     QHash<QWidget *, QPointer<QWidget>> m_lastActive;
     QPointer<QWidget> m_activeLeaf;
     // Dragging a tool pane (explorer, preview, plan, Switchboard) by its header: the pane being
