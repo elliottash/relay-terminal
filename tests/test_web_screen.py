@@ -52,7 +52,7 @@ class ScreenCostTests(unittest.TestCase):
 
     async def bench(self, browser: Browser, **options) -> None:
         """A view watching a pane, with the first page of scrollback already in."""
-        await browser.navigate(f"{self.origin}/tests/screen_harness.html")
+        await browser.navigate(f"{self.origin}/tests/screen_harness.html?count=1")
         await browser.wait_for("document.body && document.body.dataset.harnessReady === '1'")
         await browser.evaluate(f"screenHarness.open({json.dumps(options)})")
         await browser.wait_for("screenHarness.report().held >= 80", timeout=20)
@@ -150,7 +150,7 @@ class ScreenCostTests(unittest.TestCase):
             browser = Browser()
             await browser.start()
             try:
-                await browser.navigate(f"{self.origin}/tests/screen_harness.html")
+                await browser.navigate(f"{self.origin}/tests/screen_harness.html?count=1")
                 await browser.wait_for("document.body.dataset.harnessReady === '1'")
                 await browser.evaluate('screenHarness.open({"refuse": "rate_limited"})')
                 await browser.wait_for("screenHarness.report().asks >= 1", timeout=10)

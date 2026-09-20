@@ -32,17 +32,24 @@
       const root = document.getElementById('screen-wrap');
       // Every layout read the view makes on its container, counted. `getComputedStyle` resolves
       // style and `clientWidth` flushes layout; doing either once per frame is finding 4 of #3H5T.
+      //
+      // Only with `?count=1`, because the wrappers are themselves JS frames: on the phone's own
+      // profile they collected the layout read's cost under `get clientWidth` instead of under
+      // `fit`, which is the number being measured. Counts and profiles are taken on separate
+      // runs of the same page for that reason.
       const counts = { style: 0, clientWidth: 0 };
-      const nativeStyle = window.getComputedStyle.bind(window);
-      window.getComputedStyle = (element, ...rest) => {
-        if (element === root) counts.style += 1;
-        return nativeStyle(element, ...rest);
-      };
-      const width = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth');
-      Object.defineProperty(root, 'clientWidth', {
-        configurable: true,
-        get() { counts.clientWidth += 1; return width.get.call(this); },
-      });
+      if (new URLSearchParams(location.search).has('count')) {
+        const nativeStyle = window.getComputedStyle.bind(window);
+        window.getComputedStyle = (element, ...rest) => {
+          if (element === root) counts.style += 1;
+          return nativeStyle(element, ...rest);
+        };
+        const width = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth');
+        Object.defineProperty(root, 'clientWidth', {
+          configurable: true,
+          get() { counts.clientWidth += 1; return width.get.call(this); },
+        });
+      }
 
       const ROWS = 24;
       const COLS = 80;
