@@ -72,3 +72,55 @@ merging a generated index risks writing back another session's card states.
 Three commits carry the change and none of them ends in the Co-Authored-By line this session was
 told to add — it was missed on the first two and then kept consistent rather than rewriting a
 shared branch's history. Noted here so the trail is not silent about it.
+
+<!-- relay:entry 20260920T222156Z-zw author=claude-code kind=decision -->
+**Owner decision, 2026-09-20 — an action row is left-aligned buttons and nothing else.**
+Comparing the card page's row with the Switchboard panel's: *"the plan / execute buttons etc,
+would those work better at the left? (in the switchboard card agent)"*, agreed as *"yes, lets do
+both left-aligned, drop the label"*. Landed as `69fee7b2`.
+
+- **Card page** (`src/BoardPane.cpp`): `boardCardActions` keeps its stretch **behind** Plan (p),
+  Execute (x) and Verify (v) instead of in front of them, so the row reads in the order the work
+  is done. Same object names, keys, tooltips, note behaviour, `fitButtons()` rule and button face.
+- **Switchboard panel** (`src/HelperChat.{h,cpp}`): the head row starts with the tool row — Check,
+  Clean up, and whatever `addToolWidget` reparents in (Tests and Profile land there too) — and
+  closes with the stretch. The `boardChatHead` "Switchboard agent" label is **gone** from it: the
+  box's placeholder already names the agent, and the busy strip names it again while a turn runs.
+- **Where the clock went.** `drawHead()` put the turn clock and the `· survey` word on that label.
+  They are now on the busy strip's own line (`drawBusyLine`, `HelperChatPanel::drawBusy`), which
+  already carried `✦ <helper>` and is on screen for exactly as long as there is a turn to time —
+  so it reads `✦ Switchboard agent · 0:42 · survey`. Nothing was lost with the label.
+- **The panels that fold** (Options, Actions, Sessions) keep their name and their fold control:
+  the rule is about action rows, and their head row has no actions. Their action row is the
+  collapsed `? Helper Agent (Alt+Q)` row, which stays at the pane's bottom right (c3e8695c).
+- `docs/SWITCHBOARD-DESIGN.md` §4.13 and §4.13a say the rule; the card's QA checklist items 4, 5,
+  6, 8 and 9 were rewritten for it.
+
+Tests (`tests/boardmodel_test.cpp`): the tool row is the head row's first item and the stretch its
+last; Check is in the panel's left quarter and before Clean up; the Switchboard's panel has no
+`boardChatHead`; the busy strip reads `✦ Switchboard agent · 0:42 · survey` on a running survey
+turn. On the card, Plan is index 0 with the stretch last, and the ~350 px case measures the x
+positions — it is the one card-page test whose row has been through a resize and so has real
+geometry. `ctest -R '^board$|^boardpane$|^settings$|^conversations$'`: 4 of 4 pass, board 92 cases,
+and land.py's gate ran them again on the exact tree it committed.
+
+<!-- relay:entry 20260920T222156Z-zx author=claude-code kind=evidence -->
+Live Xvfb run for the left-aligned rows: `docs/qa_evidence/2026-09-20-action-rows-left/`
+(`drive.sh`, its own `stub-provider.py`, `RELAY_KEYRING=off`, isolated HOME/XDG/TMPDIR, no
+provider account), driving the binary land.py built from the exact tree it committed. **22 checks,
+22 passed** — every one a measured x position, because "left-aligned" is a claim about geometry
+and a shot that merely contains the word "Plan" would pass either way.
+
+- `01-switchboard-idle.png` — head row `Check · Clean up · Tests · Profile` from x=782, the pane's
+  own left margin (the INBOX header) at x=780, and nothing in front of them.
+- `02-turn-running.png` — the busy strip mid-turn: `✦ Switchboard agent · 0:00  Requesting …` with
+  `✕ Stop`. This is where the clock lives now; the stub answers `slowly` so the strip lasts longer
+  than a frame.
+- `03-switchboard-conversation.png` — the head row is unchanged by a turn having run.
+- `04-card-page.png` — `Plan (p)` at x=779, `Execute (x)` at x=861, the card page's left margin
+  (the body's "Issue" heading) at x=778.
+- `05-narrow-card-page.png` — the same at a ~350 px pane: Plan at x=394 against a margin of 393,
+  both labels whole with their keys.
+
+`NOTES.md` says what each shot shows and how the checks are made (the card's violet outlined
+`Execute (x)` is read from a saturation-boosted band, because no whole-page OCR pass reads it).
