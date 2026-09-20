@@ -249,6 +249,97 @@ class PaneTest(ChatTestBase):
         self.boardless = FakeAgent(emit)
         return self.boardless, None
 
+    def test_the_sessions_brief_says_it_can_open_a_conversation(self):
+        # Owner, 2026-09-20: "can you make that more formalized that it can do that?" — the
+        # Sessions helper's brief says, in words, that it opens conversations and how it decides
+        # where. A tool schema the model may or may not read is not the place for it.
+        brief = board_chat.PANE_BRIEFS["sessions"]
+        for phrase in ('app_open {target: "conversation", id}',
+                       'ids: ["…", "…"]', "each in a pane of its own",
+                       '"in new panes"', "new_pane", "[title](session:<id>)"):
+            self.assertIn(phrase, brief)
+
+    def test_every_pane_is_told_to_say_what_it_is_doing(self):
+        # "it also needs to reply in text that it is doing it" (owner, 2026-09-20).
+        for pane in ("options", "actions", "sessions"):
+            prompt = board_chat.pane_prompt(pane, "do the thing")
+            self.assertIn("Say what you are doing", prompt)
+            self.assertIn("Never finish a turn with an empty message after a tool call", prompt)
+
+
+class SayWhatYouDidTest(ChatTestBase):
+    """A turn that acts on the app and answers with nothing still shows what it did (owner,
+    2026-09-20: the panel draws the agent's text, never its tool calls)."""
+
+    class AppAgent(FakeAgent):
+        """Calls one or two `app_*` tools, then answers with `text`."""
+
+        results = ()
+        text = ""
+
+        def ask(self, prompt, reset_cancellation=True, turn_id=None, **kw):
+            self.prompts.append(prompt)
+            self.gate.wait(10)
+            for tool, result in self.results:
+                self.emit({"event": "tool_result", "tool": tool, "result": result,
+                           "turn_id": turn_id})
+            if self.text:
+                self.emit({"event": "delta", "text": self.text, "turn_id": turn_id})
+            self.emit({"event": "done", "turn_id": turn_id})
+
+    def build(self, emit):
+        self.agent = self.AppAgent(emit)
+        self.agent.results = self.results
+        self.agent.text = self.text
+        self.agent.tools = FakeTools()
+        self.agent.tools.board = B.Board(self.root, self.repo)
+        return self.agent, self.agent.tools
+
+    def setUp(self):
+        self.results = (("app_open", {"ok": True, "text": "Opened 3 conversations in new panes: "
+                                                          "A, B, C."}),)
+        self.text = ""
+        super().setUp()
+
+    def deltas(self):
+        return [e["text"] for e in self.of("delta")]
+
+    def test_an_empty_answer_after_an_app_call_still_says_what_happened(self):
+        self.chat.ask("open the three sessions about panes in new panes", pane="sessions")
+        self.agent.gate.set()
+        self.wait_idle()
+        self.assertEqual(self.deltas(), ["Opened 3 conversations in new panes: A, B, C."])
+        # It goes out before the turn ends, tagged like any other answer, so the panel that
+        # asked draws it and the others do not.
+        line = self.of("delta")[0]
+        self.assertEqual((line["pane"], line["chat"]), ("sessions", True))
+        self.assertLess(self.events.index(line), self.events.index(self.of("done")[0]))
+        # And it is in the conversation the next pane to open reads.
+        self.assertEqual(self.chat.state()["history"][-1]["text"],
+                         "Opened 3 conversations in new panes: A, B, C.")
+
+    def test_a_turn_that_spoke_for_itself_is_left_alone(self):
+        self.text = "Opening them now."
+        self.chat.ask("open them", pane="sessions")
+        self.agent.gate.set()
+        self.wait_idle()
+        self.assertEqual(self.deltas(), ["Opening them now."])
+
+    def test_a_refusal_is_what_gets_said_when_nothing_else_is(self):
+        self.results = (("app_open", {"error": "Relay has no saved conversation with that id.",
+                                      "code": "unknown_conversation"}),)
+        self.chat.ask("open zzz", pane="sessions")
+        self.agent.gate.set()
+        self.wait_idle()
+        self.assertEqual(self.deltas(), ["Relay has no saved conversation with that id."])
+
+    def test_a_turn_that_called_no_app_tool_invents_nothing(self):
+        self.results = (("read_file", {"text": "not an app tool"}),)
+        self.chat.ask("what is in that file?", pane="sessions")
+        self.agent.gate.set()
+        self.wait_idle()
+        self.assertEqual(self.deltas(), [])
+
 
 class QueueTest(ChatTestBase):
     def test_a_prompt_starts_a_turn_and_streams_tagged_events(self):

@@ -347,6 +347,120 @@ class OpenTest(unittest.TestCase):
         self.assertEqual(self.gui.commands, [])
 
 
+class OpenConversationTest(unittest.TestCase):
+    """`app_open {target: "conversation"}`: the Sessions row's Enter, as a tool (§30.4).
+
+    The index here answers `conversation()` the way `ConversationIndex` does — the header of one
+    saved session, or ValueError when there is none.
+    """
+
+    def setUp(self):
+        self.rows = {
+            "s1": {"session_id": "s1", "title": "The keybinding rewrite", "source": "agent",
+                   "session_dir": "/home/e/.local/share/relay/sessions",
+                   "workspace": "/home/e/relay", "model": "glm-5.3", "turns": 9,
+                   "items": [{"kind": "prompt", "text": "not part of a row"}],
+                   "overview": {"turns": 9}},
+            "s2": {"session_id": "s2", "title": "Continue the pane split", "source": "agent",
+                   "session_dir": "/home/e/.local/share/relay/sessions",
+                   "workspace": "/home/e/relay", "turns": 2},
+            "g1": {"session_id": "g1", "title": "A claude session", "source": "claude",
+                   "session_dir": "", "workspace": "/home/e/relay",
+                   "raw_cwd": "/home/e/relay", "turns": 4},
+        }
+        self.gui = FakeGui(lambda command: {"ok": True})
+        self.tools = self.gui.build(sessions=lambda: self)
+
+    # the index's two methods this needs
+    def conversation(self, session_id, turn=None, query="", limit=400):
+        if session_id not in self.rows:
+            raise ValueError("No indexed conversation with that id.")
+        return dict(self.rows[session_id])
+
+    def search(self, query, **kwargs):
+        return {"items": [dict(row) for row in self.rows.values()], "total": len(self.rows)}
+
+    def test_one_id_opens_one_conversation_in_a_new_pane(self):
+        result = self.tools.run("app_open", {"target": "conversation", "id": "s1"})
+        command = self.gui.last
+        self.assertEqual(command["command"], "open")
+        self.assertEqual(command["target"], "conversation")
+        # The session id never travels as `id`: that name is the request id's (AppBridge.send).
+        self.assertEqual(command["conversation"], "s1")
+        self.assertTrue(command["new_pane"])
+        self.assertEqual(command["item"]["session_id"], "s1")
+        self.assertEqual(command["item"]["title"], "The keybinding rewrite")
+        # The transcript is not dragged through a tool result.
+        self.assertNotIn("items", command["item"])
+        self.assertNotIn("overview", command["item"])
+        self.assertIn("The keybinding rewrite", result["text"])
+        self.assertEqual(result["opened"], 1)
+
+    def test_a_group_opens_each_in_its_own_pane_in_order(self):
+        result = self.tools.run("app_open", {"target": "conversation", "ids": ["s2", "s1"],
+                                             "new_pane": True})
+        self.assertEqual([c["conversation"] for c in self.gui.commands], ["s2", "s1"])
+        self.assertEqual([r["id"] for r in result["results"]], ["s2", "s1"])
+        self.assertTrue(all(r["ok"] for r in result["results"]))
+        self.assertIn("in new panes", result["text"])
+        self.assertIn("Continue the pane split, The keybinding rewrite", result["text"])
+
+    def test_new_pane_false_loads_it_where_the_person_is(self):
+        result = self.tools.run("app_open", {"target": "conversation", "id": "s1",
+                                             "new_pane": False})
+        self.assertFalse(self.gui.last["new_pane"])
+        self.assertIn("in this pane", result["text"])
+
+    def test_a_guest_row_carries_the_command_that_resumes_it(self):
+        self.tools.run("app_open", {"target": "conversation", "id": "g1"})
+        item = self.gui.last["item"]
+        self.assertEqual(item["source"], "claude")
+        self.assertIn("g1", item["resume_command"])
+        self.assertEqual(item["resume_cwd"], "/home/e/relay")
+
+    def test_an_unknown_id_is_named_and_the_rest_still_open(self):
+        result = self.tools.run("app_open", {"target": "conversation", "ids": ["nope", "s1"]})
+        self.assertEqual([c["conversation"] for c in self.gui.commands], ["s1"])
+        self.assertEqual(result["results"][0], {"id": "nope", "ok": False,
+                                                "error": "unknown_conversation",
+                                                "text": result["results"][0]["text"]})
+        self.assertIn("unknown_conversation", A.ERRORS)
+        self.assertIn("Not opened: nope.", result["text"])
+
+    def test_every_id_unknown_is_a_refusal(self):
+        result = self.tools.run("app_open", {"target": "conversation", "id": "nope"})
+        self.assertEqual(result["code"], "unknown_conversation")
+        self.assertEqual(self.gui.commands, [])
+
+    def test_a_refusal_from_the_gui_is_reported_per_id(self):
+        self.gui.reply = lambda command: ({"ok": False, "error": "failed",
+                                           "message": "No pane to open it in."}
+                                          if command["conversation"] == "s2" else {"ok": True})
+        result = self.tools.run("app_open", {"target": "conversation", "ids": ["s1", "s2"]})
+        self.assertTrue(result["results"][0]["ok"])
+        self.assertEqual(result["results"][1]["error"], "failed")
+        self.assertIn("No pane to open it in.", result["results"][1]["text"])
+        self.assertIn("Not opened: Continue the pane split.", result["text"])
+
+    def test_the_bad_shapes(self):
+        self.assertEqual(self.tools.run("app_open", {"target": "conversation"})["code"],
+                         "invalid_value")
+        self.assertEqual(self.tools.run("app_open", {"target": "conversation",
+                                                     "ids": "s1"})["code"], "invalid_value")
+        self.assertEqual(self.tools.run("app_open", {"target": "conversation", "id": "s1",
+                                                     "new_pane": "yes"})["code"], "invalid_value")
+        many = [f"s{n}" for n in range(A.MAX_OPEN_CONVERSATIONS + 1)]
+        self.assertEqual(self.tools.run("app_open", {"target": "conversation",
+                                                     "ids": many})["code"], "invalid_value")
+        self.assertEqual(self.gui.commands, [])
+
+    def test_the_search_gives_the_id_the_open_takes(self):
+        row = self.tools.run("app_sessions_search", {"query": "keybinding"})["items"][0]
+        self.assertEqual(row["id"], "s1")
+        self.assertTrue(self.tools.run("app_open", {"target": "conversation",
+                                                    "id": row["id"]})["ok"])
+
+
 class ChangesTest(unittest.TestCase):
     def setUp(self):
         self.clock = [1000.0]

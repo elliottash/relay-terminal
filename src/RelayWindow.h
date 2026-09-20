@@ -1734,6 +1734,26 @@ private:
             return true;
         }
         if (target == QStringLiteral("sessions")) { openSessions(QString(), query); return true; }
+        // `conversation`: open a past conversation itself, which is what Enter on a Sessions row
+        // does (`SessionManager::onResume` → `Pane::openSavedSession`). The helper could search
+        // the index and open the *list* at the search, and nothing more, so "open a group of
+        // previous sessions in new panes" came back as a list of titles (owner, 2026-09-20).
+        // The worker resolved the id and sent the whole row: there is no conversation index in
+        // this process, and a guest row resumes by running its own argv (26.7).
+        if (target == QStringLiteral("conversation")) {
+            QJsonObject item;
+            bool newPane = true;
+            if (!relay::appcommands::conversationToOpen(command, &item, &newPane, error)) return false;
+            // The pane it opens from: the active terminal pane, else this tab's first. With
+            // `new_pane` it is only the anchor the new pane goes beside; without it, it is the
+            // pane the conversation is loaded into — the same pane Enter on a row would have
+            // used, since the manager is bound to it.
+            Pane *owner = m_active.data();
+            if (!owner) { const auto panes = panesIn(m_tabs->currentWidget()); owner = panes.isEmpty() ? nullptr : panes.first(); }
+            if (!owner) return fail(QStringLiteral("failed"));
+            owner->openSavedSession(item, newPane);
+            return true;
+        }
         if (target == QStringLiteral("switchboard")) {
             if (!card.isEmpty()) { openBoardCard(card); return true; }
             runAction(QStringLiteral("board.open"));
@@ -6319,13 +6339,23 @@ public:
         // project has its own worker and its own conversation, and neither redraws the other.
         worker->onEvent = [guard, tab](const QJsonObject &event) {
             if (!guard) return;
+            // A worker names its events in `event`, never in `type` — `type` is what the *GUI*
+            // calls the messages it sends down (BoardWorker::handleLine, Pane's own reader). This
+            // read said `type` from the day the helper route was written (c78c8004), so it matched
+            // nothing: every `app_command` the helper sent sat unanswered until its 20-second
+            // deadline, and every `presets`/`key_tested`/`configured` below was dropped. The
+            // owner's report is what it looks like from the outside — "sessions helper didn't do
+            // anything when I asked to open a group of previous sessions in new panes"
+            // (2026-09-20): the helper called app_open, nothing answered, and the turn ended with
+            // the call still hanging when the tab it was in closed.
+            const QString type = event.value(QStringLiteral("event")).toString();
             // An `app_command` out of the *helper* (§30.3). A pane's worker is answered in
             // src/Pane.h; this is the other pipe, and until it was here every write the helper
             // attempted — app_option_set, app_action_run, app_open, app_undo — waited out the
             // 20-second deadline and came back `no_reply`, with nothing on screen to say why.
             // The answer goes back down this worker's own pipe: there is no routing field on the
             // wire. `who` is "helper", which is what the change log and the notification say.
-            if (event.value(QStringLiteral("type")).toString() == QStringLiteral("app_command")) {
+            if (type == QStringLiteral("app_command")) {
                 relay::BoardWorker *worker = guard->m_boardWorkers.value(tab).data();
                 if (!worker) return;
                 QPointer<RelayWindow> window(guard);
@@ -6337,7 +6367,6 @@ public:
             }
             // What this worker says about its own model is kept for the panels that are not
             // open yet: it is said on configure and not again (#BRD3).
-            const QString type = event.value(QStringLiteral("type")).toString();
             guard->m_helperModels[tab].take(type, event);
             // Options › Models on a tab with no pane agent reads the helper's presets, and its key,
             // test and custom-provider requests come back down this pipe (owner, 2026-09-20).

@@ -62,6 +62,22 @@ namespace appcommands {
 QJsonObject answerFor(const QJsonObject &command,
                       const std::function<QJsonObject(const QJsonObject &)> &execute);
 
+// `open {target: "conversation", conversation, item, new_pane}` (§30.3, §30.4): the row the
+// window is to resume, and where. The worker resolved the id against the conversation index it
+// owns and sent the whole row — the GUI holds no such index, and a resume needs the session's
+// directory and, for a claude or codex row, the argv that respawns it (26.7) — so all this does
+// is check that what arrived can be resumed and say where it goes.
+//
+// It is here rather than in RelayWindow so that the rule is testable without a window
+// (tests/appcommands_test.cpp): the window's own part is one call to `Pane::openSavedSession`,
+// which is the Sessions row's Enter.
+//
+// `*newPane` defaults to true — a conversation opened into the pane the person is sitting in
+// replaces what that pane is holding, so "open it" means "beside it" unless the agent says
+// otherwise. *error is a §30.3 word.
+bool conversationToOpen(const QJsonObject &command, QJsonObject *item, bool *newPane,
+                        QString *error);
+
 // Whether an agent may run this action without being asked (owner decision 2, §30.2). It starts
 // with the reversible ones — opening or revealing anything, testing a key, refreshing or detecting
 // local servers, copying a page, reordering models, undo — and everything else is off until the

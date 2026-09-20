@@ -51,6 +51,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable
 
+from . import guest_sessions
+
 #: How long a tool waits for the GUI's `app_command_result` before giving up (§30.3: "within
 #: 20 s or the tool returns `no_reply`" — 22.4's deadline, for a channel with 22.4's shape).
 #: The board's own dialog has no timeout because a person is reading it; an `app_command` can
@@ -63,15 +65,24 @@ ANSWER_TIMEOUT = 20.0
 OPTION_KINDS = ("toggle", "choice", "text", "number", "button", "buttons", "info", "heading")
 VALUE_KINDS = ("toggle", "choice", "text", "number")
 
-#: What `app_open` can open.  The four panes the card is about; a card id opens the Switchboard.
-OPEN_TARGETS = ("options", "actions", "sessions", "switchboard")
+#: What `app_open` can open.  The four panes the card is about; a card id opens the Switchboard,
+#: and `conversation` resumes a saved conversation in a pane — the Sessions row's own Enter
+#: (`SessionManager::onResume`), which until 2026-09-20 no tool could reach: the helper could
+#: search the index and then only open the *list* at the search, so "open a group of previous
+#: sessions in new panes" came back as a list the person had to click through (owner's report).
+OPEN_TARGETS = ("options", "actions", "sessions", "switchboard", "conversation")
+
+#: How many conversations one `app_open {ids}` may open.  A group is a handful of panes, not a
+#: window full: each one is a worker of its own.
+MAX_OPEN_CONVERSATIONS = 8
 
 #: The commands that go out as `app_command` (§30.3).
 COMMANDS = ("open", "set_option", "run_action", "undo")
 
 #: The `error` vocabulary of `app_command_result` (§30.3).  The worker's own refusals use the
 #: same words, so a refusal reads the same whether the catalog caught it or the pane did.
-ERRORS = ("unknown_row", "unknown_action", "unknown_target", "unknown_change", "not_settable",
+ERRORS = ("unknown_row", "unknown_action", "unknown_target", "unknown_change",
+          "unknown_conversation", "not_settable",
           "secret", "writes_disabled", "invalid_value", "not_agent_safe", "busy", "failed",
           "no_reply")
 
@@ -81,6 +92,7 @@ ERROR_TEXT = {
     "unknown_action": "Relay no longer has that action.",
     "unknown_target": "Relay cannot open that.",
     "unknown_change": "Relay no longer holds that change.",
+    "unknown_conversation": "Relay has no saved conversation with that id.",
     "not_settable": "That row is not one an agent may set.",
     "secret": "That row holds a secret; no agent may set it.",
     "writes_disabled": "Agents may not change options or run actions.",
@@ -567,7 +579,9 @@ TOOL_SPECS = [
     spec("app_sessions_search",
          "Search the person's past Relay conversations — the same index the Sessions pane uses. "
          "One row per conversation: id, title, when, model, workspace and the turns that matched. "
-         "Answered inside Relay; nothing is sent anywhere.",
+         "The `id` is what app_open {target: \"conversation\"} takes, so a search and an open "
+         "are the two halves of \"open the sessions about X\". Answered inside Relay; nothing "
+         "is sent anywhere.",
          {"query": {"type": "string", "description": "Words to look for. The Sessions pane's operators work here too: project:, file:, model:, branch:, before:, after:, is:, -word."},
           "limit": {"type": "integer", "minimum": 1, "maximum": MAX_SESSION_ROWS,
                     "description": f"How many conversations to return (default 10, at most {MAX_SESSION_ROWS})."}},
@@ -575,14 +589,28 @@ TOOL_SPECS = [
     spec("app_open",
          "Open one of Relay's panes for the person and zoom it to what you are talking about: "
          "Options or the actions palette at a section or a row, Sessions at a search, the "
-         "Switchboard at a card. Use it instead of describing where a setting lives. It returns "
-         "once the pane is open.",
+         "Switchboard at a card — or, with target `conversation`, open a past conversation "
+         "itself, which is what pressing Enter on a Sessions row does. `id` is a conversation's "
+         "id from app_sessions_search; `ids` opens a group, each in its own pane, in the order "
+         "given, and the result says what happened to each one. `new_pane` is true by default "
+         "for `ids` and whenever the person said \"in new panes\"; pass false to load the "
+         "conversation into the pane they are in, which replaces what that pane is holding. Use "
+         "it instead of describing where a setting lives. It returns once the pane is open.",
          {"target": {"type": "string", "enum": list(OPEN_TARGETS),
-                     "description": "options, actions, sessions or switchboard."},
+                     "description": "options, actions, sessions, switchboard or conversation."},
           "section": {"type": "string", "description": "Options/actions: the section to open at."},
           "row": {"type": "string", "description": "Options: the row id to reveal and highlight."},
           "query": {"type": "string", "description": "Sessions or actions: the search to open with."},
-          "card": {"type": "string", "description": "Switchboard: a card id such as K7Q2 to open."}},
+          "card": {"type": "string", "description": "Switchboard: a card id such as K7Q2 to open."},
+          "id": {"type": "string",
+                 "description": "conversation: the id of one conversation to open, as "
+                                "app_sessions_search gives it."},
+          "ids": {"type": "array", "items": {"type": "string"},
+                  "description": f"conversation: up to {MAX_OPEN_CONVERSATIONS} conversation ids "
+                                 "to open, each in a pane of its own, in this order."},
+          "new_pane": {"type": "boolean",
+                       "description": "conversation: open in a new pane (the default) rather "
+                                      "than loading it into the pane the person is in."}},
          ["target"]),
     spec("app_changes",
          "List the changes you have made to Relay in this session — each with the row, what it "
@@ -834,6 +862,12 @@ class AppTools:
             row = {key: item.get(key) for key in
                    ("id", "title", "updated", "model", "workspace", "turns", "source")
                    if item.get(key) is not None}
+            # The index calls it `session_id`; every row had *no* id at all until 2026-09-20,
+            # because this list asked for "id" and nothing answered to that name. The agent
+            # could then name a conversation only by its title — and `app_open {target:
+            # "conversation"}` takes the id, so the search has to give it.
+            if not row.get("id") and item.get("session_id"):
+                row["id"] = item["session_id"]
             matches = [str(m.get("text") or "")[:200] for m in (item.get("matches") or [])[:3]
                        if isinstance(m, dict)]
             if matches:
@@ -848,6 +882,8 @@ class AppTools:
         if target not in OPEN_TARGETS:
             raise AppToolError(f"target must be one of {', '.join(OPEN_TARGETS)}.",
                                code="unknown_target")
+        if target == "conversation":
+            return self._open_conversations(args)
         fields = {"target": target}
         for key in ("section", "row", "query", "card"):
             value = args.get(key)
@@ -868,6 +904,128 @@ class AppTools:
         where = ", ".join(f"{k} {v}" for k, v in fields.items() if k != "target")
         return {"ok": True, **fields,
                 "text": f"Opened {target}" + (f" at {where}." if where else " for the user.")}
+
+    # `app_open {target: "conversation"}` (§30.4).  The Sessions pane's row already does this —
+    # `SessionManager::onResume` → `Pane::openSavedSession`, in the pane or in a new one — and the
+    # helper had no way to ask for it: it could search the index and open the *list*, which is how
+    # "open a group of previous sessions in new panes" ended as a list of titles (owner, 2026-09-20,
+    # "sessions helper didn't do anything when I asked to open a group of previous sessions in new
+    # panes").
+    #
+    # The ids are resolved **here**, against the same index `app_sessions_search` answers from, and
+    # the GUI is handed the whole row: it holds no conversation index of its own, and a resume
+    # needs the session's directory, its title and — for a claude or codex row — the argv that
+    # respawns it (protocol 26.7).  One round trip per id, in the order given, so a group answers
+    # per id and one unknown id does not lose the rest.
+    def _open_conversations(self, args: dict) -> dict:
+        ids = args.get("ids")
+        if ids is None:
+            ids = [args.get("id")] if args.get("id") not in (None, "") else []
+        if not isinstance(ids, list):
+            raise AppToolError("ids must be a list of conversation ids.", code="invalid_value")
+        wanted = []
+        for value in ids:
+            if not isinstance(value, str) or not value.strip():
+                raise AppToolError("Every conversation id must be text.", code="invalid_value")
+            if value.strip() not in wanted:
+                wanted.append(value.strip())
+        if not wanted:
+            raise AppToolError("app_open with target conversation needs id or ids.",
+                               code="invalid_value")
+        if len(wanted) > MAX_OPEN_CONVERSATIONS:
+            raise AppToolError(f"app_open opens at most {MAX_OPEN_CONVERSATIONS} conversations at "
+                               "once.", code="invalid_value")
+        # A group is panes: they cannot all be the one pane the person is looking at, so `ids`
+        # means new panes unless the caller says otherwise.  One id follows the same default —
+        # "open it" should not take away what the pane is already holding — and `new_pane: false`
+        # is how the agent says "here, in this pane".
+        new_pane = args.get("new_pane")
+        if new_pane is None:
+            new_pane = True
+        if not isinstance(new_pane, bool):
+            raise AppToolError("new_pane must be true or false.", code="invalid_value")
+        if self.sessions is None:
+            raise AppToolError("The conversation index is not available in this pane.",
+                               code="failed")
+        results, opened = [], []
+        for session_id in wanted:
+            try:
+                item = self._conversation_row(session_id)
+            except AppToolError as exc:
+                results.append({"id": session_id, "ok": False, "error": exc.code,
+                                "text": str(exc)})
+                continue
+            title = str(item.get("title") or "Untitled")
+            # `conversation`, not `id`: on an `app_command` the top-level `id` is the request id
+            # the result is matched by (AppBridge.send), exactly as §30.1's row id travels as
+            # `row`. The whole row goes as `item` — the GUI has no conversation index to look one
+            # up in, and the resume path reads the row the Sessions list would have handed it.
+            try:
+                result = self.bridge.send("open", {"target": "conversation",
+                                                   "conversation": session_id,
+                                                   "new_pane": new_pane, "item": item})
+            except AppToolError as exc:
+                # The GUI stopped answering (a window that has gone, a worker being shut down).
+                # Nothing is gained by spending another deadline per remaining id.
+                results.append({"id": session_id, "ok": False, "error": exc.code,
+                                "title": title, "text": str(exc)})
+                break
+            if result.get("ok"):
+                results.append({"id": session_id, "ok": True, "title": title})
+                opened.append(title)
+            else:
+                code = result.get("error") if result.get("error") in ERRORS else "failed"
+                results.append({"id": session_id, "ok": False, "error": code,
+                                "title": title,
+                                "text": result.get("message") or ERROR_TEXT.get(code, "")})
+        # A `break` above leaves the rest untried; they are still answered, so the model never
+        # has to guess which of the ids it named were even attempted.
+        answered = {row["id"] for row in results}
+        for session_id in wanted:
+            if session_id not in answered:
+                results.append({"id": session_id, "ok": False, "error": "no_reply",
+                                "text": "Not attempted: Relay stopped answering."})
+        where = "in a new pane" if new_pane else "in this pane"
+        if len(opened) > 1:
+            where = "in new panes" if new_pane else "in this pane"
+        if not opened:
+            first = next((r for r in results if not r["ok"]), {})
+            raise AppToolError(first.get("text") or "Relay opened none of them.",
+                               code=first.get("error") or "failed")
+        text = f"Opened {len(opened)} conversation{'' if len(opened) == 1 else 's'} {where}: " \
+               + ", ".join(opened) + "."
+        missed = [r for r in results if not r["ok"]]
+        if missed:
+            text += " Not opened: " + ", ".join(r.get("title") or r["id"] for r in missed) + "."
+        return {"ok": True, "target": "conversation", "new_pane": new_pane,
+                "opened": len(opened), "results": results, "text": text}
+
+    def _conversation_row(self, session_id: str) -> dict:
+        """The saved conversation `session_id`, as the GUI's resume path needs it.
+
+        Only the fields that identify and reopen it: the transcript itself is the pane's business
+        once it is loaded, and `conversation()` would otherwise carry a whole history through a
+        tool result.
+        """
+        try:
+            index = self.sessions()
+            header = index.conversation(session_id, limit=1)
+        except ValueError:
+            raise AppToolError(f"No saved conversation with the id {session_id[:80]}.",
+                               code="unknown_conversation") from None
+        except OSError as exc:
+            raise AppToolError(f"Reading the conversation failed: {str(exc)[:200]}",
+                               code="failed") from None
+        header.pop("items", None)
+        header.pop("overview", None)
+        # A claude or codex row is not a Relay conversation: it reopens by running the guest's own
+        # resume command in the directory it was recorded in (26.7), and `annotate_items` is what
+        # puts that argv on the row — the same call the `conversations` answer makes.
+        rows = guest_sessions.annotate_items([header])
+        row = rows[0] if rows else header
+        keep = ("session_id", "session_dir", "title", "source", "workspace", "raw_cwd", "model",
+                "updated", "turns", "id", "mtime", "message_count", "resume_command", "resume_cwd")
+        return {key: row[key] for key in keep if row.get(key) not in (None, "")}
 
     # ---- the change log --------------------------------------------------------
     def _record(self, row: OptionRow, previous, value, gui_change_id) -> str:
@@ -1044,6 +1202,19 @@ def prompt_section(tools: "AppTools | None") -> str:
         "conversations, and app_open puts any of Options, the actions palette, Sessions or the "
         "Switchboard on screen zoomed to the row, search or card you are talking about — do "
         "that instead of describing where a setting lives.",
+        # The owner, 2026-09-20: "it also needs to reply in text that it is doing it." A turn that
+        # only calls tools draws nothing in a helper panel — the panel shows the agent's text, not
+        # its calls — so the app tools are the one place where narrating is not optional.
+        "app_open {target: \"conversation\"} opens a past conversation itself, the way Enter on "
+        "a Sessions row does: app_sessions_search gives the ids, `id` opens one and `ids` opens a "
+        "group, each in a pane of its own. new_pane is true unless you say otherwise; \"in new "
+        "panes\" means true, and only \"here\" or \"in this pane\" means false, which replaces "
+        "what that pane is holding. When neither is said and the conversation is not yours to "
+        "disturb, open it in a new pane.",
+        "Say what you are doing, in words, whenever you use one of these tools: name the panes, "
+        "rows or conversations before or as you act (\"Opening 3 sessions in new panes: A, B, "
+        "C.\", \"Turned Copy on select on — Undo is in the notification.\") and never end a turn "
+        "with an empty message after a tool call. The user sees your text, not your tool calls.",
     ]
     if catalog.writes_enabled:
         lines.append(

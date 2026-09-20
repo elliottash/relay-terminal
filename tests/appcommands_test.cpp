@@ -540,6 +540,89 @@ private Q_SLOTS:
                     .contains(QStringLiteral("off \u2192 on")));
     }
 
+    // ----- open a conversation (§30.4) ----------------------------------------------------------
+    // The window's own half is one call to `Pane::openSavedSession` — the Sessions row's Enter —
+    // so what is testable without a window is the rule in front of it: which row, and where.
+    void openingAConversationCarriesTheRowAndWhereItGoes() {
+        const QJsonObject row{{QStringLiteral("session_id"), QStringLiteral("abc123")},
+                              {QStringLiteral("session_dir"), QStringLiteral("/home/e/sessions")},
+                              {QStringLiteral("title"), QStringLiteral("The keybinding rewrite")}};
+        QJsonObject item;
+        bool newPane = false;
+        QString error;
+        QVERIFY(relay::appcommands::conversationToOpen(
+            {{QStringLiteral("target"), QStringLiteral("conversation")},
+             {QStringLiteral("conversation"), QStringLiteral("abc123")},
+             {QStringLiteral("item"), row}}, &item, &newPane, &error));
+        // A new pane unless the agent said otherwise: loading it where the person is sitting
+        // takes that pane's conversation away.
+        QVERIFY(newPane);
+        QCOMPARE(item.value(QStringLiteral("session_id")).toString(), QStringLiteral("abc123"));
+        QCOMPARE(item.value(QStringLiteral("session_dir")).toString(), QStringLiteral("/home/e/sessions"));
+        QCOMPARE(item.value(QStringLiteral("title")).toString(), QStringLiteral("The keybinding rewrite"));
+
+        QVERIFY(relay::appcommands::conversationToOpen(
+            {{QStringLiteral("conversation"), QStringLiteral("abc123")},
+             {QStringLiteral("item"), row},
+             {QStringLiteral("new_pane"), false}}, &item, &newPane, &error));
+        QVERIFY(!newPane);
+
+        // The id alone still resumes: the row is what the worker knows, not what it must send.
+        QVERIFY(relay::appcommands::conversationToOpen(
+            {{QStringLiteral("conversation"), QStringLiteral("only-an-id")}}, &item, &newPane, &error));
+        QCOMPARE(item.value(QStringLiteral("session_id")).toString(), QStringLiteral("only-an-id"));
+    }
+
+    void aConversationWithNoIdAndABadNewPaneAreRefused() {
+        QJsonObject item;
+        bool newPane = true;
+        QString error;
+        QVERIFY(!relay::appcommands::conversationToOpen(
+            {{QStringLiteral("target"), QStringLiteral("conversation")}}, &item, &newPane, &error));
+        QCOMPARE(error, QStringLiteral("unknown_conversation"));
+        QVERIFY(!relay::appcommands::conversationToOpen(
+            {{QStringLiteral("conversation"), QStringLiteral("abc123")},
+             {QStringLiteral("new_pane"), QStringLiteral("yes")}}, &item, &newPane, &error));
+        QCOMPARE(error, QStringLiteral("invalid_value"));
+    }
+
+    // …and the command reaches the window's opener like any other `open`, whatever the writes
+    // toggle says: resuming a conversation changes no setting (§30.4).
+    void openConversationGoesThroughTheOpenerWithTheIdAndTheFlag() {
+        app.openTarget = [this](const QJsonObject &command, QString *error) {
+            QJsonObject item;
+            bool newPane = true;
+            if (command.value(QStringLiteral("target")).toString() != QStringLiteral("conversation"))
+                { if (error) *error = QStringLiteral("unknown_target"); return false; }
+            if (!relay::appcommands::conversationToOpen(command, &item, &newPane, error)) return false;
+            state.opened << QStringLiteral("conversation:%1:%2")
+                                .arg(item.value(QStringLiteral("session_id")).toString(),
+                                     newPane ? QStringLiteral("new") : QStringLiteral("here"));
+            return true;
+        };
+        writes = false;
+        QJsonObject result = run({{QStringLiteral("id"), QStringLiteral("r1")},
+                                  {QStringLiteral("command"), QStringLiteral("open")},
+                                  {QStringLiteral("target"), QStringLiteral("conversation")},
+                                  {QStringLiteral("conversation"), QStringLiteral("abc123")},
+                                  {QStringLiteral("new_pane"), true}});
+        QVERIFY(result.value(QStringLiteral("ok")).toBool());
+        result = run({{QStringLiteral("id"), QStringLiteral("r2")},
+                      {QStringLiteral("command"), QStringLiteral("open")},
+                      {QStringLiteral("target"), QStringLiteral("conversation")},
+                      {QStringLiteral("conversation"), QStringLiteral("def456")},
+                      {QStringLiteral("new_pane"), false}});
+        QVERIFY(result.value(QStringLiteral("ok")).toBool());
+        QCOMPARE(state.opened, (QStringList{QStringLiteral("conversation:abc123:new"),
+                                            QStringLiteral("conversation:def456:here")}));
+
+        const QJsonObject refused = run({{QStringLiteral("id"), QStringLiteral("r3")},
+                                         {QStringLiteral("command"), QStringLiteral("open")},
+                                         {QStringLiteral("target"), QStringLiteral("conversation")}});
+        QCOMPARE(refused.value(QStringLiteral("error")).toString(),
+                 QStringLiteral("unknown_conversation"));
+    }
+
     void anUnknownCommandIsRefusedRatherThanIgnored() {
         const QJsonObject result = run({{QStringLiteral("id"), QStringLiteral("r1")},
                                         {QStringLiteral("command"), QStringLiteral("launch_rockets")}});

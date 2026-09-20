@@ -119,6 +119,25 @@ QJsonObject answerFor(const QJsonObject &command,
     return result;
 }
 
+bool conversationToOpen(const QJsonObject &command, QJsonObject *item, bool *newPane,
+                        QString *error) {
+    const auto fail = [error](const QString &word) { if (error) *error = word; return false; };
+    const QJsonObject row = command.value(QStringLiteral("item")).toObject();
+    // The id the tool named, for the case where the row did not travel (an older worker).
+    const QString asked = command.value(QStringLiteral("conversation")).toString();
+    const QString sessionId = row.value(QStringLiteral("session_id")).toString().isEmpty()
+                                  ? asked : row.value(QStringLiteral("session_id")).toString();
+    if (sessionId.isEmpty()) return fail(QStringLiteral("unknown_conversation"));
+    QJsonObject resolved = row;
+    resolved.insert(QStringLiteral("session_id"), sessionId);
+    const QJsonValue wanted = command.value(QStringLiteral("new_pane"));
+    if (!wanted.isUndefined() && !wanted.isNull() && !wanted.isBool())
+        return fail(QStringLiteral("invalid_value"));
+    if (item) *item = resolved;
+    if (newPane) *newPane = wanted.isBool() ? wanted.toBool() : true;
+    return true;
+}
+
 }  // namespace appcommands
 
 // ----- the catalog (§30.2) ------------------------------------------------------------------------

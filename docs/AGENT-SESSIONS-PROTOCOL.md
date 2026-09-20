@@ -6067,10 +6067,21 @@ worker) and nothing a command carries may take that name from it.
 
 | `command` | fields | what the GUI does |
 |---|---|---|
-| `open` | `target`: `options` \| `actions` \| `sessions` \| `switchboard`; `section?`, `row?`, `query?`, `card?` | `openSettingsPane(mode, section, query)` then `SettingsPane::revealOption(section, row)`; `openSessions(query)`; `openBoardCard(card)`, or `board.open` when no card is named |
+| `open` | `target`: `options` \| `actions` \| `sessions` \| `switchboard` \| `conversation`; `section?`, `row?`, `query?`, `card?`, `conversation?`, `item?`, `new_pane?` | `openSettingsPane(mode, section, query)` then `SettingsPane::revealOption(section, row)`; `openSessions(query)`; `openBoardCard(card)`, or `board.open` when no card is named; for `conversation`, `Pane::openSavedSession(item, new_pane)` on the active pane — the Sessions row's own Enter |
 | `set_option` | **`row`**, `value` | finds the row and invokes its writer |
 | `run_action` | `key` | finds the `ActionItem` — or the Options row button behind a `row:` key — and runs it |
 | `undo` | `change_id` | reverts that entry of the change log (30.6) |
+
+`open {target: "conversation"}` resumes a saved conversation, which is what pressing Enter on a
+row of the Sessions pane does. The conversation's id travels as **`conversation`** (not `id`,
+which is the request id's name) and the whole indexed row travels as **`item`** — `session_id`,
+`session_dir`, `title`, `source`, and for a claude or codex row the `resume_command` and
+`resume_cwd` of 26.7. The worker resolves the id against the conversation index of section 14
+before it sends anything, because the GUI holds no such index; an id nothing answers to is
+refused `unknown_conversation` without a round trip. `new_pane` defaults to **true**: a
+conversation loaded into the pane the person is sitting in replaces what that pane is holding, so
+"open it" means "beside it" unless the agent says otherwise. A window with no pane to open from
+answers `failed`.
 
 The row id is **`row`**, not `id`. The GUI is forgiving about where it finds it — `row`, then
 `option`, then the same two inside an `args` object — and `run_action` and `undo` likewise accept
@@ -6090,8 +6101,8 @@ there is no `change_id` to send back. The worker will record one, and a `detail`
 future GUI answers with them.
 
 `error` is one of `unknown_row`, `unknown_action`, `unknown_target`, `unknown_change`,
-`not_settable`, `secret`, `writes_disabled`, `invalid_value`, `not_agent_safe`, `busy`, `failed`
-or `no_reply`, and the sentence for the transcript rides beside it in **`message`** (the worker also
+`unknown_conversation`, `not_settable`, `secret`, `writes_disabled`, `invalid_value`,
+`not_agent_safe`, `busy`, `failed` or `no_reply`, and the sentence for the transcript rides beside it in **`message`** (the worker also
 reads `text` or `detail`, and treats an unrecognised `error` string as the sentence itself). An
 unknown `command` is answered `unknown_target`, with the command name in `message`.
 
@@ -6115,10 +6126,27 @@ never the tool list.
 | `app_option_set` | `id`, `value` | refused when the row is `secret`, when `settable` is `false`, when `writes_enabled` is `false`, and when the value does not fit the kind: a bool for `toggle`, one of `choices[].value` for `choice` (a label, or a differently-cased value, is corrected rather than refused), a number within `min`/`max` for `number`, a string of at most 4096 characters with no control characters for `text`. Otherwise `app_command {command: "set_option"}`; the result names before → after and the `change_id`. |
 | `app_action_list` | `search?` | the action catalog, at most 60 entries, `agent_safe` on each row and `runnable` counting them, so the agent can name an action it may not run and tell the person where the button is. Since #GMCF it answers from the keybinding catalog too: a row that is a bindable action carries its current `keys`, and the registry entries with no palette row (the focus moves, the window cycle, the shortcuts overlay — 31 of 92) are listed after it under section `Shortcuts`, `agent_safe: false`, with a third of the cap kept for them. `set_keybinding`'s schema no longer lists any of it, so this is where an action id is found; a truncated listing says so in `note`. |
 | `app_action_run` | `key` | `agent_safe` actions only, and only with `writes_enabled` |
-| `app_sessions_search` | `query`, `limit?` (default 10, at most 25) | worker-side, through the conversation index of section 14 (`conv_index.ConversationIndex.search`, the same query language as 14.2, `scope="all"` so it is the person's sessions and not this workspace's, up to 3 matching lines per row) — the Sessions pane never talks to the worker itself, so this needs no round trip and no open pane |
-| `app_open` | `target`, `section?`, `row?`, `query?`, `card?` | `app_command {command: "open"}`; a `row` is checked against the catalog first, so a misremembered id is a tool error rather than a pane opened at nothing, and a `card` is normalised (`#k7q2` → `K7Q2`). Returns when the pane has opened, so the agent says what it did, not what it asked for. Not a write: it is offered whatever `writes_enabled` says. |
+| `app_sessions_search` | `query`, `limit?` (default 10, at most 25) | worker-side, through the conversation index of section 14 (`conv_index.ConversationIndex.search`, the same query language as 14.2, `scope="all"` so it is the person's sessions and not this workspace's, up to 3 matching lines per row) — the Sessions pane never talks to the worker itself, so this needs no round trip and no open pane. Each row carries the `id` `app_open {target: "conversation"}` takes. |
+| `app_open` | `target`, `section?`, `row?`, `query?`, `card?`, `id?`, `ids?`, `new_pane?` | `app_command {command: "open"}`; a `row` is checked against the catalog first, so a misremembered id is a tool error rather than a pane opened at nothing, and a `card` is normalised (`#k7q2` → `K7Q2`). With `target: "conversation"` it opens past conversations: `id` for one, `ids` for up to 8, each in a pane of its own, in the order given and one round trip each, so the result answers **per id** (`results: [{id, ok, title?, error?}]`) and one unknown id does not lose the rest. `new_pane` defaults to true. Returns when the pane has opened, so the agent says what it did, not what it asked for. Not a write: it is offered whatever `writes_enabled` says. |
 | `app_changes` | — | the writes this worker has made so far, newest first (at most 100 kept): `{change_id, kind: "option", id, label, previous, value, when, undone}` for an option and `{change_id, kind: "action", key, label, when, undone}` for an action, `when` being seconds ago, built from the results it received and not from the GUI's log |
 | `app_undo` | `change_id` | `app_command {command: "undo"}` for one of its own changes, and only one it has not already undone |
+
+**Opening a conversation is a first-class ability, and the agent says so in words.** The Sessions
+helper can search the index *and* open what it finds — one conversation in the pane the person is
+in or in a new one, a group each in a new pane — and its brief (30.7) says that in a paragraph of
+its own rather than leaving it to the tool schema. The person's words decide where: "in new panes"
+(or several conversations at once) means `new_pane: true`, "here" or "in this pane" means false,
+and anything else opens in a new pane and says so rather than quietly taking a pane over.
+
+**Never answer with nothing after an app call** (owner, 2026-09-20: "it also needs to reply in
+text that it is doing it"). A helper panel draws the agent's *text*; its tool calls are not on
+screen, so a turn that opened three panes and answered with an empty message is indistinguishable
+from a turn that did nothing — which is how this was first reported. Every pane's brief and the
+`agent.app` prompt section carry the rule: one line, before or alongside the call, naming the
+things ("Opening 3 sessions in new panes: A, B, C.", "Turned Copy on select on — Undo is in the
+notification."). The worker enforces the floor: when a page-agent turn ends with no text of its
+own and its `app_*` calls reported something, `board_chat` appends their own sentences as the
+answer, so the panel always shows what was done.
 
 A refusal is a tool *result*, not an exception: `{error: "<sentence>", code: "<word>"}` with the
 codes of 30.3, plus `catalog` for an `app` block that broke its shape. A worker with no catalog at

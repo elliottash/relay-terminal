@@ -124,8 +124,34 @@ PANE_BRIEFS = {
         "-word to exclude) and answers from inside Relay, so nothing is sent anywhere. Search "
         "before you answer \"which session was that in\" — do not guess from memory — and "
         "app_open the pane at the search you used, so the person lands on the rows you are "
-        "talking about."),
+        "talking about.\n\n"
+        # The owner, 2026-09-20: "sessions helper didn't do anything when I asked to open a group
+        # of previous sessions in new panes", and then "can you make that more formalized that it
+        # can do that?" — so opening one is a paragraph of its own, not a line in the tool schema.
+        "You can also open a conversation, not only find it. app_open {target: \"conversation\", "
+        "id} resumes one — exactly what pressing Enter on a row in this pane does — and "
+        "{target: \"conversation\", ids: [\"…\", \"…\"]} opens a group, each in a pane of its "
+        "own, in the order you list them; the result says what happened to each id. The ids come "
+        "from app_sessions_search. new_pane decides where: when they said \"in new panes\" (or "
+        "asked for several), it is true, which is the default; only when they said \"here\" or "
+        "\"in this pane\" pass false, which loads it into the pane they are in and replaces what "
+        "that pane was holding. If the ask does not say and it is one conversation, open it in a "
+        "new pane and say so, or ask which they meant — never quietly take a pane over. When you "
+        "list conversations in an answer, write each as a [title](session:<id>) link, so the row "
+        "is one click away whether or not you opened it."),
 }
+
+#: The rule every pane's helper answers under (owner, 2026-09-20: "it also needs to reply in text
+#: that it is doing it").  The panel draws the agent's **text**; its tool calls are not on screen,
+#: so a turn that opens three panes and says nothing reads as a turn that did nothing — which is
+#: how the report that started this began.  It goes after the pane's own brief, in every pane,
+#: because the app tools are in every pane.
+SAY_WHAT_YOU_ARE_DOING = (
+    "Say what you are doing, in text, whenever you act on the app — app_open, app_option_set, "
+    "app_action_run, app_undo. One line before or alongside the call, naming the things: "
+    "\"Opening 3 sessions in new panes: A, B, C.\", \"Turned Copy on select on — Undo is in the "
+    "notification.\" Never finish a turn with an empty message after a tool call: the person sees "
+    "your words, not your calls, and silence reads as nothing having happened.")
 
 
 #: Where a tab's helper conversation is kept: `$XDG_DATA_HOME/relay/helper-sessions/<workspace
@@ -203,7 +229,8 @@ def pane_prompt(pane: str, text: str, context: str = "") -> str:
     conversation is about (`chat_prompt`).  These three carry no catalog: the app tools read it
     live, and a settings list pasted into a prompt is stale the moment the person changes a row.
     """
-    head = [f"[{PANE_TITLES.get(pane, pane)}]", "", PANE_BRIEFS.get(pane, ""), ""]
+    head = [f"[{PANE_TITLES.get(pane, pane)}]", "", PANE_BRIEFS.get(pane, ""), "",
+            SAY_WHAT_YOU_ARE_DOING, ""]
     if context:
         head += [f"On screen now: {str(context)[:MAX_PANE_CONTEXT]}", ""]
     return "\n".join(head + [text.strip()])
@@ -357,6 +384,10 @@ class PageAgent:
         self.built_model_id = None
         self.turn_id = None
         self.request_id = None
+        #: Whether this turn has put any text on screen, and what its `app_*` calls reported —
+        #: the two halves of the "never answer with nothing after a tool call" rule below.
+        self.said_text = False
+        self.app_notes: list[str] = []
         #: Which pane the running (or last) turn was asked from (30.7): it tags every event of
         #: the turn, so the panel that asked draws the answer and the others do not.
         self.pane = "switchboard"
@@ -464,6 +495,7 @@ class PageAgent:
         self.pane_seeded.add(self.pane)
         turn_id = f"chat-{secrets.token_hex(3)}"
         self.turn_id, self.request_id = turn_id, request_id
+        self.said_text, self.app_notes = False, []
         self.active, self.ended = True, False
         self.started = time.time()
         self.readonly, self.survey = readonly, survey
@@ -620,11 +652,44 @@ class PageAgent:
                 if self.turn_id:
                     event = {**event, "turn_id": self.turn_id}
                 if name in ("delta", "answer") and isinstance(event.get("text"), str):
+                    if event["text"].strip():
+                        self.said_text = True
                     self._collect(event["text"])
+                if name == "tool_result":
+                    self._note_app_call(event)
+                if name == "done":
+                    line = self._unsaid_app_line()
+                    if line:
+                        self._collect(line)
+                        emit({"event": "delta", "text": line, "chat": True, "pane": self.pane,
+                              "turn_id": self.turn_id})
                 if name in TERMINAL:
                     self._finish(event)
             emit(event)
         return tagged
+
+    # ---- "say what you are doing" (owner, 2026-09-20) --------------------------------
+    # The rule is in every pane's brief, and a model that ignores it leaves the panel showing
+    # nothing at all: the panel draws text, not tool calls, so a turn that opened three panes and
+    # answered with an empty message is indistinguishable from a turn that did not run. Each
+    # `app_*` result already says what happened in a sentence of its own ("Opened 3 conversations
+    # in new panes: …"), so the fallback is to say that.
+    def _note_app_call(self, event: dict) -> None:
+        if not str(event.get("tool") or "").startswith("app_"):
+            return
+        result = event.get("result")
+        text = result.get("text") if isinstance(result, dict) else None
+        if isinstance(result, dict) and result.get("error") and not text:
+            text = str(result["error"])
+        if isinstance(text, str) and text.strip():
+            self.app_notes.append(" ".join(text.split())[:300])
+
+    def _unsaid_app_line(self) -> str:
+        """One line for a turn that acted on the app and said nothing. Empty when it spoke."""
+        if self.said_text or not self.app_notes:
+            return ""
+        notes, self.app_notes = self.app_notes, []
+        return " ".join(notes)[:1000]
 
     # The answer as it streams, appended to the history when the turn ends. Same shape as a card
     # turn's collection, for the same reason: the page can be closed while the agent answers.
