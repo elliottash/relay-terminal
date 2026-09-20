@@ -796,10 +796,9 @@ Default window shortcuts:
 | Conversation info (the ⓘ view) | Alt+I | Subagents / Flash / Reasoning panes | Alt+A / Alt+F / Alt+R |
 | Activity pane | Alt+Shift+R | | |
 
-The session manager (`/resume`, `agent.resume`), titled "Manage Sessions", is Ctrl+Shift+M (owner,
-2026-09-19: moved off Ctrl+Shift+Y, Warp's key for its conversations menu, to stop reading as a
-Switchboard, Ctrl+Shift+S, variant; the Warp preset still overrides it back to Ctrl+Shift+Y for
-parity — docs/KEYBINDING-PRESETS.md).
+The session manager (`/resume`, `agent.resume`), titled "Sessions", is Ctrl+Shift+Y, Warp's key for
+its conversations menu. It was Ctrl+Shift+M for one day (2026-09-19) until the owner gave M to the
+model picker (`agent.model`, 2026-09-20: "models are more central than sessions").
 
 The ⓘ view (`agent.info`, `/status`, `/info`) is **Alt+I** (owner, 2026-09-18). Alt+I is the mnemonic
 and it is free: no preset table binds any Alt+letter, so all four presets inherit it (the konsole
@@ -1619,7 +1618,7 @@ The GUI side is `src/Conversations.{h,cpp}`: the **session manager pane**
 cards #CCKY, #R6J0), which replaced both the conversation dialog and the resume picker, and the
 Ctrl+F find bar, which searches the terminal through `TerminalBackend::find()` and counts matches
 in the pane's conversation with `conversation_get {query}`. `/resume`, `/conversations`,
-Ctrl+Shift+M and the palette rows all reach `RelayWindow::openSessionsFor(pane, query)`: one
+Ctrl+Shift+Y and the palette rows all reach `RelayWindow::openSessionsFor(pane, query)`: one
 manager per tab, bound to the pane that asked (its queries go to that pane's worker). Its
 **Project** chooser beside the Kind filter (#916B) lists the projects Relay knows, fed by the window
 from the registry (`setKnownProjects`), and asks the worker with `project` / `outside_projects`
@@ -2805,7 +2804,7 @@ of the platform and of the engine itself.
 | `src/ModelSettings.*` | the API-keys and model-roles modals |
 | `src/SettingsPane.*` | the Actions pane and the Options pane: one widget, two modes |
 | `src/AgentUi.*` | pickers and instructions dialog |
-| `src/Conversations.*` | the session manager pane (`/resume`, `/conversations`, Ctrl+Shift+M) and the Ctrl+F find bar |
+| `src/Conversations.*` | the session manager pane (`/resume`, `/conversations`, Ctrl+Shift+Y) and the Ctrl+F find bar |
 | `src/SessionInfo.*`, `src/PaneView.h` | the ⓘ conversation info pane (`/status`) and its painted button; the interface `ToolPane` hosts both through |
 | `src/FileIndex.*` | the `@` picker's file listing: the asynchronous git chain, the changed set, the non-git walk |
 | `src/Logging.*` | the GUI's rotating `relay.log` (section 13a) |

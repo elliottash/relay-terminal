@@ -3739,7 +3739,7 @@ thread, a bad id) are ordinary `error` events carrying the request `id`.
   thread's history in the same view, with "↑ owner session" and, for a nested thread, "↑ parent
   thread" links; "open in the subagents pane" goes to `RelayWindow::openSubagentTab`. Alt+Left
   goes back, F5 refreshes, Esc closes. A click on the button shows the "Next time: /status" hint.
-- `/resume [words]`, `/conversations [words]`, Ctrl+Shift+M (`agent.resume`), `conversations.open`
+- `/resume [words]`, `/conversations [words]`, Ctrl+Shift+Y (`agent.resume`), `conversations.open`
   and the palette's Resume and Conversations rows all open the session manager pane (`paneType`
   `sessions`), which replaced the resume picker (a modal over the `sessions` list of section 5,
   which is still answered for other clients) and the conversation dialog. Its "Subagent threads"

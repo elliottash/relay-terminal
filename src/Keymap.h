@@ -245,7 +245,7 @@ private:
         // window walks to the 2nd, and so on. Ctrl+Shift because a program that owns the terminal
         // must not swallow it (actsInsidePrograms) — the moment a bell entry matters is exactly
         // when the user is heads-down somewhere else. No letter is left: every Ctrl+Shift letter
-        // is bound (M went to agent.resume on 2026-09-19, after the card's plan picked it) or
+        // is bound (M is agent.model, the model picker, since 2026-09-20) or
         // reserved (C/V copy and paste, Q quits other terminals, U is the input method's Unicode
         // entry, D/P/Y are claimed in the preset tables), so the digit counts the walk: 1, 2, 3…
         // Free in the default table and all four presets.
@@ -315,6 +315,9 @@ private:
         // the average session is not worth claiming (the same reasoning as agent.localAgent).
         add("app.update", "window", "Update: download and install the latest Relay, then restart", {});
         add("agent.flashAgent", "agent", "Switch this pane between the Main agent and the Flash agent", {QStringLiteral("Alt+F")});   // model roles
+        // M for models (owner, 2026-09-20: "models are more central than sessions"): the model picker
+        // with its filter, sort and reasoning level — the same thing /model opens.
+        add("agent.model", "agent", "Models: pick this pane's model and reasoning level (/model)", {QStringLiteral("Ctrl+Shift+M")});
         // No default key: /local in the prompt box is the fast path, and Alt+L is not worth
         // claiming for a switch most panes never make (card #JH22).
         add("agent.localAgent", "agent", "Switch this pane between the Main agent and the Local agent (a model served on this machine)", {});
@@ -330,10 +333,10 @@ private:
         add("agent.rewind", "agent", "Rewind chat to an earlier turn; files are not changed (Esc Esc in an empty prompt box)", {});
         add("agent.rewindCode", "agent", "Rewind code: restore files the agent changed since an earlier turn (/rewind-code)", {});
         add("agent.fork", "agent", "Fork the conversation into a new pane", {});
-        // Was Ctrl+Shift+Y, Warp's key for its conversations menu (owner, 2026-09-18); moved to
-        // Ctrl+Shift+M for "Manage Sessions" so it stops reading as a Switchboard (Ctrl+Shift+S)
-        // variant (owner, 2026-09-19).
-        add("agent.resume", "agent", "Manage Sessions: resume a saved session, search, subagent threads (/resume)", {QStringLiteral("Ctrl+Shift+M")});
+        // Ctrl+Shift+Y: Warp's key for its conversations menu, and the free Ctrl+Shift letter with a
+        // mnemonic (historY). It was Ctrl+Shift+M from 2026-09-19 to 2026-09-20, until the owner gave
+        // M to models: "models are more central than sessions". The pane is titled "Sessions" again.
+        add("agent.resume", "agent", "Sessions: resume a saved session, search, subagent threads (/resume)", {QStringLiteral("Ctrl+Shift+Y")});
         // The ⓘ view from the keyboard (owner, 2026-09-18: "the (i) view hotkey could be alt+i or
         // alt+1?"). Alt+I, because it says what it opens, and it is free: Relay's only other
         // Alt+letters are Alt+A (subagents), Alt+F (Flash) and Alt+R (reasoning); no preset table
@@ -346,7 +349,7 @@ private:
         add("agent.info", "agent", "Conversation info: model, tokens, file and history with subagent threads (/status, the ⓘ button)",
             {QStringLiteral("Alt+I")});
         // Conversation list with full-text search, and find-in-view for this pane.
-        add("conversations.open", "agent", "Manage Sessions: search every saved session and Relay's terminal history (/conversations)", {});
+        add("conversations.open", "agent", "Sessions: search every saved session and Relay's terminal history (/conversations)", {});
         add("find.inView", "agent", "Find in this pane: the conversation and the terminal scrollback (from the prompt box)",
             {QStringLiteral("Ctrl+F"), QStringLiteral("Ctrl+Shift+F")});
         add("agent.recap", "agent", "Recap this agent session", {});

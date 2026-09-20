@@ -1120,6 +1120,7 @@ private:
         else if (id == QStringLiteral("program.delegate")) pane->delegateProgram();
         else if (id == QStringLiteral("input.toggle")) pane->toggleInputMode();
         else if (id == QStringLiteral("agent.flashAgent")) pane->toggleFlashAgent();   // model roles
+        else if (id == QStringLiteral("agent.model")) pane->openModelPicker();          // Ctrl+Shift+M, /model
         else if (id == QStringLiteral("agent.localAgent")) pane->toggleLocalAgent();   // /local
         else if (id == QStringLiteral("agent.planToggle")) pane->togglePlanMode();
         else if (id == QStringLiteral("agent.effortUp")) pane->effortStep(1);
@@ -2931,7 +2932,7 @@ private:
         {
             // One row for the session manager pane (#R6J0). /resume and /conversations both open it
             // now, so the old "Conversations…" row would be the same row twice; its words find this one.
-            PaletteItem sessions = actionItem(agent, QStringLiteral("Manage Sessions…"),
+            PaletteItem sessions = actionItem(agent, QStringLiteral("Sessions…"),
                                               QStringLiteral("Find and resume a session: every conversation and Relay's terminal "
                                                              "history, searchable, with subagent threads · /resume"),
                                               QStringLiteral("agent.resume"));
@@ -5150,6 +5151,9 @@ private:
         pane->onOpenInternals = [guard] { if (auto *w = windowOf(guard)) w->openInternalsPane(guard); };
         // The share chip, once this pane is shared: who is here and what is waiting (#W5N2).
         pane->onOpenSharing = [guard] { if (auto *w = windowOf(guard)) w->openSharingPane(guard, true); };
+        pane->onOpenOptions = [guard](const QString &tab) {
+            if (auto *w = windowOf(guard)) w->openSettingsPane(relay::SettingsPane::Mode::Options, tab);
+        };
         pane->onShareTab = [guard](int *panes) {
             auto *w = windowOf(guard);
             return w ? w->shareTabId(w->pageOf(guard), panes) : QString();

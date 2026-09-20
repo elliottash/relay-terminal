@@ -942,7 +942,7 @@ QString SessionManager::currentTab() const {
     return m_tabs->currentWidget() ? m_tabs->currentWidget()->property("tabId").toString() : QString();
 }
 
-QString SessionManager::paneTitle() const { return QStringLiteral("Manage Sessions"); }
+QString SessionManager::paneTitle() const { return QStringLiteral("Sessions"); }
 
 void SessionManager::focusView() {
     if (currentTab() == QLatin1String("sessions")) focusSearch();

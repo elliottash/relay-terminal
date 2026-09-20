@@ -631,6 +631,8 @@ public:
     std::function<void()> onOpenInternals;   // the Activity pane beside this one (#QT8C)
     // The Sharing pane (#W5N2): who is on this shared pane, who is knocking, what is waiting.
     std::function<void()> onOpenSharing;
+    // Options, opened at one of its tabs: `/models` lands on Options › Models.
+    std::function<void(const QString &tab)> onOpenOptions;
     // The window's id for the tab this pane is in, and how many terminals it holds, so the share
     // dialog can offer "Share the whole tab". Unset (or "") offers only this pane.
     std::function<QString(int *panes)> onShareTab;
@@ -994,6 +996,8 @@ public:
         changed();
     }
     void openProviderDialog() { configure(); }
+    // Ctrl+Shift+M (agent.model) and /model with no argument: the model picker for this pane.
+    void openModelPicker() { runSlashCommand(QStringLiteral("model"), QString()); }
     // The pane's provider settings follow a model switch as a whole (card WFJM): the provider dialog
     // reads `provider/base|model|extra` as its defaults, and they used to keep the first preset's
     // endpoint after every chip or /model switch.
@@ -7149,14 +7153,16 @@ private:
             {QStringLiteral("glm"), QString(), QStringLiteral("Switch to the GLM Coding Plan")},
             {QStringLiteral("kimi"), QString(), QStringLiteral("Switch to the Kimi Coding Plan")},
             {QStringLiteral("effort"), QStringLiteral("[low|medium|high|max]"), QStringLiteral("Set reasoning effort")},
+            {QStringLiteral("reasoning"), QStringLiteral("[low|medium|high|max]"), QStringLiteral("Set reasoning effort (same as /effort)")},
+            {QStringLiteral("models"), QString(), QStringLiteral("Options › Models: providers, which models the picker shows, their order")},
             {QStringLiteral("compact"), QStringLiteral("[focus]"), QStringLiteral("Summarize older turns to free context")},
             {QStringLiteral("context"), QString(), QStringLiteral("Show context usage")},
             {QStringLiteral("rewind"), QString(), QStringLiteral("Rewind chat to an earlier turn (files are not changed)")},
             {QStringLiteral("rewind-code"), QString(), QStringLiteral("Restore files the agent changed since an earlier turn")},
             {QStringLiteral("fork"), QString(), QStringLiteral("Continue this conversation in a new pane")},
-            {QStringLiteral("resume"), QStringLiteral("[words]"), QStringLiteral("Manage Sessions: resume, search, subagent threads (same as /conversations)")},
-            {QStringLiteral("sessions"), QStringLiteral("[words]"), QStringLiteral("Manage Sessions: the same pane as /resume, under the name on its header")},
-            {QStringLiteral("conversations"), QStringLiteral("[words]"), QStringLiteral("Manage Sessions: search every session and Relay's terminal history")},
+            {QStringLiteral("resume"), QStringLiteral("[words]"), QStringLiteral("Sessions: resume, search, subagent threads (same as /conversations)")},
+            {QStringLiteral("sessions"), QStringLiteral("[words]"), QStringLiteral("Sessions: the same pane as /resume, under the name on its header")},
+            {QStringLiteral("conversations"), QStringLiteral("[words]"), QStringLiteral("Sessions: search every session and Relay's terminal history")},
             {QStringLiteral("status"), QString(), QStringLiteral("Conversation info: model, tokens, file and history with subagent threads (the ⓘ button)")},
             {QStringLiteral("info"), QString(), QStringLiteral("Conversation info (same as /status)")},
             {QStringLiteral("find"), QStringLiteral("[words]"), QStringLiteral("Find in this pane: conversation and terminal scrollback")},
@@ -7528,7 +7534,13 @@ private:
             }
             status(QStringLiteral("No stored %1 key. Add one in Options › Models › API keys….")
                        .arg(glm ? QStringLiteral("GLM") : QStringLiteral("Kimi")));
-        } else if (name == QStringLiteral("effort")) {
+        } else if (name == QStringLiteral("models")) {
+            // Owner (card #Y2JW): "/models … should bring to the models options". The page, not a
+            // modal: providers, the checklist of what the picker shows, and their order all live
+            // there, so this is the one door for all three.
+            if (onOpenOptions) onOpenOptions(QStringLiteral("models"));
+            else status(QStringLiteral("Options › Models is not available from this pane."));
+        } else if (name == QStringLiteral("effort") || name == QStringLiteral("reasoning")) {
             const QStringList levels = offeredEfforts();
             const QString wanted = args.toLower();
             if (levels.isEmpty() && !wanted.isEmpty()) status(QStringLiteral("This model has no reasoning setting."));
@@ -8372,6 +8384,9 @@ public:
                 QStringLiteral("tasks in this session"));
             row(keys.shortcutText(QStringLiteral("palette.open")), QStringLiteral("every action, in a list you can filter"));
             row(keys.shortcutText(QStringLiteral("app.settings")), QStringLiteral("options"));
+            row(keys.shortcutText(QStringLiteral("agent.model")).isEmpty() ? QStringLiteral("/model")
+                                                                          : keys.shortcutText(QStringLiteral("agent.model")),
+                QStringLiteral("pick a model and reasoning level"));
             row(keys.shortcutText(QStringLiteral("agent.resume")).isEmpty() ? QStringLiteral("/resume")
                                                                            : keys.shortcutText(QStringLiteral("agent.resume")),
                 QStringLiteral("resume a saved session"));
