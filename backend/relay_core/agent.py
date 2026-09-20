@@ -25,6 +25,7 @@ from . import activity_tools
 from . import app_tools
 from . import board_tools
 from . import prompt_profiles
+from . import tool_groups
 from . import todos as todo_tool
 from . import security
 from . import tool_labels
@@ -583,6 +584,10 @@ class Agent:
         # Which prompt profile this pane sends: "auto" (short on a local endpoint or a small
         # window), "full" or "short" — see relay_core.prompt_profiles (#GMCF decision 7).
         self.prompt_profile = prompt_profiles.validate(prompt_profile)
+        # The on-demand tool groups `load_tools` has fetched in this conversation (#GMCF decision
+        # 9). Per conversation, not per turn: a schema the model has been given stays given, and a
+        # new conversation starts from the names again.
+        self.loaded_tool_groups: set[str] = set()
         self.completion_check = completion_check
         self.audit_requests = audit_requests
         self._announce = False   # emit requests/todos events on change (after construction)
@@ -679,6 +684,9 @@ class Agent:
         self._turn = None
         self.requests = RequestLedger(on_change=self._requests_changed)
         self.todos = todo_tool.TodoList()
+        # A new conversation starts from the group names again (#GMCF 9): the schemas were loaded
+        # into a conversation, and this one has not asked for them.
+        self.loaded_tool_groups = set()
         self.plan_path = None
         # Session info (card #Y63Z): every model this conversation ran on, and the provider-reported
         # token totals (and cost, where the provider reports one). Kept in the session file.
@@ -815,6 +823,23 @@ class Agent:
     def _todos_enabled(self) -> bool:
         return self.track_requests and self.todo_tool
 
+    def _deferred_groups(self) -> tuple[str, ...]:
+        """The tool groups this pane holds back until `load_tools` asks for them (#GMCF 9).
+
+        Only where a provider caches by prefix and the group is actually present: on the Local tier
+        appending a schema re-prefills the whole request (proposal 4.1), and the short profile does
+        not offer these tools at all. A group nothing is wired up for — no `app` block, no activity
+        tools, no board — is not deferred either: there is nothing to load.
+        """
+        if getattr(self, "preset", None) is not None and getattr(self.preset, "local", False):
+            return ()
+        if self.profile() != "full" or getattr(getattr(self, "board", None), "card_scope", None) is not None:
+            return ()
+        have = {"app": getattr(self, "app", None) is not None,
+                "own_session": getattr(self, "activity", None) is not None,
+                "tests": getattr(self, "board", None) is not None}
+        return tuple(group for group in tool_groups.GROUPS if have.get(group))
+
     def profile(self) -> str:
         """"full" or "short": what this pane is sending right now (#GMCF decision 7).
 
@@ -861,16 +886,24 @@ class Agent:
                 workspace=str(self.executor.workspace.root), skills=self.executor.skills,
                 instructions=self.instructions.section if self.instructions is not None else "")
         todo_rules = todo_tool.RULES if getattr(self, "track_requests", False) and getattr(self, "todo_tool", False) else ""
+        # #GMCF decision 9: a group whose schemas are loaded on demand takes its rules with it, and
+        # leaves the one line that says the names exist. The line is the same whether or not the
+        # group has been loaded, so loading one appends to the tool list and changes no prompt byte.
+        deferred = self._deferred_groups()
         # Protocol 30: driving the app, and reading this pane's own session. Both are "" for an
         # agent that has neither, so a worker the GUI sent no `app` block to is unchanged.
         sections = [
             SYSTEM,
             todo_rules,
-            app_tools.prompt_section(getattr(self, "app", None)),
-            activity_tools.prompt_section(getattr(self, "activity", None)),
+            "" if "app" in deferred else app_tools.prompt_section(getattr(self, "app", None)),
+            "" if "own_session" in deferred else activity_tools.prompt_section(getattr(self, "activity", None)),
             self.executor.skills.prompt_section() if self.executor.skills is not None else "",
             self.instructions.section if self.instructions is not None else "",
             "Chosen workspace: " + str(self.executor.workspace.root),
+            # Below the workspace line because `tests` is one of the groups: which groups exist
+            # changes when a project is attached, and that belongs with the Switchboard sections
+            # rather than above everything they share.
+            tool_groups.prompt_line(deferred),
             board_tools.prompt_section(getattr(self, "board", None)),
             board_tools.session_note(getattr(self, "board", None)),
         ]
@@ -910,6 +943,12 @@ class Agent:
         tools = [t for t in offered if t["function"]["name"] not in TAIL_TOOLS]
         extra = [todo_tool.SPEC] if self._todos_enabled() else []
         extra = extra + [WRITE_PLAN_SPEC]
+        # #GMCF decision 9: `load_tools` itself is a fixture of the list — it is the same spec for
+        # every pane and every turn — so it sits here with the stable tools. Only the schemas it
+        # fetches are appended, at the very end, where an append costs nothing above them.
+        deferred = self._deferred_groups()
+        if deferred:
+            extra = extra + [tool_groups.LOAD_TOOLS_SPEC]
         if self.subagents is not None:
             extra = extra + self.subagents.tool_specs()
         # Protocol 30: the app tools and, on a pane agent, its own session's read tools. Plan
@@ -926,7 +965,17 @@ class Agent:
         offered = tools + extra + tail
         # The short profile keeps eight of these (#GMCF decision 7) — filtered here rather than
         # assembled separately, so a tool cannot exist in two shapes.
-        return prompt_profiles.tool_specs(offered) if self.profile() == "short" else offered
+        if self.profile() == "short":
+            return prompt_profiles.tool_specs(offered)
+        if not deferred:
+            return offered
+        # The three on-demand groups are named in one line of the prompt; their schemas are held
+        # back until `load_tools` asks, and then appended after everything else — so a load leaves
+        # every byte a provider has already cached exactly where it was (#GMCF decision 9).
+        held = set(tool_groups.deferred_names(deferred))
+        loaded = [t for group in deferred if group in self.loaded_tool_groups
+                  for t in offered if t["function"]["name"] in tool_groups.GROUPS[group][0]]
+        return [t for t in offered if t["function"]["name"] not in held] + loaded
 
     @property
     def _routed(self) -> dict | None:
@@ -2910,6 +2959,15 @@ class Agent:
             self.inbox.restore(delivered)
 
     def _prepare(self, name: str, args) -> Prepared:
+        # #GMCF decision 9, before anything else can handle the name: a group's tools are wired up
+        # whether or not their schemas were sent, so the refusal has to be here rather than in
+        # whichever module owns the tool. It names the group, which is all the model needs.
+        if name == tool_groups.LOAD_TOOLS and self._deferred_groups():
+            group = tool_groups.validate(args)
+            return Prepared(name, {"group": group}, f"LOAD TOOLS\n\n{group}")
+        group = tool_groups.group_of(name)
+        if group is not None and group in self._deferred_groups() and group not in self.loaded_tool_groups:
+            raise ValueError(tool_groups.refusal(name, group))
         scope = getattr(self.board, "card_scope", None)
         app_tool = self.app is not None and self.app.handles(name)
         if scope is not None and not scope.allows(name) and not app_tool:
@@ -2945,6 +3003,13 @@ class Agent:
         return self.executor.prepare(name, args)
 
     def _execute(self, prepared: Prepared, turn: dict) -> dict:
+        if prepared.name == tool_groups.LOAD_TOOLS:
+            # The schemas reach the model with the next request's tool list, which `tools()`
+            # appends them to: nothing above them moves, which is the whole point (#GMCF 9).
+            group = prepared.arguments["group"]
+            already = group in self.loaded_tool_groups
+            self.loaded_tool_groups.add(group)
+            return tool_groups.result(group, already)
         if prepared.name == "type_into_program":
             ctx = self._turn_ctx or {}
             return self.executor.program.execute(prepared.arguments, ctx.get("turn_id"))

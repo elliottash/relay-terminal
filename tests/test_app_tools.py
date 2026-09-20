@@ -498,12 +498,27 @@ class AgentWiringTest(unittest.TestCase):
         self.agent = Agent(ProviderConfig("http://127.0.0.1:12345/v1", "mock", ""),
                            self.temp.name, lambda event: None, app=self.tools)
 
-    def test_the_specs_are_in_the_tool_list(self):
+    def load_the_app_tools(self):
+        """#GMCF decision 9: the app tools are an on-demand group — named in the prompt, their
+        schemas fetched by `load_tools`. Everything below is about what happens once they are."""
+        self.agent._execute(self.agent._prepare("load_tools", {"group": "app"}), {})
+
+    def test_the_specs_arrive_when_the_group_is_loaded(self):
+        names = [t["function"]["name"] for t in self.agent.tools()]
+        self.assertNotIn("app_option_list", names)
+        self.assertIn("load_tools", names)
+        self.load_the_app_tools()
         names = [t["function"]["name"] for t in self.agent.tools()]
         for name in A.TOOL_NAMES:
             self.assertIn(name, names)
 
+    def test_a_call_before_the_group_is_loaded_says_how_to_load_it(self):
+        with self.assertRaises(ValueError) as caught:
+            self.agent._prepare("app_option_list", {})
+        self.assertIn('load_tools with group="app"', str(caught.exception))
+
     def test_a_call_is_prepared_and_executed_through_the_tools(self):
+        self.load_the_app_tools()
         prepared = self.agent._prepare("app_option_set", {"id": "agent.app_writes", "value": True})
         self.assertIn("RELAY OPTION SET", prepared.preview)
         result = self.agent._execute(prepared, {})
@@ -512,6 +527,7 @@ class AgentWiringTest(unittest.TestCase):
 
     def test_plan_mode_keeps_the_reads_and_refuses_the_writes(self):
         self.agent.set_mode("plan")
+        self.load_the_app_tools()
         names = [t["function"]["name"] for t in self.agent.tools()]
         self.assertIn("app_option_list", names)
         with self.assertRaises(ValueError):

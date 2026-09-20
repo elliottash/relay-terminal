@@ -31,6 +31,12 @@ from relay_core.provider import ProviderConfig
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# `tests_check` and `tests_run` are an on-demand tool group since #GMCF decision 9: the
+# prompt names them and `load_tools` fetches their schemas, so they are not in the list a
+# board arrives with. Everything else of the board still is.
+from relay_core import tool_groups  # noqa: E402
+SENT_WITH_THE_BOARD = set(T.TOOL_NAMES) - set(tool_groups.GROUPS['tests'][0])
+
 CONFIG = """\
 version: 1
 tabs: [{id: features, folder: features}, {id: bugs, folder: changes}]
@@ -828,7 +834,7 @@ class AgentWiringTests(unittest.TestCase):
         tools = T.BoardTools.for_workspace(self.repo, state_path=self.repo / ".relay" / "r.json")
         agent = self.agent(tools)
         names = {t["function"]["name"] for t in agent.tools()}
-        self.assertTrue(set(T.TOOL_NAMES) <= names)
+        self.assertTrue(SENT_WITH_THE_BOARD <= names)
         prompt = agent.system_prompt()
         self.assertIn("Switchboard", prompt)
         self.assertIn("board_rate_limited", prompt)
@@ -1513,7 +1519,7 @@ class SetBoardTests(AttachTest):
         self.assertTrue(state["board"]["exists"])
         self.assertEqual(state["board"]["state"], "ready")
         # The tools and the policy arrive; the conversation is the same object, unshortened.
-        self.assertTrue(set(T.TOOL_NAMES) <= set(self.board_tools(agent)))
+        self.assertTrue(SENT_WITH_THE_BOARD <= set(self.board_tools(agent)))
         self.assertIn("board_rate_limited", agent.system_prompt())
         self.assertEqual((id(agent), id(agent.messages), len(agent.messages), agent.session_id),
                          identity)
@@ -1525,7 +1531,7 @@ class SetBoardTests(AttachTest):
         agent = self.agent(there)
         agent.messages.append({"role": "user", "content": "still here"})
         identity = (id(agent.messages), len(agent.messages))
-        self.assertTrue(set(T.TOOL_NAMES) <= set(self.board_tools(agent)))
+        self.assertTrue(SENT_WITH_THE_BOARD <= set(self.board_tools(agent)))
 
         self.events.clear()
         self.commands.set_board({"type": "set_board", "id": "s2", "board": None})
@@ -1568,7 +1574,7 @@ class SetBoardTests(AttachTest):
         self.commands.observe({"event": "done", "turn_id": "t-1"})
         landed = self.of("board_state")[0]
         self.assertEqual((landed["id"], landed["applies"], landed["at"]), ("s3", "now", "turn_end"))
-        self.assertTrue(set(T.TOOL_NAMES) <= set(self.board_tools(agent)))
+        self.assertTrue(SENT_WITH_THE_BOARD <= set(self.board_tools(agent)))
 
     def test_dir_may_name_the_project_or_the_board_folder(self):
         there = self.project("project", "issues")
@@ -1849,7 +1855,7 @@ class InitTests(AttachTest):
         self.assertNotIn("error", result)
         self.assertEqual(agent.board.state, "ready")
         # The full tools and the full policy arrive in the same turn, and so does the owner's half.
-        self.assertTrue(set(T.TOOL_NAMES) <= set(self.board_tools(agent)))
+        self.assertTrue(SENT_WITH_THE_BOARD <= set(self.board_tools(agent)))
         self.assertIn("board_rate_limited", agent.system_prompt())
         self.assertEqual(self.commands.tools.state, "ready")
         self.assertEqual(len(B.Board(project / B.DEFAULT_BOARD_FOLDER, project).cards()), 1)

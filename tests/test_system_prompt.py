@@ -196,16 +196,19 @@ class StabilityTests(PromptFixture):
         self.assertIn('PLAN MODE', agent_mod.plan_mode_note('plan'))
         self.assertEqual(agent_mod.plan_mode_note('build'), '')
 
-    def test_attaching_a_switchboard_only_appends(self):
+    def test_attaching_a_switchboard_changes_nothing_above_the_workspace_line(self):
         # A project attached or detached mid-session is the other event that used to move the
         # middle of the prompt: the board's header and policy sat above the app and own-session
-        # rules. Both board sections are the tail now, and its tools are appended.
+        # rules. They are at the bottom now, under the workspace line, with the one line naming
+        # the on-demand tool groups (#GMCF 9) — which is also board-dependent, because `tests` is
+        # one of them. Everything above that line is what two panes of one project share.
         from relay_core import agent as agent_mod
         without = build_agent(self.workspace, self.repo, self.library, board=False)
         attached = self.agent()
-        self.assertTrue(attached.system_prompt().startswith(without.system_prompt()),
-                        'attaching a Switchboard changed something other than the tail')
-        self.assertIn('Switchboard', attached.system_prompt()[len(without.system_prompt()):])
+        shared = os.path.commonprefix([without.system_prompt(), attached.system_prompt()])
+        self.assertIn('Chosen workspace: ' + str(self.workspace), shared,
+                      'attaching a Switchboard changed something above the workspace line')
+        self.assertIn('Switchboard', attached.system_prompt()[len(shared):])
         # The tools before the ones that can only append (TAIL_TOOLS) keep their order too.
         stable = [[t for t in a.tools() if t['function']['name'] not in agent_mod.TAIL_TOOLS]
                   for a in (without, attached)]

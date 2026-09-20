@@ -1,0 +1,47 @@
+[
+ {
+  "label": "deferred (nothing loaded)",
+  "tools": 23,
+  "prompt_bytes": 12541,
+  "tools_bytes": 23197,
+  "prompt_tokens": 2920,
+  "tools_tokens": 5913,
+  "total_tokens": 8833
+ },
+ {
+  "label": "after load_tools(app)",
+  "tools": 32,
+  "prompt_bytes": 12541,
+  "tools_bytes": 28544,
+  "prompt_tokens": 2920,
+  "tools_tokens": 7234,
+  "total_tokens": 10154
+ },
+ {
+  "label": "after load_tools(own_session)",
+  "tools": 34,
+  "prompt_bytes": 12541,
+  "tools_bytes": 29965,
+  "prompt_tokens": 2920,
+  "tools_tokens": 7596,
+  "total_tokens": 10516
+ },
+ {
+  "label": "after load_tools(tests)",
+  "tools": 36,
+  "prompt_bytes": 12541,
+  "tools_bytes": 31972,
+  "prompt_tokens": 2920,
+  "tools_tokens": 8136,
+  "total_tokens": 11056
+ },
+ {
+  "label": "everything sent, as before decision 9",
+  "tools": 35,
+  "prompt_bytes": 13128,
+  "tools_bytes": 31403,
+  "prompt_tokens": 3043,
+  "tools_tokens": 8000,
+  "total_tokens": 11043
+ }
+]

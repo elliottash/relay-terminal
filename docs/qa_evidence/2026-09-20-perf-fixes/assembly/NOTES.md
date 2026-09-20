@@ -35,7 +35,8 @@ used to be in the system prompt of every request of a plan turn and is now in th
 user message once, so a multi-step plan turn sends it fewer times, not more.
 
 Tests: `tests/test_system_prompt.py::StabilityTests::test_switching_mode_changes_neither_the_prompt_nor_the_tool_list`
-and `::test_attaching_a_switchboard_only_appends` (both fail before the change),
+and `::test_attaching_a_switchboard_changes_nothing_above_the_workspace_line` (both fail before
+the change),
 `tests/test_sessions.py::PlanModeTests` updated to the new behaviour.
 
 # #GMCF decision 7: the short prompt profile
@@ -77,3 +78,37 @@ Options › Agent is the override, and it takes effect on the next request.
 Tests: `tests/test_prompt_profiles.py` (11 tests: which profile `auto` picks, every hard rule of
 `SYSTEM` present in `SYSTEM_SHORT`, the byte budgets, the eight tools, and the setting overriding
 `auto` live).
+
+# #GMCF decision 9: three tool groups loaded on demand
+
+`groupsize.py` in this directory builds the same pane agent and sizes its request as the model loads
+each group, with the Local tier's tokenizer; `groupsize.json` is the raw output.
+
+```
+python3 docs/qa_evidence/2026-09-20-perf-fixes/assembly/groupsize.py . http://127.0.0.1:8080
+```
+
+| | tools | prompt | tool JSON | total |
+|---|---|---|---|---|
+| everything sent, as before | 35 | 3,043 tok | 8,000 tok | **11,043 tok** |
+| deferred, nothing loaded | 23 | 2,920 tok | 5,913 tok | **8,833 tok** (−20 %) |
+| after `load_tools(app)` | 32 | 2,920 | 7,234 | 10,154 |
+| … and `own_session` | 34 | 2,920 | 7,596 | 10,516 |
+| … and `tests` | 36 | 2,920 | 8,136 | 11,056 |
+
+A turn that needs none of the three — most turns — sends 2,210 tokens less. A turn that needs all
+three pays 13 tokens more than before (the `load_tools` schema) plus one round trip per group. The
+prompt saving is the app and own-session rules going with their tools, replaced by the one line
+naming them: 3,043 → 2,920 tokens.
+
+Loading only ever appends: `tests/test_tool_groups.py::LoadTests::test_a_load_only_appends_to_the_tool_list`
+compares the JSON of the list before a load with the same prefix after it, byte for byte, and the
+system prompt is unchanged by a load at all. The refusal a model gets for calling a name whose group
+it has not loaded names the group and the tool to call:
+`tests/test_tool_groups.py::LoadTests::test_calling_a_deferred_tool_first_is_refused_with_the_group_named`,
+and `ConversationTests` runs the whole round trip — refusal, load, successful call — through a
+scripted provider, checking that the request *after* the load is the first to carry the schema and
+that its tool list still starts with the one before it.
+
+Deferral is off on the Local tier and under the short profile (every load re-prefills there,
+proposal 4.1) and off for a group this pane has nothing wired up for.

@@ -799,6 +799,33 @@ both as `prompt_profile` and `prompt_profile_in_effect`. GUI: Options › Agent 
 Measured on `local:bonsai` (2026-09-20): full 14,544 tokens and 18.5 s of cold prefill, short 1,480
 tokens and 2.2 s; warm, both 0.2 s.
 
+### 12.13 `load_tools` — tool groups fetched on demand (v4.3, 2026-09-20, #GMCF decision 9)
+
+Three groups of tools are 8.6 KB of schemas (~2,150 tokens) that a minority of turns use, so the
+full profile names them in one line of the prompt and sends their schemas only once the model asks:
+
+| Group | Tools | For |
+|---|---|---|
+| `app` | `app_option_list`, `app_option_get`, `app_option_set`, `app_action_list`, `app_action_run`, `app_sessions_search`, `app_open`, `app_changes`, `app_undo` | Relay's own Options and actions, the sessions index, putting a screen in front of the user (30.4) |
+| `own_session` | `session_info`, `activity` | this conversation itself (30.5) |
+| `tests` | `tests_check`, `tests_run` | a card's `## Tests` section, and running named tests (31) |
+
+`load_tools {group}` returns `{loaded, tools: [names], already_loaded, note}`, and the group's
+schemas are **appended to the end of the tool list** of the next request and stay for the rest of
+the conversation. Nothing above them moves — that is the whole mechanism: on llama.cpp the tool list
+is rendered above the system prompt, so a schema inserted in the middle re-prefills everything
+(11,309 tokens, 13 s measured). Calling one of the names before its group is loaded is refused with
+`"<name> is not loaded in this conversation. Call load_tools with group=\"<group>\" first…"`, from
+`Agent._prepare`, before the module that owns the tool sees it — the tools are wired up either way,
+only their schemas were held back. This is Claude Code's own deferred-tool shape.
+
+Deferral is **off** on the Local tier and under the short profile (12.12), where a load would cost
+the whole prefix, and off for a group nothing is wired up for (no `app` block, no board): there is
+then no `load_tools` tool and no rule line. A new conversation starts from the names again. The
+group's prompt rules travel with its schemas: a deferred `app` group takes `app_tools.prompt_section`
+out of the prompt and leaves the one line. Backend: `backend/relay_core/tool_groups.py`; tests:
+`tests/test_tool_groups.py`.
+
 ## 13. Model roles (v1.3, 2026-09-17; `planning` added v3.4, 2026-09-19)
 
 One configurable model per job. Backend: `backend/relay_core/roles.py` (resolution and defaults), with
