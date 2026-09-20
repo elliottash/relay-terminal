@@ -283,14 +283,25 @@ struct Row {
     // `Fold` is the row that is neither a card nor a section (#93WR): the self-closed cards of
     // one section, put away behind "N closed by the agent" at the end of that section's cards.
     // Its own cards follow it when it is open, as ordinary card rows.
-    enum Kind { Section, Card, Fold };
+    //
+    // The last three are the machine's own faults (#AQ6X, src/BoardSignals.h), spliced in above
+    // the sections: `SignalFold` is "N signals", `DismissedFold` the "N dismissed" toggle at the
+    // end of that block, and `Signal` one signal. A signal is **not** a card — it has no id in
+    // `issues/` — so it carries `signalKey` and never `cardId`, and every card action steps over
+    // it exactly as it steps over a fold row.
+    enum Kind { Section, Card, Fold, Signal, SignalFold, DismissedFold };
     Kind kind = Card;
     QString columnId;         // every kind: the section this row belongs to
-    QString title;            // Section: the status name. Fold: "3 closed by the agent"
+    QString title;            // Section: the status name. Fold: "3 closed by the agent".
+                              // SignalFold: "5 signals". Signal: the signal's key
     QString cardId;           // Card: the card
+    QString signalKey;        // Signal: the signal's key (`ctest:panelayout`), never a card id
     int count = 0;            // Section: how many cards it holds, after the filter.
-                              // Fold: how many self-closed cards it stands for
-    bool collapsed = false;   // Section, Fold: its cards are not in the list
+                              // Fold: how many self-closed cards it stands for.
+                              // SignalFold/DismissedFold: how many signals. Signal: its failures
+    int indent = 0;           // Signal: 1 for a member of a group, or a dismissed signal under
+                              // its toggle — the row is drawn one step in from its parent
+    bool collapsed = false;   // Section, Fold, SignalFold, DismissedFold: its rows are not in the list
     bool showStatus = false;  // Card: its section holds several statuses, so the row names this one
 };
 
@@ -305,13 +316,22 @@ QPair<QString, int> dropTarget(const QList<Row> &rows, int beforeRow);
 
 // The next selectable row at or past `from` in direction `delta`, skipping section headers; -1
 // when there is none, so Up/Down walks the whole list across section breaks and stops at its
-// ends. A fold row is selectable — Enter and →/← work on it — so the walk stops there too.
+// ends. A fold row is selectable — Enter and →/← work on it — so the walk stops there too, and so
+// do the signal rows and their two toggles (#AQ6X).
 int stepRow(const QList<Row> &rows, int from, int delta);
+// Whether a row can be stood on: everything but a section header.
+bool selectableRow(const Row &row);
 
 // The row index of a card, of a section header, or of a section's fold row (#93WR); -1 for none.
 int rowOfCard(const QList<Row> &rows, const QString &cardId);
 int rowOfSection(const QList<Row> &rows, const QString &columnId);
 int rowOfFold(const QList<Row> &rows, const QString &columnId);
+// The row index of a signal, of the "N signals" row, or of the "N dismissed" toggle (#AQ6X); -1
+// for none. There is at most one of each in the list: the signals are the board's, not a
+// section's.
+int rowOfSignal(const QList<Row> &rows, const QString &key);
+int rowOfSignalFold(const QList<Row> &rows);
+int rowOfDismissedFold(const QList<Row> &rows);
 
 // The section that holds the closed cards. It is always the last one, and the pane folds it by
 // default: done is a status, not a place (owner decision, 2026-09-18).

@@ -68,6 +68,8 @@ target_compile_options(relay-helperchat PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-board STATIC src/BoardModel.cpp src/BoardModel.h src/BoardPane.cpp src/BoardPane.h
     src/CurrentTextComboBox.h   # the model box, shared with the terminal pane (#BRD3)
     src/BoardSections.cpp src/BoardSections.h
+    # Signals (#AQ6X): the machine's own faults as rows the board draws, and the page one opens.
+    src/BoardSignals.cpp src/BoardSignals.h
     src/BoardWorker.cpp src/BoardWorker.h src/BoardWorkspace.cpp src/BoardWorkspace.h
     src/BoardChat.h)   # the Switchboard's name for the helper panel (#8YQ9, #FEJQ)
 target_include_directories(relay-board PUBLIC src)

@@ -885,12 +885,20 @@ QPair<QString, int> dropTarget(const QList<Row> &rows, int beforeRow)
     return qMakePair(rows.at(header).columnId, slot);
 }
 
+bool selectableRow(const Row &row)
+{
+    // Everything but a section header. A fold row (#93WR) and a signal row or its toggles (#AQ6X)
+    // are rows the keyboard stands on — Enter and ←/→ work on them — even though none of them is
+    // a card.
+    return row.kind != Row::Section;
+}
+
 int stepRow(const QList<Row> &rows, int from, int delta)
 {
     if (delta == 0)
         return from;
     for (int i = from + delta; i >= 0 && i < rows.size(); i += delta)
-        if (rows.at(i).kind == Row::Card || rows.at(i).kind == Row::Fold)
+        if (selectableRow(rows.at(i)))
             return i;
     return -1;
 }
@@ -919,6 +927,32 @@ int rowOfFold(const QList<Row> &rows, const QString &columnId)
         return -1;
     for (int i = 0; i < rows.size(); ++i)
         if (rows.at(i).kind == Row::Fold && rows.at(i).columnId == columnId)
+            return i;
+    return -1;
+}
+
+int rowOfSignal(const QList<Row> &rows, const QString &key)
+{
+    if (key.isEmpty())
+        return -1;
+    for (int i = 0; i < rows.size(); ++i)
+        if (rows.at(i).kind == Row::Signal && rows.at(i).signalKey == key)
+            return i;
+    return -1;
+}
+
+int rowOfSignalFold(const QList<Row> &rows)
+{
+    for (int i = 0; i < rows.size(); ++i)
+        if (rows.at(i).kind == Row::SignalFold)
+            return i;
+    return -1;
+}
+
+int rowOfDismissedFold(const QList<Row> &rows)
+{
+    for (int i = 0; i < rows.size(); ++i)
+        if (rows.at(i).kind == Row::DismissedFold)
             return i;
     return -1;
 }
