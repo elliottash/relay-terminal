@@ -359,6 +359,34 @@ class BoardCommands:
         cancel = getattr(agent, "cancel_event", None)
         if cancel is not None:
             self.init.cancel = cancel
+        self._refresh_chat_model()
+
+    def _refresh_chat_model(self) -> None:
+        """A `configure` rebuilt the pane's agent: does the live page conversation still run on
+        the model the `switchboard` role names (19.18)?
+
+        The page's model picker writes that role and reconfigures every board worker — it does
+        not send `board_chat {model}`, which names a *different* role for this conversation only.
+        `PageAgent._start` rebuilds when the role changes, and the role has not; so without this
+        the pick would land in the settings, redraw the box, and leave the conversation
+        answering on the provider it was built with.  `invalidate()` keeps every message.
+        """
+        if self.chat.agent is None or self.chat.built_model_id is None:
+            return
+        model = self._chat_model_id()
+        if model and model != self.chat.built_model_id:
+            self.chat.invalidate()
+
+    def _chat_model_id(self) -> str | None:
+        """The provider model the page agent would be built on right now, without building it."""
+        main = self._agent()
+        if main is None:
+            return None
+        role = self.chat.model or "switchboard"
+        resolved = main.roles.resolve(role) if (getattr(main, "roles", None) is not None
+                                                and role != "main") else None
+        config = resolved.config if resolved is not None else main.config
+        return getattr(config, "model", None)
 
     def _attach_agent_tools(self, workspace: str | None, settings: dict) -> None:
         """Give the pane's live agent the board these settings name, keeping its conversation.

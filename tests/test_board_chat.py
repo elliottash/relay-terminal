@@ -423,5 +423,99 @@ class ImportToolTest(ProtocolChatTest):
         self.assertNotIn("error", result)
 
 
+class FakeConfig:
+    """A provider config, as far as the page agent's rebuild rule is concerned: a model id."""
+
+    def __init__(self, model: str):
+        self.model = model
+
+
+class FakeResolved:
+    def __init__(self, model: str):
+        self.config = FakeConfig(model)
+        self.preset_id = None
+        self.effort = None
+
+
+class FakeRoles:
+    """A role table whose `switchboard` row can be repointed, the way the page's picker does."""
+
+    def __init__(self, model: str):
+        self.model = model
+
+    def resolve(self, role):
+        return FakeResolved(self.model)
+
+
+class FakeMain:
+    """The pane's agent, as `bind_agent` sees it: a config, a role table and a cancel event."""
+
+    def __init__(self, model: str):
+        self.config = FakeConfig(model)
+        self.roles = FakeRoles(model)
+        self.cancel_event = threading.Event()
+
+
+class ModelNudgeTest(ProtocolChatTest):
+    """A `configure` that moves the `switchboard` role reaches a live conversation (19.18).
+
+    The page's model picker does not send `board_chat {model}` — that names another role for this
+    conversation alone.  It writes the `switchboard` role itself and reconfigures every board
+    worker, so `PageAgent.model` never changes and `_start`'s own rebuild rule never fires.  Left
+    at that, the pick would land in the settings, redraw the box, and leave the conversation
+    answering on the provider it was built with.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.main = FakeMain("glm-5.3")
+        self.commands.turns.agent = self.main
+
+    def build(self, emit):
+        agent, tools = super().build(emit)
+        # The agent a build produces answers on whatever the role resolves to right now, which is
+        # exactly what `built_model_id` records.
+        agent.config = FakeConfig(self.main.roles.model)
+        return agent, tools
+
+    def run_turn(self, text):
+        self.ask(text)
+        agent = self.agent
+        agent.gate.set()
+        self.wait_idle()
+        return agent
+
+    def test_a_configure_that_moves_the_switchboard_role_rebuilds_the_conversation(self):
+        first = self.run_turn("first")
+        self.assertEqual(self.commands.chat.built_model_id, "glm-5.3")
+
+        # The pick: the role now resolves elsewhere, and `configure` re-binds the pane's agent.
+        self.main.roles.model = "kimi-k2.5"
+        self.commands.bind_agent(self.main)
+
+        second = self.run_turn("second")
+        self.assertIsNot(second, first)
+        self.assertEqual(self.commands.chat.built_model_id, "kimi-k2.5")
+        # The conversation came across with it (13.5's rule for a pane): the new agent keeps its
+        # own system prompt and every other message, and the prompt is not re-seeded.
+        self.assertEqual(len(second.messages), 3)               # system + first + second
+        self.assertEqual(second.messages[-1]["content"], "second")
+        self.assertTrue(second.messages[1]["content"].startswith("[Switchboard page agent]"))
+
+    def test_a_configure_that_changes_nothing_leaves_the_live_agent_alone(self):
+        first = self.run_turn("first")
+        self.commands.bind_agent(self.main)                     # same resolved model
+        second = self.run_turn("second")
+        self.assertIs(second, first)
+        self.assertEqual(self.commands.chat.built_model_id, "glm-5.3")
+
+    def test_invalidate_before_the_first_turn_is_harmless(self):
+        self.commands.chat.invalidate()
+        self.assertIsNone(self.commands.chat.agent)
+        self.run_turn("first")
+        self.assertTrue(self.of("board_chat_started"))
+        self.assertEqual(self.commands.chat.built_model_id, "glm-5.3")
+
+
 if __name__ == "__main__":                                      # pragma: no cover
     unittest.main()

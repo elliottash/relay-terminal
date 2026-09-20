@@ -201,6 +201,12 @@ class PageAgent:
         #: The model the picker named: None (the `switchboard` role) or a preset id.
         self.model = None
         self._built_model = object()          # what the agent above was built on
+        #: The provider model id the live agent was actually built on (`config.model`), as
+        #: opposed to the *role* above.  A `configure` that repoints the `switchboard` role
+        #: leaves `self.model` alone — the role is still the same one — so this is what tells
+        #: the worker that the conversation is running on a model the owner has moved off
+        #: (`invalidate()`, 19.18).
+        self.built_model_id = None
         self.turn_id = None
         self.request_id = None
         self.thread = None
@@ -278,6 +284,7 @@ class PageAgent:
             if messages:
                 self.agent.messages.extend(messages)
             self._built_model = self.model
+            self.built_model_id = getattr(getattr(self.agent, "config", None), "model", None)
         # The opening turn carries the board; every later one is the owner's words alone, the
         # conversation being the context (the card sessions' seeding rule).
         if prompt is None:
@@ -305,6 +312,19 @@ class PageAgent:
             return True
         return False
 
+    def invalidate(self) -> None:
+        """Rebuild the agent on the next turn, keeping every message of the conversation.
+
+        The picker on the page writes the `switchboard` role and reconfigures the worker
+        (`onModelPick`), which never touches `self.model` — the conversation is still on the same
+        *role*.  Without this the live agent would keep answering on the provider it was built
+        with and the pick would look like it had done nothing.  `_start` already carries the
+        messages across when it rebuilds, so a switch mid-conversation costs nothing but the
+        system prompt.
+        """
+        with self._lock:
+            self._built_model = object()
+
     def drop(self, wait: float = 2.0) -> None:
         """Forget the conversation: the worker was repointed, or is shutting down."""
         with self._lock:
@@ -315,6 +335,7 @@ class PageAgent:
             self.seeded = self.surveyed = False
             self.active = False
             self._built_model = object()
+            self.built_model_id = None
         if agent is not None and getattr(agent, "stop", None) is not None:
             agent.stop()
         if thread is not None and thread.is_alive():
@@ -363,18 +384,24 @@ class PageAgent:
                 tools.end_chat_turn()
             finally:
                 with self._lock:
-                    self.active = False
-                    self.thread = None
-                    self.seeded = True
                     survey = self.survey
                     if self.survey:
                         self.surveyed = True
-                    self._announce_state(turn_id=turn_id)
+                # The turn's own state settles *before* it reads as idle. `_on_turn_end` is what
+                # writes `survey-state.json` to `done`, and a page — or a test — that has just
+                # seen the turn finish must not find the marker still saying `running`: it would
+                # survey the board again on the next open, which is the one thing the marker
+                # exists to prevent. It is a small file write, and the turn is over either way.
                 if self._on_turn_end is not None:
                     try:
                         self._on_turn_end(turn_id, survey, outcome)
                     except Exception:                       # pragma: no cover - state file
                         pass
+                with self._lock:
+                    self.active = False
+                    self.thread = None
+                    self.seeded = True
+                    self._announce_state(turn_id=turn_id)
                 self._drain()
 
     def _drain(self) -> None:

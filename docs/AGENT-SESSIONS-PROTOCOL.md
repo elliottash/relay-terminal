@@ -2749,6 +2749,12 @@ page-agent turn is already running:
   (`agent_role`, 19.1) — so the page agent and the card threads answer on the same model.
   `model` in a `board_chat` names another role for the turns after it (empty string: back to the
   Switchboard role); the conversation survives the switch, as a pane's survives `set_model`.
+  The page's **model picker** does not use that field: it writes the `switchboard` role itself
+  (13.7) and reconfigures every board worker, which is the one setting both the page agent and the
+  card threads read. So a `configure` whose resolved `switchboard` model differs from the one the
+  live conversation was built on **rebuilds its agent**, keeping every message — otherwise the
+  role would have moved and the conversation would have gone on answering on the old provider
+  (`PageAgent.built_model_id` / `invalidate()`, nudged from `BoardCommands.bind_agent`).
 - **Queueing.** A prompt that arrives while *this* conversation is turning joins a worker-side
   FIFO queue (cap 20; past it, `error`), announced by `board_chat_queued` and drained in order
   when each turn ends — the pane's semantics (#N8VK), not the board's: the page agent never
