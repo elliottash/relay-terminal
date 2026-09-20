@@ -106,3 +106,20 @@ One thing from the owner: the Risks section asks whether that pane was running a
 
 <!-- relay:entry 20260920T115528Z-rc author=owner kind=event pane=switchboard -->
 - ✦ owner moved this card · Planning → Planned · the plan is on the card
+
+<!-- relay:entry 20260920T212453Z-by author=agent kind=event model=kimi-k3 pane=b2bc87a9 turn=cd14e3411c104989b6ae99393507dcfd/87603178ea23404fb0df731d160403b3 -->
+- ✦ agent claimed this card · assignee agent, Planned → Executing, implemented_by kimi/kimi-k3, session b2bc87a9
+
+<!-- relay:entry 20260920T212453Z-z5 author=agent kind=progress model=kimi-k3 pane=b2bc87a9 turn=cd14e3411c104989b6ae99393507dcfd/87603178ea23404fb0df731d160403b3 pane_token=b2bc87a9-d7f0-49f9-a9d9-15e6b0768418 -->
+Claimed (b2bc87a9) · working on it from a terminal pane
+
+Executing the plan on the card: reproduce at HEAD, then harden the forced-agent explain_invalid default in router.py and gate dispatch()'s shell-branch note, plus regression tests with the owner's line.
+
+<!-- relay:entry 20260920T214642Z-ze author=agent kind=event model=kimi-k3 pane=b2bc87a9 turn=cd14e3411c104989b6ae99393507dcfd/87603178ea23404fb0df731d160403b3 -->
+- ✦ agent updated this card · appended to `## Tests`
+
+<!-- relay:entry 20260920T214701Z-zr author=agent kind=event model=kimi-k3 pane=b2bc87a9 turn=cd14e3411c104989b6ae99393507dcfd/87603178ea23404fb0df731d160403b3 -->
+- ✦ agent updated this card · appended to `## QA checklist`
+
+<!-- relay:entry 20260920T214816Z-7a author=agent kind=event model=kimi-k3 pane=b2bc87a9 turn=cd14e3411c104989b6ae99393507dcfd/87603178ea23404fb0df731d160403b3 -->
+- ✦ agent moved this card · Executing → Needs verification · Forced-agent decisions now judge explain_invalid like auto mode, and dispatch()'s shell branch gates the note on it; 44 router tests pass and the Xvfb live check shows prose quiet and gti status explained. · evidence docs/qa_evidence/2026-09-20-command-not-found-agent-prompts/ · implemented_by kimi/kimi-k3

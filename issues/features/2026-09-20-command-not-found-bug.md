@@ -1,10 +1,13 @@
 ---
 id: EB4A
 type: work
-status: planned
+status: needs-verification
+assignee: agent
+implemented_by: kimi/kimi-k3
+session: b2bc87a9-d7f0-49f9-a9d9-15e6b0768418
 rank: zzzzzzzzzzzzzzz
 created: '2026-09-20'
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-20-command-not-found-agent-prompts/], related: [], github: null}
 ---
 # command not found bug
 
@@ -53,3 +56,16 @@ thats a bug
 - Land in `needs-verification` with evidence under `docs/qa_evidence/2026-09-20-command-not-found-agent-prompts/` (before/after router outputs, Xvfb transcript) and a QA checklist.
 
 *Small plan — no subagents; all writes stay with the executing agent.*
+
+## Tests
+tests/test_router.py::WrongModeSignalTests::test_agent_mode_prose_does_not_explain_itself
+tests/test_router.py::WrongModeSignalTests::test_agent_mode_reports_runnability
+tests/test_router.py
+manual: docs/qa_evidence/2026-09-20-command-not-found-agent-prompts/
+
+## QA checklist
+1. **Quiet, AUTO.** Submit `another session like that, same issue?` and `same issue as before?` with the chip on AUTO: each goes to the agent with the ✦ echo and **no** `command not found` note under it.
+2. **Quiet, AGENT.** The same two lines with the chip on AGENT (Ctrl+I twice from auto): no note. Router level: `classify(<prose>, "agent").explain_invalid` is `False`.
+3. **Explained.** `gti status` in AUTO keeps `command not found: gti` under the echo; `classify("gti status", "agent").explain_invalid` stays `True`, and a valid command's agent-mode decision dict is byte-for-byte what it was before the change (`explain_invalid` default `True`).
+4. **Tests.** The three invocations in `## Tests` pass; `drive.sh` in the evidence dir re-runs the live check and reproduces `implementer-01..04`.
+5. **No regression in fixed modes.** `tests.test_ssh_remote` and `tests.test_routing_thinking_skills` (the other `classify` consumers) pass.

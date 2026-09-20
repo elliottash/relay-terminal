@@ -49,7 +49,8 @@ class Decision:
     # treats valid text without it as a shell command. High confidence only
     # (_reads_like_request), so typos and real commands never trigger it.
     agent_signal: bool = False
-    # May the GUI print invalid_reason under a line auto-routed to the agent? The note explains a
+    # May the GUI print invalid_reason under a line sent to the agent, however it got there? The
+    # note explains a
     # mistyped command ("gti status" -> command not found: gti); under a plain request it reads as
     # the failure of a command the user never meant to run (owner report, 2026-09-18:
     # "symlink from ~/projects to here" answered fine, with "command not found: symlink" under it).
@@ -1064,9 +1065,15 @@ def classify(text: str, mode: str = "auto", known_commands: Iterable[str] = (),
         valid, reason, ok, error = check_runnable(text, known_commands, commands, cwd)
         signal = _reads_like_request(trimmed, known, valid, cwd)
         if forced == "agent":
+            # explain_invalid judges prose the same here as in auto mode (card #EB4A): the GUI's
+            # agent-chip gate keeps the note quiet today, but the field ships in the decision and a
+            # caller that trusts it would print "command not found" under a plain request. Valid
+            # text keeps the default True so its decision is byte-for-byte what it was.
             return Decision("agent", text, "Explicit agent destination; nothing runs in the shell.",
                             syntax_ok=ok, syntax_error=error, valid=valid, invalid_reason=reason,
-                            agent_signal=signal)
+                            agent_signal=signal,
+                            explain_invalid=explain_invalid(text, reason, known, commands, cwd)
+                            if reason else True)
         why = "Explicit terminal destination." if valid else f"Explicit terminal destination · {reason}; the agent will fix it."
         return Decision("shell", text, why, syntax_ok=ok, syntax_error=error, valid=valid,
                         invalid_reason=reason, agent_signal=signal)

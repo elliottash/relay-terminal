@@ -10431,7 +10431,15 @@ private:
                 submitTerminal(text, !handoff, readsLikeRequest, handoff);
                 return;
             }
-            if (!valid) { submitAgent(text, true, problem); return; }
+            if (!valid) {
+                // Forwarded to the agent anyway: the note is explain_invalid's call here too, so a
+                // route-assist-rewritten or legacy shell-routed prose line cannot print
+                // "command not found" under its echo (card #EB4A). An older worker that does not
+                // send the field keeps the note.
+                submitAgent(text, true,
+                            decision.value(QStringLiteral("explain_invalid")).toBool(true) ? problem : QString());
+                return;
+            }
             submitTerminal(text, false, false, handoff);
         } else {
             // "agent", or a legacy "ambiguous" decision: the agent is the default for invalid input.

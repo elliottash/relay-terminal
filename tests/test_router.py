@@ -505,14 +505,35 @@ class WrongModeSignalTests(unittest.TestCase):
     def test_agent_mode_reports_runnability(self):
         command = classify("git stauts", "agent")
         self.assertEqual((command.route, command.valid, command.agent_signal), ("agent", True, False))
+        self.assertTrue(command.explain_invalid)  # valid text keeps the default, byte-for-byte
         request = classify("why does this fail", "agent")
         self.assertEqual(request.route, "agent")
         self.assertFalse(request.valid)
         self.assertTrue(request.agent_signal)
         self.assertIn("command not found", request.invalid_reason)
+        self.assertFalse(request.explain_invalid)  # prose: nothing to explain (card #EB4A)
         typo = classify("nope123 x", "agent")
         self.assertFalse(typo.valid)
         self.assertFalse(typo.agent_signal)
+        self.assertTrue(typo.explain_invalid)
+
+    def test_agent_mode_prose_does_not_explain_itself(self):
+        # Card #EB4A, owner report 2026-09-20: "another session like that, same issue?" printed
+        # "command not found: another" under its ✦ echo. Auto mode already suppressed the note
+        # (the 2026-09-18 fixes), but the forced-agent branch shipped explain_invalid=True by
+        # default — untrue for prose — so any caller trusting the field re-opened the bug.
+        for text in ["another session like that, same issue?", "same issue as before?",
+                     "the other session too?"]:
+            for mode in ["auto", "agent"]:
+                with self.subTest(text=text, mode=mode):
+                    result = classify(text, mode)
+                    self.assertEqual(result.route, "agent")
+                    self.assertFalse(result.explain_invalid,
+                                     f"{mode}: {text!r}: {result.invalid_reason}")
+        # A real typo still explains itself in agent mode.
+        typo = classify("gti status", "agent")
+        self.assertEqual(typo.route, "agent")
+        self.assertTrue(typo.explain_invalid)
 
     def test_signal_is_in_the_decision_dict(self):
         d = classify("explain this error", "shell").to_dict()
