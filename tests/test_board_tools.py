@@ -74,7 +74,9 @@ class SpecTests(unittest.TestCase):
     def test_the_designed_tools_are_offered_and_nothing_else(self):
         self.assertEqual(T.TOOL_NAMES, ("board_list", "board_read", "board_create_card",
                                         "board_update_card", "board_move_card",
-                                        "board_import_items", "board_comment", "board_claim"))
+                                        "board_import_items", "board_comment", "board_claim",
+                                        # protocol 31 (#7BM4): the tests a card names
+                                        "tests_check", "tests_run"))
 
     def test_there_is_no_delete_tool(self):
         names = " ".join(T.TOOL_NAMES)
@@ -2512,6 +2514,76 @@ class SharedPlacementTests(BoardToolsTest):
     def test_card_target_path_is_none_when_the_card_is_already_there(self):
         card = self.board.card_by_id(self.create())
         self.assertIsNone(B.card_target_path(self.board, card, "features"))
+
+
+class TestsToolsTest(BoardToolsTest):
+    """`tests_check` and `tests_run`, the two agent-facing tools of protocol 31 (#7BM4).
+
+    What they answer over is covered end to end in `tests/test_tests_protocol.py`, with a fake
+    `ctest` and a real unittest module; here it is the registration, the card section and the
+    refusals a model can hit by typing.
+    """
+
+    def test_both_tools_are_offered_to_a_pane_and_to_the_page_agent(self):
+        names = [spec["function"]["name"] for spec in self.tools.tool_specs()]
+        self.assertIn("tests_check", names)
+        self.assertIn("tests_run", names)
+        self.assertTrue(self.tools.handles("tests_check"))
+        scope = self.tools.begin_chat_turn()
+        self.assertTrue(scope.allows("tests_check"))
+        self.assertTrue(scope.allows("tests_run"))
+        self.tools.end_chat_turn()
+
+    def test_tests_is_a_section_the_agent_writes_without_a_rewrite_entry(self):
+        self.assertIn("tests", T.AGENT_SECTIONS)
+        card_id = self.create()
+        card_hash = self.tools.run("board_read", {"id": card_id})["hash"]
+        result = self.tools.run("board_update_card", {
+            "id": card_id, "base_hash": card_hash,
+            "append_section": {"heading": "Tests", "text": "- `ctest -R voice`"}})
+        self.assertEqual(result["logged_rewrites"], [])
+        self.assertIn("## Tests", self.board.card_by_id(card_id).body)
+
+    def test_a_card_with_no_tests_section_gets_one_sentence_and_one_action(self):
+        card_id = self.create()
+        result = self.tools.run("tests_check", {"card": card_id})
+        self.assertNotIn("error", result)
+        self.assertEqual(result["card"], card_id)
+        self.assertEqual([f["verdict"] for f in result["findings"]], ["no-tests"])
+        self.assertIn("has no `## Tests` section", result["text"])
+        self.assertEqual(result["actions"], ["Add the tests this card's commits touched"])
+
+    def test_a_listed_test_that_is_not_in_the_project_is_named(self):
+        card_id = self.create()
+        card_hash = self.tools.run("board_read", {"id": card_id})["hash"]
+        self.tools.run("board_update_card", {
+            "id": card_id, "base_hash": card_hash,
+            "append_section": {"heading": "Tests", "text": "- `ctest -R nosuchtest`"}})
+        result = self.tools.run("tests_check", {"card": card_id})
+        self.assertEqual([f["verdict"] for f in result["findings"]], ["gone"])
+        self.assertIn("nosuchtest", result["text"])
+
+    def test_tests_check_needs_a_card_that_exists(self):
+        self.assertIn("error", self.tools.run("tests_check", {"card": "ZZZ9"}))
+        self.assertEqual(self.tools.run("tests_check", {})["code"], "board_refused")
+
+    def test_tests_run_refuses_an_empty_list_and_too_many_ids(self):
+        empty = self.tools.run("tests_run", {"ids": []})
+        self.assertIn("no way to run the whole suite", empty["error"])
+        many = self.tools.run("tests_run", {"ids": [f"ctest:t{n}" for n in range(60)]})
+        self.assertEqual(many["code"], "tests_refused")
+        self.assertIn("at most 50", many["error"])
+
+    def test_tests_run_refuses_ids_that_name_nothing_runnable(self):
+        result = self.tools.run("tests_run", {"ids": ["manual: docs/qa_evidence/2026-09-20-x/"]})
+        self.assertEqual(result["code"], "tests_refused")
+        self.assertIn("recorded by hand", result["error"])
+
+    def test_the_handlers_are_pointed_at_this_board(self):
+        commands = self.tools._tests()
+        self.assertEqual(Path(commands.project), self.repo)
+        self.assertEqual(Path(commands.board_root), self.root)
+        self.assertIs(self.tools._tests(), commands)
 
 
 if __name__ == "__main__":       # pragma: no cover

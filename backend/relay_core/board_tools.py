@@ -115,6 +115,9 @@ IMMUTABLE_FIELDS = frozenset({"id", "type", "created", "source", "rank", "status
 AGENT_SECTIONS = frozenset({
     "findings", "plan", "options", "implementer check", "qa checklist", "evidence",
     "notes", "tasks", "steps", "verdict", "qa verdict", "resolution", "decisions",
+    # What proves this card, one invocation per line (#7BM4, protocol 31): `tests_check` reads
+    # it, the Test suites pane links a test back to the cards that name it.
+    "tests",
 })
 
 #: A card in a QA lane is closed with a verdict section in the body; any pane may flip it once
@@ -156,6 +159,14 @@ def spec(name: str, description: str, properties: dict, required: list[str]) -> 
 
 
 _ID_ARG = {"type": "string", "description": "Card id, four characters (e.g. K7Q2); '#K7Q2' is accepted."}
+
+#: How many tests one agent-facing `tests_run` may name (protocol 31).  The wire's own ceiling
+#: is higher (`tests_protocol.MAX_IDS`): a person selecting rows in the pane knows what they
+#: picked, and a model naming fifty tests is already naming more than it can read back.
+MAX_AGENT_TEST_IDS = 50
+#: How long that call waits before the run is stopped, and what a tool call may ask for.
+DEFAULT_TEST_TIMEOUT = 300
+MAX_TEST_TIMEOUT = 1800
 
 TOOL_SPECS = [
     spec("board_list",
@@ -298,6 +309,32 @@ TOOL_SPECS = [
                     "description": "Take a card another session holds. Only when the user says to "
                                    "take it over, or the holding session is plainly gone."}},
          ["id"]),
+    spec("tests_check",
+         "Check the tests a card names, without running one of them (protocol 31, #7BM4). Reads "
+         "the card's `## Tests` section, what the project collects now and the stored run "
+         "history, and answers only what moved: a listed test that is gone, one that has never "
+         "run here, one skipped in every run, one whose source changed, one that is flaky or "
+         "slow, or a card whose commits touched files no listed test is named after. It is "
+         "silent when nothing is wrong. Call it before you move a card to needs-verification, "
+         "and when it names a card with no `## Tests` section, write one.",
+         {"card": _ID_ARG}, ["card"]),
+    spec("tests_run",
+         "Run named tests and wait for the verdicts: a per-test table of result and duration, "
+         "with the failure message for anything that did not pass. Ids are a test's stable key, "
+         "as a card's `## Tests` section or tests_check gives them — `ctest:<name>` or "
+         f"`unittest:<module>.<Class>.<test>` — at most {MAX_AGENT_TEST_IDS} of them. There is "
+         "no way to ask for the whole suite: that is `scripts/test.sh` or `ctest` at the "
+         "terminal, where you can watch it. One run at a time, per project.",
+         {"ids": {"type": "array", "items": {"type": "string"}, "minItems": 1,
+                  "maxItems": MAX_AGENT_TEST_IDS,
+                  "description": "The tests to run, each `<runner>:<invocation>`."},
+          "repeat_until_fail": {"type": "integer", "minimum": 0, "maximum": 100,
+                                "description": "Run them up to this many times, stopping at the "
+                                               "first failure — how a flaky test is caught."},
+          "timeout_seconds": {"type": "integer", "minimum": 10, "maximum": 1800,
+                              "description": "How long to wait before the run is stopped "
+                                             "(default 300)."}},
+         ["ids"]),
 ]
 
 #: The three tools a whole-board cleanup needs and an ordinary turn does not (protocol 19.9).
@@ -773,7 +810,9 @@ CARD_MODE_BOARD_TOOLS = {
 #: stays with a cleanup: restructuring the whole board is a run with a preview of its own.
 CHAT_BOARD_TOOLS = ("board_list", "board_read", "board_create_card", "board_update_card",
                     "board_move_card", "board_comment", "board_merge_cards",
-                    "board_split_card", "board_import_items")
+                    "board_split_card", "board_import_items",
+                    # The page is where "which cards have no tests" is asked (protocol 31).
+                    "tests_check", "tests_run")
 
 #: Where a Plan turn writes. SWITCHBOARD-DESIGN 12.4: plan mode writes the plan onto the card.
 PLAN_HEADING = "Plan"
@@ -1257,6 +1296,9 @@ class BoardTools:
         #: Set while a turn that writes nothing runs (the survey of a fresh board, 19.18): every
         #: write tool refuses, so what the agent offers stays an offer until the owner says yes.
         self.readonly = False
+        #: This project's `tests_protocol.TestsCommands` (protocol 31, #7BM4), behind
+        #: `tests_check` and `tests_run`.  Made on first use; see `_tests`.
+        self._tests_commands = None
 
     # ---- events ---------------------------------------------------------------
     def _emit_board(self, event: dict) -> None:
@@ -1487,6 +1529,7 @@ class BoardTools:
                        "board_claim": self._claim,
                        "board_merge_cards": self._merge, "board_split_card": self._split,
                        "board_sections": self._sections,
+                       "tests_check": self._tests_check, "tests_run": self._tests_run,
                        "board_import_items": self._import_items}[name]
             return handler(dict(args))
         except BoardToolError as exc:
@@ -2459,6 +2502,60 @@ class BoardTools:
                 "hash": B.file_hash(card.path), "write_id": write_id, "summary": summary,
                 **({} if token else {"warning": NO_TOKEN_NOTE}),
                 "card": card_block(self.board, card)}
+
+    # ---- the tests a card names (protocol 31, #7BM4) ---------------------------
+    def _tests(self):
+        """This project's `tests_protocol.TestsCommands`, made on first use.
+
+        Imported inside the method, not at the top of the module: it pulls in `test_probe` and
+        `jobs`, and most turns never ask about a test.  Its `emit` is the default no-op — a tool
+        call answers the model with its return value, and the pane's own events come from the
+        board worker's instance (`board_protocol._tests`), not from this one.
+        """
+        if self._tests_commands is None:
+            from . import tests_protocol as TP
+            self._tests_commands = TP.TestsCommands(self.board.repo, self.board.root)
+        return self._tests_commands
+
+    def _tests_check(self, args: dict) -> dict:
+        """`tests_check`: what moved under one card's `## Tests` section.  Runs nothing."""
+        from . import tests_protocol as TP
+        card_id = normalize_id(args.get("card") or args.get("id"))
+        if not card_id:
+            raise BoardToolError("tests_check needs `card`: the card id, e.g. K7Q2.")
+        try:
+            result = self._tests().check_card(card_id)
+        except ValueError as exc:
+            raise BoardToolError(str(exc), code="tests_refused") from exc
+        return {"card": result["card"], "text": TP.format_findings(result),
+                "findings": result["findings"], "actions": result["actions"]}
+
+    def _tests_run(self, args: dict) -> dict:
+        """`tests_run`: run the named tests and wait for the table.
+
+        The refusals are `tests_protocol`'s own — an empty list, more than the ceiling, a second
+        run while one is in flight, a missing build directory, ids that name only `manual:`
+        evidence — carried through as tool errors so the model reads the sentence and corrects
+        the call rather than seeing a traceback.
+        """
+        from . import tests_protocol as TP
+        ids = args.get("ids")
+        if not isinstance(ids, list) or not ids:
+            raise BoardToolError("tests_run needs `ids`: the tests to run, each "
+                                 "`<runner>:<invocation>`. There is no way to run the whole "
+                                 "suite from here.")
+        try:
+            timeout = int(args.get("timeout_seconds") or DEFAULT_TEST_TIMEOUT)
+        except (TypeError, ValueError):
+            raise BoardToolError("tests_run timeout_seconds must be a number.") from None
+        try:
+            result = self._tests().run_and_wait(
+                ids, timeout=max(10, min(MAX_TEST_TIMEOUT, timeout)),
+                repeat_until_fail=args.get("repeat_until_fail") or 0,
+                max_ids=MAX_AGENT_TEST_IDS)
+        except TP.TestsError as exc:
+            raise BoardToolError(str(exc), code="tests_refused") from exc
+        return {"text": TP.format_run(result), **result}
 
     # ---- releasing a claim (#R9G7, owner 2026-09-20: "auto-release on done and on closed") ----
     def _release_on_close(self, card: B.Card, status: str) -> str:

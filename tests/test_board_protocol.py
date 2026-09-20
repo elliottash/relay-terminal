@@ -820,7 +820,8 @@ class AgentWiringTests(unittest.TestCase):
 
     def test_without_a_board_the_agent_offers_no_board_tools_and_no_policy(self):
         agent = self.agent(None)
-        self.assertEqual([t for t in agent.tools() if t["function"]["name"].startswith("board_")], [])
+        self.assertEqual([t for t in agent.tools()
+                          if t["function"]["name"].startswith(("board_", "tests_"))], [])
         self.assertNotIn("Switchboard", agent.system_prompt())
 
     def test_with_a_board_every_tool_and_the_policy_reach_the_model(self):
@@ -1474,8 +1475,10 @@ class AttachTest(unittest.TestCase):
 
     @staticmethod
     def board_tools(agent):
+        # `tests_check` and `tests_run` are Switchboard tools that do not wear the prefix
+        # (protocol 31, #7BM4): they are about a card's tests, not about the board's rows.
         return sorted(t["function"]["name"] for t in agent.tools()
-                      if t["function"]["name"].startswith("board_"))
+                      if t["function"]["name"].startswith(("board_", "tests_")))
 
     @staticmethod
     def tree(root: Path) -> list[str]:

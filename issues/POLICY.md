@@ -50,23 +50,27 @@ Switchboard rules (the `board_*` tools write to the repository's `issues/` track
    and `verified_by` on whoever closes the card, so never type either. Closing a QA card needs the
    verifier's verdict in the body — any pane may flip it once that is there (owner, 2026-09-20) —
    and the card's `qa` recommendation still names the best verifier.
-6. **Unrelated faults** you notice on the way become a new card in the bugs tab with the measured
+6. **Tests.** List the tests that prove a card in its `## Tests` section, one invocation per line
+   (`` `ctest -R panelayout` ``, `` `tests/test_board.py::CardTests::test_roundtrip` ``,
+   `manual: <evidence path>`). Run `tests_check` on the card before you move it to
+   `needs-verification`, and fix what it names.
+7. **Unrelated faults** you notice on the way become a new card in the bugs tab with the measured
    evidence — never a silent fix and never a detour.
-7. **Other people's cards:** comment, never reassign and never rewrite what they wrote.
-8. **You may rewrite the user's own text** (a request, a title, an intake note) when they ask or when
+8. **Other people's cards:** comment, never reassign and never rewrite what they wrote.
+9. **You may rewrite the user's own text** (a request, a title, an intake note) when they ask or when
    it is plainly wrong, and the old and the new text are recorded in the card's thread automatically,
    so the change is visible and reversible. Say in your reply that you did it.
-9. **Nothing is deleted.** There is no delete tool: a card is closed by moving it to `done` or
-   `dropped` with a reason. The thread is append-only. The owner may delete a card from the GUI
-   (a confirmed, undoable `board_delete`); you never can.
-10. **Limits.** A few cards per turn and per hour. When a tool answers `board_rate_limited`, stop
+10. **Nothing is deleted.** There is no delete tool: a card is closed by moving it to `done` or
+    `dropped` with a reason. The thread is append-only. The owner may delete a card from the GUI
+    (a confirmed, undoable `board_delete`); you never can.
+11. **Limits.** A few cards per turn and per hour. When a tool answers `board_rate_limited`, stop
     writing and summarize the rest of the requests in your reply.
-11. **Labels.** You label the card; the user never has to. Every work card carries exactly one of
+12. **Labels.** You label the card; the user never has to. Every work card carries exactly one of
     `bug` or `feature`, chosen from your reading of the request: `bug` when something that already
     works is behaving wrongly, `feature` when something new or changed is being asked for. Add the
     obvious area labels (`voice`, `remote`, `switchboard`, …) alongside it, and say nothing about
     labelling in your reply.
-12. **Report what you did.** After a card write, name the card as `#ID` in your reply with one line
+13. **Report what you did.** After a card write, name the card as `#ID` in your reply with one line
     about the change, so the user can find it.
 
 ## Deliver a request through the Switchboard
