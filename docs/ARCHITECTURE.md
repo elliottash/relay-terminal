@@ -1785,17 +1785,20 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   main / flash / lite / local, an Advanced disclosure with one row per job showing the model it
   resolves to). Reached from Options › Models ("per-job models (advanced)") and the palette
   (`agent.modelRoles`). The high tier (owner, 2026-09-20) is plan mode's default: Main at max
-  reasoning unless `tiers.high` names a model. Plus
-  "New panes use the Flash agent" (off by default; the first pane keeps the Main agent), the pane's model
+  reasoning unless `tiers.high` names a model. Plus the pane's model
   chip (role and effective model, all roles in its tooltip), "Flash agent for this pane"
-  (`agent.flashAgent`, Alt+F) and the `/main` and `/flash` slash commands.
+  (`agent.flashAgent`, Alt+F) and the `/main` and `/flash` slash commands. The "New panes use the
+  Flash agent" row went on 2026-09-20 (owner: redundant next to the priority list); the setting
+  `agent/panes_flash` is still read, off unless set by hand.
 - **The model catalog and the picker (owner, 2026-09-20).** `src/ModelCatalog.*`
   (`relay::models`, library `relay-modelcatalog`, `tests/modelcatalog_test.cpp`) turns the worker's
   preset rows — each carries `models`, the per-model catalog of `presets.py MODEL_CATALOG` — into
   one flat list of entries keyed `<preset>|<model>`, and keeps what the user said about them in
   QSettings under `models/*`: shown, priority (rank 1 is Main and writes `provider/preset` +
-  `provider/model` for new panes; rank 2 is the fallback, kept as `models/fallback/*` and sent as
-  the `fallback` request option so failover tries it first; `models/openrouter_fallback` is the
+  `provider/model` for new panes; a movable line, `models/fallback_threshold` = how many models
+  are above it, makes every model above it after Main a fallback in order — they are kept as
+  `models/fallbacks` and sent as the ordered `fallbacks` request option, which is the whole
+  failover chain; `models/collapsed` folds a provider's group; `models/openrouter_fallback` is the
   per-model opt-in sent as `failover_openrouter`, the model ids to continue on OpenRouter when
   their own provider fails — off by default, per the owner: "you wouldn't want to start doing
   gpt 6 calls at PAYG"), custom ids, favorites, recent, sort,
@@ -1862,10 +1865,11 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   the history to the new provider's dialect and follows its context window, and the restore, before
   the turn's terminal event, puts all of it back, so the pane keeps the model the user chose; if the
   chain ends in failure the turn reports the *first* provider's error, not the last one's. Options ›
-  Models can turn it off (`agent/failover`). **Relay Free is the one target that needs permission**
-  (owner, 2026-09-19): every other candidate is a provider the user set up with a key they stored,
-  and Relay's hosted service is another company's terms and a shared allowance, so `failover_hosted`
-  (Options › Models, off by default) gates it and a pane already on Relay Free needs no tick.
+  Models can turn it off (`agent/failover`). **The chain is the priority list** (owner, 2026-09-20):
+  the models above the "fallbacks end here" line, in order, as the `fallbacks` option, then the
+  same model on OpenRouter for the models opted in (`failover_openrouter`), and nothing else. Relay
+  Free is a fallback only when it sits above the line, which replaced the `failover_hosted` switch
+  of 2026-09-19 (still accepted from older GUIs and ignored).
   **Subagents fail over on the pane's chain**: `subagents.py` hands each one the pane's role
   resolver, its preset and both switches, which it did not before — without a resolver
   `_begin_failover` cannot know which presets are keyed and refuses every move. **A routed step —
