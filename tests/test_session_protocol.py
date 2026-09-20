@@ -114,6 +114,21 @@ class InstructionTests(unittest.TestCase):
         path.write_text(content)
         return path
 
+    def test_an_agents_md_that_imports_claude_md_brings_its_rules_along(self):
+        # A Switchboard-created AGENTS.md starts with `@CLAUDE.md` so that CLAUDE.md is not
+        # shadowed by the first-hit rule; the companions under .claude/ follow it (#R9G7).
+        self.write(self.repo / 'CLAUDE.md', 'claude body')
+        self.write(self.repo / '.claude/rules/style.md', 'rule body')
+        self.write(self.repo / 'AGENTS.md', '@CLAUDE.md\n\nagents body')
+        picked = [p.name for p in instructions.auto_project_files(self.repo)]
+        self.assertEqual(picked, ['AGENTS.md', 'style.md'])
+        loaded = instructions.load({'files': [], 'project_auto': True}, self.repo)
+        self.assertIn('claude body', loaded.section)
+        self.assertIn('rule body', loaded.section)
+        # An AGENTS.md that does not import CLAUDE.md shadows it, companions included, as before.
+        self.write(self.repo / 'AGENTS.md', 'agents body only')
+        self.assertEqual([p.name for p in instructions.auto_project_files(self.repo)], ['AGENTS.md'])
+
     def test_scan_covers_conventions(self):
         self.write(self.repo / 'AGENTS.md', 'root agents')
         self.write(self.ws / 'CLAUDE.md', 'claude')

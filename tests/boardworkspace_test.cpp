@@ -289,7 +289,10 @@ void BoardWorkspaceTests::theBoardPanePaintsFromTheBoardMaterials()
     // The empty board is the doc's unpatched board: one unlit jack per section.
     QVERIFY2(text.contains(QStringLiteral("class EmptyBoard final : public QLabel")), "EmptyBoard is gone");
     QVERIFY2(text.contains(QStringLiteral("setSections(titles)")), "the empty board is no longer told the sections");
-    const QString jacks = bodyOf(text, QStringLiteral("    void paintEvent(QPaintEvent *) override\n    {"));
+    // Anchor on EmptyBoard itself: another widget above it paints too (#DPJB), and the first
+    // paintEvent in the file is no longer the empty board's.
+    const QString jacks = bodyOf(text.mid(text.indexOf(QStringLiteral("class EmptyBoard final : public QLabel"))),
+                                QStringLiteral("    void paintEvent(QPaintEvent *) override\n    {"));
     QVERIFY2(jacks.contains(QStringLiteral("drawEllipse")), qPrintable(jacks.left(200)));
     QVERIFY2(jacks.contains(QStringLiteral("theme::BoardMetalDim")), "the jack rings are not unlit brass");
     // And its words stay on the legible text tokens: no material behind anything read (2.2).

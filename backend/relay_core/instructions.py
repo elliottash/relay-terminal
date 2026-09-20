@@ -197,12 +197,24 @@ def auto_project_files(workspace: str | Path) -> list[Path]:
             if not matches:
                 continue
             picked.extend(matches)
-            if "CLAUDE" in pattern:
+            # CLAUDE.md's companions ride with it whether it is the first hit or the first hit
+            # imports it: a Switchboard-created AGENTS.md starts with `@CLAUDE.md` so that the
+            # project's own instructions are not shadowed (board.pointer_files), and the rules
+            # under .claude/ must follow CLAUDE.md through that import too (#R9G7).
+            if "CLAUDE" in pattern or any(_imports_claude(p, directory) for p in matches):
                 for companion in CLAUDE_COMPANIONS:
                     picked.extend(p for p in _expand(directory, companion)
                                   if _is_file(p) and _frontmatter_ok(p, _read_text(p) or ""))
             break
     return picked
+
+
+def _imports_claude(path: Path, directory: Path) -> bool:
+    """True when `path` @-imports the CLAUDE.md beside it (and that file exists)."""
+    if not _is_file(directory / "CLAUDE.md"):
+        return False
+    text = _read_text(path) or ""
+    return any(match.group(1) in ("CLAUDE.md", "./CLAUDE.md") for match in IMPORT.finditer(text))
 
 
 def _read_text(path: Path) -> str | None:
