@@ -32,7 +32,11 @@ QString roleTier(const QString &role)
 
 QString roleRowText(const QString &role, const QString &model)
 {
-    return model.isEmpty() ? roleLabel(role) : QStringLiteral("%1 (%2)").arg(model, roleTier(role));
+    if (model.isEmpty()) return roleLabel(role);
+    // The pane's own model is just the model (owner, 2026-09-21: "i dont want it to say (main)
+    // either"): the parentheses are for the rows that are something else — (flash), (local).
+    const QString tier = roleTier(role);
+    return tier == QStringLiteral("main") ? model : QStringLiteral("%1 (%2)").arg(model, tier);
 }
 
 QList<Row> build(const Context &context)

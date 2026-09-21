@@ -12141,7 +12141,7 @@ private:
     }
 
     // A role's row in the flat model list (owner, 2026-09-19): the model the row runs, then the
-    // role in parentheses — "glm-5.3 (main)". The main role's model is the pane's own preset;
+    // tier in parentheses when it is not the pane's own — "glm-5.3", "glm-5.3-flash (flash)". The main role's model is the pane's own preset;
     // with no preset picked yet it is the model id the pane last heard, and before anything is
     // heard the row is the role's name alone. The pane_state menu uses the same text.
     QString roleRowModel(const QString &role) const {
@@ -12153,7 +12153,7 @@ private:
         // condition and the label was read from freed memory (an Xvfb run crashed in malloc).
         const relay::models::Catalog catalog = modelCatalog();
         if (const relay::models::Entry *entry = catalog.find(currentEntryKey()))
-            return entry->guest ? conciseModel(m_currentPreset, presetLabelOf(m_currentPreset)) : entry->label;
+            return entry->label;   // a guest too: "gpt-5.6-sol", not "Codex" (owner, 2026-09-21)
         const QString model = conciseModel(m_currentPreset, presetLabelOf(m_currentPreset));
         return model.isEmpty() ? m_model : model;
     }
@@ -12164,8 +12164,13 @@ private:
     // The role rows this pane offers, in order. The Local agent only when this machine serves
     // something (card #JH22): a row that always resolved back to Main would be a promise the pane
     // cannot keep. A role a restored session put the pane on keeps its row whatever the list says.
+    // A console runs under a main-tier worker role of its own ("switchboard"): that row IS its
+    // main row, so it takes the first place rather than a fourth — the box is then the same list
+    // in a console as in a terminal pane (owner, 2026-09-21: "those should be the same systems").
     QStringList paneRoleRows() const {
-        QStringList roles{QStringLiteral("main"), QStringLiteral("flash")};
+        const bool ownMain = m_agentRole != QStringLiteral("main")
+            && relay::modelrows::roleTier(m_agentRole) == QStringLiteral("main");
+        QStringList roles{ownMain ? m_agentRole : QStringLiteral("main"), QStringLiteral("flash")};
         if (hasLocalEndpoint()) roles << QStringLiteral("local");
         if (!roles.contains(m_agentRole)) roles << m_agentRole;
         return roles;

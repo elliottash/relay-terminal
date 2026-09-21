@@ -4,7 +4,7 @@
 // the same as in the main terminal", card #PK5Q).
 //
 // There were two boxes over one idea. A terminal pane's (Pane::refreshPickers) drew the role rows
-// — "glm-5.3 (main)", "glm-5.3 flash (flash)", a Local row where this machine serves one — then
+// — "glm-5.3", "glm-5.3-flash (flash)", a Local row where this machine serves one — then
 // the per-model catalog in rank order, then "more models…" and the gear. The helper agent's
 // (`relay::helpermodel`, retired with the panel by card #AGNT) drew Follow Main, Flash, Lite, one
 // row per usable *provider* and a gear.
@@ -73,10 +73,12 @@ QList<Row> build(const Context &context);
 // current row landed on, or -1.
 int fill(QComboBox *box, const Context &context);
 
-// A role row's text (owner, 2026-09-19): the model the row runs, then the role in parentheses —
-// "glm-5.3 (main)". With no model known yet it is the role's name alone.
-// The parentheses name the TIER the role runs on, never a protocol role name: the Switchboard's
-// agent is "kimi-k3 (main)", not "kimi-k3 (switchboard)" (owner, 2026-09-21).
+// A role row's text. The pane's own model is the model and nothing else — "glm-5.3" — and a row
+// that is something else says what in parentheses: "glm-5.3-flash (flash)". The parentheses name
+// the TIER the role runs on, never a protocol role name, so the Switchboard's agent (worker role
+// "switchboard", main tier) reads "kimi-k3" exactly as a terminal pane does (owner, 2026-09-21:
+// not "(switchboard)", and "i dont want it to say (main) either … those should be the same
+// systems"). With no model known yet it is the role's name alone.
 QString roleRowText(const QString &role, const QString &model);
 QString roleTier(const QString &role);
 QString roleLabel(const QString &role);

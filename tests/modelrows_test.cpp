@@ -107,16 +107,18 @@ private slots:
         QVERIFY(data.contains(QStringLiteral("entry:kimi-code|kimi-k3")));
         // A provider with no key is not offered anywhere.
         for (const QString &id : std::as_const(data)) QVERIFY(!id.contains(QStringLiteral("openai")));
-        QCOMPARE(rows.first().text, QStringLiteral("glm-5.3 (main)"));
+        QCOMPARE(rows.first().text, QStringLiteral("glm-5.3"));   // the pane's own model: no parentheses
         QCOMPARE(rows.at(1).text, QStringLiteral("glm-5.3-flash (flash)"));
     }
 
-    // Owner, 2026-09-21: the Switchboard agent's box said "kimi-k3 (switchboard)". The parentheses
-    // name the tier the role runs on; a protocol role name never reaches a person.
-    void aRoleRowNamesItsTierNotItsProtocolName()
+    // Owner, 2026-09-21: the Switchboard agent's box said "kimi-k3 (switchboard)"; "(main)" was
+    // not wanted either. A main-tier row is the model alone, in a console exactly as in a pane;
+    // the parentheses are for a row that is something else, and they name its tier.
+    void aMainTierRowIsJustTheModel()
     {
         using relay::modelrows::roleRowText;
-        QCOMPARE(roleRowText(QStringLiteral("switchboard"), QStringLiteral("kimi-k3")), QStringLiteral("kimi-k3 (main)"));
+        QCOMPARE(roleRowText(QStringLiteral("main"), QStringLiteral("kimi-k3")), QStringLiteral("kimi-k3"));
+        QCOMPARE(roleRowText(QStringLiteral("switchboard"), QStringLiteral("kimi-k3")), QStringLiteral("kimi-k3"));
         QCOMPARE(roleRowText(QStringLiteral("planning"), QStringLiteral("glm-5.3")), QStringLiteral("glm-5.3 (high)"));
         QCOMPARE(roleRowText(QStringLiteral("flash"), QStringLiteral("glm-5.3-flash")), QStringLiteral("glm-5.3-flash (flash)"));
     }
