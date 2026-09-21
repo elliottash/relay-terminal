@@ -466,7 +466,7 @@ public:
         QString label() const {
             const QString what = fix ? QStringLiteral("fix request")
                                  : written() ? QStringLiteral("terminal result") : text;
-            const QString labelled = guest.isEmpty() ? what : guestDisplayName(guest) + QStringLiteral(" · ") + what;
+            const QString labelled = guest.isEmpty() ? what : guestName(guest) + QStringLiteral(" · ") + what;
             return author.isEmpty() ? labelled : author + QStringLiteral(" · ") + labelled;
         }
     };
@@ -703,7 +703,7 @@ public:
         connect(scan, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
                 [this, scan, guest](int code, QProcess::ExitStatus exit) {
                     if (exit != QProcess::NormalExit || code != 0)
-                        status(QStringLiteral("Could not read %1 slash commands.").arg(guestDisplayName(guest)));
+                        status(QStringLiteral("Could not read %1 slash commands.").arg(guestName(guest)));
                     scan->deleteLater();
                 });
         connect(scan, &QProcess::errorOccurred, this, [scan](QProcess::ProcessError) { scan->deleteLater(); });
@@ -965,7 +965,7 @@ public:
                             {"model", QString()}};
         request.insert(QStringLiteral("guest"), takeGuestRequest(m_currentPreset));
         send(request);
-        status(QStringLiteral("%1 takes the new setting from its next turn.").arg(guestDisplayName(guest)));
+        status(QStringLiteral("%1 takes the new setting from its next turn.").arg(guestName(guest)));
         changed();
     }
     // `guests/<guest>/<key>` (model, effort): the default a guest is started with, "" for the
@@ -1437,7 +1437,7 @@ public:
         if (const QString guest = guestOfPreset(m_currentPreset); !guest.isEmpty()) {
             const QString want = model.trimmed();
             if (want.isEmpty() || want == m_model) return;
-            if (!m_configured) { status(QStringLiteral("%1 is not running yet.").arg(guestDisplayName(guest))); return; }
+            if (!m_configured) { status(QStringLiteral("%1 is not running yet.").arg(guestName(guest))); return; }
             m_guestRequest = QJsonObject{{"model", want}};
             QJsonObject request{{"type", "set_model"}, {"preset", m_currentPreset}, {"use_stored_key", true},
                                 {"base_url", preset.value(QStringLiteral("base_url")).toString()},
@@ -1553,6 +1553,50 @@ public:
         const QList<relay::models::Entry> rows = catalog.ofPreset(m_currentPreset);
         return rows.isEmpty() ? QString() : rows.first().key;
     }
+    // ----- one name for a model (card #MDL1, rule 1) ------------------------------------------
+    // "Every place that prints a model to a person prints its name, through one function." This is
+    // that function for a site that holds only a preset and a model id — a status line, a toast, a
+    // tooltip, an export header. The catalog answers first, through `resolveKey`, so Claude Code's
+    // `opus` and the `claude-opus-5` its harness reports are one model, and `kimi-code|k3` is
+    // "kimi-k3"; a model no row covers — a hand-typed id, an older worker, a model heard before the
+    // catalog arrived — gets the same derivation off the id alone.
+    QString modelNameFor(const QString &preset, const QString &model) const {
+        if (model.isEmpty()) return QString();
+        const relay::models::Catalog catalog = modelCatalog();
+        if (!preset.isEmpty())
+            if (const relay::models::Entry *entry = catalog.find(catalog.resolveKey(preset, model)))
+                return entry->name;
+        // No preset, or one that lists nothing like this id: any provider's row for it still
+        // carries the name that row was given — "k3" is "kimi-k3" only because its row says so.
+        for (const relay::models::Entry &entry : catalog.entries)
+            if (entry.model == model) return entry.name;
+        return relay::models::nameOf(model);
+    }
+    // The model id a preset serves by default, from the worker's list.
+    QString presetModelOf(const QString &presetId) const {
+        for (const auto &item : m_presets) {
+            const QJsonObject preset = item.toObject();
+            if (preset.value(QStringLiteral("id")).toString() == presetId)
+                return preset.value(QStringLiteral("model")).toString();
+        }
+        return QString();
+    }
+    // What a command that names a *provider* (/glm, /kimi, the subagent menu) prints: the model's
+    // name and the provider serving it — "glm-5.3 · z.ai (glm)", never the whole preset label
+    // "z.ai · glm-5.3 · coding plan", which is a preset and not a model.
+    QString presetModelDisplay(const QString &presetId) const {
+        const relay::models::Catalog catalog = modelCatalog();
+        if (const auto *main = catalog.tierEntry(presetId, QStringLiteral("main"))) return main->displayName();
+        const QList<relay::models::Entry> rows = catalog.ofPreset(presetId);
+        if (!rows.isEmpty()) return rows.first().displayName();
+        return modelNameFor(presetId, presetModelOf(presetId));
+    }
+    QString presetModelName(const QString &presetId) const {
+        const relay::models::Catalog catalog = modelCatalog();
+        if (const auto *main = catalog.tierEntry(presetId, QStringLiteral("main"))) return main->name;
+        return modelNameFor(presetId, presetModelOf(presetId));
+    }
+
     // The worker's `presets` rows as this pane holds them. The catalog they carry is the
     // machine's, not this pane's: the same keys, the same models, whoever asked. A helper panel
     // in a tab whose helper worker has not been asked anything yet borrows them, so its model box
@@ -1690,23 +1734,11 @@ public:
     static QString canonicalRole(const QString &role) {
         return role == QStringLiteral("fast") ? QStringLiteral("flash") : role;
     }
+    // One table, and it is relay::modelrows' (card #MDL1, rule 1). This was a second, Title-Case
+    // copy of it that disagreed — "Main agent" here, "main" there, for the same row — so a toast
+    // and the box below it named the same role two ways.
     static QString roleLabel(const QString &role) {
-        static const QHash<QString, QString> labels{
-            {QStringLiteral("main"), QStringLiteral("Main agent")},
-            {QStringLiteral("terminal_use"), QStringLiteral("Terminal-use agent")},
-            {QStringLiteral("subagent"), QStringLiteral("Subagent")},
-            {QStringLiteral("switchboard"), QStringLiteral("Switchboard agent")},
-            {QStringLiteral("flash"), QStringLiteral("Flash agent")},
-            {QStringLiteral("local"), QStringLiteral("Local agent")},
-            {QStringLiteral("planning"), QStringLiteral("Plan mode")},
-            {QStringLiteral("summaries"), QStringLiteral("Summaries")},
-            {QStringLiteral("suggestions"), QStringLiteral("Suggestions")},
-            {QStringLiteral("chores"), QStringLiteral("Chores")},
-            {QStringLiteral("audit"), QStringLiteral("Request audit")},
-            {QStringLiteral("loop_check"), QStringLiteral("Loop check")},
-            {QStringLiteral("vision"), QStringLiteral("Vision")},
-            {QStringLiteral("route_assist"), QStringLiteral("Route assist")}};
-        return labels.value(role, role);
+        return relay::modelrows::roleLabel(role);
     }
     static QString roleSetting(const QString &role, const QString &field) {
         return relay::RolesDialog::roleSetting(role, field);
@@ -1788,6 +1820,11 @@ public:
     QString roleModel(const QString &role) const {
         return m_roleSummary.value(role).toObject().value(QStringLiteral("model")).toString();
     }
+    // The preset the worker resolved that role to: a model's name is a question about a provider's
+    // row, and a role's model is usually not this pane's provider's.
+    QString rolePreset(const QString &role) const {
+        return m_roleSummary.value(role).toObject().value(QStringLiteral("preset")).toString();
+    }
     void setAgentRole(const QString &role, bool announce = true) {
         if (role == m_agentRole) return;
         // Allowed mid-turn (issue 3ES1): the worker applies it before the turn's next request.
@@ -1795,8 +1832,11 @@ public:
         if (m_configured) send({{"type", "set_agent_role"}, {"role", role}});
         if (announce) {
             const QString model = roleModel(role);
-            toast(role == QStringLiteral("main") ? QStringLiteral("Main agent for this pane")
-                                                 : QStringLiteral("%1 for this pane%2").arg(roleLabel(role), model.isEmpty() ? QString() : QStringLiteral(" · ") + model));
+            // Lower-case, and the model by name (card #MDL1, rule 1): "flash for this pane ·
+            // glm-5.3-flash". Main takes the same shape rather than a sentence of its own.
+            toast(QStringLiteral("%1 for this pane%2")
+                      .arg(roleLabel(role), model.isEmpty() ? QString()
+                               : QStringLiteral(" · ") + modelNameFor(rolePreset(role), model)));
         }
         changed();
     }
@@ -2411,13 +2451,13 @@ private:
             queueGuestQuestion(sequence, guest, payload);
         } else if (name == QStringLiteral("Notification")) {
             const QString message = payload.value(QStringLiteral("message")).toString().simplified();
-            if (!message.isEmpty()) notify(guestDisplayName(guest), message);
+            if (!message.isEmpty()) notify(guestName(guest), message);
         } else if (name == QStringLiteral("notify")) {
             // Codex's own `notify` program (26.6), which is what the Options row installs: its one
             // payload is `agent-turn-complete`, so this is the finished turn reaching the
             // notification centre — and the end of the turn, whatever the rollout tail last said.
             const QString said = payload.value(QStringLiteral("last-assistant-message")).toString().simplified();
-            notify(guestDisplayName(guest),
+            notify(guestName(guest),
                    said.isEmpty() ? QStringLiteral("finished its turn.") : said.left(200));
             setGuestBusy(false);
         } else if (name == QStringLiteral("UserPromptSubmit") || name == QStringLiteral("PreToolUse")) {
@@ -2468,7 +2508,7 @@ private:
         m_guestQuestions.append(GuestQuestion{sequence, guest, guestQuestionLabel(guest, payload)});
         // Away from the pane too: the bell, and the desktop when Relay is not in front. A blocked
         // guest that only drew a small bar in a background tab said nothing at all.
-        notify(guestDisplayName(guest), m_guestQuestions.constLast().label,
+        notify(guestName(guest), m_guestQuestions.constLast().label,
                relay::NotificationCenter::kindWarning);
         if (m_guestQuestions.size() == 1) showGuestQuestion();
         else refreshGuestBar();      // the one on screen now says how many are behind it
@@ -2481,7 +2521,7 @@ private:
         QString detail = input.value(QStringLiteral("command")).toString();
         for (const char *field : {"file_path", "path", "url", "pattern"})
             if (detail.isEmpty()) detail = input.value(QLatin1String(field)).toString();
-        QString label = guestDisplayName(guest)
+        QString label = guestName(guest)
                         + QStringLiteral(" wants to run %1").arg(tool.isEmpty() ? QStringLiteral("a tool") : tool);
         if (!detail.isEmpty()) label += QStringLiteral(" · ") + detail.simplified().left(80);
         return label;
@@ -2613,13 +2653,17 @@ private:
     void updateGuestChip() {
         if (!m_guestChip) return;
         if (m_guest.isEmpty()) { m_guestChip->hide(); return; }
-        const QString model = m_guestModel.isEmpty() ? guestDisplayName(m_guest) : m_guestModel;
+        // The model the harness reports, by its catalog name (card #MDL1, rule 1): Claude Code
+        // says "opus" and calls itself "Opus 5", neither of which is a name Relay uses anywhere
+        // else. With nothing reported yet the chip is the harness, lower-case.
+        const QString named = modelNameFor(QStringLiteral("guest:") + m_guest, m_guestModel);
+        const QString model = named.isEmpty() ? guestName(m_guest) : named;
         m_guestChip->setText(m_guestContextPct >= 0
                                  ? QStringLiteral("%1 · %2%").arg(model, QString::number(m_guestContextPct)) : model);
         m_guestChip->setProperty("warn", m_guestContextPct >= 90);
         m_guestChip->style()->unpolish(m_guestChip); m_guestChip->style()->polish(m_guestChip);
         m_guestChip->setToolTip(QStringLiteral("%1 · %2 of its context window%3")
-                                    .arg(guestDisplayName(m_guest),
+                                    .arg(guestName(m_guest),
                                          m_guestContextPct >= 0 ? QStringLiteral("%1%").arg(m_guestContextPct)
                                                                 : QStringLiteral("an unknown share"),
                                          m_guestBusy ? QStringLiteral(" · a turn is running") : QString()));
@@ -4104,7 +4148,10 @@ public:
         if (!file.open(QIODevice::ReadOnly)) { status(QStringLiteral("Nothing to export yet: the conversation has not been saved.")); return; }
         const QJsonObject data = QJsonDocument::fromJson(file.readAll()).object();
         QString markdown = QStringLiteral("# ") + (data.value(QStringLiteral("title")).toString().isEmpty() ? QStringLiteral("Relay conversation") : data.value(QStringLiteral("title")).toString())
-            + QStringLiteral("\n\nModel: %1 · exported %2\n").arg(data.value(QStringLiteral("model")).toString(), QDateTime::currentDateTime().toString(Qt::ISODate));
+            + QStringLiteral("\n\nmodel: %1 · exported %2\n")
+                  .arg(modelNameFor(data.value(QStringLiteral("preset")).toString(),
+                                    data.value(QStringLiteral("model")).toString()),
+                       QDateTime::currentDateTime().toString(Qt::ISODate));
         for (const auto &value : data.value(QStringLiteral("messages")).toArray()) {
             const QJsonObject message = value.toObject();
             const QString role = message.value(QStringLiteral("role")).toString();
@@ -5608,8 +5655,10 @@ private:
                 const QString guest = guestOfPreset(preset);
                 const bool ok = event.value(QStringLiteral("ok")).toBool();
                 if (!guest.isEmpty())
-                    status(ok ? QStringLiteral("%1 answered on %2").arg(guestDisplayName(guest), event.value(QStringLiteral("model")).toString())
-                              : guestDisplayName(guest) + QStringLiteral(": ") + event.value(QStringLiteral("error")).toString());
+                    status(ok ? QStringLiteral("%1 answered on %2")
+                                    .arg(guestName(guest),
+                                         modelNameFor(preset, event.value(QStringLiteral("model")).toString()))
+                              : guestName(guest) + QStringLiteral(": ") + event.value(QStringLiteral("error")).toString());
                 else
                     status(ok ? QStringLiteral("Key works for ") + preset
                               : QStringLiteral("Key test failed: ") + event.value(QStringLiteral("error")).toString());
@@ -7616,15 +7665,25 @@ private:
             const QString effort = event.value(QStringLiteral("effort")).toString();
             if (efforts().contains(effort)) m_effort = effort;
             const QString inFlight = event.value(QStringLiteral("in_flight_model")).toString();
+            // Names, not ids, and lower-case (card #MDL1, rule 1): "model: kimi-k3 · conversation
+            // kept", "flash: glm-5.3-flash · conversation kept". The worker sends the name it
+            // computed (`model_name`, protocol 13) and the catalog answers for a worker that does
+            // not. The preset is this report's own when it carries one: a role switch takes its
+            // model from another provider than the pane's.
+            const QString namingPreset = preset.isEmpty() ? m_currentPreset : preset;
+            const QString sentName = event.value(QStringLiteral("model_name")).toString();
+            const QString modelName = sentName.isEmpty() ? modelNameFor(namingPreset, m_model) : sentName;
+            const QString sentInFlight = event.value(QStringLiteral("in_flight_model_name")).toString();
+            const QString inFlightName = sentInFlight.isEmpty() ? modelNameFor(m_currentPreset, inFlight) : sentInFlight;
             QString what = later
                 ? (afterCompaction
-                       ? QStringLiteral("Model: %1 once the conversation is compacted to fit its window").arg(m_model)
+                       ? QStringLiteral("model: %1 once the conversation is compacted to fit its window").arg(modelName)
                        : applies == QStringLiteral("turn_end")
-                       ? QStringLiteral("Model: %1 from the next turn · this turn finishes on %2").arg(m_model, inFlight)
-                       : QStringLiteral("Model: %1 from the next step · %2 is not interrupted").arg(m_model, inFlight))
+                       ? QStringLiteral("model: %1 from the next turn · this turn finishes on %2").arg(modelName, inFlightName)
+                       : QStringLiteral("model: %1 from the next step · %2 is not interrupted").arg(modelName, inFlightName))
                 : role.isEmpty() || role == QStringLiteral("main")
-                ? QStringLiteral("Model: %1 · conversation kept").arg(m_model)
-                : QStringLiteral("%1: %2 · conversation kept").arg(roleLabel(role), m_model);
+                ? QStringLiteral("model: %1 · conversation kept").arg(modelName)
+                : QStringLiteral("%1: %2 · conversation kept").arg(roleLabel(role), modelName);
             // This report *is* the /swap arriving, so it says what the swap did instead of
             // overwriting that line 100–300 ms later with its own (card #MDL1, design 1.4.2).
             // One shot: whatever happens next, the next report speaks for itself.
@@ -7638,12 +7697,12 @@ private:
                 ensureLineStart();
                 if (afterCompaction)
                     printInline(QStringLiteral("↻ %1 takes over once the conversation is compacted to fit its window · "
-                                               "%2 summarises it\n").arg(m_model, inFlight), Ink::Note);
+                                               "%2 summarises it\n").arg(modelName, inFlightName), Ink::Note);
                 else
                     printInline(QStringLiteral("↻ %1 takes over %2 · %3 is not interrupted%4\n")
-                        .arg(m_model, applies == QStringLiteral("turn_end") ? QStringLiteral("after this turn")
+                        .arg(modelName, applies == QStringLiteral("turn_end") ? QStringLiteral("after this turn")
                                                                             : QStringLiteral("at the next step"),
-                             inFlight, willCompact ? QStringLiteral(" · will compact to fit") : QString()), Ink::Note);
+                             inFlightName, willCompact ? QStringLiteral(" · will compact to fit") : QString()), Ink::Note);
                 if (!m_agentBusy && !moreTurnsPending()) closeInline();
             }
             changed();
@@ -7655,11 +7714,16 @@ private:
             const QString model = event.value(QStringLiteral("model")).toString();
             const qint64 window = event.value(QStringLiteral("context_window")).toVariant().toLongLong();
             if (window > 0) m_ctxWindow = window;
-            QString line = QStringLiteral("→ now on %1").arg(model);
+            // By name (card #MDL1, rule 1), the worker's own when it sent one.
+            const QString appliedName = event.value(QStringLiteral("model_name")).toString().isEmpty()
+                ? modelNameFor(event.value(QStringLiteral("preset")).toString(), model)
+                : event.value(QStringLiteral("model_name")).toString();
+            QString line = QStringLiteral("→ now on %1").arg(appliedName);
             if (event.value(QStringLiteral("at")).toString() == QStringLiteral("turn_end"))
                 line += QStringLiteral(" · from the next turn");
             if (event.value(QStringLiteral("history_converted")).toBool())
-                line += QStringLiteral(" · conversation converted from %1").arg(event.value(QStringLiteral("from_model")).toString());
+                line += QStringLiteral(" · conversation converted from %1")
+                            .arg(modelNameFor(QString(), event.value(QStringLiteral("from_model")).toString()));
             if (event.value(QStringLiteral("compacted")).toBool())
                 line += QStringLiteral(" · compacted to fit its window");
             ensureLineStart();
@@ -8323,7 +8387,7 @@ public:
         // directory they start in, 26.7). A guest already here is asked to leave first.
         leaveGuest([this, source, extra, cwd] {
             launchGuest(source, extra, cwd);
-            status(QStringLiteral("Resuming the %1 session in this pane.").arg(guestDisplayName(source)));
+            status(QStringLiteral("Resuming the %1 session in this pane.").arg(guestName(source)));
         }, true);
     }
 
@@ -8517,10 +8581,10 @@ private:
             // The popup `?` shows in an empty prompt box. `/help` is what people type when they do
             // not know `?` yet, and it is where an unknown command points them (issue #Q4SD).
             {QStringLiteral("help"), QString(), QStringLiteral("The keys and prefixes Relay answers to (same as ?)")},
-            {QStringLiteral("model"), QStringLiteral("[name]"), QStringLiteral("Switch model, keeping the conversation; alone, the picker (same as Ctrl+Shift+M)")},
+            {QStringLiteral("model"), QStringLiteral("[name][@provider]"), QStringLiteral("Switch model by name — /model gpt-5.6-sol, or gpt-5.6-sol@openrouter for one provider's row — keeping the conversation; alone, the picker (same as Ctrl+Shift+M)")},
             {QStringLiteral("swap"), QString(), QStringLiteral("Swap to the fallback model, or back to the main one")},
-            {QStringLiteral("main"), QString(), QStringLiteral("Run this pane on the Main model")},
-            {QStringLiteral("flash"), QString(), QStringLiteral("Run this pane on the Flash model (same as Alt+F)")},
+            {QStringLiteral("main"), QString(), QStringLiteral("Run this pane on the main model")},
+            {QStringLiteral("flash"), QString(), QStringLiteral("Run this pane on the flash model (same as Alt+F)")},
             {QStringLiteral("local"), QString(), QStringLiteral("Run this pane on a model served on this machine")},
             {QStringLiteral("glm"), QString(), QStringLiteral("Switch to the GLM Coding Plan")},
             {QStringLiteral("kimi"), QString(), QStringLiteral("Switch to the Kimi Coding Plan")},
@@ -8614,7 +8678,7 @@ private:
             for (const QString &slash : std::as_const(m_guestSlashCommands)) {
                 const QString name = slash.mid(1);
                 if (taken.contains(name, Qt::CaseInsensitive)) continue;
-                commands.append({name, QString(), QStringLiteral("%1 · guest").arg(guestDisplayName(m_guest))});
+                commands.append({name, QString(), QStringLiteral("%1 · guest").arg(guestName(m_guest))});
                 guestNames << name;
             }
         }
@@ -8856,6 +8920,16 @@ private:
                 // first. relay::modelrows::resolve is that match, so /model in a helper agent's
                 // composer answers the same word with the same model (#PK5Q).
                 const relay::models::Catalog catalog = modelCatalog();
+                // The model's own name first (card #MDL1, rules 1 and 2): `/model gpt-5.6-sol`
+                // names one model however many providers serve it, and `/model
+                // gpt-5.6-sol@openrouter` names which of them takes it. `findByName` folds the
+                // shown rows into one group per name and answers the part after the "@"; the
+                // older matches below still take a preset id, a key or words of a label.
+                if (const relay::models::Entry *named =
+                        relay::models::findByName(catalog, relay::models::shown(catalog), args)) {
+                    selectEntry(named->key);
+                    return;
+                }
                 if (const QString key = relay::modelrows::resolve(catalog, args); !key.isEmpty()) { selectEntry(key); return; }
                 for (const auto &model : std::as_const(m_stored)) {
                     if (model.first.compare(args, Qt::CaseInsensitive) == 0 || model.second.contains(args, Qt::CaseInsensitive)) {
@@ -8895,7 +8969,9 @@ private:
             // it ended up, rather than looking like it did nothing.
             if (m_agentRole == name) {
                 const QString model = name == QStringLiteral("main") ? m_model : roleModel(name);
-                status(QStringLiteral("Already on the %1%2.").arg(roleLabel(name), model.isEmpty() ? QString() : QStringLiteral(" · ") + model));
+                const QString from = name == QStringLiteral("main") ? m_currentPreset : rolePreset(name);
+                status(QStringLiteral("Already on %1%2.").arg(roleLabel(name),
+                           model.isEmpty() ? QString() : QStringLiteral(" · ") + modelNameFor(from, model)));
                 return;
             }
             // Nothing served here: say so and stay put, rather than switching to a role that would
@@ -8915,12 +8991,18 @@ private:
                 const auto stored = std::find_if(m_stored.cbegin(), m_stored.cend(),
                                                  [&](const auto &entry) { return entry.first == id; });
                 if (stored == m_stored.cend()) continue;
+                // The model's own name and the provider serving it (card #MDL1, rule 1):
+                // "glm-5.3 · z.ai (glm)", not the preset label "z.ai · glm-5.3 · coding plan",
+                // which was being printed where a model belongs. These two commands are about
+                // which key is spent, so the provider stays.
+                const QString named = presetModelDisplay(id);
+                const QString line = named.isEmpty() ? stored->second : named;
                 if (id == m_currentPreset && m_agentRole == QStringLiteral("main")) {
-                    status(QStringLiteral("Already on %1.").arg(stored->second));
+                    status(QStringLiteral("Already on %1.").arg(line));
                     return;
                 }
                 selectModel(id);   // also puts the pane back on the Main agent
-                status(QStringLiteral("Model: %1.").arg(stored->second));
+                status(QStringLiteral("model: %1.").arg(line));
                 return;
             }
             status(QStringLiteral("No stored %1 key. Add one in Options › Models › API keys….")
@@ -9531,7 +9613,9 @@ private:
         menu.addSeparator();
         for (const auto &model : std::as_const(m_stored)) {
             if (!guestOfPreset(model.first).isEmpty()) continue;   // a guest runs no subagent (29.3)
-            QAction *action = menu.addAction(conciseModel(model.first, model.second));
+            // The model's name and its provider (card #MDL1, rule 1), not the preset's label.
+            const QString named = presetModelDisplay(model.first);
+            QAction *action = menu.addAction(named.isEmpty() ? model.second : named);
             action->setData(model.first);
             action->setCheckable(true);
             action->setChecked(presetById(model.first).value(QStringLiteral("model")).toString() == current);
@@ -10789,7 +10873,7 @@ private:
                     m_deferredModel = startModel;
                     m_currentPreset = choice;   // the box says what this pane is on
                     status(QStringLiteral("%1 is this pane's agent; it starts on your first prompt.")
-                               .arg(guestDisplayName(guest)));
+                               .arg(guestName(guest)));
                     changed();
                     return;
                 }
@@ -12232,10 +12316,23 @@ private:
         }
         return QString();
     }
+    // The model taking this turn, by name, and the provider taking it (card #MDL1, rule 1). This
+    // printed the raw id and the whole preset label — "glm-5.3 (z.ai · glm-5.3 · coding plan)" —
+    // although telling two stored keys on one model id apart is the only reason the second half is
+    // here, and the provider alone says that.
     QString servingName(const Serving &serving) const {
-        const QString label = presetLabelOf(serving.preset);
-        return label.isEmpty() || label == serving.model
-                   ? serving.model : QStringLiteral("%1 (%2)").arg(serving.model, label);
+        const relay::models::Catalog catalog = modelCatalog();
+        const relay::models::Entry *entry = catalog.find(catalog.resolveKey(serving.preset, serving.model));
+        const QString name = entry ? entry->name : relay::models::nameOf(serving.model);
+        const QString provider = entry ? entry->provider : presetLabelOf(serving.preset);
+        return provider.isEmpty() || provider == name ? name : QStringLiteral("%1 (%2)").arg(name, provider);
+    }
+    // The same model, name alone: the box's "this turn" row says what moved it in its own mark.
+    QString servingModelName(const Serving &serving) const {
+        const relay::models::Catalog catalog = modelCatalog();
+        if (const relay::models::Entry *entry = catalog.find(catalog.resolveKey(serving.preset, serving.model)))
+            return entry->name;
+        return relay::models::nameOf(serving.model);
     }
     // What the box's tooltip says while another model serves the turn: what moved it, and that the
     // pane comes back to its own model afterwards. Picking a model while this is up is the ordinary
@@ -12245,7 +12342,7 @@ private:
         if (m_serving.isEmpty()) return QString();
         const Serving &serving = m_serving.last();
         const QString name = servingName(serving);
-        const QString back = serving.backTo.isEmpty() ? m_model : serving.backTo;
+        const QString back = modelNameFor(m_currentPreset, serving.backTo.isEmpty() ? m_model : serving.backTo);
         const QString because = serving.why == QStringLiteral("vision")
             ? QStringLiteral("This turn carries an image, so it runs on %1").arg(name)
             : serving.why == QStringLiteral("plan")
@@ -12341,19 +12438,19 @@ private:
         // the pane's own model; the tooltip says the pane gets that model back after the turn.
         if (!m_serving.isEmpty()) {
             const Serving &serving = m_serving.last();
-            m_modelBox->insertItem(0, QStringLiteral("%1 %2 · this turn").arg(servingMark(serving.why), serving.model),
+            m_modelBox->insertItem(0, QStringLiteral("%1 %2 · this turn").arg(servingMark(serving.why), servingModelName(serving)),
                                    QStringLiteral("serving:") + serving.model);
             m_modelBox->setCurrentIndex(0);
         }
         m_modelBox->setToolTip(modelTooltip(!m_serving.isEmpty()
             ? servingTooltip()
             : !liveGuest.isEmpty()
-            ? QStringLiteral("%1 is this pane's agent: the prompt box is its input. Pick a model to leave it.").arg(guestDisplayName(liveGuest))
+            ? QStringLiteral("%1 is this pane's agent: the prompt box is its input. Pick a model to leave it.").arg(guestName(liveGuest))
             : onGuestPreset()
             // Tier A (29.4): the guest answers through its harness, so the conversation, the chips
             // and the call lines are Relay's and the terminal below is still the user's own shell.
             ? QStringLiteral("%1 is this pane's agent, through its own harness%2. The terminal stays yours.")
-                  .arg(guestDisplayName(guestOfPreset(m_currentPreset)),
+                  .arg(guestName(guestOfPreset(m_currentPreset)),
                        m_guestSession.isEmpty() ? QString() : QStringLiteral(" (session %1)").arg(m_guestSession.left(8)))
             : QString()));
         m_modelBox->updateGeometry();   // the collapsed box's width follows the new current row
@@ -12428,14 +12525,20 @@ private:
         if (!guestHarnessUsable(guest)) {
             if (!model.isEmpty())
                 status(QStringLiteral("%1 picks its own model when it runs in the terminal; ignoring “%2”.")
-                           .arg(guestDisplayName(guest), model));
+                           .arg(guestName(guest), model));
             if (!m_guest.isEmpty() && m_guest != guest) leaveGuest([this, guest] { chooseGuest(guest); }, true);
             else chooseGuest(guest);
             return;
         }
         const QString id = QStringLiteral("guest:") + guest;
         if (id == m_currentPreset && m_configured && m_guest.isEmpty()) {
-            if (model.isEmpty()) { status(QStringLiteral("Already on %1.").arg(guestDisplayName(guest))); refreshPickers(); }
+            if (model.isEmpty()) {
+                // The model it is running, when the harness has said which (card #MDL1, rule 1);
+                // the harness's own name only while nothing knows what that model is.
+                const QString running = modelNameFor(id, m_guestModel);
+                status(QStringLiteral("Already on %1.").arg(running.isEmpty() ? guestName(guest) : running));
+                refreshPickers();
+            }
             else setMainModel(model);   // same guest, another model: the harness restarts on it
             return;
         }
@@ -12485,9 +12588,9 @@ private:
         if (guest.isEmpty()) { m_guestSession.clear(); return; }
         m_guestSession = event.value(QStringLiteral("guest_session")).toString();
         status(m_guestSession.isEmpty()
-                   ? QStringLiteral("%1 is this pane's agent.").arg(guestDisplayName(guest))
+                   ? QStringLiteral("%1 is this pane's agent.").arg(guestName(guest))
                    : QStringLiteral("%1 is this pane's agent (session %2).")
-                         .arg(guestDisplayName(guest), m_guestSession.left(8)));
+                         .arg(guestName(guest), m_guestSession.left(8)));
     }
 
 public:
@@ -12543,7 +12646,7 @@ private:
         leaveGuest([this, guest] {
             if (m_agentBusy) stopAgent();   // a configure ends the conversation; the turn goes first
             configurePreset(QStringLiteral("guest:") + guest, false);
-            status(QStringLiteral("Resuming the %1 session on this pane's agent.").arg(guestDisplayName(guest)));
+            status(QStringLiteral("Resuming the %1 session on this pane's agent.").arg(guestName(guest)));
         });
     }
 
@@ -12555,7 +12658,7 @@ private:
             const bool back = m_guestLeaving;
             m_guestLeaving = false;
             m_guestLeaveThen = nullptr;
-            status((back ? QStringLiteral("Back on %1.") : QStringLiteral("Already on %1.")).arg(guestDisplayName(guest)));
+            status((back ? QStringLiteral("Back on %1.") : QStringLiteral("Already on %1.")).arg(guestName(guest)));
             refreshPickers();
             return;
         }
@@ -12617,7 +12720,7 @@ public:
                             QString::fromUtf8(launch->readAllStandardError()).trimmed().section(QLatin1Char('\n'), -1));
                         relay::log::error(QStringLiteral("guest_launch_failed pane=%1 guest=%2 code=%3 error=%4")
                                               .arg(paneLogId(), guest).arg(code).arg(why));
-                        status(QStringLiteral("Could not start %1: %2").arg(guestDisplayName(guest), why.isEmpty() ? QStringLiteral("the launch helper failed") : why));
+                        status(QStringLiteral("Could not start %1: %2").arg(guestName(guest), why.isEmpty() ? QStringLiteral("the launch helper failed") : why));
                         m_guestWanted.clear();
                         refreshPickers();
                         return;
@@ -12635,12 +12738,12 @@ public:
                     if (!legacy.isEmpty()) {
                         QStringList files;
                         for (const auto &value : legacy) files << value.toString();
-                        notify(guestDisplayName(guest), QStringLiteral("Removed Relay's old guest entries from %1 (Relay no longer needs them installed).").arg(files.join(QStringLiteral(", "))));
+                        notify(guestName(guest), QStringLiteral("Removed Relay's old guest entries from %1 (Relay no longer needs them installed).").arg(files.join(QStringLiteral(", "))));
                     }
                     // Now if the shell is at its prompt, else queued like anything typed while the
                     // terminal is busy; a new pane's shell is not up yet and the queue waits for it.
                     submitTerminal(line, false);
-                    status(QStringLiteral("Starting %1…").arg(guestDisplayName(guest)));
+                    status(QStringLiteral("Starting %1…").arg(guestName(guest)));
                     // The detector takes over once the guest is in the foreground; if it never
                     // arrives (the command failed in the shell), the picker stops claiming it.
                     QTimer::singleShot(30000, this, [this, guest] {
@@ -12651,7 +12754,7 @@ public:
             launch->deleteLater();
             if (m_guestLaunch == launch) m_guestLaunch = nullptr;
             relay::log::error(QStringLiteral("guest_launch_error pane=%1 guest=%2 error=%3").arg(paneLogId(), guest, launch->errorString()));
-            status(QStringLiteral("Could not start %1: %2").arg(guestDisplayName(guest), launch->errorString()));
+            status(QStringLiteral("Could not start %1: %2").arg(guestName(guest), launch->errorString()));
             m_guestWanted.clear();
             refreshPickers();
         });
@@ -12677,7 +12780,7 @@ private:
         if (!already) {
             if (m_guestBusy)
                 status(QStringLiteral("%1 finishes its turn and then exits · this pane has moved on.")
-                           .arg(guestDisplayName(guest)));
+                           .arg(guestName(guest)));
             else
                 askGuestToExit(guest);
         }
@@ -12691,13 +12794,13 @@ private:
     void askGuestToExit(const QString &guest) {
         if (guest != m_guest) return;
         typeIntoGuest(guest, QStringLiteral("/exit"));
-        status(QStringLiteral("Leaving %1…").arg(guestDisplayName(guest)));
+        status(QStringLiteral("Leaving %1…").arg(guestName(guest)));
         QTimer::singleShot(15000, this, [this, guest] {
             if (m_guest != guest || !m_guestLeaving) return;
             const bool waiting = static_cast<bool>(m_guestLeaveThen);
             m_guestLeaveThen = nullptr;
-            status(waiting ? QStringLiteral("%1 did not exit · type /exit into it, then pick again.").arg(guestDisplayName(guest))
-                           : QStringLiteral("%1 is still in the terminal · type /exit into it to close it.").arg(guestDisplayName(guest)));
+            status(waiting ? QStringLiteral("%1 did not exit · type /exit into it, then pick again.").arg(guestName(guest))
+                           : QStringLiteral("%1 is still in the terminal · type /exit into it to close it.").arg(guestName(guest)));
             refreshPickers();
         });
     }
@@ -12748,8 +12851,11 @@ private:
                 const QJsonObject entry = m_roleSummary.value(role).toObject();
                 if (entry.isEmpty()) continue;
                 const bool same = entry.value(QStringLiteral("source")).toString() == QStringLiteral("main");
-                lines << QStringLiteral("%1: %2%3").arg(roleLabel(role), entry.value(QStringLiteral("model")).toString(),
-                                                        same ? QStringLiteral(" (same as main)") : QString());
+                lines << QStringLiteral("%1: %2%3")
+                             .arg(roleLabel(role),
+                                  modelNameFor(entry.value(QStringLiteral("preset")).toString(),
+                                               entry.value(QStringLiteral("model")).toString()),
+                                  same ? QStringLiteral(" (same as main)") : QString());
             }
         }
         return lines.join('\n');
@@ -13907,7 +14013,7 @@ private:
         if (text.trimmed().isEmpty()) return false;    // nothing to type; submitGuest sends the Return
         if (!m_backend || guest != m_guest) {
             status(QStringLiteral("Guest input was not sent: %1 is no longer in this pane.")
-                       .arg(guestDisplayName(guest)));
+                       .arg(guestName(guest)));
             return false;
         }
         m_backend->sendInput(QByteArrayLiteral("\x15"));   // Ctrl+U: clear the guest's current input line
@@ -13923,7 +14029,7 @@ private:
         if (text.trimmed().startsWith(QLatin1Char('/')))
             m_backend->sendInput(QByteArrayLiteral("\x1b"));  // dismiss its slash popup before Enter
         m_backend->sendInput(QByteArrayLiteral("\r"));
-        status(QStringLiteral("Sent to %1.").arg(guestDisplayName(guest)));
+        status(QStringLiteral("Sent to %1.").arg(guestName(guest)));
         return true;
     }
 
@@ -13967,7 +14073,7 @@ private:
                           ? QStringLiteral("Queued · the agent prompt runs after the items ahead of it · Enter again to send at the next tool call")
                           : QStringLiteral("Queued · the agent prompt runs when its turn comes"))
                    : !entry.guest.isEmpty()
-                       ? QStringLiteral("Queued · sent to %1 when it is ready").arg(guestDisplayName(entry.guest))
+                       ? QStringLiteral("Queued · sent to %1 when it is ready").arg(guestName(entry.guest))
                        : QStringLiteral("Queued · the command runs when the terminal is free"));
         rebuildQueueStrip(); changed();
         pumpQueue();
@@ -15805,6 +15911,12 @@ public:
             if (guest == QLatin1String(candidate.id)) return QString::fromLatin1(candidate.name);
         return QStringLiteral("The guest agent");
     }
+    // The harness's name as a sentence about the harness prints it: lower-case, like every other
+    // label Relay writes (card #MDL1, rule 1 — "harness names stay where the sentence is about the
+    // harness itself, lower-case"). The table above keeps its own spelling because it is a
+    // cross-language contract: tests/test_guest.py reads it out of this file and compares it with
+    // backend/relay_core/guest.py, so the case comes off here rather than out of the table.
+    static QString guestName(const QString &guest) { return guestDisplayName(guest).toLower(); }
 private:
 
     // The guest `argv` runs, or empty. The CLI may be the native binary or a script a launcher
