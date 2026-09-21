@@ -228,3 +228,7 @@ The owner confirmed the box's second design ("yes") with four rulings, recorded 
 <!-- relay:entry 20260921T183023Z-m1 author=claude-code kind=decision -->
 ### Claude Code · 2026-09-21 18:30
 "yes to all your recs." — the ranking file (Markdown), the default rules by provider count, Relay Free only with no keys, harness models by name, Options › Models down to providers, keys and profiles. Design §5.4 and §5.5. Agents start on t:a9 (worker) and t:a8 (box + dialog); t:a10 follows.
+
+<!-- relay:entry 20260921T184601Z-cs author=codex kind=progress -->
+### Codex · 2026-09-21 18:46
+Owner: "claim all of these and implement them". Claimed the reported deferred-start Plan bug as codex. Scope: Pane::setAgentMode, configured handling, and worker startup/recovery only; the active model-picker work (t:a8–a10) stays with its current implementers. Original report: "bug -- in codex panes, i couldnt plan on first opening, it said no agent provider is configured. search for similar bugs". Plan: retain pre-start Plan/Build selection, apply it before queued prompts after configuration, and verify in an isolated GUI with a fake worker.
