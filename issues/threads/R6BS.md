@@ -21,3 +21,7 @@ Owner: "Native Windows installer". This requires the native port rather than a W
 <!-- relay:entry 20260921T225943Z-a6 author=codex kind=decision -->
 ### Codex · 2026-09-21 22:59
 Owner: "ok, sounds good, deliver it with a subagent". PowerShell 7 accepted. Delegated shell/command integration, Windows platform APIs, and Python locking/credentials to bounded subagents; parent owns application startup, installer, CI, release and site.
+
+<!-- relay:entry 20260921T232856Z-a7 author=codex kind=progress -->
+### Codex · 2026-09-21 23:28
+Native desktop and installer ran on Windows Server 2022 (35666469644); inspected screenshot and logs, found and fixed a masked PowerShell cwd fixture failure. Final release 35667599551 uses immutable fcf44e13, with native tests, actual install/start/uninstall and all six Linux package gates required before publication. Desktop/mobile download layouts checked; links remain unpublished until assets exist.
