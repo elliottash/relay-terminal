@@ -19,3 +19,19 @@ with the code; iOS-not-installed shows the install card and `/pair` in Safari ha
 instead of pairing; Android Install button; first arrival leads with "Turn on notifications". The
 typed code pairs end to end in `tests/test_web_meet_code.py` against the real hub. Next: the hosted
 drive, then the owner's iPad and iPhone.
+
+<!-- relay:entry 20260921T024000Z-b2 author=owner kind=comment mode=discuss -->
+is this done
+
+<!-- relay:entry 20260921T024000Z-b3 author=agent kind=comment mode=discuss model=kimi-k3 turn=4bae22fdc03440d7a7cd2e3efbeea49e/2edcef9f5ac04cbdb8916a604563de6e -->
+**Almost, but not quite.** Tasks 1–3 are landed and deployed (desktop entry point, the sidecar's `pair_code`, the phone welcome/install path — six commits through `1ee6b653`). What's open is task 4: the **hosted drive and its evidence** — driving the plug-menu path and the typed-code pairing end to end against the hosted service and writing the evidence into `docs/qa_evidence/2026-09-20-fr1c-pair-a-phone/`.
+
+This is a Discuss turn, so I can't run it from here — that's an **Execute** job. Hit Execute (or say the word) and I'll do the hosted drive and close the card.
+
+<!-- relay:entry 20260921T033000Z-c1 author=claude-code kind=evidence -->
+### Claude Code · 2026-09-21 03:30
+Task 4 landed (`831470e8`, `15b0340f`, `494a750a`, evidence `370eaab2`) and deployed: steps 14–19
+and the rerun of 1–13 all PASS against join.relay-terminal.ai in
+`docs/qa_evidence/2026-09-21-fr1c-hosted-drive/`. The drive found the dialog's first code being
+swapped 1.5 s after it appeared (fixed) and the third wrong PIN saying "try again" on a burned code
+(fixed). To needs-verification; the checklist is the owner's iPhone and iPad.
