@@ -1,0 +1,14 @@
+--- baseline-thread-CRD1.normalised.md	2026-09-21 15:30:49.658638400 -0400
++++ run-thread-CRD1.normalised.md	2026-09-21 15:34:36.436433839 -0400
+@@ -4,5 +4,11 @@
+ <!-- relay:entry <id> author=owner kind=event -->
+ - ✦ owner moved this card · Inbox → Discussing · the discussion started
+ 
++<!-- relay:entry <id> author=owner kind=comment mode=discuss -->
++and what about the queue? #CRD1
++
++<!-- relay:entry <id> author=agent kind=comment mode=discuss model=<model> turn=<session>/<turn> -->
++This card is about card turns being ordinary console turns.
++
+ <!-- relay:entry <id> author=agent kind=comment mode=discuss model=<model> turn=<session>/<turn> -->
+ This card is about card turns being ordinary console turns.

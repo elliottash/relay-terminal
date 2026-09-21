@@ -1,0 +1,2 @@
+configured: workspace=/tmp/ctrn-pjuk2oym/proj tab=tab-smoke model=stub-model
+thread written: baseline-thread-CRD1.md (468 bytes)
