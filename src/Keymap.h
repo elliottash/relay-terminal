@@ -226,6 +226,9 @@ private:
         add("pane.focusUp", "pane", "Focus pane above", {QStringLiteral("Alt+Up")});
         add("pane.focusDown", "pane", "Focus pane below", {QStringLiteral("Alt+Down")});
         add("pane.close", "pane", "Close pane, then tab, then window", {QStringLiteral("Ctrl+W"), QStringLiteral("Ctrl+Shift+W")});
+        add("terminal.zoomIn", "terminal", "Zoom terminal in", {QStringLiteral("Ctrl++"), QStringLiteral("Ctrl+="), QStringLiteral("Ctrl+Shift+=")});
+        add("terminal.zoomOut", "terminal", "Zoom terminal out", {QStringLiteral("Ctrl+-"), QStringLiteral("Ctrl+Shift+-")});
+        add("terminal.zoomReset", "terminal", "Reset terminal zoom", {QStringLiteral("Ctrl+0"), QStringLiteral("Ctrl+Shift+0")});
         add("pane.moveLeft", "pane", "Move pane left (swap with or dock beside the neighbor; past the page edge, into a column of its own; then the Move-down key docks it beneath)",
             {QStringLiteral("Ctrl+Alt+Left")});
         add("pane.moveRight", "pane", "Move pane right (past the page edge, into a column of its own; then the Move-down key docks it beneath)", {QStringLiteral("Ctrl+Alt+Right")});

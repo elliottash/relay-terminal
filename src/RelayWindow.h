@@ -1141,6 +1141,9 @@ private:
         else if (id == QStringLiteral("pane.focusUp")) navigate(relay::panes::Direction::Up);
         else if (id == QStringLiteral("pane.focusDown")) navigate(relay::panes::Direction::Down);
         else if (id == QStringLiteral("pane.close")) closeActive();
+        else if (id.startsWith(QStringLiteral("terminal.zoom"))) {
+            if (m_active) m_active->runTerminalMenuAction(id.mid(9), {}, {}, {});
+        }
         else if (id == QStringLiteral("pane.moveLeft")) moveActive(relay::panes::Direction::Left);
         else if (id == QStringLiteral("pane.moveRight")) moveActive(relay::panes::Direction::Right);
         else if (id == QStringLiteral("pane.moveUp")) moveActive(relay::panes::Direction::Up);

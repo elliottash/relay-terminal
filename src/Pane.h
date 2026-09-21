@@ -3034,7 +3034,12 @@ public:
                 action->setShortcut(QKeySequence(keys));
             const QString id = item.id;
             const QString link = state.link, file = state.filePath, card = state.cardId;
-            connect(action, &QAction::triggered, this, [this, id, link, file, card] { runTerminalMenuAction(id, link, file, card); });
+            connect(action, &QAction::triggered, this, [this, id, link, file, card] {
+                runTerminalMenuAction(id, link, file, card);
+                if (id.startsWith(QStringLiteral("zoom")))
+                    hint(QStringLiteral("terminal.zoom.menu"), relay::ShortcutHints::nextTime(
+                        Keymap::instance().shortcutText(QStringLiteral("terminal.") + id)));
+            });
         }
         menu->popup(global);
     }
@@ -3045,6 +3050,9 @@ public:
             {QStringLiteral("takeControl"), QStringLiteral("control.human")},
             {QStringLiteral("tasks"), QStringLiteral("agent.requests")},
             {QStringLiteral("find"), QStringLiteral("find.inView")},
+            {QStringLiteral("zoomIn"), QStringLiteral("terminal.zoomIn")},
+            {QStringLiteral("zoomOut"), QStringLiteral("terminal.zoomOut")},
+            {QStringLiteral("zoomReset"), QStringLiteral("terminal.zoomReset")},
             {QStringLiteral("splitRight"), QStringLiteral("pane.splitRight")},
             {QStringLiteral("splitDown"), QStringLiteral("pane.splitDown")},
             {QStringLiteral("splitSameHost"), QStringLiteral("ssh.splitSameHost")},
@@ -3088,7 +3096,7 @@ public:
         if (id == QStringLiteral("saveOutput")) { saveTerminalOutput(); return; }
         if (id.startsWith(QStringLiteral("zoom"))) {
             const int step = id == QStringLiteral("zoomIn") ? 1 : id == QStringLiteral("zoomOut") ? -1 : 0;
-            if (!m_backend->zoom(step)) status(QStringLiteral("This engine cannot change its font size."));
+            if (!m_backend || !m_backend->zoom(step)) status(QStringLiteral("This engine cannot change its font size."));
             return;
         }
         if (onWindowAction) onWindowAction(id);   // splitRight, splitDown, splitSameHost, equalize, close

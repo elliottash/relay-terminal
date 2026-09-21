@@ -504,6 +504,7 @@ private:
     bool m_builtinShortcuts = true;
     bool m_builtinContextMenu = true;
     int m_wheelRemainder = 0;
+    int m_zoomWheelRemainder = 0;
 
     QWidget *m_searchBar = nullptr;
     QLineEdit *m_searchEdit = nullptr;

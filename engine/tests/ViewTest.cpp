@@ -15,6 +15,7 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QUrl>
+#include <QWheelEvent>
 #include <QtTest>
 
 using namespace relay;
@@ -179,6 +180,54 @@ private slots:
         QTest::addColumn<QString>("core");
         for (const QString &c : availableVtCores())
             QTest::newRow(qPrintable(c)) << c;
+    }
+
+    void ctrlZoomKeysAndWheel()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        const int height = t.view->cellHeight();
+        const int rows = t.view->rows();
+        QTest::keyClick(t.view, Qt::Key_Equal, Qt::ControlModifier);
+        QVERIFY(t.view->cellHeight() > height);
+        QVERIFY(t.view->rows() < rows);
+        QTest::keyClick(t.view, Qt::Key_Minus, Qt::ControlModifier);
+        QCOMPARE(t.view->cellHeight(), height);
+        QTest::keyClick(t.view, Qt::Key_Plus, Qt::ControlModifier | Qt::ShiftModifier);
+        QVERIFY(t.view->cellHeight() > height);
+        QTest::keyClick(t.view, Qt::Key_0, Qt::ControlModifier);
+        QCOMPARE(t.view->cellHeight(), height);
+        QTest::keyClick(t.view, Qt::Key_Plus, Qt::ControlModifier | Qt::KeypadModifier);
+        QVERIFY(t.view->cellHeight() > height);
+        t.view->resetZoom();
+
+        auto wheel = [&](int delta, Qt::KeyboardModifiers mods) {
+            QWheelEvent e(QPointF(20, 20), t.view->mapToGlobal(QPoint(20, 20)),
+                          QPoint(), QPoint(0, delta), Qt::NoButton, mods,
+                          Qt::NoScrollPhase, false);
+            QApplication::sendEvent(t.view, &e);
+        };
+        wheel(60, Qt::NoModifier);
+        wheel(60, Qt::ControlModifier);
+        QCOMPARE(t.view->cellHeight(), height); // scrolling cannot complete a zoom notch
+        wheel(60, Qt::ControlModifier);
+        QVERIFY(t.view->cellHeight() > height);
+        wheel(-120, Qt::ControlModifier);
+        QCOMPARE(t.view->cellHeight(), height);
+        wheel(60, Qt::ControlModifier);
+        wheel(120, Qt::NoModifier);
+        wheel(60, Qt::ControlModifier);
+        QCOMPARE(t.view->cellHeight(), height); // changing gesture resets a partial notch
+        wheel(60, Qt::ControlModifier);
+        QVERIFY(t.view->cellHeight() > height);
+        t.view->resetZoom();
+
+        t.backend->writeToDisplay("\x1b[?1049h\x1b[?1000h\x1b[?1006h");
+        QTRY_VERIFY(t.backend->altScreen());
+        wheel(120, Qt::ControlModifier);
+        QVERIFY(t.view->cellHeight() > height); // zoom wins over program mouse reporting
+        wheel(-120, Qt::ControlModifier);
+        QCOMPARE(t.view->cellHeight(), height);
     }
 
     void rendersTextAndColours()

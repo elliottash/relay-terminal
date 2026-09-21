@@ -1274,6 +1274,14 @@ bool TerminalView::event(QEvent *e)
 bool TerminalView::handleBuiltinShortcut(QKeyEvent *e)
 {
     const Qt::KeyboardModifiers m = e->modifiers() & ~Qt::KeypadModifier;
+    if (m == Qt::ControlModifier || m == (Qt::ControlModifier | Qt::ShiftModifier)) {
+        switch (e->key()) {
+        case Qt::Key_Plus: case Qt::Key_Equal: zoomIn(); return true;
+        case Qt::Key_Minus: case Qt::Key_Underscore: zoomOut(); return true;
+        case Qt::Key_0: case Qt::Key_ParenRight: resetZoom(); return true;
+        default: break;
+        }
+    }
 #if defined(Q_OS_MACOS)
     const bool cmd = m == Qt::ControlModifier || m == (Qt::ControlModifier | Qt::ShiftModifier); // Command
 #else
@@ -1610,6 +1618,21 @@ void TerminalView::mouseReleaseEvent(QMouseEvent *e)
 
 void TerminalView::wheelEvent(QWheelEvent *e)
 {
+    // Zoom owns Ctrl+wheel even when a full-screen program requests mouse input.
+    // Keep partial zoom notches separate from ordinary scroll notches.
+    if (e->modifiers() == Qt::ControlModifier) {
+        m_wheelRemainder = 0;
+        m_zoomWheelRemainder += e->angleDelta().y();
+        const int steps = m_zoomWheelRemainder / 120;
+        m_zoomWheelRemainder -= steps * 120;
+        for (int i = 0; i < std::abs(steps); ++i) {
+            if (steps > 0) zoomIn();
+            else zoomOut();
+        }
+        e->accept();
+        return;
+    }
+    m_zoomWheelRemainder = 0;
     m_wheelRemainder += e->angleDelta().y();
     const int steps = m_wheelRemainder / 120;
     m_wheelRemainder -= steps * 120;

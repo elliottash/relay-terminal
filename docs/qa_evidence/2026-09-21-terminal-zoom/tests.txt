@@ -1,0 +1,8 @@
+********* Start testing of ViewTest *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : ViewTest::initTestCase()
+QWARN  : ViewTest::ctrlZoomKeysAndWheel(libvterm) This plugin does not support propagateSizeHints()
+PASS   : ViewTest::ctrlZoomKeysAndWheel(libvterm)
+PASS   : ViewTest::cleanupTestCase()
+Totals: 3 passed, 0 failed, 0 skipped, 0 blacklisted, 34ms
+********* Finished testing of ViewTest *********
