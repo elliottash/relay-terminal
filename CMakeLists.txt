@@ -403,7 +403,8 @@ target_compile_options(relay-agentcontext PRIVATE -Wall -Wextra -Wpedantic)
 # Agent replies in the terminal: streaming Markdown to ANSI (headings, emphasis, code, lists,
 # quotes, links, tables), word-wrapped to the pane's width. Plain QtCore so chunk boundaries can
 # be tested without a terminal.
-add_library(relay-markdown STATIC src/MarkdownAnsi.cpp src/MarkdownAnsi.h src/WordWrap.cpp src/WordWrap.h)
+add_library(relay-markdown STATIC src/MarkdownAnsi.cpp src/MarkdownAnsi.h src/WordWrap.cpp src/WordWrap.h
+                                  src/LabelLinks.h)
 target_include_directories(relay-markdown PUBLIC src)
 target_link_libraries(relay-markdown PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-markdown PRIVATE -Wall -Wextra -Wpedantic)

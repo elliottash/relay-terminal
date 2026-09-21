@@ -623,6 +623,62 @@ private slots:
         QCOMPARE(lines[0].text(), QStringLiteral("a line the user typed"));
         QVERIFY(lines[0].spans.first().bold);
     }
+
+    // ---- a markdown link's label, re-wrapped (card #MDKN)
+    //
+    // At the width the block was printed at the label is clickable because its cells carry the
+    // OSC 8 run; at any other width the view paints its own wrap of these lines instead, so the
+    // target has to be here too. FoldSpan::link is the field a tool-call fold's rows already use,
+    // and FoldLayer copies it onto the cell the hit test reads.
+    void proseSpansCarryALabelsLinkAndNotTheAnchor()
+    {
+        ProseCollector c;
+        c.feed(QStringLiteral("see \x1b]8;;relay://prose/p/1#l=option%3Aa%2Fb\x1b\\\x1b[4;32mdocs\x1b[0m"
+                              "\x1b]8;;relay://prose/p/1\x1b\\\x1b[2;97m (option:a/b)\x1b[0m now\n"));
+        const QVector<FoldLine> lines = c.take();
+        QCOMPARE(lines.size(), 1);
+        QCOMPARE(lines[0].text(), QStringLiteral("see docs (option:a/b) now"));
+        QString linked;
+        for (const FoldSpan &s : lines[0].spans)
+            if (!s.link.isEmpty()) linked += s.text;
+        QCOMPARE(linked, QStringLiteral("docs"));
+        for (const FoldSpan &s : lines[0].spans)
+            if (!s.link.isEmpty())
+                QCOMPARE(s.link, QStringLiteral("relay://prose/p/1#l=option%3Aa%2Fb"));
+        // The block's own anchor is a handle, not a destination: no span carries it, or the
+        // whole block would be one enormous link.
+        for (const FoldSpan &s : lines[0].spans)
+            QVERIFY(s.link != QStringLiteral("relay://prose/p/1"));
+        // And the cell the hit test reads has it.
+        FoldLayer f;
+        f.setGeometry(80, 3);
+        f.setProse(QStringLiteral("relay://prose/p/1"), lines, 80);
+        const FoldLayer::Fold *fold = f.fold(QStringLiteral("relay://prose/p/1"));
+        QCOMPARE(fold->cells[0][4].link, QStringLiteral("relay://prose/p/1#l=option%3Aa%2Fb"));
+        QVERIFY(fold->cells[0][0].link.isEmpty());
+    }
+
+    void aLabelsLinkSurvivesArbitraryChunkBoundaries()
+    {
+        const QString rendered =
+            QStringLiteral("a \x1b]8;;relay://prose/p/2#l=%23K7Q2\x1b\\\x1b[4;32mthe card\x1b[0m"
+                           "\x1b]8;;relay://prose/p/2\x1b\\ b\n");
+        ProseCollector whole;
+        whole.feed(rendered);
+        const QVector<FoldLine> want = whole.take();
+        for (int cut = 1; cut < rendered.size(); ++cut) {
+            ProseCollector streamed;
+            streamed.feed(rendered.left(cut));
+            streamed.feed(rendered.mid(cut));
+            const QVector<FoldLine> got = streamed.take();
+            QCOMPARE(got.size(), want.size());
+            QCOMPARE(got[0].text(), want[0].text());
+            QString a, b;
+            for (const FoldSpan &s : want[0].spans) if (!s.link.isEmpty()) a += s.text;
+            for (const FoldSpan &s : got[0].spans) if (!s.link.isEmpty()) b += s.text;
+            QCOMPARE(b, a);
+        }
+    }
 };
 
 QObject *makeFoldLayerTest()

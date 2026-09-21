@@ -2,6 +2,8 @@
 // Agent replies rendered into the terminal: Markdown in, ANSI out, whatever the chunking.
 #include "MarkdownAnsi.h"
 
+#include "LabelLinks.h"
+
 #include <QRegularExpression>
 #include <QTest>
 
@@ -29,6 +31,13 @@ QString renderStreamed(const QString &markdown) {
 QString plain(const QString &rendered) {
     static const QRegularExpression sgr(QStringLiteral("\x1b\\[[0-9;]*m"));
     return QString(rendered).remove(sgr);
+}
+
+// The same, plus the OSC 8 runs a link's label is wrapped in when an anchor is set (card #MDKN):
+// what the terminal actually shows.
+QString plainer(const QString &rendered) {
+    static const QRegularExpression osc(QStringLiteral("\x1b\\][^\x07\x1b]*(\x07|\x1b\\\\)"));
+    return plain(QString(rendered).remove(osc));
 }
 
 }  // namespace
@@ -200,6 +209,98 @@ private slots:
         QString out = md.feed(QStringLiteral("| a | b |\n|---|---|\n| `x` | y |\n"));
         out += md.finish();
         QVERIFY(out.contains(QStringLiteral("38;2;9;9;9m")));
+    }
+
+    // ---- a link's label carries its target (card #MDKN) -------------------------------------
+    //
+    // The label is painted in the link ink, so a person clicks it; until 2026-09-21 only the
+    // `(target)` printed beside it was clickable, because that is text and the link scanner scans
+    // text. With an anchor set the label's cells carry an OSC 8 run of their own — the anchor with
+    // the target as its fragment — and the anchor is re-opened after it, so the block the label
+    // sits in carries on and nothing else on the row points anywhere.
+
+    void withNoAnchorTheBytesAreExactlyWhatTheyWere() {
+        const QString md = QStringLiteral("see [docs](https://x.org/a) now\n");
+        MarkdownAnsi a;
+        MarkdownAnsi b;
+        b.setLinkAnchor(QString());
+        QCOMPARE(b.feed(md) + b.finish(), a.feed(md) + a.finish());
+        QVERIFY(!(MarkdownAnsi().feed(md)).contains(QChar(0x1b) + QStringLiteral("]8")));
+    }
+
+    void anAnchoredLabelIsItsOwnOsc8Run() {
+        MarkdownAnsi md;
+        md.setLinkAnchor(QStringLiteral("relay://prose/p4/7"));
+        const QString out = md.feed(QStringLiteral("see [docs](option:general/theme) now\n")) + md.finish();
+        // The label's run, the anchor re-opened right after it, and the target still printed.
+        QVERIFY(out.contains(QStringLiteral("\x1b]8;;relay://prose/p4/7#l=option%3Ageneral%2Ftheme\x1b\\")));
+        QVERIFY(out.contains(QStringLiteral("\x1b]8;;relay://prose/p4/7\x1b\\")));
+        QCOMPARE(plainer(out), QStringLiteral("see docs (option:general/theme) now\n"));
+        // The run closes before the printed target: that stays plain text, which is what scans as
+        // a link of its own and what survives a restore from saved bytes.
+        const int labelRun = out.indexOf(QStringLiteral("#l="));
+        const int reopen = out.indexOf(QStringLiteral("\x1b]8;;relay://prose/p4/7\x1b\\"), labelRun);
+        QVERIFY(reopen > labelRun);
+        QVERIFY(out.indexOf(QStringLiteral("(option:general/theme)")) > reopen);
+    }
+
+    void everyLinkKindRoundTripsThroughTheFragment() {
+        const QStringList targets{QStringLiteral("option:models/provider/glm-coding"),
+                                  QStringLiteral("session:0f3a91cc"),
+                                  QStringLiteral("card:K7Q2"),
+                                  QStringLiteral("#K7Q2"),
+                                  QStringLiteral("src/Pane.h:42:7"),
+                                  QStringLiteral("https://x.org/a?b=1&c=2")};
+        for (const QString &target : targets) {
+            MarkdownAnsi md;
+            md.setLinkAnchor(QStringLiteral("relay://prose/p1/1"));
+            const QString out = md.feed(QStringLiteral("[L](") + target + QStringLiteral(")\n")) + md.finish();
+            const QString uri = out.mid(out.indexOf(QStringLiteral("\x1b]8;;")) + 5);
+            QCOMPARE(relay::labellink::targetOf(uri.left(uri.indexOf(QChar(0x1b)))), target);
+        }
+    }
+
+    // Two links in one paragraph, and the same text one character at a time: the renderer holds a
+    // link back until its `)` arrives, so a link never straddles two chunks and each gets its own
+    // run.
+    void twoLinksInOneParagraphEachGetTheirOwnRun() {
+        const QString md = QStringLiteral("[one](option:a/b) and [two](session:9f) done\n");
+        MarkdownAnsi whole;
+        whole.setLinkAnchor(QStringLiteral("relay://prose/p1/2"));
+        const QString out = whole.feed(md) + whole.finish();
+        QCOMPARE(out.count(QStringLiteral("#l=")), 2);
+        QCOMPARE(out.count(QStringLiteral("\x1b]8;;relay://prose/p1/2\x1b\\")), 2);
+        MarkdownAnsi streamed;
+        streamed.setLinkAnchor(QStringLiteral("relay://prose/p1/2"));
+        QString piece;
+        for (const QChar c : md) piece += streamed.feed(QString(c));
+        QCOMPARE(piece + streamed.finish(), out);
+    }
+
+    // A label with spaces, punctuation and a card reference in it, and a label inside a list item,
+    // a quote and a table cell: the run is around the label's own characters, whatever they are.
+    void aLabelKeepsItsTextWhateverIsInIt() {
+        MarkdownAnsi md;
+        md.setLinkAnchor(QStringLiteral("relay://prose/p2/3"));
+        QString out = md.feed(QStringLiteral("- [Open #K7Q2 (the card), now](card:K7Q2)\n"
+                                             "> quoted [link](option:a/b)\n"));
+        out += md.finish();
+        QVERIFY(plainer(out).contains(QStringLiteral("Open #K7Q2 (the card), now (card:K7Q2)")));
+        QCOMPARE(out.count(QStringLiteral("#l=")), 2);
+    }
+
+    // A table cell's width is measured with visibleWidth(), which used to walk an escape to its
+    // first letter: with an OSC in the cell that stopped at the `r` of `relay://` and counted the
+    // rest of the URI as text, so the column was padded to the width of the URI.
+    void aLinkInATableCellDoesNotWidenTheColumn() {
+        const QString md = QStringLiteral("| Name | Size |\n|---|---|\n| [a](option:x/y) | 1 |\n");
+        MarkdownAnsi plainMd;
+        MarkdownAnsi anchored;
+        anchored.setLinkAnchor(QStringLiteral("relay://prose/p3/4"));
+        QCOMPARE(plainer(anchored.feed(md) + anchored.finish()),
+                 plainer(plainMd.feed(md) + plainMd.finish()));
+        QCOMPARE(MarkdownAnsi::visibleWidth(QStringLiteral("\x1b]8;;relay://prose/p/1\x1b\\x")), 1);
+        QCOMPARE(MarkdownAnsi::visibleWidth(QStringLiteral("\x1b]8;;u\ay")), 1);
     }
 };
 

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "MarkdownAnsi.h"
 
+#include "LabelLinks.h"
+
 #include <QRegularExpression>
 #include <QVector>
 
@@ -15,6 +17,11 @@ const QString kReset = QStringLiteral("\x1b[0m");
 // Colours follow the inline inks in main.cpp: violet is the agent, amber is a tool.
 
 QString sgr(const QString &params) { return kEsc + params + QLatin1Char('m'); }
+
+// OSC 8 with an ST terminator, the form every writer in the pane uses. An empty URI closes the
+// run; a link's label re-opens the block's own anchor rather than closing, so the block the label
+// sits in carries on (card #MDKN).
+QString osc8(const QString &uri) { return QStringLiteral("\x1b]8;;") + uri + QStringLiteral("\x1b\\"); }
 
 int runLength(const QString &text, int from, QChar c) {
     int n = 0;
@@ -104,6 +111,15 @@ int MarkdownAnsi::visibleWidth(const QString &rendered) {
     for (int i = 0; i < rendered.size(); ++i) {
         const QChar c = rendered.at(i);
         if (c == QChar(0x1b)) {
+            // An OSC (a label's link, #MDKN) runs to BEL or ST and its body is full of letters:
+            // the CSI rule below would stop at the `r` of `relay://…` and count the rest of the
+            // URI as text, which is what a table cell's width is measured with.
+            if (i + 1 < rendered.size() && rendered.at(i + 1) == QLatin1Char(']')) {
+                i += 2;
+                while (i < rendered.size() && rendered.at(i) != QChar(0x07) && rendered.at(i) != QChar(0x1b)) ++i;
+                if (i < rendered.size() && rendered.at(i) == QChar(0x1b)) ++i;   // ST: ESC \, both
+                continue;
+            }
             while (i < rendered.size() && !rendered.at(i).isLetter()) ++i;   // through the final byte
             continue;
         }
@@ -419,7 +435,18 @@ bool MarkdownAnsi::inlineStep(QString &out, int &i) {
                 if (paren >= 0 && paren < limit) {
                     const QString label = text.mid(i + 1, close - i - 1);
                     const QString url = text.mid(close + 2, paren - close - 2).trimmed();
+                    // Card #MDKN: the label is painted like a link, so it is one. Its cells carry
+                    // an OSC 8 run inside the block's own run — the anchor with the target as its
+                    // fragment — and the anchor is re-opened straight after, so the block carries
+                    // on and only these cells point anywhere. With no anchor set (every surface
+                    // that is not an anchored block of terminal output) this is the old two lines.
+                    const QString linkUri = labellink::uriFor(m_linkAnchor, url);
+                    if (!linkUri.isEmpty()) out += osc8(linkUri);
                     out += sgr(QStringLiteral("0;") + m_palette.link) + label + style();
+                    if (!linkUri.isEmpty()) out += osc8(m_linkAnchor);
+                    // Outside the run on purpose: the printed target is what a person reads before
+                    // clicking, and text is what survives a restore from saved bytes, where OSC 8
+                    // is stripped. It scans as a link of its own exactly as it did before.
                     if (!url.isEmpty() && url != label) out += sgr(m_palette.dim) + QStringLiteral(" (") + url + QLatin1Char(')') + style();
                     m_prev = QLatin1Char(')');
                     i = paren + 1;
@@ -479,6 +506,7 @@ QString MarkdownAnsi::renderInline(const QString &text, bool bold) const {
     // overflow in the middle of an answer, twice on 2026-09-19 (16:30:40 and 16:36:18), with
     // 8 MiB of that cycle on the stack and nothing in the log to say so.
     inner.m_inlineOnly = true;
+    inner.m_linkAnchor = m_linkAnchor;   // a link in a table cell is a link like any other (#MDKN)
     // Two statements, not `feed(text) + finish()`: the order in which `+` evaluates its operands
     // is unspecified, and g++ 15 on x86_64 runs finish() first, which flushes an empty renderer
     // and then feeds text nothing will ever emit. Every numeric table cell came out blank on that

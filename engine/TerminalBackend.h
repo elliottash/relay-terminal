@@ -75,7 +75,11 @@ inline constexpr int kFoldIndent = 3;
 // block of its own output — agent prose, a line the user typed — in
 // relay://prose/<pane>/<block>, covering exactly the block's rows, and hands
 // the same URI to setProseBlock(). Such a URI is an anchor for the view's
-// re-wrap layer, never an interactive link: no hover, no cursor, no click.
+// re-wrap layer, never an interactive link: no hover, no cursor, no click —
+// unless it carries a `#l=` fragment, which makes it a markdown link's label
+// inside that block, with the fragment saying what the label opens
+// (src/LabelLinks.h, card #MDKN). The label's cells are still the block's, so
+// the anchor walk finds them with the rest of the block's rows.
 inline constexpr const char kProsePrefix[] = "relay://prose/";
 
 // Grid columns one grapheme cluster occupies (1 or 2). East Asian Wide /

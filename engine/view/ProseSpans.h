@@ -20,6 +20,7 @@
 #pragma once
 
 #include "TerminalBackend.h"
+#include "LabelLinks.h"
 
 #include <QChar>
 #include <QString>
@@ -44,14 +45,20 @@ public:
 private:
     void closeSpan();
     void applySgr(const QString &params);
+    void applyOsc(const QString &body);
 
     QVector<FoldLine> m_lines;
     FoldLine m_line;         // the line being built
     FoldSpan m_open;         // the span being built (style set when it opened)
     bool m_bold = false, m_italic = false, m_underline = false, m_faint = false;
     int m_fg = -1;           // -1 = the default ink; else an ANSI index
+    // The OSC 8 link the next span opens with (card #MDKN). Only a *label* URI is kept: an
+    // anchor — the block's own prose run, a fold's URI — is a handle, not a destination, and a
+    // span that carried one would make the whole block clickable.
+    QString m_link;
     enum class Scan { Ground, Esc, Csi, Osc, OscEsc } m_scan = Scan::Ground;
     QString m_csi;
+    QString m_osc;
 };
 
 inline QString ProseCollector::currentSgr() const
@@ -101,6 +108,24 @@ inline void ProseCollector::applySgr(const QString &params)
     closeSpan();   // the style change ends the span in progress
 }
 
+// OSC 8 (card #MDKN): `8;;<uri>`. A label's URI becomes the span's link, which is how a re-wrapped
+// prose block and a markdown fold keep a clickable label — the view hit-tests FoldSpan::link, the
+// same field a tool-call fold's rows use. An anchor, or the empty URI that closes a run, clears it.
+inline void ProseCollector::applyOsc(const QString &body)
+{
+    if (!body.startsWith(QLatin1String("8;")))
+        return;
+    const int semi = body.indexOf(QLatin1Char(';'), 2);   // past the params field, which is unused
+    if (semi < 0)
+        return;
+    const QString uri = body.mid(semi + 1);
+    const QString link = labellink::isLabelUri(uri) ? uri : QString();
+    if (link == m_link)
+        return;
+    closeSpan();   // the link change ends the span in progress, exactly as a style change does
+    m_link = link;
+}
+
 inline void ProseCollector::feed(const QString &rendered)
 {
     for (const QChar ch : rendered) {
@@ -119,12 +144,13 @@ inline void ProseCollector::feed(const QString &rendered)
                 m_open.italic = m_italic;
                 m_open.underline = m_underline;
                 m_open.dim = m_faint;
+                m_open.link = m_link;
             }
             m_open.text += ch;
             continue;
         case Scan::Esc:
             if (ch == QLatin1Char('[')) { m_scan = Scan::Csi; m_csi.clear(); continue; }
-            if (ch == QLatin1Char(']')) { m_scan = Scan::Osc; continue; }
+            if (ch == QLatin1Char(']')) { m_scan = Scan::Osc; m_osc.clear(); continue; }
             m_scan = Scan::Ground;   // a two-character escape: nothing to keep
             continue;
         case Scan::Csi: {
@@ -138,10 +164,12 @@ inline void ProseCollector::feed(const QString &rendered)
             continue;
         }
         case Scan::Osc:
-            if (ch == QChar(0x07)) { m_scan = Scan::Ground; continue; }
+            if (ch == QChar(0x07)) { applyOsc(m_osc); m_scan = Scan::Ground; continue; }
             if (ch == QChar(0x1b)) { m_scan = Scan::OscEsc; continue; }
+            m_osc += ch;
             continue;
         case Scan::OscEsc:
+            applyOsc(m_osc);
             m_scan = Scan::Ground;   // ST: the OSC is over
             continue;
         }

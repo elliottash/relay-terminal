@@ -64,6 +64,22 @@ public:
     // Takes effect from the next line: anything held back keeps the colours it started in.
     void setPalette(const Palette &palette);
 
+    // The OSC 8 anchor a link's *label* is hung from (card #MDKN, relay::labellink).
+    //
+    // Empty — the default — and the renderer emits nothing but SGR, exactly the bytes it emitted
+    // before this existed: a surface that is not an anchored block of terminal output has nothing
+    // to hang a label from, and the tests measure those bytes. Set to the URI of the block being
+    // printed (a prose run, a fold), and `[LABEL](target)` wraps the label in an OSC 8 run whose
+    // URI is that anchor with the target as its fragment, then re-opens the anchor. The
+    // `(target)` printed after the label is left outside the run and is still plain text: it is
+    // what a person reads before clicking, and it is what survives a restore from saved terminal
+    // bytes, where OSC 8 is stripped.
+    //
+    // A block ends and the next one begins between chunks, so the caller sets this before each
+    // feed(); a link never spans two feeds (it is held back until its `)` arrives).
+    void setLinkAnchor(const QString &anchorUri) { m_linkAnchor = anchorUri; }
+    QString linkAnchor() const { return m_linkAnchor; }
+
     QString feed(const QString &text);
     // Emits whatever is held back, closes open styles and a pending table, and resets all state
     // (a new text segment starts fresh). Never adds a newline of its own.
@@ -90,6 +106,7 @@ private:
     void flushBoldHold(QString &out);
 
     Palette m_palette;
+    QString m_linkAnchor;   // #MDKN; a setting like the palette, so reset() leaves it alone
     QString m_pending;
     QStringList m_table;
     // Set on the inner renderer a table cell (or a row that turned out not to be a table) is drawn
