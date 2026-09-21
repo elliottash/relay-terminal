@@ -45,6 +45,11 @@ Why CPack rather than a `debian/` directory: one CMake install manifest serves `
 the `.deb`s, the PKGBUILD and a future Flatpak, and a per-distro `.deb` needs only a container.
 A `debian/` source package becomes worthwhile for a Launchpad PPA or a Debian upload; add it then.
 
+A manual **Release** workflow run accepts a tag name and fixes the source to that run's commit.
+It creates the tag and release only after all native Windows and Linux package checks pass. A
+pre-existing tag must point at exactly that source; the workflow never moves tags. Pushing an
+existing release tag remains supported. This avoids tagging an unverified build during preparation.
+
 ## Native Windows installer
 
 `windows.yml` is both a main-branch check and a reusable release job. It builds the native Qt6

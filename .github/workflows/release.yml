@@ -7,6 +7,13 @@
 name: Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to create only after all package gates pass
+        required: true
+        default: v0.1.0-beta.3
+        type: string
   push:
     tags: ['v*']
 
@@ -18,6 +25,7 @@ jobs:
     name: Source tarball
     runs-on: ubuntu-24.04
     outputs:
+      tag: ${{ steps.version.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
       deb_suffix: ${{ steps.version.outputs.deb_suffix }}
       arch_pkgver: ${{ steps.version.outputs.arch_pkgver }}
@@ -25,8 +33,11 @@ jobs:
       - uses: actions/checkout@v5
       - name: Derive and check the version
         id: version
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
         run: |
-          tag=${GITHUB_REF_NAME}
+          tag=${REQUESTED_TAG:-$GITHUB_REF_NAME}
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]] || { echo 'Invalid release tag'; exit 1; }
           version=${tag#v}                    # 0.1.0-beta.1
           base=${version%%-*}                 # 0.1.0
           suffix=${version#"$base"}           # -beta.1 or empty
@@ -36,6 +47,7 @@ jobs:
             exit 1
           fi
           {
+            echo "tag=$tag"
             echo "version=$version"
             echo "deb_suffix=${suffix/-/\~}"          # ~beta.1
             echo "arch_pkgver=$base${suffix#-}"       # 0.1.0beta.1
@@ -100,7 +112,10 @@ jobs:
             out/logs/*.log
 
   windows:
+    needs: source
     uses: ./.github/workflows/windows.yml
+    with:
+      version: ${{ needs.source.outputs.version }}
 
   release:
     name: GitHub release
@@ -125,7 +140,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag=${GITHUB_REF_NAME}
-          flags=(--generate-notes --title "Relay ${tag#v}" --verify-tag)
+          flags=(--generate-notes --title "Relay ${tag#v}" --target "$GITHUB_SHA")
+          if [ "$GITHUB_EVENT_NAME" != workflow_dispatch ]; then flags+=(--verify-tag); fi
+          # A manual release creates its tag at the exact tested commit only now. An existing
+          # tag must name that same source; never publish new binaries under an old tag.
+          tagged=$(git ls-remote "https://github.com/$GITHUB_REPOSITORY.git" "refs/tags/$tag" "refs/tags/$tag^{}" | tail -1 | cut -f1)
+          if [ -n "$tagged" ] && [ "$tagged" != "$GITHUB_SHA" ]; then echo 'Tag points to different source'; exit 1; fi
           case "$tag" in *-*) flags+=(--prerelease) ;; esac
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" "${flags[@]}" assets/*
 
