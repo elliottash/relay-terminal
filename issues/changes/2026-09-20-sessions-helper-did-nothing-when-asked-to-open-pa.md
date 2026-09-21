@@ -7,7 +7,7 @@ assignee: claude-code
 rank: m
 created: '2026-09-20'
 source: 'owner report, 2026-09-20 23:22, relayed to a Claude Code session'
-links: {plans: [], commits: [fd4cb3c1, 75af8a42, 3eebe40a], evidence: ['docs/qa_evidence/2026-09-20-helper-opens-sessions/'], related: [FEJQ], github: null}
+links: {plans: [], commits: [fd4cb3c1, 75af8a42, 3eebe40a, abc3ff09, 445869e9], evidence: ['docs/qa_evidence/2026-09-20-helper-opens-sessions/'], related: [FEJQ], github: null}
 ---
 # The Sessions helper could not open a conversation, and nothing answered its app_open
 
@@ -64,9 +64,13 @@ Two faults, one on each side of the pipe, and two things the owner asked for on 
    the log. The next ask starts a fresh worker through the first-ask path. `board_chat_cancelled`
    now carries the `pane` that pressed Stop, so the panel that asked settles instead of waiting for
    an answer addressed to somebody else.
-5. **The queue is drawn in every pane** (`3eebe40a`). It always was the worker's and always served
-   every panel, but only the Switchboard built the rows; the other three promised in the composer's
-   placeholder that a second prompt queues and then showed nothing. A dead worker's queue is
+5. **The queue is drawn in every pane** (`3eebe40a`, `445869e9`). It always was the worker's and
+   always served every panel, but only the Switchboard built the rows; the other three promised in
+   the composer's placeholder that a second prompt queues and then showed nothing. And because
+   `board_chat_state` is tagged with the pane of the turn that is *running*, a panel dropped every
+   state block while somebody else's turn was in front — so a prompt queued from Sessions drew its
+   row and then never heard about itself again. The queue is now read from any state block and the
+   turn is not: a Sessions panel does not go busy because the board is. A dead worker's queue is
    dropped with the turn.
 
 ## Tests

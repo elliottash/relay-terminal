@@ -6277,9 +6277,27 @@ generalised, not a sibling of it:
   board, and run exactly as usual. `board_chat {survey: true}` still needs the board and still
   refuses without one.
 - **The answer is the existing turn events.** `board_chat_started`, `board_chat_queued`,
-  `board_chat_state` and every `chat: true` turn event now also carry `pane`, so the panel that
-  asked draws the answer and the others do not. Queueing, stop and the queue ops of 19.18 are
-  unchanged and are the worker's, not the panel's.
+  `board_chat_state`, `board_chat_cancelled` and every `chat: true` turn event carry `pane`, so
+  the panel that asked draws the answer and the others do not. Queueing, stop and the queue ops of
+  19.18 are unchanged and are the worker's, not the panel's — which is exactly why the **queue**
+  is the one thing a panel reads out of a `chat` block addressed to another pane: one worker holds
+  one FIFO for the whole tab, `board_chat_state` is tagged with the pane of the turn that is
+  *running*, and a prompt queued from Sessions would otherwise never hear about itself again. The
+  turn is not read that way: a Sessions panel does not go busy because the board is. Every panel
+  of the tab draws the queue (#H6VQ); until 2026-09-20 only the Switchboard did, while the other
+  three promised in the composer that a second prompt queues.
+- **`board_chat_cancel` is not scoped by pane, and its answer is.** There is one turn per worker,
+  so Stop pressed in any of the tab's four panels stops it — it is one conversation. The
+  `board_chat_cancelled` that answers carries the `pane` that pressed Stop (falling back to the
+  turn's own pane for a client from before this section), because a panel drops what is addressed
+  to somebody else and would otherwise sit there running.
+- **A worker that goes when nobody asked it to puts its panels back.** `done` was the worker's to
+  send, so a helper that died mid-turn — its tab closed under it, it crashed, it could not start —
+  left the panel that asked showing a busy strip for an answer that is never coming, with its
+  composer refusing the next prompt. The GUI reports the exit as that turn's own `error`, tagged
+  with the pane that asked and carrying `worker_gone: true`, which also drops the queue rows: the
+  worker's FIFO went with the worker. The next ask starts a fresh worker through the first-ask
+  path above.
 - **The helper never runs on a guest harness, and never starts one** (card `#GH5T`, owner report
   2026-09-20: "The Switchboard agent could not answer: Base URL must be an HTTPS URL without
   credentials, query, or fragment"). The helper worker is configured with the *window's*

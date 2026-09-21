@@ -18,3 +18,11 @@ the prompt section, the narration floor, §30.3/§30.4), `75af8a42` (a worker th
 its panels back; `board_chat_cancelled` carries the pane that pressed Stop) and `3eebe40a` (the
 queue drawn in every pane). Evidence, 12 PASS 0 FAIL plus the before-fix reproduction through the
 real worker: `docs/qa_evidence/2026-09-20-helper-opens-sessions/`. Moved to needs-verification.
+
+<!-- relay:entry 20260921T052000Z-c3 author=claude-code kind=evidence -->
+### Claude Code · 2026-09-21 01:20
+Re-ran the live drive against the binary with all five commits in: 12 PASS, 0 FAIL. Added
+`445869e9` — a queue row is read from any panel's state block, because one worker holds one FIFO
+for the whole tab — and protocol §30.7 now states the three rules this card settled: the queue is
+every panel's, `board_chat_cancelled` carries the pane that pressed Stop, and a worker that dies
+mid-turn puts its panels back.
