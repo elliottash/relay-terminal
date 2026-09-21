@@ -333,3 +333,70 @@ export before any of these commits.
 Left for the GUI steps: the current helper panels stop working until steps 5–7 land, by design —
 an old GUI sending `board_chat` now gets one sentence naming `ask`/`surface`/`context` rather
 than a traceback.
+
+<!-- relay:entry 20260921T013929Z-rq author=claude-code kind=progress -->
+Step 3 has landed. Waves 1b–1e are the wrong cut, and here are the numbers.
+
+**Landed**
+
+- `24042b5b` — `AgentConsole` takes a `Context`, and `Pane::TerminalContext` is the first one.
+  `setContext`, `spec()`, `configureBlock()`, `askFields()`, `actions()`, `resolveLink()`,
+  `turnFinished()`, `placeholder()`, `onContextChanged`. The terminal context carries what the
+  coupling list showed crossing the cut that is the agent's *subject*: workspace, role, routing,
+  the named tool scope, and where the conversation is kept. Wired at the four funnels that
+  already exist — the context is set before the worker starts, `withSessionFields` inserts the
+  block, `startAgentEntry` merges `askFields()`, `agent_finished` builds a `TurnRecord` — and
+  `openOutputTarget` offers an activated link to the context first. The bubble question moved
+  behind `Host` (`bubbleRow`, `bubbleSpan`, `roomForBubble`, `showBubble`, `hideBubble` join
+  `bubbleRoom` and `setBubbleHeight`), with a new `overlayArea()` for the four terminal-anchored
+  overlays; the `@`/`#` pickers and the help sheet are deliberately not in it, because they
+  anchor on the composer and travel with it.
+- `81e889c1` — **and that first landing was wrong.** `persist.scope` went out as the workspace
+  path and `routing` as the pane's input mode. Both are closed sets on the wire (`PERSIST_SCOPES`
+  is `""`/`pane`/`helper`, `ROUTINGS` is `auto`/`agent`), so `ContextSpec.from_json` raised on
+  every `configure`, the worker never built an agent, and the pane came up with a filled model
+  box that did nothing when you pressed Enter. The build was green and all seventeen suites were
+  green. **The live drive is what caught it** — six of six checks failed on that binary and
+  passed on the tip before it. `persist.scope` is now `"pane"` (which store, not which path;
+  `store()` only redirects for `"helper"`, so nothing about where a pane's session lives moved)
+  and `routing` is `"auto"` flat.
+- `137f748f` — the evidence, and `--closure`.
+
+**The gate.** Re-run, seven of the ten shots are pixel-identical across the whole window. The
+three that differ are 36, 117 and 36 pixels: the blinking caret's 2×20 box twice, and the turn
+clock reading "Relaying · thinking… · 8 s" against "9 s". Suites: the same seventeen, green.
+
+**And now the finding you asked me to stop for.**
+
+`scripts/split-agent-console.py --closure` is new because hand-drawn line ranges cannot answer
+"is the cut wrong or merely large" — a member that looks like it crosses usually just sits
+outside the range somebody typed. It starts from the owner's own "agent sessions UI" banner and
+grows the set to a fixed point, adding anything whose every remaining mention is already inside
+it, which can only make the set bigger and the seam smaller. It stops at **228 members, 4 031
+lines, with a minimum seam of 284 names — 157 fields and 127 members**. That is the floor,
+whatever order the waves are run in. Cutting the whole agent block in one go agrees: 165 fields
+and 167 members left on the other side, with only 18 calls already carried by `Host`.
+
+The number that decides it is **`m_editor`: 109 uses of the composer stay in `Pane` even when the
+entire agent block moves**. They are not scattered — they are one thing, the routing decision in
+and around `requestRoute`: read the typed text, try a slash command, then an alias, then a skill,
+then choose the shell, the foreground program, an ssh login, or the agent.
+
+So the prompt box is not a part of the agent block that can be lifted out of it. It is what both
+halves are made of. Waves 1b–1e as drawn — move the agent out, leave the terminal holding the
+composer — are **the wrong cut**, not merely a large one: they would leave a 284-name seam
+through the middle of one widget, and every one of those names would have to become a `Host`
+call, a `ContextSpec` field or a console accessor before a single line could move.
+
+The cut that does work is the owner's sentence read literally: *an agent interface is the prompt
+box*. The console owns the composer, the queue, the transcript and the worker; the terminal
+becomes **one routing of what is typed in it**, and `Pane` keeps the shell, the pty, the login,
+the program control and the chrome. That inverts the card's "Pane hosts an AgentConsole" into
+something closer to "the console hosts the routing, and a terminal is one of its destinations",
+and it changes steps 5, 6 and 7 with it. It is a decision about the card's shape and it is
+yours, so it is written down here with the numbers rather than taken.
+
+What is already usable either way, whichever you decide: both seams exist and are tested
+(`relay::agent::Host`, 30 calls; `relay::agent::Context`, and `agentcontext` green), the terminal
+pane is measurably unchanged, `--coupling` and `--closure` re-measure any proposed cut in
+seconds, and the live drive catches a wire-contract break that the build and the suites do not.
