@@ -1,0 +1,25 @@
+===== (a) the Switchboard console =====
+PASS a1 the Switchboard's console is the prompt box, not a panel ("Ask the Switchboard agent" in a01-switchboard.png)
+PASS a1 the action row reads Check (k) ("Check (k)" in a01-switchboard.png)
+paneHeader widgets on screen with the Switchboard console up: 1
+PASS a1 the console draws no pane header (only the terminal pane's)
+PASS a1 and Clean up (u) ("Clean up (u)" in a01-switchboard.png)
+PASS a2 the console streams a turn into its transcript ("thought for" in a03-thinking.png)
+PASS a2 no On-screen hint reached a title (no "On screen now" in a03-thinking.png)
+PASS a2 Alt+R unfolds the thinking bubble ("reasoning block\|Looking at what this console" in a04-fold-open.png)
+PASS a2 and folds it again (no "Looking at what this console" in a05-fold-closed.png)
+PASS a3 a tool call draws its own row in the console ("read_file\|Read fixture" in a07-toolrow.png)
+PASS a4 the second prompt is in the §12 queue strip ("and then say hello" in a09-queued.png)
+PASS a4 Up opens the queued prompt in the box to edit ("and then say hello" in a10-queue-edit.png)
+PASS a4 Shift+Delete removes it from the strip (no "and then say hello" in a11-queue-removed.png)
+PASS a4 Esc stops the turn ("stopped\|cancelled\|Ready" in a12-esc.png)
+PASS a5 Alt+M opens this console's model box ("Follow Main\|Main ·\|Stub" in a14-modelbox.png)
+PASS a6 the k key ran Check and the board answered (a16-check.png)
+===== (b) the card console =====
+PASS b1 the card page carries the console's reply box ("Enter discusses" in b02-card.png)
+PASS b1 Plan (p) is on the action row above the box ("^plan" read in b02-card.png)
+FAIL b1 and Execute (x): no "Execute (x)" in b02-card.png
+FAIL b2 no thread file at /tmp/rl-agnt.cRJh/home/project/issues/threads/8C98.md
+FAIL b3 Ctrl+Shift+Enter did not write a comment
+----
+PASS 17  FAIL 3
