@@ -141,9 +141,18 @@ target_compile_options(relay-modelpicker PRIVATE ${RELAY_WARNINGS})
 # available, priorities — over the picker widget above and the settings-row renderer below. Its own
 # library and free of `Pane` and `RelayWindow`, so tests/modelspane_test.cpp drives the whole
 # surface offscreen with a std::function standing in for the pane it serves.
+# The jobs tab (card #MDL1, design 5.9): one row per job relay does, grouped by the tier it
+# follows, with the model the worker says it runs on right now and a per-job override. It is also
+# where a per-job override is *stored* (`relay::rolestore`), which `Pane::rolesObject` reads back,
+# so the writer and the reader are one pair. Its own library: tests/jobstab_test.cpp drives the
+# whole surface with no pane, no window and no worker.
+add_library(relay-jobstab STATIC src/JobsTab.cpp src/JobsTab.h)
+target_include_directories(relay-jobstab PUBLIC src)
+target_link_libraries(relay-jobstab PUBLIC relay-modelcatalog relay-modelrows relay-filterpopup ${RELAY_QT}::Widgets)
+target_compile_options(relay-jobstab PRIVATE ${RELAY_WARNINGS})
 add_library(relay-modelspane STATIC src/ModelsPane.cpp src/ModelsPane.h)
 target_include_directories(relay-modelspane PUBLIC src)
-target_link_libraries(relay-modelspane PUBLIC relay-modelpicker relay-settings ${RELAY_QT}::Widgets)
+target_link_libraries(relay-modelspane PUBLIC relay-modelpicker relay-jobstab relay-settings ${RELAY_QT}::Widgets)
 target_compile_options(relay-modelspane PRIVATE ${RELAY_WARNINGS})
 add_library(relay-modelsettings STATIC src/ModelSettings.cpp src/ModelSettings.h)
 target_include_directories(relay-modelsettings PUBLIC src)
@@ -694,6 +703,12 @@ if(BUILD_TESTING)
     add_executable(relay-modelspane-tests tests/modelspane_test.cpp)
     target_link_libraries(relay-modelspane-tests PRIVATE relay-modelspane ${RELAY_QT}::Test)
     add_test(NAME modelspane COMMAND relay-modelspane-tests)
+    # The jobs tab (card #MDL1, design 5.9): the groups and their order, "runs on" read off a
+    # worker report, an override written and cleared, and the guest rule for a background job.
+    add_executable(relay-jobstab-tests tests/jobstab_test.cpp)
+    target_link_libraries(relay-jobstab-tests PRIVATE relay-jobstab ${RELAY_QT}::Test)
+    add_test(NAME jobstab COMMAND relay-jobstab-tests)
+    set_tests_properties(jobstab PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     set_tests_properties(modelspane PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # The agent's side of Options and Actions (#FEJQ, §30): the catalog, the command executor, the
     # change log and Undo. No window: the catalogs are the same structs the settings pane takes.

@@ -19,6 +19,7 @@
 #include <QCheckBox>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -151,12 +152,12 @@ private Q_SLOTS:
                                          QStringLiteral("anthropic|claude-opus-5")});
     }
 
-    // ----- the three tabs -------------------------------------------------------------------
+    // ----- the four tabs --------------------------------------------------------------------
 
-    void theThreeTabsAreTheFirstThreeStepsOfAvailability() {
+    void theFourTabsAreTheStepsOfAvailabilityAndThenTheJobs() {
         ModelsPane pane(providerSections());
         QCOMPARE(tabs(pane.tabBar()), (QStringList{QStringLiteral("providers"), QStringLiteral("available"),
-                                                   QStringLiteral("priorities")}));
+                                                   QStringLiteral("priorities"), QStringLiteral("jobs")}));
         QVERIFY(pane.providers() != nullptr);
         QVERIFY(pane.picker() != nullptr);
         // The providers tab is Options' own renderer, drawing the section it was handed.
@@ -385,6 +386,49 @@ private Q_SLOTS:
         pane.picker()->use();
         QCOMPARE(first.uses, 0);
         QCOMPARE(second.uses, 1);
+    }
+
+    // ----- the fourth tab: what each job runs on (card #MDL1, design 5.9) ---------------------
+
+    // Alt+4 reaches it wherever the focus is in the pane, and it is handed the worker's report
+    // rather than any state of its own — `Target::roleSummary` is the "runs on" column.
+    void altFourIsTheJobsTabAndItDrawsTheWorkersReport() {
+        Served served;
+        ModelsPane pane(providerSections());
+        ModelsPane::Target target = targetFor(&served);
+        target.roleSummary = QJsonObject{
+            {QStringLiteral("summaries"), QJsonObject{{QStringLiteral("preset"), QStringLiteral("glm-coding")},
+                                                      {QStringLiteral("model"), QStringLiteral("glm-5.3-flash")},
+                                                      {QStringLiteral("effort"), QStringLiteral("low")}}}};
+        target.rolesChanged = [&served] { ++served.listEdits; };
+        pane.setTarget(target);
+        QKeyEvent alt4(QEvent::KeyPress, Qt::Key_4, Qt::AltModifier);
+        QCoreApplication::sendEvent(&pane, &alt4);
+        QCOMPARE(pane.currentTab(), ModelsPane::jobsTab());
+        QVERIFY(pane.jobs() != nullptr);
+        QCOMPARE(pane.jobs()->runsOn(QStringLiteral("summaries")), QStringLiteral("glm-5.3-flash · low"));
+        // The keyboard lands on the list, not on a filter line the tab does not have.
+        QCOMPARE(pane.jobs()->currentRole(), QStringLiteral("main"));
+    }
+
+    // An override written on the tab reaches the served pane at once, the same live update a
+    // tier-list edit makes.
+    void anOverrideOnTheJobsTabTellsTheServedPane() {
+        Served served;
+        int resends = 0;
+        ModelsPane pane(providerSections());
+        ModelsPane::Target target = targetFor(&served);
+        target.rolesChanged = [&resends] { ++resends; };
+        pane.setTarget(target);
+        pane.showTab(ModelsPane::jobsTab());
+        QVERIFY(pane.jobs()->selectRole(QStringLiteral("subagent")));
+        QVERIFY(rolestore::setOverride(QStringLiteral("subagent"), QStringLiteral("anthropic|claude-opus-5"),
+                                       QString()));
+        pane.setTarget(target);   // a worker report, or any re-read
+        QCOMPARE(pane.jobs()->overrideText(QStringLiteral("subagent")), QStringLiteral("claude-opus-5"));
+        QVERIFY(pane.jobs()->clearOverride());
+        QCOMPARE(resends, 1);
+        QCOMPARE(pane.jobs()->overrideText(QStringLiteral("subagent")), QStringLiteral("follows main"));
     }
 
     void withNoTargetItSaysSoRatherThanPretending() {

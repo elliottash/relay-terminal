@@ -55,6 +55,7 @@ ModelsPane::ModelsPane(std::function<QList<SettingsSection>()> sections, QWidget
     m_tabs->setTabToolTip(0, QStringLiteral("Step 1 — the providers this machine can reach, and their keys"));
     m_tabs->setTabToolTip(1, QStringLiteral("Step 2 — which models exist for the lists, the box and its filter"));
     m_tabs->setTabToolTip(2, QStringLiteral("Steps 3 and 4 — the five class lists, their order, levels and box cutoffs"));
+    m_tabs->setTabToolTip(3, QStringLiteral("What each job relay does runs on right now, and a model of its own for one"));
     layout->addWidget(m_tabs);
 
     m_pages = new QStackedWidget;
@@ -79,11 +80,19 @@ ModelsPane::ModelsPane(std::function<QList<SettingsSection>()> sections, QWidget
     m_pages->addWidget(m_pickerPage);
     buildPicker();
 
+    // ----- the jobs page: one row per job, grouped by the tier it follows (design 5.9) ----------
+    // A fixed table of rows over the worker's last `model_roles`, so unlike the picker it is never
+    // rebuilt on a re-target: `setTarget` hands it the new report and it redraws its own cells.
+    m_jobs = new JobsTab;
+    m_pages->addWidget(m_jobs);
+    m_jobs->installEventFilter(this);
+    m_jobs->list()->installEventFilter(this);
+
     connect(m_tabs, &QTabBar::currentChanged, this, [this](int index) {
         showTab(m_tabs->tabData(index).toString());
     });
     m_tabs->installEventFilter(this);
-    // Alt+1/2/3 as **shortcuts**, not as an event filter: the providers tab is a whole
+    // Alt+1…Alt+4 as **shortcuts**, not as an event filter: the providers tab is a whole
     // `SettingsPane` with a search line of its own, and a filter installed on that pane never sees
     // what its QLineEdit swallows — the first Xvfb run typed "2" into the search box instead of
     // changing tab. A WidgetWithChildren shortcut fires wherever the focus is inside this pane.
@@ -147,6 +156,16 @@ void ModelsPane::setTarget(const Target &target) {
     // The served pane's mode picks the class tab when it *becomes* the served pane; a re-read of
     // the pane already served keeps whichever list is being looked at.
     if (!samePane && !wantTier.isEmpty() && wantTier != kAll) m_classTab = wantTier;
+    {
+        JobsTab::Data jobsData;
+        jobsData.catalog = m_target.catalog;
+        jobsData.roles = m_target.roleSummary;
+        jobsData.tiers = m_target.tierSummary;
+        jobsData.now = m_target.now;
+        jobsData.rolesChanged = m_target.rolesChanged;
+        jobsData.focusBack = m_target.focusBack;
+        m_jobs->setData(jobsData);
+    }
     if (samePane) {
         // The same pane again — Ctrl+Shift+M pressed twice from it, or a fresh catalog after a
         // `presets` answer. Its lists, its undo stack and whatever is typed in the filter stay,
@@ -188,6 +207,10 @@ void ModelsPane::showTab(const QString &id) {
         m_pages->setCurrentWidget(m_providersPage);
         return;
     }
+    if (id == jobsTab()) {
+        m_pages->setCurrentWidget(m_jobs);
+        return;
+    }
     m_pages->setCurrentWidget(m_pickerPage);
     if (!m_picker) return;
     if (id == availableTab()) {
@@ -206,6 +229,9 @@ void ModelsPane::setFilter(const QString &text) {
 
 void ModelsPane::focusFilter() {
     if (currentTab() == providersTab()) { m_providers->focusSearch(); return; }
+    // The jobs tab has no filter line: its rows are a fixed table, so the keyboard lands on the
+    // list itself and ↑↓ walk the jobs straight away.
+    if (currentTab() == jobsTab()) { m_jobs->focusList(); return; }
     if (m_picker) m_picker->filter()->setFocus(Qt::OtherFocusReason);
 }
 
@@ -234,7 +260,7 @@ bool ModelsPane::handleShortcut(QKeyEvent *event) {
     // The same three tabs, for the controls this pane filters directly. The QShortcut above is
     // what covers the providers tab's own search line; this is what answers where there is no
     // active window for a shortcut to match against, which is every headless test.
-    if ((mods & Qt::AltModifier) && key >= Qt::Key_1 && key <= Qt::Key_3) {
+    if ((mods & Qt::AltModifier) && key >= Qt::Key_1 && key < Qt::Key_1 + tabIds().size()) {
         showTab(tabIds().at(key - Qt::Key_1));
         focusFilter();
         return true;
@@ -243,6 +269,7 @@ bool ModelsPane::handleShortcut(QKeyEvent *event) {
     // Only where the picker is not using them: on priorities they are its class tabs, and in a
     // filter line with text in it they are the caret's (the picker answers that case itself).
     if (currentTab() == prioritiesTab()) return false;
+    if (currentTab() == jobsTab()) return false;   // ←/→ are the tree's own column keys
     if (m_picker && m_picker->filter()->hasFocus() && !m_picker->filter()->text().isEmpty()) return false;
     stepTab(key == Qt::Key_Left ? -1 : 1);
     return true;
