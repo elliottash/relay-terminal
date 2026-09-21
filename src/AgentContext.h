@@ -64,6 +64,10 @@
 
 #include <functional>
 
+// Only ever a pointer here. Declaring it keeps this header QtCore-only, which is what lets
+// `relay-board`, `relay-settings` and `relay-conversations` link a context without a window.
+class QWidget;
+
 namespace relay::agent {
 
 // The on-screen hint (`screen`) is cut at this many characters before it is sent, exactly as
@@ -282,5 +286,25 @@ class Context {
             onChanged();
     }
 };
+
+// ---------------------------------------------------------------------------------------------
+// What a host gets back when it asks the window for a console. The pane libraries cannot name
+// `Pane` (it lives only in the app's translation unit), so the window hands over the widget to
+// embed and the handful of calls a host makes on it. The window owns the pane behind it; the
+// handle dies with `widget` (a host must not call through it after the widget is destroyed).
+struct ConsoleHandle {
+    QWidget *widget = nullptr;
+    std::function<void()> focusComposer;
+    std::function<void(const QString &)> draftInComposer;
+    std::function<QString()> composerText;
+    std::function<void(bool)> setCollapsed;
+    std::function<bool()> collapsed;
+    std::function<bool(const QString &letter)> runActionLetter;
+    explicit operator bool() const { return widget != nullptr; }
+};
+
+// Set by the window on every host that embeds a console. `context` is the host's and outlives
+// the console; `parent` is the widget the console is embedded in.
+using ConsoleFactory = std::function<ConsoleHandle(Context *context, QWidget *parent)>;
 
 } // namespace relay::agent
