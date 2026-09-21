@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: mcmem
 created: '2026-09-21'
 source: Codex in a Relay pane, 2026-09-21
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-autocomplete-across-sessions/], related: [FR72], github: null}
+links: {plans: [], commits: [5ddc0f142c5a3a64ffae3acde29f748e29cb7cf1], evidence: [docs/qa_evidence/2026-09-21-autocomplete-across-sessions/], related: [FR72], github: null}
 ---
 # Command autocomplete remembers across new sessions
 

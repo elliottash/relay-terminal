@@ -21,3 +21,9 @@ Editor and prompthistory tests passed (recorded run 20260921T134211Z-48eb); test
 
 <!-- relay:entry 20260921T134258Z-vr author=agent kind=event model=gpt-6-astra pane=d214b82b turn=14559e997c62439694e66e1c1ad86a0f/d5e14f7d5004486da665b258a78c06e5 -->
 - ✦ agent moved this card · Executing → Needs verification · Persistence and editor tests pass; isolated live new-tab/restart/Right acceptance checks pass. Ready for independent verification. · evidence docs/qa_evidence/2026-09-21-autocomplete-across-sessions/ · implemented_by openai/gpt-6-astra via codex
+
+<!-- relay:entry 20260921T134402Z-n2 author=agent kind=event model=gpt-6-astra pane=d214b82b turn=14559e997c62439694e66e1c1ad86a0f/d5e14f7d5004486da665b258a78c06e5 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-21-autocompl… → {"plans": [], "commits": ["5ddc0f142c5a3a64ffae3acde29f748e29cb7cf1"], "evidence…
+
+<!-- relay:entry 20260921T134402Z-y7 author=agent kind=evidence model=gpt-6-astra pane=d214b82b turn=14559e997c62439694e66e1c1ad86a0f/d5e14f7d5004486da665b258a78c06e5 -->
+Landed 5ddc0f142c5a3a64ffae3acde29f748e29cb7cf1 on main. land.py built the exact committed tree successfully. Independent verification remains the next stage.
