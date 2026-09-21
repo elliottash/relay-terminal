@@ -14,6 +14,9 @@ links: {plans: [], commits: [e24a7d066c3da9a8b7c2f8439e5ef427134c0d65], evidence
 ## Issue
 review the repo changes since the last web site change, update the web site. see if you see ways to improve it as well
 
+## Decisions
+"its not a linux terminal" — position Relay as a workspace for agentic coding; describe current platform availability separately.
+
 ## Plan
 **Goal:** Bring the public website up to date and make recent changes easier to discover.
 **Findings:** Last site commit is `58aeb17f`; `site/index.html`, `site/free.html` and `site/style.css` are static. Recent commits change models, consoles, Switchboard, approvals and keyboard workflows.

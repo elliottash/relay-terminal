@@ -35,3 +35,7 @@ Implementation commit: `e24a7d066c3da9a8b7c2f8439e5ef427134c0d65`.
 Live SHA-256 prefixes (identical on both hosts): index.html `bb8952dba0bc`, free.html `129026fabcd5`, site.js `8cf0e5c4c7dc`, style.css `08b8947e018e`.
 
 The card’s `tests_check` returned no findings, actions or blocks before landing.
+
+## Positioning correction
+
+Owner: "its not a linux terminal". Hero, search metadata and social metadata now describe Relay as "A workspace for agentic coding". Checked all three occurrences and absence of "Linux terminal" in site source. Earlier browser screenshots precede this copy-only correction.
