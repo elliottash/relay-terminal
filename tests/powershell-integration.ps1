@@ -24,6 +24,26 @@ try {
     if ($state.known_commands -notcontains 'Write-Output') {
         throw "Ready event omitted Write-Output from $($state.known_commands.Count) commands"
     }
+    # A module-heavy machine must not crowd core commands out of the prompt event or
+    # trigger module initialization just to report a ready prompt.
+    $moduleRoot = Join-Path $root 'modules'
+    $moduleDir = Join-Path $moduleRoot 'RelayHugeUnloaded'
+    [void][IO.Directory]::CreateDirectory($moduleDir)
+    [IO.File]::WriteAllText((Join-Path $moduleDir 'RelayHugeUnloaded.psm1'), "throw 'Must not import discovery fixture'")
+    $exports = @(1..21000 | ForEach-Object { 'AAA-Export' + $_ })
+    New-ModuleManifest -Path (Join-Path $moduleDir 'RelayHugeUnloaded.psd1') -RootModule 'RelayHugeUnloaded.psm1' `
+        -ModuleVersion '1.0' -FunctionsToExport $exports -CmdletsToExport @() -AliasesToExport @()
+    $oldModulePath = $env:PSModulePath
+    try {
+        $env:PSModulePath = $moduleRoot + [IO.Path]::PathSeparator + $oldModulePath
+        function global:RelayUserFixture { 'user function' }
+        __relay_event 'ready'
+        $state = Get-Content -Raw -LiteralPath (Join-Path $root 'state.json') | ConvertFrom-Json
+        if ($state.known_commands -notcontains 'Write-Output' -or
+            $state.known_commands -notcontains 'RelayUserFixture' -or
+            $state.known_commands -contains 'AAA-Export1') { throw 'Ready command priority/discovery regression' }
+        if ((Get-Item -LiteralPath (Join-Path $root 'state.json')).Length -ge 1MB) { throw 'Ready event exceeds GUI limit' }
+    } finally { $env:PSModulePath = $oldModulePath }
     $bytes = [Text.Encoding]::UTF8.GetBytes("Write-Output 'héllo 世界'`n`n")
     __relay_event 'loaded' 0 $bytes
     $state = Get-Content -Raw -LiteralPath (Join-Path $root 'state.json') | ConvertFrom-Json

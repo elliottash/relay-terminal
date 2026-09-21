@@ -13,6 +13,32 @@ if ($env:RELAY_START_DIR -and (Test-Path -LiteralPath $env:RELAY_START_DIR -Path
 }
 Remove-Item Env:RELAY_START_DIR -ErrorAction SilentlyContinue
 Import-Module PSReadLine -ErrorAction Stop
+# Import only trusted, bundled core modules. Discovery of every installed module's exports
+# can enumerate tens of thousands of commands and take seconds on each prompt.
+Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Management/Microsoft.PowerShell.Management.psd1"
+Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1"
+
+function global:__relay_known_commands {
+    $imported = @(Get-Command -ListImported -CommandType Alias,Function,Cmdlet)
+    # Keep built-in cmdlets and user-defined functions ahead of large imported module catalogs.
+    $prioritized = @($imported | Where-Object { $_.ModuleName -like 'Microsoft.PowerShell.*' }) +
+                   @($imported | Where-Object { !$_.ModuleName }) + $imported
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $names = [Collections.Generic.List[string]]::new()
+    $remainingBytes = 512 * 1024
+    foreach ($commandInfo in $prioritized) {
+        $name = $commandInfo.Name
+        if ($name.StartsWith('__relay_') -or !$seen.Add($name)) { continue }
+        # Worst-case JSON escaping is six bytes per UTF16 code unit, plus quotes/comma.
+        # Reserve the other half of the GUI's 1MiB message limit for cwd, PATH and metadata.
+        $cost = $name.Length * 6 + 3
+        if ($cost -gt $remainingBytes) { continue }
+        $names.Add($name)
+        $remainingBytes -= $cost
+        if ($names.Count -ge 20000) { break }
+    }
+    return $names.ToArray()
+}
 
 function global:__relay_event([string] $Stage, [int] $Status = 0, [byte[]] $InputBytes) {
     # Do not start Python for prompt notifications or change LASTEXITCODE.
@@ -24,8 +50,7 @@ function global:__relay_event([string] $Stage, [int] $Status = 0, [byte[]] $Inpu
             event = $Stage; status = $Status; cwd = $PWD.Path; shell_pid = $PID
         }
         if ($Stage -eq 'ready') {
-            $eventData.known_commands = @(Get-Command -CommandType Alias,Function,Cmdlet |
-                Where-Object Name -NotLike '__relay_*' | Select-Object -ExpandProperty Name -Unique -First 20000)
+            $eventData.known_commands = @(__relay_known_commands)
             $eventData.path = $env:PATH
         } elseif ($Stage -eq 'loaded') {
             $eventData.input_sha256 = [Convert]::ToHexString(
