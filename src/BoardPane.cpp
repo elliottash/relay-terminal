@@ -5105,6 +5105,42 @@ void BoardView::placeNotice()
     m_notice->raise();
 }
 
+// A hash copy says so the way a terminal pane's copy-on-highlight does (#Y2F4): the same small
+// fading popup, bottom-right, while the notice line above keeps the board's own wording. Built on
+// first use, wearing the `toast` object name the theme already styles for a pane's popup.
+void BoardView::toast(const QString &text, int milliseconds)
+{
+    if (text.isEmpty())
+        return;
+    if (!m_toast) {
+        m_toast = new QLabel(this);
+        m_toast->setObjectName(QStringLiteral("toast"));
+        m_toast->setAttribute(Qt::WA_TransparentForMouseEvents);
+        m_toast->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        m_toastTimer = new QTimer(this);
+        m_toastTimer->setSingleShot(true);
+        connect(m_toastTimer, &QTimer::timeout, m_toast, &QWidget::hide);
+    }
+    m_toast->setText(text);
+    m_toast->adjustSize();
+    // Shown before it is placed: a widget that has never been shown is hidden, and `placeToast`
+    // asks whether it is up, so placing first leaves the popup at the widget's own top-left.
+    m_toast->show();
+    placeToast();
+    m_toast->raise();
+    m_toastTimer->start(milliseconds);
+}
+
+// The bottom-right corner, kept clear of the keys row the notice also sits above.
+void BoardView::placeToast()
+{
+    if (!m_toast)
+        return;
+    const int bottom = height() - (m_keys->isVisible() ? m_keys->sizeHint().height() : 0) - 10;
+    m_toast->move(width() - m_toast->width() - 16, bottom - m_toast->height());
+    m_toast->raise();
+}
+
 // ------------------------------------------------------------------------- events
 
 // One line for the strip over the reply box: "reading Pane.h", "read 4 cards · 120 lines",
@@ -6524,6 +6560,7 @@ void BoardView::resizeEvent(QResizeEvent *event)
     QWidget::resizeEvent(event);
     updateDetailLayout();
     placeNotice();
+    placeToast();
 }
 
 // Catch up when the pane is looked at again (#N5JJ).
@@ -7004,6 +7041,9 @@ void BoardView::copyTag(const QString &tag)
         return;
     QApplication::clipboard()->setText(QStringLiteral("#") + tag);
     showNotice(QStringLiteral("Copied #%1").arg(tag), false);
+    // The same thing said where the eye is (#Y2F4): on a card's page the notice bar can be a long
+    // way from the hashtag that was clicked.
+    toast(QStringLiteral("#%1 copied").arg(tag));
 }
 
 // Zoom to a card by id (#3ZAP): a `#ID` reference in a card's text takes the same path the

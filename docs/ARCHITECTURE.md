@@ -831,6 +831,13 @@ card document and its cleanup panel (`src/BoardPane.cpp`), the tasks panel's det
 (`src/RequestsPanel.cpp`), the sharing pane's request text (`src/SharingPane.cpp`) and the share
 dialog's address and invite link (`src/RemoteShare.cpp`). Tests: `tests/copyonselect_test.cpp`.
 
+Copying something that is not a selection says so the same way. The Switchboard's `BoardView` has
+a toast of its own (`BoardView::toast`, `src/BoardPane.cpp`, #Y2F4) — the same small fading popup,
+wearing the same `toast` object name a pane's does, so the theme styles both — because the board is
+a `ToolPane` rather than a `Pane` and cannot reach `Pane::toast`. A click on a hashtag in the board
+copies `#bug` and toasts "#bug copied" at the pane's bottom-right, beside the notice line that still
+carries "Copied #bug".
+
 Default window shortcuts:
 
 | Action | Key | Action | Key |

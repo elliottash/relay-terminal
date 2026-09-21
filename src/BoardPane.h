@@ -288,6 +288,11 @@ public:
     // progress (#7BM4 phase 5), which goes exactly where Clean up's does. The view owns the
     // notice, so nothing outside it touches the widget.
     void showToolNotice(const QString &text, bool error = false) { showNotice(text, error); }
+    // A hash copy says so the way the copy-on-highlight does in a terminal pane (#Y2F4): the
+    // same small fading popup, bottom-right and over the board, so a click on a hashtag announces
+    // itself where the eye already is. The notice line still carries "Copied #K7Q2" — the toast is
+    // the one a reader skimming a card page actually catches.
+    void toast(const QString &text, int milliseconds = 1600);
 
     // Room kept free at the right of the filter row while the pane's hover buttons sit there.
     void setHeaderRightInset(int pixels);
@@ -368,6 +373,9 @@ private:
     // Ask for the reason and re-send the refused move with `override` on it.
     void overrideGatedMove();
     void placeNotice();
+    // The toast's own corner: bottom-right of the pane, above the keys row the notice also keeps
+    // clear of, and re-anchored on every resize while it is up.
+    void placeToast();
     void watchIssues();
     // The card files worth a watch of their own (#N5JJ): the one the page is open on, its
     // thread, and the cards an agent is executing while the watch budget lasts. A directory
@@ -540,6 +548,10 @@ private:
     QHash<QString, QJsonObject> m_pendingMoves;
     QJsonObject m_gatedMove;
     QTimer *m_noticeTimer = nullptr;
+    // The hash-copy toast (#Y2F4): one label built on first use, the same `toast` object name a
+    // pane's own popup wears, so the theme styles it without a rule of its own.
+    QLabel *m_toast = nullptr;
+    QTimer *m_toastTimer = nullptr;
     QLabel *m_empty = nullptr;
     QLabel *m_keys = nullptr;
     QWidget *m_listPane = nullptr;      // the quick-add field over the list; hidden when stacked

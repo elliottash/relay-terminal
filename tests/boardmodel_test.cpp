@@ -1791,6 +1791,12 @@ void BoardModelTests::hashtagClicksCopyAndCardRefsZoom()
     Q_EMIT doc->anchorClicked(QUrl(QStringLiteral("tag:bug")));
     QCOMPARE(QApplication::clipboard()->text(), QStringLiteral("#bug"));
     QCOMPARE(view.notice(), QStringLiteral("Copied #bug"));
+    // And the same copy toasts "#bug copied" (#Y2F4) — the copy-on-highlight popup, so the copy
+    // is said where the eye is and not only in the notice line over the list.
+    auto *toast = view.findChild<QLabel *>(QStringLiteral("toast"));
+    QVERIFY(toast);
+    QVERIFY(!toast->isHidden());
+    QCOMPARE(toast->text(), QStringLiteral("#bug copied"));
     QApplication::clipboard()->setText(QStringLiteral("untouched"));
     Q_EMIT doc->anchorClicked(QUrl(QStringLiteral("card:K7Q2")));
     QCOMPARE(QApplication::clipboard()->text(), QStringLiteral("untouched"));
@@ -1829,6 +1835,11 @@ void BoardModelTests::hashtagClicksCopyAndCardRefsZoom()
     }
     QVERIFY(hit > 0);
     QCOMPARE(view.notice(), QStringLiteral("Copied #bug"));
+    QCOMPARE(toast->text(), QStringLiteral("#bug copied"));   // the badge toasts too (#Y2F4)
+    // At the pane's bottom-right, where a pane's own toast sits: placing it before showing it
+    // leaves a never-shown widget at the top-left instead (#Y2F4).
+    QVERIFY(toast->geometry().right() > view.width() - 60);
+    QVERIFY(toast->geometry().bottom() > view.height() - 120);
     view.selectCard(QStringLiteral("K7Q2"));
     QApplication::clipboard()->setText(QString());
     QTest::mouseClick(list->viewport(), Qt::LeftButton, {}, QPoint(hit, y));
