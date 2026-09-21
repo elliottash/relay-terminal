@@ -307,10 +307,30 @@ more models…
 
 This replaces 5.1's mode rows and Left/Right paging.
 
-### 5.4 Defaults from a ranking file (proposal)
+### 5.4 Defaults from a ranking file (owner, 2026-09-21: "yes to all your recs")
 
-See the card's thread, 2026-09-21: the defaults come from a reviewable file in the repo, and the
-tier lists and the checklist leave Options › Models for the dialog.
+`backend/relay_core/model-ranking.md`, shipped with the worker and parsed at startup: a
+**Providers** table (`provider | kind | order`; kind is plan, harness, api, router or free) and a
+**Models** table (`name | classes | score | notes`), keyed by the one name per model (Rule 1). The
+score replaces `INTELLIGENCE`; the provider order replaces the group order. Request bodies,
+levels and the OpenRouter twin map stay in code.
+
+The defaults, from what can take a turn right now:
+
+- **no providers** → Relay Free's three: `relay-main` in high and main, `relay-flash` in flash,
+  `relay-lite` in lite;
+- **one provider** → one model per class from it, the highest score eligible for the class;
+- **two or more** → two per class by score, at most one per provider per class, the provider
+  order breaking ties; a harness counts as a provider and its models rank by name like any other;
+- Relay Free appears only with no keys; local endpoints fill the local class as before; the
+  OpenRouter twins follow only with the key; levels as before (default / top / lowest).
+
+### 5.5 Options › Models keeps providers, keys and profiles
+
+The tier lists and the "models in the picker" checklist leave the page: one row, "models and
+priorities… (Ctrl+Alt+M)", opens the dialog on the main tab, and the defaults buttons move into
+the dialog as "fill from defaults". The checklist's setting (`models/shown`) retires; the dialog's
+`all` tab shows every usable model and keeps OpenRouter's long tail behind typing.
 
 ## 6. Order of work
 

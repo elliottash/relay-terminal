@@ -66,6 +66,10 @@ and i realized that the model priority chooser is crtical, and currently its too
   same provider. default with 2+ providers -- 2 each -- lets revisit how those are decided, id like
   to have a structured ranking MD or YAML in the repo i can review and edit."
 
+- 2026-09-21, on the proposal for the ranking file, the default rules, Relay Free only with no
+  keys, harness models ranked by name, and Options › Models keeping only providers, keys and
+  profiles: "yes to all your recs."
+
 ## Discussion points
 Three calls that were the owner's (`docs/MODEL-PICKING-DESIGN.md`, section 4). All three were
 answered on 2026-09-21 — see Decisions:
@@ -95,7 +99,7 @@ never returns to the model the owner was using, and its own sentence is overwrit
 - [x] the Ctrl+Alt+M dialog is where models are picked AND prioritized: tier tabs, reorder, add, remove, level, profile, "via" <!-- t:a7 -->
 - [ ] the box as classes: top-N per class, Right expands, headers not selectable, exhausted hidden, model alone in the chip <!-- t:a8 -->
 - [ ] defaults from a ranking file in the repo: 0 providers → Relay Free's three; 1 → one per class; 2+ → two per class, one per provider per class <!-- t:a9 -->
-- [ ] Options › Models: the tier lists and the checklist leave the page for the dialog (proposal pending the owner) <!-- t:a10 -->
+- [ ] Options › Models: the tier lists and the checklist leave the page for the dialog <!-- t:a10 -->
 
 ## Execution Summary
 Seven tasks, each by an Opus subagent in a named area of the code, each landed through

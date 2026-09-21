@@ -224,3 +224,7 @@ All seven tasks landed; the targeted C++ and Python tests re-run green on the fi
 <!-- relay:entry 20260921T175711Z-k1 author=claude-code kind=decision -->
 ### Claude Code · 2026-09-21 17:57
 The owner confirmed the box's second design ("yes") with four rulings, recorded in the card's Decisions and design §5.3: class headers not selectable, exhausted models hidden, the chip is the model alone, and the defaults by provider count from a ranking file he can edit. Tasks t:a8–t:a10 added; a proposal for the ranking file and for Options › Models goes back to him before t:a9/t:a10 start.
+
+<!-- relay:entry 20260921T183023Z-m1 author=claude-code kind=decision -->
+### Claude Code · 2026-09-21 18:30
+"yes to all your recs." — the ranking file (Markdown), the default rules by provider count, Relay Free only with no keys, harness models by name, Options › Models down to providers, keys and profiles. Design §5.4 and §5.5. Agents start on t:a9 (worker) and t:a8 (box + dialog); t:a10 follows.
