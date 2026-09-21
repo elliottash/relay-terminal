@@ -133,6 +133,14 @@ class ParseTests(unittest.TestCase):
         self.assertTrue(any("'kimi' has no row in the Providers table" in line for line in problems), problems)
         self.assertTrue(any("'kimi-k3'" in line and 'Models table' in line for line in problems), problems)
 
+    def test_a_missing_file_says_so_rather_than_ranking_nothing(self):
+        # With no file there is no score, no class and no provider order, so every default list
+        # would come out blank and read like a ranking decision. It ships with the worker.
+        with self.assertRaises(FileNotFoundError) as caught:
+            MR.load('/nonexistent/model-ranking.md')
+        self.assertIn('the model ranking file the defaults are built from is missing',
+                      str(caught.exception))
+
     def test_load_parses_once_per_path_and_reload_reads_it_again(self):
         path = write(MINIMAL)
         try:

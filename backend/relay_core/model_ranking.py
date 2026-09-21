@@ -260,7 +260,17 @@ def load(path=None) -> Ranking:
         held = _cache.get(resolved)
         if held is not None:
             return held
-    ranking = parse(Path(resolved).read_text(encoding="utf-8"), resolved)
+    try:
+        text = Path(resolved).read_text(encoding="utf-8")
+    except OSError as exc:
+        # Loud rather than quietly empty: with no file there is no score, no class and no provider
+        # order, so every default list would come out blank and look like a ranking decision. The
+        # file ships with the worker (CMake installs the whole `backend` directory), so this means
+        # something went wrong with the install or the copy, not with the tables.
+        raise FileNotFoundError(f"{resolved}: the model ranking file the defaults are built from is "
+                                f"missing or unreadable ({exc.strerror}). It ships beside the "
+                                f"worker's Python modules.") from exc
+    ranking = parse(text, resolved)
     with _lock:
         _cache[resolved] = ranking
     return ranking
