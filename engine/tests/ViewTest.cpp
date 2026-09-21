@@ -1564,7 +1564,7 @@ private slots:
         Term t(core, QStringLiteral("/bin/cat"), {}, dir.path());
         t.backend->resizeTerminal(14, 100);
         t.view->setCardLookup([](const QString &id, QString *title) {
-            if (id != QStringLiteral("K7Q2") && id != QStringLiteral("GWXM"))
+            if (id != QStringLiteral("K7Q2") && id != QStringLiteral("GWXM") && id != QStringLiteral("M0VD"))
                 return false;
             if (title)
                 *title = QStringLiteral("A card");
@@ -1576,7 +1576,8 @@ private slots:
         const QString markdown = QStringLiteral(
             "Open [the theme row](option:general/theme) or [that talk](session:0f3a91cc).\n"
             "Also [card K7Q2](#K7Q2), [the notes](notes.txt:12) and [the site](https://x.org/a).\n"
-            "Plain #GWXM and unknown #ZZZZ.\n");
+            "Plain #GWXM and unknown #ZZZZ.\n"
+            "Moved [#M0VD](/no-such-card-audit.md).\n");
         MarkdownAnsi md;
         md.setLinkAnchor(anchor);
         const QString rendered = md.feed(markdown) + md.finish();
@@ -1611,6 +1612,8 @@ private slots:
             QCOMPARE(hitOn(QStringLiteral("#GWXM")).target,
                      QStringLiteral("relay://card/GWXM"));
             QVERIFY(hitOn(QStringLiteral("#ZZZZ")).target.isEmpty());
+            QCOMPARE(hitOn(QStringLiteral("#M0VD")).target,
+                     QStringLiteral("relay://card/M0VD"));
             const TerminalView::Link option = hitOn(QStringLiteral("the theme row"));
             QVERIFY2(option.target == QStringLiteral("relay://option/general/theme"),
                      qPrintable(QStringLiteral("%1: option label -> '%2'").arg(QLatin1String(where), option.target)));

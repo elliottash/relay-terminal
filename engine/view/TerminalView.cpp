@@ -1930,14 +1930,15 @@ bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endC
         const QString target = foldLinkAt(c, &foldStart, &foldEnd, segments);
         // A re-wrapped prose block and a markdown fold are both rows of FoldSpans, and a link's
         // label there carries the same URI its cells would carry in the grid (#MDKN).
-        if (relay::labellink::isLabelUri(target)) {
-            if (!resolveLabelLink(target, link))
-                return false;
+        if (relay::labellink::isLabelUri(target) && resolveLabelLink(target, link)) {
             *startCol = foldStart;
             *endCol = foldEnd;
             return true;
         }
-        if (!target.isEmpty()) {
+        // A stale Markdown target may still have a known #ID as its label. Let
+        // the plain-text scan below resolve it, just as the emulator-row path does.
+        if (relay::labellink::isLabelUri(target) && segments) segments->clear();
+        if (!target.isEmpty() && !relay::labellink::isLabelUri(target)) {
             link->text = target;
             const QString local = target.startsWith(QLatin1String("file://")) ? QUrl(target).toLocalFile() : target;
             if (!local.isEmpty() && QFileInfo::exists(local)) {
