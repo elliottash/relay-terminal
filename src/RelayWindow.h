@@ -4439,7 +4439,6 @@ private:
         }
 
         items << actionItem(panes, QStringLiteral("File explorer"), QStringLiteral("Open this pane's directory, or close the explorer again"), QStringLiteral("files.explorer"));
-        items << actionItem(panes, QStringLiteral("Open folder in explorer"), QStringLiteral("This pane's directory"), QStringLiteral("files.explorer"));
         {
             // Switchboard: the board of cards, threads, plans and memory (design 4.1).
             PaletteItem board = actionItem(panes, QStringLiteral("Switchboard"),
@@ -4644,7 +4643,48 @@ private:
             clear.run = [] { Keymap::instance().clearOverrides(); };
             items << clear;
         }
-        return items;
+        // Browse by task, with everyday actions before setup and maintenance. Keys are stable
+        // even when labels change with pane state; absent contextual actions simply drop out.
+        const QList<QPair<QString, QStringList>> groups{
+            {agent, QStringLiteral("agent.newChat agent.continue agent.stop agent.planToggle agent.requests "
+                                   "menu:agents agent.stopAllSubagents agent.resumeQueue agent.clearQueue "
+                                   "agent:skills menu:aliases alias:save alias:import agent.internalsPane "
+                                   "agent.thinkingPanel agent:last_turn").split(' ')},
+            {QStringLiteral("Conversations"), QStringLiteral("agent.resume find.inView agent.info agent.recap "
+                                   "agent.fork agent.compact agent.rewind agent.rewindCode agent.export").split(' ')},
+            {QStringLiteral("Models"), QStringLiteral("menu:model agent.swap agent.flashAgent agent.localAgent "
+                                   "menu:effort agent.modelRoles agent.modelKeys").split(' ')},
+            {terminal, QStringLiteral("menu:mode input.toggle voice.toggle agent.screenshotPane "
+                                   "control.human control.prompt terminal.interrupt program.delegate "
+                                   "control.program.agent control.program.human terminal.find "
+                                   "terminal.promptPrevious terminal.promptNext links.step terminal.clear").split(' ')},
+            {panes, QStringLiteral("tab.new window.new pane.splitRight pane.splitDown pane.splitLeft pane.splitUp "
+                                   "tab.next tab.previous pane.equalize pane.moveLeft pane.moveRight pane.moveUp pane.moveDown "
+                                   "pane.moveToNewTab tab.moveToNewWindow pane.close closed.restore closed.list").split(' ')},
+            {QStringLiteral("Files and projects"), QStringLiteral("files.explorer files.open board.open tests.open "
+                                   "project.pick project.init project.detach").split(' ')},
+            {QStringLiteral("Remote and sharing"), QStringLiteral("ssh.connect ssh.splitSameHost remote.pair "
+                                   "pane.share pane.sharing remote.openShared remote.join").split(' ')},
+            {QStringLiteral("Appearance"), QStringLiteral("pane.focusMode pane.autoDim pane.dimToggle pane.brighten "
+                                   "pane.darken theme.folder theme.reload").split(' ')},
+            {keys, QStringLiteral("keybindings.edit keybindings.reload keybindings.clearOverrides hints.reset").split(' ')},
+            {app, QStringLiteral("app.settings app.about logs.open conversations.rebuild history.clear windows.fresh").split(' ')}
+        };
+        QList<PaletteItem> ordered;
+        for (const auto &group : groups) {
+            for (const QString &key : group.second) {
+                for (qsizetype i = 0; i < items.size(); ++i) {
+                    if (items.at(i).key != key) continue;
+                    PaletteItem item = items.takeAt(i);
+                    item.section = group.first;
+                    ordered << item;
+                    break;
+                }
+            }
+        }
+        // New actions remain discoverable until they receive an explicit position above.
+        ordered.append(items);
+        return ordered;
     }
 
     // Hidden search words for palette items, so "llm", "thinking" or "keymap" find the right entry.
