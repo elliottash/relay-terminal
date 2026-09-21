@@ -6020,6 +6020,16 @@ An option row:
 | `settable` | whether an agent may write it: every value row except a secret (owner decision 1), `false` on `button`, `buttons`, `info` and `heading`. The worker takes it to mean settable **and** a value kind **and** not secret, whatever the GUI marked. |
 | `secret` | the keyring holds it (an API key, a token). Its `value` is never sent and `settable` is `false`. |
 
+**A `text` row named like a credential is marked `secret` whether or not the GUI set the flag.**
+No shipped row set it, so the guard had never once fired and nothing but this paragraph stood
+between the next key-shaped row and an agent reading its value (#AG7R group 6). A `text` row whose
+id or label matches `key|token|secret|password|passphrase|credential` is therefore listed with
+`secret: true`, `settable: false` and no `value`, and `set_option` on it answers `secret` — the
+catalog also says so on stderr, naming the row, so whoever added it marks it or names it in
+`appcommands::rowNamedLikeASecret()`. Only `text` rows are examined: a toggle, a choice or a
+number cannot hold a credential, and the rule over every kind catches innocent rows on the word
+"key" alone.
+
 `button`, `buttons`, `info` and `heading` rows are listed although nothing can be set on them,
 because the agent's other job is to *find* things: one that cannot see the Test-key button, or the
 heading a row sits under, cannot say where a setting is or open the pane at it.
@@ -6040,18 +6050,46 @@ with `settable: false`, so an agent can still name it and open the pane at it. A
 actions palette is listed with its children, one level deep, exactly as the Actions pane draws
 them; the submenu itself has no `run` and cannot be run.
 
-`agent_safe` is `true` today on: opening or revealing a pane (Options, Actions, the Switchboard,
-the session manager, the closed list, the explorer, ⓘ, Activity, requests, subagents, thinking, the
-agents menu, the shortcuts page, find-in-view, link stepping, jumping to a notification), opening a
-pane (`pane.splitRight`, `…Down`, `…Left`, `…Up`, and `closed.restore`, which puts a closed pane
-back), moving the focus between panes, tabs and windows, and re-reading a file already on disk
-(`keybindings.reload`, `theme.reload`, `agents.reload`); and on the row buttons that test a key,
-refresh, detect or find local servers, and reorder models. It is `false` on everything else —
-including every action added after the table was written, which is what opt-in has to mean:
-resetting to defaults, removing a key or a server, deleting a session, closing a pane (which takes
-away whatever that pane was holding), pairing and sharing, quit and restart. The table lives in
-`appcommands::actionIsAgentSafe()`; an `ActionItem` may also carry its own `agentSafe`, and either
-is enough.
+`agent_safe` is `true` today on two kinds of action, and the difference between them is what
+`writes_enabled` gates.
+
+**Actions that only open, reveal, focus or restore a view.** They change nothing, so — like
+`app_open` — they run whatever the Options › Agent toggle says (owner, 2026-09-20, card #AG7R:
+"pass the toggle like `app_open`"; before that the toggle refused every `run_action`, so a helper
+could open a conversation into a new pane through `app_open` and could not open an empty pane
+through `run_action`, which is the same act with two answers). They are: opening or revealing a
+pane (Options, Actions, the Switchboard, the session manager, the closed list, the explorer, ⓘ,
+Activity, requests, subagents, thinking, the agents menu, the shortcuts page, Test suites, About,
+the log folder, the theme folder, find-in-view, link stepping, jumping to a notification), opening
+a pane (`pane.splitRight`, `…Down`, `…Left`, `…Up`), putting a closed one back (`closed.restore`,
+`menu:closed` and the `closed:<id>` entry for one named pane, tab or window of the last 25), and
+moving the focus between panes, tabs and windows.
+
+**Actions that are undoable in one click but still write something.** These stay behind the
+toggle: re-reading a file already on disk (`keybindings.reload`, `theme.reload`, `agents.reload` —
+an edit made since the last read takes effect), `pane.equalize` (every splitter in the tab moves;
+a drag takes it back), `agent.screenshotPane` (it attaches an image to the pane's next prompt, so
+it changes what the person is about to send), and every row button — the ones that test a key,
+refresh, detect or find local servers, and reorder models.
+
+`agent_safe` is `false` on everything else — including every action added after the table was
+written, which is what opt-in has to mean: resetting to defaults, removing a key or a server,
+deleting a session, closing a pane (which takes away whatever that pane was holding), pairing and
+sharing, quit and restart. The table lives in `appcommands::actionIsAgentSafe()`, which is the
+read set (`appcommands::actionIsRead()`) plus the writing one; an `ActionItem` may also carry its
+own `agentSafe`, and either is enough.
+
+**A safe key the Actions palette has no row for is still runnable.** Twelve of the table's keys —
+`pane.focusUp/Down/Left/Right`, `window.next`, `window.previous`, `conversations.open`,
+`palette.open`, `help.shortcuts`, `notifications.jump`, `agent.agentsMenu`, `agent.subagentPane` —
+existed only in the keybinding registry, so until 2026-09-20 the policy named keys `run_action`
+answered `unknown_action` for, while `app_action_list` listed eight of them under section
+`Shortcuts` with `agent_safe: false` (#AG7R group 1). The GUI catalog now carries them in
+`actions` with `agent_safe: true` and the executor falls back to the registry the keyboard itself
+dispatches through, so running one is exactly what pressing its shortcut does. A registered key
+the table does *not* name is found and refused `not_agent_safe` — the policy said no, rather than
+"no such action" — and a key neither the catalog nor the registry knows is still
+`unknown_action`.
 
 A row or action that is missing from a later catalog has gone from the app: the tools answer
 `unknown_row` / `unknown_action` for it from then on, and nothing is cached across an `app_catalog`.

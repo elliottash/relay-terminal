@@ -1639,6 +1639,16 @@ private:
             m_appCommands.openTarget = [this](const QJsonObject &command, QString *error) {
                 return openAppTarget(command, error);
             };
+            // The keybinding registry, for the safe keys the palette has no row for — moving the
+            // focus between panes, Actions, the shortcuts page, the agents menu, the session
+            // manager. Twelve of them answered `unknown_action` until 2026-09-20 (#AG7R group 1).
+            // An unregistered key gets an empty label, which is what keeps it `unknown_action`.
+            m_appCommands.registryLabel = [](const QString &key) {
+                for (const ActionDef &action : Keymap::instance().actions())
+                    if (action.id == key) return action.description;
+                return QString();
+            };
+            m_appCommands.runRegistryAction = [this](const QString &key) { runAction(key); };
         }
         return m_appCommands;
     }
@@ -3355,6 +3365,12 @@ private:
                 row.detail = QStringLiteral("%1 · you said no to a Switchboard here, so Relay does not ask again").arg(path);
                 row.aliases = QStringLiteral("known projects declined undo ask again switchboard ") + path;
                 row.buttonTexts = QStringList{QStringLiteral("Undo")};
+                // Undo is the reversible class by definition, and this row's one button is
+                // literally labelled it; it was off only because the row never marked it
+                // (owner decision 2, #AG7R group 3). All it does is let Relay ask about this
+                // folder again — nothing is created, and saying no when it asks declines it
+                // once more.
+                row.agentSafeButtons = QList<int>{0};
                 row.onButton = [this, path](int) {
                     m_manager->projects().undecline(path);
                     notice(QStringLiteral("%1 may be asked about again.").arg(relay::projects::nameFor(path)), 5000);
