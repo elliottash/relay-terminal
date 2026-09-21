@@ -102,3 +102,13 @@ since the `5cf0db2b` deploy. Five product bugs found and fixed on the way; two f
 #ADTR). Phases 1 and 2 are complete; the card moves to needs-verification with the iPhone
 checklist as the acceptance. Owner decision left open: a recap on a desktop with no keys goes to
 Relay Free through the summaries role (seen with `RELAY_KEYRING=off`); fine or not?
+
+<!-- relay:entry 20260921T013000Z-j1 author=claude-code kind=evidence -->
+### Claude Code · 2026-09-21
+The drive's one red step is green. `rendezvous/deploy.sh` put `5d8ce281` on join.relay-terminal.ai
+(the served and repo `app.js` now hash the same) and the whole thirteen-step drive was run again
+against it: thirty checks, no failures, including a paired phone reloading `/pair` and the
+"paste the pairing link" path an installed iOS app needs. Evidence refreshed in `d56c80aa`.
+Two cards filed during the work carried ids outside the board's alphabet and are now #WEVT and
+#ADTR (`894385bf`); #RCPF asks the owner whether a keyless desktop should spend Relay Free on an
+automatic recap. Nothing is left on this card but Phase 3, on the owner's iPhone.
