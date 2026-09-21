@@ -1647,20 +1647,6 @@ private:
 
 // --------------------------------------------------------------------- card detail
 
-// Model reasoning is untrusted text: drop control characters except newline and tab, exactly as
-// every other transcript surface does (src/AgentInternalsView.cpp's sanitize).
-static QString sanitizeTrace(const QString &text)
-{
-    QString clean;
-    clean.reserve(text.size());
-    for (const QChar c : text) {
-        const ushort u = c.unicode();
-        if (u == '\n' || u == '\t' || (u >= 0x20 && u != 0x7f && !(u >= 0x80 && u < 0xa0)))
-            clean += c;
-    }
-    return clean;
-}
-
 // The one question every delete path asks (card #CYM9): name the card, say exactly what goes,
 // and say where recovery stands — Undo for 30 s, git after that only if it ever saw the card.
 // Cancel is the default: a delete is never something the keyboard slipped into.
@@ -1934,12 +1920,12 @@ public:
         // letter, and its composer *is* the reply box. What stays here is what is not the
         // conversation: the strip that says a card turn is running and stops it.
         //
-        // The strip is the board's because a card turn is the board's — `board_ask` on the tab's
-        // Switchboard worker (19.10), followed here card by card (19.16) — and not a turn of the
-        // console's own conversation, so the console's "Relaying · …" line never speaks for it.
-        // Owner, #VZ69: "'stop' button isnt intuitive, it should be stop planning i guess, or
-        // there should be an X next to 'agent planning'". It is both: the line names the mode and
-        // the button is an ✕ that says what it stops.
+        // The strip is the board's word for the card's turn: it names the mode and carries the ✕
+        // (owner, #VZ69: "'stop' button isnt intuitive, it should be stop planning i guess, or
+        // there should be an X next to 'agent planning'"). A card turn is an ordinary console
+        // turn since card #CTRN — the transcript below draws it, and its ✕ sends `board_cancel`
+        // addressed to this card — and the owner kept the strip anyway (decision 4): the console's
+        // own busy line speaks for the conversation, this one speaks for the card.
         m_replyFrame = new QFrame(this);
         m_replyFrame->setObjectName(QStringLiteral("boardReply"));
         auto *replyLayout = new QVBoxLayout(m_replyFrame);
@@ -1952,15 +1938,12 @@ public:
         busyRow->setSpacing(6);
         m_busyLabel = new QLabel(m_busyStrip);
         m_busyLabel->setObjectName(QStringLiteral("boardBusyLabel"));
-        busyRow->addWidget(m_busyLabel, 0);
-        // What it is doing this second — "reading Pane.h", "step 4/256". A Plan turn is minutes
-        // of silent tool calls before its first word, and a card that only said "thinking…" for
-        // all of it read as stuck (owner, 2026-09-19: "the planning agent was getting stuck").
-        // The cleanup strip has said this since 19.9; a card said nothing.
-        m_busyWhat = new QLabel(m_busyStrip);
-        m_busyWhat->setObjectName(QStringLiteral("boardBusyWhat"));
-        m_busyWhat->setTextInteractionFlags(Qt::NoTextInteraction);
-        busyRow->addWidget(m_busyWhat, 1);
+        busyRow->addWidget(m_busyLabel, 1);
+        // What the turn is doing this second was a second label here until card #CTRN, elided to
+        // one line ("reading Pane.h", "step 4/256") because a Plan turn is minutes of silent tool
+        // calls before its first word. The tool rows in the transcript below say it row by row and
+        // in full now, so the line has lost its reason to exist and the strip is label + ✕
+        // (owner decision 4 on #CTRN).
         m_stop = new QToolButton(m_busyStrip);
         m_stop->setObjectName(QStringLiteral("boardStop"));
         m_stop->setCursor(Qt::PointingHandCursor);
@@ -1983,11 +1966,6 @@ public:
         m_replyFrame->installEventFilter(this);
         layout->addWidget(m_replyFrame);
         setModeTips();
-
-        m_render = new QTimer(this);
-        m_render->setSingleShot(true);
-        m_render->setInterval(40);   // a streamed answer re-renders at most 25 times a second
-        connect(m_render, &QTimer::timeout, this, [this] { render(Scroll::Follow); });
 
         connect(m_stop, &QToolButton::clicked, this, [this] {
             if (m_busy && onCancel)
@@ -2454,11 +2432,6 @@ public:
             else
                 m_drafts.remove(id);
             m_error->hide();
-            m_streaming.clear();
-            m_thinking.clear();
-            m_thinkingDone = false;
-            m_thinkingMs = 0;
-            m_sealed.clear();
             m_executeArmed.clear();
         }
         m_id = id;
@@ -2519,17 +2492,11 @@ public:
             clearCheck();
         showTests();
 
-        const int shownBefore = int(m_entries.size());
         m_entries.clear();
         const QJsonArray thread = card.value(QStringLiteral("thread")).toArray();
         for (const QJsonValue &value : thread)
             m_entries << value.toObject();
         m_threadTotal = qMax(card.value(QStringLiteral("thread_total")).toInt(), int(m_entries.size()));
-        // The shown thread shrank (an older entry rolled off the window the worker sends): the
-        // sealed blocks' anchors have shifted with it, so they go rather than land in the wrong
-        // place. A list that only grew keeps every one where it sealed.
-        if (int(m_entries.size()) < shownBefore)
-            m_sealed.clear();
         // The `## Signal` strip (#AQ6X): read from the body the card arrived with, so a card that
         // stops being a promotion — the section removed — loses the strip at its next read.
         m_signalSection = board::signalSectionOf(card.value(QStringLiteral("body")).toString());
@@ -2547,106 +2514,30 @@ public:
         m_loading = false;
     }
 
+    // A settled thread entry the worker wrote (`board_thread_appended`, 19.10). This is the
+    // **only** way anything reaches the thread view since card #CTRN: the turn itself is drawn by
+    // the card console's transcript below — the thinking fold, the tool rows, the answer as it
+    // streams — and what lands here is the record, with the `model=` and `turn=` provenance the
+    // worker put on it (owner decision 2). Nothing is drawn twice.
     void appendEntry(const QJsonObject &entry)
     {
-        // A thread entry is landing: the reasoning that streamed before it is sealed in place
-        // above it (#9K5H), so the entry — an answer, or a question the agent asks mid-turn —
-        // reads after the thinking it came from, exactly as the terminal's transcript orders
-        // them. The live block starts empty for whatever the model thinks next.
-        sealThinking();
-        m_streaming.clear();
         m_entries << entry;
         ++m_threadTotal;
         render(Scroll::Bottom);
     }
 
-    void appendDelta(const QString &text)
-    {
-        m_streaming += text;
-        if (!m_render->isActive())
-            m_render->start();
-    }
-
-    // A reasoning delta of the running turn (protocol 19.4). It streams into the thread above
-    // the answer it precedes; the render is coalesced on the same 40 ms timer the answer uses,
-    // so a long stream of deltas cannot re-render the card per chunk.
-    void appendThinking(const QString &text)
-    {
-        if (m_thinking.size() < 200000)      // the terminal's own cap (src/Pane.h)
-            m_thinking += text;
-        if (!m_render->isActive())
-            m_render->start();
-    }
-
-    // The block ended (thinking_done): its header settles to "thought for N s" — the same words
-    // the terminal's fold uses — and the tail stays on screen for the rest of the turn.
-    void finishThinking(qint64 ms)
-    {
-        m_thinkingDone = true;
-        m_thinkingMs = ms;
-        if (!m_render->isActive())
-            m_render->start();
-    }
-
-    // Move the live trace into the sealed list, anchored to the number of entries on screen
-    // when it was sealed, so a re-read that rebuilds `m_entries` from the file keeps drawing it
-    // at the same place in the thread.
-    void sealThinking()
-    {
-        if (!m_thinking.trimmed().isEmpty() || m_thinkingDone)
-            m_sealed << LiveThinking{m_thinking, m_thinkingDone, m_thinkingMs, int(m_entries.size())};
-        m_thinking.clear();
-        m_thinkingDone = false;
-        m_thinkingMs = 0;
-        while (m_sealed.size() > 12)
-            m_sealed.removeFirst();   // the thread itself only shows the last entries
-    }
-
-    // While a Discuss or a Plan runs, the strip over the reply box names it and stops it, and the
-    // buttons that would start another turn wait (#VZ69).
-    //
-    // `streamed` and `progress` are how a card that was already running gets its turn back when
-    // you come back to it: turns run per card now (protocol 19.16), so the board can be showing
-    // #A while #B is planning, and #B's answer so far and its current step are held by the view
-    // rather than lost when the card was closed.
-    void setBusy(bool busy, const QString &mode = QString(), const QString &streamed = QString(),
-                 const QString &progress = QString(), const QString &thinking = QString(),
-                 bool thinkingDone = false, qint64 thinkingMs = 0)
+    // While a Discuss or a Plan runs on this card, the strip over the box names it and stops it,
+    // and the buttons that would start another turn wait (#VZ69). Turns run per card (protocol
+    // 19.16), so the board can be showing #A while #B is planning: coming back to a card that is
+    // still working is `setBusy(true, mode)` again, and the answer so far is in that card's own
+    // console, where it never left.
+    void setBusy(bool busy, const QString &mode = QString())
     {
         m_busy = busy;
         m_busyMode = busy ? (mode.isEmpty() ? QStringLiteral("discuss") : mode) : QString();
-        if (busy) {
-            m_streaming = streamed;
-            m_thinking = thinking;
-            m_thinkingDone = thinkingDone;
-            m_thinkingMs = thinkingMs;
-        }
-        setProgress(busy ? progress : QString());
         setModeTips();
-        if (!busy)
-            m_streaming.clear();
-        // The trace is *not* cleared when the turn ends: a settled block stays where it sealed
-        // until the next turn on this card starts, like the terminal's settled fold. A turn
-        // that ended with no answer (stopped, failed) leaves its trace readable in place.
         render(busy ? Scroll::Bottom : Scroll::Keep);
     }
-
-    // One line of what the turn is doing now. Elided rather than wrapped: the strip is one row
-    // over the reply box, and a tool call's own line ("read 4 cards · 120 lines") is already short.
-    void setProgress(const QString &line)
-    {
-        m_progress = line;
-        if (m_busyWhat == nullptr)
-            return;
-        const int room = qMax(60, m_busyWhat->width());
-        m_busyWhat->setText(QFontMetrics(m_busyWhat->font()).elidedText(line, Qt::ElideRight, room));
-        m_busyWhat->setToolTip(line);
-        m_busyWhat->setVisible(m_busy && !line.isEmpty());
-    }
-
-    // The answer so far, kept by the view while another card is on screen.
-    QString streaming() const { return m_streaming; }
-    QString progress() const { return m_progress; }
 
     void showError(const QString &text)
     {
@@ -3050,8 +2941,6 @@ public:
                                : QStringLiteral("Stop the agent's reply. Anything it has already "
                                                 "written to the card stays."));
         m_busyStrip->setVisible(m_busy);
-        if (m_busyWhat != nullptr)
-            m_busyWhat->setVisible(m_busy && !m_progress.isEmpty());
         if (onActionsChanged)
             onActionsChanged();
     }
@@ -3533,53 +3422,6 @@ private:
         insertTagged(cursor, text, format);
     }
 
-    // One reasoning block: the text, whether it ended, how long it ran, and — for a sealed
-    // block — how many entries were on screen when it sealed, so a re-read that rebuilds the
-    // entry list draws it at the same place in the thread.
-    struct LiveThinking {
-        QString text;
-        bool done = false;
-        qint64 ms = 0;
-        int after = 0;
-    };
-
-    // One reasoning block in the thread (#9K5H): the terminal fold's header ("thinking…" while
-    // it streams, "thought for N s" when it ends) over the tail of the trace, muted and italic
-    // like the placeholder it replaces. The end is the part being written and the part a reader
-    // of a question needs, so the tail is what shows and the cut is named, as the fold names
-    // its cut; the whole block is never written to the card file.
-    void insertThinking(QTextCursor &cursor, const LiveThinking &block, qreal base, int topMargin = 8)
-    {
-        QTextCharFormat head;
-        head.setForeground(theme::TextMuted);
-        head.setFontWeight(QFont::DemiBold);
-        head.setFontPointSize(qMax(theme::FloorPt, base * 0.9));
-        const QString label = !block.done
-            ? QStringLiteral("✦ thinking…")
-            : (block.ms > 0
-                   ? QStringLiteral("✦ thought for %1 s").arg((block.ms + 500) / 1000)
-                   : QStringLiteral("✦ thinking stopped"));
-        insertLine(cursor, label, head, topMargin);
-        const QString body = sanitizeTrace(block.text).trimmed();
-        if (body.isEmpty())
-            return;
-        constexpr int kTail = 4000;
-        QTextCharFormat trace;
-        trace.setForeground(theme::TextMuted);
-        trace.setFontItalic(true);
-        trace.setFontPointSize(qMax(theme::FloorPt, base * 0.9));
-        if (body.size() > kTail)
-            insertLine(cursor, QStringLiteral("… %1 more characters above").arg(body.size() - kTail),
-                       trace, 2);
-        const QString shown = body.size() > kTail ? body.right(kTail) : body;
-        const QStringList lines = shown.split(QLatin1Char('\n'));
-        for (int i = 0; i < lines.size(); ++i) {
-            // A blank line between paragraphs, an empty block otherwise: reasoning text is
-            // prose and the thread's own markdown blocks have air around them.
-            insertLine(cursor, lines.at(i), trace, i == 0 ? 2 : 1);
-        }
-    }
-
     // The body, then the thread under a small heading. Events (moves, status changes) are one
     // muted line each; comments get an author line and their Markdown.
     void render(Scroll scroll)
@@ -3626,18 +3468,7 @@ private:
                                               "picks it up."), muted, 4);
 
         const QDateTime now = QDateTime::currentDateTimeUtc();
-        // Entries already drawn: a sealed block anchors to the count it sealed at, so it draws
-        // before the first entry that landed under it — including one sealed over an empty
-        // thread (after 0), which draws at the top (#9K5H).
-        int drawn = 0;
-        const auto drawSealed = [this, &cursor, base, &drawn] {
-            for (int at = 0; at < m_sealed.size(); ++at)
-                if (m_sealed.at(at).after == drawn)
-                    insertThinking(cursor, m_sealed.at(at), base);
-        };
         for (const QJsonObject &entry : std::as_const(m_entries)) {
-            drawSealed();
-            ++drawn;
             const QJsonObject attrs = entry.value(QStringLiteral("attrs")).toObject();
             const QString author = entry.value(QStringLiteral("author")).toString(
                 attrs.value(QStringLiteral("author")).toString());
@@ -3695,32 +3526,12 @@ private:
                     insertMarkdown(cursor, board::threadMarkdown(text.mid(split).trimmed(), kind), base);
             }
         }
-        // A block sealed after the last entry on screen (or with none at all) still draws: it
-        // ran after everything the thread shows so far.
-        drawSealed();
-        const bool liveTrace = !m_thinking.trimmed().isEmpty() || m_thinkingDone;
-        if (m_busy || !m_streaming.isEmpty() || liveTrace) {
-            QTextCharFormat who;
-            who.setFontWeight(QFont::DemiBold);
-            who.setForeground(theme::Agent);
-            insertLine(cursor, QStringLiteral("✦ agent"), who, 14);
-            if (const QString mode = board::modeTitle(m_busyMode); m_busy && !mode.isEmpty())
-                cursor.insertText(QStringLiteral("  ") + mode, muted);
-            cursor.insertBlock(QTextBlockFormat(), QTextCharFormat());
-            if (liveTrace)
-                insertThinking(cursor, LiveThinking{m_thinking, m_thinkingDone, m_thinkingMs, 0}, base, 2);
-            if (m_streaming.isEmpty()) {
-                if (!liveTrace) {
-                    // No reasoning came from this worker (or the display is off): the old
-                    // placeholder keeps the turn's presence in the thread.
-                    QTextCharFormat thinking = muted;
-                    thinking.setFontItalic(true);
-                    cursor.insertText(QStringLiteral("thinking…"), thinking);
-                }
-            } else {
-                insertMarkdown(cursor, m_streaming, base);
-            }
-        }
+        // The running turn draws **nothing** here (card #CTRN, owner decision 4): the answer as
+        // it streams, the thinking fold and the tool rows are the card console's transcript, the
+        // way every other console draws a turn. Until this card the same bytes were drawn twice —
+        // once in the transcript, once here as a live tail that collapsed every tool call into
+        // one elided progress line — and neither drawing was the pane's. What settles into the
+        // thread is the entry the worker writes when the turn ends, through `appendEntry`.
 
         switch (scroll) {
         case Scroll::Top:
@@ -3774,24 +3585,15 @@ private:
     // The strip over the reply box while a turn runs: "✦ Switchboarding · planning…" and the ✕ that
     // stops it (#VZ69). Hidden the rest of the time.
     QWidget *m_busyStrip = nullptr;
-    QLabel *m_busyWhat = nullptr;
     QLabel *m_busyLabel = nullptr;
     QToolButton *m_stop = nullptr;
     QFrame *m_replyFrame = nullptr, *m_editFrame = nullptr;
     QLineEdit *m_titleEdit = nullptr;
     QPlainTextEdit *m_issueEdit = nullptr;
     QPushButton *m_saveEdit = nullptr, *m_cancelEdit = nullptr;
-    QTimer *m_render = nullptr;
     QList<QJsonObject> m_entries;
     QHash<QString, QString> m_drafts;
-    QString m_body, m_streaming, m_id, m_path;
-    // The turn's reasoning, in the thread (#9K5H). `m_thinking` is the block streaming now;
-    // `m_sealed` holds the blocks that ran before a thread entry landed under them, anchored to
-    // the entry count at which they sealed so a re-read draws them in the same place.
-    QString m_thinking;
-    bool m_thinkingDone = false;
-    qint64 m_thinkingMs = 0;
-    QList<LiveThinking> m_sealed;
+    QString m_body, m_id, m_path;
     // The card as the worker last handed it over: the hash an edit is written against, and the
     // `## Issue` text an edit starts from and is compared with.
     QString m_hash, m_issue;
@@ -3802,7 +3604,6 @@ private:
     QString m_statusValue;
     QStringList m_sections;           // the body's `## ` headings, for "has it a plan?"
     QString m_busyMode;               // "discuss" or "plan" while a turn runs
-    QString m_progress;               // what this card's turn is doing now (19.16)
     QString m_executeArmed;           // the card that was warned it has no plan or acceptance
     // The promoted card's `## Signal` strip (#AQ6X) and the section it is showing.
     QFrame *m_signalStrip = nullptr;
@@ -3979,15 +3780,19 @@ class CardContext final : public relay::agent::Context {
         spec.agentRole = QStringLiteral("switchboard");
         spec.workspace = m_view->m_workspace;
         spec.scope = QStringLiteral("card");
-        // Where the conversation is kept is **not** this page's to choose, and the two lines
-        // below are what this page would ask for if it were: one conversation per card. The
-        // window's `TabConsoleContext` overwrites both with `helper` / <tab id>, because the
-        // owner's decision 1 on this card is one conversation for the whole tab, drawn in every
-        // console of it. They are left here rather than blanked so that a host which is *not*
-        // the window — the board's own tests build a console with no wrapper — still gets a key,
-        // and so the day decision 1 is revisited this page already says what it wants.
+        // One conversation per card, persisted per (tab, card) — the owner's decision 1 on card
+        // #CTRN, which is the day the comment that stood here anticipated: a card turn is an
+        // ordinary console turn now, and folding every card into the tab's one conversation would
+        // make two cards serial again (#DR4K, #0Z13). The tab id is in the key because a tab owns
+        // one worker and that worker owns its conversation files: two tabs showing one card are
+        // two conversations about it, exactly as two tabs showing one pane's project are.
+        // `TabConsoleContext` keeps a card key rather than overwriting it, and supplies the tab
+        // id when the page has not been told one yet.
         spec.persistScope = card.isEmpty() ? QString() : QStringLiteral("helper");
-        spec.persistKey = card.isEmpty() ? QString() : spec.surface;
+        spec.persistKey = card.isEmpty()
+            ? QString()
+            : (m_view->m_tabId.isEmpty() ? spec.surface
+                                         : m_view->m_tabId + QLatin1Char('/') + spec.surface);
         spec.briefKey = QStringLiteral("card");
         spec.briefTitle = card.isEmpty() ? QStringLiteral("Card") : QStringLiteral("#") + card;
         spec.screen = m_view->screenHint();
@@ -4482,12 +4287,17 @@ void BoardView::buildChrome(QVBoxLayout *layout)
                 QTimer::singleShot(0, this, [this] { placeNotice(); });
                 return;
             }
-            m_cardTurns.insert(card, CardTurn{mode, text, QString(), QString(), QString(), false, 0});
+            m_cardTurns.insert(card, CardTurn{mode, text});
             m_detail->setBusy(true, mode);
             cardBusyChanged();
-            // protocol 19.10: one `board_ask`, its mode "discuss" or "plan"; a plan may be wordless.
+            // protocol 19.10: one `board_ask`, its mode "discuss" or "plan"; a plan may be
+            // wordless. The verb stays what a phone sends (card #CTRN, decision 6) and what
+            // changes is behind it: the turn goes to that card's own supervisor, so a second
+            // Enter queues instead of bouncing. `surface` is the console's own — `card:<ID>`,
+            // the tag every event of the turn comes back with (protocol 33).
             QJsonObject ask{{QStringLiteral("type"), QStringLiteral("board_ask")},
-                            {QStringLiteral("card"), card}, {QStringLiteral("mode"), mode}};
+                            {QStringLiteral("card"), card}, {QStringLiteral("mode"), mode},
+                            {QStringLiteral("surface"), QStringLiteral("card:") + card}};
             if (!text.isEmpty())
                 ask.insert(QStringLiteral("text"), text);
             send(ask);
@@ -4504,7 +4314,8 @@ void BoardView::buildChrome(QVBoxLayout *layout)
         if (card.isEmpty())
             return;
         send({{QStringLiteral("type"), QStringLiteral("board_cancel")},
-              {QStringLiteral("card"), card}});
+              {QStringLiteral("card"), card},
+              {QStringLiteral("surface"), QStringLiteral("card:") + card}});
     };
     m_detail->onExecute = [this](const QString &note) { executeCard(note); };
     m_detail->onVerify = [this](const QString &note) { verifyCard(note); };
@@ -4861,12 +4672,11 @@ void BoardView::ensureCardConsole()
     // `board_ask` went out, and the thread was never written (19.10, owner decision 2). The
     // integration drive of card #AGNT read exactly that. `composerEditor` is the name
     // `RichEditor`'s constructor puts on every prompt box in Relay.
-    // A card's own turn prints into the thread view above, not in here (owner decision 2), so an
-    // empty transcript is a black band between the thread and the reply box. It is hidden until
-    // something is actually printed in it — which the tab's *other* turns do, the conversation
-    // being one (decision 1), and then the bubble and the §12 strip have their room.
-    if (handle.setTranscriptHiddenUntilUsed)
-        handle.setTranscriptHiddenUntilUsed(true);
+    // The transcript is **not** hidden until it is used, as it was while a card turn drew itself
+    // into the thread view above (#AGNT). A card turn is an ordinary console turn since card
+    // #CTRN, so this transcript *is* the live view of it — the bubbles, the tool rows, the §12
+    // queue strip, Esc — and hiding it until the first byte would be a flicker on every first
+    // turn and a card page that looks like it has no agent in it.
     m_detail->setConsole(handle.widget,
                          handle.widget->findChild<RichEditor *>(QStringLiteral("composerEditor")));
 }
@@ -6006,20 +5816,6 @@ void BoardView::placeToast()
 
 // ------------------------------------------------------------------------- events
 
-// One line for the strip over the reply box: "reading Pane.h", "read 4 cards · 120 lines",
-// "Requesting model · step 4/256". The same `toollabel` the cleanup notice and the terminal
-// pane's tool lines use, so a card turn is described in the words the rest of Relay uses.
-static QString turnProgressLine(const QString &type, const QJsonObject &event)
-{
-    if (type == QStringLiteral("status"))
-        return event.value(QStringLiteral("text")).toString();
-    const toollabel::Label label = toollabel::fromEvent(event);
-    const QString line = type == QStringLiteral("tool_started")
-                             ? (label.runningLine().isEmpty() ? label.line() : label.runningLine())
-                             : label.line();
-    return line.isEmpty() ? event.value(QStringLiteral("tool")).toString() : line;
-}
-
 void BoardView::handleEvent(const QJsonObject &event)
 {
     const QString type = event.value(QStringLiteral("event")).toString();
@@ -6299,13 +6095,11 @@ void BoardView::handleEvent(const QJsonObject &event)
         m_detail->show(event);
         watchCardFiles();   // the open card and its thread get a watch each (#N5JJ)
         // Turns run per card (19.16), so the card you open may already be working: give it back
-        // its strip, the answer so far and the step it is on. A card with no turn is idle, even
-        // if the one you came from is still planning.
+        // its strip. What it has said so far is in that card's own console and was never lost —
+        // one conversation per card, and the console for this card is the one below.
         if (const QString id = event.value(QStringLiteral("card_id")).toString();
             m_cardTurns.contains(id)) {
-            const CardTurn &turn = m_cardTurns.value(id);
-            m_detail->setBusy(true, turn.mode, turn.streamed, turn.progress, turn.thinking,
-                              turn.thinkingDone, turn.thinkingMs);
+            m_detail->setBusy(true, m_cardTurns.value(id).mode);
         } else {
             m_detail->setBusy(false);
         }
@@ -6493,51 +6287,16 @@ void BoardView::handleEvent(const QJsonObject &event)
         return;
     }
     // A board_ask turn (19.16): every event carries the card it belongs to, and the board may be
-    // showing another one. The open card's view is updated; every card's turn is followed here,
-    // so coming back to it finds the answer so far and what it is doing now.
+    // showing another one. What the page keeps of a turn is the fact that it is running — the
+    // strip, the list's working marker, the actions that wait for it — and nothing of its text:
+    // since card #CTRN the turn's own events are drawn by that card's console, which is the only
+    // console they are delivered to (`RelayWindow::deliverToConsoles`). The page used to render
+    // `delta`, `thinking_*` and a progress line from the tool events as well, and that was the
+    // same bytes drawn twice.
     const QString card = event.value(QStringLiteral("card_id")).toString();
     if (!card.isEmpty() && m_cardTurns.contains(card)) {
         const bool here = card == m_detail->cardId();
         CardTurn &turn = m_cardTurns[card];
-        // The reasoning trace of the running turn (19.4's thinking events, which the worker
-        // tags with the card): streamed into the card's thread above the answer it precedes
-        // and sealed in place when a thread entry lands under it, so a question the agent asks
-        // mid-plan reads after the thinking it came from (#9K5H). "same as in the terminals"
-        // (owner, 2026-09-19) — the same words the terminal fold uses, in the thread's flow.
-        if (type == QStringLiteral("thinking_delta")) {
-            const QString text = event.value(QStringLiteral("text")).toString();
-            if (turn.thinking.size() < 200000)
-                turn.thinking += text;
-            if (here)
-                m_detail->appendThinking(text);
-            return;
-        }
-        if (type == QStringLiteral("thinking_done")) {
-            turn.thinkingDone = true;
-            turn.thinkingMs = event.value(QStringLiteral("elapsed_ms")).toVariant().toLongLong();
-            if (here)
-                m_detail->finishThinking(turn.thinkingMs);
-            return;
-        }
-        if (type == QStringLiteral("delta")) {
-            turn.streamed += event.value(QStringLiteral("text")).toString();
-            if (here)
-                m_detail->appendDelta(event.value(QStringLiteral("text")).toString());
-            return;
-        }
-        // What the turn is doing this second. A Plan reads the repository for minutes before it
-        // says a word, and a card that only said "thinking…" for all of it read as stuck
-        // (owner, 2026-09-19). The cleanup's notice has drawn these lines since 19.9.
-        if (type == QStringLiteral("status") || type == QStringLiteral("tool_started")
-            || type == QStringLiteral("tool_result")) {
-            const QString line = turnProgressLine(type, event);
-            if (!line.isEmpty()) {
-                turn.progress = line;
-                if (here)
-                    m_detail->setProgress(line);
-            }
-            return;
-        }
         if (type == QStringLiteral("done") || type == QStringLiteral("error")
             || type == QStringLiteral("cancelled")) {
             const QString endedMode = turn.mode;   // read before the turn is dropped

@@ -565,20 +565,14 @@ private:
     // otherwise. Empty for a key the board does not have.
     QString signalFoldOf(const QString &key) const;
     // The card turns running right now, by card id (protocol 19.16). Several cards can be
-    // planning or discussing at once, and only one of them is on screen, so what each turn has
-    // said so far and what it is doing this second are held here rather than in the card view.
+    // planning or discussing at once and only one of them is on screen, so the *fact* of each
+    // turn is held here rather than in the card view: the strip, the list's working marker, the
+    // Execute/Verify refusal and the end-of-turn bell all read it. What the turn has *said* is
+    // not here any more — since card #CTRN it is an ordinary console turn and its text lives in
+    // that card's own console, which is the only console its events are delivered to.
     struct CardTurn {
         QString mode;                   // "discuss" or "plan"
         QString unsent;                 // the question in flight, to put back if it is refused
-        QString streamed;               // the answer so far
-        QString progress;               // the tool or step line the strip shows
-        // The reasoning trace of the turn (protocol 19.4's thinking events, which carry the
-        // card): shown in the card's thread above the answer it precedes, so a question the
-        // agent asks mid-turn reads after the thinking it came from (#9K5H). Held here the same
-        // way as `streamed`, so coming back to a card that is still planning finds the trace.
-        QString thinking;
-        bool thinkingDone = false;      // thinking_done arrived for the live block
-        qint64 thinkingMs = 0;          // how long the block ran, for its settled line
     };
     QHash<QString, CardTurn> m_cardTurns;
     QString m_busyCard;                 // the card told "a cleanup is running", to un-tell it

@@ -265,6 +265,10 @@ public:
     int rebuilds() const { return m_rebuilds; }
     QStringList drafts;          // every `draftInComposer`, in order
     int focusCalls = 0;
+    // `setTranscriptHiddenUntilUsed`, which the card page called until card #CTRN: the transcript
+    // is where a card turn is drawn now, so it must never be hidden until a byte arrives.
+    int hideCalls = 0;
+    bool hidden = false;
 
     relay::agent::ConsoleHandle handle()
     {
@@ -276,6 +280,7 @@ public:
             m_editor->setPlainText(text);
         };
         out.composerText = [this] { return m_editor->toPlainText(); };
+        out.setTranscriptHiddenUntilUsed = [this](bool hide) { ++hideCalls; hidden = hide; };
         out.setCollapsed = [this](bool collapse) { setVisible(!collapse); };
         out.collapsed = [this] { return isHidden(); };
         out.runActionLetter = [this](const QString &letter) {
@@ -378,7 +383,7 @@ private slots:
     void aChangeRefillsTheListInPlace();
     void theOpenCardRefetchesOnlyForItsOwnChanges();
     void aQuestionTheAgentCannotTakeIsReportedOnTheCard();
-    void theThinkingTraceRunsInTheCardsThread();
+    void theThinkingTraceRunsInTheCardsConsole();
     void labelClicksCopyFiltersAndCardRefsZoom();
     void theRefCopyButtonCopiesTheIdInTheRowsAndTheHeader();
     void quickAddNamesTheSectionItAddsTo();
@@ -1795,17 +1800,21 @@ void BoardModelTests::aQuestionTheAgentCannotTakeIsReportedOnTheCard()
     QVERIFY(view.notice().isEmpty());   // on the card, not over the board
 }
 
-// #9K5H: a Discuss or Plan turn's reasoning streams in the card's thread — the same words the
-// terminal's fold uses — and is sealed where a thread entry lands under it, so a question the
-// agent asks mid-turn reads after the thinking it came from. It is a live view: never written
-// to the card file, gone when the card is left and back when it is reopened while the turn runs.
-void BoardModelTests::theThinkingTraceRunsInTheCardsThread()
+// Card #CTRN, owner decision 4: a Discuss or Plan on a card is an ordinary console turn, so the
+// turn is drawn by the card's **console** — the pane's own thinking fold, its tool rows, its
+// answer as it streams — and the thread view shows settled entries only. Until this card the same
+// bytes were drawn twice: `deliverToConsoles` fanned them to every console of the tab and this
+// page rendered them again as a live tail, where every tool call collapsed into one elided
+// progress line. #9K5H's trace-in-the-thread is what that live tail was, and it is the console's
+// fold now.
+void BoardModelTests::theThinkingTraceRunsInTheCardsConsole()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
     Consoles consoles(view);   // the console the window would make (#AGNT)
+    view.setTabId(QStringLiteral("tab-7"));
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
-    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    view.handleEvent(opened({row("K7Q2", "inbox", "features"), row("M3XJ", "inbox", "features")}));
     const auto cardArrived = [](const QString &id) {
         return QJsonObject{{"event", "board_card"}, {"card_id", id}, {"title", id + QStringLiteral(" card")},
                            {"status", "inbox"}, {"tab", "features"}, {"body", "text"},
@@ -1816,60 +1825,72 @@ void BoardModelTests::theThinkingTraceRunsInTheCardsThread()
     QVERIFY(doc);
     const auto text = [doc] { return doc->toPlainText(); };
 
+    // The console the turn is drawn in, and the conversation behind it: one per card, persisted
+    // per (tab, card) — owner decision 1 on #CTRN, which is what lets two cards run at once.
+    FakeConsole *console = consoles.card();
+    QVERIFY(console);
+    QCOMPARE(console->liveSpec().surface, QStringLiteral("card:K7Q2"));
+    QCOMPARE(console->liveSpec().persistScope, QStringLiteral("helper"));
+    QCOMPARE(console->liveSpec().persistKey, QStringLiteral("tab-7/card:K7Q2"));
+    // The transcript *is* the live view of the turn, so it is never hidden until a byte arrives.
+    QCOMPARE(console->hideCalls, 0);
+
     QPlainTextEdit *reply = replyBox(view);
     QVERIFY(reply);
     reply->setPlainText(QStringLiteral("Plan the trace."));
     QTest::keyClick(reply, Qt::Key_Return);
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_ask"));
+    QCOMPARE(sent.last().value("mode").toString(), QStringLiteral("discuss"));
+    // The surface the turn's events come back tagged with, on the message that starts it.
+    QCOMPARE(sent.last().value("surface").toString(), QStringLiteral("card:K7Q2"));
 
-    // The trace streams under the turn's own header, before any answer.
-    view.handleEvent(QJsonObject{{"event", "thinking_delta"}, {"card_id", "K7Q2"}, {"turn_id", "t-1"},
-                                 {"text", QStringLiteral("The card asks for the trace in the thread.\n")}});
-    QTest::qWait(120);   // the render is coalesced on the 40 ms timer
-    QVERIFY(text().contains(QStringLiteral("\u2726 thinking\u2026")));
-    QVERIFY(text().contains(QStringLiteral("The card asks for the trace in the thread.")));
-
-    // The block settles to the fold's own words, with its seconds.
-    view.handleEvent(QJsonObject{{"event", "thinking_done"}, {"card_id", "K7Q2"}, {"turn_id", "t-1"},
-                                 {"elapsed_ms", 4200}});
-    QTest::qWait(120);
-    QVERIFY(text().contains(QStringLiteral("\u2726 thought for 4 s")));
-    QVERIFY(!text().contains(QStringLiteral("thinking\u2026")));
-
-    // A question the agent asks mid-turn lands *after* the thinking it came from, and the trace
-    // stays sealed above it rather than following the turn to the bottom of the thread.
-    view.handleEvent(QJsonObject{{"event", "board_thread_appended"}, {"card_id", "K7Q2"},
-                                 {"entry_id", "20260919T210001Z-aa"}, {"author", "agent"},
-                                 {"kind", "question"},
-                                 {"text", QStringLiteral("1. Should the trace reach the file?")}});
-    QVERIFY(text().contains(QStringLiteral("Should the trace reach the file?")));
-    QVERIFY(text().indexOf(QStringLiteral("\u2726 thought for 4 s"))
-            < text().indexOf(QStringLiteral("Should the trace reach the file?")));
-
-    // The answer streams under the trace, and leaving the card and coming back finds both.
-    view.handleEvent(QJsonObject{{"event", "delta"}, {"card_id", "K7Q2"}, {"turn_id", "t-1"},
-                                 {"text", QStringLiteral("The plan: render it in the thread.")}});
-    QTest::qWait(120);
-    openCard(view, sent, cardArrived(QStringLiteral("M3XJ")));   // another card, no turn on it
-    QVERIFY(!text().contains(QStringLiteral("\u2726 thought for 4 s")));
-    QVERIFY(!text().contains(QStringLiteral("The plan: render it in the thread.")));
+    // The strip says a turn is running and carries the ✕ that stops it, and that is all it is:
+    // the progress line the tool rows replace is gone, widget and all.
     auto *strip = view.findChild<QWidget *>(QStringLiteral("boardBusyStrip"));
-    QVERIFY(strip && strip->isHidden());
-    openCard(view, sent, cardArrived(QStringLiteral("K7Q2")));
     QVERIFY(strip && !strip->isHidden());
-    QVERIFY(text().contains(QStringLiteral("\u2726 thought for 4 s")));
-    QVERIFY(text().contains(QStringLiteral("The plan: render it in the thread.")));
+    QVERIFY2(!view.findChild<QLabel *>(QStringLiteral("boardBusyWhat")), "the progress line is back");
 
-    // The answer lands as the thread's own entry and the turn ends; the sealed trace stays.
+    // Every event of a running card turn, and not one of them draws anything here.
+    const QString running = text();
+    for (const QJsonObject &event :
+         {QJsonObject{{"event", "thinking_delta"}, {"card_id", "K7Q2"}, {"turn_id", "t-1"},
+                      {"text", QStringLiteral("The card asks for the trace in the thread.\n")}},
+          QJsonObject{{"event", "thinking_done"}, {"card_id", "K7Q2"}, {"turn_id", "t-1"},
+                      {"elapsed_ms", 4200}},
+          QJsonObject{{"event", "tool_started"}, {"card_id", "K7Q2"}, {"turn_id", "t-1"},
+                      {"tool", "board_read"}},
+          QJsonObject{{"event", "tool_result"}, {"card_id", "K7Q2"}, {"turn_id", "t-1"},
+                      {"tool", "board_read"}},
+          QJsonObject{{"event", "status"}, {"card_id", "K7Q2"},
+                      {"text", "Requesting model · step 4/256"}},
+          QJsonObject{{"event", "delta"}, {"card_id", "K7Q2"}, {"turn_id", "t-1"},
+                      {"text", QStringLiteral("The plan: draw it in the console.")}}})
+        view.handleEvent(event);
+    QTest::qWait(120);   // longer than the 40 ms timer the live tail used to coalesce on
+    QCOMPARE(text(), running);
+    QVERIFY(!text().contains(QStringLiteral("thinking")));
+    QVERIFY(!text().contains(QStringLiteral("thought for")));
+    QVERIFY(!text().contains(QStringLiteral("The plan: draw it in the console.")));
+    QVERIFY(!text().contains(QStringLiteral("board_read")));
+
+    // Another card while that one runs: this page is idle and shows nothing of the other's turn.
+    openCard(view, sent, cardArrived(QStringLiteral("M3XJ")));
+    QVERIFY(strip->isHidden());
+    QVERIFY(!text().contains(QStringLiteral("The plan: draw it in the console.")));
+    openCard(view, sent, cardArrived(QStringLiteral("K7Q2")));
+    QVERIFY(!strip->isHidden());   // still working, and the strip comes back with the card
+
+    // What lands in the thread is the entry the worker writes, with its provenance (decision 2).
     view.handleEvent(QJsonObject{{"event", "board_thread_appended"}, {"card_id", "K7Q2"},
-                                 {"entry_id", "20260919T210002Z-bb"}, {"author", "agent"},
+                                 {"entry_id", "20260921T210002Z-bb"}, {"author", "agent"},
                                  {"kind", "comment"},
-                                 {"text", QStringLiteral("The plan: render it in the thread.")}});
+                                 {"attrs", QJsonObject{{"mode", "discuss"}, {"model", "glm-5"}}},
+                                 {"text", QStringLiteral("The plan: draw it in the console.")}});
+    QVERIFY2(text().contains(QStringLiteral("✦ agent  Discuss · glm-5")), qPrintable(text()));
+    QVERIFY(text().contains(QStringLiteral("The plan: draw it in the console.")));
     view.handleEvent(QJsonObject{{"event", "done"}, {"card_id", "K7Q2"}, {"turn_id", "t-1"}});
-    QVERIFY(strip && strip->isHidden());
-    QVERIFY(text().contains(QStringLiteral("\u2726 thought for 4 s")));
-    QVERIFY(text().indexOf(QStringLiteral("\u2726 thought for 4 s"))
-            < text().lastIndexOf(QStringLiteral("The plan: render it in the thread.")));
+    QVERIFY(strip->isHidden());
+    QVERIFY(text().contains(QStringLiteral("The plan: draw it in the console.")));   // the record stays
 }
 
 // #S53Z: bare labels copy filter terms; only known #ID references become links.
@@ -2642,6 +2663,9 @@ void BoardModelTests::theBoxDiscussesAndTheRowPlansOrLeavesTheBoard()
     auto *stop = view.findChild<QToolButton *>(QStringLiteral("boardStop"));
     QVERIFY(strip);
     QVERIFY(strip->isHidden());
+    // The strip is the label and the ✕ since card #CTRN: what the turn is doing this second is
+    // the tool rows in the console's transcript, not an elided line up here.
+    QVERIFY2(!view.findChild<QLabel *>(QStringLiteral("boardBusyWhat")), "the progress line is back");
 
     // Enter in the reply box discusses.
     QPlainTextEdit *reply = replyBox(view);
@@ -2650,6 +2674,9 @@ void BoardModelTests::theBoxDiscussesAndTheRowPlansOrLeavesTheBoard()
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_ask"));
     QCOMPARE(sent.last().value("mode").toString(), QStringLiteral("discuss"));
     QCOMPARE(sent.last().value("text").toString(), QStringLiteral("Is this still wanted?"));
+    // The verb is unchanged (card #CTRN, decision 6) and what it gains is the console's surface:
+    // the turn is submitted to that card's own supervisor and its events come back tagged with it.
+    QCOMPARE(sent.last().value("surface").toString(), QStringLiteral("card:K7Q2"));
     // While it runs, the strip over the box says which turn it is and carries the one control
     // that ends it; the buttons that would start another turn wait.
     QVERIFY(!strip->isHidden());
@@ -2677,6 +2704,7 @@ void BoardModelTests::theBoxDiscussesAndTheRowPlansOrLeavesTheBoard()
     // other cards' turns going.
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_cancel"));
     QCOMPARE(sent.last().value("card").toString(), QStringLiteral("K7Q2"));
+    QCOMPARE(sent.last().value("surface").toString(), QStringLiteral("card:K7Q2"));
     view.handleEvent(QJsonObject{{"event", "cancelled"}, {"card_id", "K7Q2"}});
     QVERIFY(strip->isHidden());
 
@@ -2724,8 +2752,9 @@ void BoardModelTests::theBoxDiscussesAndTheRowPlansOrLeavesTheBoard()
 
 
 // Protocol 19.16: turns run per card, so the board can be showing #A while #B is planning. Each
-// card keeps its own strip, its own answer so far and its own progress line; a `done` for one
-// card does not end the other's turn, and the list marks the cards that are working.
+// card keeps its own strip and its own conversation — since card #CTRN that conversation is the
+// card console's, one per (tab, card) — a `done` for one card does not end the other's turn, and
+// the list marks the cards that are working.
 void BoardModelTests::aCardKeepsItsOwnTurnWhileAnotherCardIsOnScreen()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
@@ -2735,20 +2764,17 @@ void BoardModelTests::aCardKeepsItsOwnTurnWhileAnotherCardIsOnScreen()
     view.handleEvent(opened({row("K7Q2", "inbox", "features"), row("M3XJ", "inbox", "features")}));
     auto *strip = view.findChild<QWidget *>(QStringLiteral("boardBusyStrip"));
     auto *busy = view.findChild<QLabel *>(QStringLiteral("boardBusyLabel"));
-    auto *what = view.findChild<QLabel *>(QStringLiteral("boardBusyWhat"));
-    QVERIFY(strip && busy && what);
+    QVERIFY(strip && busy);
 
-    // Plan #K7Q2, and watch it read the repository: the strip says what it is doing, which is
-    // what a Plan does for minutes before it says a word.
+    // Plan #K7Q2. What it is doing while it reads the repository is drawn by that card's console
+    // (the tool rows), so the page's job is the strip and the marker on the row.
     openCard(view, sent, card("K7Q2", "K7Q2 card", "the issue", "h1"));
     view.cardAction(QStringLiteral("plan"));
     QCOMPARE(sent.last().value("mode").toString(), QStringLiteral("plan"));
+    QCOMPARE(sent.last().value("surface").toString(), QStringLiteral("card:K7Q2"));
     view.handleEvent(QJsonObject{{"event", "status"}, {"card_id", "K7Q2"}, {"mode", "plan"},
                                  {"text", "Requesting model · step 4/256"}});
     QVERIFY(!strip->isHidden());
-    QCOMPARE(what->toolTip(), QStringLiteral("Requesting model · step 4/256"));
-    view.handleEvent(QJsonObject{{"event", "delta"}, {"card_id", "K7Q2"}, {"mode", "plan"},
-                                 {"text", "Reading the completion code."}});
 
     // Open #M3XJ while that one runs: this card is idle, and its own Plan is offered.
     openCard(view, sent, card("M3XJ", "M3XJ card", "another issue", "h2"));
@@ -2767,7 +2793,8 @@ void BoardModelTests::aCardKeepsItsOwnTurnWhileAnotherCardIsOnScreen()
     openCard(view, sent, card("K7Q2", "K7Q2 card", "the issue", "h1"));
     QVERIFY(strip->isHidden());
 
-    // Back to #M3XJ: still planning, and the strip has its answer so far and its step back.
+    // Back to #M3XJ: still planning, and the strip comes back with it. Its turn's own words are
+    // in its console and were never on this page, so the thread view has nothing of them.
     view.handleEvent(QJsonObject{{"event", "status"}, {"card_id", "M3XJ"}, {"mode", "plan"},
                                  {"text", "Requesting model · step 2/256"}});
     view.handleEvent(QJsonObject{{"event", "delta"}, {"card_id", "M3XJ"}, {"mode", "plan"},
@@ -2775,7 +2802,10 @@ void BoardModelTests::aCardKeepsItsOwnTurnWhileAnotherCardIsOnScreen()
     openCard(view, sent, card("M3XJ", "M3XJ card", "another issue", "h2"));
     QVERIFY(!strip->isHidden());
     QCOMPARE(busy->text(), QStringLiteral("✦ Switchboarding · planning…"));
-    QCOMPARE(what->toolTip(), QStringLiteral("Requesting model · step 2/256"));
+    auto *document = view.findChild<QTextBrowser *>(QStringLiteral("boardCardDocument"));
+    QVERIFY(document);
+    QVERIFY(!document->toPlainText().contains(QStringLiteral("Looking at the header.")));
+    QVERIFY(!document->toPlainText().contains(QStringLiteral("Requesting model")));
 
     // A fourth card refused while three run says which cards are working, and keeps the text.
     QPlainTextEdit *reply = replyBox(view);
@@ -3759,8 +3789,15 @@ void BoardModelTests::theCardPageAsksForACardConsoleAndItsActionsFollowTheCard()
     QCOMPARE(spec.agentRole, QStringLiteral("switchboard"));
     QVERIFY(!spec.shell);
     QCOMPARE(spec.routing, QStringLiteral("agent"));
-    // A card is its own conversation: the board's key is the tab's, this one's is the card's.
+    // A card is its own conversation, persisted per (tab, card) — owner decision 1 on card
+    // #CTRN. The tab id is in the key because a tab owns one worker and that worker owns its
+    // conversation files: two tabs on one card are two conversations about it.
+    QCOMPARE(spec.persistScope, QStringLiteral("helper"));
+    QCOMPARE(spec.persistKey, QStringLiteral("tab-7/card:K7Q2"));
     QVERIFY(spec.persistId() != consoles.board()->liveSpec().persistId());
+    // And the transcript is the live view of a card turn since #CTRN, so it is not hidden until
+    // something prints in it.
+    QCOMPARE(console->hideCalls, 0);
     QVERIFY(console->context()->placeholder().contains(QStringLiteral("Ctrl+Shift+Enter only comments")));
 
 
