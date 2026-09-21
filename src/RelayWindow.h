@@ -4061,15 +4061,24 @@ private:
         Pane *pane = m_active;
         const QString agent = QStringLiteral("Agent"), terminal = QStringLiteral("Terminal"), panes = QStringLiteral("Panes and tabs"),
                       app = QStringLiteral("Relay"), keys = QStringLiteral("Shortcuts");
+        // The model, by its name and its provider (card #MDL1, rule 1) — "glm-5.3 · z.ai (glm)",
+        // not the preset label "z.ai · glm-5.3 · coding plan", which is a plan and not a model.
         QString currentModel;
-        if (pane) for (const auto &model : pane->storedModels()) if (model.first == pane->currentPreset()) currentModel = model.second;
+        if (pane) {
+            currentModel = pane->presetModelDisplay(pane->currentPreset());
+            if (currentModel.isEmpty())
+                for (const auto &model : pane->storedModels())
+                    if (model.first == pane->currentPreset()) currentModel = model.second;
+        }
         items << submenu(QStringLiteral("menu:model"), agent, QStringLiteral("Model"), currentModel.isEmpty() ? QStringLiteral("No stored keys") : currentModel, [this] {
             QList<PaletteItem> children;
             if (!m_active) return children;
             for (const auto &model : m_active->storedModels()) {
                 PaletteItem item;
                 const QString id = model.first;
-                item.key = QStringLiteral("model:") + id; item.section = QStringLiteral("Model"); item.label = model.second;
+                item.key = QStringLiteral("model:") + id; item.section = QStringLiteral("Model");
+                const QString named = m_active->presetModelDisplay(id);
+                item.label = named.isEmpty() ? model.second : named;
                 item.detail = QStringLiteral("This pane; starts a new conversation");
                 item.checked = m_active->currentPreset() == id;
                 item.run = [this, id] { if (m_active) m_active->selectModel(id); };
