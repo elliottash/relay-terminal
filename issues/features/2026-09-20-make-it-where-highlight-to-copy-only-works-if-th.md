@@ -7,7 +7,7 @@ implemented_by: deepseek/deepseek-v4.1-flash
 session: f32a3a80-bff1-4c2d-bc96-d2f5a89f672d
 rank: zzzzzzzzzzzzzzzzr
 created: '2026-09-20'
-links: {commits: [46d7e92a, 23f5525e], evidence: [docs/qa_evidence/2026-09-21-copy-on-highlight-three-chars/], github: null, plans: [], related: []}
+links: {commits: [46d7e92a, 23f5525e, 585bbeec], evidence: [docs/qa_evidence/2026-09-21-copy-on-highlight-three-chars/], github: null, plans: [], related: []}
 ---
 # make it where, highlight to copy only works if there are at least 3 letters or n…
 
