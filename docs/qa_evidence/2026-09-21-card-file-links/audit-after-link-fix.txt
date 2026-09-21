@@ -1,0 +1,38 @@
+********* Start testing of AuditTest *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : AuditTest::initTestCase()
+QWARN  : AuditTest::missingLabelTargetStillAllowsKnownCard() This plugin does not support propagateSizeHints()
+QWARN  : AuditTest::missingLabelTargetStillAllowsKnownCard() This plugin does not support propagateSizeHints()
+QWARN  : AuditTest::missingLabelTargetStillAllowsKnownCard() This plugin does not support propagateSizeHints()
+QWARN  : AuditTest::missingLabelTargetStillAllowsKnownCard() This plugin does not support propagateSizeHints()
+QWARN  : AuditTest::missingLabelTargetStillAllowsKnownCard() This plugin does not support propagateSizeHints()
+PASS   : AuditTest::missingLabelTargetStillAllowsKnownCard()
+QWARN  : AuditTest::copyingAfterWideCharacterSurvivesResize() This plugin does not support propagateSizeHints()
+QWARN  : AuditTest::copyingAfterWideCharacterSurvivesResize() This plugin does not support propagateSizeHints()
+QWARN  : AuditTest::copyingAfterWideCharacterSurvivesResize() This plugin does not support propagateSizeHints()
+QWARN  : AuditTest::copyingAfterWideCharacterSurvivesResize() This plugin does not support propagateSizeHints()
+QWARN  : AuditTest::copyingAfterWideCharacterSurvivesResize() This plugin does not support propagateSizeHints()
+FAIL!  : AuditTest::copyingAfterWideCharacterSurvivesResize() Compared values are not the same
+   Actual   (select(t,row,2,row,4)): "BCD"
+   Expected (QStringLiteral("ABC")): "ABC"
+   Loc: [/tmp/relay-link-audit/probe.cpp(224)]
+QWARN  : AuditTest::copyPreservesSpaceAtWrappedEdge() This plugin does not support propagateSizeHints()
+QWARN  : AuditTest::copyPreservesSpaceAtWrappedEdge() This plugin does not support propagateSizeHints()
+QWARN  : AuditTest::copyPreservesSpaceAtWrappedEdge() This plugin does not support propagateSizeHints()
+QWARN  : AuditTest::copyPreservesSpaceAtWrappedEdge() This plugin does not support propagateSizeHints()
+QWARN  : AuditTest::copyPreservesSpaceAtWrappedEdge() This plugin does not support propagateSizeHints()
+QINFO  : AuditTest::copyPreservesSpaceAtWrappedEdge() ("alpha beta gamma xyz", "delta", "", "", "", "", "", "", "", "", "", "", "", "")
+FAIL!  : AuditTest::copyPreservesSpaceAtWrappedEdge() Compared values are not the same
+   Actual   (select(t,first,0,last,native ? 5 : 4)): "alpha beta gamma xyzdelta"
+   Expected (text)                                 : "alpha beta gamma xyz delta"
+   Loc: [/tmp/relay-link-audit/probe.cpp(238)]
+QWARN  : AuditTest::keyboardLinkSelectionVisibleAfterResize() This plugin does not support propagateSizeHints()
+QWARN  : AuditTest::keyboardLinkSelectionVisibleAfterResize() This plugin does not support propagateSizeHints()
+QWARN  : AuditTest::keyboardLinkSelectionVisibleAfterResize() This plugin does not support propagateSizeHints()
+QWARN  : AuditTest::keyboardLinkSelectionVisibleAfterResize() This plugin does not support propagateSizeHints()
+QWARN  : AuditTest::keyboardLinkSelectionVisibleAfterResize() This plugin does not support propagateSizeHints()
+FAIL!  : AuditTest::keyboardLinkSelectionVisibleAfterResize() 'selected' returned FALSE. (keyboard-walk selection has no visible highlight after rewrap)
+   Loc: [/tmp/relay-link-audit/probe.cpp(260)]
+PASS   : AuditTest::cleanupTestCase()
+Totals: 3 passed, 3 failed, 0 skipped, 0 blacklisted, 3305ms
+********* Finished testing of AuditTest *********

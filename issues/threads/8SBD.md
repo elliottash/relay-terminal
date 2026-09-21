@@ -39,3 +39,7 @@ Plan this card.
 
 <!-- relay:entry 20260920T224140Z-jh author=owner kind=event pane=switchboard -->
 - ✦ owner moved this card · Planning → Planned · the plan is on the card
+
+<!-- relay:entry 20260921T210756Z-a1 author=codex kind=evidence -->
+### Codex · 2026-09-21 21:07
+The #K9KC commit audit confirmed the fold-selection path independently: print "alpha beta gamma xyz delta" at 100 columns, resize to 20, then select both rows. Actual copy: "alpha beta gamma xyzdelta". With prose replacement disabled, the same resize preserves the space. In 8147cc55, wrap::rows drops the edge-space cell and visualSelectedText concatenates the displayed row ranges, omitting it. This is distinct from the native trim path already in the plan. Reproducer: run-audit-probe.py copyPreservesSpaceAtWrappedEdge under docs/qa_evidence/2026-09-21-card-file-links/.
