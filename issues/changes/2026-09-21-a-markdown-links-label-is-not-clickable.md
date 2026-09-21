@@ -1,7 +1,7 @@
 ---
 id: MDKN
 type: work
-status: executing
+status: needs-verification
 labels: [bug, terminal]
 component: [gui]
 workstream: terminal
@@ -10,7 +10,7 @@ rank: m5
 created: '2026-09-21'
 acceptance: a markdown link's label opens what the link names, in a terminal pane and in an embedded console, before and after a re-wrap
 source: "#AGNT QA checklist, 2026-09-21: \"A markdown link's label is not clickable\"; owner, 2026-09-21: \"yes, add the linking\""
-links: {plans: [], commits: [], evidence: [], related: [AGNT, R2WQ, FEJQ], github: null}
+links: {plans: [], commits: [a7ba08d8, 70a288c9, 195f2442, 19beea01, 620d14e7], evidence: [docs/qa_evidence/2026-09-21-markdown-link-labels/], related: [AGNT, R2WQ, FEJQ], github: null}
 ---
 # A markdown link's label is not clickable
 
@@ -115,6 +115,10 @@ opens on a click.
 - `manual: docs/qa_evidence/2026-09-21-markdown-link-labels/` — the live drive.
 
 ## QA checklist
+Every item below was driven once by the implementer
+(`docs/qa_evidence/2026-09-21-markdown-link-labels/`, 41 PASS · 0 FAIL); a verifier should do them
+by hand, where a person's eye catches what a gate does not.
+
 - [ ] In a terminal pane, click the **label** of each kind an agent can write — `option:`,
       `session:`, `#ID`, a file path, an `https://` URL — and check each opens what the printed
       target beside it opens.

@@ -6,3 +6,9 @@
 
 <!-- relay:entry 20260921T073100Z-a2 author=agent kind=event pane=linklabels -->
 - ✦ claimed by the `linklabels` session
+
+<!-- relay:entry 20260921T081500Z-a3 author=agent kind=progress pane=linklabels -->
+- ✦ landed in five commits: `a7ba08d8` the `#l=` convention and the renderer, `70a288c9` the view (the hit test and the merged anchor), `195f2442` the pane and the reasoning fold, `19beea01` the docs and the copy case, `620d14e7` the evidence. Design: the label's cells carry the block's own prose anchor with the target as a fragment, so no change reaches either emulator core — which the alternatives (a private anchor mark, a second per-cell link layer) could not avoid, and only libvterm builds on this machine.
+
+<!-- relay:entry 20260921T081600Z-a4 author=agent kind=progress pane=linklabels -->
+- ✦ moved to needs-verification. `docs/qa_evidence/2026-09-21-markdown-link-labels/` — 41 PASS · 0 FAIL: the label clicked for all five kinds in a terminal pane, in two embedded consoles, after a re-wrap, inside a thinking bubble, and the printed target after a restart. A transcript full of links renders to the identical picture with the card on and off (0 pixels, whole window), measured against the same tree with the feature switched off.
