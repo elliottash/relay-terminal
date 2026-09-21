@@ -2974,7 +2974,7 @@ public:
     // Where a clicked or keyboard-selected link goes. `fromMouse` teaches the keyboard path.
     void openOutputTarget(const QString &target, int line, bool fromMouse) {
         if (target.isEmpty()) return;
-        // An agent may link #ID to its backing Markdown file (#L9KC). Resolve that
+        // An agent may link #ID to its backing Markdown file (#K9KC). Resolve that
         // before context dispatch, so embedded consoles and terminal panes agree.
         if (line <= 0 && QDir::isAbsolutePath(target)) {
             const QString attached = onBoardProject ? onBoardProject(QString(), nullptr) : QString();

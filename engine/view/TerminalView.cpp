@@ -1952,7 +1952,7 @@ bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endC
             return true;
         }
     }
-    // Rewrapped prose lives in FoldLayer, not in the emulator frame (#L9KC).
+    // Rewrapped prose lives in FoldLayer, not in the emulator frame (#K9KC).
     // Explicit Markdown labels were handled above; scan ordinary text here too,
     // using the whole logical line so a reference split by wrapping still works.
     const auto visual = visualAt(c.row);
