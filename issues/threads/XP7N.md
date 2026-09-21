@@ -16,3 +16,6 @@ Created and claimed this card; implementing an explicit user choice before leavi
 
 <!-- relay:entry 20260921T190047Z-6x author=agent kind=event model=gpt-6-astra pane=8d16eb6c turn=195aba7ae52d434a8af209dd30396b81/01d60b885dea4f62ac538dc6f48076ca -->
 - ✦ agent moved this card · Executing → Needs verification · Implemented exit_plan_mode; 92 session/question tests and all 9 tracked PlanModeTests pass. Live UI QA remains. · evidence docs/qa_evidence/2026-09-21-plan-exit/verification.md · implemented_by openai/gpt-6-astra via codex
+
+<!-- relay:entry 20260921T190056Z-5w author=agent kind=event model=gpt-6-astra pane=8d16eb6c turn=195aba7ae52d434a8af209dd30396b81/01d60b885dea4f62ac538dc6f48076ca -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-21-plan-exit… → {"plans": [], "commits": ["97add146dbe8ce0877e31ad533ea21775860874e"], "evidence…

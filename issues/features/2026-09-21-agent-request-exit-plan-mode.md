@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: mpx
 created: '2026-09-21'
 source: Codex in a Relay pane, 2026-09-21
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-plan-exit/verification.md], related: [], github: null}
+links: {plans: [], commits: [97add146dbe8ce0877e31ad533ea21775860874e], evidence: [docs/qa_evidence/2026-09-21-plan-exit/verification.md], related: [], github: null}
 ---
 # Let the agent request to exit planning mode
 
