@@ -40,6 +40,11 @@ Guardrails, in one place so they can be reviewed:
   refuses `not_settable`, `secret`, `writes_disabled`, `not_agent_safe` and `invalid_value`
   itself, as 22.3 refuses a command `bash -n` rejects).  A refused value costs no round trip.
 * **Only `agent_safe` actions run.**  The catalog marks them; the fence is the GUI's.
+* **A pane-scoped action is aimed, not aimed at whatever has the focus.**  `app_action_run`
+  takes an optional `pane` (#AG7R group 2, §30.3): with none, the GUI runs it on the pane whose
+  worker asked — it knows which, because the command arrives with that pane's session token — and
+  a helper, which has no pane of its own, goes on landing where the person is focused, as it
+  always did.  `app_panes` is where the ids come from.
 * **Sessions search never leaves the worker.**  `app_sessions_search` asks the conversation
   index directly (`conv_index.ConversationIndex.search`, the protocol-14 `conversations`
   answer's own source), so asking "which session was that in" costs no GUI round trip.
@@ -76,13 +81,15 @@ OPEN_TARGETS = ("options", "actions", "sessions", "switchboard", "conversation")
 #: window full: each one is a worker of its own.
 MAX_OPEN_CONVERSATIONS = 8
 
-#: The commands that go out as `app_command` (§30.3).
-COMMANDS = ("open", "set_option", "run_action", "undo")
+#: The commands that go out as `app_command` (§30.3).  `list_panes` is a round trip and not a
+#: field of the catalog: panes open and close between two catalogs, and an agent aiming at a pane
+#: that has gone is the fault `pane` exists to fix (#AG7R group 2).
+COMMANDS = ("open", "set_option", "run_action", "undo", "list_panes")
 
 #: The `error` vocabulary of `app_command_result` (§30.3).  The worker's own refusals use the
 #: same words, so a refusal reads the same whether the catalog caught it or the pane did.
 ERRORS = ("unknown_row", "unknown_action", "unknown_target", "unknown_change",
-          "unknown_conversation", "not_settable",
+          "unknown_conversation", "unknown_pane", "not_settable",
           "secret", "writes_disabled", "invalid_value", "not_agent_safe", "busy", "failed",
           "no_reply")
 
@@ -93,6 +100,7 @@ ERROR_TEXT = {
     "unknown_target": "Relay cannot open that.",
     "unknown_change": "Relay no longer holds that change.",
     "unknown_conversation": "Relay has no saved conversation with that id.",
+    "unknown_pane": "Relay has no pane with that id any more; list the panes again.",
     "not_settable": "That row is not one an agent may set.",
     "secret": "That row holds a secret; no agent may set it.",
     "writes_disabled": "Agents may not change options or run actions.",
@@ -112,6 +120,7 @@ MAX_TEXT_VALUE = 4096
 MAX_LIST_ROWS = 60
 MAX_SEARCH = 200
 MAX_SESSION_ROWS = 25
+MAX_PANES = 60
 MAX_CHANGES = 100
 
 
@@ -573,9 +582,21 @@ TOOL_SPECS = [
          []),
     spec("app_action_run",
          "Run one of Relay's actions, as though the person had chosen it in the palette. Only "
-         "actions app_action_list marks agent_safe can be run.",
-         {"key": {"type": "string", "description": "The action's key, exactly as app_action_list gives it."}},
+         "actions app_action_list marks agent_safe can be run. An action that acts on one pane — "
+         "its model, its reasoning effort, its input mode, plan mode, its own views — runs on "
+         "your own pane unless you name another with `pane`.",
+         {"key": {"type": "string", "description": "The action's key, exactly as app_action_list gives it."},
+          "pane": {"type": "string",
+                   "description": "The pane to act on, as app_panes gives it. Your own pane by "
+                                  "default; the pane the person is looking at when you have none "
+                                  "of your own."}},
          ["key"]),
+    spec("app_panes",
+         "List the panes of the Relay window you are in: the id `pane` takes, the title the "
+         "person sees, the directory, the tab, the model and whether that pane's agent is busy. "
+         "Your own pane is marked `you`. Read it before aiming an action at a pane that is not "
+         "yours — the list is the only place the ids are.",
+         {}, []),
     spec("app_sessions_search",
          "Search the person's past Relay conversations — the same index the Sessions pane uses. "
          "One row per conversation: id, title, when, model, workspace and the turns that matched. "
@@ -610,7 +631,10 @@ TOOL_SPECS = [
                                  "to open, each in a pane of its own, in this order."},
           "new_pane": {"type": "boolean",
                        "description": "conversation: open in a new pane (the default) rather "
-                                      "than loading it into the pane the person is in."}},
+                                      "than loading it into the pane the person is in."},
+          "pane": {"type": "string",
+                   "description": "conversation: the pane to open from, as app_panes gives it. "
+                                  "Your own pane by default, so new_pane false means \"here\"."}},
          ["target"]),
     spec("app_changes",
          "List the changes you have made to Relay in this session — each with the row, what it "
@@ -702,8 +726,8 @@ class AppTools:
         if not isinstance(args, dict):
             return f"RELAY {head}"
         bits = [f"{key}: {_short(args[key], 120)}"
-                for key in ("id", "value", "key", "target", "section", "row", "query", "card",
-                            "search", "change_id")
+                for key in ("id", "value", "key", "pane", "target", "section", "row", "query",
+                            "card", "search", "change_id")
                 if args.get(key) is not None]
         return f"RELAY {head}\n\n" + ("\n".join(bits) or "(no arguments)")
 
@@ -715,6 +739,7 @@ class AppTools:
         handler = {"app_option_list": self._option_list, "app_option_get": self._option_get,
                    "app_option_set": self._option_set, "app_action_list": self._action_list,
                    "app_action_run": self._action_run, "app_sessions_search": self._sessions_search,
+                   "app_panes": self._panes,
                    "app_open": self._open, "app_changes": self._changes, "app_undo": self._undo}[name]
         try:
             return handler(dict(args))
@@ -816,7 +841,17 @@ class AppTools:
                 f"\"{action.label or action.key}\" is not one of the actions an agent may run "
                 "(only the ones the person can undo in a click are). Tell them where it is and "
                 "let them run it.", code="not_agent_safe")
-        result = self.bridge.send("run_action", {"key": action.key})
+        fields = {"key": action.key}
+        # The pane the action is aimed at (§30.3, #AG7R group 2).  Sent only when the model named
+        # one: with no `pane` the GUI aims a pane-scoped action at the asking agent's own pane —
+        # it knows which that is, because the command arrives with the pane's session token — and
+        # a helper, which has no pane of its own, goes on landing where the person is focused.
+        pane = args.get("pane")
+        if pane is not None:
+            if not isinstance(pane, str) or not pane.strip():
+                raise AppToolError("pane must be a pane id from app_panes.", code="invalid_value")
+            fields["pane"] = pane.strip()
+        result = self.bridge.send("run_action", fields)
         if not result.get("ok"):
             raise _refused(result, f"running \"{action.label or action.key}\"")
         change_id = None
@@ -826,6 +861,10 @@ class AppTools:
             change_id = self._record_action(action, result.get("change_id"))
         out = {"ok": True, "key": action.key, "action": action.label or action.key,
                "text": f"Ran \"{action.label or action.key}\"."}
+        # Which pane it landed on, when that was a choice at all: the GUI answers with it, so the
+        # model reports where the change went instead of assuming.
+        if isinstance(result.get("pane"), str) and result["pane"]:
+            out["pane"] = result["pane"]
         if change_id:
             out["change_id"] = change_id
             out["text"] += f" Undo it with app_undo change_id {change_id}."
@@ -834,6 +873,26 @@ class AppTools:
             out["detail"] = result["detail"].strip()[:MAX_DETAIL]
             out["text"] += " " + out["detail"]
         return out
+
+    # ---- panes -----------------------------------------------------------------
+    def _panes(self, args: dict) -> dict:
+        """`list_panes` (§30.3): the panes of this window, and which one is the agent's own.
+
+        A pane could not be named before #AG7R group 2: the catalog carries the *tab*,
+        `session_info` is about this conversation, and `app_sessions_search` is about saved ones —
+        so an agent could aim at no pane but the one it was sitting in.  The ids are the panes'
+        session tokens, which is what the GUI's change log already calls them by.
+        """
+        result = self.bridge.send("list_panes", {})
+        if not result.get("ok"):
+            raise _refused(result, "listing the panes")
+        panes = result.get("panes")
+        panes = [p for p in panes if isinstance(p, dict)][:MAX_PANES] if isinstance(panes, list) else []
+        mine = next((p for p in panes if p.get("you")), None)
+        text = f"{len(panes)} pane{'' if len(panes) == 1 else 's'} in this window"
+        if mine is not None:
+            text += f"; yours is \"{mine.get('title') or mine.get('id')}\""
+        return {"ok": True, "panes": panes, "count": len(panes), "text": text + "."}
 
     # ---- sessions --------------------------------------------------------------
     def _sessions_search(self, args: dict) -> dict:
@@ -945,6 +1004,14 @@ class AppTools:
             new_pane = True
         if not isinstance(new_pane, bool):
             raise AppToolError("new_pane must be true or false.", code="invalid_value")
+        # The pane it opens from (§30.3, #AG7R group 2): with `new_pane: false` that is the pane
+        # the conversation is loaded into, and "here" means the agent's own pane rather than
+        # whichever one has the focus.  Unsent unless the model named one; the GUI resolves the
+        # asking pane itself.
+        pane = args.get("pane")
+        if pane is not None and (not isinstance(pane, str) or not pane.strip()):
+            raise AppToolError("pane must be a pane id from app_panes.", code="invalid_value")
+        pane = pane.strip() if isinstance(pane, str) else None
         if self.sessions is None:
             raise AppToolError("The conversation index is not available in this pane.",
                                code="failed")
@@ -962,9 +1029,11 @@ class AppTools:
             # `row`. The whole row goes as `item` — the GUI has no conversation index to look one
             # up in, and the resume path reads the row the Sessions list would have handed it.
             try:
-                result = self.bridge.send("open", {"target": "conversation",
-                                                   "conversation": session_id,
-                                                   "new_pane": new_pane, "item": item})
+                fields = {"target": "conversation", "conversation": session_id,
+                          "new_pane": new_pane, "item": item}
+                if pane:
+                    fields["pane"] = pane
+                result = self.bridge.send("open", fields)
             except AppToolError as exc:
                 # The GUI stopped answering (a window that has gone, a worker being shut down).
                 # Nothing is gained by spending another deadline per remaining id.
@@ -1223,7 +1292,9 @@ def prompt_section(tools: "AppTools | None") -> str:
             "the user at once as \"Agent changed <row>: <before> → <after> · Undo\", so change "
             "only what was asked for, say in your reply what you changed, and use app_changes "
             "and app_undo to reverse your own. Ask first when a change reaches beyond the "
-            "request.")
+            "request. An action that acts on one pane — its model, reasoning effort, input mode "
+            "or plan mode — runs on your own pane; app_panes lists the window's panes and `pane` "
+            "aims at one of them.")
     else:
         lines.append(
             "Changing options and running actions is switched off for agents in Options › Agent, "

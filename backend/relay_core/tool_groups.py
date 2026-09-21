@@ -24,9 +24,11 @@ from __future__ import annotations
 #: group id -> (tool names, what the group is for, in the model's terms).
 GROUPS: dict[str, tuple[tuple[str, ...], str]] = {
     "app": (("app_option_list", "app_option_get", "app_option_set", "app_action_list",
-             "app_action_run", "app_sessions_search", "app_open", "app_changes", "app_undo"),
-            "read or change Relay's own Options, run one of its actions, search the user's past "
-            "conversations, or put a screen in front of them"),
+             "app_action_run", "app_panes", "app_sessions_search", "app_open", "app_changes",
+             "app_undo"),
+            "read or change Relay's own Options, run one of its actions, list the window's panes "
+            "so an action can be aimed at one, search the user's past conversations, or put a "
+            "screen in front of them"),
     "own_session": (("session_info", "activity"),
                     "read this conversation itself: its model, context left, tokens, and a digest "
                     "of recent turns with their tool-call timings"),

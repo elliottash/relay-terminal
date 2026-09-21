@@ -34,6 +34,12 @@ struct State {
     int steps = 50;
     QStringList ran;
     QStringList opened;
+    // The window's panes, by the id a command aims with — a pane's session token, which is what
+    // `who` carries for a pane agent (#AG7R group 2). `aimed` records "key@pane" for a run that
+    // was aimed at one; `ran` is the unaimed path, the palette's own closure over the focused
+    // pane, so which list an action lands in is the whole question these tests ask.
+    QStringList panes{QStringLiteral("pane-a"), QStringLiteral("pane-b")};
+    QStringList aimed;
 };
 
 QList<SettingsSection> catalog(State *state) {
@@ -159,6 +165,35 @@ QList<ActionItem> actions(State *state) {
         items << item;
     }
     {
+        // Pane-scoped and safe since #AG7R group 2: the input mode decides where the next thing
+        // the person types goes, and it is one click back.
+        ActionItem item;
+        item.key = QStringLiteral("input.toggle");
+        item.section = QStringLiteral("Agent");
+        item.label = QStringLiteral("Toggle terminal / agent input");
+        item.agentSafe = relay::appcommands::actionIsAgentSafe(item.key);
+        item.run = [state] { state->ran << QStringLiteral("input.toggle"); };
+        items << item;
+    }
+    {
+        // The Model submenu and one of its children, which is how `model:<id>` reaches the
+        // catalog at all: the id is a stored preset, so the children are built from what the
+        // pane has and there is no fixed set of keys to name.
+        ActionItem item;
+        item.key = QStringLiteral("menu:model");
+        item.section = QStringLiteral("Agent");
+        item.label = QStringLiteral("Model");
+        item.children = [state] {
+            ActionItem child;
+            child.key = QStringLiteral("model:local/bonsai");
+            child.section = QStringLiteral("Model");
+            child.label = QStringLiteral("Bonsai 2 27B");
+            child.run = [state] { state->ran << QStringLiteral("model:local/bonsai"); };
+            return QList<ActionItem>{child};
+        };
+        items << item;
+    }
+    {
         // Safe, but it writes: re-reading theme.json puts an edit made since the last read into
         // effect, so this one stays behind the writes toggle while opening a pane no longer does
         // (#AG7R group 7).
@@ -218,6 +253,20 @@ private Q_SLOTS:
         app.writesEnabled = [this] { return writes; };
         app.registryLabel = [](const QString &key) { return registryLabel(key); };
         app.runRegistryAction = [this](const QString &key) { state.ran << QStringLiteral("registry:") + key; };
+        app.paneExists = [this](const QString &id) { return state.panes.contains(id); };
+        app.runActionAt = [this](const QString &key, const QString &id) {
+            if (!state.panes.contains(id)) return false;
+            state.aimed << key + QLatin1Char('@') + id;
+            return true;
+        };
+        app.panes = [this] {
+            QJsonArray rows;
+            for (const QString &id : state.panes)
+                rows.append(QJsonObject{{QStringLiteral("id"), id},
+                                        {QStringLiteral("title"), QStringLiteral("~/src ") + id},
+                                        {QStringLiteral("focused"), id == state.panes.first()}});
+            return rows;
+        };
         app.openTarget = [this](const QJsonObject &command, QString *error) {
             const QString target = command.value(QStringLiteral("target")).toString();
             if (target != QStringLiteral("options") && target != QStringLiteral("sessions")) {
@@ -509,19 +558,231 @@ private Q_SLOTS:
     }
 
     // ----- group 3: reversible, in the catalog, never named --------------------------------------
-    // Owner, 2026-09-20 on #AG7R: "groups 1-3 all yes", for the window-scoped half. The
-    // pane-scoped keys (model, effort, input mode, plan toggle) wait for `run_action` to carry a
-    // target pane — group 2 — and are deliberately still off here.
+    // Owner, 2026-09-20 on #AG7R: "groups 1-3 all yes". The window-scoped half landed first; the
+    // pane-scoped half waited for group 2, because a picker that cannot say *which* pane it means
+    // lands on whichever one the person is looking at.
     void theWindowScopedGroupThreeKeysAreSafe() {
         for (const QString &key : {QStringLiteral("tests.open"), QStringLiteral("app.about"),
                                    QStringLiteral("logs.open"), QStringLiteral("theme.folder"),
                                    QStringLiteral("agent.screenshotPane"), QStringLiteral("pane.equalize"),
                                    QStringLiteral("menu:closed")})
             QVERIFY2(relay::appcommands::actionIsAgentSafe(key), qPrintable(key));
+    }
+
+    // …and the pane-scoped half, now that a command can be aimed. Each writes — the model and the
+    // effort are saved for the pane, the mode decides where the next thing typed goes — so each is
+    // behind the writes toggle rather than in the read set (group 7).
+    void thePaneScopedGroupThreeKeysAreSafeAndWrite() {
         for (const QString &key : {QStringLiteral("menu:model"), QStringLiteral("model:local/bonsai"),
-                                   QStringLiteral("menu:effort"), QStringLiteral("input.toggle"),
-                                   QStringLiteral("agent.planToggle")})
-            QVERIFY2(!relay::appcommands::actionIsAgentSafe(key), qPrintable(key));
+                                   QStringLiteral("menu:effort"), QStringLiteral("effort:high"),
+                                   QStringLiteral("menu:mode"), QStringLiteral("input.modeAuto"),
+                                   QStringLiteral("input.modeTerminal"), QStringLiteral("input.modeAgent"),
+                                   QStringLiteral("input.toggle"), QStringLiteral("agent.planToggle")}) {
+            QVERIFY2(relay::appcommands::actionIsAgentSafe(key), qPrintable(key));
+            QVERIFY2(!relay::appcommands::actionIsRead(key), qPrintable(key));
+            QVERIFY2(relay::appcommands::actionIsPaneScoped(key), qPrintable(key));
+        }
+        // The window-scoped keys are not aimed at anything: a split anchors on the leaf the
+        // person is looking at, and moving the focus is about the window.
+        for (const QString &key : {QStringLiteral("pane.splitRight"), QStringLiteral("tab.next"),
+                                   QStringLiteral("app.settings"), QStringLiteral("closed:2")})
+            QVERIFY2(!relay::appcommands::actionIsPaneScoped(key), qPrintable(key));
+    }
+
+    // `model:<id>` and `effort:<level>` carry a suffix nothing can enumerate — a stored preset,
+    // and whatever levels the pane's provider offers — so they are matched by prefix, exactly as
+    // `closed:<id>` is. A near miss must not become safe by looking like one.
+    void aPickedModelMatchesByPrefixAndANearMissDoesNot() {
+        QVERIFY(relay::appcommands::actionIsAgentSafe(QStringLiteral("model:local/bonsai")));
+        QVERIFY(relay::appcommands::actionIsAgentSafe(QStringLiteral("model:anything-at-all")));
+        QVERIFY(relay::appcommands::actionIsAgentSafe(QStringLiteral("effort:high")));
+        QVERIFY(!relay::appcommands::actionIsAgentSafe(QStringLiteral("model:")));      // no id at all
+        QVERIFY(!relay::appcommands::actionIsAgentSafe(QStringLiteral("effort:")));
+        QVERIFY(!relay::appcommands::actionIsAgentSafe(QStringLiteral("models:local")));  // not the prefix
+        QVERIFY(!relay::appcommands::actionIsAgentSafe(QStringLiteral("model.pick")));
+        // Being named by the policy is not being in the catalog: the id has to be one the pane
+        // really has, and `model:anything-at-all` is in no submenu, so it is still unknown.
+        QCOMPARE(run({{QStringLiteral("id"), QStringLiteral("r1")},
+                      {QStringLiteral("command"), QStringLiteral("run_action")},
+                      {QStringLiteral("key"), QStringLiteral("model:anything-at-all")}})
+                     .value(QStringLiteral("error")).toString(),
+                 QStringLiteral("unknown_action"));
+        QVERIFY(state.ran.isEmpty());
+        QVERIFY(state.aimed.isEmpty());
+    }
+
+    // ----- group 2: which pane a command lands on -------------------------------------------------
+    //
+    // `RelayWindow::runAction()` opened with `Pane *pane = m_active` and `app_command` carried no
+    // pane, so a pane-scoped action asked for by the agent in tab 2 acted on the pane the person
+    // happened to be sitting in. The three rules are below, and the first is the one that must ask
+    // nothing of the model.
+
+    // A pane agent's command with no `pane`: `who` is its pane's session token, so its own pane is
+    // resolved without it naming itself.
+    void aPaneAgentsCommandWithNoPaneLandsOnItsOwnPane() {
+        const QJsonObject result = run({{QStringLiteral("id"), QStringLiteral("r1")},
+                                        {QStringLiteral("command"), QStringLiteral("run_action")},
+                                        {QStringLiteral("key"), QStringLiteral("input.toggle")}},
+                                       QStringLiteral("pane-b"));
+        QVERIFY2(result.value(QStringLiteral("ok")).toBool(),
+                 qPrintable(result.value(QStringLiteral("error")).toString()));
+        QCOMPARE(state.aimed, QStringList{QStringLiteral("input.toggle@pane-b")});
+        QVERIFY(state.ran.isEmpty());                       // never the focused pane's closure
+        QCOMPARE(result.value(QStringLiteral("pane")).toString(), QStringLiteral("pane-b"));
+    }
+
+    // The helper has no pane of its own — `who` is the word "helper" — so its commands go on
+    // landing on the pane the person is focused on. Said out loud because it is the case that
+    // surprises people.
+    void aHelpersCommandWithNoPaneLandsOnTheFocusedPane() {
+        const QJsonObject result = run({{QStringLiteral("id"), QStringLiteral("r1")},
+                                        {QStringLiteral("command"), QStringLiteral("run_action")},
+                                        {QStringLiteral("key"), QStringLiteral("input.toggle")}},
+                                       QStringLiteral("helper"));
+        QVERIFY(result.value(QStringLiteral("ok")).toBool());
+        QCOMPARE(state.ran, QStringList{QStringLiteral("input.toggle")});
+        QVERIFY(state.aimed.isEmpty());
+        QVERIFY(!result.contains(QStringLiteral("pane")));
+    }
+
+    // An explicit `pane` names any pane of the window — how one agent reaches another's pane.
+    void anExplicitPaneIsWhereItLands() {
+        const QJsonObject result = run({{QStringLiteral("id"), QStringLiteral("r1")},
+                                        {QStringLiteral("command"), QStringLiteral("run_action")},
+                                        {QStringLiteral("key"), QStringLiteral("model:local/bonsai")},
+                                        {QStringLiteral("pane"), QStringLiteral("pane-a")}},
+                                       QStringLiteral("pane-b"));
+        QVERIFY2(result.value(QStringLiteral("ok")).toBool(),
+                 qPrintable(result.value(QStringLiteral("error")).toString()));
+        QCOMPARE(state.aimed, QStringList{QStringLiteral("model:local/bonsai@pane-a")});
+        QVERIFY(state.ran.isEmpty());
+        QCOMPARE(result.value(QStringLiteral("pane")).toString(), QStringLiteral("pane-a"));
+        // The helper may aim too: it has no pane of its own, and that is the only difference.
+        run({{QStringLiteral("id"), QStringLiteral("r2")},
+             {QStringLiteral("command"), QStringLiteral("run_action")},
+             {QStringLiteral("key"), QStringLiteral("input.toggle")},
+             {QStringLiteral("pane"), QStringLiteral("pane-b")}}, QStringLiteral("helper"));
+        QCOMPARE(state.aimed.size(), 2);
+        QCOMPARE(state.aimed.last(), QStringLiteral("input.toggle@pane-b"));
+    }
+
+    // A pane that was closed between the agent reading the list and asking. It is a refusal with
+    // its own word, never a silent landing on somebody else's pane — which is the fault this
+    // whole change is about.
+    void aPaneThatHasGoneAnswersUnknownPane() {
+        const QJsonObject result = run({{QStringLiteral("id"), QStringLiteral("r1")},
+                                        {QStringLiteral("command"), QStringLiteral("run_action")},
+                                        {QStringLiteral("key"), QStringLiteral("input.toggle")},
+                                        {QStringLiteral("pane"), QStringLiteral("pane-gone")}},
+                                       QStringLiteral("pane-b"));
+        QVERIFY(!result.value(QStringLiteral("ok")).toBool());
+        QCOMPARE(result.value(QStringLiteral("error")).toString(), QStringLiteral("unknown_pane"));
+        QVERIFY(result.value(QStringLiteral("message")).toString().contains(QStringLiteral("pane-gone")));
+        QVERIFY(state.ran.isEmpty());
+        QVERIFY(state.aimed.isEmpty());
+        // …and it is refused before the policy is even consulted, so an unsafe key aimed at a
+        // dead pane says the pane is gone rather than teaching the agent about the policy.
+        QCOMPARE(run({{QStringLiteral("id"), QStringLiteral("r2")},
+                      {QStringLiteral("command"), QStringLiteral("run_action")},
+                      {QStringLiteral("key"), QStringLiteral("pane.close")},
+                      {QStringLiteral("pane"), QStringLiteral("pane-gone")}}, QStringLiteral("pane-b"))
+                     .value(QStringLiteral("error")).toString(),
+                 QStringLiteral("unknown_pane"));
+    }
+
+    // A window-scoped action ignores the aim: a split anchors on the leaf the person is looking
+    // at, and so do the focus moves and the tab keys. Aiming those would mean a pane appearing in
+    // a tab nobody is watching (see runActionNow's comment).
+    void aWindowScopedActionRunsWhereItAlwaysDid() {
+        QVERIFY(run({{QStringLiteral("id"), QStringLiteral("r1")},
+                     {QStringLiteral("command"), QStringLiteral("run_action")},
+                     {QStringLiteral("key"), QStringLiteral("pane.splitRight")},
+                     {QStringLiteral("pane"), QStringLiteral("pane-b")}}, QStringLiteral("pane-a"))
+                    .value(QStringLiteral("ok")).toBool());
+        QCOMPARE(state.ran, QStringList{QStringLiteral("pane.splitRight")});
+        QVERIFY(state.aimed.isEmpty());
+        // A `row:` button is the app's, not a pane's, and runs its own closure whoever asked.
+        QVERIFY(run({{QStringLiteral("id"), QStringLiteral("r2")},
+                     {QStringLiteral("command"), QStringLiteral("run_action")},
+                     {QStringLiteral("key"), relay::appcommands::rowActionKey(
+                                                 QStringLiteral("models"), QStringLiteral("provider:acme"), 0)}},
+                    QStringLiteral("pane-b")).value(QStringLiteral("ok")).toBool());
+        QCOMPARE(state.ran.last(), QStringLiteral("button 0"));
+        QVERIFY(state.aimed.isEmpty());
+    }
+
+    // A window with no pane lookup at all — every existing caller of AppCommands, and the tests
+    // above this section, where `who` is not a pane token — runs exactly as it did before there
+    // was a `pane` field.
+    void withNoPaneLookupEveryActionRunsAsItAlwaysDid() {
+        app.paneExists = nullptr;
+        app.runActionAt = nullptr;
+        QVERIFY(run({{QStringLiteral("id"), QStringLiteral("r1")},
+                     {QStringLiteral("command"), QStringLiteral("run_action")},
+                     {QStringLiteral("key"), QStringLiteral("input.toggle")}},
+                    QStringLiteral("pane-b")).value(QStringLiteral("ok")).toBool());
+        QCOMPARE(state.ran, QStringList{QStringLiteral("input.toggle")});
+        QVERIFY(state.aimed.isEmpty());
+        // A named pane cannot be checked, so it is refused rather than silently ignored.
+        QCOMPARE(run({{QStringLiteral("id"), QStringLiteral("r2")},
+                      {QStringLiteral("command"), QStringLiteral("run_action")},
+                      {QStringLiteral("key"), QStringLiteral("input.toggle")},
+                      {QStringLiteral("pane"), QStringLiteral("pane-a")}}, QStringLiteral("pane-b"))
+                     .value(QStringLiteral("error")).toString(),
+                 QStringLiteral("unknown_pane"));
+    }
+
+    // `list_panes`: where an agent reads the id of a pane that is not its own. It changes
+    // nothing, so it is answered whatever the writes toggle says (§30.4), and the asking agent's
+    // own pane is marked so it never has to guess.
+    void listPanesNamesEveryPaneAndMarksTheAgentsOwn() {
+        writes = false;
+        const QJsonObject result = run({{QStringLiteral("id"), QStringLiteral("r1")},
+                                        {QStringLiteral("command"), QStringLiteral("list_panes")}},
+                                       QStringLiteral("pane-b"));
+        QVERIFY(result.value(QStringLiteral("ok")).toBool());
+        const QJsonArray panes = result.value(QStringLiteral("panes")).toArray();
+        QCOMPARE(panes.size(), 2);
+        QCOMPARE(panes.at(0).toObject().value(QStringLiteral("id")).toString(), QStringLiteral("pane-a"));
+        QVERIFY(!panes.at(0).toObject().contains(QStringLiteral("you")));
+        QVERIFY(panes.at(1).toObject().value(QStringLiteral("you")).toBool());
+        // The helper is in no pane, so none of them is marked as its own.
+        for (const auto &value : run({{QStringLiteral("id"), QStringLiteral("r2")},
+                                      {QStringLiteral("command"), QStringLiteral("list_panes")}},
+                                     QStringLiteral("helper")).value(QStringLiteral("panes")).toArray())
+            QVERIFY(!value.toObject().contains(QStringLiteral("you")));
+    }
+
+    // An `open` is aimed too: `new_pane: false` from a pane agent means *its* pane, not whichever
+    // one has the focus. The resolved token travels on as `pane`, so the window's opener needs no
+    // rule of its own.
+    void openCarriesThePaneItWasAimedAt() {
+        app.openTarget = [this](const QJsonObject &command, QString *) {
+            state.opened << command.value(QStringLiteral("target")).toString() + QLatin1Char('@')
+                                + command.value(QStringLiteral("pane")).toString();
+            return true;
+        };
+        run({{QStringLiteral("id"), QStringLiteral("r1")},
+             {QStringLiteral("command"), QStringLiteral("open")},
+             {QStringLiteral("target"), QStringLiteral("conversation")}}, QStringLiteral("pane-b"));
+        run({{QStringLiteral("id"), QStringLiteral("r2")},
+             {QStringLiteral("command"), QStringLiteral("open")},
+             {QStringLiteral("target"), QStringLiteral("conversation")},
+             {QStringLiteral("pane"), QStringLiteral("pane-a")}}, QStringLiteral("pane-b"));
+        run({{QStringLiteral("id"), QStringLiteral("r3")},
+             {QStringLiteral("command"), QStringLiteral("open")},
+             {QStringLiteral("target"), QStringLiteral("options")}}, QStringLiteral("helper"));
+        QCOMPARE(state.opened, (QStringList{QStringLiteral("conversation@pane-b"),
+                                            QStringLiteral("conversation@pane-a"),
+                                            QStringLiteral("options@")}));
+        QCOMPARE(run({{QStringLiteral("id"), QStringLiteral("r4")},
+                      {QStringLiteral("command"), QStringLiteral("open")},
+                      {QStringLiteral("target"), QStringLiteral("conversation")},
+                      {QStringLiteral("pane"), QStringLiteral("pane-gone")}}, QStringLiteral("pane-b"))
+                     .value(QStringLiteral("error")).toString(),
+                 QStringLiteral("unknown_pane"));
+        QCOMPARE(state.opened.size(), 3);
     }
 
     // One named recently-closed pane. The key carries the id the close minted, so there is no set

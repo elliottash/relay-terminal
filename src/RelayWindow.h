@@ -1072,18 +1072,38 @@ private:
     }
 
     // ----- actions ----------------------------------------------------------------------------
-    void runAction(const QString &id) {
+    // `target` is the pane the action acts on, and defaults to the focused one — which is every
+    // caller but one: the keyboard, the Actions pane, the chrome buttons and the right-click menu
+    // all mean "the pane the person is in". Only an `app_command` passes one (#AG7R group 2,
+    // §30.3): until it could, a pane-scoped action asked for by the agent in tab 2 landed on
+    // whatever pane happened to have the focus, which is why group 3's model, effort, input-mode
+    // and plan-mode keys could not be turned on.
+    void runAction(const QString &id, Pane *target = nullptr) {
         Pane *pane = m_active;
         // A split from a pane in an ssh session: the same host reached by hand in the new pane
-        // teaches Split on the same host (#S5SH).
+        // teaches Split on the same host (#S5SH). It reads `m_active` and not `target` on purpose:
+        // the split itself anchors on the focused leaf (see runActionNow), so the host to teach is
+        // the focused pane's.
         const QString sshHost = id.startsWith(QStringLiteral("pane.split")) && pane
             ? relay::panestatus::remoteHost(pane->remoteCommandLine()) : QString();
-        runActionNow(id);
+        runActionNow(id, target);
         if (!sshHost.isEmpty() && m_active != pane) markForSshHint(m_active, sshHost);
     }
 
-    void runActionNow(const QString &id) {
-        Pane *pane = m_active;
+    void runActionNow(const QString &id, Pane *target = nullptr) {
+        // The pane every `pane->…` branch below acts on. A `target` is the pane an `app_command`
+        // was aimed at; unset means the focused pane, which is what every keyboard, palette and
+        // chrome caller means and what this line said before there was a target at all.
+        //
+        // The window and layout branches deliberately do **not** follow it. The splits, the
+        // explorer, Equalize, moving a pane or a tab and the focus keys anchor on `m_activeLeaf`
+        // — where the person is looking — and they keep doing so: a new pane appearing beside a
+        // pane in a tab nobody is watching, or a focus that jumps out of the tab someone is
+        // typing in, is a worse surprise than the one being fixed here, and those are all
+        // window-scoped keys in the first place (`appcommands::actionIsPaneScoped()` names the
+        // set that is not). Aiming them would mean teaching `splitToward()` and its neighbours to
+        // take a leaf, which is a change to the layout code and not this card's.
+        Pane *pane = target ? target : m_active.data();
         // "Move left/right, then ↓ docks it beneath" (#Q7Y9): only Move-down may land inside the
         // chord's window; any other action closes it, so a stale chord never grabs a later one.
         if (id != QStringLiteral("pane.moveDown")) endBeneathDock();
@@ -1241,6 +1261,16 @@ private:
         else if (id == QStringLiteral("input.modeAuto")) pane->setMode(QStringLiteral("auto"));
         else if (id == QStringLiteral("input.modeTerminal")) pane->setMode(QStringLiteral("shell"));
         else if (id == QStringLiteral("input.modeAgent")) pane->setMode(QStringLiteral("agent"));
+        // The Model and Reasoning-effort submenus' children, `model:<id>` and `effort:<level>`.
+        // Their palette rows run a closure over `m_active` (rootItems()), which is the focused
+        // pane and nothing else; these two branches are how the same two setters are reached with
+        // a pane named — "put *this* pane on the local model" (#AG7R groups 2 and 3). Matched by
+        // prefix, as `appcommands::isOnePickedModel()` does, because the id is a stored preset and
+        // the level is whatever the provider offers: there is no fixed set to compare against.
+        // A key nothing stored answers to never gets here — it is not in the catalog, so the
+        // executor refuses it `unknown_action` first.
+        else if (id.startsWith(QStringLiteral("model:")) && id.size() > 6) pane->selectModel(id.mid(6));
+        else if (id.startsWith(QStringLiteral("effort:")) && id.size() > 7) pane->setEffort(id.mid(7));
     }
 
     // ----- palette ----------------------------------------------------------------------------
@@ -1650,6 +1680,42 @@ private:
                 return QString();
             };
             m_appCommands.runRegistryAction = [this](const QString &key) { runAction(key); };
+            // Aiming a command at a pane (#AG7R group 2, §30.3). A pane is named by its **session
+            // token** — the same string the change log's `who` already carries for a pane agent,
+            // so a pane agent's own pane resolves out of `who` with nothing asked of the model,
+            // and the id an agent reads in `list_panes` is the id it is named by everywhere else.
+            m_appCommands.paneExists = [this](const QString &token) {
+                return !token.isEmpty() && findPaneByToken(token) != nullptr;
+            };
+            m_appCommands.runActionAt = [this](const QString &key, const QString &token) {
+                Pane *pane = findPaneByToken(token);
+                if (!pane) return false;     // closed while the command was in flight
+                runAction(key, pane);
+                return true;
+            };
+            // The panes of this window, for `list_panes`: an agent cannot aim at a pane but its
+            // own until it can read the others' ids. Answered on demand rather than carried in the
+            // `app` block, because panes open and close between two catalogs and a stale list
+            // would have an agent name a pane that has gone.
+            m_appCommands.panes = [this]() -> QJsonArray {
+                QJsonArray rows;
+                for (Pane *pane : allPanes()) {
+                    if (!pane) continue;
+                    rows.append(QJsonObject{
+                        {QStringLiteral("id"), pane->sessionToken()},
+                        // What the person would call it: the pane's own title, or its directory
+                        // the way the header shows it when there is none.
+                        {QStringLiteral("title"), pane->paneTitle().isEmpty()
+                                                      ? shortPath(pane->cwd()) : pane->paneTitle()},
+                        {QStringLiteral("cwd"), pane->cwd()},
+                        {QStringLiteral("tab"), tabIdOfPane(pane)},
+                        {QStringLiteral("model"), pane->currentPreset()},
+                        {QStringLiteral("mode"), pane->mode()},
+                        {QStringLiteral("busy"), pane->agentBusy()},
+                        {QStringLiteral("focused"), pane == m_active}});
+                }
+                return rows;
+            };
         }
         return m_appCommands;
     }
@@ -1755,11 +1821,14 @@ private:
             QJsonObject item;
             bool newPane = true;
             if (!relay::appcommands::conversationToOpen(command, &item, &newPane, error)) return false;
-            // The pane it opens from: the active terminal pane, else this tab's first. With
+            // The pane it opens from: the pane the command was aimed at (#AG7R group 2 — for a
+            // pane agent that is its own pane, so `new_pane: false` means "here" and not "wherever
+            // the focus is"), else the active terminal pane, else this tab's first. With
             // `new_pane` it is only the anchor the new pane goes beside; without it, it is the
             // pane the conversation is loaded into — the same pane Enter on a row would have
             // used, since the manager is bound to it.
-            Pane *owner = m_active.data();
+            Pane *owner = findPaneByToken(command.value(QStringLiteral("pane")).toString());
+            if (!owner) owner = m_active.data();
             if (!owner) { const auto panes = panesIn(m_tabs->currentWidget()); owner = panes.isEmpty() ? nullptr : panes.first(); }
             if (!owner) return fail(QStringLiteral("failed"));
             owner->openSavedSession(item, newPane);

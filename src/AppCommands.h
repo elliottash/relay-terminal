@@ -8,7 +8,7 @@
 // `SettingsSection`/`SettingRow` and `ActionItem`, which the window already builds for the Options
 // and Actions panes — so it compiles into a small library and is tested headless
 // (`tests/appcommands_test.cpp`), where a window would need the whole app. RelayWindow supplies the
-// catalogs and the four callbacks below; it holds one AppCommands and both command sources — a
+// catalogs and the callbacks below; it holds one AppCommands and both command sources — a
 // pane's worker and the tab's helper worker — go through it (§30.3: one executor, two sources).
 //
 // What the owner decided, 2026-09-20, and where it lives here:
@@ -23,6 +23,7 @@
 #include "SettingsPane.h"
 
 #include <QDateTime>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QList>
@@ -103,6 +104,16 @@ bool actionIsAgentSafe(const QString &key);
 // Every read action is agent-safe; `actionIsAgentSafe()` is this set plus the writing ones.
 bool actionIsRead(const QString &key);
 
+// Whether an action acts on **a pane** rather than on the window or on the app as a whole: the
+// pane's model, its reasoning effort, its input mode, its plan mode, its own views (ⓘ, Activity,
+// requests, thinking, find-in-view, the sessions list bound to it, a screenshot of it).
+//
+// It is the set `run_action`'s `pane` means anything for (§30.3, #AG7R group 2). Everything else
+// — the splits, the focus moves, the tab and window keys, Options, the Switchboard, a `row:`
+// button — is aimed at the window or at the layout the person is looking at, and runs exactly as
+// it did before an agent could name a pane at all.
+bool actionIsPaneScoped(const QString &key);
+
 // Every key the safe table names outright, sorted. `catalog()` uses it to list the safe keys the
 // palette has no row for (#AG7R group 1); the prefix entries (`closed:<id>`) are not in it,
 // because there is no fixed set of them to list.
@@ -167,6 +178,26 @@ public:
     // Both unset is the tested, window-free case: then only the catalog's own rows resolve.
     std::function<QString(const QString &key)> registryLabel;
     std::function<void(const QString &key)> runRegistryAction;
+    // ----- aiming a command at a pane (§30.3, #AG7R group 2) ------------------------------------
+    // `RelayWindow::runAction()` opened with `Pane *pane = m_active` and `app_command` carried no
+    // pane at all, so an action asked for by the agent in tab 2 landed on whichever pane the
+    // *person* was focused on. Nothing pane-scoped could be made agent-safe until a command could
+    // be aimed, which is why group 3's model, effort, input-mode and plan-mode keys waited for
+    // this.
+    //
+    // A pane is named by its **session token** — the same string `who` carries for a pane agent,
+    // so a pane agent's own pane is resolved without the model having to name itself, and the
+    // change log and the aim agree about what a pane is called. `paneExists` answers whether that
+    // token still names a live pane of this window (a pane that has been closed is
+    // `unknown_pane`, never a silent landing somewhere else); `runActionAt` runs the key with that
+    // pane as the action's target, answering false if it went in between; `panes` lists them for
+    // `list_panes`, which is how an agent reads the id of a pane that is not its own.
+    //
+    // All three unset is the tested, window-free case: every command then lands where it always
+    // did, on the focused pane.
+    std::function<bool(const QString &paneId)> paneExists;
+    std::function<bool(const QString &key, const QString &paneId)> runActionAt;
+    std::function<QJsonArray()> panes;
     // ----- the catalog (§30.2) ------------------------------------------------------------------
     // The whole `app` block, for `configure` and for an `app_catalog` refresh. It is rebuilt from
     // the live catalogs every time: the block carries current values, so a setting the person
@@ -179,9 +210,11 @@ public:
 
     // ----- executing a command (§30.3) ----------------------------------------------------------
     // Takes an `app_command` and answers the `app_command_result` to send back down the same pipe.
-    // `who` says which agent asked — a pane's session token, or "helper" — and is only ever used
-    // in the change log and the notification. It never refuses by *who*: the policy is
-    // `writes_enabled`, `settable` and `agent_safe`, set once in Options (§30.8).
+    // `who` says which agent asked — a pane's session token, or "helper" — and names the asker in
+    // the change log and the notification. Since #AG7R group 2 it does one thing more: a pane
+    // agent's token *is* its pane's id, so a command with no `pane` of its own is aimed at the
+    // pane that asked (§30.3). It still never refuses by *who*: the policy is `writes_enabled`,
+    // `settable` and `agent_safe`, set once in Options (§30.8).
     QJsonObject execute(const QJsonObject &command, const QString &who);
 
     // ----- the change log (§30.6) ---------------------------------------------------------------

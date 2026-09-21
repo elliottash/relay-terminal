@@ -321,6 +321,76 @@ class ActionsTest(unittest.TestCase):
         self.assertIn("2 servers.", result["text"])
         self.assertEqual(self.tools.run("app_changes", {})["changes"][0]["kind"], "action")
 
+    def test_no_pane_is_sent_when_none_was_named(self):
+        """The GUI aims a pane-scoped action at the asking pane itself (§30.3, #AG7R group 2).
+
+        It can: the command arrives down that pane's own pipe, carrying its session token. So the
+        common case — a pane agent acting on its own pane — costs the model nothing, and a helper,
+        which has no pane, goes on landing where the person is focused.
+        """
+        self.tools.run("app_action_run", {"key": "settings.open"})
+        self.assertNotIn("pane", self.gui.last)
+
+    def test_a_named_pane_travels_and_comes_back(self):
+        self.gui.reply = lambda command: {"ok": True, "pane": command.get("pane")}
+        result = self.tools.run("app_action_run", {"key": "settings.open", "pane": " p-42 "})
+        self.assertEqual(self.gui.last["pane"], "p-42")
+        self.assertEqual(result["pane"], "p-42")
+
+    def test_a_pane_that_has_gone_is_a_refusal_with_its_own_word(self):
+        self.gui.reply = lambda command: {"ok": False, "error": "unknown_pane",
+                                          "message": "Relay has no pane p-9 in this window any more."}
+        result = self.tools.run("app_action_run", {"key": "settings.open", "pane": "p-9"})
+        self.assertEqual(result["code"], "unknown_pane")
+        self.assertIn("no pane", result["error"])
+        self.assertIn("unknown_pane", A.ERRORS)
+
+    def test_a_pane_that_is_not_text_is_refused_before_anything_is_sent(self):
+        self.assertEqual(self.tools.run("app_action_run", {"key": "settings.open",
+                                                           "pane": 7})["code"], "invalid_value")
+        self.assertEqual(self.gui.commands, [])
+
+
+class PanesTest(unittest.TestCase):
+    """`app_panes` (§30.3, #AG7R group 2): the only place a pane's id can be read.
+
+    Before it, an agent could aim at no pane but its own: the catalog carries the *tab*,
+    `session_info` is about this conversation and `app_sessions_search` about saved ones.
+    """
+
+    def setUp(self):
+        self.panes = [{"id": "p-1", "title": "~/relay", "focused": True},
+                      {"id": "p-2", "title": "build", "you": True}]
+        self.gui = FakeGui(lambda command: {"ok": True, "panes": self.panes})
+        self.tools = self.gui.build()
+
+    def test_the_panes_come_back_with_the_agents_own_marked(self):
+        result = self.tools.run("app_panes", {})
+        self.assertEqual(self.gui.last["command"], "list_panes")
+        self.assertEqual([p["id"] for p in result["panes"]], ["p-1", "p-2"])
+        self.assertEqual(result["count"], 2)
+        self.assertIn('yours is "build"', result["text"])
+
+    def test_a_window_that_cannot_answer_is_a_tool_error(self):
+        self.gui.reply = lambda command: {"ok": False, "error": "failed",
+                                          "message": "There is no window left to list panes in."}
+        result = self.tools.run("app_panes", {})
+        self.assertEqual(result["code"], "failed")
+        self.assertIn("no window", result["error"])
+
+    def test_it_is_a_read_so_the_writes_toggle_does_not_gate_it(self):
+        gui = FakeGui(lambda command: {"ok": True, "panes": self.panes})
+        tools = gui.build({**APP, "writes_enabled": False})
+        self.assertEqual(tools.run("app_panes", {})["count"], 2)
+        self.assertNotIn("app_panes", A.WRITE_TOOLS)
+
+    def test_it_is_in_the_app_group_so_its_schema_is_deferred_with_the_rest(self):
+        # A tool missing from the group would have its schema in *every* request, which is what
+        # the groups exist to avoid (#GMCF).
+        from relay_core import tool_groups
+        self.assertIn("app_panes", tool_groups.GROUPS["app"][0])
+        self.assertEqual(tool_groups.group_of("app_panes"), "app")
+
 
 class OpenTest(unittest.TestCase):
     def setUp(self):
@@ -404,6 +474,16 @@ class OpenConversationTest(unittest.TestCase):
         self.assertTrue(all(r["ok"] for r in result["results"]))
         self.assertIn("in new panes", result["text"])
         self.assertIn("Continue the pane split, The keybinding rewrite", result["text"])
+
+    def test_a_named_pane_is_the_pane_it_opens_from(self):
+        """With `new_pane: false` that is the pane it loads into: "here" is a pane, not the focus."""
+        self.tools.run("app_open", {"target": "conversation", "id": "s1", "new_pane": False,
+                                    "pane": "p-2"})
+        self.assertEqual(self.gui.last["pane"], "p-2")
+        self.tools.run("app_open", {"target": "conversation", "id": "s1"})
+        self.assertNotIn("pane", self.gui.last)
+        self.assertEqual(self.tools.run("app_open", {"target": "conversation", "id": "s1",
+                                                     "pane": ""})["code"], "invalid_value")
 
     def test_new_pane_false_loads_it_where_the_person_is(self):
         result = self.tools.run("app_open", {"target": "conversation", "id": "s1",

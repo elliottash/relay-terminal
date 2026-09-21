@@ -837,7 +837,7 @@ full profile names them in one line of the prompt and sends their schemas only o
 
 | Group | Tools | For |
 |---|---|---|
-| `app` | `app_option_list`, `app_option_get`, `app_option_set`, `app_action_list`, `app_action_run`, `app_sessions_search`, `app_open`, `app_changes`, `app_undo` | Relay's own Options and actions, the sessions index, putting a screen in front of the user (30.4) |
+| `app` | `app_option_list`, `app_option_get`, `app_option_set`, `app_action_list`, `app_action_run`, `app_panes`, `app_sessions_search`, `app_open`, `app_changes`, `app_undo` | Relay's own Options and actions, the window's panes, the sessions index, putting a screen in front of the user (30.4) |
 | `own_session` | `session_info`, `activity` | this conversation itself (30.5) |
 | `tests` | `tests_check`, `tests_run` | a card's `## Tests` section, and running named tests (31) |
 
@@ -6063,8 +6063,17 @@ moving the focus between panes, tabs and windows.
 toggle: re-reading a file already on disk (`keybindings.reload`, `theme.reload`, `agents.reload` —
 an edit made since the last read takes effect), `pane.equalize` (every splitter in the tab moves;
 a drag takes it back), `agent.screenshotPane` (it attaches an image to the pane's next prompt, so
-it changes what the person is about to send), and every row button — the ones that test a key,
-refresh, detect or find local servers, and reorder models.
+it changes what the person is about to send), every row button — the ones that test a key,
+refresh, detect or find local servers, and reorder models — and the pane's own pickers: its model
+(`menu:model`, `model:<id>`), its reasoning effort (`menu:effort`, `effort:<level>`), its input
+mode (`menu:mode`, `input.modeAuto`, `input.modeTerminal`, `input.modeAgent`, `input.toggle`) and
+plan mode (`agent.planToggle`). Those eleven are each a picker the person moves back in one click,
+and each is something people ask a helper for in words ("put this pane on the local model"); they
+waited for `run_action` to carry a pane (30.3), because a picker that cannot say *which* pane it
+means writes to whichever one the person is looking at. `model:<id>` and `effort:<level>` are
+matched by prefix, like `closed:<id>`: the id is a stored preset and the level is whatever that
+provider offers, so there is no set of them to write down. Being named by the policy is not being
+in the catalog — an id the pane does not have is in no submenu and is still `unknown_action`.
 
 `agent_safe` is `false` on everything else — including every action added after the table was
 written, which is what opt-in has to mean: resetting to defaults, removing a key or a server,
@@ -6101,10 +6110,48 @@ worker) and nothing a command carries may take that name from it.
 
 | `command` | fields | what the GUI does |
 |---|---|---|
-| `open` | `target`: `options` \| `actions` \| `sessions` \| `switchboard` \| `conversation`; `section?`, `row?`, `query?`, `card?`, `conversation?`, `item?`, `new_pane?` | `openSettingsPane(mode, section, query)` then `SettingsPane::revealOption(section, row)`; `openSessions(query)`; `openBoardCard(card)`, or `board.open` when no card is named; for `conversation`, `Pane::openSavedSession(item, new_pane)` on the active pane — the Sessions row's own Enter |
+| `open` | `target`: `options` \| `actions` \| `sessions` \| `switchboard` \| `conversation`; `section?`, `row?`, `query?`, `card?`, `conversation?`, `item?`, `new_pane?`, `pane?` | `openSettingsPane(mode, section, query)` then `SettingsPane::revealOption(section, row)`; `openSessions(query)`; `openBoardCard(card)`, or `board.open` when no card is named; for `conversation`, `Pane::openSavedSession(item, new_pane)` on the pane it was aimed at — the Sessions row's own Enter |
 | `set_option` | **`row`**, `value` | finds the row and invokes its writer |
-| `run_action` | `key` | finds the `ActionItem` — or the Options row button behind a `row:` key — and runs it |
+| `run_action` | `key`, `pane?` | finds the `ActionItem` — or the Options row button behind a `row:` key — and runs it, on the pane it was aimed at when the action is one that acts on a pane |
+| `list_panes` | — | answers `panes`: every pane of this window, with the id `pane` takes |
 | `undo` | `change_id` | reverts that entry of the change log (30.6) |
+
+**Which pane a command lands on.** Until 2026-09-20 the answer was always "whichever one the
+person is focused on": `RelayWindow::runAction()` opened with `Pane *pane = m_active` and
+`app_command` carried no pane at all, so an action asked for by the agent in tab 2 acted on the
+pane the person happened to be sitting in — which is why nothing pane-scoped could be made
+agent-safe (#AG7R group 2). A pane is named by **its session token**, the same string `who`
+already carries, and `pane` is optional on `run_action` and on `open`:
+
+- **A pane agent's command with no `pane` means its own pane.** The command comes out of that
+  pane's worker, so `who` *is* its token and the executor resolves it without the agent having to
+  name itself. This is the common case and asks nothing of the model.
+- **A helper's command with no `pane` lands on the focused pane**, exactly as it did before there
+  was a `pane` field: the helper is a tab's, not a pane's, and `who` is the word `helper`, which
+  names no pane. Said here rather than left implied, because it is the case that surprises people.
+- **An explicit `pane` names any pane of the window** — how one agent reaches another's pane, and
+  the only way for a helper to aim. `app_panes` (30.4) is where the ids are read.
+- **A `pane` that no longer exists is `unknown_pane`**, refused before the policy is consulted and
+  never a silent landing on somebody else's pane. It is also the answer when the pane goes between
+  the check and the run.
+
+Only the actions that act on a pane are aimed (`appcommands::actionIsPaneScoped()`): its model,
+effort, input mode and plan mode, and its own views (ⓘ, Activity, requests, thinking,
+find-in-view, link stepping, the sessions list bound to it, a screenshot of it). Everything else
+runs the catalog's own closure as it always did — the splits, the explorer, Equalize, moving a
+pane or a tab and the focus keys anchor on the **focused leaf**, because a new pane appearing
+beside a pane in a tab nobody is watching, or a focus that jumps out of the tab someone is typing
+in, is a worse surprise than the one being fixed; and a `row:` button belongs to Options, not to a
+pane. A successful `run_action` that *was* aimed answers with `pane`, so the transcript says where
+the change went. `open` carries the resolved token on to the window's opener, so
+`open {target: "conversation", new_pane: false}` from a pane agent means "into my pane" rather
+than "into whichever one has the focus".
+
+`list_panes` answers `panes: [{id, title, cwd, tab, model, mode, busy, focused, you?}]` — `id`
+being the token `pane` takes, `you` marking the asking agent's own pane. It is a round trip and
+not a field of the `app` block on purpose: panes open and close between two catalogs, and a list
+one pane out of date would have an agent name a pane that has gone. Like `open`, it changes
+nothing and is answered whatever `writes_enabled` says.
 
 `open {target: "conversation"}` resumes a saved conversation, which is what pressing Enter on a
 row of the Sessions pane does. The conversation's id travels as **`conversation`** (not `id`,
@@ -6135,8 +6182,8 @@ there is no `change_id` to send back. The worker will record one, and a `detail`
 future GUI answers with them.
 
 `error` is one of `unknown_row`, `unknown_action`, `unknown_target`, `unknown_change`,
-`unknown_conversation`, `not_settable`, `secret`, `writes_disabled`, `invalid_value`,
-`not_agent_safe`, `busy`, `failed` or `no_reply`, and the sentence for the transcript rides beside it in **`message`** (the worker also
+`unknown_conversation`, `unknown_pane`, `not_settable`, `secret`, `writes_disabled`,
+`invalid_value`, `not_agent_safe`, `busy`, `failed` or `no_reply`, and the sentence for the transcript rides beside it in **`message`** (the worker also
 reads `text` or `detail`, and treats an unrecognised `error` string as the sentence itself). An
 unknown `command` is answered `unknown_target`, with the command name in `message`.
 
@@ -6159,9 +6206,10 @@ never the tool list.
 | `app_option_get` | `id` | one row, in full: the listing shape plus `detail`, and `choices` or `min`/`max` for the kinds that have them |
 | `app_option_set` | `id`, `value` | refused when the row is `secret`, when `settable` is `false`, when `writes_enabled` is `false`, and when the value does not fit the kind: a bool for `toggle`, one of `choices[].value` for `choice` (a label, or a differently-cased value, is corrected rather than refused), a number within `min`/`max` for `number`, a string of at most 4096 characters with no control characters for `text`. Otherwise `app_command {command: "set_option"}`; the result names before → after and the `change_id`. |
 | `app_action_list` | `search?` | the action catalog, at most 60 entries, `agent_safe` on each row and `runnable` counting them, so the agent can name an action it may not run and tell the person where the button is. Since #GMCF it answers from the keybinding catalog too: a row that is a bindable action carries its current `keys`, and the registry entries with no palette row (the focus moves, the window cycle, the shortcuts overlay — 31 of 92) are listed after it under section `Shortcuts`, `agent_safe: false`, with a third of the cap kept for them. `set_keybinding`'s schema no longer lists any of it, so this is where an action id is found; a truncated listing says so in `note`. |
-| `app_action_run` | `key` | `agent_safe` actions only, and only with `writes_enabled` |
+| `app_action_run` | `key`, `pane?` | `agent_safe` actions only, and only with `writes_enabled`. An action that acts on one pane runs on the asking agent's own pane, or on the pane `pane` names; the helper, which has none of its own, runs it on the focused pane (30.3). The result carries `pane` when the choice was real. |
+| `app_panes` | — | the panes of this window — `{id, title, cwd, tab, model, mode, busy, focused, you?}` — over `app_command {command: "list_panes"}`. The ids are what `pane` takes, and this is the only place they can be read: the catalog carries the *tab*, `session_info` is about this conversation and `app_sessions_search` about saved ones. Not a write, so it is offered whatever `writes_enabled` says. |
 | `app_sessions_search` | `query`, `limit?` (default 10, at most 25) | worker-side, through the conversation index of section 14 (`conv_index.ConversationIndex.search`, the same query language as 14.2, `scope="all"` so it is the person's sessions and not this workspace's, up to 3 matching lines per row) — the Sessions pane never talks to the worker itself, so this needs no round trip and no open pane. Each row carries the `id` `app_open {target: "conversation"}` takes. |
-| `app_open` | `target`, `section?`, `row?`, `query?`, `card?`, `id?`, `ids?`, `new_pane?` | `app_command {command: "open"}`; a `row` is checked against the catalog first, so a misremembered id is a tool error rather than a pane opened at nothing, and a `card` is normalised (`#k7q2` → `K7Q2`). With `target: "conversation"` it opens past conversations: `id` for one, `ids` for up to 8, each in a pane of its own, in the order given and one round trip each, so the result answers **per id** (`results: [{id, ok, title?, error?}]`) and one unknown id does not lose the rest. `new_pane` defaults to true. Returns when the pane has opened, so the agent says what it did, not what it asked for. Not a write: it is offered whatever `writes_enabled` says. |
+| `app_open` | `target`, `section?`, `row?`, `query?`, `card?`, `id?`, `ids?`, `new_pane?`, `pane?` | `app_command {command: "open"}`; a `row` is checked against the catalog first, so a misremembered id is a tool error rather than a pane opened at nothing, and a `card` is normalised (`#k7q2` → `K7Q2`). With `target: "conversation"` it opens past conversations: `id` for one, `ids` for up to 8, each in a pane of its own, in the order given and one round trip each, so the result answers **per id** (`results: [{id, ok, title?, error?}]`) and one unknown id does not lose the rest. `new_pane` defaults to true, and `pane` says which pane it opens from — the asking agent's own unless it names another, so `new_pane: false` means "into my pane" (30.3). Returns when the pane has opened, so the agent says what it did, not what it asked for. Not a write: it is offered whatever `writes_enabled` says. |
 | `app_changes` | — | the writes this worker has made so far, newest first (at most 100 kept): `{change_id, kind: "option", id, label, previous, value, when, undone}` for an option and `{change_id, kind: "action", key, label, when, undone}` for an action, `when` being seconds ago, built from the results it received and not from the GUI's log |
 | `app_undo` | `change_id` | `app_command {command: "undo"}` for one of its own changes, and only one it has not already undone |
 

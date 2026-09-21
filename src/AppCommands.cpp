@@ -20,6 +20,20 @@ bool isOneNamedClosedPane(const QString &key) {
     return key.startsWith(QStringLiteral("closed:")) && key.size() > 7;
 }
 
+// `model:<id>` and `effort:<level>` are the Model and Reasoning-effort submenus' children, and
+// they have the same shape of problem as `closed:<id>`: the id is a stored provider preset and the
+// level is whatever *that* provider offers, so there is no fixed set of them to write down and
+// they are matched by prefix. A near miss — `models:foo`, or `model:` with nothing after it —
+// matches neither the set nor the palette, so it stays `unknown_action` rather than becoming a
+// safe key by accident. The catalog is what says which ids exist: a bogus `model:whatever` is not
+// among the submenu's children and is never found (#AG7R group 3).
+bool isOnePickedModel(const QString &key) {
+    return key.startsWith(QStringLiteral("model:")) && key.size() > 6;
+}
+bool isOnePickedEffort(const QString &key) {
+    return key.startsWith(QStringLiteral("effort:")) && key.size() > 7;
+}
+
 // The half of the safe table that changes nothing: it opens, reveals, focuses or restores a view
 // and stops there. This is the set `writes_enabled` does not gate (see actionIsRead()).
 const QSet<QString> &readActions() {
@@ -87,6 +101,38 @@ const QSet<QString> &reversibleWriteActions() {
         // change to the layout all the same.
         QStringLiteral("agent.screenshotPane"),
         QStringLiteral("pane.equalize"),
+        // #AG7R group 3's pane-scoped half, which waited for group 2: a command can now be aimed
+        // at a pane (`pane`, §30.3), so "put this pane on the local model" is answerable and no
+        // longer lands on whichever pane the person happens to be sitting in. Each of these is a
+        // picker the person moves back in one click — but each *writes*: the model and the effort
+        // are saved for the pane, the input mode decides where the next thing they type goes, and
+        // plan mode changes what the agent is allowed to do. So they are here and not in
+        // readActions(): the writes toggle still means "may change things" (group 7).
+        QStringLiteral("menu:model"), QStringLiteral("menu:effort"), QStringLiteral("menu:mode"),
+        QStringLiteral("input.modeAuto"), QStringLiteral("input.modeTerminal"),
+        QStringLiteral("input.modeAgent"), QStringLiteral("input.toggle"),
+        QStringLiteral("agent.planToggle"),
+    };
+    return keys;
+}
+
+// The actions that act on one pane. `run_action`'s `pane` selects which (§30.3); everything not
+// named here is aimed at the window or at the layout the person is looking at, and runs exactly as
+// it did before a command could name a pane (#AG7R group 2).
+const QSet<QString> &paneScopedActions() {
+    static const QSet<QString> keys = {
+        // Group 3's half above, plus `model:<id>` and `effort:<level>` by prefix below.
+        QStringLiteral("menu:model"), QStringLiteral("menu:effort"), QStringLiteral("menu:mode"),
+        QStringLiteral("input.modeAuto"), QStringLiteral("input.modeTerminal"),
+        QStringLiteral("input.modeAgent"), QStringLiteral("input.toggle"),
+        QStringLiteral("agent.planToggle"),
+        // Already safe, and always were about one pane: the pane's own views. Aiming them is the
+        // difference between "open the ⓘ view of the pane I am in" and "…of the pane the person
+        // is looking at", which until now were the same call.
+        QStringLiteral("agent.info"), QStringLiteral("agent.internalsPane"),
+        QStringLiteral("agent.requests"), QStringLiteral("agent.thinkingPanel"),
+        QStringLiteral("conversations.open"), QStringLiteral("find.inView"),
+        QStringLiteral("links.step"), QStringLiteral("agent.screenshotPane"),
     };
     return keys;
 }
@@ -105,7 +151,12 @@ bool actionIsAgentSafe(const QString &key) {
     // `palette.agent` used to be here and is gone: src/Keymap.h:176 migrates it to `palette.open`
     // and it exists nowhere else in the tree, so the table was naming a key that could never
     // arrive (#AG7R group 1).
-    return actionIsRead(key) || reversibleWriteActions().contains(key);
+    return actionIsRead(key) || reversibleWriteActions().contains(key)
+        || isOnePickedModel(key) || isOnePickedEffort(key);
+}
+
+bool actionIsPaneScoped(const QString &key) {
+    return paneScopedActions().contains(key) || isOnePickedModel(key) || isOnePickedEffort(key);
 }
 
 QStringList agentSafeActionKeys() {
@@ -196,6 +247,14 @@ QString target(const QJsonObject &command, const char *first, const char *second
         if (!value.isEmpty()) return value;
     }
     return {};
+}
+
+// The sentence beside `unknown_pane`. It names the id the agent asked for, because the agent read
+// that id out of a `list_panes` answer and the next thing it should do is read a fresh one.
+QString unknownPaneMessage(const QJsonObject &command) {
+    const QString asked = target(command, "pane");
+    return QStringLiteral("Relay has no pane %1 in this window any more. List the panes again.")
+        .arg(asked);
 }
 
 }  // namespace
@@ -509,11 +568,71 @@ QJsonObject AppCommands::execute(const QJsonObject &command, const QString &who)
     const QString what = command.value(QStringLiteral("command")).toString();
     const bool writes = !writesEnabled || writesEnabled();
 
+    // Which pane this command is aimed at, by the pane's session token (§30.3, #AG7R group 2).
+    // Three rules, and the first is the one that must ask nothing of the model:
+    //
+    //  * **a pane agent with no `pane`** means its own pane. `who` *is* that pane's token, so the
+    //    executor resolves it without the agent having to name itself — the common case, and no
+    //    change to anything a model writes.
+    //  * **the helper with no `pane`** keeps today's behaviour: `who` is the word "helper", which
+    //    names no pane, so the command lands on the pane the person is focused on. Said out loud
+    //    here and in §30.3 because it is the case that surprises people.
+    //  * **an explicit `pane`** names any pane of this window, and a pane that has been closed
+    //    since the agent read the list is `unknown_pane` — never a silent landing on somebody
+    //    else's pane, which is the whole fault this is fixing.
+    //
+    // `*named` says whether the command asked for a pane by name; the answer is the token to aim
+    // at, empty for "wherever the focus is".
+    QString paneError;
+    const auto aimedPane = [&](bool *named) -> QString {
+        const QString asked = target(command, "pane");
+        if (named) *named = !asked.isEmpty();
+        if (!asked.isEmpty()) {
+            if (!paneExists || !paneExists(asked)) {
+                paneError = QStringLiteral("unknown_pane");
+                return {};
+            }
+            return asked;
+        }
+        return paneExists && paneExists(who) ? who : QString();
+    };
+
     // `open` changes nothing, so it is offered whatever the Options › Agent toggle says (§30.4).
+    // It is aimed too: `open {target: "conversation", new_pane: false}` means "load it into *my*
+    // pane" when a pane agent asks, and the resolved token travels on as `pane` so the window's
+    // opener needs no rule of its own. The other targets are window-level panes and ignore it.
     if (what == QStringLiteral("open")) {
+        bool named = false;
+        const QString aim = aimedPane(&named);
+        if (named && aim.isEmpty()) return refuse(paneError, unknownPaneMessage(command));
+        QJsonObject aimed = command;
+        if (!aim.isEmpty()) aimed.insert(QStringLiteral("pane"), aim);
         QString error = QStringLiteral("unknown_target");
-        if (!openTarget || !openTarget(command, &error)) return refuse(error);
+        if (!openTarget || !openTarget(aimed, &error)) return refuse(error);
         result.insert(QStringLiteral("ok"), true);
+        return result;
+    }
+
+    // `list_panes`: the panes of this window, so that an agent can aim at one that is not its own
+    // (§30.3). It is a round trip rather than a field of the `app` catalog because panes open and
+    // close between two catalogs, and a list that is one pane out of date is worse than none: it
+    // would have an agent name a pane that has gone. Like `open`, it changes nothing and is
+    // offered whatever the toggle says.
+    if (what == QStringLiteral("list_panes")) {
+        if (!panes)
+            return refuse(QStringLiteral("failed"),
+                          QStringLiteral("There is no window left to list panes in."));
+        QJsonArray rows = panes();
+        // Which of them is the asking agent's own, so it never has to guess: `who` is its token.
+        for (int i = 0; i < rows.size(); ++i) {
+            QJsonObject row = rows.at(i).toObject();
+            if (!who.isEmpty() && row.value(QStringLiteral("id")).toString() == who) {
+                row.insert(QStringLiteral("you"), true);
+                rows.replace(i, row);
+            }
+        }
+        result.insert(QStringLiteral("ok"), true);
+        result.insert(QStringLiteral("panes"), rows);
         return result;
     }
 
@@ -588,12 +707,26 @@ QJsonObject AppCommands::execute(const QJsonObject &command, const QString &who)
         // nothing, so it passes; everything else, including a key nothing answers to, still meets
         // the toggle first and answers `writes_disabled` exactly as before.
         if (!writes && !actionIsRead(key)) return refuse(QStringLiteral("writes_disabled"));
+        bool named = false;
+        const QString aim = aimedPane(&named);
+        if (named && aim.isEmpty()) return refuse(paneError, unknownPaneMessage(command));
         ActionItem item;
         bool agentSafe = false;
         if (!findAction(key, &item, &agentSafe)) return refuse(QStringLiteral("unknown_action"));
         if (!agentSafe) return refuse(QStringLiteral("not_agent_safe"));
         if (!item.run) return refuse(QStringLiteral("failed"), QStringLiteral("%1 cannot be run from here.").arg(item.label));
-        item.run();
+        // A pane-scoped action goes to the pane it was aimed at; everything else runs the
+        // catalog's own closure, which is where the palette's rows, the `row:` buttons and the
+        // registry keys live (#AG7R group 2). With no aim — the helper, or a window with no
+        // lookup at all — every action runs exactly as it did before there was a `pane` field.
+        const bool aimed = actionIsPaneScoped(key) && !aim.isEmpty() && runActionAt;
+        if (aimed) {
+            // It could have been closed between the check above and this line.
+            if (!runActionAt(key, aim))
+                return refuse(QStringLiteral("unknown_pane"), unknownPaneMessage(command));
+        } else {
+            item.run();
+        }
 
         AppChange change;
         change.id = QStringLiteral("c%1").arg(m_nextChange++);
@@ -611,6 +744,9 @@ QJsonObject AppCommands::execute(const QJsonObject &command, const QString &who)
         while (m_changes.size() > kMaxChanges) m_changes.removeFirst();
 
         result.insert(QStringLiteral("ok"), true);
+        // Which pane it landed on, when that was a choice: a tool result says what happened, and
+        // "the pane you asked for" is part of what happened here (§30.3).
+        if (aimed) result.insert(QStringLiteral("pane"), aim);
         return result;
     }
 
