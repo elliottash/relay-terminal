@@ -12353,7 +12353,8 @@ private:
         if (m_editor && m_editor->toPlainText().trimmed().isEmpty()) { applyDestinationColor(Destination::Auto); return; }
         if (verdict.startsWith(QStringLiteral("TERMINAL")) || verdict.startsWith(QStringLiteral("SHELL")))
             applyDestinationColor(Destination::Shell);
-        else if (verdict.startsWith(QStringLiteral("AGENT")) || verdict.startsWith(QStringLiteral("COMMAND")))
+        else if (verdict.startsWith(QStringLiteral("AGENT")) || verdict.startsWith(QStringLiteral("COMMAND"))
+                 || verdict.startsWith(QStringLiteral("SKILL")))
             applyDestinationColor(Destination::Agent);
     }
 
