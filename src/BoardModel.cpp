@@ -407,10 +407,18 @@ QString executeTask(const QString &id, const QString &title, bool hasPlan, bool 
                             "its own the right answer.")
           << QStringLiteral("- Post progress, questions and decisions on %1 with board_comment, "
                             "not only here.").arg(ref)
+          // #WC3E: the expectations are written before the work, and the checklist afterwards
+          // is not the implementer's to write -- a list chosen by the pane that did the work is
+          // a list the work already satisfies.
+          << QStringLiteral("- Before you change code, %1 needs a `## Done means`: two to five "
+                            "lines saying the outcome someone could check and how failure would "
+                            "be recognised. Write it with board_update_card if it has none, from "
+                            "the issue rather than from the steps you are about to take.").arg(ref)
           << QStringLiteral("- When it lands, move %1 to needs-verification with the evidence "
-                            "path and a `## QA checklist`, as the Switchboard rules say. Its "
-                            "verifier then moves it on to needs QA, or back to an earlier "
-                            "stage.").arg(ref);
+                            "path and its `## Tests`, and write **no** `## QA checklist`: that "
+                            "section is the record of a separate verifying session, checked "
+                            "against your `## Done means`. That verifier then moves %1 on to "
+                            "needs QA, or back to an earlier stage.").arg(ref);
     if (!note.trimmed().isEmpty())
         lines << QString() << QStringLiteral("The owner adds, verbatim:") << note.trimmed();
     return lines.join(QLatin1Char('\n'));
@@ -634,19 +642,75 @@ QString verifyTask(const QString &id, const QString &title, const QString &verif
                ? QStringLiteral("Somebody else implemented it; you check that work, you do not do it again.")
                : QStringLiteral("%1 implemented it; you check that work, you do not do it again.")
                      .arg(implementedBy.trimmed());
+    // #WC3E: what makes a verification independent is that it is a different *session* from the
+    // one that wrote the code -- a different model family is what Relay recommends when it picks
+    // the verifier, and has never been a condition of the verdict.
+    who += QStringLiteral(" Being a separate session is what makes this check independent; a "
+                          "different model family is Relay's recommendation, not a requirement.");
     lines << who << QString();
     // A preset runner gets the card attached (`ask {cards: [id]}`); a guest CLI is handed this
     // text and nothing else, so the brief has to say where the card lives as well.
     lines << QStringLiteral("The card is attached. If you cannot see it, its file is the one "
                             "`grep -rl '%1' issues/` finds, and its thread is "
                             "`issues/threads/%2.md`.").arg(ref, id)
-          << QStringLiteral("- Read %1, its `## QA checklist` and the implementer's evidence under "
-                            "`docs/qa_evidence/`.").arg(ref)
-          << QStringLiteral("- Run every item of the `## QA checklist` yourself and write down what "
-                            "you actually saw, not what should have happened.")
-          << QStringLiteral("- Put your own evidence in the card's evidence directory "
-                            "(`docs/qa_evidence/<date>-<slug>/`), in files whose names start with "
-                            "`qa-`, beside the implementer's.")
+          // #WC3E: `## QA checklist` is the *verifier's* record. The implementer writes none, so
+          // there is no list waiting here -- the expectations are `## Done means`, written before
+          // the implementation, and the checklist says what this session did about each of them.
+          << QStringLiteral("- Read %1 — its `## Done means`, its `## Tests` and its "
+                            "`## Execution Summary` — and the implementer's evidence under "
+                            "`docs/qa_evidence/`. There is no checklist waiting for you: "
+                            "`## QA checklist` is yours to write.").arg(ref)
+          << QStringLiteral("- Name the revision you checked: the newest hash in the card's "
+                            "`links.commits`, or `git rev-parse --short HEAD` when it has none. "
+                            "Everything you write is a claim about that revision and no other.")
+          // The owner, 2026-09-21: verifying a card about the app is two things, and the second
+          // one is not optional. Tests say the code does what the tests say; the simulation is
+          // the only part that says the person's situation actually works.
+          << QStringLiteral("- **Verifying is two things.** One: run the tests %1 names in its "
+                            "`## Tests`. Two: verify it by simulation — stage the situation the "
+                            "card's `## Issue` and `## Done means` describe, and play the "
+                            "mechanical steps yourself.").arg(ref)
+          << QStringLiteral("- **The simulation, for a card about the app.** Stage a disposable "
+                            "fixture project, start the built binary under its own Xvfb display "
+                            "on an isolated profile (`HOME`, `XDG_*`, `TMPDIR` all inside a "
+                            "scratch directory, `RELAY_KEYRING=off`), and drive it with `xdotool` "
+                            "only — clicks, chords and typed text, never a terminal pane. Copy "
+                            "the recipe rather than inventing one: "
+                            "`docs/qa_evidence/2026-09-20-switchboard-tooling-hub/scenario/"
+                            "ai-pass.sh`. Save one capture per step.")
+          << QStringLiteral("- **The simulation, for a card that is not about the app** (backend, "
+                            "a CLI, docs): it is the request and its response, or the before and "
+                            "after of the reproduction the card describes, captured the same way. "
+                            "When there is genuinely nothing to play, the line is `not "
+                            "applicable` with one word saying why.")
+          << QStringLiteral("- **Everything you produce goes in `docs/qa_evidence/<today>-verify-"
+                            "%1/`** — the captures, the logs, and a rerunnable `stage.sh` that "
+                            "puts the same situation back. The path is fixed so that Try it can "
+                            "reopen what you staged instead of staging it again; name that "
+                            "directory in the record.").arg(id)
+          << QStringLiteral("- Check each line of %1's `## Done means`, and each line of its "
+                            "`## Tests`, against what you saw. Write down what you actually saw, "
+                            "not what should have happened.").arg(ref)
+          << QStringLiteral("- Write `## QA checklist` on %1 with board_update_card. It is your "
+                            "record, not a list of things to do: the revision you checked, then "
+                            "one line for each `## Done means` line and each `## Tests` line, "
+                            "marked `passed` / `failed` / `missing evidence` / `not applicable` "
+                            "with the path of the evidence for it, then what is left "
+                            "unresolved.").arg(ref)
+          << QStringLiteral("- Three of that section's lines are fixed, and all three are always "
+                            "there:")
+          << QStringLiteral("    tests: passed|failed|missing evidence (revision <sha>)")
+          << QStringLiteral("    simulation: played|not applicable|could not stage (evidence "
+                            "<path>)")
+          << QStringLiteral("    staged: docs/qa_evidence/<today>-verify-%1/").arg(id)
+          << QStringLiteral("- End that section with one line, always: `Reviewed by <your exact "
+                            "model id> on <YYYY-MM-DD>: no findings`, or `…: N findings`. Never "
+                            "leave it out — a card with no such line has not been reviewed, and "
+                            "that has to read differently from a review that found nothing.")
+          << QStringLiteral("- A judgement only a person can make goes in `## Human QA` as a "
+                            "numbered question. A question with no indented `Answer:` line under "
+                            "it keeps %1 out of done: leave it for the owner rather than "
+                            "answering it yourself.").arg(ref)
           << QStringLiteral("- Write a `## Verdict` section on %1 with board_update_card: what "
                             "passed, what failed, and what you ran it on.").arg(ref)
           << (verifying

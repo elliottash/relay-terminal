@@ -2944,9 +2944,12 @@ void BoardModelTests::theExecuteTaskCarriesTheBoardsConventions()
     QVERIFY(task.contains(QStringLiteral("links.commits")));
     QVERIFY(task.contains(QStringLiteral("Put #XS6Q in the message of every commit")));
     // The convention the brief carries is the lifecycle's: land it into needs-verification with
-    // the evidence and the checklist, and its verifier moves it on to QA (#3XZV).
+    // the evidence and its tests, and its verifier moves it on to QA (#3XZV). Since #WC3E the
+    // implementer writes the expectations *before* the work and no checklist at all — that
+    // section is the verifying session's record.
     QVERIFY2(task.contains(QStringLiteral("needs-verification")), qPrintable(task));
-    QVERIFY(task.contains(QStringLiteral("## QA checklist")));
+    QVERIFY2(task.contains(QStringLiteral("write **no** `## QA checklist`")), qPrintable(task));
+    QVERIFY2(task.contains(QStringLiteral("`## Done means`")), qPrintable(task));
     QVERIFY(task.endsWith(QStringLiteral("The owner adds, verbatim:\nbackend first")));
     QVERIFY(relay::board::executeTask(QStringLiteral("XS6Q"), QStringLiteral("Modes"), false, false)
                 .contains(QStringLiteral("no plan and no acceptance")));
@@ -3118,7 +3121,18 @@ void BoardModelTests::theVerifyTaskIsTheQaChecklistAndAsksForTheVerifiedByTraile
     QVERIFY(task.contains(QStringLiteral("anthropic/claude-opus-5 implemented it")));
     QVERIFY(task.contains(QStringLiteral("`## QA checklist`")));
     QVERIFY(task.contains(QStringLiteral("docs/qa_evidence/")));
-    QVERIFY(task.contains(QStringLiteral("`qa-`")));
+    // #WC3E: the checklist is this session's own record, against the `## Done means` the card
+    // carried before the work; it names the revision, carries three fixed lines, and ends with a
+    // dated line that is never left out — "not reviewed" must not read as "no findings".
+    QVERIFY2(task.contains(QStringLiteral("There is no checklist waiting for you")), qPrintable(task));
+    QVERIFY(task.contains(QStringLiteral("`## Done means`")));
+    QVERIFY(task.contains(QStringLiteral("Name the revision you checked")));
+    QVERIFY(task.contains(QStringLiteral("tests: passed|failed|missing evidence (revision <sha>)")));
+    QVERIFY(task.contains(QStringLiteral("simulation: played|not applicable|could not stage")));
+    QVERIFY(task.contains(QStringLiteral("staged: docs/qa_evidence/<today>-verify-T71W/")));
+    QVERIFY(task.contains(QStringLiteral("no findings")));
+    QVERIFY(task.contains(QStringLiteral("ai-pass.sh")));
+    QVERIFY(task.contains(QStringLiteral("`## Human QA`")));
     QVERIFY(task.contains(QStringLiteral("`## Verdict`")));
     QVERIFY(task.contains(QStringLiteral("board_update_card")));
     QVERIFY(task.contains(QStringLiteral("board_move_card")));

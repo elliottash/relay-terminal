@@ -84,13 +84,18 @@ uses: **Goal**, **Findings** (exact paths), **Steps** (numbered, each one checka
 **Risks** (including anything the user has to decide), **Verify** (the tests, and how to see it
 working). Anything smaller: go straight to work.
 
+**Whether or not it needs a plan, write `## Done means` before you write code** — two to five
+lines: the outcome someone could check, and how failure would be recognised. It is what a separate
+verifying session checks the work against, so it has to be chosen before the implementation can
+shape it. Execute on a card without it says so on the board and goes on.
+
 ## 5. Execute
 
 - **One section per stage** (`relay_core.board.CARD_SECTIONS`): the body records what each stage
-  produced. Planning leaves `## Plan`; the work keeps `## Tasks` live; landing writes
-  `## Execution Summary` (what was built, links to the outputs) beside `## Tests` and
-  `## QA checklist`; the verifier writes `## Verdict`. Invent no other headings —
-  `relay-board.py check` warns on them.
+  produced. Planning leaves `## Done means` and `## Plan`; the work keeps `## Tasks` live; landing
+  writes `## Execution Summary` (what was built, links to the outputs) beside `## Tests`; the
+  verifying session writes `## QA checklist` and `## Verdict`. Invent no other headings — the list
+  is complete, and `relay-board.py check` warns on anything outside it.
 - `#ID` in every commit message, and each commit hash into the card's `links.commits`.
 - A `progress` comment at a real milestone — the plan is settled, a hard part works, you are
   blocked — not a running commentary.
@@ -111,10 +116,17 @@ working). Anything smaller: go straight to work.
     the commits in `links.commits`, and the test's path or command as the evidence line. No QA
     checklist, no verifier: the user can reopen it.
   - **Large:** `board_move_card` to `needs-verification` with the evidence path, and
-    `## Execution Summary` and `## QA checklist` sections in the body; the verifier then moves
-    it on to a QA lane, or back to an earlier stage. Closing a card that sits in a QA lane needs the verifier's verdict in the
-    body — any pane may flip it once that is there — and the card's `qa` block still names the
-    best verifier.
+    `## Execution Summary` and `## Tests` in the body. **Write no `## QA checklist`**: that
+    section is the verifying session's record of what it checked against your `## Done means`,
+    and a checklist written by the pane that did the work is a list of criteria the work already
+    meets. A separate session verifies — recommended on a different model family, which is a
+    recommendation and not a rule — by running the tests *and* staging and playing the situation
+    the card describes, into `docs/qa_evidence/<date>-verify-<ID>/`; it then moves the card on to
+    a QA lane or back a stage. Closing a
+    card that sits in a QA lane needs the verifier's verdict in the body — any pane may flip it
+    once that is there — and the card's `qa` block still names the best verifier. A card whose
+    `## Human QA` holds a question with no `Answer:` under it is not yours to close at all: that
+    judgement is the user's.
   Relay stamps `implemented_by` with your provider/model and `verified_by` on whoever closes the
   card, so never type either — and never type `session`.
 - A question for the user goes on the card as a `question` comment with your recommendation, and

@@ -1232,6 +1232,27 @@ class PolicyFileTests(unittest.TestCase):
         board.write_index()
         self.assertFalse(path.exists())
 
+    def test_this_repositorys_own_policy_is_a_fresh_regeneration(self):
+        """#WC3E: `issues/POLICY.md` is generated, and a hand-edit of it is the bug.
+
+        The one test in this file that reads the repository it lives in, and deliberately: the
+        file that guests actually load is the one that has to agree with `board_policy.md` and
+        the `deliver` skill. It goes stale when somebody changes a source and forgets
+        `relay-board.py policy`, and nothing else notices -- Relay rewrites a stale copy only
+        when it next scaffolds or indexes that board.
+        """
+        repo = Path(B.__file__).resolve().parents[2]
+        root = repo / B.LEGACY_BOARD_FOLDER
+        policy = root / B.POLICY_FILE
+        if not policy.is_file():                           # pragma: no cover - not this checkout
+            self.skipTest(f"{policy} is not in this tree")
+        want = B.policy_text(B.Board(root, repo))
+        self.assertEqual(
+            policy.read_text(encoding="utf-8"), want,
+            f"{policy.relative_to(repo)} is not what it would be generated as: run "
+            "`python3 scripts/relay-board.py policy` and commit it with the change that made it "
+            "stale.")
+
     # ---- the pointer in the instruction files
     def test_the_block_is_appended_to_an_existing_claude_md(self):
         (self.dir / "CLAUDE.md").write_text("# Project\n\nThe project's own rules.\n")

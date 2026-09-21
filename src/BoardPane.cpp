@@ -6251,6 +6251,15 @@ void BoardView::handleEvent(const QJsonObject &event)
         const QString kind = event.value(QStringLiteral("kind")).toString();
         const QString card = event.value(QStringLiteral("card_id")).toString();
         QString note = m_pendingNotes.take(requestId);
+        // A notice the worker attached to the write itself (#WC3E: Execute on a card with no
+        // `## Done means`, which warns and goes on). It is the board's news rather than the
+        // card's, so it rides the notice line this write was already going to draw, and one
+        // write still leaves one notice.
+        if (const QString said = event.value(QStringLiteral("notice")).toString().trimmed();
+            !said.isEmpty()) {
+            const QString escaped = said.toHtmlEscaped();
+            note = note.isEmpty() ? escaped : note + QStringLiteral(" · ") + escaped;
+        }
         // The delete has landed (#CYM9): from here the "Deleted #ID · Undo" toast owns the
         // card's removal events, until the card itself comes back or the pane reloads.
         m_pendingDeletes.remove(requestId);

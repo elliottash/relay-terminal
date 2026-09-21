@@ -267,9 +267,15 @@ ISSUE_HEADINGS = ("issue", "request")
 #: warning keeps the backlog visible and countable, and a card converts when it is next
 #: touched.  `board_tools.AGENT_SECTIONS` derives the agent-writable set from it.  Memory and
 #: alias cards have their own layouts (`## Run`, `## Parameters`) and are not checked.
+#:
+#: 2026-09-21 (#WC3E): `done means` -- the expectations, written *before* the work, so the
+#: verifier has something it did not choose to check against -- plus `human qa`, `try it` and
+#: `profile`, which the board had grown and `check` was warning on.  The list is complete: a
+#: heading outside it is owner text, and nothing else is a stage.
 CARD_SECTIONS = (
-    "issue", "decisions", "discussion points", "planning notes", "plan", "tasks",
-    "execution summary", "tests", "qa checklist", "verdict", "resolution",
+    "issue", "decisions", "discussion points", "planning notes", "done means", "plan", "tasks",
+    "execution summary", "tests", "profile", "try it", "qa checklist", "human qa",
+    "verdict", "resolution",
     "merged in", "split",
 )
 
@@ -2226,11 +2232,12 @@ def _appendix(board: "Board") -> str:
                          "user made is `kind=decision`, quoting their own words (rule 4).")
     move_paragraph = _wrap(f"Set `status:` and put the file where that status belongs ({lane_pairs}"
                            "; every other status stays in the tab folder). Landing work means "
-                           "the status `needs-verification`, the evidence path in `links.evidence`, "
-                           "and a `## QA checklist` section in the body — in the same commit as "
-                           "the change (rule 5). Nothing is ever deleted: a card is closed by "
-                           "moving it to `done` or `dropped` (both in `done/`) with the reason in "
-                           "the thread.", indent="")
+                           "the status `needs-verification`, the evidence path in `links.evidence` "
+                           "and the tests in `## Tests` — in the same commit as the change (rule "
+                           "5), and no `## QA checklist`: that section is the verifier's record of "
+                           "what it checked, and you are not the verifier. Nothing is ever "
+                           "deleted: a card is closed by moving it to `done` or `dropped` (both in "
+                           "`done/`) with the reason in the thread.", indent="")
     signals_paragraph = "\n".join([
         _wrap("A **signal** is one keyed item per failing check — a test, a build, a `check` "
               "problem — that a machine opens on its second consecutive failing execution and "
@@ -2337,7 +2344,8 @@ claimed this card; starting on backend/relay_core/board.py
 ### Change a card — `board_update_card`
 
 Edit the file: a front-matter value, or the `## Heading` section in the body the change belongs in
-(a plan goes in `## Plan`, a checklist in `## QA checklist`, tasks in `## Tasks` as
+(a plan goes in `## Plan`, the expectations in `## Done means`, a verifier's record in
+`## QA checklist`, tasks in `## Tasks` as
 `- [ ] text <!-- t:xx -->`). Leave every other byte alone, and append a thread entry saying what
 you changed. Never touch `implemented_by`, `verified_by` or `session`: Relay stamps all three, and
 a value typed by hand is what makes the audit trail a lie.

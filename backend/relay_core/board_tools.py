@@ -272,7 +272,13 @@ TOOL_SPECS = [
          "stamps `implemented_by` and `verified_by` with the pane's own provider/model, so you do not "
          "type them. Closing a card that is in a QA lane requires a verdict section in the body — any "
          "pane may flip it once the verdict is there; Relay Free still may not, and the card's `qa` "
-         "block still names the best verifier.",
+         "block still names the best verifier. The verifying session is a separate one (a different "
+         "model family is the recommendation, not a rule): it writes the `## QA checklist` as its "
+         "record — the revision it checked, every `## Done means` and `## Tests` line as passed / "
+         "failed / missing evidence / not applicable with its evidence path, what is unresolved, and "
+         "one dated line saying the review happened — and the implementer writes none. A move to "
+         "`done` is refused while the card's `## Human QA` holds a numbered question with no "
+         "indented `Answer:` line under it: that judgement is the user's, not an agent's.",
          {"id": _ID_ARG,
           "status": {"type": "string", "description": "Target status; the file moves into the matching state folder."},
           "section": {"type": "string", "description": "Park the card in this manual section (a column "
@@ -581,6 +587,45 @@ def _heading_matches(found: str, wanted: str) -> bool:
     return found in B.ISSUE_HEADINGS and wanted in B.ISSUE_HEADINGS
 
 
+#: A numbered question in `## Human QA`, and the indented `Answer:` line that settles it.
+_HUMAN_QA_QUESTION_RE = re.compile(r"^(?P<number>\d+)[.)]\s+(?P<text>\S.*)$")
+_HUMAN_QA_ANSWER_RE = re.compile(r"^\s+(?:[-*]\s*)?answer\s*:", re.I)
+
+
+def section_text(body: str, heading: str) -> str:
+    """The text under one `## ` heading, without the heading line ("" when there is none)."""
+    span = _section_span(body or "", heading)
+    return "" if span is None else (body or "")[span[1]:span[2]]
+
+
+def unanswered_human_qa(body: str) -> list[str]:
+    """The numbered `## Human QA` questions with no answer under them (#WC3E).
+
+    The answered form is one line, and it is the *only* one: an indented line under the question
+    beginning `Answer:` (docs/SWITCHBOARD-FORMAT.md 2.7).  Indented, because that is what ties the
+    answer to its question in a list a person edits by hand; one spelling, because a rule that
+    closes cards has to be checkable by reading the file.  Everything else in the section -- the
+    brief, the setup, the observations -- is prose, and prose gates nothing.
+    """
+    text = section_text(body or "", HUMAN_QA_HEADING)
+    if not text.strip():
+        return []
+    open_questions: list[str] = []
+    current: str | None = None
+    for line in text.splitlines():
+        match = _HUMAN_QA_QUESTION_RE.match(line.strip()) if line[:1].isdigit() else None
+        if match:
+            if current is not None:
+                open_questions.append(current)
+            current = f"{match.group('number')}. {match.group('text').strip()}"[:120]
+            continue
+        if current is not None and _HUMAN_QA_ANSWER_RE.match(line):
+            current = None
+    if current is not None:
+        open_questions.append(current)
+    return open_questions
+
+
 def _section_span(body: str, heading: str) -> tuple[int, int, int] | None:
     """(start of the heading line, start of the section text, end of the section)."""
     wanted = heading.strip()
@@ -886,6 +931,18 @@ CHAT_APP_TOOLS = ("set_keybinding",)
 
 #: Where a Plan turn writes. SWITCHBOARD-DESIGN 12.4: plan mode writes the plan onto the card.
 PLAN_HEADING = "Plan"
+
+#: The expectations, written before the work (#WC3E, 2026-09-21): what the card is for, and how
+#: failure would be recognised.  A Plan turn writes it beside `## Plan` -- those two sections and
+#: nothing else -- and a verifying session checks its lines one by one, so it has to exist before
+#: the implementation does.  Executing a card without one warns; it never refuses.
+DONE_MEANS_HEADING = "Done means"
+
+#: The section a person's judgement lives in (#7BM4): numbered questions for a human reviewer.
+#: A question with no answer under it is unsettled, and an agent may not close the card over it
+#: (`_human_qa_gate`).  An answer is an indented line beginning `Answer:` under the question;
+#: docs/SWITCHBOARD-FORMAT.md 2.7 is the normative form.
+HUMAN_QA_HEADING = "Human QA"
 
 MAX_SEARCH_MATCHES = 80
 MAX_SEARCH_FILES = 20000
@@ -1571,7 +1628,12 @@ class BoardTools:
         self.readonly = False
 
     def _check_card_scope(self, name: str, args: dict) -> None:
-        """A Plan turn writes its own card's `## Plan` and nothing else; Discuss has no extra rule."""
+        """A Plan turn writes its own card's `## Plan` and `## Done means`; Discuss has no extra rule.
+
+        `## Done means` joined `## Plan` with #WC3E: the Plan brief tells the turn to write the
+        expectations before the plan, so the scope that enforces the stage has to allow exactly
+        those two sections and still nothing else.
+        """
         scope = self.card_scope
         if scope is None:
             return
@@ -1590,11 +1652,13 @@ class BoardTools:
             blocks = [args.get(k) for k in ("replace_section", "append_section") if args.get(k) is not None]
             headings = {str(b.get("heading") or "").strip().lstrip("#").strip().lower()
                         for b in blocks if isinstance(b, dict)}
-            if extra or not blocks or headings != {PLAN_HEADING.lower()}:
+            allowed_headings = {PLAN_HEADING.lower(), DONE_MEANS_HEADING.lower()}
+            if extra or not blocks or not headings or headings - allowed_headings:
                 raise BoardToolError(
-                    f"A Plan turn writes the card's `## {PLAN_HEADING}` section and nothing else: "
-                    f"call board_update_card with replace_section {{heading: \"{PLAN_HEADING}\", "
-                    "text}. The title, the issue, labels and status are Discuss's to change.",
+                    f"A Plan turn writes the card's `## {PLAN_HEADING}` and `## {DONE_MEANS_HEADING}` "
+                    "sections and nothing else: call board_update_card with replace_section "
+                    f"{{heading: \"{PLAN_HEADING}\", text}}. The title, the issue, labels and "
+                    "status are Discuss's to change.",
                     code="board_mode_refused", mode="plan")
 
     # ---- dispatch -------------------------------------------------------------
@@ -2226,6 +2290,9 @@ class BoardTools:
         # state wins over the card's — and it is checked here, where every status change of every
         # write path already funnels through.
         self._signal_gate(card, old_status, status)
+        # And a judgement the person has not made yet stops the card closing (#WC3E): an
+        # unanswered `## Human QA` question is exactly the case where evidence is not the answer.
+        self._human_qa_gate(card, status)
         # `section` parks the card in a manual section — a column that collects nothing — and an
         # empty string takes it out (#3XZV). Its status is left alone either way.
         section_arg = args.get("section")
@@ -2980,6 +3047,32 @@ class BoardTools:
                                         reason or signal.promote or "due")
         except BoardToolError as exc:
             return exc.to_result()
+
+    def _human_qa_gate(self, card: B.Card, status: str) -> None:
+        """No agent closes a card over an unanswered `## Human QA` question (#WC3E).
+
+        Owner, 2026-09-21: "a card with an open judgement waits for the person".  Agents move
+        cards within their own authority -- the implementer to `needs-verification`, the verifier
+        on to a QA lane or back a stage -- and this is the one move that is not theirs to make.
+        The person at the keyboard still closes it: the refusal is on the *agent* actor, so the
+        Switchboard's own Done column is unaffected, which is what "waits for the person" means.
+
+        A question is a numbered line in `## Human QA`; it is answered by an indented line under
+        it beginning `Answer:` (docs/SWITCHBOARD-FORMAT.md 2.7).  Prose with no numbered question
+        gates nothing -- the section is a brief as often as it is a question list.
+        """
+        if status != "done" or self.context.actor == OWNER_ACTOR:
+            return
+        open_questions = unanswered_human_qa(card.body)
+        if not open_questions:
+            return
+        shown = "; ".join(open_questions[:2]) + ("…" if len(open_questions) > 2 else "")
+        raise BoardToolError(
+            f"#{card.id} has {len(open_questions)} unanswered question(s) in `## Human QA` "
+            f"({shown}) — that judgement is the person's, so an agent does not move the card to "
+            "done: leave it in its QA lane and ask.",
+            code="board_refused", requires="human_qa_answer", id=card.id or "",
+            questions=open_questions)
 
     def _signal_gate(self, card: B.Card, old_status: str, status: str) -> None:
         """Decision 6 and 8: refuse a move out of `needs-verification` under an open signal.

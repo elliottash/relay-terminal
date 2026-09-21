@@ -18,50 +18,42 @@ the file fallback.
 
 ## The rules
 
-Switchboard rules (the `board_*` tools write to the repository's `issues/` tracker, in git):
+Switchboard rules (`board_*` writes the repository's `issues/` tracker in git):
 
-1. **Capture, and work through a card sized to the work.** Every distinct request the user makes
-   that you do not finish inside this turn becomes a card, or updates the card that already covers
-   it: `board_list` with a query first, one card per request, and never a card for your own working
-   steps (that is `update_todos`). *Small* — finished in this turn, verified by you (built, a test
-   run, or seen working), no design choice, no question for the user — gets no card; the commit is
-   the record. *Medium* (more than one turn or more than two files, no decision needed, a test
-   proves it) and *large* (needs a plan, a decision from the user, or changes UI) are started only
-   after you have checked the work is not already done and claimed the card that asks for it
-   (`board_claim`, on the card you found or the one you just created). Load the **`deliver`** skill
-   for the procedure; `/deliver` makes any request large, "just do it" or "no card" makes it small.
-2. **The user's words are the record.** `request` is what they wrote, verbatim — do not paraphrase,
-   correct or tidy it. The title is yours.
+1. **Capture work at its size.** Check code, history and `board_list` first; do not redo done work.
+   Each unfinished user request gets a card, or updates its existing card. One card per request,
+   never for your steps (`update_todos`). *Small*: finished and verified this turn, no design choice
+   or question; no card, the commit is the record. *Medium*: more than one turn or two files,
+   no decision needed, proved by a test. *Large*: needs a plan, a user decision or changes UI.
+   Before medium/large work, find or create the card and `board_claim` it. Load **`deliver`** for
+   the procedure. `/deliver` makes work large; "just do it" or "no card" makes it small.
+2. **Verbatim requests.** `request` is the user's words verbatim; do not paraphrase or tidy. Write the title.
 3. **Questions** for the user go on the card as a `question` comment, and the card goes to
    `discussing` with `waiting_on: owner`. Name the card in your reply rather than burying the
-   questions in the terminal or the board page's chat — wherever you ask, the card is where
-   the question waits.
-4. **Decisions** the user makes, in the terminal or on a card, go into a `decision` comment quoting
-   their own words in quotation marks, and into the card's `## Decisions` section.
+   questions in the terminal or the board page's chat: the card is where the question waits.
+4. **Decisions:** quote the user in a `decision` comment and the card's `## Decisions` section.
 5. **Work.** `board_claim` records the `session` that is this pane, so a card in Executing with
    another `session` is that session's work — comment on it, and claim it only when the user says
    to take it over. It lands in the same commit as the change: a *medium* card you move to `done`
-   yourself, a *large* one to `needs-verification` with its evidence path and a `## QA checklist`.
-   The skill has the detail.
+   yourself, a *large* one to `needs-verification` with its evidence path, and no
+   `## QA checklist`: a separate session verifies and writes it.
 6. **Unrelated faults** you notice on the way become a new card in the bugs tab with the measured
    evidence — never a silent fix and never a detour.
 7. **Other people's cards:** comment, never reassign and never rewrite what they wrote. **Nothing
    is deleted** and there is no delete tool: a card is closed by moving it to `done` or `dropped`
-   with a reason, and the thread is append-only. Only the owner can delete a card, from the GUI.
+   with a reason. Threads are append-only. Only the owner deletes cards.
 8. **Limits.** A few cards per turn and per hour. When a tool answers `board_rate_limited`, stop
    writing and summarize the rest of the requests in your reply.
-9. **Report what you did.** After a card write, name the card as `#ID` in your reply with one line
-   about the change, so the user can find it.
-10. **A card body is one section per stage**, written as the stage produces it, in this order:
-    `## Issue` (the request, verbatim — the owner's words), `## Decisions` (owner decisions,
-    quoted, whenever they happen), `## Discussion points` (what the owner is considering),
-    `## Planning notes` (decision factors, options not taken, questions asked with their
-    options, the owner's answers), `## Plan`, `## Tasks` (the live checklist), `## Execution
-    Summary` (what was built, links to the outputs), `## Tests` (what was automated),
-    `## QA checklist` (what a verifier must check by hand; the verifier may adjust it),
-    `## Verdict` (the verifier: how it was checked, and the result — a `## Resolution` is not
-    one), `## Resolution` (when and why the card closed). Write the section your stage
-    produces and invent no others; `relay-board.py check` warns on any heading outside the set.
+9. **Report:** after a card write, name `#ID` and the change in your reply.
+10. **One section per stage**: Issue, Decisions, Discussion points, Planning notes, Done means
+    (the outcome and how failure shows, before the work), Plan, Tasks, Execution Summary, Tests,
+    Profile, Try it, QA checklist, Human QA, Verdict, Resolution; no others. Write only your
+    stage's section and move cards within your authority.
+
+
+Memory: `board_create_card {type: memory}` saves one reusable fact with a stable `name` and
+`scope: project`. Pin it or set workspace `paths` globs; update existing facts, retire obsolete
+ones. Project names override globals; retired/team memories do not load. User memories go in Globals.
 
 ## Deliver a request through the Switchboard
 
@@ -143,13 +135,18 @@ uses: **Goal**, **Findings** (exact paths), **Steps** (numbered, each one checka
 **Risks** (including anything the user has to decide), **Verify** (the tests, and how to see it
 working). Anything smaller: go straight to work.
 
+**Whether or not it needs a plan, write `## Done means` before you write code** — two to five
+lines: the outcome someone could check, and how failure would be recognised. It is what a separate
+verifying session checks the work against, so it has to be chosen before the implementation can
+shape it. Execute on a card without it says so on the board and goes on.
+
 ### 5. Execute
 
 - **One section per stage** (`relay_core.board.CARD_SECTIONS`): the body records what each stage
-  produced. Planning leaves `## Plan`; the work keeps `## Tasks` live; landing writes
-  `## Execution Summary` (what was built, links to the outputs) beside `## Tests` and
-  `## QA checklist`; the verifier writes `## Verdict`. Invent no other headings —
-  `relay-board.py check` warns on them.
+  produced. Planning leaves `## Done means` and `## Plan`; the work keeps `## Tasks` live; landing
+  writes `## Execution Summary` (what was built, links to the outputs) beside `## Tests`; the
+  verifying session writes `## QA checklist` and `## Verdict`. Invent no other headings — the list
+  is complete, and `relay-board.py check` warns on anything outside it.
 - `#ID` in every commit message, and each commit hash into the card's `links.commits`.
 - A `progress` comment at a real milestone — the plan is settled, a hard part works, you are
   blocked — not a running commentary.
@@ -170,10 +167,17 @@ working). Anything smaller: go straight to work.
     the commits in `links.commits`, and the test's path or command as the evidence line. No QA
     checklist, no verifier: the user can reopen it.
   - **Large:** `board_move_card` to `needs-verification` with the evidence path, and
-    `## Execution Summary` and `## QA checklist` sections in the body; the verifier then moves
-    it on to a QA lane, or back to an earlier stage. Closing a card that sits in a QA lane needs the verifier's verdict in the
-    body — any pane may flip it once that is there — and the card's `qa` block still names the
-    best verifier.
+    `## Execution Summary` and `## Tests` in the body. **Write no `## QA checklist`**: that
+    section is the verifying session's record of what it checked against your `## Done means`,
+    and a checklist written by the pane that did the work is a list of criteria the work already
+    meets. A separate session verifies — recommended on a different model family, which is a
+    recommendation and not a rule — by running the tests *and* staging and playing the situation
+    the card describes, into `docs/qa_evidence/<date>-verify-<ID>/`; it then moves the card on to
+    a QA lane or back a stage. Closing a
+    card that sits in a QA lane needs the verifier's verdict in the body — any pane may flip it
+    once that is there — and the card's `qa` block still names the best verifier. A card whose
+    `## Human QA` holds a question with no `Answer:` under it is not yours to close at all: that
+    judgement is the user's.
   Relay stamps `implemented_by` with your provider/model and `verified_by` on whoever closes the
   card, so never type either — and never type `session`.
 - A question for the user goes on the card as a `question` comment with your recommendation, and
@@ -279,7 +283,8 @@ claimed this card; starting on backend/relay_core/board.py
 ### Change a card — `board_update_card`
 
 Edit the file: a front-matter value, or the `## Heading` section in the body the change belongs in
-(a plan goes in `## Plan`, a checklist in `## QA checklist`, tasks in `## Tasks` as
+(a plan goes in `## Plan`, the expectations in `## Done means`, a verifier's record in
+`## QA checklist`, tasks in `## Tasks` as
 `- [ ] text <!-- t:xx -->`). Leave every other byte alone, and append a thread entry saying what
 you changed. Never touch `implemented_by`, `verified_by` or `session`: Relay stamps all three, and
 a value typed by hand is what makes the audit trail a lie.
@@ -290,9 +295,10 @@ Set `status:` and put the file where that status belongs (`needs-qa-llm` → `ne
 `needs-qa-human` → `needs_qa_human/`, `needs-review` → `needs_review/`, `needs-labels` →
 `needs_labels/`, `needs-ab` → `needs_ab/`, `deferred` → `deferred/`, `done` → `done/`, `dropped`
 → `done/`; every other status stays in the tab folder). Landing work means the status
-`needs-verification`, the evidence path in `links.evidence`, and a `## QA checklist` section in
-the body — in the same commit as the change (rule 5). Nothing is ever deleted: a card is closed
-by moving it to `done` or `dropped` (both in `done/`) with the reason in the thread.
+`needs-verification`, the evidence path in `links.evidence` and the tests in `## Tests` — in the
+same commit as the change (rule 5), and no `## QA checklist`: that section is the verifier's
+record of what it checked, and you are not the verifier. Nothing is ever deleted: a card is
+closed by moving it to `done` or `dropped` (both in `done/`) with the reason in the thread.
 
 ### Signals — the faults the machine is tracking
 

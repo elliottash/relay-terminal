@@ -307,13 +307,17 @@ the order the stages happen (`relay_core.board.CARD_SECTIONS`):
 | 2 | `## Decisions` | any | an agent, quoting the owner | owner decisions, wherever they happen |
 | 3 | `## Discussion points` | discussing | the owner | what they are thinking about or considering |
 | 4 | `## Planning notes` | planning | the planner | decision factors, options not taken, the agent's questions with their options, and the owner's answers |
-| 5 | `## Plan` | planned | the planner | how it will be done |
-| 6 | `## Tasks` | planned → executing | the implementer | the live checklist (section 2.5) |
-| 7 | `## Execution Summary` | executing | the implementer | what was built, and links to the outputs |
-| 8 | `## Tests` | executing | the implementer | what was automated (section 2.6) |
-| 9 | `## QA checklist` | executing, adjusted at verify | implementer, then verifier, then the QA support agent | what a verifier must check by hand |
-| 10 | `## Verdict` | needs-qa-* | the verifier | how it was checked, and the result |
-| 11 | `## Resolution` | done / dropped | whoever closes it | a time-stamped record of how the card was removed |
+| 5 | `## Done means` | planning, before the work | the planner (or Execute on an unplanned card) | the intended outcome, and how failure would be recognised (2.8) |
+| 6 | `## Plan` | planned | the planner | how it will be done |
+| 7 | `## Tasks` | planned → executing | the implementer | the live checklist (section 2.5) |
+| 8 | `## Execution Summary` | executing | the implementer | what was built, and links to the outputs |
+| 9 | `## Tests` | executing | the implementer | what was automated (section 2.6) |
+| 10 | `## Profile` | executing | the implementer | what was measured, and on what |
+| 11 | `## Try it` | executing | the implementer | the prepared setup and the one task a person is asked to do |
+| 12 | `## QA checklist` | verify | the verifying session, never the implementer | what that session checked, against `## Done means` (2.8) |
+| 13 | `## Human QA` | needs-qa-human | the verifier asks, the owner answers | numbered questions only a person can settle (2.8) |
+| 14 | `## Verdict` | needs-qa-* | the verifier | how it was checked, and the result |
+| 15 | `## Resolution` | done / dropped | whoever closes it | a time-stamped record of how the card was removed |
 
 - `## Merged in` and `## Split` are written by the merge and split tools. The **thread** is not
   a body section: it is the append-only file under `issues/threads/`, and these sections are
@@ -323,6 +327,9 @@ the order the stages happen (`relay_core.board.CARD_SECTIONS`):
 - **`Verdict` and `Resolution` are different claims.** The QA-close gate takes a verdict only:
   a card dropped because the owner changed their mind has a resolution, and that does not say
   a verifier checked anything.
+- **The list is complete.** `Done means`, `Human QA`, `Profile` and `Try it` were added on
+  2026-09-21 (#WC3E): the board had grown all four and `check` was warning on cards that used
+  them, which is the schema disagreeing with itself. Nothing else is a stage.
 - **`AGENT_SECTIONS`** (`board_tools.py`) is this set minus `Issue` — everything an agent may
   write without the write being logged as a rewrite of the owner's own words. `Issue` stays
   owner text. Headings outside the set (`Change`, `Implementer check`, the forty other
@@ -336,6 +343,80 @@ the order the stages happen (`relay_core.board.CARD_SECTIONS`):
   backlog visible and countable.
 - Memory and alias cards keep their own layouts (`## Run`, `## Parameters`) and are not
   checked against this set.
+
+### 2.8 Expectations, the verification record, and the person's question (2026-09-21, #WC3E)
+
+Three of the sections above are one mechanism, split across three stages: what the card is for,
+written down before anybody implements it; what a separate session found when it checked the work
+against that; and the question that check could not answer without a person.
+
+**`## Done means`** is two to five lines, written by the Plan turn before `## Plan` (and by
+Execute on a card that never had a plan). Each line is an outcome someone could check, in the
+card's own terms; the last line says how failure would be recognised, so a verifier knows what it
+is looking for and not only what it is looking at. It is written **before** the work because a
+list of criteria chosen afterwards is a list the implementation already satisfies. Executing a
+card that has none is allowed — the board says so in one sentence and the claim goes through
+(`board_protocol._done_means_notice`) — because a missing section is not a reason to refuse work.
+
+**`## QA checklist`** is the verifying session's own record, and the implementer writes none. It
+names the revision checked (the newest hash in `links.commits`, or `HEAD`), then one line per
+`## Done means` line and per `## Tests` line marked `passed`, `failed`, `missing evidence` or
+`not applicable` with the path of the evidence for it, then what is left unresolved. It ends with
+one dated, named line — `Reviewed by <model> on <date>: no findings`, or `…: N findings` — which
+is **never** omitted: a card with no such line has not been reviewed, and that has to read
+differently from a review that found nothing. A different model family is what Relay recommends
+when it picks a verifier; being a *different session* is what the record means by independent.
+
+Verifying is **two** things (owner, 2026-09-21), and three of the record's lines say so in a fixed
+shape that a reader and a tool can both find:
+
+```
+tests: passed|failed|missing evidence (revision <sha>)
+simulation: played|not applicable|could not stage (evidence <path>)
+staged: docs/qa_evidence/<date>-verify-<ID>/
+```
+
+The first is the tests the card names. The second is an **AI simulation**: for a card about the
+app, the verifier stages the situation its `## Issue` and `## Done means` describe — a disposable
+fixture project, the built binary on its own Xvfb display and an isolated profile, `xdotool` for
+every input — and plays the mechanical steps, one capture per step. The recipe to copy is
+`docs/qa_evidence/2026-09-20-switchboard-tooling-hub/scenario/ai-pass.sh`. For a card that is not
+about the app (a backend change, a CLI, docs) the simulation is the request and its response, or
+the before and after of the reproduction; `not applicable` takes one word of reason. Everything
+the verifier produces goes under `docs/qa_evidence/<date>-verify-<ID>/`, with a rerunnable
+`stage.sh` beside the captures: the path is fixed, and `staged:` names it, so that **Try it** can
+reopen the staged situation for a person instead of staging it a second time.
+
+**`## Human QA`** holds the judgements a person makes. A question is a numbered line; it is
+answered by an **indented line under it beginning `Answer:`**, and that is the only answered form
+the board recognises, because a rule that closes cards has to be checkable by reading the file.
+While a numbered question has no such line, no agent moves the card to `done`
+(`board_tools._human_qa_gate`); the owner still can, from the Switchboard. Prose in the section
+with no numbered question in it gates nothing — the section is as often a brief as a question
+list.
+
+```markdown
+## Done means
+- Holding Right Alt records and inserts the transcript at the caret, in the composer and in a pane.
+- Releasing it before 300 ms inserts nothing and leaves no partial text.
+Failure would show as: a transcript pasted into the wrong pane, or a stuck recording indicator.
+
+## QA checklist
+Checked at `a1b2c3d` (newest of links.commits).
+tests: passed (revision a1b2c3d)
+simulation: played (evidence docs/qa_evidence/2026-09-21-verify-K7Q2/)
+staged: docs/qa_evidence/2026-09-21-verify-K7Q2/
+- Right Alt records and inserts — passed — docs/qa_evidence/2026-09-21-verify-K7Q2/03-inserted.png
+- Short press inserts nothing — failed — docs/qa_evidence/2026-09-21-verify-K7Q2/05-short.png (two characters appear)
+- `ctest -R voice` — passed — docs/qa_evidence/2026-09-21-verify-K7Q2/ctest.txt
+Unresolved: the indicator's wording on a denied microphone permission was not reachable here.
+Reviewed by openai/gpt-6-astra on 2026-09-21: 1 finding
+
+## Human QA
+1. Is the 300 ms threshold right for the way you hold the key?
+    Answer: yes, it matches how I use it — leave it.
+2. Should a denied permission say so in the composer or only in the pane?
+```
 
 ## 3. Threads
 

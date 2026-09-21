@@ -2593,5 +2593,72 @@ class ForgeSyncAcceptanceTests(ForgeSyncProtocolTests):
         self.assertEqual(problems, [])
 
 
+# ------------------------------------- expectations before the work, and who may close a card
+
+class DoneMeansAndHumanQATests(ProtocolTest):
+    """#WC3E, through the wire the GUI uses.
+
+    Execute is `board_claim` (19.19), and a card that has no `## Done means` gets one sentence on
+    the `board_written` answer — a notice, not a refusal. Closing is `board_move`, and a card
+    whose `## Human QA` still holds an unanswered question is not an agent's to close.
+    """
+
+    PANE = "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
+
+    def section(self, card_id, heading, text):
+        card = self.board.card_by_id(card_id)
+        self.send(type="board_update", card=card_id, base_hash=B.file_hash(card.path),
+                  patch={"append_section": {"heading": heading, "text": text}})
+
+    # ---- Execute warns, and does not refuse (bullet 1)
+    def test_execute_on_a_card_with_no_done_means_says_so_and_claims_it_anyway(self):
+        card_id = self.make_card()
+        written = [e for e in self.send(type="board_claim", id="x1", card=card_id,
+                                        pane_token=self.PANE) if e["event"] == "board_written"]
+        self.assertTrue(written, self.events)
+        self.assertEqual(written[0]["notice"],
+                         f"#{card_id} has no Done means; the verifier will have nothing to "
+                         "check against.")
+        self.assertEqual([e["event"] for e in self.events if e["event"] == "error"], [])
+        self.assertEqual(self.board.card_by_id(card_id).status, "executing")
+
+    def test_a_card_that_has_done_means_is_claimed_without_a_notice(self):
+        card_id = self.make_card()
+        self.section(card_id, "Done means",
+                     "- the key records and inserts\nFailure would show as: silence")
+        written = [e for e in self.send(type="board_claim", id="x2", card=card_id,
+                                        pane_token=self.PANE) if e["event"] == "board_written"]
+        self.assertTrue(written, self.events)
+        self.assertNotIn("notice", written[0])
+
+    # ---- an open human question keeps the card out of done (bullet 4)
+    def test_an_agent_move_to_done_is_refused_while_a_human_qa_question_is_open(self):
+        card_id = self.make_card()
+        self.section(card_id, "Human QA", "1. Does the wording read right to you?")
+        events = self.send(type="board_move", card=card_id, status="done",
+                           reason="looks right", author="agent")
+        error = [e for e in events if e["event"] == "error"]
+        self.assertTrue(error, events)
+        self.assertEqual(error[0]["code"], "board_refused")
+        self.assertIn("Human QA", error[0]["text"])
+        self.assertNotEqual(self.board.card_by_id(card_id).status, "done")
+
+    def test_the_same_move_goes_through_once_the_question_has_an_answer(self):
+        card_id = self.make_card()
+        self.section(card_id, "Human QA",
+                     "1. Does the wording read right to you?\n    Answer: yes (owner)")
+        events = self.send(type="board_move", card=card_id, status="done",
+                           reason="answered", author="agent")
+        self.assertEqual([e for e in events if e["event"] == "error"], [])
+        self.assertEqual(self.board.card_by_id(card_id).status, "done")
+
+    def test_the_owner_at_the_keyboard_still_closes_it(self):
+        card_id = self.make_card()
+        self.section(card_id, "Human QA", "1. Does the wording read right to you?")
+        events = self.send(type="board_move", card=card_id, status="done", reason="I looked")
+        self.assertEqual([e for e in events if e["event"] == "error"], [])
+        self.assertEqual(self.board.card_by_id(card_id).status, "done")
+
+
 if __name__ == "__main__":       # pragma: no cover
     unittest.main()

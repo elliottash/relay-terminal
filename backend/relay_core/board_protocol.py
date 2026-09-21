@@ -32,10 +32,10 @@ from . import roles as model_roles
 # and the new-board survey), not here: importing them at module level cost every worker
 # 5.5 ms of start-up for code most workers never reach (#TZWF item 4). `sys.modules` makes
 # every call after the first a dict lookup.
-from .board_tools import (BOARD_STATES, CARD_MODES, PLAN_HEADING, BoardInit,
+from .board_tools import (BOARD_STATES, CARD_MODES, DONE_MEANS_HEADING, PLAN_HEADING, BoardInit,
                           BoardTools, BoardToolError, ToolContext, board_at, board_for,
                           card_brief, check_pane_token, cleanup_brief, find_board_root,
-                          named_board_root, normalize_id)
+                          named_board_root, normalize_id, section_headings)
 
 #: The `tests_*` requests of protocol section 31, spelled out here rather than imported from
 #: `tests_protocol`: that module pulls in `test_probe` and `jobs`, and a pane that never opens
@@ -1867,6 +1867,13 @@ class BoardCommands:
                 # would otherwise read); the GUI re-reads the card from `board_changed`, so the
                 # block is not sent down the pipe with the reply.
                 result.pop("card", None)
+                # Execute on a card with no `## Done means` (#WC3E): a one-sentence notice on the
+                # board, and the claim goes through. The expectations belong on the card *before*
+                # the work, so that a verifying session checks something it did not choose itself
+                # -- but a card handed to a pane without them is still worth doing, and the owner
+                # decided Execute warns rather than refuses.
+                if notice := self._done_means_notice(result.get("id")):
+                    result["notice"] = notice
             else:
                 # `pane_token` (#HKAP): the pane Execute handed the card to, so the thread entry
                 # can link back to it. Absent (or empty) on every other comment.
@@ -1887,6 +1894,25 @@ class BoardCommands:
         self._send({"event": "board_written", **result, "card_id": result.get("id"),
                     "id": rid, "kind": kind})
         self._emit_changed(result.get("write_id"))
+
+    def _done_means_notice(self, card_id) -> str:
+        """The Execute warning for a card with no `## Done means` (#WC3E), or "".
+
+        Read from the card as it is *after* the claim, so a card that gained the section in the
+        same breath does not warn. Any trouble reading it is no notice at all: this is a nudge,
+        and a nudge that fires on its own broken plumbing teaches people to ignore it.
+        """
+        try:
+            card = self._need().board.card_by_id(normalize_id(str(card_id or "")))
+        except Exception:                                    # pragma: no cover - defensive
+            return ""
+        if card is None or card.type != "work":
+            return ""
+        wanted = DONE_MEANS_HEADING.strip().lower()
+        if any(h.split(" (", 1)[0].strip().lower() == wanted for h in section_headings(card.body)):
+            return ""
+        return (f"#{card.id} has no Done means; the verifier will have nothing to check "
+                "against.")
 
     def _ask_to_initialize(self, kind: str, request: dict, rid) -> None:
         """A write reached a project with no Switchboard: ask the user, and park the write.

@@ -3844,12 +3844,16 @@ card, claim, plan if it is more than a few steps, execute with `#ID` in every co
 
 ### 19.20 A card body is one section per stage (v3.10, 2026-09-20)
 
-Card `#Z4HR`, owner 2026-09-20: the eleven sections a work card's body is built from, one per
-workflow stage, in body order — `Issue`, `Decisions`, `Discussion points`, `Planning notes`,
-`Plan`, `Tasks`, `Execution Summary`, `Tests`, `QA checklist`, `Verdict`, `Resolution` — plus
+Card `#Z4HR`, owner 2026-09-20; extended by `#WC3E`, owner 2026-09-21. The sections a work
+card's body is built from, one per workflow stage, in body order — `Issue`, `Decisions`,
+`Discussion points`, `Planning notes`, `Done means`, `Plan`, `Tasks`, `Execution Summary`,
+`Tests`, `Profile`, `Try it`, `QA checklist`, `Human QA`, `Verdict`, `Resolution` — plus
 `Merged in` and `Split`, written by the merge and split tools. The full table (stage, author,
 what each holds) is `SWITCHBOARD-FORMAT.md` 2.7; the canonical list is
-`relay_core.board.CARD_SECTIONS`.
+`relay_core.board.CARD_SECTIONS`. `Done means`, `Human QA`, `Profile` and `Try it` joined it on
+2026-09-21: the board had grown all four and `check` was warning on the cards that used them,
+which is the schema disagreeing with itself. **The list is complete**, and that is the claim the
+policy makes — nothing else is a stage.
 
 - **`board_tools.AGENT_SECTIONS` is the schema**, derived from `CARD_SECTIONS` minus `issue`,
   replacing the thirteen-name allowlist (`findings`, `implementer check`, `qa verdict`, …).
@@ -3865,12 +3869,51 @@ what each holds) is `SWITCHBOARD-FORMAT.md` 2.7; the canonical list is
   board predates the schema by hundreds of cards and there is no bulk migration — a card
   converts when it is next touched, and the warning keeps the backlog countable.
 - **The policy and the procedure carry the set**: rule 10 of `board_policy.md`, and the
-  `deliver` skill names the section each stage writes (`## Execution Summary` and
-  `## QA checklist` at landing).
-- **A Plan turn writes only its own `## Plan`, and that is enforced per turn** (card #CTRN,
-  2026-09-21). It is a rule about the *stage*, so it lives on the turn and not in a narrower tool
-  list: `Agent.set_card_turn("plan", card)` opens the `CardScope` for the length of the turn, a
-  write outside `## Plan` is refused with `board_mode_refused`, and the executor's writers are
+  `deliver` skill names the section each stage writes (`## Execution Summary` and `## Tests` at
+  landing).
+- **Expectations before implementation, and a verification record** (#WC3E, 2026-09-21; Codex's
+  review E/F and the owner's decisions on #YZ8G). `## Done means` is two to five lines — the
+  intended outcome, and how failure would be recognised — written by the Plan turn *before*
+  `## Plan`, so that a verifier checks something the implementation did not shape. Execute on a
+  card that has none **warns and goes on**: `board_protocol._done_means_notice` puts one sentence
+  ("#ID has no Done means; the verifier will have nothing to check against.") on the
+  `board_written` answer to `board_claim`, and the pane shows it in the board's notice line.
+  `board_tools.CardScope` lets a Plan turn write `## Done means` beside `## Plan` and still
+  nothing else.
+- **`## QA checklist` is the verifying session's record, never the implementer's.** Policy rule 5
+  and the `deliver` skill's landing step say the implementer lands with tests and evidence and
+  writes no checklist; `board::verifyTask` (`src/BoardModel.cpp`) tells the verifier what to
+  write instead — the revision it checked (newest of `links.commits`, or `HEAD`), each
+  `## Done means` and `## Tests` line as `passed` / `failed` / `missing evidence` /
+  `not applicable` with its evidence path, what is unresolved, and one dated, named line
+  ("Reviewed by <model> on <date>: no findings" / "…: N findings") that is never omitted, because
+  *not reviewed* must not read as *no findings*. A separate session is the requirement; a
+  different model family stays Relay's recommendation when it picks the verifier (#T71W), not a
+  condition of the verdict.
+- **Verifying is the tests *and* a simulation** (owner, 2026-09-21). For a card about the app the
+  verifier stages the situation `## Issue` and `## Done means` describe — a disposable fixture
+  project, the built binary on its own Xvfb display and an isolated profile, `xdotool` for every
+  input — and plays the mechanical steps, one capture per step; the recipe it copies is
+  `docs/qa_evidence/2026-09-20-switchboard-tooling-hub/scenario/ai-pass.sh`. For a backend, CLI or
+  docs card the simulation is the request and its response, or the before and after of the
+  reproduction, and `not applicable` takes one word of reason. Everything it produces goes under
+  `docs/qa_evidence/<date>-verify-<ID>/` with a rerunnable `stage.sh`, and the record carries
+  three fixed lines — `tests: passed|failed|missing evidence (revision …)`,
+  `simulation: played|not applicable|could not stage (evidence …)` and `staged: <that directory>`.
+  The path is fixed because **Try it** (#JNYN) reopens what the verifier staged rather than
+  staging it again, and only stages on its own when Verify never ran.
+- **Agents move cards within their authority, and stop at a person's judgement.** The implementer
+  moves its card to `needs-verification`, the verifier on to a QA lane or back a stage. A card
+  whose `## Human QA` holds a numbered question with no indented `Answer:` line under it is not
+  moved to `done` by an agent: `board_tools._human_qa_gate` refuses it in one sentence
+  (`board_refused`, `requires: "human_qa_answer"`), on the agent actor only, so the owner's own
+  close from the Switchboard is untouched. That is the owner's rule of 2026-09-21, "a card with
+  an open judgement waits for the person".
+- **A Plan turn writes only its own `## Plan` and `## Done means`, and that is enforced per
+  turn** (card #CTRN, 2026-09-21; the second heading #WC3E, the same day). It is a rule about the
+  *stage*, so it lives on the turn and not in a narrower tool list:
+  `Agent.set_card_turn("plan", card)` opens the `CardScope` for the length of the turn, a write
+  outside those two sections is refused with `board_mode_refused`, and the executor's writers are
   refused in `_prepare` with the same sentence, which names Execute. The tool list a Plan turn is
   offered is the console's (19.10, 33.3).
 
@@ -7091,7 +7134,10 @@ one test, exactly as the same line would at a terminal:
 ```
 
 `tests` is in `board_tools.AGENT_SECTIONS`, so an agent writes the section without it being
-logged as a rewrite of the owner's text.
+logged as a rewrite of the owner's text. It is also, with `## Execution Summary` and the evidence
+path, the whole of what an implementer lands: since #WC3E the implementer writes no
+`## QA checklist` — the verifying session writes that, against the `## Done means` the card
+carried before the work started (19.20).
 
 **The dated block.** `tests_check` on the wire also *writes*: the **worker** appends a
 `### Check <YYYY-MM-DD HH:MM>` block under `## Tests`, one line per finding

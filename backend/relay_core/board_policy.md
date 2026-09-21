@@ -1,4 +1,4 @@
-<!-- Switchboard agent policy v5 (docs/SWITCHBOARD-DESIGN.md 6.2, owner decisions 12).
+<!-- Switchboard agent policy v7 (docs/SWITCHBOARD-DESIGN.md 6.2, owner decisions 12).
      v2, 2026-09-20 (#R9G7): work goes through a card, and a pane claims the card it works
      (`board_claim`, rules 1 and 5); the procedure is the bundled `deliver` skill.
      v3, 2026-09-20 (#R9G7, owner: "for small requests, we are not going to want the full
@@ -16,6 +16,11 @@
      `board_create_card`'s `labels`, the ceilings in the `board_rate_limited` refusal itself.
      Nothing was deleted, and `<board>/POLICY.md` — generated from this file plus that skill plus
      the appendix — still carries every sentence for a guest who has no board tools.
+     v7, 2026-09-21 (#WC3E): rule 5 stops the implementer writing the checklist, and rule 10 adds
+     `## Done means` (before the work), Profile, Try it and Human QA to the section list, which is
+     now complete. Tiered, not omitted: what the verifying session writes instead is the Verify
+     brief's and the `deliver` skill's, and the refusal to close over an unanswered `## Human QA`
+     question is `board_move_card`'s own description. This block stays under 3 KB.
      Versioned here so evals can pin it; loaded into the system prompt by
      relay_core.board_tools.prompt_section when issues/board.yaml exists and autonomy is not off.
      Keep it short: every line costs context on every turn. -->
@@ -37,7 +42,8 @@ Switchboard rules (`board_*` writes the repository's `issues/` tracker in git):
 5. **Work.** `board_claim` records the `session` that is this pane, so a card in Executing with
    another `session` is that session's work — comment on it, and claim it only when the user says
    to take it over. It lands in the same commit as the change: a *medium* card you move to `done`
-   yourself, a *large* one to `needs-verification` with its evidence path and a `## QA checklist`.
+   yourself, a *large* one to `needs-verification` with its evidence path, and no
+   `## QA checklist`: a separate session verifies and writes it.
 6. **Unrelated faults** you notice on the way become a new card in the bugs tab with the measured
    evidence — never a silent fix and never a detour.
 7. **Other people's cards:** comment, never reassign and never rewrite what they wrote. **Nothing
@@ -46,10 +52,10 @@ Switchboard rules (`board_*` writes the repository's `issues/` tracker in git):
 8. **Limits.** A few cards per turn and per hour. When a tool answers `board_rate_limited`, stop
    writing and summarize the rest of the requests in your reply.
 9. **Report:** after a card write, name `#ID` and the change in your reply.
-10. **One body section per stage**, produced in order: Issue (user's verbatim request), Decisions
-    (quoted), Discussion points, Planning notes, Plan, Tasks, Execution Summary, Tests, QA checklist,
-    Verdict, Resolution. Write only the section the current stage produces; invent no headings.
-    Verifiers write Verdict; Resolution records closure.
+10. **One section per stage**: Issue, Decisions, Discussion points, Planning notes, Done means
+    (the outcome and how failure shows, before the work), Plan, Tasks, Execution Summary, Tests,
+    Profile, Try it, QA checklist, Human QA, Verdict, Resolution; no others. Write only your
+    stage's section and move cards within your authority.
 
 
 Memory: `board_create_card {type: memory}` saves one reusable fact with a stable `name` and

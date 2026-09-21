@@ -2941,5 +2941,142 @@ class SignalToolTests(BoardToolsTest):
         self.assertIn("7 days", spec["description"])
 
 
+# ------------------------------------------------- expectations and the verification record
+
+class DoneMeansSectionTests(BoardToolsTest):
+    """#WC3E: the sections the schema grew, and the two rules that hang off them.
+
+    One test per `## Done means` bullet of the card, on the pieces that live in the tools:
+    the headings `check` and `AGENT_SECTIONS` recognise, the Plan turn's second section, and
+    the refusal to close a card over a question a person has not answered.
+    """
+
+    # ---- the heading list is complete (bullet 3)
+    def test_the_new_sections_are_in_the_schema_and_agent_writable(self):
+        for heading in ("done means", "human qa", "profile", "try it"):
+            self.assertIn(heading, B.CARD_SECTIONS, heading)
+            self.assertIn(heading, T.AGENT_SECTIONS, heading)
+        # and `Done means` comes before `Plan`, because it is written before the work
+        self.assertLess(B.CARD_SECTIONS.index("done means"), B.CARD_SECTIONS.index("plan"))
+
+    def test_check_no_longer_warns_on_them(self):
+        card_id = self.create()
+        card_hash = self.tools.run("board_read", {"id": card_id})["hash"]
+        for heading in ("Done means", "Human QA", "Profile", "Try it"):
+            card_hash = self.tools.run("board_update_card", {
+                "id": card_id, "base_hash": card_hash,
+                "append_section": {"heading": heading, "text": "x"}})["hash"]
+        self.assertEqual([p.code for p in self.board.check() if p.code == "unknown_section"], [])
+
+    def test_writing_them_is_not_logged_as_a_rewrite_of_the_owners_words(self):
+        card_id = self.create()
+        card_hash = self.tools.run("board_read", {"id": card_id})["hash"]
+        result = self.tools.run("board_update_card", {
+            "id": card_id, "base_hash": card_hash,
+            "append_section": {"heading": "Done means", "text": "- the key records\nFailure: silence"}})
+        self.assertEqual(result["logged_rewrites"], [])
+        self.assertIn("## Done means", self.board.card_by_id(card_id).body)
+
+    # ---- a Plan turn writes it (bullet 1)
+    def test_a_plan_turn_may_write_done_means_beside_the_plan_and_nothing_else(self):
+        card_id = self.create()
+        self.tools.begin_card_turn("plan", card_id)
+        self.addCleanup(self.tools.end_card_turn)
+
+        def card_hash():
+            return self.tools.run("board_read", {"id": card_id})["hash"]
+
+        result = self.tools.run("board_update_card", {
+            "id": card_id, "base_hash": card_hash(),
+            "replace_section": {"heading": "Done means", "text": "- it records\nFailure: silence"}})
+        self.assertNotIn("error", result, result)
+        plan = self.tools.run("board_update_card", {
+            "id": card_id, "base_hash": card_hash(),
+            "replace_section": {"heading": "Plan", "text": "1. do it"}})
+        self.assertNotIn("error", plan, plan)
+        refused = self.tools.run("board_update_card", {
+            "id": card_id, "base_hash": card_hash(),
+            "replace_section": {"heading": "Execution Summary", "text": "built it"}})
+        self.assertEqual(refused["code"], "board_mode_refused")
+        self.assertIn("Done means", refused["error"])
+        body = self.board.card_by_id(card_id).body
+        self.assertIn("## Done means", body)
+        self.assertNotIn("## Execution Summary", body)
+
+    # ---- the Plan brief says so, and the policy no longer contradicts it (bullet 3)
+    def test_the_plan_brief_asks_for_done_means_before_the_plan(self):
+        brief = T.card_brief("plan")
+        self.assertIn("Done means", brief)
+        self.assertLess(brief.index("Done means"), brief.index("What a plan holds"))
+
+    def test_the_policy_says_the_implementer_writes_no_checklist(self):
+        # The policy block is read before every board call and is budgeted (#GMCF decision 8,
+        # tests/test_system_prompt.py), so it carries the rule and `board_move_card`'s own
+        # description carries the detail. Both are checked here, because the split is the point:
+        # nothing was dropped, it was tiered.
+        text = T.policy_text()
+        self.assertIn("no\n   `## QA checklist`", text)
+        self.assertIn("Done means", text)
+        self.assertIn("Human QA", text)
+        self.assertIn("move cards within your authority", text)   # agents move cards
+        move = next(item["function"] for item in T.TOOL_SPECS
+                    if item["function"]["name"] == "board_move_card")["description"]
+        # the contradictions Codex listed, settled in the text rather than left to the reader
+        self.assertIn("recommendation, not a rule", move)         # model family
+        self.assertIn("the implementer writes none", move)
+        self.assertIn("`Answer:`", move)
+
+    # ---- an unanswered human question (bullet 4)
+    def test_an_answer_is_an_indented_line_under_its_numbered_question(self):
+        body = ("## Human QA\n"
+                "1. Is the threshold right?\n"
+                "    Answer: yes, leave it.\n"
+                "2. Should the denial say so in the composer?\n")
+        self.assertEqual(T.unanswered_human_qa(body),
+                         ["2. Should the denial say so in the composer?"])
+        self.assertEqual(T.unanswered_human_qa("## Human QA\nprose, no question\n"), [])
+        self.assertEqual(T.unanswered_human_qa("## Tasks\n1. not this section\n"), [])
+
+    def test_an_agent_cannot_move_a_card_to_done_over_an_open_question(self):
+        card_id = self.create()
+        card_hash = self.tools.run("board_read", {"id": card_id})["hash"]
+        self.tools.run("board_update_card", {
+            "id": card_id, "base_hash": card_hash,
+            "append_section": {"heading": "Human QA",
+                               "text": "1. Does the wording read right to you?"}})
+        refused = self.tools.run("board_move_card", {"id": card_id, "status": "done",
+                                                     "reason": "looks fine"})
+        self.assertEqual(refused["code"], "board_refused")
+        self.assertEqual(refused["requires"], "human_qa_answer")
+        self.assertIn("Human QA", refused["error"])
+        self.assertEqual(self.board.card_by_id(card_id).status, "inbox")
+
+    def test_the_same_move_goes_through_once_the_question_is_answered(self):
+        card_id = self.create()
+        card_hash = self.tools.run("board_read", {"id": card_id})["hash"]
+        self.tools.run("board_update_card", {
+            "id": card_id, "base_hash": card_hash,
+            "append_section": {"heading": "Human QA",
+                               "text": "1. Does the wording read right to you?\n"
+                                       "    Answer: yes (owner, 2026-09-21)"}})
+        result = self.tools.run("board_move_card", {"id": card_id, "status": "done",
+                                                    "reason": "answered"})
+        self.assertNotIn("error", result, result)
+        self.assertEqual(self.board.card_by_id(card_id).status, "done")
+
+    def test_the_owner_may_still_close_it(self):
+        # "a card with an open judgement waits for the person" -- for the *person*, not forever.
+        card_id = self.create()
+        card_hash = self.tools.run("board_read", {"id": card_id})["hash"]
+        self.tools.run("board_update_card", {
+            "id": card_id, "base_hash": card_hash,
+            "append_section": {"heading": "Human QA", "text": "1. Is this right?"}})
+        self.tools.context.actor = T.OWNER_ACTOR
+        result = self.tools.run("board_move_card", {"id": card_id, "status": "done",
+                                                    "reason": "I looked at it"})
+        self.assertNotIn("error", result, result)
+        self.assertEqual(self.board.card_by_id(card_id).status, "done")
+
+
 if __name__ == "__main__":       # pragma: no cover
     unittest.main()
