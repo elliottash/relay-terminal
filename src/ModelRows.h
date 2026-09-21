@@ -22,6 +22,8 @@
 #include "ModelCatalog.h"
 
 #include <QHash>
+#include <QJsonObject>
+#include <QJsonValue>
 #include <QList>
 #include <QString>
 #include <QStringList>
@@ -62,6 +64,28 @@ namespace relay::modelrows {
 // provider is spent or unusable is greyed **in place**, with the reason in its tooltip, never
 // dropped: a subscription running out must not make a model disappear from the list the user
 // ranked (design 1.3, rule 2).
+
+// What one pane picked for one mode, and the level it runs it at. The level is stored beside the
+// key rather than read back off the tier list every time, because the list is the *machine's* and
+// this is the pane's: re-ordering a list must not silently change the level a restored pane comes
+// back on. An empty `effort` means "whatever the list, or the model, says".
+struct ModePick {
+    QString key;       // "<preset>|<model>"
+    QString effort;    // a Relay level, or empty
+    bool operator==(const ModePick &other) const { return key == other.key && effort == other.effort; }
+};
+
+// A pane's picks to and from the saved window layout (`RelayWindow::serializeNode`,
+// `Pane::initRestore`): `{"flash": {"preset": …, "model": …, "effort": …}}`, the same three fields a
+// tier-list entry has. "main" is never stored — main's model is the pane's own, saved as `model`.
+// `modePicksFromJson` is total: anything that is not that shape is dropped rather than guessed at.
+QJsonObject modePicksToJson(const QHash<QString, ModePick> &picks);
+QHash<QString, ModePick> modePicksFromJson(const QJsonValue &saved);
+// The picks this catalog can still run. An entry that has left the catalog or lost its key is
+// dropped **silently** — the mode then reads rank 1 of its list again, which is what it would have
+// done had the pick never been made. An exhausted subscription is *not* dropped: it comes back.
+QHash<QString, ModePick> usableModePicks(const models::Catalog &catalog,
+                                         const QHash<QString, ModePick> &picks);
 
 // One row as the box wants it. `data` is what a pick means, and is the same word in every box:
 //

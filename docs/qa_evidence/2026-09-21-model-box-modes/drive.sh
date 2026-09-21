@@ -26,6 +26,9 @@
 #   g  /high typed: the box follows
 #   h  /main: the model alone, no "(main)"
 #   i  a Switchboard console's box, beside j, a terminal pane's: the same rows
+#   k  /flash comes back on the model this pane picked for flash, not rank 1 of the list
+#   l  after a quit and a relaunch with no arguments ("reopen where I left off"): the pane is back
+#      on "kimi-k3 · flash", and the saved layout node says why
 set -uo pipefail
 root=/home/elliott/repos/relay-terminal
 out=$root/docs/qa_evidence/2026-09-21-model-box-modes
@@ -113,13 +116,22 @@ shot() { sleep "${2:-0.9}"; xdotool mousemove $((width + 20)) $((height + 20)); 
 # above it. Cropped so the text is readable at a glance.
 crop() { convert "$out/$1.png" -crop "${width}x420+0+$((height - 420))" +repage "$out/$1-box.png"; }
 
-"$build/relay" --workspace "$work" >"$out/relay-stderr.log" 2>&1 &
-relay_pid=$!
-sleep 10
-largest_window
-[[ -z $win ]] && { echo "no Relay window"; exit 1; }
-xdotool windowmove "$win" 0 0 windowsize "$win" $width $height
-xdotool windowfocus "$win"; sleep 4
+# `--workspace` means "open this folder in a new window", and main.cpp reads that as a reason not
+# to reopen the saved layout — so run 2 is launched with no arguments at all, which is what
+# "reopen where I left off" needs.
+start_relay() {
+    if [[ ${1:-} == restore ]]; then "$build/relay" >>"$out/relay-stderr.log" 2>&1 &
+    else "$build/relay" --workspace "$work" >>"$out/relay-stderr.log" 2>&1 &
+    fi
+    relay_pid=$!
+    sleep 10
+    largest_window
+    [[ -z $win ]] && { echo "no Relay window"; exit 1; }
+    xdotool windowmove "$win" 0 0 windowsize "$win" $width $height
+    xdotool windowfocus "$win"; sleep 4
+}
+
+start_relay
 
 # --- a. the collapsed chip on main: the model alone, no "(main)" ---------------------------------
 shot a-strip 2
@@ -200,5 +212,38 @@ shot j-pane-box
 crop j-pane-box
 k Escape; sleep 1.0
 
+# --- k. /flash comes back on the model this pane picked for flash ---------------------------------
+# Not rank 1 of the flash list (glm-5.3-flash): the pick made in step f is this pane's own, and
+# /flash, Alt+F and the flash mode row all take it.
+xdotool mousemove 300 $((height - 88)) click 1; sleep 0.8
+t "/flash"; k Return; sleep 3
+shot k-flash-remembers-the-pick 2
+crop k-flash-remembers-the-pick
+
+# --- l. quit, relaunch with no arguments, and the pane is still on it ------------------------------
 cp "$conf" "$out/conf-after.txt"
+sleep 8                            # the saved layout is written on a timer; let it land
+python3 -m json.tool "$XDG_DATA_HOME/relay/state/windows.json" >"$out/saved-layout.json" 2>/dev/null
+grep -o '"mode_picks":[^}]*}' "$out/saved-layout.json" >"$out/saved-mode-picks.txt" 2>/dev/null \
+    || python3 - "$out/saved-layout.json" >"$out/saved-mode-picks.txt" <<'PYEOF'
+import json, sys
+def walk(node):
+    if isinstance(node, dict):
+        if "mode_picks" in node: print(json.dumps(node["mode_picks"], indent=2))
+        for v in node.values(): walk(v)
+    elif isinstance(node, list):
+        for v in node: walk(v)
+walk(json.load(open(sys.argv[1])))
+PYEOF
+kill -TERM "$relay_pid"; sleep 8
+relay_pid=
+
+start_relay restore
+shot l-restored-on-its-pick 2
+crop l-restored-on-its-pick
+k alt+m; sleep 1.8
+shot l2-restored-box
+crop l2-restored-box
+k Escape; sleep 1.0
+
 echo "done; shots in $out"

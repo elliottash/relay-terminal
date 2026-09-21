@@ -13,6 +13,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPair>
 #include <QScreen>
 #include <QScrollBar>
 #include <QShowEvent>
@@ -35,6 +36,39 @@ constexpr int kMaxRows = 14;   // past this the list scrolls; below it, it never
 constexpr int kRowRole = Qt::UserRole + 1;
 constexpr int kSeparatorRole = Qt::UserRole + 2;
 constexpr int kTrailingRole = Qt::UserRole + 3;
+// The marker gutter: a fixed-width column at the left of every row of a page that has a marked row,
+// so the names line up whether or not their own row carries the mark. kMarkerRole is 1 on the rows
+// that do; kGutterRole is 1 on every row of such a page. See `markerOf` below for why the mark is
+// carried in the row's text and taken back out here.
+constexpr int kMarkerRole = Qt::UserRole + 4;
+constexpr int kGutterRole = Qt::UserRole + 5;
+
+// The mark the model box puts on the mode the pane is in (relay::modelrows::modeRowText). It is in
+// the row's *text* because the combo, the popup and the phone's menu all draw the same string and
+// only one of the three can paint a gutter; the popup takes it back out and draws it itself, which
+// is the only way "high", "main" and "flash" can start at the same x in a proportional font. Two
+// spaces stand in its place on the rows that are not marked.
+const QString kMarker = QStringLiteral("\u2022");
+
+// (marked, the text without the marker column) for one row.
+QPair<bool, QString> markerOf(const QString &text)
+{
+    if (text.startsWith(kMarker + QLatin1Char(' '))) return {true, text.mid(kMarker.size() + 1)};
+    if (text.startsWith(QLatin1String("  "))) return {false, text.mid(2)};
+    return {false, text};
+}
+
+bool hasMarkerColumn(const QString &text)
+{
+    return text.startsWith(kMarker + QLatin1Char(' ')) || text.startsWith(QLatin1String("  "));
+}
+
+// How wide that column is: the mark, with room on either side of it. One number for every row of
+// the page, so the gutter cannot depend on which rows the filter happened to leave.
+int gutterWidth(const QFontMetrics &metrics)
+{
+    return metrics.horizontalAdvance(kMarker) + 7;
+}
 
 QColor mix(const QColor &over, const QColor &under, qreal amount)
 {
@@ -71,6 +105,7 @@ public:
         }
         const bool enabled = index.flags().testFlag(Qt::ItemIsEnabled);
         const bool current = option.state.testFlag(QStyle::State_Selected);
+        const int gutter = index.data(kGutterRole).toBool() ? gutterWidth(option.fontMetrics) : 0;
 
         if (current) {
             const QRectF band = QRectF(rect).adjusted(3, 1, -3, -1);
@@ -80,6 +115,14 @@ public:
         }
         painter->setFont(option.font);
         QRect text = rect.adjusted(kSidePad + 3, 0, -(kSidePad + 3), 0);
+        if (gutter > 0) {
+            if (index.data(kMarkerRole).toBool()) {
+                painter->setPen(enabled ? theme::Text : theme::TextMuted);
+                painter->drawText(QRect(text.left(), text.top(), gutter, text.height()),
+                                  Qt::AlignVCenter | Qt::AlignLeft, kMarker);
+            }
+            text.setLeft(text.left() + gutter);
+        }
         // The "via" part, at the far end and in the muted ink: which provider this row would
         // actually run on (card #MDL1, rule 2). It is drawn first and the name is elided into
         // what is left, so a narrow box loses the end of a long model id rather than the column
@@ -263,14 +306,23 @@ void FilterPopup::rebuild(int preferRow)
 {
     const QString query = m_edit->text();
     const bool filtering = !query.trimmed().isEmpty();
+    // Whether this page carries a marker column at all, decided over *every* row rather than the
+    // ones the filter left: a page must not shift sideways as you type. A list with no marked rows
+    // — the Alt+E level box, and every other box — gets no gutter and is drawn exactly as before.
+    bool gutter = false;
+    for (const FilterRow &row : std::as_const(m_rows))
+        if (!row.separator && hasMarkerColumn(row.text)) { gutter = true; break; }
     m_list->clear();
     for (int i = 0; i < m_rows.size(); ++i) {
         const FilterRow &row = m_rows.at(i);
         if (!rowMatches(row, query)) continue;
-        auto *item = new QListWidgetItem(row.separator ? QString() : row.text, m_list);
+        const QPair<bool, QString> mark = gutter ? markerOf(row.text) : qMakePair(false, row.text);
+        auto *item = new QListWidgetItem(row.separator ? QString() : mark.second, m_list);
         item->setData(kRowRole, i);
         item->setData(kSeparatorRole, row.separator);
         item->setData(kTrailingRole, row.trailing);
+        item->setData(kMarkerRole, mark.first);
+        item->setData(kGutterRole, gutter);
         if (!row.tooltip.isEmpty()) item->setToolTip(row.tooltip);
         if (row.separator || !row.enabled) item->setFlags(Qt::NoItemFlags);
     }
@@ -448,6 +500,9 @@ void FilterPopup::layoutForAnchor(bool first)
     // No narrower than the box it hangs from, no wider than its own longest row — with room for
     // the filter line's own words, which are content too.
     int widest = std::max(anchor->width(), metrics.horizontalAdvance(m_edit->placeholderText()) + 4 * kSidePad);
+    // The marker column is drawn beside the text, not over it, so it is width the rows need.
+    for (const FilterRow &row : std::as_const(m_rows))
+        if (!row.separator && hasMarkerColumn(row.text)) { widest += gutterWidth(metrics); break; }
     for (const FilterRow &row : std::as_const(m_rows))
         widest = std::max(widest, metrics.horizontalAdvance(row.text) + 4 * kSidePad
                                       + (row.trailing.isEmpty() ? 0

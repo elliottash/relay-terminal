@@ -1002,6 +1002,11 @@ public:
         if (agentMode == QStringLiteral("plan") || agentMode == QStringLiteral("build")) m_agentMode = agentMode;
         const QString input = spec.value(QStringLiteral("input_mode")).toString();
         if (input == QStringLiteral("auto") || input == QStringLiteral("shell") || input == QStringLiteral("agent")) m_modeValue = input;
+        // What this pane had picked for its high / flash / local modes (card #MDL1, section 5.1):
+        // a pane that was on "kimi-k3 · flash" comes back on it, not on rank 1 of the flash list.
+        // Whether those entries still exist is asked once a catalog has arrived (refreshPickers).
+        m_modePick = relay::modelrows::modePicksFromJson(spec.value(QStringLiteral("mode_picks")));
+        m_modePicksChecked = m_modePick.isEmpty();
         m_restoreSession = spec.value(QStringLiteral("session_id")).toString();
         // The terminal text this pane had when Relay was last quit (src/WindowState.h). The pane
         // keeps the saved id, so the same file is rewritten instead of one per restart, and the
@@ -1829,43 +1834,32 @@ public:
     // model row of the box's high / flash / local page carries. Empty — every other caller — and
     // the role takes the first usable entry of its tier list, exactly as it always has. The pick is
     // remembered per mode so the box's parentheses keep naming what this pane would run there.
-    void setAgentRole(const QString &role, bool announce = true, const QString &pick = QString()) {
+    void setAgentRole(const QString &role, bool announce = true,
+                      const relay::modelrows::ModePick &pick = {}) {
         const QString mode = relay::modelrows::roleTier(role);
-        if (!pick.isEmpty()) m_modePick.insert(mode, pick);
-        if (role == m_agentRole && pick.isEmpty()) return;
+        if (!pick.key.isEmpty()) m_modePick.insert(mode, pick);
+        if (role == m_agentRole && pick.key.isEmpty()) return;
         // Allowed mid-turn (issue 3ES1): the worker applies it before the turn's next request.
         m_agentRole = role;
         // The model this mode runs in this pane: the one just picked, else the one this pane last
         // picked for that mode. "Enter on a mode row switches the mode and keeps that mode's
         // model" (design 5.1), and /flash, /high, /local and Alt+F come back the same way. Main is
         // the pane's own model and is never pinned here.
-        const QString use = !pick.isEmpty()                  ? pick
-                          : mode == QStringLiteral("main")   ? QString()
-                                                             : m_modePick.value(mode);
-        if (m_configured) {
-            QJsonObject request{{"type", "set_agent_role"}, {"role", role}};
-            QString preset, model;
-            if (!use.isEmpty() && relay::models::Catalog::splitKey(use, &preset, &model)) {
-                request.insert(QStringLiteral("preset"), preset);
-                request.insert(QStringLiteral("model"), model);
-                // The level the tier lists give that entry, when they give one: a pick carries the
-                // level it was ranked with, as a list entry does.
-                if (const QString level = relay::models::curation::listEffortFor(use); !level.isEmpty())
-                    request.insert(QStringLiteral("effort"), level);
-            }
-            send(request);
-        }
+        const relay::modelrows::ModePick use = !pick.key.isEmpty()           ? pick
+                                             : mode == QStringLiteral("main") ? relay::modelrows::ModePick{}
+                                                                              : m_modePick.value(mode);
+        if (m_configured) sendAgentRole(role, use);
         if (announce) {
             // Lower-case, and the model by name (card #MDL1, rule 1): "flash for this pane ·
             // glm-5.3-flash". Main takes the same shape rather than a sentence of its own. A pick
             // names itself rather than waiting for the worker's report.
             QString named;
-            if (!use.isEmpty()) {
+            if (!use.key.isEmpty()) {
                 const relay::models::Catalog catalog = modelCatalog();
-                if (const relay::models::Entry *entry = catalog.find(use)) named = entry->name;
+                if (const relay::models::Entry *entry = catalog.find(use.key)) named = entry->name;
                 if (named.isEmpty()) {
                     QString preset, model;
-                    if (relay::models::Catalog::splitKey(use, &preset, &model))
+                    if (relay::models::Catalog::splitKey(use.key, &preset, &model))
                         named = relay::models::nameOf(model);
                 }
             } else if (const QString model = roleModel(role); !model.isEmpty()) {
@@ -1876,6 +1870,24 @@ public:
         }
         changed();
     }
+    // `set_agent_role`, with this pane's own model for that role when it has one (protocol 13.5).
+    // The level is the one the pick carries, else the one the tier lists give that entry: a pick
+    // that has never named a level follows the list, and one that has keeps its own.
+    void sendAgentRole(const QString &role, const relay::modelrows::ModePick &pick) {
+        QJsonObject request{{"type", "set_agent_role"}, {"role", role}};
+        QString preset, model;
+        if (!pick.key.isEmpty() && relay::models::Catalog::splitKey(pick.key, &preset, &model)) {
+            request.insert(QStringLiteral("preset"), preset);
+            request.insert(QStringLiteral("model"), model);
+            const QString level = pick.effort.isEmpty() ? relay::models::curation::listEffortFor(pick.key)
+                                                        : pick.effort;
+            if (!level.isEmpty()) request.insert(QStringLiteral("effort"), level);
+        }
+        send(request);
+    }
+    // The picks this pane holds, for the saved window layout, and the ones it comes back with.
+    QJsonObject modePicks() const { return relay::modelrows::modePicksToJson(m_modePick); }
+
     // The modes this pane's box offers, in the design's order (section 5.1): high, main, flash, and
     // local only where this machine serves a model (card #JH22) — a mode that always resolved back
     // to main would be a promise the box cannot keep. "lite" is not a pane mode.
@@ -10783,12 +10795,18 @@ private:
         } else if (type == QStringLiteral("configured")) {
             m_configured = true; m_configuring = false;
             m_model = event.value(QStringLiteral("model")).toString();
-            m_paneModel = m_model;   // what this pane was configured on (card #MDL1)
             m_skillCount = event.value(QStringLiteral("skills")).toInt();
             setSkillCommands(event.value(QStringLiteral("skill_commands")).toArray());
             // Model roles (protocol 13): the worker reports the effective model of every role and
             // which role this pane runs (a role that could not be used falls back to "main").
             m_roleSummary = event.value(QStringLiteral("roles")).toObject();
+            // What this pane was configured on — its OWN model, which is `roles.main` (13.4), not
+            // the model of whatever role it started on. `model_changed` has followed that rule
+            // since #MDL1 ("a role's model never rewrites the pane's own key"); `configure` did
+            // not, so a pane restored on /flash came back with the flash model as its main row.
+            const QString ownModel = m_roleSummary.value(QStringLiteral("main")).toObject()
+                                         .value(QStringLiteral("model")).toString();
+            m_paneModel = ownModel.isEmpty() ? m_model : ownModel;
             m_tierSummary = event.value(QStringLiteral("tiers")).toObject();
             if (m_rolesDialog) m_rolesDialog->setResolved(m_tierSummary, m_roleSummary);
             m_agentRole = event.value(QStringLiteral("agent_role")).toString(QStringLiteral("main"));
@@ -10800,6 +10818,14 @@ private:
             if (!m_workerContext.isEmpty() && !event.contains(QStringLiteral("agent_role")))
                 m_agentRole = m_workerContext.value(QStringLiteral("agent_role"))
                                   .toString(QStringLiteral("main"));
+            // A restored pane's own model for the mode it came back on (card #MDL1): `configure`
+            // carries the role, and the role alone resolves off the tier list, so the pick has to
+            // follow. It keeps the conversation, like every other model switch.
+            if (const QString mode = relay::modelrows::roleTier(m_agentRole);
+                mode != QStringLiteral("main") && m_modePick.contains(mode)) {
+                const relay::modelrows::ModePick pick = m_modePick.value(mode);
+                if (!pick.key.isEmpty() && pick.key != currentEntryKey()) sendAgentRole(m_agentRole, pick);
+            }
             onSessionConfigured(event);
             noteGuestPreset(event);   // Tier A (29.4): the guest is this pane's agent from here on
             discloseHosted();   // Relay Free: where the prompts go, said once per installation
@@ -12308,8 +12334,10 @@ private:
                 hintSwapForPick(key);
                 selectEntry(key);
             } else {
-                m_modePick.insert(mode, key);
-                setAgentRole(role, true, key);
+                // The level the tier lists give that entry is the one it runs at here, and the one
+                // the pane comes back on after a restart.
+                setAgentRole(role, true,
+                             relay::modelrows::ModePick{key, relay::models::curation::listEffortFor(key)});
             }
             focusInput();
             hint(QStringLiteral("model.mouse"), QStringLiteral("Tip: /model switches models from the prompt box"));
@@ -12514,8 +12542,8 @@ private:
         // carry whatever this pane last picked for them (`setAgentRole`'s `pick`).
         rows.modePick.insert(QStringLiteral("main"), currentEntryKey());
         for (auto it = m_modePick.cbegin(); it != m_modePick.cend(); ++it)
-            if (it.key() != QStringLiteral("main") && !it.value().isEmpty())
-                rows.modePick.insert(it.key(), it.value());
+            if (it.key() != QStringLiteral("main") && !it.value().key.isEmpty())
+                rows.modePick.insert(it.key(), it.value().key);
         // Guest agents (26.9): Claude Code and Codex the worker cannot run as a harness, plus
         // whichever one is actually in the pane's foreground. A guest the worker *can* run is a
         // catalog entry and is already one of the model rows — the same tool offered twice is what
@@ -12554,6 +12582,16 @@ private:
     }
 
     void refreshPickers() {
+        // A restored pick whose entry has left the catalog or lost its key is dropped, silently:
+        // the mode reads rank 1 of its list again, which is what it would have done had the pick
+        // never been made. Asked once, at the first refresh that has a catalog to ask.
+        if (!m_modePicksChecked) {
+            const relay::models::Catalog catalog = modelCatalog();
+            if (!catalog.entries.isEmpty()) {
+                m_modePick = relay::modelrows::usableModePicks(catalog, m_modePick);
+                m_modePicksChecked = true;
+            }
+        }
         m_paneState.changed();   // pane_state (relay-terminal-71): model and mode; changed() runs this
         if (!m_modelBox) return;
         const QSignalBlocker modelBlock(m_modelBox);
@@ -17575,12 +17613,17 @@ private:
     // `m_swapFrom` is where the last /swap (or a pick that landed on rank 1) came from, and
     // `m_swapSentence` the line the next `model_changed` prints in place of its own.
     QString m_paneModel, m_swapFrom, m_swapSentence;
-    // What this pane picked for each mode of the model box, by tier id — "flash" → the entry key a
-    // model row of the flash page named (card #MDL1, section 5.1). It is what the mode row's
-    // parentheses say and what `set_agent_role` carries as this pane's own pick; "main" is not
-    // kept here, because main's model is the pane's own (`currentEntryKey`). This pane's, not the
-    // machine's: the tier lists are never rewritten by a pick.
-    QHash<QString, QString> m_modePick;
+    // What this pane picked for each mode of the model box, by tier id — "flash" → the entry a
+    // model row of the flash page named, and the level it runs at (card #MDL1, section 5.1). It is
+    // what the mode row's parentheses say, what `set_agent_role` carries as this pane's own pick,
+    // and what `serializeNode` saves so a pane restored on "kimi-k3 · flash" comes back on it.
+    // "main" is not kept here, because main's model is the pane's own (`currentEntryKey`). This
+    // pane's, not the machine's: the tier lists are never rewritten by a pick.
+    QHash<QString, relay::modelrows::ModePick> m_modePick;
+    // Whether the restored picks have been checked against a catalog yet. One check, at the first
+    // refresh that has one: a pick whose entry has left the catalog or lost its key is dropped
+    // silently, and the mode reads rank 1 of its list again.
+    bool m_modePicksChecked = false;
     // The harness this pane is on but has not started: rank 1 of the main list, waiting for the
     // first prompt (card #MDL1, owner 2026-09-21).
     QString m_deferredPreset, m_deferredModel;

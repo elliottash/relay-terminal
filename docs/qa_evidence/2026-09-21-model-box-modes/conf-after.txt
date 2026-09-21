@@ -4,9 +4,9 @@ effort=high
 [hints]
 count\model.mouse=1
 count\pane.focus.mouse=1
-last\model.mouse=1789997807
-last\pane.focus.mouse=1789997861
-last_any=1789997861
+last\model.mouse=1789999297
+last\pane.focus.mouse=1789999352
+last_any=1789999352
 
 [instructions]
 onboarded=true

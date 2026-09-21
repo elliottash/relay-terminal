@@ -1,0 +1,81 @@
+{
+    "saved": 1789999359,
+    "version": 1,
+    "windows": [
+        {
+            "current": 0,
+            "geometry": [
+                0,
+                0,
+                1600,
+                900
+            ],
+            "screen": "screen",
+            "tabs": [
+                {
+                    "node": {
+                        "children": [
+                            {
+                                "pane": {
+                                    "agent_mode": "build",
+                                    "agent_role": "flash",
+                                    "cwd": "/tmp/claude-1000/bx/project",
+                                    "effort": "high",
+                                    "input_mode": "auto",
+                                    "mode_picks": {
+                                        "flash": {
+                                            "effort": "high",
+                                            "model": "k3",
+                                            "preset": "kimi-code"
+                                        }
+                                    },
+                                    "model": "k3",
+                                    "preset": "kimi-code",
+                                    "scrollback": "ca0dae0d-ff61-4b6b-9b19-8f1abd5c5be8",
+                                    "session_id": "46e74b5954ba42baa524ae77d4d47e21",
+                                    "workspace": "/tmp/claude-1000/bx/project"
+                                }
+                            },
+                            {
+                                "board": {
+                                    "collapsed": [
+                                        "discussing",
+                                        "done",
+                                        "executing",
+                                        "inbox",
+                                        "needs-qa",
+                                        "needs-verification",
+                                        "planned",
+                                        "planning",
+                                        "verified"
+                                    ],
+                                    "hidden": [],
+                                    "labels": [],
+                                    "navigation": {
+                                        "card": "",
+                                        "filter": "",
+                                        "selected": ""
+                                    },
+                                    "self_closed": [],
+                                    "signals": [],
+                                    "sort": "manual",
+                                    "workspace": "/tmp/claude-1000/bx/project"
+                                }
+                            }
+                        ],
+                        "sizes": [
+                            794,
+                            793
+                        ],
+                        "split": "h"
+                    },
+                    "project": "/tmp/claude-1000/bx/project",
+                    "tab_id": "t3d40e7f4b550"
+                }
+            ],
+            "titles": [
+                "project (2)  \u00b7  cpu 00% \u00b7 mem 00%"
+            ]
+        }
+    ]
+}

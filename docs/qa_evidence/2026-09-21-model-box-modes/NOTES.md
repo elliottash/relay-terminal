@@ -38,6 +38,10 @@ The lists were seeded so each thing the card asks for is visible:
 | `h-slash-main` | **`/main`**: the model alone again, `kimi-k3` |
 | `i-console-box` | the **Switchboard console's** box (its worker role is `switchboard`, a main-tier role): `high (glm-5.3)`, `• main (kimi-k3)`, `flash (glm-5.3-flash)`, `kimi-k3 kimi`, `glm-5.3 z.ai (glm) +1` — and its chip reads `kimi-k3`, not "kimi-k3 (switchboard)" |
 | `j-pane-box` | the terminal pane's box beside it, in the same window: the same rows. The one difference is `flash (kimi-k3)`, because *that* pane picked kimi-k3 for flash in step f — which is what "what this pane would run in that mode" means |
+| `k-flash-remembers-the-pick` | **`/flash`** puts the pane back on **its own** flash model, `kimi-k3 · flash`, not on rank 1 of the flash list. "Enter on a mode row switches the mode and keeps that mode's model", and the command does the same |
+| `saved-mode-picks.txt` | what the layout node then holds: `{"flash": {"preset": "kimi-code", "model": "k3", "effort": "high"}}` — cut out of `saved-layout.json` |
+| `l-restored-on-its-pick` | Relay quit with SIGTERM and **relaunched with no arguments** ("reopen where I left off"; `--workspace` on the command line suppresses restore). The pane comes back on `kimi-k3 · flash` |
+| `l2-restored-box` | and its box agrees: the marker is on `flash (kimi-k3)`, the flash list is the page, `kimi-k3` is highlighted |
 
 `*-box.png` is the bottom 420 px of each shot, cropped so the list is readable.
 
@@ -54,10 +58,24 @@ The lists were seeded so each thing the card asks for is visible:
    clicks "Initialize here" instead, which is also a truer test: the console is then a real board's
    console.
 
-## Known cosmetic point
+## The marker gutter
 
-The mode rows use a text marker — `"• "` for the mode the pane is in, two spaces on the others — so
-that the combo, the popup and the phone's menu all say the same thing from one string. In a
-proportional font the bullet is a few pixels wider than two spaces, so the mode names sit about 5 px
-apart (visible in `b-altm-main-box.png`). Exact alignment would need a fixed-width gutter in the
-row delegate; it is legible as it is and the design's mock draws the marker in a gutter too.
+The mode rows carry their mark in the row's **text** — `"• "` on the mode the pane is in, two spaces
+on the others — because the popup, the combo and the phone's menu all draw the same string and only
+one of the three can paint a gutter. In a proportional font a bullet is wider than two spaces, so
+the first run's shots had the mode names about 5 px apart. The popup now takes the mark back out of
+the text and draws it in a fixed-width column of its own, so `high`, `main` and `flash` start at the
+same x whether or not their row is the marked one (`b-altm-main-box.png`, `l2-restored-box-box.png`).
+A page with no marked row — the Alt+E level box, and every other box — gets no gutter and is drawn
+exactly where it always was. `tests/filterpopup_test.cpp`
+`theMarkerSitsInAGutterSoTheNamesLineUp` renders the same word three times with and without a
+marker and compares the two images column by column, so the names cannot drift apart again.
+
+## One more thing the shots found
+
+The restored pane's **main** row named the *flash* model. `configure` set the pane's own model
+(`m_paneModel`) from the `configured` event's `model`, which is the model of whatever role the pane
+started on — so a pane restored on `/flash` came back with its main row naming the flash model.
+`model_changed` has followed the rule since t:a3 ("a role's model never rewrites the pane's own
+key"); `configure` now does too, reading `roles.main` (protocol 13.4), which is the pane's own model
+by definition. It was there before this task and is visible in the shots of it, so it is fixed here.

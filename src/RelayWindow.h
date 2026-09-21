@@ -7978,6 +7978,11 @@ private:
             if (!pane->engineCore().isEmpty()) leaf.insert(QStringLiteral("engine_core"), pane->engineCore());
             if (!pane->currentPreset().isEmpty()) leaf.insert(QStringLiteral("preset"), pane->currentPreset());
             if (!pane->paneModel().isEmpty()) leaf.insert(QStringLiteral("model"), pane->paneModel());
+            // What the pane picked for the model box's other modes (card #MDL1, section 5.1):
+            // `{"flash": {"preset", "model", "effort"}}`. `model` above is main's, which is the
+            // pane's own model; these are the modes it is not in but would come back to.
+            if (const QJsonObject picks = pane->modePicks(); !picks.isEmpty())
+                leaf.insert(QStringLiteral("mode_picks"), picks);
             if (!pane->sessionId().isEmpty()) leaf.insert(QStringLiteral("session_id"), pane->sessionId());
             // Which file holds this pane's terminal text (src/WindowState.h). The id is in every
             // node, including "restore last closed": a reopened pane finds the text of the pane it

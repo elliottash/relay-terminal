@@ -315,6 +315,73 @@ private slots:
         QCOMPARE(roleRowText(QStringLiteral("flash"), QStringLiteral("glm-5.3-flash")), QStringLiteral("glm-5.3-flash (flash)"));
     }
 
+    // ----- a pane's picks in its saved layout node (card #MDL1) -------------------------------
+    // A pane that was on "kimi-k3 · flash" must come back on it after a restart, not on rank 1 of
+    // the flash list. The trip out and back is pure, so it can be stated here.
+    void modePicksSurviveTheSavedLayout()
+    {
+        using relay::modelrows::ModePick;
+        QHash<QString, ModePick> picks;
+        picks.insert(QStringLiteral("flash"), ModePick{QStringLiteral("kimi-code|kimi-k3"), QStringLiteral("high")});
+        picks.insert(QStringLiteral("high"), ModePick{QStringLiteral("glm-coding|glm-5.3"), QString()});
+        // "main" is the pane's own model, saved as the node's `model`: never a pick.
+        picks.insert(QStringLiteral("main"), ModePick{QStringLiteral("kimi-code|kimi-k3"), QString()});
+
+        const QJsonObject saved = relay::modelrows::modePicksToJson(picks);
+        QCOMPARE(saved.keys(), QStringList({QStringLiteral("flash"), QStringLiteral("high")}));
+        QCOMPARE(saved.value(QStringLiteral("flash")).toObject(),
+                 QJsonObject({{QStringLiteral("preset"), QStringLiteral("kimi-code")},
+                              {QStringLiteral("model"), QStringLiteral("kimi-k3")},
+                              {QStringLiteral("effort"), QStringLiteral("high")}}));
+        // A pick with no level of its own carries none: the tier list answers for it.
+        QVERIFY(!saved.value(QStringLiteral("high")).toObject().contains(QStringLiteral("effort")));
+
+        const QHash<QString, ModePick> back = relay::modelrows::modePicksFromJson(saved);
+        QCOMPARE(back.size(), 2);
+        QCOMPARE(back.value(QStringLiteral("flash")).key, QStringLiteral("kimi-code|kimi-k3"));
+        QCOMPARE(back.value(QStringLiteral("flash")).effort, QStringLiteral("high"));
+        QCOMPARE(back.value(QStringLiteral("high")).key, QStringLiteral("glm-coding|glm-5.3"));
+        QVERIFY(back.value(QStringLiteral("high")).effort.isEmpty());
+    }
+
+    // Anything that is not that shape is dropped rather than guessed at: a layout file is written
+    // by another version of Relay, or by hand.
+    void modePicksFromJsonIsTotal()
+    {
+        using relay::modelrows::modePicksFromJson;
+        QVERIFY(modePicksFromJson(QJsonValue()).isEmpty());
+        QVERIFY(modePicksFromJson(QJsonValue(QStringLiteral("flash"))).isEmpty());
+        QVERIFY(modePicksFromJson(QJsonArray{1, 2}).isEmpty());
+        const QJsonObject mixed{
+            {QStringLiteral("flash"), QJsonObject{{QStringLiteral("preset"), QStringLiteral("kimi-code")},
+                                                  {QStringLiteral("model"), QStringLiteral("kimi-k3")}}},
+            {QStringLiteral("high"), QJsonObject{{QStringLiteral("preset"), QStringLiteral("openai")}}},  // no model
+            {QStringLiteral("lite"), QStringLiteral("glm-coding|glm-5.3")},                               // not an object
+            {QStringLiteral("main"), QJsonObject{{QStringLiteral("preset"), QStringLiteral("kimi-code")},
+                                                 {QStringLiteral("model"), QStringLiteral("kimi-k3")}}}};
+        const QHash<QString, relay::modelrows::ModePick> read = modePicksFromJson(mixed);
+        QCOMPARE(read.keys(), QStringList({QStringLiteral("flash")}));
+    }
+
+    // On restore, a pick whose entry has left the catalog or lost its key is dropped **silently**.
+    // A spent subscription is not: it is a row the box greys and a reset brings back.
+    void aRestoredPickThatCannotRunIsDropped()
+    {
+        using relay::modelrows::ModePick;
+        Catalog catalog = catalogFrom(presets());
+        QHash<QString, ModePick> picks;
+        picks.insert(QStringLiteral("flash"), ModePick{QStringLiteral("kimi-code|kimi-k3"), QString()});
+        picks.insert(QStringLiteral("high"), ModePick{QStringLiteral("anthropic|claude-opus-5"), QString()});
+        picks.insert(QStringLiteral("local"), ModePick{QStringLiteral("local:gone|bonsai-2-27b"), QString()});
+        const QHash<QString, ModePick> kept = relay::modelrows::usableModePicks(catalog, picks);
+        QCOMPARE(kept.keys(), QStringList({QStringLiteral("flash")}));   // no key; not in the catalog
+
+        // Exhausted stays: the pane comes back on it and the row is greyed until the reset.
+        catalog.status.insert(QStringLiteral("kimi-code"), QStringLiteral("rejected"));
+        QCOMPARE(relay::modelrows::usableModePicks(catalog, picks).keys(),
+                 QStringList({QStringLiteral("flash")}));
+    }
+
     // `/model <words>` resolves the same way in every composer.
     void resolveMatchesKeyModelLabelThenFilter()
     {

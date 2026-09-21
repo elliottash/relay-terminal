@@ -15,6 +15,7 @@
 #include <QApplication>
 #include <QImage>
 #include <QPixmap>
+#include <QSet>
 #include <QLayout>
 #include <QTest>
 
@@ -513,6 +514,83 @@ private slots:
         QCOMPARE(inkInBand(top + 23, shot.height()), 0);
         // And the box is wide enough that the two never overlap.
         QVERIFY(popup.width() > 120);
+    }
+
+    // 17. The marker column. The mode rows carry their mark in the *text* — one string for the
+    //     popup, the combo and the phone — and the popup takes it back out and draws it in a
+    //     fixed-width gutter, so "high", "main" and "flash" start at the same x however wide a
+    //     bullet happens to be in the font. Rendered and measured, because that is the only way to
+    //     say it.
+    //
+    //     Measured as a *difference* between two renders of the same three words, one of them with
+    //     a marker: the names must land on exactly the columns they landed on without it, and the
+    //     marker must be to the left of all of them. Comparing the same word to itself is what
+    //     keeps a glyph's own shape (an "f" leans right at the top) out of the measurement.
+    void theMarkerSitsInAGutterSoTheNamesLineUp()
+    {
+        theme::SurfaceRaised = QColor(0x24, 0x1c, 0x18);
+        theme::Accent = QColor(0xc0, 0x7a, 0x4a);
+        theme::Text = QColor(0xf0, 0xe6, 0xdd);
+        theme::TextMuted = QColor(0x9a, 0x8b, 0x7f);
+        QWidget anchor;
+        anchor.resize(240, 22);
+        anchor.show();
+
+        // Every scanline's leftmost pixel that is the theme's text ink (the highlight band is a
+        // different colour and is stepped over).
+        const auto leftEdges = [](const QImage &shot) {
+            QSet<int> edges;
+            for (int y = 0; y < shot.height(); ++y)
+                for (int x = 0; x < shot.width(); ++x) {
+                    const QColor pixel = shot.pixelColor(x, y);
+                    if (std::abs(pixel.red() - theme::Text.red())
+                            + std::abs(pixel.green() - theme::Text.green())
+                            + std::abs(pixel.blue() - theme::Text.blue()) < 120) { edges << x; break; }
+                }
+            return edges;
+        };
+        const auto render = [&anchor, &leftEdges](const QStringList &texts, int current) {
+            QList<FilterRow> rows;
+            for (const QString &text : texts) rows << FilterRow{text, text, {}, false, true, {}};
+            FilterPopup popup(&anchor);
+            popup.setRows(rows, current);
+            popup.openFor(&anchor);
+            const QSet<int> edges = leftEdges(popup.grab().toImage());
+            popup.dismiss();
+            return edges;
+        };
+
+        // The same word twice over, once with the middle row marked. Comparing a word to itself is
+        // what keeps a glyph's own shape (an "f" leans right at the top) out of the measurement,
+        // and comparing two renders is what keeps the filter line's caret — which is drawn in the
+        // text ink at the far left of every render — out of it as well.
+        const QString mark = QString(QChar(0x2022)) + QLatin1Char(' ');
+        const QSet<int> plainRows = render({QStringLiteral("  main"), QStringLiteral("  main"),
+                                            QStringLiteral("  main")}, 0);
+        const QSet<int> marked = render({QStringLiteral("  main"), mark + QStringLiteral("main"),
+                                         QStringLiteral("  main")}, 0);
+        QVERIFY2(!plainRows.isEmpty() && !marked.isEmpty(), "the rows were not drawn at all");
+        const int caret = *std::min_element(plainRows.cbegin(), plainRows.cend());
+        const auto past = [](const QSet<int> &columns, int from) {
+            QSet<int> out;
+            for (const int x : columns) if (x > from) out << x;
+            return out;
+        };
+        const QSet<int> plainNames = past(plainRows, caret);
+        const QSet<int> markedAll = past(marked, caret);
+        QVERIFY(!plainNames.isEmpty() && !markedAll.isEmpty());
+        const int markerAt = *std::min_element(markedAll.cbegin(), markedAll.cend());
+        const int namesAt = *std::min_element(plainNames.cbegin(), plainNames.cend());
+        QVERIFY2(markerAt < namesAt - 2,
+                 qPrintable(QStringLiteral("the marker is at %1, the names at %2").arg(markerAt).arg(namesAt)));
+        // The names did not move by so much as a pixel when one of them gained a marker.
+        QCOMPARE(past(markedAll, markerAt), plainNames);
+
+        // A list with no marked row gets no gutter: the Alt+E level box is drawn exactly as it was,
+        // its names starting where the marker column would have begun.
+        const QSet<int> levels = past(render({QStringLiteral("high"), QStringLiteral("max")}, 0), caret);
+        QVERIFY(!levels.isEmpty());
+        QCOMPARE(*std::min_element(levels.cbegin(), levels.cend()), markerAt);
     }
 };
 

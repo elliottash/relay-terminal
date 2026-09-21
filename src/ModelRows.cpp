@@ -99,6 +99,53 @@ QString viaTooltip(const models::Group &group, const models::Catalog &catalog, q
 
 }  // namespace
 
+// ----- a pane's picks in its saved layout node (card #MDL1) ------------------------------------
+
+QJsonObject modePicksToJson(const QHash<QString, ModePick> &picks)
+{
+    QJsonObject out;
+    for (auto it = picks.cbegin(); it != picks.cend(); ++it) {
+        if (it.key().isEmpty() || it.key() == QStringLiteral("main")) continue;   // main is the pane's own model
+        QString preset, model;
+        if (!models::Catalog::splitKey(it.value().key, &preset, &model)) continue;
+        QJsonObject entry{{QStringLiteral("preset"), preset}, {QStringLiteral("model"), model}};
+        if (!it.value().effort.isEmpty()) entry.insert(QStringLiteral("effort"), it.value().effort);
+        out.insert(it.key(), entry);
+    }
+    return out;
+}
+
+QHash<QString, ModePick> modePicksFromJson(const QJsonValue &saved)
+{
+    QHash<QString, ModePick> out;
+    if (!saved.isObject()) return out;
+    const QJsonObject object = saved.toObject();
+    for (auto it = object.constBegin(); it != object.constEnd(); ++it) {
+        if (it.key().isEmpty() || it.key() == QStringLiteral("main")) continue;
+        if (!it.value().isObject()) continue;
+        const QJsonObject entry = it.value().toObject();
+        const QString preset = entry.value(QStringLiteral("preset")).toString();
+        const QString model = entry.value(QStringLiteral("model")).toString();
+        if (preset.isEmpty() || model.isEmpty()) continue;
+        out.insert(it.key(), ModePick{models::Catalog::keyFor(preset, model),
+                                      entry.value(QStringLiteral("effort")).toString()});
+    }
+    return out;
+}
+
+QHash<QString, ModePick> usableModePicks(const models::Catalog &catalog,
+                                         const QHash<QString, ModePick> &picks)
+{
+    QHash<QString, ModePick> out;
+    for (auto it = picks.cbegin(); it != picks.cend(); ++it) {
+        const models::Entry *entry = catalog.find(it.value().key);
+        // Exhausted is deliberately allowed through: a spent subscription is a row the box greys
+        // and a reset brings back, not a pick the user has abandoned.
+        if (entry != nullptr && entry->usable) out.insert(it.key(), it.value());
+    }
+    return out;
+}
+
 QString modeRowText(const QString &mode, const QString &model, bool current)
 {
     // The marker the design draws in the gutter (section 5.1). It is in the text rather than in the

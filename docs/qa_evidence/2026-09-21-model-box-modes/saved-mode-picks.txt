@@ -1,0 +1,7 @@
+{
+  "flash": {
+    "effort": "high",
+    "model": "k3",
+    "preset": "kimi-code"
+  }
+}
