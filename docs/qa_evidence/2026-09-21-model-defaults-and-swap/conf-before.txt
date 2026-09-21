@@ -1,0 +1,40 @@
+[instructions]
+onboarded=true
+
+[isolation]
+enabled=false
+
+[provider]
+preset=kimi-code
+model=k3
+
+[agent]
+effort=high
+
+[models]
+tier\main=glm-coding|glm-5.3-flash|low, glm-coding|glm-5.3|max, kimi-code|k3|high
+tier\flash=glm-coding|glm-5.3-flash|low
+tier\high=glm-coding|glm-5.3|max
+tier\lite=glm-coding|glm-5.3-flash|low
+tier\local=@Invalid()
+profile_order=work, admin
+profile=work
+profiles\work\tier\main=glm-coding|glm-5.3-flash|low, glm-coding|glm-5.3|max, kimi-code|k3|high
+profiles\work\tier\flash=glm-coding|glm-5.3-flash|low
+profiles\work\tier\high=glm-coding|glm-5.3|max
+profiles\work\tier\lite=glm-coding|glm-5.3-flash|low
+profiles\admin\tier\main=kimi-code|k3|high, glm-coding|glm-5.3-flash|low, glm-coding|glm-5.3|max
+profiles\admin\tier\flash=glm-coding|glm-5.3-flash|low
+profiles\admin\tier\high=glm-coding|glm-5.3|max
+profiles\admin\tier\lite=glm-coding|glm-5.3-flash|low
+
+[suggestions]
+next_command=false
+next_prompt=false
+
+[security]
+approvals_chosen=true
+approvals_ask=@Invalid()
+
+[url_handler]
+announced=true

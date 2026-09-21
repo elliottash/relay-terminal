@@ -1,0 +1,79 @@
+{
+    "saved": 1789995014,
+    "version": 1,
+    "windows": [
+        {
+            "current": 0,
+            "geometry": [
+                0,
+                0,
+                1600,
+                900
+            ],
+            "screen": "screen",
+            "tabs": [
+                {
+                    "node": {
+                        "children": [
+                            {
+                                "pane": {
+                                    "agent_mode": "build",
+                                    "agent_role": "main",
+                                    "cwd": "/tmp/claude-1000/df/project",
+                                    "effort": "high",
+                                    "input_mode": "auto",
+                                    "model": "k3",
+                                    "preset": "kimi-code",
+                                    "scrollback": "fb833aa8-881b-45ee-a2f8-318ac4c46b41",
+                                    "session_id": "5156aa64ac874a3184044041af0d95a4",
+                                    "workspace": "/tmp/claude-1000/df/project"
+                                }
+                            },
+                            {
+                                "pane": {
+                                    "agent_mode": "build",
+                                    "agent_role": "main",
+                                    "cwd": "/tmp/claude-1000/df/project",
+                                    "effort": "high",
+                                    "input_mode": "auto",
+                                    "model": "k3",
+                                    "preset": "kimi-code",
+                                    "scrollback": "3819f5bb-4344-48d6-9350-b52976f8453e",
+                                    "session_id": "b0792291c4934d909b78dfa173c09df0",
+                                    "workspace": "/tmp/claude-1000/df/project"
+                                }
+                            }
+                        ],
+                        "sizes": [
+                            794,
+                            793
+                        ],
+                        "split": "h"
+                    },
+                    "tab_id": "tbbcfce948638"
+                },
+                {
+                    "node": {
+                        "pane": {
+                            "agent_mode": "build",
+                            "agent_role": "main",
+                            "cwd": "/tmp/claude-1000/df/project",
+                            "effort": "max",
+                            "input_mode": "auto",
+                            "model": "glm-5.3",
+                            "preset": "glm-coding",
+                            "scrollback": "ed9eda2a-5a67-4ca6-b3ce-5932a770cac4",
+                            "session_id": "56474c84dc4840058ac0d6f627840dfa",
+                            "workspace": "/tmp/claude-1000/df/project"
+                        }
+                    },
+                    "tab_id": "t1fef52fcaacb"
+                }
+            ],
+            "titles": [
+                "project (2)  \u00b7  cpu 00% \u00b7 mem 00%",
+                "project  \u00b7  cpu 00% \u00b7 mem 00%"
+            ]
+        }
+    ]
+}
