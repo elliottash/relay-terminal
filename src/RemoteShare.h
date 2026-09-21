@@ -20,6 +20,7 @@
 #include <QJsonArray>
 #include <QSet>
 #include <QJsonObject>
+#include <QJsonValue>
 #include <QObject>
 #include <QString>
 #include <QVector>
@@ -216,7 +217,16 @@ public:
     // which the publisher coalesces, so this is at most one message per pane per 100 ms.
     void paneState(const QString &paneId, const QJsonObject &state);
 
+    // The Switchboard on the owner's devices (#SWPH, src/BoardRemote.h). One worker event going
+    // out as `{"t":"board_event","rid":n|null,"event":{…}}`: `rid` is the `rid` of the
+    // `board_request` it answers, or null for a broadcast. The hub decides which devices see it
+    // (the owner's `full` ones, never a guest) and sanitises it again.
+    void sendBoardEvent(const QJsonValue &rid, const QJsonObject &event);
+
 signals:
+    // A `board_request` line, whole: {"t","rid","device","name","request":{…}}. BoardRemote
+    // checks it against the allow-list and answers through sendBoardEvent().
+    void boardRequest(const QJsonObject &line);
     void startedChanged();
     void addressesChanged(const QJsonArray &addresses);
     void pairingReady(const QString &url, const relay::QrMatrix &qr, int expires);

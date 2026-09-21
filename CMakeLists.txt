@@ -72,6 +72,9 @@ add_library(relay-board STATIC src/BoardModel.cpp src/BoardModel.h src/BoardPane
     # Signals (#AQ6X): the machine's own faults as rows the board draws, and the page one opens.
     src/BoardSignals.cpp src/BoardSignals.h
     src/BoardWorker.cpp src/BoardWorker.h src/BoardWorkspace.cpp src/BoardWorkspace.h
+    # The Switchboard on the owner's phone (#SWPH): the bridge between the tab's BoardWorker and
+    # the remote sidecar. Widget-free and RemoteShare-free; the window hands both in as functions.
+    src/BoardRemote.cpp src/BoardRemote.h
     src/BoardChat.h)   # the Switchboard's name for the helper panel (#8YQ9, #FEJQ)
 target_include_directories(relay-board PUBLIC src)
 # relay-projects: boardRootFor() asks projects::boardDirOf() which folder of a directory is a board,
@@ -954,6 +957,13 @@ if(BUILD_TESTING)
     target_compile_definitions(relay-boardworkspace-tests PRIVATE RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME boardworkspace COMMAND relay-boardworkspace-tests)
     set_tests_properties(boardworkspace PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # The Switchboard on the phone, desktop half (#SWPH): the request allow-list, each request as
+    # the worker's own message, events back under the right `rid`, the pane still getting all of
+    # them, Execute/Verify through the window's hooks, and everything refused while remote is off.
+    add_executable(relay-boardremote-tests tests/boardremote_test.cpp)
+    target_link_libraries(relay-boardremote-tests PRIVATE relay-board ${RELAY_QT}::Test)
+    add_test(NAME boardremote COMMAND relay-boardremote-tests)
+    set_tests_properties(boardremote PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # Two Switchboard panes on one workspace (#TTYB): the worker's events reach every board pane,
     # so a `board_card` answer is opened only by the pane whose request it answers — the panes'
     # navigation is independent while their data stays shared.

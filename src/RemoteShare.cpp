@@ -199,6 +199,13 @@ void RemoteShare::send(const QJsonObject &message)
     m_process->write(QJsonDocument(message).toJson(QJsonDocument::Compact) + '\n');
 }
 
+void RemoteShare::sendBoardEvent(const QJsonValue &rid, const QJsonObject &event)
+{
+    send({{QStringLiteral("t"), QStringLiteral("board_event")},
+          {QStringLiteral("rid"), rid.isUndefined() ? QJsonValue(QJsonValue::Null) : rid},
+          {QStringLiteral("event"), event}});
+}
+
 void RemoteShare::onReadable()
 {
     m_pending.append(m_process->readAllStandardOutput());
@@ -470,6 +477,10 @@ void RemoteShare::handle(const QJsonObject &message)
         const QString paneId = message.value(QStringLiteral("pane")).toString();
         auto it = m_panes.find(paneId);
         if (it != m_panes.end()) it->needFull = true;
+    } else if (kind == QLatin1String("board_request")) {
+        // The Switchboard from one of the owner's devices (#SWPH). Nothing is decided here: the
+        // bridge re-checks the request against the allow-list and answers with sendBoardEvent().
+        emit boardRequest(message);
     } else if (kind == QLatin1String("remote_state")) {
         // The service's own state (#PH0N): on, where it is registered, whether that registration
         // is live and how many of the owner's devices are connected. Sent whenever any of it
