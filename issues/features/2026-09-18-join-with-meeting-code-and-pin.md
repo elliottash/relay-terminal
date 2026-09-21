@@ -8,6 +8,7 @@ milestone: desktop-alpha
 workstream: terminal
 assignee: agent
 implemented_by: Claude Opus 5 (Claude Code session relay-terminal-8e), 2026-09-18
+session: 5ccf8d2d-fdab-4934-bf35-8c25491b3786
 rank: 6e
 created: '2026-09-18'
 acceptance: a friend types a 4-letter meeting code and a 4-digit PIN on the join page and reaches the owner's knock row; the server never learns the PIN and cannot join or sit in the middle without guessing it online; three wrong PINs burn the code
@@ -124,4 +125,20 @@ QA hook: `RELAY_REMOTE_CODE_FILE` names a file the GUI writes `BQRT 4829` to, be
 - [x] Join page: meeting code and PIN form, the code phase, then the existing knock (`app/guest.js`) <!-- t:db -->
 - [x] Share window: "Make a code", the code and PIN shown large, countdown, used/burned states (`src/RemoteShare.cpp`) <!-- t:z9 -->
 - [x] Protocol doc (§10.7, with a sentence in §10.2 and the audit kinds in §10.6): a §10 subsection for this <!-- t:m2 -->
-- [ ] Live run: laptop (sphinxpad) joins a desktop pane by code and PIN in Chrome <!-- t:ge -->
+- [x] Live run: laptop (sphinxpad) joins a desktop pane by code and PIN in Chrome <!-- t:ge -->
+
+## Execution Summary
+Live run, 2026-09-20 (this Execute turn; the five build tasks were already in the tree from 2026-09-19). A real Relay desktop (clean worktree build of HEAD `ee12ac1a`) in an Xvfb jail made a code from its share window; a real Chrome on the same display joined through the desktop sidecar's own join page: meeting-code form → CPace in the page → sealed invite → knock → the owner's Sharing pane → "Admit as viewer" → the guest watching the pane. Four consecutive end-to-end passes (codes BKCG, SZQF, PRUV, UNXM). Evidence: `docs/qa_evidence/2026-09-18-join-with-meeting-code-and-pin/` — harness (`live.sh`, `drive_guest.mjs`), six screenshots, console log, README. Verified in the run: the five-digit codes matched on both screens (read off both and compared by the script); audit lines `code_create`/`code_used`/`knock`/`admitted` with `uses_left: 0`; the code struck through as Used; the PIN absent from the desktop's stores, rendezvous db and logs (only in the RELAY_REMOTE_CODE_FILE QA hook). Caveat: both ends ran on one machine (loopback) — this session cannot reach sphinxpad; the laptop redo is on the QA checklist. Note: between 18:44 and `4109f930`, main crashed at startup on fresh profiles (#561P, not this card); the run used the fixed HEAD.
+
+## Tests
+Automated, this turn: `python3 -m unittest tests.test_cpace tests.test_remote_meetcode tests.test_web_meet_code` — 51 tests OK (CPace draft vectors in both languages, the code-room handler, the browser peer). `python3 -m unittest tests.test_remote_security tests.test_remote_noise` — 63 tests OK (the condition-6 cases: the rendezvous cannot produce the invite from what it relayed, three failures burn and a fourth is refused, a used code is refused, a forwarded fragment after success is refused, the code room never reaches Noise). The 2026-09-19 `backend-and-bash` failures recorded on the card are gone from these modules; the suite's remaining 7–9 failures are in modules other sessions edit uncommitted (board_protocol, guest_hook, system_prompt, web_theme, remote_wire) plus load-flaky browser tests. Live: `docs/qa_evidence/2026-09-18-join-with-meeting-code-and-pin/live.sh` — self-checking, exits non-zero unless the code match, the audit lines and the PIN-absence all hold; passed four times.
+
+## QA checklist
+- [ ] Redo the live join the way the task words it: laptop (sphinxpad) → this desktop in Chrome, over the LAN or tailnet address, not loopback. The implementer ran both ends on one machine (Xvfb jail); the harness is `docs/qa_evidence/2026-09-18-join-with-meeting-code-and-pin/live.sh`.
+- [ ] On the desktop: share window → "Make a code" shows the 4-letter code and 4-digit PIN large, with the 10-minute countdown; after the join it strikes through as Used.
+- [ ] On the guest: the join page's "Have a meeting code instead?" form takes the code and PIN; a wrong PIN says so and the code field keeps focus; three wrong PINs burn the code (the desktop's share window says Closed; a fourth attempt gets the same answer as an unknown code).
+- [ ] The knock row shows the same five digits as the guest's waiting screen; Refuse burns the invite (a second knock on the same fragment is refused).
+- [ ] The code dies on its own in 10 minutes; the share window says Expired.
+- [ ] The PIN never appears in logs, the audit log, or the rendezvous db (audit kinds: code_create, code_attempt with a count and no PIN, code_used, code_burned, code_expired).
+- [ ] The rendezvous answers an unknown code exactly like an expired one, and a code room that has not finished CPace in 30 s is closed.
+- [ ] Docs: docs/REMOTE-PROTOCOL.md §10.7 matches the behaviour above.

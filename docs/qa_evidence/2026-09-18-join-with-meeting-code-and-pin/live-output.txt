@@ -1,0 +1,21 @@
+code ready: UNXM (the PIN is on screen, and in the code QA hook only)
+join page: http://127.0.0.1:38219/join
+guest is knocking; their screen shows 31479
+the five-digit codes match on both screens: 31479
+admitted: {"stage":"joined","status":"connected"}
+ok: audit recorded code_create and code_used
+ok: audit recorded the knock and the admission
+ok: the PIN is nowhere in the desktop's stores or logs
+ok: the PIN reached nothing but the code QA hook
+--- audit lines for the code ---
+{"at":1789951310.944,"kind":"code_create","code":"UNXM","invite":"a0a56d72f20db470","panes":["785ce52c-e8c4-4bb2-92fa-51b87d086b64"],"role":"viewer","expires":1789951909.944}
+{"at":1789951331.637,"kind":"code_used","code":"UNXM","invite":"a0a56d72f20db470","peer":"127.0.0.1","failures":0}
+{"at":1789951332.149,"kind":"knock","participant":"dd41d676de86375c","invite":"a0a56d72f20db470","name":"Sam (live)","peer":"127.0.0.1","role":"viewer"}
+{"at":1789951337.802,"kind":"admitted","participant":"dd41d676de86375c","invite":"a0a56d72f20db470","role":"viewer","panes":["785ce52c-e8c4-4bb2-92fa-51b87d086b64"],"uses_left":0}
+      "single_knock": true,
+      "knocked_by": "UwttSHNjnuZeiOYj1PoxxFA3M0jC6FJXPsLKKZWl3TI",
+--- guest stages ---
+{"stage":"form"}
+{"stage":"invited"}
+{"stage":"knocking","code":"31479"}
+{"stage":"joined","status":"connected"}
