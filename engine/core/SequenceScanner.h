@@ -21,13 +21,14 @@ namespace relay {
 class SequenceScanner {
 public:
     struct Hit {
-        enum Kind { PromptMark, RowRole, AltScreen } kind = PromptMark;
+        enum Kind { PromptMark, RowRole, AltScreen, Erase } kind = PromptMark;
         size_t end = 0;    // offset just past the sequence within the chunk
-        char mark = 0;     // PromptMark: 'A', 'B', 'C', 'D'
+        char mark = 0;     // PromptMark: 'A', 'B', 'C', 'D'; Erase: 'J' or 'K'
         int exitCode = -1; // PromptMark 'D'
         // Qualified: Hit's own Kind enumerator is named PromptMark and shadows
         // the type within this struct.
         ::relay::PromptMark role {}; // RowRole: MarkUserShell / MarkUserAgent
+        int eraseParam = 0;          // Erase: the CSI parameter, 0 when absent
     };
 
     // Scan data[from, len). Returns true for the first complete hit ending in
@@ -126,6 +127,25 @@ public:
                         hit->end = i;
                         return true;
                     }
+                    // ED / EL: a core that keeps row roles outside the line
+                    // (GhosttyCore) has to be told when a row was wiped, or the
+                    // role outlives the text it described. Only the selectors
+                    // that can clear a whole row are worth a hit — `CSI K` and
+                    // `CSI 0 K` end at the cursor and readline sends them by
+                    // the hundred, and `CSI 3 J` drops scrollback, whose refs
+                    // go dead on their own. DECSED / DECSEL (`CSI ? … J`) may
+                    // leave protected cells standing, so they are not this.
+                    if ((c == 'J' || c == 'K') && m_buf.find('?') == std::string::npos) {
+                        const int param = firstParam();
+                        if (c == 'J' ? param <= 2 : param == 2) {
+                            hit->kind = Hit::Erase;
+                            hit->end = i;
+                            hit->mark = c;
+                            hit->exitCode = -1;
+                            hit->eraseParam = param;
+                            return true;
+                        }
+                    }
                 } else if (c >= 0x20 && c <= 0x2f) {
                     ++i; // intermediates
                 } else {
@@ -158,6 +178,21 @@ private:
             start = end + 1;
         }
         return false;
+    }
+
+    // The CSI's first parameter, 0 when it is absent or empty (the default for
+    // every selector this scanner reads).
+    int firstParam() const
+    {
+        int value = 0;
+        for (size_t k = 0; k < m_buf.size() && m_buf[k] != ';'; ++k) {
+            if (m_buf[k] < '0' || m_buf[k] > '9')
+                return 0;
+            value = value * 10 + (m_buf[k] - '0');
+            if (value > 9999)
+                return 9999;
+        }
+        return value;
     }
 
     bool finishOsc(Hit *hit, size_t end)

@@ -358,6 +358,58 @@ struct GhosttyCore::Impl {
         roleMarks.clear();
     }
 
+    // A row erased end to end keeps nothing the host marked it for: the role
+    // describes the text, and once that is gone the band would be worn by
+    // whatever prints on the row next — `/new` clears the screen, so the new
+    // conversation opened in the colour of the command that used to be there.
+    // The rows are SCREEN coordinates, inclusive; the libvterm fork does the
+    // same to relay_marks in its erase() (third_party/libvterm/src/state.c).
+    void dropRoleRows(int firstRow, int lastRow)
+    {
+        if (lastRow < firstRow)
+            return;
+        for (size_t i = 0; i < roleMarks.size();) {
+            RoleMark &m = roleMarks[i];
+            GhosttyPointCoordinate at{0, 0};
+            if (m.onAlt == alt && ghostty_tracked_grid_ref_has_value(m.ref)
+                && ghostty_tracked_grid_ref_point(m.ref, GHOSTTY_POINT_TAG_SCREEN, &at) == GHOSTTY_SUCCESS
+                && int(at.y) >= firstRow && int(at.y) <= lastRow) {
+                ghostty_tracked_grid_ref_free(m.ref);
+                roleMarks.erase(roleMarks.begin() + long(i));
+                continue;
+            }
+            ++i;
+        }
+    }
+
+    // CSI J (display) and CSI K (line), once libghostty-vt has applied them —
+    // neither moves the cursor, so it still names the row the erase was
+    // measured from. Only the rows wiped from end to end lose their role: an
+    // erase that stops at the cursor leaves the text before it standing, and
+    // that text is what the role was about. `CSI 3 J` drops scrollback, whose
+    // refs then report no value and are pruned by roleMarkMap().
+    void eraseRoleRows(char selector, int param)
+    {
+        if (alt || roleMarks.empty())
+            return;
+        uint16_t y = 0;
+        ghostty_terminal_get(t, GHOSTTY_TERMINAL_DATA_CURSOR_Y, &y);
+        const int top = q->historyRows();       // SCREEN row of the viewport's first line
+        const int cursor = top + int(y);
+        const int bottom = top + rowsN - 1;
+        if (selector == 'K') {
+            if (param == 2)
+                dropRoleRows(cursor, cursor);
+            return;
+        }
+        if (param == 0)
+            dropRoleRows(cursor + 1, bottom);
+        else if (param == 1)
+            dropRoleRows(top, cursor - 1);
+        else if (param == 2)
+            dropRoleRows(top, bottom);
+    }
+
     // Role bits by absolute row (SCREEN coordinates: 0 = oldest scrollback
     // line, the space historyRows(), historyLines() and viewportTop() use).
     // Refs whose row left the retained scrollback report no value and are
@@ -542,6 +594,8 @@ void GhosttyCore::feed(const char *data, size_t len)
             d->checkAltScreen();
         } else if (hit.kind == SequenceScanner::Hit::RowRole) {
             d->trackRowRole(hit.role);
+        } else if (hit.kind == SequenceScanner::Hit::Erase) {
+            d->eraseRoleRows(hit.mark, hit.eraseParam);
         } else if (events.promptMark) {
             uint16_t y = 0;
             ghostty_terminal_get(d->t, GHOSTTY_TERMINAL_DATA_CURSOR_Y, &y);

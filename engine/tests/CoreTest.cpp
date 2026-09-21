@@ -3,6 +3,7 @@
 // assert cells, text, modes and events.
 #include "core/AnsiSerializer.h"
 #include "core/LibVtermCore.h"
+#include "core/SequenceScanner.h"
 #include "core/VtCore.h"
 
 #include <QtTest>
@@ -263,6 +264,74 @@ private slots:
         s.vt->scrollViewportToTop();
         const ViewportFrame up = s.frame();
         QCOMPARE(int(up.lines[0].marks), int(MarkUserAgent));
+    }
+
+    // A row erased in full loses its role with its text. `/new` clears the screen through the
+    // shell (Ctrl-L, then `\e[H\e[2J`), and the row the band was on is where the next
+    // conversation's prompt lands: without this, the new conversation opened wearing the old
+    // one's cyan.
+    void clearingARowInFullDropsItsRole()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core);
+        h.feed("\x1b]7772;shell\x1b\\! make\r\nbuilt\r\n\x1b]7772;agent\x1b\\* fix it\r\n");
+        QCOMPARE(int(h.frame().lines[0].marks), int(MarkUserShell));
+        QCOMPARE(int(h.frame().lines[2].marks), int(MarkUserAgent));
+        h.feed("\x1b[H\x1b[2J");   // what `clear` and readline's redraw send
+        h.feed("$ ");
+        const ViewportFrame after = h.frame();
+        for (int row = 0; row < 4; ++row)
+            QCOMPARE(int(after.lines[row].marks), 0);
+
+        // Erase to the end of the screen from a row's middle: that row still holds what the user
+        // typed, so it keeps the band. The rows below it are gone and do not.
+        Harness p(core);
+        p.feed("\x1b]7772;shell\x1b\\! make\r\n\x1b]7772;shell\x1b\\! test\r\n");
+        p.feed("\x1b[1;4H\x1b[J");
+        const ViewportFrame part = p.frame();
+        QCOMPARE(int(part.lines[0].marks), int(MarkUserShell));
+        QCOMPARE(int(part.lines[1].marks), 0);
+    }
+
+    // The scanner's half of the same rule, which is how a core that keeps roles
+    // outside the line (GhosttyCore, tracked grid refs) hears about an erase.
+    // Only the selectors that can clear a row end to end are reported: `CSI K`
+    // stops at the cursor and readline sends it by the hundred, `CSI 3 J` drops
+    // scrollback, and `CSI ? 2 J` (DECSED) may leave protected cells standing.
+    void theScannerReportsAnErasedRow()
+    {
+        const auto erases = [](const QByteArray &in) {
+            SequenceScanner scanner;
+            QStringList out;
+            SequenceScanner::Hit hit;
+            size_t off = 0;
+            while (off < size_t(in.size()) && scanner.next(in.constData(), size_t(in.size()), off, &hit)) {
+                off = hit.end;
+                if (hit.kind == SequenceScanner::Hit::Erase)
+                    out << QStringLiteral("%1%2").arg(hit.eraseParam).arg(QLatin1Char(hit.mark));
+            }
+            return out.join(QLatin1Char(' '));
+        };
+        QCOMPARE(erases("\x1b[H\x1b[2J"), QStringLiteral("2J"));       // `clear`, and readline's redraw
+        QCOMPARE(erases("\x1b[J"), QStringLiteral("0J"));              // to the end of the screen
+        QCOMPARE(erases("\x1b[1J\x1b[2K"), QStringLiteral("1J 2K"));
+        QCOMPARE(erases("\x1b[K\x1b[0K\x1b[1K"), QString());           // partial: the text stays
+        QCOMPARE(erases("\x1b[3J"), QString());                        // scrollback, not a row
+        QCOMPARE(erases("\x1b[?2J"), QString());                       // DECSED
+        // The role and the erase arrive in order, each hit ending where the
+        // sequence does, so the core can act on the state each one left.
+        SequenceScanner ordered;
+        const QByteArray in = "\x1b]7772;shell\x1b\\! make\r\n\x1b[2J";
+        SequenceScanner::Hit hit;
+        size_t off = 0;
+        QVERIFY(ordered.next(in.constData(), size_t(in.size()), off, &hit));
+        QCOMPARE(int(hit.kind), int(SequenceScanner::Hit::RowRole));
+        QCOMPARE(int(hit.role), int(MarkUserShell));
+        off = hit.end;
+        QVERIFY(ordered.next(in.constData(), size_t(in.size()), off, &hit));
+        QCOMPARE(int(hit.kind), int(SequenceScanner::Hit::Erase));
+        QCOMPARE(hit.eraseParam, 2);
+        QCOMPARE(int(hit.end), in.size());
     }
 
     void osc133PromptMarks()

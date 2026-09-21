@@ -51,6 +51,19 @@ static void erase(VTermState *state, VTermRect rect, int selective)
       state->lineinfo[row].continuation = 0;
   }
 
+  /* RELAY PATCH: a row erased from end to end keeps nothing the host marked it
+   * for. The marks describe the text — a prompt, a command, a line the user
+   * typed — so once that text is gone they would be worn by whatever is
+   * printed on the row next: a cleared screen opened with the band of the
+   * command that used to be there. A partial erase leaves text behind and so
+   * leaves the marks alone, and a selective erase (DECSED) may leave protected
+   * cells standing, so it does too.
+   */
+  if(!selective && rect.start_col == 0 && rect.end_col == state->cols) {
+    for(int row = rect.start_row; row < rect.end_row && row < state->rows; row++)
+      state->lineinfo[row].relay_marks = 0;
+  }
+
   if(state->callbacks && state->callbacks->erase)
     if((*state->callbacks->erase)(rect, selective, state->cbdata))
       return;
