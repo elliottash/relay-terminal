@@ -567,8 +567,28 @@ button.rp-chip:hover { color: var(--qss-stripChip-hover-color); border-color: va
 .short-viewport .relay-pane .rp-queue { padding-top: 3px; padding-bottom: 4px; }
 .short-viewport .rp-rows { max-height: calc(max(calc(1em * var(--rp-line) + 8px), var(--rp-tap)) + 4px); }
 .short-viewport .rp-composer { padding-top: 6px; padding-bottom: 6px; }
+/* The owner's decisions and the agent's question are the one thing between the queue and the prompt
+   box that can be any height: three knocks, or a question with six options, is taller than the whole
+   strip an iPhone's keyboard leaves. `flex: none` made them push the prompt box off the bottom
+   instead — the very thing this block exists to stop — so in a short viewport they shrink and
+   scroll inside themselves. Everything in them is still reachable, with a finger rather than with
+   the screen. */
+.short-viewport .rp-asks, .short-viewport .rp-ask { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
 /* Under 260 px (app/viewport.js: a phone in landscape with its keyboard up, about 185 px) the queue
    steps aside too, and the terminal keeps one line; the prompt box and its strip are what is left
    to type with, whole. Everything comes back when the keyboard goes. */
 .tiny-viewport .rp-queue { display: none; }
 .tiny-viewport .rp-term-wrap { min-height: calc(var(--rt-pt) * 10 * 1.45); }
+.tiny-viewport .relay-pane { --rp-pad: 4px; }
+/* And the strip gets one row. A second row of 44 px touch targets costs a quarter of the screen —
+   with Stop in the strip (#PH0N 2.6) the chips first wrapped at 844x185 and the prompt box ended at
+   192 px, off the bottom of an iPhone in landscape with its keyboard up. So the chips that are
+   commentary (how much context is left, what the allowance is, which folder) step aside with the
+   queue, and what is left cannot wrap: the clock, the conversations, the model, ⋯, the microphone,
+   Stop and Send, with the first four shrinking to an ellipsis rather than pushing Send down. */
+.tiny-viewport .rp-strip { flex-wrap: nowrap; }
+.tiny-viewport .rp-context, .tiny-viewport .rp-allowance, .tiny-viewport .rp-folder { display: none; }
+.tiny-viewport .rp-clock,
+.tiny-viewport .rp-sessions-button,
+.tiny-viewport .rp-model-wrap { min-width: 0; flex-shrink: 1; }
+.tiny-viewport .rp-model { min-width: 0; }

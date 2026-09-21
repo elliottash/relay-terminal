@@ -159,6 +159,61 @@ class ViewportTests(unittest.TestCase):
 
         self.drive(main())
 
+    def test_in_the_phone_landscape_gap_a_question_keeps_the_prompt_box_on_screen(self):
+        """185 px, the strip an iPhone's keyboard leaves, with the agent asking and Stop in the strip.
+
+        Two ways the bottom of the pane used to go off the screen here, both after #PH0N 2.6 put a
+        Stop button and a question row in: the strip wrapped to a second row of 44 px targets (the
+        prompt box ended at 192 px), and the question row is `flex: none`, so it pushed the box off
+        by its own height (310 px with one two-option question).
+        """
+        question = {"t": "agent", "pane": fixture("busy_queue")["pane"], "seq": 99, "event": {
+            "event": "question", "id": "q-1", "turn_id": "t-1", "questions": [
+                {"header": "Which files", "question": "Apply the rename to which files?",
+                 "options": [{"label": "This file only", "recommended": True}, {"label": "Every file"},
+                             {"label": "Ask me again when you get there"}],
+                 "multiple": False}]}}
+        width, height = IPHONE_LANDSCAPE_KEYBOARD_GAP
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await browser.call("Emulation.setDeviceMetricsOverride",
+                                   {"width": width, "height": height, "deviceScaleFactor": 1, "mobile": True})
+                await browser.call("Emulation.setTouchEmulationEnabled",
+                                   {"enabled": True, "maxTouchPoints": 5})
+                await browser.navigate(
+                    f"{self.origin}/app/pane-demo.html?fixture=busy_queue&bare=1&input=touch")
+                await browser.wait_for("document.body && document.body.dataset.demoReady === '1'"
+                                       " && !!document.querySelector('.relay-pane textarea')")
+                self.assertTrue(await browser.evaluate(
+                    "window.paneDemo.agentEvent(%s)" % json.dumps(question)))
+                await browser.evaluate(frames(), timeout=10)
+                return json.loads(await browser.evaluate("""JSON.stringify((() => {
+                  const box = q => (r => [r.top, r.bottom])(
+                    document.querySelector(q).getBoundingClientRect());
+                  const ask = document.querySelector('.rp-ask');
+                  return {comp: box('.rp-composer'), send: box('.rp-send'), ask: box('.rp-ask'),
+                          term: box('.rp-term-wrap'), askScrolls: ask.scrollHeight > ask.clientHeight + 1,
+                          rows: new Set([...document.querySelectorAll('.rp-strip > *')]
+                            .filter(e => e.getBoundingClientRect().height)
+                            .map(e => Math.round(e.getBoundingClientRect().top))).size};
+                })())"""))
+            finally:
+                await browser.stop()
+
+        seen = self.drive(main())
+        self.assertEqual(seen["rows"], 1, "the strip wrapped: Send is on a second row")
+        for part in ("comp", "send", "ask"):
+            self.assertGreaterEqual(seen[part][0], 0, part)
+            self.assertLessEqual(seen[part][1], height, f"{part} ends at {seen[part][1]}px")
+        # The question gave way by scrolling rather than by pushing, and is still a strip you can
+        # reach — and the terminal still has its one line under it.
+        self.assertTrue(seen["askScrolls"], "the question row did not scroll")
+        self.assertGreater(seen["ask"][1] - seen["ask"][0], 20)
+        self.assertGreater(seen["term"][1] - seen["term"][0], 12)
+
     def paired_pane_at(self, height: int, *, touch: bool, width: int = IPAD_LANDSCAPE[0]) -> dict:
         """Pair the real client with a hub, open a pane that publishes pane_state, and measure."""
         async def main():
