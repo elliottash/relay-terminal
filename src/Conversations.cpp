@@ -33,6 +33,7 @@
 #include <QStyledItemDelegate>
 #include <QTabBar>
 #include <QTabWidget>
+#include <QStackedWidget>
 #include <QTextBrowser>
 #include <QTextDocument>
 #include <QTimer>
@@ -959,6 +960,11 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     searchRow->setSpacing(6);
     searchRow->addWidget(m_search, 1);
     searchRow->addWidget(m_help);
+    m_recentlyClosed = new QPushButton(QStringLiteral("Recently closed"));
+    m_recentlyClosed->setObjectName(QStringLiteral("sessionsRecentlyClosed"));
+    m_recentlyClosed->setVisible(false);  // The window supplies the closed-items page.
+    searchRow->addWidget(m_recentlyClosed);
+    connect(m_recentlyClosed, &QPushButton::clicked, this, [this] { showTab(QStringLiteral("closed")); });
 
     auto *statusRow = new QHBoxLayout;
     statusRow->addWidget(m_status, 1);
@@ -1005,16 +1011,27 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_tabs = new QTabWidget;
     m_tabs->setObjectName(QStringLiteral("sessionsTabs"));
     m_tabs->setDocumentMode(true);
-    m_tabs->addTab(list, QStringLiteral("Sessions"));
+    m_sessionPages = new QStackedWidget;
+    m_sessionPages->setObjectName(QStringLiteral("sessionsPages"));
+    m_sessionPages->addWidget(list);
+    m_tabs->addTab(m_sessionPages, QStringLiteral("Sessions"));
     m_tabs->widget(0)->setProperty("tabId", QStringLiteral("sessions"));
     m_tabs->tabBar()->setVisible(false);   // shown once another tab is added
     connect(m_tabs, &QTabWidget::currentChanged, this, [this] {
+        if (currentTab() == QLatin1String("sessions")) m_sessionPages->setCurrentIndex(0);
         if (m_context) m_context->tabChanged();
         if (m_helperHead) m_helperHead->setText(QStringLiteral("%1 helper").arg(paneTitle()));
         if (onTabActivated) onTabActivated(currentTab());
+        if (currentTab() == QLatin1String("sessions")) refresh();
         focusSearch();
     });
     connect(m_tabs->tabBar(), &QTabBar::tabBarClicked, this, [this](int index) {
+        if (index == m_tabs->currentIndex() && currentTab() == QLatin1String("sessions")) {
+            m_sessionPages->setCurrentIndex(0);
+            if (m_context) m_context->tabChanged();
+            refresh();
+            focusSearch();
+        }
         if (index >= 0 && onTabSelectedByUser)
             onTabSelectedByUser(m_tabs->widget(index)->property("tabId").toString());
     });
@@ -1111,6 +1128,12 @@ void SessionManager::setQuery(const QString &text) {
 }
 
 void SessionManager::focusSearch() {
+    if (currentTab() == QLatin1String("sessions") && m_closedPage
+        && m_sessionPages->currentWidget() == m_closedPage) {
+        if (auto *field = m_closedPage->findChild<QLineEdit *>()) field->setFocus();
+        else if (auto *back = m_closedPage->findChild<QPushButton *>()) back->setFocus();
+        return;
+    }
     if (currentTab() != QLatin1String("sessions")) {
         if (auto *page = m_tabs->currentWidget()) {
             if (auto *field = page->findChild<QLineEdit *>()) { field->setFocus(); field->selectAll(); }
@@ -1131,6 +1154,23 @@ void SessionManager::addTab(const QString &id, const QString &label, QWidget *wi
 
 void SessionManager::insertTab(int index, const QString &id, const QString &label, QWidget *widget) {
     if (!widget || id.isEmpty() || id == QLatin1String("sessions")) return;
+    if (id == QLatin1String("closed")) {
+        if (m_closedPage) return;
+        m_closedPage = new QWidget;
+        m_closedPage->setObjectName(QStringLiteral("sessionsClosedPage"));
+        auto *layout = new QVBoxLayout(m_closedPage);
+        layout->setContentsMargins(8, 8, 8, 8);
+        auto *back = new QPushButton(QStringLiteral("← Back to sessions"));
+        back->setObjectName(QStringLiteral("sessionsClosedBack"));
+        layout->addWidget(back, 0, Qt::AlignLeft);
+        layout->addWidget(widget, 1);
+        m_sessionPages->addWidget(m_closedPage);
+        m_recentlyClosed->setVisible(true);
+        connect(back, &QPushButton::clicked, this, [this] {
+            showTab(QStringLiteral("sessions")); refresh(); focusSearch();
+        });
+        return;
+    }
     for (int i = 0; i < m_tabs->count(); ++i)
         if (m_tabs->widget(i)->property("tabId").toString() == id) return;
     widget->setProperty("tabId", id);
@@ -1139,6 +1179,18 @@ void SessionManager::insertTab(int index, const QString &id, const QString &labe
 }
 
 void SessionManager::showTab(const QString &id) {
+    if (id == QLatin1String("closed")) {
+        if (!m_closedPage) return;
+        showTab(QStringLiteral("sessions"));
+        m_sessionPages->setCurrentWidget(m_closedPage);
+        if (m_context) m_context->tabChanged();
+        focusSearch();
+        return;
+    }
+    if (id.isEmpty() || id == QLatin1String("sessions")) {
+        m_sessionPages->setCurrentIndex(0);
+        if (m_context) m_context->tabChanged();
+    }
     for (int i = 0; i < m_tabs->count(); ++i)
         if (m_tabs->widget(i)->property("tabId").toString() == (id.isEmpty() ? QStringLiteral("sessions") : id)) {
             m_tabs->setCurrentIndex(i);
@@ -1214,6 +1266,10 @@ void SessionManager::helperDraft(const QString &text) {
 // force and the row that is selected. A hint about what is being read, not a dump of the list —
 // the rows themselves are the worker's to fetch.
 QString SessionManager::agentScreen() const {
+    if (currentTab() == QLatin1String("sessions") && m_closedPage
+        && m_sessionPages->currentWidget() == m_closedPage)
+        return QStringLiteral("Recently closed windows, tabs and panes, inside Sessions. "
+                              "Restore an item or return with Back to sessions.");
     if (currentTab() != QLatin1String("sessions")) {
         if (onTabScreen) return onTabScreen(currentTab());
         return QStringLiteral("The %1 view").arg(paneTitle());
@@ -1409,8 +1465,9 @@ void SessionManager::setHeaderRightInset(int pixels) {
     m_inset->setFixedSize(std::max(0, pixels), 1);
     // With no tab bar the search row is the first row; its right end must stay clear too.
     for (int i = 0; i < m_tabs->count(); ++i) {
-        auto *list = m_tabs->widget(i);
-        if (list->property("tabId").toString() == QLatin1String("sessions") && list->layout())
+        auto *page = m_tabs->widget(i);
+        auto *list = m_sessionPages->widget(0);
+        if (page->property("tabId").toString() == QLatin1String("sessions") && list->layout())
             list->layout()->setContentsMargins(8, 8, 8 + (m_tabs->tabBar()->isVisible() ? 0 : std::max(0, pixels)), 8);
     }
 }

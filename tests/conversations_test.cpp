@@ -26,6 +26,7 @@
 #include <QSettings>
 #include <QPushButton>
 #include <QTabBar>
+#include <QStackedWidget>
 #include <QTest>
 #include <QTextBrowser>
 #include <QTextDocument>
@@ -199,6 +200,42 @@ private slots:
         QCOMPARE(pane.query(), QStringLiteral("retained"));
         pane.selectProject(QString());
         QVERIFY(request.value(QStringLiteral("outside_projects")).toArray().contains(QStringLiteral("/tmp/demo")));
+    }
+
+    void sessionsActivationRefreshesAndClosedIsNested() {
+        SessionManager manager;
+        manager.insertTab(0, QStringLiteral("projects"), QStringLiteral("Projects"), new QWidget);
+        manager.addTab(QStringLiteral("globals"), QStringLiteral("Globals"), new QWidget);
+        auto *closedContent = new QLabel(QStringLiteral("Closed items"));
+        manager.addTab(QStringLiteral("closed"), QStringLiteral("Recently closed"), closedContent);
+        manager.setKnownProjects({{QStringLiteral("demo"), QStringLiteral("/tmp/demo")}});
+        manager.selectProject(QStringLiteral("/tmp/demo"));
+        manager.setQuery(QStringLiteral("retained search"));
+        manager.showTab(QStringLiteral("projects"));
+        manager.resize(1200, 700);
+        manager.show();
+        QTest::qWait(200);  // Drain show/search debounce before measuring navigation.
+        QJsonObject request;
+        manager.onQuery = [&](const QJsonObject &r) { request = r; };
+        auto *bar = manager.findChild<QTabBar *>();
+        QCOMPARE(bar->count(), 3);
+        QTest::mouseClick(bar, Qt::LeftButton, Qt::NoModifier, bar->tabRect(1).center());
+        QCOMPARE(manager.currentTab(), QStringLiteral("sessions"));
+        QCOMPARE(request.value(QStringLiteral("query")).toString(), QStringLiteral("retained search"));
+        QCOMPARE(request.value(QStringLiteral("project")).toString(), QStringLiteral("/tmp/demo"));
+        auto *closed = manager.findChild<QPushButton *>(QStringLiteral("sessionsRecentlyClosed"));
+        QVERIFY(closed->isVisible());
+        closed->click();
+        QCOMPARE(manager.currentTab(), QStringLiteral("sessions"));
+        QCOMPARE(bar->currentIndex(), 1);
+        QVERIFY(closedContent->isVisible());
+        QVERIFY(manager.agentContext()->spec().screen.contains(QStringLiteral("Recently closed")));
+        request = {};
+        manager.findChild<QPushButton *>(QStringLiteral("sessionsClosedBack"))->click();
+        QVERIFY(!closedContent->isVisible());
+        QVERIFY(closed->isVisible());
+        QCOMPARE(request.value(QStringLiteral("query")).toString(), QStringLiteral("retained search"));
+        QCOMPARE(request.value(QStringLiteral("project")).toString(), QStringLiteral("/tmp/demo"));
     }
 
     void kindLabels() {
@@ -476,10 +513,12 @@ private slots:
         QVERIFY(bar);
         QVERIFY(!bar->isVisibleTo(&manager));                 // one tab: no tab bar
         manager.addTab(QStringLiteral("closed"), QStringLiteral("Recently closed"), new QLabel(QStringLiteral("x")));
-        QVERIFY(bar->isVisibleTo(&manager));
+        QVERIFY(!bar->isVisibleTo(&manager));  // Closed items are inside Sessions.
+        QCOMPARE(bar->count(), 1);
         QCOMPARE(manager.currentTab(), QStringLiteral("sessions"));
         manager.showTab(QStringLiteral("closed"));
-        QCOMPARE(manager.currentTab(), QStringLiteral("closed"));
+        QCOMPARE(manager.currentTab(), QStringLiteral("sessions"));
+        QCOMPARE(manager.findChild<QStackedWidget *>(QStringLiteral("sessionsPages"))->currentIndex(), 1);
         manager.showTab(QString());
         QCOMPARE(manager.currentTab(), QStringLiteral("sessions"));
         bool closed = false;

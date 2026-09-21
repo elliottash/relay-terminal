@@ -34,6 +34,7 @@ class QMenu;
 class QPushButton;
 class QResizeEvent;
 class QTabWidget;
+class QStackedWidget;
 class QTextBrowser;
 class QTextDocument;
 class QTimer;
@@ -300,6 +301,7 @@ public:
 
     // Tabs beside the list. The list is the tab "sessions"; addTab puts a widget (owned by the
     // pane from then on) after it, and showTab brings one to the front. Unknown ids are ignored.
+    // The reserved "closed" page is reached by a button within Sessions, never a top-level tab.
     void addTab(const QString &id, const QString &label, QWidget *widget);
     void insertTab(int index, const QString &id, const QString &label, QWidget *widget);
     std::function<void(const QString &)> onTabActivated;
@@ -371,6 +373,9 @@ private:
     bool eventFilter(QObject *object, QEvent *event) override;
 
     QTabWidget *m_tabs = nullptr;
+    QStackedWidget *m_sessionPages = nullptr;
+    QWidget *m_closedPage = nullptr;
+    QPushButton *m_recentlyClosed = nullptr;
     // ----- the helper agent (#FEJQ, card #AGNT step 7) ----------------------------------
     SessionsContext *m_context = nullptr;   // owned; outlives the console, as §33 requires
     relay::agent::ConsoleHandle m_console;
