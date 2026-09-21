@@ -1,0 +1,86 @@
+===== (a) the option: label, clicked in a terminal pane =====
+PASS a0 the reply carries the paragraph of links ("SITEROW" in a01-links.png)
+PASS a0 the label and the target are both printed ("OPENROW" in a01-links.png)
+the page before the click: 
+  clicking the label "OPENROW" at 187 215
+the page after the click: Command suggestions from history|Reset to defaults|Control when a full-screen program starts|Copy on select|Colour paths and links in output|Band behind what you typed|Shell integration (OSC 7/133)|SSH sessions|Never enhance on|Always enhance on|
+PASS a1 the label opened Options at the row it names ("Copy on select" is a row of the page on screen)
+PASS a1 on the Terminal page, not the one Options opens on (no "Thinking display" row: that page is gone)
+===== (b) the session: label =====
+PASS b0 the Sessions helper is a console ("the Sessions helper" in b01-console.png)
+PASS b1 the console's answer carries the paragraph ("SESSIONROW" in b02-links.png)
+  clicking the label "SESS.*ROW" at 1345 836
+PASS b1 the label selected that conversation in this pane ("pane header and" in b03-selected.png)
+PASS b1 and the one that was selected before it is not (no "equalize key" in b03-selected.png)
+PASS b2 the reply carries the paragraph of links ("SITEROW" in b04-links.png)
+  clicking the label "SESSIONROW" at 587 215
+PASS b2 the label opened the Sessions pane from a terminal pane ("Recently closed" in b05-sessions.png)
+===== (b-control) the printed (session:…) target in the Sessions helper's console =====
+PASS bc1 the console's answer carries the paragraph ("SESSIONROW" in bc2-links.png)
+PASS bc1 the printed target selects that conversation in this pane ("pane header and" in bc3-selected.png)
+===== (c) the #ID label, clicked in a terminal pane =====
+PASS c0 the reply carries the paragraph of links ("SITEROW" in c01-links.png)
+  clicking the label "CARDROW" at 1069 215
+PASS c1 the label opened the card page ("Back to board" in c02-card.png)
+PASS c1 …on the card it named ("The console is the prompt box" in c02-card.png)
+===== (d) the path label, clicked in a terminal pane =====
+PASS d0 the reply carries the paragraph of links ("SITEROW" in d01-links.png)
+  clicking the label "FILEROW" at 1249 215
+PASS d1 the label opened the file it names ("fixture" in d02-file.png)
+  clicking the label "SITEROW" at 240 266
+PASS d2 the web label is a URL, not a path the pane could not find (no "No such file" in d03-site.png)
+===== (e) the option: label, clicked in the Options helper's own console =====
+PASS e0 the Options helper is a console ("Ask the Options helper" in e01-console.png)
+PASS e0 Options opens on General ("Thinking display" is a row of the page on screen)
+PASS e0 and the Terminal page is not the one up (no "Copy on select" row: that page is gone)
+PASS e1 the console's answer carries the paragraph ("OPENROW" in e02-links.png)
+  clicking the label "OPENROW" at 957 828
+the page after the label: Command suggestions from history|Reset to defaults|Control when a full-screen program starts|Copy on select|Colour paths and links in output|Band behind what you typed|Shell integration (OSC 7/133)|SSH sessions|Never enhance on|Always enhance on|
+PASS e1 the label revealed the row in this same pane ("Copy on select" is a row of the page on screen)
+PASS e1 and the page it was on is gone (no "Thinking display" row: that page is gone)
+===== (f) the label after the pane is made narrower and the paragraph re-wraps =====
+PASS f0 the reply carries the paragraph of links ("SITEROW" in f01-wide.png)
+PASS f1 the paragraph is still on screen after the re-wrap ("OPENROW" in f02-narrow.png)
+  clicking the label "OPENROW" at 186 215
+the page after the re-wrapped label: Command suggestions from history|Reset to defaults|Control when a full-screen program starts|Copy on select|Colour paths and links in output|Band behind what you typed|Shell integration (OSC 7/133)|SSH sessions|Never enhance on|Always enhance on|
+PASS f1 the re-wrapped label opens the row it names ("Copy on select" is a row of the page on screen)
+PASS f1 on the Terminal page (no "Thinking display" row: that page is gone)
+===== (g) the label inside a thinking bubble, which is a fold =====
+PASS g0 the turn ran and the reasoning settled ("thought for" in g01-thought.png)
+PASS g0 the bubble is open and the label is in it ("OPENROW" in g02-unfolded.png)
+  clicking the label "OPENROW" at 591 232
+the page after the bubble's label: Command suggestions from history|Reset to defaults|Control when a full-screen program starts|Copy on select|Colour paths and links in output|Band behind what you typed|Shell integration (OSC 7/133)|SSH sessions|Never enhance on|Always enhance on|
+PASS g1 a label in a fold's own rows opens the row it names ("Copy on select" is a row of the page on screen)
+PASS g1 on the Terminal page (no "Thinking display" row: that page is gone)
+===== (h) the restored transcript after a restart on the same profile =====
+PASS h0 the reply carries the paragraph of links ("SITEROW" in h01-links.png)
+PASS h1 the paragraph came back with the tab ("OPENROW" in h02-restored.png)
+the page after the restored target: Command suggestions from history|Reset to defaults|Control when a full-screen program starts|Copy on select|Colour paths and links in output|Band behind what you typed|Shell integration (OSC 7/133)|SSH sessions|Never enhance on|Always enhance on|
+PASS h1 the printed target still opens the row after a restart ("Copy on select" is a row of the page on screen)
+===== (i) ten shots each, with the card switched on and off in the same tree =====
+PASS i0 i-on-plain the turn ran ("twenty" in i-on-plain-00.png)
+PASS i0 i-off-plain the turn ran ("twenty" in i-off-plain-00.png)
+  a transcript with no links shot 01: 0 pixels differ in the transcript (36 over the whole window)
+  a transcript with no links shot 02: 62 pixels differ in the transcript (98 over the whole window)
+  a transcript with no links shot 03: 80 pixels differ in the transcript (116 over the whole window)
+  a transcript with no links shot 04: 0 pixels differ in the transcript (36 over the whole window)
+  a transcript with no links shot 05: 81 pixels differ in the transcript (223 over the whole window)
+  a transcript with no links shot 06: 80 pixels differ in the transcript (116 over the whole window)
+  a transcript with no links shot 07: 0 pixels differ in the transcript (36 over the whole window)
+  a transcript with no links shot 08: 0 pixels differ in the transcript (36 over the whole window)
+  a transcript with no links shot 09: 82 pixels differ in the transcript (118 over the whole window)
+PASS i1 a transcript with no links: all 9 shots have the same transcript with the card on and off
+PASS i0 i-on-links the turn ran ("SITEROW" in i-on-links-00.png)
+PASS i0 i-off-links the turn ran ("SITEROW" in i-off-links-00.png)
+  a transcript full of links shot 01: 0 pixels differ in the transcript (0 over the whole window)
+  a transcript full of links shot 02: 0 pixels differ in the transcript (0 over the whole window)
+  a transcript full of links shot 03: 0 pixels differ in the transcript (0 over the whole window)
+  a transcript full of links shot 04: 0 pixels differ in the transcript (0 over the whole window)
+  a transcript full of links shot 05: 0 pixels differ in the transcript (0 over the whole window)
+  a transcript full of links shot 06: 0 pixels differ in the transcript (0 over the whole window)
+  a transcript full of links shot 07: 0 pixels differ in the transcript (0 over the whole window)
+  a transcript full of links shot 08: 0 pixels differ in the transcript (0 over the whole window)
+  a transcript full of links shot 09: 0 pixels differ in the transcript (0 over the whole window)
+PASS i1 a transcript full of links: all 9 shots have the same transcript with the card on and off
+
+41 PASS · 0 FAIL

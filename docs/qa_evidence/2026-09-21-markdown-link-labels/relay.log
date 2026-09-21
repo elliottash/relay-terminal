@@ -1,0 +1,2 @@
+[2194104:27:0921/090042.379462:ERROR:gpu/ipc/client/command_buffer_proxy_impl.cc:285] ContextResult::kTransientFailure: Failed to send GpuControl.CreateCommandBuffer.
+Fontconfig error: Cannot load default config file: File not found
