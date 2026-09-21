@@ -97,3 +97,57 @@ composer differs by a pixel.
 
 Those two files are why waves 1b–1e are declared and empty rather than half-done; the tool's
 docstring says what they change about the card's seam, and the thread entry on #AGNT asks for it.
+
+---
+
+# Step 3: the console takes a Context (`24042b5b` + `81e889c1`)
+
+The same nine-scene drive, on `24042b5b^` and on the landed tree, in `step3-before/` and
+`step3-after/`; the numbers are in `diffs-step3.txt`.
+
+**Seven of the ten shots are pixel-identical across the whole window**, header included. The
+three that differ are 36, 117 and 36 pixels, and each was read: `02-thinking` and `08-esc` are a
+2×18 box at +36+817, the blinking caret; `07-queued` is a 174×42 box at +36+793, the turn clock
+reading "Relaying · thinking… · 8 s" against "9 s", plus the caret
+(`step3-diff-07-queued-turn-clock.png`).
+
+## The gate earned its keep
+
+The first landing of step 3 was **wrong**, and neither the build nor the seventeen suites said
+so. `Pane::TerminalContext` sent `persist.scope` as the workspace path and `routing` as the
+pane's input mode. Both are closed sets on the wire — `PERSIST_SCOPES` is `""`, `pane`, `helper`
+and `ROUTINGS` is `auto`, `agent` (`backend/relay_core/agent_context.py`) — so
+`ContextSpec.from_json` raised on every `configure`, the worker never built an agent, and the
+pane came up with a filled model box that did nothing when you pressed Enter.
+
+The drive failed six of its six checks on that binary and passed all six on the tip before it,
+which is how it was found. `81e889c1` sends `persist.scope: "pane"` (which store, not which path
+— `ContextSpec.store()` only redirects for `"helper"`, so a pane's session stays in
+`relay/sessions/` and nothing moves) and `routing: "auto"` flat (the surface's answer to "may a
+typed line be a command or a prompt", not the pane's input mode, which picks where *this* line
+goes). Re-run, all six pass and the pixels are above.
+
+## And what the re-measurement says about waves 1b–1e
+
+`coupling-whole-agent-block.txt` and `closure-agent-block.txt`, both reproducible from
+`scripts/split-agent-console.py`.
+
+Cutting the **whole** agent block at once — 326 members, 6 129 lines — leaves **165 fields and
+167 members** of `Pane` on the other side (18 calls are already on `Host`). `--closure`, which
+starts from the owner's own "agent sessions UI" banner and grows it to a fixed point by adding
+anything whose every remaining mention is inside the set, stops at 228 members / 4 031 lines with
+a **minimum seam of 284 names** — 157 fields, 127 members. That is the floor, whatever order the
+waves run in.
+
+The single most informative number is `m_editor`: **109 uses of the composer stay in `Pane`**
+even when the entire agent block moves. Reading them (`src/Pane.h`, `requestRoute` and its
+neighbours) they are one thing — the routing decision: read the typed text, try a slash command,
+an alias, a skill, then choose the shell, the foreground program, an ssh login, or the agent.
+
+So the prompt box is not a part of the agent block that can be lifted out of it. It is the thing
+both halves are made of, which is the owner's sentence read literally: *an agent interface is the
+prompt box*. A cut that moves the agent out and leaves the terminal holding the composer is
+therefore the wrong cut, not merely a large one — and the cut that is right inverts the card's
+host relationship, because the console would own the box and the terminal would become one
+routing of what is typed in it. That is a decision about the card's shape, so it is written down
+here and in `issues/threads/AGNT.md` rather than taken.

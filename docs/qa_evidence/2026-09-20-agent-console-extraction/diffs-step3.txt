@@ -1,0 +1,18 @@
+step 3 (24042b5b + 81e889c1) — the same nine-scene drive on <commit>^ and on the landed tree
+
+shot                        whole below header
+01-fresh                        0            0
+02-thinking                    36           36
+03-fold-open                    0            0
+03b-fold-closed                 0            0
+04-toolrow                      0            0
+05-modelbox                     0            0
+06-modelbox-closed              0            0
+07-queued                     117          117
+08-esc                         36           36
+09-after                        0            0
+
+residual bounding boxes
+  02-thinking  2x18 at +36+817   the blinking caret
+  08-esc       2x18 at +36+817   the blinking caret
+  07-queued  174x42 at +36+793   the turn clock, "Relaying · thinking… · 8 s" against "9 s", plus the caret

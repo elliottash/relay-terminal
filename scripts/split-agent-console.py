@@ -599,6 +599,107 @@ def coupling(ranges):
     return 0
 
 
+def closure(seed_ranges, rounds=40):
+    """The largest set of Pane's members that could move together, and what would still cross.
+
+    Hand-drawn line ranges cannot answer "is the cut wrong, or merely large": a member that looks
+    like it crosses the seam usually just sits outside the range somebody typed. So this starts
+    from a seed -- the owner's own "agent sessions UI" banner region -- and grows it to a fixed
+    point: any member or field whose every remaining mention is *inside* the set joins the set,
+    which can only make the set bigger and the seam smaller. What is left when it stops growing is
+    the **minimum** seam the cut can have, whatever order the waves are run in.
+
+    Read it as: everything in the closure can travel; everything in `crosses` has to become a call
+    on `relay::agent::Host` (the surface), a field of `relay::agent::ContextSpec` (the subject), or
+    an accessor `Pane` calls back on the console. A seam of a dozen is a seam. A seam of a hundred
+    and fifty is a shared class with a line drawn through it.
+    """
+    source = Source(PANE)
+    first, last = source.class_body()
+
+    members = []
+    i = first + 1
+    while i < last:
+        line = source.lines[i]
+        stripped = line.strip()
+        if not line.startswith("    ") or not stripped or stripped.startswith("//") \
+                or stripped.endswith(":") or line.startswith("     "):
+            i += 1
+            continue
+        members.append((i, source.member_end(i), stripped))
+        i = members[-1][1] + 1
+
+    def declared(decl):
+        if decl.startswith(("struct", "enum", "class", "using", "static_assert", "template")):
+            return None
+        if decl.startswith("std::function<"):
+            match = re.search(r">\s*([A-Za-z_]\w*)\s*[;=]", decl)
+            return match.group(1) if match else None
+        match = re.match(r".*?\b([A-Za-z_]\w*)\s*\(", decl)
+        return match.group(1) if match else None
+
+    # Qt and the standard library own plenty of names Pane also uses (`start`, `last`, `list`,
+    # `model`). A name is only treated as Pane's when Pane declares it exactly once.
+    seen = {}
+    for index, (start, end, decl) in enumerate(members):
+        name = declared(decl)
+        if name:
+            seen.setdefault(name, []).append(index)
+        for field in re.findall(r"\bm_[A-Za-z0-9_]+", source.lines[start]):
+            seen.setdefault(field, []).append(index)
+    owner = {name: at[0] for name, at in seen.items() if len(at) == 1}
+
+    bodies = []
+    for start, end, _ in members:
+        text = "\n".join(re.sub(r"//.*", "", source.lines[k]) for k in range(start, end + 1))
+        names = set(re.findall(r"\bm_[A-Za-z0-9_]+", text))
+        names |= set(re.findall(r"\b([A-Za-z_]\w*)\s*\(", text))
+        bodies.append(names & set(owner))
+
+    inside = set()
+    for span in seed_ranges:
+        lo, _, hi = span.partition("-")
+        inside.update(range(int(lo) - 1, int(hi)))
+    seed = {i for i, (start, _, _) in enumerate(members) if start in inside}
+
+    on_host = set(re.findall(r"virtual [^(]*?\b([A-Za-z_]\w*)\s*\(",
+                             open(os.path.join(ROOT, "src", "AgentHost.h"), encoding="utf-8").read()))
+
+    moved = set(seed)
+    for _ in range(rounds):
+        used_outside = set()
+        for index, names in enumerate(bodies):
+            if index in moved:
+                continue
+            for name in names:
+                used_outside.add(owner[name])
+        grown = {owner[name] for name in owner} - used_outside
+        grown |= seed
+        if grown == moved:
+            break
+        moved = grown
+
+    crosses = set()
+    for index in sorted(moved):
+        for name in bodies[index]:
+            if owner[name] not in moved:
+                crosses.add(name)
+    carried = sorted(n for n in crosses if n in on_host)
+    left = sorted(n for n in crosses if n not in on_host)
+
+    lines_moved = sum(members[i][1] - members[i][0] + 1 for i in sorted(moved))
+    print("seed: %d member(s)" % len(seed))
+    print("closure: %d member(s), %d line(s) -- the most that can travel together" % (len(moved), lines_moved))
+    print("\nalready on relay::agent::Host (%d):" % len(carried))
+    print("  " + " ".join(carried))
+    print("\nthe minimum seam: %d name(s) the closure still needs from Pane" % len(left))
+    fields = [n for n in left if n.startswith("m_")]
+    calls = [n for n in left if not n.startswith("m_")]
+    print("  fields (%d): %s" % (len(fields), " ".join(fields)))
+    print("  members (%d): %s" % (len(calls), " ".join(calls)))
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -610,6 +711,8 @@ def main():
                         help="list every member of class Pane with its span")
     parser.add_argument("--coupling", nargs="+", metavar="FIRST-LAST",
                         help="what a proposed cut would leave on the other side of the seam")
+    parser.add_argument("--closure", nargs="+", metavar="FIRST-LAST",
+                        help="grow a seed cut to a fixed point and print the minimum seam")
     args = parser.parse_args()
     if args.check:
         return check()
@@ -617,6 +720,8 @@ def main():
         return index()
     if args.coupling:
         return coupling(args.coupling)
+    if args.closure:
+        return closure(args.closure)
     if not args.wave:
         parser.error("say --wave, --check, --index or --coupling")
     return move(args.wave, args.dry_run)
