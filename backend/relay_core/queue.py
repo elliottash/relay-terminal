@@ -26,6 +26,9 @@ from .agent_context import validate_screen, validate_surface
 
 MAX_QUEUE = 32
 MAX_PROMPT = 131072
+#: How long `ask {mode}` and `ask {card}` may be (card #CTRN). A card id is four characters and
+#: a mode is a word; this is the same "one short line" `surface` gets, for the same reason.
+MAX_CARD_TURN = 64
 PREVIEW = 120
 TERMINAL = {"done", "error", "cancelled"}
 
@@ -37,6 +40,35 @@ def _surface_of(item: dict) -> dict:
     before the field existed and a client that does not know it never has to skip it.
     """
     return {"surface": item["surface"]} if item.get("surface") else {}
+
+
+def _card_of(item: dict) -> dict:
+    """`{"mode": …, "card_id": …}` when this item is a card turn, `{}` when it is not (#CTRN).
+
+    Absent rather than empty for `_surface_of`'s reason. The **ask** says `card`, because that is
+    what `board_ask {card, mode}` has always called it; every *event* says `card_id`, because
+    that is what 19.10 tags a card turn's events with and what the board side routes by.
+    """
+    return {"mode": item.get("mode") or "", "card_id": item["card"]} if item.get("card") else {}
+
+
+def validate_card_turn(mode, card) -> tuple[str, str]:
+    """`ask {mode, card}` (card #CTRN): the stage the owner pressed and the card it is about.
+
+    Both or neither — a mode with no card names no card and a card with no mode names no stage
+    rule — and the *spelling* of the mode is the board's business, refused where `CARD_MODES`
+    already lives (`BoardTools.begin_card_turn`). What is checked here is the shape, exactly as
+    `surface` is checked here rather than against a list of the consoles that exist.
+    """
+    for value, what in ((mode, "mode"), (card, "card")):
+        if value in (None, ""):
+            continue
+        if not isinstance(value, str) or "\n" in value or len(value) > MAX_CARD_TURN:
+            raise ValueError(f"{what} must be one line of at most {MAX_CARD_TURN} characters.")
+    mode, card = (mode or "").strip(), (card or "").strip()
+    if bool(mode) != bool(card):
+        raise ValueError("A card turn is asked with both `mode` and `card`, or with neither.")
+    return mode, card
 
 
 def validate_prompt(prompt) -> str:
@@ -128,7 +160,8 @@ class TurnSupervisor:
 
     def submit(self, prompt, when: str = "now", request_id=None, context=None, attachments=None,
                origin: str = "user", requeue: bool = True, ledger_id=None,
-               surface: str = "", screen: str = "", readonly: bool = False) -> str:
+               surface: str = "", screen: str = "", readonly: bool = False,
+               mode: str = "", card: str = "") -> str:
         """origin "relay" marks prompts Relay queued itself (e.g. a background subagent finished).
 
         when="steer" delivers the prompt inside the running turn at its next step boundary. If no
@@ -149,6 +182,12 @@ class TurnSupervisor:
           context object.)
         * `readonly` is the turn that writes nothing by design — the Switchboard's survey, which
           offers an import and waits for the owner's answer.
+
+        `mode` and `card` ride beside them (card #CTRN, owner 2026-09-21): a Discuss or Plan turn
+        on one card, which is now an ordinary supervised turn rather than a runner of its own. They
+        constrain the *turn* the way `readonly` does — `set_card_turn` opens the card's stage scope
+        around the ask and closes it after — and they leave the tool **list** alone, so a card
+        conversation that goes Discuss → Plan → Discuss re-prefills nothing.
         """
         if when not in {"now", "queue", "interrupt", "steer"}:
             raise ValueError('"when" must be "now", "queue", "interrupt", or "steer".')
@@ -157,6 +196,7 @@ class TurnSupervisor:
         if type(readonly) is not bool:
             raise ValueError("readonly must be a boolean.")
         surface, screen = validate_surface(surface), validate_screen(screen)
+        mode, card = validate_card_turn(mode, card)
         requested_steer = when == "steer"
         with self._lock:
             if when == "steer":
@@ -168,7 +208,7 @@ class TurnSupervisor:
                     item = {"id": uuid.uuid4().hex, "prompt": prompt, "request_id": request_id,
                             "context": context, "attachments": attachments, "origin": origin,
                             "requeue": requeue, "surface": surface, "screen": screen,
-                            "readonly": readonly}
+                            "readonly": readonly, "mode": mode, "card": card}
                     item["ledger_id"] = self._ledger_add(prompt, "steer", origin, attachments, ledger_id)
                     if ledger_id is not None and item["ledger_id"] is not None:
                         self._agent.requests.queued(ledger_id, item["id"])
@@ -177,7 +217,7 @@ class TurnSupervisor:
                     self._steer.append(item)
                     self._emit({"event": "queued", "id": item["id"], "request_id": request_id,
                                 "when": "steer", "position": len(self._steer) - 1, "origin": origin,
-                                "ledger_id": item["ledger_id"], **_surface_of(item)})
+                                "ledger_id": item["ledger_id"], **_surface_of(item), **_card_of(item)})
                     self._changed_locked()
                     return item["id"]
                 when = "queue"
@@ -195,7 +235,7 @@ class TurnSupervisor:
                 raise ValueError("An agent turn is already active.")
             item = {"id": uuid.uuid4().hex, "prompt": prompt, "force": when != "queue", "context": context,
                     "attachments": attachments, "origin": origin, "surface": surface,
-                    "screen": screen, "readonly": readonly}
+                    "screen": screen, "readonly": readonly, "mode": mode, "card": card}
             item["ledger_id"] = self._ledger_add(prompt, "steer" if requested_steer else when, origin, attachments,
                                                  ledger_id)
             if ledger_id is not None and item["ledger_id"] is not None:
@@ -211,7 +251,7 @@ class TurnSupervisor:
                 position = len(self._queue) - 1
             self._emit({"event": "queued", "id": item["id"], "request_id": request_id,
                         "when": when, "position": position, "origin": origin,
-                        "ledger_id": item["ledger_id"], **_surface_of(item)})
+                        "ledger_id": item["ledger_id"], **_surface_of(item), **_card_of(item)})
             if when == "interrupt" and self._running is not None:
                 self._emit({"event": "interrupting", "id": self._running, "by": item["id"]})
                 self._stop_locked()
@@ -342,7 +382,8 @@ class TurnSupervisor:
             self.submit(item["prompt"], "interrupt", as_request_id or request_id, item.get("context"),
                         item.get("attachments"), origin=item.get("origin", "user"),
                         ledger_id=item.get("ledger_id"), surface=item.get("surface", ""),
-                        screen=item.get("screen", ""), readonly=bool(item.get("readonly")))
+                        screen=item.get("screen", ""), readonly=bool(item.get("readonly")),
+                        mode=item.get("mode", ""), card=item.get("card", ""))
         except Exception:
             # Never lose the prompt: it goes back to the head of the queue instead (the invariant
             # at the top of this file), and the caller still sees the error.
@@ -351,7 +392,8 @@ class TurnSupervisor:
                                         "context": item.get("context"), "attachments": item.get("attachments"),
                                         "origin": item.get("origin", "user"), "ledger_id": item.get("ledger_id"),
                                         "surface": item.get("surface", ""), "screen": item.get("screen", ""),
-                                        "readonly": bool(item.get("readonly"))})
+                                        "readonly": bool(item.get("readonly")),
+                                        "mode": item.get("mode", ""), "card": item.get("card", "")})
                 self._changed_locked()
                 self._lock.notify_all()
             raise
@@ -371,7 +413,8 @@ class TurnSupervisor:
                               "context": item.get("context"), "attachments": item.get("attachments"),
                               "origin": item.get("origin", "user"), "ledger_id": item.get("ledger_id"),
                               "surface": item.get("surface", ""), "screen": item.get("screen", ""),
-                              "readonly": bool(item.get("readonly"))})
+                              "readonly": bool(item.get("readonly")),
+                              "mode": item.get("mode", ""), "card": item.get("card", "")})
         for item in reversed(front):
             self._queue.appendleft(item)
 
@@ -490,10 +533,10 @@ class TurnSupervisor:
     def _changed_locked(self) -> None:
         self._emit({"event": "queue_changed", "running": self._running, "paused": self._paused,
                     "items": [{"id": i["id"], "preview": i["prompt"][:PREVIEW], "forced": i["force"],
-                               "origin": i.get("origin", "user"), **_surface_of(i)}
+                               "origin": i.get("origin", "user"), **_surface_of(i), **_card_of(i)}
                               for i in self._queue],
                     "steering": [{"id": i["id"], "preview": i["prompt"][:PREVIEW],
-                                  "origin": i.get("origin", "user"), **_surface_of(i)}
+                                  "origin": i.get("origin", "user"), **_surface_of(i), **_card_of(i)}
                                  for i in self._steer]})
 
     def _next_locked(self):
@@ -523,17 +566,28 @@ class TurnSupervisor:
                 # thread the moment the first delta arrives.
                 self._surface = item.get("surface", "")
                 # The queue item id doubles as the turn id (protocol 11).
+                # A card turn's boundary pair says which card and which mode, as it has since
+                # 19.10 — from the item that is actually running, so a Plan queued behind a
+                # Discuss is bracketed as the Plan it is (#CTRN).
                 self._emit({"event": "agent_started", "id": item["id"], "turn_id": item["id"],
-                            **_surface_of(item)})
+                            **_surface_of(item), **_card_of(item)})
                 self._changed_locked()
             readonly = bool(item.get("readonly"))
             set_readonly = getattr(agent, "set_readonly", None)
+            # A card turn (card #CTRN): one Discuss or Plan on one card, constrained for the
+            # length of this turn and not a byte longer — the same shape as `readonly` above and
+            # for the same reason. What it may touch is the stage machine of 19.20, which lives
+            # in `board_tools.CardScope`; this pair is what opens and closes it.
+            card = item.get("card") or ""
+            set_card_turn = getattr(agent, "set_card_turn", None) if card else None
             try:
                 extra = {"attachments": item["attachments"]} if item.get("attachments") else {}
                 if item.get("ledger_id"):
                     extra["ledger_id"] = item["ledger_id"]
                 if readonly and set_readonly is not None:
                     set_readonly(True)
+                if set_card_turn is not None:
+                    set_card_turn(item.get("mode") or "", card)
                 # The "On screen now:" hint goes to the model and **nowhere else**: not into the
                 # prompt the queue and the ledger hold, and not into the title, the session
                 # summary or the checkpoint, which are all made of `prompt` inside `ask`. It used
@@ -547,10 +601,12 @@ class TurnSupervisor:
             finally:
                 if readonly and set_readonly is not None:
                     set_readonly(False)
+                if set_card_turn is not None:
+                    set_card_turn(None, None)
             with self._lock:
                 outcome = self._outcome or "error"
                 finished = {"event": "agent_finished", "id": item["id"], "outcome": outcome,
-                            **_surface_of(item)}
+                            **_surface_of(item), **_card_of(item)}
                 if self._stop_reason:
                     finished["stop_reason"] = self._stop_reason
                 self._emit(finished)

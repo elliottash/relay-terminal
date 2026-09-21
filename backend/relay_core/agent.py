@@ -542,6 +542,18 @@ READONLY_REFUSAL = (
     "This turn writes nothing by design — the owner has not confirmed anything yet. Say what you "
     "would do; the write happens once the owner answers.")
 
+#: What a **card turn** may not call (`ask {mode, card}`, 19.10; card #CTRN, owner 2026-09-21).
+#: The board's own tools are refused by `board_tools.CardScope.allows`, which has not moved; this
+#: is the executor's half — the read-only turn's list, plus the two that read and stop a command a
+#: card turn may not start in the first place.
+#:
+#: It is a per-turn refusal and never a narrower tool list. A Discuss, a Plan and an ordinary
+#: console turn are offered byte-identical tools, so a card conversation that goes Discuss → Plan
+#: → Discuss re-prefills nothing (33.2 says the same sentence about `readonly`). The cost is
+#: honest: a Plan turn is *offered* `write_file` and told no if it calls it, in a sentence that
+#: names Execute — which is the owner's decision 3 on #CTRN.
+CARD_BLOCKED = READONLY_BLOCKED | {"command_output", "stop_command"}
+
 
 class Agent:
     def __init__(self, config: ProviderConfig, workspace: str, emit: Callable[[dict], None],
@@ -622,6 +634,11 @@ class Agent:
         # A turn that writes nothing by design (the Switchboard survey, 19.18), set for the
         # length of one turn by `set_readonly`.
         self.readonly_turn = False
+        # `(mode, card_id)` while one Discuss or Plan turn on one card runs (19.10), set for the
+        # length of that turn by `set_card_turn`, or None. It is the *turn's* constraint and not
+        # the agent's: the same agent answers the next question on that card in whichever mode
+        # the owner presses (card #CTRN).
+        self.card_turn: tuple[str, str] | None = None
         # The pane agent's read tools over its own session (relay_core.activity_tools), set by
         # `ActivityTools.attach` after construction because they need the finished agent. Only a
         # pane agent has them: the helper worker has no pane of its own to report on (30.5).
@@ -1073,6 +1090,27 @@ class Agent:
         self.readonly_turn = bool(on)
         if self.board is not None:
             self.board.readonly = bool(on)
+
+    def set_card_turn(self, mode, card_id) -> None:
+        """One Discuss or Plan turn on one card (`board_ask {card, mode}`, 19.10), for its length.
+
+        Both halves at once, exactly as `set_readonly` above: the board opens the `CardScope`
+        that `_check_card_scope` and `CardScope.refusal` have always read — so the stage machine
+        of 19.20 did not move an inch — and `_prepare` refuses the executor's writers
+        (`CARD_BLOCKED`) with that same scope's sentence, which already names Execute.
+
+        `(None, None)` closes it. Before card #CTRN a card turn ran on an agent of its own whose
+        whole tool *list* was the mode's; now it is an ordinary supervised turn on an ordinary
+        console, and what is per-mode is the refusal rather than the list.
+        """
+        mode, card_id = (mode or ""), (card_id or "")
+        self.card_turn = (mode, card_id) if mode and card_id else None
+        if self.board is None:
+            return
+        if self.card_turn is not None:
+            self.board.begin_card_turn(mode, card_id)
+        else:
+            self.board.end_card_turn()
 
     def set_mode(self, mode: str) -> None:
         # Neither the prompt nor the tool list depends on the mode since #GMCF, so a switch
@@ -3319,6 +3357,13 @@ class Agent:
             raise ValueError(READONLY_REFUSAL)
         scope = getattr(self.board, "card_scope", None)
         app_tool = self.app is not None and self.app.handles(name)
+        # A card turn (`ask {mode, card}`, card #CTRN): the executor's half of the stage rule,
+        # the way the read-only turn's is above. It does not wait for a board — the scope below
+        # is the board's copy of the same answer, and a card turn is refused these whether or not
+        # one is attached — and it borrows `CardScope`'s own sentence, which names Execute. The
+        # app tools ride alongside every scope (30.4), so they are asked about first.
+        if self.card_turn is not None and name in CARD_BLOCKED and not app_tool:
+            raise ValueError(board_tools.CardScope(*self.card_turn).refusal(name))
         if scope is not None and not scope.allows(name) and not app_tool:
             # The board's scopes do not know the app tools' names, and they are offered with
             # every scope (30.4), so they are asked about before the scope refuses.

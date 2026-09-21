@@ -633,6 +633,95 @@ class ConsoleFieldTests(unittest.TestCase):
         self.assertEqual(seen, [True, False])
         self.assertFalse(self.agent.readonly_turn)
 
+    def test_a_queued_card_turn_carries_its_mode_and_card(self):
+        """`ask {mode, card}` rides the queue item (card #CTRN): a card turn is an ordinary turn.
+
+        Before this card a second prompt on a busy card was refused with `board_busy`, because
+        the card's turn was a runner of its own with no queue. The rows are what the §12 strip
+        draws, so the mode and the card have to be on them and not only inside the worker.
+        """
+        p = self.use(GatedProvider())
+        first = self.sup.submit('what is this card about?', 'now',
+                                surface='card:CTRN', mode='discuss', card='CTRN')
+        started = self.rec.wait(lambda e: e['event'] == 'agent_started' and e['id'] == first)
+        self.assertEqual((started['mode'], started['card_id']), ('discuss', 'CTRN'))
+        self.sup.submit('now plan it', 'queue', surface='card:CTRN', mode='plan', card='CTRN')
+        row = self.rec.of('queue_changed')[-1]['items'][-1]
+        self.assertEqual((row['mode'], row['card_id'], row['surface']),
+                         ('plan', 'CTRN', 'card:CTRN'))
+        self.assertEqual(self.rec.of('queued')[-1]['mode'], 'plan')
+        p.release.release()
+        finished = self.rec.wait(lambda e: e['event'] == 'agent_finished' and e['id'] == first)
+        self.assertEqual((finished['mode'], finished['card_id']), ('discuss', 'CTRN'))
+        p.release.release()
+        # A pane's turn says neither, exactly as it says no surface.
+        self.sup.submit('ls', 'queue')
+        self.assertNotIn('card_id', self.rec.of('queued')[-1])
+        p.release.release()
+
+    def test_the_card_scope_is_opened_for_the_turn_and_closed_after_it(self):
+        """`set_card_turn` brackets the ask, and the bracket closes when the ask raises.
+
+        It is `set_readonly`'s shape (above), on the two lines beside it, because a card turn is
+        the same kind of thing: a constraint on one turn, never a narrower tool list (#CTRN).
+        """
+        seen = []
+        p = self.use(GatedProvider())
+        self.agent.set_card_turn = lambda mode, card, seen=seen: seen.append((mode, card))
+        item = self.sup.submit('plan this', 'now', mode='plan', card='CTRN')
+        self.rec.wait(lambda e: e['event'] == 'agent_started')
+        p.release.release()
+        self.rec.wait(lambda e: e['event'] == 'agent_finished' and e['id'] == item)
+        self.assertEqual(seen, [('plan', 'CTRN'), (None, None)])
+
+        class Boom:
+            def complete(self, messages, tools, emit, cancel):
+                raise RuntimeError('the provider fell over')
+
+            def cancel(self):
+                pass
+
+        seen.clear()
+        self.sup.set_agent(Agent(CONFIG, self.temp.name, self.sup.agent_emit, provider=Boom()))
+        self.sup.agent.set_card_turn = lambda mode, card, seen=seen: seen.append((mode, card))
+        item = self.sup.submit('discuss this', 'now', mode='discuss', card='CTRN')
+        self.rec.wait(lambda e: e['event'] == 'agent_finished' and e['id'] == item)
+        self.assertEqual(seen, [('discuss', 'CTRN'), (None, None)])
+        # A turn that names no card never reaches the agent's card half at all.
+        seen.clear()
+        item = self.sup.submit('and this', 'now')
+        self.rec.wait(lambda e: e['event'] == 'agent_finished' and e['id'] == item)
+        self.assertEqual(seen, [])
+
+    def test_a_card_turn_is_refused_the_writers_at_call_time_and_told_why(self):
+        """The executor's half of the stage rule (#CTRN): refused when called, never withheld.
+
+        A board-less agent is the case that decides where this lives: the scope the board holds
+        is the same answer, but it is only there when a board is. The sentence is `CardScope`'s
+        own, so the model is told what Discuss and Plan are for and that writing code is Execute.
+        """
+        self.use(GatedProvider())
+        self.agent.set_card_turn('plan', 'CTRN')
+        self.assertEqual(self.agent.card_turn, ('plan', 'CTRN'))
+        for name in ('write_file', 'edit_file', 'run_command'):
+            with self.assertRaises(ValueError) as caught:
+                self.agent._prepare(name, {'path': 'x'})
+            self.assertIn('Execute', str(caught.exception))
+            self.assertIn('#CTRN', str(caught.exception))
+        # What a card turn reads is not refused, and neither is anything once the turn is over.
+        Path(self.temp.name, 'card.md').write_text('# a card\n')
+        self.agent._prepare('read_file', {'path': 'card.md'})
+        self.agent.set_card_turn(None, None)
+        self.assertIsNone(self.agent.card_turn)
+        self.agent._prepare('write_file', {'path': 'x', 'content': 'y'})
+
+    def test_a_mode_without_a_card_is_refused_before_anything_is_queued(self):
+        self.use(GatedProvider())
+        for mode, card in (('plan', ''), ('', 'CTRN'), ('pl\nan', 'CTRN'), ('plan', 'C' * 65)):
+            with self.assertRaises(ValueError):
+                self.sup.submit('go', 'queue', mode=mode, card=card)
+        self.assertEqual(self.rec.of('queued'), [])
+
     def test_queue_move_reorders_a_waiting_prompt(self):
         p = self.use(GatedProvider())
         self.sup.submit('running', 'queue')
