@@ -201,6 +201,12 @@ private slots:
         QVERIFY(isUsableNode(QJsonObject{{"models", QJsonObject{{"cwd", "/repo"}, {"tab", "available"}}}}));
         QVERIFY(isUsableNode(QJsonObject{{"models", QJsonObject{}}}));
         QVERIFY(!isUsableNode(QJsonObject{{"models", "available"}}));
+        // The Activity pane (card #QT8C) is written by PaneChrome::serialize as `internals` and was
+        // never listed here, so a terminal beside it was dropped with its tab on reopen (card #ACT1).
+        QVERIFY(isUsableNode(QJsonObject{{"internals", QJsonObject{{"cwd", "/repo"}, {"owner", "abc"}}}}));
+        QVERIFY(!isUsableNode(QJsonObject{{"internals", "/repo"}}));
+        QVERIFY(isUsableNode(split(QStringLiteral("h"), QJsonArray{pane(QStringLiteral("/repo")),
+                                                                   QJsonObject{{"internals", QJsonObject{{"cwd", "/repo"}}}}})));
         QVERIFY(isUsableNode(split(QStringLiteral("h"), QJsonArray{pane(QStringLiteral("/repo")),
                                                                    QJsonObject{{"models", QJsonObject{{"cwd", "/repo"}}}}})));
         QVERIFY(!isUsableNode(QJsonObject{}));
