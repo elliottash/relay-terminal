@@ -10,13 +10,15 @@
 //
 //   models/shown      keys the picker shows; absent = every usable entry (so a fresh install
 //                     changes nothing, and an all-unchecked list can never empty the picker)
-//   models/priority   keys in rank order; rank 1 is Main (new panes), rank 2 the fallback /swap
-//                     goes to; unlisted keys follow in the default order
+//   models/priority   the single rank order the five tier lists replaced (owner, 2026-09-20).
+//                     Nothing writes it any more, and once any tier list is stored `ranked()`
+//                     stops reading it: a stale list from before the lists existed must not
+//                     re-order what Options › Models now shows. Kept only so an install that has
+//                     never seen the tier lists keeps the order it had (card #MDL1).
 //   models/custom     keys the user typed by hand ("add model by id"); they are entries like any
 //   models/favorites  keys pinned to the top of the picker (opencode's Favorites)
 //   models/recent     keys picked most recently, newest first, at most ten (opencode's Recent)
 //   models/sort       the picker's sort: priority | alpha | intelligence | speed | usage | remaining
-//   models/effort/K   the reasoning level remembered for one entry (opencode's per-model variant)
 //   models/uses/K     how many turns ran on it, for the usage sort
 //   models/speed/K    output tokens per second, a running average, for the speed sort
 //
@@ -142,9 +144,12 @@ void setShown(const QString &key, bool on, const Catalog &catalog);  // first ch
 void resetShown();
 
 QStringList priority();
-// Keys in rank order for this catalog: the explicit list first (dropping keys that no longer
-// exist), then the default order — the default provider's main and flash, then each other usable
-// preset's main, then the rest as the worker listed them.
+// Keys in rank order for this catalog: the tier lists first, main leading (dropping keys that no
+// longer exist), then — only on an install that has stored no tier list at all — whatever
+// `models/priority` still holds, then the default order: each usable preset's main, then the rest
+// as the worker listed them. It reads no `provider/preset` (card #MDL1, rule 3): that key is the
+// last provider *some pane* switched to, and letting it re-order every picker is how "which model
+// is selected first" stopped being answerable.
 QStringList ranked(const Catalog &catalog);
 void move(const QString &key, int delta, const Catalog &catalog);    // delta -1 up, +1 down
 void setRank(const QString &key, int rank, const Catalog &catalog);
@@ -163,9 +168,6 @@ void noteUse(const QString &key);   // recent (capped at ten) and the uses count
 int uses(const QString &key);
 double speed(const QString &key);   // tokens per second, 0 unknown
 void noteSpeed(const QString &key, double tokensPerSecond);
-
-QString effortFor(const QString &key);
-void setEffortFor(const QString &key, const QString &level);
 
 // Models the user wants tried on OpenRouter when their own provider fails (owner, 2026-09-20: off
 // by default — nobody wants surprise pay-as-you-go GPT-6 calls — and on per model, "glm 5.3
@@ -300,6 +302,55 @@ Entry fallback(const Catalog &catalog, qint64 now = 0);
 QList<Entry> fallbacks(const Catalog &catalog, qint64 now = 0);
 // A tier's list as live catalog entries, in order: usable and not exhausted.
 QList<Entry> liveTier(const Catalog &catalog, const QString &tier, qint64 now = 0);
+
+// ----- one default, and /swap as a toggle (card #MDL1, rule 3) ----------------------------------
+// > A pane runs on rank 1 of the main list until you pick something else *in that pane*.
+//
+// Both answers are computed here, out of a catalog and two strings, so the rule is one place and
+// tests/modelcatalog_test.cpp can state it. Nothing below reads the pane, writes a setting or
+// touches the worker.
+
+// What a pane starts on. `entry.key` empty means "this catalog cannot answer": the caller falls
+// back to its own ladder (the saved preset, the worker's `warp_default`, the first stored key —
+// Pane's `presets` handler), which is the only thing that works on an install whose worker has
+// not sent a catalog yet.
+struct StartChoice {
+    Entry entry;
+    // The level to start at: the main list's own level for that entry, empty where it has none —
+    // then the pane keeps `agent/effort`, the global default, exactly as before.
+    QString effort;
+    // Whether this is the pane's *own* saved entry coming back (a restored pane) rather than rank
+    // 1 of the main list. The caller says so differently and does not re-announce a default.
+    bool restored = false;
+};
+// `restoredPreset`/`restoredModel` are what a restored pane saved, empty for a new one. The saved
+// entry wins while it is still usable and not exhausted — resolved through `Catalog::resolveKey`,
+// so a guest that saved `claude-opus-5` comes back as `guest:claude|opus`. Otherwise rank 1 of the
+// main list, **guests included** (owner, 2026-09-21: a harness ranked first is what a new pane
+// starts on; the harness process starts on the first turn, which is the caller's half of it).
+StartChoice startEntry(const Catalog &catalog, const QString &restoredPreset, const QString &restoredModel,
+                       qint64 now = 0);
+
+// Which kind of step /swap took, for the sentence and for the caller's own bookkeeping.
+enum class SwapKind {
+    None,       // nowhere to go; `SwapStep::message` says why
+    Main,       // off rank 1 → rank 1, remembering where the pane was
+    Back,       // on rank 1 → the model this pane came from
+    Fallback    // on rank 1 with nothing remembered → rank 2
+};
+struct SwapStep {
+    Entry target;         // where the pane goes; `key` empty when kind is None
+    QString remember;     // what the pane should remember afterwards; empty clears the memory
+    SwapKind kind = SwapKind::None;
+    QString message;      // always set: the sentence to put on the status line
+};
+// /swap as a toggle with memory. `currentKey` is the pane's entry key (resolved through
+// `resolveKey`, so a guest's reported model is its list entry) and `rememberedKey` is what the
+// last swap off rank 1 stored — both may be empty. Off rank 1 it remembers where the pane is and
+// goes to rank 1; on rank 1 it goes back to the remembered model, or to rank 2 when there is
+// none. A pane whose own subscription is spent goes to the first live entry whatever rank it held.
+SwapStep swapTarget(const Catalog &catalog, const QString &currentKey, const QString &rememberedKey,
+                    qint64 now = 0);
 // The best "percent left" over a preset's windows, or -1 with no figures.
 double percentLeft(const Catalog &catalog, const QString &preset);
 // When a reset lands, in the words the limits line uses: today's "14:30", "tue" within a week,

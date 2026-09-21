@@ -339,15 +339,16 @@ QStringList ranked(const Catalog &catalog) {
     for (const QString &tier : tierIds())
         for (const TierEntry &entry : tierList(tier))
             if (catalog.find(entry.key) && !out.contains(entry.key)) out << entry.key;
-    for (const QString &key : priority())
-        if (catalog.find(key) && !out.contains(key)) out << key;
-    // The default order behind the explicit list.
-    const QString defaultPreset = QSettings().value(QStringLiteral("provider/preset")).toString();
+    // The single list the five tier lists replaced. Nothing writes it any more, so once the lists
+    // exist a leftover copy is only a way for an order nobody can see to outrank the one on the
+    // page (card #MDL1): it is read on an install that has stored no list at all, and there only.
+    if (!tierListsSet())
+        for (const QString &key : priority())
+            if (catalog.find(key) && !out.contains(key)) out << key;
+    // The default order behind the explicit list. `provider/preset` is deliberately *not* read
+    // here (card #MDL1, rule 3): it is the last provider some pane switched to, and using it to
+    // lead every picker is half of why a new pane and /swap disagreed about rank 1.
     auto add = [&](const Entry *entry) { if (entry && !out.contains(entry->key)) out << entry->key; };
-    if (!defaultPreset.isEmpty()) {
-        add(catalog.tierEntry(defaultPreset, QStringLiteral("main")));
-        add(catalog.tierEntry(defaultPreset, QStringLiteral("flash")));
-    }
     for (const QString &preset : catalog.presets()) {
         const Entry *main = catalog.tierEntry(preset, QStringLiteral("main"));
         if (main && main->usable) add(main);
@@ -438,14 +439,6 @@ void noteSpeed(const QString &key, double tokensPerSecond) {
     const double old = speed(key);
     const double value = old > 0 ? old * 0.7 + tokensPerSecond * 0.3 : tokensPerSecond;
     QSettings().setValue(perKey(QStringLiteral("speed"), key), value);
-}
-
-QString effortFor(const QString &key) { return QSettings().value(perKey(QStringLiteral("effort"), key)).toString(); }
-
-void setEffortFor(const QString &key, const QString &level) {
-    if (key.isEmpty()) return;
-    if (level.isEmpty()) QSettings().remove(perKey(QStringLiteral("effort"), key));
-    else QSettings().setValue(perKey(QStringLiteral("effort"), key), level);
 }
 
 QStringList openrouterFallbackKeys() { return list(kOpenrouter); }
@@ -909,6 +902,116 @@ QList<Entry> fallbacks(const Catalog &catalog, qint64 now) {
     if (curation::tierListsSet()) return liveTier(catalog, QStringLiteral("main"), now).mid(1);
     const QList<Entry> list = live(catalog, now);
     return list.mid(1, qMax(0, curation::fallbackThreshold() - 1));
+}
+
+// ----- one default, and /swap as a toggle (card #MDL1, rule 3) ----------------------------------
+
+namespace {
+
+// The main list's own level for one entry. Only the main list: the level a pane starts at is the
+// one written beside rank 1 there, and a copy of the model sitting in the flash list at `low` is
+// not an answer about the main agent. `listEffortFor` (every list, first hit) stays what a *pick*
+// uses, where the question is "the level this model runs at when chosen".
+QString mainListEffort(const QString &key) {
+    for (const curation::TierEntry &item : curation::tierList(QStringLiteral("main")))
+        if (item.key == key) return item.effort;
+    return QString();
+}
+
+// Why there is no rank 1 to go to. Told apart because the old `/swap` said "every ranked
+// subscription is exhausted" in all four cases, including the common one — the worker has not
+// sent a catalog yet — where nothing is exhausted at all (design section 1.4.5).
+QString noMainReason(const Catalog &catalog, qint64 now) {
+    if (catalog.entries.isEmpty())
+        return QStringLiteral("The model list is not ready yet: this pane's agent has not reported its providers.");
+    if (shown(catalog).isEmpty())
+        return QStringLiteral("No model is usable yet. Open Options › Models (/models) to add a provider key.");
+    if (live(catalog, now).isEmpty())
+        return QStringLiteral("No model with anything left to swap to: every ranked subscription is exhausted.");
+    return QStringLiteral("No models in the main list yet: rank one in Options › Models (/models).");
+}
+
+}  // namespace
+
+StartChoice startEntry(const Catalog &catalog, const QString &restoredPreset, const QString &restoredModel, qint64 now) {
+    if (now <= 0) now = QDateTime::currentSecsSinceEpoch();
+    StartChoice choice;
+    // A restored pane comes back on its own model, not on rank 1: the pick it holds was made in
+    // that pane. Through resolveKey, so a guest that saved the model its CLI reported
+    // ("claude-opus-5") comes back as the entry the lists name (`guest:claude|opus`).
+    if (!restoredPreset.isEmpty()) {
+        QString key = catalog.resolveKey(restoredPreset, restoredModel);
+        if (key.isEmpty() && restoredModel.isEmpty())
+            if (const Entry *main = catalog.tierEntry(restoredPreset, QStringLiteral("main"))) key = main->key;
+        if (const Entry *entry = key.isEmpty() ? nullptr : catalog.find(key);
+            entry && entry->usable && !exhausted(catalog, entry->preset, now)) {
+            choice.entry = *entry;
+            choice.effort = mainListEffort(entry->key);
+            choice.restored = true;
+            return choice;
+        }
+    }
+    // Rank 1 of the main list, guests included (owner, 2026-09-21). An exhausted rank 1 is stepped
+    // over by mainDefault, and nothing is written down, so the pane goes back to it by itself when
+    // the subscription resets (design edge case 15).
+    const Entry main = mainDefault(catalog, now);
+    if (main.key.isEmpty()) return choice;   // empty: the caller's own ladder answers
+    choice.entry = main;
+    choice.effort = mainListEffort(main.key);
+    return choice;
+}
+
+SwapStep swapTarget(const Catalog &catalog, const QString &currentKey, const QString &rememberedKey, qint64 now) {
+    if (now <= 0) now = QDateTime::currentSecsSinceEpoch();
+    SwapStep step;
+    const Entry main = mainDefault(catalog, now);
+    if (main.key.isEmpty()) { step.message = noMainReason(catalog, now); return step; }
+
+    QString currentPreset;
+    Catalog::splitKey(currentKey, &currentPreset, nullptr);
+    const bool spent = !currentPreset.isEmpty() && exhausted(catalog, currentPreset, now);
+
+    // Off rank 1 — the normal case, and the one the old /swap could never come back from: remember
+    // where this pane is and go to rank 1. A spent model is left behind the same way; it is worth
+    // remembering, because the next /swap from rank 1 will skip it while it is still spent and
+    // offer it again once it resets.
+    if (spent || currentKey != main.key) {
+        step.target = main;
+        step.remember = currentKey;
+        step.kind = SwapKind::Main;
+        const Entry *from = currentKey.isEmpty() ? nullptr : catalog.find(currentKey);
+        step.message = spent
+            ? QStringLiteral("Swapped to %1 — rank 1 of the main list; %2 has nothing left.")
+                  .arg(main.displayName(), from ? from->name : currentPreset)
+            : from ? QStringLiteral("Swapped to %1 — rank 1 of the main list. /swap goes back to %2.")
+                         .arg(main.displayName(), from->name)
+                   : QStringLiteral("Swapped to %1 — rank 1 of the main list.").arg(main.displayName());
+        return step;
+    }
+
+    // On rank 1: back to the model this pane came from. It has to still be there, still usable and
+    // not spent — and not rank 1 itself, which would be a /swap that did nothing.
+    if (!rememberedKey.isEmpty() && rememberedKey != main.key) {
+        if (const Entry *back = catalog.find(rememberedKey);
+            back && back->usable && !exhausted(catalog, back->preset, now)) {
+            step.target = *back;
+            step.kind = SwapKind::Back;
+            step.message = QStringLiteral("Back on %1 — where this pane was. /swap returns to %2.")
+                               .arg(back->displayName(), main.name);
+            return step;
+        }
+    }
+    // Nothing to come back to: rank 2, which is what /swap has always meant on rank 1.
+    const Entry second = fallback(catalog, now);
+    if (second.key.isEmpty()) {
+        step.message = QStringLiteral("No second model in the main list: rank one in Options › Models (/models).");
+        return step;
+    }
+    step.target = second;
+    step.kind = SwapKind::Fallback;
+    step.message = QStringLiteral("Swapped to %1 — rank 2 of the main list. /swap goes back to %2.")
+                       .arg(second.displayName(), main.name);
+    return step;
 }
 
 QString resetText(qint64 resetsAt, qint64 now) {

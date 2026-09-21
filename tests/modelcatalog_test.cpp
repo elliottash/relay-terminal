@@ -231,20 +231,29 @@ private Q_SLOTS:
         QCOMPARE(shown(catalog).size(), 7);
     }
 
-    void defaultRankPutsTheDefaultProviderFirst() {
+    // Each usable provider's main model, in the worker's order, then everything else. The last
+    // provider some pane switched to (`provider/preset`) is no longer part of it: a pick made in
+    // one pane must not re-order every other pane's picker (card #MDL1, rule 3).
+    void defaultRankIsEachProvidersMainThenTheRest() {
         QSettings().setValue(QStringLiteral("provider/preset"), QStringLiteral("kimi-code"));
         const Catalog catalog = catalogFrom(presets());
         const QStringList ranks = curation::ranked(catalog);
-        QCOMPARE(ranks.at(0), QStringLiteral("kimi-code|k3"));
-        QCOMPARE(ranks.at(1), QStringLiteral("kimi-code|kimi-for-coding-highspeed"));
-        QCOMPARE(ranks.at(2), QStringLiteral("glm-coding|glm-5.3"));   // the next provider's main
-        QCOMPARE(mainDefault(catalog).key, QStringLiteral("kimi-code|k3"));
-        QCOMPARE(fallback(catalog).key, QStringLiteral("kimi-code|kimi-for-coding-highspeed"));
+        QCOMPARE(ranks.at(0), QStringLiteral("glm-coding|glm-5.3"));
+        QCOMPARE(ranks.at(1), QStringLiteral("kimi-code|k3"));
+        QCOMPARE(ranks.at(2), QStringLiteral("glm-coding|glm-5.3-flash"));
+        QCOMPARE(mainDefault(catalog).key, QStringLiteral("glm-coding|glm-5.3"));
+        QCOMPARE(fallback(catalog).key, QStringLiteral("kimi-code|k3"));
         QCOMPARE(ranks.size(), catalog.entries.size());
+        // …and the tier lists, once they exist, are the order: a `models/priority` left behind by
+        // an older Relay cannot outrank the page nobody can see it on.
+        QSettings().setValue(QStringLiteral("models/priority"), QStringList{QStringLiteral("kimi-code|k3")});
+        QCOMPARE(curation::ranked(catalog).at(0), QStringLiteral("kimi-code|k3"));   // no lists yet: it still counts
+        curation::addToTier(QStringLiteral("main"), QStringLiteral("glm-coding|glm-5.3-flash"));
+        QCOMPARE(curation::ranked(catalog).at(0), QStringLiteral("glm-coding|glm-5.3-flash"));
+        QCOMPARE(curation::ranked(catalog).at(1), QStringLiteral("glm-coding|glm-5.3"));   // the stale list is not read
     }
 
     void movingARankPersistsAndDroppedKeysAreForgotten() {
-        QSettings().setValue(QStringLiteral("provider/preset"), QStringLiteral("kimi-code"));
         const Catalog catalog = catalogFrom(presets());
         curation::move(QStringLiteral("glm-coding|glm-5.3"), -2, catalog);
         QCOMPARE(curation::ranked(catalog).at(0), QStringLiteral("glm-coding|glm-5.3"));
@@ -258,7 +267,7 @@ private Q_SLOTS:
         QSettings().setValue(QStringLiteral("models/priority"), stale);
         QCOMPARE(curation::ranked(catalog).at(0), QStringLiteral("glm-coding|glm-5.3"));
         curation::resetPriority();
-        QCOMPARE(curation::ranked(catalog).at(0), QStringLiteral("kimi-code|k3"));
+        QCOMPARE(curation::ranked(catalog).at(0), QStringLiteral("glm-coding|glm-5.3"));
     }
 
     void aCustomModelIsAnEntryOfItsProviderAndShownAtOnce() {
@@ -279,7 +288,6 @@ private Q_SLOTS:
     }
 
     void sortsAreStableOverRank() {
-        QSettings().setValue(QStringLiteral("provider/preset"), QStringLiteral("glm-coding"));
         const Catalog catalog = catalogFrom(presets());
         const QList<Entry> list = shown(catalog);
         const QList<Entry> alpha = ordered(list, Sort::Alphabetical, catalog);
@@ -313,14 +321,6 @@ private Q_SLOTS:
         QCOMPARE(curation::uses(QStringLiteral("p|m13")), 1);
     }
 
-    void effortIsRememberedPerEntry() {
-        curation::setEffortFor(QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max"));
-        QCOMPARE(curation::effortFor(QStringLiteral("glm-coding|glm-5.3")), QStringLiteral("max"));
-        QCOMPARE(curation::effortFor(QStringLiteral("glm-coding|glm-5.3-flash")), QString());
-        curation::setEffortFor(QStringLiteral("glm-coding|glm-5.3"), QString());
-        QCOMPARE(curation::effortFor(QStringLiteral("glm-coding|glm-5.3")), QString());
-    }
-
     void openrouterFallbackIsPerModelAndOffByDefault() {
         QVERIFY(curation::openrouterFallbackModels().isEmpty());
         curation::setOpenrouterFallback(QStringLiteral("glm-coding|glm-5.3-flash"), true);
@@ -334,7 +334,8 @@ private Q_SLOTS:
     }
 
     void collapsedProvidersAndTheFallbackThreshold() {
-        QSettings().setValue(QStringLiteral("provider/preset"), QStringLiteral("kimi-code"));
+        QSettings().setValue(QStringLiteral("models/priority"),
+                             QStringList{QStringLiteral("kimi-code|k3"), QStringLiteral("kimi-code|kimi-for-coding-highspeed")});
         const Catalog catalog = catalogFrom(presets());
         QVERIFY(!curation::isCollapsed(QStringLiteral("glm-coding")));
         curation::setCollapsed(QStringLiteral("glm-coding"), true);
@@ -722,7 +723,8 @@ private Q_SLOTS:
     }
 
     void thePrioritySkipsAnExhaustedPresetUntilItResets() {
-        QSettings().setValue(QStringLiteral("provider/preset"), QStringLiteral("kimi-code"));
+        QSettings().setValue(QStringLiteral("models/priority"),
+                             QStringList{QStringLiteral("kimi-code|k3"), QStringLiteral("kimi-code|kimi-for-coding-highspeed")});
         curation::setFallbackThreshold(3);
         Catalog catalog = catalogFrom(presets());
         const qint64 now = 1000;
@@ -925,6 +927,178 @@ private Q_SLOTS:
         QVERIFY(findByName(catalog, rows, QStringLiteral("gpt-5.6-sol@kimi")) == nullptr);
         QVERIFY(findByName(catalog, rows, QStringLiteral("nothing-like-this")) == nullptr);
         QVERIFY(findByName(catalog, rows, QString()) == nullptr);
+    }
+
+    // ----- one default, and /swap as a toggle (card #MDL1, rule 3) -----------------------------
+    // "A pane runs on rank 1 of the main list until you pick something else in that pane."
+
+    // A main list shaped like the owner's on 2026-09-21: rank 1 a model that is *not* its
+    // provider's default (so a caller that only reads the preset lands on the wrong one), rank 2
+    // another of that provider's, and rank 3 the model he actually works on.
+    static void mainList() {
+        curation::addToTier(QStringLiteral("main"), QStringLiteral("glm-coding|glm-5.3-flash"), QStringLiteral("low"));
+        curation::addToTier(QStringLiteral("main"), QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max"));
+        curation::addToTier(QStringLiteral("main"), QStringLiteral("kimi-code|k3"), QStringLiteral("high"));
+    }
+
+    void aNewPaneStartsOnRankOneOfTheMainList() {
+        const Catalog catalog = catalogFrom(presets());
+        mainList();
+        const StartChoice choice = startEntry(catalog, QString(), QString(), 1000);
+        QCOMPARE(choice.entry.key, QStringLiteral("glm-coding|glm-5.3-flash"));
+        // The model, not merely the preset: rank 1 here is not what glm-coding serves by default.
+        QCOMPARE(choice.entry.model, QStringLiteral("glm-5.3-flash"));
+        QCOMPARE(choice.effort, QStringLiteral("low"));   // the level written beside it in the list
+        QVERIFY(!choice.restored);
+        // An entry the list gives no level keeps none: the pane stays on `agent/effort`.
+        curation::setTierEffort(QStringLiteral("main"), QStringLiteral("glm-coding|glm-5.3-flash"), QString());
+        QVERIFY(startEntry(catalog, QString(), QString(), 1000).effort.isEmpty());
+    }
+
+    // Owner, 2026-09-21: a harness he ranked first is what a new pane starts on. Being installed
+    // is not a default; being put first is.
+    void aGuestAtRankOneIsWhatANewPaneStartsOn() {
+        const Catalog catalog = catalogFrom(presets());
+        curation::addToTier(QStringLiteral("main"), QStringLiteral("guest:claude|opus"), QStringLiteral("high"));
+        curation::addToTier(QStringLiteral("main"), QStringLiteral("glm-coding|glm-5.3"));
+        const StartChoice choice = startEntry(catalog, QString(), QString(), 1000);
+        QCOMPARE(choice.entry.key, QStringLiteral("guest:claude|opus"));
+        QVERIFY(choice.entry.guest);
+        QCOMPARE(choice.effort, QStringLiteral("high"));
+    }
+
+    void aRestoredPaneComesBackOnItsOwnModel() {
+        const Catalog catalog = catalogFrom(presets());
+        mainList();
+        const StartChoice choice = startEntry(catalog, QStringLiteral("kimi-code"), QStringLiteral("k3"), 1000);
+        QCOMPARE(choice.entry.key, QStringLiteral("kimi-code|k3"));
+        QVERIFY(choice.restored);
+        QCOMPARE(choice.effort, QStringLiteral("high"));
+        // A guest saved the model its CLI reported; the entry the lists name is `opus`.
+        const StartChoice guest = startEntry(catalog, QStringLiteral("guest:claude"), QStringLiteral("claude-opus-5"), 1000);
+        QCOMPARE(guest.entry.key, QStringLiteral("guest:claude|opus"));
+        QVERIFY(guest.restored);
+        // An older layout saved a preset and no model: that preset's main model comes back.
+        QCOMPARE(startEntry(catalog, QStringLiteral("glm-coding"), QString(), 1000).entry.key,
+                 QStringLiteral("glm-coding|glm-5.3"));
+    }
+
+    void aRestoredEntryThatCannotRunFallsBackToRankOne() {
+        Catalog catalog = catalogFrom(presets());
+        mainList();
+        const QString rankOne = QStringLiteral("glm-coding|glm-5.3-flash");
+        // The key was removed in Options since the layout was saved…
+        const StartChoice noKey = startEntry(catalog, QStringLiteral("openai"), QStringLiteral("gpt-6-astra"), 1000);
+        QCOMPARE(noKey.entry.key, rankOne);
+        QVERIFY(!noKey.restored);
+        // …the provider is not in the catalog at all…
+        QCOMPARE(startEntry(catalog, QStringLiteral("gone"), QStringLiteral("model"), 1000).entry.key, rankOne);
+        // …and the subscription it was on is spent.
+        catalog.limits[QStringLiteral("kimi-code")] = {LimitWindow{QStringLiteral("weekly"), 100, 2000}};
+        QCOMPARE(startEntry(catalog, QStringLiteral("kimi-code"), QStringLiteral("k3"), 1000).entry.key, rankOne);
+    }
+
+    void withNothingToStartOnTheCallersOwnLadderAnswers() {
+        QVERIFY(startEntry(Catalog(), QString(), QString(), 1000).entry.key.isEmpty());
+        QVERIFY(startEntry(Catalog(), QStringLiteral("glm-coding"), QStringLiteral("glm-5.3"), 1000).entry.key.isEmpty());
+        Catalog catalog = catalogFrom(presets());
+        mainList();
+        for (const QString &preset : catalog.presets())
+            catalog.limits[preset] = {LimitWindow{QStringLiteral("daily"), 100, 0}};
+        QVERIFY(startEntry(catalog, QString(), QString(), 1000).entry.key.isEmpty());
+    }
+
+    // The defect the owner reported: from `kimi-k3`, four /swaps alternated two models he had not
+    // chosen and never came back (design section 1.4.1).
+    void swapRemembersWhereThePaneWasAndComesBack() {
+        const Catalog catalog = catalogFrom(presets());
+        mainList();
+        const SwapStep out = swapTarget(catalog, QStringLiteral("kimi-code|k3"), QString(), 1000);
+        QCOMPARE(out.target.key, QStringLiteral("glm-coding|glm-5.3-flash"));
+        QCOMPARE(out.remember, QStringLiteral("kimi-code|k3"));
+        QVERIFY(out.kind == SwapKind::Main);
+        QVERIFY(out.message.contains(QStringLiteral("kimi-k3")));   // it says where /swap goes back to
+        const SwapStep back = swapTarget(catalog, out.target.key, out.remember, 1000);
+        QCOMPARE(back.target.key, QStringLiteral("kimi-code|k3"));
+        QVERIFY(back.kind == SwapKind::Back);
+        QVERIFY(back.remember.isEmpty());
+        // And from there /swap is the same toggle again, forever.
+        const SwapStep again = swapTarget(catalog, back.target.key, back.remember, 1000);
+        QCOMPARE(again.target.key, QStringLiteral("glm-coding|glm-5.3-flash"));
+        QCOMPARE(again.remember, QStringLiteral("kimi-code|k3"));
+    }
+
+    void onRankOneWithNothingRememberedSwapGoesToRankTwo() {
+        const Catalog catalog = catalogFrom(presets());
+        mainList();
+        const SwapStep out = swapTarget(catalog, QStringLiteral("glm-coding|glm-5.3-flash"), QString(), 1000);
+        QCOMPARE(out.target.key, QStringLiteral("glm-coding|glm-5.3"));
+        QVERIFY(out.kind == SwapKind::Fallback);
+        QVERIFY(out.remember.isEmpty());
+        // Rank 2 is off rank 1 like any other model: the next /swap remembers it and goes back up.
+        const SwapStep back = swapTarget(catalog, out.target.key, out.remember, 1000);
+        QCOMPARE(back.target.key, QStringLiteral("glm-coding|glm-5.3-flash"));
+        QCOMPARE(back.remember, QStringLiteral("glm-coding|glm-5.3"));
+    }
+
+    void aRememberedModelThatCannotRunIsSkipped() {
+        Catalog catalog = catalogFrom(presets());
+        mainList();
+        const QString rankOne = QStringLiteral("glm-coding|glm-5.3-flash");
+        catalog.limits[QStringLiteral("kimi-code")] = {LimitWindow{QStringLiteral("weekly"), 100, 2000}};
+        const SwapStep spent = swapTarget(catalog, rankOne, QStringLiteral("kimi-code|k3"), 1000);
+        QCOMPARE(spent.target.key, QStringLiteral("glm-coding|glm-5.3"));   // rank 2 instead
+        QVERIFY(spent.kind == SwapKind::Fallback);
+        // Gone from the catalog, unusable, or rank 1 itself: all the same answer.
+        QVERIFY(swapTarget(catalog, rankOne, QStringLiteral("gone|model"), 1000).kind == SwapKind::Fallback);
+        QVERIFY(swapTarget(catalog, rankOne, QStringLiteral("openai|gpt-6-astra"), 1000).kind == SwapKind::Fallback);
+        QVERIFY(swapTarget(catalog, rankOne, rankOne, 1000).kind == SwapKind::Fallback);
+        // …and once kimi resets, the memory is good again.
+        QVERIFY(swapTarget(catalog, rankOne, QStringLiteral("kimi-code|k3"), 3000).kind == SwapKind::Back);
+    }
+
+    void aSpentModelSwapsToTheFirstLiveEntry() {
+        Catalog catalog = catalogFrom(presets());
+        mainList();
+        catalog.limits[QStringLiteral("glm-coding")] = {LimitWindow{QStringLiteral("weekly"), 100, 2000}};
+        // The pane sits on rank 1, but rank 1 has nothing left: the first live entry takes over.
+        const SwapStep out = swapTarget(catalog, QStringLiteral("glm-coding|glm-5.3-flash"), QString(), 1000);
+        QCOMPARE(out.target.key, QStringLiteral("kimi-code|k3"));
+        QVERIFY(out.kind == SwapKind::Main);
+        QCOMPARE(out.remember, QStringLiteral("glm-coding|glm-5.3-flash"));
+        QVERIFY(out.message.contains(QStringLiteral("nothing left")));
+    }
+
+    void oneModelInTheMainListHasNowhereToSwapTo() {
+        const Catalog catalog = catalogFrom(presets());
+        curation::addToTier(QStringLiteral("main"), QStringLiteral("glm-coding|glm-5.3"));
+        const SwapStep out = swapTarget(catalog, QStringLiteral("glm-coding|glm-5.3"), QString(), 1000);
+        QVERIFY(out.target.key.isEmpty());
+        QVERIFY(out.kind == SwapKind::None);
+        QVERIFY(out.message.contains(QStringLiteral("No second model in the main list")));
+        // From anywhere else there is still a rank 1 to go to.
+        QCOMPARE(swapTarget(catalog, QStringLiteral("kimi-code|k3"), QString(), 1000).target.key,
+                 QStringLiteral("glm-coding|glm-5.3"));
+    }
+
+    // Design 1.4.5: with no catalog yet /swap said "every ranked subscription is exhausted",
+    // which was never true — the worker simply had not answered.
+    void withNoCatalogSwapSaysTheListIsNotReady() {
+        const SwapStep out = swapTarget(Catalog(), QString(), QString(), 1000);
+        QVERIFY(out.kind == SwapKind::None);
+        QVERIFY(out.message.contains(QStringLiteral("not ready")));
+        QVERIFY(!out.message.contains(QStringLiteral("exhausted")));
+        // A catalog whose providers have no keys says that instead.
+        QJsonArray noKeys;
+        noKeys << preset(QStringLiteral("openai"), QStringLiteral("openai"), QStringLiteral("openai"), QStringLiteral("gpt-6-astra"),
+                         {model(QStringLiteral("gpt-6-astra"), QStringLiteral("gpt-6-astra"), QStringLiteral("main"), {})}, false);
+        QVERIFY(swapTarget(catalogFrom(noKeys), QString(), QString(), 1000).message.contains(QStringLiteral("usable")));
+        // And everything really spent does say exhausted.
+        Catalog catalog = catalogFrom(presets());
+        mainList();
+        for (const QString &preset : catalog.presets())
+            catalog.limits[preset] = {LimitWindow{QStringLiteral("daily"), 100, 0}};
+        QVERIFY(swapTarget(catalog, QStringLiteral("kimi-code|k3"), QString(), 1000).message.contains(QStringLiteral("exhausted")));
     }
 
     void filterMatchesEveryWordAnywhere() {
