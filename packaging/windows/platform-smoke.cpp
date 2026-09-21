@@ -8,7 +8,7 @@
 #include <QProcess>
 #include <QStandardPaths>
 #include <QTemporaryDir>
-#include <QThread>
+#include <QUuid>
 #include <windows.h>
 #include <cstdio>
 
@@ -24,7 +24,7 @@ int main(int argc, char **argv) {
     if (app.arguments().contains(QStringLiteral("--crash"))) {
         SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
         relay::log::setLevel(QStringLiteral("info"));
-        relay::crashlog::install(QStringLiteral("windows-platform-smoke"));
+        relay::crashlog::install(app.arguments().last());
         RaiseException(0xE0424242, EXCEPTION_NONCONTINUABLE, 0, nullptr);
         return 99;
     }
@@ -43,13 +43,14 @@ int main(int argc, char **argv) {
                "native process counters unavailable")) return 4;
     if (!check(relay::usage::processorCount() > 0 && relay::usage::totalMemoryBytes() > 0
                && relay::usage::clockTicksPerSecond() == 10000000, "machine counters unavailable")) return 5;
+    const QString marker = QStringLiteral("windows-platform-smoke-") + QUuid::createUuid().toString();
     QProcess crash;
-    crash.start(QCoreApplication::applicationFilePath(), {QStringLiteral("--crash")});
+    crash.start(QCoreApplication::applicationFilePath(), {QStringLiteral("--crash"), marker});
     if (!check(crash.waitForFinished(10000) && crash.exitCode() != 0,
                "exception child did not terminate")) return 6;
     QFile log(relay::log::filePath());
     if (!check(log.open(QIODevice::ReadOnly)
-               && log.readAll().contains("build=windows-platform-smoke"),
+               && log.readAll().contains((QStringLiteral("build=") + marker).toUtf8()),
                "native exception was not recorded")) return 7;
     std::puts("Native process ownership, usage and exception logging passed.");
     return 0;
