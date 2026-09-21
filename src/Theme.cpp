@@ -520,6 +520,13 @@ QLabel#stripChipLabel[warn="true"] { color: @warning; border-color: @warning; }
 /* The composer's status strip: dim, flat, no dropdown chrome (Warp keeps its chips quiet). */
 QComboBox#statusPicker { background: @raised; border: 1px solid @border; border-radius: 6px; color: @muted; padding: 2px 18px 2px 8px; font-size: 9pt; }
 QComboBox#statusPicker:hover { color: @text; border-color: @accent; }
+/* A picker whose value is not this pane's to set: the level box on a model with no reasoning knob,
+   and on Relay Free, where the gateway picks the level for the role (owner, 2026-09-21: "for no
+   knob models, the effort box should be grayed out. same for relay free"). The rule above sets an
+   explicit colour, so Qt's disabled palette never reaches this widget and `setEnabled(false)` alone
+   changed nothing anyone could see; the tooltip says why it is grey. */
+QComboBox#statusPicker:disabled, QComboBox#statusPicker:disabled:hover {
+    color: @disabled; border-color: @border; background: transparent; }
 QComboBox#statusPicker::drop-down { border: none; width: 12px; }
 QComboBox#statusPicker QAbstractItemView { background: @raised; color: @text; selection-background-color: @accent; }
 /* The pane's button row. It is on screen in every pane, always the same: nothing appears, lifts or

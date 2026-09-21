@@ -241,6 +241,46 @@ private slots:
         popup.dismiss();
     }
 
+    // 7b. A box whose rows *shrank* between two opens draws them all (card #MDL1, 2026-09-21).
+    //     The level box is filled from the model's own `efforts` now, so its length changes with
+    //     every switch: Alt+E after openai (four levels) then kimi (three) drew "high" and "max"
+    //     with "low" scrolled off the top, because the list kept the scroll offset and the height
+    //     it had while it was longer.
+    void aShorterListOnTheNextOpenDrawsEveryRow()
+    {
+        // The anchor as the pane has it: a small box at the bottom right of a window, so the list
+        // opens *above* it, which is the geometry the fault was seen in.
+        QWidget window;
+        window.resize(1600, 900);
+        QWidget anchor(&window);
+        anchor.setGeometry(1460, 862, 70, 22);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        QList<FilterRow> four;
+        for (const QString &name : {QStringLiteral("low"), QStringLiteral("medium"),
+                                    QStringLiteral("high"), QStringLiteral("xhigh")})
+            four << FilterRow{name, name, {}, false, true};
+        FilterPopup popup(&anchor);
+        popup.setRows(four, 2);
+        popup.openFor(&anchor);
+        QCOMPARE(popup.visibleCount(), 4);
+        popup.dismiss();
+
+        // The same box on another model: three levels, the last of them current.
+        QList<FilterRow> three;
+        for (const QString &name : {QStringLiteral("low"), QStringLiteral("high"), QStringLiteral("max")})
+            three << FilterRow{name, name, {}, false, true};
+        popup.setRows(three, 2);
+        popup.openFor(&anchor);
+        QCOMPARE(popup.visibleCount(), 3);
+        QVERIFY2(!popup.scrolling(), "three rows must not need a scrollbar");
+        QVERIFY2(popup.rowVisible(0), "the first level must not be scrolled off the top");
+        QVERIFY(popup.rowVisible(1));
+        QVERIFY(popup.rowVisible(2));
+        QCOMPARE(popup.height(), popup.layout()->totalSizeHint().height());
+        popup.dismiss();
+    }
+
     // 8. A list short enough to draw whole never shows a scrollbar — the four reasoning levels,
     //    and the two a model with only high and max offers, which is what Alt+E opened over a
     //    scrollbar before. Long lists still scroll, and then the bar's width is added to the box

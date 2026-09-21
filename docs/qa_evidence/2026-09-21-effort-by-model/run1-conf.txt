@@ -1,0 +1,26 @@
+[instructions]
+onboarded=true
+
+[isolation]
+enabled=false
+
+[agent]
+effort=high
+
+[models]
+tier\main=kimi-code|k3|, openai|gpt-6-astra|, relay-free|relay-main|
+tier\high=openai|gpt-6-astra|xhigh
+tier\flash=glm-coding|glm-5.3-flash|low
+tier\lite=glm-coding|glm-5.3-flash|low
+tier\local=@Invalid()
+
+[suggestions]
+next_command=false
+next_prompt=false
+
+[security]
+approvals_chosen=true
+approvals_ask=@Invalid()
+
+[url_handler]
+announced=true

@@ -556,3 +556,66 @@ second control (the `via` list), not a different setting.
 <!-- relay:entry 20260921T211250Z-r1 author=claude-code kind=decision -->
 ### Claude Code · 2026-09-21 21:12
 Owner, 2026-09-21: "lets build the models pane. and we can make it where, when you open relay for the first time, you have a pane at the left and models at the right. and just remove ctrl alt m, not worth the extra confusion. just ctrl m or ctrl shift m … typing it again closes the pane (or esc as you mentioned). ticks per model is OK for now." Design §5.8, task t:a11. Key: Ctrl+Shift+M alone — Relay binds one key per surface (Options is Ctrl+Shift+O, no plain twin), and plain Ctrl+M is the carriage-return code in a terminal.
+
+<!-- relay:entry 20260921T211909Z-e1 author=claude-fable kind=progress -->
+### Claude Fable · 2026-09-21 21:19
+**The GUI half of "the effort options are determined by the model" is landed.** Three commits:
+`3ba73e82` (the change), `8be86bb6` (the BYOK dialog's preset table, which the worker's
+deepseek-flash row had left behind and `tests/test_presets.GuiMirrorTests` caught), `35e7bccf`
+(the snap sentence and the level box's width), plus `src/Theme.cpp`'s greyed-box rule and this
+evidence.
+
+**Relay's four levels are gone, and with them every validation against them.** `Entry::efforts`
+is the model's own list, in the provider's order and the provider's words, and the word goes on
+the wire as it stands — the worker validates it per model. Places that assumed four and what they
+read now: `Pane::efforts()` (deleted; `offeredEfforts()` is the catalog row's list, falling
+back to the preset row's and then to `models::effortLadder()`), `setEffort` / `setPaneEffort`
+/ `initRestore` / `rolesObject` / `tiersObject` / `session_configured` / `model_changed`
+/ `effort_changed` / `startEntry`'s level, the level box and Alt+E, Alt+. / Alt+,, `/effort`
+and its `/` popup row (which now spells this pane's own levels), the palette's Reasoning
+submenu, the model chip's tooltip, `ModelPicker`'s level list and reasoning column, and the
+roles dialog's level pickers. `effort_labels` is retired on this side too: the levels are
+already the provider's words, so an old worker's map would rename them twice, and it is read by
+nobody.
+
+**Greyed, not hidden.** `Entry::effortFixed` — the worker's `effort_fixed`, derived as
+`efforts.isEmpty() || hosted` from a worker that does not send it — disables the box with
+`effortFixedReason()` in its tooltip ("<name> has no reasoning level", "Relay Free sets the
+level for you"), and Alt+E, `/effort` and the picker's level list say the same instead of
+changing anything. The pane keeps the level it had for the next model that takes one. The
+stylesheet set an explicit colour on `#statusPicker`, so `setEnabled(false)` alone changed
+nothing anyone could see; there is a `:disabled` rule now.
+
+**The snap rule.** `models::nearestEffort(levels, level)`: itself when the model takes it, else
+the nearest by position in `effortLadder()` (`low medium high xhigh max ultra`, codex's own
+list, of which every other provider's is a subset) — the model's top when the level is above all
+of them, its lowest when below, ties going up, so `xhigh` on a model that stops at `max` lands
+on `max`. The sentence rides the switch's own line rather than being wiped by it 200 ms later:
+"model: kimi-k3 · conversation kept · xhigh is not a level of kimi-k3 here · using max".
+
+**Tests.** modelcatalog `theLevelsAreTheModelsOwnListInTheProvidersOrder`,
+`effortFixedIsTheWorkersWordAndOtherwiseDerived`, `theWorkersEffortFixedWinsOverTheDerivation`,
+`aLevelTheModelDoesNotTakeSnapsToItsNearest`, `anOldWorkersEffortLabelsAreIgnored`; modelpicker
+`levelsAreTheModelsOwnListInTheProvidersWords`, `aCodexRowListsXhighAndUltra`,
+`aRelayFreeRowListsNothingAndSaysWhy`, `aLevelTheRowDoesNotTakeSnapsInThePreselect`;
+modelsettings `anEffortBoxListsTheModelsOwnLevelsInTheProvidersWords`,
+`thePickedModelsOwnLevelsWinOverTheProviders`; filterpopup
+`aShorterListOnTheNextOpenDrawsEveryRow`.
+`ctest -R "modelcatalog|modelpicker|modelrows|filterpopup|panestate|modelsettings"` 6/6, and
+`tests.test_presets.GuiMirrorTests` 3/3.
+
+**Evidence.** `docs/qa_evidence/2026-09-21-effort-by-model/` — drive.sh, NOTES.md and thirteen
+Xvfb shots across two runs: Alt+E on a codex pane (six levels, `xhigh` and `ultra`), on the
+OpenAI row (four, `xhigh`), on kimi (three, no `medium`); the snap line; the greyed box on
+Relay Free with its tooltip; `/effort` and Alt+E answering with the reason; the `/` popup
+spelling the pane's own levels; and the Ctrl+Alt+M dialog's codex row.
+
+**One thing found and not fixed here.** `relay::FilterPopup` measures its list one row short of
+what it draws once the app stylesheet is on it, so the last row is clipped by a few pixels and a
+list that got *shorter* between two opens scrolls past its first row (Alt+E on openai, then on
+kimi, drew "high" and "max" with "low" off the top while the box held all three). The level box's
+length changes with every model switch now, so this is far easier to hit than it was, but it is
+`src/FilterPopup.cpp`'s own sizing and two other sessions are working that surface.
+`tests/filterpopup_test.cpp :: aShorterListOnTheNextOpenDrawsEveryRow` states the expectation and
+passes headlessly, because the stylesheet — the thing that makes the measurement wrong — is not on
+the popup there. NOTES.md has the reproduction.

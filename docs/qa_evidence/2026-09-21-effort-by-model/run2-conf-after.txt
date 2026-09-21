@@ -1,0 +1,26 @@
+[agent]
+effort=ultra
+
+[instructions]
+onboarded=true
+
+[isolation]
+enabled=false
+
+[models]
+tier\flash=guest:codex|gpt-5.6-sol|low
+tier\high=guest:codex|gpt-6-astra|max
+tier\lite=guest:codex|gpt-5.6-sol|low
+tier\local=@Invalid()
+tier\main=guest:codex|gpt-6-astra|xhigh, guest:codex|gpt-5.6-sol|
+
+[security]
+approvals_ask=@Invalid()
+approvals_chosen=true
+
+[suggestions]
+next_command=false
+next_prompt=false
+
+[url_handler]
+announced=true

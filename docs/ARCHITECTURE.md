@@ -2181,6 +2181,32 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   the "fill the lists" defaults buttons all left the page for that dialog. It replaced
   the API keys and Model roles doors and the "Claude Code and Codex" page. Labels are lower-case
   throughout, per the owner.
+- **The reasoning levels are the model's (card #MDL1, 2026-09-21).** Owner: *"i want the effort
+  options in relay to be determined by the model … so xhigh shows up for codex for example"* and
+  *"for no knob models, the effort box should be grayed out. same for relay free."* Relay owned
+  four levels — low, medium, high, max — and every picker validated against them, which is why a
+  Codex pane could not be put on `xhigh` or `ultra` and a Kimi pane offered a `medium` that was
+  the same request as `high`. There is no Relay vocabulary any more. `models::Entry::efforts` is
+  the model's own list as the worker reports it, in the provider's order and the provider's words,
+  and the word goes on the wire as it stands (the worker validates it per model;
+  `presets.effort_levels` / a guest's own catalogue). `effort_labels`, the {Relay level: provider
+  word} map, is retired on both sides. `Pane::offeredEfforts()` is that list — the catalog row's,
+  falling back to the preset row's and then to `models::effortLadder()` for a provider that
+  reports none — and the level box, Alt+E, Alt+. / Alt+,, `/effort` and its `/` popup row, the
+  palette's Reasoning submenu, the model chip's tooltip, `ModelPicker`'s level list and the roles
+  dialog's level pickers all read it. `models::effortLadder()` is *an order only*
+  (`low medium high xhigh max ultra`, Codex's own list, of which every other provider's is a
+  subset): `models::nearestEffort(levels, level)` snaps a level carried from another model to the
+  model's nearest by ladder position — its top when the level is above all of them, its lowest
+  when below, ties going up, so `xhigh` on a model that stops at `max` lands on `max` — and the
+  pane says so once, on the model report's own line ("model: kimi-k3 · conversation kept · xhigh
+  is not a level of kimi-k3 here · using max"). `Entry::effortFixed` (the worker's `effort_fixed`,
+  derived as `efforts.isEmpty() || hosted` from a worker that does not send it) greys the box
+  rather than hiding it, with `Entry::effortFixedReason()` in its tooltip — "<name> has no
+  reasoning level", "Relay Free sets the level for you" — and Alt+E, `/effort` and the picker's
+  level list say the same instead of changing anything; the pane keeps the level it had for the
+  next model that takes one. Evidence:
+  `docs/qa_evidence/2026-09-21-effort-by-model`.
 - **One name, one row (card #MDL1, 2026-09-21).** A model has exactly one name — lower-case, no
   spaces, no vendor prefix — and everything that prints a model prints it: `gpt-5.6-sol`, never
   "Codex" and never "GPT-5.6 Sol". The worker computes it (`presets.model_name`) and sends it as

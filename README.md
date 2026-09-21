@@ -209,8 +209,12 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   `.gitignore`) or a bounded walk of the directory, previewable files first, filtered as you type.
 - **History suggestions.** A dim completion from commands you ran in this directory, the prompt
   history and your shell history file; Actions › Command suggestions from history turns it off.
-- **Agent sessions.** Per pane: switch model without losing the conversation, reasoning effort
-  (picker, Alt+. / Alt+,), and a context indicator (`ctx 142k · 14%`, amber near the auto-compact
+- **Agent sessions.** Per pane: switch model without losing the conversation, a reasoning level
+  (the box beside the model, Alt+E, Alt+. / Alt+,) offering exactly the levels **this model**
+  takes, in its provider's own order and words — six on a Codex model (`low medium high xhigh max
+  ultra`), four on the OpenAI API, three on Kimi — greyed out with the reason in its tooltip on a
+  model with no reasoning knob and on Relay Free, whose gateway sets the level per role; a level
+  the next model does not take moves to its nearest and the pane says so. And a context indicator (`ctx 142k · 14%`, amber near the auto-compact
   limit). Type `/` in the prompt box for commands: `/new`, `/model` (alone: the picker, also
   Ctrl+Alt+M), `/models` (Options › Models, also Ctrl+Shift+M), `/profile [name]` (switch the model profile), `/swap`, `/effort` (`/reasoning`), `/compact [focus]`,
   `/context`, `/rewind` (rewind chat: the conversation only, files untouched; also Esc Esc in
