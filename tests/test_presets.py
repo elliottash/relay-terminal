@@ -480,6 +480,10 @@ class ModelCatalogTests(unittest.TestCase):
         self.assertEqual(P._MAIN_GROUP_ORDER["payg"], rank.provider_order("kimi"))
         self.assertEqual(P._MAIN_GROUP_ORDER["guest"], rank.provider_order("guest:claude"))
         self.assertEqual(P._MAIN_GROUP_ORDER["included"], rank.provider_order("relay-free"))
+        # No preset carries `guest` or `custom`, so those two are read off the file another way:
+        # the first harness, and — for a custom OpenAI-compatible endpoint the user added — the
+        # same band as pay-as-you-go, which is where the hand-written table put it.
+        self.assertEqual(P._MAIN_GROUP_ORDER["custom"], P._MAIN_GROUP_ORDER["payg"])
         order = [P._MAIN_GROUP_ORDER[g] for g in ("subscription", "guest", "payg", "aggregator",
                                                   "included")]
         self.assertEqual(order, sorted(order))

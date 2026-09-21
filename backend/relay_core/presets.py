@@ -689,11 +689,13 @@ OPENROUTER_TWIN_MAX_COMPLETION_USD_PER_MTOK = 3.0
 # #MDL1; now read off `model-ranking.md`'s Providers table, whose `order` column is the group order
 # (design section 5.4: "the provider order replaces the group order"). A group is the lowest order
 # of the built-ins that carry it — so `subscription` is the first plan, `payg` the first api — and
-# `guest` is the first harness, because no entry of PRESETS is one. A group no row covers
-# (`custom`, `local`) sorts after everything that has one.
+# `guest` is the first harness and `custom` sorts with `payg`, because no entry of PRESETS carries
+# either group — a custom provider is an OpenAI-compatible pay-as-you-go endpoint the user added,
+# which is where the hand-written table put it too. A group nothing covers (`local`) sorts after
+# everything that has a row; a model server on this machine is never ranked anyway.
 #
-# The ranking itself goes through `Ranking.provider_order` per provider; this is only for a
-# provider with no row of its own, which is the custom ones.
+# The ranking itself goes through `Ranking.provider_order` per provider. This is what `_order_of`
+# falls back to for a provider with no row of its own, which is the custom ones.
 def _group_orders() -> dict[str, int]:
     rank = model_ranking.load()
     out: dict[str, int] = {}
@@ -703,10 +705,20 @@ def _group_orders() -> dict[str, int]:
             out[preset.group] = order
     harnesses = [row.order for row in rank.providers.values() if row.kind == "harness"]
     out["guest"] = min(harnesses, default=model_ranking.UNKNOWN_PROVIDER_ORDER)
+    out["custom"] = out.get("payg", model_ranking.UNKNOWN_PROVIDER_ORDER)
     return out
 
 
 _MAIN_GROUP_ORDER = _group_orders()
+
+
+def _order_of(rank, preset_id: str, group: str = "") -> int:
+    """Where a provider sorts when two candidates tie on score: its own row of the ranking file,
+    else the order of the `group` it belongs to (_MAIN_GROUP_ORDER), else after everything."""
+    row = rank.providers.get(preset_id)
+    if row is not None:
+        return row.order
+    return _MAIN_GROUP_ORDER.get(group, model_ranking.UNKNOWN_PROVIDER_ORDER)
 
 # What the openrouter default puts first in the Lite list (owner, 2026-09-20: "I thought it's 3.5
 # flash lite with no reasoning"): the cheapest Gemini, at its lowest level. Not `_LITE_VIA_OPENROUTER`,
@@ -884,7 +896,7 @@ def _custom_candidates(preset_id: str, model: str, rank) -> list[_Candidate]:
     name where the file knows it — a hand-added `glm-5.3` is the same model — and High and Main
     otherwise, because a provider the user configured deliberately is a provider."""
     name = model_name(preset_id, model)
-    return [_Candidate(preset_id, model or "", name, preset_id, rank.provider_order(preset_id),
+    return [_Candidate(preset_id, model or "", name, preset_id, _order_of(rank, preset_id, "custom"),
                        rank.score(name), _ranked_classes(rank, name) or GUEST_CLASSES)]
 
 
