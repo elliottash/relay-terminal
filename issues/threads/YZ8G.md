@@ -135,3 +135,6 @@ Owner: "i was not looking at knowledge work as a metaphor for verification. i wa
 <!-- relay:entry 20260921T230206Z-cx author=claude-code kind=plan -->
 ### Claude Code · 2026-09-21 23:02
 Owner: "can you query codex cli to give you a skeptical take and to see if this is forced … then have codex give you the product simulations as well". Codex (gpt-6-astra, high) said the shape-per-card taxonomy is forced and gave a five-line design and a smaller slice; its three simulations (an economist, a policy analyst, a computational scientist) agree on one output record, one acceptance record, and Results as a separate list. Both are under `docs/research/qa-across-fields/` (f, g). `## Plan` rewritten to that slice; the previous plan is superseded and summarised in `docs/QA-ACROSS-FIELDS-RESEARCH.md` §5. Three questions for the owner replace the earlier four.
+<!-- relay:entry 20260921T233702Z-ex author=claude-code kind=decision -->
+### Claude Code · 2026-09-21 23:37
+Owner: "i agree with all, go ahead with it". Plan adopted; card claimed; steps 1–3 filed as #PR4Q, #WC3E, #JNYN with their expectations written first. One Opus subagent per card; a separate verifier session writes each checklist.

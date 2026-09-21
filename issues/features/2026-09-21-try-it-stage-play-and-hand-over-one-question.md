@@ -1,0 +1,23 @@
+---
+id: JNYN
+type: work
+status: planned
+labels: [feature, switchboard, qa]
+component: [gui, worker]
+parent: YZ8G
+rank: zzzzzzzzzzzzzzzzc
+created: '2026-09-21'
+source: 'owner, 2026-09-21: "i agree with all, go ahead with it" (#YZ8G plan)'
+links: {plans: [], commits: [], evidence: [], related: [YZ8G, 7BM4], github: null}
+---
+# Try it: stage the situation, complete the mechanical pass, hand the person one task and one question
+
+## Issue
+Step 3 of #YZ8G's plan and decision 1 of that card ("a button after verify … the agent would then run your app in a way that illustrates the feature or fix"). Codex: "One Try it action launches the pinned build and disposable fixture. If preparation fails, report that before requesting review"; "Automate [the mechanical steps]. Ask the person to perform only the task whose usability or interpretation needs observation"; "Give the problem without the answer. Observe whether they find it; reveal the expected result afterwards"; "Do not restrict it to cards carrying scenario". Worked example to generalise: docs/qa_evidence/2026-09-20-switchboard-tooling-hub/scenario/ (stage.py, scenario.json, ai-pass.sh, HUMAN-QA.md).
+
+## Done means
+- A **Try it** action on the card page (available from needs-verification on) starts a bounded Switchboard-agent turn that: reads `## Issue` and `## Done means`; stages the situation as a disposable fixture (a throwaway project, seeded data, a pinned binary where the card is about the app), records how the staged environment differs from real use; plays every mechanical step itself in the real app or command and captures evidence; then writes `## Try it` on the card: how to open the staged thing (one command or one button), one short task, one question — with the expected result withheld until the person answers.
+- If staging or the mechanical pass fails, the card gets that report and no request for review.
+- The person's answer goes in the thread as their verdict, and the expected result is revealed after it; the card's `## Human QA` is generated from `## Try it`, not typed twice.
+- It works for a card about the GUI (Xvfb-isolated app, xdotool), a backend behaviour (a request and a response or a failure reproduction), and a command-line tool (a before/after on a real file), on this repository's own board.
+Failure would show as: the brief containing the answer; a person asked to run tests or attach evidence by hand; a Try it that needs the owner to set up a display or a profile; a staging failure surfacing as a review request.
