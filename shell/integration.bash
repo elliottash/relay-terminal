@@ -308,6 +308,8 @@ __relay_debug() {
     if [[ $__relay_at_prompt == 1 && $__relay_in_prompt == 0 && $BASH_COMMAND != __relay_* ]]; then
         __relay_at_prompt=0
         __relay_mark_typed_rows
+        # Separate the echoed command from its output, after marking only the input rows.
+        printf '\n'
         __relay_staged_rows=
         __relay_event running 0 < /dev/null
     fi
@@ -347,12 +349,11 @@ bind -m vi-insert -x '"\C-x\C-p":__relay_redraw'
 bind -m vi-move -x '"\C-x\C-p":__relay_redraw'
 trap '__relay_debug' DEBUG
 
-# What you type belongs on its own line, not tacked onto the end of the folder: a command staged by
-# Relay, and the agent's inline output (which erases only the line it opens on), both start below the
-# prompt instead of running into it. Appended to the user's own PS1, whatever it is; never doubled,
-# and skipped for a prompt that already ends in a newline.
-if [[ -n ${PS1:-} && $PS1 != *$'\n' ]]; then
-    PS1=$PS1$'\n'
+# Leave a blank row between the folder prompt and what you type, matching agent prompt spacing.
+# Preserve the user's PS1 and any extra spacing it already has.
+if [[ -n ${PS1:-} ]]; then
+    [[ $PS1 == *$'\n' ]] || PS1=$PS1$'\n'
+    [[ $PS1 == *$'\n\n' ]] || PS1=$PS1$'\n'
 fi
 
 # Opt-in OSC 7 / OSC 133 marks (palette: "Shell integration (OSC 7/133)", or

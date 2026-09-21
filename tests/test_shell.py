@@ -154,7 +154,7 @@ class ShellTests(unittest.TestCase):
         s = self.session
         s.submit("printf 'RELAY_OK\\n'")
         s.wait('ready'); s.drain()
-        self.assertIn(b'\x1b[1A' + OSC_ROW_MARK + b'\x1b[B', s.output)
+        self.assertIn(b'\x1b[1A' + OSC_ROW_MARK + b'\x1b[B\r\nRELAY_OK', s.output)
         self.assertEqual(s.output.count(OSC_ROW_MARK), 1)
 
     def test_staged_multiline_rows_marked(self):
@@ -169,7 +169,7 @@ class ShellTests(unittest.TestCase):
         s = self.session
         os.write(s.master, b"printf 'TYPED_OK\\n'\r")
         s.wait('ready'); s.drain()
-        self.assertIn(b'\x1b[1A' + OSC_ROW_MARK + b'\x1b[B', s.output)
+        self.assertIn(b'\x1b[1A' + OSC_ROW_MARK + b'\x1b[B\r\nTYPED_OK', s.output)
         self.assertIn(b'TYPED_OK', s.output)
 
     def test_aliases_reported(self):
@@ -193,6 +193,7 @@ class ShellCompatibilityTests(unittest.TestCase):
                 self.assertEqual(state['status'], 1)
                 self.assertIn(b'PROMPT_A', s.output)
                 self.assertIn(b'PROMPT_B', s.output)
+                self.assertIn(b'test> \r\n\r\n', s.output)
             finally:
                 s.close()
 
