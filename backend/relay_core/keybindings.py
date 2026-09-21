@@ -35,9 +35,11 @@ NAMED_KEYS = ("Tab", "Backtab", "Return", "Enter", "Escape", "Space", "Backspace
               "Home", "End", "PgUp", "PgDown", "Left", "Right", "Up", "Down")
 _NAMED = {name.lower(): name for name in NAMED_KEYS}
 _NAMED.update({"esc": "Escape", "del": "Delete", "ins": "Insert", "pageup": "PgUp", "pagedown": "PgDown"})
-# Every printable ASCII symbol except '+', which separates modifiers. Shifted symbols such as
-# ( | % ~ are needed by the Konsole and VS Code presets.
-PUNCTUATION = set("!\"#$%&'()*,-./:;<=>?@[\\]^_`{|}~")
+# Every printable ASCII symbol. '+' separates modifiers, so it is spelled by writing it last —
+# "Ctrl++" is Ctrl and the plus key, which is what Qt writes and what Relay's own default table
+# binds terminal.zoomIn to (#Z00M). Shifted symbols such as ( | % ~ are needed by the Konsole and
+# VS Code presets.
+PUNCTUATION = set("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~")
 
 
 class KeybindingError(ValueError):
@@ -49,8 +51,14 @@ def normalize_key(text: str) -> str:
     if not isinstance(text, str) or not text.strip() or len(text) > 64:
         raise KeybindingError("A key must be a non-empty string such as 'Ctrl+Shift+P'.")
     raw = text.strip()
-    # Split on '+' but keep a trailing literal '+'-free key; '+' itself is not an allowed key.
     parts = raw.split("+")
+    # The plus key is written last, Qt's way: "Ctrl++" splits to ["Ctrl", "", ""], and the two
+    # empty tails are the separator and the key. Put the key back. Relay's own default table binds
+    # terminal.zoomIn to "Ctrl++" (#Z00M), and rejecting it failed the whole `configure` that
+    # carries the shortcut catalogue — so from the moment that binding landed no pane, helper or
+    # console could build an agent at all, with only "Invalid key 'Ctrl++'" in the log to say so.
+    if len(parts) > 1 and parts[-1] == "" and parts[-2] == "":
+        parts = parts[:-2] + ["+"]
     if any(part == "" for part in parts):
         raise KeybindingError(f"Invalid key '{raw}': empty part. Use a form like 'Ctrl+Shift+P'.")
     *mods, key = [part.strip() for part in parts]

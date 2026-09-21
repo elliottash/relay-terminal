@@ -53,8 +53,13 @@ class NormalizeTests(unittest.TestCase):
         self.assertEqual(kb.normalize_key("Ctrl+|"), "Ctrl+|")
         self.assertEqual(kb.normalize_key("Ctrl+Esc"), "Ctrl+Escape")
         self.assertEqual(kb.normalize_key("Ctrl+PageDown"), "Ctrl+PgDown")
-        with self.assertRaises(kb.KeybindingError):
-            kb.normalize_key("Ctrl++")
+        # The plus key, written Qt's way: the separator and the key are the same character, so it
+        # is the last part and the split leaves two empty tails. Relay's own defaults bind
+        # terminal.zoomIn to it (#Z00M); while this raised, the `configure` that carries the
+        # catalogue raised with it and no agent was ever built.
+        self.assertEqual(kb.normalize_key("Ctrl++"), "Ctrl++")
+        self.assertEqual(kb.normalize_key("ctrl+shift++"), "Ctrl+Shift++")
+        self.assertEqual(kb.normalize_key("+"), "+")
 
     def test_invalid_keys(self):
         for bad in ['', 'Ctrl+', '+P', 'Hyper+P', 'Ctrl+Ctrl+P', 'Ctrl+F36', 'Ctrl+Pause', 'Ctrl+P, Ctrl+Q',
@@ -342,6 +347,29 @@ class GuiDefaultsTests(unittest.TestCase):
         source = (ROOT / 'src/Keymap.h').read_text(encoding='utf-8')
         for preset in re.findall(r'"tests\.open"\s*:\s*\[', source):
             self.fail('a preset binds tests.open; it ships with no default key')
+
+    def test_every_default_key_is_one_the_worker_accepts(self):
+        # The twin of the test below, for the keys rather than the ids. The GUI sends every default
+        # binding — and every preset table's — with `configure`, and one key the worker refuses
+        # fails the whole configure, so no pane, helper or console builds an agent at all. It
+        # happened on 2026-09-21: #Z00M bound terminal.zoomIn to "Ctrl++", the plus key written
+        # Qt's way, and every `configure` from that build on answered "Invalid key 'Ctrl++'".
+        source = (ROOT / 'src/Keymap.h').read_text(encoding='utf-8')
+        for action, block in re.findall(r'add\("([a-zA-Z.]+)", "[a-z]+", "[^"]*",\s*\{(.*?)\}\);', source, re.S):
+            for key in re.findall(r'QStringLiteral\("([^"]+)"\)', block):
+                try:
+                    normalize_key(key)
+                except KeybindingError as exc:
+                    self.fail(f'{action} binds {key!r}, which the worker refuses: {exc}')
+        presets = re.search(r'R"PRESETS\((.*?)\)PRESETS"', source, re.S)
+        self.assertIsNotNone(presets, 'the preset tables are not where this test looks for them')
+        for name, table in json.loads(presets.group(1)).items():
+            for action, keys in table.items():
+                for key in keys:
+                    try:
+                        normalize_key(key)
+                    except KeybindingError as exc:
+                        self.fail(f'the {name} preset binds {action} to {key!r}, which the worker refuses: {exc}')
 
     def test_every_registered_action_id_is_one_the_worker_accepts(self):
         # The GUI sends the whole registry with `configure`; one id the worker refuses fails the
