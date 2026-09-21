@@ -14759,8 +14759,7 @@ private:
     }
 
     void enqueue(QueueEntry entry) {
-        // A queued item is edited where it stands now (selectQueueEntry / saveQueueEdit), so nothing
-        // is ever pulled out and resubmitted at the head: everything queued here joins the back.
+        // Every submission joins the back, including a draft recalled from the queue with Up.
         entry.id = ++m_entrySerial;
         m_entries.append(entry);
         m_selected = -1;
@@ -14774,6 +14773,8 @@ private:
                    : !entry.guest.isEmpty()
                        ? QStringLiteral("Queued · sent to %1 when it is ready").arg(guestName(entry.guest))
                        : QStringLiteral("Queued · the command runs when the terminal is free"));
+        hint(QStringLiteral("queue.recall"),
+             relay::ShortcutHints::nextTime(QStringLiteral("↑"), QStringLiteral("takes the next queued item back to the empty prompt box")));
         rebuildQueueStrip(); changed();
         pumpQueue();
     }
@@ -14993,6 +14994,37 @@ private:
              QStringLiteral("Editing a queued item · ↑↓ move between items · Enter saves · Esc cancels"));
     }
 
+    // Up from an empty composer takes the pending item back as an ordinary unsent draft.
+    // Clear selection before removing it: keepSelectionOn must not clear the restored text,
+    // and the queue must not remain held while the user edits it (#QRC1).
+    void recallQueueHead() {
+        selectQueueRow(0);
+        if (!m_selectedSteer.isEmpty()) {
+            takeBackSelectedSteer();
+            return;
+        }
+        if (!m_selectedWorkerRow.isEmpty()) {
+            const QString id = m_selectedWorkerRow;
+            if (!workerRowText(id).isEmpty()) removeWorkerRow(id, true);
+            else queueEditHint(); // A preview from another console is not the full prompt.
+            return;
+        }
+        if (m_selected < 0 || m_selected >= m_entries.size()) return;
+        const QueueEntry entry = m_entries[m_selected];
+        if (entry.written()) { queueEditHint(); return; }
+        m_selected = -1;
+        // Preserve an explicit shell/agent destination in a mixed queue. Guest entries already
+        // belong to the active guest composer. @file and #card references stay in the text.
+        if (entry.guest.isEmpty()) {
+            clearPrefixMode(true);
+            setPrefixMode(entry.agent ? QStringLiteral("agent") : QStringLiteral("shell"));
+        }
+        removeEntry(entry.id);
+        m_editor->setPlainText(entry.text);
+        m_editor->moveCursor(QTextCursor::End);
+        status(QStringLiteral("Taken back · edit the draft and press Enter to submit again"));
+    }
+
     void pauseQueue(const QString &reason) {
         if (m_entries.isEmpty()) return;
         m_entriesPaused = true; m_pauseReason = reason;
@@ -15049,7 +15081,7 @@ private:
             }
         } else if (whole && moved) {
             hint(QStringLiteral("queue.reorder.drag"),
-                 relay::ShortcutHints::nextTime(QStringLiteral("↑ then Ctrl+↑↓"), QStringLiteral("moves a queued row")));
+                 relay::ShortcutHints::nextTime(QStringLiteral("↑"), QStringLiteral("takes the next queued item back to edit")));
         }
         QTimer::singleShot(0, this, [this] { rebuildQueueStrip(); pumpQueue(); });
     }
@@ -15198,9 +15230,7 @@ private:
             using Action = relay::queuenav::Action;
             switch (relay::queuenav::decide(nav, k, mods)) {
             case Action::Enter:
-                // In at the top row: what is delivered first, so a waiting steer before the queue.
-                selectQueueRow(0);
-                queueEditHint();
+                recallQueueHead();
                 return true;
             case Action::Up:      saveQueueEdit(); selectQueueRow(nav.selected - 1); return true;
             case Action::Down:    saveQueueEdit(); selectQueueRow(nav.selected + 1); return true;
@@ -17246,16 +17276,14 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
                                     ? QStringLiteral("Ctrl+↑ next tool call · Ctrl+↓ move · Enter save · Esc cancel · Shift+Del remove")
                                 : inQueueSelection()
                                     ? QStringLiteral("↑↓ row · Ctrl+↑↓ move · Enter save · Esc cancel · Shift+Del remove")
-                                    : QStringLiteral("↑ select a row · Ctrl+↑↓ move · Shift+Del remove"));
+                                    : QStringLiteral("↑ take back to edit · drag to reorder · × remove"));
         hint->setObjectName(QStringLiteral("queueHint"));
         hint->setToolTip(QStringLiteral(
             "Rows run top to bottom. ↪ rows reach the agent inside this turn, at its next tool call; the rest run after it.\n"
-            "↑ on the empty prompt box selects the top row; ↑↓ move between rows.\n"
-            "A queued row is edited in the prompt box: Enter saves, Esc cancels. Ctrl+↑↓ reorders it;\n"
-            "Ctrl+↑ on the first queued prompt while the agent works sends it at the next tool call.\n"
-            "A ↪ row: Enter or typing takes it back into the prompt box to edit, Ctrl+↓ moves it back to\n"
-            "the queue, Ctrl+Enter interrupts the turn and sends it now.\n"
-            "Shift+Delete or × removes a queued row and withdraws a ↪ row the agent has not taken yet."));
+            "↑ on the empty prompt box removes the top editable row and restores it as an unsent draft.\n"
+            "Enter submits that draft again; the remaining queued rows keep their order.\n"
+            "Drag queued rows to reorder; × removes a row. A ↪ row is withdrawn if the agent has not taken it yet.\n"
+            "Rows without editable text stay selected: Ctrl+↑↓ moves them, Shift+Delete removes, Esc leaves."));
         header->addWidget(hint);
         if ((m_entriesPaused || workerPaused) && !held) {
             auto *resume = new QToolButton; resume->setText(QStringLiteral("Resume")); resume->setFocusPolicy(Qt::NoFocus);

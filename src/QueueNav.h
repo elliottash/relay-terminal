@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // relay::queuenav: what a key does while the prompt box is arrowing through the queue.
 //
-// Pressing Up on an empty prompt box steps into the queue; from there the selected item's text sits
-// in the prompt box and is edited there, so the same Up and Down keys have to serve two masters —
-// moving between queued items, and moving the cursor inside a multi-line item. The rule is the one
-// every shell history uses: the queue moves only when the cursor is already on the first line (Up)
-// or the last line (Down); anywhere else the keys belong to the text.
+// Up on an empty prompt recalls the head as an unsent draft. Rows that cannot be recalled
+// (Relay-authored items or worker previews without full text) retain the selection controls.
+// Within that selection, Up/Down move between rows only at the first/last line of the text.
 //
 // The Pane owns the state (the queue, the selection, the prompt box); these functions turn a key
 // into a decision, so the rules can be tested without a widget. See
@@ -19,8 +17,8 @@ namespace relay::queuenav {
 // What the pane should do with this key.
 enum class Action {
     None,           // not ours: let the rest of the composer have the key
-    Enter,          // step into the queue from the prompt box, selecting the top row (the first
-                    // steer if there is one, else the head of the queue: what is delivered first)
+    Enter,          // recall the top row into an unsent draft (first steer, else queue head);
+                    // noneditable rows retain selection for move/remove actions
     Up,             // select the item above, keeping any edit to the one being left
     Down,           // select the item below, keeping any edit
     LeaveToHistory, // past the top: leave the queue empty-handed and let prompt history take the key
