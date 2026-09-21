@@ -220,3 +220,62 @@ One note for step 4: the `context` block carries `surface` beside `name` (`name`
 tab with two cards open on one worker can be told apart on events). If the worker would rather take
 the surface only off the `ask`, it can ignore the field; `fromJson` ignores unknown keys the same
 way, so neither side breaks when the other adds one.
+
+<!-- relay:entry 20260921T011240Z-e7 author=claude-code kind=progress -->
+Step 1 wave 1a has landed, and the measurement says waves 1b-1e are not a pure move.
+
+**Landed**
+
+- `cbf06cc0d668` — the seam. `src/AgentHost.h` is `relay::agent::Host`: the thirty `m_backend`
+  touches of the agent block grouped and named (`writeTerminal` / `columns` / `atLineStart`, the
+  four fold calls, `viewportAtBottom` / `scrollToBottom`, `screenText` / `cursorPosition`,
+  `sendText` / `paste` / `shellPid` / `foregroundProcessId` / `terminalMode`), plus `status` /
+  `toast` / `hint` and `bubbleRoom` / `setBubbleHeight`. `src/AgentConsole.h` is the console,
+  empty but for its host reference. `Pane` gains the second base: nine members it already had
+  were spelled the way the interface names them and became overrides in place, thirteen more are
+  written once above the "agent sessions UI" banner, and it owns
+  `relay::AgentConsole m_agent{*this}`. No public member of `Pane` changed, no behaviour changed,
+  and no agent code has moved yet.
+- `dd104c3ba3cd` — `scripts/split-agent-console.py` (the mover, `--check`, `--index`,
+  `--coupling`) and the live evidence in
+  `docs/qa_evidence/2026-09-20-agent-console-extraction/`.
+
+**The terminal pane is unchanged, and this is what says so.** The pane driven live under Xvfb
+through nine scenes — a fresh pane, a turn with reasoning folded and unfolded with Alt+R, a
+`read_file` tool row, the model box, a second prompt queued behind a running turn with its strip,
+Esc during that turn — on a clean export of the tip this started from and on that same tree with
+wave 1a's diff applied (so nothing else that landed on `main` is in the comparison), plus a third
+control run of the *before* binary against itself. Below the pane header, six of the ten shots
+are pixel-identical (`compare -metric AE` = 0) and every non-zero number is read: 36 pixels is
+the blinking caret, a 2x18 box the control shows too, and 21 310 on the first shot is the startup
+quota toast the screenshot caught in one run and missed in the others. The pane's
+auto-generated title differs between two runs of the *same* binary (1 316–1 539 px), which is
+why the whole-window numbers are read below the header. Tests: the pane's suites unchanged and
+green before and after — `queuenav queuesubmit continueturn input slash markdown calllines
+internalsledger toollabel panestate panes agentinternals turntranscript outputlinks requests
+transcriptreplay`, 16/16.
+
+**The finding, and what it needs from you.** The plan costed the seam as "the 4 631-line agent
+block touches `m_backend` exactly 30 times". That is true, and it is not the whole cost: the
+block also reads `Pane`'s own fields and calls its own members directly.
+`split-agent-console.py --coupling` over wave 1b's regions (101 members, 1 395 lines) reports
+**33 fields that would travel with the cut, 66 that cross it, and 52 members of `Pane` called
+from inside it that are not on `Host`** — `m_editor` (181 uses left behind), `m_backend` (131),
+`m_agentBusy` (71), `m_login` (67), `m_cwd` (59), `m_token` (40), `m_workspace` (32). Narrowing
+does not rescue it: the 137-line prose / `printInline` slice alone leaves 8 fields and 11 members
+on the other side. Both measurements are committed
+(`coupling-wave-1b.txt`, `coupling-printinline.txt`).
+
+So a pure move needs `Host` to grow from ~22 calls to sixty-odd — and a good part of what the
+block reads from `Pane` is not what the console is *drawn on* at all. `workspace`, `cwd`, the
+routing, the agent role, the persist key are what the agent is *about*, which is
+`relay::agent::Context` and step 3. Pushing them through `Host` would make every embedded host —
+BoardPane, SettingsPane, Conversations — answer `loginAtPrompt()` and `foregroundCommandLine()`,
+which is the opposite of what Risks 3 chose.
+
+That is a change to this card's own seam, so it is not taken here. Waves 1b–1e are declared and
+empty in the tool, with their anchors kept as the record of what each was to move. **The step
+that unblocks them is step 3** (`AgentConsole` takes a `Context`; `Pane` supplies
+`TerminalContext`), which this session holds and which waits on step 2. The order in the plan —
+1b–1e before 3 — should be read the other way round: the context has to exist before the block
+can be cut, or the cut has to carry the context through the host.
