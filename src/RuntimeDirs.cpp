@@ -8,9 +8,13 @@
 #include <QFileInfo>
 #include <QSaveFile>
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#else
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#endif
 
 namespace relay {
 namespace runtimedirs {
@@ -26,6 +30,16 @@ constexpr int kMaxRemoveDepth = 8;
 // second field is the executable name in parentheses and may itself contain spaces and brackets,
 // so the fields are counted from the *last* ')' — the usual way to read this file.
 bool startTimeOf(qint64 pid, qulonglong *out) {
+#ifdef Q_OS_WIN
+    if (pid <= 0 || quint64(pid) > MAXDWORD) return false;
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, DWORD(pid));
+    if (!process) return false;
+    FILETIME created{}, exited{}, kernel{}, user{};
+    const bool ok = GetProcessTimes(process, &created, &exited, &kernel, &user);
+    CloseHandle(process);
+    if (ok) *out = (qulonglong(created.dwHighDateTime) << 32) | created.dwLowDateTime;
+    return ok;
+#else
     QFile stat(QStringLiteral("/proc/%1/stat").arg(pid));
     if (!stat.open(QIODevice::ReadOnly)) return false;
     const QByteArray line = stat.readLine(8192);
@@ -39,8 +53,10 @@ bool startTimeOf(qint64 pid, qulonglong *out) {
     if (!ok) return false;
     *out = ticks;
     return true;
+#endif
 }
 
+#ifndef Q_OS_WIN
 // lstat(2): tells a symlink from what it points at, and hands back the mode, owner and mtime in
 // one call. Every decision the sweep makes about an entry is made from this, never from a path
 // that a symlink could have redirected.
@@ -84,9 +100,16 @@ qint64 newestMtime(const QString &path, const struct stat &dirInfo) {
     return newest;
 }
 
+
+#endif
 }  // namespace
 
 bool DirStamp::changed(const QString &path) {
+#ifdef Q_OS_WIN
+    // NTFS directory timestamps can be deferred while file handles are open. Listing the
+    // small spool is safer than suppressing events based on an unreliable timestamp.
+    return QDir(path).exists();
+#else
     struct stat info;
     if (::stat(QFile::encodeName(path).constData(), &info) != 0) { m_seen = false; return false; }
     if (m_seen && info.st_ino == m_inode
@@ -96,11 +119,16 @@ bool DirStamp::changed(const QString &path) {
     m_inode = info.st_ino;
     m_mtime = info.st_mtim;
     return true;
+#endif
 }
 
 Owner self() {
     Owner owner;
+#ifdef Q_OS_WIN
+    const qint64 pid = qint64(GetCurrentProcessId());
+#else
     const qint64 pid = qint64(::getpid());
+#endif
     qulonglong ticks = 0;
     if (!startTimeOf(pid, &ticks)) return owner;   // no /proc: better to leave no mark at all
     owner.pid = pid;
@@ -180,6 +208,14 @@ bool isRuntimeDirName(const QString &name) {
 
 SweepResult sweep(const QString &tempRoot, qint64 graceSeconds, int maxDirectories) {
     SweepResult result;
+#ifdef Q_OS_WIN
+    // Unix mode/uid checks do not establish ownership on Windows. Keep crash leftovers
+    // until an ACL/reparse-safe sweep is available; QTemporaryDir still cleans normal exits.
+    Q_UNUSED(tempRoot);
+    Q_UNUSED(graceSeconds);
+    Q_UNUSED(maxDirectories);
+    return result;
+#else
     const QString root = QFileInfo(tempRoot).canonicalFilePath();
     if (root.isEmpty()) return result;
     const qint64 now = QDateTime::currentSecsSinceEpoch();
@@ -224,6 +260,7 @@ SweepResult sweep(const QString &tempRoot, qint64 graceSeconds, int maxDirectori
         else ++result.errors;
     }
     return result;
+#endif
 }
 
 }  // namespace runtimedirs

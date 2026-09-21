@@ -5,6 +5,71 @@
 
 #include <QByteArray>
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <cstring>
+
+namespace relay::crashlog {
+namespace {
+wchar_t g_path[32768]{};
+char g_build[256]{};
+volatile LONG g_reporting = 0;
+volatile LONG g_toFile = 0;
+
+LONG WINAPI exceptionHandler(EXCEPTION_POINTERS *exception) {
+    if (InterlockedCompareExchange(&g_reporting, 1, 0)) return EXCEPTION_CONTINUE_SEARCH;
+    // Prepare all strings at install time. At a fatal exception only fixed buffers and
+    // Kernel32 I/O are used: neither Qt nor heap allocation is safe here.
+    char report[512]{};
+    size_t used = 0;
+    const auto append = [&](const char *text) {
+        while (*text && used + 1 < sizeof(report)) report[used++] = *text++;
+    };
+    const auto hex = [&](ULONG_PTR value) {
+        constexpr char digits[] = "0123456789abcdef";
+        for (int shift = int(sizeof(value) * 8) - 4; shift >= 0; shift -= 4)
+            if (used + 1 < sizeof(report)) report[used++] = digits[(value >> shift) & 15];
+    };
+    append("ERROR relay.gui gui_crash exception=0x");
+    hex(exception && exception->ExceptionRecord ? exception->ExceptionRecord->ExceptionCode : 0);
+    append(" address=0x");
+    hex(exception && exception->ExceptionRecord
+            ? reinterpret_cast<ULONG_PTR>(exception->ExceptionRecord->ExceptionAddress) : 0);
+    append(" build="); append(g_build); append("\r\n");
+    HANDLE file = INVALID_HANDLE_VALUE;
+    if (InterlockedCompareExchange(&g_toFile, 0, 0) && g_path[0])
+        file = CreateFileW(g_path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                           nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    const HANDLE outputs[] = {file, GetStdHandle(STD_ERROR_HANDLE)};
+    for (HANDLE output : outputs) {
+        if (!output || output == INVALID_HANDLE_VALUE) continue;
+        DWORD written = 0;
+        WriteFile(output, report, DWORD(used), &written, nullptr);
+        if (output == file) FlushFileBuffers(output);
+    }
+    if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+    // Preserve Windows Error Reporting and the original exception's termination status.
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+}
+void install(const QString &buildId) {
+    const QString path = relay::log::filePath();
+    if (path.size() < int(sizeof(g_path) / sizeof(g_path[0])) - 1) {
+        path.toWCharArray(g_path);
+        g_path[path.size()] = 0;
+    }
+    const QByteArray build = buildId.toUtf8().left(sizeof(g_build) - 1);
+    std::memcpy(g_build, build.constData(), size_t(build.size()));
+    g_build[build.size()] = 0;
+    noteLogEnabled(relay::log::level() != relay::log::Level::Off);
+    SetUnhandledExceptionFilter(exceptionHandler);
+}
+void noteLogEnabled(bool enabled) { InterlockedExchange(&g_toFile, enabled ? 1 : 0); }
+QString reportPath() {
+    return InterlockedCompareExchange(&g_toFile, 0, 0) ? QString::fromWCharArray(g_path) : QString();
+}
+} // namespace relay::crashlog
+#else
 #include <errno.h>
 #include <execinfo.h>
 #include <fcntl.h>
@@ -246,3 +311,5 @@ void noteLogEnabled(bool enabled) { g_toFile = enabled ? 1 : 0; }
 QString reportPath() { return g_toFile ? QString::fromUtf8(g_path) : QString(); }
 
 } // namespace relay::crashlog
+
+#endif

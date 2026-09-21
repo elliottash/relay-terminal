@@ -31,7 +31,6 @@
 
 #include <algorithm>
 #include <memory>
-#include <unistd.h>
 
 // ----- saved window layout: "reopen where I left off" ----------------------------------------
 // See the block comment on WindowManager. The file format and the pure rules live in

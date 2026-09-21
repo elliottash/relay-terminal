@@ -13,16 +13,19 @@
 #include <cmath>
 #include <utility>
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <tlhelp32.h>
+#include <psapi.h>
+#else
 #include <unistd.h>
-
-#ifndef Q_OS_LINUX
-#error "relay::usage reads /proc; this file is Linux-only (see docs/ARCHITECTURE.md, platform notes)"
 #endif
 
 namespace relay::usage {
 
 namespace {
 
+#ifndef Q_OS_WIN
 // sysconf answers are constant for the life of the process; ask once.
 template <int Name>
 qint64 cachedSysconf()
@@ -33,10 +36,13 @@ qint64 cachedSysconf()
 
 qint64 pageSizeBytes() { return cachedSysconf<_SC_PAGESIZE>(); }
 
+#endif
+
 // The root every path here is built from. A global rather than an argument threaded through the
 // walk: only a test ever moves it, and it moves it before anything is running.
 QString g_procRoot = QStringLiteral("/proc");
 
+#ifndef Q_OS_WIN
 QString procPath(qint64 pid, const QString &leaf)
 {
     return QStringLiteral("%1/%2/%3").arg(g_procRoot).arg(pid).arg(leaf);
@@ -64,6 +70,8 @@ bool readResident(qint64 pid, qint64 *bytes)
     return true;
 }
 
+
+#endif
 }  // namespace
 
 bool parseStat(const QByteArray &line, ProcessInfo *info)
@@ -109,6 +117,66 @@ void setProcRoot(const QString &root) { g_procRoot = root; }
 
 QList<ProcessInfo> walkTrees(const QList<qint64> &roots, int cap, Detail detail)
 {
+#ifdef Q_OS_WIN
+    QList<ProcessInfo> out;
+    if (cap <= 0 || roots.isEmpty()) return out;
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return out;
+    QHash<qint64, PROCESSENTRY32W> entries;
+    QMultiHash<qint64, qint64> children;
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    if (Process32FirstW(snapshot, &entry)) do {
+        entries.insert(entry.th32ProcessID, entry);
+        children.insert(entry.th32ParentProcessID, entry.th32ProcessID);
+    } while (Process32NextW(snapshot, &entry));
+    CloseHandle(snapshot);
+    QList<qint64> queue;
+    QSet<qint64> seen;
+    for (qint64 pid : roots) {
+        if (pid > 0 && entries.contains(pid) && !seen.contains(pid) && queue.size() < cap) {
+            seen.insert(pid);
+            queue.append(pid);
+        }
+    }
+    const auto ticks = [](FILETIME value) {
+        return qint64((quint64(value.dwHighDateTime) << 32) | value.dwLowDateTime);
+    };
+    for (int i = 0; i < queue.size() && i < cap; ++i) {
+        const qint64 pid = queue.at(i);
+        const auto row = entries.value(pid);
+        ProcessInfo info;
+        info.pid = pid;
+        info.ppid = row.th32ParentProcessID;
+        info.comm = QString::fromWCharArray(row.szExeFile);
+        if (detail == Detail::Counters) {
+            HANDLE process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, DWORD(pid));
+            if (!process) process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, DWORD(pid));
+            if (process) {
+                FILETIME created{}, exited{}, kernel{}, user{};
+                if (GetProcessTimes(process, &created, &exited, &kernel, &user)) {
+                    info.startTicks = ticks(created);
+                    info.ticks = ticks(kernel) + ticks(user);
+                }
+                PROCESS_MEMORY_COUNTERS memory{};
+                memory.cb = sizeof(memory);
+                if (GetProcessMemoryInfo(process, &memory, sizeof(memory)))
+                    info.rssBytes = qint64(memory.WorkingSetSize);
+                CloseHandle(process);
+            }
+        }
+        out.append(info);
+        for (qint64 child : children.values(pid)) {
+            if (!seen.contains(child) && queue.size() < cap) {
+                seen.insert(child);
+                queue.append(child);
+            }
+        }
+    }
+    // These are the live processes' counters. Unlike wait()/proc on Linux, Windows
+    // does not transfer reaped children's CPU time into their parent's counters.
+    return out;
+#else
     QList<ProcessInfo> out;
     if (cap <= 0) return out;
     QList<qint64> queue;
@@ -147,6 +215,7 @@ QList<ProcessInfo> walkTrees(const QList<qint64> &roots, int cap, Detail detail)
         }
     }
     return out;
+#endif
 }
 
 Reading summarize(const QList<ProcessInfo> &procs)
@@ -264,11 +333,21 @@ void Meter::reset()
     m_lastPids.clear();
 }
 
+#ifdef Q_OS_WIN
+int processorCount() { return int(GetActiveProcessorCount(ALL_PROCESSOR_GROUPS)); }
+qint64 totalMemoryBytes() {
+    MEMORYSTATUSEX memory{};
+    memory.dwLength = sizeof(memory);
+    return GlobalMemoryStatusEx(&memory) ? qint64(memory.ullTotalPhys) : 0;
+}
+qint64 clockTicksPerSecond() { return 10000000; } // FILETIME units: 100 ns
+#else
 int processorCount() { return int(cachedSysconf<_SC_NPROCESSORS_ONLN>()); }
 
 qint64 totalMemoryBytes() { return cachedSysconf<_SC_PHYS_PAGES>() * pageSizeBytes(); }
 
 qint64 clockTicksPerSecond() { return cachedSysconf<_SC_CLK_TCK>(); }
+#endif
 
 double cpuPercentOf(qint64 tickDelta, qint64 elapsedMs, int cores, qint64 clkTck)
 {

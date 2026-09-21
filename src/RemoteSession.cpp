@@ -6,7 +6,9 @@
 #include <QFileInfo>
 #include <QLocalSocket>
 
+#ifndef Q_OS_WIN
 #include <sys/stat.h>
+#endif
 #include <QSet>
 
 #include <algorithm>
@@ -152,6 +154,11 @@ bool isLocalHost(const QString &host, const QString &localName) {
 }
 
 int pruneSockets(const QString &dir) {
+#ifdef Q_OS_WIN
+    // Windows OpenSSH does not provide Unix ControlMaster socket sharing.
+    Q_UNUSED(dir);
+    return 0;
+#else
     int removed = 0;
     const QDir folder(dir);
     if (!folder.exists()) return 0;
@@ -166,6 +173,7 @@ int pruneSockets(const QString &dir) {
         if (QFile::remove(path)) ++removed;
     }
     return removed;
+#endif
 }
 
 QByteArray gzip(const QByteArray &data) {

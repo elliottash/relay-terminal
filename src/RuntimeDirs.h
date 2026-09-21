@@ -35,7 +35,9 @@
 #include <QDir>
 #include <QString>
 
+#ifndef Q_OS_WIN
 #include <sys/stat.h>
+#endif
 
 namespace relay {
 namespace runtimedirs {
@@ -61,8 +63,10 @@ public:
 
 private:
     bool m_seen = false;
+#ifndef Q_OS_WIN
     ino_t m_inode = 0;
     timespec m_mtime{};
+#endif
 };
 
 // The owner file's name inside a runtime directory, and the format version on its first line.

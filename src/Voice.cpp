@@ -11,8 +11,10 @@
 #include <QTemporaryFile>
 #include <QTimer>
 
+#ifndef Q_OS_WIN
 #include <signal.h>
 #include <sys/types.h>
+#endif
 
 namespace relay::voice {
 
@@ -327,8 +329,12 @@ void Capture::stop() {
     if (m_tick) m_tick->stop();
     // SIGINT, not terminate(): every one of these tools finalizes the WAV header on an interrupt,
     // and repairWav() covers the one that does not.
+#ifdef Q_OS_WIN
+    if (m_process) m_process->terminate();
+#else
     const qint64 pid = m_process ? m_process->processId() : 0;
     if (pid > 0) ::kill(pid_t(pid), SIGINT);
+#endif
     QTimer::singleShot(2000, this, [this] {
         if (m_recording && m_process && m_process->state() != QProcess::NotRunning) m_process->terminate();
     });
@@ -343,8 +349,12 @@ void Capture::cancel() {
     m_stopping = false;
     if (m_tick) m_tick->stop();
     if (m_process) {
+#ifdef Q_OS_WIN
+        m_process->terminate();
+#else
         const qint64 pid = m_process->processId();
         if (pid > 0) ::kill(pid_t(pid), SIGINT);
+#endif
         m_process->waitForFinished(1000);
         if (m_process->state() != QProcess::NotRunning) m_process->kill();
         m_process->deleteLater();

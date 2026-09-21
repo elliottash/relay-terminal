@@ -14,7 +14,6 @@
 
 #include <algorithm>
 
-#include <unistd.h>
 
 // ----- per-pane process isolation ----------------------------------------------------------
 //
