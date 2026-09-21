@@ -114,3 +114,15 @@ Owner, three statements while QA-ing #7BM4: "in my mind, QA support is 'human QA
 <!-- relay:entry 20260921T114924Z-dc author=claude-code kind=decision -->
 ### Claude Code (#7BM4) · 2026-09-21 11:49
 Owner: "i tend to agree" — human QA is its own card section beside `## QA checklist`, not part of it. And: "i have been taking an app-focused view here. but many things people build dont have users … can you give me a wider view, potentially with opus-agent research, on how QA is done across different fields with code/computing. so we can take a broader approach to his issue." Both in `## Decisions`; four research passes started (software along the UX spectrum; systems with no users; data analysis, econometrics and ML; the theory of oracles, verification and validation).
+<!-- relay:entry 20260921T130633Z-de author=claude-code kind=decision -->
+### Claude Code · 2026-09-21 13:06
+Owner: "re 3 econometrics -- thats of course my personal interest, but its niche and we should think about this more broadly as for example scientific / research  / knowledge-work automation" and "great, and i want to phase this -- my main worry is that, this approach could get clunky very fast". Both in `## Decisions`; the second is the constraint the plan is written under.
+<!-- relay:entry 20260921T130633Z-pf author=claude-code kind=plan -->
+### Claude Code · 2026-09-21 13:06
+`## Plan` written from five research passes (software with users; systems without users; analysis and ML; the theory and a classification; knowledge work and research automation), kept whole under `docs/research/qa-across-fields/` and synthesised in `docs/QA-ACROSS-FIELDS-RESEARCH.md`. One idea across every field: manufacture an asymmetry between maker and checker and let the right judge decide. A card carries one word — check, diff, measure, scenario, read — proposed by the planning agent. Six phases, each useful alone; the recommendation is to build through 3 and then use it before deciding the rest.
+<!-- relay:entry 20260921T130633Z-qg author=claude-code kind=question -->
+### Claude Code · 2026-09-21 13:06
+1. The five shape words — check, diff, measure, scenario, read — are those the names? Recommendation: yes; short, and each says what the person will be handed.
+2. May the AI verifier ever move a card on its own? Recommendation: no — it produces evidence and a recommendation only, until phase 5 gives it a measured record.
+3. Build through phase 3 and then pause to use it? Recommendation: yes; phases 4–6 should be decided by where you were asked something you did not need to be asked.
+4. "The implementer may not verify or write the checklist" — adopt as a rule now? It costs nothing (Relay already recommends a different model family) but it means the implementing agent hands the checklist to the verifier instead of writing it, as this session did on #7BM4. Recommendation: yes.

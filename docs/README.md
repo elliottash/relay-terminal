@@ -48,6 +48,7 @@ Start with [ARCHITECTURE.md](ARCHITECTURE.md) for how Relay works today and
 | [OPENCODE-NOTES.md](OPENCODE-NOTES.md) | What Relay's agent could adopt from opencode, ranked |
 | [SWITCHBOARD-AESTHETIC.md](SWITCHBOARD-AESTHETIC.md) | Proposal: the switchboard aesthetic inside Relay — design only, nothing implemented (`#8E4Q`) |
 | [SWITCHBOARD-TOOLING-RESEARCH.md](SWITCHBOARD-TOOLING-RESEARCH.md) | The Switchboard as the project's tooling hub (#7BM4): test explorers and test analytics, what "stale", "slow" and "flaky" mean and how they are measured, profiling shapes and what is feasible on these machines, how seven agent products surface verification, and a ranked list of other tooling that fits a board of cards |
+| [QA-ACROSS-FIELDS-RESEARCH.md](QA-ACROSS-FIELDS-RESEARCH.md) | How quality is assured where code is involved — games and apps, CLIs, subsystems and services, estimators and data pipelines, papers, reports and lab work — reduced to one idea (an asymmetry between maker and checker, and the right judge), the lines every field draws, five QA shapes a card can carry, and a phasing that keeps it light (#YZ8G). The five source reports are under `research/qa-across-fields/` |
 | [RESEARCH.md](RESEARCH.md) | Historical: primary sources checked for the first build (KonsolePart, Qt editor, Warp licensing, Kimi and Z.AI endpoints) |
 
 ## Evidence
