@@ -6,6 +6,7 @@
 #include <QFileInfo>
 #include <QSaveFile>
 #include <QStandardPaths>
+#include <QLockFile>
 
 #include <algorithm>
 
@@ -42,6 +43,47 @@ QString legacyPath() {
     const QString data = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
     if (data.isEmpty()) return {};
     return data + QStringLiteral("/relay/state/prompt-history.txt");
+}
+
+QString commandPath() {
+    const QString data = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+    return data.isEmpty() ? QString() : data + QStringLiteral("/relay/state/command-history.txt");
+}
+
+bool CommandSuggestions::remember(const QString &command, QString *error) {
+    if (error) error->clear();
+    if (!storable(command) || command.contains('\n') || command.contains('\r')) return true;
+    if (m_path.isEmpty()) return append(m_path, command, error);
+    const QString dir = QFileInfo(m_path).absolutePath();
+    if (!QDir().mkpath(dir)) {
+        if (error) *error = QStringLiteral("Could not create %1.").arg(dir);
+        return false;
+    }
+    // Serialize append + occasional trim across processes, not just across this app's panes.
+    QLockFile lock(m_path + QStringLiteral(".lock"));
+    if (!lock.tryLock(100)) {
+        if (error) *error = QStringLiteral("Command history is busy.");
+        return false;
+    }
+    const bool ok = append(m_path, command, error);
+    m_size = -1;
+    return ok;
+}
+
+QString CommandSuggestions::suggest(const QString &prefix) {
+    if (prefix.trimmed().isEmpty() || prefix.contains('\n')) return {};
+    const QFileInfo info(m_path);
+    const qint64 size = info.exists() ? info.size() : -1;
+    const QDateTime modified = info.lastModified();
+    if (size != m_size || modified != m_modified) {
+        m_entries = read(m_path);
+        m_size = size;
+        m_modified = modified;
+    }
+    for (auto it = m_entries.crbegin(); it != m_entries.crend(); ++it)
+        if (it->size() > prefix.size() && it->startsWith(prefix) && !it->contains('\n'))
+            return it->mid(prefix.size());
+    return {};
 }
 
 QString encode(const QString &entry) {
@@ -165,6 +207,11 @@ bool clearDirectory(const QString &dir, QString *error) {
 bool clearAll(QString *error) {
     if (error) error->clear();
     if (!clearDirectory(directory(), error)) return false;
+    const QString commands = commandPath();
+    if (!commands.isEmpty() && QFile::exists(commands) && !QFile::remove(commands)) {
+        if (error) *error = QStringLiteral("Could not remove %1.").arg(commands);
+        return false;
+    }
     // The file every pane shared until 2026-09-19: nothing reads it, but forgetting everything
     // means it goes too.
     const QString legacy = legacyPath();

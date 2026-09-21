@@ -26,6 +26,7 @@
 // out of every store Relay has. This file holds what the person typed at Relay itself.
 #include <QString>
 #include <QStringList>
+#include <QDateTime>
 
 namespace relay {
 namespace prompthistory {
@@ -49,6 +50,21 @@ QString pathFor(const QString &paneId);
 // The file every pane shared until 2026-09-19. Nothing reads it any more; `clearAll()` is the
 // only thing that removes it.
 QString legacyPath();
+
+// Shared shell commands for autocomplete only. Outside the pane directory so closing/pruning
+// panes does not forget them. Only acknowledged shell commands belong here, never prompts/stdin.
+QString commandPath();
+class CommandSuggestions {
+public:
+    explicit CommandSuggestions(const QString &path = commandPath()) : m_path(path) {}
+    bool remember(const QString &command, QString *error = nullptr);
+    QString suggest(const QString &prefix);
+private:
+    QString m_path;
+    QStringList m_entries;
+    QDateTime m_modified;
+    qint64 m_size = -1;
+};
 
 // One entry as its line in the file, and back. decode(encode(text)) == text.
 QString encode(const QString &entry);
@@ -83,7 +99,7 @@ int prune(const QString &dir, const QStringList &keepPaneIds);
 // exists and could not be removed; a missing one is fine. A test passes its own directory.
 bool clearDirectory(const QString &dir, QString *error = nullptr);
 
-// Forget everything ("Clear prompt history"): clearDirectory(directory()), and the legacy shared
+// Forget everything ("Clear prompt history"): pane files, shared command suggestions, and the legacy shared
 // file with it. Every live prompt box notices on its next Up, because that re-reads a file that
 // is gone.
 bool clearAll(QString *error = nullptr);

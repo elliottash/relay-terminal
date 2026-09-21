@@ -4582,11 +4582,11 @@ private:
             // open prompt box holds — including one part-way through a browse.
             PaletteItem history; history.key = QStringLiteral("history.clear"); history.section = app;
             history.label = QStringLiteral("Clear prompt history");
-            history.detail = QStringLiteral("Forget every line Up recalls, in every pane");
+            history.detail = QStringLiteral("Forget pane recall and saved command suggestions");
             history.aliases = QStringLiteral("prompt history up arrow forget clear erase commands prompts");
             history.run = [this] {
                 if (QMessageBox::question(this, QStringLiteral("Clear prompt history"),
-                                          QStringLiteral("Forget every line the prompt box recalls with Up?"),
+                                          QStringLiteral("Forget every line the prompt box recalls with Up and all saved command suggestions?"),
                                           QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
                     return;
                 QString error;

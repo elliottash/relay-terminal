@@ -14792,12 +14792,15 @@ private:
             m_editor->setToolTip(QString());
         }
         m_editor->setGhost(remainder);
+        if (!aiGhost && !remainder.isEmpty())
+            hint(QStringLiteral("history.suggestion.accept"), relay::ShortcutHints::nextTime(
+                QKeySequence(Qt::Key_Right).toString(QKeySequence::NativeText), QStringLiteral("accept suggestion")));
         // Typing, clearing the box and the ghost coming and going all change whether the
         // "waiting for N subagents . . ." placeholder is on screen (card #V7QD).
         refreshBackgroundWait();
     }
 
-    // Newest match first: commands run in this directory, then prompt history, then the shell's history file.
+    // Newest match first: this directory, pane prompts, saved commands across panes, shell history.
     QString historySuggestion(const QString &prefix) {
         auto fits = [&prefix](const QString &candidate) {
             return candidate.size() > prefix.size() && candidate.startsWith(prefix) && !candidate.contains('\n');
@@ -14806,6 +14809,8 @@ private:
             if (m_commandLog[i].second == m_cwd && fits(m_commandLog[i].first)) return m_commandLog[i].first.mid(prefix.size());
         const QStringList &history = m_editor->history();
         for (int i = history.size() - 1; i >= 0; --i) if (fits(history[i])) return history[i].mid(prefix.size());
+        const QString shared = m_commandSuggestions.suggest(prefix);
+        if (!shared.isEmpty()) return shared;
         const QStringList &shell = shellHistory();
         for (int i = shell.size() - 1; i >= 0; --i) if (fits(shell[i])) return shell[i].mid(prefix.size());
         return {};
@@ -16816,6 +16821,9 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
                    event.value(QStringLiteral("input_sha256")).toString() == m_pendingHash) {
             m_loading = false; m_shellReady = false; m_promptReported = false; m_refocus = true;
             m_editor->remember(m_pendingCommand);
+            QString historyError;
+            if (!m_commandSuggestions.remember(m_pendingCommand, &historyError))
+                status(QStringLiteral("Could not save command suggestions: %1").arg(historyError));
             m_commandLoaded = true;
             m_commandLog.append({m_pendingCommand, m_cwd});
             if (m_commandLog.size() > 500) m_commandLog.removeFirst();
@@ -17440,6 +17448,7 @@ private:
     int m_cardDismissedAt = -1;
     int m_atDismissedAt = -1;
     relay::FileIndex m_fileIndex;   // the `@` picker's listing; keeps its own cwd and freshness
+    relay::prompthistory::CommandSuggestions m_commandSuggestions;
     QStringList m_recentFiles, m_shellHistory;
     QDateTime m_shellHistoryStamp;
     QList<QPair<QString, QString>> m_commandLog;   // command, directory

@@ -19,6 +19,60 @@ private:
 private slots:
     void init() { QFile::remove(path()); }
 
+    void commandSuggestionsSurviveNewSessions() {
+        {
+            ph::CommandSuggestions first(path());
+            QVERIFY(first.remember(QStringLiteral("sudo apt update")));
+        }
+        ph::CommandSuggestions reopened(path());
+        QCOMPARE(reopened.suggest(QStringLiteral("sudo apt")), QStringLiteral(" update"));
+        QCOMPARE(reopened.suggest(QStringLiteral("sudo apt update")), QString());
+        QVERIFY(reopened.suggest(QStringLiteral("unrelated")).isEmpty());
+        QVERIFY(reopened.suggest(QString()).isEmpty());
+        // The store is independent of pane history and survives pane pruning.
+        const QString paneDir = m_dir.filePath(QStringLiteral("panes"));
+        const QString pane = paneDir + QStringLiteral("/pane-12345678.txt");
+        QVERIFY(ph::read(pane).isEmpty());
+        QVERIFY(ph::append(pane, QStringLiteral("explain this project")));
+        QVERIFY(reopened.suggest(QStringLiteral("explain")).isEmpty());
+        QCOMPARE(ph::prune(paneDir, {}), 1);
+        QCOMPARE(reopened.suggest(QStringLiteral("sudo apt")), QStringLiteral(" update"));
+    }
+
+    void commandSuggestionsRefreshAcrossWritersAndClear() {
+        ph::CommandSuggestions one(path()), two(path());
+        QVERIFY(two.suggest(QStringLiteral("sudo apt")).isEmpty());
+        QVERIFY(one.remember(QStringLiteral("sudo apt update")));
+        QCOMPARE(two.suggest(QStringLiteral("sudo apt")), QStringLiteral(" update"));
+        QVERIFY(one.remember(QStringLiteral("sudo apt upgrade")));
+        QCOMPARE(two.suggest(QStringLiteral("sudo apt")), QStringLiteral(" upgrade"));
+        QVERIFY(one.remember(QStringLiteral("sudo apt upgrade")));
+        QCOMPARE(ph::read(path()).size(), 2);
+        QVERIFY(one.remember(QStringLiteral("sudo apt install\necho multiline")));
+        QCOMPARE(ph::read(path()).size(), 2);
+        QVERIFY(QFile::remove(path()));
+        QVERIFY(two.suggest(QStringLiteral("sudo apt")).isEmpty());
+    }
+
+    void clearAllAlsoForgetsCommandSuggestions() {
+        QTemporaryDir data;
+        const QByteArray previous = qgetenv("XDG_DATA_HOME");
+        qputenv("XDG_DATA_HOME", data.path().toUtf8());
+        const QString commands = ph::commandPath();
+        // Restore the environment even if an assertion below fails.
+        const auto restore = qScopeGuard([previous] {
+            if (previous.isNull()) qunsetenv("XDG_DATA_HOME");
+            else qputenv("XDG_DATA_HOME", previous);
+        });
+        QVERIFY(commands.startsWith(data.path() + '/'));
+        ph::CommandSuggestions suggestions;
+        QVERIFY(suggestions.remember(QStringLiteral("sudo apt update")));
+        QCOMPARE(suggestions.suggest(QStringLiteral("sudo apt")), QStringLiteral(" update"));
+        QVERIFY(ph::clearAll());
+        QVERIFY(!QFile::exists(commands));
+        QVERIFY(suggestions.suggest(QStringLiteral("sudo apt")).isEmpty());
+    }
+
     void multilineEntriesSurviveTheRoundTrip() {
         const QString entry = QStringLiteral("explain this:\n  path\\to\\thing\n\nand fix it");
         QCOMPARE(ph::encode(entry).contains(QLatin1Char('\n')), false);
