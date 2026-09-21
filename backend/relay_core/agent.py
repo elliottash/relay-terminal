@@ -1035,6 +1035,30 @@ class Agent:
         self.agent_context = spec
         self.refresh_system_prompt()
 
+    # ---- "say what you are doing" (owner, 2026-09-20) --------------------------------
+    # The rule is in every console's brief, and a model that ignores it leaves the surface
+    # showing nothing at all. Each `app_*` result already says what happened in a sentence
+    # ("Opened 3 conversations in new panes: …"), so a turn that acted and said nothing says
+    # that. It lived in the helper's own emit wrapper until #AGNT; here it is every agent's,
+    # because since this card every agent holds the app tools.
+
+    def _note_app_call(self, result) -> None:
+        notes = (self._turn_ctx or {}).get("app_notes")
+        if notes is None or not isinstance(result, dict):
+            return
+        text = result.get("text")
+        if result.get("error") and not text:
+            text = str(result["error"])
+        if isinstance(text, str) and text.strip():
+            notes.append(" ".join(text.split())[:300])
+
+    def _unsaid_app_line(self, content) -> str:
+        """One line for a turn that acted on the app and said nothing. "" when it spoke."""
+        notes = (self._turn_ctx or {}).get("app_notes") or []
+        if not notes or (isinstance(content, str) and content.strip()):
+            return ""
+        return " ".join(notes)[:1000]
+
     def set_readonly(self, on: bool) -> None:
         """A turn that writes nothing by design (`ask {readonly: true}`, 19.18's survey).
 
@@ -1849,7 +1873,15 @@ class Agent:
                # assistant's tool calls and their results. `nudges` counts the ones already sent:
                # past loopdetect.MAX_NUDGES the turn is stopped. `recited_*` are the cadence marks.
                "loop": loopdetect.Detector(), "loop_pattern": None, "nudges": 0, "recent": [],
-               "recited_step": 0, "recited_calls": 0, "prompt": prompt}
+               "recited_step": 0, "recited_calls": 0, "prompt": prompt,
+               # "Say what you are doing" (owner, 2026-09-20). A console draws the agent's
+               # *text*, not its tool calls, so a turn that opened three panes and finished with
+               # an empty message is indistinguishable from a turn that did not run — which is
+               # how the report behind #FEJQ began. Each `app_*` result already says what
+               # happened in a sentence of its own, so `app_notes` keeps them and the `done`
+               # branch says that much rather than nothing. It was the helper's own wrapper
+               # until #AGNT; it belongs to every agent, because every agent has the app tools.
+               "app_notes": []}
         self._turn_ctx = ctx
         if self.board is not None:
             # Switchboard write budgets are per turn (design 6.3).
@@ -2008,6 +2040,12 @@ class Agent:
                         continue
                     if self.track_requests:
                         self.requests.finish_turn(turn_id, True, self.todos.items)
+                    said = self._unsaid_app_line(message.get("content"))
+                    if said:
+                        # Streamed as text, and kept on the message, so the transcript, the
+                        # saved conversation and a reopened console all read the same.
+                        message["content"] = said
+                        self.emit({"event": "delta", "text": said, "turn_id": turn_id})
                     self._end_turn(record, {"event": "done", "turn_id": turn_id,
                                             "open_items": self._open_items(ctx, final=True)})
                     if self.track_requests and self.audit_requests:
@@ -3284,7 +3322,10 @@ class Agent:
             return self.board.run(prepared.name, prepared.arguments)
         for side in (self.app, self.activity):
             if side is not None and side.handles(prepared.name):
-                return side.run(prepared.name, prepared.arguments)
+                result = side.run(prepared.name, prepared.arguments)
+                if side is self.app:
+                    self._note_app_call(result)
+                return result
         if prepared.name == "update_todos":
             ctx = self._turn_ctx or {"turn_id": None, "opening": [], "requests": []}
             items = self.todos.replace(prepared.arguments, self.requests.ids(), ctx["turn_id"], ctx["opening"])

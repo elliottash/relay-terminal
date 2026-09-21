@@ -53,6 +53,17 @@ MODE_TAGGED = ("delta", "done", "error", "cancelled", "turn_summary", "turn_star
 TERMINAL = ("done", "error", "cancelled")
 
 
+def surface_of(card_id: str) -> str:
+    """The `surface` a card's turn events carry (protocol 33, card #AGNT).
+
+    A card console is one of the surfaces a console can be, so its turns are addressed the way
+    every other console's are — `card:AGNT` — rather than only by `card_id`. Both ride: the id
+    is what the board side routes by and has since 19.10, and the surface is what an
+    `AgentConsole` matches against the ask it made.
+    """
+    return f"card:{card_id}"
+
+
 @dataclass
 class CardSession:
     """One card's conversation: its agent, its tools (and so its scope), and its running turn."""
@@ -76,6 +87,8 @@ class CardSession:
     #: is emitted a hair before the thread unwinds.
     active: bool = False
     ended: bool = False
+    #: How the turn's own terminal event read, for the `agent_finished` that closes the boundary.
+    outcome: str | None = None
     started: float = 0.0
 
     def seconds(self) -> float:
@@ -151,9 +164,16 @@ class CardTurns:
             session.turn_id = uuid.uuid4().hex
             session.request_id = request_id
             session.active, session.ended = True, False
+            session.outcome = None
             session.started = time.time()
             session.tools.begin_card_turn(mode, card_id)
             turn_id = session.turn_id
+            # The turn boundary a pane's queue has had since protocol 11 and a card turn had
+            # not: the panel used to *infer* where a turn began and ended from the events it
+            # saw, which is one line of #AGNT's table. `id` is the turn id, as it is for a pane
+            # whose queue item id doubles as one.
+            self._emit({"event": "agent_started", "id": turn_id, "turn_id": turn_id,
+                        "card_id": card_id, "mode": mode, "surface": surface_of(card_id)})
             session.thread = threading.Thread(target=self._run, args=(session, prompt, turn_id),
                                               name=f"relay-card-{card_id}", daemon=True)
             session.thread.start()
@@ -223,13 +243,16 @@ class CardTurns:
 
     def _run(self, session: CardSession, prompt: str, turn_id: str) -> None:
         agent = session.agent
+        outcome = "done"
         try:
             agent.cancel_event.clear()
             agent.ask(prompt, reset_cancellation=False, turn_id=turn_id)
         except Exception as exc:                        # ask() reports its own; this is defensive
+            outcome = "error"
             self._emit({"event": "error", "card_id": session.card_id, "mode": session.mode,
-                        "turn_id": turn_id, "text": f"The turn on #{session.card_id} failed "
-                                                    f"({type(exc).__name__})."})
+                        "turn_id": turn_id, "surface": surface_of(session.card_id),
+                        "text": f"The turn on #{session.card_id} failed "
+                                f"({type(exc).__name__})."})
         finally:
             try:
                 session.tools.end_card_turn()
@@ -237,6 +260,10 @@ class CardTurns:
                 with self._lock:
                     session.active = False
                     session.thread = None
+                    outcome = session.outcome or outcome
+                self._emit({"event": "agent_finished", "id": turn_id, "outcome": outcome,
+                            "card_id": session.card_id, "mode": session.mode,
+                            "surface": surface_of(session.card_id)})
 
     def _observe(self, session: CardSession, event: dict) -> None:
         """Tag one card turn's events with their card and mode, and collect the answer."""
@@ -248,11 +275,12 @@ class CardTurns:
         if name == "tool_started" and session.text and not session.text[-1].endswith("\n\n"):
             session.text.append("\n\n")
         if name in CARD_TAGGED:
-            event = {**event, "card_id": session.card_id}
+            event = {**event, "card_id": session.card_id, "surface": surface_of(session.card_id)}
         if name in MODE_TAGGED:
             event = {**event, "mode": session.mode}
         if name in TERMINAL:
             session.ended = True
+            session.outcome = name
             if name == "done":
                 # A provider that broke a tool call can have streamed part of it as content
                 # (#VN69): the fragment rides the deltas into `session.text` and would land on

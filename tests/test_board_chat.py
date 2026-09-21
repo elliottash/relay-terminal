@@ -1,20 +1,37 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""`relay_core.board_chat` and its wiring in `board_protocol` (protocol 19.18).
+"""The Switchboard console: one worker, one protocol (cards #AGNT, #FEJQ; protocol 19.18, 33).
 
-No model, no network, no keyring: the page agent runs against a stub, the way the card-turn
-pool's tests do. What is under test is the rule set — the FIFO queue, the read-only survey
-turn, the busy guards, the survey's marker file and the import tool.
+Until #AGNT the helper was a second implementation — `board_chat.PageAgent`, its own FIFO, its
+own `board_chat*` messages, its own event tagging — and the owner's report was that it did not
+work like a terminal pane: *"the queue doesn't work like the main terminal, and the thinking
+bubbles don't work the same way. why not just make it feature equal with the terminal agent?"*
+
+So a console is now an ordinary pane worker with a `context`: its queue is the pane's
+(`relay_core.queue`, tested in `tests/test_queue.py`), its persistence and its brief are the
+context's (`relay_core.agent_context`, tested in `tests/test_agent_context.py`), and what is
+left here is the board's own half — the console's tool scope, the seed, the busy guards, the
+survey and its marker file — plus one end-to-end run of `backend/worker.py` as a console.
+
+No model, no network, no keyring: the end-to-end run answers out of a loopback stub.
 """
 import json
+import os
+import subprocess
+import sys
+import tempfile
 import threading
 import time
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from relay_core import agent_context as AC
 from relay_core import board as B
 from relay_core import board_chat
 from relay_core import board_protocol as P
 from relay_core import board_tools as T
+
+ROOT = Path(__file__).resolve().parents[1]
 
 CONFIG = """\
 version: 1
@@ -37,442 +54,31 @@ def write_card(root: Path, name: str, card_id: str, title: str, status: str = "i
 
 
 class StubTurns:
-    """`board_protocol`'s supervisor stub: no provider, nothing submitted."""
+    """`board_protocol`'s supervisor: records what the board submits, and whether it is busy."""
 
-    agent = None
-    busy = False
+    def __init__(self):
+        self.agent = None
+        self.busy = False
+        self.submitted: list[dict] = []
+        self.fail = None
+
+    def submit(self, prompt, when="now", request_id=None, context=None, attachments=None,
+               origin="user", requeue=True, ledger_id=None, surface="", screen="",
+               readonly=False):
+        if self.fail:
+            raise ValueError(self.fail)
+        self.submitted.append({"prompt": prompt, "when": when, "id": request_id,
+                               "surface": surface, "screen": screen, "readonly": readonly})
+        return "turn-1"
 
     def reset(self):
         pass
 
 
-class FakeTools:
-    """What the page agent touches on its tools: the turn counters and the chat scope."""
-
-    def __init__(self):
-        self.turns: list[str] = []
-        self.scopes: list[tuple[bool, bool]] = []      # (chat scope open, readonly)
-        self.card_scope = None
-        self.readonly = False
-
-    def begin_turn(self, turn_id=None):
-        self.turns.append(turn_id)
-
-    def begin_chat_turn(self, *, readonly=False):
-        self.card_scope = T.ChatScope()
-        self.readonly = bool(readonly)
-        self.scopes.append((True, self.readonly))
-        return self.card_scope
-
-    def end_chat_turn(self):
-        self.card_scope, self.readonly = None, False
-        self.scopes.append((False, False))
-
-
-class FakeAgent:
-    """Stands in for the page agent's `Agent`: gated, cancellable, records the prompt."""
-
-    def __init__(self, emit):
-        self.emit = emit
-        self.cancel_event = threading.Event()
-        self.prompts: list[str] = []
-        self.gate = threading.Event()
-        self.messages = [{"role": "system", "content": "s"}]
-        self.scope_during = None
-        self.stopped = 0
-
-    def ask(self, prompt, reset_cancellation=True, turn_id=None, **kw):
-        self.prompts.append(prompt)
-        self.messages.append({"role": "user", "content": prompt})
-        self.scope_during = self.tools.card_scope if self.tools else None
-        self.gate.wait(10)
-        if self.cancel_event.is_set():
-            self.emit({"event": "cancelled", "turn_id": turn_id})
-            return
-        self.emit({"event": "delta", "text": "Answer.", "turn_id": turn_id})
-        self.emit({"event": "done", "turn_id": turn_id})
-
-    def stop(self):
-        self.stopped += 1
-        self.cancel_event.set()
-        self.gate.set()
-
-
-def wait_idle(agent, timeout: float = 10.0):
-    """Poll until no turn is running and the queue is empty (a finished turn drains on its own
-    thread, so the thread object keeps being replaced and cannot simply be joined)."""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if not agent.busy() and not agent.state()["queue"]:
-            thread = agent.thread
-            if thread is None or not thread.is_alive():
-                return
-        time.sleep(0.005)
-
-class ChatTestBase(unittest.TestCase):
-    def setUp(self):
-        import tempfile
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.repo = Path(self.tmp.name).resolve()
-        self.root = self.repo / "issues"
-        self.root.mkdir()
-        (self.root / B.BOARD_CONFIG).write_text(CONFIG, encoding="utf-8")
-        write_card(self.root, "2026-09-19-one.md", "ABCD", "One card")
-        self.events: list[dict] = []
-        self.ended: list[tuple] = []
-        self.agent: FakeAgent | None = None
-        self.chat = board_chat.PageAgent(self.events.append, self.build,
-                                        on_turn_end=self.turn_ended)
-        self.addCleanup(self.chat.drop)
-
-    def build(self, emit):
-        self.agent = FakeAgent(emit)
-        self.agent.tools = FakeTools()
-        self.agent.tools.board = B.Board(self.root, self.repo)
-        return self.agent, self.agent.tools
-
-    def turn_ended(self, turn_id, survey, outcome):
-        self.ended.append((turn_id, survey, outcome))
-
-    def of(self, name):
-        return [e for e in self.events if e.get("event") == name]
-
-    def wait_idle(self):
-        wait_idle(self.chat)
-
-
-class BriefTest(unittest.TestCase):
-    """The page agent's brief, pinned the way the cleanup brief is (drift bit #2MF1's cases):
-    the question move — ask on a card, never only in chat (#WT9V) — and the survey's one
-    exception must both survive edits to `board_chat_brief.md`."""
-
-    def test_the_brief_teaches_the_question_move(self):
-        text = board_chat.chat_brief()
-        self.assertNotIn("<!--", text)
-        for phrase in ("`question` comment", "`waiting_on: owner`", "no card covers",
-                       "one line naming the card", "Ask before a restructure",
-                       "questions on the card(s)", "writes nothing"):
-            self.assertIn(phrase, text)
-
-    def test_the_survey_prompt_keeps_its_question_in_chat(self):
-        # The survey turn is read-only by design (`board_readonly_turn`): its one question is
-        # the confirmation, so it stays in chat — the brief's question move must not talk the
-        # agent into writing during it.
-        prompt = board_chat.survey_prompt(Path("/b"), Path("/p"),
-                                          {"git": {}, "trackers": [], "hints": []}, [])
-        self.assertIn("writes nothing", prompt)
-        self.assertIn("the owner's answer is the confirmation", prompt)
-
-
-class PaneTest(ChatTestBase):
-    """`board_chat {pane}`: one conversation, four panes (protocol 30.7, card #FEJQ)."""
-
-    def test_the_pane_defaults_to_the_switchboard(self):
-        self.assertEqual(board_chat.validate_pane(None), "switchboard")
-        self.assertEqual(board_chat.validate_pane(""), "switchboard")
-        self.assertEqual(board_chat.validate_pane("options"), "options")
-        for bad in ("info", "activity", 3, True):
-            with self.assertRaises(ValueError):
-                board_chat.validate_pane(bad)
-
-    def test_an_options_turn_gets_the_options_brief_and_no_roster(self):
-        self.chat.ask("is dark mode on?", pane="options")
-        self.agent.gate.set()
-        self.wait_idle()
-        prompt = self.agent.prompts[0]
-        self.assertTrue(prompt.startswith("[Options helper]"))
-        self.assertIn("app_option_list", prompt)
-        self.assertIn("Undo", prompt)
-        self.assertNotIn("#ABCD", prompt)          # the board is not this pane's context
-        self.assertTrue(prompt.endswith("is dark mode on?"))
-
-    def test_the_brief_goes_in_once_per_pane_and_again_when_the_pane_changes(self):
-        for pane, text in (("options", "first"), ("options", "second"),
-                           ("sessions", "third"), ("options", "fourth")):
-            self.chat.ask(text, pane=pane)
-        self.agent.gate.set()
-        self.wait_idle()
-        first, second, third, fourth = self.agent.prompts
-        self.assertIn("app_option_list", first)
-        self.assertNotIn("app_option_list", second)          # same pane: the header alone
-        self.assertTrue(second.startswith("[Options helper]"))
-        self.assertIn("app_sessions_search", third)          # a new pane: its brief
-        self.assertNotIn("app_option_list", fourth)          # back to a pane it has been in
-
-    def test_what_is_on_screen_rides_with_the_prompt(self):
-        self.chat.ask("what did I find?", pane="sessions", context="query: keybinding rewrite")
-        self.agent.gate.set()
-        self.wait_idle()
-        self.assertIn("On screen now: query: keybinding rewrite", self.agent.prompts[0])
-
-    def test_one_conversation_spans_the_panes(self):
-        self.chat.ask("about the board")
-        self.chat.ask("about the settings", pane="options")
-        self.agent.gate.set()
-        self.wait_idle()
-        # Two turns of the same agent, not two conversations.
-        self.assertEqual(len(self.agent.prompts), 2)
-        self.assertTrue(self.agent.prompts[0].startswith("[Switchboard page agent]"))
-        self.assertTrue(self.agent.prompts[1].startswith("[Options helper]"))
-
-    def test_every_event_of_a_turn_carries_its_pane(self):
-        self.chat.ask("is dark mode on?", pane="options")
-        self.agent.gate.set()
-        self.wait_idle()
-        tagged = [e for e in self.events if e.get("chat") is True]
-        self.assertTrue(tagged)
-        self.assertTrue(all(e.get("pane") == "options" for e in tagged), tagged)
-        self.assertEqual(self.of("board_chat_state")[-1]["pane"], "options")
-        self.assertEqual(self.chat.state()["pane"], "options")
-
-    def test_a_queued_prompt_keeps_its_pane(self):
-        self.chat.ask("about the board")
-        self.chat.ask("about the settings", pane="options")
-        self.assertEqual(self.of("board_chat_queued")[0]["pane"], "options")
-        self.assertEqual(self.chat.state()["queue"][0]["pane"], "options")
-        self.agent.gate.set()
-        self.wait_idle()
-        self.assertIn("app_option_list", self.agent.prompts[1])
-
-    def test_a_helper_with_no_board_still_answers_its_pane(self):
-        # A tab with no project attached gets a board-less helper (30.7): the app tools and no
-        # board tools at all. Nothing in a pane turn may assume the board is there.
-        chat = board_chat.PageAgent(self.events.append, self.build_boardless)
-        self.addCleanup(chat.drop)
-        chat.ask("what is this setting?", pane="options")
-        self.boardless.gate.set()
-        wait_idle(chat)
-        self.assertIn("app_option_list", self.boardless.prompts[0])
-
-    def build_boardless(self, emit):
-        self.boardless = FakeAgent(emit)
-        return self.boardless, None
-
-    def test_the_sessions_brief_says_it_can_open_a_conversation(self):
-        # Owner, 2026-09-20: "can you make that more formalized that it can do that?" — the
-        # Sessions helper's brief says, in words, that it opens conversations and how it decides
-        # where. A tool schema the model may or may not read is not the place for it.
-        brief = board_chat.PANE_BRIEFS["sessions"]
-        for phrase in ('app_open {target: "conversation", id}',
-                       'ids: ["…", "…"]', "each in a pane of its own",
-                       '"in new panes"', "new_pane", "[title](session:<id>)"):
-            self.assertIn(phrase, brief)
-
-    def test_every_pane_is_told_to_say_what_it_is_doing(self):
-        # "it also needs to reply in text that it is doing it" (owner, 2026-09-20).
-        for pane in ("options", "actions", "sessions"):
-            prompt = board_chat.pane_prompt(pane, "do the thing")
-            self.assertIn("Say what you are doing", prompt)
-            self.assertIn("Never finish a turn with an empty message after a tool call", prompt)
-
-
-class SayWhatYouDidTest(ChatTestBase):
-    """A turn that acts on the app and answers with nothing still shows what it did (owner,
-    2026-09-20: the panel draws the agent's text, never its tool calls)."""
-
-    class AppAgent(FakeAgent):
-        """Calls one or two `app_*` tools, then answers with `text`."""
-
-        results = ()
-        text = ""
-
-        def ask(self, prompt, reset_cancellation=True, turn_id=None, **kw):
-            self.prompts.append(prompt)
-            self.gate.wait(10)
-            for tool, result in self.results:
-                self.emit({"event": "tool_result", "tool": tool, "result": result,
-                           "turn_id": turn_id})
-            if self.text:
-                self.emit({"event": "delta", "text": self.text, "turn_id": turn_id})
-            self.emit({"event": "done", "turn_id": turn_id})
-
-    def build(self, emit):
-        self.agent = self.AppAgent(emit)
-        self.agent.results = self.results
-        self.agent.text = self.text
-        self.agent.tools = FakeTools()
-        self.agent.tools.board = B.Board(self.root, self.repo)
-        return self.agent, self.agent.tools
+class BoardConsoleTest(unittest.TestCase):
+    """`BoardCommands` with `console` on, which is what `worker.py` sets from the context."""
 
     def setUp(self):
-        self.results = (("app_open", {"ok": True, "text": "Opened 3 conversations in new panes: "
-                                                          "A, B, C."}),)
-        self.text = ""
-        super().setUp()
-
-    def deltas(self):
-        return [e["text"] for e in self.of("delta")]
-
-    def test_an_empty_answer_after_an_app_call_still_says_what_happened(self):
-        self.chat.ask("open the three sessions about panes in new panes", pane="sessions")
-        self.agent.gate.set()
-        self.wait_idle()
-        self.assertEqual(self.deltas(), ["Opened 3 conversations in new panes: A, B, C."])
-        # It goes out before the turn ends, tagged like any other answer, so the panel that
-        # asked draws it and the others do not.
-        line = self.of("delta")[0]
-        self.assertEqual((line["pane"], line["chat"]), ("sessions", True))
-        self.assertLess(self.events.index(line), self.events.index(self.of("done")[0]))
-        # And it is in the conversation the next pane to open reads.
-        self.assertEqual(self.chat.state()["history"][-1]["text"],
-                         "Opened 3 conversations in new panes: A, B, C.")
-
-    def test_a_turn_that_spoke_for_itself_is_left_alone(self):
-        self.text = "Opening them now."
-        self.chat.ask("open them", pane="sessions")
-        self.agent.gate.set()
-        self.wait_idle()
-        self.assertEqual(self.deltas(), ["Opening them now."])
-
-    def test_a_refusal_is_what_gets_said_when_nothing_else_is(self):
-        self.results = (("app_open", {"error": "Relay has no saved conversation with that id.",
-                                      "code": "unknown_conversation"}),)
-        self.chat.ask("open zzz", pane="sessions")
-        self.agent.gate.set()
-        self.wait_idle()
-        self.assertEqual(self.deltas(), ["Relay has no saved conversation with that id."])
-
-    def test_a_turn_that_called_no_app_tool_invents_nothing(self):
-        self.results = (("read_file", {"text": "not an app tool"}),)
-        self.chat.ask("what is in that file?", pane="sessions")
-        self.agent.gate.set()
-        self.wait_idle()
-        self.assertEqual(self.deltas(), [])
-
-
-class QueueTest(ChatTestBase):
-    def test_a_prompt_starts_a_turn_and_streams_tagged_events(self):
-        what, ident = self.chat.ask("How many cards are in Inbox?")
-        self.assertEqual(what, "turn")
-        self.assertTrue(ident.startswith("chat-"))
-        self.agent.gate.set()
-        self.wait_idle()
-        self.assertTrue(self.agent.prompts[0].startswith("[Switchboard page agent]"))
-        deltas = [e for e in self.events if e.get("event") == "delta"]
-        self.assertTrue(deltas and all(e.get("chat") for e in deltas))
-
-    def test_a_second_prompt_queues_and_then_runs_in_order(self):
-        self.chat.ask("first")
-        self.assertEqual(self.chat.ask("second"), ("queued", "c1"))
-        self.assertEqual([i["text"] for i in self.chat.state()["queue"]], ["second"])
-        self.chat.ask("third")
-        self.agent.gate.set()
-        self.wait_idle()
-        self.assertEqual([p.split("\n")[-1] for p in self.agent.prompts],
-                         ["first", "second", "third"])   # the roster seeds only the first
-        self.assertEqual(self.chat.state()["queue"], [])
-
-    def test_the_queue_is_announced_and_removable(self):
-        self.chat.ask("first")
-        self.chat.ask("second")
-        self.chat.ask("third")
-        self.assertTrue(self.of("board_chat_queued"))
-        self.assertTrue(self.chat.remove("c1"))
-        self.assertFalse(self.chat.remove("c1"))
-        self.assertEqual([i["text"] for i in self.chat.state()["queue"]], ["third"])
-        self.assertTrue(self.chat.move("c2", 0))
-        self.agent.gate.set()
-        self.wait_idle()
-        self.assertEqual(self.agent.prompts[-1], "third")
-
-    def test_stop_cancels_the_turn_and_the_queue_carries_on(self):
-        self.chat.ask("first")
-        self.chat.ask("second")
-        self.assertTrue(self.chat.stop())
-        self.wait_idle()
-        # The pane's rule: Stop ends the running turn; the queue is not discarded, and the
-        # next prompt starts on a cleared cancel event.
-        self.assertEqual([p.split("\n")[-1] for p in self.agent.prompts],
-                         ["first", "second"])
-        self.assertFalse(self.chat.busy())
-        self.assertEqual(self.chat.state()["queue"], [])
-
-    def test_a_full_queue_refuses(self):
-        self.chat.ask("first")
-        for _ in range(board_chat.MAX_QUEUE):
-            self.chat.ask("filler")
-        with self.assertRaises(ValueError):
-            self.chat.ask("one too many")
-        self.agent.gate.set()
-        self.wait_idle()
-
-    def test_the_history_collects_the_answer_for_a_reopened_page(self):
-        self.chat.ask("hello")
-        self.agent.gate.set()
-        self.wait_idle()
-        roles = [h["role"] for h in self.chat.state()["history"]]
-        self.assertEqual(roles, ["owner", "agent"])
-        self.assertEqual(self.chat.state()["history"][-1]["text"], "Answer.")
-
-    def test_a_model_switch_keeps_the_conversation(self):
-        self.chat.ask("first")
-        self.agent.gate.set()
-        self.wait_idle()
-        self.chat.model = "flash"
-        self.chat.ask("second")
-        self.agent.gate.set()
-        self.wait_idle()
-        self.assertEqual(self.agent.prompts[-1], "second")     # not re-seeded
-        self.assertEqual(len(self.agent.messages), 3)          # system + first + second
-
-    def test_the_survey_turn_is_readonly_and_reported(self):
-        self.chat.ask("survey", prompt="[Switchboard survey] …", readonly=True, survey=True)
-        self.assertTrue(self.chat.state()["survey"])
-        self.agent.gate.set()
-        self.wait_idle()
-        self.assertEqual(self.agent.tools.scopes[0], (True, True))
-        self.assertTrue(self.chat.surveyed)
-        self.assertEqual(self.ended, [(self.chat.turn_id, True, "done")] or
-                         [(t, s, o) for t, s, o in self.ended if s])
-
-
-class DrainStateTest(ChatTestBase):
-    def test_the_queue_stops_listing_a_prompt_once_it_is_running(self):
-        """A prompt drained off the queue has no `board_chat_started` of its own — that answers a
-        `board_chat` message — so the page only learns it started from the state that follows."""
-        self.chat.ask("first")
-        self.chat.ask("second")
-        self.assertEqual([i["text"] for i in self.chat.state()["queue"]], ["second"])
-        self.agent.gate.set()
-        self.wait_idle()
-        states = [e["chat"] for e in self.of("board_chat_state")]
-        # The queue empties when the prompt starts, and the page is told so then. Before the
-        # drain announced itself the only state carrying an empty queue was the one sent when
-        # *everything* had finished, so the page drew a queue row for the prompt it was already
-        # streaming, for the whole of that turn.
-        #
-        # The assertion is about the queue and not about `running`: a stub agent finishes its
-        # turn before the announcement is even written, so whether the drained turn is still
-        # marked running here is a race and says nothing. What the page draws is the queue.
-        emptied = [i for i, chat in enumerate(states) if not chat["queue"]]
-        self.assertTrue(emptied, [[i["text"] for i in chat["queue"]] for chat in states])
-        self.assertLess(emptied[0], len(states) - 1,
-                        "the queue only reads empty in the very last state: the page was never "
-                        "told the queued prompt had started")
-        self.assertEqual(self.chat.state()["queue"], [])
-
-
-class SurveyFileTest(ChatTestBase):
-    def test_mark_and_read_the_state_file(self):
-        board = B.Board(self.root, self.repo)
-        self.assertIsNone(board_chat.survey_state(board))
-        board_chat.mark_survey(board, "pending")
-        self.assertEqual(board_chat.survey_state(board), "pending")
-        data = json.loads((self.root / board_chat.SURVEY_FILE).read_text())
-        self.assertEqual(data["state"], "pending")
-
-    def test_a_corrupt_file_reads_as_absent(self):
-        (self.root / board_chat.SURVEY_FILE).write_text("{not json", encoding="utf-8")
-        board = B.Board(self.root, self.repo)
-        self.assertIsNone(board_chat.survey_state(board))
-
-
-class ProtocolChatTest(unittest.TestCase):
-    """`board_chat` through `BoardCommands.dispatch`, against the real board tools."""
-
-    def setUp(self):
-        import tempfile
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.repo = Path(self.tmp.name).resolve()
@@ -482,189 +88,178 @@ class ProtocolChatTest(unittest.TestCase):
         write_card(self.root, "2026-09-19-one.md", "ABCD", "One card")
         write_card(self.root, "2026-09-19-two.md", "EFGH", "Two card", "ready")
         self.events: list[dict] = []
-        self.commands = P.BoardCommands(StubTurns(), self.events.append)
+        self.turns = StubTurns()
+        self.commands = P.BoardCommands(self.turns, self.events.append)
+        self.commands.console = True
         self.commands.configure(str(self.repo), {})
-        self.agent: FakeAgent | None = None
-        self.commands.chat._build = self.build
-        self.addCleanup(self.commands.chat.drop)
-
-    def build(self, emit):
-        self.agent = FakeAgent(emit)
-        self.agent.tools = self.commands.agent_tools(str(self.repo), {})
-        return self.agent, self.agent.tools
 
     def of(self, name):
         return [e for e in self.events if e.get("event") == name]
 
-    def wait_idle(self):
-        wait_idle(self.commands.chat)
-
-    def ask(self, text, **extra):
-        request = {"type": "board_chat", "id": "r1", "text": text, **extra}
+    def dispatch(self, **request):
         self.commands.dispatch(request)
 
-    def test_a_guest_config_is_refused_in_a_sentence_not_an_endpoint_error(self):
-        """Card #GH5T. A guest harness is not an endpoint: `harness://claude` is the pane agent's
-        base URL because the guest *process* is its provider, and there is no second one to give a
-        page or card turn. Building one anyway is what the owner saw on 2026-09-20 — "The
-        Switchboard agent could not answer: Base URL must be an HTTPS URL without credentials,
-        query, or fragment", from five frames down in `ProviderConfig.validate`. The helper worker
-        no longer configures itself on a guest at all; this is the backstop, in the same words.
-        """
-        from relay_core.agent import Agent
-        from relay_core.guest_harness_provider import UnavailableProvider, helper_refusal
-        from relay_core.provider import ProviderConfig
 
-        config = ProviderConfig("harness://claude", "", "", {}, 32_768)
-        # Exactly how a helper worker with nothing to fall back on is built: no guest started, and
-        # a stand-in that is never called, so the Agent exists and the Switchboard still opens.
-        main = Agent(config, str(self.repo), lambda event: None,
-                     provider=UnavailableProvider(config, helper_refusal("Claude Code")))
-        self.commands.turns.agent = main
-        for build in (lambda: self.commands._build_page_agent(lambda e: None),
-                      lambda: self.commands._build_card_agent("ABCD", lambda e: None)):
+class RetiredMessageTest(BoardConsoleTest):
+    """`board_chat` and its three queue messages are gone, and say so in a sentence."""
+
+    def test_each_retired_message_names_what_to_send_instead(self):
+        for kind in ("board_chat", "board_chat_cancel", "board_chat_queue_remove",
+                     "board_chat_queue_move"):
             with self.assertRaises(ValueError) as caught:
-                build()
-            self.assertIn("cannot run on Claude Code", str(caught.exception))
-            self.assertIn("Options", str(caught.exception))
-            self.assertNotIn("Base URL", str(caught.exception))
+                self.dispatch(type=kind, id="r1", text="merge the two voice cards")
+            text = str(caught.exception)
+            self.assertIn("#AGNT", text)
+            self.assertIn("ask", text)
+            self.assertIn("queue_move", text)
 
-    def test_a_prompt_starts_a_turn_with_the_board_as_context(self):
-        self.ask("What is ready?")
-        self.assertTrue(self.of("board_chat_started"))
-        self.assertIn("#EFGH", self.agent.prompts[0])          # the roster carries every card
-        self.agent.gate.set()
-        self.wait_idle()
-
-    def test_a_prompt_while_the_page_agent_runs_queues(self):
-        self.ask("first")
-        self.ask("second")
-        self.assertEqual(len(self.of("board_chat_queued")), 1)
-        self.agent.gate.set()
-        self.wait_idle()
-        self.assertEqual(len(self.agent.prompts), 2)
-
-    def test_a_card_turn_is_refused_while_the_page_agent_runs(self):
-        self.ask("hold the board")
-        self.commands.dispatch({"type": "board_ask", "id": "r2", "card": "ABCD",
-                                "text": "meanwhile"})
-        busy = [e for e in self.events if e.get("event") == "error"]
-        self.assertEqual(busy[0]["code"], "board_busy")
-        self.assertIn("page agent", busy[0]["text"])
-        self.agent.gate.set()
-        self.wait_idle()
-
-    def test_cancel_stops_the_turn(self):
-        self.ask("hold")
-        self.commands.dispatch({"type": "board_chat_cancel", "id": "r2"})
-        self.wait_idle()
-        self.assertTrue(self.of("board_chat_cancelled")[0]["stopped"])
-        self.assertFalse(self.commands.chat.busy())
-
-    def test_a_cancel_is_answered_to_the_panel_that_pressed_stop(self):
-        # There is one turn per worker, so Stop in any of the tab's four panels stops it — but
-        # the answer used to carry no `pane` at all, and every panel but the Switchboard's drops
-        # an event addressed to somebody else. The Sessions panel that pressed Stop then kept its
-        # busy strip: "message queue isn't working in the sessions helper, i can't interrupt"
-        # (owner, 2026-09-20).
-        self.ask("hold", pane="sessions")
-        self.commands.dispatch({"type": "board_chat_cancel", "id": "r2", "pane": "sessions"})
-        self.wait_idle()
-        answer = self.of("board_chat_cancelled")[0]
-        self.assertEqual(answer["pane"], "sessions")
-        self.assertTrue(answer["stopped"])
-        # With no pane on the request (a client from before 30.7) it goes to the turn's own pane.
-        self.ask("hold again", pane="options")
-        self.commands.dispatch({"type": "board_chat_cancel", "id": "r3"})
-        self.wait_idle()
-        self.assertEqual(self.of("board_chat_cancelled")[1]["pane"], "options")
-
-    def test_a_bad_model_is_refused_before_anything_runs(self):
-        with self.assertRaises(ValueError):
-            self.ask("hi", model="not-a-role")
-        self.assertFalse(self.commands.chat.busy())
-
-    def test_a_check_can_be_scoped_to_one_section(self):
-        # A card whose front matter is broken lands in check; the section filter keeps it.
-        (self.root / "features" / "2026-09-19-bad.md").write_text(
-            "---\nid: NOPE\nstatus: inbox\n---\n# Bad\n", encoding="utf-8")
-        self.commands.dispatch({"type": "board_check", "id": "r1"})
-        self.assertGreater(len(self.of("board_problems")[0]["items"]), 0)
-        self.commands.dispatch({"type": "board_check", "id": "r2", "section": "inbox"})
-        scoped = self.of("board_problems")[1]
-        self.assertEqual(scoped["section"], "inbox")
-        self.assertTrue(scoped["items"])
-        self.commands.dispatch({"type": "board_check", "id": "r3", "section": "done"})
-        self.assertEqual(self.of("board_problems")[2]["items"], [])
+    def test_the_board_event_no_longer_carries_a_chat_block(self):
+        # `chat` was overloaded four ways — true on turn events, an object on `board`,
+        # `board_chat_started`, `board_chat_state` — and there is one queue now.
+        self.dispatch(type="board_open", id="r1")
+        self.assertNotIn("chat", self.of("board")[0])
 
 
-class SurveyProtocolTest(ProtocolChatTest):
-    def setUp(self):
-        super().setUp()
-        (self.repo / "TODO.md").write_text(
-            "# TODO\n\n- [ ] Fix the flaky test\n- [ ] Ship the board\n", encoding="utf-8")
+class ConsoleSeedTest(BoardConsoleTest):
+    """The board goes in front of the first question of a conversation, and never again (19.18)."""
 
-    def test_a_created_board_is_marked_pending_and_surveys_on_open(self):
-        self.commands._board_became_ready()
-        self.assertEqual(board_chat.survey_state(B.Board(self.root, self.repo)), "pending")
-        self.commands.dispatch({"type": "board_open", "id": "r1"})
-        surveys = self.of("board_survey")
-        self.assertEqual(len(surveys), 1)
-        keys = [p["source_key"] for p in surveys[0]["proposals"]]
-        self.assertTrue(any("TODO.md" in k for k in keys), keys)
-        self.assertIn("Fix the flaky test", self.agent.prompts[0])
-        self.assertTrue(self.commands.chat.readonly)            # the read-only survey turn
-        self.agent.gate.set()
-        self.wait_idle()
-        self.assertEqual(board_chat.survey_state(B.Board(self.root, self.repo)), "done")
-        # A second open does not survey again.
-        self.commands.chat.drop()
-        self.commands.chat._build = self.build
-        self.commands.dispatch({"type": "board_open", "id": "r2"})
-        self.assertEqual(len(self.of("board_survey")), 1)
+    class FakeAgent:
+        def __init__(self, messages=1):
+            self.messages = [{"role": "system", "content": "s"}] * messages
+
+    def test_the_first_question_carries_the_roster_and_the_second_does_not(self):
+        seed = self.commands.console_seed(self.FakeAgent())
+        self.assertIn("#ABCD", seed)
+        self.assertIn("#EFGH", seed)
+        self.assertIn("the board today", seed)
+        self.assertEqual(self.commands.console_seed(self.FakeAgent()), "")
+
+    def test_a_conversation_that_came_back_from_disk_is_not_seeded_again(self):
+        # 30.7: a restart brings the tab's console back with its history. It has been told what
+        # the board is; telling it again would put a stale roster above a live conversation.
+        self.assertEqual(self.commands.console_seed(self.FakeAgent(messages=5)), "")
+
+    def test_a_terminal_pane_is_never_seeded(self):
+        self.commands.console = False
+        self.assertEqual(self.commands.console_seed(self.FakeAgent()), "")
+
+    def test_moving_the_worker_to_another_tab_seeds_again(self):
+        self.commands.set_tab("t0123456789ab")
+        self.assertTrue(self.commands.console_seed(self.FakeAgent()))
+        self.commands.set_tab("tfedcba987654")
+        self.assertTrue(self.commands.console_seed(self.FakeAgent()))
+
+
+class BusyTest(BoardConsoleTest):
+    """A console can write any card, so card work waits for it — and it never waits for itself."""
+
+    def test_a_card_turn_is_refused_while_the_console_turns(self):
+        self.turns.busy = True
+        self.dispatch(type="board_ask", id="r1", card="ABCD", text="what is this?")
+        error = self.of("error")[0]
+        self.assertEqual(error["code"], "board_busy")
+        self.assertIn("console", error["text"])
+
+    def test_nothing_is_refused_while_a_terminal_panes_own_turn_runs(self):
+        # A pane's agent does not hold the board the way a console does: 19.16 is unchanged, and
+        # a card turn runs on its own agent beside the pane's.
+        self.commands.console = False
+        self.turns.busy = True
+        self.assertFalse(self.commands._busy_error("r1", "the question", card_id="ABCD"))
+        self.assertFalse([e for e in self.of("error") if e.get("code") == "board_busy"])
+
+    def test_a_cleanup_still_waits_for_whatever_is_running(self):
+        self.commands.console = False
+        self.turns.busy = True
+        self.assertTrue(self.commands._busy_error("r1", "the cleanup"))
+
+
+class SurveyTest(BoardConsoleTest):
+    """The survey is an ordinary read-only turn of the console's own conversation (19.18)."""
+
+    def pending(self):
+        board_chat.mark_survey(self.commands.tools.board, "pending", note="created by board_init")
+
+    def test_a_pending_board_surveys_on_open_as_a_readonly_queued_turn(self):
+        self.pending()
+        self.dispatch(type="board_open", id="r1")
+        offer = self.of("board_survey")
+        self.assertEqual(len(offer), 1)
+        self.assertEqual(offer[0]["project"], str(self.repo))
+        turn = self.turns.submitted[-1]
+        self.assertTrue(turn["readonly"])
+        self.assertEqual(turn["surface"], "switchboard")
+        self.assertEqual(turn["when"], "queue")     # it takes its place in the queue like any ask
+        self.assertIn("Switchboard survey", turn["prompt"])
+        self.assertEqual(board_chat.survey_state(self.commands.tools.board), "done")
 
     def test_a_board_that_predates_the_survey_is_never_surveyed(self):
-        self.commands.dispatch({"type": "board_open", "id": "r1"})
-        self.assertEqual(self.of("board_survey"), [])
-        self.assertIsNone(self.agent)
+        self.dispatch(type="board_open", id="r1")
+        self.assertFalse(self.of("board_survey"))
+        self.assertFalse(self.turns.submitted)
 
-    def test_a_github_remote_is_reported_as_a_link_only(self):
-        import subprocess
-        try:
-            subprocess.run(["git", "init", "-q"], cwd=self.repo, check=True,
-                           capture_output=True)
-            subprocess.run(["git", "remote", "add", "origin",
-                            "https://github.com/example/boardly.git"], cwd=self.repo,
-                           check=True, capture_output=True)
-        except (OSError, subprocess.CalledProcessError):       # pragma: no cover - no git
-            self.skipTest("git is unavailable")
-        self.commands._board_became_ready()
-        self.commands.dispatch({"type": "board_open", "id": "r1"})
-        survey = self.of("board_survey")[0]
-        self.assertEqual(survey["git"]["owner"], "example")
-        self.assertEqual(survey["git"]["repo"], "boardly")
-        self.assertEqual(survey["git"]["primary"], "origin")
-        self.assertIn("github.com/example/boardly/issues", self.agent.prompts[0])
-        self.agent.gate.set()
-        self.wait_idle()
+    def test_a_survey_runs_once_per_worker(self):
+        self.pending()
+        self.dispatch(type="board_open", id="r1")
+        self.dispatch(type="board_open", id="r2")
+        self.assertEqual(len(self.of("board_survey")), 1)
+
+    def test_a_terminal_pane_worker_never_surveys_into_the_persons_own_pane(self):
+        # The one thing a survey must not do is start a turn in a terminal pane the person is
+        # working in: `board_open` happens whenever a Switchboard pane is opened.
+        self.commands.console = False
+        self.pending()
+        self.dispatch(type="board_open", id="r1")
+        self.assertFalse(self.turns.submitted)
+        self.assertEqual(board_chat.survey_state(self.commands.tools.board), "pending")
+
+    def test_a_queue_that_refuses_the_turn_leaves_the_marker_pending(self):
+        self.pending()
+        self.turns.fail = "Queue is full (32 prompts)."
+        self.dispatch(type="board_open", id="r1")
+        self.assertEqual(board_chat.survey_state(self.commands.tools.board), "pending")
+        self.assertIn("Queue is full", self.of("error")[-1]["text"])
+
+    def test_the_survey_prompt_keeps_its_question_and_drops_the_duplicated_brief(self):
+        prompt = board_chat.survey_prompt(self.root, self.repo, {"trackers": [], "hints": []}, [])
+        self.assertIn("Then ask which parts", prompt)
+        # The brief is in the system prompt now, so repeating it here would be the one thing
+        # this card took `board_chat`'s prompt building apart for.
+        self.assertNotIn(board_chat.chat_brief(), prompt)
 
 
-class ImportToolTest(ProtocolChatTest):
-    def test_the_agent_imports_through_the_same_never_twice_path(self):
-        (self.repo / "TODO.md").write_text("# TODO\n\n- [ ] A task\n", encoding="utf-8")
-        tools = self.commands.agent_tools(str(self.repo), {})
-        proposals = __import__("relay_core.board_import", fromlist=["propose"]).propose(
-            self.repo, board=tools.board)
-        keys = [p.source_key for p in proposals]
-        first = tools.run("board_import_items", {"keys": keys})
-        self.assertEqual(first["created"], 1)
-        again = tools.run("board_import_items", {"keys": keys})
-        self.assertEqual(again["created"], 0)                  # never twice
+class SurveyFileTest(BoardConsoleTest):
+    def test_mark_and_read_the_state_file(self):
+        board = self.commands.tools.board
+        self.assertIsNone(board_chat.survey_state(board))
+        board_chat.mark_survey(board, "pending", note="created by board_init")
+        self.assertEqual(board_chat.survey_state(board), "pending")
+        board_chat.mark_survey(board, "done", note="turn done")
+        self.assertEqual(board_chat.survey_state(board), "done")
 
-    def test_the_import_tool_needs_keys(self):
-        tools = self.commands.agent_tools(str(self.repo), {})
-        result = tools.run("board_import_items", {"keys": []})
-        self.assertIn("error", result)
+    def test_a_corrupt_file_reads_as_absent(self):
+        board = self.commands.tools.board
+        board_chat.survey_path(board).write_text("{not json", encoding="utf-8")
+        self.assertIsNone(board_chat.survey_state(board))
+
+
+class BriefTest(unittest.TestCase):
+    def test_the_brief_teaches_the_question_move(self):
+        text = board_chat.chat_brief()
+        self.assertIn("card", text.lower())
+        self.assertNotIn("<!--", text)
+
+    def test_the_brief_is_the_context_registrys_own(self):
+        # One text, two names: the board side has always called it `chat_brief`, and the context
+        # reaches it by `brief.key`. They may not drift apart.
+        self.assertEqual(board_chat.chat_brief(), AC.brief_body("switchboard"))
+
+
+class ConsoleScopeTest(BoardConsoleTest):
+    """What a console's board tools offer — and the two things that are still withheld."""
+
+    def tools(self):
+        return self.commands.agent_tools(str(self.repo), {})
 
     def test_a_console_gets_merge_and_the_shell_and_not_board_sections(self):
         """#AGNT, owner 2026-09-20: a context specialises an agent, it does not fence it.
@@ -674,481 +269,296 @@ class ImportToolTest(ProtocolChatTest):
         is not a fence: `board_sections` restructures the whole board and stays with a cleanup,
         and `board_claim` records a terminal pane a console has not got.
         """
-        tools = self.commands.agent_tools(str(self.repo), {})
-        tools.begin_console()
+        tools = self.tools()
         scope = tools.card_scope
+        self.assertIsInstance(scope, T.ConsoleScope)   # set by `agent_tools`, not per turn
         self.assertTrue(scope.allows("board_merge_cards"))
-        self.assertTrue(scope.allows("read_file"))
         self.assertTrue(scope.allows("run_command"))
         self.assertTrue(scope.allows("write_file"))
         names = {t["function"]["name"] for t in tools.tool_specs()}
         self.assertIn("board_merge_cards", names)
+        self.assertIn("board_import_items", names)
         self.assertIn("search_files", names)
         self.assertNotIn("board_sections", names)
         self.assertNotIn("board_claim", names)
-        tools.end_chat_turn()
 
-    def test_a_readonly_turn_refuses_every_write(self):
-        tools = self.commands.agent_tools(str(self.repo), {})
-        tools.begin_chat_turn(readonly=True)
+    def test_a_terminal_panes_board_tools_are_untouched(self):
+        self.commands.console = False
+        names = {t["function"]["name"] for t in self.tools().tool_specs()}
+        self.assertIn("board_claim", names)
+        self.assertNotIn("board_merge_cards", names)   # merge and split stay with a cleanup
+
+    def test_the_import_tool_runs_through_the_same_never_twice_path(self):
+        (self.repo / "TODO.md").write_text("- [ ] one thing\n", encoding="utf-8")
+        tools = self.tools()
+        import relay_core.board_import as I
+        keys = [p.to_dict()["source_key"] for p in I.propose(self.repo, board=tools.board)]
+        self.assertTrue(keys)
+        self.assertEqual(tools.run("board_import_items", {"keys": keys})["created"], 1)
+        self.assertEqual(tools.run("board_import_items", {"keys": keys})["created"], 0)
+
+    def test_a_readonly_turn_refuses_every_board_write(self):
+        tools = self.tools()
+        tools.readonly = True                          # what `Agent.set_readonly` does
         result = tools.run("board_comment", {"id": "ABCD", "kind": "note", "text": "no"})
         self.assertEqual(result.get("code"), "board_readonly_turn")
-        result = tools.run("board_import_items", {"keys": ["todo-md:TODO.md#0"]})
-        self.assertEqual(result.get("code"), "board_readonly_turn")
-        tools.end_chat_turn()
-        result = tools.run("board_comment", {"id": "ABCD", "kind": "note", "text": "yes"})
-        self.assertNotIn("error", result)
+        tools.readonly = False
+        self.assertNotIn("error", tools.run("board_comment", {"id": "ABCD", "kind": "note",
+                                                              "text": "yes"}))
 
 
-class HelperKeybindingTest(ProtocolChatTest):
-    """The helper may rebind keys (#GMCF, owner 2026-09-20: "yes" to question 3).
+class KeybindingTest(BoardConsoleTest):
+    """A `keybindings` reload reaches the card conversations, which are the second agents left."""
 
-    The Actions pane is Relay's palette "with its keyboard shortcut beside it", and the helper
-    is the agent answering there. Two things have to be true for that: the worker's keybinding
-    catalogue reaches the *helper's* agent — it is a second `Agent` with its own executor, so
-    the pane's one is not enough — and the helper's scope offers `set_keybinding`, which no
-    card turn's does.
-    """
+    class FakeExecutor:
+        keybindings = None
 
-    ACTIONS = [{"id": "pane.close", "description": "Close pane", "keys": ["Ctrl+W"]},
-               {"id": "tab.new", "description": "New tab", "keys": ["Ctrl+T"]}]
+    class FakeAgent:
+        def __init__(self):
+            self.executor = KeybindingTest.FakeExecutor()
 
-    def main_agent(self, catalog):
-        """A pane agent as `configure` builds one, with the GUI's keybinding catalogue on it."""
-        from relay_core.agent import Agent
-        from relay_core.provider import ProviderConfig
+    def test_a_reload_reaches_every_live_card_conversation(self):
+        from relay_core.board_turns import CardSession
+        session = CardSession(card_id="ABCD", agent=self.FakeAgent(), tools=None)
+        self.commands.cards._sessions["ABCD"] = session
+        catalog = object()
+        self.commands.set_keybindings(catalog)
+        self.assertIs(session.agent.executor.keybindings, catalog)
 
-        main = Agent(ProviderConfig("http://127.0.0.1:12345/v1", "mock", ""), str(self.repo),
-                     lambda event: None, keybindings=catalog)
-        self.commands.turns.agent = main
-        return main
-
-    def catalog(self):
-        import json as _json
-
-        from relay_core.keybindings import KeybindingCatalog
-        return KeybindingCatalog(str(self.repo / "relay" / "keybindings.json"),
-                                 _json.loads(_json.dumps(self.ACTIONS)))
-
-    def test_the_helper_is_built_on_the_workers_own_catalogue(self):
-        catalog = self.catalog()
-        self.main_agent(catalog)
-        agent, _tools = self.commands._build_page_agent(lambda event: None)
-        self.assertIs(agent.executor.keybindings, catalog)
-
-    def test_the_helpers_turn_offers_set_keybinding_last_and_a_card_turn_does_not(self):
-        catalog = self.catalog()
-        self.main_agent(catalog)
-        agent, tools = self.commands._build_page_agent(lambda event: None)
-
-        tools.begin_console()
-        names = [t["function"]["name"] for t in agent.tools()]
-        self.assertIn("set_keybinding", names)
-        # Last, for TAIL_TOOLS' reason: it is the one tool of this list that comes and goes.
-        self.assertEqual(names[-1], "set_keybinding")
-        # And the shell and the file writes are there too since #AGNT: one tool set everywhere.
-        self.assertIn("run_command", names)
-        self.assertIn("write_file", names)
-        tools.end_chat_turn()
-
-        # A card's Discuss or Plan turn reads the repository and writes the board: rebinding a
-        # key is not part of either, and the refusal says what the turn is for. It is a *card*
-        # agent that says so since #AGNT — the scope is named on the agent, not read off
-        # whatever the board's tools happen to be holding.
-        card_agent, card_tools = self.commands._build_card_agent("ABCD", lambda event: None)
-        card_tools.begin_card_turn("discuss", "ABCD")
-        self.assertNotIn("set_keybinding", [t["function"]["name"] for t in card_agent.tools()])
-        self.assertFalse(card_tools.card_scope.allows("set_keybinding"))
-        card_tools.end_card_turn()
-
-    def test_a_helper_with_no_catalogue_is_offered_nothing_to_rebind(self):
-        """A GUI that sends no `keybindings` block: the tool simply is not there (#GMCF)."""
-        self.main_agent(None)
-        agent, tools = self.commands._build_page_agent(lambda event: None)
-        tools.begin_chat_turn()
-        self.assertNotIn("set_keybinding", [t["function"]["name"] for t in agent.tools()])
-        tools.end_chat_turn()
-
-    def test_the_helpers_app_action_list_shows_the_keys(self):
-        """The Actions pane's promise (`PANE_BRIEFS["actions"]`): the palette *with* its keys.
-
-        The rows come from the keybinding catalogue, read live through the worker's agent, so
-        this is the block the GUI's `configure` now carries arriving where the brief needs it.
-        """
-        from relay_core import app_tools as A
-
-        catalog = self.catalog()
-        main = self.main_agent(catalog)
-        commands = A.AppCommands(lambda event: None, agent=lambda: main)
-        main.app = commands.configure({"app": {
-            "tab": "t1", "writes_enabled": True, "options": [],
-            "actions": [{"key": "pane.close", "section": "Relay", "label": "Close pane",
-                         "agent_safe": False}]}})
-        agent, tools = self.commands._build_page_agent(lambda event: None)
-        tools.begin_chat_turn()
-        rows = {a["key"]: a for a in agent.app.run("app_action_list", {})["actions"]}
-        self.assertEqual(rows["pane.close"]["keys"], ["Ctrl+W"])
-        self.assertEqual(rows["tab.new"]["keys"], ["Ctrl+T"])   # shortcut-only, no palette row
-        names = [t["function"]["name"] for t in agent.tools()]
-        self.assertIn("app_action_list", names)
-        self.assertEqual(names[-1], "set_keybinding")
-        tools.end_chat_turn()
-
-    def test_a_reload_reaches_the_live_helper_agent(self):
-        """`worker.py`'s `keybindings` message: the pane's agent is not the helper's (30.7)."""
-        catalog = self.catalog()
-        self.main_agent(catalog)
-        agent, _tools = self.commands._build_page_agent(lambda event: None)
-        self.commands.chat.agent = agent
-        fresh = self.catalog()
-        self.commands.set_keybindings(fresh)
-        self.assertIs(agent.executor.keybindings, fresh)
-        # No helper yet is not an error: a worker whose Switchboard was never opened has none.
-        self.commands.chat.agent = None
-        self.commands.set_keybindings(self.catalog())
+    def test_a_worker_with_no_card_conversation_is_not_an_error(self):
+        self.commands.set_keybindings(object())
 
 
-class StubProvider:
-    """Answers every request with one line, so a real `Agent.ask` finishes and autosaves."""
+# ---------------------------------------------------------------------------------------------
+# End to end: `backend/worker.py` driven as a console over NDJSON, against a loopback stub.
 
-    def complete(self, messages, tools, emit, cancel):
-        emit({"event": "delta", "text": "Noted."})
-        return {"role": "assistant", "content": "Noted."}
+class _StubHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    reply = "Noted."
 
-    def cancel(self):
+    def log_message(self, *args):
         pass
 
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+        self.server.seen.append(body)
+        payload = {"id": "stub", "object": "chat.completion", "created": int(time.time()),
+                   "model": body.get("model", "stub"),
+                   "choices": [{"index": 0, "finish_reason": "stop",
+                                "message": {"role": "assistant", "content": self.reply}}],
+                   "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}}
+        raw = json.dumps(payload).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
 
-class HelperHistoryTest(unittest.TestCase):
-    """The helper's conversation is persisted per (project, tab) — protocol 30.7.
 
-    Keyed rather than stored: the same tab in the same workspace resolves to the same file at
-    every start, so a restart brings each tab's helper back with its own history and two tabs
-    on one project never share one.
+class WorkerConsoleTest(unittest.TestCase):
+    """One `configure` with a context, one `ask` with a surface, through the real worker.
+
+    The whole of #AGNT's step 4 on the wire: no `board_chat`, no second agent, no second queue.
     """
 
-    TAB_A = "t0123456789ab"
-    TAB_B = "tfedcba987654"
-
     def setUp(self):
-        import os
-        import tempfile
         from unittest import mock
-        from relay_core.agent import Agent
-        from relay_core.provider import ProviderConfig
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.data = Path(self.tmp.name) / "data"
-        patch = mock.patch.dict(os.environ, {"XDG_DATA_HOME": str(self.data)})
+        self.home = Path(self.tmp.name)
+        # The worker writes under this data root; the test reads the same paths back, so it has
+        # to resolve them against the same root rather than the person's own.
+        patch = mock.patch.dict(os.environ, {"XDG_DATA_HOME": str(self.home / ".local/share")})
         patch.start()
         self.addCleanup(patch.stop)
-        self.repo = Path(self.tmp.name).resolve() / "project"
+        self.repo = self.home / "project"
         self.root = self.repo / "issues"
         self.root.mkdir(parents=True)
         (self.root / B.BOARD_CONFIG).write_text(CONFIG, encoding="utf-8")
-        write_card(self.root, "2026-09-19-one.md", "ABCD", "One card")
-        self.events: list[dict] = []
-        self.commands = P.BoardCommands(StubTurns(), self.events.append)
-        self.commands.turns.agent = Agent(
-            ProviderConfig("http://127.0.0.1:12345/v1", "mock", ""), str(self.repo),
-            lambda event: None)
-        self.commands.chat._build = self.build
-        self.addCleanup(self.commands.chat.drop)
+        write_card(self.root, "2026-09-19-one.md", "FX01", "A fixture card")
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), _StubHandler)
+        self.server.seen = []
+        self.addCleanup(self.server.server_close)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.shutdown)
+        self.base = f"http://127.0.0.1:{self.server.server_address[1]}/v1"
 
-    def build(self, emit):
-        agent, tools = self.commands._build_page_agent(emit)
-        agent.provider = StubProvider()
-        return agent, tools
+    def context(self, name="switchboard", key="t0123456789ab", scope=None):
+        block = {"name": name, "agent_role": "switchboard",
+                 "workspace": str(self.repo),
+                 "brief": {"key": name, "title": "Switchboard agent"},
+                 "shell": False, "routing": "agent"}
+        if key:
+            block["persist"] = {"scope": "helper", "key": key}
+        if scope:
+            block["scope"] = scope
+        return block
 
-    def restart(self):
-        """Throw this worker away and start another on the same data root: what a restart is."""
-        from relay_core.agent import Agent
-        from relay_core.provider import ProviderConfig
-        self.commands.chat.drop()
-        self.commands = P.BoardCommands(StubTurns(), self.events.append)
-        self.commands.turns.agent = Agent(
-            ProviderConfig("http://127.0.0.1:12345/v1", "mock", ""), str(self.repo),
-            lambda event: None)
-        self.commands.chat._build = self.build
-        self.addCleanup(self.commands.chat.drop)
+    #: The smallest `app` block that makes the app tools exist (§30.2), so this proves a console
+    #: is offered them rather than that this worker happens to have none.
+    APP = {"tab": "t0123456789ab",
+           "options": [{"id": "appearance.copy_on_select", "section": "appearance",
+                        "label": "Copy on select", "kind": "toggle", "value": True,
+                        "settable": True}],
+           "actions": [{"key": "pane.split_right", "label": "Split right", "agent_safe": True}]}
 
-    def configure(self, tab=None, workspace=None):
-        # What `worker.py` does on a `configure`: point the board, then say which tab this
-        # worker is the helper of.
-        request = {} if tab is None else {"tab": tab}
-        self.commands.configure(str(workspace or self.repo), request)
-        self.commands.set_tab(request.get("tab"))
+    def configure(self, **extra):
+        return {"type": "configure", "id": "c1", "base_url": self.base, "model": "stub",
+                "api_key": "", "workspace": str(self.repo), "app": self.APP,
+                "board": {"autonomy": "auto"}, **extra}
 
-    def turn(self, text):
-        """One real helper turn, saved the way a finished turn saves itself."""
-        self.commands.chat.ask(text, pane="options")
-        wait_idle(self.commands.chat)
-        return self.commands.chat.agent
+    def run_worker(self, messages, until=("agent_finished",), timeout=60):
+        """Drive the real worker over its pipe, and shut it down once the turn has landed.
 
-    def said(self, agent):
-        return [m.get("content") for m in agent.messages[1:] if m.get("role") == "user"]
+        A `shutdown` in the same batch would break the read loop while the turn was still in the
+        queue — `shutdown` is answered the moment it is read — so the turn's own end is what
+        this waits for, and the errors that end an ask count as an end too.
+        """
+        env = {**os.environ, "XDG_DATA_HOME": str(self.home / ".local/share"),
+               "RELAY_KEYRING": "off", "PYTHONPATH": str(ROOT / "backend")}
+        messages = [m for m in messages if m.get("type") != "shutdown"]
+        proc = subprocess.Popen([sys.executable, "-S", str(ROOT / "backend/worker.py")],
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, cwd=ROOT, env=env)
+        self.addCleanup(proc.kill)
+        for pipe in (proc.stdin, proc.stdout, proc.stderr):
+            self.addCleanup(pipe.close)
+        # A readline() on a worker waiting on stdin never returns on its own; killing it closes
+        # the pipe, so a broken run fails this one test instead of hanging the suite.
+        watchdog = threading.Timer(timeout, proc.kill)
+        watchdog.start()
+        self.addCleanup(watchdog.cancel)
+        proc.stdin.write("".join(json.dumps(m) + "\n" for m in messages))
+        proc.stdin.flush()
+        asked = {m.get("id") for m in messages if m.get("type") in ("ask", "board_chat")}
+        events = []
+        while True:
+            line = proc.stdout.readline()
+            if not line:
+                break
+            events.append(json.loads(line))
+            name = events[-1].get("event")
+            if name in until or (name == "error" and events[-1].get("id") in asked):
+                break
+        proc.stdin.write(json.dumps({"type": "shutdown"}) + "\n")
+        proc.stdin.flush()
+        proc.stdin.close()
+        events += [json.loads(line) for line in proc.stdout.read().splitlines() if line.strip()]
+        stderr = proc.stderr.read()
+        self.assertEqual(proc.wait(timeout=20), 0, stderr)
+        self.assertTrue(events, "the worker said nothing: " + stderr[-2000:])
+        return events
 
-    # ---- the key ----------------------------------------------------------------
-    def test_a_tab_id_is_validated_and_optional(self):
-        self.assertEqual(board_chat.validate_tab(None), "")
-        self.assertEqual(board_chat.validate_tab(""), "")
-        self.assertEqual(board_chat.validate_tab(" " + self.TAB_A + " "), self.TAB_A)
-        for bad in (7, True, ["t1"], "x" * 65, "   "):
-            with self.assertRaises(ValueError):
-                board_chat.validate_tab(bad)
+    @staticmethod
+    def of(events, name):
+        return [e for e in events if e.get("event") == name]
 
-    def test_the_session_id_is_derived_and_stable(self):
-        first = board_chat.helper_session_id(self.TAB_A)
-        self.assertRegex(first, r"^[0-9a-f]{32}$")
-        self.assertEqual(first, board_chat.helper_session_id(self.TAB_A))
-        self.assertNotEqual(first, board_chat.helper_session_id(self.TAB_B))
+    def test_a_console_configures_asks_and_answers_with_its_surface_on_every_event(self):
+        events = self.run_worker([
+            self.configure(context=self.context()),
+            {"type": "ask", "id": "a1", "text": "which cards are on the board?",
+             "surface": "switchboard", "screen": "the Inbox column"},
+            {"type": "shutdown"}])
+        configured = self.of(events, "configured")[0]
+        self.assertEqual(configured["context"]["scope"], "console")
+        self.assertEqual(configured["context"]["name"], "switchboard")
+        self.assertEqual(configured["context"]["agent_role"], "switchboard")
+        # Every event of the turn is addressed to the console that asked (owner decision 1:
+        # one conversation, drawn everywhere).
+        for name in ("agent_started", "delta", "done", "agent_finished"):
+            got = self.of(events, name)
+            self.assertTrue(got, name)
+            self.assertEqual(got[0].get("surface"), "switchboard", name)
+        # The board was seeded into the first prompt, and the screen hint reached the model.
+        prompt = [m["content"] for m in self.server.seen[0]["messages"] if m["role"] == "user"][0]
+        self.assertIn("#FX01", prompt)
+        self.assertIn("On screen now: the Inbox column", prompt)
+        # The brief is in the system prompt, once, not in front of the prompt.
+        system = self.server.seen[0]["messages"][0]["content"]
+        self.assertIn("[Switchboard agent]", system)
+        self.assertNotIn("[Switchboard agent]", prompt)
 
-    def test_the_helper_conversations_are_not_the_persons_sessions(self):
-        from relay_core import conv_index
-        directory = board_chat.helper_dir(str(self.repo))
-        root = conv_index.sessions_root()
-        self.assertNotEqual(directory, root)
-        self.assertNotIn(root, directory.parents)
-        # A different project is a different directory; no workspace is its own.
-        self.assertNotEqual(directory, board_chat.helper_dir(str(self.repo / "other")))
-        self.assertNotEqual(directory, board_chat.helper_dir(""))
+    def test_the_tools_a_console_is_offered_include_the_shell_and_the_board_set(self):
+        self.run_worker([self.configure(context=self.context()),
+                         {"type": "ask", "id": "a1", "text": "tidy the board", "surface": "sb"},
+                         {"type": "shutdown"}])
+        names = {t["function"]["name"] for t in self.server.seen[0]["tools"]}
+        self.assertLessEqual({"run_command", "write_file", "board_merge_cards", "search_files",
+                              "app_option_list", "session_info"}, names)
+        self.assertNotIn("load_tools", names)      # a console defers nothing (#GMCF decision 9)
 
-    # ---- the behaviour ------------------------------------------------------------
-    def test_the_same_tab_gets_its_history_back(self):
-        self.configure(self.TAB_A)
-        first = self.turn("what is this setting?")
-        self.assertEqual(self.said(first)[-1].split("\n")[-1], "what is this setting?")
-        self.assertTrue(first.store.path(first.session_id).is_file())
+    def test_the_same_tab_gets_its_conversation_back_and_another_tab_does_not(self):
+        script = [self.configure(context=self.context()),
+                  {"type": "ask", "id": "a1", "text": "remember the teapot", "surface": "sb"},
+                  {"type": "shutdown"}]
+        self.run_worker(script)
+        directory = AC.helper_dir(str(self.repo))
+        saved = sorted(p.name for p in directory.glob("*.json"))
+        self.assertEqual(saved[0], AC.helper_session_id("t0123456789ab") + ".json")
+        # A second worker on the same (project, tab) picks the conversation up …
+        self.server.seen.clear()
+        self.run_worker([self.configure(context=self.context()),
+                         {"type": "ask", "id": "a2", "text": "and now?", "surface": "sb"},
+                         {"type": "shutdown"}])
+        said = [m["content"] for m in self.server.seen[0]["messages"] if m["role"] == "user"]
+        self.assertTrue(any("teapot" in t for t in said), said)
+        # … and it is not seeded with the board a second time.
+        self.assertNotIn("the board today", said[-1])
+        # … while another tab of the same project starts empty.
+        self.server.seen.clear()
+        self.run_worker([self.configure(context=self.context(key="tfedcba987654")),
+                         {"type": "ask", "id": "a3", "text": "and here?", "surface": "sb"},
+                         {"type": "shutdown"}])
+        said = [m["content"] for m in self.server.seen[0]["messages"] if m["role"] == "user"]
+        self.assertFalse(any("teapot" in t for t in said), said)
 
-        # A restart: a new worker, a new PageAgent, the same (workspace, tab).
-        self.restart()
-        self.configure(self.TAB_A)
-        again = self.turn("and this one?")
-        self.assertEqual(again.session_id, first.session_id)
-        self.assertEqual([s.split("\n")[-1] for s in self.said(again)],
-                         ["what is this setting?", "and this one?"])
+    def test_a_switchboard_ask_in_a_tab_with_no_board_is_one_sentence(self):
+        events = self.run_worker([
+            {"type": "configure", "id": "c1", "base_url": self.base, "model": "stub",
+             "api_key": "", "workspace": "", "app": self.APP, "context": self.context()},
+            {"type": "ask", "id": "a1", "text": "what is on the board?", "surface": "switchboard"},
+            {"type": "shutdown"}])
+        error = [e for e in self.of(events, "error") if e.get("id") == "a1"][0]
+        self.assertIn("no Switchboard", error["text"])
+        self.assertFalse(self.of(events, "agent_started"))
 
-    def test_two_tabs_on_one_project_keep_two_conversations(self):
-        self.configure(self.TAB_A)
-        a = self.turn("the first tab's question")
-        a_id = a.session_id
-        # The same worker re-pointed at the other tab: the conversation is let go, not carried.
-        self.configure(self.TAB_B)
-        b = self.turn("the second tab's question")
-        self.assertNotEqual(b.session_id, a_id)
-        self.assertEqual([s.split("\n")[-1] for s in self.said(b)], ["the second tab's question"])
-        # And the first tab still has its own.
-        self.configure(self.TAB_A)
-        back = self.turn("more from the first tab")
-        self.assertEqual(back.session_id, a_id)
-        self.assertEqual([s.split("\n")[-1] for s in self.said(back)],
-                         ["the first tab's question", "more from the first tab"])
+    def test_the_other_surfaces_answer_without_a_board(self):
+        events = self.run_worker([
+            {"type": "configure", "id": "c1", "base_url": self.base, "model": "stub",
+             "api_key": "", "workspace": "", "app": self.APP,
+             "context": {**self.context(name="options"), "brief": {"key": "options",
+                                                                   "title": "Options helper"}}},
+            {"type": "ask", "id": "a1", "text": "what is copy on select?", "surface": "options"},
+            {"type": "shutdown"}])
+        self.assertTrue(self.of(events, "done"))
+        self.assertFalse([e for e in self.of(events, "error") if e.get("id") == "a1"])
+        system = self.server.seen[0]["messages"][0]["content"]
+        self.assertIn("[Options helper]", system)
+        self.assertIn("app_option_list", system)
+        # No board, so no board tools — the one constraint that is a constraint (#AGNT).
+        names = {t["function"]["name"] for t in self.server.seen[0]["tools"]}
+        self.assertFalse({n for n in names if n.startswith("board_")})
+        self.assertIn("run_command", names)
 
-    def test_a_configure_that_does_not_move_the_tab_keeps_the_conversation(self):
-        self.configure(self.TAB_A)
-        first = self.turn("first")
-        self.configure(self.TAB_A)              # a model swap, a keybinding reload, anything
-        self.assertIs(self.commands.chat.agent, first)
-        again = self.turn("second")
-        self.assertIs(again, first)
-        self.assertEqual(len(self.said(again)), 2)
+    def test_a_terminal_pane_configure_is_byte_for_byte_what_it_was(self):
+        events = self.run_worker([
+            {"type": "configure", "id": "c1", "base_url": self.base, "model": "stub",
+             "api_key": "", "workspace": str(self.repo), "app": self.APP},
+            {"type": "ask", "id": "a1", "text": "ls"},
+            {"type": "shutdown"}])
+        self.assertNotIn("context", self.of(events, "configured")[0])
+        self.assertFalse([e for e in events if "surface" in e])
+        names = {t["function"]["name"] for t in self.server.seen[0]["tools"]}
+        self.assertIn("load_tools", names)         # a pane still defers (#GMCF decision 9)
 
-    def test_no_tab_means_no_store_and_a_fresh_conversation(self):
-        self.configure()                         # a GUI from before 30.7
-        first = self.turn("a question")
-        self.assertIsNone(first.store)
-        self.assertEqual(self.commands.tab, "")
-        self.commands.chat.drop()
-        second = self.turn("another question")
-        self.assertIsNot(second, first)
-        self.assertEqual([s.split("\n")[-1] for s in self.said(second)], ["another question"])
-
-    def test_a_board_less_tab_is_keyed_by_the_tab_alone(self):
-        self.commands.configure(None, {})
-        self.commands.set_tab(self.TAB_A)
-        self.assertIsNone(self.commands.tools)
-        agent, tools = self.build(lambda event: None)
-        self.assertIsNone(tools)
-        self.assertEqual(agent.session_id, board_chat.helper_session_id(self.TAB_A))
-        self.assertEqual(Path(agent.store.directory), board_chat.helper_dir(""))
-
-
-class BoardlessHelperTest(unittest.TestCase):
-    """A tab with no project attached still has a helper (protocol 30.7, card #FEJQ).
-
-    It is the same worker and the same conversation; what it has not got is a board. So the
-    `board_*` tools are absent, the app tools are there, and only the one pane whose whole
-    subject is the cards refuses — in a sentence, not a traceback.
-    """
-
-    def setUp(self):
-        import tempfile
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.events: list[dict] = []
-        self.commands = P.BoardCommands(StubTurns(), self.events.append)
-        self.commands.configure(None, {})          # no workspace: no board anywhere
-        self.assertIsNone(self.commands.tools)
-        self.agent: FakeAgent | None = None
-        self.commands.chat._build = self.build
-        self.addCleanup(self.commands.chat.drop)
-
-    def build(self, emit):
-        self.agent = FakeAgent(emit)
-        return self.agent, None                    # the board-less shape
-
-    def of(self, name):
-        return [e for e in self.events if e.get("event") == name]
-
-    def ask(self, text, **extra):
-        self.commands.dispatch({"type": "board_chat", "id": "r1", "text": text, **extra})
-
-    def test_a_switchboard_ask_with_no_board_is_one_sentence(self):
-        with self.assertRaises(ValueError) as caught:
-            self.ask("what is ready?")
-        self.assertEqual(str(caught.exception), P.NO_BOARD_CHAT_ERROR)
-        self.assertIn("Options", str(caught.exception))
-        self.assertFalse(self.commands.chat.busy())
-        # And the default — no `pane` at all — is the Switchboard, so it refuses the same way.
-        with self.assertRaises(ValueError):
-            self.ask("still the board", pane="switchboard")
-
-    def test_the_other_three_panes_answer_without_a_board(self):
-        for pane, needle in (("options", "app_option_list"),
-                             ("actions", "app_action_list"),
-                             ("sessions", "app_sessions_search")):
-            with self.subTest(pane=pane):
-                self.ask(f"a question about {pane}", pane=pane)
-                started = self.of("board_chat_started")[-1]
-                self.assertEqual(started["pane"], pane)
-                self.agent.gate.set()
-                wait_idle(self.commands.chat)
-                self.assertIn(needle, self.agent.prompts[-1])
-                self.assertIsNone(self.commands.chat.tools)
-
-    def test_a_survey_still_needs_a_board(self):
-        with self.assertRaises(ValueError):
-            self.ask("survey", survey=True)
-
-    def test_the_builder_makes_a_board_less_agent_that_keeps_the_app_tools(self):
-        import tempfile
-        from relay_core import app_tools as A
-        from relay_core.agent import Agent
-        from relay_core.provider import ProviderConfig
-
-        with tempfile.TemporaryDirectory() as root:
-            main = Agent(ProviderConfig("http://127.0.0.1:12345/v1", "mock", ""), root,
-                         lambda event: None)
-            main.app = A.AppTools(A.AppCatalog.from_request(
-                {"tab": "t1", "writes_enabled": True, "options": [], "actions": []}),
-                A.AppBridge(lambda event: None))
-            self.commands.turns.agent = main
-            agent, tools = self.commands._build_page_agent(lambda event: None)
-            self.assertIsNone(tools)
-            self.assertIsNone(agent.board)
-            self.assertIs(agent.app, main.app)
-            names = [spec["function"]["name"] for spec in agent.tools()]
-            self.assertFalse([n for n in names if n.startswith("board_")], names)
-            self.assertIn("app_option_list", names)
-            # No board repository to stand in for it: the workspace is the pane agent's own.
-            self.assertEqual(str(agent.executor.workspace.root),
-                             str(main.executor.workspace.root))
+    def test_board_chat_is_answered_with_the_message_to_send_instead(self):
+        events = self.run_worker([self.configure(context=self.context()),
+                                  {"type": "board_chat", "id": "b1", "text": "merge them"},
+                                  {"type": "shutdown"}])
+        error = [e for e in self.of(events, "error") if e.get("id") == "b1"][0]
+        self.assertIn("#AGNT", error["text"])
+        self.assertNotIn("Protocol error", error["text"])
 
 
-
-class FakeConfig:
-    """A provider config, as far as the page agent's rebuild rule is concerned: a model id."""
-
-    def __init__(self, model: str):
-        self.model = model
-
-
-class FakeResolved:
-    def __init__(self, model: str):
-        self.config = FakeConfig(model)
-        self.preset_id = None
-        self.effort = None
-
-
-class FakeRoles:
-    """A role table whose `switchboard` row can be repointed, the way the page's picker does."""
-
-    def __init__(self, model: str):
-        self.model = model
-
-    def resolve(self, role):
-        return FakeResolved(self.model)
-
-
-class FakeMain:
-    """The pane's agent, as `bind_agent` sees it: a config, a role table and a cancel event."""
-
-    def __init__(self, model: str):
-        self.config = FakeConfig(model)
-        self.roles = FakeRoles(model)
-        self.cancel_event = threading.Event()
-
-
-class ModelNudgeTest(ProtocolChatTest):
-    """A `configure` that moves the `switchboard` role reaches a live conversation (19.18).
-
-    The page's model picker does not send `board_chat {model}` — that names another role for this
-    conversation alone.  It writes the `switchboard` role itself and reconfigures every board
-    worker, so `PageAgent.model` never changes and `_start`'s own rebuild rule never fires.  Left
-    at that, the pick would land in the settings, redraw the box, and leave the conversation
-    answering on the provider it was built with.
-    """
-
-    def setUp(self):
-        super().setUp()
-        self.main = FakeMain("glm-5.3")
-        self.commands.turns.agent = self.main
-
-    def build(self, emit):
-        agent, tools = super().build(emit)
-        # The agent a build produces answers on whatever the role resolves to right now, which is
-        # exactly what `built_model_id` records.
-        agent.config = FakeConfig(self.main.roles.model)
-        return agent, tools
-
-    def run_turn(self, text):
-        self.ask(text)
-        agent = self.agent
-        agent.gate.set()
-        self.wait_idle()
-        return agent
-
-    def test_a_configure_that_moves_the_switchboard_role_rebuilds_the_conversation(self):
-        first = self.run_turn("first")
-        self.assertEqual(self.commands.chat.built_model_id, "glm-5.3")
-
-        # The pick: the role now resolves elsewhere, and `configure` re-binds the pane's agent.
-        self.main.roles.model = "kimi-k2.5"
-        self.commands.bind_agent(self.main)
-
-        second = self.run_turn("second")
-        self.assertIsNot(second, first)
-        self.assertEqual(self.commands.chat.built_model_id, "kimi-k2.5")
-        # The conversation came across with it (13.5's rule for a pane): the new agent keeps its
-        # own system prompt and every other message, and the prompt is not re-seeded.
-        self.assertEqual(len(second.messages), 3)               # system + first + second
-        self.assertEqual(second.messages[-1]["content"], "second")
-        self.assertTrue(second.messages[1]["content"].startswith("[Switchboard page agent]"))
-
-    def test_a_configure_that_changes_nothing_leaves_the_live_agent_alone(self):
-        first = self.run_turn("first")
-        self.commands.bind_agent(self.main)                     # same resolved model
-        second = self.run_turn("second")
-        self.assertIs(second, first)
-        self.assertEqual(self.commands.chat.built_model_id, "glm-5.3")
-
-    def test_invalidate_before_the_first_turn_is_harmless(self):
-        self.commands.chat.invalidate()
-        self.assertIsNone(self.commands.chat.agent)
-        self.run_turn("first")
-        self.assertTrue(self.of("board_chat_started"))
-        self.assertEqual(self.commands.chat.built_model_id, "glm-5.3")
-
-
-if __name__ == "__main__":                                      # pragma: no cover
+if __name__ == "__main__":
     unittest.main()

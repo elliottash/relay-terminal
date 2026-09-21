@@ -74,7 +74,7 @@ TYPES = {"board_open", "board_refresh", "board_card_get", "board_create", "board
          "project_probe", "board_import_propose", "board_import_apply",
          # Two-way sync with GitHub issues (19.14, docs/GITHUB-SYNC.md section 8).
          "forge_sync_plan", "forge_sync_run",
-         # The Switchboard page agent (19.18): a conversation about the whole board.
+         # Retired by #AGNT and answered with one sentence for a release (see RETIRED_CHAT).
          "board_chat", "board_chat_cancel", "board_chat_queue_remove", "board_chat_queue_move",
          # The Test suites pane and a card's Check (section 31, #7BM4). Answered by
          # `tests_protocol.TestsCommands`, which this class holds one of per board.
@@ -88,12 +88,20 @@ TYPES = {"board_open", "board_refresh", "board_card_get", "board_create", "board
 NO_BOARD_ERROR = ("This project has no Switchboard (no switchboard/board.yaml, and no "
                   "issues/board.yaml).")
 
-#: What a *Switchboard* ask gets when this tab has no board (protocol 30.7).  The helper itself
+#: What a *Switchboard* ask gets when this tab has no board (protocol 30.7).  The console itself
 #: still runs — Options, Actions and Sessions are about the app, not about a board — so this is
-#: only for the one pane whose whole subject is the cards.
+#: only for the one surface whose whole subject is the cards.
 NO_BOARD_CHAT_ERROR = ("This tab has no Switchboard, so there is nothing for the Switchboard "
                        "pane to talk about. Attach a project to the tab, or ask from Options, "
                        "Actions or Sessions.")
+
+#: `board_chat` and its three queue messages are retired (card #AGNT): a console is an ordinary
+#: pane worker with a context, so its turn is `ask` and its queue is the pane's.  They are still
+#: *recognised* for a release, and answered with this rather than "Unknown protocol message" —
+#: a GUI one version behind must be told what to send, not handed a traceback.
+RETIRED_CHAT = ("board_chat and its queue messages retired with card #AGNT: send `ask` with a "
+                "`surface`, after a `configure` carrying a `context` block, and use `cancel`, "
+                "`queue_remove` and `queue_move` — the console's queue is the pane's queue now.")
 
 #: The owner-side messages that may be the first thing a project's board ever hears.  Only a
 #: create can be: the other three name a card, and an uninitialized board has none.
@@ -385,20 +393,23 @@ class BoardCommands:
         self.cards = board_turns.CardTurns(
             self.emit, lambda card_id, emit: self._build_card_agent(card_id, emit),
             on_answer=self._card_answer)
-        #: The page agent (19.18, `relay_core.board_chat`): one conversation about the whole
-        #: board, on the Switchboard's main page.  It can write any card, so it is exclusive
-        #: with the card turns and the cleanup (see `_busy_error`), and it queues its own
-        #: prompts the way a pane's agent does instead of refusing them.
-        self.chat = board_chat.PageAgent(
-            self.emit, lambda emit: self._build_page_agent(emit),
-            on_turn_end=self._chat_turn_ended)
-        #: The tab this worker is the helper of (`configure {tab}`, protocol 30.7), or "" from a
-        #: GUI that sends none. With the workspace it keys the helper's conversation, which is
-        #: why it is kept here rather than passed through each ask.
+        #: Whether this worker's agent is an agent **console** rather than a terminal pane's own
+        #: (`configure {context: {scope: "console"}}`, protocol 33).  Set by `worker.py`. It is
+        #: what makes the board offer a console's tool set, what makes the survey a turn of this
+        #: worker's own conversation, and what makes a card turn wait for it.
+        self.console = False
+        #: Whether the console's conversation has been seeded with the board (19.18): the roster
+        #: goes in front of the first question and never again, the conversation being the
+        #: context from then on.  `False` again whenever the worker is pointed elsewhere.
+        self.seeded = False
+        #: A survey has run on this worker, so `board_open` does not offer a second one.
+        self.surveyed = False
+        #: The tab this worker is the console of (`configure {tab}`, protocol 30.7), or "" from
+        #: a GUI that sends none.  The context's `persist.key` is the same id, and `worker.py`
+        #: passes whichever it was sent.
         self.tab = ""
-        #: The (workspace, tab) the live conversation belongs to. A `configure` that moves
-        #: either of them is a different helper, so the conversation is let go and the next ask
-        #: adopts that tab's own.
+        #: The (workspace, tab) the live conversation belongs to, so a `configure` that moves
+        #: either is known to be a different console.
         self._helper_key: tuple[str, str] | None = None
         #: This worker's `SubagentManager`, set by `backend/worker.py` (#AQ6X step 7b). It is what
         #: a **signal thread** runs on: a failing check nobody is on becomes a subagent of this
@@ -525,7 +536,10 @@ class BoardCommands:
         # The card conversations belong to the board we are leaving, and their agents hold that
         # board's tools: stop them and forget them rather than let them write into it (19.16).
         self.cards.drop()
-        self.chat.drop()
+        # The roster this worker's console was seeded with was the old board's (19.18): the next
+        # question seeds again. The conversation itself is the agent's and `set_board` keeps it
+        # on purpose — that is the whole of 19.11.
+        self.seeded = self.surveyed = False
         self._snapshot = {}
         self._snapshot_search = {}
         self._drop_parse_cache()
@@ -544,7 +558,14 @@ class BoardCommands:
         if board is None:
             return None
         tools = self._build(board, state, settings, actor="agent")
-        return None if tools.autonomy == "off" else tools
+        if tools.autonomy == "off":
+            return None
+        if self.console:
+            # An agent console's board tools offer a console's set for as long as the console
+            # exists — merge, split, the import and `search_files` — rather than for one turn
+            # the way a card's stage scope does (#AGNT, `board_tools.ConsoleScope`).
+            tools.begin_console()
+        return tools
 
     # ---- the agent's half, swapped without losing the conversation -------------
     def _agent(self):
@@ -560,7 +581,6 @@ class BoardCommands:
         cancel = getattr(agent, "cancel_event", None)
         if cancel is not None:
             self.init.cancel = cancel
-        self._refresh_chat_model()
 
     def set_tab(self, tab) -> str:
         """Which tab this worker is the helper of (`configure {tab}`, protocol 30.7).
@@ -578,36 +598,12 @@ class BoardCommands:
         key = (self.workspace or "", tab)
         self.tab = tab
         if self._helper_key is not None and self._helper_key != key:
-            self.chat.drop()
+            # Another tab's console: its roster and its survey were the last tab's. The
+            # conversation is `Agent.adopt_session`'s, keyed by (workspace, tab) in
+            # `agent_context` — `configure` has already pointed it at this tab's own file.
+            self.seeded = self.surveyed = False
         self._helper_key = key
         return tab
-
-    def _refresh_chat_model(self) -> None:
-        """A `configure` rebuilt the pane's agent: does the live page conversation still run on
-        the model the `switchboard` role names (19.18)?
-
-        The page's model picker writes that role and reconfigures every board worker — it does
-        not send `board_chat {model}`, which names a *different* role for this conversation only.
-        `PageAgent._start` rebuilds when the role changes, and the role has not; so without this
-        the pick would land in the settings, redraw the box, and leave the conversation
-        answering on the provider it was built with.  `invalidate()` keeps every message.
-        """
-        if self.chat.agent is None or self.chat.built_model_id is None:
-            return
-        model = self._chat_model_id()
-        if model and model != self.chat.built_model_id:
-            self.chat.invalidate()
-
-    def _chat_model_id(self) -> str | None:
-        """The provider model the page agent would be built on right now, without building it."""
-        main = self._agent()
-        if main is None:
-            return None
-        role = self.chat.model or "switchboard"
-        resolved = main.roles.resolve(role) if (getattr(main, "roles", None) is not None
-                                                and role != "main") else None
-        config = resolved.config if resolved is not None else main.config
-        return getattr(config, "model", None)
 
     def _attach_agent_tools(self, workspace: str | None, settings: dict) -> None:
         """Give the pane's live agent the board these settings name, keeping its conversation.
@@ -672,6 +668,10 @@ class BoardCommands:
                       skills=getattr(main.executor, "skills", None),
                       preset_id=main.preset.id if main.preset else None,
                       roles=main.roles, board=tools, effort=getattr(main, "effort", None),
+                      # Protocol 33: the named scope. A card turn's tools are its stage's — the
+                      # mode's board tools and the read-only file tools — and that is the one
+                      # thing #AGNT left fenced, because 19.20 is a rule about the stage.
+                      tool_scope="card",
                       # Protocol 30.4: one tool set. A card turn drives the app through the same
                       # `AppTools` the pane agent holds, so the change log is the worker's.
                       app=getattr(main, "app", None),
@@ -690,86 +690,21 @@ class BoardCommands:
             agent.set_instructions(main.instructions)
         return agent, tools
 
-    def _build_page_agent(self, emit):
-        """Build the page agent (19.18): this worker's provider — the `switchboard` role, which
-        is what the GUI starts a board worker on (`agent_role`) — its own conversation and its
-        own `BoardTools`, whose `ChatScope` offers the board tools with merge and split.
+    def console_seed(self, agent) -> str:
+        """The board a console's first question is seeded with (19.18), or "".
 
-        The model the page's picker named, when there is one, resolves through the same role
-        table, so a page on the Flash agent is a role choice and not a second provider setup.
-
-        Since 30.7 this agent is the whole tab's helper, and a tab with no project attached has
-        no board: it is then built with `board=None` — no `board_*` tool at all — and answers
-        for Options, Actions and Sessions through the app tools alone.
+        Read by `worker.py` on every `ask`: the roster goes in front of the first prompt of a
+        conversation and never again. It is checked against the agent's own message list rather
+        than a flag alone, so a console whose saved conversation came back from disk (30.7) is
+        not re-seeded with a board it has already been told about.
         """
-        from .agent import Agent          # late: agent.py pulls in the whole tool executor
-        from .tools import Workspace
-        main = self._agent()
-        if main is None:
-            raise ValueError("Configure a provider and workspace first.")
-        # None here is the board-less helper of 30.7 — a tab with no project attached, or one
-        # whose board autonomy is off. It is a shape this agent has, not a failure: it keeps the
-        # app tools (`app=` below) and is offered no `board_*` tool at all. Its workspace is then
-        # the pane agent's own, since there is no board repository to stand in for it.
-        tools = self.agent_tools(self.workspace, {"board": self.settings["raw"]})
-        workspace = (str(tools.board.repo) if tools is not None
-                     else self.workspace or str(main.executor.workspace.root))
-        config = main.config
-        preset_id = main.preset.id if main.preset else None
-        effort = getattr(main, "effort", None)
-        role = self.chat.model or "switchboard"
-        resolved = main.roles.resolve(role) if (main.roles is not None and role != "main") else None
-        if resolved is not None:
-            config, preset_id = resolved.config, resolved.preset_id
-            effort = resolved.effort or effort
-        config = self._usable_config(config)
-        # The tab's helper keeps its conversation on disk, keyed by (workspace, tab) — 30.7.
-        # The directory is outside `relay/sessions/`, the one tree that is indexed, so nothing
-        # here is listed as one of the person's own conversations. No tab (a GUI from before
-        # 30.7): no store, and the conversation lives and dies with the worker as it did.
-        session_dir = str(board_chat.helper_dir(self.workspace or "")) if self.tab else None
-        agent = Agent(config, workspace, emit, session_dir=session_dir,
-                      max_steps=main.max_steps, max_tool_calls=main.max_tool_calls,
-                      skills=getattr(main.executor, "skills", None),
-                      preset_id=preset_id, roles=main.roles, board=tools, effort=effort,
-                      # Protocol 30.4/30.7: the helper agent is the one that most needs the app
-                      # tools — a question asked in Options is answered by this agent.
-                      app=getattr(main, "app", None),
-                      # #GMCF decision 9: and because it is that agent, it never holds those
-                      # schemas back. A tab with no project attached has no board to hang a
-                      # `ChatScope` on, so without this flag the helper took the pane branch and
-                      # deferred the very tools it exists for.
-                      helper=True,
-                      # #GMCF (owner, 2026-09-20): the Actions pane is the palette with its
-                      # shortcuts beside it, so the helper may rebind one. The catalogue is the
-                      # worker's own — the same object the `configure` built and a `keybindings`
-                      # message replaces (`set_keybindings` below keeps this agent on the live
-                      # one) — so the helper and the pane write the same file through one path.
-                      keybindings=getattr(main.executor, "keybindings", None),
-                      track_requests=False, todo_tool=False, completion_check=False,
-                      stall_timeout_s=main.stall_timeout_s,
-                      first_token_timeout_s=getattr(main, "first_token_timeout_s", 0.0),
-                      failover=getattr(main, "failover", True),
-                      failover_hosted=getattr(main, "failover_hosted", False))
-        policy = getattr(main.executor, "policy", None)
-        if policy is not None:
-            agent.executor.policy = policy
-            agent.executor.workspace = Workspace(workspace, policy)
-        if getattr(main, "instructions", None) is not None:
-            agent.set_instructions(main.instructions)
-        # Last of all, so nothing above rebuilds the conversation underneath it.
-        board_chat.adopt(agent, self.tab)
-        return agent, tools
-
-    def _chat_turn_ended(self, turn_id: str, survey: bool, outcome: str) -> None:
-        """A page-agent turn ended: settle the survey state file (19.18).
-
-        `done`, `cancelled` or `error` all count: the survey ran, and asking again on every open
-        of the page would be the thing nobody wanted.  The owner can still import later — the
-        proposals are in the conversation and the import tool is one call away.
-        """
-        if survey and self.tools is not None:
-            board_chat.mark_survey(self.tools.board, "done", note=f"turn {outcome}")
+        if not self.console or self.tools is None:
+            return ""
+        if self.seeded or len(getattr(agent, "messages", [None])) > 1:
+            self.seeded = True
+            return ""
+        self.seeded = True
+        return board_chat.board_seed(self.tools)
 
     def _card_answer(self, session, turn_id, answer: str) -> None:
         """A card turn finished with something to say: it goes on that card's thread (19.10)."""
@@ -823,18 +758,19 @@ class BoardCommands:
 
     # ---- set_board -------------------------------------------------------------
     def set_keybindings(self, catalog) -> None:
-        """A `keybindings` message reached the worker: hand the live helper agent the new catalogue.
+        """A `keybindings` message reached the worker: hand the board's own agents the catalogue.
 
-        The helper is a second `Agent` with its own `ToolExecutor` (19.18), so the worker's own
-        `agent.executor.keybindings = catalog` misses it, and a helper that may rebind keys
-        (#GMCF, owner 2026-09-20) would otherwise go on writing against the keys as they were
-        when its conversation started.  Replaced in place, like the pane's: the conversation and
-        the tool list are the same afterwards, because the schema no longer carries the keys.
+        `worker.py` replaces the catalogue on this worker's agent, which since #AGNT is the
+        console itself.  What it misses is the **card** conversations (19.16), each a second
+        `Agent` with its own `ToolExecutor`; a card turn still refuses `set_keybinding` by scope,
+        so this is about the keys a card turn *reports*, not the ones it writes.  Replaced in
+        place, like the pane's: the conversation and the tool list are the same afterwards,
+        because the schema no longer carries the keys.
         """
-        agent = getattr(self.chat, "agent", None)
-        executor = getattr(agent, "executor", None)
-        if executor is not None:
-            executor.keybindings = catalog
+        for session in list(getattr(self.cards, "_sessions", {}).values()):
+            executor = getattr(getattr(session, "agent", None), "executor", None)
+            if executor is not None:
+                executor.keybindings = catalog
 
     def set_board(self, request: dict) -> None:
         """`set_board`: point this pane at another board (or none) without ending its conversation.
@@ -1623,7 +1559,7 @@ class BoardCommands:
                         "project": tools.project, "state": tools.state, "exists": tools.exists(),
                         "config": self._config(), "cards": batches[0] if batches else [],
                         "cards_total": len(self._snapshot), "more": len(batches) > 1,
-                        "problems": self._problems(), "chat": self.chat.state()})
+                        "problems": self._problems()})
             for index, batch in enumerate(batches[1:], 1):
                 self._send({"event": "board_cards", "id": rid, "rev": self.rev,
                             "cards": batch, "more": index < len(batches) - 1})
@@ -1666,29 +1602,11 @@ class BoardCommands:
             self._emit_changed()
         elif kind == "board_ask":
             self._ask(request, rid)
-        elif kind == "board_chat":
-            self._chat(request, rid)
-        elif kind == "board_chat_cancel":
-            # One turn at a time, so a Stop pressed in any of the tab's four panels stops *the*
-            # turn — which is right: it is one conversation (30.7). What was wrong is the answer.
-            # It went out with no `pane`, so every panel but the Switchboard's dropped it and the
-            # one that pressed Stop sat there running until something else arrived (owner,
-            # 2026-09-20: "message queue isn't working in the sessions helper, i can't
-            # interrupt"). It is addressed to whoever asked, falling back to the turn's own pane
-            # for a client from before 30.7.
-            pane = board_chat.validate_pane(request.get("pane")) if request.get("pane") \
-                else self.chat.pane
-            stopped = self.chat.stop()
-            self._send({"event": "board_chat_cancelled", "id": rid, "stopped": stopped,
-                        "pane": pane, "chat": self.chat.state()})
-        elif kind == "board_chat_queue_remove":
-            item = request.get("item")
-            if not isinstance(item, str) or not self.chat.remove(item):
-                raise ValueError("That prompt is not queued (it may already have started).")
-        elif kind == "board_chat_queue_move":
-            item, to = request.get("item"), request.get("to")
-            if not isinstance(item, str) or not isinstance(to, int) or not self.chat.move(item, to):
-                raise ValueError("That prompt is not queued (it may already have started).")
+        elif kind in ("board_chat", "board_chat_cancel", "board_chat_queue_remove",
+                      "board_chat_queue_move"):
+            # Retired by #AGNT. Still recognised for a release so a GUI one version behind is
+            # told what to send instead of being handed "Unknown protocol message".
+            raise ValueError(RETIRED_CHAT)
         elif kind == "board_cancel":
             self._cancel_card(request, rid)
         elif kind == "board_cleanup":
@@ -1736,10 +1654,10 @@ class BoardCommands:
         running_cards = self.cards.running_cards()
         if cleanup:
             running, busy_card = "a Switchboard cleanup", None
-        elif self.chat.busy():
-            # The page agent's own prompts never reach here (they queue, 19.18); everything else
-            # waits, because it can write any card on the board.
-            running, busy_card = "the Switchboard page agent's turn", None
+        elif self.console and bool(getattr(self.turns, "busy", False)):
+            # The console's own prompts never reach here — they queue, which is what a pane's
+            # queue is for. Everything else waits, because the console can write any card.
+            running, busy_card = "the Switchboard console's turn", None
         elif card_id is not None and card_id in running_cards:
             running, busy_card = f"{_turn_phrase(self.cards.mode_of(card_id))} on #{card_id}", card_id
         elif card_id is None and (running_cards or bool(getattr(self.turns, "busy", False))):
@@ -1957,45 +1875,6 @@ class BoardCommands:
         self._send({"event": "board_cancelled", "id": rid, "card_id": card_id or None,
                     "stopped": stopped, "cards": self.cards.running_cards()})
 
-    # ---- board_chat: the page agent (protocol 19.18) -----------------------------
-    def _chat(self, request: dict, rid) -> None:
-        """`board_chat`: a prompt for the page agent — a turn, or a place in the queue.
-
-        The page agent's own prompts never refuse on `board_busy`: the queue is the answer
-        (#N8VK's rule, the same as a pane's).  Everything else the board can run still refuses
-        while it is turning, because it can write any card.
-        """
-        text = request.get("text")
-        if not isinstance(text, str) or not text.strip() or len(text) > MAX_ASK_TEXT:
-            raise ValueError(f"board_chat text must be 1-{MAX_ASK_TEXT} characters.")
-        # Which pane asked (protocol 30.7). It picks the brief and tags every event of the turn;
-        # absent means the Switchboard, so every client from before 30.7 is unchanged.
-        pane = board_chat.validate_pane(request.get("pane"))
-        # A tab with no project attached still has a helper: the app tools and no board tools
-        # (30.7). So the board is required by the *pane*, not by the message — and the one pane
-        # that needs it is refused in a sentence rather than with a protocol error nobody can
-        # act on. The check is after the pane is parsed, which is why it moved down here.
-        if pane == "switchboard" and self.tools is None:
-            raise ValueError(NO_BOARD_CHAT_ERROR)
-        context = request.get("context")
-        if context is not None and not isinstance(context, str):
-            raise ValueError("board_chat context must be text.")
-        model = request.get("model")
-        if model is not None:
-            if not isinstance(model, str) or (model and model not in model_roles.SETTABLE):
-                raise ValueError("board_chat model must be a role id, or empty for the "
-                                 "Switchboard role.")
-            self.chat.model = model or None
-        if request.get("survey"):
-            return self._maybe_survey(self._need(), rid)   # one path: the survey is a chat turn
-        if not self.chat.busy() and self._busy_error(rid, "the page agent's prompt"):
-            return
-        what, ident = self.chat.ask(text.strip(), rid, pane=pane,
-                                    context=(context or "")[:board_chat.MAX_PANE_CONTEXT])
-        if what == "turn":
-            self._send({"event": "board_chat_started", "id": rid, "turn_id": ident, "pane": pane,
-                        "model": self.chat.model or "switchboard", "chat": self.chat.state()})
-
     def _problem_section(self, problem: dict) -> str | None:
         """Which section a problem belongs to, for `board_check {section}` (a triage button).
 
@@ -2019,7 +1898,9 @@ class BoardCommands:
         owner answers.  The board's `survey-state.json` is what makes a board fresh: a board from
         before the survey existed has no file and is never surveyed.
         """
-        if tools is None or self.chat.surveyed or self.chat.busy():
+        if tools is None or not self.console or self.surveyed:
+            return
+        if self.turns is None or bool(getattr(self.turns, "busy", False)):
             return
         from . import board_import as I
         from . import project_probe as PP
@@ -2051,8 +1932,20 @@ class BoardCommands:
             board_chat.mark_survey(tools.board, "pending")  # card turns are running; next open
             return
         prompt = board_chat.survey_prompt(tools.board.root, repo, probe, proposals[:MAX_IMPORT_KEYS])
-        self.chat.ask("Survey the project: what is already tracked here, and what should become "
-                      "cards?", rid, prompt=prompt, readonly=True, survey=True)
+        # The survey is an ordinary turn of this console's own conversation since #AGNT: it
+        # queues behind whatever is running, it is stopped by `cancel`, and its events are the
+        # pane's. `readonly` is the one thing that makes it different, and it is a flag on the
+        # turn rather than a second code path — nothing is written until the owner answers.
+        self.surveyed = True
+        self.seeded = True          # the survey carries the board's shape itself
+        try:
+            self.turns.submit(prompt, "queue", rid, surface="switchboard", readonly=True)
+        except ValueError as exc:
+            board_chat.mark_survey(tools.board, "pending")   # try again on the next open
+            self.surveyed = False
+            self.emit({"event": "error", "id": rid, "text": str(exc)[:2000]})
+            return
+        board_chat.mark_survey(tools.board, "done", note="survey turn queued")
 
     # ---- board_cleanup: one agent turn over the whole board ----------------------
     def _cleanup(self, request: dict, rid) -> None:

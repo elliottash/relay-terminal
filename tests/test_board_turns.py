@@ -286,5 +286,35 @@ class SessionTests(PoolTest):
         self.assertEqual(self.agents["AAAA"].prompts, ["one", "two"])
 
 
+class TurnBoundaryTests(PoolTest):
+    """A card turn has a beginning and an end on the wire, like a pane's (#AGNT).
+
+    The helper panel used to *infer* where a turn started and stopped from the events it saw —
+    one line of the Issue's table — so a console could not draw a busy strip it was sure of.
+    """
+
+    def of(self, name):
+        return [e for e in self.events if e.get("event") == name]
+
+    def test_a_turn_is_bracketed_and_every_event_of_it_names_its_surface(self):
+        turn_id = self.pool.start("AAAA", "discuss", "one")
+        self.wait_idle()
+        started, finished = self.of("agent_started"), self.of("agent_finished")
+        self.assertEqual([e["id"] for e in started], [turn_id])
+        self.assertEqual([e["id"] for e in finished], [turn_id])
+        self.assertEqual(started[0]["card_id"], "AAAA")
+        self.assertEqual(finished[0]["outcome"], "done")
+        for event in started + finished + self.of("delta") + self.of("done"):
+            self.assertEqual(event["surface"], "card:AAAA", event)
+
+    def test_a_stopped_turn_says_how_it_ended(self):
+        self.hold("AAAA")
+        self.pool.start("AAAA", "plan", "one")
+        self.wait_running()
+        self.pool.stop("AAAA")
+        self.wait_idle()
+        self.assertEqual(self.of("agent_finished")[0]["outcome"], "cancelled")
+
+
 if __name__ == "__main__":                              # pragma: no cover
     unittest.main()

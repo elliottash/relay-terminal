@@ -22,6 +22,7 @@ Owner decisions this implements are recorded in
 | `plans_dir` | abs path | default `<workspace>/.relay/plans` |
 | `instructions` | `{"files": [abs paths], "project_auto": true}` | instruction files to load; `project_auto` also loads project files found in the workspace (AGENTS.md, CLAUDE.md, WARP.md, ... per the scan table) |
 | `agents` | `{"dirs": [abs paths] or omitted}` | agent definition directories; omitted = all known locations (section 7) |
+| `context` | object | **what this agent is about** (section 33, card #AGNT): the surface's name, the role, the brief, where the conversation is kept, the named tool scope. Absent means a terminal pane, which is what every `configure` before section 33 meant. |
 
 `configured` event gains: `context_window`, `effort`, `mode`, `instructions` (list of loaded paths), `agents` (count), `session_id`.
 
@@ -567,6 +568,17 @@ while todos are open: … ignore this if it is current"). No event; no extra mod
   (Enter or typing on the selected row) keeps its text in the prompt box; Ctrl+Down puts it back at the head
   of the GUI queue when `steer_removed` (or `steer_returned`) arrives. Ctrl+Up on the head queued prompt, or
   dropping it above the steers, sends the usual `ask {when: "steer", requeue: false}`. No new messages.
+- **Reordering a queued prompt** (`queue_move {item, to}`, v4.4, 2026-09-20, card #AGNT): a *queued* prompt
+  moves to another place in the line. A steer is already inside the running turn and a forced item is an
+  interrupt, so neither can be moved; `to` is clamped to the queue's length rather than refused, because a
+  drag past the end of a list that shrank under it means "last", not "error". Reply: `queue_changed`, and
+  `queue_ack` below. The helper's own FIFO had reorder and the pane's queue did not, which is one line of
+  card #AGNT's table; there is one queue now and it has both.
+- **The queue ops answer with their request id** (`queue_ack {id, op, item?, to?}`, v4.4, 2026-09-20): sent by
+  `queue_remove`, `queue_move` and `queue_clear` when the request carried an `id`, so a client that sent three
+  ops can tell which of them landed. `queue_changed` says what the queue *is* and carries no request id;
+  `board_chat_queue_remove` and `_move` answered with nothing at all, which is what this replaces. Nothing is
+  sent for a request with no id, so a GUI from before this is unchanged.
 - **Cancel, interrupt and failure** no longer remove the user's prompt, delivered steers or subagent notes from
   the conversation. A half-finished tool-call group is completed with
   `{"error": "Not completed: the turn stopped before this tool call finished. …"}` results, then a note says the
@@ -3383,104 +3395,86 @@ only what a board created from now on is called (`new_board_folder()` / `newBoar
 never touches a board that already exists. Turning it off does not send `board_folder`, and sending
 `board_folder` does not change the option.
 
-### 19.18 The Switchboard page agent: a conversation about the whole board (v3.8, 2026-09-19)
+### 19.18 The Switchboard is a context (v4.4, 2026-09-20, card #AGNT; was the page agent, v3.8)
 
-Card #8YQ9, owner 2026-09-19: an agent on the Switchboard's **main page** that takes the whole
-board as its context by default, for the questions that are about the board rather than one card
-— reorganizing it, merging duplicates, moving cards between sections, explaining what is where.
-It is the board worker's fourth kind of turn (after a pane's own, a card's 19.16, and the cleanup
-19.9): one persistent conversation per worker, in `relay_core.board_chat.py`.
+Card #8YQ9, owner 2026-09-19: an agent on the Switchboard's **main page** that takes the whole board as
+its context by default, for the questions that are about the board rather than one card — reorganizing
+it, merging duplicates, moving cards between sections, explaining what is where.
 
-Since 2026-09-20 (card `#FEJQ`, section 30) that worker is the tab's **helper**, and this page is
-one of its panes: the same conversation answers in Options, Actions and Sessions, picked by `pane`,
-and the worker is keyed by the tab rather than the window — two tabs on one project run two helpers
-over one set of board files (30.7). Everything below is the `switchboard` pane of it, unchanged.
+Since card #AGNT (owner, 2026-09-20) that agent is not a second implementation. *"An agent interface is
+the prompt box. It has a set of options and tools that vary according to the setting/task, but in general
+they are shared systems."* So the Switchboard is one **context** (section 33) of an ordinary pane worker,
+and everything the page agent had of its own is gone:
 
-`board_chat {text, pane?, model?, survey?}` → `board_chat_started` (below), or `board_chat_queued`
-when a page-agent turn is already running:
+| Was (v3.8) | Is |
+|---|---|
+| `board_chat {text, pane, model, context, survey}` | `ask {text, surface, screen}` (12, 33.2) |
+| `board_chat_started` / `board_chat_queued` / `board_chat_state` | `agent_started`, `queued`, `queue_changed` |
+| `board_chat_cancel` → `board_chat_cancelled` | `cancel` |
+| `board_chat_queue_remove` / `_move` | `queue_remove` / `queue_move`, with `queue_ack` (12.5) |
+| `chat: true` on every turn event, and `pane` | `surface` on every turn event (33.2) |
+| `chat` block on `board` and on the events | — the queue is the worker's one queue |
+| `board_chat.PageAgent` — a second `Agent`, a second FIFO, a second thread | `TurnSupervisor`, as for a pane |
+| its own 20-prompt cap, no steering, no interrupt, no request ledger | the pane's queue, whole (12) |
 
-```jsonc
-// GUI -> worker
-{"type": "board_chat", "id": 61, "text": "merge the two voice cards"}
-// worker -> GUI, when the turn starts
-{"event": "board_chat_started", "id": 61, "turn_id": "chat-9f1c2a", "model": "switchboard",
- "chat": { "running": true, "turn_id": "chat-9f1c2a", "model": null, "survey": false,
-           "seconds": 0.0, "queue": [], "history": [ … the conversation so far … ]}}
-// worker -> GUI, when one is already running (FIFO, #N8VK's rule — never a refusal)
-{"event": "board_chat_queued", "id": "c2", "position": 1, "text": "then sort Inbox", "chat": true}
-```
+The four retired messages are still *recognised* for a release and answered with one sentence naming what
+to send instead (`board_protocol.RETIRED_CHAT`), rather than "Unknown protocol message".
 
-- **Context.** The conversation's first prompt is seeded with the whole board — the cleanup's
-  roster shape (one line per card, sections, config, `board_chat_brief.md`) — and every later
-  prompt is the owner's words alone. It persists for the life of the worker, like a card session;
-  `board` events now carry `chat` (the `chat` block above) so a reopened page redraws it.
-- **Tools.** Its own `BoardTools` under a `ChatScope`: the ordinary board tools **plus
-  `board_merge_cards` and `board_split_card`** (merging duplicates is this conversation's headline
-  job) **plus `board_import_items`** (below), the executor's read-only file tools and `search_files`.
-  No shell, no file writes: code is a card's Execute. `board_sections` stays with a cleanup.
-- **Model.** The `switchboard` role (13.1) — which is what a board worker is started on
-  (`agent_role`, 19.1) — so the page agent and the card threads answer on the same model.
-  `model` in a `board_chat` names another role for the turns after it (empty string: back to the
-  Switchboard role); the conversation survives the switch, as a pane's survives `set_model`.
-  The page's **model picker** does not use that field: it writes the `switchboard` role itself
-  (13.7) and reconfigures every board worker, which is the one setting both the page agent and the
-  card threads read. So a `configure` whose resolved `switchboard` model differs from the one the
-  live conversation was built on **rebuilds its agent**, keeping every message — otherwise the
-  role would have moved and the conversation would have gone on answering on the old provider
-  (`PageAgent.built_model_id` / `invalidate()`, nudged from `BoardCommands.bind_agent`).
-- **Queueing.** A prompt that arrives while *this* conversation is turning joins a worker-side
-  FIFO queue (cap 20; past it, `error`), announced by `board_chat_queued` and drained in order
-  when each turn ends — the pane's semantics (#N8VK), not the board's: the page agent never
-  refuses its own prompt. Everything else still refuses while it turns (`board_busy`, naming the
-  page agent), because it can write any card: a cleanup, a card turn, an import.
-- **Queue ops and stop.** `board_chat_queue_remove {item}`, `board_chat_queue_move {item, to}` →
-  `board_chat_state` (the `chat` block, always current); `board_chat_cancel` →
-  `board_chat_cancelled {stopped}` — the running turn stops and the queue carries on.
-- **Pane.** `pane` is `"switchboard"` (the default, and what a client that does not send the
-  field means), `"options"`, `"actions"` or `"sessions"`: which surface is asking, and so which
-  brief goes in front of the turn (30.7). The conversation is one whatever the pane — a question in
-  Options and the next one on the board are consecutive turns of the same agent.
-- **Events.** Every turn event of the page agent carries `chat: true` and its `turn_id` — the
-  idiom `cleanup: true` and `card_id` already use — including `context`, so the page's
-  context-left chip follows the conversation like a pane's. Each one also carries `pane`, the
-  value the ask was made with, so the panel that asked draws the answer and the others do not;
-  `board_chat_started`, `board_chat_queued` and `board_chat_state` carry it too.
+What is still the board's own:
 
-**`board_import_items`** is a new ordinary board tool (pane agents get it too): it turns tracking
-the project already has into cards through the same import the survey and the page use
-(`board_import.propose` + `apply`, 19.13), so every card carries its `source` key and nothing is
-imported twice. `keys` are re-derived from the project, never trusted from the caller; it is a
-write tool, budgeted like the others and refused in a read-only turn.
+- **The seed.** The first question of a console's conversation carries the board — one line per card, the
+  cleanup's roster shape, capped at 400 — so it costs no `board_list` round trip. Every later prompt is the
+  owner's words alone, the conversation being the context; a conversation that came back from disk (30.7)
+  is not seeded again. The **brief** is not part of it: since #AGNT it is in the system prompt, once
+  (`agent_context`, `brief.key: "switchboard"` → `board_chat_brief.md`).
+- **Tools.** The console's `ConsoleScope`: the whole executor — the shell and the file tools included since
+  the owner's decision of 2026-09-20 — plus the ordinary board tools, `board_merge_cards`,
+  `board_split_card`, `board_import_items`, `tests_check`, `tests_run` and `search_files`. §19.18 used to
+  say "No shell, no file writes: code is a card's Execute"; that fence is gone (33.3), and a board-less
+  console got round it by accident anyway. `board_sections` still belongs to a cleanup and `board_claim`
+  to a terminal pane, which are constraints rather than fences.
+- **Exclusion.** A console can write any card, so a card turn, a cleanup and an import wait while it turns
+  (`board_busy`, naming the console's turn); its own prompts queue instead, which is what a pane's queue is
+  for. A **terminal pane's** own turn does not hold the board this way: 19.16 is unchanged.
+- **Model.** The `switchboard` role (13.1), which is what the GUI configures a board worker with
+  (`agent_role`, or `context.agent_role`). A model pick writes that role and reconfigures the worker; the
+  conversation comes back from its file (30.7), so the pick no longer needs `PageAgent.invalidate`.
 
-**The survey** is the page agent's opening turn on a **freshly created** board (owner, 2026-09-19:
-"for a new project, the switchboard agent should search for existing project todos or tracking. if
-it finds anything, it offers to conver to switchboard issues. if its .git, it should offer to look
-on github.com for an issues corpus to sync"). What makes a board fresh is a marker file,
-`<board folder>/survey-state.json`, which `board_init` writes as `{state: pending}` when it creates
-a board (`_board_became_ready`); boards from before this existed have no file and are **never**
-surveyed. The first `board_open` on a pending board:
+**`board_import_items`** is an ordinary board tool (pane agents get it too): it turns tracking the project
+already has into cards through the same import the survey and the console use (`board_import.propose` +
+`apply`, 19.13), so every card carries its `source` key and nothing is imported twice. `keys` are
+re-derived from the project, never trusted from the caller; it is a write tool, budgeted like the others
+and refused in a read-only turn.
+
+**The survey** is the console's opening turn on a **freshly created** board (owner, 2026-09-19: "for a new
+project, the switchboard agent should search for existing project todos or tracking. if it finds anything,
+it offers to conver to switchboard issues. if its .git, it should offer to look on github.com for an issues
+corpus to sync"). What makes a board fresh is a marker file, `<board folder>/survey-state.json`, which
+`board_init` writes as `{state: pending}` when it creates a board (`_board_became_ready`); boards from
+before this existed have no file and are **never** surveyed. The first `board_open` on a pending board:
 
 1. runs `project_probe.probe()` and `board_import.propose()` offline (both read-only), and sends
-   **`board_survey {root, project, hints, counts, proposals, git}`** — the `git` block is the
-   primary remote (`upstream` over `origin`, with its reason), its URL, the forge, and owner/repo,
-   so the page can offer the GitHub corpus;
-2. starts the page agent's turn on a prompt built from that data (`board_chat.survey_prompt`)
-   under a **read-only scope**: every write tool refuses with `board_readonly_turn`, so nothing is
-   written until the owner answers — the confirm path is the reply, or the page's Import button,
-   which sends the existing `board_import_apply` (19.13) or lets the agent call
+   **`board_survey {root, project, hints, counts, proposals, git}`** — the `git` block is the primary remote
+   (`upstream` over `origin`, with its reason), its URL, the forge, and owner/repo, so the page can offer the
+   GitHub corpus;
+2. submits the survey as an ordinary turn of the console's own conversation, with `readonly: true` and
+   `surface: "switchboard"` (33.2): it takes its place in the queue, `cancel` stops it, and its events are
+   the pane's. Every write tool refuses — the board's with `board_readonly_turn`, the executor's with the
+   same sentence — so nothing is written until the owner answers. The confirm path is the reply, or the
+   page's Import button, which sends the existing `board_import_apply` (19.13) or lets the agent call
    `board_import_items`;
-3. settles the marker to `done` when the turn ends, whatever its outcome, so a board is surveyed
-   once. If card turns or a cleanup are running at open, the marker goes back to `pending` and the
-   next open tries again. A `board_chat {survey: true}` runs the same path by hand.
+3. settles the marker to `done` once the turn is queued, so a board is surveyed once; a queue that refuses
+   the turn puts it back to `pending` and the next open tries again. **Only a console surveys**: a terminal
+   pane's worker opening a Switchboard must never start a turn in the pane the person is working in.
 
-The GitHub corpus is **an offer that links out only** until #GDQN (engine) and #ZKR0 (its
-Switchboard surface) land: the survey's prompt and event carry the issues URL and say so, and
-nothing is fetched or synced.
+The GitHub corpus is **an offer that links out only** until #GDQN (engine) and #ZKR0 (its Switchboard
+surface) land: the survey's prompt and event carry the issues URL and say so, and nothing is fetched or
+synced.
 
 **`board_check` gains `section`** (the page's per-section triage button): a column id, answered by
-`board_problems {items, section}` with only that section's cards' problems. Problems about the
-board itself (an orphan thread, a duplicate id) belong to no section and are left out of a scoped
-check; unscoped `board_check` is unchanged.
+`board_problems {items, section}` with only that section's cards' problems. Problems about the board itself
+(an orphan thread, a duplicate id) belong to no section and are left out of a scoped check; unscoped
+`board_check` is unchanged.
 
 ### 19.19 A pane claims a card: `pane_token`, `board_claim` and `session` (v3.9, 2026-09-20)
 
@@ -6254,122 +6248,120 @@ Owner, 2026-09-20: "it should be clear what's changed / done and reversion / und
 - `app_changes` and `app_undo` (30.4) are the agent's view of the same log — a convenience, not the
   mechanism.
 
-### 30.7 The helper worker: one per tab, and `board_chat {pane}`
+### 30.7 The helper worker: one per tab, and one conversation (v4.4, 2026-09-20, card #AGNT)
 
 The helper is the board worker (`src/BoardWorker.{h,cpp}`, `agent_role: "switchboard"`, 19.18)
-generalised, not a sibling of it:
+generalised, not a sibling of it — and since card #AGNT it is not a second implementation either: it is
+an ordinary pane worker configured with a `context` (section 33). `board_chat {pane}` is retired;
+`ask {surface}` is how a console asks, and one conversation is drawn in all of them (33.2, owner
+decision 1).
 
 - **One worker per tab**, keyed by the tab's persistent id, configured with that tab's workspace.
   The id is minted lazily by `RelayWindow::tabIdOf(page)` — `t` and twelve hex digits, kept on the
   page widget and written into the saved layout as `tab_id`, so it survives a restart and a tab
   being moved or renumbered. It is not the share id (`tab-…`), which is deliberately not saved.
-  It rides twice on the helper's `configure`: as `app.tab` (30.2), which is the canonical field and
-  reaches pane agents too, and as a **top-level `tab`** beside `workspace`, which is what the board
-  side keys its conversation by without reaching into the app block.
+  It rides on the helper's `configure` three times: as `app.tab` (30.2), which is the canonical field
+  and reaches pane agents too; as a **top-level `tab`** beside `workspace`, which is what the board
+  side keys by; and, since #AGNT, as `context.persist.key` (33.1), which is the field the *agent*
+  reads. They are the same id and `configure` accepts any of them.
   Switchboards are per tab, so the same project open in two tabs gets two helpers with two
   conversations over **one** set of board files; only the conversation and the queue are the tab's
   own.
 - **The conversation is persisted per (project, tab)**, so a restart brings each tab's helper back
-  with its own history. The top-level `tab` and the workspace are the key and nothing else is
-  written down: the file is
-  `$XDG_DATA_HOME/relay/helper-sessions/<workspace digest>/<tab digest>.json`, the digest of the
-  workspace being `sessions.default_session_dir`'s and the file name a 32-hex digest of the tab id
-  (`board_chat.helper_dir` / `helper_session_id`), so the same tab in the same project resolves to
-  the same file at every start. The directory is deliberately **outside** `relay/sessions/`, the one
-  tree `SessionStore.index()` indexes: a helper conversation is not one of the person's own
-  sessions and is not listed as one (14). The page agent is built with that `session_dir` and takes
-  the id over with `Agent.adopt_session`, which loads the file when there is one and starts an empty
-  conversation under that id when there is not; from then on the ordinary end-of-turn autosave keeps
-  it. A `configure` that moves either the workspace or the tab drops the live conversation so the
-  next ask adopts the new tab's own; one that moves neither — a model swap, a keybinding reload —
-  leaves it exactly where it was. A board-less tab is keyed by `("", tab)`, and a `configure` with
-  **no** `tab` at all (a GUI from before 30.7) gets no store: its helper behaves as it did, one
-  conversation per worker, gone when the worker goes.
+  with its own history. The key and the workspace are all that is written down: the file is
+  `$XDG_DATA_HOME/relay/helper-sessions/<workspace digest>/<key digest>.json`, the digest of the
+  workspace being `sessions.default_session_dir`'s and the file name a 32-hex digest of the key
+  (`agent_context.helper_dir` / `helper_session_id` — moved there from `board_chat` by #AGNT, layout
+  untouched, so a tab's history from before that card is found by the same name). The directory is
+  deliberately **outside** `relay/sessions/`, the one tree `SessionStore.index()` indexes: a console's
+  conversation is not one of the person's own sessions and is not listed as one (14). `worker.py`
+  builds the agent with that `session_dir` and takes the id over with `Agent.adopt_session`, which
+  loads the file when there is one and starts an empty conversation under that id when there is not;
+  from then on the ordinary end-of-turn autosave keeps it. A `configure` that moves either the
+  workspace or the key adopts the other conversation; one that moves neither — a model swap, a
+  keybinding reload — brings the same one back. A `configure` with **no** persistence at all (a GUI
+  from before this) gets no store: its console behaves as it did, one conversation per worker, gone
+  when the worker goes.
 - **Started on the first ask**, not when the tab opens (owner decision 5), and it lives as long as
   the tab: closing the tab stops its worker, and a Switchboard put away no longer ends it. A tab
-  with no project attached gets a **board-less** helper: the `app` block and the app tools, no
-  `board` block and no `board_*` tools (`configure` with an empty `workspace`; the page agent is
-  built with `board=None` and takes the pane agent's workspace).
+  with no project attached gets a **board-less** console: the `app` block and the app tools, no
+  `board` block and no `board_*` tools (`configure` with an empty `workspace`).
 - **The helper's `configure` carries the `keybindings` block too**, the same one a pane's does and
   from the same builder (`Keymap::instance().catalog()`), and a reload is re-sent to every
   configured helper beside the panes (`RelayWindow::sendHelperKeybindings()`). It is what lets
   `app_action_list` answer with each action's current keys — the Actions pane is the palette "with
   its keyboard shortcut beside it", and since `set_keybinding`'s schema stopped listing the actions
   that tool result is where a shortcut is found. It also hands the helper `set_keybinding` itself,
-  which the owner decided on card `#GMCF` (2026-09-20): the helper may rebind a key. The worker
-  runs two agents, so a `keybindings` message replaces the catalogue on both (`worker.py`,
-  `BoardCommands.set_keybindings`). A card's Discuss or Plan turn still refuses the tool.
-- **`board_chat` gains `pane`**: `"switchboard"` (the default, and what a client that does not send
-  the field means), `"options"`, `"actions"` or `"sessions"`; anything else is an error. It picks
-  the brief that goes in front of the turn — the board roster and the page agent's job for
-  `switchboard` (19.18), and for the others a paragraph about that pane, headed with the panel's own
-  title. The conversation is one: a question in Options and the next one on the board are
-  consecutive turns of the same agent, which is the point of a single helper.
-- **`board_chat` also takes `context`**: an optional string, cut at 2000 characters, saying what is
-  on screen in the asking pane — the rows being read, the search that is in the box. It is a hint,
-  not a context dump, and the catalog itself is never pasted in: the agent reads the rows live with
-  the app tools, because a settings list pasted into a prompt is stale the moment the person changes
-  one. It reaches the turn as an "On screen now:" line under the brief.
+  which the owner decided on card `#GMCF` (2026-09-20): the helper may rebind a key. Since #AGNT the
+  worker runs **one** agent, so `worker.py`'s own `agent.executor.keybindings = catalog` is the
+  console's; `BoardCommands.set_keybindings` carries it on to the live *card* conversations (19.16),
+  which are the second agents that remain. A card's Discuss or Plan turn still refuses the tool.
+- **Which surface asked is `ask {surface}`** (33.2), free text the GUI mints — `"switchboard"`,
+  `"options"`, `"actions"`, `"sessions"`, `"card:AGNT"`. It rides on `queued`, on each queue row, on
+  `agent_started` / `agent_finished` and on every event of the turn, so four consoles sharing one
+  conversation each know which of their own asks an event belongs to. **The conversation is one and
+  is drawn everywhere** (owner decision 1 on card #AGNT): a question in Options and the next one on
+  the board are consecutive turns of the same agent, and every console shows both. The `pane`
+  filtering that drew only "its own" turns is gone, and with it the class of bug #H6VQ was — a panel
+  dropping an event addressed to somebody else and then waiting for ever.
+- **What is on screen is `ask {screen}`** (33.2): an optional string, cut at 2 000 characters, saying
+  what the asking surface is showing — the rows being read, the search that is in the box. It is a
+  hint, not a context dump, and the catalog itself is never pasted in: the agent reads the rows live
+  with the app tools, because a settings list pasted into a prompt is stale the moment the person
+  changes one. It reaches the model as an "On screen now:" line above the prompt, and is kept out of
+  the prompt the queue and the request ledger hold — the record is what the person typed. It is
+  **not** `context`, which on `ask` is already the program/terminal context object; that collision is
+  why the field was renamed.
+- **The brief is in the system prompt**, once, from `context.brief` (33.1). It was prefixed to the
+  prompt text of every turn until #AGNT, with a once-per-pane rule to stop it becoming the
+  conversation; a brief the model is told once is also what `session_info` can report.
 - **A `switchboard` ask in a tab with no board is refused in a sentence**, not with a protocol
   error nobody can act on: "This tab has no Switchboard, so there is nothing for the Switchboard
   pane to talk about. Attach a project to the tab, or ask from Options, Actions or Sessions."
-  (`board_protocol.NO_BOARD_CHAT_ERROR`). The other three panes are about the app, not about a
-  board, and run exactly as usual. `board_chat {survey: true}` still needs the board and still
-  refuses without one.
-- **The answer is the existing turn events.** `board_chat_started`, `board_chat_queued`,
-  `board_chat_state`, `board_chat_cancelled` and every `chat: true` turn event carry `pane`, so
-  the panel that asked draws the answer and the others do not. Queueing, stop and the queue ops of
-  19.18 are unchanged and are the worker's, not the panel's — which is exactly why the **queue**
-  is the one thing a panel reads out of a `chat` block addressed to another pane: one worker holds
-  one FIFO for the whole tab, `board_chat_state` is tagged with the pane of the turn that is
-  *running*, and a prompt queued from Sessions would otherwise never hear about itself again. The
-  turn is not read that way: a Sessions panel does not go busy because the board is. Every panel
-  of the tab draws the queue (#H6VQ); until 2026-09-20 only the Switchboard did, while the other
-  three promised in the composer that a second prompt queues.
-- **`board_chat_cancel` is not scoped by pane, and its answer is.** There is one turn per worker,
-  so Stop pressed in any of the tab's four panels stops it — it is one conversation. The
-  `board_chat_cancelled` that answers carries the `pane` that pressed Stop (falling back to the
-  turn's own pane for a client from before this section), because a panel drops what is addressed
-  to somebody else and would otherwise sit there running.
-- **A worker that goes when nobody asked it to puts its panels back.** `done` was the worker's to
+  (`board_protocol.NO_BOARD_CHAT_ERROR`, raised by `worker.py` when `context.name` is `switchboard`
+  and no board is attached). The other three surfaces are about the app, not about a board, and run
+  exactly as usual. A survey still needs the board and still does not run without one.
+- **Stop is `cancel`,** and the queue ops are `queue_remove`, `queue_move` and `queue_clear` (12.5).
+  There is one turn per worker, so Stop pressed in any of the tab's consoles stops it — it is one
+  conversation — and the events that answer carry the `surface` of the turn that was running.
+- **A worker that goes when nobody asked it to puts its consoles back.** `done` was the worker's to
   send, so a helper that died mid-turn — its tab closed under it, it crashed, it could not start —
-  left the panel that asked showing a busy strip for an answer that is never coming, with its
-  composer refusing the next prompt. The GUI reports the exit as that turn's own `error`, tagged
-  with the pane that asked and carrying `worker_gone: true`, which also drops the queue rows: the
-  worker's FIFO went with the worker. The next ask starts a fresh worker through the first-ask
-  path above.
+  left the console that asked showing a busy strip for an answer that is never coming, with its
+  composer refusing the next prompt. The GUI reports the exit as that turn's own `error`, carrying
+  the turn's `surface` and `worker_gone: true`, which also drops the queue rows: the worker's queue
+  went with the worker. The next ask starts a fresh worker through the first-ask path above.
 - **The helper never runs on a guest harness, and never starts one** (card `#GH5T`, owner report
   2026-09-20: "The Switchboard agent could not answer: Base URL must be an HTTPS URL without
   credentials, query, or fragment"). The helper worker is configured with the *window's*
   `provider/preset`, so a Main on Claude Code or Codex made it a guest worker (29.3) — and the
   helper's whole job is Relay's own `board_*` and `app_*` tools, which a guest does not take
-  (`#4NXH`). Every card and page turn then died in `ProviderConfig.validate`, because
-  `harness://claude` is not an endpoint. So when `agent_role` is `switchboard` and the preset is a
-  `guest:` one, the worker starts no guest: before any role is resolved it walks the Options ›
-  Models priority list (the `fallbacks` option, the same order and the same terms a failover walks
-  it — guest rows, entries whose key has gone and Relay Free unless the list names it and
-  `hosted.available()` are all skipped) and the first entry that can take a turn becomes the
-  resolver's Main. "Follow Main", the tiers, the subagent factory and a pick in the helper's model
-  box then all name that model, and `configured.roles.switchboard.note` (and `tiers.main.note`)
-  says why, which is what the model box shows in its tooltip: *"Main is Claude Code, a guest
-  session the helper agent cannot run on, so it fell back to kimi-k3."* A role pick of a real
-  provider or tier still wins over it. When the list holds nothing usable the worker is still
-  configured — the Switchboard is files, so the pane opens and its cards are read — on a provider
-  that is never called, and a turn answers one sentence: "The helper agent cannot run on Claude
-  Code. Add a provider under Options › Models, or pick a model for the helper in its model box."
-  A **pane** on a guest preset is untouched by all of this: 29.3 stands exactly as written.
+  (`#4NXH`). So when `agent_role` is `switchboard` and the preset is a `guest:` one, the worker
+  starts no guest: before any role is resolved it walks the Options › Models priority list (the
+  `fallbacks` option, the same order and the same terms a failover walks it — guest rows, entries
+  whose key has gone and Relay Free unless the list names it and `hosted.available()` are all
+  skipped) and the first entry that can take a turn becomes the resolver's Main. "Follow Main", the
+  tiers, the subagent factory and a pick in the helper's model box then all name that model, and
+  `configured.roles.switchboard.note` (and `tiers.main.note`) says why, which is what the model box
+  shows in its tooltip: *"Main is Claude Code, a guest session the helper agent cannot run on, so it
+  fell back to kimi-k3."* A role pick of a real provider or tier still wins over it. When the list
+  holds nothing usable the worker is still configured — the Switchboard is files, so the pane opens
+  and its cards are read — on a provider that is never called, and a turn answers one sentence: "The
+  helper agent cannot run on Claude Code. Add a provider under Options › Models, or pick a model for
+  the helper in its model box." A **pane** on a guest preset is untouched by all of this: 29.3 stands
+  exactly as written, and #AGNT changes none of it.
 
 The `switchboard` role keeps its protocol name — settings, the model box (#BRD3), its Options ›
 Models row and its Main default are untouched — and is **labelled "Helper agent"** in the UI (owner
-decision 4, 13.1). Each panel's header says where it is: "Switchboard agent", "Options helper",
-"Actions helper", "Sessions helper".
+decision 4, 13.1). Each console's header says where it is: "Switchboard agent", "Options helper",
+"Actions helper", "Sessions helper", which is `context.brief.title`.
 
 ### 30.8 Notes and deviations
 
-- **No `helper_ask` message.** Card `#FEJQ`'s plan sketched one; `board_chat` already carries a turn to
-  this worker, with a queue, a stop and events the panels can draw, so `pane` on `board_chat` is
-  that message. One message and one conversation is also what "a single joint system" means on the
-  wire.
+- **No `helper_ask` message, and in the end no `board_chat` either.** Card `#FEJQ`'s plan sketched a
+  `helper_ask`; `board_chat` already carried a turn to this worker, so `pane` on `board_chat` became
+  that message. Card #AGNT went one step further and removed the second message as well: `ask` already
+  carries a turn, with a queue, a stop, steering and events a console can draw, so a console's ask is
+  `ask`. One message and one conversation is what "a single joint system" means on the wire.
 - **The catalog is the GUI's, always.** The worker never reads a settings file and never writes
   one: it knows exactly what the last `configure` or `app_catalog` said. A value the agent reports
   is therefore as fresh as the last catalog, which is why the GUI resends on every change rather
@@ -6967,3 +6959,135 @@ Switchboard's "Work signals unasked" writes `signals_config`.
   is on, and the card is the context the thread needs, so `regressed` is an exception.
 - The notification for `stopped` reads "Stopped working on `<key>`" rather than the card's bare
   "Stopped": a line in the bell that names no fault cannot be acted on.
+
+## 33. An agent is the prompt box: the `context` block (v4.4, 2026-09-20, card #AGNT)
+
+Owner, 2026-09-20, comparing the helper's panels with a terminal pane:
+
+> "the queue doesn't work like the main terminal, and the thinking bubbles don't work the same way.
+> why not just make it feature equal with the terminal agent?"
+
+> "an agent interface is the prompt box. it has a set of options and tools that vary according to the
+> setting/task, but in general they are shared systems."
+
+> "agents are specialized for the given pane context, but the general rule/approach is that agents
+> have access to all systems and can work across panes and contexts."
+
+Those three sentences fix the seam. **What is shared is everything about *how* you talk to an agent**
+— one composer, one queue, one transcript, one model box, one `ask`, one `cancel`. **What varies is
+what the agent is *about*** — the brief, the defaults, where the conversation is kept, what a finished
+turn's output does. **What must not vary is the tool set.**
+
+So there is no second protocol for a helper. A helper worker is `backend/worker.py`, configured with a
+`context` block; `board_chat` and its queue messages are retired (19.18). Backend:
+`backend/relay_core/agent_context.py`, `queue.py`, `agent.py`, `board_protocol.py`; tests
+`tests/test_agent_context.py`, `tests/test_queue.py`, `tests/test_board_chat.py`. The GUI half is
+`relay::agent::ContextSpec` (`src/AgentContext.h`), field for field with `ContextSpec` here.
+
+### 33.1 `configure {context}`
+
+```jsonc
+{"type": "configure", "workspace": "/home/e/relay-terminal", "…": "…",
+ "context": {
+   "name": "switchboard",            // terminal | switchboard | card | options | actions | sessions
+   "agent_role": "switchboard",      // 13.1; the top-level `agent_role` wins when both are sent
+   "workspace": "/home/e/relay-terminal",
+   "persist": {"scope": "helper", "key": "t0123456789ab"},
+   "brief": {"key": "switchboard", "title": "Switchboard agent", "screen": ""},
+   "scope": "console",               // pane | console | card — the NAMED tool scope
+   "shell": false,
+   "routing": "agent"}}              // auto | agent
+```
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `name` | enum, **required** | — | which surface this is. An unknown name is refused rather than ignored: a typo would otherwise silently take the terminal's defaults. |
+| `agent_role` | string | `""` | the model role (13.1). The top-level `agent_role` wins when both are sent, so a GUI that sends both cannot contradict itself. |
+| `workspace` | string | `""` | the surface's workspace; the `configure`'s own `workspace` is what the agent and the board use. |
+| `persist.scope` | `""` \| `pane` \| `helper` | `""` | where the conversation is kept. `helper` is the per-(project, key) file of 30.7; `""` is the agent's own session store. |
+| `persist.key` | string ≤128 | `""` | the key inside that scope — the tab id, for `helper`. A scope with no key is refused: keying by `""` would give every tab of every project one shared conversation. |
+| `brief.key` | string ≤64 | `""` | which brief goes in the **system prompt**: `switchboard` (`board_chat_brief.md`), `options`, `actions`, `sessions`. An unknown key is no brief rather than an error — the GUI may name a surface this worker is older than. |
+| `brief.title` | string ≤200 | `""` | the heading the brief is written under, and what the console's header says. |
+| `brief.screen` | string ≤2000 | `""` | the surface's standing "On screen" line. The live one is `ask {screen}`. |
+| `scope` | `pane` \| `console` \| `card` | from `name` | the **named tool scope** (33.3). `terminal` → `pane`, `card` → `card`, everything else → `console`. |
+| `shell` | bool | `name == "terminal"` | whether the surface spawns a shell. The GUI's; the worker records and echoes it. |
+| `routing` | `auto` \| `agent` | `auto` for `terminal`, else `agent` | what the composer does with a line that is not obviously a prompt. The terminal is the only context that can run it as a command. |
+
+`configured` gains `context`, the same block back with `scope` set to the scope the worker actually
+settled on — which is what the GUI reads to confirm the surface it is drawn on was understood.
+
+A `configure` with no `context` is a terminal pane, byte for byte what it was: no event grows a field,
+and the pane still defers its tool groups (12.13).
+
+### 33.2 `ask {surface, screen, readonly}`
+
+Three additive fields, all the console's; a terminal pane sends none of them and nothing changes for it.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `surface` | string ≤64, one line | which console asked. Free text the GUI mints (`switchboard`, `options`, `card:AGNT`), never an enum. It rides on `queued`, on each `queue_changed` row, on `agent_started` / `agent_finished` and on **every event of that turn**, so several consoles can share one conversation and each still knows which of its own asks an event belongs to. Absent means the field appears on nothing. |
+| `screen` | string, cut at 2000 | what the asking surface is showing (30.7). Reaches the model as an `On screen now: …` line above the prompt; kept out of the prompt the queue and the request ledger hold, because the record is what the person typed. Not `context`, which is the program-context object. |
+| `readonly` | bool, default false | this turn writes nothing by design (the Switchboard's survey, 19.18). The board's write tools refuse with `board_readonly_turn`; the executor's — `write_file`, `edit_file`, `run_command`, `run_in_terminal`, `set_keybinding`, `app_option_set`, `app_action_run`, the subagent tools — refuse with the same sentence. The tool *list* is unchanged, so one read-only turn does not re-prefill every cached request below it. |
+
+**One conversation, drawn everywhere** (owner decision 1 on card #AGNT). The four helper surfaces of a
+tab share one agent and one conversation, and each draws all of it: a question in Options and the next
+one on the board are consecutive turns, and both appear in both. `surface` is provenance and addressing,
+not a filter. A per-surface conversation is `context.persist.key`, and nothing else moves.
+
+### 33.3 The named tool scope, and the three things that still withhold a tool
+
+`configure {context: {scope}}` names it and `Agent.tools()` resolves it, in one place. Before this card
+it was *inferred* from `getattr(self.board, "card_scope", None)`, so a console in a tab with no project
+attached fell through to the pane branch and silently got the whole executor while a board-attached one
+got read-only tools: the same agent, two tool sets, decided by whether a board happened to be there.
+
+| Scope | Who | Tools |
+|---|---|---|
+| `pane` | a terminal pane's own agent | the whole executor, the app tools, its own session's read tools, the board's ordinary set. Defers the on-demand groups (12.13). |
+| `console` | the Switchboard page, Options, Actions, Sessions | **the same list**, plus `board_merge_cards`, `board_split_card`, `board_import_items` and `search_files`. Defers nothing. |
+| `card` | one Discuss or Plan turn on one card | the mode's board tools and the read-only file tools (19.10). Defers nothing. |
+
+**A context carries no tool whitelist.** A per-surface allowlist would re-create the fence the owner just
+took down — today's Sessions helper could not open a pane until #H6VQ, because "opening a pane" had been
+marked unsafe. The only gates are the two that are the owner's: the `settable` / `agent_safe` markers on
+the catalog rows, and the Options › Agent toggle "Agents may change options and run actions" (30, #FEJQ
+decisions 1–3).
+
+Three things still withhold a tool, and each is a constraint rather than a fence:
+
+1. **No board, no `board_*` tools.** There is nothing to act on, and a `switchboard` ask in a board-less
+   tab is answered in a sentence (30.7).
+2. **A guest harness cannot run Relay's tools** (#GH5T, #4NXH), so the helper never runs on one and never
+   starts one. 29.3 and 30.7's last bullet stand exactly as written.
+3. **A card's Plan turn writes only its own `## Plan`** (19.20, `board_tools.CardScope`). That is the
+   stage machine, not a per-surface fence, and it is why a Plan turn gets no shell and no file writes
+   while a console does.
+
+What came down with this card, and why each was a fence:
+
+- **`ChatScope` gave a console no shell and no file writes** (§19.18: "No shell, no file writes: code is
+  a card's Execute"). Owner decision 3 on card #AGNT: *yes, with the workspace it has, and never for a
+  card's Plan turn.* A board-less console already got them by accident.
+- **`session_info` and `activity` were the pane agent's alone** (30.5). Every agent should be able to
+  answer "why was that turn slow" about a turn of its own; since there is one agent per worker it does.
+- **`track_requests` / `todo_tool` / `completion_check` were off for the helper.** That is precisely "not
+  feature equal"; a console now takes the ordinary options.
+- **`_deferred_groups` special-cased a `helper` flag.** It reads the named scope, and the rule is one
+  line: only a terminal pane defers.
+
+### 33.4 Notes and deviations
+
+- **`helper: true` on a built agent still means `scope: "console"`.** It is the spelling from before the
+  scope had a name, and `Agent.helper` is now a property of the scope, so the flag and the scope cannot
+  disagree — which they did, in opposite directions, in `tools()` and in `_deferred_groups`.
+- **"Say what you are doing" belongs to every agent.** A turn that acted on the app through `app_open`,
+  `app_option_set`, `app_action_run` or `app_undo` and then finished with an empty message used to read
+  as a turn that did nothing — a console draws text, not tool calls. Each `app_*` result already says
+  what happened in a sentence, so the agent streams that as its answer. It was the helper's own emit
+  wrapper until this card.
+- **The dead `turn_started` tag is gone.** `board_chat` and `board_turns` both listed it and nothing ever
+  emitted it. `chat` was overloaded four ways (true on turn events, an object on `board`, on
+  `board_chat_started` and on `board_chat_state`) and is gone with them.
+- **A card turn now has a turn boundary.** `agent_started` and `agent_finished` bracket it, carrying
+  `card_id`, `mode` and `surface: "card:<ID>"`; a console used to infer where a card turn began and ended
+  from the events it saw.

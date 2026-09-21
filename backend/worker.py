@@ -80,7 +80,10 @@ def main():
     subagents = SubagentManager(emit)
     # Which model role this pane's own agent runs (protocol 13): "main", or "flash" for panes that
     # default to the Flash agent.
-    state = {"agent_role": "main"}
+    # `context` is what this worker's agent is *about* (protocol 33): None for a terminal pane,
+    # a `ContextSpec` for an agent console. Kept here rather than as a local of `configure`,
+    # because `ask` reads it and a message may arrive before any `configure` has.
+    state = {"agent_role": "main", "context": None}
 
     # Switchboard (protocol 17). `board` also tags board_ask turn events with their card_id and
     # appends the agent's answer to the card thread, so it is created before the supervisor.
@@ -225,6 +228,7 @@ def main():
                 # named tool scope. A GUI that sends none gets a terminal pane, which is every
                 # worker before this card.
                 context = agent_context.from_request(request)
+                state["context"] = context
                 # Protocol 30.7: which tab this worker is the helper of. It keys the helper's
                 # conversation with the workspace `board.configure` has just settled, so the
                 # same tab comes back with its own history after a restart. The context's
@@ -499,7 +503,24 @@ def main():
                         loaded = (loaded or []) + agent.executor.skills.invoked(request["skills"])
                     except skills.SkillError as exc:
                         raise ValueError(f"Skill: {exc}") from None
-                turns.submit(request.get("text", ""), request.get("when", "now"), request.get("id"),
+                # Protocol 30.7: the one surface whose whole subject is the cards, asked in a
+                # tab with no project attached, is refused in a sentence rather than with a
+                # protocol error nobody can act on. Options, Actions and Sessions are about the
+                # app and run exactly as usual without a board.
+                asked_by = state.get("context")
+                if (asked_by is not None and asked_by.name == "switchboard"
+                        and board.tools is None):
+                    raise ValueError(board_protocol.NO_BOARD_CHAT_ERROR)
+                text = request.get("text", "")
+                # The board a Switchboard console's first question is seeded with (19.18): one
+                # line per card, in front of the first prompt of the conversation and never
+                # again. Every later prompt is the owner's words alone, the conversation being
+                # the context — the card sessions' seeding rule.
+                if turns.agent is not None and isinstance(text, str):
+                    seed = board.console_seed(turns.agent)
+                    if seed:
+                        text = seed + "\n" + text
+                turns.submit(text, request.get("when", "now"), request.get("id"),
                              request.get("context"), loaded or None,
                              requeue=request.get("requeue", True),
                              # Protocol 33 (#AGNT): which console asked, what it is showing, and

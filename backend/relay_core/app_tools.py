@@ -631,12 +631,13 @@ WRITE_TOOLS = ("app_option_set", "app_action_run")
 
 
 class AppTools:
-    """The `app_*` tools for one worker: the helper's and every pane agent's alike (§30.4).
+    """The `app_*` tools for one worker: a console's and every pane agent's alike (§30.4).
 
-    One instance per worker, shared by the pane's own agent and by the helper agents the board
-    worker builds (`board_protocol._build_page_agent`), so `app_changes` is "what this worker
-    changed" and not "what this one conversation changed".  What differs between those agents is
-    the brief they are given, not the tools — the card's "one tool set" decision.
+    One instance per worker, shared by the worker's own agent and by the card conversations the
+    board builds beside it (19.16), so `app_changes` is "what this worker changed" and not "what
+    this one conversation changed".  What differs between those agents is the brief they are
+    given, not the tools — #FEJQ's "one tool set" decision, and since #AGNT (§33.3) the rule for
+    every agent: a context specialises an agent, it does not fence it.
     """
 
     def __init__(self, catalog: AppCatalog | None, bridge: AppBridge, *,
