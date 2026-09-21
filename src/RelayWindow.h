@@ -7421,8 +7421,19 @@ private:
             // The tab's project, or none: a tab attached to nothing gets a board-less console,
             // which is a supported state and not an error (protocol 30.7).
             spec.workspace = page ? m_window->boardWorkspaceOfTab(page) : QString();
+            const QString tab = page ? page->property("relayTabId").toString() : QString();
             spec.persistScope = QStringLiteral("helper");
-            spec.persistKey = page ? page->property("relayTabId").toString() : QString();
+            // The conversation is the tab's — except a card's, which is its own, keyed per (tab,
+            // card): the owner's decision 1 on card #CTRN, because the worker runs one turn at a
+            // time per supervisor and folding cards into the tab's conversation would make two
+            // cards serial again (#DR4K, #0Z13). The tab id is still the window's to supply, since
+            // a view has no idea what a tab is; a host that already knows it and put it in front
+            // (`BoardView::setTabId`) is not prefixed twice. Options, Sessions and the board list
+            // share the tab's key exactly as they did.
+            const int card = spec.persistKey.indexOf(QStringLiteral("card:"));
+            spec.persistKey = card < 0                   ? tab
+                            : tab.isEmpty()              ? spec.persistKey.mid(card)
+                                                         : tab + QLatin1Char('/') + spec.persistKey.mid(card);
             // The role every non-terminal surface answers on (protocol 13.1), spelled the way
             // `startBoardWorker` spells it so one worker cannot be asked for two.
             if (spec.agentRole.isEmpty()) spec.agentRole = QStringLiteral("switchboard");
@@ -7682,19 +7693,60 @@ private:
         if (worker) worker->send(message);
     }
 
-    // Every event of a tab's worker, to every console embedded in that tab. Nothing is filtered by
-    // `surface`: the conversation is one (owner decision 1), so a console draws what it can of it
-    // and ignores the rest. `app_command` is the exception — the window answers that pipe once for
-    // the tab, and a console answering it as well would run the same write twice.
+    // Which card's turn an event belongs to, or empty when it belongs to the tab's own
+    // conversation. A card turn's events are tagged `surface: "card:<ID>"` by the supervisor that
+    // runs them (protocol 33, `queue.TurnSupervisor.agent_emit`), which is what makes `surface`
+    // provenance rather than a filter.
+    //
+    // A queue op's answer is the one shape that is not tagged on the envelope: `queue_changed`
+    // carries the surface on each *row* and nothing outside them (`queue.py`, `_surface_of`), and
+    // a `Pane` takes a `queue_changed` whole. So rows that all name one card make the envelope
+    // that card's, and the §12 strip on a card operates that card's queue instead of appearing in
+    // every console of the tab. An envelope with no rows at all says nothing about whose it is and
+    // broadcasts, exactly as it did before this card.
+    static QString cardSurfaceOf(const QJsonObject &event) {
+        const auto ofCard = [](const QString &surface) { return surface.startsWith(QStringLiteral("card:")); };
+        const QString tagged = event.value(QStringLiteral("surface")).toString();
+        if (ofCard(tagged)) return tagged;
+        if (!tagged.isEmpty()
+            || event.value(QStringLiteral("event")).toString() != QStringLiteral("queue_changed"))
+            return QString();
+        QString rows;
+        for (const QString &key : {QStringLiteral("items"), QStringLiteral("steering")})
+            for (const QJsonValue &value : event.value(key).toArray()) {
+                const QString surface = value.toObject().value(QStringLiteral("surface")).toString();
+                if (!ofCard(surface) || (!rows.isEmpty() && rows != surface)) return QString();
+                rows = surface;
+            }
+        return rows;
+    }
+
+    // Every event of a tab's worker, to every console embedded in that tab. One exception, and it
+    // is the predicate #AGNT said could be added back in one line on the day it was needed (card
+    // #CTRN, Planning notes question 1): an event of a **card** turn goes to that card's console
+    // and to no other. A card is genuinely a different conversation — one per (tab, card), which
+    // is what lets two cards be planned at once — so a card's bubbles and tool rows in the board's
+    // console, and in Options', were one turn drawn in three places. Everything else broadcasts as
+    // before: the tab's other consoles share one conversation (owner decision 1 on #AGNT) and each
+    // draws what it can of it and ignores the rest. `app_command` is the other exception — the
+    // window answers that pipe once for the tab, and a console answering it as well would run the
+    // same write twice.
     void deliverToConsoles(const QString &tab, const QJsonObject &event) {
         if (event.value(QStringLiteral("event")).toString() == QStringLiteral("app_command")) return;
+        const QString card = cardSurfaceOf(event);
         for (int i = int(m_consoles.size()) - 1; i >= 0; --i)
             if (!m_consoles.at(i).pane) m_consoles.removeAt(i);
         const QList<ConsoleEntry> entries = m_consoles;   // a handler may close a pane
         for (const ConsoleEntry &entry : entries) {
             if (!entry.pane) continue;
             QWidget *page = pageOf(entry.pane);
-            if (page && tabIdOf(page) == tab) entry.pane->deliverWorkerEvent(event);
+            if (!page || tabIdOf(page) != tab) continue;
+            // The console's own `surface`, read through the wrapper so it is the same string the
+            // `configure` block carried: `card:<ID>` on a card page, `switchboard`, `options` or
+            // `sessions` everywhere else, and none of those can equal a card's.
+            if (!card.isEmpty()
+                && (!entry.context || entry.context->spec().surface != card)) continue;
+            entry.pane->deliverWorkerEvent(event);
         }
     }
 

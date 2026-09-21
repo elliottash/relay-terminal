@@ -62,6 +62,8 @@ private slots:
     void anEmbeddedConsoleIsNotOneOfTheWindowsPanes();
     void theWindowMakesConsolesAndWiresThemAsPanesExceptWhereItMustNot();
     void theConsolesOfATabShareOneWorkerAndOneConversation();
+    void aCardTurnsEventsReachThatCardsConsoleAndNoOther();
+    void aCardConsoleKeepsItsOwnConversationAndTheHelpersShareTheTabs();
     void theWindowsWrapperForwardsEveryContextVirtual();
     void theHelperPanelAndItsModelBoxAreGoneFromTheTree();
     void aConsoleIsNotALeafSoTheActivePaneIsNeverOne();
@@ -495,6 +497,67 @@ void BoardWorkspaceTests::theConsolesOfATabShareOneWorkerAndOneConversation()
     QVERIFY2(text.contains(QStringLiteral("void sendToHelper(QWidget *page, QJsonObject message) {")),
              "sendToHelper still carries a pane tag");
     QVERIFY(text.contains(QStringLiteral("void listenToHelper(")));   // tests_* and profile_* still ride it
+}
+
+// Card #CTRN, Planning notes question 1: a card turn is an ordinary console turn, and a card is
+// its own conversation — so its events reach that card's console and no other. Until this card
+// `deliverToConsoles` filtered nothing at all (the comment said so in as many words), and a
+// Discuss on a card streamed into the board's console and into Options' as well as into the card's
+// own page: one turn drawn in three places. #AGNT said the filter was "one predicate to add back
+// if he dislikes it", and this is the one place it is needed.
+void BoardWorkspaceTests::aCardTurnsEventsReachThatCardsConsoleAndNoOther()
+{
+    const QString text = windowSource();
+    QVERIFY2(!text.isEmpty(), "src/RelayWindow.h could not be read");
+    const QString deliver = bodyOf(text, QStringLiteral("void deliverToConsoles(const QString &tab, const QJsonObject &event) {"));
+    QVERIFY2(!deliver.isEmpty(), "RelayWindow::deliverToConsoles() is gone");
+    // The event's card, and the console's own surface — the same string its `configure` carried,
+    // read through the wrapper rather than guessed from the pane.
+    QVERIFY2(deliver.contains(QStringLiteral("const QString card = cardSurfaceOf(event);")), qPrintable(deliver));
+    QVERIFY2(deliver.contains(QStringLiteral("entry.context->spec().surface != card")), qPrintable(deliver));
+    // A card's event skips every other console; everything untagged still reaches them all, so
+    // the tab's one conversation is drawn in each of its consoles exactly as before.
+    QVERIFY2(deliver.contains(QStringLiteral("if (!card.isEmpty()")), qPrintable(deliver));
+    QVERIFY2(deliver.contains(QStringLiteral("entry.pane->deliverWorkerEvent(event);")), qPrintable(deliver));
+    // And the tab is still what decides whether a console is in scope at all.
+    QVERIFY2(deliver.contains(QStringLiteral("tabIdOf(page) != tab")), qPrintable(deliver));
+
+    const QString of = bodyOf(text, QStringLiteral("static QString cardSurfaceOf(const QJsonObject &event) {"));
+    QVERIFY2(!of.isEmpty(), "RelayWindow::cardSurfaceOf() is gone");
+    // `card:<ID>` is the tag, and nothing else is treated as one: `switchboard`, `options` and
+    // `sessions` are surfaces too and they broadcast.
+    QVERIFY2(of.contains(QStringLiteral("startsWith(QStringLiteral(\"card:\"))")), qPrintable(of));
+    // `queue_changed` is the shape the worker tags per row and not on the envelope (`queue.py`,
+    // `_surface_of`), and a `Pane` takes one whole — so rows that all name one card make the
+    // envelope that card's, and a card's §12 strip is not drawn in the board's console.
+    QVERIFY2(of.contains(QStringLiteral("QStringLiteral(\"queue_changed\")")), qPrintable(of));
+    QVERIFY2(of.contains(QStringLiteral("QStringLiteral(\"items\")")), qPrintable(of));
+    QVERIFY2(of.contains(QStringLiteral("QStringLiteral(\"steering\")")), qPrintable(of));
+}
+
+// The other half of question 1: **where** a card's conversation is kept. One per card, persisted
+// per (tab, card) — the worker runs one turn at a time per supervisor, so folding card turns into
+// the tab's one conversation would make two cards serial again (#DR4K, #0Z13). The window went on
+// overwriting every console's key with the tab's until this card; that override now applies to the
+// helper surfaces only, and a card's key keeps the card in it.
+void BoardWorkspaceTests::aCardConsoleKeepsItsOwnConversationAndTheHelpersShareTheTabs()
+{
+    const QString text = windowSource();
+    QVERIFY2(!text.isEmpty(), "src/RelayWindow.h could not be read");
+    const QString spec = bodyOf(text, QStringLiteral("relay::agent::ContextSpec spec() const override {"));
+    QVERIFY2(!spec.isEmpty(), "RelayWindow::TabConsoleContext::spec() is gone");
+    // The store is the helper store for all of them (§30.7); the key is where they differ.
+    QVERIFY2(spec.contains(QStringLiteral("spec.persistScope = QStringLiteral(\"helper\")")), qPrintable(spec));
+    // A host key that names a card keeps it, with the tab in front: `<tab id>/card:<ID>`.
+    QVERIFY2(spec.contains(QStringLiteral("spec.persistKey.indexOf(QStringLiteral(\"card:\"))")), qPrintable(spec));
+    QVERIFY2(spec.contains(QStringLiteral("tab + QLatin1Char('/') + spec.persistKey.mid(card)")), qPrintable(spec));
+    // Everything else is the tab's, exactly as before: two consoles of one tab, one conversation.
+    QVERIFY2(spec.contains(QStringLiteral("const QString tab = page ? page->property(\"relayTabId\").toString() : QString();")),
+             qPrintable(spec));
+    QVERIFY2(spec.contains(QStringLiteral("card < 0")), qPrintable(spec));
+    // Two cards on one tab are two keys, and a card on two tabs is two conversations: the card
+    // part is taken from the host's key rather than invented here, so the id is always in it.
+    QVERIFY2(!spec.contains(QStringLiteral("QStringLiteral(\"card:\") +")), qPrintable(spec));
 }
 
 // Every console the window makes is a `Pane` with the window's **wrapper** as its context, not
