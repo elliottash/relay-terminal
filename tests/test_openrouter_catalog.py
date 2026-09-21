@@ -66,7 +66,10 @@ class OpenRouterCatalogTests(unittest.TestCase):
                          ["deepseek/deepseek-v4.1-flash", "z-ai/glm-5.3", "mistralai/mistral-small-4",
                           "openrouter/auto", "meta/no-window"])
         levels = P.effort_levels("openrouter")
-        self.assertEqual(rows[0], {"id": "deepseek/deepseek-v4.1-flash", "label": "deepseek: deepseek v4.1 flash",
+        # `name` is the slug's, not the API's "DeepSeek: DeepSeek V4.1 Flash" (card #MDL1): one
+        # model has one name, and it is what folds this row into the first-party row for it.
+        self.assertEqual(rows[0], {"id": "deepseek/deepseek-v4.1-flash", "name": "deepseek-v4.1-flash",
+                                   "label": "deepseek-v4.1-flash",
                                    "tier": None, "efforts": levels,
                                    # OpenRouter's own word for each level: max is sent as "xhigh".
                                    "effort_labels": {"low": "low", "medium": "medium", "high": "high",
@@ -82,8 +85,8 @@ class OpenRouterCatalogTests(unittest.TestCase):
         self.assertIsNone(rows[2]["price_completion_per_mtok"])
         self.assertIsNone(rows[3]["price_completion_per_mtok"])
         self.assertEqual(rows[3]["context_window"], 200000)                # from top_provider
-        self.assertEqual((rows[4]["label"], rows[4]["context_window"]),
-                         ("meta/no-window", P.DEFAULT_CONTEXT_WINDOW))    # the slug stands in for a blank name
+        self.assertEqual((rows[4]["name"], rows[4]["context_window"]),
+                         ("no-window", P.DEFAULT_CONTEXT_WINDOW))         # the vendor prefix is never the name
         self.assertEqual(oc.parse_rows({"data": "nope"}), [])
         self.assertEqual(oc.parse_rows(None), [])
         json.dumps(rows)

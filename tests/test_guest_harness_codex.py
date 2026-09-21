@@ -480,7 +480,9 @@ class ModelsTest(HarnessCase):
         harness, rows = self._models()
         by_id = {row["id"]: row for row in rows}
         self.assertIn("gpt-6-astra", by_id)
-        self.assertEqual(by_id["gpt-6-astra"]["label"], "GPT-6-Astra")
+        # Not codex's "GPT-6-Astra": the owner's picker says gpt-6-astra (card #MDL1).
+        self.assertEqual(by_id["gpt-6-astra"]["name"], "gpt-6-astra")
+        self.assertEqual(by_id["gpt-6-astra"]["label"], "gpt-6-astra")
         self.assertEqual(by_id["gpt-6-astra"]["efforts"],
                          ["low", "medium", "high", "xhigh", "max", "ultra"])
         self.assertEqual(by_id["gpt-6-astra"]["default_effort"], "medium")
@@ -506,7 +508,7 @@ class ModelsTest(HarnessCase):
             {"slug": "gpt-reserve", "display_name": "GPT-Reserve", "visibility": "hide",
              "default_reasoning_level": "medium", "supported_reasoning_levels": []}],
             current="gpt-6-astra")
-        self.assertEqual(rows, [{"id": "gpt-6-astra", "label": "GPT-6-Astra",
+        self.assertEqual(rows, [{"id": "gpt-6-astra", "name": "gpt-6-astra", "label": "gpt-6-astra",
                                  "efforts": ["low", "ultra"], "default_effort": "medium",
                                  "current": True}])
 

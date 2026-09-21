@@ -19,9 +19,12 @@ Rules, in the order they matter:
   it does when the codex catalogue lands (guest_harness_provider.start_catalog_scan).
 
 Row shape, the same keys `catalog_rows` gives a built-in row plus `context_window` and the two
-prices: ``{"id", "label", "tier": None, "efforts", "effort_labels", "intelligence": None,
+prices: ``{"id", "name", "label", "tier": None, "efforts", "effort_labels", "intelligence": None,
 "openrouter": None, "context_window", "price_prompt_per_mtok", "price_completion_per_mtok"}``.
-`label` is the API's `name` lower-cased (Warp style, like every label the GUI shows); `efforts` is
+`name` is `presets.model_name` of the slug — the vendor prefix stripped, lower-case, no spaces, so
+``openai/gpt-5.6-sol`` folds into the one `gpt-5.6-sol` row (card #MDL1) — and `label` is the same
+string; the API's own `name` ("OpenAI: GPT-5.6 Sol") is not carried, because a model has one name
+and this is not it. `efforts` is
 the openrouter effort style's levels, narrowed to `[]` for a model whose `supported_parameters`
 says it takes no `reasoning`, and `effort_labels` names each of them in OpenRouter's own words
 (max is "xhigh"; presets.effort_labels). The prices are US dollars per million tokens, from the
@@ -72,7 +75,7 @@ def set_listener(callback) -> None:
 def parse_rows(payload) -> list[dict]:
     """The API's ``{"data": [...]}`` (or the list itself) as catalog rows. Entries without a
     string id are dropped; the rest never raise, whatever shape a field turns out to be."""
-    from .presets import DEFAULT_CONTEXT_WINDOW, effort_labels, effort_levels
+    from .presets import DEFAULT_CONTEXT_WINDOW, effort_labels, effort_levels, model_name
     entries = payload.get("data") if isinstance(payload, dict) else payload
     if not isinstance(entries, list):
         return []
@@ -86,8 +89,7 @@ def parse_rows(payload) -> list[dict]:
         if not isinstance(slug, str) or not slug.strip() or slug in seen:
             continue
         seen.add(slug)
-        name = entry.get("name")
-        label = name.strip().lower() if isinstance(name, str) and name.strip() else slug.lower()
+        name = model_name("openrouter", slug)
         supported = entry.get("supported_parameters")
         efforts = list(levels) if (not isinstance(supported, list) or "reasoning" in supported) else []
         window = entry.get("context_length")
@@ -97,7 +99,7 @@ def parse_rows(payload) -> list[dict]:
         if not isinstance(window, int) or window <= 0:
             window = DEFAULT_CONTEXT_WINDOW
         pricing = entry.get("pricing") if isinstance(entry.get("pricing"), dict) else {}
-        out.append({"id": slug, "label": label, "tier": None, "efforts": efforts,
+        out.append({"id": slug, "name": name, "label": name, "tier": None, "efforts": efforts,
                     "effort_labels": effort_labels("openrouter", efforts),
                     "intelligence": None, "openrouter": None, "context_window": int(window),
                     "price_prompt_per_mtok": _per_mtok(pricing.get("prompt")),

@@ -1021,7 +1021,11 @@ class ModelsTest(unittest.TestCase):
         harness = gh.ClaudeHarness(spawn=Spawner(), binary=_on_path())
         rows = harness.models()
         self.assertEqual([row["id"] for row in rows], list(gh.MODEL_ALIASES))
-        self.assertEqual([row["label"] for row in rows], ["claude fable", "claude opus", "claude sonnet", "claude haiku"])
+        # The name is the model the alias points at (card #MDL1), so the picker shows one row for
+        # it whether it comes from here, the Anthropic API or OpenRouter. `label` is the same.
+        self.assertEqual([row["name"] for row in rows],
+                         ["claude-fable-5.1", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4.5"])
+        self.assertEqual([row["label"] for row in rows], [row["name"] for row in rows])
         for row in rows:
             self.assertEqual(row["efforts"], ["low", "medium", "high", "xhigh", "max"])
             self.assertIsNone(row["default_effort"])

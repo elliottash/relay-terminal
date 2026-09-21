@@ -1209,8 +1209,8 @@ presets of the same company are both offered. Since 2026-09-20 `label`, `provide
 lower-case (Warp style) and the GUI shows them as they are.
 
 Since 2026-09-20 every cloud preset row also carries `models`: the models that row can be set to, as
-`[{id, label, tier, efforts, effort_labels, intelligence, openrouter}]` from `presets.MODEL_CATALOG` — `id` is what
-the API takes, `label` is lower-case, `tier` is `main` / `flash` / `lite` for a model the tier table
+`[{id, name, label, tier, efforts, effort_labels, intelligence, openrouter}]` from `presets.MODEL_CATALOG` — `id` is what
+the API takes, `name` is what a person reads (below) and `label` is the same string, `tier` is `main` / `flash` / `lite` for a model the tier table
 (13.7) names on that preset (a Lite that points at OpenRouter puts its row on `openrouter`) and
 `null` otherwise, `efforts` is the Relay levels that model accepts (already resolved: `["low",
 "medium"]` on Relay Free, `[]` where there is no effort knob), `effort_labels` names each of those levels
@@ -1219,9 +1219,29 @@ hand-entered index or `null`, and `openrouter` is the OpenRouter slug that serve
 (`presets.OPENROUTER_TWINS`, each verified against `openrouter.ai/api/v1/models`) or `null` where
 there is none — the GUI offers the per-model "fall back to the same model on OpenRouter" toggle
 (`failover_openrouter`, 12.1, 15.2.2) only on a row that carries one; the rows of `openrouter`
-itself and of Relay Free never do. A guest row's own `models` (29.3) carries the same `id` / `label` / `efforts`
+itself and of Relay Free never do. A guest row's own `models` (29.3) carries the same `id` / `name` / `label` / `efforts`
 keys, so one model box reads both; a local endpoint's preset row carries `models: []`, because its
-list is the probe's (28, `{id, context_window, tools, thinking}`) and it serves one model per row.
+list is the probe's (28, `{id, context_window, tools, thinking}`) and it serves one model per row —
+the GUI names that one entry off the row's own `model` with the same rule.
+
+**`name`: one model, one name** (v3.11, card `#MDL1`, 2026-09-21, owner: "model names should always
+be lowercase, no spaces … the picker should say gpt-5.6-sol, not Codex"). Every `models` row of
+every row that carries one — the built-in table, OpenRouter's live listing, a guest's own list
+(29.3) and a custom provider's — carries `name`: lower-case, no spaces, no vendor prefix, and
+**never sent on the wire** (the API still gets `MiniMax-M3`). `presets.model_name(preset_id,
+model_id)` computes it, in order: the `name` its MODEL_CATALOG row carries, for the three ids that
+cannot be derived (`kimi-code`'s `k3` is `kimi-k3`; Anthropic writes `claude-haiku-4-5` and
+`claude-fable-5-1` where OpenRouter writes the version with a dot); then a guest alias through
+`presets.GUEST_MODEL_ALIASES`, so Claude Code's `opus` is `claude-opus-5`; else the id with
+everything up to the last `/` and a leading `~` removed, lower-cased, whitespace turned into `-`.
+Serving variants keep their own names (`-highspeed`, `:batch`, `k3-256k`, `-pro`) because they are
+different models to the person picking one, and Relay Free's three are `relay-main` / `relay-flash`
+/ `relay-lite`. `label` is the same string on every row, so a GUI or a phone that predates `name`
+shows the name too; the prettified spellings ("glm-5.3 flash", "GPT-5.6-Sol") are gone. A GUI
+reading a row from an older worker derives the same name off the id (`relay::models::nameOf`), so
+the two fold together. `presets.INTELLIGENCE` is keyed by the name rather than the id, which is
+what stops one model being scored twice by hand. The point of all of it is the picker: it shows one
+row per name and lists the providers that serve it behind it (docs/MODEL-PICKING-DESIGN.md).
 
 The `openrouter` row's `models` does not stop at the table (owner, 2026-09-20): after its built-in
 tier rows come OpenRouter's own live listing, every model `https://openrouter.ai/api/v1/models`

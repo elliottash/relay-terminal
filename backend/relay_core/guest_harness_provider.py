@@ -33,7 +33,7 @@ import time
 import uuid
 
 from . import guest, logs, questions as questions_mod, tool_labels
-from .presets import tier_start_efforts
+from .presets import model_name, tier_start_efforts
 from .guest_harness import (HARNESS_GUESTS, HarnessError, HarnessNotAvailable, HarnessEvent,
                             limit_windows,
                             TOOL_NAMES, chunk_tool_output, map_tool_name, validate_effort,
@@ -285,13 +285,13 @@ _CODEX_EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
 # works, so this only goes stale while codex itself cannot be asked). Order is codex's own
 # `priority` so the menu does not reorder when the scan recovers.
 _CODEX_FALLBACK_MODELS = (
-    {"id": "gpt-6-astra", "label": "GPT-6-Astra",
+    {"id": "gpt-6-astra", "name": "gpt-6-astra", "label": "gpt-6-astra",
      "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"], "default_effort": "medium"},
-    {"id": "gpt-5.6-sol", "label": "GPT-5.6-Sol",
+    {"id": "gpt-5.6-sol", "name": "gpt-5.6-sol", "label": "gpt-5.6-sol",
      "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"], "default_effort": "low"},
-    {"id": "gpt-5.6-terra", "label": "GPT-5.6-Terra",
+    {"id": "gpt-5.6-terra", "name": "gpt-5.6-terra", "label": "gpt-5.6-terra",
      "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"], "default_effort": "medium"},
-    {"id": "gpt-5.6-luna", "label": "GPT-5.6-Luna",
+    {"id": "gpt-5.6-luna", "name": "gpt-5.6-luna", "label": "gpt-5.6-luna",
      "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"], "default_effort": "medium"},
 )
 
@@ -458,6 +458,10 @@ def guest_models(guest_id: str) -> list[dict]:
         efforts = row.get("efforts") if isinstance(row.get("efforts"), list) else []
         default = row.get("default_effort") if isinstance(row.get("default_effort"), str) else None
         row["tier_effort"] = tier_start_efforts(efforts, default, guest_id)
+        # One model, one name (card #MDL1). The adapters fill this in; an older one, or a row that
+        # came from somewhere else, gets it here, so no guest row ever reaches the GUI without it.
+        name = row.get("name") or model_name(PRESET_PREFIX + guest_id, row.get("id"))
+        row["name"] = row["label"] = name
     return rows
 
 

@@ -89,6 +89,7 @@ from .guest_harness import (Emit, HarnessError, HarnessEvent, HarnessNotAvailabl
                             TurnResult, approval_scope, chunk_tool_output, map_tool_name,
                             validate_effort, validate_permissions,
                             window_kind_for_minutes)
+from .presets import model_name
 
 log = logging.getLogger(__name__)
 
@@ -1146,6 +1147,10 @@ def catalog_rows(entries, current: str = "") -> list[dict]:
     `defaultReasoningEffort`) and `codex debug models` snake_case (`slug`, `display_name`,
     `supported_reasoning_levels[].effort`, `default_reasoning_level`) — so one reader serves the
     adapter and the worker's background scan (`guest_harness_provider`).
+
+    `name` is `presets.model_name` of the id, not codex's `displayName`: the owner's picker says
+    `gpt-5.6-sol`, not "GPT-5.6-Sol" and not "Codex" (card #MDL1), and that is also what folds the
+    row into the one the OpenAI API and OpenRouter serve. `label` is the same string.
     """
     rows: list[dict] = []
     for entry in entries or []:
@@ -1172,8 +1177,8 @@ def catalog_rows(entries, current: str = "") -> list[dict]:
                                       or entry.get("default_reasoning_level"))
         except ValueError:
             default = None
-        row = {"id": model_id,
-               "label": str(entry.get("displayName") or entry.get("display_name") or model_id),
+        name = model_name("guest:codex", model_id)
+        row = {"id": model_id, "name": name, "label": name,
                "efforts": efforts, "default_effort": default}
         if current and model_id == current:
             row["current"] = True

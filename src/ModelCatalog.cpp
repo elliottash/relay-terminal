@@ -4,10 +4,12 @@
 #include <QDateTime>
 #include <QJsonObject>
 #include <QLocale>
+#include <QRegularExpression>
 #include <QSettings>
 #include <QSet>
 
 #include <algorithm>
+#include <limits>
 
 namespace relay::models {
 
@@ -77,9 +79,19 @@ QList<LimitWindow> windowsOf(const QJsonObject &preset) {
 
 // ----- Entry / Catalog ------------------------------------------------------------------------
 
+QString nameOf(const QString &modelId) {
+    QString text = modelId.trimmed();
+    while (text.startsWith(QLatin1Char('~'))) text.remove(0, 1);
+    const int slash = text.lastIndexOf(QLatin1Char('/'));
+    if (slash >= 0) text = text.mid(slash + 1);
+    while (text.startsWith(QLatin1Char('~'))) text.remove(0, 1);
+    static const QRegularExpression space(QStringLiteral("\\s+"));
+    return text.trimmed().toLower().replace(space, QStringLiteral("-"));
+}
+
 QString Entry::displayName() const {
-    if (provider.isEmpty()) return label;
-    return label + QStringLiteral(" · ") + provider;
+    if (provider.isEmpty()) return name;
+    return name + QStringLiteral(" · ") + provider;
 }
 
 QString Catalog::keyFor(const QString &preset, const QString &model) { return preset + QLatin1Char('|') + model; }
@@ -118,6 +130,24 @@ const Entry *Catalog::tierEntry(const QString &preset, const QString &tier) cons
     return nullptr;
 }
 
+QString Catalog::resolveKey(const QString &preset, const QString &reportedModel) const {
+    if (preset.isEmpty() || reportedModel.isEmpty()) return QString();
+    for (const Entry &entry : entries)
+        if (entry.preset == preset && entry.model == reportedModel) return entry.key;
+    // The alias knowledge is already in the row: the worker names `guest:claude|opus`
+    // "claude-opus-5", which is what the CLI reports once it is running, so comparing names is
+    // comparing what the two spellings mean. `reportedModel` is compared as it stands too, for a
+    // row whose name is itself the alias (a guest whose family nothing maps).
+    const QString wanted = nameOf(reportedModel);
+    for (const Entry &entry : entries) {
+        if (entry.preset != preset) continue;
+        if (entry.name.compare(wanted, Qt::CaseInsensitive) == 0
+            || entry.name.compare(reportedModel, Qt::CaseInsensitive) == 0)
+            return entry.key;
+    }
+    return QString();
+}
+
 Catalog catalogFrom(const QJsonArray &presets) {
     Catalog catalog;
     for (const auto &value : presets) {
@@ -146,7 +176,7 @@ Catalog catalogFrom(const QJsonArray &presets) {
             // to today is lost. A guest with no list yet (codex's scan still running) has no model
             // id either; its entry is the guest itself, which the pane switches to as before.
             QJsonObject own{{QStringLiteral("id"), str(preset, "model")},
-                            {QStringLiteral("label"), str(preset, "model").isEmpty() ? str(preset, "label").toLower() : str(preset, "model").toLower()},
+                            {QStringLiteral("name"), str(preset, "model").isEmpty() ? nameOf(str(preset, "label")) : nameOf(str(preset, "model"))},
                             {QStringLiteral("efforts"), preset.value(QStringLiteral("efforts"))}};
             models << own;
         }
@@ -156,7 +186,10 @@ Catalog catalogFrom(const QJsonArray &presets) {
             entry.preset = id;
             entry.model = str(row, "id");
             entry.key = Catalog::keyFor(id, entry.model);
-            entry.label = str(row, "label").isEmpty() ? entry.model.toLower() : str(row, "label").toLower();
+            // One name per model (card #MDL1): the worker's `name`, else the same derivation here,
+            // so a row from an older worker and a row from this one fold into the same group.
+            entry.name = str(row, "name").isEmpty() ? nameOf(entry.model) : str(row, "name").toLower();
+            entry.label = entry.name;
             entry.provider = provider;
             entry.plan = str(preset, "plan").toLower();
             entry.tier = str(row, "tier");
@@ -187,7 +220,8 @@ Catalog catalogFrom(const QJsonArray &presets) {
         if (!own.isEmpty() && !catalog.find(Catalog::keyFor(id, own))) {
             Entry entry;
             entry.preset = id; entry.model = own; entry.key = Catalog::keyFor(id, own);
-            entry.label = own.toLower(); entry.provider = provider; entry.plan = str(preset, "plan").toLower();
+            entry.name = nameOf(own); entry.label = entry.name;
+            entry.provider = provider; entry.plan = str(preset, "plan").toLower();
             for (const auto &level : preset.value(QStringLiteral("efforts")).toArray()) entry.efforts << level.toString();
             entry.usable = usable; entry.guest = guest; entry.local = local; entry.hosted = hosted;
             catalog.entries << entry;
@@ -200,7 +234,8 @@ Catalog catalogFrom(const QJsonArray &presets) {
         const QList<Entry> siblings = catalog.ofPreset(preset);
         if (siblings.isEmpty()) continue;   // the preset is gone; the key stays until the user removes it
         Entry entry = siblings.first();
-        entry.key = key; entry.model = model; entry.label = model.toLower(); entry.tier.clear();
+        entry.key = key; entry.model = model; entry.name = nameOf(model); entry.label = entry.name;
+        entry.tier.clear();
         entry.intelligence = -1; entry.custom = true;
         catalog.entries << entry;
     }
@@ -898,11 +933,161 @@ QString limitsText(const QList<LimitWindow> &windows, qint64 now) {
 }
 
 bool matches(const Entry &entry, const QString &query) {
-    const QString haystack = (entry.label + QLatin1Char(' ') + entry.model + QLatin1Char(' ') + entry.provider
+    // The model's name, the id the API takes, the provider and its plan. The id is in there as
+    // well as the name because they differ where it matters most — "k3" finds kimi-k3, and
+    // "anthropic/claude-haiku-4.5" finds the row a hand-typed OpenRouter slug made.
+    const QString haystack = (entry.name + QLatin1Char(' ') + entry.model + QLatin1Char(' ') + entry.provider
                               + QLatin1Char(' ') + entry.plan).toLower();
     for (const QString &word : query.toLower().split(QLatin1Char(' '), Qt::SkipEmptyParts))
         if (!haystack.contains(word)) return false;
     return true;
+}
+
+// ----- groups ------------------------------------------------------------------------------------
+
+namespace {
+
+// Whether the preset behind this entry is a subscription rather than metered credit.
+//
+// The plans that exist today (presets.py, customproviders.py, localmodels.py) are "coding plan"
+// and "token plan" — what you have already paid for — against "pay-as-you-go" and "standard api",
+// which spend credit per call, "included" (Relay Free, which is `hosted` and ranked last on its
+// own account), "custom endpoint" and a local server's name. So the test is: the preset says it
+// has a plan, and the words of that plan are not the metered ones. Reading the words rather than
+// listing the preset ids is what survives a provider being added: a new "<something> plan" sorts
+// with the subscriptions without anyone remembering to add it here.
+bool subscription(const Entry &entry) {
+    if (entry.hosted || entry.local || entry.guest || entry.plan.isEmpty()) return false;
+    static const QStringList metered{QStringLiteral("pay-as-you-go"), QStringLiteral("pay as you go"),
+                                     QStringLiteral("payg"), QStringLiteral("api"), QStringLiteral("credit")};
+    for (const QString &word : metered)
+        if (entry.plan.contains(word)) return false;
+    return true;
+}
+
+// Rule 2.2: a plan first (it is already paid for), then a guest harness, then the first-party
+// pay-as-you-go API, then OpenRouter, then Relay Free — so credit is spent last and the included
+// allowance last of all.
+int accessRank(const Entry &entry) {
+    if (entry.hosted) return 4;
+    if (entry.guest) return 1;
+    if (entry.openEnded || entry.preset == QStringLiteral("openrouter")) return 3;
+    if (subscription(entry)) return 0;
+    return 2;
+}
+
+// Where the user has already ranked this entry: its position in the tier lists, main first. An
+// entry in no list sorts after every entry in one.
+int listRank(const QString &key) {
+    const QStringList tiers = curation::tierIds();      // main, high, flash, lite, local
+    for (int tier = 0; tier < tiers.size(); ++tier) {
+        const QList<curation::TierEntry> list = curation::tierList(tiers.at(tier));
+        for (int at = 0; at < list.size(); ++at)
+            if (list.at(at).key == key) return tier * 10000 + at;
+    }
+    return std::numeric_limits<int>::max();
+}
+
+// A local entry never groups with a cloud one even when the names match (design 3.2): "local" is a
+// promise about where the text goes, not a provider, so it gets its own bucket.
+QString bucketOf(const Entry &entry) {
+    return entry.local ? QStringLiteral("local\x1f") + entry.name : entry.name;
+}
+
+bool liveEntry(const Catalog &catalog, const Entry &entry, qint64 now) {
+    return entry.usable && !exhausted(catalog, entry.preset, now);
+}
+
+}  // namespace
+
+Entry Group::preferred(const Catalog &catalog, qint64 now) const {
+    if (entries.isEmpty()) return Entry();
+    if (now <= 0) now = QDateTime::currentSecsSinceEpoch();
+    for (const Entry &entry : entries)
+        if (liveEntry(catalog, entry, now)) return entry;
+    for (const Entry &entry : entries)
+        if (entry.usable) return entry;
+    return entries.first();
+}
+
+bool Group::spent(const Catalog &catalog, qint64 now) const {
+    if (now <= 0) now = QDateTime::currentSecsSinceEpoch();
+    for (const Entry &entry : entries)
+        if (liveEntry(catalog, entry, now)) return false;
+    return true;
+}
+
+const Entry *Group::via(const QString &presetOrProviderText) const {
+    const QString want = presetOrProviderText.trimmed().toLower();
+    if (want.isEmpty()) return nullptr;
+    for (const Entry &entry : entries) {
+        const QString preset = entry.preset.toLower();
+        if (preset == want || preset.section(QLatin1Char(':'), -1) == want) return &entry;
+    }
+    for (const Entry &entry : entries)
+        if (entry.provider.toLower() == want) return &entry;
+    for (const Entry &entry : entries)
+        if (entry.provider.toLower().contains(want) || entry.preset.toLower().contains(want)) return &entry;
+    return nullptr;
+}
+
+QList<Group> grouped(const Catalog &catalog, const QList<Entry> &rows, qint64 now) {
+    Q_UNUSED(catalog);
+    Q_UNUSED(now);
+    QList<Group> out;
+    QHash<QString, int> at;                 // bucket -> its index in `out`
+    // The tier lists are read once per group, not once per comparison: `tierList` builds a
+    // QSettings, and a sort calls its comparator O(n log n) times (the same trap as `shown`, #PPR4).
+    QHash<QString, int> ranks;
+    for (const Entry &entry : rows) {
+        const QString bucket = bucketOf(entry);
+        if (!ranks.contains(entry.key)) ranks.insert(entry.key, listRank(entry.key));
+        const auto found = at.constFind(bucket);
+        if (found == at.constEnd()) {
+            at.insert(bucket, out.size());
+            out << Group{entry.name, {entry}};
+        } else {
+            out[found.value()].entries << entry;
+        }
+    }
+    for (Group &group : out) {
+        if (group.entries.size() < 2) continue;
+        std::stable_sort(group.entries.begin(), group.entries.end(), [&ranks](const Entry &a, const Entry &b) {
+            const int rankA = ranks.value(a.key, std::numeric_limits<int>::max());
+            const int rankB = ranks.value(b.key, std::numeric_limits<int>::max());
+            if (rankA != rankB) return rankA < rankB;
+            return accessRank(a) < accessRank(b);
+        });
+    }
+    return out;
+}
+
+const Entry *findByName(const Catalog &catalog, const QList<Entry> &rows, const QString &text) {
+    const QString query = text.trimmed();
+    if (query.isEmpty()) return nullptr;
+    const int at = query.lastIndexOf(QLatin1Char('@'));
+    const QString wanted = (at > 0 ? query.left(at) : query).trimmed();
+    const QString providerText = at > 0 ? query.mid(at + 1).trimmed() : QString();
+    const QList<Group> groups = grouped(catalog, rows);
+    const Group *group = nullptr;
+    for (const Group &candidate : groups)
+        if (candidate.name.compare(wanted, Qt::CaseInsensitive) == 0) { group = &candidate; break; }
+    // A bare model id ("k3", "anthropic/claude-haiku-4.5"), or a spelling whose derived name is the
+    // one a row carries.
+    for (int i = 0; group == nullptr && i < groups.size(); ++i)
+        for (const Entry &entry : groups.at(i).entries)
+            if (entry.model.compare(wanted, Qt::CaseInsensitive) == 0
+                || entry.name.compare(nameOf(wanted), Qt::CaseInsensitive) == 0) { group = &groups.at(i); break; }
+    if (group == nullptr) return nullptr;
+    const Entry *chosen = providerText.isEmpty() ? nullptr : group->via(providerText);
+    if (chosen == nullptr && !providerText.isEmpty()) return nullptr;
+    const QString key = chosen != nullptr ? chosen->key : group->preferred(catalog).key;
+    if (key.isEmpty()) return nullptr;
+    // `grouped` copied the entries; the answer has to point into the caller's list, not into a
+    // temporary that goes out of scope with this call.
+    for (const Entry &entry : rows)
+        if (entry.key == key) return &entry;
+    return nullptr;
 }
 
 }  // namespace relay::models

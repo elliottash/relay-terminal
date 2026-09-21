@@ -10,6 +10,7 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
+from relay_core import openrouter_catalog
 from relay_core import presets as P
 from relay_core import roles as model_roles
 
@@ -281,8 +282,8 @@ class TierTableTests(unittest.TestCase):
 class ModelCatalogTests(unittest.TestCase):
     """One list of models per provider row (owner, 2026-09-20): MODEL_CATALOG and catalog_rows()."""
 
-    ROW_KEYS = {"id", "label", "tier", "efforts", "effort_labels", "intelligence", "openrouter",
-                "default_effort", "tier_effort"}
+    ROW_KEYS = {"id", "name", "label", "tier", "efforts", "effort_labels", "intelligence",
+                "openrouter", "default_effort", "tier_effort"}
 
     def setUp(self):
         # The `openrouter` row also carries OpenRouter's live listing when this machine has fetched
@@ -310,7 +311,9 @@ class ModelCatalogTests(unittest.TestCase):
             ids = [row["id"] for row in rows]
             self.assertEqual(len(ids), len(set(ids)), preset_id)
             for row in rows:
-                self.assertTrue(row["id"].strip() and row["label"].strip(), (preset_id, row))
+                self.assertTrue(row["id"].strip(), (preset_id, row))
+                # Only the few that cannot be derived carry a `name` in the table.
+                self.assertTrue(row.get("name", "x").strip(), (preset_id, row))
 
     def test_tier_rows_match_tier_defaults(self):
         # Every model a tier names has a row on the *target* preset, marked with a tier that names
@@ -339,8 +342,8 @@ class ModelCatalogTests(unittest.TestCase):
         for preset in P.PRESETS.values():
             for text in (preset.label, preset.provider, preset.plan):
                 self.assertEqual(text, text.lower(), preset.id)
-        for preset_id, rows in P.MODEL_CATALOG.items():
-            for row in rows:
+        for preset_id in P.MODEL_CATALOG:
+            for row in P.catalog_rows(preset_id):
                 self.assertEqual(row["label"], row["label"].lower(), (preset_id, row["id"]))
         self.assertEqual(P.PRESETS["glm-coding"].label, "z.ai · glm-5.3 · coding plan")
         self.assertEqual(P.PRESETS["relay-free"].label, "relay free")
@@ -357,8 +360,11 @@ class ModelCatalogTests(unittest.TestCase):
                     # None means the preset's style; a list only ever narrows what it offers.
                     self.assertEqual(row["efforts"], offered if raw["efforts"] is None else raw["efforts"])
                     self.assertTrue(set(row["efforts"]) <= set(offered), (preset_id, row["id"]))
-                    self.assertIn(row["id"], P.INTELLIGENCE)
-                    self.assertEqual(row["intelligence"], P.INTELLIGENCE[row["id"]])
+                    # INTELLIGENCE is keyed by the *name* since card #MDL1: one model, one score.
+                    self.assertEqual(row["name"], P.model_name(preset_id, row["id"]))
+                    self.assertIn(row["name"], P.INTELLIGENCE)
+                    self.assertEqual(row["intelligence"], P.INTELLIGENCE[row["name"]])
+                    self.assertEqual(row["label"], row["name"])
                     self.assertIn(row["intelligence"], (None, *range(0, 101)))
                     # The same model on OpenRouter, or None: where the per-model toggle shows.
                     self.assertEqual(row["openrouter"], P.openrouter_twin(row["id"]))
@@ -372,6 +378,88 @@ class ModelCatalogTests(unittest.TestCase):
         # An id with no catalog — a local endpoint, a guest, nonsense — is [] and never raises.
         for other in ("local:bonsai", "guest:codex", "", None, 7):
             self.assertEqual(P.catalog_rows(other), [])
+
+    # ----- one model, one name (card #MDL1, docs/MODEL-PICKING-DESIGN.md rule 1) ------------------
+
+    NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._:+-]*$")
+
+    def test_every_row_of_every_preset_has_a_well_formed_name(self):
+        # Lower-case, no spaces, no vendor prefix (owner, 2026-09-21), on every row the worker can
+        # emit: the built-in table and the cached OpenRouter listing, which is the only one whose
+        # ids carry a "/", a ":variant" and a "~" moving alias.
+        for preset_id in P.MODEL_CATALOG:
+            for row in P.catalog_rows(preset_id):
+                with self.subTest(preset=preset_id, model=row["id"]):
+                    self.assertRegex(row["name"], self.NAME_RE)
+                    self.assertEqual(row["label"], row["name"])
+        listing = openrouter_catalog.parse_rows({"data": [
+            {"id": "openai/gpt-5.6-sol", "name": "OpenAI: GPT-5.6 Sol", "context_length": 400000},
+            {"id": "anthropic/claude-haiku-4.5", "name": "Anthropic: Claude Haiku 4.5"},
+            {"id": "moonshotai/kimi-k3:batch", "name": "MoonshotAI: Kimi K3 (batch)"},
+            {"id": "~openai/gpt-sol-latest", "name": "OpenAI: GPT Sol (latest)"},
+            {"id": "z-ai/glm-5.3", "name": "Z.AI: GLM 5.3"},
+        ]})
+        self.assertEqual([row["name"] for row in listing],
+                         ["gpt-5.6-sol", "claude-haiku-4.5", "kimi-k3:batch", "gpt-sol-latest", "glm-5.3"])
+        for row in listing:
+            self.assertRegex(row["name"], self.NAME_RE)
+            self.assertEqual(row["label"], row["name"])
+
+    def test_the_names_the_design_doc_tabulates(self):
+        # Section 1.2: the same model spelled several ways, and what it is called.
+        self.assertEqual(P.model_name("kimi-code", "k3"), "kimi-k3")           # the one hand-set alias
+        self.assertEqual(P.model_name("kimi", "kimi-k3"), "kimi-k3")
+        self.assertEqual(P.model_name("anthropic", "claude-haiku-4-5"), "claude-haiku-4.5")
+        self.assertEqual(P.model_name("anthropic", "claude-fable-5-1"), "claude-fable-5.1")
+        self.assertEqual(P.model_name("minimax", "MiniMax-M3"), "minimax-m3")  # capitals never reach a person
+        self.assertEqual(P.model_name("openai", "gpt-5.6-sol"), "gpt-5.6-sol")
+        self.assertEqual(P.model_name("guest:codex", "gpt-5.6-sol"), "gpt-5.6-sol")
+        self.assertEqual(P.model_name("openrouter", "openai/gpt-5.6-sol"), "gpt-5.6-sol")
+        # A guest alias is named after the model it points at (owner, 2026-09-21).
+        for alias, model in P.GUEST_MODEL_ALIASES.items():
+            self.assertEqual(P.model_name("guest:claude", alias), P.model_name("anthropic", model), alias)
+        self.assertEqual(P.model_name("guest:claude", "opus"), "claude-opus-5")
+        self.assertEqual(P.model_name("guest:claude", "fable"), "claude-fable-5.1")
+        # Relay Free's three are role names and keep them, hyphenated (design 3.5).
+        self.assertEqual([r["name"] for r in P.catalog_rows("relay-free")],
+                         ["relay-main", "relay-flash", "relay-lite"])
+        # Serving variants are their own models to the person picking one (design 3.3).
+        self.assertEqual(P.model_name("kimi-code", "k3-256k"), "k3-256k")
+        self.assertEqual(P.model_name("kimi", "kimi-k2.7-code-highspeed"), "kimi-k2.7-code-highspeed")
+        self.assertEqual(P.model_name("minimax", "MiniMax-M2.7-highspeed"), "minimax-m2.7-highspeed")
+        # A moving alias loses OpenRouter's "~" and nothing else (design 3.4).
+        self.assertEqual(P.derived_name("~openai/gpt-sol-latest"), "gpt-sol-latest")
+        # A hand-typed id with capitals and spaces is still a name (design 3.13).
+        self.assertEqual(P.derived_name("  OpenAI/GPT 5.6 Sol "), "gpt-5.6-sol")
+        # Nothing at all is nothing, not a crash.
+        for junk in ("", "   ", None, 7):
+            self.assertEqual(P.model_name("openai", junk), "")
+
+    def test_a_first_party_model_and_its_openrouter_twin_share_one_name(self):
+        # The point of the rule: the twin table and the names must not drift, or the picker grows a
+        # second row for a model it already has. The exceptions are the three ids that deliberately
+        # twin onto a *different* model — a serving variant mapped to the plain slug — which the
+        # OPENROUTER_TWINS comment sets out.
+        variants = {"kimi-k2.7-code-highspeed", "k3-256k", "MiniMax-M2.7-highspeed"}
+        by_id = {row["id"]: preset_id for preset_id, rows in P.MODEL_CATALOG.items() for row in rows}
+        for model_id, slug in P.OPENROUTER_TWINS.items():
+            with self.subTest(model_id):
+                same = P.model_name(by_id[model_id], model_id) == P.derived_name(slug)
+                self.assertEqual(same, model_id not in variants)
+
+    def test_one_model_is_scored_once_and_the_numbers_did_not_move(self):
+        # INTELLIGENCE is keyed by name, so Kimi Code's "k3" and the Kimi platform's "kimi-k3" are
+        # one entry — they used to be two hand-kept 44s. The numbers the GUI reads are unchanged.
+        was = {("kimi-code", "k3"): 44, ("kimi", "kimi-k3"): 44, ("glm", "glm-5.3"): 45,
+               ("glm-coding", "glm-5.3"): 45, ("openai", "gpt-6-astra"): 53,
+               ("openai", "gpt-5.6-sol"): 47, ("anthropic", "claude-opus-5"): 51,
+               ("anthropic", "claude-fable-5-1"): 53, ("anthropic", "claude-sonnet-5"): None,
+               ("relay-free", "relay-main"): None}
+        for (preset_id, model_id), score in was.items():
+            rows = {row["id"]: row for row in P.catalog_rows(preset_id)}
+            self.assertEqual(rows[model_id]["intelligence"], score, (preset_id, model_id))
+        self.assertNotIn("k3", P.INTELLIGENCE)     # scored through the name now, not by hand twice
+        self.assertEqual(P.INTELLIGENCE["kimi-k3"], 44)
 
     def test_every_openrouter_twin_names_a_catalog_model_and_a_real_slug(self):
         # OPENROUTER_TWINS (owner, 2026-09-20): keyed by a cloud catalog model id, valued by the
@@ -406,7 +494,7 @@ class ModelCatalogTests(unittest.TestCase):
         json.dumps([p.to_dict() for p in P.PRESETS.values()])
         # The same three keys a guest row's models already carry (29.3), so one GUI reads both.
         for row in P.PRESETS["openai"].to_dict()["models"]:
-            self.assertTrue({"id", "label", "efforts"} <= set(row))
+            self.assertTrue({"id", "name", "label", "efforts"} <= set(row))
 
 
 class GuiMirrorTests(unittest.TestCase):

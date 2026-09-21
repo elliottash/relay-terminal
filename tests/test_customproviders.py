@@ -81,8 +81,10 @@ class SaveTests(Case):
         self.assertEqual((row["base_url"], row["model"]), ("https://llm.example.com/v1", "big-model"))
         self.assertEqual(row["model_ids"], ["big-model", "small-model"])
         self.assertEqual(row["models"], [
-            {"id": "big-model", "label": "big-model", "tier": None, "efforts": [], "intelligence": None, "openrouter": None},
-            {"id": "small-model", "label": "small-model", "tier": None, "efforts": [], "intelligence": None, "openrouter": None}])
+            {"id": "big-model", "name": "big-model", "label": "big-model", "tier": None, "efforts": [],
+             "intelligence": None, "openrouter": None},
+            {"id": "small-model", "name": "small-model", "label": "small-model", "tier": None, "efforts": [],
+             "intelligence": None, "openrouter": None}])
         self.assertTrue(row["custom"])
         self.assertFalse(row["local"] or row["hosted"])
         self.assertEqual((row["has_stored_key"], row["key_source"], row["effort_style"]), (True, "keyring", "none"))

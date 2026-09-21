@@ -921,7 +921,7 @@ class CatalogueTests(unittest.TestCase):
             rows = ghp._read_codex_catalog("/usr/bin/codex")
         self.assertEqual(run.call_args[0][0], ["/usr/bin/codex", "debug", "models"])
         self.assertEqual(run.call_args[1]["timeout"], ghp.CODEX_CATALOG_TIMEOUT)
-        self.assertEqual(rows, [{"id": "gpt-6-astra", "label": "GPT-6-Astra",
+        self.assertEqual(rows, [{"id": "gpt-6-astra", "name": "gpt-6-astra", "label": "gpt-6-astra",
                                  "efforts": ["low", "ultra"], "default_effort": "medium"}])
         with mock.patch.object(ghp.subprocess, "run",
                                return_value=mock.Mock(returncode=1, stdout="", stderr="no auth")):

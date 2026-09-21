@@ -91,6 +91,7 @@ import uuid
 from .guest_harness import (HarnessError, HarnessEvent, HarnessNotAvailable, HarnessStart,
                             TurnResult, approval_scope, map_tool_name, validate_effort,
                             validate_permissions)
+from .presets import model_name
 
 GUEST = "claude"
 BINARY = "claude"                  # what `start()` looks for on PATH
@@ -890,16 +891,19 @@ class ClaudeHarness:
         Claude Code publishes no catalogue on this protocol — `claude --help` is the only list
         there is — so this is static, plus the full model name the running session reported when
         that is not one of the aliases, marked as the one in force.
+
+        The `name` is `presets.model_name` of the alias, which is the model the alias points at
+        ("opus" is `claude-opus-5`, card #MDL1): the id stays the alias `--model` takes, and the
+        picker folds the row into the one row for that model whoever else serves it.
         """
         with self._state_lock:
             running = self._model
-        # "claude opus", not "opus" (owner, 2026-09-20): the family name on the row, lower-case
-        # like every other model label; the id stays the alias `--model` takes.
-        rows = [{"id": alias, "label": "claude " + alias, "efforts": list(EFFORTS),
-                 "default_effort": None} for alias in MODEL_ALIASES]
+        rows = [{"id": alias, "name": model_name("guest:" + GUEST, alias), "label": model_name("guest:" + GUEST, alias),
+                 "efforts": list(EFFORTS), "default_effort": None} for alias in MODEL_ALIASES]
         known = {row["id"] for row in rows}
         if running and running not in known:
-            rows.append({"id": running, "label": running, "efforts": list(EFFORTS),
+            rows.append({"id": running, "name": model_name("guest:" + GUEST, running),
+                         "label": model_name("guest:" + GUEST, running), "efforts": list(EFFORTS),
                          "default_effort": None})
         for row in rows:
             if running and row["id"] == running:

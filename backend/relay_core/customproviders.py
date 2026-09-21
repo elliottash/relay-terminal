@@ -36,7 +36,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import keystore
-from .presets import DEFAULT_CONTEXT_WINDOW, Preset, effort_levels, openrouter_twin
+from .presets import DEFAULT_CONTEXT_WINDOW, Preset, effort_levels, model_name, openrouter_twin
 from .provider import loopback_http, shared_opener
 
 PREFIX = "custom:"
@@ -120,7 +120,8 @@ class CustomProvider:
             if model_id in seen:
                 continue
             seen.add(model_id)
-            out.append({"id": model_id, "label": model_id.lower(), "tier": None,
+            name = model_name(self.id, model_id)
+            out.append({"id": model_id, "name": name, "label": name, "tier": None,
                         "efforts": list(efforts), "intelligence": None,
                         "openrouter": openrouter_twin(model_id)})
         return out

@@ -323,7 +323,11 @@ RECOMMENDED = (("glm-coding", "openrouter"), ("kimi-code", "openrouter"))
 #
 # Row shape, as `catalog_rows()` hands it to the GUI:
 #   id           the model id the API takes (for OpenRouter, the slug)
-#   label        lower-case display name ("glm-5.3 flash")
+#   name         what a person reads: lower-case, no spaces, no vendor prefix (`model_name`, card
+#                #MDL1). Only the handful that cannot be derived from the id carry a `name` in the
+#                table below; `catalog_rows` fills it in for every row.
+#   label        the same string. It is the key an older GUI and the phone read, kept so they show
+#                the name too; nothing computes a second, prettier spelling any more.
 #   tier         main | flash | lite | None — the tier this model is the built-in default for. A
 #                tier that points at another preset (Lite via OpenRouter) puts its row on the
 #                *target* preset, so "google/gemini-3.8-flash" is a lite row of `openrouter`. A
@@ -343,77 +347,130 @@ RECOMMENDED = (("glm-coding", "openrouter"), ("kimi-code", "openrouter"))
 # their tier entries carry no effort field.
 MODEL_CATALOG: dict[str, list[dict]] = {
     "relay-free": [
-        {"id": "relay-main", "label": "relay main", "tier": "main", "efforts": None},
-        {"id": "relay-flash", "label": "relay flash", "tier": "flash", "efforts": None},
-        {"id": "relay-lite", "label": "relay lite", "tier": "lite", "efforts": None},
+        {"id": "relay-main", "tier": "main", "efforts": None},
+        {"id": "relay-flash", "tier": "flash", "efforts": None},
+        {"id": "relay-lite", "tier": "lite", "efforts": None},
     ],
     "kimi": [
-        {"id": "kimi-k3", "label": "kimi k3", "tier": "main", "efforts": None},
-        {"id": "kimi-k2.7-code-highspeed", "label": "kimi k2.7 code highspeed", "tier": "flash", "efforts": []},
+        {"id": "kimi-k3", "tier": "main", "efforts": None},
+        {"id": "kimi-k2.7-code-highspeed", "tier": "flash", "efforts": []},
     ],
     # https://www.kimi.com/code/docs/en/ — k3, k3-256k, kimi-for-coding, kimi-for-coding-highspeed.
+    # Kimi Code's "k3" is the same model the `kimi` preset calls "kimi-k3", so it is named that and
+    # the two fold into one row; "k3-256k" is a serving variant and keeps its own name (§3.3).
     "kimi-code": [
-        {"id": "k3", "label": "k3", "tier": "main", "efforts": None},
-        {"id": "k3-256k", "label": "k3 256k", "tier": None, "efforts": None},
-        {"id": "kimi-for-coding", "label": "kimi for coding", "tier": None, "efforts": []},
-        {"id": "kimi-for-coding-highspeed", "label": "kimi for coding highspeed", "tier": "flash", "efforts": []},
+        {"id": "k3", "name": "kimi-k3", "tier": "main", "efforts": None},
+        {"id": "k3-256k", "tier": None, "efforts": None},
+        {"id": "kimi-for-coding", "tier": None, "efforts": []},
+        {"id": "kimi-for-coding-highspeed", "tier": "flash", "efforts": []},
     ],
     "glm": [
-        {"id": "glm-5.3", "label": "glm-5.3", "tier": "main", "efforts": None},
-        {"id": "glm-5.3-flash", "label": "glm-5.3 flash", "tier": "flash", "efforts": None},
+        {"id": "glm-5.3", "tier": "main", "efforts": None},
+        {"id": "glm-5.3-flash", "tier": "flash", "efforts": None},
     ],
     "glm-coding": [
-        {"id": "glm-5.3", "label": "glm-5.3", "tier": "main", "efforts": None},
-        {"id": "glm-5.3-flash", "label": "glm-5.3 flash", "tier": "flash", "efforts": None},
+        {"id": "glm-5.3", "tier": "main", "efforts": None},
+        {"id": "glm-5.3-flash", "tier": "flash", "efforts": None},
     ],
     # https://platform.minimax.io/docs/api-reference/api-overview — no effort knob on any of them.
     "minimax": [
-        {"id": "MiniMax-M3", "label": "minimax m3", "tier": "main", "efforts": None},
-        {"id": "MiniMax-M2.7", "label": "minimax m2.7", "tier": None, "efforts": None},
-        {"id": "MiniMax-M2.7-highspeed", "label": "minimax m2.7 highspeed", "tier": "flash", "efforts": None},
-        {"id": "MiniMax-M2.5", "label": "minimax m2.5", "tier": None, "efforts": None},
+        {"id": "MiniMax-M3", "tier": "main", "efforts": None},
+        {"id": "MiniMax-M2.7", "tier": None, "efforts": None},
+        {"id": "MiniMax-M2.7-highspeed", "tier": "flash", "efforts": None},
+        {"id": "MiniMax-M2.5", "tier": None, "efforts": None},
     ],
     "openrouter": [
-        {"id": "deepseek/deepseek-v4.1-flash", "label": "deepseek v4.1 flash", "tier": "main", "efforts": None},
-        {"id": "google/gemini-3.8-flash", "label": "gemini 3.8 flash", "tier": "lite", "efforts": None},
-        {"id": "google/gemini-3.5-flash-lite", "label": "gemini 3.5 flash-lite", "tier": "lite", "efforts": None},
+        {"id": "deepseek/deepseek-v4.1-flash", "tier": "main", "efforts": None},
+        {"id": "google/gemini-3.8-flash", "tier": "lite", "efforts": None},
+        {"id": "google/gemini-3.5-flash-lite", "tier": "lite", "efforts": None},
     ],
     # The four codex-cli 0.155.1 lists first (#E516); every one takes reasoning_effort.
     "openai": [
-        {"id": "gpt-6-astra", "label": "gpt-6 astra", "tier": "main", "efforts": None},
-        {"id": "gpt-5.6-sol", "label": "gpt-5.6 sol", "tier": None, "efforts": None},
-        {"id": "gpt-5.6-terra", "label": "gpt-5.6 terra", "tier": "flash", "efforts": None},
-        {"id": "gpt-5.6-luna", "label": "gpt-5.6 luna", "tier": "lite", "efforts": None},
+        {"id": "gpt-6-astra", "tier": "main", "efforts": None},
+        {"id": "gpt-5.6-sol", "tier": None, "efforts": None},
+        {"id": "gpt-5.6-terra", "tier": "flash", "efforts": None},
+        {"id": "gpt-5.6-luna", "tier": "lite", "efforts": None},
     ],
     # https://platform.claude.com/docs/en/models/overview — the compat layer has no effort knob.
+    # Anthropic's API spells two versions with a hyphen where everyone else (and OpenRouter) uses a
+    # dot, so those two carry a `name`: without it the same model would sit in the picker twice.
     "anthropic": [
-        {"id": "claude-opus-5", "label": "claude opus 5", "tier": "main", "efforts": None},
-        {"id": "claude-sonnet-5", "label": "claude sonnet 5", "tier": "flash", "efforts": None},
-        {"id": "claude-haiku-4-5", "label": "claude haiku 4.5", "tier": "lite", "efforts": None},
-        {"id": "claude-fable-5-1", "label": "claude fable 5.1", "tier": None, "efforts": None},
+        {"id": "claude-opus-5", "tier": "main", "efforts": None},
+        {"id": "claude-sonnet-5", "tier": "flash", "efforts": None},
+        {"id": "claude-haiku-4-5", "name": "claude-haiku-4.5", "tier": "lite", "efforts": None},
+        {"id": "claude-fable-5-1", "name": "claude-fable-5.1", "tier": None, "efforts": None},
     ],
     "gemini": [
-        {"id": "gemini-3.1-pro-preview", "label": "gemini 3.1 pro", "tier": "main", "efforts": None},
-        {"id": "gemini-3.8-flash", "label": "gemini 3.8 flash", "tier": "flash", "efforts": None},
-        {"id": "gemini-3.5-flash-lite", "label": "gemini 3.5 flash-lite", "tier": "lite", "efforts": None},
+        {"id": "gemini-3.1-pro-preview", "tier": "main", "efforts": None},
+        {"id": "gemini-3.8-flash", "tier": "flash", "efforts": None},
+        {"id": "gemini-3.5-flash-lite", "tier": "lite", "efforts": None},
     ],
 }
 
-# Seeded by the owner from the Artificial Analysis index; edited by hand. Keyed by model id; None
-# until a number is entered, and the GUI shows nothing for None rather than a zero.
+# --- one model, one name (card #MDL1, docs/MODEL-PICKING-DESIGN.md rule 1) -----------------------
+# Claude Code names its models by family ("fable", "opus"), so a guest reporting "opus" and the
+# `anthropic` preset's "claude-opus-5" are one model. This is the only table that says so.
+GUEST_MODEL_ALIASES = {"fable": "claude-fable-5-1", "opus": "claude-opus-5",
+                       "sonnet": "claude-sonnet-5", "haiku": "claude-haiku-4-5"}
+
+# The `name` a MODEL_CATALOG row carries, by model id, for the alias step below: the alias resolves
+# to an API id, and that id may itself be one of the few that cannot be derived.
+_NAME_OVERRIDES: dict[str, str] = {row["id"]: row["name"]
+                                   for rows in MODEL_CATALOG.values() for row in rows if row.get("name")}
+
+
+def derived_name(model_id) -> str:
+    """The name of a model id nothing knows anything else about: lower-case, no vendor prefix, no
+    spaces (owner, 2026-09-21: "model names should always be lowercase, no spaces").
+
+    Everything up to the last "/" goes (``openai/gpt-5.6-sol`` and ``gpt-5.6-sol`` are one model,
+    and stripping the prefix collides on none of OpenRouter's 446 ids), a leading "~" goes
+    (OpenRouter writes a moving alias ``~openai/gpt-sol-latest``), and any whitespace becomes "-".
+    A serving variant keeps whatever marks it: ``-highspeed``, ``:batch``, ``k3-256k``, ``-pro``
+    are different models to the person picking one (design section 3.3).
+    """
+    text = (model_id or "").strip() if isinstance(model_id, str) else ""
+    text = text.lstrip("~").rsplit("/", 1)[-1].lstrip("~").strip().lower()
+    return "-".join(text.split())
+
+
+def model_name(preset_id, model_id) -> str:
+    """What this model is called, everywhere a person reads it. Never sent on the wire.
+
+    In order (design rule 1): the ``name`` its own MODEL_CATALOG row carries, for the handful that
+    cannot be derived (``kimi-code``'s "k3" is "kimi-k3"; Anthropic spells two versions with a
+    hyphen where OpenRouter uses a dot); then a guest alias through GUEST_MODEL_ALIASES, so Claude
+    Code's "opus" is "claude-opus-5"; else `derived_name`.
+    """
+    text = (model_id or "").strip() if isinstance(model_id, str) else ""
+    if not text:
+        return ""
+    for row in MODEL_CATALOG.get(preset_id, ()) if isinstance(preset_id, str) else ():
+        if row["id"] == text and row.get("name"):
+            return row["name"]
+    aliased = GUEST_MODEL_ALIASES.get(text)
+    if aliased is not None:
+        return _NAME_OVERRIDES.get(aliased) or derived_name(aliased)
+    return _NAME_OVERRIDES.get(text) or derived_name(text)
+
+
+# Seeded by the owner from the Artificial Analysis index; edited by hand. Keyed by `model_name`
+# (card #MDL1) rather than by API id, so one model is scored once however many providers serve it:
+# "k3" on Kimi Code and "kimi-k3" on the Kimi platform used to be two hand-kept 44s. None until a
+# number is entered, and the GUI shows nothing for None rather than a zero.
 INTELLIGENCE: dict[str, int | None] = {
-    row["id"]: None for rows in MODEL_CATALOG.values() for row in rows
+    model_name(preset_id, row["id"]): None
+    for preset_id, rows in MODEL_CATALOG.items() for row in rows
 }
 # The owner's ruling, seeded 2026-09-20 from the Artificial Analysis Intelligence Index v4.3.2
 # (https://artificialanalysis.ai/leaderboards/models), each model at its highest reasoning level,
 # as the picker's "intelligence" sort. Edit by hand; a model not listed here sorts last, blank.
 INTELLIGENCE.update({
-    "claude-fable-5-1": 53,
+    "claude-fable-5.1": 53,
     "gpt-6-astra": 53,
     "claude-opus-5": 51,
     "gpt-5.6-sol": 47,
     "glm-5.3": 45,
-    "k3": 44,
     "kimi-k3": 44,
 })
 
@@ -473,8 +530,12 @@ def openrouter_twin(model_id) -> str | None:
 
 
 def catalog_rows(preset_id) -> list[dict]:
-    """The catalog rows of a preset with `efforts` resolved, `intelligence` filled in and the
-    model's OpenRouter twin named.
+    """The catalog rows of a preset with `name` and `efforts` resolved, `intelligence` filled in
+    and the model's OpenRouter twin named.
+
+    `name` is `model_name(preset_id, id)` and `label` is the same string (card #MDL1): one model
+    has one name wherever it is read, and the picker folds the providers that serve it into one
+    row by that name.
 
     `efforts` of None becomes the levels the preset's effort style offers, so the GUI always gets a
     list and never has to know about styles. `openrouter` is `openrouter_twin(id)` — the slug that
@@ -500,10 +561,11 @@ def catalog_rows(preset_id) -> list[dict]:
         # (`infer_effort`), None where no tier names it and the model states nothing of its own. The
         # same key a guest row carries (protocol 29.3), and what `tier_start_efforts` starts Main at.
         provider_default = infer_effort(preset.effort_style, model_extra(preset_id, row["id"]))
-        out.append({"id": row["id"], "label": row["label"], "tier": row["tier"],
+        name = model_name(preset_id, row["id"])
+        out.append({"id": row["id"], "name": name, "label": name, "tier": row["tier"],
                     "efforts": efforts,
                     "effort_labels": effort_labels(preset.effort_style, efforts),
-                    "intelligence": INTELLIGENCE.get(row["id"]),
+                    "intelligence": INTELLIGENCE.get(name),
                     "openrouter": openrouter_twin(row["id"]),
                     "default_effort": provider_default,
                     "tier_effort": tier_start_efforts(efforts, provider_default)})
@@ -603,11 +665,6 @@ def model_efforts(preset_id, model: str) -> list[str] | None:
 # listing fetched yet) is left out of Main and High, where a wrong guess is expensive, and kept in
 # Flash and Lite, where every twin there is cheap.
 OPENROUTER_TWIN_MAX_COMPLETION_USD_PER_MTOK = 3.0
-
-# Claude Code names its models by family ("fable", "opus"); INTELLIGENCE is keyed by API id. Only
-# the default lists' ordering reads this, so a family nobody mapped simply sorts as unknown.
-GUEST_MODEL_ALIASES = {"fable": "claude-fable-5-1", "opus": "claude-opus-5",
-                       "sonnet": "claude-sonnet-5", "haiku": "claude-haiku-4-5"}
 
 _MAIN_GROUP_ORDER = {"guest": 0, "subscription": 0, "payg": 1, "aggregator": 1, "custom": 1,
                      "included": 2}
@@ -718,7 +775,7 @@ def tier_list_defaults(usable, *, local=(), custom=(), guests=(), listing=None) 
             continue
         first = next((m for m in row.get("models") or [] if isinstance(m, dict) and m.get("id")), {})
         model = first.get("id") or ""
-        score = INTELLIGENCE.get(GUEST_MODEL_ALIASES.get(model, model))
+        score = INTELLIGENCE.get(model_name(row["id"], model))
         ranked.append(((0, -(score or -1), order), row["id"], model, first.get("default_effort") or None, True))
         levels = first.get("efforts") if isinstance(first.get("efforts"), list) else None
         if not levels:
@@ -730,7 +787,8 @@ def tier_list_defaults(usable, *, local=(), custom=(), guests=(), listing=None) 
         preset = PRESETS[preset_id]
         entry = tier_default(preset_id, "main") or (preset_id, preset.model, preset.extra)
         effort = infer_effort(preset.effort_style, entry[2]) if model_efforts(preset_id, entry[1]) != [] else None
-        ranked.append(((_MAIN_GROUP_ORDER.get(preset.group, 1), -(INTELLIGENCE.get(entry[1]) or -1), order),
+        ranked.append(((_MAIN_GROUP_ORDER.get(preset.group, 1),
+                        -(INTELLIGENCE.get(model_name(preset_id, entry[1])) or -1), order),
                        preset_id, entry[1], effort, False))
         order += 1
     for preset_id, model in custom:

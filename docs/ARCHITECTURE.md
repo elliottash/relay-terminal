@@ -2102,6 +2102,23 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   the per-provider checklist with "add a model by id", the five tier lists, the defaults; it replaced
   the API keys and Model roles doors and the "Claude Code and Codex" page (a guest's permission
   posture sits under its models). Labels are lower-case throughout, per the owner.
+- **One name, one row (card #MDL1, 2026-09-21).** A model has exactly one name — lower-case, no
+  spaces, no vendor prefix — and everything that prints a model prints it: `gpt-5.6-sol`, never
+  "Codex" and never "GPT-5.6 Sol". The worker computes it (`presets.model_name`) and sends it as
+  `name` on every catalog row; `relay::models::nameOf` derives the same string for a row that has
+  none (an id typed by hand, an older worker), so the two fold together. `Entry::name` is it,
+  `Entry::label` is the same string (the old prettified spelling is gone) and `displayName()` is
+  still `"<name> · <provider>"`. Because the name is the same whoever serves the model,
+  `relay::models::grouped(catalog, rows)` folds the rows a caller already has into one `Group` per
+  name, entries inside it in preference order — where the user ranked them in the tier lists first,
+  then a plan before a guest harness before a pay-as-you-go API before OpenRouter before Relay
+  Free — and `Group::preferred` / `spent` / `via` answer which provider the row runs, whether every
+  one of them is spent, and which one `gpt-5.6-sol@openrouter` names. A local entry never joins a
+  cloud group: "local" is a promise about where the text goes. `Catalog::resolveKey(preset,
+  reportedModel)` maps what a worker reports back onto the preset's own entry by name, so Claude
+  Code started as `opus` and reporting `claude-opus-5` is one model to `/swap`, recents and the
+  usage counts. The rules, the edge cases they have to survive and what is still the owner's are in
+  **docs/MODEL-PICKING-DESIGN.md**.
 - **Usage limits and an exhausted subscription (owner, 2026-09-20).** `Catalog.limits` (one
   `LimitWindow{kind, usedPercent, resetsAt}` per window, by preset) and `Catalog.status` come from
   the preset rows — a guest's `limits: {windows, status?}`, Relay Free's `quota` — and the pane

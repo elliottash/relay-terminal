@@ -38,7 +38,15 @@ struct Entry {
     QString key;          // "<preset>|<model>"
     QString preset;       // "glm-coding", "guest:claude", "local:spark", "relay-free"
     QString model;        // the id the API or CLI takes
-    QString label;        // lower-case display name of the model: "glm-5.3 flash", "opus"
+    // What a person reads, and the only name this model has (card #MDL1, rule 1): lower-case, no
+    // spaces, no vendor prefix — "glm-5.3-flash", "claude-opus-5" for Claude Code's `opus`,
+    // "gpt-5.6-sol" whether it comes from codex, the OpenAI API or "openai/gpt-5.6-sol" on
+    // OpenRouter. The worker computes it (`presets.model_name`) and sends it as the row's `name`;
+    // a row without one — a custom id, an older worker — gets `nameOf(model)`.
+    QString name;
+    // The same string. It was the prettified "glm-5.3 flash" until #MDL1 and is kept so the call
+    // sites that print a row still compile and now print the name.
+    QString label;
     QString provider;     // lower-case provider: "z.ai (glm)", "claude code"
     QString plan;         // lower-case plan: "coding plan"; empty when the preset has none
     QString tier;         // the tier this is the provider's default for: main | flash | lite | ""
@@ -60,9 +68,16 @@ struct Entry {
     bool usable = false;     // a stored key, a local server, a runnable harness, Relay Free available
     bool openEnded = false;  // the provider lists more than a few models (OpenRouter's live list)
     bool guest = false, local = false, hosted = false, custom = false;
-    // "<label> · <provider>" — one line for a row, a status bar, a tooltip.
+    // "<name> · <provider>" — one line for a row, a status bar, a tooltip.
     QString displayName() const;
 };
+
+// The last step of the naming rule, for a model id nothing else knows anything about: everything
+// up to the last "/" removed, a leading "~" removed (OpenRouter's moving aliases are written
+// `~openai/gpt-sol-latest`), lower-cased, whitespace turned into "-". The worker's `name` wins
+// wherever there is one; this is what a hand-typed id and an older worker's row get, and it is the
+// same derivation, so `openai/gpt-5.6-sol` typed by hand folds into the existing gpt-5.6-sol row.
+QString nameOf(const QString &modelId);
 
 // One subscription window a provider reported: "5h" or "weekly", how much is spent, when it resets.
 struct LimitWindow {
@@ -85,6 +100,12 @@ struct Catalog {
     QStringList presets() const;          // ids in order, once each
     // The preset's row for a tier ("main" → the model the provider serves as Main), or null.
     const Entry *tierEntry(const QString &preset, const QString &tier) const;
+    // The key of this preset's entry for a model the worker has just reported running (card #MDL1,
+    // rule 3): its model id if the preset lists it, else the entry whose *name* is that model's
+    // name — so `guest:claude` reporting `claude-opus-5` resolves to `guest:claude|opus`, and the
+    // pane's key, the "current" mark, recents and usage counts all see one model. Empty when this
+    // preset has no such entry: the caller decides what that means, and no key is invented.
+    QString resolveKey(const QString &preset, const QString &reportedModel) const;
 
     static QString keyFor(const QString &preset, const QString &model);
     static bool splitKey(const QString &key, QString *preset, QString *model);
@@ -287,8 +308,56 @@ QString resetText(qint64 resetsAt, qint64 now);
 // "5h 62% left, resets 14:30 · weekly 40% left, resets tue" — empty with no figures. `now` is
 // unix seconds, for the wording of the reset time (today's hour, else a weekday).
 QString limitsText(const QList<LimitWindow> &windows, qint64 now);
-// Filter as opencode does: a substring match over label, model id and provider, case-insensitive,
-// every word of the query somewhere in the row.
+// Filter as opencode does: a substring match over the model's name, its id, its provider and its
+// plan, case-insensitive, every word of the query somewhere in the row. The provider is in the
+// haystack on purpose (design edge case 11): typing "openrouter" finds the row and names the entry
+// to pick out of its group.
 bool matches(const Entry &entry, const QString &query);
+
+// ----- groups: the small picker shows a model once (card #MDL1, rule 2) -------------------------
+// One name, one row. `gpt-5.6-sol` is served by Codex, the OpenAI API and OpenRouter; the box and
+// the Ctrl+Alt+M picker show it once and the row says which provider it will use. Options › Models
+// and the tier lists keep working on entries, because that is where the order between providers is
+// expressed.
+struct Group {
+    QString name;          // the shared `Entry::name`; the row's text
+    QList<Entry> entries;  // the providers that serve it, in preference order (see `grouped`)
+
+    // The entry picking this row runs: the first that is usable and not exhausted, else the first
+    // usable one, else the first — a group is never empty and always answers with something, so a
+    // caller never has to special-case a row it just drew. `now` is unix seconds; 0 means the clock.
+    Entry preferred(const Catalog &catalog, qint64 now = 0) const;
+    // Whether the row is greyed: no entry in it is usable and unexhausted. A subscription running
+    // out therefore does not remove the row — the next provider in it takes the turn — and only
+    // when every one is spent does the row go grey (rule 2, "the payoff").
+    bool spent(const Catalog &catalog, qint64 now = 0) const;
+    // The entry a "via" names: `/model gpt-5.6-sol@openrouter`, or clicking a provider in the
+    // picker's via list. Matches a preset id ("guest:codex" and plain "codex" both), or the
+    // provider's words ("openrouter", "claude code"). Null when this group has no such entry; the
+    // pointer is into `entries` and lives as long as the group.
+    const Entry *via(const QString &presetOrProviderText) const;
+};
+
+// `rows` folded into one group per name — callers pass `shown(catalog)`, `live(catalog)` or any
+// ordered list they already have, and the groups come out in the order each name first appeared,
+// so the rank order the caller handed in survives.
+//
+// Inside a group the entries are in *preference* order: (a) where the user already ranked them, by
+// position in the tier lists with main first; (b) then the kind of access — a subscription or plan
+// first, then a guest harness, then a first-party pay-as-you-go API, then OpenRouter, then Relay
+// Free; (c) stable otherwise, so the caller's order breaks the remaining ties. A local entry never
+// joins a group with a non-local one (design section 3.2: "local" is a promise about where the text
+// goes), so it gets its own group even when the name matches.
+//
+// `now` is accepted for symmetry with the rest of this header and because a caller has one to
+// hand; the order does not depend on the clock — which entry is *live* does, and that is
+// `preferred` and `spent`.
+QList<Group> grouped(const Catalog &catalog, const QList<Entry> &rows, qint64 now = 0);
+
+// The entry `text` names, for `/model <name>` and `/model <name>@<provider>`: the group whose name
+// it is (case-insensitive; a bare model id is understood too), then that group's `via` for the part
+// after "@", or its `preferred` without one. Null when no row matches. The pointer is into `rows`,
+// which the caller owns.
+const Entry *findByName(const Catalog &catalog, const QList<Entry> &rows, const QString &text);
 
 }  // namespace relay::models
