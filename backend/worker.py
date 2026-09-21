@@ -18,7 +18,7 @@ from relay_core import openrouter_catalog
 from relay_core import request_stream, tool_stream
 from relay_core.subagents import SubagentFactory, SubagentManager
 from relay_core.keybindings import KeybindingCatalog
-from relay_core.presets import PRESETS, tier_list_defaults
+from relay_core.presets import PRESETS, model_name, tier_list_defaults
 from relay_core.queue import TurnSupervisor
 from relay_core.router import classify
 
@@ -385,7 +385,11 @@ def main():
                 subagents.configure(agent_catalog, subagent_factory)
                 subagents.attach(agent)
                 # --- end subagents ---
+                # `model_name` (protocol 13, card #MDL1 rule 1): the one name this model has,
+                # beside the id the API takes, so every surface that prints it — the pane, the
+                # phone — prints the same word without a catalog of its own.
                 event = {"event": "configured", "model": config.model,
+                         "model_name": model_name(resolver.main_preset_id, config.model),
                          "skills": len(agent.executor.skills.skills) if agent.executor.skills is not None else 0,
                          "agent_role": agent_role, "roles": resolver.summary(),
                          "tiers": resolver.tier_summary(),
@@ -630,6 +634,7 @@ def main():
                             if isinstance(pick, str) and pick.strip() else agent.roles.resolve(role))
                 new_role = "main" if resolved.is_main else role
                 changed = {"event": "model_changed", "id": request.get("id"), "model": resolved.config.model,
+                           "model_name": model_name(resolved.preset_id, resolved.config.model),
                            "preset": resolved.preset_id, "effort": agent.effort, "agent_role": new_role,
                            **({"warning": resolved.warning} if resolved.warning else {})}
 

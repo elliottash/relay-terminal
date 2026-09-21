@@ -17,7 +17,8 @@ import urllib.parse
 from dataclasses import dataclass, replace
 
 from .presets import (EFFORTS, PRESETS, TIER_LABELS, TIERS, apply_effort, effort_style, match_preset,
-                      model_efforts, model_extra, openrouter_twin, provider_tier_model, tier_default,
+                      model_efforts, model_extra, model_name, openrouter_twin, provider_tier_model,
+                      tier_default,
                       tier_fallbacks, validate_effort, validate_tier)
 from .provider import MIN_OUTPUT_TOKENS, ProviderConfig
 from . import customproviders, hosted, localmodels
@@ -74,17 +75,20 @@ ROLES = ("main", "terminal_use", "subagent", "switchboard", "high", "flash", "lo
 # guest harness (`leave_guest`, card #GH5T) — its whole job is Relay's own tools.
 HELPER_ROLE = "switchboard"
 SETTABLE = tuple(r for r in ROLES if r != "main")
-LABELS = {"main": "Main agent", "terminal_use": "Terminal-use agent", "subagent": "Subagent",
+# Lower-case, and the same words as the GUI's one table (src/ModelRows.cpp `roleLabel`): a role
+# is named the same way wherever it is printed (card #MDL1, rule 1). These reach a person in the
+# warning a role with no key raises — "flash: no stored key for kimi; using main."
+LABELS = {"main": "main", "terminal_use": "terminal use", "subagent": "subagents",
           # "switchboard" keeps its protocol name — settings, the model box (#BRD3), its Options ›
-          # Models row and its Main default are untouched — and is labelled "Helper agent" since
+          # Models row and its Main default are untouched — and is the word for the job since
           # card #FEJQ (owner decision 4, 2026-09-20): one helper worker per tab now serves the
           # Switchboard *and* the Options, Actions and Sessions panes, so the label names the job
           # rather than the one pane it started in (protocol 30.7).
-          "switchboard": "Helper agent", "high": "High agent", "flash": "Flash agent",
-          "local": "Local agent",
-          "planning": "Plan mode", "summaries": "Summaries", "suggestions": "Suggestions",
-          "chores": "Chores", "audit": "Request audit", "loop_check": "Loop check",
-          "vision": "Vision", "route_assist": "Route assist"}
+          "switchboard": "helpers", "high": "high", "flash": "flash",
+          "local": "local",
+          "planning": "plan mode", "summaries": "summaries", "suggestions": "suggestions",
+          "chores": "chores", "audit": "request audit", "loop_check": "loop check",
+          "vision": "vision", "route_assist": "route assist"}
 
 # The pane-agent role was called "fast" until 2026-09-18. It is renamed to "flash" so the one word
 # names the tier, the role and the /flash command, and so nothing in Relay says "fast" — in Codex and
@@ -520,7 +524,7 @@ class RoleResolver:
         if not key and not local and not is_hosted:
             where = preset_id or base_url
             return self._main(role, "fallback",
-                              f"{LABELS[role]}: no stored key for {where}; using the main agent.")
+                              f"{LABELS[role]}: no stored key for {where}; using main.")
         preset = _preset(preset_id)
         extra = copy.deepcopy(extra or {})
         if effort is not None:
@@ -705,15 +709,17 @@ class RoleResolver:
                                      f"using {TIER_LABELS[candidate]}.")
                 elif skipped:
                     why = "no stored key, or a guest that cannot run here" if guest_skipped else "no stored key"
+                    # The model by its name, never the raw id (card #MDL1, rule 1).
                     resolved.note = (f"The first {skipped} of the {TIER_LABELS[tier]} list cannot be "
-                                     f"used right now ({why}); using {model or preset_id}.")
+                                     f"used right now ({why}); using "
+                                     f"{model_name(preset_id, model) or preset_id}.")
                 return resolved
         if tier == "local":
             # Nothing set up rather than no key, and Local is not a step on the ladder: it falls
             # straight back to Main, with the note the roles modal shows inline.
-            return self._main(role, "main", tier="main", note="No local model is set up; using Main.")
+            return self._main(role, "main", tier="main", note="No local model is set up; using main.")
         return self._main(role, "main", tier="main",
-                          note=(f"No stored key for the {TIER_LABELS[tier]} model; using Main."
+                          note=(f"No stored key for the {TIER_LABELS[tier]} model; using main."
                                 if self.tiers.get(tier) or self._tier_entries(tier) else None))
 
     def _default(self, role: str) -> Resolved:

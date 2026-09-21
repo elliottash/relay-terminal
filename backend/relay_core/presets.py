@@ -261,7 +261,10 @@ PRESETS: dict[str, Preset] = {p.id: p for p in [
 # has an obvious "bigger" model to name — and an override resolves the way Flash and Lite do.
 PROVIDER_TIERS = ("main", "flash", "lite")
 TIERS = ("high", "main", "flash", "lite", "local")
-TIER_LABELS = {"high": "High", "main": "Main", "flash": "Flash", "lite": "Lite", "local": "Local"}
+# Lower-case, like every other word Relay writes for a tier (card #MDL1, rule 1: "tier and role
+# words are lower-case too: main, flash, not Main agent"). These reach a person in the notes the
+# roles modal shows inline — "No stored key for the flash model; using main."
+TIER_LABELS = {"high": "high", "main": "main", "flash": "flash", "lite": "lite", "local": "local"}
 TIER_HINTS = {"high": "plan mode and the hardest turns; main at max reasoning unless you pick a model",
               "main": "the pane's agent and subagents",
               "flash": "terminal use and quick turns",

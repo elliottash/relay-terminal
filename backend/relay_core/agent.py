@@ -38,7 +38,7 @@ from .context import DEFAULT_THRESHOLD, ContextTracker
 from .planning import (PLAN_BLOCKED_TOOLS, PLAN_MODE_NOTE, WRITE_PLAN_SPEC, guest_plan_prompt, plan_from_reply,
                        validate_mode, validate_plan_args, write_plan)
 from .roles import GUEST_BASE_SCHEME, guest_id_of, is_guest_preset
-from .presets import (apply_effort, context_window_for, effort_style, infer_effort,
+from .presets import (apply_effort, context_window_for, effort_style, infer_effort, model_name,
                       model_supports_vision, resolve_preset, tier_default, validate_effort)
 from .program_input import DEFAULT_MAX_WRITES, clip_screen, validate_grant
 from .terminal_handoff import validate_ceiling
@@ -1307,6 +1307,8 @@ class Agent:
                                    "refused_fields": refused_fields, "pre_land": pre_land}
             start_exclusive(lambda agent: agent.apply_pending_model(at="now"))
             return {"applies": "after_compaction", "in_flight_model": self.config.model,
+                    "in_flight_model_name": model_name(self.preset.id if self.preset else None,
+                                                       self.config.model),
                     "context_window": window, "will_compact": True}
 
     def defer_model(self, config: ProviderConfig, preset_id: str | None = None,
@@ -1356,7 +1358,11 @@ class Agent:
             # model to the end: the new model applies after it, and so does a turn that has failed
             # over — `_end_failover` would undo a step switch.
             applies = "turn_end" if (routed or self._failover) else "next_step"
-            outcome = {"applies": applies, "in_flight_model": running, "context_window": window}
+            # `in_flight_model_name` beside it (protocol 13, card #MDL1 rule 1): "model: kimi-k3
+            # from the next turn · this turn finishes on glm-5.3" is two names, not two ids.
+            outcome = {"applies": applies, "in_flight_model": running,
+                       "in_flight_model_name": model_name(self.preset.id if self.preset else None, running),
+                       "context_window": window}
             if self.switch_fit(config, window)["compacts"]:
                 outcome["will_compact"] = True
             if applies == "next_step" and self._reply_open():
@@ -1365,7 +1371,9 @@ class Agent:
                 # the status line; a refused request being waited out is pre-empted instead, and
                 # its `provider_retry {reason: "switch"}` says so when it happens (card #DC4J).
                 self.emit({"event": "status",
-                           "text": f"{config.model} takes over from the next step · {running} is answering now"})
+                           "text": f"{model_name(preset_id, config.model)} takes over from the next step"
+                                   f" · {model_name(self.preset.id if self.preset else None, running)}"
+                                   f" is answering now"})
             return outcome
 
     def _reply_open(self) -> bool:
@@ -1482,10 +1490,15 @@ class Agent:
         if pre_land is not None:
             pre_land()
         from_model = self.config.model
+        from_preset = self.preset.id if self.preset else None
         from_style = self._effort_style()
         self.set_model(pending["config"], pending["preset_id"], pending["window"])
+        # `model_name` / `from_model_name` (protocol 13, card #MDL1 rule 1): the names the
+        # transcript line prints, beside the ids the API takes.
         event = {"event": "model_applied", "turn_id": turn_id, "at": at, "model": self.config.model,
-                 "from_model": from_model, "preset": self.preset.id if self.preset else None,
+                 "model_name": model_name(self.preset.id if self.preset else None, self.config.model),
+                 "from_model": from_model, "from_model_name": model_name(from_preset, from_model),
+                 "preset": self.preset.id if self.preset else None,
                  "context_window": self.context.window, "effort": self.effort, **pending["fields"]}
         if step is not None:
             event["step"] = step

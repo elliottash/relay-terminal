@@ -237,7 +237,7 @@ class TierTableTests(unittest.TestCase):
         # Owner, 2026-09-20: "a 'high' default on top of main, used by the planner by default".
         self.assertEqual(P.TIERS, ("high", "main", "flash", "lite", "local"))
         self.assertEqual(P.PROVIDER_TIERS, ("main", "flash", "lite"))
-        self.assertEqual(P.TIER_LABELS["high"], "High")
+        self.assertEqual(P.TIER_LABELS["high"], "high")   # lower-case, card #MDL1 rule 1
         self.assertIn("max reasoning", P.TIER_HINTS["high"])
         self.assertEqual(P.validate_tier("high"), "high")
         for provider in P.TIER_DEFAULTS:
@@ -273,7 +273,7 @@ class TierTableTests(unittest.TestCase):
         json.dumps(catalog)
         self.assertEqual([t["id"] for t in catalog["tiers"]], list(P.TIERS))
         # High is drawn first, above Main, and carries its label and hint like every other row.
-        self.assertEqual(catalog["tiers"][0], {"id": "high", "label": "High", "hint": P.TIER_HINTS["high"]})
+        self.assertEqual(catalog["tiers"][0], {"id": "high", "label": "high", "hint": P.TIER_HINTS["high"]})
         self.assertEqual(sorted(catalog["providers"]), sorted(P.PRESETS))
         for provider, table in catalog["providers"].items():
             self.assertEqual(sorted(table), sorted(P.PROVIDER_TIERS), provider)
@@ -541,7 +541,8 @@ class GuiMirrorTests(unittest.TestCase):
         self.assertIn("clearServingModels();", clock)
         # One row in the box, marked with what moved the turn, and it is not a preset to pick.
         picker = source.split("void refreshPickers() {", 1)[1].split("// ----- Claude Code and Codex", 1)[0]
-        self.assertIn('QStringLiteral("%1 %2 · this turn").arg(servingMark(serving.why), serving.model)', picker)
+        # The row prints the model's *name* since card #MDL1 (rule 1); the data is still the id.
+        self.assertIn('QStringLiteral("%1 %2 · this turn").arg(servingMark(serving.why), servingModelName(serving))', picker)
         self.assertIn('QStringLiteral("serving:") + serving.model', picker)
         self.assertIn("servingTooltip()", picker)
         guard = source.split("void selectModel(const QString &id, const QString &model = QString()) {", 1)[1].split("\n    }", 1)[0]

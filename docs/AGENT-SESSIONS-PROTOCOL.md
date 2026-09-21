@@ -24,7 +24,19 @@ Owner decisions this implements are recorded in
 | `agents` | `{"dirs": [abs paths] or omitted}` | agent definition directories; omitted = all known locations (section 7) |
 | `context` | object | **what this agent is about** (section 33, card #AGNT): the surface's name, the role, the brief, where the conversation is kept, the named tool scope. Absent means a terminal pane, which is what every `configure` before section 33 meant. |
 
-`configured` event gains: `context_window`, `effort`, `mode`, `instructions` (list of loaded paths), `agents` (count), `session_id`, and — when the request carried one — `context`, the block back with the scope the worker settled on (section 33.1).
+`configured` event gains: `context_window`, `effort`, `mode`, `instructions` (list of loaded paths), `agents` (count), `session_id`, `model_name`, and — when the request carried one — `context`, the block back with the scope the worker settled on (section 33.1).
+
+**`model_name`: the one name a model has** (card #MDL1, rule 1, 2026-09-21). Every event that names
+a model carries the name beside the id — `configured` and `model_changed` carry `model_name`,
+`model_changed` also `in_flight_model_name`, and `model_applied` carries `model_name` and
+`from_model_name`. The id is what the API takes and never changes (`MiniMax-M3`, `k3`,
+`openai/gpt-5.6-sol`); the name is what a person reads and is lower-case, has no spaces and no
+vendor prefix (`minimax-m3`, `kimi-k3`, `gpt-5.6-sol`). The worker computes it once
+(`presets.model_name(preset_id, model_id)`: the model's own catalog `name`, then a guest alias —
+Claude Code's `opus` is `claude-opus-5` — then the derivation), and it is the same string the
+`presets` answer puts on each catalog row as `name`. A surface prefers it and derives its own only
+for an older worker that sends none: the desktop through `Pane::modelNameFor`, the phone through
+`app/modelname.js`. It is never sent upstream.
 
 **A named preset is an endpoint.** In `configure` and `set_model`, `base_url`, `model` and `extra` are
 optional when `preset` names a built-in preset: the preset supplies each one that is missing, the same
@@ -38,10 +50,10 @@ of them. Sending an endpoint with no preset is unchanged: the key is looked up f
 
 ## 2. Model and effort without losing the conversation
 
-- `set_model {preset, base_url, model, extra, max_tokens, context_window, use_stored_key, api_key?}` → swaps the provider, keeping the conversation. Event `model_changed {model, preset, context_window, effort, applies, in_flight_model?, will_compact?}`, or `model_switch_refused` (below).
+- `set_model {preset, base_url, model, extra, max_tokens, context_window, use_stored_key, api_key?}` → swaps the provider, keeping the conversation. Event `model_changed {model, model_name, preset, context_window, effort, applies, in_flight_model?, in_flight_model_name?, will_compact?}`, or `model_switch_refused` (below).
   - **Accepted while a turn runs** (issue 3ES1, 2026-09-18; until then it was refused with `agent_busy`). The request already in flight is never aborted: it finishes on the model it started on. The switch lands at the next step boundary of the tool loop — every tool call of the previous response has its result — before the next provider request and before the auto-compaction check, so that request goes to the new model with the whole conversation. `model_changed` then says `applies: "next_step"` and names `in_flight_model`, and `context_window` is the new model's.
   - **A refused request is not waited out for a switch** (card #DC4J, 2026-09-20). "Never aborted" covers a request that is *answering*. When the provider has refused the request — 429, 408, 409, a 5xx: the transport's own retries (15.2.1) — and is waiting to ask it again, a `set_model` ends that wait at once. The worker emits `provider_retry {turn_id, reason: "switch", step, attempt, max_attempts, status, from_model, to_model, text}` (what was refused, where the step is going), lands the switch at the same step boundary as any other (`model_applied {at: "step"}`, the takeover note, `context`) and asks that same step of the new model. Nothing had been streamed, so nothing is repeated, and `model_changed` still says `applies: "next_step"` — the next step is simply now. The first attempt's connect and its wait for the response headers are not interrupted (nothing exists to close until they arrive), and a request whose response is open finishes on the model it started on, as before: the worker then says so in a `status` line, `<new> takes over from the next step · <old> is answering now`. A switch during a plan, image or failed-over turn keeps waiting for the turn's end and leaves those retries alone. A switch back to the model in force during the wait drops the pending one; if the wait had already ended for it, the step is asked again at once.
-  - When the switch lands the worker emits `model_applied {turn_id, at: "step"|"turn_end"|"now", step?, model, from_model, preset, context_window, effort, history_converted?, compacted?}` followed by `context`. `at: "turn_end"` means the turn ended without another request (it answered, stopped, failed or hit a limit): the new model applies from the next turn, and the event comes after `agent_finished`, so `done`/`error`/`cancelled` stay the turn's last events. The worker's own follow-ups of a switch (subagents that inherit the main model, role defaults, `agent_role: "main"`) happen at that moment, not when the request arrives. A landing at `"step"` adds a Relay handoff note to the conversation — the model taking over is told the request above is still open and to continue it with tools — and that turn's open requests count for the completion check (2026-09-20, #B9V4): a takeover must not read as a fresh start, so a wrap-up in plain text draws the check instead of ending the turn. A switch off a guest harness that lands mid-turn ends the harness at the landing, as an idle switch does at once (29.3).
+  - When the switch lands the worker emits `model_applied {turn_id, at: "step"|"turn_end"|"now", step?, model, model_name, from_model, from_model_name, preset, context_window, effort, history_converted?, compacted?}` followed by `context`. `at: "turn_end"` means the turn ended without another request (it answered, stopped, failed or hit a limit): the new model applies from the next turn, and the event comes after `agent_finished`, so `done`/`error`/`cancelled` stay the turn's last events. The worker's own follow-ups of a switch (subagents that inherit the main model, role defaults, `agent_role: "main"`) happen at that moment, not when the request arrives. A landing at `"step"` adds a Relay handoff note to the conversation — the model taking over is told the request above is still open and to continue it with tools — and that turn's open requests count for the completion check (2026-09-20, #B9V4): a takeover must not read as a fresh start, so a wrap-up in plain text draws the check instead of ending the turn. A switch off a guest harness that lands mid-turn ends the harness at the landing, as an idle switch does at once (29.3).
   - Two switches before the next request: the last one wins, and only it is applied. A switch back to the model in force drops the pending one (`applies: "now"`, no `model_applied`).
   - An image turn (issue EM1E) stays on its vision model to the end: a switch during one says `applies: "turn_end"` and `in_flight_model` is the vision model.
   - A missing stored key is refused at once, mid-turn or not, with nothing left pending.
@@ -969,7 +981,10 @@ configured role whose key is missing). No key material appears in any of it.
 after a `set_model` (per-provider defaults are recomputed for the new main model), and after `configure`
 **only when `warnings` is non-empty**, so a pane that configured cleanly keeps its old event order.
 `warnings` holds one line per role that fell back, e.g.
-`Subagent: no stored key for glm; using the main agent.`
+`subagents: no stored key for glm; using main.` The role and tier words in these lines, and in the
+`note` a stepped-down tier carries, are lower-case (card #MDL1, rule 1): the same vocabulary the
+GUI's one table uses — `main`, `high`, `flash`, `lite`, `local`, `terminal use`, `subagents`,
+`helpers`, `plan mode`.
 
 `set_agent_options {roles}` replies with `agent_options {…, roles}` (the same table) followed by
 `model_roles`. A missing key is never a hard failure: the role falls back to the main agent.
@@ -1703,6 +1718,12 @@ negated: true}`; every other key is one of the operators in 14.2.
 the rows the **filters** select (the query text is not applied, so a menu does not empty out as
 the user types), most recently used first, at most 30 each. It is there so the filter menus need
 no second request.
+
+`facets.models` holds model **names**, not the ids history recorded (card #MDL1, rule 1): the rows
+written as `k3` and as `kimi-k3` are one entry, and `openai/gpt-5.6-sol` is `gpt-5.6-sol`. The
+stored ids are untouched — nothing is migrated — and the `model` filter and the `model:` operator
+match either, so picking the one menu entry selects every row of that model and a query saved with
+a raw id still works.
 
 Each item:
 

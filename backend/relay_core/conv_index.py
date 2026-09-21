@@ -96,6 +96,8 @@ import threading
 import time
 from pathlib import Path
 
+from .presets import model_name as _model_name
+
 # v2 (2026-09-18, cards #Y63Z/#R6J0): subagent threads, owner/parent links, models and usage totals.
 # v3 (2026-09-18): summary/first_prompt/last_prompt/files/branch/unfinished/mode columns, title and
 # summary indexed as entries, query operators.
@@ -267,8 +269,30 @@ SORTS = ("recent", "oldest", "longest", "shortest", "title", "title_desc", "mode
 # their label, everything else its model. The CASE is written to match, so the two never drift
 # apart silently; both fall back to recency when the key ties.
 _TITLE_KEY = "COALESCE(NULLIF(c.custom_title, ''), c.title, '') COLLATE NOCASE"
-_MODEL_KEY = ("CASE c.source WHEN 'terminal' THEN 'terminal' WHEN 'claude' THEN 'Claude Code'"
-              " WHEN 'codex' THEN 'Codex' ELSE c.model END COLLATE NOCASE")
+_MODEL_KEY = ("CASE c.source WHEN 'terminal' THEN 'terminal' WHEN 'claude' THEN 'claude code'"
+              " WHEN 'codex' THEN 'codex' ELSE relay_model_name(c.model) END COLLATE NOCASE")
+
+
+def _sql_model_name(value):
+    """`relay_model_name(<a stored model id>)`: the one name that model has (card #MDL1, rule 1).
+
+    History records the id the API took — "k3", "openai/gpt-5.6-sol", "MiniMax-M3" — and those
+    stay on disk exactly as they were written. This is the name a person reads, and registering it
+    on the connection is what lets the Model filter and the Model sort work on names without a
+    second table: the menu lists each name once, so `k3` and `kimi-k3` are one entry that selects
+    both, and `openai/gpt-5.6-sol` sorts beside `gpt-5.6-sol` rather than under "o".
+    """
+    if not isinstance(value, str) or not value:
+        return value
+    return _model_name(None, value) or value
+
+
+def _register_functions(db: sqlite3.Connection) -> None:
+    """`relay_model_name` on this connection, for the Model filter, menu and sort."""
+    try:
+        db.create_function("relay_model_name", 1, _sql_model_name, deterministic=True)
+    except TypeError:      # an sqlite too old for `deterministic`
+        db.create_function("relay_model_name", 1, _sql_model_name)
 # `relevance` tiers a conversation by the best kind it matched, then by how many entries matched,
 # then by recency: a title hit outranks a summary hit outranks a prompt outranks a reply outranks
 # tool or terminal output, however many of the weaker ones there are.
@@ -1195,6 +1219,7 @@ class ConversationIndex:
             db.execute("PRAGMA busy_timeout=10000")
             db.execute("PRAGMA journal_mode=WAL")
             os.chmod(self.path, 0o600)
+        _register_functions(db)
         db.executescript(SCHEMA)
         db.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)", (str(SCHEMA_VERSION),))
         db.commit()
@@ -2201,7 +2226,10 @@ class ConversationIndex:
             add(r"(c.workspace = ? OR c.workspace LIKE ? ESCAPE '\')", folder, under_pattern(folder),
                 negated=True)
         if model:
-            add("c.model = ?", model)
+            # By name (card #MDL1, rule 1): the menu offers each model once, and picking "kimi-k3"
+            # selects the rows recorded as `k3` too. A raw id still filters, for a saved query and
+            # for a name this build cannot derive.
+            add("(relay_model_name(c.model) = ? OR c.model = ?)", model, model)
         if has_open:
             add("c.open_requests > 0")
         if isinstance(since, (int, float)):
@@ -2225,7 +2253,12 @@ class ConversationIndex:
             if key == "project":
                 add(r"(lower(c.project) LIKE ? ESCAPE '\' OR lower(c.workspace) LIKE ? ESCAPE '\')",
                     like_value(value), like_value(value), negated=negated)
-            elif key in ("file", "model", "branch"):
+            elif key == "model":
+                # `model:` matches the name as well as the stored id, so `model:kimi-k3` finds the
+                # conversations history wrote as `k3` (card #MDL1, rule 1).
+                add(r"(lower(c.model) LIKE ? ESCAPE '\' OR lower(relay_model_name(c.model)) LIKE ? ESCAPE '\')",
+                    like_value(value), like_value(value), negated=negated)
+            elif key in ("file", "branch"):
                 add(r"lower(c.%s) LIKE ? ESCAPE '\'" % ("files" if key == "file" else key),
                     like_value(value), negated=negated)
             elif key == "after":
@@ -2253,11 +2286,15 @@ class ConversationIndex:
         """
         out = {}
         for name, column in (("models", "model"), ("branches", "branch"), ("projects", "project")):
-            sql = (f"SELECT c.{column} AS value, MAX(COALESCE(c.updated, 0)) AS last FROM conversations c"
+            # The models menu lists *names* (card #MDL1, rule 1): one entry per model, so the rows
+            # written as `k3` and as `kimi-k3` are one line that selects both, and `_filters`
+            # takes the name straight back.
+            value_sql = "relay_model_name(c.model)" if column == "model" else f"c.{column}"
+            sql = (f"SELECT {value_sql} AS value, MAX(COALESCE(c.updated, 0)) AS last FROM conversations c"
                    f" WHERE c.{column} IS NOT NULL AND c.{column} != ''")
             if clause:
                 sql += " AND " + clause
-            sql += f" GROUP BY c.{column} ORDER BY last DESC LIMIT {MAX_FACET_VALUES}"
+            sql += f" GROUP BY value ORDER BY last DESC LIMIT {MAX_FACET_VALUES}"
             out[name] = [row["value"] for row in db.execute(sql, params).fetchall()]
         return out
 

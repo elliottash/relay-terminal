@@ -23,7 +23,7 @@ from . import (alias_import, aliases, attachments, conv_index, customproviders,
 from .agent import validate_turn_options
 from .requests import check_ledger_id
 from .context import validate_threshold, validate_window
-from .presets import PRESETS, match_preset, resolve_preset, validate_effort
+from .presets import PRESETS, match_preset, model_name, resolve_preset, validate_effort
 from .provider import AUTOMATIC_OUTPUT_TOKENS, ProviderConfig, ProviderError
 from . import sessions as session_files
 from .sessions import SessionStore, check_id, default_session_dir
@@ -369,8 +369,13 @@ class SessionCommands:
                                "context_window": agent.context.window, "effort": agent.effort,
                                "reason": outcome["reason"]})
                 else:
+                    # `model_name` (protocol 13, card #MDL1 rule 1): the one name this model has,
+                    # so the pane's status line and the phone's both read "model: kimi-k3" without
+                    # either deriving it.
+                    named = preset.id if preset else preset_id if guest_provider else None
                     changed = {"event": "model_changed", "id": request.get("id"), "model": config.model,
-                               "preset": preset.id if preset else preset_id if guest_provider else None,
+                               "model_name": model_name(named, config.model),
+                               "preset": named,
                                "effort": agent.effort, **outcome}
                     if guest_provider is not None:
                         changed["guest"] = guest_provider.guest_id

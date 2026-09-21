@@ -62,7 +62,7 @@ class TierTableTests(unittest.TestCase):
         # High was added above Main on 2026-09-20; like Local it has no per-provider row.
         self.assertEqual(P.TIERS, ('high', 'main', 'flash', 'lite', 'local'))
         self.assertEqual(P.PROVIDER_TIERS, ('main', 'flash', 'lite'))
-        self.assertEqual(P.TIER_LABELS['local'], 'Local')
+        self.assertEqual(P.TIER_LABELS['local'], 'local')   # lower-case, card #MDL1 rule 1
         self.assertTrue(P.TIER_HINTS['local'])
         for provider, table in P.TIER_DEFAULTS.items():
             self.assertNotIn('local', table, provider)
@@ -157,13 +157,13 @@ class ResolveTests(Case):
         self.assertEqual(sorted(summary), ['flash', 'high', 'lite', 'local', 'main'])
         self.assertEqual(summary['local']['model'], 'bonsai-2-27b')
         self.assertEqual((summary['local']['label'], summary['local']['source'], summary['local']['using']),
-                         ('Local', 'default', 'local'))
+                         ('local', 'default', 'local'))
         self.assertNotIn('note', summary['local'])
 
     def test_the_summary_names_the_local_role(self):
         summary = self.resolver().summary()
         self.assertEqual(summary['local']['model'], 'bonsai-2-27b')
-        self.assertEqual(summary['local']['label'], 'Local agent')
+        self.assertEqual(summary['local']['label'], 'local')
         self.assertEqual(summary['local']['tier'], 'local')
 
     def test_no_key_is_ever_looked_up_for_the_local_tier(self):
@@ -178,7 +178,7 @@ class NoEndpointTests(Empty):
         resolved = made.resolve('local')
         self.assertTrue(resolved.is_main)
         self.assertEqual(resolved.config.model, 'kimi-k3')
-        self.assertEqual(resolved.note, 'No local model is set up; using Main.')
+        self.assertEqual(resolved.note, 'No local model is set up; using main.')
         self.assertIsNone(resolved.warning)
         self.assertEqual(made.warnings, [])          # an expected step, not a misconfiguration
 
@@ -225,7 +225,7 @@ class AgentRoleTests(Case):
         catalog = model_roles.tier_catalog()
         # High joined the list above Main on 2026-09-20; Local stays last.
         self.assertEqual([t['id'] for t in catalog['tiers']], ['high', 'main', 'flash', 'lite', 'local'])
-        self.assertEqual(catalog['tiers'][-1]['label'], 'Local')
+        self.assertEqual(catalog['tiers'][-1]['label'], 'local')
         # The Local tier has no per-provider row; the GUI lists the `presets` rows with local: true.
         for table in catalog['providers'].values():
             self.assertNotIn('local', table)

@@ -190,7 +190,7 @@ class DefaultTests(unittest.TestCase):
         flash = made.resolve("flash")
         self.assertEqual((flash.preset_id, flash.model, flash.tier), ("glm-coding", "glm-5.3-flash", "flash"))
         # The step-down note names the entries that could not be used, as it does for every tier.
-        self.assertIn("High", high.note or "")
+        self.assertIn("high", high.note or "")   # lower-case, card #MDL1 rule 1
 
     # ----- a pane's own pick for a role (protocol 13.5, set_agent_role {preset, model, effort}) ---
     def test_resolve_entry_pins_one_pane_without_touching_the_list(self):
@@ -370,7 +370,7 @@ class PlanRoleTests(unittest.TestCase):
         planning = made.resolve("planning")
         self.assertTrue(planning.is_main)
         self.assertEqual((planning.tier, planning.model), ("main", "kimi-k3"))
-        self.assertIn("No stored key for the High model; using Main.", planning.note)
+        self.assertIn("No stored key for the high model; using main.", planning.note)
         self.assertIsNone(made.planning_target())
         self.assertEqual(made.warnings, [])            # a step-down, not a misconfiguration
         self.assertEqual(made.tier_summary()["high"]["using"], "main")
@@ -685,7 +685,7 @@ class TierTests(unittest.TestCase):
         chores = made.resolve("chores")
         self.assertEqual(chores.model, "kimi-k2.7-code-highspeed")
         self.assertEqual(chores.tier, "flash")
-        self.assertIn("using Flash", chores.note)
+        self.assertIn("using flash", chores.note)
         # A step-down is expected, not a failure: it never reaches the protocol warnings list.
         self.assertIsNone(chores.warning)
         self.assertEqual(made.warnings, [])
@@ -753,7 +753,7 @@ class TierTests(unittest.TestCase):
         self.assertEqual((summary["high"]["model"], summary["high"]["effort"]), ("kimi-k3", "max"))
         self.assertEqual(summary["flash"]["model"], "kimi-k2.7-code-highspeed")
         self.assertEqual(summary["lite"]["using"], "flash")
-        self.assertIn("using Flash", summary["lite"]["note"])
+        self.assertIn("using flash", summary["lite"]["note"])
         self.assertNotIn("kimi-key", json.dumps(summary))
 
     def test_probing_the_tiers_does_not_poison_the_role_cache(self):
