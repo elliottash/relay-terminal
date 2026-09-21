@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: m
 created: '2026-09-21'
 source: User request in Relay, 2026-09-21
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-subagent-pane-formatting/], related: [M9T4, TK9C], github: null}
+links: {plans: [], commits: [e9f4e259e1901b64fe8f8e6ed8d18057f0444cc4], evidence: [docs/qa_evidence/2026-09-21-subagent-pane-formatting/], related: [M9T4, TK9C], github: null}
 ---
 # Match subagent transcript formatting to regular panes
 
