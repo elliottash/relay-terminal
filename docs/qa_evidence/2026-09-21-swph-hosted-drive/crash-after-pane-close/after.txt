@@ -1,0 +1,5 @@
+# the same reproduction on the build with the fix (clean export of main + the RelayWindow.h hunk):
+# board_create, sent 4 s after the Switchboard pane was closed, was answered:
+{"event":{"card_id":"BQET","created":true,"event":"board_written","kind":"board_create","status":"inbox","tab":"features"},"rid":2,"t":"board_event"}
+# and Relay ran until the script ended it:
+65:Thread 1 "relay" received signal SIGTERM, Terminated.

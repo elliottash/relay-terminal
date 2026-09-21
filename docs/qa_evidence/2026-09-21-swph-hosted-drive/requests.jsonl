@@ -1,0 +1,11 @@
+{"at": 1789995348.4724555, "scene": "DISCUSSIT", "tools": true, "stream": true, "users": [".\n\nThe owner says:\nDISCUSSIT only our three ports, or the whole coast?"]}
+{"at": 1789995350.1629722, "scene": "SLOWCARD", "tools": true, "stream": true, "users": [".\n\nThe owner says:\nDISCUSSIT only our three ports, or the whole coast?", "SLOWCARD take all the time you like"]}
+{"at": 1789995357.1487544, "scene": "PLANIT", "tools": true, "stream": true, "users": ["ner adds, verbatim:\nPLANIT P7AN say what happens when the feed is down"]}
+{"at": 1789995357.4525476, "scene": "PLANIT", "tools": true, "stream": true, "users": ["ner adds, verbatim:\nPLANIT P7AN say what happens when the feed is down"]}
+{"at": 1789995357.7739182, "scene": "PLANIT", "tools": true, "stream": true, "users": ["ner adds, verbatim:\nPLANIT P7AN say what happens when the feed is down"]}
+{"at": 1789995361.9907043, "scene": "EXECUTE:P7AN", "tools": true, "stream": true, "users": ["ts verifier then moves it on to needs QA, or back to an earlier stage."]}
+{"at": 1789995363.4961584, "scene": "side", "tools": false, "stream": true, "users": ["ant: I have card #P7AN and what came with it. (EXECUTING-BY-FAKE P7AN)"]}
+{"at": 1789995363.4965084, "scene": "side", "tools": false, "stream": true, "users": ["TANT\nI have card #P7AN and what came with it. (EXECUTING-BY-FAKE P7AN)"]}
+{"at": 1789995371.768076, "scene": "VERIFY:V6RF", "tools": true, "stream": true, "users": [" when you close it. Without it the board cannot say who checked #V6RF."]}
+{"at": 1789995373.27344, "scene": "side", "tools": false, "stream": true, "users": ["TANT\nI have card #V6RF and what came with it. (VERIFYING-BY-FAKE V6RF)"]}
+{"at": 1789995373.2734709, "scene": "side", "tools": false, "stream": true, "users": ["ant: I have card #V6RF and what came with it. (VERIFYING-BY-FAKE V6RF)"]}

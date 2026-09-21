@@ -1,0 +1,81 @@
+code_create          code_kind='pair' code='CEKJ' invite=None panes=[] role=None expires=1789995809.443
+code_used            code_kind='pair' code='CEKJ' invite=None peer='127.0.0.1' failures=0
+pair                 device='e1b327347a596821' name='Linux Chrome' capability='full' peer='127.0.0.1'
+board_request        device='e1b327347a596821' type='board_open' card=None
+board_request        device='e1b327347a596821' type='board_open' card=None
+code_create          code_kind='pair' code='QXEK' invite=None panes=[] role=None expires=1789995830.042
+code_attempt         code_kind='pair' code='QXEK' invite=None peer='127.0.0.1' reason='closed' failures=1
+code_attempt         code_kind='pair' code='QXEK' invite=None peer='127.0.0.1' reason='closed' failures=2
+code_attempt         code_kind='pair' code='QXEK' invite=None peer='127.0.0.1' reason='closed' failures=3
+code_burned          code_kind='pair' code='QXEK' invite=None failures=3 reason='failures'
+code_create          code_kind='pair' code='MAXN' invite=None panes=[] role=None expires=1789995846.872
+code_used            code_kind='pair' code='MAXN' invite=None peer='127.0.0.1' failures=0
+pair                 device='c2cf73b869b97a3a' name='Linux Chrome' capability='full' peer='127.0.0.1'
+board_request        device='c2cf73b869b97a3a' type='board_open' card=None
+board_request        device='c2cf73b869b97a3a' type='board_open' card=None
+code_create          code_kind='pair' code='AYHZ' invite=None panes=[] role=None expires=1789995861.216
+pair                 device='8fb56a4c62a0f236' name='iOS Safari' capability='full' peer='127.0.0.1'
+board_request        device='8fb56a4c62a0f236' type='board_open' card=None
+board_request        device='8fb56a4c62a0f236' type='board_open' card=None
+push_subscribe       device='e1b327347a596821'
+code_used            code_kind='pair' code='AYHZ' invite=None peer='127.0.0.1' failures=0
+pair                 device='c100dfe8afa6229a' name='Linux Chrome' capability='view' peer='127.0.0.1'
+code_create          code_kind='pair' code='GVGA' invite=None panes=[] role=None expires=1789995900.185
+board_request        device='e1b327347a596821' type='board_open' card=None
+board_request        device='e1b327347a596821' type='board_open' card=None
+board_request        device='e1b327347a596821' type='board_card_get' card='W8TQ'
+board_request        device='e1b327347a596821' type='board_comment' card='W8TQ'
+board_request        device='e1b327347a596821' type='board_card_get' card='W8TQ'
+board_request        device='e1b327347a596821' type='board_card_get' card='N2BX'
+board_request        device='e1b327347a596821' type='board_comment' card='N2BX'
+board_request        device='e1b327347a596821' type='board_card_get' card='N2BX'
+board_request        device='e1b327347a596821' type='board_card_get' card='D4MV'
+board_request        device='e1b327347a596821' type='board_move' card='D4MV'
+board_request        device='e1b327347a596821' type='board_card_get' card='D4MV'
+board_request        device='e1b327347a596821' type='board_create' card=None
+board_request        device='e1b327347a596821' type='board_card_get' card='FPHK'
+board_request        device='e1b327347a596821' type='board_search' card=None
+board_request        device='e1b327347a596821' type='board_card_get' card='Q2HK'
+board_request        device='e1b327347a596821' type='board_ask' card='Q2HK'
+board_request        device='e1b327347a596821' type='board_card_get' card='Q2HK'
+board_request        device='e1b327347a596821' type='board_ask' card='Q2HK'
+board_request        device='e1b327347a596821' type='board_card_get' card='Q2HK'
+board_request        device='e1b327347a596821' type='board_card_get' card='Q2HK'
+board_request        device='e1b327347a596821' type='board_cancel' card='Q2HK'
+board_request        device='e1b327347a596821' type='board_card_get' card='P7AN'
+board_request        device='e1b327347a596821' type='board_ask' card='P7AN'
+board_request        device='e1b327347a596821' type='board_card_get' card='P7AN'
+board_request        device='e1b327347a596821' type='board_card_get' card='P7AN'
+board_request        device='e1b327347a596821' type='board_card_get' card='P7AN'
+board_request        device='e1b327347a596821' type='board_card_get' card='P7AN'
+board_request        device='e1b327347a596821' type='board_card_get' card='P7AN'
+board_request        device='e1b327347a596821' type='board_card_get' card='P7AN'
+board_request        device='e1b327347a596821' type='board_action' card='P7AN'
+board_request        device='e1b327347a596821' type='board_card_get' card='P7AN'
+board_request        device='e1b327347a596821' type='board_card_get' card='V6RF'
+board_request        device='e1b327347a596821' type='board_action' card='V6RF'
+board_request        device='e1b327347a596821' type='board_card_get' card='V6RF'
+board_request        device='e1b327347a596821' type='board_card_get' card='R4SK'
+board_request        device='e1b327347a596821' type='board_open' card=None
+board_request        device='e1b327347a596821' type='board_open' card=None
+board_request        device='e1b327347a596821' type='board_card_get' card='R4SK'
+board_request        device='e1b327347a596821' type='board_card_get' card='R4SK'
+board_request        device='e1b327347a596821' type='board_card_get' card='N2BX'
+board_request        device='e1b327347a596821' type='board_open' card=None
+board_request        device='e1b327347a596821' type='board_open' card=None
+board_request        device='e1b327347a596821' type='board_comment' card='N2BX'
+board_request        device='e1b327347a596821' type='board_card_get' card='N2BX'
+board_request        device='e1b327347a596821' type='board_card_get' card='N2BX'
+invite_create        invite='d067a5e551a344d9' panes=['b42c3467-604d-40fb-9fe7-ac696fffb549'] tab='' role='editor' uses=1 expires=1790081814.922
+code_burned          code_kind='pair' code='GVGA' invite=None failures=0 reason='revoked'
+knock                participant='13dc0ad197c18c6c' invite='d067a5e551a344d9' name='alice' peer='127.0.0.1' role='editor'
+knock_answer         device='e1b327347a596821' participant='13dc0ad197c18c6c' admit=True
+admitted             participant='13dc0ad197c18c6c' invite='d067a5e551a344d9' role='editor' panes=['b42c3467-604d-40fb-9fe7-ac696fffb549'] uses_left=0
+join                 participant='13dc0ad197c18c6c' peer='127.0.0.1'
+board_refused        participant='13dc0ad197c18c6c' code='not_permitted' type='board_comment'
+board_refused        device='c100dfe8afa6229a' code='not_permitted' type='board_comment'
+board_request        device='e1b327347a596821' type='board_card_get' card='Q2HK'
+board_request        device='e1b327347a596821' type='board_comment' card='Q2HK'
+board_request        device='e1b327347a596821' type='board_card_get' card='Q2HK'
+board_request        device='e1b327347a596821' type='board_card_get' card='W8TQ'
+leave                participant='13dc0ad197c18c6c'

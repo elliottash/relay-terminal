@@ -1,0 +1,51 @@
+QProcess: Destroyed while process ("python3") is still running.
+QProcess: Destroyed while process ("python3") is still running.
+QProcess: Destroyed while process ("python3") is still running.
+ERROR asyncio Task exception was never retrieved
+future: <Task finished name='Task-63' coro=<Host._run_channel() done, defined at /tmp/claude-1000/-home-elliott-repos-relay-terminal/75f55680-22be-46d3-8017-48f79fb6a601/scratchpad/swph/drive/export/src/remote/host.py:930> exception=BrokenPipeError(32, 'Broken pipe')>
+Traceback (most recent call last):
+  File "/tmp/claude-1000/-home-elliott-repos-relay-terminal/75f55680-22be-46d3-8017-48f79fb6a601/scratchpad/swph/drive/export/src/remote/host.py", line 938, in _run_channel
+    self.source.release_device(channel.device_id)
+  File "/tmp/claude-1000/-home-elliott-repos-relay-terminal/75f55680-22be-46d3-8017-48f79fb6a601/scratchpad/swph/drive/export/src/remote/gui_host.py", line 389, in release_device
+    self.send({"t": "release", "pane": "", "device": device})
+  File "/tmp/claude-1000/-home-elliott-repos-relay-terminal/75f55680-22be-46d3-8017-48f79fb6a601/scratchpad/swph/drive/export/src/remote/gui_host.py", line 616, in emit
+    sys.stdout.write(json.dumps(message, separators=(",", ":")) + "\n")
+BrokenPipeError: [Errno 32] Broken pipe
+ERROR asyncio Task exception was never retrieved
+future: <Task finished name='Task-64' coro=<Host._run_channel() done, defined at /tmp/claude-1000/-home-elliott-repos-relay-terminal/75f55680-22be-46d3-8017-48f79fb6a601/scratchpad/swph/drive/export/src/remote/host.py:930> exception=BrokenPipeError(32, 'Broken pipe')>
+Traceback (most recent call last):
+  File "/tmp/claude-1000/-home-elliott-repos-relay-terminal/75f55680-22be-46d3-8017-48f79fb6a601/scratchpad/swph/drive/export/src/remote/host.py", line 938, in _run_channel
+    self.source.release_device(channel.device_id)
+  File "/tmp/claude-1000/-home-elliott-repos-relay-terminal/75f55680-22be-46d3-8017-48f79fb6a601/scratchpad/swph/drive/export/src/remote/gui_host.py", line 389, in release_device
+    self.send({"t": "release", "pane": "", "device": device})
+  File "/tmp/claude-1000/-home-elliott-repos-relay-terminal/75f55680-22be-46d3-8017-48f79fb6a601/scratchpad/swph/drive/export/src/remote/gui_host.py", line 616, in emit
+    sys.stdout.write(json.dumps(message, separators=(",", ":")) + "\n")
+BrokenPipeError: [Errno 32] Broken pipe
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/tmp/swph.Cpp4Xj/tap/remote/gui_host.py", line 142, in <module>
+    raise SystemExit(real.main())
+                     ^^^^^^^^^^^
+  File "/tmp/claude-1000/-home-elliott-repos-relay-terminal/75f55680-22be-46d3-8017-48f79fb6a601/scratchpad/swph/drive/export/src/remote/gui_host.py", line 1600, in main
+    return asyncio.run(main_async())
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/base_events.py", line 687, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/tmp/claude-1000/-home-elliott-repos-relay-terminal/75f55680-22be-46d3-8017-48f79fb6a601/scratchpad/swph/drive/export/src/remote/gui_host.py", line 1592, in main_async
+    await sidecar.stop()
+  File "/tmp/claude-1000/-home-elliott-repos-relay-terminal/75f55680-22be-46d3-8017-48f79fb6a601/scratchpad/swph/drive/export/src/remote/gui_host.py", line 1572, in stop
+    self.emit({"t": "stopped"})
+  File "/tmp/claude-1000/-home-elliott-repos-relay-terminal/75f55680-22be-46d3-8017-48f79fb6a601/scratchpad/swph/drive/export/src/remote/gui_host.py", line 616, in emit
+    sys.stdout.write(json.dumps(message, separators=(",", ":")) + "\n")
+BrokenPipeError: [Errno 32] Broken pipe
+QProcess: Destroyed while process ("python3") is still running.
+QProcess: Destroyed while process ("python3") is still running.
+QProcess: Destroyed while process ("python3") is still running.

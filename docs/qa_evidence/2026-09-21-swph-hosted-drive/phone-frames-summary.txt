@@ -1,0 +1,25 @@
+every message the phone's page decrypted in this run, by type (`message` is rrp.js's
+catch-all: every frame again); a path is any of the project's (/tmp/swph.u1JlGy/harbour), the jail's,
+"/home/" or "/tmp/"
+
+agent                        14 frames       5405 bytes     2 with a path
+authcode                      1 frames         16 bytes     0 with a path
+board_event                  94 frames     131251 bytes     0 with a path
+closed                        4 frames        212 bytes     0 with a path
+control                       2 frames        200 bytes     0 with a path
+history                       4 frames        472 bytes     0 with a path
+message                     147 frames     186251 bytes    21 with a path
+owner_asks                    2 frames        216 bytes     0 with a path
+paired                        1 frames        239 bytes     0 with a path
+pane_state                    2 frames       1665 bytes     0 with a path
+panes                        11 frames       7707 bytes    11 with a path
+participants                  3 frames        329 bytes     0 with a path
+push_state                    1 frames        131 bytes     0 with a path
+resumed                       1 frames         80 bytes     0 with a path
+screen_snapshot               8 frames      36954 bytes     8 with a path
+welcome                       8 frames       3204 bytes     0 with a path
+
+where a path was, outside the Switchboard's messages (one sample per type):
+  agent conversations: …local:fake","project":"harbour","raw_cwd":"","session_dir":"/tmp/swph.u1JlGy/data/relay/sessions/1b2bd538543552ef","session_id":"f1f4ad762b2…
+  panes: …ffb549","window":1,"tab":"harbour","title":"harbour","cwd":"/tmp/swph.u1JlGy/harbour","program":"","control":"human","status":"idle","unread…
+  screen_snapshot: …",0,0,0]]},{"row":3,"segs":[["elliott@spark-dcc9:/tmp/swph.u1JlGy/harbour$ ",0,0,0]]},{"row":…

@@ -1,0 +1,47 @@
+Thread 1 "relay" received signal SIGSEGV, Segmentation fault.
+0x0067006900680078 in ?? ()
+#0  0x0067006900680078 in ?? ()
+#1  0x0000aaaaaaceb8b0 in std::function<void ()>::operator=(decltype(nullptr)) (this=0xaaaaac314458) at /usr/include/c++/13/bits/std_function.h:505
+#2  RelayWindow::TabConsoleContext::~TabConsoleContext (this=0xaaaaac24d720, __in_chrg=<optimized out>) at src/RelayWindow.h:7529
+#3  std::_Destroy<RelayWindow::TabConsoleContext> (__pointer=0xaaaaac24d720) at /usr/include/c++/13/bits/stl_construct.h:151
+#4  std::allocator_traits<std::allocator<void> >::destroy<RelayWindow::TabConsoleContext> (__p=0xaaaaac24d720) at /usr/include/c++/13/bits/alloc_traits.h:675
+#5  std::_Sp_counted_ptr_inplace<RelayWindow::TabConsoleContext, std::allocator<void>, (__gnu_cxx::_Lock_policy)2>::_M_dispose (this=0xaaaaac24d710) at /usr/include/c++/13/bits/shared_ptr_base.h:613
+#6  0x0000aaaaaad1a5e0 in std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release (this=0xaaaaac24d710) at /usr/include/c++/13/bits/shared_ptr_base.h:346
+#7  std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release (this=0xaaaaac24d710) at /usr/include/c++/13/bits/shared_ptr_base.h:317
+#8  0x0000aaaaaaeadacc in std::__shared_count<(__gnu_cxx::_Lock_policy)2>::~__shared_count (this=0xaaaaac276998, __in_chrg=<optimized out>) at /usr/include/c++/13/bits/shared_ptr_base.h:1071
+#9  std::__shared_ptr<RelayWindow::TabConsoleContext, (__gnu_cxx::_Lock_policy)2>::~__shared_ptr (this=0xaaaaac276990, __in_chrg=<optimized out>) at /usr/include/c++/13/bits/shared_ptr_base.h:1524
+#10 std::shared_ptr<RelayWindow::TabConsoleContext>::~shared_ptr (this=0xaaaaac276990, __in_chrg=<optimized out>) at /usr/include/c++/13/bits/shared_ptr.h:175
+#11 RelayWindow::ConsoleEntry::~ConsoleEntry (this=0xaaaaac276980, __in_chrg=<optimized out>) at src/RelayWindow.h:10265
+#12 QList<RelayWindow::ConsoleEntry>::node_destruct (this=<optimized out>, n=<optimized out>) at /usr/include/aarch64-linux-gnu/qt5/QtCore/qlist.h:481
+#13 QList<RelayWindow::ConsoleEntry>::removeAt (i=0, this=<optimized out>) at /usr/include/aarch64-linux-gnu/qt5/QtCore/qlist.h:594
+#14 QList<RelayWindow::ConsoleEntry>::removeAt (i=0, this=<optimized out>) at /usr/include/aarch64-linux-gnu/qt5/QtCore/qlist.h:582
+#15 RelayWindow::deliverToConsoles (this=0xaaaaacd10660, tab=..., event=...) at src/RelayWindow.h:7782
+#16 0x0000aaaaaaeae100 in RelayWindow::boardWorker(QWidget*)::{lambda(QJsonObject const&)#1}::operator()(QJsonObject const&) const (__closure=0xaaaaacc65bd0, event=...) at src/RelayWindow.h:6556
+#17 0x0000aaaaab171b48 in std::function<void(QJsonObject const&)>::operator() (__args#0=..., this=0xaaaaac375c40) at /usr/include/c++/13/bits/std_function.h:587
+#18 operator() (event=..., __closure=0xaaaaac375c40) at src/BoardRemote.cpp:321
+#19 std::__invoke_impl<void, relay::BoardRemote::tap(relay::BoardWorker*, QObject*, const QString&)::<lambda(const QJsonObject&)>&, const QJsonObject&> (__f=...) at /usr/include/c++/13/bits/invoke.h:61
+#20 std::__invoke_r<void, relay::BoardRemote::tap(relay::BoardWorker*, QObject*, const QString&)::<lambda(const QJsonObject&)>&, const QJsonObject&> (__fn=...) at /usr/include/c++/13/bits/invoke.h:111
+#21 std::_Function_handler<void(const QJsonObject&), relay::BoardRemote::tap(relay::BoardWorker*, QObject*, const QString&)::<lambda(const QJsonObject&)> >::_M_invoke(const std::_Any_data &, const QJsonObject &) (__functor=..., __args#0=...) at /usr/include/c+
+#22 0x0000aaaaab165fcc in std::function<void(QJsonObject const&)>::operator() (__args#0=..., this=0xaaaaab8d3780) at /usr/include/c++/13/bits/std_function.h:587
+#23 relay::BoardWorker::handleLine (this=0xaaaaab8d3770, line=...) at src/BoardWorker.cpp:93
+#24 0x0000aaaaab166214 in operator() (__closure=0xaaaaac3841c0) at src/BoardWorker.cpp:36
+#25 QtPrivate::FunctorCall<QtPrivate::IndexesList<>, QtPrivate::List<>, void, relay::BoardWorker::connectProcess()::<lambda()> >::call (arg=<optimized out>, f=...) at /usr/include/aarch64-linux-gnu/qt5/QtCore/qobjectdefs_impl.h:146
+#26 QtPrivate::Functor<relay::BoardWorker::connectProcess()::<lambda()>, 0>::call<QtPrivate::List<>, void> (arg=<optimized out>, f=...) at /usr/include/aarch64-linux-gnu/qt5/QtCore/qobjectdefs_impl.h:256
+#27 QtPrivate::QFunctorSlotObject<relay::BoardWorker::connectProcess()::<lambda()>, 0, QtPrivate::List<>, void>::impl(int, QtPrivate::QSlotObjectBase *, QObject *, void **, bool *) (which=<optimized out>, this_=0xaaaaac3841b0, r=<optimized out>, a=<optimized o
+#28 0x0000fffff6b305bc in ?? () from /lib/aarch64-linux-gnu/libQt5Core.so.5
+#29 0x0000fffff6a4a0b4 [PAC] in QProcess::readyReadStandardOutput(QProcess::QPrivateSignal) () from /lib/aarch64-linux-gnu/libQt5Core.so.5
+#30 0x0000fffff6a5059c [PAC] in ?? () from /lib/aarch64-linux-gnu/libQt5Core.so.5
+#31 0x0000fffff6a50ba8 [PAC] in ?? () from /lib/aarch64-linux-gnu/libQt5Core.so.5
+#32 0x0000fffff6b30568 [PAC] in ?? () from /lib/aarch64-linux-gnu/libQt5Core.so.5
+#33 0x0000fffff6b34538 [PAC] in QSocketNotifier::activated(QSocketDescriptor, QSocketNotifier::Type, QSocketNotifier::QPrivateSignal) () from /lib/aarch64-linux-gnu/libQt5Core.so.5
+#34 0x0000fffff6b35050 [PAC] in QSocketNotifier::event(QEvent*) () from /lib/aarch64-linux-gnu/libQt5Core.so.5
+#35 0x0000fffff7602aa8 [PAC] in QApplicationPrivate::notify_helper(QObject*, QEvent*) () from /lib/aarch64-linux-gnu/libQt5Widgets.so.5
+#36 0x0000fffff6aec460 [PAC] in QCoreApplication::notifyInternal2(QObject*, QEvent*) () from /lib/aarch64-linux-gnu/libQt5Core.so.5
+#37 0x0000fffff6b59b08 [PAC] in ?? () from /lib/aarch64-linux-gnu/libQt5Core.so.5
+#38 0x0000fffff56ef90c [PAC] in ?? () from /lib/aarch64-linux-gnu/libglib-2.0.so.0
+#39 0x0000fffff5751ae8 [PAC] in ?? () from /lib/aarch64-linux-gnu/libglib-2.0.so.0
+#40 0x0000fffff56eebc8 [PAC] in g_main_context_iteration () from /lib/aarch64-linux-gnu/libglib-2.0.so.0
+#41 0x0000fffff6b58c9c [PAC] in QEventDispatcherGlib::processEvents(QFlags<QEventLoop::ProcessEventsFlag>) () from /lib/aarch64-linux-gnu/libQt5Core.so.5
+#42 0x0000fffff6aea614 [PAC] in QEventLoop::exec(QFlags<QEventLoop::ProcessEventsFlag>) () from /lib/aarch64-linux-gnu/libQt5Core.so.5
+#43 0x0000fffff6af4590 [PAC] in QCoreApplication::exec() () from /lib/aarch64-linux-gnu/libQt5Core.so.5
+#44 0x0000aaaaaacd11b4 [PAC] in main (argc=<optimized out>, argv=<optimized out>) at src/main.cpp:368

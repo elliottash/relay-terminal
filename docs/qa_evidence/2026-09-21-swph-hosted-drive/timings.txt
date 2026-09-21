@@ -1,0 +1,20 @@
+   26.5 s  14 the plug menu pairs
+    9.9 s  15 the typed code
+   31.2 s  16 a burned code
+   24.8 s  17 iOS installs first
+    2.5 s  18 notifications offered
+    7.0 s  sw0 a view-only device
+   15.1 s  19 the plug switch
+    0.1 s  sw1 the inbox row
+    7.9 s  sw2 the board
+    2.3 s  sw3 the answer
+   14.0 s  sw4 a note and a move
+   10.1 s  sw5 a new card
+    3.1 s  sw6 search
+   16.9 s  sw7 discuss, stop, plan
+   24.8 s  sw8 execute and verify
+   12.3 s  sw9 card_waiting
+   12.6 s  sw10 offline
+   28.9 s  sw11 a guest and a view device
+    0.0 s  sw12 no machine path
+    7.1 s  sw13 layouts

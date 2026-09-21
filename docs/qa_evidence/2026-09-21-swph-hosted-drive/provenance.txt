@@ -1,0 +1,20 @@
+run started    2026-09-21 08:53:01 EDT
+checkout HEAD  2e3ff161 evidence: a pane starts on rank 1, a pick is its own, and /swap comes back (#MDL1)
+source-dir     /tmp/claude-1000/-home-elliott-repos-relay-terminal/75f55680-22be-46d3-8017-48f79fb6a601/scratchpad/swph/drive/export3/src  (git archive of ca055cd1)
+relay binary   /tmp/claude-1000/-home-elliott-repos-relay-terminal/75f55680-22be-46d3-8017-48f79fb6a601/scratchpad/swph/drive/export3/build/relay  2026-09-21 08:43:57  sha256 42c87198e855
+health before  {"ok": true, "desktops": 0, "channels": 0}
+served index.html      c1702230060c  source c1702230060c
+served app.js          358279e6a6fe  source 358279e6a6fe
+served board.js        358430846376  source 5f550c39b00c
+served board.css       3b0f88997522  source 3b0f88997522
+served boardmd.js      b71acf1ed466  source b71acf1ed466
+served outbox.js       b16ea58e6775  source b16ea58e6775
+served rrp.js          97234bc1a36f  source 97234bc1a36f
+served sw.js           596dba5a8af3  source 596dba5a8af3
+served pane.js         773e418a434d  source 773e418a434d
+served pane.css        0b41978e415e  source 0b41978e415e
+served pane-theme.css  16315a82243a  source 160513f1944d
+served style.css       dfdaec4868d9  source dfdaec4868d9
+served meet.js         1bd4d6b48a7a  source 1bd4d6b48a7a
+health after   {"ok": true, "desktops": 0, "channels": 0}
+run ended      2026-09-21 08:57:25 EDT
