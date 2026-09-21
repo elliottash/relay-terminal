@@ -54,6 +54,14 @@ struct Entry {
     QString label;
     QString provider;     // lower-case provider: "z.ai (glm)", "claude code"
     QString plan;         // lower-case plan: "coding plan"; empty when the preset has none
+    // How this provider is reached, and where it sorts against the others serving the same model:
+    // its row of backend/relay_core/model-ranking.md, which the owner edits, sent per preset
+    // (protocol 13.2). `kind` is plan | harness | api | router | free and `order` is the
+    // tie-break, lower first. `grouped()` sorts a fold by `order` instead of keeping a second copy
+    // of rule 2.2 here; `order` is -1 on a row that carried none — an older worker — and then the
+    // hard-coded shape in `accessRank` decides, exactly as it did before this pair existed.
+    QString kind;
+    int order = -1;
     QString tier;         // the tier this is the provider's default for: main | flash | lite | ""
     QStringList efforts;  // reasoning levels the model accepts; empty = no knob
     // What the provider says this model's own default level is (the worker's `default_effort`: a

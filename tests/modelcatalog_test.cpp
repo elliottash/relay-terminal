@@ -121,6 +121,23 @@ QJsonArray groupPresets() {
     return out;
 }
 
+// The same rows with `kind` and `order` on them (protocol 13.2, card #MDL1): what this worker
+// sends, against `groupPresets()` above, which is a worker that predates the pair. `ranked` names
+// the order to give each preset; a preset it does not name keeps none, which is the mixed case.
+QJsonArray rankedPresets(const QHash<QString, int> &ranked,
+                         const QHash<QString, QString> &kinds = {}) {
+    QJsonArray out;
+    for (const auto &value : groupPresets()) {
+        QJsonObject row = value.toObject();
+        const QString id = row.value(QStringLiteral("id")).toString();
+        if (!ranked.contains(id)) { out << row; continue; }
+        row.insert(QStringLiteral("order"), ranked.value(id));
+        row.insert(QStringLiteral("kind"), kinds.value(id, QStringLiteral("api")));
+        out << row;
+    }
+    return out;
+}
+
 // Every entry of the catalog, in the worker's own order: `grouped` takes whatever list the caller
 // has, and these tests want a list nothing else has reordered.
 QList<Entry> allEntries(const Catalog &catalog) { return catalog.entries; }
@@ -887,6 +904,72 @@ private Q_SLOTS:
         QCOMPARE(keysOf(sol.entries), (QStringList{QStringLiteral("openrouter|openai/gpt-5.6-sol"),
                                                     QStringLiteral("openai|gpt-5.6-sol"),
                                                     QStringLiteral("guest:codex|gpt-5.6-sol"),
+                                                    QStringLiteral("relay-free|gpt-5.6-sol")}));
+    }
+
+    // ----- the ranking file decides the fold (card #MDL1, protocol 13.2) ------------------------
+
+    void aRowCarriesTheRankingFilesKindAndOrder() {
+        const Catalog catalog = catalogFrom(rankedPresets({{QStringLiteral("guest:codex"), 11},
+                                                           {QStringLiteral("openai"), 31}},
+                                                          {{QStringLiteral("guest:codex"), QStringLiteral("harness")}}));
+        const Entry *codex = catalog.find(QStringLiteral("guest:codex|gpt-5.6-sol"));
+        QVERIFY(codex != nullptr);
+        QCOMPARE(codex->kind, QStringLiteral("harness"));
+        QCOMPARE(codex->order, 11);
+        // Every row of a preset gets the preset's pair, not just the first.
+        QCOMPARE(catalog.find(QStringLiteral("guest:codex|gpt-6-astra"))->order, 11);
+        QCOMPARE(catalog.find(QStringLiteral("openai|gpt-5.6-sol"))->kind, QStringLiteral("api"));
+        // A worker that sends neither leaves the row at -1, and nothing here invents a number.
+        const Catalog old = catalogFrom(groupPresets());
+        QCOMPARE(old.find(QStringLiteral("openai|gpt-5.6-sol"))->order, -1);
+        QVERIFY(old.find(QStringLiteral("openai|gpt-5.6-sol"))->kind.isEmpty());
+    }
+
+    void theFilesOrderDecidesTheFoldEvenAgainstTheOldRank() {
+        // The hard-coded `accessRank` puts a guest harness before a first-party API, and every
+        // unranked test above shows it doing so. The file is the owner's, so a file that says
+        // otherwise has to win outright — otherwise the two rulings would have to be kept in step
+        // by hand, which is the copy card #MDL1 removed.
+        const Catalog catalog = catalogFrom(rankedPresets({{QStringLiteral("guest:codex"), 40},
+                                                           {QStringLiteral("openai"), 10},
+                                                           {QStringLiteral("openrouter"), 20},
+                                                           {QStringLiteral("relay-free"), 30}},
+                                                          {{QStringLiteral("guest:codex"), QStringLiteral("harness")}}));
+        const Group sol = groupNamed(grouped(catalog, allEntries(catalog)), QStringLiteral("gpt-5.6-sol"));
+        QVERIFY(!sol.name.isEmpty());
+        QCOMPARE(keysOf(sol.entries), (QStringList{QStringLiteral("openai|gpt-5.6-sol"),
+                                                    QStringLiteral("openrouter|openai/gpt-5.6-sol"),
+                                                    QStringLiteral("relay-free|gpt-5.6-sol"),
+                                                    QStringLiteral("guest:codex|gpt-5.6-sol")}));
+    }
+
+    void aRankedEntryStillBeatsTheFilesOrder() {
+        // The user's own tier lists come first, as they always did: the file breaks ties between
+        // providers, it does not overrule what the person ranked.
+        const Catalog catalog = catalogFrom(rankedPresets({{QStringLiteral("guest:codex"), 10},
+                                                           {QStringLiteral("openai"), 20},
+                                                           {QStringLiteral("openrouter"), 30},
+                                                           {QStringLiteral("relay-free"), 40}}));
+        curation::setTierList(QStringLiteral("main"),
+                              {{QStringLiteral("relay-free|gpt-5.6-sol"), QString()}});
+        const Group sol = groupNamed(grouped(catalog, allEntries(catalog)), QStringLiteral("gpt-5.6-sol"));
+        QCOMPARE(sol.entries.first().key, QStringLiteral("relay-free|gpt-5.6-sol"));
+        QCOMPARE(keysOf(sol.entries).mid(1), (QStringList{QStringLiteral("guest:codex|gpt-5.6-sol"),
+                                                           QStringLiteral("openai|gpt-5.6-sol"),
+                                                           QStringLiteral("openrouter|openai/gpt-5.6-sol")}));
+    }
+
+    void oneRowWithoutAnOrderSendsThePairBackToTheOldRank() {
+        // -1 and 10 are not on the same scale, so a pair where one side has no number is decided
+        // by `accessRank` rather than by comparing the two. Here openai carries the file's 10 and
+        // codex carries nothing, and the guest still leads, exactly as it did before the pair
+        // existed — the only safe answer when half the rows are from an older worker.
+        const Catalog catalog = catalogFrom(rankedPresets({{QStringLiteral("openai"), 10}}));
+        const Group sol = groupNamed(grouped(catalog, allEntries(catalog)), QStringLiteral("gpt-5.6-sol"));
+        QCOMPARE(keysOf(sol.entries), (QStringList{QStringLiteral("guest:codex|gpt-5.6-sol"),
+                                                    QStringLiteral("openai|gpt-5.6-sol"),
+                                                    QStringLiteral("openrouter|openai/gpt-5.6-sol"),
                                                     QStringLiteral("relay-free|gpt-5.6-sol")}));
     }
 

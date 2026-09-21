@@ -161,6 +161,11 @@ Catalog catalogFrom(const QJsonArray &presets) {
         QString provider = str(preset, "provider");
         if (provider.isEmpty()) provider = str(preset, "label").section(QStringLiteral(" · "), 0, 0);
         provider = provider.toLower();
+        // The ranking file's ruling for this provider (13.2), read once for every row it makes.
+        // A worker that sends neither leaves `order` at -1, and `grouped()` falls back.
+        const QString kind = str(preset, "kind");
+        const int order = preset.value(QStringLiteral("order")).isDouble()
+                              ? preset.value(QStringLiteral("order")).toInt() : -1;
         catalog.presetLabels.insert(id, str(preset, "label").toLower());
         const QList<LimitWindow> windows = windowsOf(preset);
         if (!windows.isEmpty()) catalog.limits.insert(id, windows);
@@ -190,6 +195,8 @@ Catalog catalogFrom(const QJsonArray &presets) {
             entry.label = entry.name;
             entry.provider = provider;
             entry.plan = str(preset, "plan").toLower();
+            entry.kind = kind;
+            entry.order = order;
             entry.tier = str(row, "tier");
             for (const auto &level : row.value(QStringLiteral("efforts")).toArray()) entry.efforts << level.toString();
             entry.defaultEffort = str(row, "default_effort");
@@ -220,6 +227,7 @@ Catalog catalogFrom(const QJsonArray &presets) {
             entry.preset = id; entry.model = own; entry.key = Catalog::keyFor(id, own);
             entry.name = nameOf(own); entry.label = entry.name;
             entry.provider = provider; entry.plan = str(preset, "plan").toLower();
+            entry.kind = kind; entry.order = order;
             for (const auto &level : preset.value(QStringLiteral("efforts")).toArray()) entry.efforts << level.toString();
             entry.usable = usable; entry.guest = guest; entry.local = local; entry.hosted = hosted;
             catalog.entries << entry;
@@ -1136,15 +1144,33 @@ bool subscription(const Entry &entry) {
     return true;
 }
 
-// Rule 2.2: a plan first (it is already paid for), then a guest harness, then the first-party
-// pay-as-you-go API, then OpenRouter, then Relay Free — so credit is spent last and the included
-// allowance last of all.
+// Rule 2.2 as this file used to hold it: a plan first (it is already paid for), then a guest
+// harness, then the first-party pay-as-you-go API, then OpenRouter, then Relay Free — so credit is
+// spent last and the included allowance last of all.
+//
+// Since card #MDL1 that ruling lives in backend/relay_core/model-ranking.md, which the owner edits,
+// and reaches every row as `kind` and `order` (13.2). This stays as the fallback for a row that
+// carried neither — an older worker — so the picker never loses its order, and it is deliberately
+// not kept in step with the file by hand: `providerBefore` below prefers the file wherever there
+// is one, which is every row this worker sends.
 int accessRank(const Entry &entry) {
     if (entry.hosted) return 4;
     if (entry.guest) return 1;
     if (entry.openEnded || entry.preset == QStringLiteral("openrouter")) return 3;
     if (subscription(entry)) return 0;
     return 2;
+}
+
+// Which of two providers serving the same model comes first. The ranking file decides whenever
+// both rows carry its `order` — one number, so a band's whole shape is the owner's — and the
+// hard-coded `accessRank` decides only when at least one row is missing it, because the two are on
+// different scales and must never be compared against each other.
+bool providerBefore(const Entry &a, const Entry &b) {
+    if (a.order >= 0 && b.order >= 0) {
+        if (a.order != b.order) return a.order < b.order;
+        return false;                       // the same rank: stable_sort keeps the row order
+    }
+    return accessRank(a) < accessRank(b);
 }
 
 // Where the user has already ranked this entry: its position in the tier lists, main first. An
@@ -1227,7 +1253,7 @@ QList<Group> grouped(const Catalog &catalog, const QList<Entry> &rows, qint64 no
             const int rankA = ranks.value(a.key, std::numeric_limits<int>::max());
             const int rankB = ranks.value(b.key, std::numeric_limits<int>::max());
             if (rankA != rankB) return rankA < rankB;
-            return accessRank(a) < accessRank(b);
+            return providerBefore(a, b);
         });
     }
     return out;
