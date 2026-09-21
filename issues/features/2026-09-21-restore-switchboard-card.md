@@ -7,7 +7,7 @@ assignee: codex
 rank: m
 created: '2026-09-21'
 source: 'Codex in a Relay pane, 2026-09-21'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-restore-switchboard-card/README.md], related: [XAME], github: null}
+links: {plans: [], commits: [d4ac69d7872aabf184794faa4cc8366f22f3bbe9], evidence: [docs/qa_evidence/2026-09-21-restore-switchboard-card/README.md], related: [XAME], github: null}
 ---
 # Restore the open Switchboard card
 
