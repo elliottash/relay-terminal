@@ -33,6 +33,18 @@
 // The only two message types that mean anything after the link comes back.
 export const QUEUEABLE = new Set(['compose', 'agent_stop']);
 
+// …and, of the Switchboard's requests (app/board.js, card #SWPH), the three that are a thing the
+// person *said* rather than a thing to start now: a comment, a move and a new card. They ride in
+// a `board_request` envelope, so the type that decides is the request's own. A Discuss, a Plan,
+// Execute and Verify start work on the desktop and are never kept: finding one running twenty
+// minutes after the thought is the `keys` problem again.
+export const QUEUEABLE_BOARD = new Set(['board_comment', 'board_move', 'board_create']);
+
+export function mayWait(message) {
+  if (QUEUEABLE.has(message?.t)) return true;
+  return message?.t === 'board_request' && QUEUEABLE_BOARD.has(message.request?.type);
+}
+
 // 72 random bits, the shape app.js's composer and app/pane.js both already send.
 function randomId() {
   const bytes = crypto.getRandomValues(new Uint8Array(9));
@@ -69,7 +81,7 @@ export class Outbox {
   // Send, or keep. Resolves 'sent' or 'queued'; a message that may not be queued rejects with
   // whatever the transport said, exactly as a direct `rrp.send` would.
   async post(message) {
-    if (!QUEUEABLE.has(message?.t)) return this.sendNow(message).then(() => 'sent');
+    if (!mayWait(message)) return this.sendNow(message).then(() => 'sent');
     const staged = message.msg_id ? { ...message } : { ...message, msg_id: this.newId() };
     if (this.online()) {
       try {
@@ -132,8 +144,10 @@ export class Outbox {
 export function pendingLine(counts) {
   const composes = counts.compose || 0;
   const stops = counts.agent_stop || 0;
+  const cards = counts.board_request || 0;
   const parts = [];
   if (composes) parts.push(composes === 1 ? '1 message' : `${composes} messages`);
   if (stops) parts.push(stops === 1 ? '1 Stop' : `${stops} Stops`);
+  if (cards) parts.push(cards === 1 ? '1 card change' : `${cards} card changes`);
   return parts.length ? `Sends when back online · ${parts.join(', ')}` : '';
 }

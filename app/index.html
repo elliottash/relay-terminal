@@ -28,6 +28,8 @@
      pane-theme.css is generated from src/Theme.cpp by scripts/gen-web-theme.py. -->
 <link rel="stylesheet" href="./pane-theme.css">
 <link rel="stylesheet" href="./pane.css">
+<!-- The Switchboard (app/board.js, card #SWPH): cards by stage, a card's page, its actions. -->
+<link rel="stylesheet" href="./board.css">
 </head>
 <body>
 
@@ -138,6 +140,9 @@
       <button type="button" id="inbox-install" class="quiet-button" hidden>Install Relay</button>
       <p id="notify-offer-note" class="muted small"></p>
     </div>
+    <!-- The Switchboard leads the inbox when the desktop offers it to this device (#SWPH):
+         app/board.js puts its row here, with how many cards are waiting on you. -->
+    <div id="board-row-slot"></div>
     <div id="pane-list"></div>
     <p id="inbox-empty" class="pad muted"></p>
     <!-- Notifications (docs/REMOTE-PROTOCOL.md section 9). The browser only grants permission
@@ -219,6 +224,11 @@
       <button type="button" id="composer-send">Send</button>
     </div>
   </section>
+
+  <!-- The Switchboard (#SWPH): built whole by app/board.js from the desktop's board events. It
+       comes after the thread on purpose: its root is a `.relay-pane` too (that is where the
+       generated theme's variables live), and the pane view is the first one in the document. -->
+  <section class="screen" id="screen-board" hidden></section>
 
   <!-- ---- a guest, invited to one pane (docs/REMOTE-PROTOCOL.md section 10) ------------------
        Screens of their own, never the owner's with parts switched off. There is no password

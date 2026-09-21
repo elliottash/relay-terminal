@@ -53,7 +53,9 @@ self.addEventListener('push', (event) => {
       // lock-screen-triggered request out of this app's control.
       icon: './icons/icon-192.png',
       badge: './icons/icon-192.png',
-      data: { pane: body.pane },
+      // …or the card, when it is a Switchboard card that started waiting on you (#SWPH): an
+      // opaque four-character id, and like the pane id the only thing here that names anything.
+      data: { pane: body.pane, card: body.card },
     });
   })());
 });
@@ -70,14 +72,17 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const data = event.notification.data || {};
   const pane = typeof data.pane === 'string' ? data.pane : '';
+  const card = typeof data.card === 'string' && /^[0-9A-Z]{4}$/.test(data.card) ? data.card : '';
   event.waitUntil((async () => {
     const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const client of all) {
       if ('focus' in client) {
-        if (pane) client.postMessage({ t: 'open_pane', pane });
+        if (card) client.postMessage({ t: 'open_card', card });
+        else if (pane) client.postMessage({ t: 'open_pane', pane });
         return client.focus();
       }
     }
+    if (card) return self.clients.openWindow(`./?card=${encodeURIComponent(card)}`);
     return self.clients.openWindow(pane ? `./?pane=${encodeURIComponent(pane)}` : './');
   })());
 });

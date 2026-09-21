@@ -1,0 +1,567 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+/* The Switchboard on the phone (app/board.js, card #SWPH). Layout only, like app/pane.css: the
+   root is a `.relay-pane`, so every colour and font here is a variable from app/pane-theme.css —
+   generated from the desktop's src/Theme.cpp — and no literal colour appears in this file. The
+   board's own materials are the theme's too (docs/SWITCHBOARD-AESTHETIC.md): section headers are
+   the enamel label — mono, upper case, letter-spaced, muted, a hairline above — brass is only ever
+   a small ring, and amber means exactly one thing, "somebody is waiting on you".
+
+   A phone in portrait is the design size. Everything a thumb touches is at least 44 px tall. Above
+   900 px the list and the card sit side by side (an iPad in landscape); under it the card page
+   covers the list. Under 520 px of height (a keyboard is up) the chrome tightens, and under 260 px
+   (a phone in landscape with its keyboard) only the thread's end and the reply box are left. */
+
+/* The inbox row sits outside the board's own root, in the app's shell, so it is drawn with the
+   shell's variables (app/style.css :root) and shaped exactly like a pane's row. The accent edge is
+   the one thing that says it is the board and not a pane. */
+.rb-inbox-row {
+  display: block; width: 100%; min-height: 44px; text-align: left; background: var(--panel);
+  color: inherit; border: 0; border-bottom: 1px solid var(--line); border-left: 3px solid var(--accent);
+  padding: 14px 16px 14px 13px; font: inherit; cursor: pointer;
+}
+.rb-inbox-row:active { background: var(--line); }
+.rb-inbox-head { display: flex; align-items: center; gap: 8px; }
+.rb-inbox-title { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rb-inbox-sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+
+.relay-pane.rb {
+  --rb-tap: 44px;
+  --rp-tap: 44px;
+  padding: 0;
+  gap: 0;
+  background: var(--rt-bg);
+  overflow: hidden;
+}
+.rb button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+/* app/pane.css gives every control in a `.relay-pane` `font: inherit`, at a specificity a lone class
+   does not beat. So wherever a control here has a size or a face of its own, the rule says `.rb `
+   first — which is why those selectors look longer than they need to be. */
+.rb input, .rb textarea, .rb select { font-family: inherit; color: inherit; }
+
+/* ---- the bar ------------------------------------------------------------------------------- */
+.rb-bar, .rb-card-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: var(--rb-tap);
+  padding: 0 6px;
+  background: var(--rt-surface);
+  border-bottom: 1px solid var(--rt-border);
+}
+.rb .rb-back, .rb .rb-bar-button {
+  flex: none;
+  min-width: var(--rb-tap);
+  min-height: var(--rb-tap);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  color: var(--rt-accent);
+  font-size: calc(var(--rt-pt) * 16);
+  line-height: 1;
+  cursor: pointer;
+}
+.rb .rb-back { font-size: 28px; padding-bottom: 4px; }
+.rb-back:active, .rb-bar-button:active { background: var(--rt-raised); }
+.rb-bar-title { flex: 1 1 auto; min-width: 0; }
+.rb-bar-name { font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.rb-bar-sub {
+  color: var(--rt-muted); font-size: var(--rt-floor-size);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.rb-bar-sub:empty { display: none; }
+.rb-card-ref { font-family: var(--rt-mono); color: var(--rt-muted); font-size: var(--rt-secondary-size); }
+
+/* ---- the two columns ------------------------------------------------------------------------ */
+.rb-body { flex: 1 1 auto; min-height: 0; display: flex; position: relative; }
+.rb-list-col, .rb-card-col { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.rb[data-card="open"] .rb-list-col { display: none; }
+.rb[data-card="closed"] .rb-card-col { display: none; }
+
+/* ---- tabs, search, the lines ---------------------------------------------------------------- */
+.rb-tabs {
+  flex: none;
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px 4px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.rb-tabs::-webkit-scrollbar { display: none; }
+.rb .rb-tab {
+  flex: none;
+  min-height: var(--rb-tap);
+  padding: 0 14px;
+  background: var(--rt-surface);
+  border: 1px solid var(--rt-border);
+  border-radius: 999px;
+  color: var(--rt-muted);
+  font-size: var(--rt-secondary-size);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.rb-tab.rb-tab-on { background: var(--rt-accent-soft); border-color: var(--rt-accent-border); color: var(--rt-text); }
+.rb .rb-search {
+  flex: none;
+  min-height: var(--rb-tap);
+  margin: 4px 10px 6px;
+  padding: 0 12px;
+  background: var(--rt-surface);
+  border: 1px solid var(--rt-border);
+  border-radius: 10px;
+  /* 16 px at least, or iOS zooms the page into the field. */
+  font-size: max(16px, var(--rt-body-size));
+  -webkit-appearance: none;
+  appearance: none;
+}
+.rb-search:focus { outline: none; border-color: var(--rt-accent-border); }
+.rb-search::placeholder { color: var(--rt-muted); opacity: 1; }
+.rb-offline {
+  flex: none;
+  padding: 6px 12px;
+  color: var(--rt-accent);
+  font-size: var(--rt-secondary-size);
+  border-top: 1px solid var(--rt-border);
+  border-bottom: 1px solid var(--rt-border);
+}
+.rb-line {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px 2px 12px;
+  background: var(--rt-surface);
+  border-top: 1px solid var(--rt-border);
+  border-bottom: 1px solid var(--rt-border);
+  color: var(--rt-text);
+  font-size: var(--rt-secondary-size);
+}
+.rb-line.rb-error { color: var(--rt-error); }
+.rb-line-text { flex: 1 1 auto; min-width: 0; padding: 6px 0; overflow-wrap: anywhere; }
+.rb .rb-line-action, .rb .rb-line-x {
+  flex: none;
+  min-width: var(--rb-tap);
+  min-height: var(--rb-tap);
+  background: none;
+  border: 0;
+  color: var(--rt-accent);
+  cursor: pointer;
+}
+.rb .rb-line-action { padding: 0 10px; font-weight: 600; }
+.rb .rb-line-x { color: var(--rt-muted); font-size: calc(var(--rt-pt) * 13); }
+.rb-pull {
+  flex: none;
+  padding: 8px 12px;
+  text-align: center;
+  color: var(--rt-muted);
+  font-size: var(--rt-secondary-size);
+}
+
+/* ---- the list ------------------------------------------------------------------------------- */
+.rb-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;      /* the browser's own pull-to-refresh would reload the app */
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 24px;
+}
+.rb-empty, .rb-note { padding: 18px 16px; color: var(--rt-muted); }
+.rb-note { padding: 6px 0; font-size: var(--rt-secondary-size); }
+
+/* The enamel label: the one text treatment the board owns. */
+.rb .rb-section {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--rb-tap);
+  padding: 0 14px;
+  background: var(--rt-bg);
+  border: 0;
+  border-top: 1px solid var(--rt-border);
+  color: var(--rt-muted);
+  font-family: var(--rt-mono);
+  font-size: var(--rt-floor-size);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+}
+.rb-section-caret { flex: none; width: 1em; }
+.rb-section-title { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.rb-section-count { flex: none; color: var(--rt-text); }
+.rb-section.rb-section-waiting { color: var(--rt-warning); }
+.rb-section.rb-section-waiting .rb-section-count { color: var(--rt-warning); }
+
+.rb-row {
+  display: block;
+  width: 100%;
+  min-height: var(--rb-tap);
+  padding: 10px 14px;
+  background: var(--rt-surface);
+  border: 0;
+  border-top: 1px solid var(--rt-border);
+  border-left: 3px solid transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.rb-row:active { background: var(--rt-raised); }
+.rb-row.rb-row-open { background: var(--rt-queue-row-selected, var(--rt-raised)); border-left-color: var(--rt-accent); }
+.rb-row.rb-row-waiting { border-left-color: var(--rt-warning); }
+.rb-row-head { display: flex; align-items: flex-start; gap: 8px; }
+.rb-row-id {
+  flex: none;
+  padding-top: 0.12em;
+  color: var(--rt-muted);
+  font-family: var(--rt-mono);
+  font-size: var(--rt-floor-size);
+}
+.rb-row-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+/* The priority flag (#VKFV): a filled disc in the board's own materials. */
+.rb-row-flag {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  margin-top: 0.45em;
+  border-radius: 50%;
+  background: var(--rt-board-metal);
+}
+.rb-row-flag[data-priority="-1"] { background: var(--rt-warning); }
+.rb-row-flag[data-priority="1"] { background: var(--rt-text); }
+.rb-row-flag[data-priority="2"] { background: var(--rt-success-border); }
+.rb-row-flag[data-priority="3"] { background: var(--rt-success); }
+/* The busy lamp: a brass bezel, lit amber while a turn runs. It breathes unless the reader asked
+   for stillness, and it never blinks. */
+.rb-row-busy {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  margin-top: 0.4em;
+  border-radius: 50%;
+  background: var(--rt-warning);
+  box-shadow: 0 0 0 1.5px var(--rt-board-metal-dim);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .rb-row-busy { animation: rb-breathe 1.6s ease-in-out infinite; }
+  @keyframes rb-breathe { 50% { opacity: 0.45; } }
+}
+.rb-row-chips, .rb-card-chips { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 6px; }
+.rb-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 1px 8px;
+  border: 1px solid var(--rt-border);
+  border-radius: 999px;
+  color: var(--rt-muted);
+  font-size: var(--rt-floor-size);
+  line-height: 1.5;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.rb-chip-waiting { color: var(--rt-warning); border-color: var(--rt-warning-border); }
+.rb-chip-agent { color: var(--rt-agent); border-color: var(--rt-agent-border); }
+.rb-chip-done { color: var(--rt-success); border-color: var(--rt-success-border); }
+.rb-chip-status { color: var(--rt-text); border-color: var(--rt-border-strong); }
+.rb-chip-plain { color: var(--rt-text); }
+.rb-chip-quiet { border-color: transparent; padding-left: 0; padding-right: 2px; }
+.rb-chip-private { color: var(--rt-token-tool); }
+.rb-chip-session { color: var(--rt-link); }
+/* A chip that goes somewhere is a button, so it is a finger tall even though it is drawn small. */
+.rb button.rb-chip-link { position: relative; background: none; cursor: pointer; overflow: visible; font-size: var(--rt-floor-size); line-height: 1.5; }
+button.rb-chip-link::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: var(--rb-tap); transform: translateY(-50%); }
+.rb-chip-busy { color: var(--rt-warning); border-color: var(--rt-warning-border); }
+.rb .rb-fold {
+  display: block;
+  width: 100%;
+  min-height: var(--rb-tap);
+  padding: 0 14px 0 17px;
+  background: var(--rt-surface);
+  border: 0;
+  border-top: 1px solid var(--rt-border);
+  color: var(--rt-muted);
+  font-size: var(--rt-secondary-size);
+  text-align: left;
+  cursor: pointer;
+}
+
+/* ---- the card page -------------------------------------------------------------------------- */
+.rb-card-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 12px 16px 20px;
+}
+.rb-card-empty { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; color: var(--rt-muted); padding: 24px; text-align: center; }
+.rb-card-title { margin: 0; font-size: calc(var(--rt-pt) * 13); line-height: 1.3; font-weight: 600; overflow-wrap: anywhere; }
+.rb-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
+.rb-action, .rb-send, .rb-send-alt, .rb-stop, .rb-stage, .rb-sheet-cancel {
+  min-height: var(--rb-tap);
+  padding: 0 14px;
+  background: var(--rt-surface);
+  border: 1px solid var(--rt-border-strong);
+  border-radius: 8px;
+  color: var(--rt-text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rb-action:active, .rb-send-alt:active, .rb-stage:active { background: var(--rt-raised); }
+.rb-action:disabled, .rb-send-alt:disabled, .rb-send:disabled { color: var(--rt-disabled); border-color: var(--rt-border); cursor: default; }
+.rb-action-execute, .rb-action-verify { border-color: var(--rt-accent-border); color: var(--rt-accent); }
+.rb-send { background: var(--rt-accent); border-color: var(--rt-accent); color: var(--rt-accent-text); font-weight: 600; }
+.rb-send:active { background: var(--rt-accent-hover); }
+.rb-stop { background: transparent; border-color: var(--rt-warning-border); color: var(--rt-warning); }
+
+.rb-section-body, .rb-thread { margin-top: 16px; }
+.rb-body-heading {
+  margin: 0 0 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--rt-border);
+  color: var(--rt-muted);
+  font-family: var(--rt-mono);
+  font-size: var(--rt-floor-size);
+  font-weight: 400;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.rb-tasks { list-style: none; margin: 0; padding: 0; }
+.rb-task { display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; }
+.rb-task-nested { margin-left: 22px; }
+.rb-task input, .rb-md-task > input { flex: none; width: 18px; height: 18px; margin: 0.15em 0 0; accent-color: var(--rt-accent); }
+.rb-task-text { flex: 1 1 auto; min-width: 0; }
+.rb-task-text .rb-md-p { margin: 0; }
+.rb-task-dropped { color: var(--rt-muted); }
+
+/* ---- Markdown, as nodes (app/boardmd.js) ---------------------------------------------------- */
+.rb-md { overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
+.rb-md > :first-child { margin-top: 0; }
+.rb-md > :last-child { margin-bottom: 0; }
+.rb-md-p { margin: 0 0 10px; }
+.rb-md-h { margin: 14px 0 6px; font-size: var(--rt-body-size); font-weight: 600; }
+.rb-md-h1, .rb-md-h2 { font-size: calc(var(--rt-pt) * 11.5); }
+.rb-md-list { margin: 0 0 10px; padding-left: 22px; }
+.rb-md-list .rb-md-list { margin-bottom: 0; }
+.rb-md-item > .rb-md-p { margin-bottom: 4px; }
+.rb-md-task { list-style: none; display: flex; align-items: flex-start; gap: 8px; margin-left: -22px; }
+.rb-md-task > .rb-md-item { flex: 1 1 auto; min-width: 0; }
+.rb-md-code, .rb-md-pre {
+  font-family: var(--rt-mono);
+  font-size: 0.9em;
+  background: var(--rt-term-background);
+  color: var(--rt-term-foreground);
+  border-radius: 4px;
+}
+.rb-md-code { padding: 1px 4px; }
+.rb-md-pre { margin: 0 0 10px; padding: 8px 10px; overflow-x: auto; white-space: pre; border: 1px solid var(--rt-border); }
+.rb-md-pre code { font: inherit; }
+.rb-md-quote { margin: 0 0 10px; padding: 2px 0 2px 12px; border-left: 2px solid var(--rt-border-strong); color: var(--rt-muted); }
+.rb-md-rule { border: 0; border-top: 1px solid var(--rt-border); margin: 12px 0; }
+.rb-md-table-wrap { overflow-x: auto; margin: 0 0 10px; }
+.rb-md-table { border-collapse: collapse; font-size: var(--rt-secondary-size); }
+.rb-md-table th, .rb-md-table td { border: 1px solid var(--rt-border); padding: 4px 8px; text-align: left; vertical-align: top; }
+.rb-md-table th { color: var(--rt-muted); font-weight: 600; background: var(--rt-surface); }
+.rb .rb-md-link, .rb .rb-md-ref {
+  display: inline;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--rt-link);
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: var(--rt-border-strong);
+  text-underline-offset: 2px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.rb .rb-md-ref { font-family: var(--rt-mono); font-size: 0.92em; color: var(--rt-accent); }
+.rb-md-link-url, .rb-md-image, .rb-md-path { color: var(--rt-muted); }
+
+/* ---- the thread ----------------------------------------------------------------------------- */
+.rb-entry {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  background: var(--rt-surface);
+  border: 1px solid var(--rt-border);
+  border-radius: 8px;
+}
+.rb-entry[data-author="owner"] { background: var(--rt-raised); }
+.rb-entry-head { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; margin-bottom: 4px; }
+.rb-entry-author { font-weight: 600; }
+.rb-entry[data-author="agent"] .rb-entry-author { color: var(--rt-agent); }
+.rb-entry-meta { color: var(--rt-muted); font-size: var(--rt-floor-size); }
+.rb-entry-event { padding: 2px 10px; background: none; border: 0; color: var(--rt-muted); font-size: var(--rt-secondary-size); }
+.rb-entry-event .rb-md-p { margin: 0; }
+/* A question is the one entry that wants something from the reader: amber, like every other
+   "waiting on you" in Relay. */
+.rb-entry-question { border-color: var(--rt-warning-border); border-left: 3px solid var(--rt-warning); }
+.rb-entry-question .rb-entry-meta { color: var(--rt-warning); }
+.rb-entry[data-pending] { border-style: dashed; }
+.rb-entry[data-pending] .rb-entry-meta { color: var(--rt-accent); }
+.rb-entry-live { border-style: dashed; color: var(--rt-muted); }
+.rb-options { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.rb-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--rb-tap);
+  padding: 4px 10px;
+  background: var(--rt-bg);
+  border: 1px solid var(--rt-warning-border);
+  border-radius: 8px;
+  color: var(--rt-text);
+  text-align: left;
+  cursor: pointer;
+}
+.rb-option:active { background: var(--rt-raised); }
+.rb-option-n { flex: none; color: var(--rt-warning); font-family: var(--rt-mono); font-weight: 600; }
+.rb-option-text { flex: 1 1 auto; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+
+/* ---- the reply box -------------------------------------------------------------------------- */
+.rb-reply {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+  background: var(--rt-surface);
+  border-top: 1px solid var(--rt-border);
+}
+.rb-reply:focus-within { border-top-color: var(--rt-accent-border); }
+.rb .rb-reply-text, .rb .rb-field {
+  min-height: var(--rb-tap);
+  padding: 10px 12px;
+  background: var(--rt-bg);
+  border: 1px solid var(--rt-border);
+  border-radius: 10px;
+  font-size: max(16px, var(--rt-body-size));
+  line-height: 1.4;
+  resize: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.rb-reply-text { flex: 1 1 100%; min-width: 0; overflow-y: auto; }
+.rb-reply-text:focus, .rb-field:focus { outline: none; border-color: var(--rt-accent-border); }
+.rb-reply-text::placeholder, .rb-field::placeholder { color: var(--rt-muted); opacity: 1; }
+.rb-reply-row { flex: 1 1 100%; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rb-spacer { flex: 1 1 0; min-width: 0; }
+.rb-mic {
+  flex: none;
+  min-width: var(--rb-tap);
+  min-height: var(--rb-tap);
+  background: none;
+  border: 1px solid var(--rt-border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.rb-mic.rb-recording { border-color: var(--rt-error); background: var(--rt-raised); }
+.rb-mic:disabled { opacity: 0.5; }
+
+/* ---- sheets --------------------------------------------------------------------------------- */
+.rb-layer { position: absolute; inset: 0; z-index: 20; display: flex; align-items: flex-end; justify-content: center; }
+.rb-backdrop { position: absolute; inset: 0; background: var(--rt-bg); opacity: 0.72; }
+.rb-sheet {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 560px;
+  max-height: calc(100% - 12px);
+  overflow-y: auto;
+  padding: 10px 14px calc(14px + env(safe-area-inset-bottom, 0px));
+  background: var(--rt-surface);
+  border: 1px solid var(--rt-border-strong);
+  border-bottom: 0;
+  border-radius: 14px 14px 0 0;
+}
+.rb-sheet-head { display: flex; align-items: center; gap: 8px; }
+.rb-sheet-title { flex: 1 1 auto; font-weight: 600; }
+.rb-sheet-cancel { border-color: transparent; background: none; color: var(--rt-accent); }
+.rb-sheet-note { color: var(--rt-muted); font-size: var(--rt-secondary-size); overflow-wrap: anywhere; }
+.rb-sheet-note:empty { display: none; }
+.rb-sheet-note.rb-error { color: var(--rt-error); }
+.rb-sheet-foot { display: flex; align-items: center; gap: 8px; }
+.rb-stages { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.rb-stage { text-align: left; white-space: normal; }
+.rb-stage.rb-stage-current { border-color: var(--rt-accent-border); color: var(--rt-accent); }
+.rb-link-url {
+  padding: 8px 10px;
+  background: var(--rt-bg);
+  border: 1px solid var(--rt-border);
+  border-radius: 8px;
+  font-family: var(--rt-mono);
+  font-size: var(--rt-secondary-size);
+  overflow-wrap: anywhere;
+  -webkit-user-select: all;
+  user-select: all;
+}
+select.rb-field { padding-top: 0; padding-bottom: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .rb-sheet { animation: rb-sheet-in 140ms ease-out; }
+  @keyframes rb-sheet-in { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+}
+
+/* ---- one column: the card page has one bar, not two ------------------------------------------ */
+@media (max-width: 899px) {
+  .rb[data-card="open"] .rb-bar { display: none; }
+}
+
+/* ---- wide: a tablet's reply box is one row --------------------------------------------------- */
+@media (min-width: 600px) {
+  .rb-reply { flex-wrap: nowrap; }
+  .rb-reply-text { flex: 1 1 0; }
+  .rb-reply-row { flex: 0 0 auto; }
+  .rb-reply-row .rb-spacer { display: none; }
+}
+
+/* ---- an iPad: the list and the card side by side --------------------------------------------- */
+@media (min-width: 900px) {
+  .rb[data-card="open"] .rb-list-col, .rb[data-card="closed"] .rb-card-col { display: flex; }
+  .rb-list-col { flex: 0 0 clamp(340px, 36%, 440px); border-right: 1px solid var(--rt-border); }
+  .rb .rb-card-back { display: none; }
+  .rb-card-bar { padding-left: 16px; }
+  .rb-card-scroll { padding: 16px 24px 24px; }
+  .rb-layer { align-items: center; }
+  .rb-sheet { border-bottom: 1px solid var(--rt-border-strong); border-radius: 14px; }
+}
+
+/* ---- a keyboard is up ------------------------------------------------------------------------ */
+.short-viewport .rb-reply { padding-top: 4px; padding-bottom: 4px; flex-wrap: nowrap; }
+.short-viewport .rb-reply-text { flex: 1 1 0; }
+.short-viewport .rb-reply-row { flex: 0 0 auto; }
+.short-viewport .rb-reply-row .rb-spacer { display: none; }
+.short-viewport .rb-card-scroll { padding-top: 6px; padding-bottom: 6px; }
+.short-viewport .rb-sheet { gap: 6px; padding-top: 6px; }
+/* A phone in landscape with its keyboard: 185 px. The app's bar has already gone (style.css); the
+   card's bar goes too, and the row of sends tightens, so what is left is the end of the thread and
+   the box with all three sends on it. */
+.tiny-viewport .rb-card-bar { display: none; }
+.tiny-viewport .rb-tabs { display: none; }
+.tiny-viewport .rb-reply { gap: 4px; padding: 2px 6px; }
+.tiny-viewport .rb-reply-row { gap: 4px; }
+.tiny-viewport .rb-reply .rb-mic { display: none; }
+.tiny-viewport .rb-send, .tiny-viewport .rb-send-alt, .tiny-viewport .rb-stop { padding: 0 10px; }
+.tiny-viewport .rb-create-text { min-height: 0; height: 56px; }

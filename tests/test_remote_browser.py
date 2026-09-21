@@ -17,6 +17,7 @@ from pathlib import Path
 
 from remote import host as host_mod
 from remote import identity as identity_mod
+from remote import notify
 from remote import panes as panes_mod
 from remote import wire
 from rendezvous.server import Store, build
@@ -1357,9 +1358,9 @@ class InstallFirstTests(unittest.TestCase):
                     self.assertIsNotNone(stored, await browser.evaluate(
                         "document.getElementById('notify-offer-note').textContent"))
                     self.assertEqual(stored["endpoint"], "https://push.example.test/abc")
-                    self.assertEqual(sorted(stored["kinds"]),
-                                     sorted(["agent_finished", "waiting_input", "password",
-                                             "failed", "plan"]))
+                    # Both switches on is every kind there is — `card_waiting` among them since
+                    # the Switchboard reached the phone (#SWPH).
+                    self.assertEqual(sorted(stored["kinds"]), sorted(notify.KINDS))
 
                     # The row collapses into the settings that were always there, with both
                     # switches on.

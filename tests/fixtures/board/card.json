@@ -1,0 +1,145 @@
+{
+ "body": "# Scrollback survives a resume\n\n## Issue\n\nwhen i resume a session the terminal is empty. i want the old text back\nsecond line of the owner's words, kept as typed <!-- relay:note hidden-marker-one -->\n\n<!-- relay:entry 20260920T165525Z-zz author=agent kind=note -->\n<script>window.pwned = 1</script>\n<img src=x onerror=\"window.pwned = 2\">\n<a href=\"javascript:window.pwned=3\">click me</a>\n\n## Decisions (owner, 2026-09-20)\n\n- 2026-09-20, owner: \"plain text is fine\" → no sqlite.\n- **Bold**, *italic*, __also bold__, _also italic_, ~~struck~~, `code span with <b>tags</b>` and snake_case_name stays whole.\n\n## Planning notes\n\nOptions considered, see [the design doc](https://relay-terminal.ai/docs/scrollback \"title\") and\n<https://example.org/auto> and a bare https://example.com/bare. A repo link [the pane](src/Pane.h)\nis not a web link, a [script link](javascript:window.pwned=4) never opens, and an image\n![diagram](https://example.org/d.png) is never fetched. See also #80E3 and \\*not emphasis\\*.\n\n> A quote, with **bold** inside.\n> Second quoted line.\n\n1. First numbered\n2. Second numbered\n   - nested bullet\n   - another nested\n3. Third numbered\n\n| Option | Cost | Verdict |\n|---|---:|---|\n| plain text | 0 | **yes** |\n| sqlite | high | no \\| never |\n\n---\n\n```cpp\n// a fence: nothing in here is Markdown, and nothing is HTML\nauto x = \"<div onclick='window.pwned=5'>\"; <!-- kept: this is code -->\n```\n\n## Plan\n\n### Step one\n\nWrite the file on close.\n\n#### Deeper\n\nRead it on resume.\n\n## Tasks\n- [x] Save on close <!-- t:a1 -->\n- [x] Replay on resume <!-- t:a2 -->\n- [ ] Rewind's auxiliary file <!-- t:a3 s=in-progress -->\n  - [ ] Cap it at 512 KiB <!-- t:a4 blocked_by=a3 -->\n- [x] ~~Compress with sqlite~~ <!-- t:a5 s=dropped -->\n\n## QA checklist\n\n- [ ] Resume shows the last screen\n- [x] A closed pane loses nothing\n",
+ "body_truncated": false,
+ "card_id": "2DW4",
+ "event": "board_card",
+ "front": {
+  "acceptance": "after a resume the pane shows the text it had, up to the cap, and nothing else changes",
+  "assignee": "agent",
+  "created": "2026-09-20",
+  "id": "2DW4",
+  "labels": [
+   "feature",
+   "remote"
+  ],
+  "milestone": "beta",
+  "rank": "07a",
+  "status": "discussing",
+  "type": "work",
+  "waiting_on": "owner"
+ },
+ "hash": "4aa488effca43c70a59cf6c173ca52c858bbbf3b8b2280242c6d085453817f99",
+ "id": "remote-2",
+ "issue": "when i resume a session the terminal is empty. i want the old text back",
+ "issue_heading": "Issue",
+ "sections": [
+  "Issue",
+  "Decisions (owner, 2026-09-20)",
+  "Planning notes",
+  "Plan",
+  "Tasks",
+  "QA checklist"
+ ],
+ "status": "discussing",
+ "tab": "features",
+ "tasks": [
+  {
+   "blocked_by": [],
+   "card": null,
+   "depth": 0,
+   "done": true,
+   "item_id": "a1",
+   "status": "done",
+   "text": "Save on close"
+  },
+  {
+   "blocked_by": [],
+   "card": null,
+   "depth": 0,
+   "done": true,
+   "item_id": "a2",
+   "status": "done",
+   "text": "Replay on resume"
+  },
+  {
+   "blocked_by": [],
+   "card": null,
+   "depth": 0,
+   "done": false,
+   "item_id": "a3",
+   "status": "in-progress",
+   "text": "Rewind's auxiliary file"
+  },
+  {
+   "blocked_by": [
+    "a3"
+   ],
+   "card": null,
+   "depth": 1,
+   "done": false,
+   "item_id": "a4",
+   "status": "open",
+   "text": "Cap it at 512 KiB"
+  },
+  {
+   "blocked_by": [],
+   "card": null,
+   "depth": 0,
+   "done": true,
+   "item_id": "a5",
+   "status": "dropped",
+   "text": "Compress with sqlite"
+  }
+ ],
+ "thread": [
+  {
+   "attrs": {
+    "mode": "discuss"
+   },
+   "author": "owner",
+   "entry_id": "20260920T160101Z-a1",
+   "kind": "comment",
+   "text": "where should the text live? cheap is fine"
+  },
+  {
+   "attrs": {
+    "model": "kimi-k3",
+    "pane": "8999d43e",
+    "turn": "s9f2/t-14"
+   },
+   "author": "agent",
+   "entry_id": "20260920T160230Z-b2",
+   "kind": "event",
+   "text": "- ✦ agent moved this card · Inbox → Discussing · first thread entry"
+  },
+  {
+   "attrs": {
+    "mode": "discuss",
+    "model": "kimi-k3"
+   },
+   "author": "agent",
+   "entry_id": "20260920T160300Z-c3",
+   "kind": "comment",
+   "text": "Beside the session file is cheapest. <!-- t:zz hidden-marker-two -->\n\n<b onmouseover=\"window.pwned=6\">not bold</b>"
+  },
+  {
+   "attrs": {},
+   "author": "agent",
+   "entry_id": "20260920T161500Z-e5",
+   "kind": "decision",
+   "text": "Owner, 2026-09-20: \"plain text is fine\" → no sqlite."
+  },
+  {
+   "attrs": {
+    "pane_token": "8999d43e"
+   },
+   "author": "agent",
+   "entry_id": "20260920T163000Z-d4",
+   "kind": "progress",
+   "text": "Executing (8999d43e) · handed to a new terminal pane"
+  },
+  {
+   "attrs": {
+    "model": "kimi-k3",
+    "pane": "8999d43e"
+   },
+   "author": "agent",
+   "entry_id": "20260920T165525Z-fm",
+   "kind": "question",
+   "text": "Two choices before this is built:\n1. Where the text lives. Recommended: beside the session file — it survives the layout's prune and is deleted with the conversation.\n2. Scope. Recommended: Relay agent sessions only, replay on resume.\n\nSay \"go\" and I take both recommendations."
+  }
+ ],
+ "thread_total": 9,
+ "title": "Scrollback survives a resume",
+ "type": "work"
+}

@@ -32,6 +32,9 @@ import { NOTIFY_SWITCHES, ALL_KINDS, switchesFrom, kindsFor } from './notifykind
 // against this origin's rendezvous and comes back with a fragment; a pairing fragment (`s=`) goes
 // into the pairing flow below exactly as a scanned link does.
 import { joinWithCode, cleanCode, cleanPin, validCode, validPin, meetProblem } from './meet.js';
+// The Switchboard (#SWPH): the inbox's first row, the board screen and a card's page, drawn from
+// the desktop's own board events. This file only carries its messages in and out.
+import { mountBoard } from './board.js';
 
 trackViewport();
 
@@ -148,6 +151,7 @@ function renderOutboxNote() {
   node.textContent = text;
   node.hidden = !text;
   paintStatus();        // and in the header, where it is readable from the inbox too
+  board.onOutbox();     // a comment, a move or a new card that is waiting says so on the board
 }
 
 // One place that knows a message may have been kept rather than sent, so every caller — the pane
@@ -157,6 +161,23 @@ function post(message, onError) {
     .then((what) => { if (what === 'queued') renderOutboxNote(); return what; })
     .catch((error) => { if (onError) onError(error); });
 }
+
+// ---- the Switchboard (#SWPH) --------------------------------------------------------------------
+
+// The count on the app icon is everything that wants you: panes, and cards waiting on you.
+const paintBadge = () => updateBadge(panes.filter(needsYou).length + board.waiting());
+
+const board = mountBoard({
+  screen: $('screen-board'),
+  rowSlot: $('board-row-slot'),
+  outbox,
+  online: linkUp,
+  show,
+  openPane: (paneId) => requestOpenPane(paneId),
+  panes: () => panes,
+  onCount: paintBadge,
+  sendRaw: (message) => rrp.send(message),
+});
 
 // ---- pairing ----------------------------------------------------------------------------------
 
@@ -613,7 +634,7 @@ function renderInbox() {
     list.append(row);
   }
   $('inbox-empty').textContent = panes.length ? '' : 'No panes yet.';
-  updateBadge(panes.filter(needsYou).length);
+  paintBadge();
   // A running pane's elapsed time is the one thing in the list that changes without a message
   // from the desktop, so it is ticked here rather than left to say "running · 0s" for an hour.
   if (inboxTimer) clearInterval(inboxTimer);
@@ -1223,6 +1244,7 @@ function toggleSticky(name) {
 // prompt box needs: whether a turn is running, and anything it wants to say.
 function onAgent(message) {
   const event = message.event || {};
+  if (board.onAgent(message)) return;     // a clip spoken on a card: the words go to that box
   // A transcript answers one clip by its id, so it is taken before the open-pane check: it must
   // land in the prompt box even if the inbox was opened while the desktop was transcribing.
   if (voiceRequest && message.id === voiceRequest && event.event === 'transcribed') {
@@ -1804,6 +1826,7 @@ rrp.addEventListener('welcome', (event) => {
   passwordEntry = !!event.detail.password_entry;
   $('capability').textContent = capability;
   updateVoiceUi();
+  board.setAccess(features, capability);
 });
 
 rrp.addEventListener('welcome', () => {
@@ -1841,6 +1864,9 @@ rrp.addEventListener('panes', (event) => {
 });
 
 rrp.addEventListener('agent', (event) => onAgent(event.detail));
+
+// The desktop's Switchboard events, sanitised by the hub (REMOTE-PROTOCOL.md section 17).
+rrp.addEventListener('board_event', (event) => board.onEvent(event.detail));
 
 rrp.addEventListener('control', (event) => onControl(event.detail));
 
@@ -1889,12 +1915,14 @@ rrp.addEventListener('error', (event) => {
   // A refused `queue_edit` belongs to the pane view: it has the row and the keys typed on it, and
   // says so over the terminal where the note below cannot be read (see threadNote).
   if (paneView && paneView.onRefused(detail)) return;
+  if (board.onRefused(detail)) return;
   if (current) threadNote(detail.message || 'Refused.', true);
 });
 
 rrp.addEventListener('revoked', async () => {
   await forgetDevice();
   outbox.clear();            // nothing staged for a desktop that will not take it
+  board.reset();
   setStatus('revoked', 'warn');
   showWelcome();
   $('welcome-note').textContent = 'This device was revoked from the desktop.';
@@ -1902,6 +1930,7 @@ rrp.addEventListener('revoked', async () => {
 
 rrp.addEventListener('closed', (event) => {
   setStatus('offline', 'warn');
+  board.onLink();
   // Stop stays where it is. Hiding it here meant that the moment the socket dropped — which on
   // iOS is seconds after the app leaves the foreground — the one button whose whole purpose is
   // "stop it now" was the one button that had gone. The turn it belongs to is still running on
@@ -1948,10 +1977,11 @@ window.addEventListener('DOMContentLoaded', () => {
   // has only just been created has no `message` handler yet, so the id comes in the URL instead
   // and the query is dropped again so a reload does not re-open it.
   const asked = new URLSearchParams(location.search).get('pane');
-  if (asked) {
-    pendingOpen = asked;
-    history.replaceState(null, '', location.pathname + location.hash);
-  }
+  // …or with `?card=…`, when it was a Switchboard card that started waiting on you (#SWPH).
+  const askedCard = new URLSearchParams(location.search).get('card');
+  if (asked) pendingOpen = asked;
+  if (askedCard) board.open(askedCard);
+  if (asked || askedCard) history.replaceState(null, '', location.pathname + location.hash);
   renderOutboxNote();
   $('composer-send').addEventListener('click', sendPrompt);
   $('composer-mic').addEventListener('click', toggleVoice);
@@ -2166,6 +2196,12 @@ if ('serviceWorker' in navigator) {
     const data = event.data;
     if (data && data.t === 'open_pane' && typeof data.pane === 'string') {
       requestOpenPane(data.pane);
+    }
+    // A card that started waiting on you: the board opens on it (it is only an id, and the card
+    // that opens is built from the desktop's own `board_card`).
+    if (data && data.t === 'open_card' && typeof data.card === 'string') {
+      if (current) closePane();
+      board.open(data.card);
     }
   });
 }
