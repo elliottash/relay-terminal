@@ -14,8 +14,10 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QScreen>
+#include <QScrollBar>
 #include <QShowEvent>
 #include <QStyledItemDelegate>
+#include <QLayout>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -27,7 +29,7 @@ constexpr int kRowHeight = 23;
 constexpr int kSeparatorHeight = 7;
 constexpr int kSidePad = 9;
 constexpr int kMaxWidth = 560;
-constexpr int kMaxHeight = 420;
+constexpr int kMaxRows = 14;   // past this the list scrolls; below it, it never does
 
 // Which original row an item stands for; -1 for the "no match" line.
 constexpr int kRowRole = Qt::UserRole + 1;
@@ -310,34 +312,122 @@ void FilterPopup::openFor(QWidget *anchor)
     m_edit->setFocus(Qt::PopupFocusReason);
 }
 
-// Size and place the list. `first` decides above-or-below once; afterwards the list keeps that
-// side and, as the filter narrows it, shrinks against the edge it is anchored to — so a one-row
-// result is a one-row box and not a tall empty one.
+// Size and place the list.
+//
+// Two rules, both of them things the first cut got wrong (the Alt+E list had a scrollbar over two
+// rows, and hung off the right edge of the window because the level box sits at the end of the
+// strip):
+//
+//  * **A list that fits does not scroll.** The height is the real row heights the delegate
+//    returns, plus the filter line's own, and the scrollbar is switched *off* rather than left to
+//    ScrollBarAsNeeded — a few pixels short and "as needed" means "always". Only past kMaxRows, or
+//    past the room the window leaves, does it become a scrolling list, and then the bar's width is
+//    added to the popup instead of taken out of the rows.
+//  * **It stays inside the window it hangs from.** Left-aligned with the box as before; when that
+//    would run off the right, right-aligned to the box instead, and clamped to the window's own
+//    rectangle (intersected with the screen) either way.
+//
+// `first` decides above-or-below once; afterwards the list keeps that side and, as the filter
+// narrows it, shrinks against the edge it is anchored to — so a one-row result is a one-row box.
 void FilterPopup::layoutForAnchor(bool first)
 {
     QWidget *anchor = m_anchor;
     if (anchor == nullptr) return;
     const QFontMetrics metrics(anchor->font());
-    int widest = anchor->width();
+    // Polished first, every time: an unpolished QLineEdit answers sizeHint() without the
+    // stylesheet's padding, and sizing the box from that number left a gap under the last row on
+    // the first open and clipped it on the next.
+    ensurePolished();
+    m_edit->ensurePolished();
+    m_list->ensurePolished();
+
+    // The rectangle the list may live in: the window it hangs from, and never off the screen.
+    const QScreen *screen = anchor->screen() != nullptr ? anchor->screen() : QGuiApplication::primaryScreen();
+    QRect bound = screen != nullptr ? screen->availableGeometry() : QRect(0, 0, 1024, 768);
+    if (const QWidget *top = anchor->window(); top != nullptr && top->isVisible()) {
+        const QRect window = bound.intersected(top->frameGeometry());
+        if (window.width() > 160 && window.height() > 160) bound = window;
+    }
+
+    // How tall the rows really are, straight from the delegate, and how many of them may show.
+    QList<int> rows;
+    int wanted = 0;
+    for (int r = 0; r < m_list->count(); ++r) {
+        rows << m_list->sizeHintForRow(r) + 2 * m_list->spacing();
+        wanted += rows.last();
+    }
+    const int chrome = 2 * m_list->frameWidth() + 2;   // the list's frame and the popup's own 1px
+    // The filter line is pinned as well as the list. applyPalette() re-sets the stylesheet on
+    // every open, so the first sizeHint() after it is the unstyled one and the real layout pass a
+    // moment later used the styled one — the box then had a spare row's worth of ground under the
+    // last row, or cut through it, depending on which way the two numbers differed. With both
+    // children fixed there is nothing left for the layout to redistribute.
+    const int editHeight = std::max({m_edit->sizeHint().height(), m_edit->minimumSizeHint().height(),
+                                     metrics.height() + 10});
+    m_edit->setFixedHeight(editHeight);
+    int cap = 0;
+    for (int r = 0; r < rows.size() && r < kMaxRows; ++r) cap += rows.at(r);
+    const int room = std::max(bound.height() - editHeight - chrome - 8, 3 * kRowHeight);
+    const int listHeight = std::min({std::max(wanted, 1), cap, room});
+    const bool scrolls = listHeight < wanted;
+    m_list->setVerticalScrollBarPolicy(scrolls ? Qt::ScrollBarAsNeeded : Qt::ScrollBarAlwaysOff);
+    m_list->setFixedHeight(listHeight);
+    // The layout caches the widget's minimum size and only refreshes it on the next pass, so a
+    // setGeometry straight after a shrink was clamped to the height the list used to want.
+    if (QLayout *box = layout(); box != nullptr) box->activate();
+    // The layout's own total, not a sum of guesses: with the list at a fixed height this is
+    // exactly the room the filter line and the rows need, so there is no slack for the layout to
+    // leave under the last row and nothing for it to clip.
+    const int height = std::min(bound.height() - 8, editHeight + listHeight + chrome);
+
+    // No narrower than the box it hangs from, no wider than its own longest row — with room for
+    // the filter line's own words, which are content too.
+    int widest = std::max(anchor->width(), metrics.horizontalAdvance(m_edit->placeholderText()) + 4 * kSidePad);
     for (const FilterRow &row : std::as_const(m_rows))
         widest = std::max(widest, metrics.horizontalAdvance(row.text) + 4 * kSidePad);
-    const QRect screen = (anchor->screen() != nullptr ? anchor->screen() : QGuiApplication::primaryScreen())
-                             ->availableGeometry();
-    const int width = std::clamp(widest, 140, std::min(kMaxWidth, screen.width() - 16));
+    if (scrolls) widest += m_list->verticalScrollBar()->sizeHint().width();
+    const int width = std::clamp(widest, 64, std::min(kMaxWidth, bound.width() - 8));
 
-    // Measured, not guessed: sizeHintForRow asks the delegate with the font the list really has,
-    // and the filter line answers for itself. Guessing left the last row under a scrollbar.
-    int content = 2 * m_list->frameWidth();
-    for (int r = 0; r < m_list->count(); ++r) content += m_list->sizeHintForRow(r);
-    const int height = std::min(kMaxHeight, m_edit->sizeHint().height() + content + 8);
+    const QPoint corner = anchor->mapToGlobal(QPoint(0, 0));
+    const int below = corner.y() + anchor->height() + 2;
+    if (first) m_above = below + height > bound.bottom();
+    int x = corner.x();
+    if (x + width - 1 > bound.right()) x = corner.x() + anchor->width() - width;   // right-align to the box
+    x = std::clamp(x, bound.left(), std::max(bound.left(), bound.right() - width + 1));
+    int y = m_above ? corner.y() - 2 - height : below;
+    y = std::clamp(y, bound.top(), std::max(bound.top(), bound.bottom() - height + 1));
+    setGeometry(QRect(QPoint(x, y), QSize(width, height)));
 
-    const QPoint below = anchor->mapToGlobal(QPoint(0, anchor->height() + 2));
-    const QPoint above = anchor->mapToGlobal(QPoint(0, -2));
-    if (first) m_above = below.y() + height > screen.bottom();
-    QPoint at(below.x(), m_above ? above.y() - height : below.y());
-    at.setX(std::clamp(at.x(), screen.left() + 4, screen.right() - width - 4));
-    at.setY(std::clamp(at.y(), screen.top() + 4, screen.bottom() - height - 4));
-    setGeometry(QRect(at, QSize(width, height)));
+    // Only now does the list have its new size, and only now can it be scrolled sensibly. A list
+    // that grew keeps whatever offset it scrolled to while it was short: three levels with the
+    // middle one current drew as "high", "max" and a row of empty ground, with "low" scrolled off
+    // the top — the second half of the Alt+E fault, and the one that survived the sizing fix.
+    if (QLayout *box = layout(); box != nullptr) box->activate();
+    if (!scrolls) m_list->verticalScrollBar()->setValue(0);
+    else if (QListWidgetItem *item = m_list->currentItem(); item != nullptr)
+        m_list->scrollToItem(item, QAbstractItemView::EnsureVisible);
+}
+
+// Whether that row (an index into rows()) is drawn whole, rather than scrolled out of the
+// viewport. Every row of a list short enough to draw whole answers true.
+bool FilterPopup::rowVisible(int row) const
+{
+    for (int r = 0; r < m_list->count(); ++r) {
+        const QListWidgetItem *item = m_list->item(r);
+        if (rowOf(item) != row) continue;
+        const QRect rect = m_list->visualItemRect(item);
+        return rect.top() >= 0 && rect.bottom() <= m_list->viewport()->height();
+    }
+    return false;
+}
+
+// Whether any row is out of reach without scrolling. Asked by tests/filterpopup_test.cpp, and the
+// answer is "no" for every list short enough to draw whole.
+bool FilterPopup::scrolling() const
+{
+    if (m_list->verticalScrollBarPolicy() == Qt::ScrollBarAlwaysOff) return false;
+    const QScrollBar *bar = m_list->verticalScrollBar();
+    return bar->maximum() > bar->minimum();
 }
 
 void FilterPopup::showEvent(QShowEvent *event)

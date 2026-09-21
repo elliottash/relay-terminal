@@ -15,6 +15,7 @@
 #include <QApplication>
 #include <QImage>
 #include <QPixmap>
+#include <QLayout>
 #include <QTest>
 
 using namespace relay;
@@ -205,7 +206,106 @@ private slots:
         popup.dismiss();
     }
 
-    // 8. The short list Alt+E opens is the same popup: four rows, no separators, and the pane's
+    // 8. A list short enough to draw whole never shows a scrollbar — the four reasoning levels,
+    //    and the two a model with only high and max offers, which is what Alt+E opened over a
+    //    scrollbar before. Long lists still scroll, and then the bar's width is added to the box
+    //    rather than taken out of the rows.
+    void aListThatFitsDoesNotScroll()
+    {
+        QWidget anchor;
+        anchor.resize(70, 22);
+        anchor.show();
+        QList<FilterRow> levels;
+        for (const QString &name : {QStringLiteral("high"), QStringLiteral("max")})
+            levels << FilterRow{name, name, {}, false, true};
+        FilterPopup popup(&anchor);
+        popup.setRows(levels, 0);
+        popup.openFor(&anchor);
+        QCOMPARE(popup.visibleCount(), 2);
+        QVERIFY2(!popup.scrolling(), "two rows must not need a scrollbar");
+        QVERIFY(popup.rowVisible(0));
+        QVERIFY(popup.rowVisible(1));
+        // Exactly the room the filter line and the rows ask for: taller and the box has a gap
+        // under the last row, shorter and it cuts through it.
+        QCOMPARE(popup.height(), popup.layout()->totalSizeHint().height());
+        const int twoRows = popup.height();
+
+        // Filtering down to one row keeps it that way, and the box shrinks with the list.
+        popup.setFilterText(QStringLiteral("max"));
+        QVERIFY(!popup.scrolling());
+        QCOMPARE(popup.height(), popup.layout()->totalSizeHint().height());
+        QVERIFY(popup.height() < twoRows);
+        popup.setFilterText(QString());
+        QCOMPARE(popup.height(), twoRows);
+
+        // Forty rows is past the cap, so that one does scroll — and is still no taller than the
+        // room it was given.
+        QList<FilterRow> many;
+        for (int i = 0; i < 40; ++i)
+            many << FilterRow{QStringLiteral("model-%1").arg(i), QStringLiteral("entry:%1").arg(i), {}, false, true};
+        popup.setRows(many, 0);
+        popup.openFor(&anchor);
+        QVERIFY2(popup.scrolling(), "forty rows must scroll");
+        QCOMPARE(popup.currentRow(), 0);
+        QVERIFY(popup.rowVisible(0));
+        popup.dismiss();
+    }
+
+    // 10. The three levels kimi offers, with the middle one current. The list used to be sized for
+    //     two and scrolled down to reach "high"; when the sizing was fixed it kept the offset, so
+    //     it drew "high", "max" and a row of empty ground with "low" off the top. Every row of a
+    //     list that fits is drawn, wherever the current one is.
+    void agrownListIsNotLeftScrolled()
+    {
+        QWidget anchor;
+        anchor.resize(70, 22);
+        anchor.show();
+        QList<FilterRow> levels;
+        for (const QString &name : {QStringLiteral("low"), QStringLiteral("high"), QStringLiteral("max")})
+            levels << FilterRow{name, name, {}, false, true};
+        FilterPopup popup(&anchor);
+        popup.setRows(levels, 1);
+        popup.openFor(&anchor);
+        QCOMPARE(popup.currentRow(), 1);
+        QVERIFY(!popup.scrolling());
+        for (int row = 0; row < 3; ++row)
+            QVERIFY2(popup.rowVisible(row), qPrintable(QStringLiteral("row %1 is not drawn").arg(row)));
+        popup.dismiss();
+    }
+
+    // 9. The box it hangs from is at the right-hand end of the composer strip, so the list has to
+    //    be right-aligned to it rather than run off the window. It never leaves the window, and it
+    //    is never narrower than the box.
+    void theListStaysInsideTheWindow()
+    {
+        QWidget window;
+        window.resize(500, 300);
+        auto *anchor = new QWidget(&window);
+        anchor->setGeometry(430, 270, 66, 22);   // the far right of the strip
+        window.move(0, 0);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+        QList<FilterRow> rows;
+        for (const QString &name : {QStringLiteral("glm-5.3 flash · z.ai (glm)"),
+                                    QStringLiteral("kimi-for-coding-highspeed · kimi")})
+            rows << FilterRow{name, name, {}, false, true};
+        FilterPopup popup(anchor);
+        popup.setRows(rows, 0);
+        popup.openFor(anchor);
+
+        const QRect box = popup.geometry();
+        const QRect frame = window.frameGeometry();
+        QVERIFY2(box.right() <= frame.right(),
+                 qPrintable(QStringLiteral("popup right %1 past window right %2").arg(box.right()).arg(frame.right())));
+        QVERIFY(box.left() >= frame.left());
+        QVERIFY(box.width() >= anchor->width());
+        // Right-aligned to the box, not left-aligned off the edge.
+        QVERIFY(box.left() < anchor->mapToGlobal(QPoint(0, 0)).x());
+        popup.dismiss();
+    }
+
+    // 11. The short list Alt+E opens is the same popup: four rows, no separators, and the pane's
     //    level highlighted.
     void theEffortListIsTheSameControl()
     {

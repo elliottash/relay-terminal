@@ -54,9 +54,33 @@ reading the rows out of the combo's own model, so nothing that *fills* a box had
 | `k-altm-again.png` | **Alt+M** a second time closes the list, as it has since 2026-09-20 |
 | `before-*.png` | the box as it was: no fill on any row, only a hairline |
 
+The first cut of the shots had the list's geometry wrong in three ways, all of them visible in the
+Alt+E one and all fixed before landing.
+
+1. **It scrolled over two rows.** The height is now the row heights the delegate really returns
+   plus the filter line's own, both children pinned with `setFixedHeight` so the layout has nothing
+   to redistribute, and the scrollbar switched *off* rather than left to `ScrollBarAsNeeded` — a
+   few pixels short and "as needed" means "always". Only past fourteen rows, or past the room the
+   window leaves, does the list scroll, and then the bar's width is added to the box instead of
+   taken out of the rows.
+2. **A list that grew stayed scrolled.** kimi offers three levels and the pane was on the middle
+   one, so the short list had scrolled down to reach it; once it was tall enough for all three it
+   kept the offset and drew "high", "max" and a row of empty ground, with "low" off the top. The
+   scroll is now reset after the resize, not before it.
+3. **It hung off the right of the window**, because the level box sits at the end of the strip.
+   The box is clamped to the window it hangs from (intersected with the screen), left-aligned with
+   the picker as before and right-aligned to it when that would overflow. The width floor went with
+   it: no narrower than the picker, no wider than its own longest row, counting the filter line's
+   own words as content.
+
+Measured on the shots that landed: the three-level list is 117px for a 31px filter line and three
+28px rows, nothing over and nothing under, and its right edge is x=1367 in a window that ends at
+1399. `aListThatFitsDoesNotScroll`, `agrownListIsNotLeftScrolled` and `theListStaysInsideTheWindow`
+hold all three.
+
 ## Unit test
 
-`tests/filterpopup_test.cpp`, `ctest --test-dir build -R filterpopup` — 8 cases, all passing:
+`tests/filterpopup_test.cpp`, `ctest --test-dir build -R filterpopup` — 11 cases, all passing:
 
 - `currentRowIsHighlightedOnOpen` — the row the caller calls current is the highlighted one, and a
   separator or a switched-off row never can be.
@@ -69,6 +93,11 @@ reading the rows out of the combo's own model, so nothing that *fills* a box had
 - `noMatchSaysSoAndPicksNothing`, `enterReturnsTheOriginalRowIndex` (the index in the list as it was
   handed in, not the filtered position), `escapeAnswersWithNothingAndClearsTheFilter`,
   `theEffortListIsTheSameControl`.
+- `aListThatFitsDoesNotScroll` — two rows, and one after filtering, with no scrollbar, every row
+  drawn whole, and a box that is exactly its layout's size hint; forty rows still scroll.
+- `agrownListIsNotLeftScrolled` — three levels with the middle one current: all three are drawn.
+- `theListStaysInsideTheWindow` — a picker at the far right of the strip: the list is right-aligned
+  to it, its right edge is inside the window, and it is never narrower than the picker.
 
 ## What a QA pass should check
 
@@ -81,7 +110,9 @@ reading the rows out of the combo's own model, so nothing that *fills* a box had
 5. Alt+E on a model with levels, and Alt+E on one without (it should still say "This model has no
    reasoning setting.").
 6. Mouse only: click the box, hover the rows, click one.
-7. The Switchboard pane's model box, which is the same widget, behaves the same way.
+7. A picker at the right-hand end of a narrow pane: the list must not hang off the window, and a
+   list short enough to draw whole must show no scrollbar.
+8. The Switchboard pane's model box, which is the same widget, behaves the same way.
 
 ## Notes on the run
 

@@ -67,6 +67,8 @@ public:
     int visibleCount() const;         // rows the filter left, 0 when there is no match
     bool hasMatches() const { return visibleCount() > 0; }
     int activate();                   // Enter: pick the highlighted row, returns its rows() index
+    bool scrolling() const;           // true only when a row is out of reach without scrolling
+    bool rowVisible(int row) const;   // that rows() index is drawn whole, not scrolled out
 
     // A row matches a query when the query is empty, or fuzzily (relayFuzzyScore) against its
     // text. Separators never match: a divider between groups that are no longer shown is noise.
