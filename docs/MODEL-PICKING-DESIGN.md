@@ -226,7 +226,56 @@ it is spent.
 3. **`relay-main` rather than `relay main`**: follows from "always lowercase, no spaces";
    recorded here because an earlier note called the hyphenated form unrecognisable.
 
-## 5. Order of work
+## 5. The two surfaces (owner, 2026-09-21)
+
+### 5.1 The box (Alt+M): modes, then the mode's list
+
+```
+  high (gpt-6-astra)
+• main (kimi-k3)              ← the mode this pane is in
+  flash (glm-5.3-flash)
+  local (bonsai-2-27b)        only where this machine serves one
+  ─────────────────────
+  gpt-6-astra   codex
+▌ kimi-k3       kimi          ← this pane's model, highlighted when the box opens
+  glm-5.3       z.ai +1
+  ─────────────────────
+  more models…   customize…
+```
+
+- A mode row is the tier first and, in parentheses, the model **this pane** would run in it: rank 1
+  of that list until a model was picked in the pane for that mode, then the pick.
+- Below, the models of the mode the pane is in, **in list order** (the order is the information:
+  rank 1 is the default, the rest is the failover order), one row per model (Rule 2), with the
+  provider it would use. Models outside the list are behind "more models…".
+- **Left / Right change the mode in place**: the marker moves, the list below is redrawn, nothing
+  closes. Up / Down move through the models, Enter picks, typing filters, Escape leaves everything
+  as it was. Enter on a mode row switches the mode and keeps that mode's model.
+- The collapsed box is the model alone on main, and `<model> · <mode>` on any other mode.
+- `/high` joins `/main`, `/flash` and `/local` as a pane mode: the pane runs on the high list.
+
+### 5.2 The dialog (Ctrl+Alt+M): pick *and* prioritize
+
+The priority lists were under Options › Models, below the providers and the checklist — "too hard
+to find". The dialog becomes the main place for both jobs, over the same storage
+(`models/tier/<tier>`, written through to the current profile), so Options and the dialog can never
+disagree.
+
+- Tabs across the top, `high · main · flash · lite · local · all`; Left / Right or Tab changes tab,
+  and it opens on the tab of the mode the pane is in.
+- A tier tab is that list, numbered, in order. Enter uses the row in this pane. **Alt+Up / Alt+Down
+  (or a drag) moves it; Delete takes it out of the list**; the level list on the right sets the
+  level the entry carries in the list. Rank 1 says what it is: "new panes start here".
+- Typing filters across *every* model: those already in the list first, then, under a rule,
+  "not in this list" — Enter uses one, **Ctrl+Enter adds it to the list**.
+- `all` is the old flat picker: favorites, recents, the sort menu.
+- One row per model with a "via" column; Right on a row with several providers opens them.
+- The profile is named in the header and can be switched there; "customize…" still opens Options ›
+  Models for providers and keys, and that page gets a "prioritize models… (Ctrl+Alt+M)" button
+  at the top.
+- A footer line spells the keys. Every change is live and undoable with Ctrl+Z inside the dialog.
+
+## 6. Order of work
 
 1. `/swap` and the defaults (Rule 3): bugs the owner is hitting now; no visible redesign.
 2. Names (Rule 1): worker `name`, `models::name`, one call at every site in §1.1, lower-case roles.

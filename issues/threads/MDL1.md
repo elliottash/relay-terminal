@@ -38,3 +38,7 @@ A colour would have been lost again at the next style change, so the list is our
 `CurrentTextComboBox::showPopup` opens it instead of `QComboBox`'s — so Alt+M, Alt+E, the Switchboard's box and the mouse all get it — reading the rows out of the combo's own model (text, data, tooltips, separators, disabled state). Nothing that *fills* a box changed, which keeps this clear of t:a5 and t:a6: `ModelRows.cpp`, `conciseModel`, `roleRowModel` and `refreshPickers` were not touched. A pick still emits `activated(index)`, and a chord still reaches `Pane::passHotkeysThrough`'s filter, so Alt+M a second time closes the list as it has since 2026-09-20.
 
 Tests: `ctest -R filterpopup`, 8 cases, one of which renders the popup and measures the pixels so an invisible highlight cannot come back. `manual: docs/qa_evidence/2026-09-21-model-box-filter` (eleven shots, the before shots, the probe and its output).
+
+<!-- relay:entry 20260921T124111Z-g1 author=claude-code kind=decision -->
+### Claude Code · 2026-09-21 12:41
+Two decisions from the owner, recorded in the card: the box is mode rows then the mode's list ("great, left/right changes mode. add /high."), and the Ctrl+Alt+M dialog becomes "the main way to select / prioritize models". Design: docs/MODEL-PICKING-DESIGN.md section 5. Tasks t:a6 rewritten, t:a7 added.

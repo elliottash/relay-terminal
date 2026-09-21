@@ -30,11 +30,31 @@ something else i want to fix in this workstream, is that when you use alt+m or a
 
 in case you didnt notice yet, i also dont like how it says "switchboard" in the picker in the switchboard agent: [a screenshot of the box reading "kimi-k3 (switchboard)"]
 
+for the box, what do you think about this, first it just says high, main, flash, with the first model in parens, eg high (gpt-6-astra). then it lists the models for the mode you are in, in alphabetical order, with your selected model highlighted.
+
+so it shows the models from main if a pane is on /main, or if its on /high, it shows the high models.
+
+is this intuitive?
+
+great, left/right changes mode. add /high.
+
+and i realized that the model priority chooser is crtical, and currently its too hard to find -- model options, then scroll down. i think we should beef up the ctrl alt m dialogue to be the main way to select / prioritize models
+
 ## Decisions
 - 2026-09-21, on the three questions below: "i agree with your rec on all 3". So: a guest harness
   at rank 1 of main is what a new pane starts on (the process starts on the first turn); Claude
   Code's `opus` is named `claude-opus-5`; Relay Free's models are `relay-main`, `relay-flash`,
   `relay-lite`.
+
+- 2026-09-21, the box (Alt+M): mode rows first, written tier-first with the model in parentheses,
+  "high (gpt-6-astra)", then the models of the mode the pane is in, the pane's own highlighted.
+  Claude proposed list order rather than alphabetical, the parentheses naming what *this pane*
+  would run in that mode, Left/Right changing the mode in place, and a collapsed box that is the
+  model alone on main and "<model> · <mode>" otherwise; the owner: "great, left/right changes mode.
+  add /high."
+- 2026-09-21, the dialog (Ctrl+Alt+M): "the model priority chooser is crtical, and currently its
+  too hard to find -- model options, then scroll down. i think we should beef up the ctrl alt m
+  dialogue to be the main way to select / prioritize models".
 
 ## Discussion points
 Three calls that are the owner's; work proceeds on the recommendation for each until he says
@@ -61,4 +81,5 @@ never returns to the model the owner was using, and its own sentence is overwrit
 - [ ] defaults: a new pane reads the main list; a pick is per pane; restore the model; re-send tiers <!-- t:a3 -->
 - [ ] `/swap`: a toggle with memory, a sentence that survives, a test <!-- t:a4 -->
 - [ ] names at every display site, lower-case roles; no protocol role name ("switchboard") in a box <!-- t:a5 -->
-- [ ] one row per model in the box and the picker, "via", `/model name@provider` <!-- t:a6 -->
+- [ ] the box: mode rows "high (model)", Left/Right changes mode in place, that mode's list below, one row per model, `/high` <!-- t:a6 -->
+- [ ] the Ctrl+Alt+M dialog is where models are picked AND prioritized: tier tabs, reorder, add, remove, level, profile, "via" <!-- t:a7 -->
