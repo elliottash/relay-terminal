@@ -2407,7 +2407,12 @@ class Agent:
             guest = self._start_plan_guest(turn_id, target)
             if guest is None:
                 target = self.roles.planning_target(guests=False)
-        if target is None or is_guest_preset(target.preset_id) and guest is None \
+        if target is None:
+            # Nothing to swap on an endpoint pane means the default changed nothing (no effort
+            # knob, or the effort is already max). On a guest pane the knob is the harness's own
+            # level, which the resolver cannot see — the boost says it there instead (card #HR5E).
+            return self._begin_guest_plan_boost(turn_id)
+        if is_guest_preset(target.preset_id) and guest is None \
                 or (target.config.model == self.config.model
                     and target.config.base_url == self.config.base_url
                     and target.config.extra == self.config.extra):
@@ -2441,6 +2446,72 @@ class Agent:
             event["guest_session"] = guest.session_id
         self.emit(event)
         self.emit({"event": "status", "text": f"Plan turn · {to_name}"})
+        return swap
+
+    def _begin_guest_plan_boost(self, turn_id: str) -> dict | None:
+        """An unpinned plan turn on a guest pane: the same harness at its top level, for this turn
+        (card #HR5E, owner 2026-09-21: "it should run on codex astra in xhigh").
+
+        The planning role's default — the pane's own model pushed to max reasoning — has no
+        request-body knob on a guest (`roles._high_default` finds no effort style on the harness
+        scheme and resolves as main), so it is said here, in the guest's own words: the harness's
+        `set_effort` stages the level for the next `turn/start`, and `_end_plan_turn` puts the
+        pane's own level back. None when there is nothing to boost: not a guest pane, a pinned
+        planning role (a pin that resolves to main is a choice, not a boost), no levels known,
+        or the harness already at its top.
+        """
+        if not self._on_a_guest_harness():
+            return None
+        if self.roles is not None and self.roles.stored().get("planning"):
+            return None
+        from . import guest_harness_provider as ghp
+        provider = ghp.agent_provider(self)
+        if provider is None:
+            return None
+        # The level list of the model the harness is running, when it will say — astra tops out
+        # at xhigh, not at whatever the catalogue's first row names — else the guest's own list.
+        try:
+            rows = provider.harness.models() or []
+        except Exception:
+            rows = []
+        current = next((row for row in rows
+                        if row.get("efforts") and row.get("id") == provider.config.model), None)
+        efforts = list(current["efforts"]) if current is not None else None
+        if efforts is None:
+            efforts = ghp.guest_efforts(provider.guest_id, rows or None)
+        if not efforts:
+            return None
+        # What the turn end puts back: the pane's own level, or the model's default when the pane
+        # never picked one ("" is the guest's own default, which `set_effort` cannot restage).
+        restore = current.get("default_effort") or current.get("default") if current is not None else None
+        top = efforts[-1]
+        own = provider.effort
+        if own == top:
+            return None
+        try:
+            provider.effort = provider.harness.set_effort(top) or top
+        except Exception as exc:    # HarnessError: the pane keeps its own level for the turn
+            self.emit({"event": "status",
+                       "text": f"Plan mode: the harness would not take {top} ({exc}); this turn runs at "
+                               f"{own or 'the default'}"})
+            return None
+        # The same shape `_route_swap` builds, with nothing adopted: `_route_back` then puts the
+        # same provider back and touches no config, and the level is restored separately below.
+        swap = {"turn_id": turn_id, "provider": self.provider, "model": self.config.model,
+                "back_to": self.config.model, "config": self.config, "preset": self.preset,
+                "window": self.context.window, "effort": self.effort, "to_preset": self.preset,
+                "adopted": False, "guest_boost_provider": provider,
+                "guest_boost_restore": own or restore, "to_name": self.config.model}
+        self._planning = swap
+        logs.event(_log, "plan_route", session=self.session_id, turn=turn_id,
+                   from_model=self.config.model, to_model=self.config.model,
+                   host=f"{provider.guest_id} harness", effort=top, source="default", guest="")
+        text = f"Plan mode · this turn runs on {self.config.model} at {top}."
+        self.emit({"event": "plan_route", "turn_id": turn_id, "model": self.config.model,
+                   "from_model": self.config.model, "preset": f"guest:{provider.guest_id}",
+                   "from_preset": f"guest:{provider.guest_id}", "base_url": self.config.base_url,
+                   "source": "default", "effort": top, "scope": "turn", "text": text})
+        self.emit({"event": "status", "text": f"Plan turn · {self.config.model} at {top}"})
         return swap
 
     def _start_plan_guest(self, turn_id: str, target):
@@ -2499,6 +2570,17 @@ class Agent:
         swap, self._planning = self._planning, None
         if not swap:
             return
+        # A guest boost (`_begin_guest_plan_boost`) staged the top level on the pane's own
+        # harness; codex's `set_effort` holds for every later `turn/start`, so the pane's own
+        # level goes back before the turn's terminal event, however the turn ended.
+        boost = swap.pop("guest_boost_provider", None)
+        if boost is not None:
+            restore = swap.pop("guest_boost_restore", None)
+            if restore:
+                try:
+                    boost.effort = boost.harness.set_effort(restore) or restore
+                except Exception:   # the harness may already be down; its next start re-stages
+                    boost.effort = restore
         # A guest matches no Preset object; its id is the swap's (`_begin_plan_turn`).
         was_preset = self._preset_id(swap["to_preset"]) or swap.get("guest_preset")
         self._route_back(swap)

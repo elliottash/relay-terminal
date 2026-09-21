@@ -1048,7 +1048,7 @@ presets … then advanced options, which would then reveal the specific actions"
 
 | Tier | Used for | Where it comes from |
 |---|---|---|
-| `high` | plan mode (`planning`), panes on the High agent (`/high`, the `high` role, v4.6), and any role pinned to it | the first usable entry of `tiers.high` — a `guest:` entry starts that guest's harness for the plan turn (v4.4, below) — else the pane's own model at `max` reasoning |
+| `high` | panes on the High agent (`/high`, the `high` role, v4.6), and any role pinned to it — a `planning` pin included (v4.4, below) | the first usable entry of `tiers.high` — a `guest:` entry starts that guest's harness for the plan turn (v4.4, below) — else the pane's own model at `max` reasoning |
 | `main` | agent turns, subagents, Switchboard threads | the pane's own model (`configure` / `set_model`); `tiers.main` is only the order a failing turn walks |
 | `flash` | terminal use, fast panes, summaries, suggestions | the first usable entry of `tiers.flash`, else `TIER_DEFAULTS[<main preset>]["flash"]` |
 | `lite` | chores and the request audit; a pane whose model is on this list also sends the **short prompt profile** by default (12.12) | the first usable entry of `tiers.lite`, else `TIER_DEFAULTS[<main preset>]["lite"]` |
@@ -1125,9 +1125,11 @@ a harness mid-way.
 **The High tier** (v3.9, 2026-09-20; owner: "there needs to be a 'high' default on top of main, used by
 the planner by default") sits above Main and is listed first in `tier_defaults.tiers`, so the roles modal
 draws it above the Main row. With no `tiers.high` override it is the pane's own model pushed to `max`
-reasoning — the same endpoint, key and preset, only the effort raised — which is what the `planning`
-role's default was in 13.11 and now comes from the tier (`ROLE_TIERS["planning"] == "high"`, resolved once
-in `roles.RoleResolver._high_default`); like Local it has no `TIER_DEFAULTS` row, so `providers` stays
+reasoning — the same endpoint, key and preset, only the effort raised (`roles.RoleResolver._high_default`).
+The `planning` role followed the tier from v3.9 until card #HR5E (2026-09-21): a default-filled High list
+rerouted every plan turn to another provider, so planning's default is again 13.11's own — the pane's own
+model at `max`, decided in `_default` with `ROLE_TIERS["planning"] is None` — and the tier serves `/high`
+and the roles pinned to it. Like Local it has no `TIER_DEFAULTS` row, so `providers` stays
 three wide. A `tiers.high` list resolves exactly as Flash and Lite do (an entry with no model means that
 provider's Main model, since none has a bigger one to name; an entry with no `effort` runs at the model's
 own default — High does not imply `max`, the entry says it), and one with nothing usable steps straight
@@ -1466,18 +1468,22 @@ change nothing (#G5MK).
 the old default, which was also the old top of the range — migrates to 0 once at startup
 (`migrateOutputTokenCeiling`); any other stored number was chosen on purpose and is left alone.
 
-### 13.11 The `planning` role: what serves a plan-mode turn (v3.4, 2026-09-19)
+### 13.11 The `planning` role: what serves a plan-mode turn (v3.4, 2026-09-19; default restored 2026-09-21, card #HR5E)
 
 Owner, 2026-09-19: "allow a separate planning agent with higher reasoning. change to max reasoning by
 default." A plan-mode turn (section 6) runs on the `planning` role, decided once per turn before the
 first model request, the way an image turn decides its model (17.3). The role's **default is the pane's
-own model pushed to `max` reasoning**: since v3.9 (2026-09-20) that default is the High tier's (13.7) —
-`ROLE_TIERS["planning"] == "high"`, and `roles.RoleResolver._high_default` applies
-`apply_effort(main.extra, style, "max")` to the pane's own config — so a plan is investigated harder
-without changing the pane's model, preset or key, and `tiers.high` moves plan mode to another model
-for every pane. `planning` is an ordinary settable role —
+own model pushed to `max` reasoning**: `roles.RoleResolver._high_default` applies
+`apply_effort(main.extra, style, "max")` to the pane's own config, so a plan is investigated harder
+without changing the pane's model, preset or key. From v3.9 (2026-09-20) that default came from the High
+tier (`ROLE_TIERS["planning"] == "high"`), which let `tiers.high` move plan mode to another model for
+every pane — and once the tier lists were filled by defaults, every plan turn swapped to another
+provider's model and back. Card #HR5E (owner, 2026-09-21: "it should run on codex astra in xhigh") took
+planning back off the tier (`ROLE_TIERS["planning"] is None`): `tiers.high` no longer moves plan mode.
+`planning` is an ordinary settable role —
 `roles.planning` takes the same fields as any other (13.2) — and a model the user picked by hand always
-wins over the default, swapping for the turn whatever the pane's effort is.
+wins over the default, swapping for the turn whatever the pane's effort is. A pin onto a tier
+(`{"tier": "high"}`) restores the v3.9 behaviour explicitly, guest entries included.
 
 When the effort knob cannot move — the provider has no effort parameter at all (Anthropic, MiniMax;
 effort style `none`, section 3) or the pane's own effort is already `max` — the role resolves back to
@@ -1505,9 +1511,9 @@ prints: it names the serving model when it is not the pane's own, and otherwise 
 runs at `max` reasoning. Both ends of both notes name **model plus preset label**, and so do the two
 `status` lines, which is the one shape all three of Relay's turn swaps share (15.2.2).
 
-**A plan turn on a guest** (v4.4, 2026-09-20; 13.7). When the High list's first usable entry is a
-`guest:` entry and the pane's own agent is an ordinary provider, `Agent._begin_plan_turn` starts that
-guest's harness for the turn (`guest_harness_provider.start_provider`, the same start a guest pane
+**A plan turn on a guest** (v4.4, 2026-09-20; 13.7). When the planning role is pinned to a `guest:`
+entry — or pinned onto a tier whose first usable entry is one — and the pane's own agent is an ordinary
+provider, `Agent._begin_plan_turn` starts that guest's harness for the turn (`guest_harness_provider.start_provider`, the same start a guest pane
 gets): a **fresh session** in the pane's workspace, on the entry's model (none named: the guest's own
 default) and at the entry's `effort` in the guest's own words (`xhigh` to codex, `max` to claude), with
 the **read-only posture** `agent.PLAN_GUEST_PERMISSIONS` (`"deny"`: codex's read-only sandbox, claude's
@@ -1526,12 +1532,16 @@ other: `plan_route` carries `preset: "guest:<id>"`, `base_url: "harness://<id>"`
 `guest_session`, both notes name the model plus the guest ("gpt-5.5-codex (Codex)"), and
 `plan_route_ended` — the harness ended with it — puts the pane back. A guest that **will not start**
 (not installed, an effort it does not take) is said on a `status` ("Codex could not start for this
-plan turn (…); planning without it.") and the turn plans as if the High list had no guest entries
-(`RoleResolver.planning_target(guests=False)`): the entry below, or the pane's own model with no route.
+plan turn (…); planning without it.") and the turn plans as if the pin had no guest entries
+(`RoleResolver.planning_target(guests=False)`): the entry below a tier pin, or the pane's own model at
+`max`.
 A guest whose turn **fails** is a planning model that is not answering (15.2.3): `route_dropped`, the
 harness ended, the pane's own model finishes the turn. A pane whose own agent *is* a guest (an injected
-provider) is unchanged: its harness serves the plan turn as 29.3 always had it, and no second harness
-is started. Tests: `tests/test_plan_turns.py` (`GuestPlanTurnTests`, on the scripted fake harness) and
+provider) plans on its own harness — no second harness is started — pushed to the harness's top level
+for the turn (#HR5E: the default's "own model at max" has no request-body knob on a guest, so
+`Agent._begin_guest_plan_boost` stages the top level of the running model's own list — `xhigh` for
+codex's astra — through the harness's `set_effort`, says it as a same-model `plan_route`, and puts the
+pane's own level back at the turn's end). Tests: `tests/test_plan_turns.py` (`GuestPlanTurnTests`, on the scripted fake harness) and
 `tests/test_tier_lists.py`.
 
 **The swap is a model change, not a swapped socket**, on the same terms as a failover's (15.2.2): the

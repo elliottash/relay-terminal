@@ -128,6 +128,22 @@ class PlanTurnTests(unittest.TestCase):
         self.assertEqual(agent.config.extra, {"reasoning_effort": "high"})
         self.assertEqual(self.events[-1]["event"], "done")
 
+    def test_a_filled_high_list_does_not_pull_a_plan_turn_off_the_panes_model(self):
+        # The #HR5E regression: while planning followed the High tier, a filled High list rerouted
+        # every plan turn — a Codex pane on gpt-6-astra planned on glm-5.3 and back, twice per
+        # turn. Planning's default is the pane's own model at max; the High list serves /high.
+        agent = self.plan_agent(KIMI, "kimi",
+                                tiers={"high": [{"preset": "glm", "model": "glm-5.3", "effort": "high"}]})
+        agent.ask("plan this change")
+        route = self.event("plan_route")
+        self.assertIsNotNone(route)
+        self.assertEqual((route["model"], route["from_model"], route["preset"], route["effort"]),
+                         ("kimi-k3", "kimi-k3", "kimi", "max"))
+        self.assertEqual(self.served_configs()[-1],
+                         ("kimi-k3", {"reasoning_effort": "max"}, KIMI.base_url))
+        self.assertIsNotNone(self.event("plan_route_ended"))
+        self.assertEqual(self.events[-1]["event"], "done")
+
     def test_the_turn_after_a_plan_turn_is_back_on_the_panes_own_effort(self):
         agent = self.plan_agent()
         agent.ask("plan this change")
@@ -327,11 +343,11 @@ PLAN_TEXT = "# Split the widget\n\n## Goal\n\nTwo files.\n\n1. Move it.\n2. Test
 
 
 class GuestPlanTurnTests(PlanTurnTests):
-    """A `guest:` entry of the High list serves a plan turn through its harness (protocol 13.7;
-    owner, 2026-09-20: "claude and codex weren't showing up under 'high' models"). Everything runs
-    on the scripted FakeHarness: no test starts a real claude or codex."""
+    """A `guest:` pin of the planning role serves a plan turn through its harness (protocol 13.7;
+    the pin is the only way off the pane's own model since card #HR5E). Everything runs on the
+    scripted FakeHarness: no test starts a real claude or codex."""
 
-    HIGH = {"high": [{"preset": "guest:codex", "model": "", "effort": "xhigh"}]}
+    PIN = {"planning": {"preset": "guest:codex", "effort": "xhigh"}}
 
     def harness(self, script=None, **kwargs):
         kwargs.setdefault("guest", "codex")
@@ -345,8 +361,9 @@ class GuestPlanTurnTests(PlanTurnTests):
         self.addCleanup(patch.stop)
         return made
 
-    def glm_planner(self, tiers=None):
-        agent = self.plan_agent(GLM_CONFIG, "glm-coding", tiers=tiers or self.HIGH, guests=("codex",))
+    def glm_planner(self, roles=None, tiers=None):
+        agent = self.plan_agent(GLM_CONFIG, "glm-coding", roles=roles or self.PIN, tiers=tiers,
+                                guests=("codex",))
         agent.messages.append({"role": "user", "content": "earlier: look at widget.py", "relay_kind": "prompt"})
         agent.messages.append({"role": "assistant", "content": "",
                                "tool_calls": [{"id": "c0", "type": "function",
@@ -420,7 +437,7 @@ class GuestPlanTurnTests(PlanTurnTests):
 
     def test_a_build_turn_never_starts_the_guest(self):
         harness = self.harness()
-        agent = self.build(GLM_CONFIG, "glm-coding", tiers=self.HIGH, guests=("codex",))
+        agent = self.build(GLM_CONFIG, "glm-coding", roles=self.PIN, guests=("codex",))
         agent.ask("do it")
         self.assertEqual(self.events[-1]["event"], "done")
         self.assertEqual(harness.starts, [])
@@ -428,9 +445,11 @@ class GuestPlanTurnTests(PlanTurnTests):
 
     def test_a_guest_that_will_not_start_is_said_and_the_turn_plans_without_it(self):
         harness = self.harness(start_error=HarnessNotAvailable("codex is not installed."))
+        # Planning pinned onto the High tier itself (the pre-#HR5E default, kept as an explicit
+        # pin): the guest entry plans the turn, and the entry below it is the fallback.
         tiers = {"high": [{"preset": "guest:codex", "effort": "xhigh"},
                           {"preset": "kimi", "model": "kimi-k3", "effort": "max"}]}
-        agent = self.glm_planner(tiers)
+        agent = self.glm_planner(roles={"planning": {"tier": "high"}}, tiers=tiers)
         agent.ask("plan splitting the widget")
         self.assertEqual(self.events[-1]["event"], "done")
         self.assertTrue(harness.closed)
@@ -446,12 +465,14 @@ class GuestPlanTurnTests(PlanTurnTests):
         self.assertIsNotNone(self.event("plan_route_ended"))
         self.assertEqual(agent.config.model, "glm-5.3")
         self.assertIsNone(self.event("plan_written"))
-        # With nothing below it: no route at all, the pane's own model plans.
+        # Pinned to the guest alone: the pane's own model plans, pushed to max (#HR5E's default).
         self.harness(start_error=HarnessNotAvailable("codex is not installed."))
         agent = self.glm_planner()
         agent.ask("plan splitting the widget")
         self.assertEqual(self.events[-1]["event"], "done")
-        self.assertIsNone(self.event("plan_route"))
+        route = self.event("plan_route")
+        self.assertEqual((route["model"], route["from_model"], route["effort"]),
+                         ("glm-5.3", "glm-5.3", "max"))
         self.assertEqual([c[0] for c in self.served_configs()], ["kimi-k3", "glm-5.3"])
 
     def test_a_guest_whose_turn_fails_hands_the_plan_back_to_the_pane(self):
@@ -479,9 +500,10 @@ class GuestPlanTurnTests(PlanTurnTests):
         self.assertIsNone(self.event("plan_written"))
         self.assertIsNone(agent.plan_path)
 
-    def test_a_pane_that_is_itself_a_guest_keeps_todays_behaviour(self):
-        # An injected provider (a guest pane) is never replaced: the pane's own harness serves the
-        # plan turn, no second harness is started, and no route is announced.
+    def test_a_pane_that_is_itself_a_guest_plans_at_its_harnesss_top_level(self):
+        # Card #HR5E (owner: "it should run on codex astra in xhigh"): an unpinned plan turn on a
+        # guest pane is the pane's own harness pushed to its top level for the turn — no second
+        # harness, no provider swap, the level put back afterwards.
         pane = FakeHarness([{"events": [ev("delta", text="the plan")], "result": ("the plan", "end", {})}],
                            guest="claude", session_id="cl-1", model="claude-fake")
         pane.start(cwd=self.temp.name)
@@ -490,7 +512,7 @@ class GuestPlanTurnTests(PlanTurnTests):
         other = self.harness()
         self.events = []
         agent = Agent(provider.config, self.temp.name, self.events.append, preset_id="guest:claude",
-                      provider=provider, roles=resolver(provider.config, "guest:claude", tiers=self.HIGH,
+                      provider=provider, roles=resolver(provider.config, "guest:claude",
                                                         guests=("codex", "claude")),
                       track_requests=False, todo_tool=False, completion_check=False)
         ghp.attach(agent, provider)
@@ -499,7 +521,16 @@ class GuestPlanTurnTests(PlanTurnTests):
         self.assertEqual(self.events[-1]["event"], "done")
         self.assertEqual(other.starts, [])
         self.assertEqual(len(pane.sent), 1)
-        self.assertNotIn("plan_route", self.kinds())
+        route = self.event("plan_route")
+        self.assertEqual((route["model"], route["from_model"], route["preset"], route["effort"],
+                          route["source"], route["scope"]),
+                         ("claude-fake", "claude-fake", "guest:claude", "max", "default", "turn"))
+        self.assertEqual(route["text"], "Plan mode · this turn runs on claude-fake at max.")
+        self.assertIsNotNone(self.event("plan_route_ended"))
+        # The harness took the turn at its top level, and the pane's own level went back at the
+        # turn's end (the pane never picked one, so the model's own default was restaged).
+        self.assertEqual(pane.calls.count(("set_effort", "max")), 1)
+        self.assertEqual(pane.calls.count(("set_effort", "low")), 1)
         self.assertIsNone(self.event("plan_written"))       # the pane's own guest: 29.3 as before
         self.assertIs(agent.provider, provider)
 

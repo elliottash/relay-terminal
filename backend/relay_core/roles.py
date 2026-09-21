@@ -62,9 +62,11 @@ def _preset(preset_id):
 # modal's Advanced list can name one action per row; their defaults resolve exactly as before.
 # "local" (2026-09-18) is the pane role /local switches to, the way "flash" is the one /flash
 # switches to: a role a pane runs, not a job some side call does.
-# "planning" (2026-09-19) serves plan-mode turns. Since 2026-09-20 it follows the High tier, whose
-# default is the main model pushed to max reasoning, so a plan is investigated harder without
-# switching the pane's own model.
+# "planning" (2026-09-19) serves plan-mode turns. Its default is the pane's own model pushed to
+# max reasoning, so a plan is investigated harder without switching the pane's own model. From
+# 2026-09-20 it followed the High tier instead, but once the tier lists are filled by defaults
+# that rerouted every plan turn to another provider (card #HR5E), so the owner put it back on
+# 2026-09-21: only a hand-pinned `roles.planning` entry routes a plan turn off the pane's model.
 # "high" (2026-09-21, card #MDL1) is the pane role /high switches to, exactly as "flash" is the
 # one /flash switches to and "local" the one /local does: the box's modes are high, main, flash and
 # local, so each of the three that is not the pane's own model needs a role a pane can be put on.
@@ -106,7 +108,7 @@ def canonical_role(role):
 # after the job rather than the protocol id (owner, 2026-09-17). The GUI mirrors this table.
 ACTIONS: tuple[tuple[str, str, str], ...] = (
     ("main", "Agent turns", "the main conversation in this pane"),
-    ("planning", "Plan mode", "investigating and writing plans; the High tier by default"),
+    ("planning", "Plan mode", "investigating and writing plans; the pane's own model at max reasoning by default"),
     ("high", "Panes on the High tier (/high)", "the hardest turns; empty, the pane's own model at its top level"),
     ("subagent", "Subagents", "agents the main agent starts"),
     ("terminal_use", "Driving programs in the terminal", "answering prompts, fixing failed commands"),
@@ -130,9 +132,10 @@ MAX_URL = 400
 # --- built-in defaults (issues/features/2026-09-17-model-roles-and-fast-agent.md) -------------------
 # Roles are grouped into tiers (presets.TIERS, protocol 13.7): a role either follows the pane's own
 # model ("main"), the High tier above it (main at max reasoning unless `tiers.high` picks a model;
-# owner, 2026-09-20), or takes the provider's Flash or Lite model.
+# owner, 2026-09-20), or takes the provider's Flash or Lite model. "planning" is not tiered (None):
+# its default is the pane's own model at max reasoning, decided in `_default` (card #HR5E).
 ROLE_TIERS: dict[str, str | None] = {
-    "planning": "high", "high": "high",
+    "planning": None, "high": "high",
     "main": "main", "subagent": "main", "switchboard": "main",
     "terminal_use": "flash", "flash": "flash", "summaries": "flash", "suggestions": "flash",
     "chores": "lite", "audit": "lite", "loop_check": "lite", "local": "local",
@@ -541,6 +544,21 @@ class RoleResolver:
     def _configured(self, role: str, entry: dict) -> Resolved:
         if entry.get("tier"):
             return self._tier(role, entry["tier"], "configured", entry.get("effort"))
+        preset_text = entry.get("preset")
+        if isinstance(preset_text, str) and is_guest_preset(preset_text.strip()):
+            # A role pinned to a guest harness (protocol 13.7): a plan turn starts that harness
+            # for the turn; any other role takes it where a harness may serve (GUEST_TIERS).
+            tier = ROLE_TIERS.get(role) or "main"
+            if tier not in GUEST_TIERS or not self.guest_check(guest_id_of(preset_text.strip())):
+                return self._main(role, "fallback",
+                                  f"{LABELS[role]}: {preset_text.strip()} cannot run here; "
+                                  "using the main agent.")
+            clean: dict = {"preset": preset_text.strip()}
+            if entry.get("model") is not None:
+                clean["model"] = _text(entry["model"], "model", MAX_MODEL)
+            guest_preset, base_url, model, _extra, guest_effort = self._guest_target(clean)
+            return self._guest(role, guest_preset, base_url, model,
+                               entry.get("effort") or guest_effort, "configured", tier)
         preset = _preset(entry.get("preset"))
         base_url = entry.get("base_url") or (preset.base_url if preset else "")
         chosen = entry.get("model") or ""
@@ -641,6 +659,11 @@ class RoleResolver:
         no effort parameter, or the pane's effort is already there — there is nothing to swap, so
         the role is the main agent, still marked as the High tier.
         """
+        if self.main_config.base_url.startswith(GUEST_BASE_SCHEME):
+            # A guest pane's own harness has no request-body effort knob: its level is the
+            # harness's own word, staged for one turn by `Agent._begin_guest_plan_boost` (#HR5E) —
+            # never a bogus `reasoning_effort` written into the harness's config.
+            return self._main(role, tier="high")
         effort = "max" if effort is None else effort
         style = effort_style(_preset(self.main_preset_id), self.main_config.extra,
                              self.main_config.base_url)
@@ -728,9 +751,13 @@ class RoleResolver:
     def _default(self, role: str) -> Resolved:
         tier = ROLE_TIERS.get(role)
         if tier is not None:
-            # Plan mode follows the High tier: the main model at max reasoning unless `tiers.high`
-            # names a model (owner, 2026-09-19 and 2026-09-20). That is decided in _tier, once.
             return self._main(role, tier="main") if tier == "main" else self._tier(role, tier, "default")
+        if role == "planning":
+            # Plan mode's default is the pane's own model pushed to max reasoning (owner,
+            # 2026-09-19; restored by card #HR5E, 2026-09-21) — never the High tier's list, whose
+            # default-filled entries rerouted every plan turn to another provider. Only a
+            # hand-pinned `roles.planning` entry routes a plan turn off the pane's own model.
+            return self._high_default(role, "default")
         if role == "vision":
             candidates = [VISION_DEFAULTS.get(self.main_preset_id or "")]
         elif role == "route_assist":
@@ -1014,24 +1041,28 @@ class RoleResolver:
     def planning_target(self, guests: bool = True) -> Resolved | None:
         """Where a plan-mode turn goes when the planning role is not the main agent (owner, 2026-09-19).
 
-        None means plan turns stay on the pane's own model: nothing is configured, and the High
-        tier's default (the main model at max reasoning) either cannot move the provider's effort
-        knob or the pane's effort is already max.
-
-        A `guest:` entry of the High list resolves here like any other (protocol 13.7): the agent
-        starts that guest's harness for the turn. ``guests=False`` is the agent's second ask when
-        the harness would not start: the same resolution with the guest entries left out, so the
-        turn goes where it would have gone without them.
+        The default is the pane's own model pushed to max reasoning (card #HR5E, owner 2026-09-21):
+        None means there is nothing to swap — the provider has no effort knob, or the pane's
+        effort is already max. The High tier's list is never consulted: a default-filled list
+        rerouted every plan turn to another provider's model. Only a hand-pinned `roles.planning`
+        entry routes the turn elsewhere, and a `guest:` pin starts that guest's harness for the
+        turn (protocol 13.7). ``guests=False`` is the agent's second ask when the harness would
+        not start: the same pin with the guest entries left out.
         """
-        if guests:
-            resolved = self.resolve("planning")
-        else:
-            entry = self.roles.get("planning")
-            if entry and not entry.get("tier"):
-                resolved = self.resolve("planning")     # pinned to an endpoint: never a guest
+        entry = self.roles.get("planning")
+        if entry and not guests:
+            if entry.get("tier"):
+                # A pin onto a tier, re-resolved without its guest entries after a harness would
+                # not start.
+                resolved = self._tier("planning", entry["tier"], "configured", entry.get("effort"),
+                                      guests=False)
+            elif is_guest_preset(str(entry.get("preset") or "")):
+                # The pinned harness itself would not start: the pane's own model at max instead.
+                resolved = self._high_default("planning", "default")
             else:
-                resolved = self._tier("planning", "high", "configured" if entry else "default",
-                                      (entry or {}).get("effort"), guests=False)
+                resolved = self.resolve("planning")     # a pinned endpoint is never a guest to skip
+        else:
+            resolved = self.resolve("planning")
         return None if resolved.is_main else resolved
 
     def vision_target(self) -> Resolved | None:
