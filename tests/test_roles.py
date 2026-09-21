@@ -218,11 +218,20 @@ class DefaultTests(unittest.TestCase):
     def test_resolve_entry_falls_back_rather_than_failing(self):
         made = resolver("kimi", keys=("kimi",))
         for entry in ({"preset": "openai", "model": "gpt-6"},          # no stored key
-                      {"preset": "nope-there-is-no-such-provider"},    # not a provider at all
-                      {"preset": "guest:claude"}):                     # no harness in this resolver
+                      {"preset": "nope-there-is-no-such-provider"}):   # not a provider at all
             resolved = made.resolve_entry("flash", entry)
             self.assertTrue(resolved.is_main, entry)
             self.assertTrue(resolved.warning)
+        # A guest: the /flash *pane* may run on one since 2026-09-21 (GUEST_TIERS), so what makes
+        # this fall back is the harness not running here, not the tier. A background job on the
+        # same tier refuses it either way — it is a side call, and a harness cannot take one.
+        made.guest_check = lambda guest_id: False
+        self.assertTrue(made.resolve_entry("flash", {"preset": "guest:claude"}).is_main)
+        made.guest_check = lambda guest_id: True
+        self.assertEqual(made.resolve_entry("flash", {"preset": "guest:claude"}).preset_id,
+                         "guest:claude")
+        self.assertTrue(made.resolve_entry("terminal_use", {"preset": "guest:claude"}).is_main)
+        self.assertTrue(made.resolve_entry("chores", {"preset": "guest:claude"}).warning)
         for bad in (None, {}, {"preset": ""}, {"preset": "kimi", "effort": "turbo"}):
             with self.assertRaises(ValueError):
                 made.resolve_entry("flash", bad)

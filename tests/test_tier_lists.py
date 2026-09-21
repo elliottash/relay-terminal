@@ -130,21 +130,60 @@ class ResolutionTests(unittest.TestCase):
                       {'preset': 'kimi', 'model': 'kimi-k3', 'effort': 'max'}]
                for tier in ('high', 'flash', 'lite')}
 
-    def test_a_guest_is_skipped_in_flash_and_lite(self):
-        """A side call or a per-turn swap cannot be handed to a harness: in Flash and Lite a guest
-        is passed over silently, whether or not it runs here, and a list of nothing but guests
-        has nothing to run on (Main)."""
-        for guests in ((), ('claude',)):
-            made = resolver({'kimi': 'k'}, self.GUESTED, guests=guests)
-            for role in ('flash', 'chores'):
-                with self.subTest(role=role, guests=guests):
-                    self.assertEqual(made.resolve(role).preset_id, 'kimi')
-                    self.assertIsNone(made.resolve(role).note)   # a guest is not a missing key
-            summary = made.tier_summary()
-            self.assertEqual([e['usable'] for e in summary['flash']['list']], [False, True])
-            self.assertEqual([e['usable'] for e in summary['lite']['list']], [False, True])
-        alone = resolver({}, {'flash': [{'preset': 'guest:claude', 'model': 'fable'}]}, guests=('claude',))
+    def test_a_guest_serves_a_flash_pane_but_never_a_background_job(self):
+        """Owner, 2026-09-21: "the worker should allow the harness for flash, and defaults should
+        be the same across plans / apis / harnesses".
+
+        Flash is the one tier that is both a pane and a set of chores. The `flash` role is the
+        pane /flash switches to, and a harness can own that conversation from its first turn.
+        Every other role on the tier — terminal use, summaries, suggestions — and every role on
+        Lite is a side call into a conversation running somewhere else, which a whole agent of
+        its own cannot be handed: those skip the guest entry and take the next one.
+        """
+        made = resolver({'kimi': 'k'}, self.GUESTED, guests=('claude',))
+        flash = made.resolve('flash')
+        self.assertEqual((flash.preset_id, flash.config.base_url, flash.effort),
+                         ('guest:claude', 'harness://claude', 'max'))
+        for role in ('terminal_use', 'summaries', 'suggestions', 'chores', 'audit', 'loop_check'):
+            with self.subTest(role=role):
+                self.assertEqual(made.resolve(role).preset_id, 'kimi')
+                self.assertIsNone(made.resolve(role).note)   # a guest is not a missing key
+        # A guest that cannot run here is passed over by the pane role too, as it always was.
+        away = resolver({'kimi': 'k'}, self.GUESTED, guests=())
+        for role in ('flash', 'chores'):
+            with self.subTest(role=role, guests=()):
+                self.assertEqual(away.resolve(role).preset_id, 'kimi')
+        self.assertEqual([e['usable'] for e in away.tier_summary()['flash']['list']], [False, True])
+        self.assertEqual([e['usable'] for e in made.tier_summary()['flash']['list']], [True, True])
+        # Lite is never a guest's at all, however well the harness runs.
+        self.assertEqual([e['usable'] for e in made.tier_summary()['lite']['list']], [False, True])
+        alone = resolver({}, {'flash': [{'preset': 'guest:claude', 'model': 'fable'}]}, guests=())
         self.assertTrue(alone.resolve('flash').is_main)
+
+    def test_a_harness_pane_runs_its_background_jobs_on_relay_free(self):
+        """Owner, 2026-09-21: "so if somebody just has a harness, the flash chores run on relay
+        flash?" — "i agree".
+
+        A pane whose own model is a harness cannot serve a side call from it, so "using main" is
+        no answer: with nothing usable in the Flash or Lite list those jobs land on Relay Free's
+        role for the tier. The pane's own /flash turn never does — it *is* the harness.
+        """
+        guest_main = ProviderConfig('harness://claude', 'fable', '', {}, 32_768)
+        made = RoleResolver(guest_main, 'guest:claude', key_lookup=lambda p: '',
+                            tiers={'flash': [{'preset': 'guest:claude', 'model': 'fable'}]},
+                            guest_check=lambda g: True)
+        with mock.patch('relay_core.hosted.available', return_value=True):
+            chores = made.resolve('chores')
+            self.assertEqual((chores.preset_id, chores.config.model), ('relay-free', 'relay-lite'))
+            self.assertIn('relay free', chores.note)
+            terminal = made.resolve('terminal_use')
+            self.assertEqual((terminal.preset_id, terminal.config.model), ('relay-free', 'relay-flash'))
+            # The pane's own /flash turn is the harness itself, not Relay Free.
+            self.assertEqual(made.resolve('flash').preset_id, 'guest:claude')
+        # Without Relay Free there is nothing to fall through to, and it is main as before.
+        with mock.patch('relay_core.hosted.available', return_value=False):
+            self.assertTrue(RoleResolver(guest_main, 'guest:claude', key_lookup=lambda p: '',
+                                         guest_check=lambda g: True).resolve('chores').is_main)
 
     def test_a_guest_whose_harness_runs_here_serves_the_high_tier(self):
         """Owner, 2026-09-20: "claude and codex weren't showing up under 'high' models" — and

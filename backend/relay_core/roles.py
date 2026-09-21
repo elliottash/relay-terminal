@@ -35,6 +35,8 @@ def _hostname(base_url: str) -> str:
 
 # The preset whose key the "same model on OpenRouter" failover spends (owner, 2026-09-20).
 OPENROUTER_PRESET_ID = "openrouter"
+# Relay's own hosted allowance, which a background job falls through to (`_relay_free_role`).
+HOSTED_PRESET_ID = "relay-free"
 
 
 def _hosted(preset_id) -> bool:
@@ -271,10 +273,36 @@ GUEST_BASE_SCHEME = "harness://"    # guest_harness_provider.BASE_SCHEME, likewi
 # (guest_harness_provider._guest_max_tokens): the guest decides its own reply length.
 GUEST_MAX_TOKENS = max(MIN_OUTPUT_TOKENS, 32_768)
 # The tiers a guest entry may serve (protocol 13.7): Main as a pane's own agent, High for a plan
-# turn, which starts the guest's harness for that one turn (`Agent._begin_plan_turn`). Flash, Lite
-# and Local are side calls and per-turn swaps of a running conversation, which a harness — a whole
-# agent of its own, with its own transcript — cannot be handed mid-way.
-GUEST_TIERS = ("main", "high")
+# turn, which starts the guest's harness for that one turn (`Agent._begin_plan_turn`), and — since
+# 2026-09-21, at the owner's ask ("the worker should allow the harness for flash, and defaults
+# should be the same across plans / apis / harnesses") — Flash, for a pane that is *on* the Flash
+# tier. Lite and Local are never a guest's: Lite is nothing but background jobs and Local is a
+# model server on this machine.
+#
+# Flash is the tier where the distinction matters, because it is both a pane and a set of chores.
+# A /flash pane is a conversation the harness can own from its first turn; terminal use, summaries
+# and suggestions are side calls *into* a conversation that is already running somewhere else, and
+# a harness — a whole agent of its own, with its own transcript — cannot be handed one mid-way.
+# BACKGROUND_ROLES is that line, and `_tier` skips a guest entry for every role on it.
+GUEST_TIERS = ("main", "high", "flash")
+
+
+# The roles on the Flash and Lite tiers that are **not** a pane's own turn: the jobs Relay does
+# around a conversation rather than in it (owner, 2026-09-21). Two rules are theirs alone:
+#
+# * a guest entry of their tier's list is skipped, and the next entry taken instead — a harness
+#   cannot serve a side call (GUEST_TIERS above);
+# * when nothing in their list can take them at all, they fall through to Relay Free's role for
+#   that tier rather than to the pane's own model. The owner asked for exactly this: "so if
+#   somebody just has a harness, the flash chores run on relay flash?" — "i agree", "and yes to
+#   the rule on the relay free fallbacks as well". A pane's own turn never does this: /flash on a
+#   provider with no key is the user's business to fix, and silently moving their conversation
+#   onto Relay's allowance is not the same kind of act as running a title through it.
+#
+# Derived from ROLE_TIERS so a role added to either tier is covered without a second list to keep:
+# everything on flash and lite except `flash` itself, which is the pane role /flash switches to.
+BACKGROUND_ROLES = tuple(role for role, tier in ROLE_TIERS.items()
+                         if tier in ("flash", "lite") and role != "flash")
 
 
 def is_guest_preset(preset_id) -> bool:
@@ -592,7 +620,8 @@ class RoleResolver:
             # A role pinned to a guest harness (protocol 13.7): a plan turn starts that harness
             # for the turn; any other role takes it where a harness may serve (GUEST_TIERS).
             tier = ROLE_TIERS.get(role) or "main"
-            if tier not in GUEST_TIERS or not self.guest_check(guest_id_of(preset_text.strip())):
+            if tier not in GUEST_TIERS or role in BACKGROUND_ROLES \
+                    or not self.guest_check(guest_id_of(preset_text.strip())):
                 return self._main(role, "fallback",
                                   f"{LABELS[role]}: {preset_text.strip()} cannot run here; "
                                   "using the main agent.")
@@ -748,8 +777,19 @@ class RoleResolver:
         max reasoning (_high_default); with one it is resolved like any other tier, and a list
         with nothing usable steps straight down to Main. ``guests=False`` resolves as if the High
         list had no guest entries: where a plan turn goes when the guest it resolved to could not
-        be started after all (`planning_target`)."""
+        be started after all (`planning_target`).
+
+        A **background role** (BACKGROUND_ROLES: terminal use, summaries, suggestions, chores,
+        audit, loop check) differs twice. Its tier's guest entries are skipped whatever
+        ``guests`` says — a side call cannot be handed a harness — so it takes the next entry of
+        the list instead. And when nothing in its list can take it *and* the pane's own model is a
+        harness, which cannot take it either, it lands on Relay Free's role for its own tier
+        (`relay-flash`, `relay-lite`) instead of on a "using main" that is no answer at all
+        (owner, 2026-09-21: "so if somebody just has a harness, the flash chores run on relay
+        flash?" — "i agree"). `_relay_free_role` says why it is that narrow."""
         validate_tier(tier)
+        background = role in BACKGROUND_ROLES
+        guests = guests and not background
         if tier == "main":
             # The pane's own model, whatever `tiers.main` lists: that list is the order a failing
             # Main turn walks (failover_chain), never a pick.
@@ -798,9 +838,46 @@ class RoleResolver:
             # Nothing set up rather than no key, and Local is not a step on the ladder: it falls
             # straight back to Main, with the note the roles modal shows inline.
             return self._main(role, "main", tier="main", note="No local model is set up; using main.")
+        if background and self.main_config.base_url.startswith(GUEST_BASE_SCHEME):
+            # Nothing in the list, and the pane's own model is a harness — which cannot take a
+            # side call either, so "using main" would be no answer at all. See `_relay_free_role`.
+            spare = self._relay_free_role(role, tier, source)
+            if spare is not None:
+                return spare
         return self._main(role, "main", tier="main",
                           note=(f"No stored key for the {TIER_LABELS[tier]} model; using main."
                                 if self.tiers.get(tier) or self._tier_entries(tier) else None))
+
+    def _relay_free_role(self, role: str, tier: str, source: str) -> Resolved | None:
+        """Relay Free's own role for a tier — `relay-flash` for Flash, `relay-lite` for Lite — for
+        a background job whose list has nothing left in it, or None when there is no such role or
+        this worker cannot use Relay Free.
+
+        The owner's rule of 2026-09-21, and the case that prompted it is a user whose only
+        provider is a guest harness: a harness can serve their panes but not one of these jobs, so
+        without this every summary, every suggestion and every title would run on the pane's own
+        model — which is to say through the harness, which cannot take it either. Relay's own
+        allowance is the answer he chose. It is never reached from a pane's own turn.
+
+        Deliberately narrow: it fires only where "using main" is not an answer, which today means
+        a pane whose own model is a harness. A pane on a provider Relay cannot name — a custom
+        endpoint, a model server on this machine — has no tier defaults either, and there main
+        *is* an answer and a better one: `suggestions` carries recent command output and its own
+        row in `ACTIONS` promises it "stays on your own provider", which moving it to Relay's
+        gateway would break. If the owner wants the fall-through wider than the case he asked
+        about, this is the one line to widen.
+        """
+        entry = tier_default(HOSTED_PRESET_ID, tier)
+        if entry is None:
+            return None
+        preset_id, model, extra = entry
+        resolved = self._build(role, preset_id, PRESETS[preset_id].base_url, model, dict(extra),
+                               None, source, tier)
+        if resolved.source == "fallback":
+            return None                     # Relay Free cannot run here either
+        resolved.note = (f"Nothing in the {TIER_LABELS[tier]} list can take this job; "
+                         f"using relay free.")
+        return resolved
 
     def _default(self, role: str) -> Resolved:
         tier = ROLE_TIERS.get(role)
@@ -1091,8 +1168,10 @@ class RoleResolver:
                 clean["effort"] = listed
         if is_guest_preset(preset_id):
             # A guest is a process, not an endpoint: it serves the tiers a harness may serve, and
-            # only where this machine can start it (GUEST_TIERS, protocol 29.3).
-            if tier not in GUEST_TIERS or not self.guest_check(guest_id_of(preset_id)):
+            # only where this machine can start it (GUEST_TIERS, protocol 29.3) and only for a
+            # role that is a pane's own turn rather than a side call (BACKGROUND_ROLES).
+            if tier not in GUEST_TIERS or role in BACKGROUND_ROLES \
+                    or not self.guest_check(guest_id_of(preset_id)):
                 return self._main(role, "fallback",
                                   f"{LABELS[role]}: {preset_id} cannot run here; using the main agent.")
             guest_preset, base_url, model, _extra, guest_effort = self._guest_target(clean)
@@ -1220,7 +1299,7 @@ class RoleResolver:
             preset_id = entry.get("preset")
             if is_guest_preset(preset_id):
                 if preset_id not in known:
-                    known[preset_id] = tier == "main" or (tier == "high"
+                    known[preset_id] = tier == "main" or (tier in GUEST_TIERS
                                                           and bool(self.guest_check(guest_id_of(preset_id))))
                 usable = known[preset_id]
             elif preset_id:
