@@ -50,8 +50,9 @@ def prefer_as_oom_victim(value: int = OOM_SCORE_ADJ) -> bool:
 def main():
     # This is a UTF-8 byte protocol even when Windows launches the private Python
     # runtime with redirected pipes. Its isolated ._pth ignores PYTHONIOENCODING.
-    sys.stdout.reconfigure(encoding="utf-8", errors="strict")
-    sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
+    for stream, errors in ((sys.stdout, "strict"), (sys.stderr, "backslashreplace")):
+        if hasattr(stream, "reconfigure"):  # In-process consumers may use StringIO.
+            stream.reconfigure(encoding="utf-8", errors=errors)
     prefer_as_oom_victim()
     # Rotating diagnostics under $XDG_DATA_HOME/relay/logs (docs/ARCHITECTURE.md, "Logs"). Pane id
     # and level come from the GUI through the environment. Never logs prompts or tool output.
