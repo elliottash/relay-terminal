@@ -23,6 +23,7 @@
 #include <QApplication>
 #include <QPointer>
 #include <QTemporaryDir>
+#include <QLabel>
 #include <QToolButton>
 
 #include <cstdio>
@@ -237,6 +238,44 @@ void anActionThatRebuildsItsOwnRowIsSafe()
     CHECK(!first);   // and it is freed once the event loop reaches it
     }
 
+    // A click on an action button teaches its letter once, and pressing the letter teaches
+    // nothing — WARP.md's standing rule, on the id `relay::agent::Action::key` names
+    // ("board.action." + key). Before this the row was the one fast path in the console with no
+    // hint at all: the letters were in the board's key legend and nowhere the mouse could find
+    // them. A keyless action has nothing to teach and stays quiet.
+void aClickedActionTeachesItsLetter()
+{
+    relay::ShortcutHints::instance().resetAll();
+    StubContext context;
+    context.workspace = home->path();
+    context.rows = {{QStringLiteral("check"), QStringLiteral("k"), QStringLiteral("Check"),
+                     QString(), false, true, [] {}},
+                    {QStringLiteral("tests"), QString(), QStringLiteral("Tests"),
+                     QString(), false, true, [] {}}};
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    auto *row = console.findChild<QWidget *>(QStringLiteral("agentActionRow"));
+    CHECK(row != nullptr);
+    const auto buttons = row->findChildren<QToolButton *>(QString(), Qt::FindDirectChildrenOnly);
+    CHECK_EQ(buttons.size(), 2);
+    if (buttons.size() != 2) return;
+
+    buttons.at(0)->click();
+    auto *toast = console.findChild<QLabel *>(QStringLiteral("toast"));
+    CHECK(toast != nullptr);
+    if (toast) CHECK_EQ(toast->text(), QStringLiteral("Next time: k · check"));
+    CHECK_EQ(relay::ShortcutHints::instance().shownCount(QStringLiteral("board.action.check")), 1);
+
+    // The keyless one has no letter to name, so it draws nothing rather than an empty hint.
+    relay::ShortcutHints::instance().resetAll();
+    buttons.at(1)->click();
+    CHECK_EQ(relay::ShortcutHints::instance().shownCount(QStringLiteral("board.action.tests")), 0);
+
+    // And the letter path teaches nothing: somebody who typed `k` knows what `k` does.
+    relay::ShortcutHints::instance().resetAll();
+    CHECK(console.runActionLetter(QStringLiteral("k")));
+    CHECK_EQ(relay::ShortcutHints::instance().shownCount(QStringLiteral("board.action.check")), 0);
+    }
+
     // A context that takes the line before the pane routes it: a card's Enter travels as
     // `board_ask`, not as an ordinary `ask` (19.10, owner decision 2). The pane clears and
     // remembers the draft either way, so the composer behaves the same.
@@ -330,11 +369,12 @@ int main(int argc, char **argv)
     cases::aChangedContextRebuildsTheRow();
     cases::anActionThatRebuildsItsOwnRowIsSafe();
     cases::aContextMaySwallowASubmit();
+    cases::aClickedActionTeachesItsLetter();
     cases::theContextBlockAndTheAskFieldsAreTheContextsOwn();
     cases::theHostsHandlesWork();
     cases::aConsoleIsAnOrdinaryChildOfItsHost();
 
     if (failures == 0)
-    std::fprintf(stdout, "consolemode: 11 cases, all passed\n");
+    std::fprintf(stdout, "consolemode: 12 cases, all passed\n");
     return failures == 0 ? 0 : 1;
 }

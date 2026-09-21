@@ -3071,10 +3071,11 @@ public:
 
     // ===== relay::agent::Host: the seam the agent console is drawn through (#AGNT step 1) =======
     //
-    // Everything below the "agent sessions UI" banner is moving into relay::AgentConsole
-    // (src/AgentConsole.h), and a console never names the widget it lives in: it reaches this
-    // pane through the pure-virtual in src/AgentHost.h. These are that interface's terminal half,
-    // written once here in terms of the backend the pane already holds. The other half --
+    // A console never names the widget it lives in: it reaches it through the pure-virtual in
+    // src/AgentHost.h, which this pane implements. (The console *is* this pane -- the seam was
+    // measured and the class folded back in; src/AgentHost.h says why the interface is still
+    // here.) These are that interface's terminal half, written once here in terms of the backend
+    // the pane already holds, so nothing below has to know about a backend. The other half --
     // writeTerminal, terminalFolds, status, toast, hint, bubbleRoom, setBubbleHeight, shellPid,
     // terminalMode -- is already spelled the same way further down and overrides in place; that
     // is why this block is short. A host with no shell answers 0 / Unknown to the shell calls
@@ -3239,7 +3240,21 @@ public:
             button->setEnabled(action.enabled);
             button->setFocusPolicy(Qt::NoFocus);
             button->setCursor(Qt::PointingHandCursor);
-            if (action.run) connect(button, &QToolButton::clicked, this, action.run);
+            // The mouse path teaches the letter once (WARP.md's standing rule, and the id
+            // `Action::key` documents): a click on Check says "Next time: k · check". The letter
+            // path teaches nothing — somebody who typed it knows it — and a keyless action has
+            // nothing to teach, so it is the click that carries the hint and only when there is
+            // a letter to name.
+            if (action.run) {
+                const QString id = QStringLiteral("board.action.") + action.key;
+                const QString letter = action.letter.trimmed();
+                const QString what = action.label.trimmed().toLower();
+                connect(button, &QToolButton::clicked, this, [this, run = action.run, id, letter, what] {
+                    if (!letter.isEmpty())
+                        hint(id, relay::ShortcutHints::nextTime(letter, what));
+                    run();
+                });
+            }
             m_actionRowLayout->addWidget(button);
         }
         m_actionRowLayout->addStretch(1);   // left-aligned, which is the rule #PBX1 settled
@@ -4591,6 +4606,12 @@ private:
         routeRow->setContentsMargins(2, 0, 2, 0);
         routeRow->setSpacing(6);
         m_editor = new RichEditor;
+        // The prompt box, by name. Every agent surface in Relay is this widget since card #AGNT —
+        // a terminal pane, the Switchboard, a card, Options, Actions, Sessions — so a QA driver
+        // that wants "the composer of the console I am looking at" asks for `paneComposer` under
+        // that host, rather than for the first `RichEditor` in the window and hoping. The board's
+        // card page finds it by type (`setConsole`); the name is for the drives.
+        m_editor->setObjectName(QStringLiteral("paneComposer"));
         // Up and Down walk this pane's own history, kept in a file under the pane's layout id so
         // it survives a restart and a close-and-reopen, and stays this pane's alone (owner report,
         // 2026-09-19: "the up/down history seems to be getting commands from other panes, not just

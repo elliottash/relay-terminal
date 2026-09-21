@@ -1350,6 +1350,17 @@ private:
         };
         // The live key, never a written one (WARP.md's standing rule): the collapsed row says it.
         view->setHelperShortcut(hintId, Keymap::instance().shortcutText(QStringLiteral("helper.ask")));
+        // And the slow path teaches it once. The row's own text carries the key too, but a button
+        // that was clicked is exactly the case the standing rule is about, and the host cannot
+        // show a toast — it is a pane library with no window. So it says which hint it earned and
+        // the window shows it, through the same gates every other hint goes through.
+        view->onHelperHint = [guard, hintId] {
+            auto *w = windowOf(guard);
+            if (!w) return;
+            w->hint(hintId, relay::ShortcutHints::nextTime(
+                                Keymap::instance().shortcutText(QStringLiteral("helper.ask")),
+                                QStringLiteral("the helper agent")));
+        };
         QTimer::singleShot(0, this, [guard, viewGuard] {
             auto *w = windowOf(guard);
             if (!w || !viewGuard) return;
@@ -7635,6 +7646,15 @@ private:
         }
         QList<relay::agent::Action> actions() const override {
             return m_host ? m_host->actions() : QList<relay::agent::Action>();
+        }
+        // Every virtual of `relay::agent::Context` is forwarded, and `submit` is the one that
+        // must be: a card's Enter has to travel as the `board_ask` of 19.10 — the thread written
+        // before and after, the stage advanced — and a wrapper that swallowed it sent an ordinary
+        // `ask` instead, so the card's conversation ran and `issues/threads/<ID>.md` learned
+        // nothing (owner decision 2). Nothing in `consolemode` saw it, because those cases hand a
+        // context to a `Pane` directly; every console the *window* makes is wrapped.
+        bool submit(const QString &route, const QString &text) override {
+            return m_host && m_host->submit(route, text);
         }
         bool resolveLink(const relay::links::Target &target) override {
             return m_host && m_host->resolveLink(target);

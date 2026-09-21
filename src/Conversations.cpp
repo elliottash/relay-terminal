@@ -1140,11 +1140,12 @@ void SessionManager::setHelperWorkspace(const QString &workspace) {
     if (m_context) m_context->setWorkspace(workspace);
 }
 
-// The row teaches its own shortcut: the key is in the button's own text ("Helper Agent (Ctrl+/)"),
-// so there is no notice to show and no hint id to keep. The argument stays because the window
-// wires this pane and the Options pane with one line, and because the console's own slow paths are
-// the `Pane`'s to teach.
-void SessionManager::setHelperShortcut(const QString & /*hintId*/, const QString &keys) {
+// The row wears its own shortcut — the key is in the button's own text — and a *click* on it is
+// still the slow path WARP.md's standing rule is about, so it teaches the key once through
+// `onHelperHint`. The pane has no window to show a toast in, which is why the hint is the
+// window's to draw; the id it earned is the one the window wired.
+void SessionManager::setHelperShortcut(const QString &hintId, const QString &keys) {
+    m_askHintId = hintId;
     m_askKeys = keys;
     updateHelperRow();
 }
@@ -1239,7 +1240,11 @@ void SessionManager::buildHelperRow(QVBoxLayout *into) {
     ask->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     askLine->addWidget(ask, 0);
     outer->addWidget(m_askRow);
-    connect(ask, &QToolButton::clicked, this, [this] { focusHelper(); });
+    connect(ask, &QToolButton::clicked, this, [this] {
+        // The mouse, not the key: the ask key comes in through `focusHelper()` and teaches nothing.
+        if (onHelperHint && !m_askHintId.isEmpty()) onHelperHint();
+        focusHelper();
+    });
 
     // ---- expanded: the console, under a row that folds it away ------------------------------
     m_helperBody = new QWidget(m_helper);

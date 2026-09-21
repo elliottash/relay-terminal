@@ -62,6 +62,7 @@ private slots:
     void anEmbeddedConsoleIsNotOneOfTheWindowsPanes();
     void theWindowMakesConsolesAndWiresThemAsPanesExceptWhereItMustNot();
     void theConsolesOfATabShareOneWorkerAndOneConversation();
+    void theWindowsWrapperForwardsEveryContextVirtual();
     void anOptionOrSessionLinkOpensWhereItNames();
     void theBoardPanePaintsFromTheBoardMaterials();
     void tabMetersGiveWayOnlyWhenFullLabelsDoNotFit();
@@ -479,6 +480,53 @@ void BoardWorkspaceTests::theConsolesOfATabShareOneWorkerAndOneConversation()
     QVERIFY2(text.contains(QStringLiteral("void sendToHelper(QWidget *page, QJsonObject message) {")),
              "sendToHelper still carries a pane tag");
     QVERIFY(text.contains(QStringLiteral("void listenToHelper(")));   // tests_* and profile_* still ride it
+}
+
+// Every console the window makes is a `Pane` with the window's **wrapper** as its context, not
+// the host's own — `TabConsoleContext` is what knows the tab's project and where the tab's one
+// conversation is kept (above). So the wrapper has to forward every virtual of
+// `relay::agent::Context`, and a virtual it forgets is silently swallowed: `submit` was, and a
+// card's Enter travelled as an ordinary `ask` instead of the `board_ask` of 19.10 — the thread
+// unwritten, the stage not advanced (owner decision 2). Nothing in `consolemode` could see it,
+// because those cases hand a context to a `Pane` directly.
+//
+// The list is read out of `src/AgentContext.h` rather than written here, so the **next** virtual
+// somebody adds fails this test on the day it is added rather than on the day a card stops
+// writing its thread.
+void BoardWorkspaceTests::theWindowsWrapperForwardsEveryContextVirtual()
+{
+    QFile header(QStringLiteral(RELAY_SOURCE_DIR "/src/AgentContext.h"));
+    QVERIFY2(header.open(QIODevice::ReadOnly | QIODevice::Text), "src/AgentContext.h could not be read");
+    const QString context = QString::fromUtf8(header.readAll());
+    const QString text = windowSource();
+    QVERIFY2(!text.isEmpty(), "src/RelayWindow.h could not be read");
+    const int wrapper = text.indexOf(QStringLiteral("class TabConsoleContext final : public relay::agent::Context {"));
+    QVERIFY2(wrapper > 0, "RelayWindow::TabConsoleContext is gone");
+    const int end = text.indexOf(QStringLiteral("\n    };"), wrapper);
+    QVERIFY(end > wrapper);
+    const QString body = text.mid(wrapper, end - wrapper);
+
+    // The names of the virtuals, as the interface declares them: `virtual <type> name(`.
+    QRegularExpression declaration(QStringLiteral("\\n    virtual [^;{]*?\\b(\\w+)\\("));
+    QStringList virtuals;
+    for (auto it = declaration.globalMatch(context); it.hasNext();) {
+        const QString name = it.next().captured(1);
+        if (name != QStringLiteral("Context") && !virtuals.contains(name)) virtuals << name;
+    }
+    virtuals.removeAll(QStringLiteral("~Context"));
+    QVERIFY2(virtuals.contains(QStringLiteral("submit")), qPrintable(virtuals.join(' ')));
+    QVERIFY2(virtuals.size() >= 5, qPrintable(virtuals.join(' ')));
+
+    for (const QString &name : virtuals) {
+        QVERIFY2(body.contains(name + QStringLiteral("(")),
+                 qPrintable(QStringLiteral("TabConsoleContext does not override Context::%1").arg(name)));
+        // `spec()` is the one it does not simply hand on — it fills in the tab's project and
+        // persist key, which is what the wrapper exists for — but it still starts from the host's.
+        QVERIFY2(body.contains(QStringLiteral("m_host->") + name + QStringLiteral("(")),
+                 qPrintable(QStringLiteral("TabConsoleContext::%1 does not reach the host's").arg(name)));
+    }
+    // And the other direction: a card going busy or Options swapping mode still reaches the row.
+    QVERIFY2(body.contains(QStringLiteral("m_host->onChanged = [this] { changed(); }")), qPrintable(body));
 }
 
 // `option:sec/row` and `session:<id>` are kinds of the transcript since step 8, so an answer that

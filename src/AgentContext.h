@@ -11,7 +11,7 @@
 //
 // Read together they split the agent in two. **How you talk to an agent is shared** — one
 // composer, one queue, one transcript with its thinking bubbles and tool rows, one model box, one
-// history, one Esc: that is `relay::AgentConsole`, the surface, and a behaviour added to it
+// history, one Esc: that is the **console**, the surface, and a behaviour added to it
 // appears everywhere at once. **What the agent is about varies** — the brief in front of the turn,
 // the defaults (which role, whether there is a shell, how a line routes), the row of actions that
 // need no typing, how a link in the answer resolves, where the conversation is kept, and what
@@ -46,7 +46,7 @@
 //   "sessions"     src/Conversations.cpp   no     (workspace, tab)   -
 //
 // `ContextSpec` is the plain-data half, and it is the **only** part of a context that crosses to
-// the worker: `AgentConsole` puts `spec().toJson()` into `configure`'s `context` block and
+// the worker: the console puts `spec().toJson()` into `configure`'s `context` block and
 // `spec().askFields()` into each `ask` (protocol 30.7, and the new section card #AGNT step 4
 // writes). The bytes are pinned by tests/agentcontext_test.cpp, so the C++ and the Python are
 // tested against one shape rather than against each other.
@@ -257,7 +257,8 @@ class Context {
 
     // The row of things that need no typing, left to right, above the box. Empty is the common
     // case: a terminal pane has no such actions and neither do Options, Actions or Sessions.
-    // `AgentConsole` puts the list through `withUniqueLetters` and builds the row from it.
+    // The console puts the list through `withUniqueLetters` and builds the row from it
+    // (`Pane::rebuildActionRow`).
     virtual QList<Action> actions() const { return {}; }
 
     // A line the owner submitted in this console, offered to the context **before** the pane

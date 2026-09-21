@@ -1,13 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
-// relay::agent::Host -- what an AgentConsole is drawn on.
+// relay::agent::Host -- what an agent console is drawn on.
 //
-// The console (src/AgentConsole.h) is the prompt box and everything that belongs to it: the
-// composer, the queue, the transcript, the folds, the model box, the worker. It never names the
-// widget it lives in. Everything it needs from that widget is here, and there is one
-// implementation per host: `Pane` (a terminal pane) today, the Switchboard, a card, Options and
-// Sessions after card #AGNT's later steps.
+// A console is the prompt box and everything that belongs to it: the composer, the queue, the
+// transcript, the folds, the model box, the worker. It never names the widget it lives in, and
+// everything it needs from that widget is here.
+//
+// There is one implementation, `Pane`, and that is the card's answer rather than an accident:
+// `--closure` measured the agent block at 228 members with a floor of 284 names on any seam that
+// left the composer behind, because the prompt box is what both halves are made of. So the class
+// `relay::AgentConsole` was folded back into `Pane` and a console is a `Pane` with a no-shell
+// `relay::agent::Context` -- in the Switchboard, on a card, in Options, Actions and Sessions.
+// This interface stays because it is still the answer to "what is the transcript drawn on":
+// a host that one day is not a vterm implements it and touches nothing else.
 //
 // The interface is terminal-shaped on purpose (#AGNT, Risks 3): `writeTerminal`, `columns`,
 // folds, `screenText`. Every context keeps a vterm as its transcript surface, which costs one

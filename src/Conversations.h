@@ -275,8 +275,11 @@ public:
     // The project this pane's agent works in. Empty is a supported state, not an error.
     void setHelperWorkspace(const QString &workspace);
     // The key that opens the console, in the window's live Keymap wording, for the collapsed row's
-    // text (WARP.md's standing rule: the live Keymap text, never a written-down key).
+    // text (WARP.md's standing rule: the live Keymap text, never a written-down key). `hintId` is
+    // the hint a *click* on that row earns; the pane cannot show a toast, so it calls `onHelperHint`
+    // and the window does. The key path teaches nothing — somebody who pressed it knows it.
     void setHelperShortcut(const QString &hintId, const QString &keys);
+    std::function<void()> onHelperHint;
     // Open the helper and put the cursor in it — the pane's ask key, and what a click on the row
     // does. `helperDraft` prefills the composer without sending.
     void focusHelper();
@@ -370,6 +373,7 @@ private:
     QWidget *m_helperBody = nullptr;        // expanded: the fold row and the console
     QLabel *m_helperHead = nullptr;
     QString m_askKeys;
+    QString m_askHintId;   // the hint a click on the row earns (onHelperHint)
     bool m_helperCollapsed = true;
     QWidget *m_inset = nullptr;
     QLineEdit *m_search = nullptr;

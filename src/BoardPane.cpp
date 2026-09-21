@@ -3953,6 +3953,13 @@ class CardContext final : public relay::agent::Context {
         spec.agentRole = QStringLiteral("switchboard");
         spec.workspace = m_view->m_workspace;
         spec.scope = QStringLiteral("card");
+        // Where the conversation is kept is **not** this page's to choose, and the two lines
+        // below are what this page would ask for if it were: one conversation per card. The
+        // window's `TabConsoleContext` overwrites both with `helper` / <tab id>, because the
+        // owner's decision 1 on this card is one conversation for the whole tab, drawn in every
+        // console of it. They are left here rather than blanked so that a host which is *not*
+        // the window — the board's own tests build a console with no wrapper — still gets a key,
+        // and so the day decision 1 is revisited this page already says what it wants.
         spec.persistScope = card.isEmpty() ? QString() : QStringLiteral("helper");
         spec.persistKey = card.isEmpty() ? QString() : spec.surface;
         spec.briefKey = QStringLiteral("card");
@@ -4772,10 +4779,26 @@ void BoardView::ensureConsole()
     if (auto *column = qobject_cast<QVBoxLayout *>(m_chatArea->layout()))
         column->addWidget(m_console, 1);
     m_console->show();
+    updateConsoleHeight();
     // The key legend ends with the console's action row, read off the context — it could say
     // nothing about it until there was a row to read (agentActionKeyLine). `ensureConsole` has
     // already set `m_console`, so the `syncChatVisible` inside this does not come back here.
     updateDetailLayout();
+}
+
+// See the header: a maximum alone is not a size. The column adds the console with no stretch, so
+// it takes the console's own size hint, and on the list page that is three rows — which is where
+// `placeQueueStrip` stops drawing the strip at all (`roomForBubble(0)` is false), so a second
+// prompt queues with nothing on screen to say so. Twenty lines is a conversation: the header,
+// the action row, the box and its chips take about half of it.
+void BoardView::updateConsoleHeight()
+{
+    if (m_console == nullptr)
+        return;
+    const int line = QFontMetrics(font()).lineSpacing();
+    const int cap = std::max(10 * line, height() * 2 / 5);
+    m_console->setMaximumHeight(cap);
+    m_console->setMinimumHeight(std::min(cap, 20 * line));
 }
 
 // The open card's console (card #AGNT step 6). A second console, not the list page's one: the
@@ -7355,6 +7378,7 @@ void BoardView::setHiddenSections(const QJsonArray &state)
 void BoardView::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
+    updateConsoleHeight();   // the console's share of the pane follows the pane's own height
     updateDetailLayout();
     placeNotice();
     placeToast();

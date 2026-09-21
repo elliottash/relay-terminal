@@ -349,6 +349,13 @@ private:
     // for one (§30.7, and the owner's decision 5 on this card).
     void ensureConsole();
     void syncChatVisible();
+    // The console is sized to the pane it is in, the way Options and Sessions size theirs: at
+    // most ~40 % of the pane's height, and never so little that the transcript is a slot rather
+    // than a conversation. Without the floor the column takes the console's own size hint — a
+    // `Pane`'s, which is a terminal's — and the list page gave it three rows: the integration
+    // drive of card #AGNT read a whole answer, a thinking fold, a tool row and the §12 queue
+    // strip as missing, when what was missing was the room to draw them in.
+    void updateConsoleHeight();
     // Put a request in the console's composer and focus it — a **draft**, never sent (owner,
     // 2026-09-19: "draft you confirm"). What the problems banner and every finding row do.
     void draftForAgent(const QString &text);
