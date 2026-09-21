@@ -143,6 +143,9 @@ public:
     // model, survey, seconds, queue[], history[]}`. Redraws the whole panel, so a pane opened
     // mid-conversation catches up from one event.
     void setChatState(const QJsonObject &chat);
+    // The queue rows alone, from any `chat` block: the FIFO is the worker's and every panel of
+    // the tab draws the same one (#H6VQ).
+    void setQueueState(const QJsonObject &chat);
     // A `chat: true` turn event, or one of `board_chat_started`, `board_chat_queued`,
     // `board_chat_cancelled`, `board_chat_state`, `board_survey`, `transcribed`. True when the
     // panel took it, so `BoardView` never lets one reach a card thread (the `cleanup: true`

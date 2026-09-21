@@ -4329,6 +4329,22 @@ void BoardModelTests::everyHelperPanelDrawsTheQueueAndCanStopItsOwnTurn()
                                                                {"history", QJsonArray{}}}}}));
     QVERIFY(!panel.running());
     QTRY_VERIFY(!queue->isVisible());
+
+    // The queue is the worker's, not the turn's: a state block addressed to the *board's* panel
+    // still lists this panel's waiting prompt, so the row is read from it. Only the turn is not —
+    // a Sessions panel does not go busy because the board is.
+    QVERIFY(!panel.handleEvent(QStringLiteral("board_chat_state"),
+                               QJsonObject{{"pane", "switchboard"},
+                                           {"chat", QJsonObject{
+                                               {"running", true}, {"pane", "switchboard"},
+                                               {"turn_id", "chat-9"},
+                                               {"queue", QJsonArray{QJsonObject{
+                                                   {"id", "c2"}, {"text", "mine, still waiting"},
+                                                   {"pane", "sessions"}}}},
+                                               {"history", QJsonArray{}}}}}));
+    QVERIFY(!panel.running());
+    QTRY_VERIFY(queue->isVisible());
+    QVERIFY(panel.findChild<QWidget *>(QStringLiteral("boardChatQueueRow")));
 }
 
 // A helper worker that died mid-turn is the window's `error` with `worker_gone` on it

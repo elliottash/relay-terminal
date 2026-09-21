@@ -1051,13 +1051,7 @@ void HelperChatPanel::setChatState(const QJsonObject &chat)
     if (chat.isEmpty())
         return;
     m_history = chat.value(QStringLiteral("history")).toArray();
-    m_queue.clear();
-    const QJsonArray queue = chat.value(QStringLiteral("queue")).toArray();
-    for (const QJsonValue &value : queue) {
-        const QJsonObject item = value.toObject();
-        m_queue.append(QueueItem{item.value(QStringLiteral("id")).toString(),
-                                 item.value(QStringLiteral("text")).toString()});
-    }
+    setQueueState(chat);
     const bool running = chat.value(QStringLiteral("running")).toBool();
     const QString turn = chat.value(QStringLiteral("turn_id")).toString();
     m_surveyTurn = chat.value(QStringLiteral("survey")).toBool();
@@ -1442,6 +1436,19 @@ bool HelperChatPanel::eventFilter(QObject *object, QEvent *event)
         }
     }
     return QWidget::eventFilter(object, event);
+}
+
+// The queue as the worker has it, from any `chat` block — including one addressed to another
+// panel of this tab, because the FIFO is the worker's and the panels share it.
+void HelperChatPanel::setQueueState(const QJsonObject &chat)
+{
+    m_queue.clear();
+    for (const QJsonValue &value : chat.value(QStringLiteral("queue")).toArray()) {
+        const QJsonObject item = value.toObject();
+        m_queue.append(QueueItem{item.value(QStringLiteral("id")).toString(),
+                                 item.value(QStringLiteral("text")).toString()});
+    }
+    rebuildQueue();
 }
 
 // ------------------------------------------------------------------------------- the queue
@@ -2210,8 +2217,16 @@ bool HelperChatPanel::handleEvent(const QString &type, const QJsonObject &event)
     if (type.startsWith(QStringLiteral("board_chat")) || chatValue.toBool()
         || chatValue.isObject()) {
         const QString from = event.value(QStringLiteral("pane")).toString();
-        if (!from.isEmpty() ? from != m_pane : !isBoard())
+        if (!from.isEmpty() ? from != m_pane : !isBoard()) {
+            // The *queue* is the worker's, not the turn's. A state block addressed to another
+            // panel still lists every prompt waiting for the one worker, and one of them may be
+            // this panel's: the row it drew would otherwise stand until an event this panel does
+            // take — which, for a panel with no turn of its own, may be never. So the queue is
+            // read from any state block and the turn is not (#H6VQ).
+            if (chatValue.isObject())
+                setQueueState(chatValue.toObject());
             return false;
+        }
     }
 
     if (type == QStringLiteral("board_chat_started")) {
