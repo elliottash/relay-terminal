@@ -250,5 +250,16 @@ the command or the screenshot that proves it; the verifier re-runs them on a cle
 - [ ] Profile (`docs/qa_evidence/2026-09-20-profile-button/`): the four-entry menu; a build profile's result pane with the table, share column and evidence path; Attach to card… adds a `## Profile` section and the evidence path to `links.evidence`; `scripts/relay-profile tests tests.test_test_history` writes `tests.speedscope.json` and `summary.md`.
 - [ ] `scripts/relay-speedscope --print-url <any profile>` prints a `file://…/index.html#localProfilePath=` URL and the bundle opens it offline.
 - [ ] Docs: `docs/PROFILING.md`, `docs/SWITCHBOARD-TOOLING-RESEARCH.md`, `docs/SWITCHBOARD-DESIGN.md` §4.14, `docs/SWITCHBOARD-FORMAT.md` §2.6, `docs/AGENT-SESSIONS-PROTOCOL.md` §31 (31.9 Profile still to land — see the thread), `docs/VALIDATION.md` inventory pointer.
+- [ ] The staged scenario plays in the real app (AI pass): `docs/qa_evidence/2026-09-20-switchboard-tooling-hub/scenario/ai-pass.md`, eight screenshots; re-run with `scenario/ai-pass.sh`.
 - [ ] Not done, by decision: the app profile target has no screenshot (it profiles a second Relay someone must drive); the agent-facing `tests_check` tool writes no block (§31.6's contract — the owner's call); coverage and test-impact analysis are out of scope.
+
+## Human QA
+The owner is put into a staged project in which this card's three problems are happening; an AI
+played it first (`docs/qa_evidence/2026-09-20-switchboard-tooling-hub/scenario/ai-pass.md`). Brief:
+`docs/qa_evidence/2026-09-20-switchboard-tooling-hub/HUMAN-QA.md`. Answers go under each question,
+in the owner's words.
+
+1. **The agent says it is done.** Did the card stop you from accepting work that was not done, and did it tell you why quickly enough that you would use it?
+2. **CI goes red about once a week.** Could you name the flaky test, since when, and on which machines, in under a minute, without reading a log?
+3. **The build got slow.** Do you now know which file to look at, and is that answer on the card for the next person?
 
