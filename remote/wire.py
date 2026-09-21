@@ -124,6 +124,7 @@ NEVER_FROM_CLIENT = frozenset({
     "import_skills_preview", "import_skills_confirm", "refine_skills", "skills_check_updates",
     "keybindings", "presets", "model_roles", "agent_options", "load_state", "fork", "reset",
     "rewind", "scan_instructions", "index_rebuild", "conversation_delete",
+    "globals_list", "globals_get", "globals_save", "globals_retire",
 }) | OWNER_ONLY
 
 # ---- what a participant may send (section 10.1) ------------------------------------------------
@@ -435,6 +436,11 @@ WITHHELD_EVENTS: dict[str, str] = {
     # and stored shell text. Same call as `skills` and `agents`: a phone may see the *result* of
     # a turn, not the desktop's saved definitions. Running an alias remotely is a separate
     # decision and a separate client message; none exists yet.
+    # Globals (protocol 34): saved guidance and original local instruction sources.
+    "globals_state": "global definitions and local instruction paths",
+    "globals_record": "global memory, alias or instruction source contents",
+    "globals_saved": "global memory, alias or instruction source contents",
+    "globals_error": "desktop-local editor errors can contain local paths",
     "aliases": "alias definitions and local file paths",
     "alias_expanded": "a command line built for this desktop's shell",
     "alias_saved": "local file paths",

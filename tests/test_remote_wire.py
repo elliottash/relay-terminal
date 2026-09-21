@@ -56,6 +56,15 @@ class AllowListTests(unittest.TestCase):
             self.assertFalse(wire.may_forward(name), name)
             self.assertIn(name, wire.WITHHELD_EVENTS)
 
+    def test_globals_editor_stays_on_the_desktop(self):
+        for name in ("globals_list", "globals_get", "globals_save", "globals_retire"):
+            self.assertIn(name, wire.NEVER_FROM_CLIENT)
+            self.assertNotIn(name, wire.CLIENT_TYPES)
+            self.assertNotIn(name, wire.GUEST_TYPES)
+        for name in ("globals_state", "globals_record", "globals_saved", "globals_error"):
+            self.assertIn(name, wire.WITHHELD_EVENTS)
+            self.assertFalse(wire.may_forward(name))
+
     def test_an_unknown_event_is_not_forwarded(self):
         self.assertFalse(wire.may_forward("some_new_event_nobody_classified"))
 

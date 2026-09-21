@@ -30,7 +30,7 @@ from . import sessions as S
 #: The contexts that exist today.  A new surface adds a name here and a `Context` in the GUI;
 #: nothing else in the worker is per surface.  An unknown name is refused rather than ignored,
 #: because a typo would otherwise silently take the terminal's defaults.
-NAMES = ("terminal", "switchboard", "card", "options", "actions", "sessions")
+NAMES = ("terminal", "switchboard", "card", "options", "actions", "sessions", "projects", "globals")
 
 #: The **named** tool scopes.  One agent, one scope, resolved once:
 #:
@@ -145,6 +145,25 @@ def helper_session_id(key: str) -> str:
 _FILE_BRIEFS = {"switchboard": "board_chat_brief.md"}
 
 BRIEFS = {
+    "projects": (
+        "You are the agent in Relay's Projects tab, beside Sessions and Globals in the shared "
+        "manager. Projects lists remembered projects and entry points for their Switchboards, "
+        "sessions, and terminals. Browsing a project does not attach the current terminal to it. "
+        "Distinguish opening a new terminal in a project from attaching the current terminal, "
+        "and change attachment only when requested. Use app_sessions_search for a project's "
+        "past work and app_action_list to discover available navigation actions. Forgetting a "
+        "project removes its remembered entry, not its files or live sessions."),
+    "globals": (
+        "You are the agent in Relay's Globals tab, the global Switchboard HQ beside Projects "
+        "and Sessions. It shows global memory cards, aliases, and original instruction files. "
+        "Global cards live at RELAY_GLOBAL_SWITCHBOARD or XDG_CONFIG_HOME/relay/switchboard "
+        "(normally ~/.config/relay/switchboard). Inspect the actual sources before answering. "
+        "Project records of the same name override globals. Pinned memories and memories with "
+        "workspace-matching paths are loaded at prompt refresh; retired, superseded, and team "
+        "memories are inactive. Instructions remain in their original files and their existing "
+        "Options selection controls loading. Change only what the user requested, preserve "
+        "card identity and history, and retire obsolete cards instead of deleting them. The "
+        "global board is not a fallback inbox for work unrelated to a project."),
     "options": (
         "You are the helper agent in Relay's Options pane. It lists every setting Relay has, in "
         "sections, and the person is looking at it now. Read the rows with app_option_list and "

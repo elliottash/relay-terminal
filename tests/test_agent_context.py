@@ -32,7 +32,7 @@ class ParsingTests(unittest.TestCase):
         self.assertFalse(spec.is_console())
 
     def test_every_other_context_defaults_to_a_console_with_no_shell(self):
-        for name in ("switchboard", "options", "actions", "sessions"):
+        for name in ("switchboard", "options", "actions", "sessions", "projects", "globals"):
             spec = AC.ContextSpec.from_json({"name": name})
             self.assertEqual(spec.scope, "console", name)
             self.assertEqual(spec.routing, "agent", name)
@@ -154,6 +154,16 @@ class BriefTests(unittest.TestCase):
         spec = AC.ContextSpec.from_json(SWITCHBOARD)
         self.assertIn("card", spec.brief_text().lower())
         self.assertNotIn("<!--", spec.brief_text())
+
+    def test_project_and_global_briefs_describe_distinct_destinations(self):
+        projects = AC.ContextSpec.from_json({"name": "projects", "brief": {"key": "projects"}})
+        globals_ = AC.ContextSpec.from_json({"name": "globals", "brief": {"key": "globals"}})
+        self.assertIn("does not attach", projects.brief_text())
+        self.assertIn("original instruction files", globals_.brief_text())
+        self.assertIn("not a fallback inbox", globals_.brief_text())
+        for spec in (projects, globals_):
+            self.assertEqual(AC.ContextSpec.from_json(spec.to_json()), spec)
+            self.assertEqual(spec.scope, "console")
 
     def test_an_unknown_brief_key_is_no_brief_rather_than_an_error(self):
         # The GUI may name a context this worker is older than; a console with no brief still works.

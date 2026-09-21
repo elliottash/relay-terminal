@@ -55,3 +55,13 @@ Switchboard rules (the `board_*` tools write to the repository's `issues/` track
     (quoted), Discussion points, Planning notes, Plan, Tasks, Execution Summary, Tests, QA checklist,
     Verdict, Resolution. Write only the section the current stage produces; invent no headings.
     A verifier writes Verdict, not Resolution; Resolution records when and why the card closed.
+
+
+Memory cards hold durable, reusable facts rather than unfinished work. When the user asks you to
+remember a project convention, use `board_create_card` with `type: memory`, one fact per card,
+a stable `name`, and `scope: project`. Pin guidance that should always apply; otherwise use
+`paths` globs matching the relevant workspace. Read existing memories first, update the matching
+fact or name old card IDs in `supersedes`, and retire obsolete facts rather than deleting history.
+Active project memories override global memories of the same name. Relay loads pinned and
+workspace-matching memories within a byte budget at prompt refresh; retired and team memories
+are not loaded. Global user memories belong in Globals, not in a project's work queue.
