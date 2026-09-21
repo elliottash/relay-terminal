@@ -83,11 +83,35 @@ QJsonArray solPresets() {
     return out;
 }
 
+// The same catalog plus an open-ended provider: OpenRouter with a live listing of ten, which is
+// what `shown()` holds back until something is typed (card #MDL1 t:a10, design 5.5).
+QJsonArray tailPresets() {
+    QJsonArray out = presets();
+    QJsonArray rows;
+    rows << model(QStringLiteral("meta/muse-spark-1.3"), QStringLiteral("meta: muse spark 1.3"), QString(), {});
+    for (int i = 0; i < 9; ++i)
+        rows << model(QStringLiteral("vendor/tail-%1").arg(i), QStringLiteral("vendor: tail %1").arg(i), QString(), {});
+    out << QJsonObject{{QStringLiteral("id"), QStringLiteral("openrouter")}, {QStringLiteral("label"), QStringLiteral("openrouter")},
+                       {QStringLiteral("provider"), QStringLiteral("openrouter")}, {QStringLiteral("has_stored_key"), true},
+                       {QStringLiteral("models"), rows}};
+    return out;
+}
+
 ModelPicker::Context context(const QString &currentKey = QStringLiteral("glm-coding|glm-5.3"), const QString &effort = QStringLiteral("high")) {
     ModelPicker::Context ctx;
     ctx.catalog = catalogFrom(presets());
     ctx.currentKey = currentKey;
     ctx.currentEffort = effort;
+    ctx.now = 1;
+    return ctx;
+}
+
+ModelPicker::Context tailContext() {
+    ModelPicker::Context ctx;
+    ctx.catalog = catalogFrom(tailPresets());
+    ctx.currentKey = QStringLiteral("glm-coding|glm-5.3");
+    ctx.currentEffort = QStringLiteral("high");
+    ctx.tier = QStringLiteral("all");
     ctx.now = 1;
     return ctx;
 }
@@ -451,7 +475,8 @@ private Q_SLOTS:
         QCOMPARE(keys(picker.list()), (QStringList{QStringLiteral("[favorites]"), QStringLiteral("guest:claude|opus"),
                                                    QStringLiteral("[recent]"), QStringLiteral("anthropic|claude-opus-5"),
                                                    QStringLiteral("[all, by priority]"), QStringLiteral("glm-coding|glm-5.3"),
-                                                   QStringLiteral("glm-coding|glm-5.3-flash")}));
+                                                   QStringLiteral("glm-coding|glm-5.3-flash"),
+                                                   QStringLiteral("[+ add a model by id…]")}));
         QVERIFY(picker.list()->topLevelItem(1)->text(ColModel).startsWith(QStringLiteral("★ ")));
         QVERIFY(picker.sortBox()->isVisibleTo(&picker));
         picker.filter()->setText(QStringLiteral("flash"));
@@ -459,7 +484,7 @@ private Q_SLOTS:
         picker.filter()->setText(QStringLiteral("claude"));
         QCOMPARE(rowKeys(picker.list()), (QStringList{QStringLiteral("anthropic|claude-opus-5"), QStringLiteral("guest:claude|opus")}));
         picker.filter()->clear();
-        QCOMPARE(keys(picker.list()).size(), 7);
+        QCOMPARE(keys(picker.list()).size(), 8);   // …and "+ add a model by id…" at the end
         const int intelligence = picker.sortBox()->findData(QStringLiteral("intelligence"));
         picker.sortBox()->setCurrentIndex(intelligence);
         emit picker.sortBox()->activated(intelligence);
@@ -702,6 +727,71 @@ private Q_SLOTS:
         ModelPicker bare(context());
         QCOMPARE(bare.defaultsButton(false), nullptr);
         QCOMPARE(bare.defaultsButton(true), nullptr);
+    }
+
+    // ----- the long tail, and the id box that came with it (card #MDL1 t:a10, design 5.5) --------
+
+    // `shown()` holds an open-ended provider's rows back — OpenRouter's live listing would
+    // otherwise be most of every list — and typing is what reaches them now that Options › Models
+    // has no per-provider id box. They come under their own rule, and Enter uses one.
+    void theAllTabKeepsTheLongTailBehindTyping() {
+        ModelPicker::Context ctx = tailContext();
+        ModelPicker picker(ctx);
+        const QStringList untyped = rowKeys(picker.list());
+        QVERIFY2(!untyped.contains(QStringLiteral("openrouter|meta/muse-spark-1.3")), qPrintable(untyped.join(QLatin1Char(' '))));
+        QVERIFY(untyped.contains(QStringLiteral("glm-coding|glm-5.3")));
+        picker.filter()->setText(QStringLiteral("muse-spark"));
+        const QStringList rows = keys(picker.list());
+        QVERIFY2(rows.contains(QStringLiteral("[more from openrouter]")), qPrintable(rows.join(QLatin1Char(' '))));
+        QVERIFY(rows.contains(QStringLiteral("openrouter|meta/muse-spark-1.3")));
+        picker.selectKey(QStringLiteral("openrouter|meta/muse-spark-1.3"));
+        picker.accept();
+        QCOMPARE(picker.pick().key, QStringLiteral("openrouter|meta/muse-spark-1.3"));
+    }
+
+    // The same on a tier tab: the tail sits below "not in this list" under its own rule, and
+    // ctrl+enter puts one in the list — which is also what makes it a listed model from then on.
+    void aTierTabsFilterReachesTheTailAndCtrlEnterAddsIt() {
+        setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()}});
+        ModelPicker::Context ctx = tailContext();
+        ctx.tier = QStringLiteral("main");
+        ModelPicker picker(ctx);
+        picker.filter()->setText(QStringLiteral("muse-spark"));
+        const QStringList rows = keys(picker.list());
+        QVERIFY2(rows.contains(QStringLiteral("[more from openrouter]")), qPrintable(rows.join(QLatin1Char(' '))));
+        picker.selectKey(QStringLiteral("openrouter|meta/muse-spark-1.3"));
+        QTest::keyClick(picker.filter(), Qt::Key_Return, Qt::ControlModifier);
+        QCOMPARE(listKeys(QStringLiteral("main")),
+                 (QStringList{QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("openrouter|meta/muse-spark-1.3")}));
+        // A tier list names it now, so it is a listed model everywhere, with no typing.
+        ModelPicker again(tailContext());
+        QVERIFY(rowKeys(again.list()).contains(QStringLiteral("openrouter|meta/muse-spark-1.3")));
+    }
+
+    // "+ add a model by id…" is the last row of the `all` tab: the input that sat under every
+    // open-ended provider on Options › Models. An id the provider serves but does not list is
+    // remembered in `models/custom` and is an entry like any other from then on.
+    void addAModelByIdIsTheLastRowOfTheAllTab() {
+        ModelPicker picker(tailContext());
+        const QStringList rows = keys(picker.list());
+        QCOMPARE(rows.last(), QStringLiteral("[+ add a model by id…]"));
+        int told = 0;
+        picker.onListsChanged = [&told] { ++told; };
+        const QString key = picker.addModelById(QStringLiteral("openrouter"), QStringLiteral("  moonshotai/kimi-k3  "));
+        QCOMPARE(key, QStringLiteral("openrouter|moonshotai/kimi-k3"));
+        QVERIFY(curation::customKeys().contains(key));
+        QCOMPARE(told, 1);
+        QVERIFY(rowKeys(picker.list()).contains(key));
+        // It survives the dialog: a fresh one lists it without typing, because it is yours.
+        ModelPicker again(tailContext());
+        QVERIFY(rowKeys(again.list()).contains(key));
+        // An id the catalog already holds needs nothing stored — it is just selected.
+        const QString had = picker.addModelById(QStringLiteral("openrouter"), QStringLiteral("meta/muse-spark-1.3"));
+        QCOMPARE(had, QStringLiteral("openrouter|meta/muse-spark-1.3"));
+        QVERIFY(!curation::customKeys().contains(had));
+        QCOMPARE(picker.selectedKey(), had);
+        // Nothing typed is nothing added.
+        QVERIFY(picker.addModelById(QStringLiteral("openrouter"), QStringLiteral("   ")).isEmpty());
     }
 
     void customizeClosesAndOpensThePage() {

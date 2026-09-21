@@ -8,8 +8,6 @@
 // this module turns those rows into one flat list of *entries* — a provider and a model id, with
 // the reasoning levels the model takes — plus what the user has said about them:
 //
-//   models/shown      keys the picker shows; absent = every usable entry (so a fresh install
-//                     changes nothing, and an all-unchecked list can never empty the picker)
 //   models/priority   the single rank order the five tier lists replaced (owner, 2026-09-20).
 //                     Nothing writes it any more, and once any tier list is stored `ranked()`
 //                     stops reading it: a stale list from before the lists existed must not
@@ -21,6 +19,11 @@
 //   models/sort       the picker's sort: priority | alpha | intelligence | speed | usage | remaining
 //   models/uses/K     how many turns ran on it, for the usage sort
 //   models/speed/K    output tokens per second, a running average, for the speed sort
+//
+// Retired with card #MDL1 t:a10, and ignored rather than migrated where an old settings file
+// still holds them: `models/shown` (the "models in the picker" checklist) and `models/collapsed`
+// (its per-provider fold). Both left Options › Models with the checklist — every usable model is
+// in the lists now, and OpenRouter's long tail is behind typing in the Ctrl+Alt+M dialog.
 //
 // Keys are "<preset>|<model>". A preset id can hold ":" (guest:claude, local:foo) and a model id
 // can hold "/" (deepseek/deepseek-v4.1-flash); neither holds "|".
@@ -134,15 +137,6 @@ QList<Sort> allSorts();
 
 // What the user has said, in QSettings. Every reader tolerates an absent key.
 namespace curation {
-QStringList shownKeys();
-bool isShown(const Entry &entry);                                   // absent list → usable entries, minus an open-ended provider's long tail
-// The same answer against a key list the caller has already read. `shownKeys()` builds a
-// QSettings, which re-stats the whole XDG search path, and the catalog has hundreds of entries on
-// an OpenRouter key — asking per entry is what `shown()` below used to do (card #PPR4).
-bool isShown(const Entry &entry, const QStringList &shown);
-void setShown(const QString &key, bool on, const Catalog &catalog);  // first change materialises the list
-void resetShown();
-
 QStringList priority();
 // Keys in rank order for this catalog: the tier lists first, main leading (dropping keys that no
 // longer exist), then — only on an install that has stored no tier list at all — whatever
@@ -294,11 +288,6 @@ QList<ProfileDoc> readProfiles(const QJsonObject &document, QString *error = nul
 // lists onto it, because the lists and the current profile are one thing.
 void writeProfile(const ProfileDoc &profile);
 
-// A provider whose checkbox on Options › Models is off: every model hidden and the group folded.
-QStringList collapsedProviders();
-bool isCollapsed(const QString &preset);
-void setCollapsed(const QString &preset, bool on);
-
 // The fallback threshold (owner, 2026-09-20): a line in the priority list. Rank 1 is Main; every
 // model above the line after it is a fallback, in order — the second model is the main fallback,
 // the third the next, as many as you want. `fallbackThreshold` is how many models are above the
@@ -310,8 +299,16 @@ Sort sort();
 void setSort(Sort sort);
 }  // namespace curation
 
-// The entries the picker offers: usable, shown, in rank order.
+// The entries the picker offers, in rank order: every usable entry, minus an open-ended
+// provider's long tail — an OpenRouter row that no tier list names, that is not one of its tier
+// defaults and that you did not type yourself. Nothing else is held back: the "models in the
+// picker" checklist and its `models/shown` retired with card #MDL1 t:a10, so a model a provider
+// serves is a model the box, the dialog and `/model` all offer.
 QList<Entry> shown(const Catalog &catalog);
+// Every usable entry in rank order — `shown()` plus the tail it holds back. The Ctrl+Alt+M
+// dialog's filter searches this, which is how the tail is reached now that the per-provider
+// "add a model by id" box has left Options › Models; nothing else should need it.
+QList<Entry> allUsable(const Catalog &catalog);
 // The same list under one sort. Every sort is stable over `entries`' order, so ties keep rank.
 QList<Entry> ordered(QList<Entry> entries, Sort sort, const Catalog &catalog);
 

@@ -4,9 +4,12 @@
 #include <QAbstractItemView>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCompleter>
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDialogButtonBox>
 #include <QDropEvent>
+#include <QFormLayout>
 #include <QFont>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -16,6 +19,7 @@
 #include <QListWidget>
 #include <QPushButton>
 #include <QSignalBlocker>
+#include <QStringListModel>
 #include <QTabBar>
 #include <QTreeWidget>
 #include <QVBoxLayout>
@@ -39,6 +43,7 @@ constexpr int ViaRole = Qt::UserRole + 2;      // the keys of every provider fol
 constexpr int ListedRole = Qt::UserRole + 3;   // this row is an entry of the tab's tier list
 constexpr int AddRole = Qt::UserRole + 4;      // "not in this list": ctrl+enter puts it in
 constexpr int GroupRole = Qt::UserRole + 5;    // the folded row's group id, for the via choice
+constexpr int AddByIdRole = Qt::UserRole + 6;  // the `all` tab's "+ add a model by id…" row
 
 const QString kAll = QStringLiteral("all");
 
@@ -62,6 +67,17 @@ bool addableToTier(const Entry &entry, const QString &tier) {
     if ((tier == QStringLiteral("local")) != entry.local) return false;
     if (entry.guest && tier != QStringLiteral("main") && tier != QStringLiteral("high")) return false;
     return true;
+}
+
+// The rule the long tail appears under once something is typed. `shown()` holds back an
+// open-ended provider's rows — OpenRouter's four hundred live ones — so naming the provider is
+// what says why they were not there a moment ago (design 5.5).
+QString tailRule(const QList<Entry> &tail) {
+    QStringList providers;
+    for (const Entry &entry : tail)
+        if (!entry.provider.isEmpty() && !providers.contains(entry.provider)) providers << entry.provider;
+    return providers.isEmpty() ? QStringLiteral("more models")
+                               : QStringLiteral("more from %1").arg(providers.join(QStringLiteral(", ")));
 }
 
 // A QTreeWidget that says when a drag finished, so the tier list can be rewritten from what the
@@ -537,23 +553,35 @@ void ModelPicker::buildTier(const QString &query) {
         return;
     }
     // Typing searches every model, not only this list: the rows of this list that match come
-    // first, then the rest of the catalog under a rule, folded one row per model.
-    QList<Entry> rest;
-    for (const Entry &entry : shown(m_context.catalog)) {
+    // first, then the rest of the catalog under a rule, folded one row per model. "The rest" is
+    // every *usable* entry, so the long tail `shown()` holds back is reachable here — this is the
+    // door that replaced the per-provider id box on Options › Models (design 5.5) — and it comes
+    // under its own rule so it is clear why those rows were not listed until you typed.
+    QStringList listed;
+    for (const Entry &entry : shown(m_context.catalog)) listed << entry.key;
+    QList<Entry> rest, tail;
+    for (const Entry &entry : allUsable(m_context.catalog)) {
         if (inList.contains(entry.key) || !addableToTier(entry, m_tier) || !matches(entry, query)) continue;
-        rest << entry;
+        (listed.contains(entry.key) ? rest : tail) << entry;
     }
-    if (rest.isEmpty()) {
+    if (rest.isEmpty() && tail.isEmpty()) {
         if (drawn == 0) addSection(QStringLiteral("no model matches “%1”").arg(query));
         return;
     }
-    addSection(QStringLiteral("not in this list"));
-    for (const Group &group : grouped(m_context.catalog, rest, nowSeconds())) addGroupRow(group, true);
+    if (!rest.isEmpty()) {
+        addSection(QStringLiteral("not in this list"));
+        for (const Group &group : grouped(m_context.catalog, rest, nowSeconds())) addGroupRow(group, true);
+    }
+    if (!tail.isEmpty()) {
+        addSection(tailRule(tail));
+        for (const Group &group : grouped(m_context.catalog, tail, nowSeconds())) addGroupRow(group, true);
+    }
 }
 
 void ModelPicker::buildAll(const QString &query) {
     const Sort sort = sortFromId(m_sort->currentData().toString());
-    const QList<Entry> rows = ordered(shown(m_context.catalog), sort, m_context.catalog);
+    const QList<Entry> listed = shown(m_context.catalog);
+    const QList<Entry> rows = ordered(listed, sort, m_context.catalog);
     const QList<Group> groups = grouped(m_context.catalog, rows, nowSeconds());
     if (!query.isEmpty() || sort != Sort::Priority) {
         for (const Group &group : groups) {
@@ -561,7 +589,22 @@ void ModelPicker::buildAll(const QString &query) {
             for (const Entry &entry : group.entries) hit = hit || query.isEmpty() || matches(entry, query);
             if (hit) addGroupRow(group, false);
         }
+        // This tab shows every usable model (design 5.5), and typing reaches the one part of it
+        // `shown()` holds back: an open-ended provider's long tail, which would otherwise be the
+        // whole list. Untyped it stays out of the way; typed it is right here, under its own rule.
+        if (!query.isEmpty()) {
+            QStringList have;
+            for (const Entry &entry : listed) have << entry.key;
+            QList<Entry> tail;
+            for (const Entry &entry : allUsable(m_context.catalog))
+                if (!have.contains(entry.key) && matches(entry, query)) tail << entry;
+            if (!tail.isEmpty()) {
+                addSection(tailRule(tail));
+                for (const Group &group : grouped(m_context.catalog, tail, nowSeconds())) addGroupRow(group, false);
+            }
+        }
         if (m_list->topLevelItemCount() == 0) addSection(QStringLiteral("no model matches “%1”").arg(query));
+        addAddByIdRow();
         return;
     }
     // Sections, opencode's way: favorites, then the ten most recent, then everything by rank. A
@@ -582,6 +625,83 @@ void ModelPicker::buildAll(const QString &query) {
     if (!recent.isEmpty()) { addSection(QStringLiteral("recent")); for (const Group *group : recent) addGroupRow(*group, false); }
     if (!favorites.isEmpty() || !recent.isEmpty()) addSection(QStringLiteral("all, by priority"));
     for (const Group &group : groups) if (!placed.contains(&group)) addGroupRow(group, false);
+    addAddByIdRow();
+}
+
+// The last row of the `all` tab: the "add a model by id" box that used to sit under every
+// open-ended provider on Options › Models (design 5.5). Almost everything it was for is done by
+// typing now — the filter reaches the whole catalog — so what is left is the case it was really
+// for: an id the provider serves but does not list. Enter on the row asks for it.
+void ModelPicker::addAddByIdRow() {
+    // Column 0, spanned, like a rule — but selectable, because it is a row you press.
+    auto *row = new QTreeWidgetItem(m_list, QStringList{QStringLiteral("+ add a model by id…")});
+    row->setData(0, AddByIdRole, true);
+    row->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+    row->setFirstColumnSpanned(true);
+    const QString tip = QStringLiteral("A model id your provider serves but does not list. Typing in the filter already "
+                                       "finds every model it does list, this tab's long tail included");
+    for (int c = 0; c < ColCount; ++c) row->setToolTip(c, tip);
+    row->setForeground(0, palette().color(QPalette::Disabled, QPalette::Text));
+}
+
+QString ModelPicker::addModelById(const QString &preset, const QString &id) {
+    const QString model = id.trimmed();
+    if (preset.isEmpty() || model.isEmpty()) return QString();
+    const QString key = Catalog::keyFor(preset, model);
+    // An id the provider already lists needs nothing stored: every usable entry is offered, and
+    // the filter reaches the tail. One it does not list is remembered in `models/custom` and is an
+    // entry like any other from then on — including in this dialog, whose catalog is a copy taken
+    // when it opened, so the new row is added to it rather than waited for.
+    if (!m_context.catalog.find(key)) m_context.catalog.entries << curation::addCustom(preset, model, m_context.catalog);
+    m_filter->setText(model);
+    rebuild();
+    selectKey(key);
+    changed();
+    return key;
+}
+
+void ModelPicker::promptAddModelById() {
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("add a model by id"));
+    auto *form = new QFormLayout(&dialog);
+    auto *provider = new QComboBox;
+    provider->setObjectName(QStringLiteral("addByIdProvider"));
+    for (const QString &preset : m_context.catalog.presets()) {
+        const QList<Entry> rows = m_context.catalog.ofPreset(preset);
+        if (rows.isEmpty() || !rows.first().usable) continue;
+        provider->addItem(providerText(rows.first()), preset);
+    }
+    if (provider->count() == 0) return;
+    // The provider of the row you were on, where there was one: the likeliest answer.
+    if (const Entry *entry = m_context.catalog.find(selectedKey()); entry != nullptr)
+        provider->setCurrentIndex(qMax(0, provider->findData(entry->preset)));
+    auto *id = new QLineEdit;
+    id->setObjectName(QStringLiteral("addByIdModel"));
+    id->setPlaceholderText(QStringLiteral("model id"));
+    // The provider's own ids complete it, so the common case is a few keystrokes and the rare one
+    // — an id it serves but does not list — is still typeable in full.
+    auto *completer = new QCompleter(&dialog);
+    auto *model = new QStringListModel(completer);
+    completer->setModel(model);
+    completer->setCaseSensitivity(Qt::CaseInsensitive);
+    completer->setFilterMode(Qt::MatchContains);
+    id->setCompleter(completer);
+    const auto refill = [this, provider, model] {
+        QStringList ids;
+        for (const Entry &entry : m_context.catalog.ofPreset(provider->currentData().toString())) ids << entry.model;
+        model->setStringList(ids);
+    };
+    refill();
+    QObject::connect(provider, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, [refill](int) { refill(); });
+    form->addRow(QStringLiteral("provider"), provider);
+    form->addRow(QStringLiteral("model id"), id);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    form->addRow(buttons);
+    id->setFocus();
+    if (dialog.exec() != QDialog::Accepted) return;
+    addModelById(provider->currentData().toString(), id->text());
 }
 
 bool ModelPicker::boxClassTab() const {
@@ -792,7 +912,8 @@ void ModelPicker::onLevelChanged() {
 
 void ModelPicker::updateFooter() {
     m_footer->setText(m_tier == kAll
-        ? QStringLiteral("←→ tab · ↑↓ row · enter uses it · tab, then → : the providers of a folded row, and the levels")
+        ? QStringLiteral("←→ tab · ↑↓ row · enter uses it · type to search every model, openrouter's long tail "
+                         "included · tab, then → : the providers of a folded row, and the levels")
         : QStringLiteral("←→ tab · ↑↓ row · enter uses it · alt+↑↓ moves it · del removes it · type a name, "
                          "ctrl+enter adds it · ctrl+z undoes")
               + (boxClassTab() ? QStringLiteral(" · “in box” is a cutoff: alt+m shows this class down to the last one ticked")
@@ -964,6 +1085,12 @@ bool ModelPicker::eventFilter(QObject *watched, QEvent *event) {
 }
 
 void ModelPicker::accept() {
+    // "+ add a model by id…" is a row you press, not a model you use: Enter on it asks for the id
+    // and leaves the dialog open on what it added.
+    if (QTreeWidgetItem *row = currentRow(); row != nullptr && row->data(0, AddByIdRole).toBool()) {
+        promptAddModelById();
+        return;
+    }
     const QString key = selectedKey();
     if (key.isEmpty()) return;
     m_pick.accepted = true;

@@ -187,47 +187,31 @@ private Q_SLOTS:
         QVERIFY(!Catalog::splitKey(QStringLiteral("trailing|"), &preset, &model));
     }
 
-    void shownDefaultsToEveryUsableEntry() {
+    void shownIsEveryUsableEntry() {
         const Catalog catalog = catalogFrom(presets());
         const QList<Entry> list = shown(catalog);
         QCOMPARE(list.size(), 7);   // openai has no key
         for (const Entry &entry : list) QVERIFY(entry.usable);
+        // Nothing curates it any more (card #MDL1 t:a10): with no open-ended provider in this
+        // catalog, `allUsable` is the same list in the same order.
+        const QList<Entry> every = allUsable(catalog);
+        QCOMPARE(every.size(), list.size());
+        for (int i = 0; i < every.size(); ++i) QCOMPARE(every.at(i).key, list.at(i).key);
     }
 
-    void unCheckingOneMaterialisesTheListAndHidesOnlyThat() {
+    // The "models in the picker" checklist left Options › Models for the Ctrl+Alt+M dialog, and
+    // its setting went with it (card #MDL1 t:a10, design 5.5). A settings file that still holds
+    // `models/shown` — every install that ever un-checked a model — is ignored, not migrated: the
+    // picker shows every usable entry either way.
+    void aStoredModelsShownListIsIgnored() {
         const Catalog catalog = catalogFrom(presets());
-        curation::setShown(QStringLiteral("kimi-code|kimi-for-coding-highspeed"), false, catalog);
-        QCOMPARE(curation::shownKeys().size(), 6);
-        QCOMPARE(shown(catalog).size(), 6);
-        QVERIFY(!curation::isShown(*catalog.find(QStringLiteral("kimi-code|kimi-for-coding-highspeed"))));
-        QVERIFY(curation::isShown(*catalog.find(QStringLiteral("kimi-code|k3"))));
-        curation::setShown(QStringLiteral("kimi-code|kimi-for-coding-highspeed"), true, catalog);
+        QSettings().setValue(QStringLiteral("models/shown"),
+                             QStringList{QStringLiteral("kimi-code|k3")});
         QCOMPARE(shown(catalog).size(), 7);
-        // Un-checking everything is a reset, never an empty picker.
-        for (const Entry &entry : catalog.entries) curation::setShown(entry.key, false, catalog);
-        QVERIFY(curation::shownKeys().isEmpty());
+        QSettings().setValue(QStringLiteral("models/shown"), QStringList{});
         QCOMPARE(shown(catalog).size(), 7);
-    }
-
-    // `shown()` reads the curated list once and hands it to every entry (card #PPR4): asking per
-    // entry built a QSettings per entry, which is the 65–81 ms hitch the #PF4K profile measured at
-    // the start of a turn. The hoist is only safe while the two forms cannot disagree.
-    void theCuratedListIsReadOnceAndBothFormsAgree() {
-        const Catalog catalog = catalogFrom(presets());
-        curation::setShown(QStringLiteral("kimi-code|kimi-for-coding-highspeed"), false, catalog);
-        const QStringList keys = curation::shownKeys();
-        QCOMPARE(keys.size(), 6);
-        for (const Entry &entry : catalog.entries)
-            QCOMPARE(curation::isShown(entry, keys), curation::isShown(entry));
-        QCOMPARE(shown(catalog).size(), 6);
-        // With no list at all both still mean "every usable entry".
-        curation::resetShown();
-        const QStringList none = curation::shownKeys();
-        QVERIFY(none.isEmpty());
-        for (const Entry &entry : catalog.entries) {
-            QCOMPARE(curation::isShown(entry, none), entry.usable);
-            QCOMPARE(curation::isShown(entry, none), curation::isShown(entry));
-        }
+        // Same for the per-provider fold the checklist's heading wrote.
+        QSettings().setValue(QStringLiteral("models/collapsed"), QStringList{QStringLiteral("kimi-code")});
         QCOMPARE(shown(catalog).size(), 7);
     }
 
@@ -272,7 +256,6 @@ private Q_SLOTS:
 
     void aCustomModelIsAnEntryOfItsProviderAndShownAtOnce() {
         Catalog catalog = catalogFrom(presets());
-        curation::setShown(QStringLiteral("kimi-code|k3"), false, catalog);   // the list is explicit now
         const Entry added = curation::addCustom(QStringLiteral("kimi-code"), QStringLiteral(" k3-256k "), catalog);
         QCOMPARE(added.key, QStringLiteral("kimi-code|k3-256k"));
         QCOMPARE(added.provider, QStringLiteral("kimi"));
@@ -280,11 +263,13 @@ private Q_SLOTS:
         catalog = catalogFrom(presets());
         const Entry *entry = catalog.find(QStringLiteral("kimi-code|k3-256k"));
         QVERIFY(entry && entry->custom);
-        QVERIFY(curation::isShown(*entry));
+        bool listed = false;
+        for (const Entry &each : shown(catalog)) listed = listed || each.key == entry->key;
+        QVERIFY(listed);
         curation::removeCustom(entry->key);
         catalog = catalogFrom(presets());
         QVERIFY(!catalog.find(QStringLiteral("kimi-code|k3-256k")));
-        QVERIFY(!curation::shownKeys().contains(QStringLiteral("kimi-code|k3-256k")));
+        QVERIFY(!curation::customKeys().contains(QStringLiteral("kimi-code|k3-256k")));
     }
 
     void sortsAreStableOverRank() {
@@ -333,15 +318,10 @@ private Q_SLOTS:
         QCOMPARE(curation::openrouterFallbackModels(), QStringList{QStringLiteral("glm-5.3-flash")});
     }
 
-    void collapsedProvidersAndTheFallbackThreshold() {
+    void theFallbackThreshold() {
         QSettings().setValue(QStringLiteral("models/priority"),
                              QStringList{QStringLiteral("kimi-code|k3"), QStringLiteral("kimi-code|kimi-for-coding-highspeed")});
         const Catalog catalog = catalogFrom(presets());
-        QVERIFY(!curation::isCollapsed(QStringLiteral("glm-coding")));
-        curation::setCollapsed(QStringLiteral("glm-coding"), true);
-        QVERIFY(curation::isCollapsed(QStringLiteral("glm-coding")));
-        curation::setCollapsed(QStringLiteral("glm-coding"), false);
-        QVERIFY(curation::collapsedProviders().isEmpty());
         // Two above the line by default: Main and one fallback.
         QCOMPARE(curation::fallbackThreshold(), 2);
         QCOMPARE(fallbacks(catalog).size(), 1);
@@ -710,22 +690,37 @@ private Q_SLOTS:
         QVERIFY(tierStartEffort(*odd, QStringLiteral("main")).isEmpty());
     }
 
-    void anOpenEndedProvidersLongTailIsHiddenUntilChecked() {
+    // The one thing `shown()` still holds back: an open-ended provider's long tail — OpenRouter's
+    // four hundred live rows, which would bury every other provider in every list they appear in.
+    // A tail row joins the moment something says it is wanted (a tier default, a list, an id you
+    // typed); `allUsable` has all of them, which is what the dialog's filter searches.
+    void anOpenEndedProvidersLongTailIsBehindTyping() {
         QJsonArray rows = presets();
         QJsonObject big = rows.at(0).toObject();   // glm-coding, given ten models
         QJsonArray models = big.value(QStringLiteral("models")).toArray();
         for (int i = 0; i < 8; ++i) models << model(QStringLiteral("extra-%1").arg(i), QStringLiteral("extra %1").arg(i), QString(), {});
         big.insert(QStringLiteral("models"), models); rows.replace(0, big);
-        const Catalog catalog = catalogFrom(rows);
+        Catalog catalog = catalogFrom(rows);
         QVERIFY(catalog.find(QStringLiteral("glm-coding|extra-3"))->openEnded);
-        QVERIFY(curation::isShown(*catalog.find(QStringLiteral("glm-coding|glm-5.3"))));         // a tier row
-        QVERIFY(!curation::isShown(*catalog.find(QStringLiteral("glm-coding|extra-3"))));        // the tail
+        const auto listed = [&](const QString &key) {
+            for (const Entry &entry : shown(catalog)) if (entry.key == key) return true;
+            return false;
+        };
+        const auto everywhere = [&](const QString &key) {
+            for (const Entry &entry : allUsable(catalog)) if (entry.key == key) return true;
+            return false;
+        };
+        QVERIFY(listed(QStringLiteral("glm-coding|glm-5.3")));          // a tier row
+        QVERIFY(!listed(QStringLiteral("glm-coding|extra-3")));         // the tail
+        QVERIFY(everywhere(QStringLiteral("glm-coding|extra-3")));      // …but the filter reaches it
         curation::addToTier(QStringLiteral("main"), QStringLiteral("glm-coding|extra-3"));
-        QVERIFY(curation::isShown(*catalog.find(QStringLiteral("glm-coding|extra-3"))));         // named by a list
-        curation::setShown(QStringLiteral("glm-coding|extra-5"), true, catalog);
-        QVERIFY(curation::isShown(*catalog.find(QStringLiteral("glm-coding|extra-5"))));         // checked by hand
-        QVERIFY(!curation::isShown(*catalog.find(QStringLiteral("glm-coding|extra-6"))));        // the rest stays hidden
-        QVERIFY(curation::isShown(*catalog.find(QStringLiteral("kimi-code|k3"))));               // a small provider: all in
+        QVERIFY(listed(QStringLiteral("glm-coding|extra-3")));          // named by a list
+        curation::addCustom(QStringLiteral("glm-coding"), QStringLiteral("extra-99"), catalog);
+        catalog = catalogFrom(rows);
+        QVERIFY(listed(QStringLiteral("glm-coding|extra-99")));         // an id you typed yourself
+        QVERIFY(!listed(QStringLiteral("glm-coding|extra-6")));         // the rest stays behind typing
+        QVERIFY(everywhere(QStringLiteral("glm-coding|extra-6")));
+        QVERIFY(listed(QStringLiteral("kimi-code|k3")));                // a small provider: all in
     }
 
     void sortRoundTrips() {

@@ -15,14 +15,12 @@ namespace relay::models {
 
 namespace {
 
-const QString kShown = QStringLiteral("models/shown");
 const QString kPriority = QStringLiteral("models/priority");
 const QString kCustom = QStringLiteral("models/custom");
 const QString kFavorites = QStringLiteral("models/favorites");
 const QString kRecent = QStringLiteral("models/recent");
 const QString kSort = QStringLiteral("models/sort");
 const QString kOpenrouter = QStringLiteral("models/openrouter_fallback");
-const QString kCollapsed = QStringLiteral("models/collapsed");
 const QString kProviderOrder = QStringLiteral("models/provider_order");
 const QString kProfileOrder = QStringLiteral("models/profile_order");
 const QString kProfile = QStringLiteral("models/profile");
@@ -299,38 +297,6 @@ namespace curation {
 // Whether any tier list names this entry (an open-ended provider's tail shows only then).
 bool inAnyList(const QString &key);
 
-
-QStringList shownKeys() { return list(kShown); }
-
-bool isShown(const Entry &entry, const QStringList &shown) {
-    if (!entry.usable) return false;
-    if (!shown.isEmpty()) return shown.contains(entry.key);
-    // No list yet: everything a provider serves — except the long tail of an open-ended one
-    // (OpenRouter's 400-odd live rows), which stays behind the id box until checked. Its tier
-    // rows, the ids you typed and anything a tier list names are in (owner report, 2026-09-20:
-    // a stray pick landed on meta/muse-spark-1.3 while the box still said deepseek).
-    if (!entry.openEnded || !entry.tier.isEmpty() || entry.custom) return true;
-    return inAnyList(entry.key);
-}
-
-bool isShown(const Entry &entry) { return isShown(entry, shownKeys()); }
-
-void setShown(const QString &key, bool on, const Catalog &catalog) {
-    QStringList keys = shownKeys();
-    if (keys.isEmpty()) {
-        // First change: write down today's default so the one un-check does not hide everything.
-        for (const Entry &entry : catalog.entries)
-            if (isShown(entry, QStringList())) keys << entry.key;
-    }
-    if (on && !keys.contains(key)) keys << key;
-    if (!on) keys.removeAll(key);
-    // Un-checking the last one is a reset to "everything", never an empty picker.
-    if (keys.isEmpty()) { QSettings().remove(kShown); return; }
-    store(kShown, keys);
-}
-
-void resetShown() { QSettings().remove(kShown); }
-
 QStringList priority() { return list(kPriority); }
 
 QStringList ranked(const Catalog &catalog) {
@@ -379,8 +345,6 @@ Entry addCustom(const QString &preset, const QString &model, const Catalog &cata
     const QString key = Catalog::keyFor(preset, model.trimmed());
     QStringList keys = customKeys();
     if (!catalog.find(key) && !keys.contains(key)) { keys << key; store(kCustom, keys); }
-    // Shown at once: adding a model and then hunting for its checkbox would be two steps for one.
-    setShown(key, true, catalog);
     Entry entry;
     entry.key = key; entry.preset = preset; entry.model = model.trimmed(); entry.label = entry.model.toLower();
     entry.custom = true;
@@ -397,9 +361,6 @@ void removeCustom(const QString &key) {
     QStringList keys = customKeys();
     keys.removeAll(key);
     store(kCustom, keys);
-    QStringList shown = shownKeys();
-    shown.removeAll(key);
-    store(kShown, shown);
     QStringList ranks = priority();
     ranks.removeAll(key);
     store(kPriority, ranks);
@@ -844,15 +805,6 @@ void writeProfile(const ProfileDoc &profile) {
     if (settings.value(kProfile).toString() == clean) applyProfile(clean);
 }
 
-QStringList collapsedProviders() { return list(kCollapsed); }
-bool isCollapsed(const QString &preset) { return collapsedProviders().contains(preset); }
-void setCollapsed(const QString &preset, bool on) {
-    QStringList keys = collapsedProviders();
-    keys.removeAll(preset);
-    if (on) keys << preset;
-    store(kCollapsed, keys);
-}
-
 int fallbackThreshold() { return qMax(1, QSettings().value(kThreshold, kDefaultThreshold).toInt()); }
 void setFallbackThreshold(int count) {
     if (count == kDefaultThreshold) QSettings().remove(kThreshold);
@@ -869,18 +821,33 @@ void setSort(Sort sort) {
 
 // ----- lists -----------------------------------------------------------------------------------
 
+// The one rule behind `shown()`, stated once (card #MDL1 t:a10, design 5.5). There is no
+// "models in the picker" checklist any more and no `models/shown`: a model a provider serves is
+// a model you can pick. The single exception is an open-ended provider's long tail — OpenRouter's
+// four hundred live rows — which would bury every other provider in every list it appears in. A
+// tail row joins the lists the moment something says it is wanted: it is a provider's tier
+// default, it is an id you typed (`models/custom`), or a tier list names it. Typing in the
+// Ctrl+Alt+M dialog reaches the rest (`allUsable`), which is where the old id box went.
+static bool inPickerList(const Entry &entry) {
+    if (!entry.usable) return false;
+    if (!entry.openEnded || !entry.tier.isEmpty() || entry.custom) return true;
+    return curation::inAnyList(entry.key);
+}
+
 QList<Entry> shown(const Catalog &catalog) {
     QList<Entry> out;
-    // The curated list is read once, not once per entry (card #PPR4). `isShown()` builds a
-    // QSettings, and a pane refreshes its pickers on every `changed()` — which is what a turn
-    // start is — so with an OpenRouter catalog this walk was a few hundred QSettings
-    // constructions, each re-stating the whole XDG search path, on the GUI thread. That is the
-    // 65–81 ms hitch at the start of a turn the #PF4K profile measured and could not place
-    // (finding 5; the stack is in docs/qa_evidence/2026-09-20-perf-fixes/toolout/stall.txt).
-    const QStringList keys = curation::shownKeys();
     for (const QString &key : curation::ranked(catalog)) {
         const Entry *entry = catalog.find(key);
-        if (entry && curation::isShown(*entry, keys)) out << *entry;
+        if (entry && inPickerList(*entry)) out << *entry;
+    }
+    return out;
+}
+
+QList<Entry> allUsable(const Catalog &catalog) {
+    QList<Entry> out;
+    for (const QString &key : curation::ranked(catalog)) {
+        const Entry *entry = catalog.find(key);
+        if (entry && entry->usable) out << *entry;
     }
     return out;
 }

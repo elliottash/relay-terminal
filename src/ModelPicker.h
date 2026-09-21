@@ -10,7 +10,8 @@
 // models." So the dialog is now tabbed:
 //
 //   high · main · flash · lite · local        each tab *is* that tier list, numbered, in order
-//   all                                        the old flat picker: favorites, recents, the sort
+//   all                                        every usable model: favorites, recents, the sort,
+//                                              and "+ add a model by id…" at the end
 //
 // A tier tab is the list itself, so editing it here is editing it on Options › Models: both write
 // `models/tier/<tier>` through `curation::setTierList`, which writes through to the current
@@ -34,6 +35,8 @@
 //   alt+↑ / alt+↓  move the row up or down the list (a drag does the same)
 //   delete         take the row out of the list (backspace does it while the filter is empty)
 //   ctrl+enter     add the highlighted model to this list, at the end
+//   typing         searches every usable model, this tab's list first; an open-ended provider's
+//                  long tail (OpenRouter's live listing) comes under "more from <provider>"
 //   ctrl+z         undo a list edit made in this dialog
 //   the "in box" column is a cutoff: it says how far down this class the Alt+M box shows
 //
@@ -129,6 +132,11 @@ public:
     // and a test presses them without a window manager; each one writes through
     // `curation::setTierList` and calls `onListsChanged`.
     void moveSelected(int delta);   // alt+↑ / alt+↓, and the end of a drag
+    // "+ add a model by id…", the last row of the `all` tab: the input that sat under every
+    // open-ended provider on Options › Models until the checklist left the page (card #MDL1
+    // t:a10, design 5.5). Returns the key it added, or an empty string. Public because a test
+    // adds one without putting the little dialog on screen.
+    QString addModelById(const QString &preset, const QString &id);
     void removeSelected();          // delete
     void addSelected();             // ctrl+enter, and the "+ add" cell
     void undo();                    // ctrl+z
@@ -150,6 +158,8 @@ private:
     QTreeWidgetItem *addGroupRow(const models::Group &group, bool addable);
     void buildTier(const QString &query);
     void buildAll(const QString &query);
+    void addAddByIdRow();
+    void promptAddModelById();
     void onBoxCheckChanged(QTreeWidgetItem *item, int column);
     void refreshBoxChecks();   // the ticks again from the stored cutoff, without rebuilding the rows
     bool boxClassTab() const;        // this tab is one of the four classes the box can draw
