@@ -1317,117 +1317,68 @@ private:
         tool->setProperty("paneType", actions ? QStringLiteral("actions") : QStringLiteral("options"));
     }
 
-    // ----- the helper panels in Options, Actions and Sessions (card #FEJQ, protocol §30.7) ------
+    // ----- the helper's panels are gone; its worker is not (card #AGNT step 5) ----------------
     //
-    // "When you are in options, actions, or sessions, you have a helper agent, same as the
-    // switchboard agent" (owner). Those three panes carry the Switchboard's own panel and ask the
-    // **tab's** helper worker, so the window is what joins them: where the panel's messages go,
-    // where its answers come from, what its links open, and the model box in its composer.
+    // `wireHelperPanel` lived here: one template that gave the Options, Actions and Sessions
+    // panes the Switchboard's `HelperChatPanel`, its own `board_chat` FIFO and its own model box.
+    // `board_chat` is retired on the wire (step 4) and the panel is replaced by an embedded
+    // agent console (`createAgentConsole`, above), so the template had nothing left to wire: a
+    // panel's `onHelperSend` now has no message the worker would answer. The three hosts each
+    // grow a `relay::agent::ConsoleFactory onCreateConsole` instead and keep `focusHelper()`,
+    // which is what `helper.ask` (Alt+Q) calls.
     //
-    // They keep one seam, name for name (src/SettingsPane.h, src/Conversations.h), so this is a
-    // template rather than two copies of a dozen callbacks that would drift the first time one of
-    // them grew a thirteenth.
+    // What did **not** go with it: `helperWorker`, `startBoardWorker`, `sendToHelper`,
+    // `listenToHelper` and `deliverToHelperPanels`. Those are the tab worker itself and its
+    // subscription, and they still carry the Test suites pane's `tests_*`, the Profile pane's
+    // `profile_*`, the board's own writes and `signals_config` — none of which was ever chat.
+
+    // The four things a console host needs from the window, and nothing else. `SettingsPane` and
+    // `relay::conversations::SessionManager` name them identically on purpose (step 7), so this is
+    // one template rather than two copies that would drift the first time one grew a fifth.
     //
-    // `leaf` is the ToolPane the view is hosted in. It is not in a tab while its creator runs —
-    // insertBeside comes after — so everything that needs the page waits a turn of the event
-    // loop, the way the Switchboard's own `board_open` does.
+    // `leaf` is the `ToolPane` the view is hosted in. It is not in a tab while its creator runs —
+    // `insertBeside` comes afterwards — so the tab's id and workspace are pushed a turn of the
+    // event loop later, the way the Switchboard's own `board_open` waits, and again whenever the
+    // tab's project changes (`refreshConsoleHosts`).
     template <typename View>
-    void wireHelperPanel(View *view, QWidget *leaf, const QString &hintId,
-                         const QString &accessibleName) {
+    void wireConsoleHost(View *view, QWidget *leaf, const QString &hintId) {
         QPointer<QWidget> guard(leaf);
         QPointer<View> viewGuard(view);
-        view->onHelperSend = [guard](const QJsonObject &message) {
+        view->onCreateConsole = [guard](relay::agent::Context *context, QWidget *parent) {
             auto *w = windowOf(guard);
-            if (!w) return;
-            // The panel tags its own messages with the pane it is, and in Options that tag
-            // follows the mode, so the window names no pane of its own: which brief the turn
-            // gets is the panel's to say (§30.7).
-            w->sendToHelper(w->pageOf(guard), QString(), message);
+            return w ? w->createAgentConsole(context, parent) : relay::agent::ConsoleHandle();
         };
-        // The panel's messages need ids the worker's answers can be told by. One counter per
-        // panel behind one minted prefix: two Options panes in two tabs share a worker only by
-        // accident of the same project, and must never share a request id.
-        auto seq = std::make_shared<int>(0);
-        const QString prefix = QLatin1Char('h')
-            + QUuid::createUuid().toString(QUuid::Id128).left(6) + QLatin1Char('-');
-        view->nextHelperRequestId = [seq, prefix] { return prefix + QString::number(++*seq); };
-        view->onHelperOpenCard = [guard](const QString &id) {
-            if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->openBoardCard(id); }
-        };
-        view->onHelperOpenFile = [guard](const QString &path) {
-            if (auto *w = windowOf(guard)) w->openPath(path, 0, guard);
-        };
-        view->onHelperHint = [guard](const QString &id, const QString &keys) {
-            auto *w = windowOf(guard);
-            if (w && !keys.isEmpty()) w->hint(id, relay::ShortcutHints::nextTime(keys));
-        };
-        // The live key, not a written one (WARP.md's standing rule): the collapsed row says it
-        // and the hint a mouse click teaches quotes it.
+        // The live key, never a written one (WARP.md's standing rule): the collapsed row says it.
         view->setHelperShortcut(hintId, Keymap::instance().shortcutText(QStringLiteral("helper.ask")));
-
-        // The model box in the panel's composer (#BRD3): the same rows the Switchboard's carries,
-        // over the same `switchboard` role, so a pick in any of the four writes one setting and
-        // reconfigures one worker.
-        auto *box = new CurrentTextComboBox;
-        box->setObjectName(QStringLiteral("statusPicker"));
-        box->setAccessibleName(accessibleName);
-        box->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
-        box->setFocusPolicy(Qt::TabFocus);
-        auto state = std::make_shared<relay::helpermodel::State>();
-        QPointer<CurrentTextComboBox> boxGuard(box);
-        const auto fillBox = [boxGuard, state] {
-            if (!boxGuard) return;
-            const QSignalBlocker blocker(boxGuard.data());
-            boxGuard->setToolTip(relay::helpermodel::fill(boxGuard.data(), *state));
-            boxGuard->updateGeometry();   // the collapsed box is as wide as the model it names
-        };
-        connect(box, QOverload<int>::of(&QComboBox::activated), box, [this, boxGuard, fillBox](int index) {
-            if (!boxGuard) return;
-            const QString data = boxGuard->itemData(index).toString();
-            // A gear row, or a pick the window refused: put the box back on the live row at once.
-            // A real pick stays showing until the reconfigure's `configured` redraws it.
-            if (pickHelperModel(data)) fillBox();
+        QTimer::singleShot(0, this, [guard, viewGuard] {
+            auto *w = windowOf(guard);
+            if (!w || !viewGuard) return;
+            QWidget *page = w->pageOf(guard);
+            if (!page) return;
+            viewGuard->setHelperTabId(w->tabIdOf(page));
+            viewGuard->setHelperWorkspace(w->boardWorkspaceOfTab(page));
         });
-        view->addHelperComposerWidget(box);
-        // `/model` and `/models` in this panel's composer (#PK5Q), over the box just added.
-        if (relay::HelperChatPanel *panel = view->helperPanel())
-            panel->onSlashCommand = [this](const QString &name, const QString &args) {
-                return helperSlashCommand(name, args);
-            };
+    }
 
-        // The tab's helper is started at the first ask, so the catalog a box is lent may itself
-        // still be arriving when the panel is built. Asking again as the list is about to be drawn
-        // costs nothing and means a box is never opened on four rows and a gear.
-        box->onBeforePopup = [this, guard, state, fillBox] {
-            if (!state->presets.isEmpty() || !guard) return;
-            *state = helperModelState(pageOf(guard));
-            if (!state->presets.isEmpty()) fillBox();
-        };
-        QTimer::singleShot(0, this, [this, guard, viewGuard, state, fillBox] {
-            QWidget *page = guard ? pageOf(guard) : nullptr;
-            if (!page || !viewGuard) return;
-            // What the tab's worker has already said about its model. A helper that has been
-            // answering the Switchboard for an hour says `configured` again only at the next
-            // reconfigure, so a panel opened now would otherwise show an empty box until then.
-            *state = helperModelState(page);
-            fillBox();
-            listenToHelper(page, guard, [viewGuard, state, fillBox](const QJsonObject &event) {
-                if (!viewGuard) return;
-                // A worker **event** names itself in `event`, not in `type` — `type` is what a
-                // message going the other way carries (BoardView::handleEvent reads the same
-                // field). Reading `type` here handed every panel an untyped event: a `delta`
-                // arrived, the panel took it as proof that a turn was running and then matched
-                // none of the branches, so the Options helper sat at "running" with an empty log
-                // while the worker's log said the turn was done in 628 ms.
-                const QString type = event.value(QStringLiteral("event")).toString();
-                viewGuard->helperEvent(type, event);
-                // The `presets` rows are the composer microphone's too (the "voice needs an
-                // OpenRouter key" offer), which is why the panel is given them as well.
-                if (type == QStringLiteral("presets"))
-                    viewGuard->setHelperPresets(event.value(QStringLiteral("presets")).toArray());
-                if (state->take(type, event)) fillBox();
-            });
-        });
+    // A tab that gained (or changed) its project: its console hosts are told, so the next ask
+    // goes out with the board the tab is now attached to. The conversation does not move — the
+    // key is the tab's and the tab has not changed — which is what protocol 30.7's move test says.
+    void refreshConsoleHosts(QWidget *page) {
+        if (!page) return;
+        const QString tab = tabIdOf(page);
+        const QString workspace = boardWorkspaceOfTab(page);
+        for (QWidget *leaf : leavesIn(page)) {
+            auto *tool = dynamic_cast<ToolPane *>(leaf);
+            if (!tool) continue;
+            if (relay::SettingsPane *settings = tool->settings()) {
+                settings->setHelperTabId(tab);
+                settings->setHelperWorkspace(workspace);
+            }
+            if (auto *sessions = sessionsViewOf(tool)) {
+                sessions->setHelperTabId(tab);
+                sessions->setHelperWorkspace(workspace);
+            }
+        }
     }
 
     // A pick in any helper model box (#BRD3, §30.7). It writes the persisted `switchboard` role
@@ -1615,13 +1566,12 @@ private:
         };
         view->onClose = [guard] { if (auto *w = windowOf(guard)) w->closeSettingsPane(guard); };
         view->onRun = [guard](const relay::ActionItem &item) { if (auto *w = windowOf(guard)) w->runFromSettings(guard, item); };
-        // The helper agent's panel at the foot of the pane (#FEJQ). `option:` links resolve inside
-        // the pane itself; a `session:` one is the manager's, and opens it on that conversation.
-        wireHelperPanel(view, tool, QStringLiteral("options.ask"),
-                        QStringLiteral("Options helper model"));
-        view->onHelperOpenSession = [guard](const QString &id) {
-            if (auto *w = windowOf(guard)) w->openSessions(QString(), id);
-        };
+        // The agent console at the foot of the pane (#AGNT step 5, replacing #FEJQ's panel). The
+        // window makes it, because a pane library cannot name `Pane`; the pane owns the collapsed
+        // "? Helper Agent (Alt+Q)" row and asks for one on **first expand**, so a tab whose helper
+        // nobody opens pays for nothing. `option:` links resolve inside the pane itself through
+        // its own context; everything else the answer names travels the window's own routes.
+        wireConsoleHost(view, tool, QStringLiteral("options.ask"));
         return tool;
     }
 
@@ -3561,7 +3511,7 @@ private:
                                           "Switchboard to set that on."), 6000);
                     return;
                 }
-                sendToHelper(page, QString(), {{QStringLiteral("type"), QStringLiteral("signals_config")},
+                sendToHelper(page, {{QStringLiteral("type"), QStringLiteral("signals_config")},
                                                {QStringLiteral("auto_work"), on}});
             });
             work.aliases = QStringLiteral("signals signal thread unasked auto work failing test fix "
@@ -5229,7 +5179,7 @@ public:
             if (!w) return;
             QWidget *page = w->pageOf(guard);
             if (!page || w->boardWorkspaceOfTab(page).isEmpty()) return;
-            w->sendToHelper(page, QString(), request);
+            w->sendToHelper(page, request);
         };
         // In: every event of that helper. The pane keeps the `tests_*` ones and ignores the rest,
         // and `ready` — a worker that has just started or restarted — is what makes it ask again,
@@ -5336,7 +5286,7 @@ public:
         if (!view) return;
         view->startWaitingFor(target);
         updateTitles();
-        sendToHelper(page, QString(), request);
+        sendToHelper(page, request);
     }
 
     relay::profile::ProfilePane *openProfilePane() {
@@ -5377,7 +5327,7 @@ public:
             if (!w) return;
             QWidget *page = w->pageOf(guard);
             if (!page || w->boardWorkspaceOfTab(page).isEmpty()) return;
-            w->sendToHelper(page, QString(), request);
+            w->sendToHelper(page, request);
         };
         listenToHelper(page, view, [guard, viewGuard](const QJsonObject &event) {
             auto *w = windowOf(guard);
@@ -5446,8 +5396,7 @@ public:
             relative = QDir(root).relativeFilePath(evidence);
         const QString id = nextProfileWriteId();
         m_profileWrites.insert(id, ProfileCardWrite{markdown, relative});
-        sendToHelper(page, QString(),
-                     {{QStringLiteral("type"), QStringLiteral("board_card_get")},
+        sendToHelper(page, {{QStringLiteral("type"), QStringLiteral("board_card_get")},
                       {QStringLiteral("id"), id},
                       {QStringLiteral("card"), card}});
     }
@@ -5485,8 +5434,7 @@ public:
                 patch.insert(QStringLiteral("fields"), QJsonObject{{QStringLiteral("links"), links}});
             }
         }
-        sendToHelper(page, QString(),
-                     {{QStringLiteral("type"), QStringLiteral("board_update")},
+        sendToHelper(page, {{QStringLiteral("type"), QStringLiteral("board_update")},
                       {QStringLiteral("id"), nextProfileWriteId()},
                       {QStringLiteral("card"), card},
                       {QStringLiteral("base_hash"), hash},
@@ -5547,8 +5495,7 @@ public:
         const QString id = nextTestsWriteId();
         m_testsWrites.insert(id, TestsCardWrite{QPointer<ToolPane>(tool), testsSectionLine(row),
                                                 QStringLiteral("Filed a card for %1.").arg(row.name), true});
-        sendToHelper(page, QString(),
-                     {{QStringLiteral("type"), QStringLiteral("board_create")},
+        sendToHelper(page, {{QStringLiteral("type"), QStringLiteral("board_create")},
                       {QStringLiteral("id"), id},
                       {QStringLiteral("tab"), bugsTabOf(page)},
                       {QStringLiteral("status"), QStringLiteral("inbox")},
@@ -5578,8 +5525,7 @@ public:
         const QString id = nextTestsWriteId();
         m_testsWrites.insert(id, TestsCardWrite{QPointer<ToolPane>(tool), testsSectionLine(row),
                                                 QStringLiteral("Added %1 to #%2.").arg(row.name, card), false});
-        sendToHelper(page, QString(),
-                     {{QStringLiteral("type"), QStringLiteral("board_card_get")},
+        sendToHelper(page, {{QStringLiteral("type"), QStringLiteral("board_card_get")},
                       {QStringLiteral("id"), id},
                       {QStringLiteral("card"), card}});
     }
@@ -5638,8 +5584,7 @@ public:
         if (!pending.section.isEmpty() && !card.isEmpty() && hash.size() == 64 && page) {
             const QString next = nextTestsWriteId();
             m_testsWrites.insert(next, TestsCardWrite{pending.pane, QString(), pending.note, pending.reveal});
-            sendToHelper(page, QString(),
-                         {{QStringLiteral("type"), QStringLiteral("board_update")},
+            sendToHelper(page, {{QStringLiteral("type"), QStringLiteral("board_update")},
                           {QStringLiteral("id"), next},
                           {QStringLiteral("card"), card},
                           {QStringLiteral("base_hash"), hash},
@@ -5744,23 +5689,11 @@ public:
             relay::theme::polishWindow(tool);
             for (const SessionsTab &extra : sessionsTabs())
                 if (QWidget *widget = extra.make ? extra.make(this) : nullptr) view->addTab(extra.id, extra.label, widget);
-            // The helper agent's panel at the foot of the pane (#FEJQ). Wired before the pane is
-            // shown, because the panel is hidden until it has somewhere to send. A `session:`
-            // link is the manager's own business; an `option:` one belongs to Options.
-            wireHelperPanel(view, tool, QStringLiteral("sessions.ask"),
-                            QStringLiteral("Sessions helper model"));
-            {
-                QPointer<ToolPane> toolGuard(tool);
-                view->onHelperOpenOption = [toolGuard](const QString &section, const QString &row) {
-                    auto *w = windowOf(toolGuard);
-                    if (!w) return;
-                    w->openSettingsPane(relay::SettingsPane::Mode::Options, section);
-                    if (ToolPane *pane = w->settingsPaneIn(w->m_tabs->currentWidget(),
-                                                           relay::SettingsPane::Mode::Options);
-                        pane && pane->settings())
-                        pane->settings()->revealOption(section, row);
-                };
-            }
+            // The agent console at the foot of the pane (#AGNT step 5, replacing #FEJQ's panel):
+            // the window makes it on first expand, the row stays this pane's. A `session:` link is
+            // the manager's own business; an `option:` one is the console's, which opens Options
+            // on the row exactly as a terminal pane's transcript does.
+            wireConsoleHost(view, tool, QStringLiteral("sessions.ask"));
             insertBeside(owner, tool, owner->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
         }
         // What is open and what was closed is the window's knowledge, not the list's: it is pushed
@@ -6603,6 +6536,11 @@ public:
         const bool attached = !tabProject(page).isEmpty();
         const QJsonObject board = boardSettingsFor(page);
         for (Pane *pane : panesIn(page)) pane->setBoard(attached ? board : QJsonObject());
+        // The consoles of the tab are not in `panesIn` — that is the whole point of the walk
+        // stopping at a `ToolPane` — so their hosts are told here instead, by the board the tab
+        // is now attached to rather than by a `set_board` meant for a terminal agent (#AGNT
+        // step 5).
+        refreshConsoleHosts(page);
     }
 
     // ----- the helper worker: one per tab (card #FEJQ, protocol §30.7) --------------------------
@@ -6661,15 +6599,23 @@ public:
             // busy strip and its composer refuses a second prompt for ever. This is the list that
             // gets put back — the pane a turn started in, and any pane with a prompt queued
             // behind it.
-            if (type == QStringLiteral("board_chat_started") || type == QStringLiteral("board_chat_queued")) {
-                const QString from = event.value(QStringLiteral("pane")).toString();
-                guard->m_helperWaiting[tab].insert(from.isEmpty() ? QStringLiteral("switchboard") : from);
-            } else if (event.value(QStringLiteral("chat")).toBool()
-                       && (type == QStringLiteral("done") || type == QStringLiteral("error")
-                           || type == QStringLiteral("cancelled"))) {
-                const QString from = event.value(QStringLiteral("pane")).toString();
-                guard->m_helperWaiting[tab].remove(from.isEmpty() ? QStringLiteral("switchboard") : from);
+            // Since card #AGNT the wire says this in one word. The two chat-era events that fed
+            // this list are retired; a console's turn is an ordinary pane turn, and `surface`
+            // rides on `queued`, on `agent_started` and on `agent_finished` (protocol 33). A
+            // finish with no surface is a worker that answered nothing in particular, and clears
+            // the list rather than leaving a name in it for ever.
+            if (type == QStringLiteral("queued") || type == QStringLiteral("agent_started")) {
+                if (const QString surface = event.value(QStringLiteral("surface")).toString(); !surface.isEmpty())
+                    guard->m_helperWaiting[tab].insert(surface);
+            } else if (type == QStringLiteral("agent_finished")) {
+                const QString surface = event.value(QStringLiteral("surface")).toString();
+                if (surface.isEmpty()) guard->m_helperWaiting[tab].clear();
+                else guard->m_helperWaiting[tab].remove(surface);
             }
+            // The handshake, kept for a console made after this worker was already up: it is said
+            // once per configure and would otherwise never reach one (attachConsoleToTab).
+            if (type == QStringLiteral("ready") || type == QStringLiteral("configured"))
+                guard->m_workerHandshake.insert(handshakeKey(tab, type), event);
             // What this worker says about its own model is kept for the panels that are not
             // open yet: it is said on configure and not again (#BRD3).
             guard->m_helperModels[tab].take(type, event);
@@ -6698,6 +6644,7 @@ public:
                 if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board())
                     tool->board()->handleEvent(event);
             guard->deliverToHelperPanels(page, event);
+            guard->deliverToConsoles(tab, event);
         };
         // The process has gone and nobody asked it to: every panel of this tab that was waiting
         // on it is put back to idle (#H6VQ, §30.7). Nothing else says so — `done` was the
@@ -6741,13 +6688,14 @@ public:
         m_helperListeners.append({QPointer<QWidget>(page), QPointer<QObject>(owner), std::move(handle)});
     }
 
-    // What a helper panel sends: everything it does leaves as a worker message
-    // (relay::HelperChatPanel::onSend), and this puts it on the tab's helper — started here, at
-    // the **first ask** rather than when the tab opened (owner decision 5). `pane` rides on the
-    // message so the brief follows the panel that asked (§30.7).
-    void sendToHelper(QWidget *page, const QString &pane, QJsonObject message) {
+    // A message on the tab's worker, which is started here — at the **first** one rather than
+    // when the tab opened (owner decision 5, §30.7). It used to take a `pane` to tag the message
+    // with, which was `board_chat`'s way of saying which brief the turn should get; a console
+    // says it in its `context` block and its `surface` instead (protocol 33), so the tag is gone
+    // and every caller left is a pane of the window asking the tab's worker for something — the
+    // Test suites list, a profile run, a board write, the signals configuration.
+    void sendToHelper(QWidget *page, QJsonObject message) {
         if (!page) return;
-        if (!pane.isEmpty()) message.insert(QStringLiteral("pane"), pane);
         if (relay::BoardWorker *worker = helperWorker(page, true)) worker->send(message);
     }
 
@@ -6805,6 +6753,9 @@ public:
     // where a helper comes from anyway.
     void helperWorkerGone(const QString &tab, bool crashed) {
         const QSet<QString> waiting = m_helperWaiting.take(tab);
+        // Whatever the dead worker said about itself is not true of the next one.
+        m_workerHandshake.remove(handshakeKey(tab, QStringLiteral("ready")));
+        m_workerHandshake.remove(handshakeKey(tab, QStringLiteral("configured")));
         QWidget *page = pageOfTabId(tab);
         if (!page || waiting.isEmpty()) return;
         const QString text = crashed
@@ -6825,6 +6776,13 @@ public:
                     tool->board()->handleEvent(event);
             deliverToHelperPanels(page, event);
         }
+        // And the consoles of this tab, once rather than per waiting surface: it is one agent
+        // that died and every console of the tab is on it. An `error` with no request id is what
+        // a pane already ends a stuck turn on — the busy line goes, the clock stops and the
+        // composer takes prompts again — and the next ask starts a fresh worker.
+        deliverToConsoles(tab, QJsonObject{{QStringLiteral("event"), QStringLiteral("error")},
+                                           {QStringLiteral("worker_gone"), true},
+                                           {QStringLiteral("text"), text}});
     }
 
     // The tab has gone, so its helper has nobody left to talk to (§30.7: "closing the tab stops
@@ -6837,6 +6795,9 @@ public:
         if (tab.isEmpty()) return;                       // nothing ever asked: no worker to stop
         m_helperModels.remove(tab);                      // what it said about its model goes with it
         m_helperWaiting.remove(tab);
+        m_tabConsole.remove(tab);
+        m_workerHandshake.remove(handshakeKey(tab, QStringLiteral("ready")));
+        m_workerHandshake.remove(handshakeKey(tab, QStringLiteral("configured")));
         if (relay::BoardWorker *worker = m_boardWorkers.take(tab).data()) {
             worker->onEvent = nullptr;
             worker->onStatus = nullptr;
@@ -6920,6 +6881,15 @@ public:
         // decided on #GMCF (2026-09-20) that the helper may also rebind one, which is the
         // `set_keybinding` this block hands it. Reloads travel as `sendHelperKeybindings()`.
         configure.insert(QStringLiteral("keybindings"), Keymap::instance().catalog());
+        // Protocol 33's `context` block: what this tab's agent is *about*. It is the context of
+        // the console that last spoke, because the consoles of a tab share one worker and one
+        // conversation (owner decision 1) and what differs between them is the brief and the
+        // surface name, never the store — `persist {scope: "helper", key: <tab id>}` is the same
+        // for all four, so swapping the block reconfigures the brief and leaves the conversation
+        // exactly where it was (30.7's move test). A tab with no console attached sends no block
+        // at all, which is how this configure read before card #AGNT.
+        if (Pane *console = m_tabConsole.value(tabIdOf(page)).data(); console && console->context())
+            configure.insert(QStringLiteral("context"), console->contextBlock());
         // Only this tab's helper: another tab, even on the same project, keeps its own.
         if (relay::BoardWorker *worker = boardWorker(page)) worker->start(configure);
     }
@@ -7331,6 +7301,18 @@ private:
         QList<Pane *> panes;
         if (!root) return panes;
         if (auto *pane = dynamic_cast<Pane *>(root)) { panes.append(pane); return panes; }
+        // A `ToolPane` is a leaf, and this stops there the way `leavesIn` above already does.
+        // Since card #AGNT a tool pane may *contain* a `Pane` — the agent console the Switchboard,
+        // Options, Actions and Sessions embed — and descending into one would put that console in
+        // `allPanes()`. Six things break at once when it does: `syncTabShares` and
+        // `syncAlwaysOnShares` publish it to the phone as its own inbox row, `closeEvent` and
+        // `confirmClose` disagree so every close prompts, `createPane`'s `!allPanes().isEmpty()`
+        // makes the first real terminal default to Flash, `savePaneScrollbacks` writes a
+        // scrollback the prune then removes, `paneWithToken` resolves a notification to a non-leaf
+        // and hands `setActiveLeaf` one, and `repointTabPanes` sends it a `set_board` meant for
+        // terminal agents. The console's own worker is the tab's, and the window reaches it
+        // through `m_consoles`, never through this walk.
+        if (dynamic_cast<ToolPane *>(root)) return panes;
         // Walk the layout tree in visual order (splitter child order).
         if (auto *splitter = dynamic_cast<QSplitter *>(root)) {
             for (int i = 0; i < splitter->count(); ++i) panes += panesIn(splitter->widget(i));
@@ -7538,6 +7520,17 @@ private:
         };
         // Session manager and ⓘ (cards #R6J0, #Y63Z).
         pane->onOpenSessions = [guard](const QString &query) { if (auto *w = windowOf(guard)) w->openSessionsFor(guard, query); };
+        // An `option:sec/row` in this pane's output (#AGNT step 8): Options on that section, zoomed
+        // to the row. The same two steps `app_open {target: "options", row}` takes, and the same
+        // two the helper's own answers took before the link became a kind of the transcript.
+        pane->onOpenOption = [guard](const QString &section, const QString &row) {
+            auto *w = windowOf(guard);
+            if (!w) return;
+            w->openSettingsPane(relay::SettingsPane::Mode::Options, section);
+            if (ToolPane *tool = w->settingsPaneIn(w->m_tabs->currentWidget(), relay::SettingsPane::Mode::Options);
+                tool && tool->settings())
+                tool->settings()->revealOption(section, row);
+        };
         pane->onOpenInfo = [guard] { if (auto *w = windowOf(guard)) w->openInfoPane(guard); };
         pane->onOpenThreadInfo = [guard](const QString &threadId, const QString &dir, const QString &owner) {
             if (auto *w = windowOf(guard)) w->openInfoPane(guard, QString(), dir, threadId, owner);
@@ -7562,6 +7555,291 @@ private:
         };
         relay::theme::polishWindow(pane);
         return pane;
+    }
+
+    // ----- the window makes agent consoles (#AGNT step 5) --------------------------------------
+    //
+    // A console is a `Pane` with a non-terminal context: no shell, no pty, no poll timers, the
+    // vterm kept as the transcript surface, and the queue, the thinking bubbles, the tool rows,
+    // the model box and the Activity hook of a terminal pane (`7a35a498`). The pane libraries
+    // cannot construct one — `Pane` exists only in this executable's translation unit — so a host
+    // asks the window for one through `relay::agent::ConsoleFactory` and is handed the widget to
+    // embed plus the handful of calls it makes on it. That is the `relay::PaneView` pattern, and
+    // it is why `ConsoleHandle` carries `std::function`s rather than a type.
+    //
+    // What a console is deliberately **not** in: `panesIn` (which stops at a `ToolPane`, above),
+    // and therefore the phone's publish list, the close count, the first-pane Flash default, the
+    // scrollback store and `paneWithToken`. It is not serialised either — `serializeNode` returns
+    // at the `ToolPane` branch without descending — so the host recreates it on restore.
+
+    // What only the window knows about a console's context: which project the tab works in, and
+    // where the tab's one conversation is kept. Everything else — the name, the brief, the action
+    // row, the links, the placeholder — is the host's and is asked of it fresh, so a host is never
+    // made to invent a tab id it has no way of learning.
+    //
+    // The consoles of one tab share one worker and one conversation (owner decision 1), which is
+    // exactly what `persist {scope: "helper", key: <tab id>}` says: `helper` is a wire enum — which
+    // store, not which path — and the key is the tab's own persistent id, so the same tab in the
+    // same project comes back to the same file after a restart and two tabs on one project keep
+    // two conversations.
+    class TabConsoleContext final : public relay::agent::Context {
+      public:
+        TabConsoleContext(RelayWindow *window, relay::agent::Context *host)
+            : m_window(window), m_host(host) {
+            // The pane owns *this* context's `onChanged`; this is the other half of the chain, so
+            // a card going busy or Options swapping mode still reaches the console's action row.
+            if (m_host) m_host->onChanged = [this] { changed(); };
+        }
+        ~TabConsoleContext() override { if (m_host) m_host->onChanged = nullptr; }
+
+        void setConsole(QWidget *console) { m_console = console; }
+
+        relay::agent::ContextSpec spec() const override {
+            relay::agent::ContextSpec spec = m_host ? m_host->spec() : relay::agent::ContextSpec();
+            QWidget *page = m_window && m_console ? m_window->pageOf(m_console) : nullptr;
+            // The tab's project, or none: a tab attached to nothing gets a board-less console,
+            // which is a supported state and not an error (protocol 30.7).
+            spec.workspace = page ? m_window->boardWorkspaceOfTab(page) : QString();
+            spec.persistScope = QStringLiteral("helper");
+            spec.persistKey = page ? page->property("relayTabId").toString() : QString();
+            // The role every non-terminal surface answers on (protocol 13.1), spelled the way
+            // `startBoardWorker` spells it so one worker cannot be asked for two.
+            if (spec.agentRole.isEmpty()) spec.agentRole = QStringLiteral("switchboard");
+            spec.shell = false;                        // the terminal context is the only one
+            spec.routing = QStringLiteral("agent");    // there is nothing else for a line to go to
+            if (spec.surface.isEmpty()) spec.surface = spec.name;
+            return spec;
+        }
+        QList<relay::agent::Action> actions() const override {
+            return m_host ? m_host->actions() : QList<relay::agent::Action>();
+        }
+        bool resolveLink(const relay::links::Target &target) override {
+            return m_host && m_host->resolveLink(target);
+        }
+        void turnFinished(const relay::agent::TurnRecord &record) override {
+            if (m_host) m_host->turnFinished(record);
+        }
+        QString placeholder() const override { return m_host ? m_host->placeholder() : QString(); }
+
+      private:
+        QPointer<RelayWindow> m_window;
+        relay::agent::Context *m_host;   // the host's, and it outlives the console (the API says so)
+        QPointer<QWidget> m_console;
+    };
+
+    // One console, made for a host that asked for one. `parent` is the widget it will be embedded
+    // in; the host puts the returned `widget` in its own layout and owns nothing else.
+    relay::agent::ConsoleHandle createAgentConsole(relay::agent::Context *context, QWidget *parent) {
+        relay::agent::ConsoleHandle handle;
+        if (!context) return handle;
+        auto wrapper = std::make_shared<TabConsoleContext>(this, context);
+        // A console has no shell, so it stands nowhere: the directory is the window's workspace,
+        // and the *agent's* workspace is the tab's project, which `TabConsoleContext::spec()`
+        // answers fresh on every configure.
+        const QString here = m_manager->workspace();
+        auto *console = new Pane(here, here, m_manager->cleanShell(), relay::defaultEngineCore(), wrapper.get());
+        wrapper->setConsole(console);
+        if (parent) console->setParent(parent);
+        console->setObjectName(QStringLiteral("agentConsole"));
+        m_consoles.append(ConsoleEntry{QPointer<Pane>(console), wrapper});
+        wireAgentConsole(console);
+        QPointer<Pane> guard(console);
+        // The tab's worker, and the handshake it has already had. Deferred one turn of the event
+        // loop because the host is still building: the console is not in a tab until its
+        // `ToolPane` is inserted, and `pageOf` answers nothing before that — the same wait the
+        // Switchboard's own `board_open` takes.
+        QTimer::singleShot(0, console, [guard] { if (auto *w = windowOf(guard)) w->attachConsoleToTab(guard); });
+        handle.widget = console;
+        handle.focusComposer = [guard] { if (guard) guard->focusComposer(); };
+        handle.draftInComposer = [guard](const QString &text) { if (guard) guard->draftInComposer(text); };
+        handle.composerText = [guard] { return guard ? guard->composerText() : QString(); };
+        handle.setCollapsed = [guard](bool collapse) { if (guard) guard->setCollapsed(collapse); };
+        handle.collapsed = [guard] { return guard && guard->collapsed(); };
+        handle.runActionLetter = [guard](const QString &letter) { return guard && guard->runActionLetter(letter); };
+        return handle;
+    }
+
+    // The callbacks a console shares with a terminal pane, and only those. A console is not in any
+    // leaf list, so everything here reaches the window through `windowOf` exactly as `createPane`
+    // does; what is left out is left out on purpose and said so, because the next person to add a
+    // callback to `createPane` will come looking here.
+    void wireAgentConsole(Pane *console) {
+        QPointer<Pane> guard(console);
+        console->onStatus = [guard](const QString &text) { if (guard) guard->toast(text, 5000); };
+        // Its line goes on the tab's worker, which is started by the first thing it says.
+        console->onWorkerLine = [guard](const QJsonObject &message) {
+            if (auto *w = windowOf(guard)) w->sendFromConsole(guard, message);
+        };
+        // The links an answer can carry, resolved the way a terminal pane resolves them — the
+        // context gets first refusal inside the pane, and what it declines arrives here.
+        console->onOpenPath = [guard](const QString &path, int line) {
+            if (auto *w = windowOf(guard)) w->openPath(path, line, hostLeafOf(guard));
+        };
+        console->onOpenCard = [guard](const QString &id) { if (auto *w = windowOf(guard)) w->openBoardCard(id); };
+        console->onOpenOption = [guard](const QString &section, const QString &row) {
+            auto *w = windowOf(guard);
+            if (!w) return;
+            w->openSettingsPane(relay::SettingsPane::Mode::Options, section);
+            if (ToolPane *pane = w->settingsPaneIn(w->m_tabs->currentWidget(), relay::SettingsPane::Mode::Options);
+                pane && pane->settings())
+                pane->settings()->revealOption(section, row);
+        };
+        console->onOpenSessions = [guard](const QString &query) {
+            if (auto *w = windowOf(guard)) w->openSessions(QString(), query);
+        };
+        console->onOpenDocument = [guard](const QString &path) {
+            if (auto *w = windowOf(guard)) w->openDocument(path, w->paneForConsoleOpen(guard), false);
+        };
+        console->onOpenTurn = [guard](const QString &turnId) {
+            if (auto *w = windowOf(guard)) w->openTurnPane(w->paneForConsoleOpen(guard), turnId);
+        };
+        console->onOpenInternals = [guard] {
+            if (auto *w = windowOf(guard)) w->openInternalsPane(w->paneForConsoleOpen(guard));
+        };
+        console->onOpenDiff = [guard](const QString &title, const QString &unifiedDiff) -> relay::DiffView * {
+            if (auto *w = windowOf(guard)) return w->openDiffPane(w->paneForConsoleOpen(guard), title, unifiedDiff);
+            return nullptr;
+        };
+        console->onOpenOptions = [guard](const QString &tab) {
+            if (auto *w = windowOf(guard)) w->openSettingsPane(relay::SettingsPane::Mode::Options, tab);
+        };
+        console->onOpenInfo = [guard] { if (auto *w = windowOf(guard)) w->openInfoPane(w->paneForConsoleOpen(guard)); };
+        console->onToggleExplorer = [guard](const QString &path) {
+            if (auto *w = windowOf(guard)) w->toggleExplorer(path, hostLeafOf(guard));
+        };
+        console->onShowAgents = [guard] { if (auto *w = windowOf(guard)) w->openAgentsMenu(); };
+        console->onOpenSubagent = [guard](const QString &id) {
+            if (auto *w = windowOf(guard)) w->openSubagentTab(w->paneForConsoleOpen(guard), id);
+        };
+        // The app catalog of the tab it is in (protocol 30.2). The *answers* to `app_command` are
+        // not this console's: one worker serves every console of the tab, and the window already
+        // answers that pipe once, tagged `helper` — four consoles answering the same write would
+        // run it four times. That is why `onAppCommand` is deliberately not set here, and why
+        // `deliverToConsoles` drops `app_command`.
+        console->onAppCatalog = [guard]() -> QJsonObject {
+            auto *w = windowOf(guard);
+            return w ? w->appCatalogFor(w->pageOf(guard)) : QJsonObject{};
+        };
+        // Protocol 23's `local_*` events belong to Options › Local models wherever they arrive.
+        console->onLocalModelEvent = [guard](const QJsonObject &event) {
+            if (auto *w = windowOf(guard)) w->localModels().handleEvent(event);
+        };
+        console->onChooseTheme = [guard](const QString &id) {
+            if (auto *w = windowOf(guard)) {
+                const bool asDefault = themeCommandsSetDefault();
+                const bool ok = w->chooseTheme(id, w->pageOf(guard), asDefault);
+                if (ok && asDefault) w->refreshSettingsPanes();
+                return ok;
+            }
+            return relay::theme::setActiveTheme(id);
+        };
+        console->onProfileApplied = [guard] {
+            if (auto *w = windowOf(guard)) { applyMainDefault(guard->modelCatalog()); w->modelsCurated(); }
+        };
+        console->onUpdateApp = [guard]() { if (auto *w = windowOf(guard)) w->updateApp(); };
+        console->onJoinShared = [guard](const QString &code) { if (auto *w = windowOf(guard)) w->joinSharedSession(code); };
+        // The `board` block of its `configure` is the tab's, exactly as a pane's is.
+        console->onBoardSettings = [guard]() -> QJsonObject {
+            auto *w = windowOf(guard);
+            return w ? w->boardSettingsFor(w->pageOf(guard)) : QJsonObject{{QStringLiteral("attach"), false}};
+        };
+        // What is **not** wired, and why: `onShellExited`, `onOpenGuestPane`, `onForkState`,
+        // `onOpenSessionInNewPane`, `onSessionOpenElsewhere`, `onPlanWritten` and the project-init
+        // question are a terminal pane's (there is no shell, no guest, no pane to fork into and no
+        // directory the console stands in); `onTitleChanged` / `onRenameTab` / `hasPaneSiblings` /
+        // `onWindowAction` / `onShareTab` / `onOpenSharing` belong to a leaf, and a console is not
+        // one; and `onPersonPrompt` is a pane agent's loop guard, keyed by a pane's session token.
+        relay::theme::polishWindow(console);
+    }
+
+    // The leaf a console is embedded in — the host's `ToolPane`. A console is not itself a leaf,
+    // so "open this beside me" has to name the widget the window's splitters do know about, or
+    // `insertBeside` would replace the console inside its host's own layout.
+    static QWidget *hostLeafOf(QWidget *console) {
+        for (QWidget *w = console ? console->parentWidget() : nullptr; w; w = w->parentWidget())
+            if (dynamic_cast<ToolPane *>(w)) return w;
+        return nullptr;
+    }
+
+    // The terminal pane the openers that insist on one use for a console: the tab's active pane
+    // if the tab has one, else its first. Activity, ⓘ, a turn view, a diff and a subagent tab are
+    // all `openX(Pane *owner, …)` — they read the owner's cwd and dock beside it — and a console
+    // has neither. With no terminal pane in the tab there is nothing to open beside, and every one
+    // of those openers already returns on a null owner. It is the same fallback `openSessions`
+    // has taken since #R6J0.
+    Pane *paneForConsoleOpen(QWidget *console) const {
+        QWidget *page = pageOf(console);
+        if (!page) return nullptr;
+        if (auto *active = dynamic_cast<Pane *>(m_activeLeaf.data()); active && pageOf(active) == page)
+            return active;
+        const QList<Pane *> panes = panesIn(page);
+        return panes.isEmpty() ? nullptr : panes.first();
+    }
+
+    // `ready` and `configured`, per tab. The separator is built rather than spelled as a hex
+    // escape in the string: a hex escape runs on into the hex digits of the word after it, so the
+    // one naming `configured` would be a single out-of-range character, not a separator and a
+    // word — a warning, and a key that never matches.
+    static QString handshakeKey(const QString &tab, const QString &type) {
+        return tab + QChar(QChar::fromLatin1(0x1f)) + type;
+    }
+
+    // The console is in its tab now: start the tab's worker and hand it the handshake it missed.
+    //
+    // This is where "the tab's agent starts at the first ask" (owner decision 5, 30.7) becomes
+    // "at the first console". It has to: a pane refuses to submit while it is unconfigured, so a
+    // console that had never heard `configured` would answer the first question with the provider
+    // dialog rather than with an agent. The rule survives one step out instead — Options, Actions
+    // and Sessions create their console on first *expand*, so a tab whose helper nobody opens
+    // still pays for nothing.
+    void attachConsoleToTab(Pane *console) {
+        QWidget *page = pageOf(console);
+        if (!page) return;
+        const QString tab = tabIdOf(page);
+        if (tab.isEmpty()) return;
+        m_tabConsole.insert(tab, QPointer<Pane>(console));
+        console->contextChanged();      // the workspace and the persist key are answerable now
+        helperWorker(page, true);
+        // A worker that was already up said `ready` and `configured` before this console existed
+        // and will not say them again until the next reconfigure, which may never come. Both are
+        // replayed, in that order, so the console is configured before it can be asked anything.
+        if (const QJsonObject ready = m_workerHandshake.value(handshakeKey(tab, QStringLiteral("ready"))); !ready.isEmpty())
+            console->deliverWorkerEvent(ready);
+        if (const QJsonObject configured = m_workerHandshake.value(handshakeKey(tab, QStringLiteral("configured"))); !configured.isEmpty())
+            console->deliverWorkerEvent(configured);
+    }
+
+    // A console's line, on its tab's worker. The worker is started here — `helperWorker(page,
+    // true)` is the same call a Switchboard pane makes — and `startBoardWorker` builds the one
+    // `configure` there is, carrying this console's `context` block. Asking from a second console
+    // of the tab therefore reconfigures the brief and leaves the conversation exactly where it is:
+    // `persist` does not move, and protocol 30.7's move test is precisely that.
+    void sendFromConsole(Pane *console, const QJsonObject &message) {
+        QWidget *page = console ? pageOf(console) : nullptr;
+        if (!page) return;
+        // The window owns this worker's `configure`. A console building one of its own would
+        // overwrite the tab's context block and its conversation key with a pane's; a model
+        // picked in its box reaches the worker the way every other helper model box does, by
+        // writing the `switchboard` role and calling `reconfigureBoardWorkers()`.
+        if (message.value(QStringLiteral("type")).toString() == QStringLiteral("configure")) return;
+        m_tabConsole.insert(tabIdOf(page), QPointer<Pane>(console));
+        if (relay::BoardWorker *worker = helperWorker(page, true)) worker->send(message);
+    }
+
+    // Every event of a tab's worker, to every console embedded in that tab. Nothing is filtered by
+    // `surface`: the conversation is one (owner decision 1), so a console draws what it can of it
+    // and ignores the rest. `app_command` is the exception — the window answers that pipe once for
+    // the tab, and a console answering it as well would run the same write twice.
+    void deliverToConsoles(const QString &tab, const QJsonObject &event) {
+        if (event.value(QStringLiteral("event")).toString() == QStringLiteral("app_command")) return;
+        for (int i = int(m_consoles.size()) - 1; i >= 0; --i)
+            if (!m_consoles.at(i).pane) m_consoles.removeAt(i);
+        const QList<ConsoleEntry> entries = m_consoles;   // a handler may close a pane
+        for (const ConsoleEntry &entry : entries) {
+            if (!entry.pane) continue;
+            QWidget *page = pageOf(entry.pane);
+            if (page && tabIdOf(page) == tab) entry.pane->deliverWorkerEvent(event);
+        }
     }
 
     QWidget *buildNode(const QJsonObject &node) {
@@ -9958,6 +10236,25 @@ private:
     // with a prompt queued behind it. `helperWorkerGone` is the only reader (#H6VQ).
     QMap<QString, QSet<QString>> m_helperWaiting;
     QSet<QString> m_helperStarting;   // tabs whose helper startBoardWorker() is building right now
+    // ----- the agent consoles this window made (#AGNT step 5) ---------------------------------
+    //
+    // A console is not in any leaf list and is not serialised, so this is the only place the
+    // window knows about one. The context travels with it because the window made that one: it
+    // wraps the host's with the tab's workspace and conversation key, and it must not outlive the
+    // pane that holds it — `~Pane` clears its `onChanged` — so the list is pruned by the pane
+    // going null, never by the host.
+    struct ConsoleEntry {
+        QPointer<Pane> pane;
+        std::shared_ptr<TabConsoleContext> context;
+    };
+    QList<ConsoleEntry> m_consoles;
+    // Per tab, the console whose context that tab's one worker is configured with: the last one
+    // to speak. What differs between the consoles of a tab is the brief and the surface name,
+    // never the store, so swapping it reconfigures without moving the conversation.
+    QHash<QString, QPointer<Pane>> m_tabConsole;
+    // What a tab's worker has already said about itself, kept so a console created after it was
+    // up can be handed the handshake it missed. Keyed by `handshakeKey(tab, "ready"|"configured")`.
+    QHash<QString, QJsonObject> m_workerHandshake;
     // /update: the one running updater (scripts/relay-update.py), its unread output and whether
     // its final line was the UPDATED marker the restart waits for. One at a time.
     QProcess *m_updateProcess = nullptr;

@@ -43,7 +43,6 @@ class QTreeWidgetItem;
 class QVBoxLayout;
 
 namespace relay {
-class HelperChatPanel;   // only named by the step-5 bridge below; never built here
 }
 
 namespace relay::conversations {
@@ -285,24 +284,6 @@ public:
     // What the window needs to reach the console it made, and what a test reads.
     const relay::agent::ConsoleHandle &agentConsole() const { return m_console; }
     relay::agent::Context *agentContext() const;
-
-    // ----- a bridge for card #AGNT step 5, and nothing else -----------------------------------
-    //
-    // `RelayWindow::wireHelperPanel` still wires the panel this pane no longer has. Step 5 replaces
-    // it with `onCreateConsole` above and is landing beside this commit, but a name it still
-    // mentions has to exist or `main` does not compile — and the tree that goes on `main` is what
-    // land.py builds. **These do nothing.** They are the whole list, and step 5 deletes them with
-    // the template that names them (step 9 then retires `HelperChatPanel` itself).
-    std::function<void(const QJsonObject &message)> onHelperSend;
-    std::function<QString()> nextHelperRequestId;
-    std::function<void(const QString &sectionId, const QString &rowId)> onHelperOpenOption;
-    std::function<void(const QString &cardId)> onHelperOpenCard;
-    std::function<void(const QString &path)> onHelperOpenFile;
-    std::function<void(const QString &id, const QString &keys)> onHelperHint;
-    void helperEvent(const QString &, const QJsonObject &) {}
-    void setHelperPresets(const QJsonArray &) {}
-    void addHelperComposerWidget(QWidget *widget);   // adopts it and hides it, so nothing leaks
-    relay::HelperChatPanel *helperPanel() const { return nullptr; }
 
     void focusSearch();
     QString query() const;

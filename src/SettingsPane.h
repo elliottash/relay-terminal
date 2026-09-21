@@ -65,7 +65,6 @@ namespace relay {
 // widget and the mode is what decides which of the two contexts it is (card #AGNT step 7).
 class OptionsContext;
 
-class HelperChatPanel;   // only named by the step-5 bridge below; never built here
 
 // One row of a settings section. The caller supplies the reader (the current value fields) and
 // the writer, so QSettings stays the single source of truth.
@@ -305,24 +304,6 @@ public:
     // widget is null until the first expand) and the context behind it.
     const relay::agent::ConsoleHandle &agentConsole() const { return m_console; }
     relay::agent::Context *agentContext() const;
-
-    // ----- a bridge for card #AGNT step 5, and nothing else -----------------------------------
-    //
-    // `RelayWindow::wireHelperPanel` still wires the panel this pane no longer has. Step 5 replaces
-    // it with `onCreateConsole` above and is landing beside this commit, but a name it still
-    // mentions has to exist or `main` does not compile — and the tree that goes on `main` is what
-    // land.py builds. **These do nothing.** They are the whole list, and step 5 deletes them with
-    // the template that names them (step 9 then retires `HelperChatPanel` itself).
-    std::function<void(const QJsonObject &message)> onHelperSend;
-    std::function<QString()> nextHelperRequestId;
-    std::function<void(const QString &cardId)> onHelperOpenCard;
-    std::function<void(const QString &path)> onHelperOpenFile;
-    std::function<void(const QString &sessionId)> onHelperOpenSession;
-    std::function<void(const QString &id, const QString &keys)> onHelperHint;
-    void helperEvent(const QString &, const QJsonObject &) {}
-    void setHelperPresets(const QJsonArray &) {}
-    void addHelperComposerWidget(QWidget *widget);   // adopts it and hides it, so nothing leaks
-    HelperChatPanel *helperPanel() const { return nullptr; }
 
 protected:
     bool eventFilter(QObject *object, QEvent *event) override;

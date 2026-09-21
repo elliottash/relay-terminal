@@ -59,6 +59,10 @@ private slots:
     void theHelpersConfigureCarriesTheKeybindings();
     void theHelperOutlivesItsPanelsAndOnlyTheTabEndsIt();
     void aHelperThatDiesMidTurnPutsItsPanelsBack();
+    void anEmbeddedConsoleIsNotOneOfTheWindowsPanes();
+    void theWindowMakesConsolesAndWiresThemAsPanesExceptWhereItMustNot();
+    void theConsolesOfATabShareOneWorkerAndOneConversation();
+    void anOptionOrSessionLinkOpensWhereItNames();
     void theBoardPanePaintsFromTheBoardMaterials();
     void tabMetersGiveWayOnlyWhenFullLabelsDoNotFit();
 };
@@ -329,9 +333,16 @@ void BoardWorkspaceTests::aHelperThatDiesMidTurnPutsItsPanelsBack()
     // …and it reaches the embedded panels of Options, Actions and Sessions, not only the board.
     QVERIFY2(gone.contains(QStringLiteral("deliverToHelperPanels(page, event)")), qPrintable(gone));
     QVERIFY2(gone.contains(QStringLiteral("m_helperWaiting.take(tab)")), qPrintable(gone));
-    // The waiting list is kept from the worker's own events: a turn's pane and a queued prompt's.
-    QVERIFY(text.contains(QStringLiteral("QStringLiteral(\"board_chat_started\")")));
-    QVERIFY(text.contains(QStringLiteral("QStringLiteral(\"board_chat_queued\")")));
+    // The waiting list is kept from the worker's own events. Since card #AGNT the wire says it in
+    // one word: `board_chat_started`/`board_chat_queued` are retired, a console's turn is an
+    // ordinary pane turn, and `surface` rides on `queued`, `agent_started` and `agent_finished`.
+    QVERIFY2(!text.contains(QStringLiteral("board_chat_started")), "board_chat is back on the wire");
+    QVERIFY2(!text.contains(QStringLiteral("board_chat_queued")), "board_chat is back on the wire");
+    QVERIFY(text.contains(QStringLiteral("guard->m_helperWaiting[tab].insert(surface)")));
+    QVERIFY(text.contains(QStringLiteral("guard->m_helperWaiting[tab].remove(surface)")));
+    // And the consoles of the tab are told as well, once: it is one agent that died and every
+    // console of the tab was on it.
+    QVERIFY2(gone.contains(QStringLiteral("deliverToConsoles(tab,")), qPrintable(gone));
     // A deliberate stop is not a death: the callbacks come off before the worker is asked to go.
     const QString release = bodyOf(text, QStringLiteral("void releaseBoardWorker(QWidget *page) {"));
     QVERIFY2(release.contains(QStringLiteral("worker->onExit = nullptr")), qPrintable(release));
@@ -343,6 +354,172 @@ void BoardWorkspaceTests::aHelperThatDiesMidTurnPutsItsPanelsBack()
              "BoardWorker no longer reports an exit nobody asked for");
     QVERIFY2(worker.contains(QStringLiteral("if (m_stopping)\n                    return;")),
              "a deliberate stop reports itself as a death");
+}
+
+// ----- card #AGNT step 5: the window makes consoles ------------------------------------------
+//
+// A console is a `Pane` with a non-terminal context, embedded in a host's `ToolPane`. The one
+// line that keeps it out of everything a *window's* pane is in is `panesIn` stopping at a
+// `ToolPane`, the way `leavesIn` already does. Without it the console is published to the phone,
+// counted in the close dialog, makes the first real terminal default to Flash, churns the
+// scrollback prune, resolves a notification to a non-leaf and takes a `set_board` meant for a
+// terminal agent — six things, from one recursion.
+void BoardWorkspaceTests::anEmbeddedConsoleIsNotOneOfTheWindowsPanes()
+{
+    const QString text = windowSource();
+    QVERIFY2(!text.isEmpty(), "src/RelayWindow.h could not be read");
+    const QString walk = bodyOf(text, QStringLiteral("static QList<Pane *> panesIn(QWidget *root) {"));
+    QVERIFY2(!walk.isEmpty(), "RelayWindow::panesIn() is gone");
+    QVERIFY2(walk.contains(QStringLiteral("if (dynamic_cast<ToolPane *>(root)) return panes;")),
+             qPrintable(walk));
+    // It must stop *before* the child walk, or the early-out is decoration.
+    QVERIFY(walk.indexOf(QStringLiteral("if (dynamic_cast<ToolPane *>(root)) return panes;"))
+            < walk.indexOf(QStringLiteral("findChildren<QWidget *>")));
+    // `leavesIn` already stopped there, and `isLeaf` is what says a ToolPane is a leaf at all.
+    QVERIFY(text.contains(QStringLiteral("static bool isLeaf(QWidget *widget) { return dynamic_cast<Pane *>(widget) || dynamic_cast<ToolPane *>(widget); }")));
+    // The six readers go on reading `panesIn`/`allPanes()` — they are not to be taught about
+    // consoles one by one, which is the whole point of fixing the walk instead.
+    QVERIFY(text.contains(QStringLiteral("!allPanes().isEmpty()")));   // the first-pane Flash default
+    // And the window reaches a console the only other way there is: its own list.
+    QVERIFY2(text.contains(QStringLiteral("QList<ConsoleEntry> m_consoles;")), "the console list is gone");
+    // Nothing may put a console in a leaf list: it is created with a parent and registered
+    // nowhere else. `createAgentConsole` is the one place a console is made.
+    QCOMPARE(text.count(QStringLiteral("new Pane(here, here, m_manager->cleanShell()")), 1);
+}
+
+// What the factory wires, and what it deliberately does not. The callbacks a console shares with
+// a terminal pane are the ones that answer "open this thing in this window"; the ones it must not
+// have are the terminal's (a shell, a guest, a fork) and a leaf's (a title, a share, a close).
+void BoardWorkspaceTests::theWindowMakesConsolesAndWiresThemAsPanesExceptWhereItMustNot()
+{
+    const QString text = windowSource();
+    QVERIFY2(!text.isEmpty(), "src/RelayWindow.h could not be read");
+    const QString make = bodyOf(text, QStringLiteral("relay::agent::ConsoleHandle createAgentConsole(relay::agent::Context *context, QWidget *parent) {"));
+    QVERIFY2(!make.isEmpty(), "RelayWindow::createAgentConsole() is gone");
+    // Every call the handle promises is answered, and each one guards the pane it points at.
+    for (const QString &call : {QStringLiteral("handle.widget = console;"),
+                                QStringLiteral("handle.focusComposer"), QStringLiteral("handle.draftInComposer"),
+                                QStringLiteral("handle.composerText"), QStringLiteral("handle.setCollapsed"),
+                                QStringLiteral("handle.collapsed"), QStringLiteral("handle.runActionLetter")})
+        QVERIFY2(make.contains(call), qPrintable(call));
+    const QString wire = bodyOf(text, QStringLiteral("void wireAgentConsole(Pane *console) {"));
+    QVERIFY2(!wire.isEmpty(), "RelayWindow::wireAgentConsole() is gone");
+    for (const QString &hook : {QStringLiteral("console->onWorkerLine"), QStringLiteral("console->onStatus"),
+                                QStringLiteral("console->onOpenPath"), QStringLiteral("console->onOpenCard"),
+                                QStringLiteral("console->onOpenOption"), QStringLiteral("console->onOpenSessions"),
+                                QStringLiteral("console->onOpenInternals"), QStringLiteral("console->onOpenInfo"),
+                                QStringLiteral("console->onAppCatalog"), QStringLiteral("console->onBoardSettings")})
+        QVERIFY2(wire.contains(hook), qPrintable(hook));
+    // `app_command` is answered once per tab by the window, so a console must not answer it too —
+    // four consoles on one worker would run the same write four times.
+    QVERIFY2(!wire.contains(QStringLiteral("console->onAppCommand")), qPrintable(wire));
+    const QString deliver = bodyOf(text, QStringLiteral("void deliverToConsoles(const QString &tab, const QJsonObject &event) {"));
+    QVERIFY2(deliver.contains(QStringLiteral("QStringLiteral(\"app_command\")")), qPrintable(deliver));
+    // A console is a terminal pane in nothing that needs a shell or a place in the splitter tree.
+    for (const QString &absent : {QStringLiteral("console->onShellExited"), QStringLiteral("console->onOpenGuestPane"),
+                                  QStringLiteral("console->onForkState"), QStringLiteral("console->onShareTab"),
+                                  QStringLiteral("console->onRenameTab"), QStringLiteral("console->onTitleChanged"),
+                                  QStringLiteral("console->hasPaneSiblings"), QStringLiteral("console->onPersonPrompt")})
+        QVERIFY2(!wire.contains(absent), qPrintable(absent));
+    // The openers that insist on a `Pane *owner` dock beside a leaf, and a console is not one:
+    // they are handed the tab's own terminal pane, or nothing.
+    QVERIFY(wire.contains(QStringLiteral("w->paneForConsoleOpen(guard)")));
+    const QString fallback = bodyOf(text, QStringLiteral("Pane *paneForConsoleOpen(QWidget *console) const {"));
+    QVERIFY2(fallback.contains(QStringLiteral("return panes.isEmpty() ? nullptr : panes.first();")), qPrintable(fallback));
+}
+
+// One worker per tab, one conversation in it, and each ask tagged with the console that asked
+// (owner decision 1). The window supplies what a host cannot know — the tab's project and the
+// tab's conversation key — and nothing else about the context is the window's to invent.
+void BoardWorkspaceTests::theConsolesOfATabShareOneWorkerAndOneConversation()
+{
+    const QString text = windowSource();
+    QVERIFY2(!text.isEmpty(), "src/RelayWindow.h could not be read");
+    const QString spec = bodyOf(text, QStringLiteral("relay::agent::ContextSpec spec() const override {"));
+    QVERIFY2(!spec.isEmpty(), "RelayWindow::TabConsoleContext::spec() is gone");
+    // The conversation: the helper store of §30.7, keyed by the tab's own persistent id — so two
+    // consoles of one tab resolve to one conversation and two tabs on one project do not.
+    QVERIFY2(spec.contains(QStringLiteral("spec.persistScope = QStringLiteral(\"helper\")")), qPrintable(spec));
+    QVERIFY2(spec.contains(QStringLiteral("page->property(\"relayTabId\").toString()")), qPrintable(spec));
+    // The project is the tab's, and a tab attached to nothing gives a board-less console rather
+    // than an error — the same rule `startBoardWorker` follows for its `workspace`.
+    QVERIFY2(spec.contains(QStringLiteral("m_window->boardWorkspaceOfTab(page)")), qPrintable(spec));
+    // A console never spawns a shell and a line typed in it has nowhere else to go.
+    QVERIFY(spec.contains(QStringLiteral("spec.shell = false;")));
+    QVERIFY(spec.contains(QStringLiteral("spec.routing = QStringLiteral(\"agent\")")));
+    // What the host says stays the host's: the name, the actions, the links, the placeholder.
+    QVERIFY2(!spec.contains(QStringLiteral("spec.name =")), "the window is naming the host's context");
+
+    // One worker: a console's line goes on `helperWorker(page, true)`, the same call a Switchboard
+    // pane makes, and the worker is started by the first thing a console says.
+    const QString send = bodyOf(text, QStringLiteral("void sendFromConsole(Pane *console, const QJsonObject &message) {"));
+    QVERIFY2(send.contains(QStringLiteral("helperWorker(page, true)")), qPrintable(send));
+    // And the window owns the configure: a console building one of its own would overwrite the
+    // tab's context block and its conversation key with a pane's.
+    QVERIFY2(send.contains(QStringLiteral("QStringLiteral(\"configure\")")), qPrintable(send));
+    QCOMPARE(text.count(QStringLiteral("void startBoardWorker(QWidget *page) {")), 1);
+    const QString start = bodyOf(text, QStringLiteral("void startBoardWorker(QWidget *page) {"));
+    QVERIFY2(start.contains(QStringLiteral("configure.insert(QStringLiteral(\"context\"), console->contextBlock())")),
+             qPrintable(start));
+    // A console made after the worker was already up is handed the handshake it missed, in order,
+    // so it is configured before it can be asked anything.
+    const QString attach = bodyOf(text, QStringLiteral("void attachConsoleToTab(Pane *console) {"));
+    QVERIFY2(attach.contains(QStringLiteral("handshakeKey(tab, QStringLiteral(\"ready\"))")), qPrintable(attach));
+    QVERIFY2(attach.contains(QStringLiteral("handshakeKey(tab, QStringLiteral(\"configured\"))")), qPrintable(attach));
+    QVERIFY(attach.indexOf(QStringLiteral("QStringLiteral(\"ready\")")) < attach.indexOf(QStringLiteral("QStringLiteral(\"configured\")")));
+    // And the key is built rather than spelled: "\\x1fconfigured" is one out-of-range hex escape,
+    // not a separator followed by a word, which is the bug that shape invites.
+    QVERIFY2(!text.contains(QStringLiteral("\\x1fconfigured\"")), "a hex escape is eating the word after it");
+    // Every event of the tab's worker reaches every console of that tab: the conversation is one.
+    QVERIFY(text.contains(QStringLiteral("guard->deliverToConsoles(tab, event);")));
+
+    // The panel template that gave those surfaces a second chat implementation is gone, and the
+    // tab worker it used is not: `sendToHelper` no longer carries `board_chat`'s `pane` tag.
+    QVERIFY2(!text.contains(QStringLiteral("void wireHelperPanel(")), "wireHelperPanel is back");
+    QVERIFY2(text.contains(QStringLiteral("void sendToHelper(QWidget *page, QJsonObject message) {")),
+             "sendToHelper still carries a pane tag");
+    QVERIFY(text.contains(QStringLiteral("void listenToHelper(")));   // tests_* and profile_* still ride it
+}
+
+// `option:sec/row` and `session:<id>` are kinds of the transcript since step 8, so an answer that
+// names a setting or a saved conversation is one click from it in *any* pane — not only inside the
+// helper panel's browser. The window is what opens them.
+void BoardWorkspaceTests::anOptionOrSessionLinkOpensWhereItNames()
+{
+    const QString text = windowSource();
+    QVERIFY2(!text.isEmpty(), "src/RelayWindow.h could not be read");
+    // Both prompt boxes route it the same way, and each takes the two steps `app_open {target:
+    // "options", row}` takes — the section, then the row. Read out of the two bodies rather than
+    // counted over the file: the Switchboard's own answers and `app_open` reveal rows too, and a
+    // count would make this test fail for their reasons.
+    const QString wire = bodyOf(text, QStringLiteral("void wireAgentConsole(Pane *console) {"));
+    const QString create = bodyOf(text, QStringLiteral("Pane *createPane(const QJsonObject &spec) {"));
+    for (const QString &body : {wire, create}) {
+        QVERIFY2(body.contains(QStringLiteral("onOpenOption = [guard](const QString &section, const QString &row) {")),
+                 qPrintable(body.left(120)));
+        QVERIFY2(body.contains(QStringLiteral("openSettingsPane(relay::SettingsPane::Mode::Options, section)")),
+                 qPrintable(body.left(120)));
+        QVERIFY2(body.contains(QStringLiteral("settings()->revealOption(section, row)")), qPrintable(body.left(120)));
+    }
+    QVERIFY(wire.contains(QStringLiteral("console->onOpenSessions = [guard](const QString &query) {")));
+
+    QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/Pane.h"));
+    QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
+    const QString pane = QString::fromUtf8(source.readAll());
+    const QString open = bodyOf(pane, QStringLiteral("void openOutputTarget(const QString &target, int line, bool fromMouse) {"));
+    QVERIFY2(!open.isEmpty(), "Pane::openOutputTarget() is gone");
+    QVERIFY2(open.contains(QStringLiteral("relay::links::optionOf(target, &section, &row) && onOpenOption")), qPrintable(open));
+    QVERIFY2(open.contains(QStringLiteral("relay::links::sessionIdOf(target)")), qPrintable(open));
+    // The context still gets first refusal: Options reveals its own row without opening a second
+    // pane, and only what it declines reaches the window.
+    QVERIFY(open.indexOf(QStringLiteral("resolveContextLink(activated)"))
+            < open.indexOf(QStringLiteral("url.host() == QStringLiteral(\"option\")")));
+    // And the engine's right-click menu stops reading those two as file paths.
+    QFile view(QStringLiteral(RELAY_SOURCE_DIR "/engine/view/TerminalView.cpp"));
+    QVERIFY2(view.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(view.fileName()));
+    const QString engine = QString::fromUtf8(view.readAll());
+    QVERIFY2(engine.contains(QStringLiteral("links::optionOf(link.target, &section, &row) || !links::sessionIdOf(link.target).isEmpty()")),
+             "a right-click on an option:/session: link is a file path again");
 }
 
 // The Switchboard's materials (docs/SWITCHBOARD-AESTHETIC.md 3.4, owner 2026-09-19 "yeah build

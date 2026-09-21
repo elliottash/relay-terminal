@@ -1329,15 +1329,6 @@ void SettingsPane::setHelperShortcut(const QString & /*hintId*/, const QString &
 // Asking for the cursor is asking for the console: the pane's ask key, a click on the row and a
 // drafted request all mean the box has to be there to type in (#FEJQ). The console is built here,
 // on the first expand, so a tab nobody asks anything never pays for one (§33, owner decision 5).
-// The step-5 bridge (see the header): the window's old wiring still hands this pane a model box
-// built for a panel that is gone. Taking it and hiding it is what keeps it from leaking while the
-// two commits cross; the console brings its own model box.
-void SettingsPane::addHelperComposerWidget(QWidget *widget) {
-    if (widget == nullptr) return;
-    widget->setParent(this);
-    widget->hide();
-}
-
 void SettingsPane::focusHelper() {
     if (!onCreateConsole) return;
     ensureConsole();
