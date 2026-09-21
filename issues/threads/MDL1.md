@@ -674,3 +674,43 @@ strip the popup's ground *is* the strip's ground, so the diff loses the bottom o
 measurement silently reads the wrong rectangle. The tool that landed asks X instead: the popup is
 the one visible `relay` window that is not the main one, and `drive.sh` writes its geometry beside
 each shot (`*-popup.txt`). NOTES.md and the tool's own docstring say so correctly.
+
+<!-- relay:entry 20260921T221200Z-h1 author=claude-fable kind=progress -->
+### Claude Fable · 2026-09-21 22:12
+**t:a11 — the models pane.** Landed as `912dd2e2` (the pane, the key, first run, the tests) and
+`<follow-up sha>` (three faults the Xvfb run found, the docs and the evidence).
+
+The Ctrl+Alt+M modal is a `ToolPane` now — `src/ModelsPane.{h,cpp}`, `relay-modelspane` — beside
+the pane it serves, hosted the way Options is, with **providers · available · priorities**. Nothing
+was rewritten: available and priorities are one `relay::ModelPicker` (the modal's own guts, now a
+plain `QWidget`: no `QDialog`, no `exec()`, no `pickModel()`, no "cancel") put on the flat tab or on
+a class tab by this pane's tab bar, and providers is a `relay::SettingsPane` over
+`modelsSection(true)` — the same section Options › Models draws, with `setEmbedded(true)` taking its
+own tab row and footer away. `ModelsPane::Target` is the whole contract with the app: title, token,
+catalog, model, level, mode and four callbacks, every one a `std::function`, so
+`tests/modelspane_test.cpp` drives the surface with no `Pane` and no window.
+
+`agent.model` (Ctrl+Alt+M) is **gone from the registry**, not merely unbound, per the owner: "just
+remove ctrl alt m, not worth the extra confusion". `agent.modelOptions` (Ctrl+Shift+M) is the
+three-state toggle — closed → open beside the active pane; open and focused → close; open and the
+focus elsewhere → re-target and focus — and Escape hands the focus back and leaves it open.
+`/model` alone opens it on priorities, `/models` on providers. First run (no saved layout and
+`instructions/onboarded` unset) is a terminal pane at the left and this at the right, on providers.
+
+**Three faults the driven run found**, each fixed before the shots were kept: Ctrl+Tab for the
+three tabs did nothing (it is the window's Next tab and never reaches a pane — they are Alt+1/2/3
+now, and ←/→ where the class row is not in front); Alt+2 typed "2" into the providers tab's search
+box (an event filter on a pane never sees what its own QLineEdit swallows — they are a
+`WidgetWithChildrenShortcut` as well); and the model's own name was elided to `claude-o…` at half a
+window's width (the `intelligence` and `tok/s` columns are hidden while hosted; both are in every
+cell's tooltip and the sort menu). A fourth came out of the first-run shot: the pane had no catalog
+until its worker answered `presets`, and `rebuild()` redrew from the one it was built with —
+`ModelPicker::setCatalog` and a `SettingsWatch` listener fixed that.
+
+**Evidence:** `docs/qa_evidence/2026-09-21-models-pane/` — `drive.sh`, `NOTES.md` and fourteen
+shots under Xvfb, including the first-run layout, the key closing and reopening the pane, the three
+tabs, Enter changing the *served* pane's chip, Escape leaving the pane open, and both Options doors.
+**Tests:** `ctest -R "modelspane|modelpicker|settings|modelrows|modelcatalog|filterpopup|panestate"`
+green (`modelspane` 15 cases, `modelpicker` 37), and
+`python3 -m unittest discover -s tests -p test_keybindings.py` 24/24 with a new guard that
+`agent.model` is gone and `agent.modelOptions` is Ctrl+Shift+M.

@@ -66,8 +66,8 @@ that conflict.
    bottom of the model box). The page reads top to bottom the way it is set up: **providers** —
    add key… for one of them (or Actions › API keys… to **Import from Warp** or **from Claude Code /
    Codex**; **test** checks the key reaches the provider) — then **profiles**. Which models you
-   run, and in what order, is the dialog at the top of the page: **models and priorities…**
-   (Ctrl+Alt+M), a tab per list — **main, high, flash, lite and local**. Each row there is a model
+   run, and in what order, is the **models pane** beside it (Ctrl+Shift+M, or **models and
+   priorities…** at the top of the page): a tab per list — **main, high, flash, lite and local**. Each row there is a model
    and the reasoning level it runs at in that list, in the provider's own words (xhigh on a GPT
    row, max on a GLM row). The first of a list is what that tier runs on: main for new panes, high
    for plan mode, flash for terminal driving and quick side calls, lite for chores, local for
@@ -102,10 +102,10 @@ that conflict.
 | Ctrl+Shift+A | Actions: everything you can do now, with its keys, in a list you can filter (again to close) |
 | Ctrl+Shift+O | Options: what persists, a tab per section (again to close; also Ctrl+, and the gear) |
 | Ctrl+Shift+S | Switchboard: this repository's cards, threads and plans (again to close it) |
-| Alt+M, Ctrl+Alt+M | Models: drop the pane's model box open (a header per class and its top models; Up/Down the rows, Right opens a class to its whole list, typing searches every model you have made available) / the dialog that picks *and* prioritizes them, and says which models are available at all (`/model`) |
+| Alt+M | Models: drop the pane's model box open (a header per class and its top models; Up/Down the rows, Right opens a class to its whole list, typing searches every model you have made available) |
 | Alt+F, Alt+H | This pane on the Flash model / the High model, and back to main (`/flash`, `/high`, `/main`) |
 | Alt+E | Reasoning: drop the pane's level box open (also Alt+. / Alt+, and `/effort`) |
-| Ctrl+Shift+M | Model options: Options › Models (`/models`) |
+| Ctrl+Shift+M | Models: the models pane beside this one — **providers**, **available** models and **priorities** (again to close it, Esc to go back to the pane; `/model`, `/models`) |
 | Ctrl+Shift+Y | Sessions: resume a saved session (`/resume`) |
 | Alt+A, Ctrl+Shift+X | Subagents: this pane's subagent tabs / stop all running subagents |
 | Ctrl+T, Ctrl+N | New tab, new window |
@@ -215,8 +215,8 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   ultra`), four on the OpenAI API, three on Kimi — greyed out with the reason in its tooltip on a
   model with no reasoning knob and on Relay Free, whose gateway sets the level per role; a level
   the next model does not take moves to its nearest and the pane says so. And a context indicator (`ctx 142k · 14%`, amber near the auto-compact
-  limit). Type `/` in the prompt box for commands: `/new`, `/model` (alone: the picker, also
-  Ctrl+Alt+M), `/models` (Options › Models, also Ctrl+Shift+M), `/profile [name]` (switch the model profile), `/swap`, `/effort` (`/reasoning`), `/compact [focus]`,
+  limit). Type `/` in the prompt box for commands: `/new`, `/model` (alone: the models pane, also
+  Ctrl+Shift+M), `/models` (the same pane, on providers), `/profile [name]` (switch the model profile), `/swap`, `/effort` (`/reasoning`), `/compact [focus]`,
   `/context`, `/rewind` (rewind chat: the conversation only, files untouched; also Esc Esc in
   an empty prompt), `/rewind-code` (restores the files the agent changed, after showing them and
   asking; "Code and chat" does both), `/fork` (continues in a new pane),
@@ -246,19 +246,27 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   updated on every autosave and rebuildable from the session files at any time (Actions › Rebuild
   the conversation index). It holds message text, so it stays on this machine and is deleted with
   the conversation; `RELAY_INDEX=off` turns indexing off entirely.
-- **The model dialog: pick *and* prioritize.** Ctrl+Alt+M, `/model`, or **more models…** at the
-  bottom of the pane's model box. A tab per list — **high · main · flash · lite · local** — and an
-  **all** tab; it opens on the tab of the mode the pane is in, and ←/→ (or Ctrl+Tab) walk them. A
+- **The models pane: pick *and* prioritize.** Ctrl+Shift+M, `/model`, `/models`, or **more
+  models…** at the bottom of the pane's model box. It is a pane beside the one you were in, not a
+  dialog over it: three tabs — **providers**, **available** and **priorities** — and a header line
+  saying which pane it serves. Pressing the key again while you are in it closes it; pressing it in
+  another pane points it at that one; **Esc** puts the cursor back in the pane it serves and leaves
+  the pane open. A fresh install opens with a terminal pane at the left and this at the right.
+  **priorities** is a tab per list — **high · main · flash · lite · local** — on a second row of
+  tabs; it opens on the list of the mode the pane is in, ←/→ walk those and **Alt+1/2/3** walk the
+  three. A
   tier tab *is* that list: numbered, in order, one row per model in lower case with the provider in
   a **via** column, rank 1 of main marked "new panes start here", and a rank whose provider has no
   key or is spent greyed in place with the reason rather than dropped. **Enter** uses the row in
   this pane, **Alt+↑/Alt+↓** or a drag moves it, **Delete** takes it out, the level list on the
   right sets the level that model runs at *in that list*, and **Ctrl+Z** undoes any of it — the
-  same storage Options › Models writes, so the two can never disagree. **Typing** searches every
+  same storage Options › Models writes, so the two can never disagree. Nothing switches the pane
+  you came from until you say so: a click only highlights, **Enter** or **use** is the switch.
+  **Typing** searches every
   model your providers serve: this list's matches first, then "not in this list", where
   **Ctrl+Enter** adds one, and last **more from openrouter** — a provider with a listing of
   hundreds is kept out of the lists until you type, so it cannot bury the rest. The
-  **all** tab is every model you can run, grouped by provider — a **sort** menu (priority, a to z,
+  **available** tab is every model you can run, grouped by provider — a **sort** menu (priority, a to z,
   intelligence, speed, most used, subscription left), ★ favorites and the ten most recent above the
   rest, subscription windows ("5h 62% left, resets 14:30") under the list — with one row per model
   whatever serves it and **→** opening that row's providers to choose one, and
@@ -267,12 +275,13 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   A provider you have a key for starts with all of its models ticked — un-tick the ones you never
   want — and a provider that lists hundreds, like OpenRouter, starts with a few recommended ones
   instead: type a name, and tick the row that comes up under **more from openrouter** to add it.
-  (Options › Models has a **models… (N of M available)** link under every provider that opens
-  this tab on it.) A class tab also says what **Alt+M** shows
+  (The **providers** tab — which is Options › Models' own provider rows, keys and profiles, drawn
+  by the same page — has a **models… (N of M available)** link under every provider that opens this
+  tab on it.) A class tab also says what **Alt+M** shows
   of it: the **in box** column is a cutoff (tick rank 3 and the box draws three of that class), and
   **show this class in the box** takes the class out of it altogether. Both travel with the profile,
   and **fill from defaults** replaces every list with what your providers can serve. The profile is
-  named in the header and switched there. `/model <name>` switches without the dialog.
+  named in the header and switched there. `/model <name>` switches without opening the pane.
 - **The model box (Alt+M)** is the short answer: a header per class — **high**, **main**, **flash**,
   and **local** where this machine serves a model — with that class's top two models under it and
   your own highlighted. The headers are labels, so ↑↓ step over them; **→** opens a class to its

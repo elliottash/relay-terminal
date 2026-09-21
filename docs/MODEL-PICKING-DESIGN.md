@@ -435,7 +435,7 @@ available model no class lists, folded one row per model. Enter on one of those 
 `pick:main|<key>` — a model in no list becomes this pane's own model, on main, at the level the
 Levels rule gives it. With the filter empty the box is exactly what it was.
 
-### 5.8 The models pane (owner, 2026-09-21: "lets build the models pane")
+### 5.8 The models pane (owner, 2026-09-21: "lets build the models pane") — **built**, t:a11
 
 The modal dialog becomes a **pane** — a `ToolPane` beside the active pane, the way Options and
 Sessions are hosted — with three tabs for the first three steps of §5.7: **providers** (the
@@ -448,6 +448,30 @@ carry over. **Ctrl+Shift+M** opens it (Ctrl+Alt+M goes: "not worth the extra con
 again it closes the pane; Escape returns focus to the pane it serves and leaves it open. One per
 window; opened again from another pane it re-targets. Options › Models becomes one row that opens
 it. **First run** opens with a terminal pane at the left and the models pane at the right.
+
+**Built on 2026-09-21** (`src/ModelsPane.{h,cpp}`, `relay-modelspane`, `tests/modelspane_test.cpp`;
+evidence under `docs/qa_evidence/2026-09-21-models-pane/`). What the build settled that this
+section did not say:
+
+- **The picker is a widget, not a dialog.** `relay::ModelPicker` lost its `QDialog` base, `exec()`,
+  `pickModel()`, "cancel" and `reject()`; it is embedded twice over — on `all` it is the available
+  tab, on a class it is the priorities tab — and the host, not the widget, says which. `onUse` and
+  `onEscape` replaced `accept()`.
+- **One renderer, two hosts** for providers: the tab is a `relay::SettingsPane` over
+  `modelsSection(true)`, the same section Options › Models draws, with `setEmbedded(true)` taking
+  its own tab row and footer away. The only difference between the two hosts is the
+  "models and priorities…" row, which inside the pane would be a door to where you already are.
+- **The tab keys are Alt+1 / Alt+2 / Alt+3**, and ←/→ where the class row is not in front (the
+  available tab). Not Ctrl+Tab: that is the window's **Next tab** (`tab.next`) and never reaches a
+  pane — the first Xvfb run pressed it three times and stayed put. ←/→ stay the class tabs.
+- **`agent.model` is gone from the keymap**, not merely unbound, and `agent.modelOptions` is the
+  one models key. `/model` alone opens the pane on priorities; `/models` opens it on providers.
+- **First run opens on providers.** A fresh profile has no key, so there is nothing to rank or tick
+  yet and step 1 is the first thing to do. The condition is `instructions/onboarded` unset *and* no
+  saved layout to restore (`WindowManager::newWindowAt`).
+- **The pane is saved with the layout** as `{"models": {"cwd", "tab"}}` and comes back serving the
+  first terminal pane of its tab; a `SettingsWatch` listener re-reads its target, because a first
+  run has no catalog at all until the worker answers `presets`.
 
 ## 6. Order of work
 

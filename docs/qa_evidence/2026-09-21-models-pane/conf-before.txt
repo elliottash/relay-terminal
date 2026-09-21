@@ -1,0 +1,13 @@
+[isolation]
+enabled=false
+
+[suggestions]
+next_command=false
+next_prompt=false
+
+[security]
+approvals_chosen=true
+approvals_ask=@Invalid()
+
+[url_handler]
+announced=true

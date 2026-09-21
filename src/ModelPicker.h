@@ -122,6 +122,14 @@ public:
     ModelPick pick() const { return m_pick; }
     void rebuild();
 
+    // The catalog and the served pane's current row again, without throwing the tab, the filter,
+    // the class list or the undo stack away. A pane's catalog arrives **late** — an install with
+    // no providers has nothing to draw until its worker answers `presets`, and a key added on the
+    // models pane's providers tab changes what the other two tabs may offer — and `rebuild()`
+    // alone would redraw the rows from the catalog this widget was built with (card #MDL1 t:a11).
+    void setCatalog(const models::Catalog &catalog, const QString &currentKey,
+                    const QString &currentEffort, qint64 now);
+
     // Hosted in `relay::ModelsPane`: the flat tab is the host's own **available** tab, so it
     // leaves this widget's tab row — which then holds the five classes and nothing else, and
     // hides itself altogether while the flat tab is in front. `setTier("all")` still reaches it;

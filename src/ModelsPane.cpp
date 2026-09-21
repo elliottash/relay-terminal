@@ -8,6 +8,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QTreeWidget>
+#include <QShortcut>
 #include <QSignalBlocker>
 #include <QStackedWidget>
 #include <QTabBar>
@@ -82,8 +83,20 @@ ModelsPane::ModelsPane(std::function<QList<SettingsSection>()> sections, QWidget
         showTab(m_tabs->tabData(index).toString());
     });
     m_tabs->installEventFilter(this);
+    // Alt+1/2/3 as **shortcuts**, not as an event filter: the providers tab is a whole
+    // `SettingsPane` with a search line of its own, and a filter installed on that pane never sees
+    // what its QLineEdit swallows — the first Xvfb run typed "2" into the search box instead of
+    // changing tab. A WidgetWithChildren shortcut fires wherever the focus is inside this pane.
+    for (int i = 0; i < tabIds().size(); ++i) {
+        auto *jump = new QShortcut(QKeySequence(Qt::ALT | (Qt::Key_1 + i)), this);
+        jump->setContext(Qt::WidgetWithChildrenShortcut);
+        const QString id = tabIds().at(i);
+        connect(jump, &QShortcut::activated, this, [this, id] { showTab(id); focusFilter(); });
+    }
     updateHeader();
-    showTab(availableTab());
+    // Priorities is the tab a pick is made on, so it is where the key lands by default; the window
+    // asks for providers on a first run, where there is nothing to pick yet.
+    showTab(prioritiesTab());
 }
 
 // The picker, built around the target this pane serves now. It is rebuilt rather than reconfigured
@@ -130,8 +143,10 @@ void ModelsPane::setTarget(const Target &target) {
     if (!samePane && !wantTier.isEmpty() && wantTier != kAll) m_classTab = wantTier;
     if (samePane) {
         // The same pane again — Ctrl+Shift+M pressed twice from it, or a fresh catalog after a
-        // `presets` answer. Its lists, its undo stack and whatever is typed in the filter stay.
-        m_picker->rebuild();
+        // `presets` answer. Its lists, its undo stack and whatever is typed in the filter stay,
+        // but the catalog is read again: on a first run there were no providers at all when this
+        // pane was built, and the rows only exist once the worker has answered.
+        m_picker->setCatalog(m_target.catalog, m_target.currentKey, m_target.currentEffort, m_target.now);
     } else {
         buildPicker();
     }
@@ -201,13 +216,29 @@ void ModelsPane::stepTab(int delta) {
     focusFilter();
 }
 
+// Two rows of tabs need a key each. ←/→ are the class tabs of the priorities page (the picker's
+// own); these three are **Alt+1 / Alt+2 / Alt+3**, and ←/→ as well wherever the picker has no
+// class row in front of it (the available tab) or there is no picker at all (providers).
+//
+// Not Ctrl+Tab, which is the window's **Next tab** (Keymap `tab.next`) and never reaches a pane:
+// a first Xvfb run of this pane pressed it three times and stayed on the same tab.
 bool ModelsPane::handleShortcut(QKeyEvent *event) {
     const Qt::KeyboardModifiers mods = event->modifiers();
-    if (!(mods & Qt::ControlModifier)) return false;
-    if (event->key() != Qt::Key_Tab && event->key() != Qt::Key_Backtab) return false;
-    // Two rows of tabs, one key each: ←/→ are the class tabs of the priorities page (the picker's
-    // own), ctrl+tab is these three. The picker steps aside for ctrl+tab while it is hosted.
-    stepTab(event->key() == Qt::Key_Backtab || (mods & Qt::ShiftModifier) ? -1 : 1);
+    const int key = event->key();
+    // The same three tabs, for the controls this pane filters directly. The QShortcut above is
+    // what covers the providers tab's own search line; this is what answers where there is no
+    // active window for a shortcut to match against, which is every headless test.
+    if ((mods & Qt::AltModifier) && key >= Qt::Key_1 && key <= Qt::Key_3) {
+        showTab(tabIds().at(key - Qt::Key_1));
+        focusFilter();
+        return true;
+    }
+    if (mods != Qt::NoModifier || (key != Qt::Key_Left && key != Qt::Key_Right)) return false;
+    // Only where the picker is not using them: on priorities they are its class tabs, and in a
+    // filter line with text in it they are the caret's (the picker answers that case itself).
+    if (currentTab() == prioritiesTab()) return false;
+    if (m_picker && m_picker->filter()->hasFocus() && !m_picker->filter()->text().isEmpty()) return false;
+    stepTab(key == Qt::Key_Left ? -1 : 1);
     return true;
 }
 

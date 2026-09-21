@@ -213,21 +213,47 @@ private Q_SLOTS:
         QCOMPARE(pane.tier(), QStringLiteral("main"));
     }
 
-    void ctrlTabWalksTheThreeTabs() {
+    // Two rows of tabs, a key each. **Not Ctrl+Tab**: that is the window's Next tab (Keymap
+    // `tab.next`) and never reaches a pane — the first Xvfb run of this pane pressed it three
+    // times and stayed where it was (docs/qa_evidence/2026-09-21-models-pane).
+    void altDigitsWalkTheThreeTabsAndCtrlTabIsTheWindows() {
         Served served;
         ModelsPane pane(providerSections());
         pane.setTarget(targetFor(&served));
         pane.showTab(ModelsPane::providersTab());
-        QTest::keyClick(&pane, Qt::Key_Tab, Qt::ControlModifier);
+        QTest::keyClick(&pane, Qt::Key_2, Qt::AltModifier);
         QCOMPARE(pane.currentTab(), QStringLiteral("available"));
-        QTest::keyClick(&pane, Qt::Key_Tab, Qt::ControlModifier);
+        QTest::keyClick(&pane, Qt::Key_3, Qt::AltModifier);
         QCOMPARE(pane.currentTab(), QStringLiteral("priorities"));
-        QTest::keyClick(&pane, Qt::Key_Tab, Qt::ControlModifier);   // wraps
+        QTest::keyClick(pane.picker()->filter(), Qt::Key_1, Qt::AltModifier);
         QCOMPARE(pane.currentTab(), QStringLiteral("providers"));
-        // …and from inside the picker's own controls, where ←→ belong to the class tabs.
-        pane.showTab(ModelsPane::prioritiesTab());
-        QTest::keyClick(pane.picker()->filter(), Qt::Key_Tab, Qt::ControlModifier);
+        // Ctrl+Tab is left alone wherever it is pressed.
+        QTest::keyClick(&pane, Qt::Key_Tab, Qt::ControlModifier);
         QCOMPARE(pane.currentTab(), QStringLiteral("providers"));
+        // ←/→ walk them too, but only where the picker is not using them for its class tabs.
+        pane.showTab(ModelsPane::availableTab());
+        QTest::keyClick(pane.picker()->filter(), Qt::Key_Right);
+        QCOMPARE(pane.currentTab(), QStringLiteral("priorities"));
+        QCOMPARE(pane.tier(), QStringLiteral("main"));
+        QTest::keyClick(pane.picker()->filter(), Qt::Key_Right);   // now the class tabs
+        QCOMPARE(pane.currentTab(), QStringLiteral("priorities"));
+        QCOMPARE(pane.tier(), QStringLiteral("flash"));
+    }
+
+    // A pane's catalog arrives late: with no providers there is nothing to draw until the worker
+    // answers `presets`, and a re-read of the same pane has to bring the new rows with it.
+    void aLateCatalogReachesTheRowsWithoutLosingTheTab() {
+        Served served;
+        ModelsPane pane(providerSections());
+        ModelsPane::Target empty = targetFor(&served);
+        empty.catalog = catalogFrom(QJsonArray());       // a first run: no providers at all
+        empty.currentKey.clear();
+        pane.setTarget(empty);
+        pane.showTab(ModelsPane::availableTab());        // the tab that draws the catalog alone
+        QVERIFY(rowKeys(pane.picker()->list()).isEmpty());
+        pane.setTarget(targetFor(&served));              // …and then the worker answers
+        QCOMPARE(pane.currentTab(), QStringLiteral("available"));
+        QVERIFY(rowKeys(pane.picker()->list()).contains(QStringLiteral("glm-coding|glm-5.3")));
     }
 
     void providersIsWhereCustomizeGoes() {

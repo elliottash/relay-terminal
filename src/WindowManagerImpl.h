@@ -247,11 +247,14 @@ inline RelayWindow *WindowManager::newWindowAt(const QString &cwd) {
         return newWindow(QJsonArray{terminal});
     return newWindow(QJsonArray{QJsonObject{
         {"split", "h"},
-        {"children", QJsonArray{terminal, QJsonObject{{"models", QJsonObject{{"cwd", cwd}}}}}},
+        // On the **providers** tab: a fresh profile has no key, so there is nothing to rank or
+        // tick yet and the first thing to do is add one (design 5.7, step 1).
+        {"children", QJsonArray{terminal, QJsonObject{{"models", QJsonObject{
+            {"cwd", cwd}, {"tab", relay::ModelsPane::providersTab()}}}}}},
         // Wide enough for the three tabs and the level column beside the rows, and narrower than
         // the terminal: the terminal is what is being worked in, the models pane is what is being
         // set up. RelayWindow::buildNode applies these only when the splitter has two children.
-        {"sizes", QJsonArray{980, 720}}}});
+        {"sizes", QJsonArray{860, 840}}}});
 }
 
 inline void WindowManager::focusPane(const QString &token) {

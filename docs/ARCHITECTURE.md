@@ -857,7 +857,9 @@ Default window shortcuts:
 
 The session manager (`/resume`, `agent.resume`), titled "Sessions", is Ctrl+Shift+Y, Warp's key for
 its conversations menu. It was Ctrl+Shift+M for one day (2026-09-19) until the owner gave M to the
-model options (`agent.modelOptions`, Options › Models, 2026-09-20: "models are more central than sessions"; the picker is Ctrl+Alt+M, the model box Alt+M). The key is a
+model options (`agent.modelOptions`, 2026-09-20: "models are more central than sessions"; since
+card #MDL1 t:a11 that key opens the **models pane**, and the model box is Alt+M — Ctrl+Alt+M went
+with the modal picker). The key is a
 **toggle** (owner, 2026-09-20): pressed again with the manager focused it closes the pane, as Esc
 does; pressed while the focus is elsewhere it brings the open manager forward instead, so the key
 never closes a pane the user is not looking at (`RelayWindow::toggleSessionsPane`). The slash
@@ -2124,7 +2126,7 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
 - **Four steps of availability** (owner, 2026-09-21; design 5.7): **1** add a provider, **2** make
   a model *available*, **3** put it in a tier list, **4** say how much of that list the box draws.
   Step 2 came back with `models/available` — a list of keys, **per machine and never per profile**,
-  edited in the Ctrl+Alt+M dialog's `all` tab (an `available` column, first on a model row) and
+  edited on the models pane's **available** tab (an `available` column, first on a model row) and
   reached from Options › Models by the **models… (N of M available)** link under each provider.
   Absent — every install until the first un-tick — is the default t:a10 had hard-coded: every model
   of a **branded** provider, and of an **open-ended** one (`Entry::openEnded`, OpenRouter's live
@@ -2135,7 +2137,7 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   **available** entry in rank order — the lists, the box, its filter and `/model` all read it —
   `models::allUsable(catalog)` is every usable entry (the dialog's "more from openrouter", and the
   fallback `/model <name>` takes: typing a name is asking for that model), and
-  `models::curatable(catalog)` is what the `all` tab draws, so an un-ticked row stays there greyed
+  `models::curatable(catalog)` is what the available tab draws, so an un-ticked row stays there greyed
   with a box to tick again.
   What the two **defaults** are is a file in the repo rather than a table in the code (card #MDL1):
   `backend/relay_core/model-ranking.md` holds a **Providers** table (`provider | kind | order`) and
@@ -2148,13 +2150,17 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   class, and two or more two per class by score with at most one per provider in each. The wire
   shape is untouched, so the C++ side applies the same `{tier: [{preset, model, effort}]}` it always
   did. `src/ModelPicker.*`
-  (`relay-modelpicker`, `tests/modelpicker_test.cpp`) is the dialog behind Ctrl+Alt+M
-  (`agent.model`), `/model` alone and the box's "more models…", and since card #MDL1 t:a7 it is
-  where models are *prioritized* as well as picked (design 5.2; the lists were "too hard to find"
-  under Options › Models). A tab per tier list — high · main · flash · lite · local, `local` only
-  where this machine serves one — plus `all`; `Context::tier` is the mode the pane is in, so it
-  opens on the list it would be editing, and ←/→ (empty filter, or the caret at that end) and
-  Ctrl+Tab walk the tabs. A tier tab is `curation::tierList(tier)` itself: one row per list
+  (`relay-modelpicker`, `tests/modelpicker_test.cpp`) is the widget behind `/model`, the box's
+  "more models…" and Ctrl+Shift+M, and since card #MDL1 t:a7 it is where models are *prioritized*
+  as well as picked (design 5.2; the lists were "too hard to find" under Options › Models). It was
+  a `QDialog` on Ctrl+Alt+M until t:a11, when the owner retired both the modal and the key ("just
+  remove ctrl alt m, not worth the extra confusion"): it is a plain `QWidget` now, embedded in
+  `relay::ModelsPane` (below), and `pickModel()` is gone with `exec()`, "cancel" and `reject()`.
+  A tab per tier list — high · main · flash · lite · local, `local` only
+  where this machine serves one — plus `all`, which the host draws as its own tab and so leaves
+  this widget's tab row (`setHosted`); `Context::tier` is the mode the pane is in, so it
+  opens on the list it would be editing, and ←/→ (empty filter, or the caret at that end) walk the
+  class tabs; the host's three are Alt+1/2/3. A tier tab is `curation::tierList(tier)` itself: one row per list
   *entry*, numbered, the model named once and the provider in a "via" column, rank 1 of main
   marked, an unusable or exhausted rank greyed in place with the reason in the "left" column. The
   edits — Alt+↑/↓, a drag (`commitDragOrder`), Delete, Ctrl+Enter with `models::tierStartEffort`,
@@ -2171,16 +2177,46 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   (`ModelPicker::addModelById`: an id the catalog holds is simply selected, one it does not is
   stored in `models/custom`). The profile is in the header when there is
   one, and a footer line spells the tab's keys. Every pick goes
-  through `Pane::selectEntry(key, effort)`, which is `selectModel(preset, model)` plus the level;
+  through `Pane::selectEntry(key, effort)` **in the pane the models pane serves**, which is
+  `selectModel(preset, model)` plus the level;
   `/swap` toggles between rank 1 and rank 2 (#DC4J). Options › Models (`RelayWindow::modelsSection`)
-  is the page for what the dialog is *not* about (card #MDL1 t:a10, design 5.5): a
-  "models and priorities… (Ctrl+Alt+M)" button at the top — `Pane::openModelPicker("main")`, because
+  is the page for what the picker is *not* about (card #MDL1 t:a10, design 5.5): a
+  "models and priorities…" button at the top — `Pane::openModelPicker("main")`, because
   a page is not in a mode — then providers and keys (through the pane's `storeKey` / `testKey` /
   `removeKey`, with a guest's permission posture under its provider row) and the profiles. The five
   tier lists, the "models in the picker" checklist, its per-provider "add a model by id" box and
   the "fill the lists" defaults buttons all left the page for that dialog. It replaced
   the API keys and Model roles doors and the "Claude Code and Codex" page. Labels are lower-case
   throughout, per the owner.
+- **The models pane (card #MDL1 t:a11, design 5.8).** Owner, 2026-09-21: *"lets build the models
+  pane … and just remove ctrl alt m, not worth the extra confusion … typing it again closes the
+  pane (or esc as you mentioned)."* `src/ModelsPane.*` (`relay-modelspane`,
+  `tests/modelspane_test.cpp`) is a `ToolPane` beside the pane it serves, hosted exactly the way
+  Options is (`RelayWindow::createModelsPane`, `ToolPane::Kind::Models`, `paneType` "models"), with
+  three tabs for the first three of the four steps of §5.7: **providers** — Options › Models' own
+  section, drawn by `relay::SettingsPane` over that one section (`modelsSection(true)`, which drops
+  only the row that would be a door to here) with `setEmbedded(true)` taking its tab row and footer
+  away, so a key added here is a key added there — **available**, the picker's flat tab, and
+  **priorities**, the picker's class tabs. The two are **one** `ModelPicker`, put on `all` or on a
+  class by this pane's tab bar. ←/→ walk the class tabs, and these three are **Alt+1/2/3** — not
+  Ctrl+Tab, which is the window's Next tab (`tab.next`) and never reaches a pane — as a
+  `WidgetWithChildrenShortcut`, because the providers tab has a search line of its own that
+  swallows keys an event filter on the pane would never see.
+  `ModelsPane::Target` is the served pane and nothing else: its title for the header line
+  ("for: …"), its session token (how a re-target is told from a re-read), its catalog, model, level
+  and mode, and callbacks for `use` (`Pane::selectEntry`), `fillFromDefaults`, `listsChanged` and
+  `focusBack`. Every one of those is a `std::function`, so the pane knows nothing of `Pane` or
+  `RelayWindow` and its test drives the whole surface offscreen. `Pane::modelsTarget()` builds one;
+  `Pane::openModelPicker(tier, filter)` — still the one door every pick takes — hands it to the
+  window through `onOpenModelsPane`. `agent.modelOptions` (Ctrl+Shift+M) is a three-state toggle in
+  `RelayWindow::toggleModelsPane`: closed → open beside the active pane on priorities at its class;
+  open and focused → close; open and the focus elsewhere → re-target and focus. Escape is
+  `focusBack`, which leaves the pane open. The pane is saved with the layout as
+  `{"models": {"cwd", "tab"}}` and comes back serving the first terminal pane of its tab
+  (`linkRestoredModelsPane`); a `SettingsWatch` listener re-reads the target whenever a key, a
+  preset answer or a list edit lands. **First run** — no saved layout and `instructions/onboarded`
+  not yet true — is a terminal pane at the left and this at the right
+  (`WindowManager::newWindowAt`).
 - **The reasoning levels are the model's (card #MDL1, 2026-09-21).** Owner: *"i want the effort
   options in relay to be determined by the model … so xhigh shows up for codex for example"* and
   *"for no knob models, the effort box should be grayed out. same for relay free."* Relay owned
@@ -2295,7 +2331,7 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
 - **The cutoff and the class switch are the dialog's, and they live with the lists.**
   `models/box/<tier>` is the cutoff rank and `models/box_off/<tier>` the switch; an absent key
   means "two, on". They are written through to the current profile exactly as `setTierList` is,
-  travel in an exported profile's `box` object, and are edited in Ctrl+Alt+M: every row of a class
+  travel in an exported profile's `box` object, and are edited on the models pane’s priorities tab: every row of a class
   tab has a "show in box" tick that behaves as a **cutoff** (ticking rank n ticks 1..n, unticking
   n unticks n and everything below, unticking rank 1 switches the class off) and the tab has a
   "show this class in the box" switch. Both call `onListsChanged`, so an open box redraws. The two
@@ -3447,7 +3483,8 @@ of the platform and of the engine itself.
 | `src/SkillsDialog.*` | skills list, exclude, refine, import, updates |
 | `src/ModelSettings.*` | the API-keys and model-roles modals (roles: "per-job models (advanced)" on Options › Models) |
 | `src/ModelCatalog.*` | the one model catalog behind the box, the picker and Options › Models, and what the user checked and ranked |
-| `src/ModelPicker.*` | the model dialog: picks a model *and* prioritizes the five lists (Ctrl+Alt+M, `/model`; Alt+M drops the model box open, Ctrl+Shift+M opens Options › Models) |
+| `src/ModelPicker.*` | the picker widget: picks a model *and* prioritizes the five lists; the models pane's available and priorities tabs |
+| `src/ModelsPane.*` | the models pane (Ctrl+Shift+M, `/model`, `/models`): providers · available · priorities, beside the pane it serves |
 | `src/SettingsPane.*` | the Actions pane and the Options pane: one widget, two modes |
 | `src/AgentUi.*` | pickers and instructions dialog |
 | `src/Conversations.*` | the session manager pane (`/resume`, `/conversations`, Ctrl+Shift+Y) and the Ctrl+F find bar |

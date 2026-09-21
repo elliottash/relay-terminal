@@ -416,6 +416,21 @@ void ModelPicker::populateTabs() {
     }
 }
 
+void ModelPicker::setCatalog(const Catalog &catalog, const QString &currentKey,
+                             const QString &currentEffort, qint64 now) {
+    m_context.catalog = catalog;
+    m_context.currentKey = currentKey;
+    m_context.currentEffort = currentEffort;
+    m_context.now = now;
+    const QString selected = selectedKey();
+    rebuild();
+    // Whatever was highlighted, if the fresh catalog still has it; otherwise the pane's own model,
+    // which is what a first draw would have selected.
+    if (!selected.isEmpty()) selectKey(selected);
+    if (selectedKey().isEmpty() && !currentKey.isEmpty()) selectKey(currentKey);
+    if (!m_list->currentItem()) selectFirstRow();
+}
+
 void ModelPicker::setHosted(bool hosted) {
     if (hosted == m_hosted) return;
     m_hosted = hosted;
@@ -429,7 +444,11 @@ void ModelPicker::setHosted(bool hosted) {
     }
     populateTabs();
     syncTabBar();
+    // The pane is narrower than the 980 px dialog was, and the side column is fixed width: at 210
+    // it took a third of the rows' room. "z.ai (glm) · coding…" still fits at 170.
+    if (hosted) { m_vias->setFixedWidth(170); m_levels->setFixedWidth(170); }
     updateFooter();
+    rebuild();   // the columns a host hides are decided in rebuild()
 }
 
 void ModelPicker::syncTabBar() {
@@ -928,6 +947,14 @@ void ModelPicker::rebuild() {
     // Step 2 is edited in one place: the `all` tab. A tier tab is step 3 and the box column is
     // step 4, and three checkbox columns on one row would say nothing.
     m_list->setColumnHidden(ColAvail, !availabilityTab());
+    // Hosted, the widget is half a window wide rather than a 980 px dialog, and nine columns left
+    // the **model's name** — the one thing rule 1 says every surface must print — elided to
+    // "claude-o…". Intelligence and tok/s are what the sort menu sorts by, not what is read while
+    // picking, and every cell of the row already carries them in its tooltip, so they are the two
+    // that go (card #MDL1 t:a11; docs/qa_evidence/2026-09-21-models-pane/e-available.png is the
+    // run that showed it). "left" stays: it is where an exhausted row says why it is greyed.
+    m_list->setColumnHidden(ColIntelligence, m_hosted);
+    m_list->setColumnHidden(ColSpeed, m_hosted);
     // Dragging is how a list is reordered; on the flat tab there is no order to write down.
     m_list->setDragDropMode(all ? QAbstractItemView::NoDragDrop : QAbstractItemView::InternalMove);
     if (all) buildAll(query); else buildTier(query);
@@ -1091,8 +1118,8 @@ void ModelPicker::updateFooter() {
     // Hosted on the flat tab the class row is hidden, so ←→ has no tab of this widget's to walk:
     // it is the host's three tabs the arrows belong to then, and the footer says so.
     const QString tabs = !m_hosted                ? QStringLiteral("←→ tab · ")
-                       : m_tier == kAll           ? QStringLiteral("ctrl+tab tab · ")
-                                                  : QStringLiteral("←→ class · ctrl+tab tab · ");
+                       : m_tier == kAll           ? QStringLiteral("←→ alt+1/2/3 tab · ")
+                                                  : QStringLiteral("←→ class · alt+1/2/3 tab · ");
     QString text = m_tier == kAll
         ? tabs + QStringLiteral("↑↓ row · enter uses it in the pane · type to search every model, openrouter's "
                                 "long tail included · tab, then → : the providers of a folded row, and the levels · "
@@ -1209,9 +1236,10 @@ bool ModelPicker::handleShortcut(QKeyEvent *event) {
     const Qt::KeyboardModifiers mods = event->modifiers();
     const bool ctrl = mods & Qt::ControlModifier;
     const bool alt = mods & Qt::AltModifier;
-    // Ctrl+Tab walks this widget's own tabs — unless it is hosted in the models pane, where two
-    // rows of tabs need a key each: ←/→ stay the class tabs and ctrl+tab becomes the host's three
-    // (providers · available · priorities), so it is left for the host to answer.
+    // Ctrl+Tab walks this widget's own tabs — unless it is hosted in the models pane, where it is
+    // not this widget's to answer at all: Ctrl+Tab is the window's **Next tab** (Keymap
+    // `tab.next`), so it never reaches a pane. The host's three tabs are Alt+1/2/3 and ←/→ on the
+    // flat tab; the class tabs keep ←/→.
     if (ctrl && (key == Qt::Key_Tab || key == Qt::Key_Backtab)) {
         if (m_hosted) return false;
         stepTab(key == Qt::Key_Backtab || (mods & Qt::ShiftModifier) ? -1 : 1);
@@ -1249,8 +1277,11 @@ bool ModelPicker::eventFilter(QObject *watched, QEvent *event) {
             if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) { use(); return true; }
             // ←/→ walk the tabs from the filter, which is where the focus starts — unless there is
             // text and the caret is somewhere inside it, when they are a caret's arrows again.
-            if (key->key() == Qt::Key_Left && (m_filter->text().isEmpty() || m_filter->cursorPosition() == 0)) { stepTab(-1); return true; }
-            if (key->key() == Qt::Key_Right && (m_filter->text().isEmpty() || m_filter->cursorPosition() == m_filter->text().size())) { stepTab(1); return true; }
+            // Hosted on the flat tab this widget's class row is hidden, so ←/→ have no tab of
+            // its own to walk: they fall through to the host's three (src/ModelsPane.cpp).
+            const bool ownTabs = !(m_hosted && m_tier == kAll);
+            if (ownTabs && key->key() == Qt::Key_Left && (m_filter->text().isEmpty() || m_filter->cursorPosition() == 0)) { stepTab(-1); return true; }
+            if (ownTabs && key->key() == Qt::Key_Right && (m_filter->text().isEmpty() || m_filter->cursorPosition() == m_filter->text().size())) { stepTab(1); return true; }
         }
         if (watched == m_list) {
             // The view swallows Enter (it emits activated), so the default button never sees it.

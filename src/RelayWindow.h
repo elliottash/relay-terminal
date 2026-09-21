@@ -1625,8 +1625,15 @@ private:
     // re-target (src/ModelsPane.cpp).
     void refreshModelsPane(ToolPane *tool) {
         relay::ModelsPane *view = modelsViewOf(tool);
-        if (!view || view->servedToken().isEmpty()) return;
+        if (!view) return;
+        // The pane it serves, or — for one that came back with a layout and has not been pointed
+        // at anything yet, and for one whose pane has since closed — the first terminal pane of
+        // the tab it is in, which is what `linkRestoredModelsPane` would have given it.
         Pane *served = findPaneByToken(view->servedToken());
+        if (!served) {
+            const QList<Pane *> panes = panesIn(pageOf(tool));
+            served = panes.isEmpty() ? nullptr : panes.first();
+        }
         if (!served) return;
         applyModelsTarget(tool, served, served->modelsTarget(), QString(), QString());
     }
