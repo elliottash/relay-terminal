@@ -2,7 +2,7 @@
 // relay::Pty: pseudo-terminal with its own I/O thread.
 //
 // Unix: forkpty + a reader/writer thread (PtyUnix.cpp).
-// Windows: ConPTY (PtyWin.cpp, not implemented yet; see the TODO there).
+// Windows: ConPTY (PtyWin.cpp); reader, queued writer and process watcher threads.
 //
 // Threading contract:
 // - onOutput and onFinished are called on the Pty's I/O thread, never on the

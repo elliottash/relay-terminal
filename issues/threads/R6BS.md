@@ -13,3 +13,7 @@ Main pushed at 5f0d7efe. Reproduced release gates: Qt6 rejects findChild<RichEdi
 <!-- relay:entry 20260921T220805Z-a4 author=codex kind=progress -->
 ### Codex · 2026-09-21 22:08
 Corrected card ID R6LS (L is outside the board alphabet) to R6BS. Gate fixes landed e4bfa994 after exact-tree build and consolemode check. Updated the board test helper to use the named QPlainTextEdit too, and kept the existing source guard aligned with that Qt6-compatible lookup. Windows clarification remains pending; Linux work continues.
+
+<!-- relay:entry 20260921T221042Z-a5 author=codex kind=decision -->
+### Codex · 2026-09-21 22:10
+Owner: "Native Windows installer". This requires the native port rather than a WSL wrapper. Starting the independent ConPTY backend and native smoke-test job; asked whether the installer should use PowerShell or bundled Bash before implementing shell integration. Linux CI is running at a59525c0.

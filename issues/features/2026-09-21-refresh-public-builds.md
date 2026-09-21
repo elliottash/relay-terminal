@@ -1,8 +1,7 @@
 ---
 id: R6BS
 type: work
-status: discussing
-waiting_on: owner
+status: executing
 labels: [feature, packaging, website]
 assignee: codex
 rank: m
@@ -15,6 +14,9 @@ links: {plans: [], commits: [], evidence: [], related: [W9ST, P4GP, 3AZG, YJK8],
 ## Issue
 update a clean commit, push, and update the linux and windows builds available on the web site
 
+## Decisions
+"Native Windows installer" — Windows means a native application, not WSL.
+
 ## Planning notes
 Published releases end at v0.1.0-beta.2 and contain six Linux packages, source and checksums. The release pipeline builds Linux only. `engine/pty/PtyWin.cpp` explicitly returns “ConPTY backend not implemented yet”; Windows native packaging is absent. Asked whether Windows means WSL or a native installer while preparing the independent Linux work.
 
@@ -24,6 +26,7 @@ Published releases end at v0.1.0-beta.2 and contain six Linux packages, source a
 **Steps:**
 1. Prepare beta.3 metadata, push main and inspect CI on that exact revision.
 2. Resolve release build failures within scope, cut a fresh tag and verify package jobs and smoke tests.
-3. Publish release notes and update website download links only after assets exist; handle Windows according to the owner's clarification.
+3. Implement and smoke-test ConPTY on a native Windows runner; establish the native application/installer build, including platform-specific runtime and shell integration. Shell selection (PowerShell or bundled Bash) is pending.
+4. Publish release notes and update website download links only after assets exist; handle Windows according to the owner's clarification.
 **Risks:** Existing CI failures may block release. Native Windows support is a port, not a rebuild; no Windows binary will be advertised without a working build.
 **Verify:** CI, package smoke tests, release asset checksum verification, website links and deployed bytes.
