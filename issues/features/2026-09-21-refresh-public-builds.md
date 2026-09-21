@@ -1,7 +1,8 @@
 ---
-id: R6LS
+id: R6BS
 type: work
-status: executing
+status: discussing
+waiting_on: owner
 labels: [feature, packaging, website]
 assignee: codex
 rank: m
