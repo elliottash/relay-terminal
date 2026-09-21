@@ -20,6 +20,7 @@
 #include "PromptHistory.h"
 #include "Theme.h"
 #include "BoardPane.h"
+#include "BoardWorkspace.h"
 #include "CleanupTranscript.h"
 #include "ApprovalsPane.h"  // relay::approvals::cautious(): the ask's "Always allow" writes the same list the checklist shows
 #include "Projects.h"      // which project this pane's tab is attached to, and why (#JN7X)
@@ -2973,6 +2974,17 @@ public:
     // Where a clicked or keyboard-selected link goes. `fromMouse` teaches the keyboard path.
     void openOutputTarget(const QString &target, int line, bool fromMouse) {
         if (target.isEmpty()) return;
+        // An agent may link #ID to its backing Markdown file (#L9KC). Resolve that
+        // before context dispatch, so embedded consoles and terminal panes agree.
+        if (line <= 0 && QDir::isAbsolutePath(target)) {
+            const QString attached = onBoardProject ? onBoardProject(QString(), nullptr) : QString();
+            const QString id = relay::boardCardIdForFile(
+                target, attached.isEmpty() ? relay::boardRootFor({m_cwd}) : attached);
+            if (!id.isEmpty()) {
+                openOutputTarget(relay::links::cardTarget(id), -1, fromMouse);
+                return;
+            }
+        }
         // What this console is about gets first refusal (#AGNT step 3): a card page resolves
         // `card:` to itself, Options reveals an `option:` row, Sessions opens a `session:`.
         // A terminal context resolves nothing, so every link below travels exactly the path it
@@ -3028,6 +3040,10 @@ public:
             // A `#K7Q2` in the output (Switchboard design section 5): the Switchboard opens in
             // this tab if it is not there yet, and the card opens in it.
             if (url.host() == QStringLiteral("card") && parts.size() == 1 && onOpenCard) {
+                if (fromMouse)
+                    hint(QStringLiteral("links.step"),
+                         relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("links.step")),
+                                                        QStringLiteral("step through the links in the output")));
                 onOpenCard(parts.at(0).toUpper());
                 return;
             }

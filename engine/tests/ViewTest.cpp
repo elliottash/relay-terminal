@@ -1564,7 +1564,7 @@ private slots:
         Term t(core, QStringLiteral("/bin/cat"), {}, dir.path());
         t.backend->resizeTerminal(14, 100);
         t.view->setCardLookup([](const QString &id, QString *title) {
-            if (id != QStringLiteral("K7Q2"))
+            if (id != QStringLiteral("K7Q2") && id != QStringLiteral("GWXM"))
                 return false;
             if (title)
                 *title = QStringLiteral("A card");
@@ -1575,7 +1575,8 @@ private slots:
         const QString anchor = QStringLiteral("relay://prose/t/5");
         const QString markdown = QStringLiteral(
             "Open [the theme row](option:general/theme) or [that talk](session:0f3a91cc).\n"
-            "Also [card K7Q2](#K7Q2), [the notes](notes.txt:12) and [the site](https://x.org/a).\n");
+            "Also [card K7Q2](#K7Q2), [the notes](notes.txt:12) and [the site](https://x.org/a).\n"
+            "Plain #GWXM and unknown #ZZZZ.\n");
         MarkdownAnsi md;
         md.setLinkAnchor(anchor);
         const QString rendered = md.feed(markdown) + md.finish();
@@ -1607,6 +1608,9 @@ private slots:
             return TerminalView::Link();
         };
         auto checkAll = [&](const char *where) {
+            QCOMPARE(hitOn(QStringLiteral("#GWXM")).target,
+                     QStringLiteral("relay://card/GWXM"));
+            QVERIFY(hitOn(QStringLiteral("#ZZZZ")).target.isEmpty());
             const TerminalView::Link option = hitOn(QStringLiteral("the theme row"));
             QVERIFY2(option.target == QStringLiteral("relay://option/general/theme"),
                      qPrintable(QStringLiteral("%1: option label -> '%2'").arg(QLatin1String(where), option.target)));
@@ -1663,6 +1667,19 @@ private slots:
         QVERIFY2(t.view->visibleRowsText().join(QLatin1Char('|')).contains(QStringLiteral("the theme row")),
                  "the block did not re-wrap into view");
         checkAll("re-wrapped at 62");
+        {
+            const auto rows = t.view->visibleRowsText();
+            int row = -1, col = -1;
+            for (int r = 0; r < rows.size(); ++r) {
+                const int at = rows[r].indexOf(QStringLiteral("#GWXM"));
+                if (at >= 0) { row = r; col = at; break; }
+            }
+            QVERIFY(row >= 0);
+            QTest::mouseClick(t.view, Qt::LeftButton, Qt::NoModifier,
+                             QPoint(2 + (col + 2) * t.view->cellWidth(),
+                                    2 + row * t.view->cellHeight() + t.view->cellHeight() / 2));
+            QCOMPARE(t.links.last(), QStringLiteral("relay://card/GWXM"));
+        }
         t.backend->resizeTerminal(14, 100);
         QTest::qWait(120);
         checkAll("back at the print width");

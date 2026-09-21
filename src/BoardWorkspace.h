@@ -31,4 +31,8 @@ namespace relay {
 // never drift apart about what counts as a board.
 QString boardRootFor(const QStringList &candidates);
 
+// A local Markdown card in this project's board, even before its card index has loaded.
+// Board documentation, threads, and files outside this board return an empty id.
+QString boardCardIdForFile(const QString &path, const QString &project);
+
 }  // namespace relay

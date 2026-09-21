@@ -48,6 +48,7 @@ class BoardWorkspaceTests : public QObject {
     Q_OBJECT
 
 private slots:
+    void cardFileLinksRecognizeOnlyThisBoardsCards();
     void theNearestAncestorWithABoardWins();
     void theFirstCandidateWithABoardWins();
     void noBoardAnywhereIsEmpty();
@@ -71,6 +72,41 @@ private slots:
     void theBoardPanePaintsFromTheBoardMaterials();
     void tabMetersGiveWayOnlyWhenFullLabelsDoNotFit();
 };
+
+void BoardWorkspaceTests::cardFileLinksRecognizeOnlyThisBoardsCards()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    for (const QString &folder : relay::projects::boardFolders()) {
+        const QString project = tmp.path() + '/' + folder;
+        makeBoard(project, folder);
+        const QString board = project + '/' + folder;
+        auto write = [](const QString &path, const QByteArray &body) {
+            QDir().mkpath(QFileInfo(path).absolutePath());
+            QFile file(path);
+            if (!file.open(QIODevice::WriteOnly)) return false;
+            return file.write(body) == body.size();
+        };
+        const QString card = board + "/features/needs_qa_llm/2026-09-17-keyboard-jump-to-output-links.md";
+        for (const QByteArray &id : {QByteArray("GWXM"), QByteArray("'GWXM'"), QByteArray("\"GWXM\" # note")}) {
+            QVERIFY(write(card, "---\nid: " + id + "\ntype: work\n---\n# Keyboard links\n"));
+            QCOMPARE(relay::boardCardIdForFile(card, project), QStringLiteral("GWXM"));
+        }
+        QVERIFY(relay::boardCardIdForFile(card, tmp.path() + "/other").isEmpty());
+        QVERIFY(relay::boardCardIdForFile(card + ".missing", project).isEmpty());
+        QVERIFY(write(board + "/threads/GWXM.md", "---\nid: GWXM\n---\n"));
+        QVERIFY(relay::boardCardIdForFile(board + "/threads/GWXM.md", project).isEmpty());
+        QVERIFY(write(board + "/BOARD.md", "---\nid: GWXM\n---\n"));
+        QVERIFY(relay::boardCardIdForFile(board + "/BOARD.md", project).isEmpty());
+        for (const QByteArray &body : {QByteArray("# Notes\nid: GWXM\n"),
+                                     QByteArray("---\ntitle: Notes\n---\nid: GWXM\n"),
+                                     QByteArray("---\nid: 1234\n---\n"),
+                                     QByteArray("---\nid: GWXM\n")}) {
+            QVERIFY(write(card, body));
+            QVERIFY(relay::boardCardIdForFile(card, project).isEmpty());
+        }
+    }
+}
 
 // A pane deep inside a project finds the project's board, and the answer is the project root
 // rather than the directory the pane is standing in.

@@ -1952,6 +1952,62 @@ bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endC
             return true;
         }
     }
+    // Rewrapped prose lives in FoldLayer, not in the emulator frame (#L9KC).
+    // Explicit Markdown labels were handled above; scan ordinary text here too,
+    // using the whole logical line so a reference split by wrapping still works.
+    const auto visual = visualAt(c.row);
+    if (visual.fold) {
+        const auto &fold = m_folds.folds()[size_t(visual.foldIndex)];
+        const auto &row = fold.rows[size_t(visual.foldRow)];
+        const auto &cells = fold.cells[size_t(row.line)];
+        QString text;
+        QVector<int> offsets;
+        for (const auto &cell : cells) {
+            offsets.append(text.size());
+            text += cell.text;
+        }
+        offsets.append(text.size());
+        int hit = -1, col = m_folds.rowStartCol(visual.foldIndex, visual.foldRow);
+        for (int i = row.first; i < row.first + row.count; ++i) {
+            if (c.col >= col && c.col < col + cells[size_t(i)].width) hit = offsets[i];
+            col += cells[size_t(i)].width;
+        }
+        if (hit < 0) return false;
+        for (const auto &found : links::scan(text, currentDirectory(), QDir::homePath(),
+                                            m_linkProbe ? m_linkProbe : links::systemProbe(),
+                                            m_cardLookup, links::Mode::Prose)) {
+            const int begin = found.candidate.start;
+            const int end = begin + found.candidate.length;
+            if (hit < begin || hit >= end) continue;
+            link->target = found.target.target;
+            link->text = found.candidate.text;
+            link->card = found.target.kind == links::Kind::Card ? found.candidate.path : QString();
+            link->cardTitle = found.target.label;
+            link->url = found.target.kind == links::Kind::Url;
+            link->directory = found.target.directory;
+            link->line = found.target.line;
+            link->column = found.target.column;
+            for (int r = 0; r < int(fold.rows.size()); ++r) {
+                const auto &part = fold.rows[size_t(r)];
+                if (part.line != row.line) continue;
+                int x = m_folds.rowStartCol(visual.foldIndex, r), left = -1, right = -1;
+                for (int i = part.first; i < part.first + part.count; ++i) {
+                    if (offsets[i] < end && offsets[i + 1] > begin) {
+                        if (left < 0) left = x;
+                        right = x + cells[size_t(i)].width - 1;
+                    }
+                    x += cells[size_t(i)].width;
+                }
+                if (left < 0) continue;
+                if (r == visual.foldRow) { *startCol = left; *endCol = right; }
+                const int screen = c.row + r - visual.foldRow;
+                if (segments && screen >= 0 && screen < m_rows)
+                    segments->append(QRect(left, screen, right - left + 1, 1));
+            }
+            return true;
+        }
+        return false;
+    }
     const int row = frameRowOf(c.row);
     if (row < 0 || row >= int(m_frame.lines.size()))
         return false;
