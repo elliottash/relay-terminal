@@ -31,6 +31,7 @@ jobs:
         if: ${{ !cancelled() }}
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           $env:PYTHONPATH = 'backend'
           $env:RELAY_POWERSHELL = (Get-Command pwsh).Source
           python -m unittest discover -s tests -p test_platform_storage.py -v
@@ -55,6 +56,7 @@ jobs:
         if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           $installer = (Get-ChildItem dist/*setup.exe).FullName
           $destination = Join-Path $env:RUNNER_TEMP 'Relay installed'
           $install = Start-Process $installer -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$destination`"") -Wait -PassThru
