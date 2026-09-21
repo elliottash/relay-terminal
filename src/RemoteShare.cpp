@@ -103,6 +103,15 @@ QString codeIntro()
         "here.");
 }
 
+// What the top of the pairing half says before the QR has an expiry to quote. The typed code is
+// named first (#FR1C): scanning on an iPhone opens Safari, which pairs a browser tab rather than
+// the Home Screen app the notifications go to.
+QString pairingIntro()
+{
+    return QStringLiteral("Type the code beside the QR on your phone, or scan the QR with its "
+                          "camera.");
+}
+
 } // namespace
 
 RemoteShare &RemoteShare::instance()
@@ -383,6 +392,25 @@ void RemoteShare::handle(const QJsonObject &message)
                               message.value(QStringLiteral("state")).toString(),
                               message.value(QStringLiteral("failures")).toInt());
         requestParticipants();
+    } else if (kind == QLatin1String("pair_code")) {
+        // The pairing code (#FR1C): #97EG's meeting code with a pairing fragment behind it. The
+        // PIN is the secret half, so it is never logged — the same QA hook as the invite code's,
+        // under its own variable because a driver pairing a phone is not a driver inviting a guest.
+        remotesettings::PairCode parsed;
+        if (!remotesettings::parsePairCode(message, &parsed)) return;
+        const QByteArray dump = qgetenv("RELAY_REMOTE_PAIR_CODE_FILE");
+        if (!dump.isEmpty()) {
+            QFile file(QString::fromLocal8Bit(dump));
+            if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+                file.write((parsed.code + QLatin1Char(' ') + parsed.pin).toUtf8() + '\n');
+            }
+        }
+        emit pairCodeReady(parsed.code, parsed.pin, parsed.expires);
+    } else if (kind == QLatin1String("pair_code_state")) {
+        remotesettings::PairCodeState parsed;
+        if (!remotesettings::parsePairCodeState(message, &parsed)) return;
+        emit pairCodeStateChanged(parsed.code, parsed.state, parsed.failures);
     } else if (kind == QLatin1String("knock")) {
         m_sharing.addKnock(message, QDateTime::currentMSecsSinceEpoch());
         emit sharingModelChanged();
@@ -711,6 +739,16 @@ void RemoteShare::poll()
 
 void RemoteShare::requestPairing() { send({{"t", "pair"}}); }
 
+// The pairing code (#FR1C). The GUI mints one whenever the pairing dialog opens and withdraws it
+// when the dialog closes; the sidecar answers `pair_code`, and `pair_code_state` afterwards.
+void RemoteShare::requestPairCode() { send(remotesettings::pairCodeRequest()); }
+
+void RemoteShare::revokePairCode(const QString &code)
+{
+    if (code.isEmpty()) return;
+    send(remotesettings::pairCodeRevoke(code));
+}
+
 void RemoteShare::requestDevices() { send({{"t", "devices"}}); }
 
 void RemoteShare::useAddress(const QString &address)
@@ -886,6 +924,15 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     m_status->setWordWrap(true);
     column->addWidget(m_status);
 
+    // One line, at the top, because pairing turns remote control on by itself (#FR1C) and a
+    // switch that turned itself on must say so where it happened — and say where to turn it off.
+    m_alwaysOnLine = new QLabel(relay::remotesettings::pairAlwaysOnLine());
+    m_alwaysOnLine->setWordWrap(true);
+    m_alwaysOnLine->setTextFormat(Qt::PlainText);
+    m_alwaysOnLine->setObjectName(QStringLiteral("settingsRowDetail"));
+    m_alwaysOnLine->setVisible(relay::remotesettings::alwaysOn());
+    column->addWidget(m_alwaysOnLine);
+
     // Which address the phone should reach this machine on. Getting it wrong is the most likely
     // reason a phone says it cannot reach the site, so the choice is in front of the QR code.
     m_address = new QComboBox;
@@ -914,7 +961,50 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     m_qr->setFixedSize(260, 260);
     // A QR code must never be squeezed or overlapped: a phone cannot read a partial one. The
     // label has a fixed size and the dialog grows to fit whatever else it has to say.
-    column->addWidget(m_qr, 0, Qt::AlignHCenter);
+    auto *pairRow = new QHBoxLayout;
+    pairRow->setSpacing(16);
+    pairRow->addWidget(m_qr, 0, Qt::AlignTop);
+
+    // Large, fixed-width and letter-spaced: every character here is going to be typed on a phone,
+    // and an ambiguous glyph is a code that does not work. The same face the meeting code uses.
+    QFont bigCode = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+    bigCode.setPixelSize(30);
+    bigCode.setWeight(QFont::DemiBold);
+    bigCode.setLetterSpacing(QFont::AbsoluteSpacing, 6);
+
+    // The code to type, beside the QR (#FR1C). Scanning the QR on an iPhone opens Safari, which
+    // pairs a browser tab that gets no push and is not the Home Screen app; typing four letters
+    // and four digits pairs whichever Relay is in the person's hand. Minted when this window
+    // opens and withdrawn when it closes.
+    m_pairBox = new QWidget;
+    auto *pairColumn = new QVBoxLayout(m_pairBox);
+    pairColumn->setContentsMargins(0, 0, 0, 0);
+    pairColumn->setSpacing(4);
+    m_pairHeading = new QLabel(relay::remotesettings::pairCodeHeading());
+    m_pairHeading->setWordWrap(true);
+    m_pairHeading->setTextFormat(Qt::PlainText);
+    pairColumn->addWidget(m_pairHeading);
+    m_pairValue = new QLabel;
+    m_pairValue->setFont(bigCode);
+    m_pairValue->setTextFormat(Qt::PlainText);
+    m_pairValue->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    pairColumn->addWidget(m_pairValue);
+    m_pairClock = new QLabel;
+    m_pairClock->setTextFormat(Qt::PlainText);
+    pairColumn->addWidget(m_pairClock);
+    m_pairNote = new QLabel;
+    m_pairNote->setWordWrap(true);
+    m_pairNote->setTextFormat(Qt::PlainText);
+    m_pairNote->setObjectName(QStringLiteral("settingsRowDetail"));
+    pairColumn->addWidget(m_pairNote);
+    m_pairAgain = new QPushButton(QStringLiteral("New code"));
+    m_pairAgain->setAutoDefault(false);
+    m_pairAgain->hide();
+    connect(m_pairAgain, &QPushButton::clicked, this, [this] { askPairCode(); });
+    pairColumn->addWidget(m_pairAgain, 0, Qt::AlignLeft);
+    pairColumn->addStretch(1);
+    pairRow->addWidget(m_pairBox, 1);
+    column->addLayout(pairRow);
     column->setSizeConstraint(QLayout::SetMinimumSize);
 
 
@@ -926,7 +1016,24 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     // The theme's muted text at the secondary size: palette(mid) is the border colour, about 1.4:1
     // on the dialog (docs/ARCHITECTURE.md, "Legible text").
     m_url->setObjectName(QStringLiteral("shareNote"));
-    column->addWidget(m_url);
+    auto *urlRow = new QHBoxLayout;
+    urlRow->addWidget(m_url, 1);
+    // The invite link has had a Copy button since it existed; the pairing link had none, and on a
+    // Linux desktop a 140-character link with a one-time secret in its fragment has no other way
+    // of reaching a phone that cannot scan (#FR1C).
+    m_pairCopy = new QPushButton(QStringLiteral("Copy link"));
+    m_pairCopy->setAutoDefault(false);
+    m_pairCopy->setToolTip(QStringLiteral(
+        "The whole pairing link, secret and all. Send it to your own phone and nowhere else: "
+        "whoever opens it first is the device that gets paired."));
+    m_pairCopy->setEnabled(false);
+    connect(m_pairCopy, &QPushButton::clicked, this, [this] {
+        if (m_pairingLink.isEmpty()) return;
+        QGuiApplication::clipboard()->setText(m_pairingLink);
+        m_pairCopy->setText(QStringLiteral("Copied"));
+    });
+    urlRow->addWidget(m_pairCopy, 0, Qt::AlignTop);
+    column->addLayout(urlRow);
 
     m_note = new QLabel;
     m_note->setWordWrap(true);
@@ -1108,10 +1215,7 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     auto *codeRow = new QHBoxLayout(m_codeBox);
     codeRow->setContentsMargins(0, 0, 0, 0);
     codeRow->setSpacing(24);
-    QFont big = QFontDatabase::systemFont(QFontDatabase::FixedFont);
-    big.setPixelSize(30);
-    big.setWeight(QFont::DemiBold);
-    big.setLetterSpacing(QFont::AbsoluteSpacing, 6);
+    const QFont big = bigCode;   // the pairing code's face, built above: one look for both codes
     auto value = [&](const QString &caption, QLabel **target) {
         auto *cell = new QVBoxLayout;
         cell->setSpacing(2);
@@ -1206,7 +1310,10 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
                 showCode(code, pin, expires);
             });
     connect(&share, &RemoteShare::codeStateChanged, this, &RemoteShareDialog::showCodeState);
+    connect(&share, &RemoteShare::pairCodeReady, this, &RemoteShareDialog::showPairCode);
+    connect(&share, &RemoteShare::pairCodeStateChanged, this, &RemoteShareDialog::showPairCodeState);
     connect(&share, &RemoteShare::secondPassed, this, &RemoteShareDialog::codeTick);
+    connect(&share, &RemoteShare::secondPassed, this, &RemoteShareDialog::refreshPairCode);
     connect(&share, &RemoteShare::inviteSent, this, [this](bool ok, const QString &message) {
         m_inviteNote->setText(message);
         m_inviteSend->setEnabled(true);
@@ -1227,21 +1334,134 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     });
     connect(&share, &RemoteShare::startedChanged, this, [this, &share] {
         if (share.running()) {
-            m_status->setText(QStringLiteral("Scan this with your phone's camera."));
+            m_status->setText(pairingIntro());
             m_note->setText(share.note());
             share.requestPairing();
             share.requestDevices();
+            askPairCode();
         }
     });
     if (share.running()) {
-        m_status->setText(QStringLiteral("Scan this with your phone's camera."));
+        m_status->setText(pairingIntro());
         m_note->setText(share.note());
         // The phones paired before this window existed — at launch, with remote control on —
         // from the list RemoteShare kept, then a fresh one from the sidecar.
         showDevices(share.devices());
         share.requestPairing();
         share.requestDevices();
+        // A code every time this window opens (#FR1C), so the person never reads out a stale one.
+        askPairCode();
     }
+}
+
+// ----- the pairing code (#FR1C) -----------------------------------------------------------------
+
+void RemoteShareDialog::askPairCode()
+{
+    RemoteShare &share = RemoteShare::instance();
+    if (!share.running() || !m_pairBox) return;
+    // A code on screen is withdrawn before another is asked for: two live pairing codes are two
+    // open doors for one phone.
+    if (m_pairDeadline && !m_pairCode.isEmpty()) share.revokePairCode(m_pairCode);
+    m_pairCode.clear();
+    m_pairPin.clear();
+    m_pairState.clear();
+    m_pairFailures = 0;
+    m_pairDeadline = 0;
+    m_pairWaiting = true;
+    m_pairBox->show();
+    m_pairHeading->setText(relay::remotesettings::pairCodeHeading());
+    m_pairValue->clear();
+    m_pairClock->clear();
+    m_pairAgain->hide();
+    m_pairNote->setText(QStringLiteral("Making a code…"));
+    share.requestPairCode();
+    // A sidecar from before this card ignores `pair_code` rather than refusing it, so waiting is
+    // the only way to tell the two apart. After the wait the QR is on its own, and says so.
+    QTimer::singleShot(relay::remotesettings::pairCodeWaitMs(), this, [this] { noPairCode(); });
+    fit();
+}
+
+void RemoteShareDialog::showPairCode(const QString &code, const QString &pin, int expires)
+{
+    // A window that is waiting takes the code; one that already has a live one leaves it to the
+    // window that asked. (A late answer, after the 3 s wait gave up, is still shown: the code is
+    // live on the sidecar whether this window waited for it or not.)
+    if (!m_pairWaiting && !m_pairCode.isEmpty()) return;
+    m_pairWaiting = false;
+    m_pairCode = code;
+    m_pairPin = pin;
+    m_pairState.clear();
+    m_pairFailures = 0;
+    m_pairDeadline =
+        QDateTime::currentMSecsSinceEpoch() + qint64(expires > 0 ? expires : 600) * 1000;
+    m_pairBox->show();
+    m_pairHeading->setText(relay::remotesettings::pairCodeHeading());
+    refreshPairCode();
+    fit();
+}
+
+void RemoteShareDialog::showPairCodeState(const QString &code, const QString &state, int failures)
+{
+    if (code.isEmpty() || code != m_pairCode) return;   // an older code this window no longer shows
+    if (m_pairWaiting) return;   // a new code is on its way, and the old one's burn made room
+    m_pairState = state;
+    m_pairFailures = failures;
+    m_pairDeadline = 0;
+    refreshPairCode();
+    fit();
+}
+
+// The row itself is relay::remotesettings::pairCodeRow, so what the four states say is pinned by
+// tests/remotesettings_test.cpp rather than living in a widget nothing headless can read.
+void RemoteShareDialog::refreshPairCode()
+{
+    if (!m_pairBox || m_pairCode.isEmpty()) return;
+    int left = 0;
+    if (m_pairDeadline) {
+        left = int((m_pairDeadline - QDateTime::currentMSecsSinceEpoch() + 999) / 1000);
+        if (left <= 0) {   // it ran out here before the sidecar said so
+            m_pairDeadline = 0;
+            m_pairState = QStringLiteral("expired");
+            left = 0;
+        }
+    }
+    const relay::remotesettings::PairCode code{m_pairCode, m_pairPin, 600};
+    const relay::remotesettings::PairCodeRow row =
+        relay::remotesettings::pairCodeRow(code, m_pairState, m_pairFailures, left);
+    m_pairValue->setText(row.value);
+    QFont font = m_pairValue->font();
+    if (font.strikeOut() != row.dead) {
+        font.setStrikeOut(row.dead);
+        m_pairValue->setFont(font);
+    }
+    m_pairClock->setText(row.clock);
+    m_pairNote->setText(row.note);
+    m_pairAgain->setVisible(row.again);
+}
+
+// Nothing answered `pair_code`. The QR is still good, and saying so is better than an empty
+// column where a code was promised.
+void RemoteShareDialog::noPairCode()
+{
+    if (!m_pairWaiting) return;
+    m_pairWaiting = false;
+    m_pairHeading->setText(relay::remotesettings::pairCodeUnavailable());
+    m_pairValue->clear();
+    m_pairClock->clear();
+    m_pairNote->clear();
+    m_pairAgain->hide();
+    fit();
+}
+
+void RemoteShareDialog::done(int result)
+{
+    // The code goes with the window: one left live would pair a phone while nobody is here to
+    // compare the five digits it shows.
+    if (m_pairDeadline && !m_pairCode.isEmpty()) RemoteShare::instance().revokePairCode(m_pairCode);
+    m_pairDeadline = 0;
+    m_pairWaiting = false;
+    QDialog::done(result);
 }
 
 void RemoteShareDialog::showPairing(const QString &url, const QrMatrix &qr, int expires)
@@ -1252,8 +1472,12 @@ void RemoteShareDialog::showPairing(const QString &url, const QrMatrix &qr, int 
     // Only the address, not the link: the full link is in the QR already, and its fragment is
     // the one-time secret — no reason to also print it in the window.
     m_url->setText(QStringLiteral("Phone connects to %1").arg(url.section(QLatin1Char('/'), 0, 2)));
-    QString text = QStringLiteral("Scan this with your phone's camera. The code lasts %1 s.")
-                       .arg(expires);
+    m_pairingLink = url;
+    if (m_pairCopy) {
+        m_pairCopy->setEnabled(true);
+        m_pairCopy->setText(QStringLiteral("Copy link"));
+    }
+    QString text = QStringLiteral("%1 The QR lasts %2 s.").arg(pairingIntro()).arg(expires);
     if (m_address->count() > 1) {
         text += QStringLiteral("\nIf your phone says it cannot reach the site, choose the other "
                                "address in the list — the phone has to be on that network.");

@@ -255,4 +255,139 @@ SettingsSection section(const SectionHooks &hooks)
     return remote;
 }
 
+// ----- one entry point: the plug menu (#FR1C) ---------------------------------------------------
+
+QList<PlugItem> plugMenu(const State &state)
+{
+    QList<PlugItem> items;
+    // The line the plug has carried since #PH0N: where this desktop is published and how many of
+    // the owner's phones are on it. Not clickable — it is the answer to "is it on?", and the two
+    // rows under it are what to do about it.
+    items.append({PlugItem::Status, QStringLiteral("remote.status"), statusLine(state), false});
+    items.append({PlugItem::Separator, QString(), QString(), false});
+    // First, because it is the thing a person with a phone in their hand came here to do, and
+    // because it turns remote control on by itself when it is off.
+    items.append({PlugItem::Action, QStringLiteral("remote.pair"),
+                  QStringLiteral("Pair a phone…"), false});
+    // The switch itself, one click from the window rather than three from Options. Turning it off
+    // here is what "Disconnect all" used to be: the phones go and the service goes with them.
+    items.append({PlugItem::Toggle, QStringLiteral("remote.control"),
+                  state.on ? QStringLiteral("Remote control: on")
+                           : QStringLiteral("Remote control: off"),
+                  state.on});
+    items.append({PlugItem::Separator, QString(), QString(), false});
+    // Somebody else's session, and your own other desktop's panes: the two the plug started with.
+    items.append({PlugItem::Action, QStringLiteral("remote.join"),
+                  QStringLiteral("Join with a code…"), false});
+    items.append({PlugItem::Action, QStringLiteral("remote.openShared"),
+                  QStringLiteral("Open a pane your other desktop shares…"), false});
+    return items;
+}
+
+QString turnOnForPairing()
+{
+    // An address the owner picked earlier is kept: "pair a phone" is not the place to move a
+    // desktop off the tailnet it was deliberately put on.
+    const QString remembered = relay::settings::stringValue(addressKey(), QString());
+    if (remembered.isEmpty()) setAddress(hostedValue());
+    setAlwaysOn(true);
+    return address();
+}
+
+// ----- the pairing code (#FR1C) -----------------------------------------------------------------
+
+QJsonObject pairCodeRequest() { return {{QStringLiteral("t"), QStringLiteral("pair_code")}}; }
+
+QJsonObject pairCodeRevoke(const QString &code)
+{
+    return {{QStringLiteral("t"), QStringLiteral("pair_code_revoke")},
+            {QStringLiteral("code"), code}};
+}
+
+bool parsePairCode(const QJsonObject &message, PairCode *out)
+{
+    const QString code = message.value(QStringLiteral("code")).toString();
+    if (code.isEmpty()) return false;
+    if (out) {
+        out->code = code;
+        out->pin = message.value(QStringLiteral("pin")).toString();
+        // A sidecar that leaves the field out means the ten minutes #97EG's codes always last.
+        const int expires = message.value(QStringLiteral("expires")).toInt(600);
+        out->expires = expires > 0 ? expires : 600;
+    }
+    return true;
+}
+
+bool parsePairCodeState(const QJsonObject &message, PairCodeState *out)
+{
+    const QString code = message.value(QStringLiteral("code")).toString();
+    const QString state = message.value(QStringLiteral("state")).toString();
+    if (code.isEmpty() || state.isEmpty()) return false;
+    if (out) {
+        out->code = code;
+        out->state = state;
+        out->failures = message.value(QStringLiteral("failures")).toInt();
+    }
+    return true;
+}
+
+int pairCodeWaitMs() { return 3000; }
+
+QString pairCodeUnavailable()
+{
+    return QStringLiteral("This desktop cannot make a code; scan the QR instead.");
+}
+
+QString pairCodeHeading()
+{
+    return QStringLiteral("On your phone, open Relay and enter");
+}
+
+QString pairAlwaysOnLine()
+{
+    return QStringLiteral("Remote control is on: your paired phones see every pane. Turn it off in "
+                          "the plug menu or Options › Remote.");
+}
+
+PairCodeRow pairCodeRow(const PairCode &code, const QString &state, int failures, int secondsLeft)
+{
+    PairCodeRow row;
+    // One value, spaced: it is read off the screen and typed on a phone in one go, and two
+    // captioned cells would be two things to find. The PIN is still the secret half.
+    row.value = (code.code + QLatin1Char(' ') + code.pin).trimmed();
+    if (state.isEmpty()) {
+        const int left = secondsLeft > 0 ? secondsLeft : 0;
+        row.clock = QStringLiteral("Expires in %1:%2")
+                        .arg(left / 60)
+                        .arg(left % 60, 2, 10, QLatin1Char('0'));
+        row.note = QStringLiteral(
+            "The code pairs one phone and lasts 10 minutes. The phone then shows five digits; "
+            "allow it here when they match what it shows.");
+        return row;
+    }
+    // Struck through rather than cleared, as a meeting code is: the answer to "which code?" is
+    // this one, and it is no longer any good.
+    row.dead = true;
+    row.again = true;
+    if (state == QLatin1String("used")) {
+        row.clock = QStringLiteral("Used");
+        row.note = QStringLiteral(
+            "A phone used this code. Compare the five digits it is showing with the ones here and "
+            "allow it. Make a new code to pair another phone.");
+    } else if (state == QLatin1String("burned")) {
+        row.clock = QStringLiteral("Closed");
+        row.note = failures > 0
+                       ? QStringLiteral("%1 wrong PINs were tried, so the code was closed. Nothing "
+                                        "was paired; make a new one.")
+                             .arg(failures == 3 ? QStringLiteral("Three") : QString::number(failures))
+                       : QStringLiteral("This code was closed before any phone used it. Make a new "
+                                        "one if you still want to pair.");
+    } else {
+        row.clock = QStringLiteral("Expired");
+        row.note = QStringLiteral("This code expired before any phone used it. Make a new one when "
+                                  "the phone is in your hand.");
+    }
+    return row;
+}
+
 }  // namespace relay::remotesettings

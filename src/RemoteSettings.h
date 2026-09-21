@@ -97,6 +97,74 @@ struct SectionHooks {
 };
 SettingsSection section(const SectionHooks &hooks);
 
+// ----- one entry point: the plug menu (#FR1C) --------------------------------------------------
+// "even step 1 of enabling remote, that was not obvious to me" (owner, 2026-09-20). The plug at
+// the top right of the window said "Join a shared session" and nothing about this desktop's own
+// phones, so turning remote control on was Options › Remote and nowhere else. The menu is a list
+// of rows here rather than QMenu calls inside the window, so a test can read the rows and their
+// order without building a window.
+struct PlugItem {
+    enum Kind { Status, Action, Toggle, Separator };
+    Kind kind = Action;
+    QString id;         // "remote.status", "remote.pair", "remote.control", "remote.join", …
+    QString label;
+    bool checked = false;   // Toggle rows only
+};
+QList<PlugItem> plugMenu(const State &state);
+
+// "Pair a phone" on a desktop whose switch is off. A phone paired against a desktop that
+// publishes nothing shows an empty list and no notification, so the switch goes on first, every
+// time — writing exactly what the Options switch writes: the hosted address unless another one is
+// already remembered, and `remote/alwaysOn`. Returns the address, which is what the `start` line
+// that follows carries (startMessage(name, true, address()), with `always` true).
+QString turnOnForPairing();
+
+// ----- the pairing code (#FR1C) ----------------------------------------------------------------
+// Four letters and four digits the owner types on the phone. Scanning the pairing QR on an iPhone
+// opens Safari, which pairs a browser tab that gets no push and is not the installed app; a typed
+// code reaches whichever Relay is in front of the person. It is #97EG's meeting code with a
+// pairing fragment behind it, and these are the GUI's half of that wire contract — the sidecar's
+// half is task 2 of the same card.
+QJsonObject pairCodeRequest();                       // {"t":"pair_code"}
+QJsonObject pairCodeRevoke(const QString &code);     // {"t":"pair_code_revoke","code":"ABCD"}
+
+// `{"t":"pair_code","code":"ABCD","pin":"4829","expires":600}`. The PIN is the secret half and
+// never leaves the dialog, exactly as an invite code's does.
+struct PairCode {
+    QString code, pin;
+    int expires = 600;
+};
+bool parsePairCode(const QJsonObject &message, PairCode *out);
+
+// `{"t":"pair_code_state","code":"ABCD","state":"used"|"burned"|"expired","failures":n}`.
+struct PairCodeState {
+    QString code, state;
+    int failures = 0;
+};
+bool parsePairCodeState(const QJsonObject &message, PairCodeState *out);
+
+// How long the dialog waits for a `pair_code` answer before showing the QR on its own, and the one
+// sentence it then says. A sidecar from before this card ignores the line rather than refusing it,
+// so the wait is what tells the two apart.
+int pairCodeWaitMs();
+QString pairCodeUnavailable();
+// Above the code, because it is an instruction rather than a caption.
+QString pairCodeHeading();
+// The line at the top of the pairing dialog: pairing turned remote control on, it stays on, and
+// where to turn it off.
+QString pairAlwaysOnLine();
+
+// What the code row shows. `state` is empty while the code is live, otherwise the last
+// `pair_code_state` word; `secondsLeft` is the countdown the dialog ticks.
+struct PairCodeRow {
+    QString value;      // "ABCD 4829"
+    bool dead = false;  // struck through: it no longer pairs anything
+    QString clock;      // "Expires in 9:58" · "Used" · "Closed" · "Expired"
+    QString note;       // one sentence under it
+    bool again = false; // the "New code" button
+};
+PairCodeRow pairCodeRow(const PairCode &code, const QString &state, int failures, int secondsLeft);
+
 // Row ids, so a test and a "reveal this option" link name the same string.
 QString alwaysOnRowId();
 QString addressRowId();

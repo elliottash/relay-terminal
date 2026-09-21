@@ -285,6 +285,158 @@ private Q_SLOTS:
         QVERIFY(!rs::alwaysOn());
         QCOMPARE(rs::address(), QStringLiteral("relay-terminal.ai"));
     }
+
+    // ----- one entry point: the plug menu (#FR1C) ----------------------------------------------
+
+    // The plug at the top right of the window. "Pair a phone…" is the first row a person can
+    // choose — the status line above it is not clickable — and the switch itself is the row under
+    // it, so turning remote control on is one click from the window rather than three from
+    // Options ("even step 1 of enabling remote, that was not obvious to me").
+    void thePlugMenuLeadsWithPairingAndCarriesTheSwitch() {
+        rs::State off;
+        const QList<rs::PlugItem> items = rs::plugMenu(off);
+        QCOMPARE(items.size(), 7);
+        QCOMPARE(items[0].kind, rs::PlugItem::Status);
+        QCOMPARE(items[0].id, QStringLiteral("remote.status"));
+        QCOMPARE(items[0].label, QStringLiteral("Remote control off"));
+        QCOMPARE(items[1].kind, rs::PlugItem::Separator);
+        QCOMPARE(items[2].kind, rs::PlugItem::Action);
+        QCOMPARE(items[2].id, QStringLiteral("remote.pair"));
+        QCOMPARE(items[2].label, QStringLiteral("Pair a phone…"));
+        QCOMPARE(items[3].kind, rs::PlugItem::Toggle);
+        QCOMPARE(items[3].id, QStringLiteral("remote.control"));
+        QCOMPARE(items[3].label, QStringLiteral("Remote control: off"));
+        QVERIFY(!items[3].checked);
+        QCOMPARE(items[4].kind, rs::PlugItem::Separator);
+        QCOMPARE(items[5].id, QStringLiteral("remote.join"));
+        QCOMPARE(items[6].id, QStringLiteral("remote.openShared"));
+
+        rs::State on;
+        on.on = true;
+        on.online = true;
+        on.address = rs::hostedValue();
+        on.devices = 2;
+        const QList<rs::PlugItem> lit = rs::plugMenu(on);
+        QCOMPARE(lit[0].label, QStringLiteral("Remote control on · relay-terminal.ai · 2 devices"));
+        QCOMPARE(lit[3].label, QStringLiteral("Remote control: on"));
+        QVERIFY(lit[3].checked);
+        // Joining somebody else's session is still there, under the separator: the plug keeps
+        // what it had and gains the two rows above.
+        QStringList ids;
+        for (const rs::PlugItem &item : lit) ids << item.id;
+        QVERIFY(ids.contains(QStringLiteral("remote.openShared")));
+    }
+
+    // "Pair a phone" on a desktop whose switch is off turns it on the way Options would: the
+    // switch itself, and the hosted address, which is then what the `start` line carries.
+    void pairingTurnsTheSwitchOnWithTheHostedAddress() {
+        QVERIFY(!rs::alwaysOn());
+        QCOMPARE(rs::turnOnForPairing(), QStringLiteral("relay-terminal.ai"));
+        QVERIFY(rs::alwaysOn());
+        QCOMPARE(QSettings().value(rs::alwaysOnKey()).toBool(), true);
+        QCOMPARE(QSettings().value(rs::addressKey()).toString(), QStringLiteral("relay-terminal.ai"));
+        const QJsonObject start = rs::startMessage(QStringLiteral("this desktop"), rs::alwaysOn(),
+                                                   rs::address());
+        QCOMPARE(start.value(QStringLiteral("always")).toBool(), true);
+        QCOMPARE(start.value(QStringLiteral("address")).toString(), QStringLiteral("relay-terminal.ai"));
+    }
+
+    // An address picked earlier is kept: "pair a phone" is not the place to move a desktop off
+    // the tailnet somebody deliberately put it on.
+    void pairingKeepsAnAddressTheOwnerAlreadyPicked() {
+        rs::setAddress(rs::tailnetValue());
+        QCOMPARE(rs::turnOnForPairing(), QStringLiteral("tailscale"));
+        QVERIFY(rs::alwaysOn());
+        QCOMPARE(rs::address(), QStringLiteral("tailscale"));
+    }
+
+    // ----- the pairing code (#FR1C) --------------------------------------------------------------
+    // The wire contract the sidecar half is being built against in parallel, so every field name
+    // here is load-bearing: `pair_code` out, `pair_code` and `pair_code_state` back,
+    // `pair_code_revoke` when the dialog closes.
+
+    void theDialogAsksForACodeAndWithdrawsIt() {
+        const QJsonObject ask = rs::pairCodeRequest();
+        QCOMPARE(ask.value(QStringLiteral("t")).toString(), QStringLiteral("pair_code"));
+        QCOMPARE(ask.size(), 1);
+        const QJsonObject revoke = rs::pairCodeRevoke(QStringLiteral("ABCD"));
+        QCOMPARE(revoke.value(QStringLiteral("t")).toString(), QStringLiteral("pair_code_revoke"));
+        QCOMPARE(revoke.value(QStringLiteral("code")).toString(), QStringLiteral("ABCD"));
+    }
+
+    void theCodeAndItsStateAreParsed() {
+        rs::PairCode code;
+        QVERIFY(rs::parsePairCode(QJsonObject{{QStringLiteral("t"), QStringLiteral("pair_code")},
+                                              {QStringLiteral("code"), QStringLiteral("ABCD")},
+                                              {QStringLiteral("pin"), QStringLiteral("4829")},
+                                              {QStringLiteral("expires"), 600}},
+                                  &code));
+        QCOMPARE(code.code, QStringLiteral("ABCD"));
+        QCOMPARE(code.pin, QStringLiteral("4829"));
+        QCOMPARE(code.expires, 600);
+        // A sidecar that leaves the ttl out means the ten minutes a meeting code always lasts.
+        rs::PairCode bare;
+        QVERIFY(rs::parsePairCode(QJsonObject{{QStringLiteral("code"), QStringLiteral("WXYZ")}}, &bare));
+        QCOMPARE(bare.expires, 600);
+        QVERIFY(!rs::parsePairCode(QJsonObject{{QStringLiteral("t"), QStringLiteral("pair_code")}}, nullptr));
+
+        rs::PairCodeState state;
+        QVERIFY(rs::parsePairCodeState(
+            QJsonObject{{QStringLiteral("t"), QStringLiteral("pair_code_state")},
+                        {QStringLiteral("code"), QStringLiteral("ABCD")},
+                        {QStringLiteral("state"), QStringLiteral("burned")},
+                        {QStringLiteral("failures"), 3}},
+            &state));
+        QCOMPARE(state.code, QStringLiteral("ABCD"));
+        QCOMPARE(state.state, QStringLiteral("burned"));
+        QCOMPARE(state.failures, 3);
+        QVERIFY(!rs::parsePairCodeState(QJsonObject{{QStringLiteral("code"), QStringLiteral("ABCD")}},
+                                        nullptr));
+    }
+
+    // The four states of the row beside the QR: live with a countdown, then used, burned or
+    // expired — each struck through, each offering a new code.
+    void theCodeRowShowsItsFourStates() {
+        const rs::PairCode code{QStringLiteral("ABCD"), QStringLiteral("4829"), 600};
+        const rs::PairCodeRow live = rs::pairCodeRow(code, QString(), 0, 598);
+        QCOMPARE(live.value, QStringLiteral("ABCD 4829"));
+        QVERIFY(!live.dead);
+        QCOMPARE(live.clock, QStringLiteral("Expires in 9:58"));
+        QVERIFY(!live.again);
+        QVERIFY(live.note.contains(QStringLiteral("five digits")));
+
+        const rs::PairCodeRow used = rs::pairCodeRow(code, QStringLiteral("used"), 0, 0);
+        QCOMPARE(used.clock, QStringLiteral("Used"));
+        QVERIFY(used.dead);
+        QVERIFY(used.again);
+
+        const rs::PairCodeRow burned = rs::pairCodeRow(code, QStringLiteral("burned"), 3, 0);
+        QCOMPARE(burned.clock, QStringLiteral("Closed"));
+        QVERIFY(burned.dead);
+        QVERIFY(burned.again);
+        QVERIFY(burned.note.startsWith(QStringLiteral("Three wrong PINs")));
+
+        // Closed with no wrong guess is a revoked code, not three misses.
+        const rs::PairCodeRow revoked = rs::pairCodeRow(code, QStringLiteral("burned"), 0, 0);
+        QVERIFY(revoked.note.contains(QStringLiteral("before any phone used it")));
+
+        const rs::PairCodeRow expired = rs::pairCodeRow(code, QStringLiteral("expired"), 0, 0);
+        QCOMPARE(expired.clock, QStringLiteral("Expired"));
+        QVERIFY(expired.dead);
+        QVERIFY(expired.again);
+    }
+
+    // A sidecar from before this card ignores `pair_code` rather than refusing it, so the dialog
+    // waits three seconds and then says the QR is the way in.
+    void aSidecarThatCannotMakeACodeLeavesTheQr() {
+        QCOMPARE(rs::pairCodeWaitMs(), 3000);
+        QCOMPARE(rs::pairCodeUnavailable(),
+                 QStringLiteral("This desktop cannot make a code; scan the QR instead."));
+        QVERIFY(rs::pairCodeHeading().contains(QStringLiteral("On your phone")));
+        // And the line the dialog puts at the top, because pairing turned the switch on itself.
+        QVERIFY(rs::pairAlwaysOnLine().startsWith(QStringLiteral("Remote control is on")));
+        QVERIFY(rs::pairAlwaysOnLine().contains(QStringLiteral("plug menu")));
+    }
 };
 
 QTEST_MAIN(RemoteSettingsTests)

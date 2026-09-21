@@ -138,6 +138,11 @@ public:
     void setPaneTab(const QString &paneId, const QString &tab);
 
     void requestPairing();
+    // The pairing code (#FR1C): four letters and four digits the owner types on the phone, instead
+    // of scanning a QR that opens Safari and pairs a browser tab no notification ever reaches.
+    // `pair_code` mints one; `pair_code_revoke` withdraws it, which the dialog does as it closes.
+    void requestPairCode();
+    void revokePairCode(const QString &code);
     // The paired devices, as the sidecar last reported them (`devices`), and a request for the
     // list again. The sidecar reports the list when a device pairs, is revoked or has its
     // password switch moved, and once at `start` — with remote control on (#PH0N) that is at
@@ -229,6 +234,11 @@ signals:
     void codeReady(const QString &code, const QString &pin, int expires, const QString &invite);
     // A `code_state` line: "used", "burned" (too many wrong PINs) or "expired".
     void codeStateChanged(const QString &code, const QString &state, int failures);
+    // A `pair_code` line (#FR1C). The PIN is the secret half, as an invite code's is: it goes to
+    // the pairing dialog and nowhere else.
+    void pairCodeReady(const QString &code, const QString &pin, int expires);
+    // A `pair_code_state` line: "used", "burned" (too many wrong PINs) or "expired".
+    void pairCodeStateChanged(const QString &code, const QString &state, int failures);
     // Something changed in sharingModel(): the Sharing pane and the pane headers redraw.
     void sharingModelChanged();
     // Somebody is at the door, wants the keyboard, or has written a prompt. The window opens the
@@ -298,6 +308,10 @@ class RemoteShareDialog final : public QDialog {
     Q_OBJECT
 public:
     explicit RemoteShareDialog(const QString &paneId, QWidget *parent = nullptr);
+    // Every closing path — the X, Escape, "Stop sharing" — comes through done(), which is where
+    // the pairing code is withdrawn: a code left live after the window went would pair a phone
+    // nobody is watching for.
+    void done(int result) override;
     // The tab the pane is in, so "Share the whole tab" can be offered. `tab` is the window's id
     // for the tab page; `panes` counts the terminals in it now, for the sentence beside the box.
     void setTab(const QString &tab, int panes);
@@ -305,6 +319,13 @@ public:
 private:
     void updateWholeTab();
     void showPairing(const QString &url, const relay::QrMatrix &qr, int expires);
+    // The pairing code beside the QR (#FR1C): minted when this window opens, withdrawn when it
+    // closes, and drawn from relay::remotesettings::pairCodeRow so its four states are testable.
+    void askPairCode();
+    void showPairCode(const QString &code, const QString &pin, int expires);
+    void showPairCodeState(const QString &code, const QString &state, int failures);
+    void refreshPairCode();
+    void noPairCode();
     void showInvite(const QString &url, const relay::QrMatrix &qr, const QString &role,
                     int uses, int expires);
     void createInvite();
@@ -331,6 +352,24 @@ private:
     QLabel *m_status = nullptr;
     QLabel *m_qr = nullptr;
     QLabel *m_url = nullptr;
+    // The one line saying remote control is on and where to turn it off: pairing turns it on, and
+    // a switch that turned itself on must say so where it happened.
+    QLabel *m_alwaysOnLine = nullptr;
+    // Copying the pairing link, as the invite link is copied: on a Linux desktop a 140-character
+    // link has no other way of reaching a phone, and scanning is not always an option.
+    QPushButton *m_pairCopy = nullptr;
+    QString m_pairingLink;
+    // The pairing code column beside the QR.
+    QWidget *m_pairBox = nullptr;
+    QLabel *m_pairHeading = nullptr;
+    QLabel *m_pairValue = nullptr;
+    QLabel *m_pairClock = nullptr;
+    QLabel *m_pairNote = nullptr;
+    QPushButton *m_pairAgain = nullptr;
+    QString m_pairCode, m_pairPin, m_pairState;
+    int m_pairFailures = 0;
+    qint64 m_pairDeadline = 0;    // ms since the epoch; 0 once the code is no longer live
+    bool m_pairWaiting = false;   // a pair_code is out and nothing has answered it yet
     QComboBox *m_address = nullptr;
     QLabel *m_addressNote = nullptr;
     QLabel *m_note = nullptr;
