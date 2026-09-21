@@ -24,12 +24,12 @@ CloseApplications=yes
 [Files]
 Source: "{#RelayStage}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 [Icons]
-Name: "{group}\Relay"; Filename: "{app}\bin\relay.exe"
-Name: "{autodesktop}\Relay"; Filename: "{app}\bin\relay.exe"; Tasks: desktopicon
+Name: "{group}\Relay"; Filename: "{app}\bin\relay.exe"; WorkingDir: "{userdocs}"
+Name: "{autodesktop}\Relay"; Filename: "{app}\bin\relay.exe"; WorkingDir: "{userdocs}"; Tasks: desktopicon
 [Tasks]
 Name: desktopicon; Description: "Create a desktop shortcut"; Flags: unchecked
 [Run]
-Filename: "{app}\bin\relay.exe"; Description: "Open Relay"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\bin\relay.exe"; WorkingDir: "{userdocs}"; Description: "Open Relay"; Flags: nowait postinstall skipifsilent
 
 [Registry]
 Root: HKCU; Subkey: "Software\Classes\relay"; ValueType: string; ValueData: "URL:Relay"; Flags: uninsdeletekey
