@@ -98,7 +98,7 @@ never returns to the model the owner was using, and its own sentence is overwrit
 - [x] the box: mode rows "high (model)", Left/Right changes mode in place, that mode's list below, one row per model, `/high` <!-- t:a6 -->
 - [x] the Ctrl+Alt+M dialog is where models are picked AND prioritized: tier tabs, reorder, add, remove, level, profile, "via" <!-- t:a7 -->
 - [ ] the box as classes: top-N per class, Right expands, headers not selectable, exhausted hidden, model alone in the chip <!-- t:a8 -->
-- [ ] defaults from a ranking file in the repo: 0 providers → Relay Free's three; 1 → one per class; 2+ → two per class, one per provider per class <!-- t:a9 -->
+- [x] defaults from a ranking file in the repo: 0 providers → Relay Free's three; 1 → one per class; 2+ → two per class, one per provider per class <!-- t:a9 -->
 - [ ] Options › Models: the tier lists and the checklist leave the page for the dialog <!-- t:a10 -->
 
 ## Execution Summary
