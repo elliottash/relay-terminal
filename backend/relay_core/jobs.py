@@ -93,7 +93,7 @@ def shell_argv(command: str, env: dict) -> list[str]:
               "\nif (!$?) { if ($LASTEXITCODE) { exit $LASTEXITCODE }; exit 1 }; exit 0")
     encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
     return [env.get("RELAY_POWERSHELL") or "pwsh.exe", "-NoLogo", "-NoProfile",
-            "-NonInteractive", "-EncodedCommand", encoded]
+            "-NonInteractive", "-OutputFormat", "Text", "-EncodedCommand", encoded]
 
 
 class JobTable:

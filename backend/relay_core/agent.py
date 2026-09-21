@@ -371,8 +371,7 @@ When type_into_program is absent you cannot type into the user's terminal and mu
 When run_in_terminal is absent, show the command in a fenced bash block.
 Never write a fenced block tagged relay-run unless the request in front of you is a terminal fix request that asks for one: anywhere else it does nothing."""
 
-from .prompt_profiles import platform_prompt
-SYSTEM = platform_prompt(SYSTEM)
+SYSTEM = prompt_profiles.platform_prompt(SYSTEM)
 
 CONTEXT_OPEN = "[Relay context: added by Relay, not typed by the user]"
 CONTEXT_CLOSE = "[End of Relay context]"

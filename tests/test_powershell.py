@@ -47,6 +47,7 @@ class PowerShellParserTests(unittest.TestCase):
                 argv = jobs.shell_argv(command, {'RELAY_POWERSHELL': PWSH})
             result = subprocess.run(argv, capture_output=True)
             self.assertEqual(result.returncode, expected, command)
+            self.assertNotIn(b"CLIXML", result.stderr)
 
     def test_events(self):
         subprocess.run([PWSH, '-NoLogo', '-NoProfile', '-File',
