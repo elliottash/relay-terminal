@@ -331,11 +331,13 @@ private slots:
         QVERIFY(editor);
         editor->textCursor().insertText(QStringLiteral("x"));
         QVERIFY(preview.isDirty());
-        QVERIFY(QFile::setPermissions(path, QFile::ReadOwner));
+        // A directory cannot be replaced by QSaveFile, even when packaging tests
+        // run as root. chmod alone does not make a file unwritable for that user.
+        QVERIFY(QFile::remove(path));
+        QVERIFY(QDir().mkdir(path));
         QVERIFY(!preview.save());
         QVERIFY(preview.isDirty());
         QVERIFY(!preview.notice().isEmpty());
-        QVERIFY(QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner));   // let the temp dir clean up
     }
 
     // Card #SEJ2: a Markdown file is edited as source, so startEditing() leaves the render.

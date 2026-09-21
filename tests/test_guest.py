@@ -137,7 +137,7 @@ class MirroredInCxx(unittest.TestCase):
         """startTerminal runs per pane and per shell restart and qputenv mutates Relay's own
         environment, so an unguarded append grew PYTHONPATH without bound (review of 51587e3)."""
         text = self.PANE.read_text(encoding="utf-8")
-        guard = text.index('if (!pythonPath.split(QLatin1Char(\':\'), Qt::SkipEmptyParts).contains(backendDir))')
+        guard = text.index('if (!pythonPath.split(QDir::listSeparator(), Qt::SkipEmptyParts).contains(backendDir))')
         append = text.index('qputenv("PYTHONPATH"', guard)
         self.assertLess(guard, append)
         self.assertEqual(1, text.count('qputenv("PYTHONPATH"'))
