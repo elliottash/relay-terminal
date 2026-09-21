@@ -8140,7 +8140,10 @@ private:
             if (!error.isEmpty()) {
                 if (event.value(QStringLiteral("id")).toString() != m_suggestionId) return true;
                 m_suggestionId.clear();
-                const QString model = event.value(QStringLiteral("model")).toString();
+                // By name (card #MDL1, rule 1): this is a role's model, from another provider
+                // than the pane's as often as not.
+                const QString model = modelNameFor(event.value(QStringLiteral("preset")).toString(),
+                                                   event.value(QStringLiteral("model")).toString());
                 status(QStringLiteral("%1 suggestion failed%2: %3")
                            .arg(kind == QStringLiteral("next_prompt") ? QStringLiteral("Next-prompt") : QStringLiteral("Next-command"),
                                 model.isEmpty() ? QString() : QStringLiteral(" (") + model + ')', error));
@@ -12331,7 +12334,7 @@ private:
             else
                 hint(QStringLiteral("model.role.mouse"),
                      relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("agent.flashAgent")),
-                                                    QStringLiteral("the Main and Flash agents")));
+                                                    QStringLiteral("the main and flash models")));
             return;
         }
         // Claude Code or Codex: the guest is this pane's agent from here on — through its harness
