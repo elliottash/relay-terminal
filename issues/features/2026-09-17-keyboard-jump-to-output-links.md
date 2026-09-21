@@ -12,7 +12,7 @@ rank: 4n
 created: '2026-09-17'
 acceptance: after `ls`, `grep -n` or a compiler error, Ctrl+Shift+L highlights a path or URL in the pane and repeated presses / arrows move between them, scrolling scrollback as needed; Enter opens it with the same routing as a click (explorer, preview, browser); Esc cancels
 source: '`issues/feature_intake.txt`, "add a shortcut to scroll through files / folders / links in the output, maybe alt page up / alt page down."'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-17-clickable-paths/, docs/qa_evidence/2026-09-21-keyboard-links/], related: [issues/features/needs_qa_llm/2026-09-17-clickable-paths.md], github: null}
+links: {plans: [], commits: [103288815bc96d78c57969b5eacb797f3f9d6e95], evidence: [docs/qa_evidence/2026-09-17-clickable-paths/, docs/qa_evidence/2026-09-21-keyboard-links/], related: [issues/features/needs_qa_llm/2026-09-17-clickable-paths.md], github: null}
 ---
 # Keyboard shortcut to step through files, folders and links in output
 

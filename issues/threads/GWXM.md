@@ -24,3 +24,9 @@ Requested activation actions and immediate navigation feedback implemented. Targ
 
 <!-- relay:entry 20260921T214552Z-gj author=agent kind=event model=gpt-6-astra pane=f632f1e4 turn=df8af0c4932e4c1a8120358358571b40/eeeba6e961874c24b2cb3ddbec313889 -->
 - ✦ agent moved this card · Executing → Needs verification · Implemented keyboard file/folder actions, immediate selection feedback, and history fixes; targeted tests and isolated GUI checked. Candidate-tree build gates the commit. · evidence docs/qa_evidence/2026-09-21-keyboard-links/ · implemented_by openai/gpt-6-astra via codex
+
+<!-- relay:entry 20260921T214830Z-m4 author=agent kind=event model=gpt-6-astra pane=f632f1e4 turn=df8af0c4932e4c1a8120358358571b40/eeeba6e961874c24b2cb3ddbec313889 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-17-clickable… → {"plans": [], "commits": ["103288815bc96d78c57969b5eacb797f3f9d6e95"], "evidence…
+
+<!-- relay:entry 20260921T214831Z-ns author=agent kind=evidence model=gpt-6-astra pane=f632f1e4 turn=df8af0c4932e4c1a8120358358571b40/eeeba6e961874c24b2cb3ddbec313889 -->
+Landed 103288815bc96d78c57969b5eacb797f3f9d6e95 after land.py built the exact candidate tree. Targeted engine tests (4/4 including setup/cleanup), outputlinks, and final isolated GUI drive passed; test check has no findings. Evidence is docs/qa_evidence/2026-09-21-keyboard-links/. Ready for independent verification.
