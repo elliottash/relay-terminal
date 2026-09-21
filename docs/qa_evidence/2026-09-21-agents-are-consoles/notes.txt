@@ -1,0 +1,63 @@
+===== (a) the Switchboard console =====
+PASS a1 the Switchboard's console is the prompt box, not a panel ("Ask the Switchboard agent" in a01-switchboard.png)
+PASS a1 the action row reads Check (k) ("Check (k)" in a01-switchboard.png)
+PASS a1 and Clean up (u) ("Clean up (u)" in a01-switchboard.png)
+PASS a2 the console streams a turn into its transcript ("thought for" in a03-thinking.png)
+PASS a2 Alt+R unfolds the thinking bubble ("reasoning block\|Looking at what this console" in a04-fold-open.png)
+PASS a2 and folds it again (no "Looking at what this console" in a05-fold-closed.png)
+PASS a3 a tool call draws its own row in the console ("read_file\|Read fixture" in a07-toolrow.png)
+PASS a4 the second prompt is in the §12 queue strip ("and then say hello" in a09-queued.png)
+PASS a4 Up opens the queued prompt in the box to edit ("and then say hello" in a10-queue-edit.png)
+PASS a4 Shift+Delete removes it from the strip (no "and then say hello" in a11-queue-removed.png)
+PASS a4 Esc stops the turn ("stopped\|cancelled\|Ready" in a12-esc.png)
+PASS a5 Alt+M opens this console's model box ("Follow Main\|Main ·\|Stub" in a14-modelbox.png)
+PASS a6 the k key ran Check and the board answered (a16-check.png)
+===== (b) the card console =====
+PASS b1 the card page carries the console's reply box ("Enter discusses" in b02-card.png)
+FAIL b1 Plan (p) is on the action row above the box: no "Plan (p)" in b02-card.png
+PASS b1 and Execute (x) ("Execute (x)" in b02-card.png)
+FAIL b2 no thread file at /tmp/rl-agnt.Ulti/home/project/issues/threads/QMGA.md
+FAIL b3 Ctrl+Shift+Enter did not write a comment
+===== (c) the Options helper =====
+PASS c1 Options carries the collapsed Helper Agent row ("Helper Agent" in c01-options.png)
+PASS c1 Alt+Q expands it into a console with the Options placeholder ("Ask the Options helper" in c02-console.png)
+PASS c2 the helper says in text what it changed ("turned Copy on select on" in c03-changed.png)
+relay.conf: copy_on_select=true
+PASS c2 the agent's write reached the setting
+PASS c2 the change is shown with Undo ("Undo" in c03-changed.png)
+FAIL c2 and the row is marked changed by the agent: no "changed by the agent" in c03b-row.png
+relay.conf after Undo: copy_on_select=true
+FAIL c2 Undo did not put Copy on select back (still true in relay.conf)
+PASS c3 an option: link is in the answer ("Clicking that opens" in c06-link.png)
+PASS c3 the link revealed the row in this same pane ("Copy on select" in c07-revealed.png)
+PASS c4 and behind it is a console with the Actions brief ("Ask the Actions helper" in c09-actions-console.png)
+===== (d) the Sessions helper =====
+PASS d1 and expands into a console of its own ("Ask the Sessions helper" in d02-console.png)
+FAIL d2 the helper says in text what it is doing: no "Opened 3 conversations\|Opened 3" in d03-opened.png after 180s
+panes in the tab after the open: 5 · transcripts saying "Session loaded": 1
+PASS d2 the three conversations opened in panes of their own (tab says 5)
+===== (e) agents work across panes and contexts =====
+PASS e1 the Sessions helper changed an option ("Copy on select" in e02-sessions-option.png)
+PASS e1 and the write is offered with Undo ("Undo" in e02-sessions-option.png)
+PASS e2 the Options helper opened a card in the Switchboard ("Opened card" in e04-card-opened.png)
+PASS e2 and the Switchboard is showing it ("#QMGA\|QMGA" in e05-card-open.png)
+FAIL e3 a terminal pane's agent used the board tools: no "BOARDLIST" in e07-boardlist.png after 150s
+the board, as the terminal pane's agent was given it: 
+FAIL e3 the board tool answered nothing: 
+===== (f) the Info and Activity Ask rows =====
+PASS f1 the terminal pane answered ("Hello from the tab" in f02-answered.png)
+PASS f1 the ⓘ pane carries its Ask row ("Ask" in f03-info.png)
+PASS f1 the ⓘ Ask row drafted its question into the terminal pane's composer
+FAIL f2 the Options console answered: no "thought for" in f06-console-turn.png after 150s
+PASS f2 Activity opened from the console shows that console's turn (f07-activity.png)
+===== (g) two tabs on one project, and a restart =====
+PASS g1 tab one's helper answered ("Hello from the tab" in g02-tab1-answer.png)
+PASS g1 the second tab's helper is a conversation of its own (no "Hello from the tab" in g03-tab2.png)
+PASS g1 tab two's helper answered too ("Hello from the tab" in g05-tab2-answer.png)
+helper conversation files: 8
+PASS g1 two tabs kept two conversations
+PASS g2 the helper answers after a restart ("Hello from the tab" in g07-restarted-answer.png)
+helper conversation files: 8 before the restart, 9 after
+FAIL g2 the restart started a new conversation (8 → 9 files)
+----
+PASS 38  FAIL 10

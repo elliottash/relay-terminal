@@ -1,0 +1,13 @@
+compare -metric AE, whole window and below the pane header (crop 1400x824+0+76).
+before = 67837ec9 (the tip this session started from), after = d0c974aa (its tip).
+shot                      whole below-header
+01-fresh                     36         36
+02-thinking                1888          0
+03-fold-open               1924         36
+03b-fold-closed            1888          0
+04-toolrow                 2030          0
+05-modelbox                1888          0
+06-modelbox-closed         1888          0
+07-queued                  2030          0
+08-esc                     1888          0
+09-after                   1888          0

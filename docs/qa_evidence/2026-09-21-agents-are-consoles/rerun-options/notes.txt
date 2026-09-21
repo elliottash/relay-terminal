@@ -1,0 +1,22 @@
+===== (b) the card console =====
+PASS b1 the card page carries the console's reply box ("Enter discusses" in b02-card.png)
+PASS b1 Plan (p) is on the action row above the box ("^plan" read in b02-card.png)
+PASS b1 and Execute (x) ("Execute (x)" in b02-card.png)
+FAIL b2 no thread file at /tmp/rl-agnt.ytTD/home/project/issues/threads/FXVM.md
+FAIL b3 Ctrl+Shift+Enter did not write a comment
+===== (c) the Options helper =====
+PASS c1 Options carries the collapsed Helper Agent row ("Helper Agent" in c01-options.png)
+PASS c1 Alt+Q expands it into a console with the Options placeholder ("Ask the Options helper" in c02-console.png)
+PASS c2 the helper says in text what it changed ("turned Copy on select on" in c03-changed.png)
+relay.conf: copy_on_select=true
+PASS c2 the agent's write reached the setting
+PASS c3 an option: link is in the answer ("Clicking that opens" in c06-link.png)
+PASS c3 the link revealed the row in this same pane ("Copy on select" in c07-revealed.png)
+FAIL c2 and the row is marked changed by the agent: no "changed by the agent" in c07-revealed.png
+FAIL c2 the change is offered with Undo where the owner will find it: no "Agent changed" in c04-notice.png
+relay.conf after Undo: copy_on_select=true
+FAIL c2 Undo did not put Copy on select back (still true in relay.conf)
+PASS c4 Actions carries its own collapsed helper row ("helper" read in c08-actions.png)
+FAIL c4 and behind it is a console with the Actions brief: no "Ask the Actions helper" in c09-actions-console.png
+----
+PASS 10  FAIL 6
