@@ -128,3 +128,43 @@ in place, clamp, close nothing and pick nothing; a turn keeps the filter; Enter 
 row's data; Escape picks nothing; the via column rendered and measured; the one-page effort box
 unchanged). Python: `tests/test_roles.py`, 77 cases, with `high` and `resolve_entry`;
 `tests/test_keybindings.py` green, so Alt+H passes the worker's own catalogue check.
+
+<!-- relay:entry 20260921T140105Z-m1 author=claude-code kind=progress -->
+### Claude Code · 2026-09-21 14:01
+t:a5 landed — every remaining place that prints a model prints its name, through one function, and
+tier and role words are lower-case.
+
+`Pane::modelNameFor(preset, model)` is that function for a site that holds only a preset and a
+model id: the catalog through `resolveKey`, so Claude Code's `opus` and the `claude-opus-5` its
+harness reports are one model and `kimi-code|k3` is `kimi-k3`, then `relay::models::nameOf` for an
+id no row covers. `Pane::roleLabel` was a second, Title-Case table beside
+`relay::modelrows::roleLabel`; there is one now — main, high, flash, lite, local, terminal use,
+subagents, helpers, plan mode — and `roles.LABELS` and `presets.TIER_LABELS` say the same words, so
+"No stored key for the flash model; using main." is the worker's wording too.
+
+The worker sends the name it computed rather than leaving four surfaces to derive it: `model_name`
+on `configured` and `model_changed`, `in_flight_model_name` on `model_changed`, `model_name` and
+`from_model_name` on `model_applied`, `model_name` on every search item and `models_named` on
+`session_info` (protocol section 13 and 14.3). The phone's `app/modelname.js` prefers it and
+derives only for an older worker; `tests/test_web_model_name.py` runs that JavaScript under Node
+and compares every answer with `presets.derived_name`, so the three copies of the rule cannot
+drift.
+
+The Sessions pane's model filter works on names: `facets.models` folds the ids history recorded
+into one entry per model, so `k3` and `kimi-k3` are one line that selects both rows, and a raw id
+still filters. Nothing on disk changed — `relay_model_name` is registered on the index connection.
+
+`/model` resolves through `relay::models::findByName` first, so `/model gpt-5.6-sol` names one model
+however many providers serve it and `/model gpt-5.6-sol@openrouter` says which takes it.
+
+The first evidence run crashed Relay: `findByName` returns a pointer into the list it is handed and
+the list was a temporary in an `if` condition. Fixed in `9eccaa8e` before anything else was shot.
+
+Commits: `95773991` (the one role table), `7f8f0616` (the pane), `0dddb9ee` (the worker's
+`model_name` and its lower-case words), `c5c815de` (Sessions and the ⓘ panel), `e76d6eab` (the
+phone), `e955feb5` (the Actions palette), `9eccaa8e` (the crash), `6b2a3c66` + `a6a7c72e` +
+`bae87fd7` (the five the grep audit found), `5de41a8f` (evidence).
+Evidence: `docs/qa_evidence/2026-09-21-model-names-everywhere`, whose NOTES.md ends with the audit —
+the commands, and why each remaining hit is left (Options' row headings, the Actions palette's
+action names, "the Switchboard agent" as a product noun, and `conciseModel`, which only the model
+box still calls).
