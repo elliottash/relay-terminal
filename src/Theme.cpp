@@ -815,6 +815,10 @@ QToolButton#boardTextButton:disabled { color: @disabled; }
 QLabel#boardEmpty { color: @muted; }
 QLabel#boardKeys { color: @muted; font-size: 9pt; padding: 4px 10px; border-top: 1px solid @boardMetalDim; }
 QLabel#boardCardRef { color: @muted; font-family: "@mono"; }
+/* The ⧉ that copies the reference (#FT77): as quiet as the id it copies, the pane's ink
+   under the pointer, so it reads as the button it is. */
+QToolButton#boardCardRefCopy { color: @muted; background: transparent; border: none; padding: 0 3px; font-size: 9pt; }
+QToolButton#boardCardRefCopy:hover { color: @text; }
 QLabel#boardCardTitle { color: @text; font-size: 12pt; font-weight: 600; }
 /* The pencil that edits the card sits on the title it edits, outlined in the accent (#VZ69). On a
    card whose other tools are muted text buttons, exactly one control is obviously pressable, and

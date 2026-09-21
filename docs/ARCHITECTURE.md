@@ -749,7 +749,7 @@ paste shortcut) and "Screenshot this pane" from the palette (→ `agent.screensh
 Ctrl+Shift+G), running an alias from the palette (→ `/name`, and for a command the name typed in
 terminal mode), asking for a skill by name in a prompt that says "skill" (→ `/name`), renaming a pane or a tab by double click (→ `/rename`, `/rename-tab`),
 starting a card edit in the Switchboard with the Edit button, a click on the title or a
-double-click in the text (→ `e`), a card's Discuss, Plan, Execute and Verify buttons (→ Enter, `p`, `x`, `v`; `board.verify` is #T71W's, on a card in a QA lane),
+double-click in the text (→ `e`), a card's Discuss, Plan, Execute and Verify buttons (→ Enter, `p`, `x`, `v`; `board.verify` is #T71W's, on a card in a QA lane), a click on the ⧉ beside a card's `#ID` in the Switchboard (→ `y`; #FT77),
 the program banner's "Let the agent drive" / "Take over" buttons (→ `program.delegate`, `control.human`), a click on a running-agents row or its folded line (→ `agent.subagentPane`, Alt+A, or ↓ then Enter), a click on a task row of the strip under the prompt and the Tasks chip menu's task rows (→ ↓ then →, `tasks.strip.open.mouse`), the subagent pane's "← main agent" (→ `agent.subagentPane`), a turn that printed tool-call
 lines (→ click a ▸ line to unfold it, `Ctrl+Shift+Return` for the nearest) and a diff pane opening
 (→ n and p step through the hunks), the share button on a pane that is already shared (→ the palette, then "Sharing", because
@@ -836,7 +836,9 @@ a toast of its own (`BoardView::toast`, `src/BoardPane.cpp`, #Y2F4) — the same
 wearing the same `toast` object name a pane's does, so the theme styles both — because the board is
 a `ToolPane` rather than a `Pane` and cannot reach `Pane::toast`. A click on a hashtag in the board
 copies `#bug` and toasts "#bug copied" at the pane's bottom-right, beside the notice line that still
-carries "Copied #bug".
+carries "Copied #bug". The ⧉ beside a card's `#ID` — every card row's id column, and the card page's
+header (#FT77) — copies the reference the same way: one click, notice and toast, and never a
+selection, the one-gesture rule the label badges keep (#3ZAP).
 
 Default window shortcuts:
 

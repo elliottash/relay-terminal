@@ -233,6 +233,7 @@ private slots:
     void aQuestionTheAgentCannotTakeIsReportedOnTheCard();
     void theThinkingTraceRunsInTheCardsThread();
     void hashtagClicksCopyAndCardRefsZoom();
+    void theRefCopyButtonCopiesTheIdInTheRowsAndTheHeader();
     void quickAddNamesTheSectionItAddsTo();
     void aCleanupPreviewsFirstAndItsEventsNeverReachACardThread();
     void applyingAPreviewRunsTheCleanupForReal();
@@ -1846,9 +1847,77 @@ void BoardModelTests::hashtagClicksCopyAndCardRefsZoom()
     QCOMPARE(QApplication::clipboard()->text(), QStringLiteral("#bug"));
     QCOMPARE(view.selectedCard(), QStringLiteral("K7Q2"));   // the badge never selects
     QApplication::clipboard()->setText(QStringLiteral("keep"));
-    QTest::mouseClick(list->viewport(), Qt::LeftButton, {}, QPoint(rowRect.left() + 90, y));
-    QCOMPARE(view.selectedCard(), QStringLiteral("M3XJ"));   // the row still does
+    // On the title, past the id column and its ⧉ (#FT77): the row still selects as before.
+    QTest::mouseClick(list->viewport(), Qt::LeftButton, {}, QPoint(rowRect.left() + 130, y));
+    QCOMPARE(view.selectedCard(), QStringLiteral("M3XJ"));
     QCOMPARE(QApplication::clipboard()->text(), QStringLiteral("keep"));
+}
+
+// The ⧉ beside a card's `#ID` (#FT77): on the card page's header and beside every row's id — one
+// click and the reference is on the clipboard, with the notice and the toast, and the row is
+// never selected by it.
+void BoardModelTests::theRefCopyButtonCopiesTheIdInTheRowsAndTheHeader()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    QStringList hinted;
+    view.onHint = [&hinted](const QString &id, const QString &keys) { hinted << id << keys; };
+    view.handleEvent(opened({row("K7Q2", "inbox", "features"), row("M3XJ", "inbox", "features")}));
+    view.setCollapsedSections(QJsonArray{});
+    view.resize(1100, 700);
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+
+    // The card page's ⧉: one click and the reference is on the clipboard, with the notice, the
+    // toast, and the one-off `y` hint (the click is the slow path).
+    openCard(view, sent, QJsonObject{{"event", "board_card"}, {"card_id", "M3XJ"},
+                                     {"title", "M3XJ card"}, {"status", "inbox"},
+                                     {"tab", "features"}, {"path", "issues/features/M3XJ.md"},
+                                     {"front", QJsonObject{}}, {"body", "a plain body"},
+                                     {"thread", QJsonArray{}}, {"thread_total", 0}});
+    QApplication::clipboard()->setText(QString());
+    auto *refCopy = view.findChild<QToolButton *>(QStringLiteral("boardCardRefCopy"));
+    QVERIFY(refCopy);
+    QTest::mouseClick(refCopy, Qt::LeftButton);
+    QCOMPARE(QApplication::clipboard()->text(), QStringLiteral("#M3XJ"));
+    QCOMPARE(view.notice(), QStringLiteral("Copied #M3XJ"));
+    auto *toast = view.findChild<QLabel *>(QStringLiteral("toast"));
+    QVERIFY(toast);
+    QVERIFY(!toast->isHidden());
+    QCOMPARE(toast->text(), QStringLiteral("#M3XJ copied"));
+    QVERIFY(hinted.contains(QStringLiteral("copyId")));
+    hinted.clear();
+
+    // The row's ⧉: the id column is a fixed strip at the row's left; a sweep over it finds the
+    // glyph wherever this platform's metrics put it.
+    QListWidget *list = listOf(view);
+    QVERIFY(list);
+    view.selectCard(QStringLiteral("M3XJ"));
+    const QRect rowRect = list->visualItemRect(list->currentItem());
+    QVERIFY(rowRect.isValid());
+    const int y = rowRect.center().y();
+    QApplication::clipboard()->setText(QString());
+    int hit = -1;
+    for (int x = rowRect.left() + 30; x < rowRect.left() + 110; x += 4) {
+        QTest::mouseClick(list->viewport(), Qt::LeftButton, {}, QPoint(x, y));
+        if (QApplication::clipboard()->text() == QStringLiteral("#M3XJ")) {
+            hit = x;
+            break;
+        }
+    }
+    QVERIFY(hit > 0);
+    QCOMPARE(view.notice(), QStringLiteral("Copied #M3XJ"));
+    QCOMPARE(toast->text(), QStringLiteral("#M3XJ copied"));
+    QVERIFY(hinted.contains(QStringLiteral("copyId")));
+
+    // It is a copy, not a selection: stand the keyboard on K7Q2 and click the ⧉ again — the
+    // sweep's own clicks on the id text did select the row, as any row click does.
+    view.selectCard(QStringLiteral("K7Q2"));
+    QApplication::clipboard()->setText(QStringLiteral("keep"));
+    QTest::mouseClick(list->viewport(), Qt::LeftButton, {}, QPoint(hit, y));
+    QCOMPARE(QApplication::clipboard()->text(), QStringLiteral("#M3XJ"));
+    QCOMPARE(view.selectedCard(), QStringLiteral("K7Q2"));
 }
 
 // ---- the whole-board cleanup (protocol 19.9) -----------------------------------------------

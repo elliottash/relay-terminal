@@ -1,0 +1,33 @@
+02 bravo badge at: 1173 276
+PASS 02 badge notice (ocr 'Copied #bug')
+PASS 02 badge toast (ocr '#bug copied')
+PASS 02 badge clipboard: '#bug'
+PASS 02 list still shown (card not opened): 'yes'
+02b row copy-glyph at: 798 275
+PASS 02b row ⧉ notice (ocr 'Copied #')
+PASS 02b row ⧉ toast (ocr '#DC4J copied')
+PASS 02b row ⧉ clipboard: '#DC4J'
+PASS 02b list still shown (card not opened): 'yes'
+PASS 03 body rendered (ocr 'ref')
+04 meta #bug at: 806 259
+PASS 04 meta notice (ocr 'Copied #bug')
+PASS 04 meta toast (ocr '#bug copied')
+PASS 04 meta clipboard: '#bug'
+04b header copy-button at: 824 151
+PASS 04b header ⧉ notice (ocr 'Copied #')
+PASS 04b header ⧉ toast (ocr '#DC4J copied')
+PASS 04b header ⧉ clipboard: '#DC4J'
+05 body #bug at: 824 343
+PASS 05 body notice (ocr 'Copied #bug')
+PASS 05 body toast (ocr '#bug copied')
+PASS 05 body clipboard: '#bug'
+06 thread #bug at: 814 441
+PASS 06 thread notice (ocr 'Copied #bug')
+PASS 06 thread toast (ocr '#bug copied')
+PASS 06 thread clipboard: '#bug'
+PASS 06b toast faded (no '#bug copied')
+PASS 06b notice still up (ocr 'Copied #bug')
+07 ref #KAN3 at: 953 440
+PASS 07 clipboard untouched by the ref: '#bug'
+PASS 07 zoomed to Alpha's title: 'yes'
+---- 25 passed, 0 failed ----

@@ -269,13 +269,20 @@ int idColumnWidth(const QFont &font)
     return QFontMetrics(monoFont(font, 0.85)).horizontalAdvance(QStringLiteral("#WWWW")) + kIdGap;
 }
 
+// The room the ⧉ beside the `#ID` takes (#FT77): the copy glyph in the id's own mono, with a gap
+// either side. It is the column's room, so every row's ⧉ lines up like every row's id.
+int idCopyWidth(const QFont &font)
+{
+    return QFontMetrics(monoFont(font, 0.85)).horizontalAdvance(QStringLiteral("⧉")) + 6;
+}
+
 // Whether a row `width` px wide can carry the two date columns at all: the flag, the `#ID`
 // column and the title's floor are owed their room first, and only then does the table get its
 // right-hand columns.
 bool dateColumnsFit(const QFont &font, int width)
 {
-    const int keep = kRowPadX + kGlyphWidth + 4 + idColumnWidth(font) + kTitleMin + kDateGap
-                     + 2 * dateColumnWidth(font) + kDateGap + kRowPadX;
+    const int keep = kRowPadX + kGlyphWidth + 4 + idColumnWidth(font) + idCopyWidth(font)
+                     + kTitleMin + kDateGap + 2 * dateColumnWidth(font) + kDateGap + kRowPadX;
     return width >= keep;
 }
 
@@ -283,7 +290,7 @@ bool dateColumnsFit(const QFont &font, int width)
 // do not fit are already gone (board::fitBadges) and the title is elided into what is left, so a
 // narrow pane loses decoration before it loses meaning.
 struct CardShape {
-    QRect priorityRect, idRect, titleRect, createdRect, updatedRect;
+    QRect priorityRect, idRect, idCopyRect, titleRect, createdRect, updatedRect;
     QString title, created, updated;
     bool dates = false;                 // the two date columns are on this row
     QList<QPair<board::Badge, QRect>> badges;
@@ -307,7 +314,14 @@ CardShape cardShape(const board::Card &card, bool showStatus, const QFont &font,
     shape.priorityRect = QRect(x, 0, kGlyphWidth, shape.height);
     x += kGlyphWidth + 4;
     shape.idRect = QRect(x, 0, idColumnWidth(font) - kIdGap, shape.height);
-    x += idColumnWidth(font);
+    // The ⧉ that copies the reference (#FT77), straight after the id's own glyphs. Its room is
+    // owed before the title's: a narrow pane loses title before it loses the button.
+    const QFont idFont = monoFont(font, 0.85);
+    const int idTextWidth = QFontMetrics(idFont).horizontalAdvance(card.reference());
+    shape.idCopyRect = QRect(shape.idRect.left() + idTextWidth + 3, 0,
+                             QFontMetrics(idFont).horizontalAdvance(QStringLiteral("⧉")) + 4,
+                             shape.height);
+    x += idColumnWidth(font) + idCopyWidth(font);
 
     // The table's right-hand columns first: the badges and the title are what give way to them,
     // and the badges that no longer fit are dropped by board::fitBadges — a narrow pane loses
@@ -587,6 +601,20 @@ public:
             .priorityRect.translated(itemRect.topLeft());
     }
 
+    // The ⧉ beside a card row's `#ID` (#FT77), given that row's rect: a click target, exactly
+    // where paint() draws the glyph.
+    QRect idCopyRectOf(int rowIndex, const QRect &itemRect) const
+    {
+        const board::Row *row = rowAt(rowIndex);
+        if (!row || row->kind != board::Row::Card)
+            return QRect();
+        const board::Card *card = m_model->card(row->cardId);
+        if (!card)
+            return QRect();
+        return cardShape(*card, row->showStatus, m_list->font(), rowWidth(), sessionLive(*card))
+            .idCopyRect.translated(itemRect.topLeft());
+    }
+
     // The label a click at `at` (viewport coordinates) lands on in the card row at `rowIndex`
     // (#3ZAP): labels are the one badge that copies rather than decorates. A null string when
     // the click is anywhere else in the row.
@@ -816,6 +844,11 @@ private:
         painter->setPen(theme::TextMuted);
         painter->drawText(shape.idRect.translated(origin), Qt::AlignLeft | Qt::AlignVCenter,
                           card->reference());
+        // …and the ⧉ that copies it (#FT77): muted as the id is, the row's colour under the
+        // pointer, so it reads as the button it is.
+        painter->setPen(hover ? theme::Text : theme::TextMuted);
+        painter->drawText(shape.idCopyRect.translated(origin), Qt::AlignLeft | Qt::AlignVCenter,
+                          QStringLiteral("⧉"));
 
         painter->setFont(option.font);
         painter->setPen(card->closed() ? theme::TextMuted : theme::Text);
@@ -1014,7 +1047,8 @@ private:
         const int reserve = m_list ? rowReserve(m_list) : 0;
         const int rowWidth = m_list ? rowContentWidth(m_list) : width();
         const QFont base = font();
-        m_layout->setContentsMargins(frame + kRowPadX + kGlyphWidth + 4 + idColumnWidth(base), 3,
+        m_layout->setContentsMargins(
+            frame + kRowPadX + kGlyphWidth + 4 + idColumnWidth(base) + idCopyWidth(base), 3,
                                      qMax(0, reserve - frame) + kRowPadX, 3);
         const bool dates = dateColumnsFit(base, rowWidth);
         const int column = dateColumnWidth(base);
@@ -1136,8 +1170,11 @@ public:
     std::function<void(const QString &cardId, int step)> onPriority;
     // A click on a row's label badge copies its hashtag (#3ZAP) instead of selecting the row.
     std::function<void(const QString &label)> onCopyLabel;
+    // A click on the ⧉ beside a row's `#ID` copies the reference (#FT77), under the badge's
+    // one-gesture rule: a copy, never a selection.
+    std::function<void(const QString &cardId)> onCopyId;
     std::function<QRect(int rowIndex, const QRect &itemRect)> addRectOf, priorityRectOf,
-        triageRectOf;
+        triageRectOf, idCopyRectOf;
     // The label badge a point lands on, as text, or a null string (#3ZAP).
     std::function<QString(int rowIndex, const QRect &itemRect, const QPoint &at)> labelBadgeAt;
     static QString dragging;
@@ -1175,6 +1212,26 @@ protected:
         return labelBadgeAt(index.row(), visualRect(index), at);
     }
 
+    // The card id whose ⧉ a point lands on, or a null string (#FT77): the press, release and
+    // double-click guards share it, the same one-gesture rule the label badges keep (#3ZAP).
+    QString idCopyUnder(const QMouseEvent *event) const
+    {
+        if (!idCopyRectOf || event->button() != Qt::LeftButton)
+            return QString();
+#if QT_VERSION_MAJOR >= 6
+        const QPoint at = event->position().toPoint();
+#else
+        const QPoint at = event->pos();
+#endif
+        const QModelIndex index = indexAt(at);
+        const board::Row *row = rowAt(index.row());
+        if (!row || row->kind != board::Row::Card)
+            return QString();
+        const QRect rect = idCopyRectOf(index.row(), visualRect(index));
+        return rect.isValid() && rect.adjusted(-2, -2, 2, 2).contains(at) ? row->cardId
+                                                                         : QString();
+    }
+
     // A click on a section header toggles it, or adds into it; it never becomes a selection.
     void mousePressEvent(QMouseEvent *event) override
     {
@@ -1198,6 +1255,14 @@ protected:
                 event->accept();
                 return;
             }
+        }
+        // The ⧉ beside the `#ID` copies the reference (#FT77), under the same rule the label
+        // badges keep: a copy, never a selection.
+        if (const QString id = idCopyUnder(event); !id.isEmpty()) {
+            if (onCopyId)
+                onCopyId(id);
+            event->accept();
+            return;
         }
         // A label badge copies its hashtag (#3ZAP) rather than selecting the row; the row's
         // other badges still decorate, and a click between them selects as before.
@@ -1256,6 +1321,10 @@ protected:
     // release to the row as a click — a badge is a control, not a selection.
     void mouseReleaseEvent(QMouseEvent *event) override
     {
+        if (!idCopyUnder(event).isEmpty()) {
+            event->accept();
+            return;
+        }
         if (!labelBadgeUnder(event).isEmpty()) {
             event->accept();
             return;
@@ -1266,6 +1335,13 @@ protected:
     // A second click on a badge is another copy, not an activation of the row (#3ZAP).
     void mouseDoubleClickEvent(QMouseEvent *event) override
     {
+        // The ⧉ again: a second click is another copy, not an activation of the row (#FT77).
+        if (const QString id = idCopyUnder(event); !id.isEmpty()) {
+            if (onCopyId)
+                onCopyId(id);
+            event->accept();
+            return;
+        }
         const QString label = labelBadgeUnder(event);
         if (!label.isEmpty()) {
             if (onCopyLabel)
@@ -1612,6 +1688,15 @@ public:
         m_ref = new QLabel(this);
         m_ref->setObjectName(QStringLiteral("boardCardRef"));
         top->addWidget(m_ref);
+        // The ⧉ beside it (#FT77): the sign a copyable id wears in the info pane. One click and
+        // the reference is on the clipboard — the row's ⧉ does the same for its card.
+        m_refCopy = new QToolButton(this);
+        m_refCopy->setObjectName(QStringLiteral("boardCardRefCopy"));
+        m_refCopy->setText(QStringLiteral("⧉"));
+        m_refCopy->setToolTip(QStringLiteral("Copy #ID to the clipboard"));
+        m_refCopy->setCursor(Qt::PointingHandCursor);
+        m_refCopy->setFocusPolicy(Qt::NoFocus);
+        top->addWidget(m_refCopy);
         top->addStretch();
         m_toPrompt = textButton(QStringLiteral("#ID → prompt (t)"),
                                 QStringLiteral("Insert this card's #ID in the terminal's prompt (t)"));
@@ -1979,6 +2064,13 @@ public:
         connect(m_saveEdit, &QPushButton::clicked, this, [this] { saveEdit(); });
         connect(m_cancelEdit, &QPushButton::clicked, this, [this] { cancelEdit(); });
         connect(m_close, &QToolButton::clicked, this, [this] { if (onClose) onClose(); });
+        connect(m_refCopy, &QToolButton::clicked, this, [this] {
+            // The ⧉ (#FT77): the same copy the row's ⧉ makes.
+            if (onCopyTag)
+                onCopyTag(m_id);
+            if (onCopyIdHint)
+                onCopyIdHint();
+        });
         connect(m_toPrompt, &QToolButton::clicked, this, [this] { if (onToPrompt) onToPrompt(); });
         connect(m_openFile, &QToolButton::clicked, this, [this] { if (onOpenPath) onOpenPath(m_path); });
         // Ctrl+Shift+Enter is the composer's "terminal, never the model" chord; here it means
@@ -2097,6 +2189,9 @@ public:
     // A label hashtag was clicked — a badge in the list, the meta's labels, or a `#tag` in the
     // card's own words or the thread (#3ZAP): copy `#tag` and say so.
     std::function<void(const QString &tag)> onCopyTag;
+    // A click on the ⧉ beside the ref is the slow path: `y` is its key (#FT77, the WARP.md hint
+    // rule).
+    std::function<void()> onCopyIdHint;
     // A `#ID` in the card's own words or the thread names another card on this board: zoom to
     // it, the way the cleanup panel's `card:` anchors do (#3ZAP).
     std::function<void(const QString &id)> onOpenCard;
@@ -3658,6 +3753,7 @@ private:
 
     PriorityFlagButton *m_flag = nullptr;   // the card page's priority flag (#DPJB)
     QLabel *m_ref = nullptr, *m_title = nullptr, *m_meta = nullptr, *m_error = nullptr;
+    QToolButton *m_refCopy = nullptr;   // the ⧉ beside the ref (#FT77)
     QLabel *m_verifyLine = nullptr;   // the cross-provider QA recommendation (#T71W)
     // The `## Tests` strip (#7BM4): the header line, the Check button, the findings rows the
     // last `tests_check` drew, and the action buttons it offered. `m_checkFiles`,
@@ -3883,6 +3979,15 @@ void BoardView::buildChrome(QVBoxLayout *layout)
         return delegate->labelBadgeAt(rowIndex, itemRect, at);
     };
     m_list->onCopyLabel = [this](const QString &label) { copyTag(label); };
+    m_list->idCopyRectOf = [delegate](int rowIndex, const QRect &itemRect) {
+        return delegate->idCopyRectOf(rowIndex, itemRect);
+    };
+    m_list->onCopyId = [this](const QString &id) {
+        copyTag(id);
+        // A click is the slow path: `y` copies the selected card's reference (#FT77).
+        if (onHint)
+            onHint(QStringLiteral("copyId"), QStringLiteral("y"));
+    };
     m_list->onPriority = [this](const QString &card, int step) { setCardPriority(card, step); };
     m_list->onToggleSection = [this](const QString &columnId) { toggleSection(columnId); };
     // A click on the self-closed fold row (#93WR) does what Enter on it does, and says so once:
@@ -4105,6 +4210,10 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     m_detail->paneExists = [this](const QString &token) { return tokenLive(token); };
     m_detail->hasCard = [this](const QString &id) { return m_model.card(id) != nullptr; };
     m_detail->onCopyTag = [this](const QString &tag) { copyTag(tag); };
+    m_detail->onCopyIdHint = [this] {
+        if (onHint)
+            onHint(QStringLiteral("copyId"), QStringLiteral("y"));
+    };
     m_detail->onOpenCard = [this](const QString &id) { openCard(id); };
     m_detail->onOpenPath = [this](const QString &path) {
         if (!onOpenFile || path.isEmpty())
