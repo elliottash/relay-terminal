@@ -7,7 +7,7 @@ assignee: codex
 rank: mqrc1
 created: '2026-09-21'
 source: 'Owner in Relay, 2026-09-21'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-queue-recall/], related: [9V1F], github: null}
+links: {plans: [], commits: [3ebf3673bcfa68cb92cbf1a492ab32dc28bd0adb], evidence: [docs/qa_evidence/2026-09-21-queue-recall/], related: [9V1F], github: null}
 ---
 # Up recalls a queued command as an unsent draft
 
