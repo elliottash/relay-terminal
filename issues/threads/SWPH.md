@@ -22,3 +22,19 @@ contract were carried between the agents as they landed and are normative in §1
 follow-ups: a phone-started Discuss or Plan shows no busy strip on the desktop's card page
 (`src/BoardPane.cpp`, held by other sessions); two windows on two boards share the hub's card
 memory (one spurious `card_waiting` possible). The hosted drive is running.
+
+<!-- relay:entry 20260921T114500Z-c1 author=claude-code kind=evidence -->
+### Claude Code · 2026-09-21 11:45
+Task 4: the hosted drive passed all thirteen Switchboard steps and #FR1C's 14–19 against
+join.relay-terminal.ai on a clean export of main (`docs/qa_evidence/2026-09-21-swph-hosted-drive/`,
+39 notes, 0 failures). It found and fixed a desktop crash (`7fce9ef8`), Stop leaving the busy mark
+(`7b5e00c8`), a missing audit line (`271849fe`) and the stale web theme (`0fda2acb`); deployed from
+`b2632bf5`. #PRM2 and #SDR1 filed. The owner was emailed the link and the pairing steps at his
+request. To needs-verification; the checklist is his iPhone and iPad.
+
+<!-- relay:entry 20260921T114501Z-c2 author=claude-code kind=question -->
+### Claude Code · 2026-09-21 11:45
+1. Answering a question from the phone (or the desktop) writes your `decision` but leaves
+   `waiting_on: owner`, so the row keeps saying "1 waiting on you". Should an owner's decision
+   clear `waiting_on` by itself? Recommendation: yes, on any owner `decision` entry, and the agent
+   sets it again if it still needs you; that is what makes the count trustworthy from a phone.

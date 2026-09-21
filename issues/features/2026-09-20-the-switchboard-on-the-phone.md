@@ -1,7 +1,7 @@
 ---
 id: SWPH
 type: work
-status: executing
+status: needs-verification
 labels: [feature, remote, switchboard]
 component: [gui, remote]
 milestone: beta
@@ -11,7 +11,7 @@ rank: 6a
 created: '2026-09-20'
 source: 'owner, 2026-09-20, Claude Code session (after #PH0N and #FR1C)'
 acceptance: from a paired phone or iPad, by touch, the owner opens the Switchboard from the inbox, sees the cards by stage with the ones waiting on him first, opens a card to read its body and thread, answers a question or comments, moves a card, files a new card by typing or dictating, and starts Discuss, Plan, Execute or Verify on a card; a card that starts waiting on him produces a notification; a guest never sees any of it
-links: {plans: [], commits: [38659350, 2c466481, 5eb5699e, 0abb4df0, fd9d2caf, 39c94b91], evidence: [docs/qa_evidence/2026-09-21-swph-board-bridge/, docs/qa_evidence/2026-09-21-swph-board-view/], related: [PH0N, FR1C, 0VT4, W5N2], github: null}
+links: {plans: [], commits: [38659350, 2c466481, 5eb5699e, 0abb4df0, fd9d2caf, 39c94b91, 271849fe, 0fda2acb, 7b5e00c8, 7fce9ef8, 2c19e11c], evidence: [docs/qa_evidence/2026-09-21-swph-hosted-drive/, docs/qa_evidence/2026-09-21-swph-board-bridge/, docs/qa_evidence/2026-09-21-swph-board-view/], related: [PH0N, FR1C, 0VT4, W5N2, PRM2, SDR1], github: null}
 ---
 # The Switchboard on the phone: cards, threads and the card actions, by touch
 
@@ -95,4 +95,65 @@ owner's devices.
 - [x] 1 Desktop bridge: BoardWorker ↔ hub, Execute/Verify through the desktop's hooks <!-- t:s1 -->
 - [x] 2 Hub: allow-lists, sanitiser, fan-out to `full` devices, `card_waiting` push, protocol §17 <!-- t:s2 -->
 - [x] 3 Phone: Switchboard row, stages, card page, reply/move/actions, new card with the microphone <!-- t:s3 -->
-- [ ] 4 Drive, deploy, open Relay and pair the owner's iPhone and iPad <!-- t:s4 -->
+- [x] 4 Drive and deploy (the owner opened Relay himself on 2026-09-21; pairing is the QA checklist) <!-- t:s4 -->
+
+## Discussion points
+
+- Answering a question from the phone writes the owner's `decision` but does not clear
+  `waiting_on: owner`, so the row still says "1 waiting on you". The desktop behaves the same
+  way. Should an owner's decision on a card clear `waiting_on`, or is that the agent's to do when
+  it reads the answer? (Board policy; the owner's call.)
+
+## Execution Summary
+
+- **Desktop bridge** (`38659350`, `2c466481`): `src/BoardRemote.{h,cpp}` between the tab's
+  `BoardWorker` and `RemoteShare`; starts the worker on demand (no Switchboard pane needs to be
+  open), rebuilds each request field by field, runs Execute and Verify through the desktop's own
+  hooks, strips paths, watches the board folder itself so a card an agent writes still reaches the
+  phone, and says every remote write in the status line.
+- **Hub** (`5eb5699e`, `271849fe`): ten allow-listed requests at `full` only and never a guest;
+  `remote/board_state.py` refuses paths and over-long text; rate limits; audit lines without text,
+  including refusals at the gate; the `card_waiting` push; `docs/REMOTE-PROTOCOL.md` §17 is the
+  normative contract (it supersedes the sketch in this card's Plan where they differ).
+- **Phone** (`0abb4df0`, `fd9d2caf`, `39c94b91`, `7b5e00c8`, `0fda2acb`): the Switchboard row with
+  the waiting count and badge; stages in the desktop's order with "Waiting on you" pinned first;
+  the card page with Markdown built as DOM nodes; Answer / Comment / Discuss / Plan; Move; Execute
+  and Verify with a link to the pane they open; Stop; New card; search; the offline outbox; iPad
+  two-column and phone-landscape-with-keyboard layouts.
+- **Found by the drive and fixed**: Relay crashed when a phone touched the board after the
+  desktop's Switchboard pane had been closed, a use-after-free in #AGNT's console bookkeeping
+  (`7fce9ef8`); Stop from the phone left the busy mark on (`7b5e00c8`); a refused request left no
+  audit line (`271849fe`); the web theme was stale after #AGNT (`0fda2acb`).
+- **Filed, not fixed here**: #PRM2 (the pairing dialog spends 2–4 of the hour's 20 pairing rooms
+  per look, and shows a dead code across an off/on), #SDR1 (`conversations` carries `session_dir`
+  to `full` devices).
+- **Open, in files other sessions hold**: a Discuss or Plan started from the phone shows no busy
+  strip on the desktop's card page (`src/BoardPane.cpp`); a Verify pane is headed "Execute"
+  (`src/Pane.h`); with two windows on two boards the hub shares one card memory, so one spurious
+  `card_waiting` is possible (needs an opaque `board_key` from the bridge); a card turn that ends
+  with no text would leave the phone's busy mark on until its 45-minute timeout (needs a new
+  allow-listed event across all three halves).
+
+## Tests
+
+- `ctest --test-dir build -R "boardremote|boardworkspace|boardpane|sharing"`
+- `RELAY_KEYRING=off python3 -m unittest tests.test_remote_board tests.test_remote_push tests.test_remote_host tests.test_remote_gui_host tests.test_remote_security`
+- `RELAY_KEYRING=off python3 -m unittest tests.test_board_view tests.test_pane_view tests.test_remote_browser tests.test_web_viewport tests.test_web_theme`
+- `manual: docs/qa_evidence/2026-09-21-swph-hosted-drive/` (`drive.sh`: thirteen Switchboard steps and #FR1C's 14–19 all PASS against join.relay-terminal.ai, on a clean export of main)
+
+## QA checklist
+
+On the owner's iPhone and iPad, paired at `full`, with the desktop on a build that has `7fce9ef8`:
+
+- [ ] The inbox's first row is Switchboard, with the count of cards waiting on you; the app badge shows the same count.
+- [ ] Open it: tabs, stages in the desktop's order, "Waiting on you" first; counts match the desktop's board.
+- [ ] Open a waiting card: the body reads well, the question is highlighted, tapping an option prefills the reply, Answer lands in the thread on the phone and on the desktop.
+- [ ] Comment on a card; Move a card with a reason; the desktop's board follows and its status line names the device.
+- [ ] + New card with a few dictated sentences (keyboard dictation): the card exists with your words verbatim.
+- [ ] Discuss on a card: busy mark, then the agent's reply in the thread; Stop on a long one.
+- [ ] Execute on a planned card: a pane opens on the desktop, "Open pane" on the phone shows it.
+- [ ] With both notification switches on and the desktop window not active, a card that starts waiting on you rings on the lock screen; tapping it opens that card.
+- [ ] Close the desktop's Switchboard pane, then use the board from the phone: nothing crashes.
+- [ ] iPad in landscape: list and card side by side; iPhone in landscape with the keyboard up: the reply box and send fit.
+- [ ] Touch: every target is comfortable with a thumb; nothing needs hover.
+
