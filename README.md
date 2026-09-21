@@ -65,14 +65,15 @@ that conflict.
 1. Start Relay and open **Options › Models** (`/models`, Ctrl+Shift+O, or ⚙ customize… at the
    bottom of the model box). The page reads top to bottom the way it is set up: **providers** —
    add key… for one of them (or Actions › API keys… to **Import from Warp** or **from Claude Code /
-   Codex**; **test** checks the key reaches the provider) — then **models in the picker**, a
-   checklist of each provider's models, then five ordered lists — **main, high, flash, lite and
-   local models**. Each row is a model and the reasoning level it runs at there, in the provider's
-   own words (xhigh on a GPT row, max on a GLM row). The first of a list is what that tier runs
-   on: main for new panes, high for plan mode, flash for terminal driving and quick side calls,
-   lite for chores, local for `/local`. The rest are that tier's fallbacks, in order, and a model
-   in no list is only used when you pick it by hand. "fill the lists" applies Relay's defaults,
-   or the recommended ones with the cheaper OpenRouter twins after your own models; those defaults
+   Codex**; **test** checks the key reaches the provider) — then **profiles**. Which models you
+   run, and in what order, is the dialog at the top of the page: **models and priorities…**
+   (Ctrl+Alt+M), a tab per list — **main, high, flash, lite and local**. Each row there is a model
+   and the reasoning level it runs at in that list, in the provider's own words (xhigh on a GPT
+   row, max on a GLM row). The first of a list is what that tier runs on: main for new panes, high
+   for plan mode, flash for terminal driving and quick side calls, lite for chores, local for
+   `/local`. The rest are that tier's fallbacks, in order, and a model in no list is only used when
+   you pick it by hand. **fill from defaults** applies Relay's defaults, or the recommended ones
+   with the cheaper OpenRouter twins after your own models; those defaults
    come out of `backend/relay_core/model-ranking.md`, a file you can read and edit — with no
    provider set up you get Relay's three included models, with one you get one model per list, and
    with two or more you get two, by score and never twice from the same provider. A **profile**
@@ -246,11 +247,14 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   this pane, **Alt+↑/Alt+↓** or a drag moves it, **Delete** takes it out, the level list on the
   right sets the level that model runs at *in that list*, and **Ctrl+Z** undoes any of it — the
   same storage Options › Models writes, so the two can never disagree. **Typing** searches every
-  model: this list's matches first, then "not in this list", where **Ctrl+Enter** adds one. The
-  **all** tab is the flat picker — a **sort** menu (priority, a to z, intelligence, speed, most
-  used, subscription left), ★ favorites and the ten most recent above the rest, subscription
+  model your providers serve: this list's matches first, then "not in this list", where
+  **Ctrl+Enter** adds one, and last **more from openrouter** — a provider with a listing of
+  hundreds is kept out of the lists until you type, so it cannot bury the rest. The
+  **all** tab is every model you can run — a **sort** menu (priority, a to z, intelligence, speed,
+  most used, subscription left), ★ favorites and the ten most recent above the rest, subscription
   windows ("5h 62% left, resets 14:30") under the list — with one row per model whatever serves it
-  and **→** opening that row's providers to choose one. A class tab also says what **Alt+M** shows
+  and **→** opening that row's providers to choose one, and **+ add a model by id…** at the end for
+  an id your provider serves but does not list. A class tab also says what **Alt+M** shows
   of it: the **in box** column is a cutoff (tick rank 3 and the box draws three of that class), and
   **show this class in the box** takes the class out of it altogether. Both travel with the profile,
   and **fill from defaults** replaces every list with what your providers can serve. The profile is

@@ -2095,7 +2095,7 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   (`relay::models`, library `relay-modelcatalog`, `tests/modelcatalog_test.cpp`) turns the worker's
   preset rows — each carries `models`, the per-model catalog of `presets.py MODEL_CATALOG` — into
   one flat list of entries keyed `<preset>|<model>`, and keeps what the user said about them in
-  QSettings under `models/*`: shown; the five tier lists (`models/tier/<tier>`, owner, 2026-09-20
+  QSettings under `models/*`: the five tier lists (`models/tier/<tier>`, owner, 2026-09-20
   evening: main, high, flash, lite, local — each an ordered list of a model and the reasoning level
   it runs at there, `curation::tierList`; rank 1 of main writes `provider/preset`, `provider/model`
   and `agent/effort` for new panes, every entry after it is a fallback, and a model in no list is
@@ -2114,10 +2114,16 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   the entries in the same `{preset, model, effort}` shape as `tier_list_defaults`; an imported name
   that is already taken asks replace / keep both (" (2)") / skip, and importing never changes which
   profile is current.
-  `models/collapsed` folds a provider's group (the priority list, its
-  "fallbacks end here" line and the per-model "openrouter fallback" switch of earlier that day are
-  gone — an OpenRouter model is a list entry like any other); custom ids, favorites, recent, sort,
-  a remembered reasoning level per entry, use counts and a tokens/s estimate.
+  Also: custom ids, favorites, recent, sort,
+  a remembered reasoning level per entry, use counts and a tokens/s estimate. `models/shown` (the
+  "models in the picker" checklist) and `models/collapsed` (its per-provider fold) are **retired**
+  with card #MDL1 t:a10 and are ignored where an old settings file still holds them — as are the
+  priority list, its "fallbacks end here" line and the per-model "openrouter fallback" switch of
+  2026-09-20, which went earlier. `models::shown(catalog)` is now one rule with no setting behind
+  it: every usable entry in rank order, minus an open-ended provider's long tail (an OpenRouter row
+  that is not one of its tier defaults, that no tier list names and that the user did not type).
+  `models::allUsable(catalog)` is the same walk without that exception, and only the dialog's
+  filter reads it.
   What the two **defaults** are is a file in the repo rather than a table in the code (card #MDL1):
   `backend/relay_core/model-ranking.md` holds a **Providers** table (`provider | kind | order`) and
   a **Models** table (`name | classes | score | notes`), one row per model name, and the owner
@@ -2143,19 +2149,25 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   go through `curation::setTierList`, which is the same single writer Options › Models uses and
   writes through to the current profile, and then call `onListsChanged`; the pane wires that to
   `onProfileApplied`, i.e. `RelayWindow::modelsCurated()`, so the page redraws and every running
-  worker is re-sent its tiers. Typing searches `shown(catalog)`: this list's matches, then a "not
-  in this list" rule with the rest folded by `models::grouped`. The `all` tab is the old flat
-  picker — filter, sort menu, favorites / recent sections — but one row per *group*, with "via"
+  worker is re-sent its tiers. Typing searches `allUsable(catalog)`: this list's matches, then a
+  "not in this list" rule, then a "more from <provider>" rule holding the long tail `shown()` keeps
+  out, all folded by `models::grouped`. The `all` tab is every usable model — filter, sort menu,
+  favorites / recent sections — one row per *group*, with "via"
   naming the preferred provider and "+N" and → opening the group's providers beside the levels
-  (which follow the chosen entry into its own words). The profile is in the header when there is
-  one, a footer line spells the tab's keys, and Options › Models carries a "prioritize models…"
-  button at the top that opens the same dialog. Every pick goes
+  (which follow the chosen entry into its own words), and "+ add a model by id…" as its last row
+  (`ModelPicker::addModelById`: an id the catalog holds is simply selected, one it does not is
+  stored in `models/custom`). The profile is in the header when there is
+  one, and a footer line spells the tab's keys. Every pick goes
   through `Pane::selectEntry(key, effort)`, which is `selectModel(preset, model)` plus the level;
   `/swap` toggles between rank 1 and rank 2 (#DC4J). Options › Models (`RelayWindow::modelsSection`)
-  is the one page: providers and keys (through the pane's `storeKey` / `testKey` / `removeKey`),
-  the per-provider checklist with "add a model by id", the five tier lists, the defaults; it replaced
-  the API keys and Model roles doors and the "Claude Code and Codex" page (a guest's permission
-  posture sits under its models). Labels are lower-case throughout, per the owner.
+  is the page for what the dialog is *not* about (card #MDL1 t:a10, design 5.5): a
+  "models and priorities… (Ctrl+Alt+M)" button at the top — `Pane::openModelPicker("main")`, because
+  a page is not in a mode — then providers and keys (through the pane's `storeKey` / `testKey` /
+  `removeKey`, with a guest's permission posture under its provider row) and the profiles. The five
+  tier lists, the "models in the picker" checklist, its per-provider "add a model by id" box and
+  the "fill the lists" defaults buttons all left the page for that dialog. It replaced
+  the API keys and Model roles doors and the "Claude Code and Codex" page. Labels are lower-case
+  throughout, per the owner.
 - **One name, one row (card #MDL1, 2026-09-21).** A model has exactly one name — lower-case, no
   spaces, no vendor prefix — and everything that prints a model prints it: `gpt-5.6-sol`, never
   "Codex" and never "GPT-5.6 Sol". The worker computes it (`presets.model_name`) and sends it as
@@ -2202,7 +2214,9 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   list in **list order**, one row per model (`models::grouped`), with a right-hand "via" column
   naming the provider the turn would go to and `+N` for the rest, down to that class's **cutoff**
   — two by default (`models::curation::boxCutoff`). A class switched off
-  (`curation::boxShown`), and one with nothing left to draw, is not drawn at all. Then the Tier B
+  (`curation::boxShown`), and one with nothing left to draw, is not drawn at all — with one
+  exception: the class the pane is *running*, which comes back with the pane's own row and nothing
+  else, expands to nothing and says so in its header tooltip (card #MDL1 t:a10). Then the Tier B
   guest rows (26.9) and "more models…" (`gear:picker`); "⚙ customize…" left the box, because the
   dialog has the Options button (design 5.5).
   **What is left out is the part to know.** "exhausted models dont show up" — a row whose every
@@ -2210,7 +2224,8 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   the tier lists do. A list is an order the user wrote down and the dialog shows it whole; the box
   answers "what can I run right now". The one row that survives the cutoff whatever its rank is
   **this pane's own model** for its class, because the box opens with it highlighted and the
-  highlight needs a home.
+  highlight needs a home — and that is the same reason a switched-off class keeps that one row when
+  the pane is in it.
   **Right** opens the highlighted row's class to its whole list and **Left** closes it
   (`FilterPopup::onExpandKey` → `Pane::expandModelClass`, `modelrows::Context::expanded`); the
   expansion is the pane's, lasts only while the box is open, and never reaches the settings.
