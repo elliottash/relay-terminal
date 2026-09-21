@@ -68,6 +68,11 @@
     <display_length compare="ge">768</display_length>
   </requires>
   <releases>
+    <release version="0.1.0~beta.3" date="2026-09-21" type="development">
+      <description>
+        <p>Agent consoles throughout the workspace, model switching and ranking, phone pairing and Switchboard access, configurable approvals, and the libghostty-vt terminal core.</p>
+      </description>
+    </release>
     <release version="0.1.0~beta.2" date="2026-09-19" type="development">
       <description>
         <p>Open a pane another of your Relays shares, inside the app; a friend joins a shared pane with a meeting code and a PIN; Relay Free works out of the box.</p>
