@@ -76,3 +76,55 @@ Looking at the first evidence run's screenshots found three things, all fixed be
 Tests: `ctest -R modelpicker`, 20 cases (`tests/modelpicker_test.cpp`), the old flat-layout ones rewritten onto the `all` tab rather than dropped. `ModelPick` and `pickModel()` stayed source-compatible — the fourth argument is defaulted — so nothing else moved. `relay` builds; land.py's gate built the exact tree three times.
 
 Not in this task and still open on the card: t:a5 (names at every display site) and t:a6 (the box). The dialog reads whatever `Entry::name` holds, so t:a5's work improves it with no change here.
+
+<!-- relay:entry 20260921T134224Z-k1 author=claude-code kind=progress -->
+### Claude Code · 2026-09-21 13:42
+t:a6 landed. `9d0b7b8e` (the `high` role and a pane's own pick for a role), `86ddc3b0` (the popup's
+pages), `3cac1ecd` (the box), `f0dede9c` (evidence, the docs, and the fix the shots found).
+Evidence: `docs/qa_evidence/2026-09-21-model-box-modes`.
+
+The box is a stack of **pages**, one per mode (`relay::modelrows::pages`), and every page carries the
+same mode rows at the top with the marker on a different one, so Left and Right move only the marker
+and the list below (`FilterPopup::setPages` / `turnPage`, which keeps the filter text and re-applies
+it). A mode row's parentheses name what *this pane* would run in that mode: its own pick where it
+has one, else rank 1 of that tier's list, else what the worker's role summary resolved — never a
+model guessed out of the whole catalog, which is why `local` with nothing ranked says the endpoint
+the worker found rather than a cloud model, and why the local page offers no cloud model at all.
+Below the separator are that mode's models in **list order** and one row per model
+(`models::grouped`), with a right-hand "via" column naming the provider the turn would go to and
+`+N` for the rest; a row whose every provider is spent or keyless is greyed **in place** with the
+reason in its tooltip, which is design 1.3 and the opposite of what `build` did (it dropped them).
+
+**Left and Right change the mode always**, whatever has been typed. The owner's words carried no
+condition, and a key that means one thing with an empty filter and another with a letter in it is
+the guessing this popup replaced; the filter stays editable with typing, Backspace and Ctrl+A /
+Ctrl+U, so the caret lives at the end of what you typed. A list with no pages — the Alt+E level box
+— is untouched and its Left and Right are still the line edit's own caret keys.
+
+Picking a model for a **non-main** mode needed the protocol, and it was a contained change:
+`set_agent_role` now takes an optional `{preset, model, effort}`, read as one tier-list entry and
+resolved by the same code path (`roles.RoleResolver.resolve_entry`), so a pane's pick and a list
+entry can never mean two different things. **`tiers` is not written** — the list belongs to every
+other pane and to every side call — and an unusable pick falls back to the main agent with a
+warning rather than erroring. Protocol 13.5 and 13.7 are at v4.6. `/high` is a real role on the High
+tier, exactly as `flash` is one on Flash, with Alt+H in Alt+F's shape.
+
+The collapsed chip is the model alone on main and `<model> · <mode>` otherwise, through
+`CurrentTextComboBox::setCollapsedText` — the reason that class exists. A console's main mode is its
+own main-tier worker role, which is the one line that makes its box the same list as a terminal
+pane's; the shots put the two side by side and neither says "(switchboard)". The phone gets the same
+strings from the same builder and a `pick:` token comes back through `modelBoxPicked`.
+
+Looking at the first evidence run's shots found one real bug: the popup wrote the page it had been
+turned to back into the box, so Escape after a turn left the *next* Alt+M opening on the wrong mode.
+`pageId` is the owner's now and is re-read from the pane's mode each time the list is drawn.
+
+Tests: `ctest -R "modelrows|filterpopup|modelcatalog|modelpicker|panestate"` green — 13 cases in
+`tests/modelrows_test.cpp` (modes and their order, list order rather than alphabetical, one row per
+model with via and +N, the parentheses per pane, a console building a pane's rows, the collapsed
+text, a spent row greyed and a keyless one too, guests only on the main page) and 18 in
+`tests/filterpopup_test.cpp` (pages open on the named page and its own current row; Left/Right turn
+in place, clamp, close nothing and pick nothing; a turn keeps the filter; Enter is answered by the
+row's data; Escape picks nothing; the via column rendered and measured; the one-page effort box
+unchanged). Python: `tests/test_roles.py`, 77 cases, with `high` and `resolve_entry`;
+`tests/test_keybindings.py` green, so Alt+H passes the worker's own catalogue check.
