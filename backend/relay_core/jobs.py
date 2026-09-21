@@ -89,8 +89,8 @@ def shell_argv(command: str, env: dict) -> list[str]:
     # EncodedCommand avoids Windows argv quoting corrupting quotes/newlines. Preserve native
     # exit codes; a failed cmdlet must also produce a nonzero result. Explicit exit still wins.
     script = ("[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); "
-              "$global:LASTEXITCODE = 0; & {\n" + command +
-              "\n}; if (!$?) { if ($LASTEXITCODE) { exit $LASTEXITCODE }; exit 1 }; exit 0")
+              "$global:LASTEXITCODE = 0;\n" + command +
+              "\nif (!$?) { if ($LASTEXITCODE) { exit $LASTEXITCODE }; exit 1 }; exit 0")
     encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
     return [env.get("RELAY_POWERSHELL") or "pwsh.exe", "-NoLogo", "-NoProfile",
             "-NonInteractive", "-EncodedCommand", encoded]

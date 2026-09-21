@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from relay_core import jobs, router
 
@@ -38,6 +39,14 @@ class PowerShellParserTests(unittest.TestCase):
             text = "Write-Output $(New-Item -ItemType File -Path '" + str(path).replace("'", "''") + "')"
             self.assertTrue(router.powershell_runnable(text, (), None, root)[0])
             self.assertFalse(path.exists())
+
+    def test_command_wrapper_preserves_failure_and_exit(self):
+        for command, expected in (("Write-Error 'bad'", 1), ('exit 13', 13),
+                                  ("Write-Output 'héllo 世界'", 0)):
+            with patch('os.name', 'nt'):
+                argv = jobs.shell_argv(command, {'RELAY_POWERSHELL': PWSH})
+            result = subprocess.run(argv, capture_output=True)
+            self.assertEqual(result.returncode, expected, command)
 
     def test_events(self):
         subprocess.run([PWSH, '-NoLogo', '-NoProfile', '-File',
