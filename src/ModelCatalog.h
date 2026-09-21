@@ -43,6 +43,13 @@ struct Entry {
     QString plan;         // lower-case plan: "coding plan"; empty when the preset has none
     QString tier;         // the tier this is the provider's default for: main | flash | lite | ""
     QStringList efforts;  // reasoning levels the model accepts; empty = no knob
+    // What the provider says this model's own default level is (the worker's `default_effort`: a
+    // guest's `default_reasoning_level`, a cloud model's tier extra read back), and the level it
+    // starts at in each list — `tier_effort`, `{main, high, flash, lite}` — for the row's `+ add a
+    // model…` button (card #TKN7). Both in the provider's own words; empty where it states none,
+    // and on a worker that sends neither (then `tierStartEffort` reads the same rules off the row).
+    QString defaultEffort;
+    QHash<QString, QString> tierEffort;
     int intelligence = -1;   // the owner's ruling (presets.INTELLIGENCE); -1 unknown
     QString openrouter;      // the same model's OpenRouter slug, when it has one (presets.OPENROUTER_TWINS)
     // What each reasoning level is called by the provider it is sent to (owner, 2026-09-20:
@@ -87,6 +94,14 @@ struct Catalog {
 // row with no `models` (an older worker, a local server whose probe listed nothing) still yields
 // one entry: the row's own `model`.
 Catalog catalogFrom(const QJsonArray &presets);
+
+// The level a model starts at when the user adds it to one of the lists by hand (Options › Models'
+// `+ add a model…`, card #TKN7): the row's own `tier_effort` for that list, which the worker
+// computes once (`presets.tier_start_efforts` — Main is the provider's own default, High the level
+// a plan turn uses, Flash and Lite the lowest). A row that carries none — an older worker — falls
+// back to the same three rules read off the entry itself, except the guest's own High rule, which
+// only the worker can know. Empty means the entry carries no level: the model's own default.
+QString tierStartEffort(const Entry &entry, const QString &tier);
 
 enum class Sort { Priority, Alphabetical, Intelligence, Speed, Usage, Remaining };
 QString sortId(Sort sort);

@@ -496,11 +496,17 @@ def catalog_rows(preset_id) -> list[dict]:
     out = []
     for row in MODEL_CATALOG.get(preset_id, []):
         efforts = list(default if row["efforts"] is None else row["efforts"])
+        # The provider's own default level for this model: the level its built-in tier extra names
+        # (`infer_effort`), None where no tier names it and the model states nothing of its own. The
+        # same key a guest row carries (protocol 29.3), and what `tier_start_efforts` starts Main at.
+        provider_default = infer_effort(preset.effort_style, model_extra(preset_id, row["id"]))
         out.append({"id": row["id"], "label": row["label"], "tier": row["tier"],
                     "efforts": efforts,
                     "effort_labels": effort_labels(preset.effort_style, efforts),
                     "intelligence": INTELLIGENCE.get(row["id"]),
-                    "openrouter": openrouter_twin(row["id"])})
+                    "openrouter": openrouter_twin(row["id"]),
+                    "default_effort": provider_default,
+                    "tier_effort": tier_start_efforts(efforts, provider_default)})
     if preset_id == "openrouter":
         from . import openrouter_catalog          # here, not at the top: it imports this module
         known = {row["id"] for row in out}
@@ -644,6 +650,31 @@ def _list_entry(preset_id: str, model: str, effort: str | None) -> dict:
     if effort:
         entry["effort"] = effort
     return entry
+
+
+def tier_start_efforts(efforts, default_effort: str | None = None, guest_id: str = "") -> dict:
+    """``{tier: level}`` for main, high, flash and lite: where a model starts when the user adds it
+    to that list by hand (Options › Models' ``+ add a model…``, card #TKN7).
+
+    The same three rules the ``defaults`` buttons fill the lists by, so a hand-added row and a
+    filled list agree:
+
+    * **main** — the provider's own default level for this model (``default_effort``: a guest's
+      ``default_effort``, a cloud model's ``infer_effort`` of its tier extra), and ``None`` when
+      the provider states none. Not the top level: Main is the pane's agent, and codex's top level
+      is ``ultra``, a delegation mode rather than a reasoning depth (owner, 2026-09-21: *"it
+      defaulted effort to ultra reasoning"*).
+    * **high** — the model's top level, in the guest's own words where it has them
+      (``_guest_top_level``: ``xhigh`` for codex, the owner's rule for a plan turn).
+    * **flash** / **lite** — the model's lowest level (``_low_level``: Lite is "with no reasoning").
+
+    ``None`` for a tier means the entry carries no level and the model's own default applies.
+    """
+    levels = [level for level in (efforts or []) if isinstance(level, str)]
+    main = default_effort if default_effort in levels else None
+    high = _guest_top_level(guest_id, levels) if guest_id else _top_level(levels)
+    low = levels[0] if levels else None
+    return {"main": main, "high": high, "flash": low, "lite": low}
 
 
 def tier_list_defaults(usable, *, local=(), custom=(), guests=(), listing=None) -> dict:

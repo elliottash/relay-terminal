@@ -1255,6 +1255,20 @@ OpenAI and OpenRouter, `{"low", "medium", "high"}` as themselves on Gemini (whos
 and the label is only ever what the user reads. A guest row has no `effort_labels` and needs none: its
 `efforts` are already its CLI's own words (29.3), and a guest entry's `effort` is stored as written.
 
+**`default_effort` and `tier_effort`: where a model starts** (card #TKN7, 2026-09-21). Every `models`
+row — the built-in catalog, OpenRouter's live rows and a guest's own (29.3) — carries
+`default_effort`, the provider's own default level for that model in the provider's own words
+(codex's `default_reasoning_level`; on a cloud row the `infer_effort` of the model's built-in tier
+extra; `null` where neither states one), and `tier_effort`, `{main, high, flash, lite}`, the level
+that model starts at when the user adds it to that list by hand (Options › Models' `+ add a model…`).
+One rule computes both, `presets.tier_start_efforts`, which is the same rule `tier_list_defaults`
+(13.7) fills the lists by: Main is the provider's own default, High the level a plan turn uses
+(`xhigh`, not `ultra`, on a codex model), Flash and Lite the lowest level. A tier is `null` where the
+model states no level there, and the GUI then stores no level at all — the model's own default
+applies at run time. The GUI takes the worker's answer rather than the top of `efforts` because
+Main's and High's rules are not readable off a row (owner, 2026-09-21: a hand-added gpt-5.6-sol
+"defaulted effort to ultra reasoning").
+
 The event also carries `tier_list_defaults`, the two default fillings of Options › Models' five lists
 (13.7).
 
@@ -5882,7 +5896,7 @@ or a field of its own `turn/start`. `configured`, `model_changed` and `effort_ch
 `guest_effort`. An effort is one short lowercase word, **not** one of Relay's four levels
 (`validate_effort`): Claude Code has five, and codex's catalogue names six and differs by model, so
 Relay's enum must not be mapped onto them. The `guest:` preset rows therefore carry the lists:
-`efforts` for the guest, and `models` as `[{id, label, efforts, default_effort}]` — claude's
+`efforts` for the guest, and `models` as `[{id, label, efforts, default_effort, tier_effort}]` — claude's
 aliases are static, codex's come from `codex debug models`, which runs once per worker process in a
 background thread because `presets` is answered on the protocol thread and may not wait for a
 subprocess; until it lands the row says `models: []` and the GUI offers a text box. When the scan

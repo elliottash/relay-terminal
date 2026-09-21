@@ -161,6 +161,13 @@ Catalog catalogFrom(const QJsonArray &presets) {
             entry.plan = str(preset, "plan").toLower();
             entry.tier = str(row, "tier");
             for (const auto &level : row.value(QStringLiteral("efforts")).toArray()) entry.efforts << level.toString();
+            entry.defaultEffort = str(row, "default_effort");
+            {
+                const QJsonObject tiers = row.value(QStringLiteral("tier_effort")).toObject();
+                for (auto it = tiers.begin(); it != tiers.end(); ++it)
+                    if (it.value().isString() && !it.value().toString().isEmpty())
+                        entry.tierEffort.insert(it.key(), it.value().toString());
+            }
             entry.intelligence = row.value(QStringLiteral("intelligence")).isDouble() ? row.value(QStringLiteral("intelligence")).toInt() : -1;
             entry.openrouter = str(row, "openrouter");
             {
@@ -198,6 +205,21 @@ Catalog catalogFrom(const QJsonArray &presets) {
         catalog.entries << entry;
     }
     return catalog;
+}
+
+// The level a model starts at when it is added to a list by hand (card #TKN7). The worker computes
+// it per row (`tier_effort`, presets.tier_start_efforts) because two of its three rules are not
+// readable off the row: Main is the provider's own default level — codex's `default_reasoning_level`
+// is `low` for gpt-5.6-sol — and a codex model's High is `xhigh`, not its top level, which is
+// `ultra` (a delegation mode, and the owner's report: "it defaulted effort to ultra reasoning").
+QString tierStartEffort(const Entry &entry, const QString &tier) {
+    const QString listed = entry.tierEffort.value(tier);
+    if (!listed.isEmpty()) return listed;
+    if (entry.efforts.isEmpty()) return QString();
+    if (tier == QStringLiteral("main"))                       // the provider's own default
+        return entry.efforts.contains(entry.defaultEffort) ? entry.defaultEffort : QString();
+    if (tier == QStringLiteral("high")) return entry.efforts.last();    // the hardest reasoning
+    return entry.efforts.first();       // flash and lite: the lowest level, "with no reasoning"
 }
 
 // ----- sorts -----------------------------------------------------------------------------------

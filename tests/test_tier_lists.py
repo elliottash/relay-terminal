@@ -552,5 +552,55 @@ class DefaultsTests(unittest.TestCase):
         self.assertIn('"tier_list_defaults": list_defaults', source)
 
 
+# ----- where a hand-added model starts (card #TKN7) ---------------------------------------------
+# Options › Models' `+ add a model…` used to start every new entry at the model's top level, so
+# gpt-5.6-sol went into Main at codex's `ultra` (owner report, 2026-09-21). One rule decides it
+# now, `tier_start_efforts`, and every `models` row carries its answer as `tier_effort`.
+class StartEffortTests(unittest.TestCase):
+    CODEX_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']
+
+    def test_main_is_the_providers_own_default_not_the_top_level(self):
+        self.assertEqual(P.tier_start_efforts(self.CODEX_LEVELS, 'low', 'codex'),
+                         {'main': 'low', 'high': 'xhigh', 'flash': 'low', 'lite': 'low'})
+        self.assertEqual(P.tier_start_efforts(self.CODEX_LEVELS, 'medium', 'codex')['main'], 'medium')
+
+    def test_high_is_the_top_level_and_a_codex_model_takes_xhigh(self):
+        # Claude Code has no `xhigh`: its top level is the High list's answer, as for a cloud model.
+        claude = ['low', 'medium', 'high', 'max']
+        self.assertEqual(P.tier_start_efforts(claude, 'medium', 'claude')['high'], 'max')
+        self.assertEqual(P.tier_start_efforts(['low', 'high', 'max'], 'high')['high'], 'max')
+        # A codex model without `xhigh` (gpt-5.5) still takes its own top level.
+        self.assertEqual(P.tier_start_efforts(['low', 'medium', 'high'], 'medium', 'codex')['high'], 'high')
+
+    def test_flash_and_lite_are_the_lowest_level_and_a_model_with_no_knob_starts_empty(self):
+        self.assertEqual(P.tier_start_efforts(['low', 'high', 'max'], 'high'),
+                         {'main': 'high', 'high': 'max', 'flash': 'low', 'lite': 'low'})
+        self.assertEqual(P.tier_start_efforts([], None),
+                         {'main': None, 'high': None, 'flash': None, 'lite': None})
+
+    def test_a_default_the_model_does_not_offer_is_no_level_at_all(self):
+        # Never a level the model would refuse: the entry then carries none and the model's own
+        # default applies at run time.
+        self.assertIsNone(P.tier_start_efforts(['low', 'high'], 'max')['main'])
+
+    def test_every_cloud_row_carries_both_keys(self):
+        with mock.patch('relay_core.openrouter_catalog.rows', return_value=[]):
+            for preset_id in P.PRESETS:
+                for row in P.catalog_rows(preset_id):
+                    with self.subTest(preset=preset_id, model=row['id']):
+                        self.assertEqual(set(row['tier_effort']), {'main', 'high', 'flash', 'lite'})
+                        self.assertEqual(row['tier_effort'],
+                                         P.tier_start_efforts(row['efforts'], row['default_effort']))
+                        # A level named is a level the model offers; None is None.
+                        for level in row['tier_effort'].values():
+                            self.assertIn(level, [None, *row['efforts']])
+        rows = {r['id']: r for r in P.catalog_rows('openai')}
+        self.assertEqual(rows['gpt-5.6-terra']['default_effort'], 'medium')
+        self.assertEqual(rows['gpt-5.6-terra']['tier_effort']['main'], 'medium')
+        self.assertEqual(rows['gpt-5.6-luna']['default_effort'], 'low')
+        # Anthropic's models carry no levels at all: no default, no tier level.
+        self.assertEqual({r['default_effort'] for r in P.catalog_rows('anthropic')}, {None})
+
+
 if __name__ == '__main__':
     unittest.main()

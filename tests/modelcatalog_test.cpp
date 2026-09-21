@@ -488,6 +488,70 @@ private Q_SLOTS:
         QCOMPARE(entry->effortLabel(QStringLiteral("low")), QStringLiteral("low"));   // no label: the level itself
     }
 
+    // Where a hand-added row starts (card #TKN7). The worker computes it per model (`tier_effort`),
+    // because two of its three rules are not readable off a row: Main is the provider's own default,
+    // and a codex model's High is `xhigh`, not its top level — `ultra`.
+    void aHandAddedModelStartsAtTheLevelTheWorkerNamed() {
+        QJsonArray models;
+        models << QJsonObject{{QStringLiteral("id"), QStringLiteral("gpt-5.6-sol")},
+                              {QStringLiteral("label"), QStringLiteral("GPT-5.6-Sol")},
+                              {QStringLiteral("efforts"), QJsonArray::fromStringList(
+                                   QStringList{QStringLiteral("low"), QStringLiteral("medium"), QStringLiteral("high"),
+                                               QStringLiteral("xhigh"), QStringLiteral("max"), QStringLiteral("ultra")})},
+                              {QStringLiteral("default_effort"), QStringLiteral("low")},
+                              {QStringLiteral("tier_effort"),
+                               QJsonObject{{QStringLiteral("main"), QStringLiteral("low")},
+                                           {QStringLiteral("high"), QStringLiteral("xhigh")},
+                                           {QStringLiteral("flash"), QStringLiteral("low")},
+                                           {QStringLiteral("lite"), QStringLiteral("low")}}}};
+        QJsonArray rows;
+        rows << preset(QStringLiteral("guest:codex"), QStringLiteral("Codex"), QStringLiteral("Codex"),
+                       QString(), models, false);
+        const Catalog catalog = catalogFrom(rows);
+        const Entry *sol = catalog.find(QStringLiteral("guest:codex|gpt-5.6-sol"));
+        QVERIFY(sol);
+        QCOMPARE(sol->defaultEffort, QStringLiteral("low"));
+        QCOMPARE(sol->tierEffort.value(QStringLiteral("high")), QStringLiteral("xhigh"));
+        // The report: the button used to take the top of `efforts`, which here is `ultra`.
+        QCOMPARE(tierStartEffort(*sol, QStringLiteral("main")), QStringLiteral("low"));
+        QCOMPARE(tierStartEffort(*sol, QStringLiteral("high")), QStringLiteral("xhigh"));
+        QCOMPARE(tierStartEffort(*sol, QStringLiteral("flash")), QStringLiteral("low"));
+        QCOMPARE(tierStartEffort(*sol, QStringLiteral("lite")), QStringLiteral("low"));
+    }
+
+    void withoutTheWorkersAnswerTheRowItselfDecides() {
+        QJsonArray models;
+        models << QJsonObject{{QStringLiteral("id"), QStringLiteral("sol")},
+                              {QStringLiteral("efforts"), QJsonArray::fromStringList(
+                                   QStringList{QStringLiteral("low"), QStringLiteral("medium"), QStringLiteral("high"), QStringLiteral("max")})},
+                              {QStringLiteral("default_effort"), QStringLiteral("medium")}};
+        models << QJsonObject{{QStringLiteral("id"), QStringLiteral("no-knob")}, {QStringLiteral("efforts"), QJsonArray()}};
+        models << QJsonObject{{QStringLiteral("id"), QStringLiteral("odd-default")},
+                              {QStringLiteral("efforts"), QJsonArray::fromStringList(QStringList{QStringLiteral("low"), QStringLiteral("high")})},
+                              {QStringLiteral("default_effort"), QStringLiteral("max")}};
+        QJsonArray rows;
+        rows << preset(QStringLiteral("openai"), QStringLiteral("openai"), QStringLiteral("openai"),
+                       QStringLiteral("sol"), models, true);
+        const Catalog catalog = catalogFrom(rows);
+        const Entry *sol = catalog.find(QStringLiteral("openai|sol"));
+        QVERIFY(sol);
+        QVERIFY(sol->tierEffort.isEmpty());            // an older worker sends none
+        QCOMPARE(tierStartEffort(*sol, QStringLiteral("main")), QStringLiteral("medium"));
+        QCOMPARE(tierStartEffort(*sol, QStringLiteral("high")), QStringLiteral("max"));
+        QCOMPARE(tierStartEffort(*sol, QStringLiteral("flash")), QStringLiteral("low"));
+        QCOMPARE(tierStartEffort(*sol, QStringLiteral("lite")), QStringLiteral("low"));
+        // A model with no levels has no level to start at, on any list.
+        const Entry *plain = catalog.find(QStringLiteral("openai|no-knob"));
+        QVERIFY(plain && plain->efforts.isEmpty());
+        // A default the model does not offer is not a level to store: the entry carries none and the
+        // model's own default applies at run time.
+        const Entry *odd = catalog.find(QStringLiteral("openai|odd-default"));
+        QVERIFY(odd);
+        for (const QString &tier : {QStringLiteral("main"), QStringLiteral("high"), QStringLiteral("flash"), QStringLiteral("lite")})
+            QVERIFY(tierStartEffort(*plain, tier).isEmpty());
+        QVERIFY(tierStartEffort(*odd, QStringLiteral("main")).isEmpty());
+    }
+
     void anOpenEndedProvidersLongTailIsHiddenUntilChecked() {
         QJsonArray rows = presets();
         QJsonObject big = rows.at(0).toObject();   // glm-coding, given ten models

@@ -281,7 +281,8 @@ class TierTableTests(unittest.TestCase):
 class ModelCatalogTests(unittest.TestCase):
     """One list of models per provider row (owner, 2026-09-20): MODEL_CATALOG and catalog_rows()."""
 
-    ROW_KEYS = {"id", "label", "tier", "efforts", "effort_labels", "intelligence", "openrouter"}
+    ROW_KEYS = {"id", "label", "tier", "efforts", "effort_labels", "intelligence", "openrouter",
+                "default_effort", "tier_effort"}
 
     def setUp(self):
         # The `openrouter` row also carries OpenRouter's live listing when this machine has fetched

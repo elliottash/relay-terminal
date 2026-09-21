@@ -880,6 +880,15 @@ class CatalogueTests(unittest.TestCase):
                          ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"])
         self.assertEqual(rows["guest:codex"]["efforts"],
                          ["low", "medium", "high", "xhigh", "max", "ultra"])
+        # Where each model starts when it is added to a list by hand (card #TKN7): codex's own
+        # default for Main — `low` for gpt-5.6-sol, never its top level `ultra` — and `xhigh` for
+        # High, the owner's rule for a plan turn.
+        self.assertEqual({m["id"]: m["tier_effort"] for m in rows["guest:codex"]["models"]},
+                         {"gpt-6-astra": {"main": "medium", "high": "xhigh", "flash": "low", "lite": "low"},
+                          "gpt-5.6-sol": {"main": "low", "high": "xhigh", "flash": "low", "lite": "low"},
+                          "gpt-5.6-terra": {"main": "medium", "high": "xhigh", "flash": "low", "lite": "low"},
+                          "gpt-5.6-luna": {"main": "medium", "high": "xhigh", "flash": "low", "lite": "low"}})
+        self.assertEqual(rows["guest:codex"]["models"][1]["default_effort"], "low")
         ghp.reset_catalog()
         ghp._detected = None
         with self._installed(binary=""), mock.patch.object(

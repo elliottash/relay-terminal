@@ -33,6 +33,7 @@ import time
 import uuid
 
 from . import guest, logs, questions as questions_mod, tool_labels
+from .presets import tier_start_efforts
 from .guest_harness import (HARNESS_GUESTS, HarnessError, HarnessNotAvailable, HarnessEvent,
                             limit_windows,
                             TOOL_NAMES, chunk_tool_output, map_tool_name, validate_effort,
@@ -428,22 +429,35 @@ def reset_catalog() -> None:
 
 
 def guest_models(guest_id: str) -> list[dict]:
-    """What this guest can be set to, for the row's `models` — `[]` when it cannot be said here."""
+    """What this guest can be set to, for the row's `models` — `[]` when it cannot be said here.
+
+    Every row also carries `tier_effort` — ``{main, high, flash, lite}: the level this model starts
+    at when the user adds it to that list by hand`` (Options › Models' `+ add a model…`). One rule
+    computes it, `presets.tier_start_efforts`, which is the same one the `defaults` buttons fill the
+    lists by, so a hand-added row and a filled list agree; a guest's Main is its own
+    `default_effort` (codex's `default_reasoning_level`), never its top level — codex's is `ultra`,
+    a delegation mode (card #TKN7).
+    """
     if guest_id == "claude":
         global _CLAUDE_MODELS
         if _CLAUDE_MODELS is None:
             adapter = _load_adapter("claude")
             _CLAUDE_MODELS = adapter().models() if adapter is not None else []
-        return [dict(row) for row in _CLAUDE_MODELS]
-    start_catalog_scan(guest_id)
-    with _catalog_lock:
-        rows = [dict(row) for row in _catalog.get(guest_id) or ()]
-    # Codex only, and only once the scan has completed empty (owner, 2026-09-19: "add model
-    # selection in codex options"): before that the first `presets` answer must not wait, and
-    # after it an empty scan is a codex that could not be asked — the fallback's four models
-    # stand in until one can. A scan that found rows always wins.
-    if guest_id == "codex" and not rows and catalog_ready.is_set():
-        return [dict(row) for row in _CODEX_FALLBACK_MODELS]
+        rows = [dict(row) for row in _CLAUDE_MODELS]
+    else:
+        start_catalog_scan(guest_id)
+        with _catalog_lock:
+            rows = [dict(row) for row in _catalog.get(guest_id) or ()]
+        # Codex only, and only once the scan has completed empty (owner, 2026-09-19: "add model
+        # selection in codex options"): before that the first `presets` answer must not wait, and
+        # after it an empty scan is a codex that could not be asked — the fallback's four models
+        # stand in until one can. A scan that found rows always wins.
+        if guest_id == "codex" and not rows and catalog_ready.is_set():
+            rows = [dict(row) for row in _CODEX_FALLBACK_MODELS]
+    for row in rows:
+        efforts = row.get("efforts") if isinstance(row.get("efforts"), list) else []
+        default = row.get("default_effort") if isinstance(row.get("default_effort"), str) else None
+        row["tier_effort"] = tier_start_efforts(efforts, default, guest_id)
     return rows
 
 

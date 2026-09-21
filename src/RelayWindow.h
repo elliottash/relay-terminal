@@ -2896,7 +2896,13 @@ private:
                         {QStringLiteral("model"), QStringLiteral("provider")}, rows, {{QStringLiteral("add"), QStringLiteral("add"), true}});
                     if (result.row < 0) return;
                     const relay::models::Entry &entry = offered.at(result.row);
-                    relay::models::curation::addToTier(tier, entry.key, entry.efforts.isEmpty() ? QString() : entry.efforts.last());
+                    // Where the new row starts: the level this model starts at *in this list*, which
+                    // the worker computes (tierStartEffort). Not the model's top level, which is what
+                    // this button used to take — Main is the provider's own default (codex's
+                    // gpt-5.6-sol starts at `low`, not the `ultra` that gave, owner report
+                    // 2026-09-21), High the level a plan turn uses, Flash and Lite the lowest
+                    // (card #TKN7).
+                    relay::models::curation::addToTier(tier, entry.key, relay::models::tierStartEffort(entry, tier));
                     applyMainDefault(catalog);
                     curated();
                 };
