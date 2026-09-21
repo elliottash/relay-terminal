@@ -1,4 +1,4 @@
-configured: workspace=/tmp/ctrn-jacvtgb6/proj tab=tab-smoke model=stub-model
+configured: workspace=/tmp/ctrn-79ew58xq/proj tab=tab-smoke model=stub-model
 queued on #CRD1: {"surface": "card:CRD1", "items": [{"mode": "discuss", "card_id": "CRD1", "surface": "card:CRD1", "preview": "and what about the queue? #CRD1"}]}
 board_busy events: 0 (it queued instead)
 running at once: CRD1, CRD2
@@ -6,8 +6,8 @@ write_file on a Plan turn: write_file is not available in a Plan turn on #CRD2: 
 cancel surface=card:CRD3 -> #CRD3 cancelled
 #CRD4 was untouched and ended done
 #CRD3 wrote to its thread: False
-conversation for #CRD1: helper-sessions/.../22ecbd7355b13474a63ebc25799db5a9.json (8570 bytes)
+conversation for #CRD1: helper-sessions/.../22ecbd7355b13474a63ebc25799db5a9.json (8572 bytes)
 conversation for #CRD2: helper-sessions/.../3728d6ed68321b84c5036602631c9536.json (8852 bytes)
 conversation for #CRD3: helper-sessions/.../3fcb7aaa2ecfea452154176ca55218ae.json (8133 bytes)
-conversation for #CRD4: helper-sessions/.../3979036226e81a6e6c73af3658088594.json (7929 bytes)
+conversation for #CRD4: helper-sessions/.../3979036226e81a6e6c73af3658088594.json (7931 bytes)
 thread written: run-thread-CRD1.md (810 bytes)
