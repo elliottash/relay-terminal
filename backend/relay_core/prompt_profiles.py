@@ -40,6 +40,16 @@ reasoning as decision 2, which moved them out of `SYSTEM` itself.
 from __future__ import annotations
 
 import copy
+import os
+
+
+def platform_prompt(text: str) -> str:
+    if os.name == "nt":
+        return (text.replace("inside a Linux terminal", "in a native Windows coding workspace")
+                .replace("Bash", "PowerShell 7").replace("fenced bash block", "fenced powershell block")
+                + "\nThis is native Windows: use PowerShell syntax and Windows paths, not Bash or WSL. "
+                  "run_command uses PowerShell 7; use $env:NAME for environment variables.")
+    return text
 
 #: The setting: `auto` picks per model, the other two pin it.
 PROFILES = ("auto", "full", "short")
@@ -77,6 +87,8 @@ When the request is done, stop calling tools and reply.
 Reply in short Markdown: `inline code` for commands and paths, fenced code blocks for code, no HTML.
 When you name a folder, write it with a trailing `/` (`tests/`, not `tests`): a folder word in your reply links only when it carries a slash.
 Start the final reply with **Done:**, **Problem:** or **Need:** and say what you actually verified."""
+
+SYSTEM_SHORT = platform_prompt(SYSTEM_SHORT)
 
 #: The five Switchboard tools a card round trip needs — file one, find it again, claim it, say what
 #: happened — and nothing that rewrites, moves or imports a card (owner, 2026-09-20, answering the

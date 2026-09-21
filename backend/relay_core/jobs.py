@@ -20,6 +20,7 @@ later turn could name them. Each job is its own process group, so stopping one t
 from __future__ import annotations
 
 import atexit
+import base64
 import os
 import selectors
 import signal
@@ -67,6 +68,9 @@ class Job:
 
 
 def _kill_group(process: subprocess.Popen) -> None:
+    if os.name == "nt":
+        process._relay_tree.stop()
+        return
     for sig in (signal.SIGTERM, signal.SIGKILL):
         try:
             os.killpg(process.pid, sig)
@@ -77,6 +81,19 @@ def _kill_group(process: subprocess.Popen) -> None:
                 process.wait(timeout=TERM_GRACE)
             except subprocess.TimeoutExpired:
                 pass
+
+
+def shell_argv(command: str, env: dict) -> list[str]:
+    if os.name != "nt":
+        return ["/bin/bash", "--noprofile", "--norc", "-c", command]
+    # EncodedCommand avoids Windows argv quoting corrupting quotes/newlines. Preserve native
+    # exit codes; a failed cmdlet must also produce a nonzero result. Explicit exit still wins.
+    script = ("[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); "
+              "$global:LASTEXITCODE = 0; & {\n" + command +
+              "\n}; if (!$?) { if ($LASTEXITCODE) { exit $LASTEXITCODE }; exit 1 }; exit 0")
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    return [env.get("RELAY_POWERSHELL") or "pwsh.exe", "-NoLogo", "-NoProfile",
+            "-NonInteractive", "-EncodedCommand", encoded]
 
 
 class JobTable:
@@ -105,10 +122,14 @@ class JobTable:
             finished = [job for job in self._jobs.values() if not job.running]
             for old in finished[:max(0, len(finished) - KEEP_FINISHED + 1)]:
                 del self._jobs[old.id]
-        process = subprocess.Popen(argv or ["/bin/bash", "--noprofile", "--norc", "-c", command],
+        process = subprocess.Popen(argv or shell_argv(command, env),
                                    cwd=cwd, env=env, stdin=subprocess.DEVNULL,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                   start_new_session=True, bufsize=0)
+                                   start_new_session=os.name != "nt", bufsize=0,
+                                   creationflags=0x08000004 if os.name == "nt" else 0)
+        if os.name == "nt":
+            from .windows_jobs import attach
+            attach(process)
         job = Job(job_id, command, process, time.monotonic(), host=host)
         with self._lock:
             self._jobs[job_id] = job
@@ -128,6 +149,9 @@ class JobTable:
     # then, so a stray `server &` inside a command does not outlive it. (A server the model wants
     # kept is a job of its own, started with background: true.)
     def _pump(self, job: Job) -> None:
+        if os.name == "nt":
+            self._pump_windows(job)
+            return
         stream = job.process.stdout
         selector = selectors.DefaultSelector()
         selector.register(stream, selectors.EVENT_READ)
@@ -155,6 +179,30 @@ class JobTable:
         finally:
             selector.close()
             stream.close()
+            with self._lock:
+                job.exit_code = job.process.returncode
+                job.finished = time.monotonic()
+                job.live = None
+            job.done.set()
+            if job.handed_back:
+                self._changed()
+
+    def _pump_windows(self, job: Job) -> None:
+        # Windows selectors cannot read anonymous pipes. A reader drains concurrently with
+        # the waiter, which closes the job tree when its root exits, also releasing pipe EOF.
+        def read():
+            try:
+                while chunk := job.process.stdout.read(65536):
+                    self._append(job, chunk)
+            finally:
+                job.process.stdout.close()
+        reader = threading.Thread(target=read, name=f"relay-read-{job.id}", daemon=True)
+        reader.start()
+        try:
+            job.process.wait()
+        finally:
+            _kill_group(job.process)
+            reader.join()
             with self._lock:
                 job.exit_code = job.process.returncode
                 job.finished = time.monotonic()

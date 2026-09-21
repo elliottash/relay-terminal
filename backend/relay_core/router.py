@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import json
+import base64
 import re
 import shlex
 import shutil
@@ -85,6 +87,55 @@ def bash_syntax(text: str) -> tuple[bool, str]:
     except (OSError, subprocess.TimeoutExpired) as exc:
         return False, f"Bash syntax check unavailable: {exc}"
     return proc.returncode == 0, proc.stderr.strip()[:1000]
+
+
+_POWERSHELL_PARSE = r"""
+[Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Management/Microsoft.PowerShell.Management.psd1"
+Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1"
+$source = [Console]::In.ReadToEnd()
+$tokens = $null; $parseErrors = $null
+$tree = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+$commands = @($tree.FindAll({param($node) $node -is [System.Management.Automation.Language.CommandAst]}, $true) |
+    ForEach-Object { $_.GetCommandName() } | Where-Object { $_ })
+# ListImported avoids importing modules (and executing their initialization) during routing.
+$known = @(Get-Command -ListImported -CommandType Alias,Function,Cmdlet | Select-Object -ExpandProperty Name)
+@{errors = @($parseErrors | ForEach-Object { $_.Message }); commands = $commands; known = $known} |
+    ConvertTo-Json -Compress -Depth 3
+"""
+
+
+def powershell_runnable(text: str, known_commands: Iterable[str], path, cwd) -> tuple[bool, str, bool, str]:
+    """Parse with PowerShell's AST, never invoke the submitted text (including substitutions)."""
+    encoded = base64.b64encode(_POWERSHELL_PARSE.encode("utf-16-le")).decode("ascii")
+    try:
+        proc = subprocess.run([os.environ.get("RELAY_POWERSHELL") or "pwsh.exe", "-NoLogo",
+                               "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+                              input=text, text=True, encoding="utf-8", capture_output=True,
+                              timeout=5, cwd=cwd)
+        if proc.returncode:
+            raise ValueError(proc.stderr.strip()[:1000])
+        result = json.loads(proc.stdout)
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        error = f"PowerShell syntax check unavailable: {exc}"
+        return False, error, False, error
+    if result["errors"]:
+        error = "; ".join(result["errors"])[:1000]
+        return False, "syntax error: " + error, False, error
+    known = {name.casefold() for name in (*known_commands, *result["known"])}
+    commands = as_commands(path)
+    for word in result["commands"]:
+        if word.casefold() in known or commands.has(word):
+            continue
+        if "/" in word or "\\" in word:
+            target = os.path.expanduser(word)
+            if not os.path.isabs(target):
+                target = os.path.join(cwd or os.getcwd(), target)
+            if os.path.isfile(target):
+                continue
+        return False, f"command not found: {word}", True, ""
+    return True, "", True, ""
 
 
 class _TooComplex(Exception):
@@ -886,6 +937,8 @@ def check_runnable(text: str, known_commands: Iterable[str] = (), path: str | Co
 
     Returns (valid, invalid_reason, syntax_ok, syntax_error).
     """
+    if os.name == "nt":
+        return powershell_runnable(text, known_commands, path, cwd)
     ok, error = bash_syntax(text)
     if not ok:
         first = error.splitlines()[0] if error else "invalid Bash syntax"

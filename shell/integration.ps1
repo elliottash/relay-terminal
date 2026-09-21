@@ -1,0 +1,87 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# PowerShell 7: -NoLogo -NoProfile -NoExit -ExecutionPolicy Bypass -File integration.ps1
+# Profiles are loaded here so clean-shell recovery does not change the user's files.
+if ($env:RELAY_CLEAN_SHELL -ne '1') {
+    foreach ($profilePath in @($PROFILE.AllUsersAllHosts, $PROFILE.AllUsersCurrentHost,
+                               $PROFILE.CurrentUserAllHosts, $PROFILE.CurrentUserCurrentHost)) {
+        if (Test-Path -LiteralPath $profilePath) { . $profilePath }
+    }
+}
+if (!$env:RELAY_RUNTIME_DIR -or !$env:RELAY_SESSION_TOKEN) { return }
+if ($env:RELAY_START_DIR -and (Test-Path -LiteralPath $env:RELAY_START_DIR -PathType Container)) {
+    Set-Location -LiteralPath $env:RELAY_START_DIR
+}
+Remove-Item Env:RELAY_START_DIR -ErrorAction SilentlyContinue
+Import-Module PSReadLine -ErrorAction Stop
+
+function global:__relay_event([string] $Stage, [int] $Status = 0, [byte[]] $InputBytes) {
+    # Do not start Python for prompt notifications or change LASTEXITCODE.
+    $temporary = Join-Path $env:RELAY_RUNTIME_DIR ('state-' + [guid]::NewGuid().ToString('N'))
+    try {
+        $eventData = @{
+            token = $env:RELAY_SESSION_TOKEN
+            sequence = [DateTime]::UtcNow.Ticks.ToString()
+            event = $Stage; status = $Status; cwd = $PWD.Path; shell_pid = $PID
+        }
+        if ($Stage -eq 'ready') {
+            $eventData.known_commands = @(Get-Command -CommandType Alias,Function,Cmdlet |
+                Where-Object Name -NotLike '__relay_*' | Select-Object -ExpandProperty Name -Unique -First 20000)
+            $eventData.path = $env:PATH
+        } elseif ($Stage -eq 'loaded') {
+            $eventData.input_sha256 = [Convert]::ToHexString(
+                [System.Security.Cryptography.SHA256]::HashData($InputBytes)).ToLowerInvariant()
+        }
+        [IO.File]::WriteAllText($temporary, ($eventData | ConvertTo-Json -Compress -Depth 3),
+                               [Text.UTF8Encoding]::new($false))
+        [IO.File]::Move($temporary, (Join-Path $env:RELAY_RUNTIME_DIR 'state.json'), $true)
+    } catch [IO.IOException] {
+        # Closing a pane removes its private runtime directory.
+    } catch [UnauthorizedAccessException] {
+    } finally {
+        if ([IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
+    }
+}
+
+function global:__relay_load {
+    $inputPath = Join-Path $env:RELAY_RUNTIME_DIR 'input.txt'
+    if (![IO.File]::Exists($inputPath)) { return }
+    # Hash the exact bytes loaded, not a second read that could acknowledge newer input.
+    $bytes = [IO.File]::ReadAllBytes($inputPath)
+    $text = [Text.UTF8Encoding]::new($false, $true).GetString($bytes)
+    $line = ''; $cursor = 0
+    [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
+    [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, $text)
+    __relay_event 'loaded' 0 $bytes
+}
+Set-PSReadLineKeyHandler -Chord 'Ctrl+x,Ctrl+r' -ScriptBlock { __relay_load }
+Set-PSReadLineKeyHandler -Chord 'Ctrl+x,Ctrl+p' -ScriptBlock {
+    [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
+}
+
+# Wrap the host's reader, not just Enter: every accepted line (including multiline input
+# and other accept-line bindings) emits running, while cancelled/incomplete edits do not.
+$global:__relay_readline = (Get-Command PSConsoleHostReadLine).ScriptBlock
+function global:PSConsoleHostReadLine {
+    $line = & $global:__relay_readline
+    if (![string]::IsNullOrWhiteSpace($line)) { __relay_event 'running' }
+    return $line
+}
+$global:__relay_prompt = (Get-Command prompt).ScriptBlock
+function global:prompt {
+    $succeeded = $?
+    $nativeStatus = $global:LASTEXITCODE
+    $status = if ($succeeded) { 0 } elseif ($nativeStatus) { $nativeStatus } else { 1 }
+    $rendered = & $global:__relay_prompt
+    __relay_event 'ready' $status
+    return $rendered
+}
+function global:relay {
+    if ($args.Count -ge 1 -and $args[0] -eq 'open') {
+        $target = if ($args.Count -gt 1) { $args[1] } else { '.' }
+        $previous = $env:RELAY_OPEN_FROM_SHELL
+        try {
+            $env:RELAY_OPEN_FROM_SHELL = '1'
+            & $env:RELAY_PYTHON $env:RELAY_OPEN_HELPER $target
+        } finally { $env:RELAY_OPEN_FROM_SHELL = $previous }
+    } else { Write-Error 'usage: relay open [PATH]' }
+}
