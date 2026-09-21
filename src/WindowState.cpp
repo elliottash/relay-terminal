@@ -177,6 +177,12 @@ bool isUsableNode(const QJsonObject &node, int depth) {
     // The Test suites pane (card #7BM4) restores empty and asks its tab's board worker for the
     // inventory again, so the object may hold nothing but the project it was opened on.
     if (node.contains(QStringLiteral("testsuites"))) return node.value(QStringLiteral("testsuites")).isObject();
+    // The models pane (card #MDL1 t:a11): the object holds the directory and the tab it was left
+    // on, and it comes back serving the first terminal pane of its tab, so there is nothing in it
+    // that can go stale. A node listed here is not merely *restorable* — a node this function does
+    // not know makes its whole **split** unusable, and with it the tab: a driven quit-and-reopen
+    // came back with no models pane *and no terminal*, because the pair was one split.
+    if (node.contains(QStringLiteral("models"))) return node.value(QStringLiteral("models")).isObject();
     // A subagent pane (card #WD83) comes back with its tabs' text; one with no tabs is not saved.
     if (node.contains(QStringLiteral("subagents"))) {
         const QJsonObject subagents = node.value(QStringLiteral("subagents")).toObject();

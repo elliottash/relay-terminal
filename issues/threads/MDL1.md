@@ -730,3 +730,35 @@ t:a11 is the last of the eleven tasks and it is ticked, but the card's `status` 
 `executing`: two other sessions are live on this card (t:a8's model box and t:a9's ranking file),
 so whether #MDL1 as a whole is ready for verification is not mine to say.
 
+<!-- relay:entry 20260921T230500Z-h3 author=claude-fable kind=evidence -->
+### Claude Fable · 2026-09-21 23:05
+**The quit-and-reopen round trip, driven — and the two faults it found.** `drive.sh` in
+`docs/qa_evidence/2026-09-21-models-pane/` has a **run 2** now: the models pane is left on the
+**available** tab, Relay is asked to quit with SIGTERM (which writes the layout), and it is started
+again **with no arguments at all**, because `--workspace` is what suppresses "reopen where I left
+off". `check-layout.py` makes the three assertions the shots cannot — one models node in the saved
+file, carrying the tab it was left on, beside a terminal pane — and `k-before-quit.png`,
+`l-after-restart.png` and `m-restored-row-switches-the-pane.png` are the before, the after and the
+proof that the restored pane is serving the terminal beside it (Enter on `claude-haiku-4.5` moves
+*that pane's* chip off `glm-5.3`).
+
+It did not work the first time, and the failure was worse than a missing pane: **the whole tab was
+dropped**. `relay::windowstate::isUsableNode` is the gate every saved node passes and it did not
+know `"models"`; an unknown node makes its whole *split* unusable, so the terminal went with it and
+Relay opened a bare window in the launch directory. One line in `src/WindowState.cpp`, and
+`tests/windowstate_test.cpp` asserts the node and the split that holds it. The second fault: a
+**restored pane had no "fill from defaults" buttons**, because the picker makes them in its
+constructor and a restored pane is pointed at a terminal whose worker has not answered `presets`
+yet — `ModelsPane::setTarget` treats gaining or losing that action as a re-target now
+(`gainingFillFromDefaultsBringsItsButtons`).
+
+**Also from the shots:** on the providers tab the **providers group opened folded**, so a first-run
+window showed the blurb, the profiles and the defaults and not the one thing step 1 is about. The
+fold lives under `options/collapsed/heading:providers` and defaults to folded once any provider is
+set up — right for the Options page, wrong for a tab whose whole subject is providers. In the pane
+the group is drawn open and has no fold control (`modelsSection(inModelsPane)`); Options is
+unchanged. `a-first-run.png` is re-shot.
+
+`ctest -R "modelspane|modelpicker|modelcatalog|modelrows|settings|filterpopup|panestate|windowstate"`
+is 11/11, with `modelspane` at 16 cases.
+

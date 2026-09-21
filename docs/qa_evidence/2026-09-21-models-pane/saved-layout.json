@@ -1,0 +1,53 @@
+{
+    "saved": 1790030009,
+    "version": 1,
+    "windows": [
+        {
+            "current": 0,
+            "geometry": [
+                0,
+                0,
+                1600,
+                900
+            ],
+            "screen": "screen",
+            "tabs": [
+                {
+                    "node": {
+                        "children": [
+                            {
+                                "pane": {
+                                    "agent_mode": "build",
+                                    "agent_role": "main",
+                                    "cwd": "/tmp/claude-1000/mp/project",
+                                    "effort": "high",
+                                    "input_mode": "auto",
+                                    "model": "glm-5.3",
+                                    "preset": "glm-coding",
+                                    "scrollback": "5dede110-3da4-4e28-9cff-4bbfe6007695",
+                                    "session_id": "34572d4d951743eaafa574646ba1575f",
+                                    "workspace": "/tmp/claude-1000/mp/project"
+                                }
+                            },
+                            {
+                                "models": {
+                                    "cwd": "/tmp/claude-1000/mp/project",
+                                    "tab": "available"
+                                }
+                            }
+                        ],
+                        "sizes": [
+                            529,
+                            1058
+                        ],
+                        "split": "h"
+                    },
+                    "tab_id": "t21b2dc0d45ac"
+                }
+            ],
+            "titles": [
+                "project (2)  \u00b7  cpu 00% \u00b7 mem 00%"
+            ]
+        }
+    ]
+}

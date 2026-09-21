@@ -1,0 +1,37 @@
+[hints]
+count\pane.focus.mouse=1
+last\pane.focus.mouse=1790029987
+last_any=1790029987
+
+[instructions]
+files=/tmp/claude-1000/mp/.config/relay/relay.md
+onboarded=true
+
+[isolation]
+enabled=false
+
+[models]
+fallbacks=glm-coding|glm-5.3
+provider_order=kimi-code, glm-coding, openrouter, guest:claude, guest:codex
+tier\flash=guest:claude|sonnet|low
+tier\high=guest:claude|fable|high, glm-coding|glm-5.3|max
+tier\lite=relay-free|relay-lite|low
+tier\local=@Invalid()
+tier\main=guest:claude|opus|high, glm-coding|glm-5.3|high
+
+[provider]
+base=https://api.z.ai/api/coding/paas/v4
+extra="{\"reasoning_effort\":\"high\",\"thinking\":{\"type\":\"enabled\"}}"
+model=glm-5.3
+preset=glm-coding
+
+[security]
+approvals_ask=@Invalid()
+approvals_chosen=true
+
+[suggestions]
+next_command=false
+next_prompt=false
+
+[url_handler]
+announced=true

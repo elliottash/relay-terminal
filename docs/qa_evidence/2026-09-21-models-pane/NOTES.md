@@ -24,10 +24,17 @@ condition the window reads.
 | `i2-row-opens-priorities-on-main.png` | That row pressed: the models pane goes to **priorities on main** — not to the mode the pane is in, because a page is in no mode. |
 | `i1-provider-models-link.png` | Back in Options, "available models" typed: the per-provider **models… (N of M available)** links, one under each provider. |
 | `j-link-lands-on-available.png` | One pressed: the models pane's **available** tab, filtered to that provider (`kimi`), which is how step 2 is reached from step 1. |
+| `k-before-quit.png` | **Run 2 begins.** Options closed, the models pane left on **available**, and Relay asked to quit with SIGTERM — which is what writes the layout. |
+| `l-after-restart.png` | Relay started again **with no arguments at all** (`--workspace` is what suppresses "reopen where I left off", so run 1 has it and run 2 must not): the tab is back with its terminal — scrollback and all — *and* the models pane, on the same **available** tab, `for: project` in its header, the served pane's `glm-5.3` bold and marked `· current`, and "fill from defaults" present. |
+| `m0-restored-row-highlighted.png`, `m-restored-row-switches-the-pane.png` | `claude-haiku-4.5` used in the restored pane: the **terminal** pane's chip goes from `glm-5.3` to `claude-haiku-4.5`. Nothing in the layout says which pane it serves, so this is the proof that `linkRestoredModelsPane` found it. |
+
+`saved-layout.json` is the file Relay wrote at quit and `saved-layout-check.txt` is
+`check-layout.py` run over it — the three assertions the shots cannot make: exactly **one** models
+node, carrying `tab: available`, and **beside a terminal pane**.
 
 ## What the runs changed in the code
 
-Three faults this evidence found, each fixed before the shots above were taken:
+Seven faults this evidence found, each fixed before the shots above were taken:
 
 1. **Ctrl+Tab did nothing.** The first run pressed it three times to walk the three tabs and stayed
    on the same one: Ctrl+Tab is the window's **Next tab** (Keymap `tab.next`) and never reaches a
@@ -40,15 +47,32 @@ Three faults this evidence found, each fixed before the shots above were taken:
    `intelligence` and `tok/s` columns — what the sort menu sorts by, not what is read while
    picking, and both are in every cell's tooltip. `e-available.png` is the run after.
 
-A fourth was caught by the first-run shot rather than by a key: the pane was built before its
+4. **A quit and reopen came back with no models pane — and no terminal either.** `isUsableNode`
+   (`src/WindowState.cpp`) is the gate every saved node passes, and it did not know `"models"`. An
+   unknown node makes its whole **split** unusable and the tab is dropped with it, so the pair this
+   card is about vanished and Relay opened a bare window in the launch directory instead. One line
+   added, and `tests/windowstate_test.cpp` now asserts the node and the split that holds it.
+5. **A restored pane had no "fill from defaults" buttons.** They are made in the picker's
+   constructor from `Context::fillFromDefaults`, and a pane restored with a layout is pointed at a
+   terminal whose worker has not answered `presets` yet, so the action was absent then and a later
+   re-read does not rebuild the widget. `ModelsPane::setTarget` now treats gaining or losing that
+   action as a re-target.
+
+A sixth was caught by the first-run shot rather than by a key: the pane was built before its
 worker had answered `presets`, so it had **no catalog at all** and `rebuild()` redrew the rows from
 the one it was built with. `ModelPicker::setCatalog` is what a re-read calls now, and
 `RelayWindow::refreshModelsPane` is wired to `SettingsWatch`, which both a `presets` answer and a
 key added on the providers tab already fire.
 
+…and a seventh came out of `a-first-run.png`: on the providers tab the **providers group was
+folded**, so a first-run window showed the blurb, the profiles and the defaults and not the one
+thing step 1 is about. The fold is remembered under `options/collapsed/heading:providers` and
+defaults to folded once any provider is set up — sensible on the Options page, wrong on a tab whose
+whole subject is providers. In the pane the group is drawn open and has no fold control at all
+(`modelsSection(inModelsPane)`); Options is unchanged.
+
 ## Not covered here
 
-The **restored** models pane (`{"models": {"cwd", "tab"}}` in a saved layout) is exercised by the
-first-run path — that layout node is built by `WindowManager::newWindowAt` and read by the same
-`buildNode` branch a saved one takes — but not by a quit-and-reopen round trip, which needs a
-second Relay start against the same profile.
+Two Relay windows at once, and a models pane in a tab that is *not* the first — `usableWindows`
+keeps every window and `linkRestoredModelsPane` walks the page it landed in, so neither is
+suspected, but neither is driven.

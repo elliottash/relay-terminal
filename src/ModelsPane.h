@@ -135,6 +135,11 @@ private:
     // whatever the person last looked at, so available → priorities does not throw the tab away.
     QString m_classTab = QStringLiteral("main");
     QString m_pendingFilter;
+    // Whether the picker on screen was built with a "fill from defaults" action. The two buttons
+    // are made in its constructor, so a target that gains the action — a restored pane, whose
+    // worker had not answered `presets` when it was first pointed at a pane — needs a rebuild and
+    // not a re-read (card #MDL1 t:a11).
+    bool m_pickerHasFill = false;
 };
 
 }  // namespace relay

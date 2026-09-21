@@ -1,0 +1,4 @@
+models nodes in the saved layout: 1
+  node:    {"cwd": "/tmp/claude-1000/mp/project", "tab": "available"}
+  beside:  ['pane']
+OK: one models node, tab=available, beside a terminal pane

@@ -240,6 +240,24 @@ private Q_SLOTS:
         QCOMPARE(pane.tier(), QStringLiteral("flash"));
     }
 
+    // "fill from defaults" is two buttons the picker makes in its constructor, so a target that
+    // gains the action has to rebuild it rather than re-read. A models pane restored with a saved
+    // layout is exactly that case: it is pointed at a pane whose worker has not answered yet.
+    void gainingFillFromDefaultsBringsItsButtons() {
+        Served served;
+        ModelsPane pane(providerSections());
+        ModelsPane::Target early = targetFor(&served);   // no worker answer yet: no action
+        pane.setTarget(early);
+        pane.showTab(ModelsPane::prioritiesTab());
+        QVERIFY(pane.picker()->defaultsButton(false) == nullptr);
+        ModelsPane::Target ready = targetFor(&served);
+        ready.fillFromDefaults = [](bool) { return true; };
+        pane.setTarget(ready);
+        QVERIFY(pane.picker()->defaultsButton(false) != nullptr);
+        QVERIFY(pane.picker()->defaultsButton(true) != nullptr);
+        QCOMPARE(pane.currentTab(), QStringLiteral("priorities"));
+    }
+
     // A pane's catalog arrives late: with no providers there is nothing to draw until the worker
     // answers `presets`, and a re-read of the same pane has to bring the new rows with it.
     void aLateCatalogReachesTheRowsWithoutLosingTheTab() {

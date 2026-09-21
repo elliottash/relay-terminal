@@ -27,6 +27,18 @@
 #   i2 that row pressed: the models pane goes to priorities, on **main** (a page is in no mode)
 #   j  a provider's "models… (N of M available)" link: the available tab, filtered to it
 #
+# Then a **second Relay start against the same profile** (run 2), which is the only way to prove
+# the layout node: the pane is left on the **available** tab, Relay is asked to quit (SIGTERM,
+# which writes the layout), and it is started again with **no arguments at all** — `--workspace`
+# is what suppresses "reopen where I left off", so run 1 has it and run 2 must not have it.
+#
+#   k  the two panes as they are at quit, the models pane on available
+#   l  after the restart: the pane is back, on the same tab, beside the terminal it serves
+#   m  a row used in the restored pane: the *terminal* pane's chip changes, so it is serving it
+#
+# `check-layout.py` makes the three assertions the shots cannot: one models node in the saved
+# layout, carrying the tab it was left on, beside a terminal pane.
+#
 # The two Options steps are driven through the pane's search box rather than by clicking at fixed
 # coordinates: the first run of this script clicked where the rows would have been on the Models
 # tab and hit the General tab instead.
@@ -154,6 +166,47 @@ t "available models"; sleep 3
 shot i1-provider-models-link 2
 k Return; sleep 5
 shot j-link-lands-on-available 2
+
+# =================================== run 2 ======================================================
+# --- k. the layout at quit: two panes, the models pane on available -------------------------------
+# Options goes first, so the layout under test is the pair this card is about: clicking into it and
+# pressing its own key is what closes it (`toggleSettingsPane` closes the pane that has the focus).
+xdotool mousemove ${OPTIONS_XY:-600 400} click 1; sleep 1.5
+k ctrl+shift+o; sleep 3
+# Back into the models pane, on available — the tab the restart has to bring back.
+k ctrl+shift+m; sleep 4
+k alt+2; sleep 3
+shot k-before-quit 2
+cp "$conf" "$out/conf-before-quit.txt"
+
+sleep 8                              # the layout is written on a timer; let it land
+kill -TERM "$relay_pid"; sleep 8
+relay_pid=
+python3 -m json.tool "$XDG_DATA_HOME/relay/state/windows.json" >"$out/saved-layout.json" 2>/dev/null
+# The assertions the shots cannot make on their own.
+python3 "$out/check-layout.py" "$XDG_DATA_HOME/relay/state/windows.json" >"$out/saved-layout-check.txt" 2>&1
+layout_rc=$?
+cat "$out/saved-layout-check.txt"
+[[ $layout_rc -eq 0 ]] || { echo "the saved layout is wrong; stopping"; exit 1; }
+
+# --- l. the restart: no arguments, so "reopen where I left off" runs ------------------------------
+"$build/relay" >>"$out/relay-stderr.log" 2>&1 &
+relay_pid=$!
+sleep 14
+largest_window
+[[ -z $win ]] && { echo "no Relay window after the restart"; exit 1; }
+xdotool windowmove "$win" 0 0 windowsize "$win" $width $height
+xdotool windowfocus "$win"; sleep 5
+shot l-after-restart 3
+
+# --- m. the restored pane is serving the terminal beside it ---------------------------------------
+# It came back pointed at the first terminal pane of its tab, which nothing in the layout told it:
+# Enter on a row is what proves it, because the chip that changes is that pane's.
+xdotool mousemove ${RESTORED_ROW_XY:-1100 320} click 1; sleep 1.5
+shot m0-restored-row-highlighted 1.5
+k Return; sleep 5
+shot m-restored-row-switches-the-pane 2
+cp "$conf" "$out/conf-after-restart.txt"
 
 sleep 2
 echo "done; shots in $out"

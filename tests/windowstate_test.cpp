@@ -195,6 +195,14 @@ private slots:
         QVERIFY(isUsableNode(QJsonObject{{"testsuites", QJsonObject{{"cwd", "/repo"}}}}));
         QVERIFY(isUsableNode(QJsonObject{{"testsuites", QJsonObject{}}}));
         QVERIFY(!isUsableNode(QJsonObject{{"testsuites", "/repo"}}));
+        // The models pane (card #MDL1 t:a11). It is listed here for more than itself: an unknown
+        // node makes its whole split unusable, so a tab holding a terminal *and* a models pane was
+        // dropped entirely — the driven quit-and-reopen came back with neither.
+        QVERIFY(isUsableNode(QJsonObject{{"models", QJsonObject{{"cwd", "/repo"}, {"tab", "available"}}}}));
+        QVERIFY(isUsableNode(QJsonObject{{"models", QJsonObject{}}}));
+        QVERIFY(!isUsableNode(QJsonObject{{"models", "available"}}));
+        QVERIFY(isUsableNode(split(QStringLiteral("h"), QJsonArray{pane(QStringLiteral("/repo")),
+                                                                   QJsonObject{{"models", QJsonObject{{"cwd", "/repo"}}}}})));
         QVERIFY(!isUsableNode(QJsonObject{}));
         QVERIFY(!isUsableNode(QJsonObject{{"subagent", QJsonObject{}}}));
         QVERIFY(!isUsableNode(QJsonObject{{"explorer", QJsonObject{}}}));   // no path

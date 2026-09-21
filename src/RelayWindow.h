@@ -2484,15 +2484,22 @@ private:
         {
             // Folds by default once a provider is set up (owner, 2026-09-20): from then on the
             // page opens on the models, and the keys are one click away.
+            //
+            // **Not in the models pane** (card #MDL1 t:a11). There the providers rows are the whole
+            // of a tab called "providers", and a fold — remembered under the same
+            // `options/collapsed/heading:providers` key, so one set up on Options travelled here —
+            // left a first-run window showing the blurb, the profiles and the defaults and not the
+            // one thing step 1 is about. A first run opens on this tab precisely because there is a
+            // key to add, so the group is drawn open and has no fold control at all.
             relay::SettingRow head = headingRow(QStringLiteral("providers"));
-            head.collapsible = true;
+            head.collapsible = !inModelsPane;
             bool anySetUp = false;
             for (const auto &value : presets) {
                 const QJsonObject preset = value.toObject();
                 anySetUp = anySetUp || preset.value(QStringLiteral("has_stored_key")).toBool() || preset.value(QStringLiteral("custom")).toBool()
                     || (preset.value(QStringLiteral("harness")).toBool() && preset.value(QStringLiteral("logged_in")).toBool());
             }
-            head.collapsedByDefault = anySetUp;
+            head.collapsedByDefault = anySetUp && !inModelsPane;
             models.rows << head;
         }
         if (presets.isEmpty()) {

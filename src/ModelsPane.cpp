@@ -126,6 +126,7 @@ void ModelsPane::buildPicker() {
     };
     m_picker->onListsChanged = [this] { if (m_target.listsChanged) m_target.listsChanged(); };
     m_picker->openModelsPage = [this] { showTab(providersTab()); };
+    m_pickerHasFill = bool(m_target.fillFromDefaults);
     m_picker->setHosted(true);
     m_picker->installEventFilter(this);
     m_picker->filter()->installEventFilter(this);
@@ -135,7 +136,12 @@ void ModelsPane::buildPicker() {
 }
 
 void ModelsPane::setTarget(const Target &target) {
-    const bool samePane = m_picker && !target.token.isEmpty() && target.token == m_target.token;
+    // A re-read keeps the picker; a re-target rebuilds it. So does a target that has gained or
+    // lost "fill from defaults", because those two buttons exist only if the Context carried the
+    // action when the widget was made — a models pane restored with a layout is pointed at a pane
+    // whose worker has not answered `presets` yet, so it never had them until now.
+    const bool samePane = m_picker && !target.token.isEmpty() && target.token == m_target.token
+                          && bool(target.fillFromDefaults) == m_pickerHasFill;
     const QString wantTier = target.tier.isEmpty() ? m_classTab : target.tier;
     m_target = target;
     // The served pane's mode picks the class tab when it *becomes* the served pane; a re-read of
