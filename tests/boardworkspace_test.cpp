@@ -587,6 +587,26 @@ void BoardWorkspaceTests::aConsoleIsNotALeafSoTheActivePaneIsNeverOne()
              "the card's reply box is being found by a type that has no metaobject of its own");
     QVERIFY2(board.contains(QStringLiteral("findChild<RichEditor *>(QStringLiteral(\"composerEditor\"))")),
              "the card's reply box is no longer found by name");
+
+    // The row's face. `src/Theme.cpp` is one sheet with `@token`s that every theme substitutes
+    // into, so a rule written once is written for every variant; what can drift is *which*
+    // selector it is keyed on. These two are the properties `Pane::rebuildActionRow` sets, and
+    // they are what make a card's Plan the same 33 px card-shaped button as the Switchboard's
+    // Check (k) and give Execute back the accent outline `QPushButton#boardExecute` had while
+    // the row was the card page's own push buttons.
+    QFile theme(QStringLiteral(RELAY_SOURCE_DIR "/src/Theme.cpp"));
+    QVERIFY2(theme.open(QIODevice::ReadOnly | QIODevice::Text), "src/Theme.cpp could not be read");
+    const QString sheet = QString::fromUtf8(theme.readAll());
+    QVERIFY2(sheet.contains(QStringLiteral("QPushButton[actionRow=\"true\"], QToolButton[actionRow=\"true\"]")),
+             "the action row's shape rule is gone");
+    QVERIFY2(sheet.contains(QStringLiteral("QToolButton[actionRow=\"true\"] { background: @raised")),
+             "a console's action row has no ground of its own");
+    QVERIFY2(sheet.contains(QStringLiteral("QToolButton[actionRow=\"true\"][leaves=\"true\"] { color: @agent")),
+             "an action that leaves the surface has lost its accent outline");
+    // And the card page's own frame steps back when the box inside it is a console's, so the
+    // owner is not looking at a border inside a border.
+    QVERIFY2(sheet.contains(QStringLiteral("QFrame#boardReply[hasConsole=\"true\"]")),
+             "the card page draws two frames around one prompt box again");
 }
 
 // Card #AGNT step 9. The helper was a second implementation of the prompt box — its own panel,

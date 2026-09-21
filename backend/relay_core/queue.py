@@ -22,7 +22,7 @@ from collections import deque
 from typing import Callable
 
 from .agent import validate_context
-from .agent_context import screen_line, validate_screen, validate_surface
+from .agent_context import validate_screen, validate_surface
 
 MAX_QUEUE = 32
 MAX_PROMPT = 131072
@@ -534,12 +534,13 @@ class TurnSupervisor:
                     extra["ledger_id"] = item["ledger_id"]
                 if readonly and set_readonly is not None:
                     set_readonly(True)
-                # The "On screen now:" hint goes to the model and not into the prompt the queue
-                # and the ledger hold: the record is the person's own words (protocol 33).
-                hint = screen_line(item.get("screen"))
-                prompt = f"{hint}\n\n{item['prompt']}" if hint else item["prompt"]
-                agent.ask(prompt, reset_cancellation=False, context=item.get("context"),
-                          turn_id=item["id"], **extra)
+                # The "On screen now:" hint goes to the model and **nowhere else**: not into the
+                # prompt the queue and the ledger hold, and not into the title, the session
+                # summary or the checkpoint, which are all made of `prompt` inside `ask`. It used
+                # to be composed into the string here, and the Switchboard console's pane title
+                # came out reading "On screen now: Inbox 2, Discussing 1, …" (protocol 33).
+                agent.ask(item["prompt"], reset_cancellation=False, context=item.get("context"),
+                          turn_id=item["id"], screen=item.get("screen"), **extra)
             except Exception as exc:  # ask() handles its own errors; this is defensive.
                 self._emit({"event": "error", "text": f"Agent error ({type(exc).__name__})."})
                 self._outcome = "error"

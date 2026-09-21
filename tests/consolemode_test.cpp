@@ -23,6 +23,8 @@
 #include <QApplication>
 #include <QPointer>
 #include <QTemporaryDir>
+#include <QJsonObject>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLayout>
 #include <QPlainTextEdit>
@@ -176,9 +178,27 @@ void theActionRowIsBuiltFromTheContext()
     CHECK_EQ(buttons.at(1)->text(), QStringLiteral("Clean up (u)"));
     CHECK_EQ(buttons.at(2)->text(), QStringLiteral("Kites"));   // its letter was taken
     CHECK(row->isVisibleTo(&console));
+    // The two properties src/Theme.cpp keys the row's face on: `actionRow` is the shape every
+    // no-typing button over a prompt box shares, and `leaves` is the accent outline for the ones
+    // that hand the card to a pane. Without them a card's Plan and Execute came out as bare
+    // Fusion buttons — the rules that used to give them their face are id rules written for the
+    // card page's old *push* buttons, and this row is tool buttons.
+    for (auto *button : buttons) CHECK(button->property("actionRow").toBool());
+    CHECK(!buttons.at(0)->property("leaves").toBool());
     CHECK(console.runActionLetter(QStringLiteral("k")));
     CHECK_EQ(checked, 1);
     CHECK(!console.runActionLetter(QStringLiteral("z")));
+    // An action that **leaves the surface** — Execute and Verify hand the card to a pane — wears
+    // the accent outline, and src/Theme.cpp keys that on this property.
+    context.rows = {{QStringLiteral("exec"), QStringLiteral("x"), QStringLiteral("Execute"),
+                     QString(), true, true, [] {}}};
+    context.changed();
+    const auto leaving = row->findChildren<QToolButton *>(QString(), Qt::FindDirectChildrenOnly);
+    CHECK_EQ(leaving.size(), 1);
+    if (!leaving.isEmpty()) {
+        CHECK(leaving.first()->property("actionRow").toBool());
+        CHECK(leaving.first()->property("leaves").toBool());
+    }
     }
 
     // A context that says something moved is re-read, and the row follows it.
@@ -328,6 +348,42 @@ void aContextMaySwallowASubmit()
     CHECK_EQ(console.composerText(), QStringLiteral("discuss this card"));
     }
 
+    // All three chords, on a console with **no shell**, and after a turn. Ctrl+Shift+Enter is
+    // the composer's "terminal, never the model" chord; on a card it is the comment that writes
+    // the thread and calls no model, so a console that has no terminal must still hand it to its
+    // context rather than refusing it for want of one. The live drive of card #AGNT could not
+    // tell whether it was the page, a busy guard or its own aim — it is none of the three: the
+    // route travels, and the drive was clicking a placeholder that a finished turn had replaced.
+void everyChordReachesTheContextWithItsOwnRoute()
+{
+    StubContext context;
+    context.workspace = home->path();
+    context.takeSubmit = true;
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    auto *editor = console.findChild<QPlainTextEdit *>(QStringLiteral("composerEditor"));
+    CHECK(editor != nullptr);
+    if (editor == nullptr) return;
+
+    auto chord = [&](Qt::KeyboardModifiers mods, const QString &text) {
+        console.draftInComposer(text);
+        QKeyEvent press(QEvent::KeyPress, Qt::Key_Return, mods);
+        QCoreApplication::sendEvent(editor, &press);
+    };
+    chord(Qt::NoModifier, QStringLiteral("discuss"));
+    chord(Qt::ControlModifier, QStringLiteral("plan"));
+    chord(Qt::ControlModifier | Qt::ShiftModifier, QStringLiteral("comment"));
+    CHECK_EQ(context.submitted,
+             (QStringList{QStringLiteral("auto|discuss"), QStringLiteral("agent|plan"),
+                          QStringLiteral("shell|comment")}));
+    // And again after a turn has run: nothing about a finished turn takes the chord away, and
+    // the pane's own mode is locked to the agent either way (`applyContextRouting`).
+    console.deliverWorkerEvent(QJsonObject{{QStringLiteral("event"), QStringLiteral("agent_finished")},
+                                           {QStringLiteral("id"), QStringLiteral("1")},
+                                           {QStringLiteral("outcome"), QStringLiteral("done")}});
+    chord(Qt::ControlModifier | Qt::ShiftModifier, QStringLiteral("after the turn"));
+    CHECK_EQ(context.submitted.last(), QStringLiteral("shell|after the turn"));
+    }
+
     // What the worker is told, and what rides on an ask.
 void theContextBlockAndTheAskFieldsAreTheContextsOwn()
 {
@@ -403,6 +459,7 @@ int main(int argc, char **argv)
     cases::aChangedContextRebuildsTheRow();
     cases::anActionThatRebuildsItsOwnRowIsSafe();
     cases::aContextMaySwallowASubmit();
+    cases::everyChordReachesTheContextWithItsOwnRoute();
     cases::aClickedActionTeachesItsLetter();
     cases::theComposerSaysWhatTheContextSays();
     cases::theContextBlockAndTheAskFieldsAreTheContextsOwn();
@@ -410,6 +467,6 @@ int main(int argc, char **argv)
     cases::aConsoleIsAnOrdinaryChildOfItsHost();
 
     if (failures == 0)
-    std::fprintf(stdout, "consolemode: 13 cases, all passed\n");
+    std::fprintf(stdout, "consolemode: 14 cases, all passed\n");
     return failures == 0 ? 0 : 1;
 }

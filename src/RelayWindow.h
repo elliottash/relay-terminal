@@ -439,6 +439,7 @@ public:
             }
         });
         qApp->installEventFilter(this);
+        startQaRects();   // only when RELAY_QA_RECTS names a file; see it for why
     }
 
     // stopBoardWorkers() again (closeEvent has usually run already, and it is idempotent): a
@@ -1388,6 +1389,13 @@ private:
                 sessions->setHelperWorkspace(workspace);
             }
         }
+        // And the **worker** is told, so the tab's consoles stop talking about a project they no
+        // longer work in. This is the GUI's half of the bargain the backend's `helper_file`
+        // names: the window sends the tab's project as soon as it knows it, and the backend does
+        // not move a conversation that was started before it did. Without the reconfigure the
+        // console kept the old board until its next `configure` — which, for a tab that gains a
+        // project, is the next restart.
+        if (m_boardWorkers.contains(tab)) reconfigureBoardWorkers();
     }
 
     // `pickHelperModel`, `applyHelperEntry` and `helperModelState` were here: the window kept the
@@ -7593,6 +7601,7 @@ private:
         handle.setCollapsed = [guard](bool collapse) { if (guard) guard->setCollapsed(collapse); };
         handle.collapsed = [guard] { return guard && guard->collapsed(); };
         handle.runActionLetter = [guard](const QString &letter) { return guard && guard->runActionLetter(letter); };
+        handle.setTranscriptHiddenUntilUsed = [guard](bool on) { if (guard) guard->setTranscriptHiddenUntilUsed(on); };
         return handle;
     }
 
@@ -8761,6 +8770,11 @@ private:
         rightRow->setContentsMargins(6, 0, 6, 0);
         rightRow->setSpacing(2);
         m_bell = new ChromeButton(ChromeButton::Glyph::Bell);
+        // The one chrome button something outside this row has to name. Every other one is a
+        // `windowChromeButton` and is reached by its neighbours; the bell is what a GUI drive
+        // has to *click* to read the "Agent changed … · Undo" notice, and an icon is the one
+        // thing OCR cannot find (RELAY_QA_RECTS, startQaRects).
+        m_bell->setObjectName(QStringLiteral("windowBellButton"));
         connect(m_bell, &QToolButton::clicked, this, [this] { toggleNotifications(); });
         rightRow->addWidget(m_bell);
         // The row's three hairlines: after the bell, and either side of the plug below, so the
@@ -8942,6 +8956,74 @@ private:
                                       : total > 0 ? QStringLiteral("Notifications · %1").arg(total)
                                                   : QStringLiteral("Notifications"));
     }
+
+    // ----- RELAY_QA_RECTS: where the named widgets are, for a driver that must click one -------
+    //
+    // A GUI drive reads the screen with OCR, which finds words and cannot find an icon: the bell
+    // that opens the notification list, the ⧉ beside a card id, a switch. The integration drive
+    // of card #AGNT had to leave "the notification offers Undo, and Undo puts it back" unverified
+    // for exactly that — it could see the notice existed and could not aim at it.
+    //
+    // So, **only when `RELAY_QA_RECTS` names a file**, the window writes every named widget's
+    // screen rectangle there as JSON, debounced, whenever the layout settles. Unset — which is
+    // every run that is not a drive — this costs one `qEnvironmentVariableIsSet` at startup and
+    // nothing else: no timer is created and no event filter looks at anything.
+    //
+    // It is deliberately names-and-rectangles and nothing else: a driver that could ask the app
+    // what it *thinks* is on screen would stop reading what is actually drawn, which is the whole
+    // value of driving it live.
+    void startQaRects() {
+        const QByteArray path = qgetenv("RELAY_QA_RECTS");
+        if (path.isEmpty()) return;
+        m_qaRects = new QTimer(this);
+        m_qaRects->setSingleShot(true);
+        m_qaRects->setInterval(400);
+        connect(m_qaRects, &QTimer::timeout, this, [this, path] {
+            QJsonObject out;
+            for (QWidget *widget : findChildren<QWidget *>()) {
+                if (widget->objectName().isEmpty() || !widget->isVisible()) continue;
+                const QPoint at = widget->mapToGlobal(QPoint(0, 0));
+                // Object names are not unique — every prompt box is a `composerEditor` — so the
+                // second and later ones are numbered in the order they are found. A driver that
+                // wants "the one in the pane I am looking at" reads the rectangles; a driver that
+                // wants "how many of these are on screen" counts the keys, which is how "a
+                // console draws no pane header" is checked without reading a pixel.
+                QString key = widget->objectName();
+                for (int n = 2; out.contains(key); ++n)
+                    key = widget->objectName() + QLatin1Char('#') + QString::number(n);
+                out.insert(key,
+                           QJsonObject{{QStringLiteral("x"), at.x()}, {QStringLiteral("y"), at.y()},
+                                       {QStringLiteral("w"), widget->width()},
+                                       {QStringLiteral("h"), widget->height()},
+                                       {QStringLiteral("text"), widget->property("text").toString()}});
+            }
+            QSaveFile file(QString::fromLocal8Bit(path));
+            if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) return;
+            file.write(QJsonDocument(out).toJson(QJsonDocument::Compact));
+            file.commit();
+        });
+        qApp->installEventFilter(new QaRectsWatch(m_qaRects));
+        m_qaRects->start();
+    }
+    // Anything that can move a widget restarts the debounce; the write itself is one pass over
+    // the window's children and happens 400 ms after the last of them.
+    class QaRectsWatch final : public QObject {
+      public:
+        explicit QaRectsWatch(QTimer *timer) : QObject(timer), m_timer(timer) {}
+        bool eventFilter(QObject *, QEvent *event) override {
+            switch (event->type()) {
+            case QEvent::Show: case QEvent::Hide: case QEvent::Move: case QEvent::Resize:
+            case QEvent::LayoutRequest: case QEvent::Polish:
+                if (m_timer) m_timer->start();
+                break;
+            default: break;
+            }
+            return false;
+        }
+      private:
+        QPointer<QTimer> m_timer;
+    };
+    QTimer *m_qaRects = nullptr;
 
     void toggleNotifications() {
         if (!m_notifications) {

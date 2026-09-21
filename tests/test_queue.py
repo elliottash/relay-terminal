@@ -602,6 +602,20 @@ class ConsoleFieldTests(unittest.TestCase):
         self.assertEqual(row['preview'], 'and this one?')
         self.assertNotIn('On screen', json.dumps(self.rec.of('queue_changed')))
         p.release.release()
+        # …and so is everything `ask` makes out of the prompt. The hint used to be composed into
+        # the string before `ask` saw it, so the **title** was "On screen now: Appearance › Copy
+        # on select which row is…" — which is what the Switchboard console's pane header showed,
+        # and what the Sessions list would have kept for ever.
+        self.rec.wait(lambda e: e['event'] == 'agent_finished' and e['id'] != item)
+        self.assertNotIn('On screen', self.agent.title)
+        self.assertTrue(self.agent.title)
+        # The turn's own record is the words as typed: the checkpoint a rewind goes back to and
+        # the ledger row the request audit shows. (The *message* still carries the hint in its
+        # prefix, beside plan-mode notes and attachments — that is what a note is.)
+        self.assertNotIn('On screen', json.dumps([c.get('prompt') for c in self.agent.checkpoints.items]))
+        self.assertEqual([c.get('prompt') for c in self.agent.checkpoints.items][-1], 'and this one?')
+        self.assertNotIn('On screen', json.dumps(self.agent.requests.items))
+        self.assertIn('On screen now: Appearance', p.prompts[0])
 
     def test_a_readonly_turn_is_read_only_for_exactly_that_turn(self):
         seen = []

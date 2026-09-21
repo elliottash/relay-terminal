@@ -335,6 +335,11 @@ struct ConsoleHandle {
     std::function<void(bool)> setCollapsed;
     std::function<bool()> collapsed;
     std::function<bool(const QString &letter)> runActionLetter;
+    // Hide the transcript while it has printed nothing, and show it for good at the first byte.
+    // The card page is the one host that asks: its own turn's deltas go to the thread view above
+    // (owner decision 2), so an empty band would sit between the thread and the reply box — and
+    // the tab's other turns *do* print here (decision 1), so it is not hidden for ever.
+    std::function<void(bool)> setTranscriptHiddenUntilUsed;
     explicit operator bool() const { return widget != nullptr; }
 };
 

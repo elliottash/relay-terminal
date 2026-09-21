@@ -5,6 +5,7 @@ The C++ half is `src/AgentContext.h` (`ContextSpec::toJson` / `fromJson`) and is
 `tests/agentcontext_test.cpp` against the same shape — which is the point of having the block
 written down in one place rather than assembled at each end.
 """
+import pathlib
 import unittest
 
 from relay_core import agent_context as AC
@@ -90,6 +91,35 @@ class StoreTests(unittest.TestCase):
         two = AC.ContextSpec.from_json({**SWITCHBOARD, "persist": {"scope": "helper", "key": "tB"}})
         self.assertEqual(one.store("/w")[0], two.store("/w")[0])
         self.assertNotEqual(one.store("/w")[1], two.store("/w")[1])
+
+    def test_a_tab_that_gains_a_project_keeps_the_conversation_it_had(self):
+        """The live drive of card #AGNT read one tab id under two workspace digests.
+
+        A console asked before its tab's project was known — or the tab gained one afterwards —
+        so its workspace digest changed, the derived directory changed with it, and the history
+        was left behind: a restart came back to an empty console. The name is already unique per
+        tab, so the directory is filing; a conversation that exists under any digest for this key
+        is the one that is opened.
+        """
+        import os
+        import tempfile
+        spec = AC.ContextSpec.from_json({**SWITCHBOARD, "persist": {"scope": "helper", "key": "tG"}})
+        with tempfile.TemporaryDirectory() as home:
+            os.environ["XDG_DATA_HOME"] = home
+            try:
+                nowhere, name = spec.store("")          # asked before the project was known
+                project, same = spec.store("/w")        # and again once it was
+                self.assertEqual(name, same)            # one tab, one file name, always
+                self.assertNotEqual(nowhere, project)   # and two directories, until one exists
+                pathlib.Path(nowhere).mkdir(parents=True, exist_ok=True)
+                (pathlib.Path(nowhere) / f"{name}.json").write_text("{}", encoding="utf-8")
+                # Now the project arrives: the conversation is found where it actually is.
+                self.assertEqual(spec.store("/w"), (nowhere, name))
+                # A tab with no conversation anywhere is still filed under its own project.
+                fresh = AC.ContextSpec.from_json({**SWITCHBOARD, "persist": {"scope": "helper", "key": "tH"}})
+                self.assertEqual(fresh.store("/w")[0], project)
+            finally:
+                os.environ.pop("XDG_DATA_HOME", None)
 
     def test_a_pane_keeps_its_own_session_store(self):
         self.assertEqual(AC.ContextSpec.from_json(TERMINAL).store("/w"), (None, None))

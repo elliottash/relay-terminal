@@ -3734,6 +3734,7 @@ void BoardModelTests::theCardPageAsksForACardConsoleAndItsActionsFollowTheCard()
     QVERIFY(spec.persistId() != consoles.board()->liveSpec().persistId());
     QVERIFY(console->context()->placeholder().contains(QStringLiteral("Ctrl+Shift+Enter only comments")));
 
+
     // Discuss and Comment are what the box does, so they have no buttons; what is left on the row
     // is Plan and the two that leave the board. Verify is not offered outside a QA lane.
     QStringList labels;
@@ -3787,6 +3788,15 @@ void BoardModelTests::theCardPageAsksForACardConsoleAndItsActionsFollowTheCard()
     QTest::keyClick(console->editor(), Qt::Key_Return, Qt::ControlModifier | Qt::ShiftModifier);
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_comment"));
     QCOMPARE(sent.last().value("kind").toString(), QStringLiteral("note"));
+    QCOMPARE(sent.last().value("card").toString(), QStringLiteral("K7Q2"));
+    QCOMPARE(sent.last().value("text").toString(), QStringLiteral("a note for later"));
+    // The chord takes the words with it: a comment that left them in the box would be sent
+    // twice by the next Enter. This is the page's half of what the live drive could not get to
+    // land — and it lands here, on a card nothing is running on and on one that has just
+    // answered, which is what says the failure out there is neither the route nor a busy guard.
+    QVERIFY2(console->editor()->toPlainText().isEmpty(), "the comment chord left the words in the box");
+    QTest::keyClick(console->editor(), Qt::Key_Return, Qt::ControlModifier | Qt::ShiftModifier);
+    QCOMPARE(sent.last().value("text").toString(), QStringLiteral("a note for later"));   // not twice
 }
 
 // Verify is on the row only in a QA lane (#T71W): on any other card it would be a control for a

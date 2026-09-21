@@ -86,6 +86,36 @@ def helper_dir(workspace) -> Path:
     return beside.parent.parent / HELPER_DIRNAME / beside.name
 
 
+def helper_file(workspace, key: str) -> tuple[Path, str]:
+    """(directory, session id) for this console's conversation, wherever it already is.
+
+    **The backend owns "a tab's conversation does not move because its project arrived."** The
+    directory is the workspace's and the file name is the tab's, which files a project's consoles
+    together — but the *name* is already unique, so the directory is filing and nothing more. A
+    tab that is asked something before its project is known, or that gains one later, changed its
+    workspace digest and left its history behind: the live drive of card #AGNT read one tab id
+    under two digests, and a restart came back to an empty console.
+
+    So a conversation that already exists under **any** digest for this key is the one that is
+    opened, and only a genuinely new one is filed under the workspace of the moment. The GUI's
+    half of the bargain is to send the tab's project as soon as it knows it
+    (`RelayWindow::TabConsoleContext::spec`, which reads it fresh on every `configure`); this is
+    what makes the day it did not know harmless rather than lossy.
+    """
+    name = helper_session_id(key)
+    here = helper_dir(workspace or "")
+    if (here / f"{name}.json").exists():
+        return here, name
+    root = here.parent
+    try:
+        for digest in sorted(p for p in root.iterdir() if p.is_dir()):
+            if (digest / f"{name}.json").exists():
+                return digest, name
+    except OSError:
+        pass
+    return here, name
+
+
 def helper_session_id(key: str) -> str:
     """The session id a persistence key always has: 32 hex digits from the key.
 
@@ -350,7 +380,10 @@ class ContextSpec:
         dangling row.
         """
         if self.persist_scope == "helper" and self.persist_key:
-            return str(helper_dir(workspace or "")), helper_session_id(self.persist_key)
+            # Wherever it already is: see `helper_file`. A tab that gained a project keeps the
+            # conversation it had, which is what "a restart brings each tab's helper back" means.
+            directory, name = helper_file(workspace, self.persist_key)
+            return str(directory), name
         return None, None
 
     def key(self) -> tuple[str, str, str]:

@@ -1846,7 +1846,18 @@ class Agent:
         self.provider.cancel()
 
     def ask(self, prompt: str, *, reset_cancellation: bool = True, context: dict | None = None,
-            attachments: list[dict] | None = None, turn_id: str | None = None, ledger_id: str | None = None):
+            attachments: list[dict] | None = None, turn_id: str | None = None, ledger_id: str | None = None,
+            screen: str | None = None):
+        """Run one turn on `prompt`.
+
+        `screen` is protocol 33's on-screen hint — the rows a console is looking at, the search in
+        its box — and it is **not part of the prompt**. It reaches the model in the same prefix
+        every other per-turn note rides (`note`), and `prompt` stays the person's own words, which
+        is what the title, the session summary, the checkpoint, the request ledger and the log
+        are made of. Composing it into the string instead put "On screen now: Inbox 2, Discussing
+        1, …" at the front of the Switchboard console's pane title, and would have put it in the
+        Sessions list and the ledger the same way.
+        """
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt.encode('utf-8')) > 131072:
             raise ValueError("Prompt must contain 1–131072 bytes of text.")
         # `cd` in the terminal moves the agent's default working directory with it.
@@ -1859,7 +1870,9 @@ class Agent:
         self.executor.program.begin_turn(validated.get("program_control"))
         self.executor.terminal.begin_turn(validated.get("terminal_handoff"))
         self.executor.questions.begin_turn()
+        hint = agent_context.screen_line(screen)
         note = (self._pending_note + plan_mode_note(self.mode) + format_context(context)
+                + (hint + "\n\n" if hint else "")
                 + format_attachments(attachments) + image_block(attachments))
         if reset_cancellation:
             self.cancel_event.clear()

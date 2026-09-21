@@ -705,6 +705,22 @@ QWidget#boardCardActions QPushButton { padding: 5px 12px 6px 12px; }
    is the `actionRow` rule above. One selector list rather than a rule per button, so a plain
    button added to a row joins the list and nothing else changes — and a button that brings its
    own colours (`boardExecute`) is simply not in it. */
+/* Every other button on an action row, whoever made it. `Pane::rebuildActionRow` builds the row
+   from `relay::agent::Context::actions()` and stamps `actionRow` on each button, so a card's
+   Plan and Execute — which are tool buttons on that row now, not the push buttons the id rules
+   below were written for — get the same ground as Check and Clean up instead of the bare Fusion
+   button. An id rule still outranks this one, so a button that brings its own colours keeps
+   them. */
+QToolButton[actionRow="true"] { background: @raised; color: @text; }
+QToolButton[actionRow="true"]:hover { color: @text; border-color: @accent; }
+QToolButton[actionRow="true"]:disabled { color: @disabled; border-color: @surface; }
+/* …and the one that **leaves the surface**: Execute and Verify hand the card to a terminal pane,
+   so they wear the agent's colour outlined, exactly as `QPushButton#boardExecute` did while the
+   row was the card page's own. Keyed on the `leaves` property the row already sets, so an action
+   a later session adds gets the face by saying what it does rather than by being named here. */
+QToolButton[actionRow="true"][leaves="true"] { color: @agent; border-color: @agent; }
+QToolButton[actionRow="true"][leaves="true"]:hover { background: @surface; border-color: @agent; }
+QToolButton[actionRow="true"][leaves="true"]:disabled { color: @disabled; border-color: @surface; }
 QToolButton#boardChatCheck, QToolButton#boardCleanup,
 QToolButton#boardTests, QToolButton#boardProfile { background: @raised; color: @text; border: 1px solid @border; border-radius: 6px; padding: 4px 12px; }
 QToolButton#boardChatCheck:hover, QToolButton#boardCleanup:hover,
@@ -828,6 +844,13 @@ QLabel#boardCardError { color: @error; }
    are visibly one thing. */
 QFrame#boardReply { background: @surface; border: 1px solid @border; border-radius: 10px; }
 QFrame#boardReply[relayActive="true"] { background: @raised; border: 1px solid @accentBorder; }
+/* Unless the box inside it is a console's, which brings its own frame: `QFrame#composer` is the
+   pane's prompt box and it is the same control, so two frames drew a border inside a border on
+   the card page. The outer one steps back to the page's ground and the console's is the one the
+   owner sees — one frame, as in a pane. The busy strip lives in here too, which is why the
+   widget stays rather than being taken out of the layout. */
+QFrame#boardReply[hasConsole="true"],
+QFrame#boardReply[hasConsole="true"][relayActive="true"] { background: transparent; border: none; }
 QPlainTextEdit#boardReplyEditor { background: transparent; border: none; padding: 2px 4px; font-family: "@mono"; font-size: 11pt; }
 /* Plan, Execute and Verify are above the box now, not in it (owner: "put buttons like that in a
    row above the chat box"), so the row is on the page's ground and wears the panel's Check/Clean

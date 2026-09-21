@@ -2067,22 +2067,19 @@ public:
         if (console == nullptr || m_consoleBox == nullptr)
             return;
         m_consoleBox->addWidget(console);
-        // **The console's own pane header comes off here.** A `Pane` wears one — the title the
-        // model writes for the conversation, the mode chip, the directory — and on a card page
-        // that is a second heading under the card's own title, saying "project" over the reply
-        // box. The card page has said what this surface is about at the top of the page since
-        // #8YQ9. `Pane::bubbleRoom()` already reads `isVisible()`, so the room it frees goes to
-        // the transcript and the §12 queue strip rather than nowhere.
-        if (QWidget *header = console->findChild<QWidget *>(QStringLiteral("paneHeader")))
-            header->hide();
-        // And a floor, so what is below the header is a conversation rather than a slot. The
-        // integration drive of card #AGNT looked at this: the transcript is empty *today*,
-        // because a card turn's deltas stream into the thread view above (owner decision 2) --
-        // but it is not dead space, because the tab's conversation is one and drawn in every
-        // console of it (decision 1), and because the thinking bubble and the queue strip are
-        // drawn in that room. A console with three rows draws neither, which is the half of this
-        // card's Issue that is about the queue. Ten lines, and the page keeps the rest.
-        console->setMinimumHeight(10 * QFontMetrics(font()).lineSpacing());
+        // The console's pane header is not drawn here, and not because this page hides it: a
+        // console draws none at all (`Pane::applyContextHeader`). Its transcript is hidden until
+        // it has something to show, which `ensureCardConsole` asks for — so the page reads
+        // thread → action row → box, which is what the owner approved.
+        //
+        // And the frame steps back: the console brings the pane's own `QFrame#composer`, so this
+        // page's `boardReply` frame would draw a border inside a border. src/Theme.cpp keys the
+        // difference on this property; the widget stays because the busy strip is in it.
+        if (m_replyFrame != nullptr) {
+            m_replyFrame->setProperty("hasConsole", true);
+            m_replyFrame->style()->unpolish(m_replyFrame);
+            m_replyFrame->style()->polish(m_replyFrame);
+        }
         m_reply = editor;
         if (m_reply == nullptr)
             return;
@@ -4827,6 +4824,12 @@ void BoardView::ensureCardConsole()
     // `board_ask` went out, and the thread was never written (19.10, owner decision 2). The
     // integration drive of card #AGNT read exactly that. `composerEditor` is the name
     // `RichEditor`'s constructor puts on every prompt box in Relay.
+    // A card's own turn prints into the thread view above, not in here (owner decision 2), so an
+    // empty transcript is a black band between the thread and the reply box. It is hidden until
+    // something is actually printed in it — which the tab's *other* turns do, the conversation
+    // being one (decision 1), and then the bubble and the §12 strip have their room.
+    if (handle.setTranscriptHiddenUntilUsed)
+        handle.setTranscriptHiddenUntilUsed(true);
     m_detail->setConsole(handle.widget,
                          handle.widget->findChild<RichEditor *>(QStringLiteral("composerEditor")));
 }

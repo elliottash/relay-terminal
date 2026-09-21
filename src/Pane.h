@@ -3176,8 +3176,51 @@ public:
         const relay::agent::ContextSpec spec = contextSpec();
         m_hasShell = !m_context || spec.shell;
         applyContextRouting(spec);
+        applyContextHeader();
         rebuildActionRow();
         applyComposerPlaceholders();
+    }
+
+    // **A console draws no pane header.** The row is a *pane's* chrome — the title the model
+    // writes for the conversation, the "auto" badge that says it wrote it, the card chip, the
+    // directory, and the whole row as the pane's drag handle — and an embedded console has none
+    // of those things to say: the host already says where you are (the Switchboard's own header,
+    // the card's title, "Options helper"), the console stands in no splitter to be dragged, and
+    // with no shell there is no directory it is standing in. The live drive read the Switchboard
+    // console's header as "On screen now: Inbox 2, Discussing 1, … | auto | ~/project" — three
+    // wrong things in one row, and the row itself was the fourth.
+    //
+    // Hidden, not removed: `bubbleRoom()` reads `isVisible()`, so the space goes to the
+    // transcript and the §12 queue strip, and a context that one day wants a shell gets its
+    // header back with it.
+    void applyContextHeader() {
+        if (m_headerWidget) m_headerWidget->setVisible(hasShell());
+    }
+
+    // **A transcript that has printed nothing takes no room** — for the one host that asks.
+    //
+    // A card's own turn does not print here: its `delta` and `thinking_delta` stream into the
+    // thread view above (owner decision 2), which is where the record is. So on a card page an
+    // empty black band sat between the thread and the reply box, and the page read thread → dead
+    // space → row → box instead of thread → row → box. Hidden until the first byte, and shown
+    // for good afterwards — because the tab's conversation is *one* and drawn in every console
+    // of it (decision 1), so a Switchboard turn does print here, and the thinking bubble and the
+    // §12 queue strip need the room the moment anything does.
+    //
+    // Only the card page asks. Every other console *is* where its turns print, and a surface
+    // that hides its own transcript until it is used would flash open on the first answer.
+    void setTranscriptHiddenUntilUsed(bool on) {
+        if (m_hideEmptyTranscript == on) return;
+        m_hideEmptyTranscript = on;
+        applyTranscriptVisibility();
+    }
+
+    void applyTranscriptVisibility() {
+        if (!m_terminalHost) return;
+        const bool show = !m_hideEmptyTranscript || m_transcriptUsed;
+        if (m_terminalHost->isVisibleTo(this) == show) return;
+        m_terminalHost->setVisible(show);
+        placeQueueStrip();   // the strip's room is the pane's, and it has just changed
     }
 
     // Routing, and the chips that show it. It only ever *restricts*: a terminal context leaves
@@ -3241,6 +3284,14 @@ public:
             button->setText(action.fullLabel());
             // What a row that runs out of room shortens *from* (relay::agent::labelWithoutKey).
             button->setProperty("fullLabel", action.fullLabel());
+            // The two properties src/Theme.cpp keys the row's face on. `actionRow` is the shape
+            // — one border width, one radius, one padding, so every no-typing button over a
+            // prompt box is the same height as Check (k) — and `leaves` is the accent outline
+            // that says this one hands the card to a pane (Execute, Verify). Without them the
+            // card's Plan and Execute came out as bare Fusion buttons: the rules that gave them
+            // their face are `QPushButton#boardExecute` and friends, and this row is tool
+            // buttons, so an id rule written for the old push-button row could not match.
+            button->setProperty("actionRow", true);
             button->setProperty("leaves", action.leaves);
             button->setToolTip(action.tooltip);
             button->setEnabled(action.enabled);
@@ -13026,6 +13077,10 @@ private:
     // them. Nothing is typed into the shell, so agent text never reaches shell history and is
     // never executed: the engine feeds them to its parser.
     void writeTerminal(const QByteArray &bytes) override {
+        if (!bytes.isEmpty() && !m_transcriptUsed) {   // the first byte is what un-hides it
+            m_transcriptUsed = true;
+            applyTranscriptVisibility();
+        }
         if (m_backend && (m_backend->capabilities() & relay::TerminalBackend::DisplayInjection))
             m_backend->writeToDisplay(bytes);
         else
@@ -16789,6 +16844,8 @@ private:
     relay::TerminalBackend *m_backend = nullptr;
     QString m_engineCore;
     QWidget *m_terminal = nullptr, *m_terminalHost = nullptr;
+    // setTranscriptHiddenUntilUsed: the card page's console asks, and the first byte answers.
+    bool m_hideEmptyTranscript = false, m_transcriptUsed = false;
     RichEditor *m_editor = nullptr;
     QString m_modeValue = defaultInputMode();
     QLabel *m_routeLabel = nullptr, *m_cwdLabel = nullptr, *m_help = nullptr;
