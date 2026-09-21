@@ -8,7 +8,7 @@ waiting_on: owner
 rank: m
 created: '2026-09-20'
 source: 'owner report, 2026-09-20, in the terminal pane after #FEJQ decision 2 was amended'
-links: {plans: [], commits: [ab9e2ab7, 1a2459ed, c375a86e, 2e51e3b6, cb33a900, c33df71b], evidence: [], related: [FEJQ, H6VQ, GMCF], github: null}
+links: {plans: [], commits: [ab9e2ab7, 1a2459ed, c375a86e, 2e51e3b6, cb33a900, c33df71b, 3ce297fe], evidence: [], related: [FEJQ, H6VQ, GMCF], github: null}
 ---
 # What an agent still cannot do in Relay, read off the catalog rather than remembered
 
@@ -55,9 +55,21 @@ Settled, and being built:
 **Group 4 — the answer is yes, but not by marking them `agent_safe` as they stand.** See
 "The risk in group 4" below: it is mechanical, not a matter of taste.
 
-**Group 5 — the argument against each, as asked.** See "Group 5, key by key" below. Hotkeys are
-already an agent's to change and have been since #GMCF; only the bulk wipe and the open-the-file
-action are off.
+**Group 5 — answered 2026-09-20, after the argument below was put to him:** "group 5: dont let the
+agent do 1, 4, 6, 7. others are ok". So four things stay off — `voice.toggle` (item 1),
+`control.human` / `control.program.agent` / `control.program.human` / `program.delegate` (item 4),
+`keybindings.clearOverrides` (item 6) and `history.clear` (item 7) — and **everything else in
+group 5 is allowed**, including the three I argued against and lost: `pane.share`/`pane.sharing`,
+`app.update` and `windows.fresh`. Hotkeys were never the question: an agent has been able to change
+one since #GMCF, through `set_keybinding`; only the bulk wipe is off.
+
+Two consequences being handled as the widening lands. The table's founding line, "undoable in one
+click", is no longer true of its contents — `pane.close`, `agent.compact`, `agent.clearQueue`,
+`terminal.clear` and `windows.fresh` are not undoable at all — so the notification has to carry the
+weight instead: it must say what happened and offer the real undo where one exists. And a key whose
+handler opens a **modal** still cannot be marked, whatever the owner said, until group 4's
+non-blocking pass: `run()` would not return, the result would never be sent, and the window would
+sit frozen behind a dialog. `pane.share` is one of those, so it is allowed and not yet on.
 
 
 ## Discussion points
