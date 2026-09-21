@@ -85,6 +85,26 @@ TREE_DIGEST_TIMEOUT = 20.0      # seconds `git diff HEAD` may take before the di
 RESULTS = ("pass", "fail", "skip", "error", "timeout")
 BAD_RESULTS = ("fail", "error", "timeout")
 
+#: The four answers Check gives per **listed test** (card #PR4Q, Codex's review §C: "make the
+#: status distinguish passed, failed, missing evidence and not applicable").  A status says
+#: whether this card is proven; the older verdicts (`gone`, `never-run`, `flaky`, `slow`, …) say
+#: whether a *test* is weak, and travel beside a status as advisory findings.
+STATUS_PASSED = "passed"
+STATUS_FAILED = "failed"
+STATUS_MISSING = "missing-evidence"
+STATUS_NA = "not-applicable"
+STATUSES = (STATUS_PASSED, STATUS_FAILED, STATUS_MISSING, STATUS_NA)
+#: The two that stop a landing.  `not-applicable` never does — a retired test is a thing to
+#: replace, not evidence that the work is unfinished — and `passed` is the point.
+BLOCKING_STATUSES = (STATUS_FAILED, STATUS_MISSING)
+
+#: Two commit spellings are one commit when either is a prefix of the other and both are at
+#: least this long: a card's `links.commits` carries 12 characters, a run's store row whatever
+#: `git rev-parse` gave it, and `3f2a9c1e` is the same commit as `3f2a9c1e4d5b`.
+COMMIT_PREFIX_MIN = 7
+#: Executions carried per test on a `tests_check` event: enough to say who ran it and when.
+MAX_EVIDENCE = 3
+
 #: Where the store lives inside a board.
 STORE_DIR = "tests"
 STORE_NAME = "history.jsonl"
@@ -792,6 +812,7 @@ def _covers(test_file: str, changed: str) -> bool:
 
 
 _GROUP_PHRASES = {
+    "retired": "are not in the project any more",
     "never-run": "never ran here",
     "skipped-forever": "are skipped for good",
     "edited": "were edited since their history began, so it starts over",
@@ -829,27 +850,199 @@ def _grouped_findings(entry: dict, found: Sequence[dict]) -> list[dict]:
     return out
 
 
+# --------------------------------------------------------------------------- the four statuses
+
+def same_commit(one: str, other: str) -> bool:
+    """Two commit spellings naming one commit: either is a prefix of the other.
+
+    A card's `links.commits` holds 12 characters, an execution holds whatever `git rev-parse`
+    printed, and a staged fixture holds 8.  Both must be at least `COMMIT_PREFIX_MIN` long, so
+    an empty commit never matches anything.
+    """
+    a = (one or "").strip().lower()
+    b = (other or "").strip().lower()
+    if len(a) < COMMIT_PREFIX_MIN or len(b) < COMMIT_PREFIX_MIN:
+        return False
+    return a.startswith(b) or b.startswith(a)
+
+
+def _field(row, key: str, default=""):
+    """One field of an execution, whether it arrived as an `Execution` or as its dict."""
+    if isinstance(row, Execution):
+        return getattr(row, key, default)
+    if isinstance(row, dict):
+        value = row.get(key, default)
+        return default if value is None else value
+    return default
+
+
+def applicable(row, *, commits: Sequence[str] = (), since: str = "", source_hash: str = "",
+               accepted: Sequence[str] = ()) -> bool:
+    """Does this execution say anything about **this card's revision**?
+
+    The rule, in one sentence (card #PR4Q; Codex's review §C: "'passed last time' is not proof
+    about this change", and "'never run here' is not 'never run'"):
+
+        an execution is evidence for a card when it ran at one of the card's own commits, or
+        when it is newer than the card's newest commit and was recorded under the test's
+        current `source_hash` — plus any run the card has explicitly accepted.
+
+    So a green run from another *host* counts (the store is host-agnostic: a run fetched from
+    sphinxpad by `scripts/relay-remote-tests` is an execution like any other), while a green run
+    from before the card's work does not.  A card with no commits at all has no revision to
+    compare against: then every execution recorded under the test's current source hash counts,
+    which is the answer this module gave before statuses existed.
+
+    `accepted` is the set of run ids the card's `### Check` status records as accepted for this
+    revision ("Use this existing result"), and those are evidence whatever their commit.
+    """
+    run_id = str(_field(row, "run_id") or "")
+    if run_id and run_id in set(accepted or ()):
+        return True
+    row_hash = str(_field(row, "source_hash") or "")
+    if source_hash and row_hash and row_hash != source_hash:
+        return False                                  # a run of a different version of the test
+    commit = str(_field(row, "commit") or "")
+    if any(same_commit(commit, str(one or "")) for one in commits or ()):
+        return True
+    if not commits and not since:
+        return True                                   # no revision to compare against
+    base = _parse_ts(since)
+    stamp = _parse_ts(str(_field(row, "ts") or ""))
+    return bool(base is not None and stamp is not None and stamp >= base)
+
+
+def _evidence(row, ok: bool) -> dict:
+    """One execution as the `tests_check` event carries it, with the fold's own verdict on it."""
+    return {"run_id": str(_field(row, "run_id") or ""), "host": str(_field(row, "host") or ""),
+            "commit": str(_field(row, "commit") or ""), "ts": str(_field(row, "ts") or ""),
+            "result": str(_field(row, "result") or ""), "applicable": bool(ok)}
+
+
+def _record_status(record: dict, *, commits, since, accepted) -> tuple[str, list[dict]]:
+    """One discovered test's status, and the executions that decided it (newest first)."""
+    if "gone" in (record.get("stale") or []):
+        return STATUS_NA, []
+    source_hash = str(record.get("source_hash") or "")
+    rows = list(record.get("history") or [])           # newest first, already source-hash-clean
+    fit = [r for r in rows if applicable(r, commits=commits, since=since,
+                                         source_hash=source_hash, accepted=accepted)]
+    decided = [r for r in fit if str(_field(r, "result") or "") != "skip"]
+    evidence = [_evidence(r, True) for r in fit[:MAX_EVIDENCE]]
+    if not evidence and rows:
+        evidence = [_evidence(rows[0], False)]         # what there is, marked as not evidence
+    if not decided:
+        return STATUS_MISSING, evidence
+    result = str(_field(decided[0], "result") or "")
+    return (STATUS_FAILED if result in BAD_RESULTS else STATUS_PASSED), evidence
+
+
+def line_status(entry: dict, found: Sequence[dict], *, commits: Sequence[str] = (),
+                since: str = "", accepted: Sequence[str] = (), host: str = "") -> dict:
+    """One `## Tests` line's status: `{test, invocation, status, retired, evidence, …}`.
+
+    A line may name several tests (`tests/test_board.py` is every case in the file), and the line
+    is only as proven as its worst test: one applicable failure makes the line `failed`, one test
+    with no applicable evidence makes it `missing-evidence`, and otherwise it `passed`.
+
+    `use_existing` is the "Use this existing result" affordance (#PR4Q): true when the newest
+    execution for this line is a pass from **another** host — a CI or a second runner whose
+    results `tests_list` folded in from `.private/tests/incoming/` — that this card has not
+    accepted yet.  Accepting it is a decision, so it is offered rather than taken.
+    """
+    test_id = str(entry.get("id") or "")
+    invocation = str(entry.get("invocation") or test_id.split(":", 1)[-1])
+    out = {"test": test_id, "invocation": invocation, "status": STATUS_NA, "retired": False,
+           "evidence": [], "use_existing": False, "accepted": False, "message": ""}
+    if entry.get("runner") == P.RUNNER_MANUAL:
+        out["message"] = (f"manual evidence, recorded by hand: "
+                          f"{entry.get('file') or invocation}")
+        return out
+    if not found or all("gone" in (r.get("stale") or []) for r in found):
+        out["retired"] = True
+        out["message"] = f"{invocation} is not in the project any more"
+        return out
+
+    statuses: list[str] = []
+    evidence: list[dict] = []
+    for record in found:
+        status, rows = _record_status(record, commits=commits, since=since, accepted=accepted)
+        statuses.append(status)
+        evidence.extend(rows)
+    evidence.sort(key=lambda row: (row["applicable"], row["ts"]), reverse=True)
+    evidence = evidence[:MAX_EVIDENCE]
+    if STATUS_FAILED in statuses:
+        out["status"] = STATUS_FAILED
+    elif STATUS_MISSING in statuses:
+        out["status"] = STATUS_MISSING
+    elif STATUS_PASSED in statuses:
+        out["status"] = STATUS_PASSED
+    else:
+        out["retired"] = True
+        out["message"] = f"{invocation} is not in the project any more"
+        return out
+
+    newest = evidence[0] if evidence else None
+    out["evidence"] = evidence
+    out["accepted"] = bool(newest and newest["run_id"] in set(accepted or ()))
+    if out["status"] == STATUS_PASSED:
+        where = f" on {newest['host']}" if newest and newest["host"] else ""
+        when = f", {newest['ts']}" if newest and newest["ts"] else ""
+        out["message"] = f"{invocation} passed for this revision{where}{when}"
+    elif out["status"] == STATUS_FAILED:
+        where = f" on {newest['host']}" if newest and newest["host"] else ""
+        out["message"] = f"{invocation} failed for this revision{where}"
+    else:
+        out["message"] = (f"no run of {invocation} for this revision, from any host, and no "
+                          f"attached result")
+    if (newest is not None and newest["result"] == "pass" and newest["host"]
+            and newest["host"] != host and not out["accepted"]
+            and out["status"] != STATUS_FAILED):
+        out["use_existing"] = True
+    return out
+
+
+def card_statuses(test_lines: Sequence[str], records_list: Sequence[dict], *,
+                  commits: Sequence[str] = (), since: str = "", accepted: Sequence[str] = (),
+                  host: str = "") -> list[dict]:
+    """`line_status()` for every line of a card's `## Tests`, in the order the card lists them."""
+    out = []
+    for line in test_lines or []:
+        entry = parse_test_line(line)
+        if entry:
+            out.append(line_status(entry, resolve(entry, records_list), commits=commits,
+                                   since=since, accepted=accepted, host=host))
+    return out
+
+
 def check_card(test_lines: Sequence[str], card_commit_files: Sequence[str],
-               records_list: Sequence[dict]) -> dict:
-    """Check one card's `## Tests` section against discovery and history.  Silent when fine.
+               records_list: Sequence[dict], *, commits: Sequence[str] = (), since: str = "",
+               accepted: Sequence[str] = (), host: str = "") -> dict:
+    """Check one card's `## Tests` section against discovery and history.
 
     `test_lines` are the section's raw lines, `card_commit_files` the repo-relative files this
-    card's commits touched, `records_list` what `records()` returned.  The result is
+    card's commits touched, `records_list` what `records()` returned; `commits`, `since`,
+    `accepted` and `host` are the card's revision, as `applicable()` above defines it.  The
+    result is
 
-        {"findings": [{"test", "verdict", "message", "severity"}], "actions": [str]}
+        {"statuses": [{test, invocation, status, evidence, retired, use_existing, …}],
+         "findings": [{"test", "verdict", "message", "severity"}], "actions": [str]}
 
-    with `findings` **empty** when nothing is wrong — a report nobody must read is what every CI
-    product ends up ignoring, so this one only speaks when something moved.  Severities are
-    GitHub's Checks vocabulary (`failure` / `warning` / `notice`) and there are at most three
-    actions, which is that API's own cap.
+    **`statuses` is the answer** (card #PR4Q): one of `passed`, `failed`, `missing-evidence` or
+    `not-applicable` per listed test, decided by the executions that apply to this revision from
+    *any* host.  `findings` are what is additionally worth reading — the older verdicts, now
+    advisory notices — and stay **empty** when nothing moved, because a report nobody must read
+    is what every CI product ends up ignoring.  Severities are GitHub's Checks vocabulary
+    (`failure` / `warning` / `notice`) and there are at most three actions, which is that API's
+    own cap.
 
-    The verdicts, in the order they are emitted per test: **gone** (listed, absent from
-    discovery), **never-run** (no execution in the store), **skipped-forever** (disabled, or
-    skipped in every stored run), **edited** (source changed, history reset), **flaky**, **slow**.
-    One card-level **orphaned** finding is added when the card changed files and *no* listed
-    test's source shares a directory or a naming convention with any of them — convention-based
-    by design: there is no coverage data here, and a guess dressed as coverage would be worse
-    than an honest heuristic.
+    The verdicts, in the order they are emitted per test: **retired** (listed, absent from
+    discovery), **never-run** (no execution in the store at all), **skipped-forever** (disabled,
+    or skipped in every stored run), **edited** (source changed, history reset), **flaky**,
+    **slow**, and **failing** (added by `tests_protocol`).  One card-level **orphaned** finding
+    is added when the card changed files and *no* listed test's source shares a directory or a
+    naming convention with any of them — convention-based by design: there is no coverage data
+    here, and a guess dressed as coverage would be worse than an honest heuristic.
 
     A line need not name exactly one test: `resolve()` below takes `tests/test_board.py` as every
     case in that file and `ctest -R board` as the regex ctest would, so a section written the way
@@ -865,6 +1058,8 @@ def check_card(test_lines: Sequence[str], card_commit_files: Sequence[str],
     matched: dict[str, list[dict]] = {}
     for entry in listed:
         matched[entry["id"]] = resolve(entry, records_list)
+    statuses = [line_status(entry, matched.get(entry["id"]) or [], commits=commits, since=since,
+                            accepted=accepted, host=host) for entry in listed]
 
     for entry in listed:
         test_id = entry["id"]
@@ -877,9 +1072,9 @@ def check_card(test_lines: Sequence[str], card_commit_files: Sequence[str],
             continue
         found = matched.get(test_id) or []
         if not found:
-            findings.append(_finding(test_id, "gone",
+            findings.append(_finding(test_id, "retired",
                                      f"{entry['invocation']} is not in the project any more",
-                                     "failure"))
+                                     "notice"))
             continue
         if len(found) == 1:
             findings.extend(_test_findings(entry, found[0]))
@@ -904,17 +1099,21 @@ def check_card(test_lines: Sequence[str], card_commit_files: Sequence[str],
                                  "warning"))
 
     verdicts = {f["verdict"] for f in findings}
+    kinds = {row["status"] for row in statuses}
     actions: list[str] = []
-    if verdicts & {"never-run", "edited"}:
+    # The three Codex's review names — "Run", "Use this existing result", "Replace retired
+    # check" — minus the middle one, which needs a run id and so rides on the status row itself
+    # rather than on a button about the whole card.
+    if kinds & {STATUS_FAILED, STATUS_MISSING} or "edited" in verdicts:
         actions.append("Run these")
+    if any(row["retired"] for row in statuses):
+        actions.append("Replace retired check")
+    if STATUS_FAILED in kinds or any(r.get("last_result") in BAD_RESULTS
+                                     for group in matched.values() for r in group):
+        actions.append("Open the failing one")
     if "orphaned" in verdicts:
         actions.append("Add the tests this card's commits touched")
-    if any(r.get("last_result") in BAD_RESULTS
-           for group in matched.values() for r in group):
-        actions.append("Open the failing one")
-    elif "gone" in verdicts and len(actions) < 3:
-        actions.append("Remove the tests that are gone")
-    return {"findings": findings, "actions": actions[:3]}
+    return {"statuses": statuses, "findings": findings, "actions": actions[:3]}
 
 
 def resolve(entry: dict, records_list: Sequence[dict]) -> list[dict]:
@@ -952,13 +1151,13 @@ def _test_findings(entry: dict, record: dict) -> list[dict]:
     stale = record.get("stale") or []
     out: list[dict] = []
     if "gone" in stale:
-        return [_finding(test_id, "gone",
-                         f"{shown} has history but is no longer collected", "failure")]
+        return [_finding(test_id, "retired",
+                         f"{shown} has history but is no longer collected", "notice")]
     if not record.get("last_run"):
-        out.append(_finding(test_id, "never-run", f"{shown} has never run here", "failure"))
+        out.append(_finding(test_id, "never-run", f"{shown} has never run here", "notice"))
     if "skipped-forever" in stale:
         out.append(_finding(test_id, "skipped-forever",
-                            f"{shown} is skipped in every run", "warning"))
+                            f"{shown} is skipped in every run", "notice"))
     if "edited" in stale:
         out.append(_finding(test_id, "edited",
                             f"{shown} was edited; its history was reset", "notice"))
@@ -966,7 +1165,7 @@ def _test_findings(entry: dict, record: dict) -> list[dict]:
         out.append(_finding(test_id, "flaky",
                             f"{shown} flips between pass and fail "
                             f"(flake score {record.get('flake_score', 0)}, "
-                            f"reliability {record.get('reliability', 0)}%)", "warning"))
+                            f"reliability {record.get('reliability', 0)}%)", "notice"))
     if record.get("slow"):
         out.append(_finding(test_id, "slow",
                             f"{shown} is slow: p95 {record.get('duration_p95', 0):.2f} s, "

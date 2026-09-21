@@ -477,17 +477,22 @@ class CheckCardTests(unittest.TestCase):
         self.assertEqual(out["findings"], [])
         self.assertEqual(out["actions"], [])
 
-    def test_a_listed_test_that_does_not_exist_is_gone(self):
+    def test_a_listed_test_that_does_not_exist_is_retired(self):
+        # #PR4Q: "gone" was a failure that blocked the landing; a retired check is a notice
+        # beside a `not-applicable` status, with the action that replaces it.
         out = H.check_card(["- `ctest -R vanished`"], [], self.records_for(
             {"id": "ctest:panelayout", "results": ["pass"]}))
-        self.assertEqual([f["verdict"] for f in out["findings"]], ["gone"])
-        self.assertEqual(out["findings"][0]["severity"], "failure")
-        self.assertIn("Remove the tests that are gone", out["actions"])
+        self.assertEqual([f["verdict"] for f in out["findings"]], ["retired"])
+        self.assertEqual(out["findings"][0]["severity"], "notice")
+        self.assertIn("Replace retired check", out["actions"])
+        self.assertEqual([s["status"] for s in out["statuses"]], [H.STATUS_NA])
+        self.assertTrue(out["statuses"][0]["retired"])
 
     def test_a_test_with_history_but_gone_from_discovery(self):
         records = H.records([], [ex("ctest:old", minutes=1)])
         out = H.check_card(["- `ctest -R old`"], [], records)
-        self.assertEqual([f["verdict"] for f in out["findings"]], ["gone"])
+        self.assertEqual([f["verdict"] for f in out["findings"]], ["retired"])
+        self.assertEqual([s["status"] for s in out["statuses"]], [H.STATUS_NA])
 
     def test_never_run_asks_to_run_them(self):
         out = H.check_card(["- `ctest -R fresh`"], [],
@@ -595,6 +600,140 @@ class CheckCardTests(unittest.TestCase):
     def test_manual_evidence_that_is_not_there(self):
         out = H.check_card(["- manual: docs/qa_evidence/no-such-directory/"], [], [])
         self.assertEqual([f["verdict"] for f in out["findings"]], ["gone"])
+
+
+class StatusTests(unittest.TestCase):
+    """The four statuses, applicability and the attached result (card #PR4Q)."""
+
+    REV = "a1b2c3d4e5f6"
+
+    def records_for(self, *rows):
+        found = [discovered(spec["id"], file=spec.get("file", ""),
+                            source_hash=spec.get("source_hash", "")) for spec in rows]
+        executions = []
+        for spec in rows:
+            executions.extend(spec.get("executions", []))
+        return H.records(found, executions)
+
+    def statuses(self, lines, records_list, **kw):
+        return {row["test"]: row
+                for row in H.card_statuses(lines, records_list, **kw)}
+
+    def test_the_four_statuses_on_one_card(self):
+        records = self.records_for(
+            {"id": "ctest:totals", "executions": [ex("ctest:totals", "pass", minutes=10,
+                                                     commit=self.REV, host="desktop")]},
+            {"id": "ctest:large", "executions": [ex("ctest:large", "fail", minutes=11,
+                                                    commit=self.REV, host="desktop")]},
+            {"id": "ctest:fresh", "executions": []})
+        out = H.check_card(["- `ctest -R totals`", "- `ctest -R large`", "- `ctest -R fresh`",
+                            "- `ctest -R rounding`"], [], records, commits=[self.REV])
+        self.assertEqual([row["status"] for row in out["statuses"]],
+                         [H.STATUS_PASSED, H.STATUS_FAILED, H.STATUS_MISSING, H.STATUS_NA])
+        self.assertEqual(sorted(H.STATUSES), sorted({H.STATUS_PASSED, H.STATUS_FAILED,
+                                                     H.STATUS_MISSING, H.STATUS_NA}))
+
+    def test_a_run_from_another_host_for_this_revision_is_evidence(self):
+        # Codex, §C: "'never run here' is not 'never run'". The store is host-agnostic, so a
+        # green run fetched from the second runner proves the card.
+        records = self.records_for({"id": "ctest:totals", "executions": [
+            ex("ctest:totals", "pass", minutes=5, commit=self.REV, host="sphinxpad",
+               run_id="remote-1")]})
+        rows = self.statuses(["- `ctest -R totals`"], records, commits=[self.REV], host="spark")
+        row = rows["ctest:totals"]
+        self.assertEqual(row["status"], H.STATUS_PASSED)
+        self.assertEqual(row["evidence"][0]["host"], "sphinxpad")
+        self.assertTrue(row["evidence"][0]["applicable"])
+        # …and because the newest result is another machine's, the card offers to take it.
+        self.assertTrue(row["use_existing"])
+        self.assertNotIn("never", row["message"])
+
+    def test_a_result_this_card_accepted_counts_whatever_its_commit(self):
+        records = self.records_for({"id": "ctest:totals", "executions": [
+            ex("ctest:totals", "pass", minutes=1, commit="9999999999", host="ci",
+               run_id="ci-77")]})
+        without = self.statuses(["- `ctest -R totals`"], records, commits=[self.REV],
+                                since=at(100))
+        self.assertEqual(without["ctest:totals"]["status"], H.STATUS_MISSING)
+        with_accept = self.statuses(["- `ctest -R totals`"], records, commits=[self.REV],
+                                    since=at(100), accepted=["ci-77"])
+        self.assertEqual(with_accept["ctest:totals"]["status"], H.STATUS_PASSED)
+        self.assertTrue(with_accept["ctest:totals"]["accepted"])
+        self.assertFalse(with_accept["ctest:totals"]["use_existing"])   # never asked twice
+
+    def test_a_pass_from_before_the_card_is_not_evidence_for_it(self):
+        # "'passed last time' is not proof about this change" (§C).
+        records = self.records_for({"id": "ctest:totals", "executions": [
+            ex("ctest:totals", "pass", minutes=1, commit="0000000000", host="spark")]})
+        rows = self.statuses(["- `ctest -R totals`"], records, commits=[self.REV],
+                             since=at(100))
+        self.assertEqual(rows["ctest:totals"]["status"], H.STATUS_MISSING)
+        self.assertFalse(rows["ctest:totals"]["evidence"][0]["applicable"])
+
+    def test_a_run_after_the_cards_last_commit_with_the_same_source_counts(self):
+        records = self.records_for({"id": "ctest:totals", "source_hash": "sha256:aa",
+                                    "executions": [ex("ctest:totals", "pass", minutes=120,
+                                                      commit="feedface11", host="spark",
+                                                      source_hash="sha256:aa")]})
+        rows = self.statuses(["- `ctest -R totals`"], records, commits=[self.REV],
+                             since=at(100))
+        self.assertEqual(rows["ctest:totals"]["status"], H.STATUS_PASSED)
+
+    def test_a_run_of_a_different_version_of_the_test_is_not_evidence(self):
+        records = self.records_for({"id": "ctest:totals", "source_hash": "sha256:bb",
+                                    "executions": [ex("ctest:totals", "pass", minutes=120,
+                                                      commit="feedface11", host="spark",
+                                                      source_hash="sha256:aa")]})
+        rows = self.statuses(["- `ctest -R totals`"], records, commits=[self.REV],
+                             since=at(100))
+        self.assertEqual(rows["ctest:totals"]["status"], H.STATUS_MISSING)
+
+    def test_a_card_with_no_commits_reads_every_run_of_todays_test(self):
+        records = self.records_for({"id": "ctest:totals", "executions": [
+            ex("ctest:totals", "pass", minutes=1, commit="0000000000")]})
+        rows = self.statuses(["- `ctest -R totals`"], records)
+        self.assertEqual(rows["ctest:totals"]["status"], H.STATUS_PASSED)
+
+    def test_commits_match_by_prefix_either_way_round(self):
+        self.assertTrue(H.same_commit("3f2a9c1e", "3f2a9c1e4d5b"))
+        self.assertTrue(H.same_commit("3f2a9c1e4d5b", "3f2a9c1e"))
+        self.assertFalse(H.same_commit("3f2a9c1e", "3f2a9c11"))
+        self.assertFalse(H.same_commit("", "3f2a9c1e"))
+        self.assertFalse(H.same_commit("3f2a", "3f2a"))        # too short to mean anything
+
+    def test_a_manual_line_is_not_applicable_and_never_blocks(self):
+        rows = self.statuses(["- manual: docs/qa_evidence/2026-09-21-thing/"], [])
+        row = rows["manual:docs/qa_evidence/2026-09-21-thing/"]
+        self.assertEqual(row["status"], H.STATUS_NA)
+        self.assertNotIn(row["status"], H.BLOCKING_STATUSES)
+
+    def test_a_line_is_as_proven_as_its_worst_test(self):
+        records = self.records_for(
+            {"id": "unittest:tests.test_x.T.test_a", "file": "tests/test_x.py",
+             "executions": [ex("unittest:tests.test_x.T.test_a", "pass", minutes=3,
+                               commit=self.REV)]},
+            {"id": "unittest:tests.test_x.T.test_b", "file": "tests/test_x.py",
+             "executions": []})
+        rows = self.statuses(["- `tests/test_x.py`"], records, commits=[self.REV])
+        self.assertEqual(rows["unittest:tests.test_x"]["status"], H.STATUS_MISSING)
+
+    def test_a_failed_test_is_failed_even_when_an_older_run_passed(self):
+        records = self.records_for({"id": "ctest:totals", "executions": [
+            ex("ctest:totals", "pass", minutes=1, commit=self.REV),
+            ex("ctest:totals", "fail", minutes=9, commit=self.REV)]})
+        rows = self.statuses(["- `ctest -R totals`"], records, commits=[self.REV])
+        self.assertEqual(rows["ctest:totals"]["status"], H.STATUS_FAILED)
+        self.assertFalse(rows["ctest:totals"]["use_existing"])
+
+    def test_the_statuses_are_json_and_carry_the_wire_keys(self):
+        records = self.records_for({"id": "ctest:totals", "executions": [
+            ex("ctest:totals", "pass", minutes=1, commit=self.REV, host="ci", run_id="ci-1")]})
+        rows = H.card_statuses(["- `ctest -R totals`"], records, commits=[self.REV])
+        self.assertEqual(set(rows[0]), {"test", "invocation", "status", "retired", "evidence",
+                                        "use_existing", "accepted", "message"})
+        self.assertEqual(set(rows[0]["evidence"][0]),
+                         {"run_id", "host", "commit", "ts", "result", "applicable"})
+        json.dumps(rows)
 
 
 if __name__ == "__main__":                                # pragma: no cover
