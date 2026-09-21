@@ -172,8 +172,8 @@ Layout rules:
 - **Recently closed** (`src/ClosedStack.h`, `WindowManager::remember` / `restoreClosed`). The last
   25 closed panes, tabs and windows, newest last, each with when it closed, where it sat (split
   direction, divider sizes, tab position, window geometry), hand-set tab names and what its panes
-  were called. `closed.restore` (Ctrl+Shift+Z) reopens the newest; `closed.list` and the "Recently
-  closed" group in the Actions pane reopen any of them. The list is written to
+  were called. `closed.restore` (Ctrl+Shift+Z) reopens the newest; `closed.list` (Actions › Recently closed…) opens a searchable modal
+  for reopening any of them. Sessions retains a Recently closed tab using the same list widget. The list is written to
   `state/closed.json` (0600, atomic) on every change and read back on start, under the same
   rules as the saved layout: only the Relay that owns the layout reads or writes it, and not at
   all when `windows/restore` is off. A pane that ends because its shell exited (`exit`) is

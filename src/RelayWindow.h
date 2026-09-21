@@ -4552,29 +4552,7 @@ private:
         items << actionItem(panes, QStringLiteral("Move pane up"), QString(), QStringLiteral("pane.moveUp"));
         items << actionItem(panes, QStringLiteral("Move pane down"), QStringLiteral("Straight after a left/right move, beneath that neighbor"), QStringLiteral("pane.moveDown"));
         items << actionItem(panes, QStringLiteral("Restore closed"), QStringLiteral("Last closed pane, tab or window"), QStringLiteral("closed.restore"));
-        items << actionItem(panes, QStringLiteral("Recently closed…"), QStringLiteral("The last 25 closed panes, tabs and windows, in the Sessions pane"), QStringLiteral("closed.list"));
-        // Any of the last 25, newest first (src/ClosedStack.h). Searching the actions finds them by
-        // name and by directory.
-        if (const QList<relay::closed::Record> closed = m_manager->closedRecords(); !closed.isEmpty()) {
-            items << submenu(QStringLiteral("menu:closed"), panes, QStringLiteral("Recently closed"),
-                             QStringLiteral("%1 to reopen, with their text and conversations").arg(closed.size()), [this] {
-                QList<PaletteItem> children;
-                const QList<relay::closed::Record> records = m_manager->closedRecords();
-                const qint64 now = QDateTime::currentMSecsSinceEpoch();
-                for (auto it = records.crbegin(); it != records.crend(); ++it) {
-                    PaletteItem item;
-                    const QString id = it->id;
-                    item.key = QStringLiteral("closed:") + id; item.section = QStringLiteral("Panes and tabs");
-                    item.label = QStringLiteral("Reopen %1: %2").arg(relay::closed::kindName(it->kind).toLower(), relay::closed::label(*it));
-                    item.detail = QStringList{relay::closed::place(*it, QDir::homePath()), relay::closed::age(it->closedAt, now)}
-                                      .filter(QRegularExpression(QStringLiteral("."))).join(QStringLiteral(" · "));
-                    item.aliases = QStringLiteral("restore closed undo reopen");
-                    item.run = [this, id] { m_manager->restoreClosed(this, id); };
-                    children << item;
-                }
-                return children;
-            });
-        }
+        items << actionItem(panes, QStringLiteral("Recently closed…"), QStringLiteral("Choose from the last 25 closed panes, tabs and windows"), QStringLiteral("closed.list"));
         // "Reopen windows on start" is a row in Options › General.
         items << actionItem(panes, QStringLiteral("Start a fresh window set"),
                             QStringLiteral("Forget the saved layout; the next start opens one new window"),
@@ -10365,32 +10343,49 @@ private:
         return best < 0 ? nullptr : panes.at(best);
     }
 
-    // closed.list: the session manager pane, on its "Recently closed" tab (card #R6J0 owns the
-    // pane; registerClosedTab() below is what puts the tab in it).
-    void openClosedList() { openSessions(QStringLiteral("closed")); }
+    // Actions opens the list only when requested; Sessions keeps its own tab of the same view.
+    void openClosedList() {
+        QDialog dialog(this);
+        dialog.setObjectName(QStringLiteral("recentlyClosedPicker"));
+        dialog.setWindowTitle(QStringLiteral("Recently closed"));
+        dialog.resize(860, 520);
+        auto *layout = new QVBoxLayout(&dialog);
+        auto *view = createClosedList(this);
+        layout->addWidget(view);
+        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        layout->addWidget(buttons);
+        QString chosen;
+        view->onReopen = [&](const QString &id) { chosen = id; dialog.accept(); };
+        if (dialog.exec() == QDialog::Accepted && !chosen.isEmpty())
+            m_manager->restoreClosed(this, chosen);
+    }
+
+    static relay::closed::ListView *createClosedList(RelayWindow *window) {
+        auto *view = new relay::closed::ListView;
+        WindowManager *manager = window->m_manager;
+        QPointer<RelayWindow> guard(window);
+        view->setRecords(manager->closedRecords());
+        manager->watchClosed(view, [view, manager] { view->setRecords(manager->closedRecords()); });
+        view->onReopen = [manager, guard](const QString &id) { manager->restoreClosed(guard, id); };
+        view->onDiscard = [manager](const QString &id) { manager->discardClosed(id); };
+        view->onClear = [manager, view] {
+            if (QMessageBox::question(view, QStringLiteral("Clear recently closed?"),
+                                      QStringLiteral("Forget all %1 closed items and the terminal text saved for them? "
+                                                     "Their conversations stay in Sessions.").arg(manager->closedRecords().size()),
+                                      QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) == QMessageBox::Yes)
+                manager->forgetClosed();
+        };
+        return view;
+    }
 
 public:
-    // The "Recently closed" tab of every session manager (src/ClosedList.h). One widget per pane,
-    // all showing the manager's one list and refreshed whenever it changes.
     static void registerClosedTab() {
         addSessionsTab(QStringLiteral("closed"), QStringLiteral("Recently closed"), [](RelayWindow *window) -> QWidget * {
-            auto *view = new relay::closed::ListView;
-            WindowManager *manager = window->m_manager;
-            QPointer<RelayWindow> guard(window);
-            view->setRecords(manager->closedRecords());
-            manager->watchClosed(view, [view, manager] { view->setRecords(manager->closedRecords()); });
-            view->onReopen = [manager, guard](const QString &id) { manager->restoreClosed(guard, id); };
-            view->onDiscard = [manager](const QString &id) { manager->discardClosed(id); };
-            view->onClear = [manager, guard, view] {
-                if (QMessageBox::question(view, QStringLiteral("Clear recently closed?"),
-                                          QStringLiteral("Forget all %1 closed items and the terminal text saved for them? "
-                                                         "Their conversations stay in Sessions.").arg(manager->closedRecords().size()),
-                                          QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) == QMessageBox::Yes)
-                    manager->forgetClosed();
-            };
-            return view;
+            return createClosedList(window);
         });
     }
+
 private:
 
     void closeActive() {
