@@ -1,7 +1,7 @@
 ---
 id: FT77
 type: work
-status: executing
+status: needs-verification
 labels: [feature, switchboard]
 assignee: agent
 implemented_by: kimi/kimi-k3
@@ -9,7 +9,7 @@ session: e273439f-004b-4369-b20d-b81d11a21ec0
 rank: zzzzzzzzzzzzzzzzr
 created: '2026-09-20'
 source: pane, 2026-09-20
-links: {plans: [], commits: [], evidence: [], related: [3ZAP, Y2F4], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-switchboard-ref-copy-button/], related: [3ZAP, Y2F4], github: null}
 ---
 # A ⧉ copy button beside a card's #ID — in the rows and on the card page
 
@@ -30,14 +30,14 @@ A ⧉ copy button beside a card's `#ID`, on both surfaces the screenshots named.
 Nothing about the reference behaviour changed: a `#ID` in the card's words still zooms, no copy.
 
 ## Tasks
+- [x] Row: idCopyRect + painted ⧉ + one-gesture hit-test, id column widened <!-- t:b4 -->
+- [x] Card page: ⧉ button beside the ref, styled, same copy <!-- t:z2 -->
+- [x] copyTag path: clipboard + notice + toast for both <!-- t:sz -->
+- [x] Shortcut hint "Next time: y" on both clicks; registry entry <!-- t:b7 -->
+- [x] Unit test + the #3ZAP test's plain-row click moved onto the title <!-- t:xq -->
+- [x] Live Xvfb drive 25/25, evidence dir <!-- t:dk -->
+- [x] Land through scripts/land.py, my hunks only — 19df94e6d3a1 <!-- t:mz -->
 
-- [x] Row: idCopyRect + painted ⧉ + one-gesture hit-test, id column widened <!-- t:9c -->
-- [x] Card page: ⧉ button beside the ref, styled, same copy <!-- t:5j -->
-- [x] copyTag path: clipboard + notice + toast for both <!-- t:fp -->
-- [x] Shortcut hint "Next time: y" on both clicks; registry entry <!-- t:d6 -->
-- [x] Unit test + the #3ZAP test's plain-row click moved onto the title <!-- t:ss -->
-- [x] Live Xvfb drive 25/25, evidence dir <!-- t:jj -->
-- [ ] Land through scripts/land.py, my hunks only <!-- t:g8 s=in-progress -->
 
 ## Tests
 - `./build/relay-board-tests theRefCopyButtonCopiesTheIdInTheRowsAndTheHeader` — PASS (header button: clipboard, notice, toast, the `y` hint; row ⧉: sweep finds it, copies without selecting).
