@@ -12,10 +12,12 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QScrollBar>
+#include <QSettings>
 #include <QStackedWidget>
 #include <QTabBar>
 #include <QTextCharFormat>
 #include <QTextCursor>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -31,6 +33,39 @@ QString sanitize(const QString &text) {
         if (u == '\n' || u == '\t' || (u >= 0x20 && u != 0x7f && !(u >= 0x80 && u < 0xa0))) clean += c;
     }
     return clean;
+}
+
+calllines::Palette transcriptPalette(bool prose = false) {
+    calllines::Palette p;
+    p.text = prose ? theme::Agent : theme::Text;
+    p.muted = prose ? theme::Text : theme::TextMuted;
+    p.code = theme::SyntaxCommand;
+    p.link = theme::Link;
+    p.error = theme::SyntaxUnknown;
+    p.accent = theme::Accent;
+    return p;
+}
+
+void insertMarkdown(QTextCursor &cursor, const QVector<FoldLine> &lines, bool finalNewline) {
+    for (int i = 0; i < lines.size(); ++i) {
+        for (const auto &span : lines.at(i).spans) {
+            QTextCharFormat f;
+            f.setForeground(span.fg.isValid() ? span.fg : theme::Text);
+            f.setFontWeight(span.bold ? QFont::Bold : QFont::Normal);
+            f.setFontItalic(span.italic);
+            f.setFontUnderline(span.underline);
+            cursor.insertText(span.text, f);
+        }
+        if (i + 1 < lines.size() || finalNewline) cursor.insertText(QStringLiteral("\n"), QTextCharFormat{});
+    }
+}
+
+QString thinkingDisplay() {
+    QSettings settings;
+    const QString value = settings.value(QStringLiteral("agent/thinking_display")).toString();
+    if (!value.isEmpty()) return value;
+    return settings.value(QStringLiteral("agent/show_thinking"), true).toBool()
+        ? QStringLiteral("collapse") : QStringLiteral("never");
 }
 
 }  // namespace
@@ -117,6 +152,7 @@ void SubagentTranscriptView::restore(const QString &type, const QString &descrip
                        ? QStringLiteral("stopped") : status;
     m_title->setText(title());
     m_log->clear(); m_atLineStart = true;
+    m_prose.reset(); m_thinking = -1;
     m_calls.clear(); m_merge.clear(); m_mergeHead = -1;
     if (!text.isEmpty()) append(text, Ink::Agent);
     setEnded(true);
@@ -157,7 +193,7 @@ bool SubagentTranscriptView::eventFilter(QObject *object, QEvent *event) {
         // the log to copy must not fold rows open under the pointer.
         if (mouse->button() == Qt::LeftButton && !m_log->textCursor().hasSelection()) {
             const int at = callAt(m_log->cursorForPosition(mouse->pos()).blockNumber());
-            if (at >= 0) { toggleToolCall(at); return true; }
+            if (at >= 0) { m_calls[at].userToggled = true; toggleRow(at); return true; }
         }
     }
     if (object == m_input && event->type() == QEvent::KeyPress) {
@@ -178,6 +214,7 @@ bool SubagentTranscriptView::eventFilter(QObject *object, QEvent *event) {
 }
 
 void SubagentTranscriptView::append(const QString &text, Ink ink) {
+    finishProse();
     const QString clean = sanitize(text);
     if (clean.isEmpty()) return;
     // Same two-level scheme as the terminal's inks (main.cpp, owner 2026-09-18): user lines carry
@@ -200,6 +237,82 @@ void SubagentTranscriptView::append(const QString &text, Ink ink) {
     if (follow) bar->setValue(bar->maximum());
 }
 
+void SubagentTranscriptView::finishProse() {
+    m_prose.reset();
+}
+
+void SubagentTranscriptView::appendProse(const QString &text) {
+    if (text.isEmpty()) return;
+    m_merge.clear(); m_mergeHead = -1;
+    QScrollBar *bar = m_log->verticalScrollBar();
+    const bool follow = bar->value() >= bar->maximum() - 4;
+    if (!m_prose) {
+        m_prose = std::make_unique<calllines::MarkdownStream>(transcriptPalette(true));
+        m_proseTail = QTextCursor(m_log->document());
+        m_proseTail.movePosition(QTextCursor::End);
+    }
+    QTextCursor cursor(m_log->document());
+    cursor.setPosition(m_proseTail.position());
+    cursor.movePosition(QTextCursor::End, QTextCursor::KeepAnchor);
+    cursor.removeSelectedText();
+    insertMarkdown(cursor, m_prose->feed(sanitize(text)), true);
+    const int tailStart = cursor.position();
+    insertMarkdown(cursor, m_prose->tail(), false);
+    m_proseTail = QTextCursor(m_log->document());
+    m_proseTail.setPosition(tailStart);
+    m_proseTail.setKeepPositionOnInsert(false); // a tool fold inserted before this tail moves it
+    m_atLineStart = cursor.atBlockStart();
+    if (follow) bar->setValue(bar->maximum());
+}
+
+void SubagentTranscriptView::refreshThinking() {
+    m_thinkingRefreshPending = false;
+    if (m_thinking < 0 || m_thinking >= m_calls.size() || !m_calls[m_thinking].expanded) return;
+    QScrollBar *bar = m_log->verticalScrollBar();
+    const bool follow = bar->value() >= bar->maximum() - 4;
+    toggleRow(m_thinking);
+    toggleRow(m_thinking);
+    if (follow) bar->setValue(bar->maximum());
+}
+
+void SubagentTranscriptView::thinkingEvent(const QJsonObject &payload) {
+    const bool done = payload.value(QStringLiteral("event")).toString() == QStringLiteral("thinking_done");
+    if (m_thinking < 0) {
+        if (!done && thinkingDisplay() == QStringLiteral("never")) return;
+        ensureLineStart(); finishProse();
+        m_merge.clear(); m_mergeHead = -1;
+        ToolCall call;
+        call.thinking = true;
+        const int start = m_log->document()->characterCount() - 1;
+        append(QStringLiteral(" \n"), Ink::Note);
+        call.line = QTextCursor(m_log->document()); call.line.setPosition(start);
+        call.after = QTextCursor(m_log->document());
+        call.after.setPosition(m_log->document()->characterCount() - 1);
+        call.after.setKeepPositionOnInsert(true);
+        m_calls.append(call); forgetCalls(); m_thinking = m_calls.size() - 1;
+    }
+    ToolCall &call = m_calls[m_thinking];
+    if (!done) {
+        call.detail = (call.detail + sanitize(payload.value(QStringLiteral("text")).toString())).right(400000);
+        drawRow(call);
+        if (!call.expanded && !call.userToggled) toggleRow(m_thinking);
+        if (!m_thinkingRefreshPending) {
+            m_thinkingRefreshPending = true;
+            QTimer::singleShot(250, this, [this] { refreshThinking(); });
+        }
+        return;
+    }
+    const bool keepOpen = call.userToggled ? call.expanded : thinkingDisplay() == QStringLiteral("always");
+    if (call.expanded) toggleRow(m_thinking);
+    call.done = true;
+    const qint64 ms = payload.value(QStringLiteral("elapsed_ms")).toVariant().toLongLong();
+    call.label.title = QStringLiteral("✦ thought for %1 s").arg(QString::number(ms / 1000.0, 'f', 1));
+    drawRow(call);
+    if (keepOpen) toggleRow(m_thinking);
+    m_thinking = -1;
+    m_atLineStart = true;
+}
+
 void SubagentTranscriptView::appendNote(const QString &text) {
     ensureLineStart();
     append(text + QLatin1Char('\n'), Ink::Note);
@@ -208,6 +321,9 @@ void SubagentTranscriptView::appendNote(const QString &text) {
 // ----- one line per tool call (protocol § 23, card #TK9C) --------------------------------------
 
 QString SubagentTranscriptView::rowText(const ToolCall &call) const {
+    if (call.thinking)
+        return (call.expanded ? QStringLiteral("▾ ") : QStringLiteral("▸ "))
+            + (call.done ? call.label.title : QStringLiteral("✦ thinking…"));
     // The marker and the arrow are this surface's, not the backend's (§ 23): ✗ for a call that
     // failed, ▾ for a row whose detail is folded open, ▸ for one that can be.
     const QString marker = call.done && call.label.failed() ? QStringLiteral("✗")
@@ -255,6 +371,7 @@ void SubagentTranscriptView::forgetCalls() {
     while (m_calls.size() > kKeepRows) {
         m_calls.removeFirst();
         if (m_mergeHead >= 0) --m_mergeHead;
+        if (m_thinking >= 0) --m_thinking;
     }
     if (m_mergeHead < 0 || m_mergeHead >= m_calls.size()) { m_mergeHead = -1; m_merge.clear(); }
 }
@@ -284,7 +401,7 @@ void SubagentTranscriptView::toolResult(const QJsonObject &payload) {
     int at = indexOfCall(callId);
     if (at < 0 && callId.isEmpty())                     // an old worker names no call: the row still
         for (int i = m_calls.size() - 1; i >= 0; --i)   // running is the one that has landed
-            if (!m_calls.at(i).done) { at = i; break; }
+            if (!m_calls.at(i).done && !m_calls.at(i).thinking) { at = i; break; }
     if (at < 0) {                                       // no tool_started reached us: open a row now
         toolStarted(QJsonObject{{"call_id", callId}, {"tool", payload.value(QStringLiteral("tool"))}});
         at = m_calls.size() - 1;
@@ -348,13 +465,24 @@ void SubagentTranscriptView::toolResult(const QJsonObject &payload) {
 void SubagentTranscriptView::toolOutput(const QString &text) {
     // Output belongs behind the line, not in front of it: it goes into the fold of the call that
     // is running, and only reaches the log when there is no row to put it on.
-    if (m_calls.isEmpty() || m_calls.last().done) { append(text, Ink::ToolOutput); return; }
+    if (m_calls.isEmpty() || m_calls.last().done || m_calls.last().thinking) { append(text, Ink::ToolOutput); return; }
     ToolCall &call = m_calls.last();
     call.detail = (call.detail + text).right(16000);
-    if (call.expanded) { toggleToolCall(m_calls.size() - 1); toggleToolCall(m_calls.size() - 1); }
+    if (call.expanded) { toggleRow(m_calls.size() - 1); toggleRow(m_calls.size() - 1); }
 }
 
 void SubagentTranscriptView::toggleToolCall(int index) {
+    for (int i = 0; i < m_calls.size(); ++i)
+        if (!m_calls.at(i).thinking && index-- == 0) { toggleRow(i); return; }
+}
+
+int SubagentTranscriptView::toolCallCount() const {
+    int count = 0;
+    for (const auto &call : m_calls) if (!call.thinking) ++count;
+    return count;
+}
+
+void SubagentTranscriptView::toggleRow(int index) {
     if (index < 0 || index >= m_calls.size()) return;
     ToolCall &call = m_calls[index];
     if (call.expanded) {
@@ -380,16 +508,29 @@ void SubagentTranscriptView::toggleToolCall(int index) {
     const int before = m_log->document()->characterCount();
     QTextCharFormat format;
     format.setForeground(inkColor(Ink::ToolOutput));
-    for (const QString &line : detail.split(QLatin1Char('\n'))) {
-        QTextCharFormat lineFormat = format;
-        if (line.startsWith(QLatin1Char('+')) && !line.startsWith(QStringLiteral("+++"))) {
-            lineFormat.setForeground(inkColor(Ink::DiffAdd));
-            lineFormat.setBackground(theme::Success);
-        } else if (line.startsWith(QLatin1Char('-')) && !line.startsWith(QStringLiteral("---"))) {
-            lineFormat.setForeground(inkColor(Ink::DiffRemove));
-            lineFormat.setBackground(theme::Error);
+    if (call.thinking) {
+        calllines::FoldOptions options;
+        options.maxLines = call.done ? calllines::kFoldLineCap : calllines::kThinkingStreamRows;
+        const int cells = qMax(10, m_log->viewport()->width() / qMax(1, m_log->fontMetrics().horizontalAdvance(QLatin1Char('M'))) - 4);
+        auto lines = calllines::foldForMarkdown(call.done ? detail : detail.right(12000), transcriptPalette(), options, cells, !call.done);
+        for (auto &line : lines) {
+            for (auto &span : line.spans) span.text.remove(QStringLiteral(" · open in pane"));
+            FoldSpan indent; indent.text = QStringLiteral("    "); line.spans.prepend(indent);
         }
-        cursor.insertText(sanitize(QStringLiteral("    ") + line + QLatin1Char('\n')), lineFormat);
+        if (lines.isEmpty()) lines = calllines::foldForNote(QStringLiteral("    (No reasoning was kept for this block.)"), transcriptPalette());
+        insertMarkdown(cursor, lines, true);
+    } else {
+        for (const QString &line : detail.split(QLatin1Char('\n'))) {
+            QTextCharFormat lineFormat = format;
+            if (line.startsWith(QLatin1Char('+')) && !line.startsWith(QStringLiteral("+++"))) {
+                lineFormat.setForeground(inkColor(Ink::DiffAdd));
+                lineFormat.setBackground(theme::Success);
+            } else if (line.startsWith(QLatin1Char('-')) && !line.startsWith(QStringLiteral("---"))) {
+                lineFormat.setForeground(inkColor(Ink::DiffRemove));
+                lineFormat.setBackground(theme::Error);
+            }
+            cursor.insertText(sanitize(QStringLiteral("    ") + line + QLatin1Char('\n')), lineFormat);
+        }
     }
     call.foldChars = m_log->document()->characterCount() - before;
     call.expanded = true;
@@ -398,7 +539,7 @@ void SubagentTranscriptView::toggleToolCall(int index) {
 
 QStringList SubagentTranscriptView::toolLines() const {
     QStringList out;
-    for (const ToolCall &call : m_calls) out << rowText(call);
+    for (const ToolCall &call : m_calls) if (!call.thinking) out << rowText(call);
     return out;
 }
 
@@ -406,6 +547,7 @@ void SubagentTranscriptView::handleEvent(const QJsonObject &event) {
     const QString type = event.value(QStringLiteral("event")).toString();
     if (type == QStringLiteral("subagent_transcript")) {
         m_log->clear(); m_atLineStart = true; m_snapshot = true;
+        m_prose.reset(); m_thinking = -1;
         m_calls.clear(); m_merge.clear(); m_mergeHead = -1;
         for (const auto &value : event.value(QStringLiteral("messages")).toArray()) {
             const QJsonObject message = value.toObject();
@@ -415,7 +557,7 @@ void SubagentTranscriptView::handleEvent(const QJsonObject &event) {
             if (role == QStringLiteral("user")) {
                 append(QStringLiteral("› ") + content.trimmed() + QLatin1Char('\n'), Ink::User);
             } else if (role == QStringLiteral("assistant")) {
-                if (!content.trimmed().isEmpty()) append(content.trimmed() + QLatin1Char('\n'), Ink::Agent);
+                if (!content.trimmed().isEmpty()) { appendProse(content); ensureLineStart(); }
                 QStringList calls;
                 for (const auto &call : message.value(QStringLiteral("tool_calls")).toArray()) calls << call.toString();
                 if (!calls.isEmpty()) append(QStringLiteral("⚙ ") + calls.join(QStringLiteral(", ")) + QLatin1Char('\n'), Ink::Tool);
@@ -430,6 +572,8 @@ void SubagentTranscriptView::handleEvent(const QJsonObject &event) {
         return;
     }
     if (type == QStringLiteral("subagent_finished")) {
+        if (m_thinking >= 0) thinkingEvent(QJsonObject{{"event", "thinking_done"}});
+        finishProse();
         const QString outcome = event.value(QStringLiteral("outcome")).toString();
         QString note = SubagentModel::statusIcon(outcome) + QLatin1Char(' ') + outcome;
         const QString handoff = SubagentModel::handoffText(event.value(QStringLiteral("handoff")).toString(),
@@ -442,7 +586,8 @@ void SubagentTranscriptView::handleEvent(const QJsonObject &event) {
     if (type != QStringLiteral("subagent_event")) return;
     const QJsonObject payload = event.value(QStringLiteral("payload")).toObject();
     const QString kind = payload.value(QStringLiteral("event")).toString();
-    if (kind == QStringLiteral("delta")) append(payload.value(QStringLiteral("text")).toString(), Ink::Agent);
+    if (kind == QStringLiteral("thinking_delta") || kind == QStringLiteral("thinking_done")) thinkingEvent(payload);
+    else if (kind == QStringLiteral("delta")) appendProse(payload.value(QStringLiteral("text")).toString());
     else if (kind == QStringLiteral("tool_started")) toolStarted(payload);
     else if (kind == QStringLiteral("tool_output")) toolOutput(payload.value(QStringLiteral("text")).toString());
     else if (kind == QStringLiteral("tool_result")) toolResult(payload);

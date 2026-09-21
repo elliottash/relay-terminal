@@ -5,6 +5,10 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLineEdit>
+#include <QPlainTextEdit>
+#include <QSettings>
+#include <QTextBlock>
+#include "Theme.h"
 #include <QTabBar>
 #include <QTest>
 #include <QToolButton>
@@ -57,6 +61,76 @@ void feedTodos(relay::RequestLedgerModel *ledger, const QStringList &items) {
 class SubagentsTests : public QObject {
     Q_OBJECT
 private slots:
+    void transcriptMarkdownAndThinkingMatchPane() {
+        if (!qEnvironmentVariableIsEmpty("RELAY_SUBAGENT_SCREENSHOT")) relay::theme::applyTheme(*qApp);
+        QSettings settings;
+        const QVariant previous = settings.value(QStringLiteral("agent/thinking_display"));
+        settings.setValue(QStringLiteral("agent/thinking_display"), QStringLiteral("collapse"));
+        SubagentTranscriptView view(QStringLiteral("a1"));
+        view.resize(720, 600); view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        auto *log = view.findChild<QPlainTextEdit *>(QStringLiteral("transcriptView"));
+        QVERIFY(log);
+        auto send = [&](const QString &kind, const QString &text = QString()) {
+            view.handleEvent(QJsonObject{{"event", "subagent_event"}, {"payload", QJsonObject{{"event", kind}, {"text", text}, {"elapsed_ms", 2100}}}});
+        };
+        auto clickLine = [&](const QString &text) {
+            QTextCursor cursor = log->document()->find(text);
+            QVERIFY(!cursor.isNull());
+            cursor.clearSelection(); cursor.movePosition(QTextCursor::StartOfBlock);
+            log->setTextCursor(cursor); log->ensureCursorVisible();
+            QTest::mouseClick(log->viewport(), Qt::LeftButton, Qt::NoModifier, log->cursorRect(cursor).center() + QPoint(5, 0));
+        };
+        send(QStringLiteral("thinking_delta"), QStringLiteral("Compare **both** rendering paths."));
+        QVERIFY(view.plainText().contains(QStringLiteral("▾ ✦ thinking…")));
+        QVERIFY(view.plainText().contains(QStringLiteral("Compare both rendering paths.")));
+        send(QStringLiteral("thinking_delta"), QStringLiteral(" Then inspect the tool folds."));
+        QTRY_VERIFY(view.plainText().simplified().contains(QStringLiteral("Then inspect the tool folds.")));
+        send(QStringLiteral("thinking_done"));
+        QVERIFY(view.plainText().contains(QStringLiteral("▸ ✦ thought for 2.1 s")));
+        QVERIFY(!view.plainText().contains(QStringLiteral("Compare both")));
+        QCOMPARE(view.toolCallCount(), 0);
+        send(QStringLiteral("delta"), QStringLiteral("## Result\nA **bo"));
+        send(QStringLiteral("delta"), QStringLiteral("ld** answer with `code`."));
+        QVERIFY(view.plainText().endsWith(QStringLiteral("Result\nA bold answer with code.")));
+        QVERIFY(!view.plainText().contains(QStringLiteral("**")));
+        QTextCursor bold = log->document()->find(QStringLiteral("bold"));
+        QVERIFY(!bold.isNull());
+        QCOMPARE(bold.charFormat().fontWeight(), int(QFont::Bold));
+        QTextCursor code = log->document()->find(QStringLiteral("code"));
+        QCOMPARE(code.charFormat().fontWeight(), int(QFont::Bold));
+        // Opening an earlier fold must not move the live prose tail to before its detail.
+        clickLine(QStringLiteral("thought for"));
+        QVERIFY(view.plainText().contains(QStringLiteral("Compare both")));
+        send(QStringLiteral("delta"), QStringLiteral(" More text."));
+        QVERIFY(view.plainText().contains(QStringLiteral("Compare both")));
+        QVERIFY(view.plainText().contains(QStringLiteral("answer with code. More text.")));
+        QCOMPARE(view.plainText().count(QStringLiteral("A bold answer")), 1);
+        send(QStringLiteral("thinking_delta"), QStringLiteral("Second block"));
+        clickLine(QStringLiteral("thinking…"));
+        send(QStringLiteral("thinking_delta"), QStringLiteral(" stays hidden"));
+        send(QStringLiteral("thinking_done"));
+        QVERIFY(!view.plainText().contains(QStringLiteral("stays hidden")));
+        view.handleEvent(json("{'event':'subagent_event','payload':{'event':'tool_started','tool':'run_command','call_id':'c1','preview':'echo ok\\n'}}"));
+        view.handleEvent(json("{'event':'subagent_event','payload':{'event':'tool_output','text':'ok'}}"));
+        view.toggleToolCall(0);
+        QCOMPARE(view.toolCallCount(), 1);
+        QVERIFY(view.plainText().contains(QStringLiteral("    echo ok")));
+        // The other display modes share the regular pane's preference.
+        settings.setValue(QStringLiteral("agent/thinking_display"), QStringLiteral("always"));
+        send(QStringLiteral("thinking_delta"), QStringLiteral("Keep this reasoning visible."));
+        send(QStringLiteral("thinking_done"));
+        QVERIFY(view.plainText().contains(QStringLiteral("Keep this reasoning visible.")));
+        settings.setValue(QStringLiteral("agent/thinking_display"), QStringLiteral("never"));
+        send(QStringLiteral("thinking_delta"), QStringLiteral("Hidden by preference."));
+        send(QStringLiteral("thinking_done"));
+        QVERIFY(!view.plainText().contains(QStringLiteral("Hidden by preference.")));
+        if (previous.isValid()) settings.setValue(QStringLiteral("agent/thinking_display"), previous);
+        else settings.remove(QStringLiteral("agent/thinking_display"));
+        const QString screenshot = qEnvironmentVariable("RELAY_SUBAGENT_SCREENSHOT");
+        if (!screenshot.isEmpty()) QVERIFY(view.grab().save(screenshot));
+    }
+
     void startProgressFinishLifecycle() {
         Harness h;
         h.start("a1");

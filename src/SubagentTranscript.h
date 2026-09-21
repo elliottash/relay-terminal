@@ -11,6 +11,7 @@
 // listings collapses into "read 6 files · 4,100 lines".
 #include "SubagentsPanel.h"
 #include "ToolLabel.h"
+#include "CallLines.h"
 #include <QColor>
 #include <QHash>
 #include <QJsonObject>
@@ -19,6 +20,7 @@
 #include <QVector>
 #include <QWidget>
 #include <functional>
+#include <memory>
 
 class QHBoxLayout;
 class QLabel;
@@ -72,7 +74,7 @@ public:
     // The tool lines drawn so far, newest last, exactly as they read (marker included). A merged
     // run of reads is one entry. For tests and for the pane's own bookkeeping.
     QStringList toolLines() const;
-    int toolCallCount() const { return int(m_calls.size()); }
+    int toolCallCount() const;
     // Folds one tool line's detail open, or shut again. Out-of-range does nothing.
     void toggleToolCall(int index);
 
@@ -93,8 +95,15 @@ private:
         int foldChars = 0;       // characters the open fold occupies, 0 when it is shut
         bool expanded = false;
         bool done = false;
+        bool thinking = false;
+        bool userToggled = false;
     };
     void append(const QString &text, Ink ink);
+    void appendProse(const QString &text);
+    void finishProse();
+    void thinkingEvent(const QJsonObject &payload);
+    void toggleRow(int index);
+    void refreshThinking();
     void ensureLineStart() { if (!m_atLineStart) append(QStringLiteral("\n"), Ink::Note); }
     void toolStarted(const QJsonObject &payload);
     void toolResult(const QJsonObject &payload);
@@ -116,6 +125,10 @@ private:
     QVector<ToolCall> m_calls;
     toollabel::MergeRun m_merge;
     int m_mergeHead = -1;        // the row showing the merged run, or -1 when none is open
+    std::unique_ptr<calllines::MarkdownStream> m_prose;
+    QTextCursor m_proseTail;
+    int m_thinking = -1;
+    bool m_thinkingRefreshPending = false;
     bool m_atLineStart = true, m_snapshot = false, m_ended = false;
 };
 
