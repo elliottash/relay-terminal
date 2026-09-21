@@ -1,0 +1,78 @@
+the cut: 101 member(s), 1395 line(s)
+
+travels with the cut (33 field(s), mentioned outside it only where declared):
+  m_callOrder m_calls m_foldRequests m_inlinePending m_internalsAsked m_internalsBlockInline m_internalsBlockKey m_internalsBlockTurn m_internalsFirstCall m_internalsFlushPending m_internalsLedger m_internalsMembers m_internalsPushAt m_internalsReprintPending m_internalsRun m_internalsTurn m_markdown m_prose m_proseInk m_prosePrintColumns m_proseSeq m_proseUri m_remoteAuthor m_remotePrompts m_remoteSubmit m_thinkingFlushPending m_thinkingFoldOpen m_thinkingPushAt m_thinkingUserToggled m_transcriptDismissed m_transcriptHeader m_transcriptView m_wrap
+
+crosses the seam (66 field(s); the count is uses that stay in Pane):
+    181  m_editor
+    131  m_backend
+     71  m_agentBusy
+     67  m_login
+     60  m_entries
+     59  m_cwd
+     52  m_ask
+     45  m_currentPreset
+     44  m_configured
+     42  m_native
+     40  m_token
+     34  m_guest
+     32  m_workspace
+     29  m_subagents
+     28  m_workerReady
+     25  m_selected
+     24  m_model
+     20  m_requestId
+     18  m_terminalHost
+     17  m_promptReported
+     17  m_composer
+     16  m_queueStrip
+     16  m_presets
+     14  m_shellReady
+     14  m_paneState
+     13  m_loading
+     12  m_activeValid
+     11  m_altScreen
+     10  m_active
+      9  m_guestBusy
+      9  m_atLineStart
+      7  m_submittedDraft
+      7  m_internals
+      7  m_inlineOpen
+      7  m_callCursor
+      6  m_jobs
+      6  m_interruptPending
+      6  m_apiKey
+      5  m_turnViews
+      5  m_turnThinking
+      5  m_thinkingAnchor
+      5  m_headerWidget
+      5  m_handoffNext
+      5  m_activeLoaded
+      4  m_shareFinished
+      4  m_shareFailed
+      4  m_lastTurnId
+      4  m_knownCommands
+      4  m_entrySerial
+      4  m_configuring
+      3  m_skillsDialog
+      3  m_shellResizeHeld
+      3  m_shellPath
+      3  m_restoredScrollback
+      3  m_lastQueuedEntryId
+      3  m_lastQueuedAt
+      2  m_turnHeader
+      2  m_transcriptProgram
+      2  m_transcript
+      2  m_thinkingBlocks
+      2  m_scrollbackReplayed
+      2  m_restoredIsSessionText
+      2  m_lastThinkingAnchor
+      2  m_lastBlock
+      2  m_currentRequest
+      2  m_activeRequest
+
+already on relay::agent::Host (14), so they cost the cut nothing:
+  columns cursorPosition foldExpanded hint screenText scrollToBottom sendText setFoldContent setFoldExpanded shellPid status toast toggleFold viewportAtBottom
+
+crosses the seam (52 Pane member(s) called from inside the cut and not on Host):
+  QStringLiteral answerQuestion askProjectInit attachmentsFor cardsFor changed clearAiGhost configure currentEntryKey foregroundCommandLine foregroundPid foregroundProgramName guestDisplayName hideAtPopup hideSlashPopup keepPaneSizes keepSelectionOn last loginAtPrompt loginContext moreTurnsPending noteWorkCard onOpenCard onOpenDocument onOpenInternals onOpenPath openSubagent processBusy programGrant promptHistoryPath queueBlocked rebuildQueueStrip rememberPresetBeforeGuest runInTerminal scrollbackCloseMark scrollbackOpenMark selectedEntryId send sendPrompt sendShellInput sessionTextCloseMark sessionTextOpenMark setTurnCards skillSlashHint skillsFor start takeGuestRequest terminalCan toastCopied updatePaths upgradeLastQueuedToSteer withSessionFields

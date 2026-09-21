@@ -39,6 +39,16 @@ public:
 
 private:
     agent::Host &m_host;
+
+    // Everything between these two lines is written by scripts/split-agent-console.py: one block
+    // per member moved out of class Pane, each carrying the line it followed there, so --check
+    // can put them all back and prove the rebuild is the original src/Pane.h to the byte. Nothing
+    // below is edited by hand. `split-base` is the commit whose src/Pane.h the rebuild is
+    // compared with: the tip the extraction started from.
+    //
+    // split-base: cbf06cc0d6681d8c1d2d82ed92def89af397af10
+    // ===== moved out of class Pane by scripts/split-agent-console.py =====
+    // ===== end of the moved blocks =====
 };
 
 }  // namespace relay

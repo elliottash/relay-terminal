@@ -1,0 +1,20 @@
+the cut: 10 member(s), 137 line(s)
+
+travels with the cut (5 field(s), mentioned outside it only where declared):
+  m_prose m_proseInk m_prosePrintColumns m_proseSeq m_proseUri
+
+crosses the seam (8 field(s); the count is uses that stay in Pane):
+    167  m_backend
+     72  m_login
+     46  m_token
+     28  m_atLineStart
+     17  m_inlineOpen
+      5  m_wrap
+      4  m_inlinePending
+      3  m_markdown
+
+already on relay::agent::Host (5), so they cost the cut nothing:
+  columns cursorPosition screenText terminalFolds writeTerminal
+
+crosses the seam (11 Pane member(s) called from inside the cut and not on Host):
+  QStringLiteral appendTranscript beginBlock endCallRun holdShellResize inkCode inlineReady loginAtPrompt sanitize terminalLines wrapped

@@ -1,0 +1,28 @@
+whole window
+shot                    control before-after
+01-fresh                      0      21310
+02-thinking                1316       2184
+03-fold-open               1352       2220
+03b-fold-closed            1316       2184
+04-toolrow                 1458       2326
+05-modelbox                1316       2184
+06-modelbox-closed         1316       2184
+07-queued                  1539       2326
+08-esc                     1352       2184
+09-after                   1316       2220
+
+below the pane header (crop 1400x824+0+76)
+shot                    control before-after control-after
+01-fresh                      0      21310      21310
+02-thinking                   0          0          0
+03-fold-open                 36         36          0
+03b-fold-closed               0          0          0
+04-toolrow                    0          0          0
+05-modelbox                   0          0          0
+06-modelbox-closed            0          0          0
+07-queued                    81          0         81
+08-esc                       36          0         36
+09-after                      0         36         36
+
+01-fresh with the startup-toast band masked (rectangle 700,750 1400,800)
+01-fresh             control=0  before-after=36
