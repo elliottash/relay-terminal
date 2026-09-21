@@ -2260,8 +2260,9 @@ private:
                                       "server; Relay Free, the included allowance, is the one exception and goes through "
                                       "Relay's hosted service. A profile names the five lists as a set, so \"AI work\" "
                                       "and \"admin work\" can rank models differently and swap in one switch (/profile). "
-                                      "Ctrl+Shift+M or /models opens this page; Alt+M drops the "
-                                      "model box open; Ctrl+Alt+M or /model opens the picker.");
+                                      "The lists themselves are the dialog at the top of this page: "
+                                      "Ctrl+Alt+M or /model. Ctrl+Shift+M or /models opens this page, "
+                                      "and Alt+M drops the pane's model box open.");
         Pane *pane = m_active;
         QSettings settings;
         QWidget *page = m_tabs->currentWidget();
@@ -2565,7 +2566,7 @@ private:
         // … so I can have an 'AI work' profile and an 'admin work' profile that sets different model
         // priorities." Warp's Agent Profile is a whole posture — base model, planning model,
         // autonomy, command allow/deny lists, MCP access — switched from an icon in its input area.
-        // Here a profile is the five lists below and nothing else, which is what was asked for, and
+        // Here a profile is the five lists and nothing else, which is what was asked for, and
         // the lists and the profile are one thing: an edit to a list while a profile is current is
         // an edit *of* it, so there is no "unsaved changes" state to explain or lose.
         {
@@ -2707,7 +2708,7 @@ private:
             row.kind = relay::SettingRow::Choice;
             row.id = QStringLiteral("models/profile");
             row.label = QStringLiteral("profile");
-            row.detail = QStringLiteral("A named set of the five lists below. Switching one in swaps every list at once "
+            row.detail = QStringLiteral("A named set of the five lists. Switching one in swaps every list at once "
                                         "(also /profile)");
             row.aliases = QStringLiteral("profile profiles preset workspace ai work admin work priorities switch");
             // "no profile" is offered only while that is where you are: once a profile is chosen the
@@ -2736,7 +2737,7 @@ private:
                 actions.id = QStringLiteral("models.profile.actions");
                 actions.label = currentProfile;
                 actions.indent = 1;
-                actions.tooltip = QStringLiteral("The profile the five lists below belong to right now");
+                actions.tooltip = QStringLiteral("The profile the five lists belong to right now");
                 actions.aliases = QStringLiteral("rename delete profile ") + currentProfile;
                 actions.buttonTexts = QStringList{QStringLiteral("rename…"), QStringLiteral("export…"), QStringLiteral("delete")};
                 actions.onButton = [this, currentProfile, curated, saveAs, exportProfiles](int index) {
