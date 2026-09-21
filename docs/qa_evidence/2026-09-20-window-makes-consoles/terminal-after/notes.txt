@@ -1,0 +1,6 @@
+PASS the pane is up with its prompt box ("prompts" in 01-fresh.png)
+PASS the reasoning fold settled under its anchor ("thought for" in 02-thinking.png)
+PASS Alt+R unfolds the reasoning ("OSC" in 03-fold-open.png)
+PASS the tool call drew its own row ("read" in 04-toolrow.png)
+PASS the model box dropped open ("stub" in 05-modelbox.png)
+PASS the second prompt queued, with its strip ("queue" in 07-queued.png)

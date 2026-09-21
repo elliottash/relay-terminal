@@ -1,0 +1,17 @@
+PASS 01 Options carries the collapsed helper row ("helper" read in 01-options.png)
+PASS 02 the console is up, with the Options context's placeholder ("Ask the Options helper" in 02-console.png)
+PASS 03 the console answered, streaming into its transcript ("Clicking that opens" in 03-answer.png)
+PASS 04 the option: link revealed the row in this same pane ("Copy on select" in 04-link.png)
+PASS 05 app_panes came back through the window ("PANELIST" in 05-panes.png)
+the window's own pane list, as the agent was given it: PANELIST count=1 titles=project
+PASS 05 the window has exactly one pane — the terminal — with two consoles on screen
+PASS 06 the Sessions pane carries its own collapsed helper row ("helper" read in 06-sessions.png)
+PASS 06 and expands into a console of its own ("Sessions helper" in 06-sessions-console.png)
+consoles showing the tab's turn: 1
+FAIL 06 only 1 console(s) show the tab's turn
+worker processes under this Relay: 2 (one for the terminal pane, one for the tab)
+PASS 07 two consoles and a terminal pane run two workers, not three
+helper conversation files under /tmp/rl-agnt5.zFpv/home/.local/share/relay/helper-sessions: 1
+PASS 07 two consoles of one tab wrote one conversation
+----
+PASS 10  FAIL 1

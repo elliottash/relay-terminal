@@ -1,0 +1,20 @@
+the terminal pane: a clean export of 5eb5699e (before this step) against one of 21fbcc5b (after)
+
+shot                      whole   below header
+01-fresh                  21310          21310
+02-thinking                2437             36
+03-fold-open               2437             36
+03b-fold-closed            2401              0
+04-toolrow                 2401              0
+05-modelbox                2401              0
+06-modelbox-closed         2401              0
+07-queued                  2401              0
+08-esc                     2401              0
+09-after                   2401              0
+
+Below the pane header is the crop 1400x824+0+76: the terminal, the transcript, the queue
+strip and the composer. Eight of the ten are pixel-identical there. The other two:
+  01-fresh  21310 -> 36 once the startup quota toast's band is masked (rectangle 700,674 1400,724)
+  02-thinking, 03-fold-open  36 each: the blinking caret's 2x18 box
+The 2401/2437 whole-window figure on every shot is the pane's auto-generated title, which
+differs between two runs of the *same* binary -- the step 1 control measured that at 1316-1539.
