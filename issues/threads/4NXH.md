@@ -92,3 +92,7 @@ Implemented the five-tool bridge and completed real Codex/Claude all-tool and re
 <!-- relay:entry 20260921T124440Z-cz author=codex kind=decision -->
 ### Codex · 2026-09-21 12:44
 Owner authorized landing the earlier session's draft: "Include the existing plan and thread". Moved to needs-verification with 496 passing targeted tests, live Codex/Claude all-tool and resume checks, and a clean tests_check (no findings, failing tests or blocking signals). Repository-wide board check still reports the two existing MDL1 ID errors.
+
+<!-- relay:entry 20260921T124515Z-d0 author=codex kind=evidence -->
+### Codex · 2026-09-21 12:45
+Landed implementation, approved plan/thread and needs-verification evidence in 590829dc9a39fdcdea6f5c3e6d685e4c0f45c3ae; linked the implementation commit.

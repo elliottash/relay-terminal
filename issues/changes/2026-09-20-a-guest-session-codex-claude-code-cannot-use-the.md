@@ -7,7 +7,7 @@ labels: [bug, switchboard, guest]
 rank: zzzzzzzzzzzzzzi
 created: '2026-09-20'
 source: 'card #1V4F (Switchboard agent, 2026-09-20)'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-4nxh-guest-board-tools/], related: [1V4F, GT7X], github: null}
+links: {plans: [], commits: [590829dc9a39fdcdea6f5c3e6d685e4c0f45c3ae], evidence: [docs/qa_evidence/2026-09-21-4nxh-guest-board-tools/], related: [1V4F, GT7X], github: null}
 ---
 # A guest session (Codex/Claude Code) cannot use the Switchboard's board_* tools
 
