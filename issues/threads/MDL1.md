@@ -762,3 +762,7 @@ unchanged. `a-first-run.png` is re-shot.
 `ctest -R "modelspane|modelpicker|modelcatalog|modelrows|settings|filterpopup|panestate|windowstate"`
 is 11/11, with `modelspane` at 16 cases.
 
+
+<!-- relay:entry 20260921T232514Z-s1 author=claude-code kind=decision -->
+### Claude Code · 2026-09-21 23:25
+Owner, 2026-09-21, on the models pane: "tab 1: add horizontal line dividers between providers. check the advanced provider settings. not sure whats helpful or needed. for the per-job models, i think that should be reviewed and improved and made a 4th tab. take a careful look at it to see how to improve it for that. for available, remove the recent section. i would order the sections alphabetically. it seems like i cant disable gemini flash lite. just to say -- this tab is only for terminal agents, so gemini flash lite should be optional. and relay lite shouldnt show up. tab 3: in a pane, i dont want separate tabs for the modes. they should just be in divided sections. remove the lite section." Two agents: `fable-tabs` (tabs 1–3, availability rules, the advanced dialog review) and `fable-jobs` (the per-job models as a fourth tab).
