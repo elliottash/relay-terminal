@@ -330,6 +330,9 @@ private:
     QWidget *actionRow(const ActionItem &item, const QString &prefix = QString());
     QWidget *optionJumpRow(const SettingsSection &section, const SettingRow &row);
     void applyMode();
+    QWidget *sectionJumpRow(const ActionItem &item, const std::function<void()> &jump);
+    void revealSection(Mode mode, const QString &section, const QString &group, int heading = -1);
+    void scrollToHeader(const QString &key);
     QWidget *groupHeader(const QString &text, const QString &key = QString());
     static bool headingCollapsed(const SettingRow &row);
     void addActionsList(QVBoxLayout *into);

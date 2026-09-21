@@ -429,6 +429,77 @@ private slots:
         QVERIFY(!relay::actionSlashCommands(QStringLiteral("agent.requests")).contains(QStringLiteral("/todos")));
     }
 
+    void sectionSearchClearsAndNavigatesWithoutRunningActions() {
+        State state;
+        SettingsPane pane(SettingsPane::Mode::Actions, [&] { return catalog(&state); }, [&] { return actions(&state); });
+        pane.resize(640, 480);
+        pane.show();
+        int executed = 0;
+        pane.onRun = [&](const ActionItem &) { ++executed; };
+        pane.setSearch(QStringLiteral("Appearance"));
+        const QString target = QStringLiteral("section-jump:options:appearance:");
+        QVERIFY(pane.visibleRowIds().contains(target));
+        QWidget *result = nullptr;
+        for (auto *widget : pane.findChildren<QWidget *>())
+            if (widget->property("rowId").toString() == target) result = widget;
+        QVERIFY(result);
+        QTest::mouseClick(result, Qt::LeftButton);
+        QTRY_COMPARE(pane.mode(), SettingsPane::Mode::Options);
+        QCOMPARE(pane.currentTab(), QStringLiteral("appearance"));
+        QVERIFY(pane.search().isEmpty());
+        QCOMPARE(executed, 0);
+        pane.setSearch(QStringLiteral("Connect to host"));
+        QVERIFY(pane.visibleRowIds().contains(QStringLiteral("section-jump:actions::menu:ssh")));
+        pane.activateCurrent();
+        QTRY_COMPARE(pane.mode(), SettingsPane::Mode::Actions);
+        QVERIFY(pane.search().isEmpty());
+        QCOMPARE(executed, 0);
+        pane.setSearch(QStringLiteral("Panes and tabs"));
+        QCOMPARE(pane.visibleRowIds().first(), QStringLiteral("section-jump:actions::action-section:Panes and tabs"));
+        pane.activateCurrent();
+        QTRY_VERIFY(pane.search().isEmpty());
+        QCOMPARE(pane.mode(), SettingsPane::Mode::Actions);
+        QCOMPARE(executed, 0);
+    }
+
+    void findingASubheadingExpandsItsParentAndScrollsToIt() {
+        SettingsSection section;
+        section.id = QStringLiteral("advanced"); section.title = QStringLiteral("Advanced");
+        for (int i = 0; i < 35; ++i) {
+            SettingRow row; row.kind = SettingRow::Info;
+            row.label = QStringLiteral("Earlier setting %1").arg(i); section.rows << row;
+        }
+        SettingRow heading;
+        heading.kind = SettingRow::Heading; heading.id = QStringLiteral("heading:search-test");
+        heading.label = QStringLiteral("Fine tuning"); heading.collapsible = true; heading.collapsedByDefault = true;
+        section.rows << heading;
+        SettingRow subheading; subheading.kind = SettingRow::Subheading;
+        subheading.label = QStringLiteral("Connection timing"); section.rows << subheading;
+        SettingRow value; value.kind = SettingRow::Info; value.label = QStringLiteral("Timeout values"); section.rows << value;
+        QSettings().remove(QStringLiteral("options/collapsed/heading:search-test"));
+        SettingsPane pane(SettingsPane::Mode::Options, [=] { return QList<SettingsSection>{section}; },
+                          [] { return QList<ActionItem>(); });
+        pane.resize(600, 350); pane.show();
+        pane.setSearch(QStringLiteral("Connection timing"));
+        QCOMPARE(pane.visibleRowIds().size(), 1);
+        pane.activateCurrent();
+        QTRY_VERIFY(pane.search().isEmpty());
+        QCOMPARE(pane.currentTab(), section.id);
+        QVERIFY(!QSettings().value(QStringLiteral("options/collapsed/heading:search-test"), true).toBool());
+        auto *pages = pane.findChild<QStackedWidget *>();
+        QVERIFY(pages);
+        auto *area = qobject_cast<QScrollArea *>(pages->currentWidget());
+        QVERIFY(area);
+        QTRY_VERIFY(area->verticalScrollBar()->value() > 0);
+        QLabel *target = nullptr;
+        for (auto *label : area->findChildren<QLabel *>())
+            if (label->text() == subheading.label) target = label;
+        QVERIFY(target);
+        QVERIFY(target->isVisible());
+        QVERIFY(area->viewport()->rect().intersects(QRect(target->mapTo(area->viewport(), QPoint()), target->size())));
+        QSettings().remove(QStringLiteral("options/collapsed/heading:search-test"));
+    }
+
     void optionsSearchFindsActionsToo() {
         State state;
         SettingsPane pane(SettingsPane::Mode::Options, [&] { return catalog(&state); }, [&] { return actions(&state); });
@@ -538,8 +609,10 @@ private slots:
         QCOMPARE(actionsPane.visibleRowIds(), QStringList{QStringLiteral("option-jump:appearance/option:theme")});
         actionsPane.setSearch(QStringLiteral("theme zzzz"));
         QVERIFY(actionsPane.visibleRowIds().isEmpty());
-        actionsPane.setSearch(QStringLiteral("limit"));   // only an option
-        QCOMPARE(actionsPane.visibleRowIds(), QStringList{QStringLiteral("option-jump:general/option:steps")});
+        actionsPane.setSearch(QStringLiteral("limit"));   // an option and its related heading
+        QCOMPARE(actionsPane.visibleRowIds().size(), 2);
+        QVERIFY(actionsPane.visibleRowIds().contains(QStringLiteral("option-jump:general/option:steps")));
+        QVERIFY(actionsPane.visibleRowIds().contains(QStringLiteral("section-jump:options:agent:option-section:agent:0")));
         SettingsPane optionsPane(SettingsPane::Mode::Options, [&] { return catalog(&state); }, [&] { return actions(&state); });
         optionsPane.setSearch(QStringLiteral("p"));
         const QStringList ids = optionsPane.visibleRowIds();
