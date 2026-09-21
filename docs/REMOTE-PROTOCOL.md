@@ -1696,7 +1696,7 @@ Each request is **rebuilt** from the fields below: a field not listed is not cop
 | `board_comment` | `id`, `text` 1–8,000, `kind` | write | a thread entry. `kind` is `note` (the default), `question` or `decision` — a person's kinds; `evidence` and `progress` are what an agent and the desktop's own hand-off write |
 | `board_move` | `id`, `status`, `reason` ≤ 500 | write | moves the card. `status` is one of the board's statuses (`inbox` … `retired`, `backend/relay_core/board.py` `ALL_STATUSES`); the worker's own gates — evidence before a QA lane, say — still apply and answer `error` |
 | `board_create` | `tab`?, `title` ≤ 200, `request` ≤ 8,000, `labels` ≤ 16 | write | files a card. `request` is stored verbatim as its `## Issue`; one of `title` and `request` must have words. `tab` is a tab id `[a-z0-9][a-z0-9_-]{0,39}`, a label 1–40 characters of letters, digits, space and `_.:+-` |
-| `board_ask` | `id`, `text` ≤ 8,000, `mode` | write | a Discuss (`discuss`, the default; needs `text`) or a Plan (`plan`; `text` is the note to the planner and may be empty) turn on the card |
+| `board_ask` | `id`, `text` ≤ 8,000, `mode` | write | a Discuss (`discuss`, the default; needs `text`) or a Plan (`plan`; `text` is the note to the planner and may be empty) turn on the card. Since card #CTRN that turn runs on the card's own queue on the desktop's worker, like any console turn; the request is unchanged and no GUI has to be looking at the card |
 | `board_cancel` | `id` | write | stops that card's turn; answers `board_cancelled` |
 | `board_action` | `id`, `action` | write | GUI-level: `execute` or `verify`, run through the same hooks as the desktop's buttons; answers `board_action_result` |
 
@@ -1825,6 +1825,23 @@ The turn events of a `board_ask` (`delta`, `thinking_delta`, `tool_started`, `do
 `board_thread_appended`, and a failed turn as `error` with its `card_id`. Editing a card's text
 (`board_update`) waits for a view that can hold a `base_hash` and show a conflict. Both are
 additions to the two lists in `remote/board_state.py`, and nothing else.
+
+**Card #CTRN changed what a `board_ask` *is*, and deliberately changed nothing here** (2026-09-21).
+A card turn is now an ordinary console turn on the desktop worker — it queues, it has a request
+ledger, its answer streams into the card console's transcript — but the verb, the two thread writes,
+the stage advance and `board_cancelled` are exactly what they were, and none of the turn's new
+events (`queued`, `queue_changed`, `agent_started`, …) is on §17.3's list. A device needs no GUI for
+any of it: the **worker** writes the thread at both ends, so a Discuss started from a phone is
+recorded whether or not a card page is open, on whatever desktop the hub reached. Two consequences
+worth knowing, both of them behaviour a device sees rather than a message:
+
+- **A second ask on a card that is working now queues** instead of answering `board_busy`. The phone
+  sees nothing at all until that turn's answer lands as `board_thread_appended`; `board_busy` still
+  comes back for a cleanup, for the console's own turn and for a write to a card that has work on it.
+- **`board_cancel` stops the running turn and pauses that card's queue**, as Esc does in a pane. A
+  device has no `resume_queue` — the ops that name a queue by `surface` (sessions protocol 12.5) are
+  not on §17.1's list of ten — so a prompt queued behind a turn a phone stopped waits for the desktop
+  to resume it.
 
 ### 17.5 The `card_waiting` push
 

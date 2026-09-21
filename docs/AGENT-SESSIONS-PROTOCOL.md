@@ -501,6 +501,11 @@ Events that gain `ledger_id` (string, or null when tracking is off): `queued`, `
   queue item id of its latest submission (matches `queued.id`/`queue_changed.items[].id`).
 - `delivered`: it reached the model at least once. `handled`: the turn that last received it ended normally.
 - `attachments`: paths only (contents are not stored in the ledger).
+- `text_preview` is **what the person typed**. For everything typed into a composer that is the
+  prompt itself; a card turn is the one submission whose prompt is not the words, because
+  `board_ask` builds it out of the card's seed block and the mode's brief (19.10). It rides as
+  `preview` on the queue item, and the ledger entry and the queue row show the owner's question
+  instead of "[Switchboard card #CRD1 — …] You are Relay's Switchboard agent…" (v4.5, card #CTRN).
 
 **Statuses:** `open` (not finished: never started, or its turn was cancelled, failed or hit the limit),
 `in_progress` (its turn is running), `done`, `cancelled` (the model cancelled every linked todo; `reason` = notes),
@@ -625,6 +630,17 @@ while todos are open: … ignore this if it is current"). No event; no extra mod
   ops can tell which of them landed. `queue_changed` says what the queue *is* and carries no request id;
   `board_chat_queue_remove` and `_move` answered with nothing at all, which is what this replaces. Nothing is
   sent for a request with no id, so a GUI from before this is unchanged.
+- **A queue op names the queue it is for** (`surface`, v4.5, 2026-09-21, card #CTRN): `cancel`,
+  `resume_queue`, `queue_remove`, `queue_move`, `queue_steer`, `queue_unsteer` and `queue_clear`
+  all take an optional `surface`, and `surface: "card:<ID>"` operates **that card's own queue**.
+  Anything else — a terminal pane, a tab console, a message with no `surface` at all — reaches the
+  worker's own supervisor exactly as before, so a GUI from before this card is unchanged. There is
+  one supervisor per worker *plus* one per live card since 19.16, and an op that named no queue
+  would operate the wrong one. `queue_changed` addresses itself the same way: a card's carries
+  `surface: "card:<ID>"` and `card_id` on the **envelope**, and each row carries its own `surface`
+  as well. A queue row is `{id, preview, forced, origin, surface?, mode?, card_id?}` (a `steering`
+  row the same without `forced`); the last three are absent, not empty, on a turn that is not a
+  card's, so a pane's wire is byte for byte what it was.
 - **Cancel, interrupt and failure** no longer remove the user's prompt, delivered steers or subagent notes from
   the conversation. A half-finished tool-call group is completed with
   `{"error": "Not completed: the turn stopped before this tool call finished. …"}` results, then a note says the
@@ -3065,9 +3081,10 @@ that; the changelog file always holds every one. `sections` is `null` when `boar
 touched. `changes[].cards` names the cards a merge folded in or a split created. `changelog` is
 `""` when the run changed nothing, and no file is written.
 
-**Busy rules.** The Switchboard worker runs **one turn at a time**, and a cleanup and a card's ask
-are not queued behind each other — a cleanup that ran while the user was talking to a card would
-rewrite the card under the conversation. The second of them is refused with
+**Busy rules.** A cleanup and a card's ask are **not queued behind each other** — a cleanup that ran
+while the user was talking to a card would rewrite the card under the conversation. (A second prompt
+on one card does queue, on that card's own supervisor, since card #CTRN; the cleanup rule is the one
+that is about the whole board and it is unchanged.) The second of them is refused with
 `{"event": "error", "code": "board_busy", "agent_busy": true, "cleanup_running": <bool>,
 "card_id": <the card being asked about, or null>}` and a sentence naming what is running. The
 check happens **before** anything is written, so a refused `board_ask` does not leave its question
@@ -3126,7 +3143,9 @@ buttons on a card — **Discuss**, **Plan**, **Execute**. Discuss and Plan are `
 omit it (the thread then records "Plan this card.") and, when given, the text is the owner's note
 to the planner, passed verbatim. The question entry and the answer entry both carry the attribute
 `mode=discuss|plan` in the thread file, and `board_thread_appended` carries `mode`; so do the turn's
-`delta`, `done`, `error`, `cancelled`, `turn_started` and `turn_summary`. The pane shows it on the
+`delta`, `done`, `error`, `cancelled` and `turn_summary` (`board_turns.MODE_TAGGED`), and its
+`agent_started` / `agent_finished`, which take it from the queue item that is actually running — a
+Plan queued behind a Discuss is bracketed as the Plan it is. The pane shows it on the
 entry's author line ("owner  Plan · 2 min ago", "✦ agent  Discuss · glm-5"), so the history
 reads right after the fact.
 
@@ -3135,9 +3154,22 @@ and `board_plan_brief.md`, sent at the head of the turn's prompt (after the seed
 card's first question). It is sent on every Plan and whenever the mode changes; a Discuss straight
 after a Discuss on the same card sends the owner's words alone, as before.
 
-**What each mode may touch — enforced by the tools, not only asked for.** The Switchboard worker is
-an ordinary worker, whose executor would otherwise offer the pane's whole tool set. For the length
-of a card turn, `BoardTools.card_scope` is set and `Agent.tools()` / `Agent._prepare` go through it:
+**A card turn is an ordinary console turn** (v4.5, 2026-09-21, card #CTRN; owner: *"that sounds
+sensible to me, scope that"*). Discuss and Plan are no longer a second turn runner: each runs on
+that card's own `TurnSupervisor` (19.16), which gives it the §12 queue, steering, interrupts, the
+request ledger, `agent_started` / `agent_finished` and a per-card Stop, and its events are drawn by
+the card's console the way every other console draws a turn. `board_ask` is still the verb, and what
+changed is behind it.
+
+**What each mode may touch — refused when it is called, never a narrower list.** The tool **list**
+is the console's, byte for byte, for a Discuss, for a Plan and for a question typed into the board's
+own console: a tool that appears or disappears re-prefills the whole request — on the Local tier the
+chat template renders the tools *before* the system prompt, and the mode switch cost 13-14 s — so a
+card conversation that goes Discuss → Plan → Discuss must not move it. What a mode may touch is the
+*turn's* constraint, in the shape `readonly` already had (33.2): for the length of the turn
+`Agent.set_card_turn(mode, card)` opens `BoardTools.card_scope` and `Agent._prepare` refuses the
+executor's writers. So the table below is the rule that is **enforced at call time**, not the list
+that is offered:
 
 | | Discuss | Plan |
 |---|---|---|
@@ -3146,13 +3178,21 @@ of a card turn, `BoardTools.card_scope` is set and `Agent.tools()` / `Agent._pre
 | never | `run_command` and the job tools, `write_file`, `edit_file`, `run_in_terminal`, `type_into_program`, `set_keybinding`, subagents, `update_todos`, the cleanup-only tools | the same |
 
 A call outside the mode is refused with `code: "board_mode_refused"` (board tools) or an ordinary
-tool error naming Execute (the rest). `search_files {pattern, path?, glob?}` is new and exists only
-in a card turn: a case-insensitive (unless the pattern has a capital) regular-expression search of
+tool error (the rest); both sentences name **Execute** as where that work belongs, and the turn
+carries on and answers. The honest cost of the shape is that a Plan turn is *offered* `write_file`
+and `run_command` and told no if it calls them — which is what a read-only turn already is, and what
+owner decision 3 on card #CTRN chose over re-prefilling the request on every mode change.
+`search_files {pattern, path?, glob?}` was added for a card turn and is a console's tool too (33.3):
+a case-insensitive (unless the pattern has a capital) regular-expression search of
 the workspace's text files, ≤80 matching lines as `path:line: text`, skipping `.git`, build and
 cache folders, binaries, files over 1 MiB, symlinks and the file tools' secret names. It shares
 `run_command`'s recursive-walk cost guard (card #2Y96): in a workspace that is the home directory
 or `/`, `search_files` without a `path` is refused with the same "pass a narrower path" message. Before
 2026-09-18 a card's "Ask the agent" ran with every pane tool, commands and file writes included.
+
+The per-mode tool *lists* that stood here until card #CTRN — `CardScope.tool_specs` and
+`Agent.tools()`'s `card_scope` branch — are deleted; `CardScope.allows`, `CardScope.refusal` and
+`_check_card_scope`, which is what the table is made of, did not move.
 
 A Discuss edit is `board_update_card` / `board_move_card` as before: hash-checked, a `rewrite`
 entry holding the old and the new title or `## Issue`, an event line per write, and the brief asks
@@ -3160,9 +3200,10 @@ the agent to say in its reply what it changed. The plan is the card's own `## Pl
 design 12.4, "plan mode writes the plan onto a card". There is no `type: plan` card: #X7NB
 dropped the type on 2026-09-20, and `links.plans` is an inert front-matter key that nothing
 writes and nothing reads as context. The scope ends on the turn's
-`done`, `error` or `cancelled`. **Busy** is 19.16's rule since 2026-09-19: turns on *different*
-cards run at the same time, a second turn on the *same* card is refused, and so is anything while
-a cleanup runs (`board_busy`, text "… then start the plan."), with nothing written.
+`done`, `error` or `cancelled`. **Busy** is 19.16's rule: turns on *different* cards run at the
+same time, a second prompt on the *same* card **queues** (card #CTRN; it was refused until
+2026-09-21), and what is still refused with `board_busy` — a cleanup, the console's own turn, a
+*write* to a card that has work on it — is refused with nothing written, exactly as before.
 
 **Execute** sends **one** message when a pane was opened for the card: `board_claim {card,
 pane_token, text}` (19.19), which does (a), (b) and (d) below in one write and adds the card's
@@ -3498,23 +3539,43 @@ once per preset.
 from the same function — *"Verify #K7Q2 with Codex (installed) · then GLM-5.3 (key) · skipped
 Claude: implemented this card · unavailable Kimi: no key"* — with this machine's availability.
 
-### 19.16 Several cards at once: one agent per card (v3.3, 2026-09-19)
+### 19.16 Several cards at once: one console per card (v3.3, 2026-09-19; a supervisor per card, v4.5, 2026-09-21)
 
 Owner, 2026-09-19: *"multiple agents working on planning switchboard cards doesnt seem to work …
 if i was planning in one card, i couldnt plan in another card."* It could not: the whole
 Switchboard worker had one `TurnSupervisor`, one conversation and one `CardScope`, so the second
 `board_ask` was refused with `board_busy` and moving to another card reset the conversation of the
-one you left. `relay_core.board_turns.CardTurns` gives **each card its own agent**, built from the
+one you left. `relay_core.board_turns.CardTurns` gives **each card its own console**, built from the
 pane agent's provider config, with its own conversation, its own `cancel_event` and its own
 `BoardTools` — which is where `card_scope` lives, so what a Plan may touch (19.10) is enforced per
 turn with no change to the tools themselves.
 
-**What may start.** `board_ask` is refused with `board_busy` when
+**Each card session also holds a `TurnSupervisor` of its own** (v4.5, card #CTRN): the pane's queue
+runner, a deque and a daemon thread apiece. A card turn is therefore an ordinary supervised turn —
+`queued`, `queue_changed`, steers, interrupts, the request ledger, `agent_started` /
+`agent_finished`, Esc — and a worker runs several queues at once: its own, and one per live card.
+`board_ask` submits to that card's queue (`when: "queue"`, never the pane's "refuse if something is
+already running"), and `_build_card_console` builds the agent as an ordinary console: `scope:
+"console"`, the request ledger, the todo tool and the completion check the pane agent has. It was
+`_build_card_agent` with `tool_scope="card"` and all three off until 2026-09-21.
+
+**What may start.** A second prompt on a card that is working **queues** since card #CTRN: it takes
+a row in the §12 strip on that card, can be steered, reordered and withdrawn, and runs when the turn
+before it finishes. A Plan pressed during a Discuss queues as a `plan` item, so the brief and the
+stage rule are the *queued* turn's and the strip goes on naming the turn that is running. What is
+still refused with `board_busy`:
 
 | | because |
 |---|---|
-| a turn is already running on **that card** | two agents writing one card's `## Plan` would each undo the other, and its thread would interleave two answers |
-| a **cleanup** is running | it merges, splits and moves the very cards the turns are talking about (19.9) |
+| a **write** to a card that has work on it — a delete, a priority change | it would race a running writer, and there is no queue for a file write. "Work on it" is `CardTurns.working_cards()`: running **or** queued, because `board_ask` returns a heartbeat before the dispatcher picks the prompt up |
+| a **cleanup** is running, or anything while one runs | it merges, splits and moves the very cards the turns are talking about (19.9) |
+| the **console's own turn** is running | that conversation can write any card (19.18). The console's own prompts never reach the check: they queue |
+
+A queued card prompt is **worker-side state that no file records**. The owner's words are on the
+thread from the moment `board_ask` accepts them (they are written before the model sees them), so a
+prompt withdrawn with `queue_remove` leaves a question with no answer — which is exactly what a
+failed turn already leaves (owner decision 5 on card #CTRN). A worker that exits forgets the queue;
+the thread is the record either way.
 
 There is no concurrent cap: as many cards run at once as the owner asks (owner, 2026-09-19,
 *"remove the cap on number of agents in the switchboard"*). The cap this section described until
@@ -3529,17 +3590,41 @@ a refused ask, exactly as before.
 continues where it left off — which the single conversation could only do for whichever card was
 asked last. The seeding rule is otherwise 19.6's: the card file's hash is kept with the session,
 and a card that changed since reseeds from the file. `board_turns.MAX_SESSIONS` (6) conversations
-are kept; past that the least recently used card reseeds next time. Pointing the worker at another
-board (`set_board`, `configure`) stops and forgets all of them.
+are kept; past that the least recently used card reseeds next time, and a session that is running
+**or has anything queued** is never dropped. Pointing the worker at another board (`set_board`,
+`configure`) stops and forgets all of them.
+
+Since card #CTRN a card's conversation is also **persisted per (tab, card)**: `persist {scope:
+"helper", key: "<tab id>/card:<ID>"}`, the same `agent_context.helper_file` store a tab's console
+uses, so a card remembers its earlier turns across a restart. The tab is in the key because a tab
+owns one worker and that worker owns its conversation files — keyed by the card alone, two tabs on
+one project would adopt one file from two workers and the last to save would win. Two tabs showing
+one card are two conversations about one card, exactly as two tabs showing one pane's project are.
+A worker that has not been told its tab (`configure {tab}`) keeps the ephemeral conversation it had
+before. Folding card turns into the tab's one conversation was the alternative and is what the owner
+ruled out: one supervisor runs one turn at a time, so two cards could not be planned at once.
 
 **Events** are unchanged and still carry `card_id` and `mode` (19.10): each turn tags its own, so
 two cards streaming at once are told apart by `card_id` alone. They do not pass through the pane
-agent's observers — a card turn is not a pane turn, and never was one in anything but wiring.
+agent's observers — a card turn is not a pane turn, and never was one in anything but wiring. Since
+card #CTRN they also carry `surface: "card:<ID>"` (33.2), and so do the supervisor's own events —
+`queued`, `queue_changed`, `queue_ack`, `steer_delivered`, `steer_returned`, `steer_removed`,
+`steer_escalated`, `interrupting`, `agent_started`, `agent_finished` (`board_turns.QUEUE_TAGGED`) —
+because a worker now runs several queues and a `queue_changed` that says nothing addresses the wrong
+strip. The GUI routes a `card:` event to that card's console and to no other (33.2).
+
+**The queue ops name the card** (12.5): `queue_remove`, `queue_move`, `queue_steer`,
+`queue_unsteer`, `queue_clear`, `resume_queue` and `cancel` with `surface: "card:<ID>"` operate that
+card's queue. `resume_queue` matters here: Stop on a card pauses that card's queue the way Esc
+pauses a pane's, so a prompt queued behind a stopped turn waits to be resumed.
 
 **`board_cancel {card?}`** — new. The worker-wide `cancel` stops the pane agent's turn, which here
-is a cleanup; a card turn runs on its own agent, so stopping it names the card. Without `card` it
-stops every card turn. It answers `board_cancelled {card_id, stopped, cards}`, where `cards` is
-what is still running.
+is a cleanup; a card turn runs on its own supervisor, so stopping it names the card. Without `card`
+it stops every card turn. It answers `board_cancelled {card_id, stopped, cards}`, where `cards` is
+what is still running. It stays the verb a phone sends (17.4). The GUI sends
+`surface: "card:<ID>"` beside the card; the worker routes this message by the **card** and reads the
+surface off nothing, because `board_cancel` named its card before surfaces existed. `cancel
+{surface: "card:<ID>"}` (12.5) is the same stop by the other road.
 
 ```json
 {"type": "board_cancel", "id": "c1", "card": "K7Q2"}
@@ -3772,6 +3857,12 @@ what each holds) is `SWITCHBOARD-FORMAT.md` 2.7; the canonical list is
 - **The policy and the procedure carry the set**: rule 10 of `board_policy.md`, and the
   `deliver` skill names the section each stage writes (`## Execution Summary` and
   `## QA checklist` at landing).
+- **A Plan turn writes only its own `## Plan`, and that is enforced per turn** (card #CTRN,
+  2026-09-21). It is a rule about the *stage*, so it lives on the turn and not in a narrower tool
+  list: `Agent.set_card_turn("plan", card)` opens the `CardScope` for the length of the turn, a
+  write outside `## Plan` is refused with `board_mode_refused`, and the executor's writers are
+  refused in `_prepare` with the same sentence, which names Execute. The tool list a Plan turn is
+  offered is the console's (19.10, 33.3).
 
 ## 20. Aliases: saved commands and prompts (v2.0, 2026-09-17)
 
@@ -7428,13 +7519,13 @@ So there is no second protocol for a helper. A helper worker is `backend/worker.
 ```jsonc
 {"type": "configure", "workspace": "/home/e/relay-terminal", "…": "…",
  "context": {
-   "name": "switchboard",            // terminal | switchboard | card | options | actions | sessions
+   "name": "switchboard",            // terminal | switchboard | card | options | actions | sessions | projects | globals
    "surface": "switchboard",         // this console's own id; defaults to `name`
    "agent_role": "switchboard",      // 13.1; the top-level `agent_role` wins when both are sent
    "workspace": "/home/e/relay-terminal",
    "persist": {"scope": "helper", "key": "t0123456789ab"},
    "brief": {"key": "switchboard", "title": "Switchboard agent", "screen": ""},
-   "scope": "console",               // pane | console | card — the NAMED tool scope
+   "scope": "console",               // pane | console — the NAMED tool scope ("card" is retired)
    "shell": false,
    "routing": "agent"}}              // auto | agent
 ```
@@ -7450,7 +7541,7 @@ So there is no second protocol for a helper. A helper worker is `backend/worker.
 | `brief.key` | string ≤64 | `""` | which brief goes in the **system prompt**: `switchboard` (`board_chat_brief.md`), `options`, `actions`, `sessions`. An unknown key is no brief rather than an error — the GUI may name a surface this worker is older than. |
 | `brief.title` | string ≤200 | `""` | the heading the brief is written under, and what the console's header says. |
 | `brief.screen` | string ≤2000 | `""` | a standing "On screen now:" line for the surface, kept in the system prompt beside the brief. No GUI sends one: `ContextSpec::toJson` writes `brief {key, title}` only, because what is on screen changes every turn and belongs on the `ask` (33.2). The field stays because the worker's brief is built once, and a surface whose screen never changes could say so here. |
-| `scope` | `pane` \| `console` \| `card` | from `name` | the **named tool scope** (33.3). `terminal` → `pane`, `card` → `card`, everything else → `console`. |
+| `scope` | `pane` \| `console` | from `name` | the **named tool scope** (33.3). `terminal` → `pane`, everything else — a card's console included — → `console`. **`card` is retired** (card #CTRN): `agent_context.SCOPES` is two names and `RETIRED_SCOPES` maps the third, so a `configure` that still sends `scope: "card"` is answered as `console` rather than refused, for the release it takes a GUI to catch up. The `configured` echo says which scope the worker settled on, which is how a GUI sees the mapping happen. |
 | `shell` | bool | `name == "terminal"` | whether the surface spawns a shell. The GUI's; the worker records and echoes it. |
 | `routing` | `auto` \| `agent` | `auto` for `terminal`, else `agent` | what the composer does with a line that is not obviously a prompt. The terminal is the only context that can run it as a command. |
 
@@ -7460,7 +7551,7 @@ settled on — which is what the GUI reads to confirm the surface it is drawn on
 A `configure` with no `context` is a terminal pane, byte for byte what it was: no event grows a field,
 and the pane still defers its tool groups (12.13).
 
-### 33.2 `ask {surface, screen, readonly}`
+### 33.2 `ask {surface, screen, readonly}`, and the fields a card turn rides on
 
 Three additive fields, all the console's; a terminal pane sends none of them and nothing changes for it.
 
@@ -7470,10 +7561,43 @@ Three additive fields, all the console's; a terminal pane sends none of them and
 | `screen` | string, cut at 2000 | what the asking surface is showing (30.7). Reaches the model as an `On screen now: …` line above the prompt; kept out of the prompt the queue and the request ledger hold, because the record is what the person typed. Not `context`, which is the program-context object. |
 | `readonly` | bool, default false | this turn writes nothing by design (the Switchboard's survey, 19.18). The board's write tools refuse with `board_readonly_turn`; the executor's — `write_file`, `edit_file`, `run_command`, `run_in_terminal`, `set_keybinding`, `app_option_set`, `app_action_run`, the subagent tools — refuse with the same sentence. The tool *list* is unchanged, so one read-only turn does not re-prefill every cached request below it. |
 
-**One conversation, drawn everywhere** (owner decision 1 on card #AGNT). The four helper surfaces of a
+**Three more ride on the queue item, and `board_ask` is what puts them there** (v4.5, 2026-09-21,
+card #CTRN). They are `TurnSupervisor.submit`'s arguments, beside `surface`, `screen` and
+`readonly`; no GUI sends them on an `ask`, because a card turn's verb is `board_ask {card, mode}`
+(19.10) and the worker fills them in from it.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `mode` | string ≤64, one line | `discuss` or `plan`: the stage the owner pressed. Its *spelling* is the board's business (`board_tools.CARD_MODES`), not the queue's. |
+| `card` | string ≤64, one line | the card this turn is about. **Both or neither**: a `mode` with no `card` names no card and a `card` with no `mode` names no stage rule, and either alone is refused before anything is queued. |
+| `preview` | string | what the owner typed, when that is not the prompt. A card turn's prompt is the card's seed block and the mode's brief, so the queue row and the request ledger show the question instead (12.3). |
+
+`mode` and `card` constrain the **turn**, exactly as `readonly` does: `Agent.set_card_turn(mode,
+card)` brackets the ask on the same two lines of `queue.py` that `set_readonly` does, opening the
+`CardScope` that 19.20's stage rule is made of and refusing the executor's writers in `_prepare`
+with that scope's own sentence, which names Execute. **The tool list is unchanged** — a Discuss, a
+Plan and an ordinary console turn on one agent are offered byte-identical tools.
+
+The **ask** says `card`; every **event** says `card_id`, because that is what 19.10 has tagged a
+card turn's events with since before surfaces existed and what the board side routes by. Both are
+absent — not empty — on a turn that is not a card's: `queued {…, mode, card_id}`, every
+`queue_changed` row, and `agent_started` / `agent_finished`, which take them from the item that is
+actually running.
+
+**One conversation, drawn everywhere** (owner decision 1 on card #AGNT). The helper surfaces of a
 tab share one agent and one conversation, and each draws all of it: a question in Options and the next
 one on the board are consecutive turns, and both appear in both. `surface` is provenance and addressing,
 not a filter. A per-surface conversation is `context.persist.key`, and nothing else moves.
+
+**A card is the one exception, and it is a conversation and not a filter** (owner decision 1 on card
+#CTRN). A card console's conversation is its own, persisted per (tab, card) — `persist {scope:
+"helper", key: "<tab id>/card:<ID>"}` — because the worker runs one turn at a time per supervisor
+and folding cards into the tab's conversation would make two cards serial again (19.16). Since the
+conversation is genuinely a different one, the GUI delivers an event whose `surface` is `card:<ID>`
+to the console whose own `surface` equals it and to no other console of the tab; everything else
+broadcasts exactly as before. Without that predicate a card's bubbles and tool rows were drawn in
+the board's console and in Options' as well — one turn in three places — and a card's `queue_changed`
+would draw its §12 strip on every console of the tab.
 
 ### 33.3 The named tool scope, and the three things that still withhold a tool
 
@@ -7485,8 +7609,13 @@ got read-only tools: the same agent, two tool sets, decided by whether a board h
 | Scope | Who | Tools |
 |---|---|---|
 | `pane` | a terminal pane's own agent | the whole executor, the app tools, its own session's read tools, the board's ordinary set. Defers the on-demand groups (12.13). |
-| `console` | the Switchboard page, Options, Actions, Sessions | **the same list**, plus `board_merge_cards`, `board_split_card`, `board_import_items` and `search_files`. Defers nothing. |
-| `card` | one Discuss or Plan turn on one card | the mode's board tools and the read-only file tools (19.10). Defers nothing. |
+| `console` | the Switchboard page, **an open card**, Options, Actions, Sessions | **the same list**, plus `board_merge_cards`, `board_split_card`, `board_import_items` and `search_files`. Defers nothing. |
+
+`card` was the third row until card #CTRN — "one Discuss or Plan turn on one card: the mode's board
+tools and the read-only file tools" — and it is gone, with `CardScope.tool_specs` and `Agent.tools()`'s
+`card_scope` branch. A card console is a console; what a mode may touch is the turn's constraint
+(33.2), refused when it is called. `agent_context.SCOPES` is now `("pane", "console")` and
+`RETIRED_SCOPES` maps `card` → `console` for one release (33.1).
 
 **A context carries no tool whitelist.** A per-surface allowlist would re-create the fence the owner just
 took down — today's Sessions helper could not open a pane until #H6VQ, because "opening a pane" had been
@@ -7500,9 +7629,11 @@ Three things still withhold a tool, and each is a constraint rather than a fence
    tab is answered in a sentence (30.7).
 2. **A guest harness cannot run Relay's tools** (#GH5T, #4NXH), so the helper never runs on one and never
    starts one. 29.3 and 30.7's last bullet stand exactly as written.
-3. **A card's Plan turn writes only its own `## Plan`** (19.20, `board_tools.CardScope`). That is the
-   stage machine, not a per-surface fence, and it is why a Plan turn gets no shell and no file writes
-   while a console does.
+3. **A card's Plan turn is refused the writers at call time** (19.20, `board_tools.CardScope`). It
+   writes only its own `## Plan`, gets no shell and no file writes — but it is *offered* the same
+   tools every console turn is, and told no in a sentence that names Execute if it calls one. That is
+   the stage machine rather than a per-surface fence, and saying it at call time is what keeps a
+   card's prefix byte-identical to any other console's (card #CTRN, owner decision 3).
 
 What came down with this card, and why each was a fence:
 
@@ -7531,7 +7662,15 @@ What came down with this card, and why each was a fence:
   `board_chat_started` and on `board_chat_state`) and is gone with them.
 - **A card turn now has a turn boundary.** `agent_started` and `agent_finished` bracket it, carrying
   `card_id`, `mode` and `surface: "card:<ID>"`; a console used to infer where a card turn began and ended
-  from the events it saw.
+  from the events it saw. Since card #CTRN the pair is the card's own `TurnSupervisor`'s, so the turn id
+  is the queue item's, as it is for a pane.
+- **A card turn is the last surface that stopped having a runner of its own** (card #CTRN, 2026-09-21).
+  `board_protocol._build_card_agent` is `_build_card_console`, `board_turns.CardSession` holds a
+  `TurnSupervisor` instead of a bare thread, and the events a card console reads are the pane's. The
+  verb did not change: `board_ask` is a device's only way to discuss a card (17.4) and is where the
+  thread write and the stage advance happen before the model sees the words, so changing it would have
+  bought a compatibility shim and a second path to the same two writes for no behaviour the owner asked
+  for. What changed is behind it.
 
 ## 34. Globals: Switchboard HQ (#P7SJ, #Y2MP)
 

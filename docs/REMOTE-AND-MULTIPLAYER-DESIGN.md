@@ -489,6 +489,15 @@ the client does not have, so it would be a row that goes nowhere.
   retired, and a turn's `surface` field (33.2) is the only thing that says which console asked.
   Card #SWPH's Switchboard bridge forwards an allow-listed set of `board_*` events to the owner's
   full devices and nothing else.
+- **A card turn is a console turn now, and the phone still does not need one** (card #CTRN,
+  2026-09-21). A card's Discuss and Plan stopped being a runner of their own and became ordinary
+  supervised turns on the tab's worker, one queue per card. A device's `board_ask {id, text, mode}`
+  is unchanged and is still the only way it starts one: the turn runs on the worker, the **worker**
+  writes both ends of `issues/threads/<ID>.md` with its `model=` / `turn=` provenance, and the phone
+  sees the question and the answer land as `board_thread_appended` (remote §17.4). So a Discuss
+  started from a phone needs no card page open on the desktop and no console published to the
+  device — which is the second reason decision 4 above costs nothing. The turn's own events
+  (`queued`, `queue_changed`, `delta`, tool rows) are the console's and stay off the wire.
 - **What would be needed to change it.** Three things, in this order: a Switchboard surface on the
   phone worth opening a console *into* (section 5's item 9 and #SWPH's card view are the start);
   a decision about which surface a remote ask names, since `ask {surface}` is how the desktop tells

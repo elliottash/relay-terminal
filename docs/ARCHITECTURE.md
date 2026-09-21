@@ -1773,7 +1773,7 @@ named — is one more class implementing `Context`, and nothing else.
 |---|---|---|---|---|---|---|---|
 | **Terminal** (`Pane::TerminalContext`) | `src/Pane.h` | the pane's own (`main`/`flash`/`local`) | yes | `pane` / the pane's scrollback id | — | path, url, `#ID` | the transcript |
 | **Switchboard** (`board::BoardContext`) | `src/BoardPane.cpp` | `switchboard` | no | `helper` / the tab id | Check (k), Clean up (u), Tests, Profile | `option:`, `session:`, `card:` | the transcript |
-| **Card** (`board::CardContext`) | `src/BoardPane.cpp` | `switchboard` | no | `helper` / the tab id | Plan (p), Execute (x), Verify (v) in a QA lane | as the board | the answer is appended to `issues/threads/<ID>.md` by the worker |
+| **Card** (`board::CardContext`) | `src/BoardPane.cpp` | `switchboard` | no | `helper` / `<tab id>/card:<ID>` | Plan (p), Execute (x), Verify (v) in a QA lane | as the board | the answer is appended to `issues/threads/<ID>.md` by the worker |
 | **Options / Actions** (`OptionsContext`) | `src/SettingsPane.cpp` | `switchboard` | no | `helper` / the tab id | — | `option:` reveals the row here | the transcript |
 | **Sessions** (`SessionsContext`) | `src/Conversations.cpp` | `switchboard` | no | `helper` / the tab id | — | `session:` selects the row here | the transcript |
 
@@ -1782,6 +1782,34 @@ Options section and the visible row ids, the Sessions query and the filters actu
 board's filter and its section counts — and the busy state of a card is a `changed()` rather than a
 pushed label. `OptionsContext` is one class for both modes: `setMode` calls `changed()` and the name,
 the brief and the placeholder all read `mode()`, so Options and Actions swap without swapping consoles.
+
+**A card turn is an ordinary console turn** (card #CTRN, owner 2026-09-21: *"that sounds sensible to
+me, scope that"*; protocol 19.10, 19.16, 33.2). A card page was the last surface in Relay that still
+owned a *turn runner*: Discuss and Plan ran on a per-card `Agent` of their own and drew into the
+card's thread view, where every tool call collapsed to one elided line. Now each card session holds
+a `TurnSupervisor` — the pane's own queue runner, `backend/relay_core/queue.py`, one deque and one
+daemon thread per live card — so a card turn queues, steers, interrupts, keeps a request ledger, is
+bracketed by `agent_started` / `agent_finished` and stops with Esc, exactly as a pane's turn does,
+and a worker runs several queues at once: its own and one per card. The principle is the one this
+section is about: a context says what an agent is *about* and constrains a **turn**; it does not own
+a runner.
+
+- **The thread stays the record, and the worker writes both ends.** The owner's words go on
+  `issues/threads/<ID>.md` before the model sees them and the answer after, with `model=` and
+  `turn=<session>/<turn>` provenance. Not the GUI: a phone sends `board_ask` and has no
+  `CardContext`, a turn can end with no page attached, the write takes the threads directory's lock,
+  and the answer must go through `strip_tool_fragments` first. `CardContext::turnFinished` refreshes
+  the view and writes nothing.
+- **The card page draws the busy strip and the settled thread.** The turn itself is in the card
+  console's transcript, with the pane's bubbles and tool rows; the thread view is fed by
+  `board_thread_appended` alone.
+- **The tool list stopped moving.** A Discuss, a Plan and an ordinary console turn on one agent are
+  offered byte-identical tools, so a card conversation that goes Discuss → Plan → Discuss re-prefills
+  nothing; `Agent.set_card_turn(mode, card)` brackets the ask beside `set_readonly` and the stage
+  rule is refused at call time (protocol 33.3).
+- Evidence: `docs/qa_evidence/2026-09-21-card-turns-backend/` (the worker driven over NDJSON, with a
+  normalised thread diff against the tip before the change) and
+  `docs/qa_evidence/2026-09-21-card-turns-console/` (the page under Xvfb).
 
 **The window makes consoles; the pane libraries never construct one.** `Pane` lives only in the
 `relay` executable's translation unit, so a host sets a `relay::agent::ConsoleFactory onCreateConsole`
@@ -1794,19 +1822,26 @@ same for the Switchboard. Options, Actions and Sessions build their console **on
 collapsed "Helper Agent (Alt+Q)" row, which is the host's — so a tab nobody asks anything pays for
 nothing.
 
-- **One worker and one conversation per tab** (owner decision 1). `RelayWindow::TabConsoleContext`
-  wraps the host's context with what only the window knows: the tab's project, and
-  `persist {scope: "helper", key: <tab id>}`. Every console of a tab therefore resolves to one
-  conversation and two tabs on one project keep two — the wrapper sets those two fields on **every**
-  console, so a context that asks for a key of its own (`CardContext` offers `card:<ID>`) still keeps
-  the tab's one conversation, which is what owner decision 1 asked for. A conversation per surface is
-  that one override and nothing else. A console's lines go down the tab's one
+- **One worker and one conversation per tab** (owner decision 1), **and one conversation per open
+  card** (owner decision 1 on card #CTRN). `RelayWindow::TabConsoleContext` wraps the host's context
+  with what only the window knows: the tab's project, and `persist {scope: "helper", key: <tab id>}`.
+  Every console of a tab therefore resolves to one conversation and two tabs on one project keep two
+  — except a console whose host asked for a **card** key, which keeps it with the tab in front:
+  `<tab id>/card:<ID>`. That exception is what lets two cards be planned at once, because a worker
+  runs one turn at a time per supervisor and a card has one of its own; the tab stays in the key
+  because a tab owns one worker and **one worker owns its conversation files**, so keying by the card
+  alone would let two tabs adopt one file from two workers and the last to save would win. A
+  console's lines go down the tab's one
   `BoardWorker` (`helperWorker(page, true)`, `sendFromConsole`), `startBoardWorker` carries the asking
-  console's `context` block, and **every** event of that worker reaches **every** console of the tab
-  (`deliverToConsoles`): the conversation is one and each console draws all of it, so a question in
-  Options and the next one on the board are consecutive turns visible in both. `surface` is provenance
-  and addressing, never a filter — which is what killed the class of bug #H6VQ was, a panel dropping an
-  event addressed to somebody else and then waiting for ever. A console created after its tab's worker
+  console's `context` block, and every event of that worker reaches every console of the tab
+  (`deliverToConsoles`) **except one whose `surface` is `card:<ID>`**, which reaches that card's
+  console alone: the tab's conversation is one and each console draws all of it, so a question in
+  Options and the next one on the board are consecutive turns visible in both, while a card's turn is
+  a different conversation and is drawn where it belongs. `surface` is otherwise provenance and
+  addressing, never a filter — which is what killed the class of bug #H6VQ was, a panel dropping an
+  event addressed to somebody else and then waiting for ever. (`cardSurfaceOf` also reads a
+  `queue_changed`'s rows, so a card's queue strip cannot appear on the board's console even if an
+  envelope ever arrives untagged.) A console created after its tab's worker
   was already up is replayed the `ready` and `configured` it missed, in that order, because a pane
   refuses to submit while it is unconfigured.
 - **A console is not a pane of the window.** `panesIn` stops at a `ToolPane` the way `leavesIn`
@@ -1847,14 +1882,19 @@ got the whole executor while a board-attached one got read-only tools.
 | Scope | Who | Tools |
 |---|---|---|
 | `pane` | a terminal pane's agent | the whole executor, the app tools, its own session's read tools, the ordinary board tools. The only scope that defers its on-demand tool groups (protocol 12.13) |
-| `console` | the Switchboard page, Options, Actions, Sessions | the same list, plus `board_merge_cards`, `board_split_card`, `board_import_items` and `search_files` |
-| `card` | one Discuss, Plan or Verify turn on one card | the mode's board tools and the read-only file tools (protocol 19.10) |
+| `console` | the Switchboard page, an open card, Options, Actions, Sessions | the same list, plus `board_merge_cards`, `board_split_card`, `board_import_items` and `search_files` |
+
+There was a third row, `card`, until card #CTRN: one Discuss or Plan turn on one card, offered the
+mode's board tools and the read-only file tools. It is gone. A card console is a console, and what a
+mode may touch is a constraint on the *turn* rather than a list of its own (below).
 
 Three things still withhold a tool, and each is a **constraint** — a fact about the setting — rather
 than a fence around a surface: no board means no `board_*` tools (there is nothing to act on, and a
 `switchboard` ask in a board-less tab is answered in a sentence); a guest harness cannot run Relay's
 own tools, so a helper never runs on one and never starts one (#GH5T, #4NXH); and a card's Plan turn
-may write only its own `## Plan`, which is the stage machine of protocol 19.20. What came **down** with
+may write only its own `## Plan`, which is the stage machine of protocol 19.20 and is refused **when
+the tool is called**, in a sentence that names Execute, rather than by narrowing what the turn was
+offered. What came **down** with
 this card was the fences: `ChatScope`'s "no shell, no file writes" (owner decision 3 — yes, with the
 workspace it has, and never for a card's Plan turn), `session_info` and `activity` being the pane
 agent's alone, `track_requests` / `todo_tool` / `completion_check` forced off, and `_deferred_groups`

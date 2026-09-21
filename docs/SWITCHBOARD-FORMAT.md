@@ -367,8 +367,24 @@ where should transcription run? cheap is fine
   or claimed by (#HKAP, #R9G7): the Switchboard draws such an entry as a link that reveals that
   pane. At most 64 characters, and neither whitespace nor `>` — a value the entry marker could
   not hold is refused rather than rewritten.
-- Appends use `O_APPEND` under `flock`, so two processes never interleave a write. Threads are
-  never rewritten in place except by `check --fix` (re-sort).
+- An append **replaces the file** — read, render, `os.replace` — under an exclusive `flock` on the
+  threads **directory**, so two processes never interleave a write. It was an `O_APPEND` write under
+  a lock on the file itself until 2026-09-20: a `QFileSystemWatcher` directory watch, which is what
+  the Switchboard pane holds, does not fire when an existing file grows, and about two of every
+  three writes never reached the pane (#N5JJ). The lock is on the directory because `os.replace`
+  gives the path a new inode. Threads are otherwise never rewritten in place except by
+  `check --fix` (re-sort).
+- **An agent's entry is written by the worker, and card #CTRN did not move a byte of it**
+  (2026-09-21). A card's Discuss and Plan became ordinary console turns that day — a queue, thinking
+  bubbles, tool rows — and the thread they leave is the same file it was: the owner's entry
+  (`author=owner kind=comment mode=discuss|plan`) written before the model sees the words, the
+  board's own stage event (`author=owner kind=event`, with `pane=` when the writer named a pane), and the agent's answer
+  (`author=agent kind=comment mode= model=<the model that answered> turn=<session>/<turn>`),
+  attributes in insertion order, no heading line above them. `relay-board.py check` validates the
+  entry id, the `kind` and the ordering but not `author`, `mode`, `model` or `turn`, so drift there
+  would be silent: the change was checked instead by diffing a driven thread against one the same
+  driver produced on the commit before it
+  (`docs/qa_evidence/2026-09-21-card-turns-backend/`).
 - The body of the card is the document QA reads (request, decisions, plan, checklist, verdicts);
   the thread is the conversation and the audit trail. Every agent write appends an entry.
 

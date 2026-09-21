@@ -397,7 +397,7 @@ owner's files. The pane never starts one of those from a click.
   report, a **Changelog** button that opens the run's Markdown through `onOpenFile`, **Apply**
   after a preview that found something, and **Dismiss**. Every control in it is `NoFocus`, so the
   arrows still walk the list.
-- **Busy** (19.9: the worker runs one turn at a time and the two refuse each other). A card's
+- **Busy** (19.9: a cleanup and a card turn refuse each other, whatever else is queued). A card's
   Discuss or Plan (until 4.9, "Ask the agent") pressed while a cleanup runs is stopped in the pane and explained on the card,
   with the typed message put back in the reply box rather than sent away to bounce; a
   `board_busy` from the worker says which is running — "A cleanup is running on this board." or
@@ -474,20 +474,26 @@ buttons under a card's reply box, after **Comment**: **Discuss** (the accent but
   `board_update_card` / `board_move_card` as always, so the thread keeps the old text (`rewrite`
   entries) and an event line per change, and the answer says what it changed. The owner's own
   editing is `e` (4.8), unchanged. **Enter** in the reply box discusses.
-- **Plan** has the agent read the code (read-only: `read_file`, `list_directory`, and
-  `search_files`, which exists for this) and write or revise the card's `## Plan`. It touches no
-  code and no other card, and the tools refuse if it tries. Words in the reply box go with it as the
-  owner's note; an empty box is fine. **`p`** on the card or the list, or **Ctrl+Enter** in the reply box.
+- **Plan** has the agent read the code (`read_file`, `list_directory`, and `search_files`, which was
+  added for this) and write or revise the card's `## Plan`. It touches no code and no other card, and
+  the tools refuse if it tries — since 2026-09-21 by refusing the *call*, in a sentence that names
+  Execute, rather than by hiding the tool: a Plan turn is offered the same list every console turn is
+  (#CTRN, protocol 19.10). Words in the reply box go with it as the owner's note; an empty box is
+  fine. **`p`** on the card or the list, or **Ctrl+Enter** in the reply box.
 - **Execute** hands the card to a new terminal pane split beside the board, in the board's
   workspace, on the main agent: the card goes to In progress and to the agent, a progress note goes
   in the thread, and the pane's agent gets the card attached with a task that tells it the board's
   conventions (`implemented_by`, `#ID` in every commit message, the hashes in `links.commits`, the
   QA lane when it lands). A card with neither a plan nor an `acceptance` line asks once, on the
   card, in the error line under it ("Execute again (x) … or Plan (p) first") — no dialog. **`x`**.
-- **One turn at a time, per card as before.** While a Discuss or a Plan runs the other modes are
-  disabled and the agent's streaming reply is headed with the mode. *(Until #VZ69 the running
-  mode's own button became **Stop**; since 4.12 it is the strip over the reply box, and Discuss and
-  Comment have no buttons at all.)* The cleanup/busy interplay of 4.8 applies to both modes.
+- **A second prompt queues** (#CTRN, owner 2026-09-21). A card turn is an ordinary console turn on
+  that card's own queue, so Enter while a Discuss runs sends the next prompt to the §12 strip and it
+  runs when the first finishes; Ctrl+Enter during a Discuss queues a **Plan**, with the Plan's brief
+  and the Plan's stage rule, and the strip goes on naming the turn that is *running*. Until that day
+  the page refused it and the worker answered `board_busy`. Execute and Verify still wait for the
+  turn to end, because they hand the card to a terminal pane. *(Until #VZ69 the running mode's own
+  button became **Stop**; since 4.12 it is the strip over the reply box, and Discuss and Comment have
+  no buttons at all.)* The cleanup/busy interplay of 4.8 applies to both modes.
 - **The thread names the mode** on every entry that has one: "owner  Plan · 2 min ago",
   "✦ agent  Discuss · glm-5". Entries from before carry no mode and read as they did.
 - **Keys** (card view): `e` edit, `d` or Tab to the reply box, Enter discuss, `p` / Ctrl+Enter plan,
@@ -496,7 +502,10 @@ buttons under a card's reply box, after **Comment**: **Discuss** (the accent but
   `board.execute`, `board.verify`, and `board.edit` for the pencil. `board.discuss` went with the
   Discuss button in 4.12: Enter *is* the fast path, so there is no slow path left to teach).
 - **Before this**, the card's ask ran on a worker with every pane tool, so "ask the agent" could run
-  commands and write files from a card thread. Discuss and Plan now cannot; that is Execute's job.
+  commands and write files from a card thread. Discuss and Plan still cannot; that is Execute's job.
+  What moved on 2026-09-21 is only *where* that is said: the turn is offered the console's whole
+  list and the call is refused, so the refusal is a sentence the agent reads rather than a tool it
+  never saw.
 
 ### 4.10 Verify: the card names its cross-provider verifier (#T71W, 2026-09-19)
 
@@ -798,6 +807,24 @@ pane's.
   **Verify (v)**, above the box and never in it (4.12); Execute and Verify wear the accent outline,
   which is the `leaves` flag of a `relay::agent::Action` — they hand the card to a terminal pane. The
   console shortens its own row when the page is narrow, so `CardDetail::fitButtons` is gone.
+- **The console draws the turn; the thread settles** (#CTRN, owner 2026-09-21). A Discuss or a Plan
+  is an ordinary console turn now, so the answer streams in the card console's **transcript** with
+  the pane's thinking bubbles that fold, its tool rows with their OSC 8 folds, its queue strip, its
+  request ledger and Esc. The thread view above it shows **settled entries only**: it is fed by
+  `board_thread_appended` and by nothing else, and the live tail it used to draw — one elided
+  progress line per tool call and a thinking block it sealed itself — is gone. Until that day the
+  same bytes were drawn twice, in two shapes, neither of them the pane's. The transcript is this
+  console's session, as a terminal pane's scrollback is: after a restart it is empty and the thread
+  is complete, and the *conversation* behind it persists, so the model still remembers.
+- **The busy strip stays** (#VZ69, owner decision 4 on #CTRN). "✦ Switchboarding · planning…" with
+  its ✕ is the board's own and it names the mode, which the console's busy line does not; it lost
+  only the progress line the tool rows replace. Keeping it is also what kept `src/Pane.h` out of the
+  change.
+- **The queue strip on a card is that card's queue.** A card console's §12 strip shows the worker's
+  queue for its own surface, so a prompt queued behind a running Discuss has a row there — steerable,
+  reorderable, withdrawable — and the board's console shows its own queue and not the card's. Each
+  card's transcript is that card's: opening another card shows that card's turns, not the previous
+  one's under a new title.
 - **The three chords are still the card's.** Enter discusses, Ctrl+Enter plans and Ctrl+Shift+Enter
   leaves a comment with no model call. The console offers a submitted line to its context first
   (`Context::submit(route, text)`, where `route` is which *key* was pressed), so a card's Enter
@@ -821,12 +848,22 @@ pane's.
   re-seeding whenever the card file's hash moves. The page hears the write back as
   `board_thread_appended` and makes sure the thread it is showing is the one that moved;
   `CardContext::turnFinished` does nothing else, because nothing else should write that file twice.
+  That is still true now that a card turn is an ordinary console turn (#CTRN): the worker writes both
+  ends because a phone has no `CardContext` (it sends `board_ask` and sees the two writes as
+  `board_thread_appended`), because a turn can finish with no page attached, because the write takes
+  the threads directory's lock, and because the answer goes through `strip_tool_fragments` first. The
+  entries themselves did not change a byte — `SWITCHBOARD-FORMAT.md` 3.
 
-All the tab's consoles — the board, an open card, Options, Actions and Sessions — talk to **one
-worker and one conversation per tab** (protocol 30.7, owner decision 1), so a question about the board
-and the next one about a setting are consecutive turns of the same agent and both are drawn in both.
-Each `ask` carries a `surface` (`switchboard`, `options`, `card:AGNT`) that rides back on every event
-of that turn; it is provenance and addressing, never a filter. The agent's tools are the board's
+All the tab's consoles — the board, Options, Actions and Sessions — talk to **one worker and one
+conversation per tab** (protocol 30.7, owner decision 1), so a question about the board and the next
+one about a setting are consecutive turns of the same agent and both are drawn in both. Each `ask`
+carries a `surface` (`switchboard`, `options`, `card:AGNT`) that rides back on every event of that
+turn; it is provenance and addressing, never a filter. **A card is the exception** (owner decision 1
+on #CTRN): one worker still, but a conversation of its own per (tab, card), because one supervisor
+runs one turn at a time and folding cards into the tab's conversation would mean you could not plan
+two cards at once (#DR4K, #0Z13). Since that conversation is a different one, a `card:<ID>` event is
+delivered to that card's console alone — the one predicate #AGNT said could be added back the day it
+was needed. The agent's tools are the board's
 (section 6.1) plus the `app_*` tools — read or change an option, run a safe action, search the session
 manager, open any pane at a section, a row, a query or a card — with every change announced as `Agent
 changed <label>: <before> → <after> · Undo` and undoable without an agent (protocol 30.6), and since
