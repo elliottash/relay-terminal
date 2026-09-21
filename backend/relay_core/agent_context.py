@@ -1,0 +1,368 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""What an agent is *about*: the `context` block of `configure` (protocol 33, card #AGNT).
+
+The owner, 2026-09-20: *"an agent interface is the prompt box. it has a set of options and tools
+that vary according to the setting/task, but in general they are shared systems"*, and *"agents
+are specialized for the given pane context, but the general rule/approach is that agents have
+access to all systems and can work across panes and contexts"*.
+
+Read together those two sentences fix the seam, and this module is the worker's half of it.  A
+**context** says what the agent is about — its name, the role it answers on, the brief in front
+of it, where its conversation is kept, whether the surface has a shell, how the composer routes
+— and it deliberately carries **no tool whitelist**.  What tools an agent holds is a *scope*
+(`pane`, `console`, `card`), named here and resolved in exactly one place (`Agent.tools`), never
+inferred from whether a board happens to be attached: inferring it is what gave a board-less
+helper the full executor by accident while a boarded one got read-only tools (`agent.py`, the
+`card_scope` branch, before this card).
+
+`ContextSpec` is the exact bytes of that block, so the C++ half (`src/AgentContext.h`,
+`ContextSpec::toJson`) and this one are tested against one shape.  Nothing here imports the
+agent, the provider or the tool executor: it is a wire format and a few briefs.
+"""
+from __future__ import annotations
+
+import hashlib
+from dataclasses import dataclass
+from pathlib import Path
+
+from . import sessions as S
+
+#: The contexts that exist today.  A new surface adds a name here and a `Context` in the GUI;
+#: nothing else in the worker is per surface.  An unknown name is refused rather than ignored,
+#: because a typo would otherwise silently take the terminal's defaults.
+NAMES = ("terminal", "switchboard", "card", "options", "actions", "sessions")
+
+#: The **named** tool scopes.  One agent, one scope, resolved once:
+#:
+#: * ``pane``    — a terminal pane's own agent: the whole executor, as it always was.
+#: * ``console`` — an agent console that is not a terminal (the Switchboard page, Options,
+#:   Actions, Sessions): the whole executor *plus* the board tools' chat set and the app tools.
+#:   It has the shell and the file tools since the owner's decision of 2026-09-20 — a context
+#:   specialises an agent without fencing it, and the gates are the ones he chose (the
+#:   `agent_safe` / `settable` markers and the Options › Agent toggle).
+#: * ``card``    — one Discuss, Plan or Verify turn on one card: the stage machine of 19.20,
+#:   which is a rule about the *stage*, not a fence around the surface.
+SCOPES = ("pane", "console", "card")
+
+#: What the composer does with a line that is not obviously a prompt.  The terminal is the only
+#: context that can run it as a command, so it is the only one that says `auto`.
+ROUTINGS = ("auto", "agent")
+
+#: Where the conversation is kept.  `""` is the agent's own default session store (a pane);
+#: `helper` is the per-(project, tab) file of 30.7, whose layout is unchanged by this card.
+PERSIST_SCOPES = ("", "pane", "helper")
+
+MAX_NAME = 32
+MAX_KEY = 128
+MAX_TITLE = 200
+MAX_BRIEF_KEY = 64
+MAX_WORKSPACE = 4096
+
+#: How much of "what is on screen" one turn may carry (`ask {screen}`, and the context's own
+#: standing line).  It is a hint, not a context dump: the agent reads the rows live with the app
+#: tools, because a settings list pasted into a prompt is stale the moment the person changes one.
+MAX_SCREEN = 2000
+
+#: How long a `surface` may be.  It names *which console* asked, so that several consoles can
+#: share one conversation and each still know which of its own asks an event belongs to; it is
+#: free text (a tab id, `card:AGNT`), never an enum, because the GUI mints them.
+MAX_SURFACE = 64
+
+
+# ---------------------------------------------------------------------------------------------
+# Where a context's conversation lives.  Moved here from `board_chat` with the file layout
+# untouched (#FEJQ's `3ddd2193`): the same tab in the same project must resolve to the same file
+# at every start, so a restart brings each tab's console back with its own history.
+
+#: `$XDG_DATA_HOME/relay/helper-sessions/<workspace digest>/<tab digest>.json`, deliberately
+#: *outside* `relay/sessions/` — the one tree `SessionStore.index()` indexes.  A console's
+#: chatter is not one of the person's own sessions and is not listed as one (14).
+HELPER_DIRNAME = "helper-sessions"
+
+
+def helper_dir(workspace) -> Path:
+    """The directory this workspace's console conversations live in."""
+    beside = S.default_session_dir(workspace or "")
+    return beside.parent.parent / HELPER_DIRNAME / beside.name
+
+
+def helper_session_id(key: str) -> str:
+    """The session id a persistence key always has: 32 hex digits from the key.
+
+    Derived rather than stored, so nothing has to be written down to find the conversation
+    again.  The personalisation string is the one #FEJQ chose, so files written before this card
+    are found by the same name afterwards.
+    """
+    return hashlib.blake2b(str(key).encode("utf-8"), digest_size=16,
+                           person=b"relay-helper").hexdigest()
+
+
+# ---------------------------------------------------------------------------------------------
+# The briefs.  One paragraph per context: what the surface shows, what can be done there, and
+# the rule that makes a write safe to offer — the person sees it and can undo it in one click
+# (30.6).  Since this card the brief goes into the **system prompt**, once, rather than in front
+# of every prompt: a paragraph repeated per turn is the conversation, and a brief the model was
+# told once is also what `session_info` can report.
+
+#: The Switchboard's brief is a file beside the policy (`board_chat_brief.md`) and is unchanged.
+_FILE_BRIEFS = {"switchboard": "board_chat_brief.md"}
+
+BRIEFS = {
+    "options": (
+        "You are the helper agent in Relay's Options pane. It lists every setting Relay has, in "
+        "sections, and the person is looking at it now. Read the rows with app_option_list and "
+        "app_option_get rather than remembering what Relay's settings are, and answer about the "
+        "values they actually have. app_option_set changes one for them and app_action_run runs "
+        "one of Relay's own actions; both are shown to the person at once as \"Agent changed "
+        "<row>: <before> → <after> · Undo\", so a change you make is never silent and is one "
+        "click to take back. Change only what was asked for and say what you changed. API keys "
+        "are secret: you cannot read or set them, so point at the row instead. When a setting "
+        "is easier shown than described, app_open puts the pane on it."),
+    "actions": (
+        "You are the helper agent in Relay's Actions pane — the palette of everything Relay can "
+        "do, with its keyboard shortcut beside it. app_action_list is that list; `agent_safe` "
+        "says which ones you may run yourself (the ones the person can undo in a click) and the "
+        "rest are for you to find and describe, with the shortcut, so they can run them. "
+        "app_action_run runs one, and the person sees that it ran. When someone asks \"how do I "
+        "…\", name the action and its shortcut, and app_open the palette at it. set_keybinding "
+        "moves a shortcut — an action id from that list and the keys to put it on — and Relay "
+        "reloads the file at once; rebind only what was asked for and say which keys the action "
+        "is on afterwards."),
+    "sessions": (
+        "You are the helper agent in Relay's Sessions pane — every past conversation and "
+        "terminal session Relay has indexed. app_sessions_search is that index: it takes the "
+        "pane's own query language (project:, file:, model:, branch:, before:, after:, is:, and "
+        "-word to exclude) and answers from inside Relay, so nothing is sent anywhere. Search "
+        "before you answer \"which session was that in\" — do not guess from memory — and "
+        "app_open the pane at the search you used, so the person lands on the rows you are "
+        "talking about.\n\n"
+        # The owner, 2026-09-20: "sessions helper didn't do anything when I asked to open a group
+        # of previous sessions in new panes", and then "can you make that more formalized that it
+        # can do that?" — so opening one is a paragraph of its own, not a line in the tool schema.
+        "You can also open a conversation, not only find it. app_open {target: \"conversation\", "
+        "id} resumes one — exactly what pressing Enter on a row in this pane does — and "
+        "{target: \"conversation\", ids: [\"…\", \"…\"]} opens a group, each in a pane of its "
+        "own, in the order you list them; the result says what happened to each id. The ids come "
+        "from app_sessions_search. new_pane decides where: when they said \"in new panes\" (or "
+        "asked for several), it is true, which is the default; only when they said \"here\" or "
+        "\"in this pane\" pass false, which loads it into the pane they are in and replaces what "
+        "that pane was holding. If the ask does not say and it is one conversation, open it in a "
+        "new pane and say so, or ask which they meant — never quietly take a pane over. When you "
+        "list conversations in an answer, write each as a [title](session:<id>) link, so the row "
+        "is one click away whether or not you opened it."),
+}
+
+#: The rule every console answers under (owner, 2026-09-20: "it also needs to reply in text that
+#: it is doing it").  A console draws the agent's **text**; a turn that opens three panes and
+#: says nothing reads as a turn that did nothing — which is how the report that started #FEJQ
+#: began.  It goes after the context's own brief, in every context, because the app tools are in
+#: every context.
+SAY_WHAT_YOU_ARE_DOING = (
+    "Say what you are doing, in text, whenever you act on the app — app_open, app_option_set, "
+    "app_action_run, app_undo. One line before or alongside the call, naming the things: "
+    "\"Opening 3 sessions in new panes: A, B, C.\", \"Turned Copy on select on — Undo is in the "
+    "notification.\" Never finish a turn with an empty message after a tool call: the person sees "
+    "your words, not your calls, and silence reads as nothing having happened.")
+
+
+def brief_body(key: str) -> str:
+    """The paragraph named by `brief.key`, or "" when the key names none.
+
+    An unknown key is not an error: the GUI may name a context this worker is older than, and a
+    console with no brief is a console that has to be told where it is by the person.
+    """
+    if not key:
+        return ""
+    if key in BRIEFS:
+        return BRIEFS[key]
+    name = _FILE_BRIEFS.get(key)
+    if name is None:
+        return ""
+    import re
+    path = Path(__file__).resolve().parent / name
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:                                        # pragma: no cover - packaging slip
+        return ""
+    return re.sub(r"<!--.*?-->", "", text, flags=re.S).strip()
+
+
+def screen_line(screen) -> str:
+    """The "On screen now:" line a turn's `screen` hint reaches the model as (30.7)."""
+    text = " ".join(str(screen or "").split())[:MAX_SCREEN]
+    return f"On screen now: {text}" if text else ""
+
+
+# ---------------------------------------------------------------------------------------------
+# Validation.  Every field is refused rather than coerced: a `configure` that cannot be believed
+# is better refused at the pipe than answered with a pane's defaults in a console's clothes.
+
+def _string(value, field: str, limit: int, *, required: bool = False) -> str:
+    if value is None:
+        if required:
+            raise ValueError(f"context {field} is required.")
+        return ""
+    if not isinstance(value, str) or len(value) > limit:
+        raise ValueError(f"context {field} must be text of at most {limit} characters.")
+    return value.strip()
+
+
+def validate_surface(value) -> str:
+    """`ask {surface}` (33.2): which console asked, echoed on every event of that turn.
+
+    Free text, because the GUI mints it and one worker may serve several consoles of one tab.
+    Absent is "" — a worker with one console never has to send it.
+    """
+    if value is None or value == "":
+        return ""
+    if not isinstance(value, str) or len(value) > MAX_SURFACE or "\n" in value:
+        raise ValueError(f"surface must be one line of at most {MAX_SURFACE} characters.")
+    return value.strip()
+
+
+def validate_screen(value) -> str:
+    """`ask {screen}` (33.2): at most 2000 characters of what the asking surface is showing.
+
+    **Not** `context`, which on `ask` is already the program/terminal context object
+    (`queue.validate_context`); naming them the same is what made this field need a rename.
+    """
+    if value is None or value == "":
+        return ""
+    if not isinstance(value, str):
+        raise ValueError("screen must be text saying what is on the asking surface.")
+    return value[:MAX_SCREEN]
+
+
+def default_scope(name: str) -> str:
+    """The scope a context takes when `configure` names none.
+
+    A terminal pane is a `pane`; a card turn is a `card`; everything else is a `console`.  It is
+    a default and not a rule — the GUI may name any of the three — but it is the one that makes a
+    `configure` from a GUI that knows about contexts and not about scopes do the right thing.
+    """
+    if name == "terminal":
+        return "pane"
+    if name == "card":
+        return "card"
+    return "console"
+
+
+@dataclass
+class ContextSpec:
+    """The `context` block of `configure`, field for field with `relay::agent::ContextSpec`."""
+
+    name: str = "terminal"
+    agent_role: str = ""
+    workspace: str = ""
+    persist_scope: str = ""
+    persist_key: str = ""
+    brief_key: str = ""
+    brief_title: str = ""
+    brief_screen: str = ""
+    scope: str = "pane"
+    shell: bool = True
+    routing: str = "auto"
+
+    # ---- the wire ---------------------------------------------------------------
+    @classmethod
+    def from_json(cls, block) -> "ContextSpec | None":
+        """Parse `configure {context}`.  None when the GUI sent none — every worker before this
+        card did, and one that does behaves exactly as it did: a terminal pane."""
+        if block is None:
+            return None
+        if not isinstance(block, dict):
+            raise ValueError("configure context must be an object.")
+        name = _string(block.get("name"), "name", MAX_NAME, required=True)
+        if name not in NAMES:
+            raise ValueError("context name must be one of " + ", ".join(NAMES) + ".")
+        persist = block.get("persist") or {}
+        if not isinstance(persist, dict):
+            raise ValueError("context persist must be an object {scope, key}.")
+        brief = block.get("brief") or {}
+        if not isinstance(brief, dict):
+            raise ValueError("context brief must be an object {key, title, screen}.")
+        persist_scope = _string(persist.get("scope"), "persist.scope", MAX_NAME)
+        if persist_scope not in PERSIST_SCOPES:
+            raise ValueError("context persist.scope must be one of " +
+                             ", ".join(s or '""' for s in PERSIST_SCOPES) + ".")
+        persist_key = _string(persist.get("key"), "persist.key", MAX_KEY)
+        if persist_scope and not persist_key:
+            raise ValueError("context persist.scope was given without a persist.key.")
+        scope = _string(block.get("scope"), "scope", MAX_NAME) or default_scope(name)
+        if scope not in SCOPES:
+            raise ValueError("context scope must be one of " + ", ".join(SCOPES) + ".")
+        routing = _string(block.get("routing"), "routing", MAX_NAME) or (
+            "auto" if name == "terminal" else "agent")
+        if routing not in ROUTINGS:
+            raise ValueError("context routing must be one of " + ", ".join(ROUTINGS) + ".")
+        shell = block.get("shell")
+        if shell is None:
+            shell = name == "terminal"
+        if not isinstance(shell, bool):
+            raise ValueError("context shell must be true or false.")
+        return cls(name=name,
+                   agent_role=_string(block.get("agent_role"), "agent_role", MAX_NAME),
+                   workspace=_string(block.get("workspace"), "workspace", MAX_WORKSPACE),
+                   persist_scope=persist_scope, persist_key=persist_key,
+                   brief_key=_string(brief.get("key"), "brief.key", MAX_BRIEF_KEY),
+                   brief_title=_string(brief.get("title"), "brief.title", MAX_TITLE),
+                   brief_screen=validate_screen(brief.get("screen")),
+                   scope=scope, shell=bool(shell), routing=routing)
+
+    def to_json(self) -> dict:
+        """The same bytes back, for `configured {context}` — what the GUI reads to confirm that
+        the worker understood the surface it is drawn on."""
+        return {"name": self.name, "agent_role": self.agent_role, "workspace": self.workspace,
+                "persist": {"scope": self.persist_scope, "key": self.persist_key},
+                "brief": {"key": self.brief_key, "title": self.brief_title,
+                          "screen": self.brief_screen},
+                "scope": self.scope, "shell": self.shell, "routing": self.routing}
+
+    # ---- what it supplies ---------------------------------------------------------
+    def is_console(self) -> bool:
+        return self.scope == "console"
+
+    def brief_text(self) -> str:
+        """The brief as it goes into the system prompt: the title, the paragraph, the rule.
+
+        Empty for a terminal pane, which is the context Relay's own `SYSTEM` prompt is written
+        for — a second paragraph saying "you are in a terminal" would only cost tokens.
+        """
+        parts = []
+        if self.brief_title:
+            parts.append(f"[{self.brief_title}]")
+        body = brief_body(self.brief_key)
+        if body:
+            parts.append(body)
+        if self.scope == "console":
+            parts.append(SAY_WHAT_YOU_ARE_DOING)
+        line = screen_line(self.brief_screen)
+        if line:
+            parts.append(line)
+        return "\n\n".join(parts).strip()
+
+    def store(self, workspace: str) -> tuple[str | None, str | None]:
+        """(session_dir, session_id) for this context's conversation, or (None, None).
+
+        `helper` is the per-(project, tab) file of 30.7; the directory is derived from the
+        workspace and the file name from the key, every time, so there is no index to fall out of
+        step with the tabs and a tab that is gone leaves one small file behind rather than a
+        dangling row.
+        """
+        if self.persist_scope == "helper" and self.persist_key:
+            return str(helper_dir(workspace or "")), helper_session_id(self.persist_key)
+        return None, None
+
+    def key(self) -> tuple[str, str, str]:
+        """What makes this the *same* conversation as the last `configure`'s.
+
+        A move of the workspace, the persistence key or the surface's name is a different
+        console and its conversation is let go; a model swap or a keybinding reload moves none
+        of them and leaves the conversation exactly where it was (30.7's rule, generalised).
+        """
+        return (self.name, self.workspace, f"{self.persist_scope}:{self.persist_key}")
+
+
+def from_request(request: dict) -> "ContextSpec | None":
+    """`configure {context}` → a spec, or None for a GUI that sends none."""
+    return ContextSpec.from_json((request or {}).get("context"))
