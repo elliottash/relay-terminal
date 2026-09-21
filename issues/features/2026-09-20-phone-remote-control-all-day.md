@@ -1,7 +1,7 @@
 ---
 id: PH0N
 type: work
-status: executing
+status: needs-verification
 labels: [feature, remote]
 component: [gui, remote]
 milestone: beta
@@ -11,7 +11,7 @@ rank: 6c
 created: '2026-09-20'
 source: 'owner, 2026-09-20, Claude Code session'
 acceptance: from the iPhone, over any network, all day and without touching the desktop, the owner opens the app and sees every pane on the desktop with who needs him, reads what an agent did, steers or stops it, answers its question, switches model, starts a new conversation, and gets a lock-screen notification when a turn finishes or an agent waits; the desktop keeps working through drops and sleep of the phone; content stays end-to-end encrypted
-links: {plans: [], commits: [80706293, 38cf319b, 2c59a720, f39cb626, 8fc8d60b, baebd13a, 8e1e740f, e97c5fc8, 0d021852, ee12ac1a, 954c9f9f, 8e9b2e05], evidence: [docs/qa_evidence/2026-09-20-phone-remote-research/], related: [W5N2, 0VT4, 97EG, T4BS, JQ7R, KBFT, WMXN, GT7X, PF4K], github: null}
+links: {plans: [], commits: [80706293, 38cf319b, 2c59a720, f39cb626, 8fc8d60b, baebd13a, 8e1e740f, e97c5fc8, 0d021852, ee12ac1a, 954c9f9f, 8e9b2e05, c6c2f72e, 4c0348a8, 4cffa9b2, 5cf0db2b], evidence: [docs/qa_evidence/2026-09-21-ph0n-hosted-drive/, docs/qa_evidence/2026-09-20-ph0n-remote-always-on/, docs/qa_evidence/2026-09-20-phone-remote-research/], related: [W5N2, 0VT4, 97EG, T4BS, JQ7R, KBFT, WMXN, GT7X, PF4K], github: null}
 ---
 # Phone remote control, all day: always on, reachable from anywhere, and the last mile on the iPhone
 
@@ -217,3 +217,55 @@ evidence, which is the acceptance.
 - [x] Phase 2.8 Two notification switches; tap opens the pane; "check in from your phone" <!-- t:b8 -->
 - [ ] Phase 3.9 A working day on the iPhone over LTE, evidence folder <!-- t:c9 -->
 - [ ] Phase 4.10 Capacitor shell, TestFlight (only if Phase 3 says so) <!-- t:d1 -->
+
+## Execution Summary
+
+Phases 1 and 2 are built, deployed and driven live; Phase 3 is the owner's on the iPhone; Phase 4
+waits on Phase 3.
+
+- **Always on** (`2c59a720`, `f39cb626`, `8e1e740f`): Options › Remote holds one switch and the
+  address (`remote/alwaysOn`, `remote/address`); the sidecar starts with Relay, registers at the
+  chosen address (`start.always`), re-registers forever after drops with jittered backoff, and
+  reports `remote_state`; every pane with a screen is published on open and withdrawn on close;
+  the plug menu shows the status line, a dot while a device is connected, and Disconnect all.
+- **Connect tokens** (`ee12ac1a`, `954c9f9f`): a per-device token minted by the desktop, handed
+  over inside the Noise session, checked statelessly by the rendezvous; no token, no channel.
+- **Deploy** (`80706293`, `38cf319b`): `rendezvous/deploy.sh` with rollback and a per-file hash
+  check; join.relay-terminal.ai serves main; PNG, maskable and apple-touch icons.
+- **The phone's day** (`e97c5fc8`, `0d021852`, `8e9b2e05`, `4cffa9b2`): inbox chips with
+  "needs you" first and the app badge; offline queue-and-replay; two notification switches with
+  tap-to-open and Relay's icon; Stop, Recap, the agent's question as a row, knock / guest-prompt /
+  control decisions from a `full` device; "paste the pairing link" for an installed iOS app.
+- **Found on the way and fixed**: #WMXN (`8fc8d60b`); a SIGSEGV at quit whenever a pane was shared;
+  Stop vanishing on a socket drop; a restarted rendezvous refusing the hub forever (4401); a >64 KiB
+  line killing the sidecar (`4c0348a8`); `shareStatus()` never saying `finished`; the share window
+  losing its device list; a `/pair` reload on a paired device (`c6c2f72e`).
+- **Filed, not fixed here**: #WCLS (25 worker events unclassified for remote), #AUDL (the audit log
+  misses invites, knocks, admits and guest prompts).
+
+## Tests
+
+- `RELAY_KEYRING=off python3 -m unittest tests.test_remote_gui_host tests.test_remote_host tests.test_remote_hosted_address`
+- `RELAY_KEYRING=off python3 -m unittest tests.test_remote_security tests.test_remote_control tests.test_remote_guests tests.test_remote_wire tests.test_remote_pane_state tests.test_remote_push`
+- `RELAY_KEYRING=off python3 -m unittest tests.test_pane_view tests.test_remote_browser tests.test_web_manifest`
+- `ctest --test-dir build -R "remotesettings|sharing|remotepane|panestate"`
+- `manual: docs/qa_evidence/2026-09-21-ph0n-hosted-drive/` (`drive.sh`, 23 of 24 steps PASS; step 12a fixed in `c6c2f72e`, served since the `5cf0db2b` deploy)
+- `manual: docs/qa_evidence/2026-09-20-ph0n-remote-always-on/`
+
+## QA checklist
+
+Phase 3, on the owner's iPhone over LTE, the acceptance line (full text in the drive's README):
+
+- [ ] Rebuild and restart Relay; Options › Remote on, address relay-terminal.ai; the plug menu says on · relay-terminal.ai · no phone connected.
+- [ ] On the iPhone, Safari → https://join.relay-terminal.ai/ → Share → Add to Home Screen; open it from there (push reaches only the installed app).
+- [ ] Options › Remote → Pair; copy the link under the QR and paste it into "Or paste the pairing link" (a camera scan opens Safari, not the installed app); the five digits match; Allow typing.
+- [ ] Off Wi-Fi, on LTE: the inbox lists every pane with a chip; a new pane on the desktop appears unasked.
+- [ ] A prompt from the phone answers into the pane; Stop ends a turn; a question shows as a row and a tap answers it; Recap prints.
+- [ ] Both notification switches on; a turn longer than 30 s with the desktop window not active produces a lock-screen notification; tapping it opens that pane.
+- [ ] Lock the phone for 20 minutes, unlock: the app reconnects without pairing; a prompt typed while it says offline shows "sends when back online" and arrives once.
+- [ ] Invite a guest (second device or laptop browser); the knock shows on the phone with its code; Admit; the guest's prompt shows; Run.
+- [ ] Quit and restart Relay: the switch is remembered, the phone reconnects with no new pairing.
+- [ ] Switch off at the end of the day: the phone says offline; the plug menu says off.
+- [ ] #KBFT's nine keyboard checks, on this iPhone.
+- [ ] Decision after the week: is the PWA enough, or does Phase 4 (Capacitor shell: APNs, Live Activities, Face ID) start?
+
