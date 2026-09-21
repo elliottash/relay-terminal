@@ -13,6 +13,24 @@ on:
 permissions:
   contents: read
 jobs:
+  runtime:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install cryptography
+      - name: Native storage, worker, credentials and PowerShell tests
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $env:PYTHONPATH = 'backend'
+          $env:RELAY_POWERSHELL = (Get-Command pwsh).Source
+          python -m unittest discover -s tests -p test_platform_storage.py -v
+          python -m unittest discover -s tests -p test_powershell.py -v
+          python -m unittest discover -s tests -p test_windows_open.py -v
   conpty:
     runs-on: windows-2022
     timeout-minutes: 40
@@ -32,16 +50,6 @@ jobs:
       - run: cmake --build build-windows --config Release --parallel
       - name: Exercise native Windows process and console lifecycle
         run: ctest --test-dir build-windows -C Release --output-on-failure
-      - name: Native storage, worker, credentials and PowerShell tests
-        if: ${{ !cancelled() }}
-        shell: pwsh
-        run: |
-          $PSNativeCommandUseErrorActionPreference = $true
-          $env:PYTHONPATH = 'backend'
-          $env:RELAY_POWERSHELL = (Get-Command pwsh).Source
-          python -m unittest discover -s tests -p test_platform_storage.py -v
-          python -m unittest discover -s tests -p test_powershell.py -v
-          python -m unittest discover -s tests -p test_windows_open.py -v
       - name: Configure Windows desktop
         id: configure
         if: ${{ !cancelled() }}
