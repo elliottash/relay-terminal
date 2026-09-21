@@ -978,9 +978,13 @@ private Q_SLOTS:
         const StartChoice guest = startEntry(catalog, QStringLiteral("guest:claude"), QStringLiteral("claude-opus-5"), 1000);
         QCOMPARE(guest.entry.key, QStringLiteral("guest:claude|opus"));
         QVERIFY(guest.restored);
-        // An older layout saved a preset and no model: that preset's main model comes back.
+        // An older layout saved a preset and no model: that preset's main model comes back, and
+        // a provider that names no main model at all (a local server whose probe listed nothing)
+        // comes back on its first row rather than on somebody else's rank 1.
         QCOMPARE(startEntry(catalog, QStringLiteral("glm-coding"), QString(), 1000).entry.key,
                  QStringLiteral("glm-coding|glm-5.3"));
+        QCOMPARE(startEntry(catalog, QStringLiteral("local:spark"), QString(), 1000).entry.key,
+                 QStringLiteral("local:spark|bonsai-2-27b"));
     }
 
     void aRestoredEntryThatCannotRunFallsBackToRankOne() {

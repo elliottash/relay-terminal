@@ -941,8 +941,13 @@ StartChoice startEntry(const Catalog &catalog, const QString &restoredPreset, co
     // ("claude-opus-5") comes back as the entry the lists name (`guest:claude|opus`).
     if (!restoredPreset.isEmpty()) {
         QString key = catalog.resolveKey(restoredPreset, restoredModel);
-        if (key.isEmpty() && restoredModel.isEmpty())
+        // A layout saved before the model was written down, or by an older Relay: the preset's own
+        // main model, else its first row — the same ladder `Pane::currentEntryKey` walks, so a
+        // pane that comes back without a model lands where it would have said it was.
+        if (key.isEmpty() && restoredModel.isEmpty()) {
             if (const Entry *main = catalog.tierEntry(restoredPreset, QStringLiteral("main"))) key = main->key;
+            else if (const QList<Entry> rows = catalog.ofPreset(restoredPreset); !rows.isEmpty()) key = rows.first().key;
+        }
         if (const Entry *entry = key.isEmpty() ? nullptr : catalog.find(key);
             entry && entry->usable && !exhausted(catalog, entry->preset, now)) {
             choice.entry = *entry;
