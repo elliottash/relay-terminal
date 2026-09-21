@@ -6,6 +6,8 @@
 #include "view/KeyMapper.h"
 #include "view/TerminalView.h"
 #include "WordWrap.h"
+#include "MarkdownAnsi.h"
+#include "view/ProseSpans.h"
 
 #include <QAccessible>
 #include <QFontDatabase>
@@ -1328,6 +1330,197 @@ private slots:
         // is not clickable.
         QVERIFY(t.view->visibleRowsText().filter(QStringLiteral("relay://prose")).isEmpty());
         QVERIFY(t.view->linkAtPoint(QPoint(2 + 10 * t.view->cellWidth(), 2 + 3 * t.view->cellHeight())).target.isEmpty());
+    }
+
+    // ---- a markdown link's label opens what it names (card #MDKN) --------------------------
+    //
+    // `[LABEL](target)` is painted in the link ink, so a person clicks the label and not the
+    // `(target)` printed beside it. The label's cells carry an OSC 8 run of their own — the
+    // block's anchor with the target as a `#l=` fragment — and the hit test resolves that
+    // fragment through relay::links, so a label and the target beside it answer identically.
+    //
+    // The block is built the way the pane builds one: MarkdownAnsi with the anchor set, the
+    // rendered text through the streaming wrapper into the grid, the same text before the
+    // wrapper handed over as logical lines.
+    void markdownLinkLabelsAreClickable()
+    {
+        QFETCH_GLOBAL(QString, core);
+        QTemporaryDir dir;
+        { QFile f(dir.filePath(QStringLiteral("notes.txt"))); QVERIFY(f.open(QIODevice::WriteOnly)); }
+        Term t(core, QStringLiteral("/bin/cat"), {}, dir.path());
+        t.backend->resizeTerminal(14, 100);
+        t.view->setCardLookup([](const QString &id, QString *title) {
+            if (id != QStringLiteral("K7Q2"))
+                return false;
+            if (title)
+                *title = QStringLiteral("A card");
+            return true;
+        });
+        t.backend->writeToDisplay("\x1b]7;file://" + QUrl::toPercentEncoding(dir.path(), "/") + "\x07");
+
+        const QString anchor = QStringLiteral("relay://prose/t/5");
+        const QString markdown = QStringLiteral(
+            "Open [the theme row](option:general/theme) or [that talk](session:0f3a91cc).\n"
+            "Also [card K7Q2](#K7Q2), [the notes](notes.txt:12) and [the site](https://x.org/a).\n");
+        MarkdownAnsi md;
+        md.setLinkAnchor(anchor);
+        const QString rendered = md.feed(markdown) + md.finish();
+        ProseCollector collector;
+        collector.feed(rendered);
+        const QVector<FoldLine> lines = collector.take();
+        WordWrap wrap;
+        wrap.setColumns(100);
+        QByteArray bytes = QStringLiteral("\x1b]8;;%1\x1b\\").arg(anchor).toUtf8();
+        bytes += QString(wrap.feed(rendered) + wrap.flush()).replace(QLatin1Char('\n'), QStringLiteral("\r\n")).toUtf8();
+        bytes += QByteArrayLiteral("\x1b]8;;\x1b\\");
+        t.backend->writeToDisplay(bytes);
+        QVERIFY(t.waitScreen(QStringLiteral("the site")));
+        t.backend->setProseBlock(anchor, lines, 100);
+        QTest::qWait(80);
+
+        const QString notes = QFileInfo(dir.filePath(QStringLiteral("notes.txt"))).absoluteFilePath();
+        // The label, wherever the rows put it: the first row whose text holds it, and the column
+        // that text starts at. The `(target)` printed after it is found the same way.
+        auto hitOn = [&t](const QString &needle) {
+            const QStringList rows = t.view->visibleRowsText();
+            for (int r = 0; r < rows.size(); ++r) {
+                const int col = rows.at(r).indexOf(needle);
+                if (col < 0)
+                    continue;
+                return t.view->linkAtPoint(QPoint(2 + (col + needle.size() / 2) * t.view->cellWidth(),
+                                                  2 + r * t.view->cellHeight() + t.view->cellHeight() / 2));
+            }
+            return TerminalView::Link();
+        };
+        auto checkAll = [&](const char *where) {
+            const TerminalView::Link option = hitOn(QStringLiteral("the theme row"));
+            QVERIFY2(option.target == QStringLiteral("relay://option/general/theme"),
+                     qPrintable(QStringLiteral("%1: option label -> '%2'").arg(QLatin1String(where), option.target)));
+            const TerminalView::Link session = hitOn(QStringLiteral("that talk"));
+            QVERIFY2(session.target == QStringLiteral("relay://session/0f3a91cc"),
+                     qPrintable(QStringLiteral("%1: session label -> '%2'").arg(QLatin1String(where), session.target)));
+            const TerminalView::Link card = hitOn(QStringLiteral("card K7Q2"));
+            QVERIFY2(card.target == QStringLiteral("relay://card/K7Q2"),
+                     qPrintable(QStringLiteral("%1: card label -> '%2'").arg(QLatin1String(where), card.target)));
+            // A card label offers what a card reference offers: the id and the board's title,
+            // which is what the context menu is built from.
+            QCOMPARE(card.card, QStringLiteral("K7Q2"));
+            QCOMPARE(card.cardTitle, QStringLiteral("A card"));
+            const TerminalView::Link path = hitOn(QStringLiteral("the notes"));
+            QVERIFY2(path.target == notes,
+                     qPrintable(QStringLiteral("%1: path label -> '%2'").arg(QLatin1String(where), path.target)));
+            QCOMPARE(path.line, 12);
+            const TerminalView::Link url = hitOn(QStringLiteral("the site"));
+            QVERIFY2(url.target == QStringLiteral("https://x.org/a"),
+                     qPrintable(QStringLiteral("%1: url label -> '%2'").arg(QLatin1String(where), url.target)));
+            QVERIFY(url.url);
+        };
+        checkAll("at the print width");
+
+        // The printed target is still text and still opens the same thing, which is what a
+        // restored transcript — where OSC 8 is stripped — is left with.
+        QCOMPARE(hitOn(QStringLiteral("(option:general/theme)")).target,
+                 QStringLiteral("relay://option/general/theme"));
+        // Prose is still prose: the anchor itself never shows and never opens anything.
+        QVERIFY(t.view->visibleRowsText().filter(QStringLiteral("relay://prose")).isEmpty());
+        QVERIFY(hitOn(QStringLiteral("Open")).target.isEmpty());
+
+        // A click on a label opens it, by the same signal every other link travels on.
+        {
+            const QStringList rows = t.view->visibleRowsText();
+            int row = -1, col = -1;
+            for (int r = 0; r < rows.size() && row < 0; ++r) {
+                col = rows.at(r).indexOf(QStringLiteral("that talk"));
+                if (col >= 0)
+                    row = r;
+            }
+            QVERIFY(row >= 0);
+            QTest::mouseClick(t.view, Qt::LeftButton, Qt::NoModifier,
+                              QPoint(2 + (col + 2) * t.view->cellWidth(),
+                                     2 + row * t.view->cellHeight() + t.view->cellHeight() / 2));
+            QCOMPARE(t.links.size(), 1);
+            QCOMPARE(t.links.first(), QStringLiteral("relay://session/0f3a91cc"));
+        }
+
+        // Re-wrapped: away from the print width the view paints its own wrap of the logical
+        // lines, so the label's target has to travel in the span, not in a cell.
+        t.backend->resizeTerminal(14, 62);
+        QTest::qWait(120);
+        QVERIFY2(t.view->visibleRowsText().join(QLatin1Char('|')).contains(QStringLiteral("the theme row")),
+                 "the block did not re-wrap into view");
+        checkAll("re-wrapped at 62");
+        t.backend->resizeTerminal(14, 100);
+        QTest::qWait(120);
+        checkAll("back at the print width");
+    }
+
+    // A label can be the only thing on the block's first grid row, which cuts the block's OSC 8
+    // run into pieces that do not start where the block does. The view merges the pieces by the
+    // anchor they share, or the layer hides the wrong rows on a resize and the row is painted
+    // twice (#MDKN).
+    void aBlockThatOpensWithALabelStillKnowsItsFirstRow()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.backend->resizeTerminal(14, 60);
+        const QString anchor = QStringLiteral("relay://prose/t/6");
+        // A label long enough that the `(target)` printed after it is pushed onto the next row:
+        // the block's first grid row is then nothing but the label, so the run of cells carrying
+        // the block's own anchor does not begin until row 1.
+        const QString markdown = QStringLiteral(
+            "[Open the terminal theme row in Options now](option:general/theme)\n"
+            "A second line, long enough to wrap when the pane narrows a lot.\n");
+        MarkdownAnsi md;
+        md.setLinkAnchor(anchor);
+        const QString rendered = md.feed(markdown) + md.finish();
+        ProseCollector collector;
+        collector.feed(rendered);
+        const QVector<FoldLine> lines = collector.take();
+        WordWrap wrap;
+        wrap.setColumns(60);
+        QByteArray bytes = QStringLiteral("\x1b]8;;%1\x1b\\").arg(anchor).toUtf8();
+        bytes += QString(wrap.feed(rendered) + wrap.flush()).replace(QLatin1Char('\n'), QStringLiteral("\r\n")).toUtf8();
+        bytes += QByteArrayLiteral("\x1b]8;;\x1b\\");
+        t.backend->writeToDisplay(bytes);
+        QVERIFY(t.waitScreen(QStringLiteral("second line")));
+        t.backend->setProseBlock(anchor, lines, 60);
+        QTest::qWait(80);
+        auto rowsHolding = [](const QStringList &rows, const QString &needle) {
+            int n = 0;
+            for (const QString &r : rows)
+                if (r.contains(needle))
+                    ++n;
+            return n;
+        };
+        QCOMPARE(rowsHolding(t.view->visibleRowsText(), QStringLiteral("theme row")), 1);
+        // The premise: the label really is alone on the block's first row.
+        const QStringList printed = t.view->visibleRowsText();
+        for (const QString &r : printed) {
+            if (!r.contains(QStringLiteral("theme row")))
+                continue;
+            QVERIFY2(!r.contains(QStringLiteral("(option:")),
+                     qPrintable(QStringLiteral("the printed target did not wrap away: '%1'").arg(r)));
+            break;
+        }
+        // Narrow: the layer takes the block's rows over. If its anchor started at the second
+        // row, the first would be painted by the grid *and* by the layer.
+        t.backend->resizeTerminal(14, 34);
+        QTest::qWait(150);
+        const QStringList narrow = t.view->visibleRowsText();
+        QCOMPARE(rowsHolding(narrow, QStringLiteral("theme row")), 1);
+        QVERIFY2(narrow.join(QLatin1Char('|')).contains(QStringLiteral("Open the terminal")),
+                 qPrintable(narrow.join(QLatin1Char('|'))));
+        // And the label is still the link it was, on the row the layer painted it on.
+        int row = -1, col = -1;
+        for (int r = 0; r < narrow.size() && row < 0; ++r) {
+            col = narrow.at(r).indexOf(QStringLiteral("theme row"));
+            if (col >= 0)
+                row = r;
+        }
+        QVERIFY(row >= 0);
+        QCOMPARE(t.view->linkAtPoint(QPoint(2 + (col + 3) * t.view->cellWidth(),
+                                            2 + row * t.view->cellHeight() + t.view->cellHeight() / 2)).target,
+                 QStringLiteral("relay://option/general/theme"));
     }
 };
 

@@ -3,6 +3,7 @@
 
 #include "BoxDrawing.h"
 #include "FaintInk.h"
+#include "LabelLinks.h"
 #include "session/TerminalSession.h"
 
 #include <QAccessible>
@@ -1802,6 +1803,46 @@ void logicalRowAt(const ViewportFrame &frame, int row, LogicalRow *out)
 }
 } // namespace
 
+// A markdown link's label, resolved (card #MDKN). The URI on the cell is the block's own anchor
+// with the target the agent wrote after `#l=`; what that target *is* — a card, a row of Options, a
+// saved conversation, a file at a line, a web page — is the same question `relay::links` answers
+// about a span of text, and it is answered the same way here so that a label and the `(target)`
+// printed beside it open identically, right down to the context menu the host builds from `card`
+// and `url`.
+bool TerminalView::resolveLabelLink(const QString &uri, Link *link)
+{
+    const QString raw = relay::labellink::targetOf(uri);
+    if (raw.isEmpty())
+        return false;
+    // A web link first, and without the scanner: `candidates()` splits a URL at a bracket or a
+    // trailing quote, and an agent writes those in a markdown target where they are not
+    // punctuation. Everything else is spelled the way the transcript spells it.
+    if (raw.startsWith(QLatin1String("http://")) || raw.startsWith(QLatin1String("https://"))
+        || raw.startsWith(QLatin1String("mailto:"))) {
+        link->target = raw;
+        link->text = raw;
+        link->url = true;
+        return true;
+    }
+    for (const links::Found &found : links::scan(raw, currentDirectory(), QDir::homePath(),
+                                                 m_linkProbe ? m_linkProbe : links::systemProbe(),
+                                                 m_cardLookup, links::Mode::Prose)) {
+        // The whole target, not a word inside it: `[x](notes about src/a.c)` is not a link.
+        if (found.candidate.start != 0 || found.candidate.length != raw.size())
+            continue;
+        link->target = found.target.target;
+        link->text = raw;
+        link->card = found.target.kind == links::Kind::Card ? found.candidate.path : QString();
+        link->cardTitle = found.target.label;
+        link->url = found.target.kind == links::Kind::Url;
+        link->directory = found.target.directory;
+        link->line = found.target.line;
+        link->column = found.target.column;
+        return true;
+    }
+    return false;
+}
+
 bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endCol)
 {
     *link = Link();
@@ -1810,6 +1851,15 @@ bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endC
     {
         int foldStart = 0, foldEnd = 0;
         const QString target = foldLinkAt(c, &foldStart, &foldEnd);
+        // A re-wrapped prose block and a markdown fold are both rows of FoldSpans, and a link's
+        // label there carries the same URI its cells would carry in the grid (#MDKN).
+        if (relay::labellink::isLabelUri(target)) {
+            if (!resolveLabelLink(target, link))
+                return false;
+            *startCol = foldStart;
+            *endCol = foldEnd;
+            return true;
+        }
         if (!target.isEmpty()) {
             link->text = target;
             const QString local = target.startsWith(QLatin1String("file://")) ? QUrl(target).toLocalFile() : target;
@@ -1833,15 +1883,35 @@ bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endC
     // An OSC 8 hyperlink: the program itself said what the text points at.
     // A prose anchor (#R2WQ) is not a link — it only names the block the view
     // re-wraps — so the row reads as ordinary text and the scan below still
-    // finds the paths and URLs inside it.
+    // finds the paths and URLs inside it. A prose URI that carries a `#l=`
+    // fragment is the exception: that is a markdown link's label, and the
+    // fragment is what it opens (#MDKN).
     const QString uri = m_session->withCore([&](VtCore &core) { return core.hyperlinkAt(row, c.col); });
-    if (!uri.isEmpty() && !FoldLayer::isProseUri(uri) && c.col < int(l.cells.size())) {
+    const bool labelHere = relay::labellink::isLabelUri(uri) && c.col < int(l.cells.size());
+    // The cells of the run under the pointer, whichever kind it is.
+    const auto runOf = [&](int *from, int *to) {
         const uint32_t id = l.cells[size_t(c.col)].link;
-        int s = c.col, e = c.col;
-        while (s > 0 && l.cells[size_t(s - 1)].link == id && id)
-            --s;
-        while (e + 1 < int(l.cells.size()) && l.cells[size_t(e + 1)].link == id && id)
-            ++e;
+        *from = c.col;
+        *to = c.col;
+        while (*from > 0 && l.cells[size_t(*from - 1)].link == id && id)
+            --*from;
+        while (*to + 1 < int(l.cells.size()) && l.cells[size_t(*to + 1)].link == id && id)
+            ++*to;
+    };
+    if (labelHere) {
+        int s = 0, e = 0;
+        runOf(&s, &e);
+        if (resolveLabelLink(uri, link)) {
+            *startCol = s;
+            *endCol = e;
+            return true;
+        }
+        // A target that resolves to nothing — a path that is not there — leaves the label the
+        // plain text it was before this existed, and the scan below still reads the row.
+    }
+    if (!uri.isEmpty() && !labelHere && !FoldLayer::isProseUri(uri) && c.col < int(l.cells.size())) {
+        int s = 0, e = 0;
+        runOf(&s, &e);
         link->text = uri;
         // file:// hyperlinks are local paths, so they open in a Relay pane like any other.
         const QString local = uri.startsWith(QLatin1String("file://")) ? QUrl(uri).toLocalFile() : QString();
@@ -2230,11 +2300,26 @@ void TerminalView::resolveFoldAnchors()
     std::vector<FoldLayer::AnchorRows> anchors;
     anchors.reserve(runs.size());
     const int before = m_folds.visualRows();
+    // A markdown link's label inside a prose block carries the block's own URI with the target as
+    // a fragment (#MDKN), which breaks the block's run into pieces — the cells before the label,
+    // the label, the cells after it — and a label can be the whole of the block's first or last
+    // grid row. The pieces are one anchor: the block's rows are their union, and without the union
+    // the layer would hide the wrong rows on a resize (the last piece wins otherwise).
+    QHash<QString, int> at;
     for (const VtCore::HyperlinkRun &r : runs) {
-        if (m_folds.known(r.uri)) {
-            anchors.push_back(FoldLayer::AnchorRows{r.uri, r.startRow, r.endRow});
-            seen.insert(r.uri);
+        const QString uri = relay::labellink::anchorOf(r.uri);
+        if (!m_folds.known(uri))
+            continue;
+        const auto it = at.constFind(uri);
+        if (it == at.constEnd()) {
+            at.insert(uri, int(anchors.size()));
+            anchors.push_back(FoldLayer::AnchorRows{uri, r.startRow, r.endRow});
+            seen.insert(uri);
+            continue;
         }
+        FoldLayer::AnchorRows &have = anchors[size_t(*it)];
+        have.startRow = std::min(have.startRow, r.startRow);
+        have.endRow = std::max(have.endRow, r.endRow);
     }
     for (const FoldLayer::Fold &f : m_folds.folds()) {
         if (f.anchorStartRow < 0)

@@ -349,6 +349,12 @@ private:
     void afterUserInput();
     void updateHover(const QPoint &pos, Qt::KeyboardModifiers mods);
     bool linkAt(const CellPos &c, Link *link, int *startCol, int *endCol);
+    // A markdown link's label (card #MDKN): its OSC 8 URI is the block's anchor with the target
+    // the agent wrote as a fragment, and the target is resolved here through relay::links exactly
+    // as a span of text is, so a label fills the same Link a scanned target does — the same kind,
+    // the same line and column, the same card id — and opens by the same road. False when the
+    // target resolves to nothing (a path that is not there), which leaves the label plain text.
+    bool resolveLabelLink(const QString &uri, Link *link);
     // Every link in the scrollback and on the screen, oldest first, in absolute rows
     // (0 = the oldest scrollback line, the same coordinates as scrollToRow()).
     struct WalkLink {
