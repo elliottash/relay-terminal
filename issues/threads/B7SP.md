@@ -13,3 +13,30 @@ Created and claimed this investigation. Tracing terminal fold layout, composer b
 
 <!-- relay:entry 20260921T210000Z-c5 author=agent kind=progress model=gpt-6-astra pane=7281bb88 turn=d51b78b277a64a1b92bf122370d5cf42/e8720f5e83474b899e928c5583853f75 -->
 Read-only findings: Pane::thinkingDelta creates an inline fold only after thinking text arrives. PaneBusyLine is shown by tickTurnClock even during silent periods, but is intended to draw a single labeled row. The queue strip is only requested for entries, paused queues, or steers. No cause established yet; no source changes or claim of reproduction.
+
+<!-- relay:entry 20260921T210000Z-c6 author=agent kind=decision model=gpt-6-astra pane=7281bb88 turn=d51b78b277a64a1b92bf122370d5cf42/581fe9d5e7404af1aaf8c09fbb567e80 -->
+Owner clarified: "inside the terminal, below the output, between the terminal and the prompt box, like 7 lines". Investigate terminal viewport/fold layout with approximately seven trailing blank rows.
+
+<!-- relay:entry 20260921T210000Z-c7 author=agent kind=event model=gpt-6-astra pane=7281bb88 turn=d51b78b277a64a1b92bf122370d5cf42/581fe9d5e7404af1aaf8c09fbb567e80 -->
+- ✦ agent updated this card · waiting_on: owner → (unset); appended to `## Decisions`
+
+<!-- relay:entry 20260921T210000Z-c8 author=agent kind=event model=gpt-6-astra pane=7281bb88 turn=d51b78b277a64a1b92bf122370d5cf42/581fe9d5e7404af1aaf8c09fbb567e80 -->
+- ✦ agent moved this card · Discussing → Executing · Owner identified roughly seven blank rows within the terminal above the prompt; resume viewport investigation. · implemented_by openai/gpt-6-astra via codex
+
+<!-- relay:entry 20260921T210000Z-c9 author=agent kind=event model=gpt-6-astra pane=7281bb88 turn=d51b78b277a64a1b92bf122370d5cf42/581fe9d5e7404af1aaf8c09fbb567e80 -->
+- ✦ agent updated this card · replaced `## Plan`
+
+<!-- relay:entry 20260921T210000Z-ca author=agent kind=progress model=gpt-6-astra pane=7281bb88 turn=d51b78b277a64a1b92bf122370d5cf42/581fe9d5e7404af1aaf8c09fbb567e80 -->
+Reproduced missing lower terminal rows with compressed prose followed by ordinary output. The renderer previously supplied only the first core frame. Fetching the remaining visible rows restores the output; targeted tests for fold opening/closing, scrolling, resize, and prose reflow pass. Extending coverage to link hit testing and drag selection before landing.
+
+<!-- relay:entry 20260921T210000Z-cb author=agent kind=event model=gpt-6-astra pane=7281bb88 turn=d51b78b277a64a1b92bf122370d5cf42/581fe9d5e7404af1aaf8c09fbb567e80 -->
+- ✦ agent updated this card · appended to `## Execution Summary`
+
+<!-- relay:entry 20260921T210000Z-cc author=agent kind=event model=gpt-6-astra pane=7281bb88 turn=d51b78b277a64a1b92bf122370d5cf42/581fe9d5e7404af1aaf8c09fbb567e80 -->
+- ✦ agent updated this card · appended to `## Tests`
+
+<!-- relay:entry 20260921T210000Z-cd author=agent kind=event model=gpt-6-astra pane=7281bb88 turn=d51b78b277a64a1b92bf122370d5cf42/581fe9d5e7404af1aaf8c09fbb567e80 -->
+- ✦ agent updated this card · appended to `## QA checklist`
+
+<!-- relay:entry 20260921T210000Z-ce author=agent kind=event model=gpt-6-astra pane=7281bb88 turn=d51b78b277a64a1b92bf122370d5cf42/581fe9d5e7404af1aaf8c09fbb567e80 -->
+- ✦ agent moved this card · Executing → Needs verification · Matching blank-row fault reproduced and fixed; seven focused engine GUI tests pass under Xvfb/libvterm. Original Codex scenario awaits visual confirmation. · evidence docs/qa_evidence/2026-09-21-terminal-bottom-gap/ · implemented_by openai/gpt-6-astra via codex

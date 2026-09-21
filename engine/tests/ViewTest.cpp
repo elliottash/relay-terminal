@@ -612,6 +612,46 @@ private slots:
         QVERIFY(!t.view->foldExpanded(uri));
     }
 
+    void compressedProseKeepsFollowingOutputVisible()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.backend->resizeTerminal(12, 80);
+        for (int i = 0; i < 14; ++i)
+            t.backend->writeToDisplay("older output\r\n");
+        // Eight hard-wrapped rows from a narrow pane become one prose row.
+        // The seven rows after that block must still be supplied by the core.
+        const QString uri = QStringLiteral("relay://prose/gap/1");
+        t.backend->writeToDisplay("\x1b]8;;relay://prose/gap/1\x1b\\");
+        for (int i = 0; i < 8; ++i)
+            t.backend->writeToDisplay("one two\r\n");
+        t.backend->writeToDisplay("\x1b]8;;\x1b\\after one\r\nafter two\r\nafter three\r\nafter four\r\nafter five\r\n"
+                                  "\x1b]8;;https://example.com/last\x1b\\after six\x1b]8;;\x1b\\\r\n");
+        t.backend->setProseBlock(uri, proseLines({QStringLiteral("one two ").repeated(8).trimmed()}), 8);
+        QTest::qWait(400);
+        const QStringList rows = t.view->visibleRowsText();
+        QVERIFY2(rows.contains(QStringLiteral("after six")), qPrintable(rows.join(QLatin1Char('|'))));
+        const int last = rows.indexOf(QStringLiteral("after six"));
+        QCOMPARE(last, rows.size() - 2); // just the terminal's cursor row follows
+        QCOMPARE(int(t.view->frame().lines.size()), t.view->frame().rows); // remote consumers retain the core grid
+        QCOMPARE(t.view->linkAtPoint(t.cellPoint(last, 2)).target, QStringLiteral("https://example.com/last"));
+        QTest::mousePress(t.view, Qt::LeftButton, Qt::NoModifier, t.cellPoint(last, 0));
+        QMouseEvent move(QEvent::MouseMove, t.cellPoint(last, 4), Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+        QApplication::sendEvent(t.view, &move);
+        QTest::mouseRelease(t.view, Qt::LeftButton, Qt::NoModifier, t.cellPoint(last, 4));
+        QCOMPARE(t.backend->selectedText(), QStringLiteral("after"));
+        if (qEnvironmentVariableIsSet("RELAY_GAP_EVIDENCE"))
+            QVERIFY(t.grab().save(qEnvironmentVariable("RELAY_GAP_EVIDENCE") + QLatin1Char('/') + core + QStringLiteral(".png")));
+        t.view->scrollLines(-2);
+        QTest::qWait(80);
+        t.view->scrollToBottom();
+        QTest::qWait(80);
+        QCOMPARE(t.view->visibleRowsText(), rows);
+        t.backend->writeToDisplay("new output\r\n");
+        QTest::qWait(400);
+        QVERIFY(t.view->visibleRowsText().contains(QStringLiteral("new output")));
+    }
+
     void anUnknownFoldAsksTheHostForItsDetail()
     {
         QFETCH_GLOBAL(QString, core);

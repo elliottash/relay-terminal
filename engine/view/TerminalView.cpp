@@ -40,6 +40,21 @@ namespace relay {
 
 namespace {
 
+// A compressed visual window can contain a real row beyond the core's current
+// viewport. Core hit tests and selections still take viewport coordinates;
+// temporarily bring that row into range, keeping the displayed scroll position.
+struct CoreRow {
+    VtCore &core;
+    int savedTop;
+    int row;
+    CoreRow(VtCore &c, int absolute) : core(c), savedTop(c.viewportTop()) {
+        if (absolute < savedTop || absolute >= savedTop + c.rows())
+            c.scrollViewportToRow(absolute);
+        row = absolute - c.viewportTop();
+    }
+    ~CoreRow() { if (core.viewportTop() != savedTop) core.scrollViewportToRow(savedTop); }
+};
+
 // Frame pacing (scheduleFrame). A frame that follows another within
 // kStreamingGapMs is part of a stream and is held to one display frame; the
 // first one after a quieter moment goes out in kEchoFrameMs, which is what
@@ -516,7 +531,9 @@ void TerminalView::pullFrame()
         resolveFoldAnchors();
     bool changed = false;
     m_session->withCore([&](VtCore &c) {
-        changed = c.updateFrame(&m_frame, force);
+        // An expanded snapshot may hold rows beyond the core's viewport (#B7SP).
+        // Rebuild its base before asking the core to apply incremental damage.
+        changed = c.updateFrame(&m_frame, force || int(m_frame.lines.size()) > m_frame.rows);
         syncFoldViewport(c, &changed);
     });
     m_contentMoved = m_contentMoved || changed;
@@ -1517,7 +1534,7 @@ void TerminalView::mousePressEvent(QMouseEvent *e)
         } else {
             clearVisualSelection();
             const int frameRow = frameRowClamped(pos.row);
-            m_session->withCore([&](VtCore &c) { c.selectionBegin(frameRow, pos.col, unit, rect); });
+            m_session->withCore([&](VtCore &c) { CoreRow at(c, m_frame.viewportTop + frameRow); c.selectionBegin(at.row, pos.col, unit, rect); });
         }
         m_selecting = true;
         m_selectionMoved = unit != SelectionUnit::Cell;
@@ -1554,7 +1571,7 @@ void TerminalView::mouseMoveEvent(QMouseEvent *e)
             extendVisualSelection(pos);
         } else {
             const int frameRow = frameRowClamped(pos.row);
-            m_session->withCore([&](VtCore &c) { c.selectionExtend(frameRow, pos.col); });
+            m_session->withCore([&](VtCore &c) { CoreRow at(c, m_frame.viewportTop + frameRow); c.selectionExtend(at.row, pos.col); });
         }
         m_selectionMoved = true;
         if (e->pos().y() < m_padding || e->pos().y() >= height() - m_padding)
@@ -1577,7 +1594,7 @@ void TerminalView::autoScrollTick()
     const CellPos pos = cellAt(m_lastMousePos);
     scrollLines(up ? -1 : 1);
     const int frameRow = frameRowClamped(up ? 0 : m_rows - 1);
-    m_session->withCore([&](VtCore &c) { c.selectionExtend(frameRow, pos.col); });
+    m_session->withCore([&](VtCore &c) { CoreRow at(c, m_frame.viewportTop + frameRow); c.selectionExtend(at.row, pos.col); });
     scheduleFrame();
 }
 
@@ -1936,7 +1953,7 @@ bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endC
     // finds the paths and URLs inside it. A prose URI that carries a `#l=`
     // fragment is the exception: that is a markdown link's label, and the
     // fragment is what it opens (#MDKN).
-    const QString uri = m_session->withCore([&](VtCore &core) { return core.hyperlinkAt(row, c.col); });
+    const QString uri = m_session->withCore([&](VtCore &core) { CoreRow at(core, m_frame.viewportTop + row); return core.hyperlinkAt(at.row, c.col); });
     const bool labelHere = relay::labellink::isLabelUri(uri) && c.col < int(l.cells.size());
     // The cells of the run under the pointer, whichever kind it is.
     const auto runOf = [&](int *from, int *to) {
@@ -2081,7 +2098,7 @@ bool TerminalView::proseLink(uint32_t link, int frameRow, int col)
             return known.second;
     }
     const bool prose = FoldLayer::isProseUri(
-        m_session->withCore([&](VtCore &core) { return core.hyperlinkUri(link, frameRow, col); }));
+        m_session->withCore([&](VtCore &core) { CoreRow at(core, m_frame.viewportTop + frameRow); return core.hyperlinkUri(link, at.row, col); }));
     m_frameProse.push_back({link, prose});
     return prose;
 }
@@ -2457,8 +2474,8 @@ void TerminalView::syncFoldViewport(VtCore &core, bool *changed)
     const int wanted = m_followBottom ? maxTop : std::max(0, std::min(m_visualTop, maxTop));
     m_visualTop = wanted;
 
-    // The core's viewport is `rows` real rows wide and the window can never
-    // show more than that, so covering its first real row covers them all.
+    // Insertion folds need at most one frame. A prose replacement can hide
+    // real rows, so the visible real rows may span MORE than one frame (#B7SP).
     int first = -1;
     for (int i = 0; i < m_rows; ++i) {
         const FoldLayer::VisualRow v = m_folds.at(m_visualTop + i);
@@ -2476,6 +2493,38 @@ void TerminalView::syncFoldViewport(VtCore &core, bool *changed)
     if (want != m_frame.viewportTop) {
         core.scrollViewportToRow(want);
         core.updateFrame(&m_frame, true);
+        *changed = true;
+    }
+    const int base = m_frame.viewportTop;
+    ViewportFrame extra;
+    for (int i = 0; i < m_rows; ++i) {
+        const FoldLayer::VisualRow v = m_folds.at(m_visualTop + i);
+        if (v.fold || v.realRow < base + m_frame.rows || v.realRow >= realRows())
+            continue;
+        if (extra.lines.empty() || v.realRow < extra.viewportTop
+            || v.realRow >= extra.viewportTop + extra.rows) {
+            if (extra.lines.empty())
+                m_baseFrame = m_frame;
+            core.scrollViewportToRow(v.realRow);
+            core.updateFrame(&extra, true);
+        }
+        const int source = v.realRow - extra.viewportTop;
+        if (source < 0 || source >= int(extra.lines.size()))
+            continue;
+        const int dest = v.realRow - base;
+        if (dest >= int(m_frame.lines.size()))
+            m_frame.lines.resize(size_t(dest + 1));
+        m_frame.lines[size_t(dest)] = extra.lines[size_t(source)];
+        if (extra.cursorInViewport) {
+            m_frame.cursor = extra.cursor;
+            m_frame.cursor.row += extra.viewportTop - base;
+            m_frame.cursorInViewport = true;
+        }
+    }
+    if (!extra.lines.empty()) {
+        core.scrollViewportToRow(base);
+        m_frame.dirty.assign(m_frame.lines.size(), 1);
+        m_frame.full = true;
         *changed = true;
     }
     if (m_visualTop != m_paintedVisualTop) {
@@ -2518,7 +2567,7 @@ QString TerminalView::foldAnchorAt(const CellPos &c) const
     if (!m_frame.altScreen && !m_folds.prefix().isEmpty()) {
         const int frameRow = frameRowOf(c.row);
         if (frameRow >= 0) {
-            const QString uri = m_session->withCore([&](VtCore &core) { return core.hyperlinkAt(frameRow, c.col); });
+            const QString uri = m_session->withCore([&](VtCore &core) { CoreRow at(core, m_frame.viewportTop + frameRow); return core.hyperlinkAt(at.row, c.col); });
             if (m_folds.isAnchorUri(uri))
                 return uri;
         }
@@ -2736,12 +2785,14 @@ void TerminalView::applyVisualSelection()
             c.selectionClear();
             return;
         }
-        const int top = m_frame.viewportTop;
-        const int rows = std::max(1, m_frame.rows);
-        c.selectionBegin(std::max(0, std::min(startRow - top, rows - 1)), startCol,
-                         m_visualSelUnit == SelectionUnit::Word && !m_selStart.fold ? SelectionUnit::Word : SelectionUnit::Cell,
-                         false);
-        c.selectionExtend(std::max(0, std::min(endRow - top, rows - 1)), endCol);
+        {
+            CoreRow at(c, startRow);
+            c.selectionBegin(at.row, startCol,
+                             m_visualSelUnit == SelectionUnit::Word && !m_selStart.fold ? SelectionUnit::Word : SelectionUnit::Cell,
+                             false);
+        }
+        CoreRow at(c, endRow);
+        c.selectionExtend(at.row, endCol);
     });
     scheduleFrame();
 }
@@ -2820,11 +2871,13 @@ QString TerminalView::visualSelectedText() const
         if (v == ev)
             lastCol = m_selEnd.col;
         ++v;
-        const int top = m_frame.viewportTop;
-        const int rows = std::max(1, m_frame.rows);
         parts << m_session->withCore([&](VtCore &c) {
-            c.selectionBegin(std::max(0, std::min(firstReal - top, rows - 1)), firstCol, SelectionUnit::Cell, false);
-            c.selectionExtend(std::max(0, std::min(lastReal - top, rows - 1)), lastCol);
+            {
+                CoreRow at(c, firstReal);
+                c.selectionBegin(at.row, firstCol, SelectionUnit::Cell, false);
+            }
+            CoreRow at(c, lastReal);
+            c.selectionExtend(at.row, lastCol);
             return c.selectedText();
         });
     }

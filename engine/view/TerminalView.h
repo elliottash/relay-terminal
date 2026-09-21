@@ -228,7 +228,9 @@ public:
     // The frame this view last pulled. Anything else that needs screen state — remote sharing,
     // for one — reads this instead of calling VtCore::updateFrame, which consumes the dirty
     // state and therefore tolerates exactly one consumer per session.
-    const ViewportFrame &frame() const { return m_frame; }
+    const ViewportFrame &frame() const {
+        return int(m_frame.lines.size()) > m_frame.rows ? m_baseFrame : m_frame;
+    }
     QVariant inputMethodQuery(Qt::InputMethodQuery query) const override;
 
 signals:
@@ -390,6 +392,9 @@ private:
     TerminalSession *m_session;
     ColorScheme m_scheme;
     ViewportFrame m_frame;
+    // Remote screen consumers keep the core's ordinary grid. Only the local
+    // folded view may extend m_frame to cover compressed prose (#B7SP).
+    ViewportFrame m_baseFrame;
     bool m_forceFull = true;
 
     QFont m_baseFont;
