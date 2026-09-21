@@ -15,6 +15,7 @@ links: {plans: [], commits: [], evidence: [], related: [YZ8G], github: null}
 also im sold to change switchboard to board, lets just use the switchboard icon / aesthetic. i would change .switchboard to /board. you can deploy a subagent to scope that
 
 ## Decisions
+- 2026-09-21, owner, on the plan's four questions: (1) "about _board rather than board? (i dont feel strongly about this)" — `board/`: an underscore is as visible to search as a plain name and is nobody's convention; the hide toggle is dropped; the generated pointer text teaches `rg -g '!board/'`. (2) "yes" — "Board agent" in the helper header; "Switchboarding" stays in the busy strip. (3) "what is the role id?" — the helper agent's model-role id, `switchboard`, a settings key and a wire name the user never sees (shown as "Helper agent"); it stays. (4) "ok" — the design, format and tooling docs become `BOARD-*` with redirect stubs; `SWITCHBOARD-AESTHETIC.md` stays.
 - 2026-09-21, owner: the product word is **Board**; the switchboard icon and aesthetic are kept; the board folder in a project changes from `.switchboard/` to `board/`.
 
 ## Done means

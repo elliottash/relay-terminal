@@ -28,3 +28,6 @@ folder" option survives; "Board agent" in the helper header and whether "Switchb
 whether the `switchboard` role id is renamed; whether the doc files are renamed. Recommendations on
 each. `docs/SWITCHBOARD-AESTHETIC.md` is recommended to keep its name — it is the document about
 the aesthetic the owner is keeping, and it is what the theme files cite.
+<!-- relay:entry 20260921T235808Z-d2 author=claude-code kind=decision -->
+### Claude Code · 2026-09-21 23:58
+Owner answered the four questions ("1 about about _board rather than board? (i dont feel strongly about this) 2 yes 3 what is the role id? 4 ok"); recorded in `## Decisions`. Implementation waits for #PR4Q, #WC3E and #JNYN to land, then one subagent per area in the plan's order.
