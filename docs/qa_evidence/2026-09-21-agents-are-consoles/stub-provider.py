@@ -34,6 +34,8 @@ The scenes, and what each is evidence of:
                                                       owner's rule), from Options and from Sessions
   "read the board"    board_list                   -> a terminal pane's agent using board tools
   "say hello"         short prose                  -> a plain turn, for the card and the restart
+  "how much do you.." the number of user messages  -> a restarted tab came back to the conversation
+                                                      it had, rather than to a fresh one
 
 Everything is deterministic on purpose: the same words, the same chunks, the same sleeps, so two
 runs of the same drive differ only where Relay prints a clock. Anything else answers one line, so
@@ -82,8 +84,11 @@ def scenes():
             ("one two three four five six seven eight nine ten eleven twelve thirteen fourteen "
              "fifteen sixteen seventeen eighteen nineteen twenty", [], ""),
         ],
+        # The link's label is a word that appears **nowhere else** on screen, so a driver that has
+        # to click it cannot land on the same words in the prose instead — which is how the
+        # integration drive read "the row was revealed" while the Options pane had not moved.
         "where is copy on": [
-            (f"It is in Terminal: [Copy on select](option:{ROW}). Clicking that opens the row.",
+            (f"It is in Terminal: [OPENROW](option:{ROW}). Clicking that opens the row.",
              [], ""),
         ],
         "turn on copy on": [
@@ -108,6 +113,12 @@ def scenes():
         "read the board": [
             ("", [call(1, "board_list", {})], ""),
             ("", [], ""),   # filled from the tool result, below
+        ],
+        # How much of the conversation the worker actually handed the model. A restarted tab that
+        # came back to the file it had asks this and gets a number greater than one; a tab that
+        # started a new conversation gets one.
+        "how much do you remember": [
+            ("", [], ""),   # filled from the request, below
         ],
         "say hello": [
             ("Hello from the tab's one agent.", [], ""),
@@ -182,6 +193,8 @@ def scene(request):
         prose = _pane_answer(messages)
     if picked == "read the board" and step >= 1:
         prose = _board_answer(messages)
+    if picked == "how much do you remember":
+        prose = "HISTORY turns=%d" % sum(1 for m in messages if m.get("role") == "user")
     return prose, calls, reasoning
 
 

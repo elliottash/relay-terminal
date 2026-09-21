@@ -161,12 +161,30 @@ committed `drive.sh`: `hasword` was used by name and never defined (a silent
 legend instead of the box, and `app_option_set` takes `option:<section>/<row>` — the catalog id
 `RelayWindow::toggleRow` builds — not the link's `<section>/<row>`.
 
+## The owner's punch list, and what it came to (`punch/`)
+
+Driven again on a build of `b62b9f34`. `punch/notes.txt` is the run; `punch/notes-switchboard.txt`
+is the Switchboard phase, which is where (A) is read.
+
+| | asked | read |
+|---|---|---|
+| **A** | the console's header row must not be drawn, and `On screen now:` must never reach a title | **PASS.** `punch/a01-switchboard-noheader.png`, and counted rather than looked at: with the Switchboard console up the window draws **one** `paneHeader` — the terminal pane's. `punch/a03-thinking-notitleleak.png` has no "On screen now" anywhere. The backend half is `test_queue`: the hint rides in `note` and the title, the checkpoint and the ledger are the person's words |
+| **B** | no dead band on a card, one frame, and the row's face back | **PASS.** `punch/b02-card.png`: thread → action row → box, one rounded frame, **Plan (p)** card-shaped and **Execute (x)** in the agent's accent outline, the same 33 px button as Check (k) in `a09-queued.png` |
+| **C** | a restart brings each tab's helper back with its history | **PASS.** `punch/g09-history.png`: the restored console's agent is handed `HISTORY turns=2` — the earlier turn is in the conversation it came back to. The file count goes 3 → 4 in the same run and that is **not** a move: the second tab has no project and asks for the first time after the restart, which is a new conversation. Who owns it is written down in `agent_context.helper_file` (the backend) and `refreshConsoleHosts` (the window's half) |
+| **D** | settle Ctrl+Shift+Enter with a test, and fix if real | **Settled: it is neither the route nor a busy guard.** `consolemode` drives all three chords through a shell-less console — `auto`, `agent`, **`shell`** — and again after a finished turn; `board` drives them through the card page's console and Ctrl+Shift+Enter sends `board_comment` with the card and the words, clears the box and does not send them twice. What is left is the **keystroke under Xvfb**: `key ctrl+shift+Return`, `--clearmodifiers` and holding the two around a plain Return were all tried, and holding them breaks the next plain Enter as well. The check stays in the drive and says so when it fails (`chord_comment`) |
+| **E** | the marker and the Undo by a real click, not skipped | **Half.** The list is now *readable and clickable*: `shotroot` captures a `Qt::Popup` (its own top-level window, which `import -window $win` renders as a black hole — `c04-notice.png` in the first attempt), the bell is clicked by name out of `RELAY_QA_RECTS`, and "Clear all" and "Undo" are OCR-findable inside it. What the list does **not** contain is the thing being looked for: after an `app_option_set` that reaches the setting (`relay.conf: copy_on_select=true`), the only entries are the two turns' own "Agent finished" — no "Agent changed Copy on select · Undo", and no "changed by the agent" on the row. `src/AppCommands.cpp:829-833` posts both unconditionally once the write lands, so this is a real gap and not the driver; it is on the card's QA checklist rather than closed here |
+
+`RELAY_QA_RECTS` is the general half of (E): set it to a path and the window writes every visible
+named widget's screen rectangle there, debounced, and nothing else — unset, it is one `qgetenv`
+at startup. It is what lets a drive click an icon, and what lets "a console draws no pane header"
+be *counted* rather than read. `windowBellButton` is the one chrome button that had to be named.
+
 ## What is in here
 
 - `drive.sh`, `stub-provider.py` — the run.
 - `notes.txt` — the PASS/FAIL lines of the full run, and the numbers each was read from.
-- `rerun-card/`, `rerun-options/` — those two phases re-driven after their findings were fixed,
-  with the card's thread file as it was written (`thread-<ID>.md`).
+- `punch/` — the owner's punch list driven again on a build of `b62b9f34`, with the card's
+  thread file as it was written (`thread-<ID>.md`).
 - `a*.png` … `g*.png` — the shots, one series per phase.
 - `terminal-before/`, `terminal-after/`, `terminal-diffs.txt`,
   `terminal-diff-02-pane-title.png` — the ten-shot pixel comparison above.

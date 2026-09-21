@@ -64,6 +64,10 @@ export DISPLAY=$display RELAY_KEYRING=off
 mkdir -p "$sandbox/home" "$sandbox/run" "$sandbox/tmp"; chmod 700 "$sandbox/run"
 ln -sfn "/run/user/$(id -u)/bus" "$sandbox/run/bus"
 export HOME=$sandbox/home XDG_RUNTIME_DIR=$sandbox/run TMPDIR=$sandbox/tmp
+# Where the named widgets are. OCR finds words and cannot find an icon — the bell that opens the
+# notification list, a switch, the ⧉ beside a card id — so the things a drive has to *click*
+# rather than read come from here. Only set for a drive: see RelayWindow::startQaRects.
+export RELAY_QA_RECTS=$sandbox/rects.json
 export XDG_CONFIG_HOME=$HOME/.config XDG_DATA_HOME=$HOME/.local/share XDG_CACHE_HOME=$HOME/.cache
 work=$HOME/project
 mkdir -p "$XDG_CONFIG_HOME/RelayTerminal" "$XDG_CONFIG_HOME/relay" "$XDG_DATA_HOME" "$work"
@@ -173,6 +177,14 @@ shot() {
     xdotool windowfocus "$win" 2>/dev/null
     sleep 0.3
 }
+# A `Qt::Popup` — the notification list, the model box, a menu — is its own top-level window, so
+# `import -window $win` captures the app window with a hole where the popup is. The whole screen
+# is what has the popup in it.
+shotroot() {
+    xdotool mousemove $((width + 20)) $((height + 20)); sleep 0.5
+    import -window root "$out/$1.png"
+    sleep 0.3
+}
 text() { tesseract "$out/$1.png" - --psm 6 2>/dev/null; }
 words() {
     convert "$out/$1.png" -scale 200% png:- 2>/dev/null \
@@ -184,6 +196,66 @@ word_xy_below() { words "$1" | awk -v want="$2" -v top="$3" 'tolower($1) ~ tolow
 word_xy_first() { words "$1" | awk -v want="$2" 'tolower($1) ~ tolower(want) && !seen {seen=1; printf "%d %d\n", $2+$4/2, $3+$5/2}'; }
 click_at() { [[ -z ${1:-} || -z ${2:-} ]] && return 1; xdotool mousemove "$1" "$2" click 1; sleep 1.5; }
 click_word() { local at; at=$(word_xy "$1" "$2"); [[ -n $at ]] && click_at ${at% *} ${at#* }; }
+# The widget by name, from RELAY_QA_RECTS. Screen coordinates, which is what xdotool takes, and
+# the window sits at 0,0. A name that is not on screen fails loudly rather than clicking nothing.
+rect() {   # objectName -> "x y w h text"
+    python3 - "$RELAY_QA_RECTS" "$1" <<'PY' 2>/dev/null
+import json, sys
+try:
+    rows = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(1)
+row = rows.get(sys.argv[2])
+if not row:
+    sys.exit(1)
+print(row["x"], row["y"], row["w"], row["h"], row.get("text", ""))
+PY
+}
+click_rect() {   # objectName
+    local r; r=$(rect "$1") || { note "  (no widget named $1 on screen)"; return 1; }
+    set -- $r
+    xdotool mousemove $(( $1 + $3 / 2 )) $(( $2 + $4 / 2 )) click 1
+    sleep 1.5
+}
+# The same name in a named part of the screen. Object names are not unique — every prompt box in
+# Relay is a `composerEditor` — and their order in the dump is the object tree's, which is not
+# the screen's: `composerEditor#2` turned out to be the *terminal pane's*, so the card's Enter
+# went to the wrong agent and the drive read it as "the card wrote no thread".
+click_rect_in() {   # objectName minx miny
+    local xy
+    xy=$(python3 - "$RELAY_QA_RECTS" "$1" "$2" "$3" <<'PY' 2>/dev/null
+import json, re, sys
+try:
+    rows = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(1)
+name, minx, miny = sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+best = None
+for key, row in rows.items():
+    if key != name and not re.fullmatch(re.escape(name) + r"#\d+", key):
+        continue
+    cx, cy = row["x"] + row["w"] // 2, row["y"] + row["h"] // 2
+    if cx >= minx and cy >= miny and (best is None or cy > best[1]):
+        best = (cx, cy)
+if best is None:
+    sys.exit(1)
+print(best[0], best[1])
+PY
+) || { note "  (no $1 past ${2},${3} on screen)"; return 1; }
+    xdotool mousemove ${xy% *} ${xy#* } click 1
+    sleep 1.5
+}
+count_rects() {  # name prefix -> how many are on screen
+    python3 - "$RELAY_QA_RECTS" "$1" <<'PY' 2>/dev/null || echo 0
+import json, re, sys
+try:
+    rows = json.load(open(sys.argv[1]))
+except Exception:
+    print(0); raise SystemExit
+name = sys.argv[2]
+print(sum(1 for k in rows if k == name or re.fullmatch(re.escape(name) + r"#\d+", k)))
+PY
+}
 await() {   # shot pattern [seconds]
     local waited=0 limit=${3:-60}
     while :; do
@@ -229,6 +301,19 @@ focus_console() {   # shot-name placeholder-word
     sleep 1
 }
 ask() { t "$1"; k Return; }
+# Ctrl+Shift+Enter. **This chord does not reach Qt under Xvfb**, whichever way it is spelled:
+# `key ctrl+shift+Return`, `--clearmodifiers`, and holding the two down around a plain Return
+# were all tried, and holding them breaks the *next* plain Enter as well. The app's two halves
+# are proved by test instead, through the real widgets:
+#
+#   consolemode  every chord reaches its context with its own route — auto, agent, **shell** —
+#                on a shell-less console, and again after a finished turn
+#   board        the card page's console turns `shell` into `board_comment` with the card and the
+#                words, clears the box, and does not send them twice
+#
+# So what stays unverified here is the keystroke, not the route mapping and not a busy guard.
+# The check is kept, and says so when it fails.
+chord_comment() { k ctrl+shift+Return; }
 
 want() { [[ " $phases " == *" $1 "* ]]; }
 
@@ -241,12 +326,24 @@ shot a01-switchboard
 has "a1 the Switchboard's console is the prompt box, not a panel" a01-switchboard "Ask the Switchboard agent"
 # The action row: left-aligned buttons above the box, each wearing its letter (#PBX1).
 has "a1 the action row reads Check (k)" a01-switchboard "Check (k)"
+# A console draws **no pane header**: the window has one terminal pane and one console on
+# screen, so exactly one `paneHeader` is drawn. Counted rather than read, because what is being
+# asserted is the absence of a row.
+headers=$(count_rects paneHeader)
+note "paneHeader widgets on screen with the Switchboard console up: $headers"
+if [[ ${headers:-0} == 1 ]]; then ok "a1 the console draws no pane header (only the terminal pane's)"
+else bad "a1 $headers pane headers are drawn: a console is wearing one"; fi
 has "a1 and Clean up (u)" a01-switchboard "Clean up (u)"
 
 # --- a thinking bubble that folds and unfolds, exactly as the pane's does
 focus_console a02-focus "Ask"
 ask "explain the fold please"
 awaited "a2 the console streams a turn into its transcript" a03-thinking "thought for" 120
+# The turn's own title is made from the prompt, and the "On screen now:" hint is not part of the
+# prompt (protocol 33). It used to be composed into the string, so the console's header read
+# "On screen now: Inbox 2, Discussing 1, …" — and the Sessions list and the ledger would have
+# kept it. The header is gone either way; this says the text is too.
+hasnt "a2 no On-screen hint reached a title" a03-thinking "On screen now"
 shot a03-thinking
 k alt+r; sleep 2; shot a04-fold-open
 has "a2 Alt+R unfolds the thinking bubble" a04-fold-open "reasoning block\|Looking at what this console"
@@ -315,12 +412,33 @@ click_word b01-list "console"
 sleep 4; shot b02-card
 has "b1 the card page carries the console's reply box" b02-card "Enter discusses"
 hasword "b1 Plan (p) is on the action row above the box" b02-card "^plan"
-has "b1 and Execute (x)" b02-card "Execute (x)"
+hasword "b1 and Execute (x), in the accent outline that says it leaves the board" b02-card "^execute"
 
-focus_console b03-focus "discusses"
+# **The comment first**, on a card nothing has run on: Ctrl+Shift+Enter is the chord that writes
+# the thread with no model call, and doing it first says whether the chord works at all before
+# a turn's own bookkeeping is in the way. (It did not land when it was sent straight after a
+# Discuss turn, and this is what tells the two apart.)
+shot b03-focus
+click_rect_in composerEditor $((width / 2)) 0 || focus_console b03-focus "discusses"
+t "a note with no model call"
+# `--clearmodifiers`: xdotool holds whatever the last `type` left on the modifier state, and a
+# chord sent on top of it is not the chord. `board`'s own case drives all three chords through
+# the console's editor and they land, before and after a turn — so what this is aiming at is
+# the keystroke, not the page.
+chord_comment       # Ctrl+Shift+Enter, held rather than sent as one key
+sleep 8
+thread=$work/issues/threads/$card.md
+if grep -qi "a note with no model call" "$thread" 2>/dev/null; then
+    ok "b3 Ctrl+Shift+Enter wrote a comment to the thread with no model call"
+else
+    bad "b3 Ctrl+Shift+Enter wrote no comment (Xvfb does not deliver the chord; see chord_comment)"
+fi
+shot b03b-comment
+cp "$thread" "$out/thread-$card-comment.md" 2>/dev/null
+
+click_rect_in composerEditor $((width / 2)) 0 || focus_console b03-focus "discusses"
 ask "say hello to the card"
 sleep 25; shot b04-discussed
-thread=$work/issues/threads/$card.md
 if [[ -f $thread ]]; then
     cp "$thread" "$out/thread-$card.md"
     if grep -qi "say hello to the card" "$thread"; then
@@ -333,12 +451,16 @@ else
     bad "b2 no thread file at $thread"
 fi
 
-# Ctrl+Shift+Enter is a comment with no model call: the thread grows, the agent does not run.
-focus_console b05-focus "discusses"
-t "a note with no model call"; k ctrl+shift+Return; sleep 6; shot b06-comment
-if grep -qi "a note with no model call" "$thread" 2>/dev/null; then
-    ok "b3 Ctrl+Shift+Enter wrote a comment to the thread"
-else bad "b3 Ctrl+Shift+Enter did not write a comment"; fi
+# And again, straight after the turn: the chord is the same, the card is busy with nothing, and
+# a second note lands beside the first.
+shot b05-focus
+click_rect_in composerEditor $((width / 2)) 0 || focus_console b05-focus "discusses"
+t "a second note, after the turn"
+chord_comment
+sleep 8; shot b06-comment
+if grep -qi "a second note, after the turn" "$thread" 2>/dev/null; then
+    ok "b3 and a comment straight after a Discuss turn lands too"
+else bad "b3 a comment after a Discuss turn did not land either (the same undelivered chord)"; fi
 cp "$thread" "$out/thread-$card-after.md" 2>/dev/null
 fi
 
@@ -353,8 +475,13 @@ k alt+q; sleep 3
 focus_console c02-console "Ask"
 has "c1 Alt+Q expands it into a console with the Options placeholder" c02-console "Ask the Options helper"
 
+# The notification list is newest-first and scrolls, and a turn posts "Agent finished" of its
+# own — so the change's notice can be below the fold before it has been looked for. Cleared
+# first, and then the only thing in the list is what this turn did.
+click_rect windowBellButton && { sleep 1; shotroot c02b-notices; click_word c02b-notices "clear"; k Escape; sleep 1; }
+focus_console c02c-focus "Ask"
 ask "turn on copy on select for me"
-awaited "c2 the helper says in text what it changed" c03-changed "turned Copy on select on" 150
+awaited "c2 the helper says in text what it changed" c03-changed "turned Copy on select on" 240
 sleep 3; shot c03-changed
 # The write itself, on disk, before anything is read off a screenshot.
 note "relay.conf: $(grep -i copy_on_select "$XDG_CONFIG_HOME/RelayTerminal/relay.conf" 2>/dev/null || echo '(absent)')"
@@ -369,22 +496,25 @@ fi
 # used here for its side effect.
 focus_console c03c-focus "Ask"
 ask "where is copy on select?"
-awaited "c3 an option: link is in the answer" c06-link "Clicking that opens" 150
+awaited "c3 an option: link is in the answer" c06-link "Clicking that opens" 240
 sleep 4; shot c06-link
-at=$(word_xy_below c06-link "^copy$" 400)
-[[ -z $at ]] && at=$(word_xy_below c06-link "select" 400)
+at=$(word_xy c06-link "openrow")
 if [[ -n $at ]]; then
     click_at ${at% *} ${at#* }; sleep 2; shot c07-revealed
     has "c3 the link revealed the row in this same pane" c07-revealed "Copy on select"
     has "c2 and the row is marked changed by the agent" c07-revealed "changed by the agent"
+    # …and again after the Undo, to say the marker goes with the change it was about.
+    marked_before=1
 else
     bad "c3 no link text to click in c06-link.png"; shot c07-revealed
 fi
 # The notice is in the bell's list, not on the screen: "Agent changed Copy on select … Undo"
-# (#FEJQ, protocol 30.6). The bell is the first button of the window's right row.
-click_at $((width - 281)) 27
-sleep 2; shot c04-notice
+# (#FEJQ, protocol 30.6). The bell is an icon, so it is clicked by name out of RELAY_QA_RECTS
+# rather than hunted for in the pixels.
+click_rect windowBellButton || click_at $((width - 281)) 27
+sleep 2; shotroot c04-notice
 has "c2 the change is offered with Undo where the owner will find it" c04-notice "Agent changed"
+has "c2 and the notice offers Undo" c04-notice "Undo"
 click_word c04-notice "undo"
 sleep 3; shot c04-undone
 note "relay.conf after Undo: $(grep -i copy_on_select "$XDG_CONFIG_HOME/RelayTerminal/relay.conf" 2>/dev/null || echo '(absent)')"
@@ -392,6 +522,18 @@ if grep -qi "copy_on_select=true" "$XDG_CONFIG_HOME/RelayTerminal/relay.conf" 2>
     bad "c2 Undo did not put Copy on select back (still true in relay.conf)"
 else
     ok "c2 Undo put Copy on select back"
+fi
+# The row again: the marker is the change's, so it goes when the change does (§30.6).
+focus_console c10-focus "Ask"
+ask "where is copy on select?"
+awaited "c5 the link is offered again" c11-link "Clicking that opens" 240
+sleep 3; shot c11-link
+at=$(word_xy c11-link "openrow")
+if [[ -n $at ]]; then
+    click_at ${at% *} ${at#* }; sleep 2; shot c12-unmarked
+    hasnt "c5 the marker went with the change it was about" c12-unmarked "changed by the agent"
+else
+    bad "c5 no link to click in c11-link.png"; shot c12-unmarked
 fi
 
 # Actions: `palette.open` gives it a pane of its own beside Options rather than swapping the
@@ -541,11 +683,24 @@ ask "say hello"
 awaited "g2 the helper answers after a restart" g07-restarted-answer "Hello from the tab" 150
 sleep 3
 after=$(find "$helperdir" -name '*.json' ! -name '*.meta.json' 2>/dev/null | wc -l)
+find "$helperdir" -name '*.json' 2>/dev/null | sort >"$out/helper-sessions-after.txt"
+# A count is not the check: the *second* tab has no project and asks for the first time after
+# the restart, which is a new conversation and not a move. What says the restored tab went back
+# to the one it had is the history below, which is the owner's decision in one number.
 note "helper conversation files: $before before the restart, $after after"
-if [[ ${after:-0} == ${before:-1} ]]; then
-    ok "g2 the restarted tab went back to the conversation it had (no new file)"
+# And the history came with it: the model is asked how many user messages it was handed, which
+# is more than one only if the earlier turn is still in the conversation.
+focus_console g08-focus "Ask"
+ask "how much do you remember?"
+awaited "g2 the restored console's agent still has the earlier turn" g09-history "HISTORY turns=" 150
+sleep 3; shot g09-history
+line=$(text g09-history | grep -o "HISTORY turns=[0-9]*" | tail -1)
+note "the restored console's conversation, as the worker handed it to the model: $line"
+turns=$(sed -n 's/HISTORY turns=//p' <<<"$line")
+if [[ ${turns:-0} -ge 2 ]]; then
+    ok "g2 the conversation came back with its history ($line)"
 else
-    bad "g2 the restart started a new conversation ($before → $after files)"
+    bad "g2 the restored console started from nothing ($line)"
 fi
 fi
 
