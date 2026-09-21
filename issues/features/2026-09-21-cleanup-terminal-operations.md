@@ -7,7 +7,7 @@ assignee: codex
 rank: m
 created: '2026-09-21'
 source: 'Codex in a Relay pane, 2026-09-21'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-cleanup-terminal/README.md], related: [8YQ9], github: null}
+links: {plans: [], commits: [bfa3afee72b0af2283ad6a6c0838c1ead1a29fdd], evidence: [docs/qa_evidence/2026-09-21-cleanup-terminal/README.md], related: [8YQ9], github: null}
 ---
 # Show cleanup operations in the Switchboard agent terminal
 
