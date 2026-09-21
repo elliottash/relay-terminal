@@ -619,3 +619,107 @@ console and its actions, Verify only in a QA lane, link resolution through the c
 board with no factory at all). `ctest -R '^board$|^boardpane$|^boardsections$|^boardworkspace$|^boardsignals$|^boardremote$|^buttonfit$'` — 7/7 green, and green again inside land.py's verify
 build of the exact tree that went on main. No live GUI drive in this step, by the plan: it needs
 step 5's factory in the same binary.
+
+<!-- relay:entry 20260921T040901Z-jb author=claude-code kind=progress -->
+Step 5 has landed: **the window makes agent consoles, and stops making helper panels.** Here is
+the API the hosts see, and the three things the live drive found that the suites did not.
+
+**Landed** (oldest first)
+
+- `694470f8` — `relay::agent::ConsoleHandle` and `ConsoleFactory` (`src/AgentContext.h`). The
+  contract Steps 6 and 7 coded against: the widget to embed plus the six calls a host makes on it
+  (`focusComposer`, `draftInComposer`, `composerText`, `setCollapsed`, `collapsed`,
+  `runActionLetter`). `QWidget` is forward-declared, so the header stays QtCore-only.
+- `fe9eea62` — `src/Pane.h`: `onWorkerLine` (a console writes to its tab's worker),
+  `deliverWorkerEvent` (the same `handle()` funnel), and `openOutputTarget` routing
+  `relay://option/` and `relay://session/` through a new `onOpenOption` hook and the
+  `onOpenSessions` one that was already there. Plus the engine's link context menu: a right-click
+  on an `option:`/`session:` link offered "Open <last segment>", "Open in the system editor" and
+  "Copy path"; it now offers the click, which is the only thing that works there.
+- `28581709` — the window. `createAgentConsole`, `panesIn` stopping at a `ToolPane`, the helper
+  panel template removed, `onCreateConsole` set on Options, Actions and Sessions, and step 7's
+  two blocks of no-op bridge stubs deleted with it.
+- `c4a1625d` — `Context::submit`, a rebuilt action row that cannot free the button under it,
+  Alt+M inside a console, and `BoardView`'s factory.
+- `21fbcc5b` — the two things the live drive found (below).
+
+## What a host gets
+
+`RelayWindow::createAgentConsole(relay::agent::Context *, QWidget *parent)` builds a no-shell
+`Pane` with that context and returns a `ConsoleHandle`. The pane libraries never construct one —
+`Pane` lives only in the executable's translation unit — so this is the `relay::PaneView` pattern.
+`wireConsoleHost(view, leaf, hintId)` is the one template that sets `onCreateConsole`, the tab id,
+the tab's workspace and the live `helper.ask` key on Options, Actions and Sessions;
+`createBoardPane` sets the factory and `setTabId` for the Switchboard. `repointTabPanes` tells the
+hosts again when the tab's project moves — the consoles are not in `panesIn`, which is the point.
+
+**What is wired, and what is deliberately not.** Wired: status, the worker line, `onOpenPath`,
+`onOpenCard`, `onOpenOption`, `onOpenSessions`, `onOpenDocument`, `onOpenTurn`, `onOpenInternals`,
+`onOpenDiff`, `onOpenInfo`, `onToggleExplorer`, `onShowAgents`, `onOpenSubagent`, `onAppCatalog`,
+`onLocalModelEvent`, `onChooseTheme`, `onProfileApplied`, `onUpdateApp`, `onJoinShared`,
+`onBoardSettings`. Not wired: `onShellExited`, `onOpenGuestPane`, `onForkState`,
+`onOpenSessionInNewPane`, `onSessionOpenElsewhere`, `onPlanWritten`, the project-init question
+(all a terminal pane's), `onTitleChanged`/`onRenameTab`/`hasPaneSiblings`/`onWindowAction`/
+`onShareTab`/`onOpenSharing` (all a *leaf's*, and a console is not one), and **`onAppCommand`**:
+the window answers that pipe once for the tab, tagged `helper`, and four consoles answering the
+same write would run it four times — so `deliverToConsoles` drops `app_command` too. The openers
+that insist on a `Pane *owner` are handed the tab's own terminal pane (`paneForConsoleOpen`), or
+nothing, because a console is not in the splitter tree and `insertBeside` would replace it inside
+its host's layout.
+
+**One worker, one conversation** (owner decision 1). `TabConsoleContext` wraps the host's context
+with what only the window knows — the tab's project and `persist {scope: "helper", key: <tab id>}`
+— so every console of a tab resolves to one conversation and two tabs on one project keep two.
+A console's lines go down `helperWorker(page, true)`, `startBoardWorker` carries that console's
+`context` block, and **every** event of the worker reaches **every** console of the tab. Swapping
+which console the block names reconfigures the brief and leaves the conversation where it is,
+which is exactly 30.7's move test. A console created after its tab's worker was already up is
+handed the `ready` and `configured` it missed, in that order.
+
+**`Context::submit(route, text)`** is new, and it is what stops a card's Enter travelling as an
+ordinary `ask`: `route` is which **key** was pressed — `auto` for Enter, `agent` for Ctrl+Enter,
+`shell` for Ctrl+Shift+Enter — not where the line would have gone, because a console's mode is
+locked to the agent and a resolved route could not tell the three chords apart. The composer is
+the context's while it handles the line: it clears what it took and leaves what it refused, so a
+card asked mid-cleanup keeps the words the owner typed. `CardContext::submit` replaces the
+`findChild<RichEditor *>()->onSubmit` the card page was taking.
+
+**Removed**: `wireHelperPanel`, the `board_chat_started`/`board_chat_queued`/`chat: true` routing
+(the waiting list is `surface` off `queued`/`agent_started`/`agent_finished` now), `sendToHelper`'s
+`pane` tag, and step 7's bridge stubs in both hosts. **Kept**: `helperWorker`, `startBoardWorker`,
+`listenToHelper` and `deliverToHelperPanels` — the tab worker and its subscription still carry the
+Test suites pane's `tests_*`, the Profile pane's `profile_*`, the board's writes and
+`signals_config`, none of which was ever chat.
+
+## The three the live gate caught, and the build and the suites did not
+
+1. **A console the window does not attach had no worker at all.** The constructor was deciding
+   "a console starts no process" before `onWorkerLine` could be set, so `tests/console_harness.cpp`'s
+   console was never configured and Enter opened the provider dialog over an empty transcript —
+   the harness drive went 6/6 → 3/6 with 18 suites green. The question is now asked a turn of the
+   event loop later, when the answer exists.
+2. **The embedded console had no room to be a transcript.** The helper strip takes the console's
+   size hint — a `Pane`'s, which is a terminal's — so Options and Sessions gave it three rows: the
+   first run drew a whole answer into them and the shot showed the pane header wearing the
+   answer's auto-generated title over an empty vterm. Both hosts now floor the strip at twenty
+   lines, never past the cap they already had.
+3. **A rebuilt action row could free the button under it.** `rebuildActionRow` unparents and
+   `deleteLater`s now, and `runActionLetter` copies the `std::function` out of the list before
+   calling it — the same hazard one level down, which step 6's guard would not have covered.
+
+## Gates
+
+`tests/boardworkspace_test.cpp` — 19 cases, four new: an embedded console is not one of the
+window's panes (`panesIn` stops *before* the child walk), what the factory wires and what it must
+not, one worker and one conversation per tab, and `option:`/`session:` routing in both prompt
+boxes. `consolemode` 11 (two new: an action that rebuilds its own row, a context that takes a
+submit). `board` 86, `boardpane`, `buttonfit`, `settings`, `conversations`, `agentcontext`,
+`outputlinks`, `appcommands` — all green, and each commit through land.py's verify build of the
+exact tree.
+
+Live, in `docs/qa_evidence/2026-09-20-window-makes-consoles/`: the terminal pane before and after
+(eight of ten shots pixel-identical below the pane header, the other two the blinking caret's
+36 px); the console harness 6/6; and the window's own consoles driven in Options and Sessions —
+the answer streaming into a vterm with the `option:` link clickable and revealing the row in
+place, and `app_panes`, which reads the same `allPanes()` the phone's publish list reads, coming
+back `count=1 titles=project` with **two consoles on screen**.
