@@ -7,7 +7,7 @@ assignee: claude-code
 rank: k
 created: '2026-09-21'
 source: 'Claude Code in a Relay pane, 2026-09-21'
-links: {plans: [docs/MODEL-PICKING-DESIGN.md], commits: [bb19b7b0], evidence: [docs/qa_evidence/2026-09-21-model-box-filter, docs/qa_evidence/2026-09-21-model-defaults-and-swap], related: [DC4J], github: null}
+links: {plans: [docs/MODEL-PICKING-DESIGN.md], commits: [bb19b7b0, b2632bf5, 4e14bdca, a61c713b], evidence: [docs/qa_evidence/2026-09-21-model-box-filter, docs/qa_evidence/2026-09-21-model-defaults-and-swap, docs/qa_evidence/2026-09-21-model-dialog-prioritize], related: [DC4J], github: null}
 ---
 # Model picking: one name per model, one row per model, one default
 
@@ -82,4 +82,4 @@ never returns to the model the owner was using, and its own sentence is overwrit
 - [x] `/swap`: a toggle with memory, a sentence that survives, a test <!-- t:a4 -->
 - [ ] names at every display site, lower-case roles; no protocol role name ("switchboard") in a box <!-- t:a5 -->
 - [ ] the box: mode rows "high (model)", Left/Right changes mode in place, that mode's list below, one row per model, `/high` <!-- t:a6 -->
-- [ ] the Ctrl+Alt+M dialog is where models are picked AND prioritized: tier tabs, reorder, add, remove, level, profile, "via" <!-- t:a7 -->
+- [x] the Ctrl+Alt+M dialog is where models are picked AND prioritized: tier tabs, reorder, add, remove, level, profile, "via" <!-- t:a7 -->
