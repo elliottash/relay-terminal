@@ -5110,6 +5110,17 @@ private:
         m_cwdChip->setCursor(Qt::PointingHandCursor);
         connect(m_cwdChip, &QToolButton::clicked, this, [this] { if (onOpenPath) onOpenPath(m_cwd, 0); });
         routeRow->addWidget(m_cwdChip);
+        m_shareChip = new QToolButton;
+        m_shareChip->setObjectName(QStringLiteral("stripChip"));
+        m_shareChip->setFocusPolicy(Qt::NoFocus);
+        m_shareChip->setCursor(Qt::PointingHandCursor);
+        m_shareChip->setIcon(stripIcon(QStringLiteral("share")));
+        if (m_shareChip->icon().isNull()) m_shareChip->setText(QStringLiteral("↗"));
+        m_shareChip->setIconSize(QSize(13, 13));
+        m_shareChip->setAccessibleName(QStringLiteral("Share this pane with a phone"));
+        connect(m_shareChip, &QToolButton::clicked, this, [this] { shareChipPressed(); });
+        routeRow->addWidget(m_shareChip);
+        updateShareChip();
         m_modeChip = new QToolButton;
         m_modeChip->setObjectName(QStringLiteral("stripChip"));
         m_modeChip->setFocusPolicy(Qt::NoFocus);
@@ -5149,7 +5160,7 @@ private:
         m_opaqueHint->hide();
         routeRow->addWidget(m_opaqueHint, 1);
         routeRow->addStretch(1);
-        buildSessionControls(routeRow);        // plan chip left, by the Switchboard chip; context chip by the model
+        buildSessionControls(routeRow);        // plan chip left; context chip by the model
         m_modelBox = new CurrentTextComboBox;
         m_modelBox->setObjectName(QStringLiteral("statusPicker"));
         m_modelBox->setAccessibleName(QStringLiteral("Agent model"));
@@ -5176,9 +5187,6 @@ private:
         connect(m_mic, &QToolButton::clicked, this, [this] { toggleVoice(false); });
         routeRow->addWidget(m_mic);
         updateVoiceChip();
-        // Sharing moved out of this strip to the pane's chrome row (src/PaneChrome.h, owner
-        // 2026-09-19: it no longer fit beside the model and the microphone). The pane keeps the
-        // share logic; the chrome owns the button and repaints it through onShareChipChanged.
         auto *cancel = new QToolButton;
         cancel->setObjectName(QStringLiteral("interruptButton"));
         const QString cancelIcon = relay::theme::themeDataDir() + QStringLiteral("/icons/cancel.svg");
@@ -7421,15 +7429,24 @@ public:
 
     // The microphone chip and the palette action: start, or finish a recording that is running.
     // ----- sharing this pane with a phone --------------------------------------------------------
-    // The share button itself is the pane chrome's (src/PaneChrome.h); it wires this callback and
-    // repaints itself from it, so the pane's share logic stays here.
-    std::function<void()> onShareChipChanged;
-
     void updateShareChip() {
-        if (onShareChipChanged) onShareChipChanged();
+        if (!m_shareChip) return;
+        relay::RemoteShare &share = relay::RemoteShare::instance();
+        const bool sharing = share.isSharing(m_token);
+        const int guests = share.sharingModel().guestsOn(m_token);
+        m_shareChip->setProperty("dest", sharing ? QStringLiteral("agent") : QVariant());
+        m_shareChip->setToolTip(!sharing
+            ? QStringLiteral("Share this pane with your phone, or invite someone to it")
+            : guests == 0
+                ? QStringLiteral("Shared — click for who is here, invites and what is waiting")
+                : QStringLiteral("Shared with %1 · click for who is here and what is waiting")
+                      .arg(guests == 1 ? QStringLiteral("one other person")
+                                       : QStringLiteral("%1 other people").arg(guests)));
+        m_shareChip->style()->unpolish(m_shareChip);
+        m_shareChip->style()->polish(m_shareChip);
     }
 
-    // The chrome row's share button. Nothing shared yet: pair a phone or make an invite, which is
+    // The share button beside the folder. Nothing shared yet: pair a phone or make an invite, which is
     // the dialog. Already shared: the ongoing question is who is here and what is waiting, which
     // is the pane — and its first button opens the dialog again for one more link.
     void shareChipPressed() {
@@ -18195,7 +18212,7 @@ private:
     // Typed as what it is, since the model box's list is pages now (card #MDL1): the modes it can
     // be turned between and the collapsed text that differs from the row are both this class's.
     CurrentTextComboBox *m_modelBox = nullptr;
-    QToolButton *m_cwdChip = nullptr, *m_modeChip = nullptr;
+    QToolButton *m_cwdChip = nullptr, *m_modeChip = nullptr, *m_shareChip = nullptr;
     relay::InputHighlighter *m_highlighter = nullptr;
     QLabel *m_toast = nullptr;
     QLabel *m_prefixChip = nullptr;

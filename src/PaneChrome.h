@@ -660,10 +660,6 @@ public:
     explicit PaneChrome(QWidget *leaf) : QFrame(leaf) {
         setObjectName(QStringLiteral("paneChrome"));
         setAttribute(Qt::WA_StyledBackground);
-        // The share button hangs below the close button (owner, 2026-09-20: "moved and put below
-        // the x (so it was a sideways L)"): one row of the pane buttons, and the share button
-        // alone beneath the last of them. The row is one button narrower than it was, which is
-        // room the pane's title gets back.
         auto *column = new QVBoxLayout(this); column->setContentsMargins(3, 2, 3, 2); column->setSpacing(1);
         m_row = new QHBoxLayout; m_row->setSpacing(1);
         column->addLayout(m_row);
@@ -681,11 +677,6 @@ public:
         dimButton->setProperty("liveTooltip", true);
         button(m_row, QStringLiteral("⇱"), QStringLiteral("pane.moveToNewTab"), QStringLiteral("Move to new tab"));
         button(m_row, QStringLiteral("×"), QStringLiteral("pane.close"), QStringLiteral("Close pane"));
-        // Sharing moved here from the prompt-box strip (owner, 2026-09-19: it no longer fit
-        // beside the model and the microphone), and on 2026-09-20 below the row's last button:
-        // shared-or-not is the one pane state worth seeing from across the window, and the row
-        // itself stays short for the title's sake.
-        if (auto *pane = dynamic_cast<Pane *>(leaf)) buildShare(column, pane);
         // The header gives up exactly this much room for good, so the title and the folder line
         // never re-elide.
         adjustSize();
@@ -730,7 +721,6 @@ public:
     }
 
     // The row of pane buttons, for the window's ⓘ (RelayWindow::syncChrome inserts it first).
-    // The share button is not on it: it hangs below the row's last button (owner, 2026-09-20).
     QHBoxLayout *buttonRow() const { return m_row; }
 
     void place() {
@@ -750,7 +740,6 @@ public:
         raise();
         syncHeaderInset();
         placeBackdrop();
-        applyShape();
         if (dimOverlay) paintDimming(dimAmount);
     }
 
@@ -911,52 +900,13 @@ protected:
     void hideEvent(QHideEvent *event) override { QFrame::hideEvent(event); syncHeaderInset(); }
     void resizeEvent(QResizeEvent *event) override {
         QFrame::resizeEvent(event);
-        applyShape();   // the child boxes are live here; queued again below for the first layout
-        QMetaObject::invokeMethod(this, [this] { applyShape(); }, Qt::QueuedConnection);
-    }
-
-    // The buttons' panel is the shape of the buttons, not of the rectangle around them (owner,
-    // 2026-09-20: "an L-shaped polyform of the buttons rather than a rectangle"): with the share
-    // button hanging below the row's last button, the bottom-left of the card is cut away and the
-    // pane shows through. The theme still paints its rounded, bordered card — for its material
-    // gradients as much as its colours — and the mask trims the silhouette; paintEvent then gives
-    // the two cut edges the same 1 px border the other three sides carry, so the L reads as one
-    // outlined shape rather than a rectangle with a bite taken out. A pane without a share button
-    // (every non-terminal pane) is one row high and keeps the plain card.
-    void applyShape() {
-        const QRect foot = m_share && m_share->isVisibleTo(this) ? m_share->geometry() : QRect();
-        // The share button is a foot only when it hangs below the row (it sat in the row until
-        // 2026-09-20, and a session whose tree still has it there must get the plain card back).
-        int rowBottom = 0;
-        for (QToolButton *b : findChildren<QToolButton *>())
-            if (b != m_share) rowBottom = std::max(rowBottom, b->geometry().bottom());
-        const int cutY = foot.top() - 1;      // the row's bottom edge: the top band ends here
-        const int footLeft = foot.left() - 2; // the foot hugs the share button, with a 2 px ledge
-        if (foot.width() <= 0 || foot.top() <= rowBottom || cutY <= 4 || footLeft <= 4
-            || foot.bottom() > height()) {
-            if (m_cutY) { m_cutY = 0; clearMask(); }   // not laid out yet, or no foot at all
-            return;
-        }
-        m_cutY = cutY; m_footLeft = footLeft;
-        setMask(QRegion(rect()).subtracted(QRegion(0, cutY, footLeft, height() - cutY)));
-    }
-
-    void paintEvent(QPaintEvent *event) override {
-        QFrame::paintEvent(event);   // the theme's card; the mask above clips it to the L
-        if (m_cutY <= 0) return;
-        // The cut rows themselves are behind the mask, so the lines sit on the last visible
-        // pixel of each edge: the band's underside at m_cutY - 1, the foot's left edge at m_footLeft.
-        QPainter p(this);
-        p.setPen(relay::theme::Border);
-        p.drawLine(0, m_cutY - 1, m_footLeft, m_cutY - 1);
-        p.drawLine(m_footLeft, m_cutY, m_footLeft, height() - 1);
     }
 
 
 public:
     void refreshTooltips() {
         for (auto *b : findChildren<QToolButton *>()) {
-            // A button whose tooltip is its live state (the share button) keeps it: the generic
+            // A button whose tooltip is its live state (the dim button) keeps it: the generic
             // label-plus-key text would replace it with nothing, knowing no label or key for it.
             if (b->property("liveTooltip").toBool()) continue;
             const QString keysFrom = b->property("keysFrom").toString();
@@ -987,7 +937,7 @@ private:
         m_phoneChip = new PaneHeaderChip(relay::panestatus::Glyph::Phone);
         m_phoneChip->setText(QStringLiteral("phone"));
         m_phoneChip->setToolTip(QStringLiteral("Shared with your phone: it sees this pane and can type into it.\n"
-                                               "The share button in the pane's top-right corner shows the code or stops it."));
+                                               "The share button beside the folder in the prompt shows sharing controls."));
         m_remoteChip->hide(); m_phoneChip->hide();
         row->insertWidget(0, m_glyph);
         // The subagent badge reads with the glyph: both are what this pane's agent is doing now
@@ -1009,51 +959,6 @@ private:
         };
         header->installEventFilter(this);
         pane->installEventFilter(this);
-    }
-
-    // A terminal pane's share button (owner, 2026-09-19: it outgrew the prompt-box strip; since
-    // 2026-09-20 it sits on its own under the row's close button). The pane keeps every bit of
-    // the share logic — Pane::shareChipPressed, the RemoteShare state — and repaints this button
-    // through Pane::onShareChipChanged; the chrome owns only the button.
-    void buildShare(QVBoxLayout *column, Pane *pane) {
-        if (!column || !pane) return;
-        m_share = new QToolButton(this);
-        m_share->setObjectName(QStringLiteral("paneChromeButton"));
-        m_share->setAutoRaise(true);
-        m_share->setFocusPolicy(Qt::NoFocus);
-        m_share->setCursor(Qt::PointingHandCursor);
-        const QString icon = relay::theme::themeDataDir() + QStringLiteral("/icons/share.svg");
-        if (QFileInfo::exists(icon)) m_share->setIcon(QIcon(icon)); else m_share->setText(QStringLiteral("↗"));
-        m_share->setIconSize(QSize(13, 13));
-        m_share->setProperty("liveTooltip", true);   // refreshTooltips() leaves its state text alone
-        m_share->setAccessibleName(QStringLiteral("Share this pane with a phone"));
-        connect(m_share, &QToolButton::clicked, pane, [pane] { pane->shareChipPressed(); });
-        column->addWidget(m_share, 0, Qt::AlignRight);   // under the close button, the L's foot
-        QPointer<PaneChrome> guard(this);
-        pane->onShareChipChanged = [guard] { if (guard) guard->refreshShare(); };
-        refreshShareFor(pane);
-    }
-
-    void refreshShare() { refreshShareFor(dynamic_cast<Pane *>(parentWidget())); }
-
-    // The state the strip's chip used to wear (Pane::updateShareChip, before the move): the
-    // agent's violet while shared, and a tooltip that says who is here rather than what the
-    // button does.
-    void refreshShareFor(Pane *pane) {
-        if (!m_share || !pane) return;
-        relay::RemoteShare &share = relay::RemoteShare::instance();
-        const bool sharing = share.isSharing(pane->sessionToken());
-        const int guests = share.sharingModel().guestsOn(pane->sessionToken());
-        m_share->setProperty("dest", sharing ? QStringLiteral("agent") : QVariant());
-        m_share->setToolTip(!sharing
-            ? QStringLiteral("Share this pane with your phone, or invite someone to it")
-            : guests == 0
-                ? QStringLiteral("Shared — click for who is here, invites and what is waiting")
-                : QStringLiteral("Shared with %1 · click for who is here and what is waiting")
-                      .arg(guests == 1 ? QStringLiteral("one other person")
-                                       : QStringLiteral("%1 other people").arg(guests)));
-        m_share->style()->unpolish(m_share);
-        m_share->style()->polish(m_share);
     }
 
     // The remote band covers the pane's title row, inside the frame, down to half the gap below it.
@@ -1438,12 +1343,10 @@ private:
     PaneSubagentBadge *m_subagentBadge = nullptr;
     PaneHeaderChip *m_remoteChip = nullptr, *m_phoneChip = nullptr;
     PaneUsageChip *m_usageChip = nullptr;
-    QToolButton *m_share = nullptr;   // terminal panes: share this pane with a phone (was the strip's chip)
     RemoteBackdrop *m_backdrop = nullptr;
     relay::panestatus::State m_state = relay::panestatus::State::Idle;
     bool m_remote = false, m_phone = false, m_guestDriving = false;
     QString m_remoteHost;
     int m_layoutLogSerial = 0;        // RELAY_LAYOUT_LOG only: which pane a line is about
-    int m_cutY = 0, m_footLeft = 0;   // the L's cut: below m_cutY only columns from m_footLeft remain
 };
 
