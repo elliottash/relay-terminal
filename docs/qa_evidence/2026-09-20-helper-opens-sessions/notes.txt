@@ -1,0 +1,14 @@
+PASS a1 the Sessions helper panel is open ("Sessions helper" in 01-sessions-helper.png)
+PASS a2 the helper says in text what it is doing ("Opened 3 conversations in new panes" in 02-answer.png)
+PASS a3 the first conversation is open in a pane ("Splitting the pane layout" in 03-three-panes.png)
+PASS a3 the second is too ("labels" in 03-three-panes.png)
+PASS a3 and the third ("equalize" in 03-three-panes.png)
+PASS a3 three panes say which conversation they loaded
+PASS a4 the helper worker did not stop (no worker_stop in worker.log)
+PASS a4 app_open was answered by the GUI (worker-app-calls.log)
+PASS b1 a turn is running in the Sessions helper ("Sessions helper" in 05-running.png)
+PASS b2 the second prompt is queued, and the Sessions panel shows the row ("prompt waiting" in 06-queued.png)
+PASS b3 the interrupted turn is marked cancelled in the Sessions panel ("cancelled" in 07-stopped.png)
+PASS b3 and the queued prompt has started, so no row is waiting (no "prompt waiting" in 07-stopped.png)
+
+12 passed, 0 failed

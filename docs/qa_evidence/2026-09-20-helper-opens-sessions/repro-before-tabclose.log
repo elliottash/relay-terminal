@@ -1,0 +1,7 @@
+--- before: the Sessions helper is asked to open three conversations in new panes
+  [tool] app_sessions_search ok=True None
+  [gui] the tab closed: the helper worker is stopped with the call still in flight
+--- before: app_commands answered = 0, conversations opened = []
+--- worker.log
+  2026-09-20T23:50:24.915Z INFO relay.agent pane=switchboard tool session=a34eb8d3c7f47858e98c5eea84a1da2f turn=chat-1eefbb call=call_1 tool=app_sessions_search ok=True ms=0
+  2026-09-20T23:50:30.697Z INFO relay.worker pane=switchboard worker_stop pid=3000693

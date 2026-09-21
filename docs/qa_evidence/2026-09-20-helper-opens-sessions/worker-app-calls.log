@@ -1,0 +1,2 @@
+2026-09-20T23:59:13.749Z INFO relay.agent pane=switchboard tool session=cb0fdab817c4a6dd0ecfebecfa5d82e5 turn=chat-cd4dea call=call_1 tool=app_sessions_search ok=True ms=2
+2026-09-20T23:59:14.061Z INFO relay.agent pane=switchboard tool session=cb0fdab817c4a6dd0ecfebecfa5d82e5 turn=chat-cd4dea call=call_2 tool=app_open ok=True ms=109

@@ -1,0 +1,10 @@
+--- before: the Sessions helper is asked to open three conversations in new panes
+  [tool] app_sessions_search ok=True None
+  [tool] app_open ok=False Relay did not answer the open request within 20s, so nothing was changed. Tell the user what you were trying to do and let them do it.
+  [panel] 'Relay did not answer the open request within 20s, so nothing was changed. Tell the user what you were trying to do and let them do it.'
+  [turn ] done after 24.5s
+--- before: app_commands answered = 0, conversations opened = []
+--- worker.log
+  2026-09-20T23:49:58.359Z INFO relay.agent pane=switchboard tool session=a34eb8d3c7f47858e98c5eea84a1da2f turn=chat-f901d2 call=call_1 tool=app_sessions_search ok=True ms=1
+  2026-09-20T23:50:18.593Z INFO relay.agent pane=switchboard tool session=a34eb8d3c7f47858e98c5eea84a1da2f turn=chat-f901d2 call=call_2 tool=app_open ok=False ms=20030
+  2026-09-20T23:50:19.597Z INFO relay.worker pane=switchboard worker_stop pid=2999994

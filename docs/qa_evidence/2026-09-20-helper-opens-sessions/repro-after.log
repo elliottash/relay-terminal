@@ -1,0 +1,13 @@
+--- after: the Sessions helper is asked to open three conversations in new panes
+  [tool] app_sessions_search ok=True None
+  [gui] answering open conversation 11111111111111111111111111111111
+  [gui] answering open conversation 22222222222222222222222222222222
+  [gui] answering open conversation 33333333333333333333333333333333
+  [tool] app_open ok=True Opened 3 conversations in new panes: Splitting the pane layout, The pane header and its labels, Pane drag and the equalize key.
+  [panel] 'Opened 3 conversations in new panes: Splitting the pane layout, The pane header and its labels, Pane drag and the equalize key.'
+  [turn ] done after 4.4s
+--- after: app_commands answered = 3, conversations opened = ['11111111111111111111111111111111', '22222222222222222222222222222222', '33333333333333333333333333333333']
+--- worker.log
+  2026-09-20T23:49:31.916Z INFO relay.agent pane=switchboard tool session=a34eb8d3c7f47858e98c5eea84a1da2f turn=chat-09924f call=call_1 tool=app_sessions_search ok=True ms=0
+  2026-09-20T23:49:32.120Z INFO relay.agent pane=switchboard tool session=a34eb8d3c7f47858e98c5eea84a1da2f turn=chat-09924f call=call_2 tool=app_open ok=True ms=1
+  2026-09-20T23:49:33.125Z INFO relay.worker pane=switchboard worker_stop pid=2999182
