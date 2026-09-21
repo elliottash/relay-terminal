@@ -290,7 +290,7 @@ private:
         // the three panes it works in hold none — and the panes' own search boxes swallow letters.
         add("helper.ask", "agent", "Ask the helper agent about this pane (Options, Actions, Sessions)",
             {QStringLiteral("Alt+Q")});
-        // No key of its own: Ctrl+Shift+S opens it by itself in a tab with no project and no candidate (#916B).
+        // Compatibility action: project selection opens the shared Projects tab (#P7SJ).
         add("projects.open", "pane", "Projects: manage projects and their active sessions", {QStringLiteral("Ctrl+Shift+P")});
         add("globals.open", "pane", "Globals: global memories, aliases and instructions", {QStringLiteral("Ctrl+Shift+G")});
         add("project.pick", "pane", "Projects: attach this tab to a project Relay knows, or initialize one here", {});

@@ -1577,16 +1577,12 @@ the only place the tab's panes are re-pointed — and `set_board` (protocol 19.1
 worker **without ending its conversation**. Nothing on the tab header names the attachment (the
 attached-project chip went with the theme swatch and the ⧉ button; owner, 2026-09-19); "Detach
 this tab from <project>" in the palette is the one way to detach, and it closes nothing — an open
-Switchboard stays open. An unattached tab shows nothing at all. In a tab with no
-project whose pane stands in no candidate (`~/Downloads`), Ctrl+Shift+S, `/card` and the palette's
-"Attach this tab to a project…" open the **project picker** instead (`src/ProjectPicker.{h,cpp}`,
-library `relay-projectpicker`, hosted like the ⓘ view with `paneType` `projects`; card #916B): the
-projects Relay knows, most recently attached first and fuzzy-filtered as you type, the "Default
-project for loose cards" preselected when set, and "Initialize new project here" on top, which
-attaches the tab to the pane's own directory and sends `board_init {git_init: true}` with no second
-question — the choice is the consent (`docs/PROJECT-INIT-AND-IMPORT.md` §1). Options › Agent ›
-Switchboard links to Projects, whose details explain why each project became known and when;
-Forget removes only the registry entry, and declined projects offer Allow initialization.
+Switchboard stays open. An unattached tab shows nothing at all. Ctrl+Shift+S always opens Switchboard: the attached project's board, the terminal's candidate
+project, or an empty board for its current directory. Opening an empty board creates no files.
+Project selection lives only in the shared Projects tab (Ctrl+Shift+P); the legacy project-picker
+page was removed (#P7SJ followup). A loose `/card` request is held there until Attach this tab or
+Initialize supplies the destination. Options links to Projects; Forget changes only the registry.
+
 
 - **`src/BoardModel.{h,cpp}`** (`relay-board`): the pure logic — the rows the worker sends, the tab
   and column a card falls into, the filter language (`label:`, `status:`, `@assignee`,

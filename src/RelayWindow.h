@@ -27,7 +27,6 @@
 #include "ProjectInit.h"      // when "Initialize a project … here?" is asked, and by which trigger
 #include "ProjectsPane.h"
 #include "GlobalsPane.h"
-#include "ProjectPicker.h"    // the project picker pane: which project a tab with none attaches to (#916B)
 #include "Hints.h"
 #include "Notifications.h"
 #include "ScreenPrompt.h"
@@ -1227,7 +1226,7 @@ private:
         else if (id == QStringLiteral("projects.open")) openSessions(QStringLiteral("projects"));
         else if (id == QStringLiteral("globals.open")) openSessions(QStringLiteral("globals"));
         else if (id == QStringLiteral("agent.resume") || id == QStringLiteral("conversations.open")) toggleSessionsPane(pane);
-        else if (id == QStringLiteral("project.pick")) openProjectPicker(m_active, QString());
+        else if (id == QStringLiteral("project.pick")) openProjectsFor(m_active, QString());
         else if (id == QStringLiteral("palette.open")) toggleSettingsPane(true);
         else if (id == QStringLiteral("keybindings.reload")) Keymap::instance().reload();
         else if (id == QStringLiteral("help.shortcuts")) openShortcutsTab();
@@ -4461,18 +4460,15 @@ private:
             detach.run = [this] { detachTab(m_tabs->currentWidget()); };
             items << detach;
         } else {
-            // The project picker (#916B): the projects Relay knows, or initialize one here. It has
-            // no key of its own, so choosing it here teaches the key that opens it by itself.
+            // The shared Projects tab owns project selection and initialization.
             PaletteItem pick = actionItem(panes, QStringLiteral("Attach this tab to a project…"),
                                           QStringLiteral("The projects Relay knows, most recent first, or initialize one here"),
                                           QStringLiteral("project.pick"));
             pick.aliases = QStringLiteral("project switchboard attach known picker initialize init board");
             pick.run = [this] {
-                openProjectPicker(m_active, QString());
-                if (candidateProject().isEmpty())
-                    hint(QStringLiteral("project.pick.palette"),
-                         relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("board.open")),
-                                                        QStringLiteral("opens this by itself in a tab with no project")));
+                openProjectsFor(m_active, QString());
+                hint(QStringLiteral("project.pick.palette"),
+                     relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("projects.open"))));
             };
             items << pick;
         }
@@ -5930,6 +5926,11 @@ public:
                 if (!QFileInfo(path).isDir()) { windowGuard->notice(QStringLiteral("That project folder is no longer available.")); return; }
                 windowGuard->attachTab(windowGuard->pageOf(guard), path, QString::fromLatin1(relay::projects::kReasonPicker));
                 refreshProjects();
+                const QString card = guard->property("pendingProjectCard").toString();
+                if (!card.isEmpty()) if (auto *owner = windowGuard->workspaceOwner(guard)) {
+                    guard->setProperty("pendingProjectCard", QVariant());
+                    owner->fileCard(card);
+                }
             };
             projects->onOpenBoard = [guard](const QString &path) { auto *windowGuard = windowOf(guard); if (windowGuard) windowGuard->openProjectTab(path, true); };
             projects->onShowSessions = [viewGuard](const QString &path) {
@@ -5967,7 +5968,11 @@ public:
             };
             projects->onInit = [guard] {
                 if (auto *w = windowOf(guard)) {
-                    if (auto *owner = w->workspaceOwner(guard)) owner->initProjectHere(QString());
+                    if (auto *owner = w->workspaceOwner(guard)) {
+                        const QString card = guard->property("pendingProjectCard").toString();
+                        guard->setProperty("pendingProjectCard", QVariant());
+                        owner->initProjectHere(card);
+                    }
                     else w->notice(QStringLiteral("Open a terminal in the folder you want to initialize."));
                 }
             };
@@ -6024,80 +6029,15 @@ public:
         if (back && back->window() == this) { setActiveLeaf(back); focusLeaf(back); }
     }
 
-    // ----- the project picker (card #916B, src/ProjectPicker.h) -------------------------------
-    // What opens when a Switchboard is reached for in a tab that has no project and the pane's
-    // directory is no candidate for one (~/Downloads, an admin folder): the projects Relay knows,
-    // with "Initialize new project here" on top. One per tab, beside the pane that asked, closed
-    // by Esc or by the answer. A pane, not an overlay (owner, 2026-09-18).
-    // Hosted as a `PaneView` like the ⓘ view (ToolPane::Kind::Info), told apart by what it hosts;
-    // its `paneType` is "projects", which is what the band and the tab lights go by.
-    static ToolPane *projectPickerIn(QWidget *page) {
-        for (QWidget *leaf : leavesIn(page))
-            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->kind() == ToolPane::Kind::Info
-                && dynamic_cast<relay::projects::ProjectPicker *>(tool->hosted()))
-                return tool;
-        return nullptr;
-    }
-
-    // `heldCard` is a `/card <text>` typed in a tab with no project: it is filed the moment a
-    // project is chosen, and never lost. Empty when the Switchboard itself was reached for.
-    void openProjectPicker(Pane *owner, const QString &heldCard) {
-        if (!owner) { notice(QStringLiteral("No pane to look from, so there is no project to pick for."), 4000); return; }
-        QWidget *page = pageOf(owner);
-        if (!page) return;
-        ToolPane *tool = projectPickerIn(page);
-        auto *view = tool ? dynamic_cast<relay::projects::ProjectPicker *>(tool->hosted()) : nullptr;
-        if (!tool) {
-            view = new relay::projects::ProjectPicker;
-            tool = new ToolPane(ToolPane::Kind::Info, view, view, owner->cwd());
-            tool->setProperty("paneType", QStringLiteral("projects"));
-            relay::theme::polishWindow(tool);
-            insertBeside(owner, tool, owner->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
+    // Project selection lives only in the shared Projects tab. Preserve a loose /card request
+    // until an explicit Attach or Initialize action supplies its destination.
+    void openProjectsFor(Pane *owner, const QString &heldCard) {
+        if (owner) openSessionsFor(owner, QString(), QStringLiteral("projects"));
+        else openSessions(QStringLiteral("projects"));
+        if (auto *tool = sessionsPaneIn(m_tabs->currentWidget()); tool && !heldCard.isEmpty()) {
+            tool->setProperty("pendingProjectCard", heldCard);
+            notice(QStringLiteral("Choose a project and Attach this tab to file your card, or Initialize here."));
         }
-        // Fed every time it opens: the registry may have grown since, and the pane may have moved.
-        view->setProjects(m_manager->projects().knownProjects());
-        view->setDefaultProject(relay::projects::defaultProject());
-        view->setHere(owner->cwd());
-        QPointer<ToolPane> guard(tool);
-        QPointer<Pane> ownerGuard(owner);
-        auto close = [guard, ownerGuard] {
-            if (auto *w = windowOf(guard)) w->closeProjectPicker(guard, ownerGuard);
-        };
-        view->onClose = close;
-        // The captures are copied out before the pane closes: closing is deleteLater, but the
-        // lambda's own storage lives in the view all the same.
-        view->onPick = [guard, ownerGuard, heldCard, close](const QString &path) {
-            auto *w = windowOf(guard);
-            QPointer<Pane> pane = ownerGuard;
-            const QString card = heldCard;
-            if (!w || !pane) return;
-            close();
-            w->attachTab(w->pageOf(pane), path, QString::fromLatin1(relay::projects::kReasonPicker));
-            w->afterProjectPicked(pane, card);
-        };
-        view->onInitHere = [guard, ownerGuard, heldCard, close] {
-            auto *w = windowOf(guard);
-            QPointer<Pane> pane = ownerGuard;
-            const QString card = heldCard;
-            if (!w || !pane) return;
-            close();
-            w->setActiveLeaf(pane);
-            pane->initProjectHere(card);
-        };
-        setActiveLeaf(tool);
-        focusLeaf(tool);
-        updateTitles();
-    }
-
-    void closeProjectPicker(ToolPane *tool, Pane *back) {
-        if (!tool) return;
-        QWidget *page = pageOf(tool);
-        if (page && leavesIn(page).size() <= 1 && m_tabs->count() <= 1) {
-            try { insertBeside(tool, createPane(paneNode(m_manager->workspace())), Qt::Horizontal, true); }
-            catch (const std::exception &error) { notice(QString::fromUtf8(error.what())); }
-        }
-        closePane(tool, false);
-        if (back && back->window() == this) { setActiveLeaf(back); focusLeaf(back); }
     }
 
     // The tab is attached now. A held card goes to the board; otherwise the Switchboard the user
@@ -6592,7 +6532,7 @@ public:
             m_boardClosedByToggle = false;
             return;
         }
-        const QString workspace = boardWorkspace();
+        QString workspace = boardWorkspace();
         const QString from = boardSearchRoot();
         // A tab holds one project's board (owner's rule: one project per tab), so an existing one
         // is what this key shows — but never silently as if it were the active pane's. When the
@@ -6614,26 +6554,14 @@ public:
                 return;
             }
         if (workspace.isEmpty()) {
-            // Trigger (3) of the init question: reaching for the Switchboard in a project that has
-            // none is the clearest moment to offer one (protocol 19.12). Still nothing is created
-            // before the yes, and a project the user has already declined gets the quiet line below
-            // instead — src/ProjectInit.h decides, not this key.
-            if (m_active && m_active->askProjectInit(relay::projectinit::Trigger::Switchboard)) return;
-            const QString candidate = candidateProject();
-            // No candidate at all — ~/Downloads, an admin folder — and the key still means "I want
-            // a Switchboard": the project picker (#916B) offers the projects Relay knows, or makes
-            // this directory one. Nothing is created before the user picks.
-            if (candidate.isEmpty() && !from.isEmpty()) { openProjectPicker(m_active, QString()); return; }
-            statusBar()->showMessage(
-                from.isEmpty()
-                    ? QStringLiteral("No pane to look from, so there is no Switchboard to open.")
-                    : candidate.isEmpty()
-                          ? QStringLiteral("No Switchboard for %1: no switchboard/board.yaml or "
-                                           "issues/board.yaml there or in any directory above it.").arg(from)
-                          : QStringLiteral("%1 has no Switchboard yet.")
-                                .arg(relay::projects::nameFor(candidate)),
-                9000);
-            return;
+            // Opening Switchboard is an explicit project action. An empty directory gets its
+            // empty board view; opening it does not initialize a repository or write board files.
+            workspace = candidateProject();
+            if (workspace.isEmpty()) workspace = from;
+            if (workspace.isEmpty()) {
+                notice(QStringLiteral("Open a terminal in the directory whose Switchboard you want."));
+                return;
+            }
         }
         QWidget *anchor = m_activeLeaf ? m_activeLeaf.data() : static_cast<QWidget *>(m_active.data());
         auto *tool = createBoardPane(workspace);
@@ -7162,6 +7090,9 @@ public:
         // `tab` is what the board side keys its persisted conversation by without reaching into
         // the app block — the conversation is per (project, tab), and the project is `workspace`.
         configure.insert(QStringLiteral("tab"), tabIdOf(page));
+        // An attached project can have no board yet; send that state explicitly so board_open
+        // returns its empty view instead of attempting to discover a nonexistent board.
+        configure.insert(QStringLiteral("board"), boardSettingsFor(page));
         configure.insert(QStringLiteral("app"), appCatalogFor(page));
         // The keybinding catalogue a pane's `configure` carries (§30.2), for the same reason and
         // from the same builder: the helper's Actions pane is the palette "with its keyboard
@@ -7739,7 +7670,7 @@ private:
             if (auto *w = windowOf(guard)) w->attachTab(w->pageOf(guard), project, reason);
         };
         pane->onPickProject = [guard](const QString &heldCard) {
-            if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->openProjectPicker(guard, heldCard); }
+            if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->openProjectsFor(guard, heldCard); }
         };
         pane->onProjectInitEvent = [guard](const QString &project, const QString &what) {
             auto *w = windowOf(guard);
@@ -9413,7 +9344,6 @@ private:
         }
         if (tool->kind() == ToolPane::Kind::Sessions) { closeSessionsPane(tool, m_active); return; }
         if (tool->kind() == ToolPane::Kind::Models) { closeModelsPane(tool); return; }
-        if (dynamic_cast<relay::projects::ProjectPicker *>(tool->hosted())) { closeProjectPicker(tool, m_active); return; }
         setActiveLeaf(tool);
         runAction(QStringLiteral("pane.close"));
     }
