@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Per-card agents for the Switchboard tests (protocol 19.16), with no model behind them.
+"""Per-card consoles for the Switchboard tests (protocol 19.16), with no model behind them.
 
-A card turn now runs on its own `Agent` on its own thread (`relay_core.board_turns`), so the
-tests that used to read the stub supervisor's `submitted` list read `CardAgents.prompts` here
-instead.  Everything else about the turn is real: the pool, the per-card conversation, the
-`CardScope` on that card's own `BoardTools`, and the events the worker sends.
+A card turn runs on its own `Agent` and, since card #CTRN, on that card's own
+`TurnSupervisor` (`relay_core.board_turns`), so the tests that used to read the stub
+supervisor's `submitted` list read `CardAgents.prompts` here instead.  Everything else about
+the turn is real: the pool, the queue, the per-card conversation, the `CardScope` the
+supervisor opens through `set_card_turn`, and the events the worker sends.
 
     self.cards = fake_cards.CardAgents(self.commands, str(self.repo))   # installs itself
     self.send(type="board_ask", card=card_id, text="why?")              # waits for the turn
@@ -46,8 +47,12 @@ class FakeCardAgent:
         #: Set to hold the turn open until `release()`.
         self.gate: threading.Event | None = None
         #: The scope this card's tools had while the turn ran, kept for the assertions that
-        #: check a Plan cannot be widened (the pool closes it when the thread unwinds).
+        #: check a Plan cannot be widened (the supervisor closes it when the turn ends).
         self.scope_during = None
+        #: What a console keeps between turns: `end_card_turn` puts the `ConsoleScope` back.
+        self.scope_between = getattr(tools, "card_scope", None)
+        #: `TurnSupervisor.set_agent` hands the agent its steering source.
+        self.steer_source = None
 
     # ---- what the agent does ----------------------------------------------
     def ask(self, prompt, reset_cancellation=True, turn_id=None, **kw):
@@ -67,6 +72,18 @@ class FakeCardAgent:
         self.send({"event": "turn_summary", "turn_id": turn_id, "outcome": self.outcome})
         self.send({"event": self.outcome, "turn_id": turn_id,
                    **({"text": "the provider said no"} if self.outcome == "error" else {})})
+
+    def set_card_turn(self, mode, card_id):
+        """What `relay_core.agent.Agent.set_card_turn` does, for a card turn's two lines (#CTRN).
+
+        The supervisor calls it around the ask; the board opens and closes the `CardScope` that
+        says what this mode may touch, exactly as it does behind the real agent.
+        """
+        if mode and card_id:
+            self.board.begin_card_turn(mode, card_id)
+        else:
+            self.board.end_card_turn()
+            self.scope_between = getattr(self.board, "card_scope", None)
 
     def stop(self):
         self.cancel_event.set()
@@ -104,7 +121,7 @@ class CardAgents:
         self.gates: dict[str, threading.Event] = {}
         #: `send()` waits for the card turns to finish unless a test is holding one open.
         self.autowait = True
-        commands._build_card_agent = self.build
+        commands._build_card_console = self.build
 
     def build(self, card_id: str, emit):
         tools = self.commands.agent_tools(self.workspace, {"board": self.commands.settings["raw"]})
@@ -127,10 +144,14 @@ class CardAgents:
         return gate
 
     def wait(self, timeout: float = 5.0) -> bool:
-        """Until every card turn has finished.  False if one was still running."""
+        """Until every card turn has finished and every card queue is empty (#CTRN).
+
+        A card has a queue of its own now, so "the turn is over" is no longer "nothing is
+        running": a prompt that queued behind it has still to run.
+        """
         deadline = time.time() + timeout
         while time.time() < deadline:
-            if self.commands.cards.count() == 0:
+            if self.commands.cards.idle():
                 return True
             time.sleep(0.005)
         return False

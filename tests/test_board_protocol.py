@@ -712,18 +712,69 @@ class AskTests(ProtocolTest):
             self.cards.agent(card_id).release()
         self.assertTrue(self.cards.wait())
 
-    def test_a_second_turn_on_the_same_card_is_refused_while_the_first_runs(self):
+    def test_a_second_turn_on_the_same_card_queues_behind_the_first(self):
+        """Card #CTRN: `board_busy` on the same card is gone — the second prompt queues.
+
+        The two things that do not change are the ones the owner decided: the question is on the
+        thread at submit (so a phone's `board_ask` is answered by the entry landing, whether the
+        turn runs now or in a minute), and the queue row carries the card and the mode, so the
+        §12 strip on the card page is that card's own queue.
+        """
         card_id = self.make_card()
         self.cards.hold(card_id)
         self.send(type="board_ask", card=card_id, text="one")
         self.assertTrue(self.cards.wait_running())
-        events = self.send(type="board_ask", id="a2", card=card_id, text="two")
-        refusal = [e for e in events if e.get("code") == "board_busy"][0]
-        self.assertEqual(refusal["card_id"], card_id)
-        self.assertIn(f"#{card_id}", refusal["text"])
-        # A refused ask leaves no trace on the card.
-        self.assertEqual(self.asked(card_id).text, "one")
-        self.assertNotIn("two", [e.text for e in self.board.thread(card_id)])
+        events = self.send(type="board_ask", id="a2", card=card_id, mode="plan")
+        self.assertEqual([e for e in events if e.get("code") == "board_busy"], [])
+        # The owner asked, so the thread says so — before the model has seen a word of it.
+        self.assertEqual(self.asked(card_id).text, "Plan this card.")
+        rows = [e for e in events if e["event"] == "queue_changed"][-1]
+        self.assertEqual([(r["mode"], r["card_id"]) for r in rows["items"]], [("plan", card_id)])
+        self.assertEqual(rows["surface"], f"card:{card_id}")
+        self.cards.agent(card_id).release()
+        self.assertTrue(self.cards.wait())
+        # Both turns ran, in order, each on this card's own conversation and with its own brief.
+        prompts = [p["prompt"] for p in self.cards.prompts if p["card"] == card_id]
+        self.assertTrue(prompts[0].endswith("one"))
+        self.assertIn(f"[Plan · #{card_id}]", prompts[1])
+        answers = [e.attrs.get("mode") for e in self.board.thread(card_id) if e.author == "agent"]
+        self.assertEqual(answers, ["discuss", "plan"])
+
+    def test_a_withdrawn_queued_prompt_keeps_its_question_on_the_thread(self):
+        """Owner decision 5 on #CTRN: "yes, unchanged from what a failed turn leaves today."
+
+        The owner did ask, so the record says so; a queued prompt withdrawn from the strip
+        leaves a question with no answer, which is exactly what a failed turn already leaves
+        (`test_a_failed_turn_writes_nothing`).
+        """
+        card_id = self.make_card()
+        self.cards.hold(card_id)
+        self.send(type="board_ask", card=card_id, text="one")
+        self.assertTrue(self.cards.wait_running())
+        self.send(type="board_ask", id="a2", card=card_id, text="two")
+        queue = self.commands.card_queue(f"card:{card_id}")
+        waiting = [r["id"] for r in self.of("queue_changed")[-1]["items"]]
+        self.assertEqual(len(waiting), 1)
+        queue.remove(waiting[0], "r9")
+        self.cards.agent(card_id).release()
+        self.assertTrue(self.cards.wait())
+        said = [(e.author, e.text) for e in self.board.thread(card_id) if e.kind == "comment"]
+        self.assertIn(("owner", "two"), said)
+        self.assertEqual([p["prompt"] for p in self.cards.prompts if p["card"] == card_id
+                          and p["prompt"].endswith("two")], [])
+
+    def test_a_queue_op_names_the_card_it_is_for(self):
+        """`queue_remove`, `queue_move`, `queue_steer`, `queue_unsteer`, `queue_clear`,
+        `resume_queue` and `cancel` carry `surface: "card:<ID>"` (protocol 33, #CTRN)."""
+        card_id = self.make_card()
+        self.assertIsNone(self.commands.card_queue("card:ZZZZ"))   # no session, no queue
+        self.assertIsNone(self.commands.card_queue("switchboard"))
+        self.assertIsNone(self.commands.card_queue(None))
+        self.cards.hold(card_id)
+        self.send(type="board_ask", card=card_id, text="one")
+        self.assertTrue(self.cards.wait_running())
+        self.assertIs(self.commands.card_queue(f"card:{card_id}"),
+                      self.commands.cards.session(card_id).turns)
         self.cards.agent(card_id).release()
         self.assertTrue(self.cards.wait())
 

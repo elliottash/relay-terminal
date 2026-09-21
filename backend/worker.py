@@ -110,6 +110,19 @@ def main():
     # argument because `board` is built before `subagents.configure` has anything to configure.
     board.subagents = subagents
 
+    def queue_for(request: dict):
+        """Which queue a message is addressed to: a card's own, or this worker's (33, #CTRN).
+
+        `ask {surface}` has named the asking console since #AGNT. Since a card turn became an
+        ordinary supervised turn it has a queue of its own, so `queue_remove`, `queue_move`,
+        `queue_steer`, `queue_unsteer`, `queue_clear`, `resume_queue` and `cancel` carry the
+        same `surface` and operate that card's queue — including the resume a card's own queue
+        needs after a turn on it failed. Everything else — a terminal pane, a tab console, a GUI
+        that sends no surface at all — is this worker's own supervisor, exactly as before.
+        """
+        own = board.card_queue(request.get("surface"))
+        return own if own is not None else turns
+
     def model_changed(agent):
         # Subagents that inherit the main model follow a set_model switch.
         factory = subagents.factory
@@ -533,22 +546,22 @@ def main():
                              surface=request.get("surface"), screen=request.get("screen"),
                              readonly=bool(request.get("readonly", False)))
             elif kind == "queue_steer":
-                turns.steer(request.get("item"))
+                queue_for(request).steer(request.get("item"))
             elif kind == "queue_unsteer":
-                turns.unsteer(request.get("request"), request.get("as_request"))
+                queue_for(request).unsteer(request.get("request"), request.get("as_request"))
             elif kind == "cancel":
-                turns.cancel()
+                queue_for(request).cancel()
             elif kind == "resume_queue":
-                turns.resume()
+                queue_for(request).resume()
             elif kind == "queue_remove":
-                turns.remove(request.get("item"), request.get("id"))
+                queue_for(request).remove(request.get("item"), request.get("id"))
             elif kind == "queue_move":
                 # Protocol 33: drag a queued prompt up or down the line. The helper's own FIFO
                 # had reorder and the pane's queue did not (#AGNT's Issue, itemised); now there
                 # is one queue and it has it.
-                turns.move(request.get("item"), request.get("to"), request.get("id"))
+                queue_for(request).move(request.get("item"), request.get("to"), request.get("id"))
             elif kind == "queue_clear":
-                turns.clear(request.get("id"))
+                queue_for(request).clear(request.get("id"))
             elif kind == "reset":
                 turns.reset()
                 subagents.stop_all(reset=True)

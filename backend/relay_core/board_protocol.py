@@ -20,6 +20,7 @@ import secrets
 import threading
 from pathlib import Path
 
+from . import agent_context
 from . import board as B
 from . import board_chat
 from . import board_turns
@@ -386,12 +387,13 @@ class BoardCommands:
         #: The id of the `forge_sync_*` request whose thread is running, or None (19.14). One
         #: sync at a time: two runs against one repository would post the same comment twice.
         self._forge_run = None
-        #: The live card conversations (19.16, `relay_core.board_turns`): one agent, one
-        #: conversation and one `CardScope` per card, so Plan on #A and Discuss on #B run at
-        #: the same time. Cards were serialized through the worker's single turn runner until
-        #: 2026-09-19; the cleanup below still is, because it rewrites the whole board.
+        #: The live card consoles (19.16, `relay_core.board_turns`): one agent, one conversation
+        #: and one `TurnSupervisor` per card, so Plan on #A and Discuss on #B run at the same
+        #: time and a second prompt on #A queues behind the first (#CTRN). Cards were serialized
+        #: through the worker's single turn runner until 2026-09-19; the cleanup below still is,
+        #: because it rewrites the whole board.
         self.cards = board_turns.CardTurns(
-            self.emit, lambda card_id, emit: self._build_card_agent(card_id, emit),
+            self.emit, lambda card_id, emit: self._build_card_console(card_id, emit),
             on_answer=self._card_answer)
         #: Whether this worker's agent is an agent **console** rather than a terminal pane's own
         #: (`configure {context: {scope: "console"}}`, protocol 33).  Set by `worker.py`. It is
@@ -640,18 +642,29 @@ class BoardCommands:
             raise ValueError(GHP.helper_refusal(name))
         return config
 
-    def _build_card_agent(self, card_id: str, emit):
-        """Build the agent one card's turns run on (19.16): the pane's provider, its own rest.
+    def _build_card_console(self, card_id: str, emit):
+        """Build the console one card's turns run on (19.16, card #CTRN): an ordinary console.
 
         The provider config, the skills, the roles chain and the failover switches are the pane
         agent's, so a card turn answers on the model the Switchboard is configured with and
         fails over the way the pane does.  Everything that carries state is this card's own: its
-        conversation, its `cancel_event` (so Stop on one card cannot stop another) and — the
-        point of the exercise — its own `BoardTools`, which is where `card_scope` lives.  That
-        is why enforcing what a Plan may touch needed no change in `board_tools.py`.
+        conversation, its `cancel_event` (so Stop on one card cannot stop another) and its own
+        `BoardTools`, which is where `card_scope` lives — which is why enforcing what a Plan may
+        touch needed no change in `board_tools.py`.
 
-        There is no request ledger, no todo tool and no completion check: a card turn is one
-        prompt answered into a card thread, not a pane's unit of work.
+        **What #CTRN changed is everything else.**  It was built `tool_scope="card"`, with no
+        request ledger, no todo tool and no completion check, because a card turn was "one
+        prompt answered into a card thread, not a pane's unit of work".  A card turn is now an
+        ordinary supervised turn on an ordinary console, so it is built as one: the console
+        scope, and the ledger, todos and completion check the pane agent has.  What a Discuss or
+        a Plan may touch is the *turn's* constraint (`Agent.set_card_turn`), not the agent's.
+
+        Its conversation is persisted per **(tab, card)** — `persist {scope: "helper", key:
+        "<tab id>/card:<ID>"}` — so a card remembers its earlier turns across a restart. The tab
+        is in the key because a tab owns one worker and that worker owns its conversation files:
+        keyed by the card alone, two tabs on one project would adopt one file from two workers
+        and the last to save would win.  A worker that has not been told its tab keeps the
+        ephemeral conversation it had before this card.
         """
         from .agent import Agent          # late: agent.py pulls in the whole tool executor
         from .tools import Workspace
@@ -663,23 +676,39 @@ class BoardCommands:
             raise ValueError("The Switchboard agent has no board tools here "
                              "(this project has no board.yaml, or its autonomy is off).")
         workspace = str(tools.board.repo)
+        session_dir, session_id = self._card_session_file(card_id)
         agent = Agent(self._usable_config(main.config), workspace, emit,
                       max_steps=main.max_steps, max_tool_calls=main.max_tool_calls,
                       skills=getattr(main.executor, "skills", None),
                       preset_id=main.preset.id if main.preset else None,
                       roles=main.roles, board=tools, effort=getattr(main, "effort", None),
-                      # Protocol 33: the named scope. A card turn's tools are its stage's — the
-                      # mode's board tools and the read-only file tools — and that is the one
-                      # thing #AGNT left fenced, because 19.20 is a rule about the stage.
-                      tool_scope="card",
+                      # Protocol 33: the named scope. A card console is a console — one tool
+                      # list, offered to every turn, with the stage's rule refused at call time
+                      # (owner decision 3 on #CTRN). `card` is what this said before that.
+                      tool_scope="console",
                       # Protocol 30.4: one tool set. A card turn drives the app through the same
                       # `AppTools` the pane agent holds, so the change log is the worker's.
                       app=getattr(main, "app", None),
-                      track_requests=False, todo_tool=False, completion_check=False,
+                      track_requests=getattr(main, "track_requests", True),
+                      todo_tool=getattr(main, "todo_tool", True),
+                      completion_check=getattr(main, "completion_check", True),
+                      session_dir=session_dir,
                       stall_timeout_s=main.stall_timeout_s,
                       first_token_timeout_s=getattr(main, "first_token_timeout_s", 0.0),
                       failover=getattr(main, "failover", True),
                       failover_hosted=getattr(main, "failover_hosted", False))
+        # A console's board tools offer the console's set (#AGNT); a card's are a console's.
+        tools.begin_console()
+        if session_id:
+            # The conversation this card had last time, loaded now that the agent exists; a card
+            # nothing has been said about yet starts empty under that id, and the end-of-turn
+            # autosave keeps it from then on (30.7). Never fatal: a card whose history cannot be
+            # read is a card with no history, not a card that cannot be discussed.
+            try:
+                agent.adopt_session(session_id)
+            except (ValueError, OSError):
+                logs.event(logs.get("board"), "card_session_unreadable",
+                           level_name="warning", card=card_id)
         # Options › Security (#3KB7): a card turn reads the repository, so the owner's extra
         # readable roots and extra secret patterns are its rules too.
         policy = getattr(main.executor, "policy", None)
@@ -689,6 +718,20 @@ class BoardCommands:
         if getattr(main, "instructions", None) is not None:
             agent.set_instructions(main.instructions)
         return agent, tools
+
+    def _card_session_file(self, card_id: str) -> tuple[str | None, str | None]:
+        """(session_dir, session_id) for one card's conversation, or (None, None).
+
+        `agent_context.helper_file` decides *where*, exactly as it does for a tab's console: the
+        directory is the workspace's and the name is the key's, and a conversation that already
+        exists under any workspace digest for this key is the one that is opened — so a tab that
+        gained its project later keeps what was said in it (#AGNT's live drive).
+        """
+        if not self.tab or not self.workspace:
+            return None, None
+        directory, name = agent_context.helper_file(
+            self.workspace, f"{self.tab}/{board_turns.surface_of(card_id)}")
+        return str(directory), name
 
     def console_seed(self, agent) -> str:
         """The board a console's first question is seeded with (19.18), or "".
@@ -1634,31 +1677,39 @@ class BoardCommands:
         return True
 
     # ---- who may start a turn --------------------------------------------------
-    def _busy_error(self, rid, what: str, card_id: str | None = None) -> bool:
+    def _busy_error(self, rid, what: str, card_id: str | None = None, *,
+                    queues: bool = False) -> bool:
         """What may start now (19.16).  True when it refused, with `board_busy` sent.
 
         Turns on **different cards run at the same time**, each on its own agent and
         conversation (`relay_core.board_turns`) — as many as the owner clicks; the concurrent
-        cap was removed the day after it landed (owner, 2026-09-19).  Two things are still
-        refused rather than queued:
+        cap was removed the day after it landed (owner, 2026-09-19).  `queues=True` is the
+        caller — `board_ask`, and only it — that has a queue to put this on: since card #CTRN a
+        card's second prompt waits in the §12 strip, can be steered, withdrawn and reordered,
+        and runs when the first finishes, instead of being refused.  Everything else is refused
+        rather than queued:
 
-        * a **second turn on the same card** — two agents writing one card's `## Plan` would
-          each undo the other, and the thread would interleave two answers;
+        * a **write to a card a turn is running on** — a delete or a priority change under a
+          running writer would race it, and there is no queue for a file write;
         * **anything while a cleanup runs**, and a cleanup while anything runs — a cleanup
           merges, splits and moves cards across the whole board, including the ones being
           talked about;
+        * **anything while the *console's* own turn runs** — that conversation can write any
+          card (19.18).  A console's own prompts never reach here: they queue.
 
         The GUI shows the refusal and offers Stop; `board_cancel {card}` stops one card's turn.
         """
         cleanup = self._cleanup_log is not None
-        running_cards = self.cards.running_cards()
+        # What has work on it, not only what is mid-turn: a card whose prompt was accepted a
+        # heartbeat ago has no running turn yet, and a delete must not slip through that gap.
+        running_cards = self.cards.working_cards()
         if cleanup:
             running, busy_card = "a Switchboard cleanup", None
         elif self.console and bool(getattr(self.turns, "busy", False)):
             # The console's own prompts never reach here — they queue, which is what a pane's
             # queue is for. Everything else waits, because the console can write any card.
             running, busy_card = "the Switchboard console's turn", None
-        elif card_id is not None and card_id in running_cards:
+        elif card_id is not None and card_id in running_cards and not queues:
             running, busy_card = f"{_turn_phrase(self.cards.mode_of(card_id))} on #{card_id}", card_id
         elif card_id is None and (running_cards or bool(getattr(self.turns, "busy", False))):
             # A cleanup wants the board to itself.
@@ -1822,7 +1873,8 @@ class BoardCommands:
                              + (" (it may be empty for a plan)." if mode == "discuss" else "."))
         text = text.strip()
         # Checked before the question is appended, so a refused ask leaves no trace on the card.
-        if self._busy_error(rid, "the plan" if mode == "plan" else "the question", card_id=card_id):
+        if self._busy_error(rid, "the plan" if mode == "plan" else "the question",
+                            card_id=card_id, queues=True):
             return
         card = tools.board.card_by_id(card_id)
         if card is None:
@@ -1858,10 +1910,22 @@ class BoardCommands:
         self._send({"event": "board_thread_appended", "id": rid, "card_id": card_id,
                     "entry_id": entry.entry_id, "author": "owner", "kind": "comment", "text": said,
                     "mode": mode})
-        # What the mode may touch is enforced for the length of the turn by this card's own
-        # tools, not only asked for in the brief (protocol 19.10): `CardTurns.start` opens the
-        # scope on them and closes it when the turn's thread unwinds.
-        self.cards.start(card_id, mode, prompt, rid, seed_hash=card_hash)
+        # The card's own queue (19.16, card #CTRN). A prompt sent while this card is busy waits
+        # in the §12 strip instead of being refused; what the mode may touch is enforced for the
+        # length of the turn by `Agent.set_card_turn`, which opens the `CardScope` on this card's
+        # own tools when the turn starts and closes it when it ends.
+        self.cards.submit(card_id, mode, prompt, rid, seed_hash=card_hash)
+
+    def card_queue(self, surface):
+        """The card queue a `surface` names (`card:<ID>`), or None (protocol 33, card #CTRN).
+
+        `worker.py` asks this of every queue op and of `cancel`: a card turn is an ordinary
+        supervised turn, so the strip drawn on a card operates that card's queue and not the
+        tab's. A surface that names no card, or a card with no live session, is None and the
+        worker's own supervisor answers — which is every message sent before this card.
+        """
+        card_id = board_turns.card_of_surface(surface)
+        return self.cards.queue_of(normalize_id(card_id)) if card_id else None
 
     def _cancel_card(self, request: dict, rid) -> None:
         """`board_cancel {card}`: stop one card's turn (19.16), or every card turn without one.

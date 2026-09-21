@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""`relay_core.board_turns`: one agent, conversation and scope per card (protocol 19.16).
+"""`relay_core.board_turns`: one console, conversation and queue per card (19.16, #CTRN).
 
 The pool itself, with neither a model nor a board behind it: `board_protocol`'s use of it is
 covered by `test_board_protocol.AskTests`.
@@ -43,6 +43,8 @@ class FakeAgent:
         self.scope_during = None
         self.tools = None
         self.raises = None
+        #: `TurnSupervisor.set_agent` hands the agent its steering source.
+        self.steer_source = None
 
     def ask(self, prompt, reset_cancellation=True, turn_id=None, **kw):
         self.prompts.append(prompt)
@@ -57,6 +59,13 @@ class FakeAgent:
         for chunk in self.answer:
             self.emit({"event": "delta", "text": chunk, "turn_id": turn_id})
         self.emit({"event": self.outcome, "turn_id": turn_id})
+
+    def set_card_turn(self, mode, card_id):
+        """What `Agent.set_card_turn` does: the supervisor's two lines, and the card's scope."""
+        if mode and card_id:
+            self.tools.begin_card_turn(mode, card_id)
+        else:
+            self.tools.end_card_turn()
 
     def stop(self):
         self.cancel_event.set()
@@ -93,9 +102,11 @@ class PoolTest(unittest.TestCase):
         return gate
 
     def wait_idle(self, timeout=5.0):
+        """Nothing running *and* nothing queued: a card has a queue of its own now (#CTRN)."""
         deadline = time.time() + timeout
-        while time.time() < deadline and self.pool.count():
+        while time.time() < deadline and not self.pool.idle():
             time.sleep(0.005)
+        self.assertTrue(self.pool.idle())
         self.assertEqual(self.pool.count(), 0)
 
     def wait_running(self, count=1, timeout=5.0):
@@ -107,7 +118,7 @@ class PoolTest(unittest.TestCase):
 
 class RunningTests(PoolTest):
     def test_a_turn_runs_its_prompt_and_tags_every_event_with_the_card(self):
-        self.pool.start("AAAA", "plan", "plan this")
+        self.pool.submit("AAAA", "plan", "plan this")
         self.wait_idle()
         self.assertEqual(self.agents["AAAA"].prompts, ["plan this"])
         tagged = [e for e in self.events if e["event"] in ("delta", "done")]
@@ -119,8 +130,8 @@ class RunningTests(PoolTest):
     def test_turns_on_different_cards_run_at_the_same_time(self):
         self.hold("AAAA")
         self.hold("BBBB")
-        self.pool.start("AAAA", "plan", "one")
-        self.pool.start("BBBB", "discuss", "two")
+        self.pool.submit("AAAA", "plan", "one")
+        self.pool.submit("BBBB", "discuss", "two")
         self.wait_running(2)
         self.assertEqual(sorted(self.pool.running_cards()), ["AAAA", "BBBB"])
         self.assertEqual(self.agents["AAAA"].scope_during.mode, "plan")
@@ -130,15 +141,45 @@ class RunningTests(PoolTest):
         self.wait_idle()
         self.assertEqual(sorted(c for c, _, _ in self.answers), ["AAAA", "BBBB"])
 
-    def test_a_second_turn_on_the_same_card_is_refused_while_the_first_runs(self):
+    def test_a_second_turn_on_the_same_card_queues_behind_the_first(self):
+        """Card #CTRN: the refusal (`board_busy`, "a turn is already running on #AAAA") is gone.
+
+        A card has the pane's queue now, so the second prompt waits in the §12 strip with its
+        own mode on the row, and the turn that runs it is bracketed as the mode it is.
+        """
         self.hold("AAAA")
-        self.pool.start("AAAA", "plan", "one")
+        first = self.pool.submit("AAAA", "discuss", "one")
         self.wait_running()
-        with self.assertRaises(ValueError) as caught:
-            self.pool.start("AAAA", "discuss", "two")
-        self.assertIn("#AAAA", str(caught.exception))
+        second = self.pool.submit("AAAA", "plan", "two")       # must not raise
+        rows = [e for e in self.events if e["event"] == "queue_changed"][-1]
+        self.assertEqual([(r["id"], r["mode"], r["card_id"], r["surface"]) for r in rows["items"]],
+                         [(second, "plan", "AAAA", "card:AAAA")])
+        self.assertEqual(rows["surface"], "card:AAAA")
         self.gates["AAAA"].set()
         self.wait_idle()
+        self.assertEqual(self.agents["AAAA"].prompts, ["one", "two"])
+        # Each turn is bracketed as its own mode, and the second one's brief is the Plan's.
+        brackets = [(e["id"], e["mode"]) for e in self.events if e["event"] == "agent_started"]
+        self.assertEqual(brackets, [(first, "discuss"), (second, "plan")])
+        self.assertEqual([(c, m) for c, m, _ in self.answers], [("AAAA", "discuss"), ("AAAA", "plan")])
+
+    def test_a_cards_queue_is_its_own_and_is_reached_by_its_surface(self):
+        """`queue_remove` and friends name the card with `surface: "card:<ID>"` (33, #CTRN)."""
+        self.hold("AAAA")
+        self.pool.submit("AAAA", "discuss", "one")
+        self.wait_running()
+        waiting = self.pool.submit("AAAA", "discuss", "two")
+        self.assertEqual(board_turns.card_of_surface("card:AAAA"), "AAAA")
+        self.assertEqual(board_turns.card_of_surface("options"), "")
+        self.assertIsNone(self.pool.queue_of("BBBB"))           # no session, no queue
+        queue = self.pool.queue_of("AAAA")
+        queue.remove(waiting, "r1")
+        ack = [e for e in self.events if e["event"] == "queue_ack"][-1]
+        self.assertEqual((ack["id"], ack["op"], ack["card_id"], ack["surface"]),
+                         ("r1", "remove", "AAAA", "card:AAAA"))
+        self.gates["AAAA"].set()
+        self.wait_idle()
+        self.assertEqual(self.agents["AAAA"].prompts, ["one"])
 
     def test_as_many_cards_run_at_once_as_are_started(self):
         """No concurrent cap (owner, 2026-09-19: 'remove the cap on number of agents in the
@@ -146,7 +187,7 @@ class RunningTests(PoolTest):
         one test; the point is that nothing counts them."""
         for card in ("AAAA", "BBBB", "CCCC", "DDDD", "EEEE"):
             self.hold(card)
-            self.pool.start(card, "plan", "go")
+            self.pool.submit(card, "plan", "go")
         self.wait_running(5)
         self.assertEqual(sorted(self.pool.running_cards()), ["AAAA", "BBBB", "CCCC", "DDDD", "EEEE"])
         for card in ("AAAA", "BBBB", "CCCC", "DDDD", "EEEE"):
@@ -159,7 +200,7 @@ class RunningTests(PoolTest):
         content; the deltas ride `session.text`, and what `_card_answer` wrote to the thread was
         the whole join. The join is stripped before it reaches the thread now."""
         self.hold("AAAA")
-        self.pool.start("AAAA", "discuss", "record this")
+        self.pool.submit("AAAA", "discuss", "record this")
         self.wait_running()
         agent = self.agents["AAAA"]
         agent.answer = [
@@ -178,7 +219,7 @@ class RunningTests(PoolTest):
         self.assertIn("The decisions are on the card.", text)
 
     def test_the_scope_is_opened_for_the_turn_and_closed_after_it(self):
-        self.pool.start("AAAA", "plan", "one")
+        self.pool.submit("AAAA", "plan", "one")
         self.wait_idle()
         tools = self.agents["AAAA"].tools
         self.assertEqual(tools.opened, [("plan", "AAAA")])
@@ -188,7 +229,7 @@ class RunningTests(PoolTest):
     def test_an_error_or_a_stop_ends_the_turn_and_writes_no_answer(self):
         self.agents_outcome = None
         self.hold("AAAA")
-        self.pool.start("AAAA", "plan", "one")
+        self.pool.submit("AAAA", "plan", "one")
         self.wait_running()
         self.agents["AAAA"].outcome = "error"
         self.gates["AAAA"].set()
@@ -199,8 +240,8 @@ class RunningTests(PoolTest):
     def test_stop_ends_one_card_and_leaves_the_other_running(self):
         self.hold("AAAA")
         self.hold("BBBB")
-        self.pool.start("AAAA", "plan", "one")
-        self.pool.start("BBBB", "plan", "two")
+        self.pool.submit("AAAA", "plan", "one")
+        self.pool.submit("BBBB", "plan", "two")
         self.wait_running(2)
         self.assertTrue(self.pool.stop("AAAA"))
         deadline = time.time() + 5
@@ -214,10 +255,10 @@ class RunningTests(PoolTest):
                             for e in self.events))
 
     def test_a_turn_that_raises_is_reported_and_leaves_nothing_running(self):
-        self.pool.start("AAAA", "plan", "one")
+        self.pool.submit("AAAA", "plan", "one")
         self.wait_idle()
         self.agents["AAAA"].raises = RuntimeError("boom")
-        self.pool.start("AAAA", "plan", "two")
+        self.pool.submit("AAAA", "plan", "two")
         self.wait_idle()
         failed = [e for e in self.events if e["event"] == "error" and e.get("card_id") == "AAAA"]
         self.assertTrue(failed)
@@ -227,20 +268,20 @@ class RunningTests(PoolTest):
 
 class SessionTests(PoolTest):
     def test_a_card_keeps_its_conversation_between_turns(self):
-        self.pool.start("AAAA", "discuss", "one")
+        self.pool.submit("AAAA", "discuss", "one")
         self.wait_idle()
-        self.pool.start("AAAA", "discuss", "two")
+        self.pool.submit("AAAA", "discuss", "two")
         self.wait_idle()
         self.assertEqual(self.builds, ["AAAA"])
         self.assertEqual(self.agents["AAAA"].prompts, ["one", "two"])
 
     def test_forget_drops_an_idle_conversation_and_keeps_a_running_one(self):
-        self.pool.start("AAAA", "discuss", "one")
+        self.pool.submit("AAAA", "discuss", "one")
         self.wait_idle()
         self.pool.forget("AAAA")
         self.assertIsNone(self.pool.session("AAAA"))
         self.hold("BBBB")
-        self.pool.start("BBBB", "plan", "two")
+        self.pool.submit("BBBB", "plan", "two")
         self.wait_running()
         self.pool.forget("BBBB")
         self.assertIsNotNone(self.pool.session("BBBB"))
@@ -251,38 +292,59 @@ class SessionTests(PoolTest):
         pool = board_turns.CardTurns(self.events.append, self.build, max_sessions=2)
         self.addCleanup(pool.drop)
         for card in ("AAAA", "BBBB", "CCCC"):
-            pool.start(card, "discuss", "hello")
+            pool.submit(card, "discuss", "hello")
             deadline = time.time() + 5
-            while time.time() < deadline and pool.count():
+            # `idle`, not `count`: a prompt is on its card's queue for a heartbeat before the
+            # dispatcher takes it, and that card is not idle yet (#CTRN).
+            while time.time() < deadline and not pool.idle():
                 time.sleep(0.005)
         self.assertIsNone(pool.session("AAAA"))
         self.assertIsNotNone(pool.session("BBBB"))
         self.assertIsNotNone(pool.session("CCCC"))
 
     def test_the_seed_hash_and_brief_mode_travel_with_the_session(self):
-        self.pool.start("AAAA", "plan", "one", seed_hash="h1")
+        self.pool.submit("AAAA", "plan", "one", seed_hash="h1")
         self.wait_idle()
         session = self.pool.session("AAAA")
         self.assertEqual((session.seed_hash, session.brief_mode, session.mode), ("h1", "plan", "plan"))
 
     def test_drop_stops_everything_and_forgets_it(self):
         self.hold("AAAA")
-        self.pool.start("AAAA", "plan", "one")
+        self.pool.submit("AAAA", "plan", "one")
         self.wait_running()
         self.pool.drop()
         self.assertEqual(self.pool.running_cards(), [])
         self.assertIsNone(self.pool.session("AAAA"))
 
-    def test_the_next_turn_waits_for_the_last_one_to_unwind(self):
+    def test_the_next_prompt_never_races_the_last_turns_unwind(self):
         # The pane sends the next ask the moment it sees `done`, which arrives from inside
-        # `ask()` — a hair before the thread lets go of the agent.
-        self.pool.start("AAAA", "discuss", "one")
+        # `ask()` — a hair before the supervisor lets go of the agent. The pool used to wait for
+        # that thread by hand (`_await_unwinding`); the queue is what makes it a non-question.
+        self.pool.submit("AAAA", "discuss", "one")
         session = self.pool.session("AAAA")
         deadline = time.time() + 5
         while time.time() < deadline and not session.ended:
             time.sleep(0.001)
-        self.pool.start("AAAA", "discuss", "two")     # must not raise
+        self.pool.submit("AAAA", "discuss", "two")     # must not raise
         self.wait_idle()
+        self.assertEqual(self.agents["AAAA"].prompts, ["one", "two"])
+
+    def test_a_card_with_a_queue_is_never_dropped_under_the_cap(self):
+        """The LRU takes idle conversations only: a queued prompt would be lost with its card."""
+        pool = board_turns.CardTurns(self.events.append, self.build, max_sessions=1)
+        self.addCleanup(pool.drop)
+        self.hold("AAAA")
+        pool.submit("AAAA", "discuss", "one")
+        deadline = time.time() + 5
+        while time.time() < deadline and not pool.is_running("AAAA"):
+            time.sleep(0.005)
+        pool.submit("AAAA", "discuss", "two")           # waiting on #AAAA's own queue
+        pool.submit("BBBB", "discuss", "hello")         # would evict #AAAA if it counted as idle
+        self.assertIsNotNone(pool.session("AAAA"))
+        self.gates["AAAA"].set()
+        deadline = time.time() + 5
+        while time.time() < deadline and not pool.idle():
+            time.sleep(0.005)
         self.assertEqual(self.agents["AAAA"].prompts, ["one", "two"])
 
 
@@ -297,7 +359,7 @@ class TurnBoundaryTests(PoolTest):
         return [e for e in self.events if e.get("event") == name]
 
     def test_a_turn_is_bracketed_and_every_event_of_it_names_its_surface(self):
-        turn_id = self.pool.start("AAAA", "discuss", "one")
+        turn_id = self.pool.submit("AAAA", "discuss", "one")
         self.wait_idle()
         started, finished = self.of("agent_started"), self.of("agent_finished")
         self.assertEqual([e["id"] for e in started], [turn_id])
@@ -309,7 +371,7 @@ class TurnBoundaryTests(PoolTest):
 
     def test_a_stopped_turn_says_how_it_ended(self):
         self.hold("AAAA")
-        self.pool.start("AAAA", "plan", "one")
+        self.pool.submit("AAAA", "plan", "one")
         self.wait_running()
         self.pool.stop("AAAA")
         self.wait_idle()
