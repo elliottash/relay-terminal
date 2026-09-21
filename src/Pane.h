@@ -17447,7 +17447,7 @@ private:
             {"anthropic", "anthropic · claude opus 5", "https://api.anthropic.com/v1", "claude-opus-5", "{}"},
             {"gemini", "google · gemini 3.1 pro", "https://generativelanguage.googleapis.com/v1beta/openai",
              "gemini-3.1-pro-preview", "{\"reasoning_effort\":\"high\"}"},
-            {"deepseek", "deepseek · v4 pro", "https://api.deepseek.com", "deepseek-v4-pro",
+            {"deepseek", "deepseek · v4.1 flash", "https://api.deepseek.com", "deepseek-flash",
              "{\"thinking\":{\"type\":\"enabled\"},\"reasoning_effort\":\"high\"}"},
         };
         auto *preset = new QComboBox;
