@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: m
 created: '2026-09-21'
 source: Codex in Relay, 2026-09-21
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-action-slash-commands/evidence.md], related: [], github: null}
+links: {plans: [], commits: [7c86a599c23ac8e81716ce3607fe9fd4d50f3e73], evidence: [docs/qa_evidence/2026-09-21-action-slash-commands/evidence.md], related: [], github: null}
 ---
 # Show slash commands in Actions
 
@@ -20,6 +20,7 @@ Add a shared mapping from action IDs to their existing slash commands. Show thos
 
 ## Execution Summary
 Actions show their existing slash commands below the description while retaining keyboard shortcuts. Slash commands and aliases are searchable. Menu actions without a bound key teach their slash command through the normal limited hint registry. Added Swap models to the Actions catalog, displaying /swap and Alt+S. Existing saved aliases already display their /name in their description.
+Committed as 7c86a599; the exact committed tree passed the C++ build gate.
 
 ## Tests
 ctest:settings
