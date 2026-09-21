@@ -6042,14 +6042,16 @@ them; the submenu itself has no `run` and cannot be run.
 
 `agent_safe` is `true` today on: opening or revealing a pane (Options, Actions, the Switchboard,
 the session manager, the closed list, the explorer, ⓘ, Activity, requests, subagents, thinking, the
-agents menu, the shortcuts page, find-in-view, link stepping, jumping to a notification), moving
-the focus between panes, tabs and windows, and re-reading a file already on disk
+agents menu, the shortcuts page, find-in-view, link stepping, jumping to a notification), opening a
+pane (`pane.splitRight`, `…Down`, `…Left`, `…Up`, and `closed.restore`, which puts a closed pane
+back), moving the focus between panes, tabs and windows, and re-reading a file already on disk
 (`keybindings.reload`, `theme.reload`, `agents.reload`); and on the row buttons that test a key,
 refresh, detect or find local servers, and reorder models. It is `false` on everything else —
 including every action added after the table was written, which is what opt-in has to mean:
-resetting to defaults, removing a key or a server, deleting a session, pairing and sharing, quit
-and restart. The table lives in `appcommands::actionIsAgentSafe()`; an `ActionItem` may also carry
-its own `agentSafe`, and either is enough.
+resetting to defaults, removing a key or a server, deleting a session, closing a pane (which takes
+away whatever that pane was holding), pairing and sharing, quit and restart. The table lives in
+`appcommands::actionIsAgentSafe()`; an `ActionItem` may also carry its own `agentSafe`, and either
+is enough.
 
 A row or action that is missing from a later catalog has gone from the app: the tools answer
 `unknown_row` / `unknown_action` for it from then on, and nothing is cached across an `app_catalog`.

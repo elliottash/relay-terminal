@@ -31,6 +31,15 @@ bool actionIsAgentSafe(const QString &key) {
         QStringLiteral("find.inView"),
         QStringLiteral("links.step"),
         QStringLiteral("notifications.jump"),
+        // Open a pane. Owner, 2026-09-20 — "the sessions helper can't open panes because it says
+        // it's unsafe. can you change that": a new pane holds nothing of the person's until they
+        // put something in it, and the × in its header (pane.close, Ctrl+W) is the one click that
+        // takes it back, so a split is on the reversible side of decision 2's line. The helper
+        // reached for these after `open {target: "conversation"}` — which was never gated (§30.4)
+        // — because "open a pane" on its own has no conversation to name.
+        QStringLiteral("pane.splitRight"), QStringLiteral("pane.splitDown"),
+        QStringLiteral("pane.splitLeft"), QStringLiteral("pane.splitUp"),
+        QStringLiteral("closed.restore"),  // puts a closed pane back; the undo of a close
         // Move the focus. Moving it back is the undo.
         QStringLiteral("pane.focusUp"), QStringLiteral("pane.focusDown"),
         QStringLiteral("pane.focusLeft"), QStringLiteral("pane.focusRight"),

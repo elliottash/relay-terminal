@@ -140,3 +140,20 @@ run does not show is a *restart*, because each of its four phases starts Relay f
 profile's worth of helper history. So QA's list loses "it is not built" and keeps "nobody has
 watched a helper conversation come back": ask the Options helper something, quit, reopen the tab,
 and see the log.
+
+<!-- relay:entry 20260920T201900Z-pn author=agent kind=decision pane=terminal -->
+Owner, 2026-09-20: "im having an issue where the sessions helper cant open panes because it says
+its unsafe. can you cahnge that". Decision 2 amended — **opening a pane is agent_safe**:
+`pane.splitRight`, `pane.splitDown`, `pane.splitLeft`, `pane.splitUp` and `closed.restore`, which
+puts a closed pane back. It is the same line the decision already draws: a new pane holds nothing
+of the person's until they put something in it, and the × in its header (`pane.close`, Ctrl+W) is
+the one click that takes it back. `pane.close` itself stays off — it takes away whatever the pane
+was holding. The helper reached for these because `app_open {target: "conversation"}`, which was
+never gated (§30.4), needs a conversation to name, and "open a pane" has none; `app_action_run`
+then answered `not_agent_safe`, which is the word the report calls "unsafe".
+
+Landed in `relay::appcommands::actionIsAgentSafe()` with
+`tests/appcommands_test.cpp::openingAPaneRunsAndClosingOneDoesNot` (a split runs through the
+executor, `pane.close` is refused `not_agent_safe`) and the §30.2 list in
+docs/AGENT-SESSIONS-PROTOCOL.md. `ctest -R appcommands` green. `writes_enabled` is unchanged: with
+Options › Agent's toggle off, `run_action` is still refused for every key.

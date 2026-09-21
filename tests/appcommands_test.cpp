@@ -129,6 +129,25 @@ QList<ActionItem> actions(State *state) {
         items << item;
     }
     {
+        // Opening a pane is safe and closing one is not, on two keys of the same section.
+        ActionItem item;
+        item.key = QStringLiteral("pane.splitRight");
+        item.section = QStringLiteral("Panes");
+        item.label = QStringLiteral("New pane to the right");
+        item.agentSafe = relay::appcommands::actionIsAgentSafe(item.key);
+        item.run = [state] { state->ran << QStringLiteral("pane.splitRight"); };
+        items << item;
+    }
+    {
+        ActionItem item;
+        item.key = QStringLiteral("pane.close");
+        item.section = QStringLiteral("Panes");
+        item.label = QStringLiteral("Close pane");
+        item.agentSafe = relay::appcommands::actionIsAgentSafe(item.key);
+        item.run = [state] { state->ran << QStringLiteral("pane.close"); };
+        items << item;
+    }
+    {
         ActionItem item;
         item.key = QStringLiteral("windows.fresh");
         item.section = QStringLiteral("Relay");
@@ -370,6 +389,29 @@ private Q_SLOTS:
                                          {QStringLiteral("command"), QStringLiteral("run_action")},
                                          {QStringLiteral("key"), QStringLiteral("no.such.action")}});
         QCOMPARE(missing.value(QStringLiteral("error")).toString(), QStringLiteral("unknown_action"));
+        QCOMPARE(state.ran.size(), 1);
+    }
+
+    // The owner's report, 2026-09-20: "the sessions helper can't open panes because it says it's
+    // unsafe". A split opens an empty pane and the × in its header takes it back in one click, so
+    // it is on the reversible side of decision 2's line; closing a pane, which takes away what the
+    // pane was holding, is not.
+    void openingAPaneRunsAndClosingOneDoesNot() {
+        for (const QString &key : {QStringLiteral("pane.splitRight"), QStringLiteral("pane.splitDown"),
+                                   QStringLiteral("pane.splitLeft"), QStringLiteral("pane.splitUp"),
+                                   QStringLiteral("closed.restore")})
+            QVERIFY2(relay::appcommands::actionIsAgentSafe(key), qPrintable(key));
+        QVERIFY(!relay::appcommands::actionIsAgentSafe(QStringLiteral("pane.close")));
+
+        QVERIFY(run({{QStringLiteral("id"), QStringLiteral("r1")},
+                     {QStringLiteral("command"), QStringLiteral("run_action")},
+                     {QStringLiteral("key"), QStringLiteral("pane.splitRight")}})
+                    .value(QStringLiteral("ok")).toBool());
+        QCOMPARE(state.ran, QStringList{QStringLiteral("pane.splitRight")});
+        QCOMPARE(run({{QStringLiteral("id"), QStringLiteral("r2")},
+                      {QStringLiteral("command"), QStringLiteral("run_action")},
+                      {QStringLiteral("key"), QStringLiteral("pane.close")}}).value(QStringLiteral("error")).toString(),
+                 QStringLiteral("not_agent_safe"));
         QCOMPARE(state.ran.size(), 1);
     }
 
