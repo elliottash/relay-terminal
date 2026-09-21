@@ -1,0 +1,17 @@
+code_create          code_kind='pair' code='VYAA' invite=None panes=[] role=None expires=1789957906.712
+pair                 device='f6689d074ccc5e2c' name='Linux Chrome' capability='full' peer='127.0.0.1'
+code_burned          code_kind='pair' code='VYAA' invite=None failures=0 reason='revoked'
+push_subscribe       device='f6689d074ccc5e2c'
+push_subscribe       device='f6689d074ccc5e2c'
+code_create          code_kind='pair' code='RPFU' invite=None panes=[] role=None expires=1789957956.921
+invite_create        invite='19fc48e4f0fdce01' panes=['e1ef3933-3252-4be6-841d-71154559c5f4'] tab='' role='editor' uses=1 expires=1790043763.539
+code_burned          code_kind='pair' code='RPFU' invite=None failures=0 reason='revoked'
+knock                participant='033c195e4495e83e' invite='19fc48e4f0fdce01' name='alice' peer='127.0.0.1' role='editor'
+knock_answer         device='f6689d074ccc5e2c' participant='033c195e4495e83e' admit=True
+admitted             participant='033c195e4495e83e' invite='19fc48e4f0fdce01' role='editor' panes=['e1ef3933-3252-4be6-841d-71154559c5f4'] uses_left=0
+join                 participant='033c195e4495e83e' peer='127.0.0.1'
+guest_prompt         participant='033c195e4495e83e' pane='e1ef3933-3252-4be6-841d-71154559c5f4' prompt='a3c04c264e306142' text='GUESTQ what is in this folder?' plan=None immediate=None
+prompt_answer        device='f6689d074ccc5e2c' prompt='a3c04c264e306142' approved=True
+prompt_decided       participant='033c195e4495e83e' pane='e1ef3933-3252-4be6-841d-71154559c5f4' prompt='a3c04c264e306142' approved=True reason=None
+join                 participant='033c195e4495e83e' peer='127.0.0.1'
+leave                participant='033c195e4495e83e'

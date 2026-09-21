@@ -1,0 +1,24 @@
+HEAD          494a750a phone: the third wrong PIN says the code has stopped working, not "try again" (#FR1C)
+build/relay   2026-09-20 22:04:03
+dirty files   92
+   D src/AgentConsole.h
+   M src/BoardPane.cpp
+   M src/CopyOnSelect.h
+   M src/FilePanes.cpp
+   M src/FilePanes.h
+   M src/Keymap.h
+   M src/ModelCatalog.cpp
+   M src/ModelCatalog.h
+   M src/ModelRows.cpp
+   M src/Pane.h
+   M src/PaneChrome.h
+   M src/PaneLayout.h
+   M src/RelayWindow.h
+   M src/RemotePane.cpp
+served index.html   a25e4b06d4be  repo a25e4b06d4be
+served app.js       f5d126d50190  repo f5d126d50190
+served meet.js      ff8ef4dc3712  repo 1bd4d6b48a7a
+served pane.js      773e418a434d  repo 773e418a434d
+served pane.css     eb35a7dfa751  repo 0b41978e415e
+served style.css    dfdaec4868d9  repo dfdaec4868d9
+served viewport.js  16ef0420c036  repo 16ef0420c036

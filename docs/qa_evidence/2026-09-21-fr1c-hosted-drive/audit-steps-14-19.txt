@@ -1,0 +1,15 @@
+code_create          code_kind='pair' code='PBDT' invite=None panes=[] role=None expires=1789957769.972
+code_used            code_kind='pair' code='PBDT' invite=None peer='127.0.0.1' failures=0
+pair                 device='b26998ba23943518' name='Linux Chrome' capability='full' peer='127.0.0.1'
+code_create          code_kind='pair' code='VGNX' invite=None panes=[] role=None expires=1789957790.854
+code_attempt         code_kind='pair' code='VGNX' invite=None peer='127.0.0.1' reason='closed' failures=1
+code_attempt         code_kind='pair' code='VGNX' invite=None peer='127.0.0.1' reason='closed' failures=2
+code_attempt         code_kind='pair' code='VGNX' invite=None peer='127.0.0.1' reason='closed' failures=3
+code_burned          code_kind='pair' code='VGNX' invite=None failures=3 reason='failures'
+code_create          code_kind='pair' code='AGQY' invite=None panes=[] role=None expires=1789957807.4
+code_used            code_kind='pair' code='AGQY' invite=None peer='127.0.0.1' failures=0
+pair                 device='27e30c7f6f7aa5ba' name='Linux Chrome' capability='full' peer='127.0.0.1'
+code_create          code_kind='pair' code='DBYM' invite=None panes=[] role=None expires=1789957822.314
+pair                 device='6ad5008a414dcc76' name='iOS Safari' capability='full' peer='127.0.0.1'
+push_subscribe       device='b26998ba23943518'
+code_create          code_kind='pair' code='EWMW' invite=None panes=[] role=None expires=1789957854.96

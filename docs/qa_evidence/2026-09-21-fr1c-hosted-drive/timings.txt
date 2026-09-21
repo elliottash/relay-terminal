@@ -1,0 +1,19 @@
+   26.3 s  14 the plug menu pairs
+    9.9 s  15 the typed code
+   31.6 s  16 a burned code
+   24.8 s  17 iOS installs first
+    2.5 s  18 notifications offered
+   15.1 s  19 the plug switch
+   15.3 s  1 off at start
+   24.1 s  2 the switch
+   18.2 s  3 pairing
+    3.9 s  4 the inbox
+    7.6 s  5 a prompt
+    7.5 s  6 stop
+    2.0 s  7 the question
+    1.9 s  8 recap
+   10.7 s  9 the offline queue
+    3.6 s  10 notifications
+   42.5 s  11 admit from the phone
+   12.1 s  12 restart
+   12.8 s  13 switch off
