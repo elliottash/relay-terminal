@@ -561,13 +561,20 @@ public:
         setContext(context ? context : &m_terminalContext);
         buildUi();
         contextChanged();   // again, now that the chips and the composer exist to be told
-        // A terminal pane starts its own worker here, as it always has. A console does not: the
-        // window attaches it to its tab's worker right after construction (createAgentConsole),
-        // and starting a process here would give every console one of its own — four per tab,
-        // four conversations, which is exactly what the card's one-conversation decision refuses.
-        // It is also the owner's own rule that a tab's agent starts at the first ask rather than
-        // when a surface opens (#FEJQ decision 5, protocol 30.7).
+        // A terminal pane starts its own worker here, as it always has. A console does not, *if*
+        // the window is about to attach it to its tab's worker (createAgentConsole): starting a
+        // process here would give every console one of its own — four per tab, four
+        // conversations, which is exactly what the card's one-conversation decision refuses.
+        //
+        // Whether that is happening is not knowable yet — `onWorkerLine` is set on the way back
+        // out of the constructor — so a console asks a turn of the event loop later, when the
+        // answer exists. A console nobody attaches (a host outside a window, the console harness)
+        // then starts its own, which is how it behaved before this card. The live drive is what
+        // found that out: with the question settled here instead, the harness's console had no
+        // worker at all, was never configured, and Enter opened the provider dialog over an empty
+        // transcript.
         if (hasShell()) startWorker();
+        else QTimer::singleShot(0, this, [this] { if (!sharesWorker()) startWorker(); });
         startTerminal(cleanShell);
         connect(&m_poll, &QTimer::timeout, this, [this] { pollShell(); });
         connect(&m_secretPoll, &QTimer::timeout, this, [this] { checkPasswordPrompt(); checkOomKills(); });

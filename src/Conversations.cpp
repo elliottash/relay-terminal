@@ -1334,9 +1334,9 @@ void SessionManager::updateConsoleHeight() {
     // it takes the console's own size hint — a `Pane`'s, which is a terminal's and small. The
     // first live run of card #AGNT step 5 drew a whole answer into the three rows that left, and
     // the shot showed the pane header wearing the answer's auto-generated title over an empty
-    // vterm. Fourteen lines is a conversation; never more than the cap, so a short pane is
-    // unchanged.
-    m_helperBody->setMinimumHeight(std::min(cap, 14 * line));
+    // vterm. Twenty lines is a conversation — the head, the box and its chips take half of it —
+    // and never more than the cap, so a short pane is unchanged.
+    m_helperBody->setMinimumHeight(std::min(cap, 20 * line));
 }
 
 // `session:<id>` in an answer. The row is usually on screen already — the helper was asked about
