@@ -17214,12 +17214,20 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
         send(remove);
         const QString text = workerRowText(itemId);
         m_workerPrompts.remove(itemId);
+        // The row goes now rather than at the worker's next `queue_changed`: the same optimism
+        // the pane's own list is drawn with, and without it a row the person has just taken back
+        // sits on screen with its own words in the prompt box under it. A `queue_remove` the
+        // worker refuses (the turn had already started) is undone by the echo that follows.
+        const auto named = [&itemId](const WorkerRow &row) { return row.id == itemId; };
+        m_workerItems.erase(std::remove_if(m_workerItems.begin(), m_workerItems.end(), named), m_workerItems.end());
+        m_workerSteering.erase(std::remove_if(m_workerSteering.begin(), m_workerSteering.end(), named), m_workerSteering.end());
         if (m_selectedWorkerRow == itemId) { m_selectedWorkerRow.clear(); m_editor->clear(); }
         if (draftItBack && !text.isEmpty()) {
             m_editor->setPlainText(text);
             m_editor->moveCursor(QTextCursor::End);
             status(QStringLiteral("Taken back · it is in the prompt box, unsent"));
         }
+        rebuildQueueStrip(); changed();
         return true;
     }
 

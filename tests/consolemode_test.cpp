@@ -580,11 +580,16 @@ void aTerminalPaneIgnoresTheWorkersRowsEntirely()
     CHECK_EQ(pane.queuedPrompts(), 0);
 }
 
-// The optimistic overlay, and what it buys: a line typed into this console's own box travels as
+// The optimistic overlay, and what it buys. A line typed into this console's own box travels as
 // the context's message (`board_ask`), which carries no request id of the pane's, so the item it
-// becomes is matched to what was typed in order. That is what lets the row be *edited* — the row
-// itself carries a 120-character preview, and writing that back would truncate the prompt.
-void aLineThisConsoleSentComesBackAsAnEditableRow()
+// becomes is matched to what was typed in order. That is what lets ↑ take the row **back** with
+// the whole prompt in it: the row itself carries a 120-character preview (`queue.PREVIEW`), and
+// a draft built from that would silently truncate what the person wrote.
+//
+// ↑ is #QRC1's: it takes the head of the queue back as an unsent draft rather than selecting it
+// in place. A worker row goes back the only way one can — `queue_remove` naming the card's own
+// queue — and the row leaves the strip at once rather than at the worker's next `queue_changed`.
+void aLineThisConsoleSentComesBackWithUpAsAnUnsentDraft()
 {
     StubContext context;
     context.workspace = home->path();
@@ -612,25 +617,32 @@ void aLineThisConsoleSentComesBackAsAnEditableRow()
     console.deliverWorkerEvent(queueChanged({workerRow(QStringLiteral("q1"), typed.left(20), QStringLiteral("stub"))}));
     CHECK_EQ(console.queuedPrompts(), 1);
 
-    // ↑ selects the top row and the **whole** prompt is in the box, not the preview.
-    QKeyEvent up(QEvent::KeyPress, Qt::Key_Up, Qt::NoModifier);
-    QCoreApplication::sendEvent(editor, &up);
-    CHECK_EQ(console.composerText(), typed);
-
-    // Enter on an edited row withdraws it and asks again — the two steps a person would take.
+    // ↑ takes it back: the op names this card's queue, the **whole** prompt is in the box — not
+    // the preview the row was drawn from — and the row is off the strip.
     sent.clear();
     context.submitted.clear();
-    console.draftInComposer(typed + QStringLiteral(" (and the tests)"));
-    QKeyEvent save(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
-    QCoreApplication::sendEvent(editor, &save);
+    QKeyEvent up(QEvent::KeyPress, Qt::Key_Up, Qt::NoModifier);
+    QCoreApplication::sendEvent(editor, &up);
     CHECK_EQ(sent.size(), 1);
     CHECK_EQ(sent.at(0).value(QStringLiteral("type")).toString(), QStringLiteral("queue_remove"));
     CHECK_EQ(sent.at(0).value(QStringLiteral("item")).toString(), QStringLiteral("q1"));
     CHECK_EQ(sent.at(0).value(QStringLiteral("surface")).toString(), QStringLiteral("stub"));
+    CHECK_EQ(console.composerText(), typed);
+    CHECK_EQ(console.queuedPrompts(), 0);
+    CHECK(context.submitted.isEmpty());   // a draft, never a send (#QRC1)
+
+    // And Enter sends the edited draft the ordinary way, through the context.
+    console.draftInComposer(typed + QStringLiteral(" (and the tests)"));
+    QKeyEvent again(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+    QCoreApplication::sendEvent(editor, &again);
     CHECK_EQ(context.submitted.size(), 1);
     CHECK(context.submitted.at(0).endsWith(QStringLiteral("(and the tests)")));
 }
 
+// A row this console did **not** send: ↑ keeps the selection rather than taking it back, because
+// its text is the worker's 120-character preview and a draft built from that would truncate the
+// prompt (#QRC1's rule for a row that cannot be recalled). What the selection can then do is the
+// strip's own, and every op names the queue it is for.
 void aWorkerRowIsRemovedAndMovedWithItsSurface()
 {
     StubContext context;
@@ -643,17 +655,8 @@ void aWorkerRowIsRemovedAndMovedWithItsSurface()
                                              workerRow(QStringLiteral("q2"), QStringLiteral("second"), QStringLiteral("card:K7Q2"))}));
     CHECK_EQ(console.queuedPrompts(), 2);
 
-    // Shift+Delete, or the × on the row: the op names the queue it is for, because a card's
-    // prompts wait in that card's supervisor and not in the tab's.
-    sent.clear();
-    CHECK(console.removeRow(QStringLiteral("item:q2")));
-    CHECK_EQ(sent.size(), 1);
-    CHECK_EQ(sent.at(0).value(QStringLiteral("type")).toString(), QStringLiteral("queue_remove"));
-    CHECK_EQ(sent.at(0).value(QStringLiteral("item")).toString(), QStringLiteral("q2"));
-    CHECK_EQ(sent.at(0).value(QStringLiteral("surface")).toString(), QStringLiteral("card:K7Q2"));
-
-    // ↑ steps into the list at the top row; Ctrl+↓ moves the selected row down the worker's queue.
-    sent.clear();
+    // ↑ selects; Ctrl+↓ moves the selected row down **the worker's** queue, and `to` is a
+    // position in that list rather than in the rows this console draws.
     auto *editor = console.findChild<QPlainTextEdit *>(QStringLiteral("composerEditor"));
     CHECK(editor != nullptr);
     if (editor == nullptr) return;
@@ -666,6 +669,16 @@ void aWorkerRowIsRemovedAndMovedWithItsSurface()
     CHECK_EQ(sent.at(0).value(QStringLiteral("item")).toString(), QStringLiteral("q1"));
     CHECK_EQ(sent.at(0).value(QStringLiteral("to")).toInt(), 1);
     CHECK_EQ(sent.at(0).value(QStringLiteral("surface")).toString(), QStringLiteral("card:K7Q2"));
+
+    // Shift+Delete, or the × on the row: a card's prompts wait in that card's supervisor and not
+    // in the tab's, so the op says which.
+    sent.clear();
+    CHECK(console.removeRow(QStringLiteral("item:q2")));
+    CHECK_EQ(sent.size(), 1);
+    CHECK_EQ(sent.at(0).value(QStringLiteral("type")).toString(), QStringLiteral("queue_remove"));
+    CHECK_EQ(sent.at(0).value(QStringLiteral("item")).toString(), QStringLiteral("q2"));
+    CHECK_EQ(sent.at(0).value(QStringLiteral("surface")).toString(), QStringLiteral("card:K7Q2"));
+    CHECK_EQ(console.queuedPrompts(), 1);   // the row leaves at once, not at the worker's echo
 
     // Esc is the card's turn too, not the tab's: an untagged `cancel` stopped the wrong one.
     sent.clear();
@@ -705,7 +718,7 @@ int main(int argc, char **argv)
     cases::aQueueChangedForThisSurfaceDrawsRowsTheConsoleNeverSubmitted();
     cases::aTerminalPaneIgnoresTheWorkersRowsEntirely();
     cases::aWorkerRowIsRemovedAndMovedWithItsSurface();
-    cases::aLineThisConsoleSentComesBackAsAnEditableRow();
+    cases::aLineThisConsoleSentComesBackWithUpAsAnUnsentDraft();
 
     if (failures == 0)
     std::fprintf(stdout, "consolemode: 19 cases, all passed\n");
