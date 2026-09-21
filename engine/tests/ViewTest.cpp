@@ -845,6 +845,51 @@ private slots:
     // A path in the output that resolves wears the link colour at rest — in the default ink and in
     // a plain one like the bright white the agent's prose is written in; a chromatic colour the
     // program chose is never overridden; the option turns it all off (owner, 2026-09-19).
+    void wrappedLinkHoverUnderlinesEveryRow()
+    {
+        QFETCH_GLOBAL(QString, core);
+        for (bool osc : {false, true}) {
+            Term t(core, QStringLiteral("/bin/cat"));
+            t.view->setLinksColouredAtRest(false);
+            ColorScheme scheme = t.view->colorScheme();
+            scheme.link = QColor(0x12, 0x34, 0xab);
+            t.view->setColorScheme(scheme);
+            const QByteArray url = "https://example.test/" + QByteArray(95, 'a');
+            QByteArray line = "see ";
+            if (osc) line += "\x1b]8;;https://example.test/target\x1b\\";
+            line += url;
+            if (osc) line += "\x1b]8;;\x1b\\";
+            line += " end\r\nhttps://example.test/separate\r\n";
+            t.backend->writeToDisplay(line);
+            QVERIFY(t.waitScreen(QStringLiteral("separate")));
+            t.grab();
+            const int ch = t.view->cellHeight();
+            for (int row : {0, 1, 2}) {
+                QTest::mouseMove(t.view, t.cellPoint(row, 8));
+                const QImage img = t.grab();
+                for (int r = 0; r < 3; ++r)
+                    QVERIFY2(rowHasColor(img, r, ch, scheme.link), "a wrapped link segment lacks its hover underline");
+                QVERIFY(!rowHasColor(img, 3, ch, scheme.link));
+                // Neither the prefix nor the text after the URL belongs to the link.
+                for (int r : {0, 2}) {
+                    const int col = r == 0 ? 1 : 30;
+                    const QRect cell(2 + col * t.view->cellWidth(), 2 + r * ch,
+                                     t.view->cellWidth(), ch);
+                    QVERIFY(!rowHasColor(img.copy(cell), 0, ch - 2, scheme.link));
+                }
+            }
+            QTest::mouseMove(t.view, t.cellPoint(5, 1));
+            const QImage cleared = t.grab();
+            for (int r = 0; r < 3; ++r)
+                QVERIFY2(!rowHasColor(cleared, r, ch, scheme.link), "a hover segment remained after leaving the link");
+            if (qEnvironmentVariableIsSet("RELAY_HOVER_EVIDENCE")) {
+                QTest::mouseMove(t.view, t.cellPoint(1, 8));
+                t.grab().save(qEnvironmentVariable("RELAY_HOVER_EVIDENCE")
+                             + (osc ? "/osc-hover.png" : "/plain-hover.png"));
+            }
+        }
+    }
+
     void aPathInTheOutputWearsTheLinkColourAtRest()
     {
         QFETCH_GLOBAL(QString, core);

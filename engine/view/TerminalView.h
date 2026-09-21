@@ -342,13 +342,14 @@ private:
     QString visualSelectedText() const;
     bool foldWordRange(const FoldSelPos &p, int *from, int *to) const;
     // A FoldSpan link under a screen cell, or an empty string.
-    QString foldLinkAt(const CellPos &c, int *startCol, int *endCol) const;
+    QString foldLinkAt(const CellPos &c, int *startCol, int *endCol, QVector<QRect> *segments = nullptr) const;
     quint32 glyphFor(int variant, char32_t cp);
     bool handleBuiltinShortcut(QKeyEvent *e);
     void sendKey(const KeyInput &k);
     void afterUserInput();
     void updateHover(const QPoint &pos, Qt::KeyboardModifiers mods);
-    bool linkAt(const CellPos &c, Link *link, int *startCol, int *endCol);
+    bool linkAt(const CellPos &c, Link *link, int *startCol, int *endCol, QVector<QRect> *segments = nullptr);
+    bool linkHovered(int row, int col) const;
     // A markdown link's label (card #MDKN): its OSC 8 URI is the block's anchor with the target
     // the agent wrote as a fragment, and the target is resolved here through relay::links exactly
     // as a span of text is, so a label fills the same Link a scanned target does — the same kind,
@@ -458,7 +459,8 @@ private:
     QTimer m_autoScroll;
     int m_mouseButtonsToProgram = 0;
 
-    // Link hover
+    // Link hover: rectangles use screen cells, one per visible row segment.
+    QVector<QRect> m_hoverSegments;
     int m_hoverRow = -1;
     int m_hoverStart = -1;
     int m_hoverEnd = -1;

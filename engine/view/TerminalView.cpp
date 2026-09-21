@@ -529,9 +529,17 @@ void TerminalView::pullFrame()
         return;
     emit frameChanged();
 
-    // A link underline belongs to the content it was computed for.
-    if (m_hoverRow >= 0 && !m_linkCursor.active()
-        && (m_frame.full || (m_hoverRow < int(m_frame.dirty.size()) && m_frame.dirty[size_t(m_hoverRow)]))) {
+    // A link underline belongs to every row it spans, including continuations.
+    bool hoverChanged = m_frame.full || force || m_visualTopMoved;
+    for (const QRect &segment : m_hoverSegments) {
+        const int frameRow = frameRowOf(segment.y());
+        hoverChanged = hoverChanged || (frameRow >= 0 && frameRow < int(m_frame.dirty.size())
+                                       && m_frame.dirty[size_t(frameRow)]);
+    }
+    if (m_hoverRow >= 0 && !m_linkCursor.active() && hoverChanged) {
+        for (const QRect &segment : m_hoverSegments)
+            update(QRect(0, m_padding + segment.y() * m_ch, width(), m_ch));
+        m_hoverSegments.clear();
         m_hoverRow = m_hoverStart = m_hoverEnd = -1;
         m_hoverCellRow = m_hoverCellCol = -2;
         setCursor(Qt::IBeamCursor);
@@ -783,7 +791,6 @@ void TerminalView::paintRow(QPainter &p, int row, const Line &line, int realRow)
         batches.push_back({variant, color.rgba(), color, {}, {}});
         return batches.back();
     };
-    const bool hoverRow = row == m_hoverRow;
     // Links at rest (setLinksColouredAtRest): the columns of this row inside a path, URL or card
     // reference that resolves. Empty when the option is off, on the alternate screen, or when the
     // row holds none.
@@ -813,7 +820,7 @@ void TerminalView::paintRow(QPainter &p, int row, const Line &line, int realRow)
         const int variant = ((c.attrs & AttrBold) ? 1 : 0) | ((c.attrs & AttrItalic) ? 2 : 0);
 
         // Decorations.
-        const bool linkHover = hoverRow && col >= m_hoverStart && col <= m_hoverEnd;
+        const bool linkHover = linkHovered(row, col);
         if ((c.attrs & (AttrUnderline | AttrDoubleUnderline | AttrCurlyUnderline)) || linkHover) {
             const int uy = baseline + std::max(1, m_descent / 3);
             const QColor uc = linkHover ? m_scheme.link : cc.fg;
@@ -1004,7 +1011,7 @@ void TerminalView::paintFoldRow(QPainter &p, int screenRow, int foldIndex, int f
                                                                : foldBackground();
             fg = faintInk(fg, under);
         }
-        const bool hovered = screenRow == m_hoverRow && col >= m_hoverStart && col <= m_hoverEnd;
+        const bool hovered = linkHovered(screenRow, col);
         if (c.underline || !c.link.isEmpty() || hovered) {
             const int uy = baseline + std::max(1, m_descent / 3);
             p.fillRect(QRect(x, uy, c.width * m_cw, 1), hovered || !c.link.isEmpty() ? m_scheme.link : fg);
@@ -1131,7 +1138,7 @@ void TerminalView::paintProseRow(QPainter &p, int screenRow, const FoldLayer::Fo
                                                                : groundAt(y);
             fg = faintInk(fg, under);
         }
-        const bool hovered = screenRow == m_hoverRow && col >= m_hoverStart && col <= m_hoverEnd;
+        const bool hovered = linkHovered(screenRow, col);
         if (c.underline || !c.link.isEmpty() || hovered) {
             const int uy = baseline + std::max(1, m_descent / 3);
             p.fillRect(QRect(x, uy, c.width * m_cw, 1), hovered || !c.link.isEmpty() ? m_scheme.link : fg);
@@ -1663,6 +1670,15 @@ void TerminalView::wheelEvent(QWheelEvent *e)
     scrollLines(-3 * steps);
 }
 
+bool TerminalView::linkHovered(int row, int col) const
+{
+    for (const QRect &segment : m_hoverSegments)
+        if (segment.contains(col, row))
+            return true;
+    return m_hoverSegments.isEmpty() && row == m_hoverRow
+        && col >= m_hoverStart && col <= m_hoverEnd;
+}
+
 void TerminalView::updateHover(const QPoint &pos, Qt::KeyboardModifiers)
 {
     // Hovering a path underlines it and shows where it points, with or without Ctrl
@@ -1677,12 +1693,15 @@ void TerminalView::updateHover(const QPoint &pos, Qt::KeyboardModifiers)
     m_hoverCellCol = c.col;
     int newRow = -1, newStart = -1, newEnd = -1;
     Link link;
+    QVector<QRect> segments;
     if (inside) {
         int s = -1, en = -1;
-        if (linkAt(c, &link, &s, &en)) {
+        if (linkAt(c, &link, &s, &en, &segments)) {
             newRow = c.row;
             newStart = s;
             newEnd = en;
+        } else {
+            segments.clear();
         }
     }
     QString tip;
@@ -1700,15 +1719,21 @@ void TerminalView::updateHover(const QPoint &pos, Qt::KeyboardModifiers)
     }
     if (tip != toolTip())
         setToolTip(tip);
-    if (newRow == m_hoverRow && newStart == m_hoverStart && newEnd == m_hoverEnd)
+    if (segments.isEmpty() && newRow >= 0)
+        segments.append(QRect(newStart, newRow, newEnd - newStart + 1, 1));
+    if (newRow == m_hoverRow && newStart == m_hoverStart && newEnd == m_hoverEnd
+        && segments == m_hoverSegments)
         return;
-    if (m_hoverRow >= 0)
-        update(QRect(0, m_padding + m_hoverRow * m_ch, width(), m_ch));
+    const auto repaintSegments = [this](const QVector<QRect> &ranges) {
+        for (const QRect &range : ranges)
+            update(QRect(0, m_padding + range.y() * m_ch, width(), m_ch));
+    };
+    repaintSegments(m_hoverSegments);
     m_hoverRow = newRow;
     m_hoverStart = newStart;
     m_hoverEnd = newEnd;
-    if (m_hoverRow >= 0)
-        update(QRect(0, m_padding + m_hoverRow * m_ch, width(), m_ch));
+    m_hoverSegments = segments;
+    repaintSegments(m_hoverSegments);
     setCursor(m_hoverRow >= 0 ? Qt::PointingHandCursor : Qt::IBeamCursor);
 }
 
@@ -1866,14 +1891,16 @@ bool TerminalView::resolveLabelLink(const QString &uri, Link *link)
     return false;
 }
 
-bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endCol)
+bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endCol, QVector<QRect> *segments)
 {
     *link = Link();
+    if (segments)
+        segments->clear();
     // A screen row may be one of a fold's own rows; those carry the FoldSpan
     // links the host put there, not the emulator's cells.
     {
         int foldStart = 0, foldEnd = 0;
-        const QString target = foldLinkAt(c, &foldStart, &foldEnd);
+        const QString target = foldLinkAt(c, &foldStart, &foldEnd, segments);
         // A re-wrapped prose block and a markdown fold are both rows of FoldSpans, and a link's
         // label there carries the same URI its cells would carry in the grid (#MDKN).
         if (relay::labellink::isLabelUri(target)) {
@@ -1920,6 +1947,34 @@ bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endC
             --*from;
         while (*to + 1 < int(l.cells.size()) && l.cells[size_t(*to + 1)].link == id && id)
             ++*to;
+        if (segments && id) {
+            int first = row, last = row;
+            while (*from == 0 && first > 0 && m_frame.lines[size_t(first)].continuation
+                   && (first == row || std::all_of(m_frame.lines[size_t(first)].cells.begin(),
+                       m_frame.lines[size_t(first)].cells.end(), [id](const Cell &cell) { return cell.link == id; }))
+                   && !m_frame.lines[size_t(first - 1)].cells.empty()
+                   && m_frame.lines[size_t(first)].cells.front().link == id
+                   && m_frame.lines[size_t(first - 1)].cells.back().link == id)
+                --first;
+            while (*to + 1 == int(l.cells.size()) && last + 1 < int(m_frame.lines.size())
+                   && m_frame.lines[size_t(last + 1)].continuation
+                   && (last == row || std::all_of(m_frame.lines[size_t(last)].cells.begin(),
+                       m_frame.lines[size_t(last)].cells.end(), [id](const Cell &cell) { return cell.link == id; }))
+                   && !m_frame.lines[size_t(last + 1)].cells.empty()
+                   && m_frame.lines[size_t(last)].cells.back().link == id
+                   && m_frame.lines[size_t(last + 1)].cells.front().link == id)
+                ++last;
+            for (int r = first; r <= last; ++r) {
+                const auto &cells = m_frame.lines[size_t(r)].cells;
+                int from = r == row ? c.col : (r < row ? int(cells.size()) - 1 : 0);
+                int to = from;
+                while (from > 0 && cells[size_t(from - 1)].link == id) --from;
+                while (to + 1 < int(cells.size()) && cells[size_t(to + 1)].link == id) ++to;
+                const int screen = screenRowOfReal(m_frame.viewportTop + r);
+                if (screen >= 0 && screen < m_rows)
+                    segments->append(QRect(from, screen, to - from + 1, 1));
+            }
+        }
     };
     if (labelHere) {
         int s = 0, e = 0;
@@ -1983,7 +2038,23 @@ bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endC
         link->directory = found.target.directory;
         link->line = found.target.line;
         link->column = found.target.column;
-        // The hover underline is per row: clip the span to the row under the pointer.
+        if (segments) {
+            segments->clear();
+            for (int i = s; i <= e; ++i) {
+                const auto cell = logical.cellOf[size_t(i)];
+                const int screen = screenRowOfReal(m_frame.viewportTop + cell.first);
+                if (screen < 0 || screen >= m_rows) continue;
+                const auto &cells = m_frame.lines[size_t(cell.first)].cells;
+                const int width = cell.second + 1 < int(cells.size())
+                    && cells[size_t(cell.second + 1)].ch == kWideTail ? 2 : 1;
+                const QRect part(cell.second, screen, width, 1);
+                if (!segments->isEmpty() && segments->last().y() == screen)
+                    segments->last() = segments->last().united(part);
+                else
+                    segments->append(part);
+            }
+        }
+        // Keep the hit row's columns for click callers.
         *startCol = logical.cellOf[size_t(s)].first == row ? logical.cellOf[size_t(s)].second : 0;
         *endCol = logical.cellOf[size_t(e)].first == row ? logical.cellOf[size_t(e)].second : m_frame.columns - 1;
         return true;
@@ -2186,6 +2257,7 @@ void TerminalView::showWalkLink(const WalkLink &walk)
     });
     // The underline the mouse draws, for the row the link starts on (a screen
     // row: an open fold above it may have pushed it down).
+    m_hoverSegments.clear();
     const int screenRow = screenRowOfReal(walk.row);
     m_hoverRow = screenRow >= 0 && screenRow < m_rows ? screenRow : -1;
     m_hoverStart = walk.col;
@@ -2221,6 +2293,7 @@ void TerminalView::endLinkWalk()
     m_linkCursor.cancel();
     m_linkWalk.clear();
     m_session->withCore([](VtCore &core) { core.selectionClear(); });
+    m_hoverSegments.clear();
     m_hoverRow = m_hoverStart = m_hoverEnd = -1;
     m_hoverCellRow = m_hoverCellCol = -2;
     m_forceFull = true;
@@ -2806,7 +2879,7 @@ bool TerminalView::foldWordRange(const FoldSelPos &p, int *from, int *to) const
 
 // A FoldSpan link under a screen cell: the host said this run of the detail
 // points somewhere, and it opens through the normal link path.
-QString TerminalView::foldLinkAt(const CellPos &c, int *startCol, int *endCol) const
+QString TerminalView::foldLinkAt(const CellPos &c, int *startCol, int *endCol, QVector<QRect> *segments) const
 {
     if (!foldsVisible())
         return QString();
@@ -2835,6 +2908,25 @@ QString TerminalView::foldLinkAt(const CellPos &c, int *startCol, int *endCol) c
             for (int k = from; k <= to; ++k)
                 x += cells[size_t(k)].width;
             *endCol = x - 1;
+            if (segments) {
+                while (from > 0 && cells[size_t(from - 1)].link == cell.link) --from;
+                while (to + 1 < int(cells.size()) && cells[size_t(to + 1)].link == cell.link) ++to;
+                for (int r = 0; r < int(f.rows.size()); ++r) {
+                    const auto &part = f.rows[size_t(r)];
+                    if (part.line != row.line) continue;
+                    const int screen = c.row + r - v.foldRow;
+                    if (screen < 0 || screen >= m_rows) continue;
+                    int col = m_folds.rowStartCol(v.foldIndex, r), left = -1, right = -1;
+                    for (int k = part.first; k < part.first + part.count; ++k) {
+                        if (k >= from && k <= to) {
+                            if (left < 0) left = col;
+                            right = col + cells[size_t(k)].width - 1;
+                        }
+                        col += cells[size_t(k)].width;
+                    }
+                    if (left >= 0) segments->append(QRect(left, screen, right - left + 1, 1));
+                }
+            }
             return cell.link;
         }
         col += cell.width;
