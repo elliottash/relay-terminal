@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from .filelock import chmod_fd
 import stat
 import tempfile
 import time
@@ -209,7 +210,7 @@ def _atomic_write(path: Path, data: bytes) -> None:
     fd, temp = tempfile.mkstemp(prefix=".relay-restore-", dir=path.parent)
     try:
         with os.fdopen(fd, "wb") as out:
-            os.fchmod(out.fileno(), mode)
+            chmod_fd(out.fileno(), mode)
             out.write(data)
             out.flush()
             os.fsync(out.fileno())

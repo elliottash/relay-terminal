@@ -127,11 +127,7 @@ class _SharedRotatingHandler(RotatingFileHandler):
             return None
 
     def emit(self, record):
-        try:
-            import fcntl
-        except ImportError:                       # pragma: no cover - Linux only
-            super().emit(record)
-            return
+        from . import filelock as fcntl
         handle = None
         try:
             fd = os.open(self._lock_path, os.O_CREAT | os.O_RDWR, FILE_MODE)
@@ -141,6 +137,10 @@ class _SharedRotatingHandler(RotatingFileHandler):
                 self.close()                      # another worker rotated the file; follow it
             super().emit(record)
             self._opened_inode = self._inode()
+            if os.name == "nt":
+                # Windows cannot rename another worker's open log during rotation.
+                # The lock covers opening, writing and closing on this platform.
+                self.close()
         except OSError:
             pass
         finally:

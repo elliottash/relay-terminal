@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from .filelock import chmod_fd
 import re
 import tempfile
 import time
@@ -212,7 +213,7 @@ def write_plan(plans_dir: str | Path, title: str, content: str, now: float | Non
     fd, temp = tempfile.mkstemp(dir=plans_dir, prefix=".plan-")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as out:
-            os.fchmod(out.fileno(), 0o644)
+            chmod_fd(out.fileno(), 0o644)
             out.write(body)
         # Never replace an existing plan (plan_path picked a free name; link fails if it raced).
         os.link(temp, path)

@@ -23,7 +23,8 @@ import json
 import logging
 import os
 import shutil
-import termios
+if os.name != "nt":
+    import termios
 import time
 from pathlib import Path
 
@@ -69,6 +70,8 @@ def secret_prompt(shell_pid: int) -> bool:
     The same test as `Pane::checkPasswordPrompt`. Full-screen programs and Readline turn ICANON
     off, so they do not match; `sudo`, `ssh` and `su` do.
     """
+    if os.name == "nt":
+        raise wire.WireError("not_permitted", "Remote terminal input requires password-state detection, which is not yet available on Windows.")
     if shell_pid <= 0:
         return False
     try:
@@ -444,6 +447,8 @@ class TerminalPaneSource(panes_mod.PaneSource):
     # ---- password prompts (section 6.7) ---------------------------------------------------------
 
     def secret_state(self, pane: str) -> dict | None:
+        if os.name == "nt":
+            return None
         item = self.panes.get(pane)
         if item is None or not secret_prompt(item.shell_pid):
             return None

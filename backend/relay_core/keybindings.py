@@ -17,6 +17,7 @@ from __future__ import annotations
 import difflib
 import json
 import os
+from .filelock import chmod_fd
 import re
 import tempfile
 import threading
@@ -259,7 +260,7 @@ class KeybindingCatalog:
         text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
         fd, temporary = tempfile.mkstemp(prefix=".keybindings-", suffix=".tmp", dir=self.path.parent)
         try:
-            os.fchmod(fd, 0o600)
+            chmod_fd(fd, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 handle.write(text)
                 handle.flush()

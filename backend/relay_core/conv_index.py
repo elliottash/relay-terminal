@@ -89,6 +89,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from .filelock import chmod_fd
 import re
 import sqlite3
 import tempfile
@@ -2680,7 +2681,7 @@ def write_user_fields(directory: Path, session_id: str, **fields) -> bool:
     fd, temp = tempfile.mkstemp(dir=path.parent, prefix=".session-")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as out:
-            os.fchmod(out.fileno(), 0o600)
+            chmod_fd(out.fileno(), 0o600)
             json.dump(meta, out, ensure_ascii=False)
         os.replace(temp, path)
     finally:
@@ -2729,7 +2730,7 @@ def write_guest_meta(path: str | Path, data: dict) -> None:
     fd, temp = tempfile.mkstemp(dir=path.parent, prefix=".guest-meta-")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as out:
-            os.fchmod(out.fileno(), 0o600)
+            chmod_fd(out.fileno(), 0o600)
             json.dump(data, out, ensure_ascii=False)
         os.replace(temp, path)
     finally:

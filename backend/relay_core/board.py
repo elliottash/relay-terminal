@@ -18,9 +18,10 @@ list and the emitted bytes stay stable and diff-friendly.
 """
 from __future__ import annotations
 
-import fcntl
+from . import filelock as fcntl
 import hashlib
 import os
+from .filelock import chmod_fd
 import re
 import secrets
 import stat
@@ -983,7 +984,7 @@ def append_to_thread(path: Path, add: Callable[[bytes], tuple[str, object]]) -> 
     nothing: an append is a read, a render and a rename.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    lock = os.open(path.parent, os.O_RDONLY)
+    lock = fcntl.open_directory_lock(path.parent)
     try:
         fcntl.flock(lock, fcntl.LOCK_EX)
         body = path.read_bytes() if path.exists() else b""
@@ -1007,7 +1008,7 @@ def _atomic_write(path: Path, text: str, mode: int | None = None) -> str:
     fd, temp = tempfile.mkstemp(prefix=".relay-board-", dir=str(path.parent))
     try:
         with os.fdopen(fd, "wb") as out:
-            os.fchmod(out.fileno(), mode)
+            chmod_fd(out.fileno(), mode)
             out.write(data)
             out.flush()
             os.fsync(out.fileno())

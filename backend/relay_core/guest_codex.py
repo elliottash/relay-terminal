@@ -37,6 +37,7 @@ from __future__ import annotations
 import glob
 import json
 import os
+from .filelock import chmod_fd
 import re
 import shutil
 import subprocess
@@ -703,7 +704,7 @@ def _write(path: str, text: str, mode: int) -> None:
     except OSError as error:
         raise SettingsError(f"cannot write {path} ({error.strerror or error}).") from None
     try:
-        os.fchmod(handle, mode)
+        chmod_fd(handle, mode)
         with os.fdopen(handle, "w", encoding="utf-8") as output:
             output.write(text)
             output.flush()

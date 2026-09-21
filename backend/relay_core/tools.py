@@ -15,6 +15,7 @@ from __future__ import annotations
 import difflib
 import hashlib
 import os
+from .filelock import chmod_fd
 import posixpath
 import re
 import selectors
@@ -889,7 +890,7 @@ class ToolExecutor:
         fd, tempname = tempfile.mkstemp(prefix=".relay-write-", dir=path.parent)
         try:
             with os.fdopen(fd, "wb") as out:
-                os.fchmod(out.fileno(), mode)
+                chmod_fd(out.fileno(), mode)
                 out.write(data)
                 out.flush()
                 os.fsync(out.fileno())

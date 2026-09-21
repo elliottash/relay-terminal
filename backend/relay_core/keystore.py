@@ -55,6 +55,15 @@ def _check_id(preset_id: str) -> None:
         raise ValueError("Invalid provider identifier.")
 
 
+def _windows_keyring(action: str, preset_id: str, *args):
+    from . import wincredentials
+    try:
+        return getattr(wincredentials, action)(f"{SERVICE}/provider/{preset_id}", *args)
+    except OSError:
+        # Do not expose native exception contents alongside credential operations.
+        raise KeystoreError("Windows Credential Manager could not complete the request.") from None
+
+
 def lookup(preset_id: str) -> str:
     """Return the stored key for a provider, or an empty string when none exists."""
     _check_id(preset_id)
@@ -65,6 +74,8 @@ def lookup(preset_id: str) -> str:
     # real keyring); environment keys above still work.
     if os.environ.get("RELAY_KEYRING", "").strip().lower() in ("off", "0", "no", "none"):
         return ""
+    if os.name == "nt":
+        return _windows_keyring("lookup", preset_id)
     if not shutil.which("secret-tool"):
         return ""
     result = _run(["lookup", "service", SERVICE, "provider", preset_id])
@@ -76,6 +87,9 @@ def store(preset_id: str, api_key: str) -> None:
     api_key = api_key.strip()
     if not api_key or len(api_key) > 4096 or any(c.isspace() for c in api_key):
         raise ValueError("API key must be non-empty text without whitespace.")
+    if os.name == "nt":
+        _windows_keyring("store", preset_id, api_key)
+        return
     result = _run(["store", "--label", f"Relay API key ({preset_id})", "service", SERVICE, "provider", preset_id],
                   stdin=api_key)
     if result.returncode != 0:
@@ -87,6 +101,8 @@ def remove(preset_id: str) -> bool:
     _check_id(preset_id)
     if os.environ.get("RELAY_KEYRING", "").strip().lower() in ("off", "0", "no", "none"):
         return False
+    if os.name == "nt":
+        return _windows_keyring("remove", preset_id)
     if not shutil.which("secret-tool"):
         return False
     result = _run(["clear", "service", SERVICE, "provider", preset_id])
@@ -189,6 +205,8 @@ def import_from_warp(settings_path: Path | None = None) -> tuple[list[ImportedEn
 
     Returns (imported, skipped-endpoint-descriptions). Never returns key material.
     """
+    if os.name == "nt":
+        raise KeystoreError("Importing Warp's keyring is currently supported on Linux. Add the API key directly on Windows.")
     endpoints = read_warp_endpoints(settings_path)
     result = _run(["lookup", "service", WARP_SERVICE, "key", "AiCustomEndpointKeys"])
     if result.returncode != 0 or not result.stdout.strip():

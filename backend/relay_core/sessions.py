@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from .filelock import chmod_fd
 import re
 import sqlite3
 import tempfile
@@ -152,7 +153,7 @@ def _atomic_text(path: Path, text: str) -> None:
     fd, temp = tempfile.mkstemp(dir=path.parent, prefix=".session-")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as out:
-            os.fchmod(out.fileno(), 0o600)
+            chmod_fd(out.fileno(), 0o600)
             out.write(text)
         os.replace(temp, path)
     finally:

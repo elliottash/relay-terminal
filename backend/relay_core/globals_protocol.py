@@ -2,7 +2,7 @@
 """Globals editor: existing Switchboard cards and original instruction sources."""
 from __future__ import annotations
 
-import fcntl
+from . import filelock as fcntl
 import hashlib
 import os
 from pathlib import Path
@@ -150,7 +150,7 @@ class GlobalsCommands:
                 text = card.to_text()
             path.parent.mkdir(parents=True, exist_ok=True)
             # Directory lock makes the optimistic check and replacement indivisible for HQ editors.
-            lock = os.open(path.parent, os.O_RDONLY)
+            lock = fcntl.open_directory_lock(path.parent)
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX)
                 if board.file_hash(path) != request['base_hash']:

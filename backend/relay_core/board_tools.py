@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import contextlib
 import difflib
-import fcntl
+from . import filelock as fcntl
 import json
 import os
 import re
