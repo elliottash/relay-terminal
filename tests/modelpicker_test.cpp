@@ -75,7 +75,13 @@ class ModelPickerTests : public QObject {
 private Q_SLOTS:
     void init() {
         QSettings().clear();
-        QSettings().setValue(QStringLiteral("provider/preset"), QStringLiteral("glm-coding"));
+        // The order the rows come in, stated rather than assumed. It used to lean on
+        // `provider/preset` — the last provider some pane switched to, which `ranked()` stopped
+        // reading with card #MDL1 — and the catalog's own default order leads with each
+        // provider's main model, so glm's flash row would no longer sit second.
+        QSettings().setValue(QStringLiteral("models/priority"),
+                             QStringList{QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("glm-coding|glm-5.3-flash"),
+                                         QStringLiteral("anthropic|claude-opus-5"), QStringLiteral("guest:claude|opus")});
     }
 
     void rowsFollowRankAndTheCurrentOneIsSelected() {

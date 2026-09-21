@@ -932,8 +932,16 @@ public:
         if (!message.contains(QStringLiteral("id"))) message.insert(QStringLiteral("id"), QStringLiteral("models-%1").arg(++m_requestId));
         send(message);
     }
-    // Options › Models changed what the picker shows or in what order: every box re-reads it.
-    void modelsCurationChanged() { rememberFallback(modelCatalog()); refreshPickers(); }
+    // Options › Models changed what the picker shows or in what order: every box re-reads it, and
+    // the running worker is told the new lists. Without that re-send a tier-list edit only reached
+    // the worker at the next configure, so `/flash` went on resolving against the list the pane
+    // was started with (card #MDL1, design 1.3): `requestOptions()` carries `fallbacks`, which is
+    // rank 2 of the main list and not the five lists themselves.
+    void modelsCurationChanged() {
+        rememberFallback(modelCatalog());
+        if (m_configured) send({{"type", "set_agent_options"}, {"tiers", tiersObject()}});
+        refreshPickers();
+    }
     // Rank 2 of the priority list, kept in QSettings so requestOptions (static, read for every
     // worker) can name it as the failover's first candidate. A guest cannot be a failover target.
     static void rememberFallback(const relay::models::Catalog &catalog) {
@@ -966,6 +974,13 @@ public:
     }
     QString currentPreset() const { return m_currentPreset; }
     QString model() const { return m_model; }
+    // The model this pane's *own* agent runs on. `m_model` is whatever the worker last reported,
+    // and during a /flash turn that is the flash role's model — from another provider entirely.
+    // Everything that asks "what is this pane on" — its catalog key, the saved layout, /swap —
+    // asks this instead, so a role's model never becomes the pane's (card #MDL1, design 1.4.3:
+    // it produced keys like `openrouter|glm-5.3-flash` that exist in no list, and counted the
+    // same model twice in models/recent and models/uses).
+    QString paneModel() const { return m_paneModel.isEmpty() ? m_model : m_paneModel; }
     QString sessionId() const { return m_sessionId; }
     QString sessionDir() const { return m_sessionDir; }
 
@@ -975,6 +990,11 @@ public:
     void initRestore(const QJsonObject &spec) {
         const QString preset = spec.value(QStringLiteral("preset")).toString();
         if (!preset.isEmpty()) m_restorePreset = preset;
+        // The model it was on, not merely the provider (card #MDL1): `serializeNode` has always
+        // written this and nothing ever read it, so a restored pane came back on whatever its
+        // preset serves by default.
+        const QString model = spec.value(QStringLiteral("model")).toString();
+        if (!model.isEmpty()) m_restoreModel = model;
         const QString effort = spec.value(QStringLiteral("effort")).toString();
         if (efforts().contains(effort)) m_effort = effort;
         const QString agentMode = spec.value(QStringLiteral("agent_mode")).toString();
@@ -1371,7 +1391,9 @@ public:
         }
         // Picking a model from the chip puts the pane back on the main agent (protocol 13).
         if (m_agentRole != QStringLiteral("main")) { setAgentRole(QStringLiteral("main")); if (id == m_currentPreset) return; }
-        if (id.isEmpty() || id == m_currentPreset) return;
+        // …unless the pane is only *holding* that preset for its first prompt (card #MDL1):
+        // picking it by hand is somebody asking for it now, and the configure below starts it.
+        if (id.isEmpty() || (id == m_currentPreset && m_deferredPreset.isEmpty())) return;
         const auto preset = presetById(id);
         // A full configure starts a new conversation, which a running turn cannot have.
         if (!m_configured || preset.isEmpty()) {
@@ -1403,6 +1425,10 @@ public:
     // is remembered as `provider/model` so the next pane and the provider dialog agree with it.
     // Empty: back to the provider's default model.
     void setMainModel(const QString &model) {
+        // Picking a model is a pick for this pane's own agent, so it comes off a role exactly as
+        // the model chip does (card #MDL1). The worker already resets `agent_role` on any
+        // set_model; it was the GUI that went on labelling the pane "Flash agent" afterwards.
+        if (m_agentRole != QStringLiteral("main")) setAgentRole(QStringLiteral("main"));
         const QJsonObject preset = presetById(m_currentPreset);
         // On a guest preset (29.4) the model belongs to the guest: the harness is asked to switch
         // (`set_model` with `guest.model`, which restarts it) and nothing is written to Relay's
@@ -1430,7 +1456,7 @@ public:
             changed();
             return;
         }
-        if (id == m_model) return;
+        if (id == paneModel()) return;
         send({{"type", "set_model"}, {"preset", m_currentPreset}, {"use_stored_key", true},
               {"base_url", preset.value(QStringLiteral("base_url")).toString()},
               {"model", id},
@@ -1510,9 +1536,18 @@ public:
     QString currentEntryKey() const {
         if (m_currentPreset.isEmpty()) return QString();
         const QString guest = guestOfPreset(m_currentPreset);
-        const QString model = !guest.isEmpty() && !m_guestModel.isEmpty() ? m_guestModel : m_model;
-        if (!model.isEmpty()) return relay::models::Catalog::keyFor(m_currentPreset, model);
+        const QString model = !guest.isEmpty() && !m_guestModel.isEmpty() ? m_guestModel : paneModel();
         const relay::models::Catalog catalog = modelCatalog();
+        if (!model.isEmpty()) {
+            // Through the catalog (card #MDL1, rule 3): Claude Code is started with `opus` and
+            // reports `claude-opus-5`, so the raw pair named an entry no list holds — /swap could
+            // not tell where the pane was, and the same model was counted twice in models/recent
+            // and models/uses. `resolveKey` answers `guest:claude|opus`. An id the catalog knows
+            // nothing about — a hand-typed model, a guest whose scan is still running — still
+            // gets its own key, exactly as before.
+            if (const QString key = catalog.resolveKey(m_currentPreset, model); !key.isEmpty()) return key;
+            return relay::models::Catalog::keyFor(m_currentPreset, model);
+        }
         if (const auto *main = catalog.tierEntry(m_currentPreset, QStringLiteral("main"))) return main->key;
         const QList<relay::models::Entry> rows = catalog.ofPreset(m_currentPreset);
         return rows.isEmpty() ? QString() : rows.first().key;
@@ -1579,21 +1614,28 @@ public:
         selectEntry(pick.key, pick.effort);
         focusInput();
     }
-    // A mouse pick that swaps the ranked Main (rank 1) for its fallback (rank 2), or back, is
-    // what /swap types in one word (card #DC4J; WARP.md, "Shortcut hints"). Called with the
-    // target key before selectEntry moves the pane, so currentEntryKey() is still the old model.
+    // A mouse pick that lands on the ranked Main (rank 1), or steps from it to rank 2, is what
+    // /swap types in one word (card #DC4J; WARP.md, "Shortcut hints"). Called with the target key
+    // before selectEntry moves the pane, so currentEntryKey() is still the old model — which is
+    // also what makes it the place to record where /swap would come back to (card #MDL1).
     void hintSwapForPick(const QString &key) {
         const relay::models::Catalog catalog = modelCatalog();
         const relay::models::Entry main = relay::models::mainDefault(catalog);
-        const relay::models::Entry fallback = relay::models::fallback(catalog);
-        if (main.key.isEmpty() || fallback.key.isEmpty()) return;
+        if (main.key.isEmpty() || key.isEmpty()) return;
         const QString current = currentEntryKey();
-        if ((current == main.key && key == fallback.key) || (current == fallback.key && key == main.key))
+        if (current == key) return;
+        // A pick that lands on rank 1 is what /swap types in one word, so this pane remembers
+        // where it came from and the next /swap brings it back — a mouse pick and the command are
+        // the same toggle (card #MDL1, rule 3).
+        if (key == main.key) m_swapFrom = current;
+        const relay::models::Entry fallback = relay::models::fallback(catalog);
+        if (key == main.key || (current == main.key && key == fallback.key))
             hint(QStringLiteral("model.swap.slash"),
-                 relay::ShortcutHints::nextTime(QStringLiteral("/swap"), QStringLiteral("swapping main ↔ fallback")));
+                 relay::ShortcutHints::nextTime(QStringLiteral("/swap"), QStringLiteral("swapping to the main model and back")));
     }
     // One door for every pick of a catalog entry. The level is the one the pick named, else the
-    // one remembered for that entry (models/effort/<key>), else the pane keeps its own.
+    // one the tier lists give that entry, else the pane keeps its own. It is this pane's level
+    // either way: a pick never rewrites the level new panes start at (card #MDL1).
     void selectEntry(const QString &key, const QString &effort = QString()) {
         QString preset, model;
         if (!relay::models::Catalog::splitKey(key, &preset, &model)) return;
@@ -1602,10 +1644,10 @@ public:
             if (preset != m_currentPreset || model != m_guestModel) pickGuest(guest, model);
         } else if (preset != m_currentPreset) {
             leaveGuest([this, preset, model] { selectModel(preset, model); });
-        } else if (model != m_model) {
+        } else if (model != paneModel()) {
             setMainModel(model);
         }
-        if (!level.isEmpty() && level != m_effort && efforts().contains(level)) setEffort(level);
+        if (!level.isEmpty() && level != m_effort && efforts().contains(level)) setPaneEffort(level);
     }
     // The pane's provider settings follow a model switch as a whole (card WFJM): the provider dialog
     // reads `provider/base|model|extra` as its defaults, and they used to keep the first preset's
@@ -3452,9 +3494,20 @@ public:
             m_transcriptPending = id;   // the worker is not up yet; asked at `session_configured`
     }
 
+    // An explicit choice of level — Alt+E, Alt+. / Alt+,, /effort, the level box. There is no row
+    // in Options for the level new panes start at, so this is the only place that default is
+    // written (card #MDL1): a level that merely *came with a model* goes through setPaneEffort.
     void setEffort(const QString &value) {
         if (!efforts().contains(value)) return;
         QSettings().setValue(QStringLiteral("agent/effort"), value);
+        setPaneEffort(value);
+    }
+    // This pane's level and nothing else. The level the main list gives rank 1, the one the picker
+    // sent with a model and the one /swap's target carries are this pane's business: until #MDL1
+    // each of them rewrote `agent/effort`, so picking a cheap model in one pane quietly moved the
+    // level every future pane would start at.
+    void setPaneEffort(const QString &value) {
+        if (!efforts().contains(value)) return;
         m_effort = value;
         if (m_configured) send({{"type", "set_effort"}, {"effort", value}});
         changed();
@@ -7524,6 +7577,9 @@ private:
             const QString preset = event.value(QStringLiteral("preset")).toString();
             const QString role = event.value(QStringLiteral("agent_role")).toString();   // protocol 13
             if (!role.isEmpty()) m_agentRole = role;
+            // A role's turn reports that role's model; only this pane's own agent moves the model
+            // the pane *is on* (card #MDL1, design 1.4.3).
+            if (role.isEmpty() || role == QStringLiteral("main")) m_paneModel = m_model;
             const QString warning = event.value(QStringLiteral("warning")).toString();
             if (!warning.isEmpty()) { ensureLineStart(); printInline(warning + '\n', Ink::Note); closeInline(); }
             // A role switch keeps the pane's main preset: only a set_model changes it.
@@ -7542,7 +7598,7 @@ private:
             const QString effort = event.value(QStringLiteral("effort")).toString();
             if (efforts().contains(effort)) m_effort = effort;
             const QString inFlight = event.value(QStringLiteral("in_flight_model")).toString();
-            const QString what = later
+            QString what = later
                 ? (afterCompaction
                        ? QStringLiteral("Model: %1 once the conversation is compacted to fit its window").arg(m_model)
                        : applies == QStringLiteral("turn_end")
@@ -7551,6 +7607,12 @@ private:
                 : role.isEmpty() || role == QStringLiteral("main")
                 ? QStringLiteral("Model: %1 · conversation kept").arg(m_model)
                 : QStringLiteral("%1: %2 · conversation kept").arg(roleLabel(role), m_model);
+            // This report *is* the /swap arriving, so it says what the swap did instead of
+            // overwriting that line 100–300 ms later with its own (card #MDL1, design 1.4.2).
+            // One shot: whatever happens next, the next report speaks for itself.
+            if (!m_swapSentence.isEmpty() && !later && (role.isEmpty() || role == QStringLiteral("main")))
+                what = m_swapSentence;
+            m_swapSentence.clear();
             status(what); toast(what);
             if (later) {
                 // The clock owns the status line while a turn runs, so the "not now, next step" part
@@ -7600,6 +7662,7 @@ private:
             const QString preset = event.value(QStringLiteral("preset")).toString();
             if (!role.isEmpty()) m_agentRole = role;
             else if (!preset.isEmpty()) { m_currentPreset = preset; rememberPreset(preset); }
+            if (role.isEmpty() || role == QStringLiteral("main")) m_paneModel = m_model;
             const qint64 window = event.value(QStringLiteral("context_window")).toVariant().toLongLong();
             if (window > 0) m_ctxWindow = window;
             clearNextContext();
@@ -8787,26 +8850,24 @@ private:
             }
         } else if (name == QStringLiteral("swap")) {
             // Owner (card #DC4J): "/swap … immediately swaps to your default fallback (or back to
-            // your first choice provider if you are on the fallback)". Rank 1 and rank 2 of the
-            // priority list in Options › Models. A switch lands at once even mid-retry (7824689d).
-            // Both skip an exhausted subscription (owner, 2026-09-20): from a spent model, /swap
-            // goes to the first live one, whatever rank the spent one held.
-            const relay::models::Catalog catalog = modelCatalog();
-            const relay::models::Entry main = relay::models::mainDefault(catalog);
-            const relay::models::Entry fallback = relay::models::fallback(catalog);
-            const QString current = currentEntryKey();
-            QString currentPreset;
-            relay::models::Catalog::splitKey(current, &currentPreset, nullptr);
-            const bool spent = !currentPreset.isEmpty() && relay::models::exhausted(catalog, currentPreset);
-            if (fallback.key.isEmpty() && !(spent && !main.key.isEmpty())) {
-                status(main.key.isEmpty() ? QStringLiteral("No model with anything left to swap to: every ranked subscription is exhausted.")
-                                          : QStringLiteral("No fallback model yet: rank a second model in Options › Models (/models)."));
-                return;
-            }
-            const relay::models::Entry &target = spent || current == fallback.key ? main : fallback;
-            if (current == target.key) { status(QStringLiteral("Already on %1.").arg(target.displayName())); return; }
-            selectEntry(target.key);
-            status(QStringLiteral("Swapped to %1%2.").arg(target.displayName(), &target == &fallback ? QStringLiteral(" (the fallback)") : QStringLiteral(" (the main model)")));
+            // your first choice provider if you are on the fallback)" — and, after #MDL1, from
+            // wherever the pane actually is. It knew two keys and had no memory, so a pane on any
+            // third model (the normal case) was sent to rank 2 and then ping-ponged 1↔2 for ever,
+            // never returning to the model the owner was working on. `swapTarget` is the rule:
+            // off rank 1 it remembers where this pane is and goes to rank 1; on rank 1 it goes
+            // back to what it remembered, or to rank 2 when there is nothing to come back to. A
+            // switch still lands at once, even mid-retry (7824689d), and a spent subscription is
+            // still stepped over on both sides.
+            const relay::models::SwapStep step =
+                relay::models::swapTarget(modelCatalog(), currentEntryKey(), m_swapFrom);
+            if (step.kind == relay::models::SwapKind::None) { status(step.message); return; }
+            m_swapFrom = step.remember;
+            // `model_changed` lands 100–300 ms later and used to replace this line with the
+            // generic "Model: … · conversation kept", so /swap read like a /model that had picked
+            // the wrong thing (design 1.4.2). The handler prints this once instead of its own.
+            m_swapSentence = step.message;
+            selectEntry(step.target.key);
+            status(step.message);
         } else if (name == QStringLiteral("main") || name == QStringLiteral("flash")
                    || name == QStringLiteral("local")) {
             // The pane's own agent, not the tier table: /flash runs this conversation on the Flash
@@ -8857,7 +8918,8 @@ private:
             // sets different model priorities". A profile is a named set of the five tier lists
             // (Options › Models › profile); switching swaps every list at once, for every pane.
             // The conversation and this pane's model stay: the status line says what main now
-            // runs on and that /main puts this pane on it.
+            // runs on and how to put this pane on it. That is /swap, not /main — /main only comes
+            // off an agent role, and said so wrongly here until card #MDL1.
             namespace curation = relay::models::curation;
             const QStringList names = curation::profiles();
             if (names.isEmpty()) {
@@ -8896,7 +8958,7 @@ private:
             const relay::models::Entry main = relay::models::mainDefault(modelCatalog());
             status(main.key.isEmpty()
                        ? QStringLiteral("Profile: %1.").arg(chosen)
-                       : QStringLiteral("Profile: %1 · main runs on %2 (/main puts this pane on it).").arg(chosen, main.label));
+                       : QStringLiteral("Profile: %1 · main runs on %2 (/swap puts this pane on it).").arg(chosen, main.name));
         } else if (name == QStringLiteral("effort") || name == QStringLiteral("reasoning")) {
             const QStringList levels = offeredEfforts();
             const QString wanted = args.toLower();
@@ -10551,6 +10613,7 @@ private:
         } else if (type == QStringLiteral("configured")) {
             m_configured = true; m_configuring = false;
             m_model = event.value(QStringLiteral("model")).toString();
+            m_paneModel = m_model;   // what this pane was configured on (card #MDL1)
             m_skillCount = event.value(QStringLiteral("skills")).toInt();
             setSkillCommands(event.value(QStringLiteral("skill_commands")).toArray());
             // Model roles (protocol 13): the worker reports the effective model of every role and
@@ -10571,6 +10634,9 @@ private:
             noteGuestPreset(event);   // Tier A (29.4): the guest is this pane's agent from here on
             discloseHosted();   // Relay Free: where the prompts go, said once per installation
             runBoardTask();   // a card handed over by the Switchboard's Execute, if any (#XS6Q)
+            // The prompt that started a deferred harness is sitting in the queue waiting for
+            // exactly this event (card #MDL1); pumpQueue does nothing when there is none.
+            QTimer::singleShot(0, this, [this] { pumpQueue(); });
             // No "Agent ready · <model>" here: the composer's own chips carry the model and the
             // agent role, so announcing it again only filled the window with a permanent line.
             changed();
@@ -10644,16 +10710,29 @@ private:
                 auto usable = [this](const QString &id) {
                     return std::any_of(m_stored.cbegin(), m_stored.cend(), [&](const auto &entry) { return entry.first == id; });
                 };
-                // A restored pane keeps the model it had; otherwise the saved choice, then Warp's
-                // default agent model, then the first stored key, then Relay Free, then a local
-                // endpoint. A key of the user's own always wins over the included allowance, so a
-                // user with any BYOK key is untouched and a fresh install lands on Relay Free and
-                // configures at once. A local endpoint never wins over either (card #24XJ): it is
-                // picked on its own only when it is the restored/saved preset, or when nothing else
-                // is usable at all.
-                QString choice = m_restorePreset;
+                // Card #MDL1, rule 3: "a pane runs on rank 1 of the main list until you pick
+                // something else in that pane". `startEntry` is that rule — this pane's own saved
+                // entry while it can still run, else rank 1 of the main list with **its model and
+                // its level**, guests included (owner, 2026-09-21: a harness he ranked first is
+                // what a new pane starts on). Until now this read `provider/preset`, which every
+                // switch in every pane rewrites, and then took that preset's *default* model: pick
+                // glm-5.3-flash in one pane and the next one opened on glm-5.3.
+                const relay::models::StartChoice start =
+                    relay::models::startEntry(modelCatalog(), m_restorePreset, m_restoreModel);
+                QString choice = start.entry.preset, startModel = start.entry.model;
                 m_restorePreset.clear();
-                if (!usable(choice)) choice = QSettings().value(QStringLiteral("provider/preset")).toString();
+                m_restoreModel.clear();
+                if (!usable(choice)) { choice.clear(); startModel.clear(); }
+                // No catalog can answer yet — an older worker, or an install with a key for
+                // nothing it lists. Then the ladder that always answered: the saved choice, Warp's
+                // default agent model, the first stored key, Relay Free, a local endpoint. A key
+                // of the user's own always wins over the included allowance, so a user with any
+                // BYOK key is untouched and a fresh install lands on Relay Free and configures at
+                // once. A local endpoint never wins over either (card #24XJ): it is picked on its
+                // own only when it is the saved preset, or when nothing else is usable at all.
+                // This is the one reader of `provider/preset` left in a pane: the last provider
+                // this install used, for an install whose main list is empty.
+                if (choice.isEmpty()) choice = QSettings().value(QStringLiteral("provider/preset")).toString();
                 if (!usable(choice)) choice = event.value(QStringLiteral("warp_default")).toString();
                 if (!usable(choice)) {
                     auto firstWhere = [this](auto predicate) {
@@ -10677,7 +10756,26 @@ private:
                     status(QStringLiteral("No stored provider keys. Open Options › Models › API keys… to add one or import from Warp."));
                     return;
                 }
-                configurePreset(choice, false);
+                // The level rank 1 carries in the main list. With none, the pane keeps the global
+                // default it read when it was built (`agent/effort`), exactly as before.
+                if (!start.effort.isEmpty() && efforts().contains(start.effort)) m_effort = start.effort;
+                // A harness the owner ranked first is what a new pane starts on — "with the
+                // harness process starting on the first turn, not when the pane opens" (owner,
+                // 2026-09-21, card #MDL1). The worker spawns the CLI inside `configure`
+                // (backend/worker.py, protocol 29.3), so deferring the spawn is deferring the
+                // configure: the pane takes the preset now, says so, and configures when there is
+                // something to ask. Every other door — the box, /model, the picker, a guest
+                // sessions row — configures at once, because each of those *is* somebody asking.
+                if (const QString guest = guestOfPreset(choice); !guest.isEmpty()) {
+                    m_deferredPreset = choice;
+                    m_deferredModel = startModel;
+                    m_currentPreset = choice;   // the box says what this pane is on
+                    status(QStringLiteral("%1 is this pane's agent; it starts on your first prompt.")
+                               .arg(guestDisplayName(guest)));
+                    changed();
+                    return;
+                }
+                configurePreset(choice, false, startModel);
             }
         } else if (type == QStringLiteral("warp_imported")) {
             const auto imported = event.value(QStringLiteral("imported")).toArray();
@@ -13566,9 +13664,20 @@ private:
     }
 
     // Configure a built-in preset using its key from the keyring. The key never enters this process.
+    // A preset this pane holds but has not configured on: a harness at rank 1 of the main list,
+    // whose process the worker starts inside `configure` and which must not run before anything
+    // has been asked of this pane (card #MDL1). The first prompt calls this; true means it started
+    // one, and the caller lets its prompt wait in the queue until `configured` pumps it.
+    bool startDeferred() {
+        if (m_deferredPreset.isEmpty() || m_configuring) return false;
+        const QString preset = m_deferredPreset, model = m_deferredModel;
+        configurePreset(preset, false, model);
+        return m_configuring;
+    }
     void configurePreset(const QString &id, bool announce, const QString &modelOverride = QString()) {
         const auto preset = presetById(id);
         if (preset.isEmpty()) return;
+        m_deferredPreset.clear(); m_deferredModel.clear();   // whatever was being held, this replaces it
         if (m_workspace.isEmpty()) m_workspace = QDir::currentPath();
         QSettings settings;
         const int tokens = settings.value(QStringLiteral("provider/max_tokens"), 0).toInt();
@@ -13611,7 +13720,9 @@ private:
     // The worker only ever receives one agent turn at a time from here.
     void submitAgent(const QString &text, bool fromEditor, const QString &why = QString(), QString when = QString(),
                      const QString &shellText = QString()) {
-        if (!m_configured) {
+        // A harness this pane is holding starts here, on the first prompt (card #MDL1). The
+        // prompt itself waits in the queue, which `configured` pumps.
+        if (!m_configured && !startDeferred()) {
             if (fromEditor) { configure(); return; }
             status(QStringLiteral("No agent provider is configured."));
             return;
@@ -13654,7 +13765,7 @@ private:
         // same submission: when the agent itself is free it starts now, bypassing the queue
         // exactly as the interrupt branch above does, and the queued items keep their order
         // (#N8VK). Only a busy — or just-started — agent turn sends a prompt to the back.
-        if (relay::queuesubmit::decide(queueSubmitState()) == relay::queuesubmit::Decision::StartNow) {
+        if (m_configured && relay::queuesubmit::decide(queueSubmitState()) == relay::queuesubmit::Decision::StartNow) {
             startAgentEntry(entry, false);
             return;
         }
@@ -17140,7 +17251,15 @@ private:
     QString m_aiGhost, m_aiGhostKind, m_suggestionId, m_savedPlaceholder;
     QJsonObject m_initialState;
     // saved window layout: the preset and conversation this pane was restored with
-    QString m_restorePreset, m_restoreSession, m_restoreRequest;
+    QString m_restorePreset, m_restoreModel, m_restoreSession, m_restoreRequest;
+    // What this pane's own agent runs on, and /swap's memory (card #MDL1). `m_paneModel` is the
+    // pane's model as against `m_model`, the last model the worker named for anything at all;
+    // `m_swapFrom` is where the last /swap (or a pick that landed on rank 1) came from, and
+    // `m_swapSentence` the line the next `model_changed` prints in place of its own.
+    QString m_paneModel, m_swapFrom, m_swapSentence;
+    // The harness this pane is on but has not started: rank 1 of the main list, waiting for the
+    // first prompt (card #MDL1, owner 2026-09-21).
+    QString m_deferredPreset, m_deferredModel;
     qint64 m_ctxUsed = 0, m_ctxWindow = 0, m_ctxLimit = 0;
     double m_ctxPercent = 0;
     // A model switch waiting to land (issue 3ES1): the bar measures against its window, not the one

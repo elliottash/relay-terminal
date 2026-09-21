@@ -2693,7 +2693,6 @@ private:
                 };
                 const QString wasCurrent = relay::models::curation::currentProfile();
                 QStringList added, skipped;
-                bool currentChanged = false;
                 for (relay::models::curation::ProfileDoc profile : incoming) {
                     if (relay::models::curation::profiles().contains(profile.name)) {
                         QMessageBox box(QMessageBox::Question, title,
@@ -2714,13 +2713,13 @@ private:
                         if (box.clickedButton() == skip) { skipped << profile.name; continue; }
                         if (box.clickedButton() == both) profile.name = freeName(profile.name);
                     }
-                    if (profile.name == wasCurrent) currentChanged = true;
                     relay::models::curation::writeProfile(profile);
                     added << profile.name;
                 }
                 if (added.isEmpty()) return;
-                // The lists only moved if the import landed on the profile they belong to.
-                if (currentChanged) applyMainDefault(catalog);
+                // An import that replaced the *current* profile moved the live lists with it, and
+                // `curated()` carries that to every pane and its worker either way (card #MDL1:
+                // there is no second copy of the default left to write when it does).
                 curated();
                 QMessageBox::information(this, title,
                                          QStringLiteral("Imported %1.%2\nChoose one in the profile box to switch the five "
@@ -2754,8 +2753,7 @@ private:
                 }
                 if (value.isEmpty()) return;
                 relay::models::curation::applyProfile(value);
-                applyMainDefault(catalog);   // rank 1 of the new main list is what new panes start on
-                curated();
+                curated();   // rank 1 of the new main list is what the next new pane starts on
             };
             models.rows << row;
             if (!currentProfile.isEmpty()) {
@@ -2906,7 +2904,6 @@ private:
                     // 2026-09-21), High the level a plan turn uses, Flash and Lite the lowest
                     // (card #TKN7).
                     relay::models::curation::addToTier(tier, entry.key, relay::models::tierStartEffort(entry, tier));
-                    applyMainDefault(catalog);
                     curated();
                 };
             models.rows << add;
@@ -2918,7 +2915,6 @@ private:
             const QJsonObject defaults = !viaHelper ? pane->tierListDefaults() : m_helperTierDefaults.value(tabIdOf(page));
             auto apply = [this, catalog, curated](const QJsonObject &lists) {
                 relay::models::curation::applyTierDefaults(lists);
-                applyMainDefault(catalog);
                 curated();
             };
             relay::SettingRow row;
@@ -2969,20 +2965,13 @@ private:
             each->agentOptionsChanged(QStringLiteral("models/fallback"));
         }
     }
-    // Rank 1 of the priority list is what a new pane starts on: the same two keys a switch writes.
-    // A guest at rank 1 is left alone — a fresh pane starting a harness unasked is a surprise.
-    static void applyMainDefault(const relay::models::Catalog &catalog) {
-        // Rank 1 itself, exhausted or not: a subscription's reset must not leave new panes on the
-        // rank 2 that stood in for it (mainDefault skips exhausted entries; this is the setting).
-        const relay::models::Entry main = relay::models::shown(catalog).value(0);
-        Pane::rememberFallback(catalog);
-        if (main.key.isEmpty() || main.guest) return;
-        QSettings settings;
-        settings.setValue(QStringLiteral("provider/preset"), main.preset);
-        settings.setValue(QStringLiteral("provider/model"), main.model);
-        for (const relay::models::curation::TierEntry &item : relay::models::curation::tierList(QStringLiteral("main")))
-            if (item.key == main.key && !item.effort.isEmpty()) settings.setValue(QStringLiteral("agent/effort"), item.effort);
-    }
+    // `applyMainDefault` was here (card #MDL1). It copied rank 1 of the list into
+    // `provider/preset`, `provider/model` and `agent/effort` so that a new pane, which read those
+    // keys, would land on it — a second copy of the default that ran on five of the eleven paths
+    // that change the list, read a list of its own, and skipped a guest at rank 1. A pane now
+    // asks `relay::models::startEntry` for rank 1 itself, so there is no copy left to keep in
+    // sync: every one of these call sites goes through `modelsCurated()` instead, which is what
+    // tells the panes and their workers. `Pane::rememberFallback` still runs, from there.
     // One spelling of the key, shared with Pane::guestSetting.
     static QString guestSettingKey(const QString &guest, const QString &key) {
         return QStringLiteral("guests/%1/%2").arg(guest, key);
@@ -6771,7 +6760,20 @@ public:
         // with no board root, and the backend attaches no `board_*` tools to it.
         const QString workspace = boardWorkspaceOfTab(page);
         QSettings settings;
-        const QString preset = settings.value(QStringLiteral("provider/preset")).toString();
+        // Where a new pane starts (card #MDL1, rule 3): rank 1 of the main list, model and all.
+        // A helper is an agent console like any other, and it answering on a different provider
+        // from the panes beside it — whichever one some pane switched to last — is exactly the
+        // inconsistency the card is about. `provider/preset` is the fallback for an install whose
+        // list cannot answer yet, as it is in a pane.
+        relay::models::Catalog catalog;
+        for (Pane *each : allPanes()) {
+            catalog = each->modelCatalog();
+            if (!catalog.entries.isEmpty()) break;
+        }
+        const relay::models::StartChoice start = relay::models::startEntry(catalog, QString(), QString());
+        const QString preset = start.entry.preset.isEmpty()
+                                   ? settings.value(QStringLiteral("provider/preset")).toString()
+                                   : start.entry.preset;
         const bool named = !preset.isEmpty() && preset != QStringLiteral("custom");
         QJsonObject configure{{QStringLiteral("type"), QStringLiteral("configure")},
                               {QStringLiteral("workspace"), workspace},
@@ -6780,6 +6782,10 @@ public:
                               {QStringLiteral("api_key"), QString()},
                               {QStringLiteral("max_tokens"), settings.value(QStringLiteral("provider/max_tokens"), 0).toInt()}};
         if (!preset.isEmpty()) configure.insert(QStringLiteral("preset"), preset);
+        // The list's rank 1 is a model, not only a provider: named alone, the worker would fill in
+        // the preset's own default (card #MDL1).
+        if (named && preset == start.entry.preset && !start.entry.model.isEmpty())
+            configure.insert(QStringLiteral("model"), start.entry.model);
         if (!named) {
             configure.insert(QStringLiteral("base_url"), settings.value(QStringLiteral("provider/base")).toString());
             configure.insert(QStringLiteral("model"), settings.value(QStringLiteral("provider/model")).toString());
@@ -7448,7 +7454,7 @@ private:
         };
         // `/profile` swapped the five lists: the same two steps a switch on Options › Models takes.
         pane->onProfileApplied = [guard] {
-            if (auto *w = windowOf(guard)) { applyMainDefault(guard->modelCatalog()); w->modelsCurated(); }
+            if (auto *w = windowOf(guard)) w->modelsCurated();
         };
         pane->onShareTab = [guard](int *panes) {
             auto *w = windowOf(guard);
@@ -7692,7 +7698,7 @@ private:
             return relay::theme::setActiveTheme(id);
         };
         console->onProfileApplied = [guard] {
-            if (auto *w = windowOf(guard)) { applyMainDefault(guard->modelCatalog()); w->modelsCurated(); }
+            if (auto *w = windowOf(guard)) w->modelsCurated();
         };
         console->onUpdateApp = [guard]() { if (auto *w = windowOf(guard)) w->updateApp(); };
         console->onJoinShared = [guard](const QString &code) { if (auto *w = windowOf(guard)) w->joinSharedSession(code); };
@@ -7922,7 +7928,7 @@ private:
             // string and defeat --engine-core on the next start.
             if (!pane->engineCore().isEmpty()) leaf.insert(QStringLiteral("engine_core"), pane->engineCore());
             if (!pane->currentPreset().isEmpty()) leaf.insert(QStringLiteral("preset"), pane->currentPreset());
-            if (!pane->model().isEmpty()) leaf.insert(QStringLiteral("model"), pane->model());
+            if (!pane->paneModel().isEmpty()) leaf.insert(QStringLiteral("model"), pane->paneModel());
             if (!pane->sessionId().isEmpty()) leaf.insert(QStringLiteral("session_id"), pane->sessionId());
             // Which file holds this pane's terminal text (src/WindowState.h). The id is in every
             // node, including "restore last closed": a reopened pane finds the text of the pane it
