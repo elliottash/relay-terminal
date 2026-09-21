@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: m
 created: '2026-09-21'
 source: User request in Relay, 2026-09-21
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-alt-i-toggle/], related: [CSMK], github: null}
+links: {plans: [], commits: [878c544b863b6f7a07169602a8b308ca0d39cc7d], evidence: [docs/qa_evidence/2026-09-21-alt-i-toggle/], related: [CSMK], github: null}
 ---
 # Alt+I toggles the info pane closed
 
