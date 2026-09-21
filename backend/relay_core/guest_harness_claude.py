@@ -611,6 +611,7 @@ class ClaudeHarness:
         for message in held[-1:]:                      # only the newest figure is a figure
             self._dispatch(message, state, emit)
         result_wait_started = None
+        completed_text = []
         while True:
             if result_wait_started is not None and time.monotonic() - result_wait_started > 30:
                 self.close()
@@ -634,12 +635,19 @@ class ClaudeHarness:
                 if self._steer_pending and not state["asked_stop"]:
                     # Stdin crossed the end of the previous native turn. Keep reading its
                     # queued continuation, rather than discarding it as stale on next send.
-                    self._finish(message, state, lambda e: emit(e) if e.kind != "done" else None)
+                    previous = self._finish(message, state, lambda e: emit(e) if e.kind != "done" else None)
+                    if previous.text:
+                        completed_text.append(previous.text)
                     state = {"text": [], "saw_delta": False, "asked_stop": False}
                     result_wait_started = time.monotonic()
                     continue
                 if self._steer_pending:
                     self.close()  # no unconsumed stdin survives cancellation into the next send
+                if completed_text and not message.get("is_error"):
+                    last = message.get("result")
+                    if not isinstance(last, str) or not last.strip():
+                        last = "".join(state["text"])
+                    message = {**message, "result": "\n\n".join(completed_text + ([last] if last else []))}
                 return self._finish(message, state, emit)
             try:
                 self._dispatch(message, state, emit)

@@ -49,3 +49,18 @@ inside the same Relay turn if its input crosses a native result boundary. After 
 transport failure, inspect what ran and reselect the guest before intentionally resuming input.
 Live acceptance is intentionally left to the owner. This delegated guest had no relay_board
 MCP tools in its discovered catalog, so board updates used POLICY.md's file fallback.
+
+
+Parent review follow-up: Claude continuation results now retain earlier final text in both the
+returned transcript and final done event. Leased steers remain visible through unrelated queue
+updates, clear and cancel; remove/unsteer honestly refuse withdrawal once transport delivery is
+in flight. Clear reports that pending native input cannot be withdrawn. Idle reset clears any
+orphan lease; turn-end cleanup returns any lease a provider did not settle. Regression tests
+exercise these lifecycle paths and accumulated result text. The focused rerun covers the steering,
+Claude adapter and queue modules (128 tests).
+
+Claude timing evidence is source-level plus fake-stream regression, not a live acceptance claim:
+the installed CLI admits additional UUID user frames into its priority queue and replays committed
+input; Relay writes priority `next` at observed tool start/result events. Native incorporation may
+occur after the observed tool, and near completion it can become a continuation within the same
+Relay turn. Owner live testing is still required to establish behavior on their CLI session.

@@ -286,7 +286,7 @@ class TurnSupervisor:
     def waiting(self, item_id) -> bool:
         """Whether a queue item is still queued or waiting to steer."""
         with self._lock:
-            return item_id is not None and any(i["id"] == item_id for i in list(self._queue) + self._steer)
+            return item_id is not None and any(i["id"] == item_id for i in list(self._queue) + self._steer_inflight + self._steer)
 
     def now_or_later(self, now: Callable, later: Callable):
         """now() when nothing runs, else later(); decided under the lock, so a turn cannot start (or
@@ -449,7 +449,9 @@ class TurnSupervisor:
         return True
 
     def _return_steer_locked(self) -> None:
-        items, self._steer = self._steer, []
+        # The provider normally settles its lease first; never strand one if it exits early.
+        items = self._steer_inflight + self._steer
+        self._steer_inflight, self._steer = [], []
         front = []
         for item in items:
             self._emit({"event": "steer_returned", "id": item["id"], "request_id": item.get("request_id"),
@@ -535,6 +537,9 @@ class TurnSupervisor:
         with self._lock:
             self._ledger_cancel(list(self._queue) + list(self._steer), "Cleared from the queue by the user.")
             self._clear_locked()
+            if self._steer_inflight:
+                self._emit({"event": "status", "text": "Steering already sent to the guest is awaiting "
+                            "acknowledgement and cannot be withdrawn by clearing the queue."})
             self._ack_locked("clear", None, request_id)
 
     def _ack_locked(self, op: str, item_id, request_id, **extra) -> None:
@@ -571,7 +576,9 @@ class TurnSupervisor:
         self._agent.stop()
 
     def _clear_locked(self) -> None:
-        had = bool(self._queue) or self._paused or bool(self._steer)
+        had = bool(self._queue) or self._paused or bool(self._steer) or bool(self._steer_inflight)
+        if self._running is None:
+            self._steer_inflight.clear()
         self._queue.clear()
         self._steer.clear()
         self._paused = False
@@ -658,7 +665,7 @@ class TurnSupervisor:
                 if self._stop_reason:
                     finished["stop_reason"] = self._stop_reason
                 self._emit(finished)
-                if self._steer:
+                if self._steer or self._steer_inflight:
                     self._return_steer_locked()
                 self._running = None
                 self._surface = ""

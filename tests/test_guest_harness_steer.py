@@ -128,7 +128,8 @@ class SteeringTests(unittest.TestCase):
             if event.kind == 'tool_started':
                 harness.steer('steer now', accepted=lambda: acknowledgements.append('accepted'))
         result = harness._run_turn('original', [], emit, threading.Event())
-        self.assertEqual(result.text, 'steered answer')
+        self.assertEqual(result.text, 'first answer\n\nsteered answer' if cross_result else 'steered answer')
+        self.assertEqual([e.data['text'] for e in events if e.kind == 'done'], [result.text])
         self.assertEqual(acknowledgements, ['accepted'])
         self.assertEqual(len([e for e in events if e.kind == 'done']), 1)
         self.assertEqual(writes[1]['priority'], 'next')
@@ -206,3 +207,42 @@ class SteeringTests(unittest.TestCase):
             raise HarnessSteerUncertain('unknown')
         with self.assertRaises(HarnessSteerUncertain):
             harness._emit(_TurnState(emit), 'tool_started', {})
+
+    def test_leased_input_stays_visible_and_cannot_be_withdrawn(self):
+        from types import SimpleNamespace
+        events = []
+        supervisor = TurnSupervisor(events.append)
+        self.addCleanup(supervisor.shutdown)
+        agent = SimpleNamespace(track_requests=False, stop=Mock())
+        supervisor.set_agent(agent)
+        supervisor._running = 'active'
+        try:
+            ident = supervisor.submit('leased', 'steer', 'request')
+            supervisor.reserve_steer()
+            supervisor.clear()
+            snapshot = [e for e in events if e['event'] == 'queue_changed'][-1]
+            self.assertEqual([i['id'] for i in snapshot['steering']], [ident])
+            self.assertFalse(supervisor.unsteer('request'))
+            with self.assertRaises(ValueError):
+                supervisor.remove(ident)
+            supervisor.cancel()
+            self.assertEqual(len(supervisor._steer_inflight), 1)
+            agent.stop.assert_called_once()
+            # End-of-turn safety net restores the lease even if the provider did not settle.
+            with supervisor._lock:
+                supervisor._return_steer_locked()
+            self.assertEqual(supervisor._steer_inflight, [])
+            self.assertEqual([e['id'] for e in events if e['event'] == 'steer_returned'], [ident])
+            self.assertFalse(any(e['event'] == 'steer_delivered' for e in events))
+        finally:
+            supervisor._running = None
+
+    def test_reset_clears_any_idle_lease(self):
+        from types import SimpleNamespace
+        supervisor = TurnSupervisor(lambda e: None)
+        self.addCleanup(supervisor.shutdown)
+        agent = SimpleNamespace(track_requests=False, reset_conversation=Mock())
+        supervisor.set_agent(agent)
+        supervisor._steer_inflight = [{'id': 'orphan'}]
+        supervisor.reset()
+        self.assertEqual(supervisor._steer_inflight, [])
