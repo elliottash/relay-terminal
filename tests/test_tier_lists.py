@@ -116,7 +116,7 @@ class ResolutionTests(unittest.TestCase):
 
     def test_a_named_model_runs_with_its_own_extras_wherever_it_is_ranked(self):
         made = resolver({}, {'high': [{'preset': 'glm', 'model': 'glm-5.3-flash'}]})
-        self.assertEqual(made.resolve('planning').config.extra['reasoning_effort'], 'low')
+        self.assertEqual(made.resolve('high').config.extra['reasoning_effort'], 'low')
 
     GUESTED = {tier: [{'preset': 'guest:claude', 'model': 'fable', 'effort': 'max'},
                       {'preset': 'kimi', 'model': 'kimi-k3', 'effort': 'max'}]
@@ -141,34 +141,48 @@ class ResolutionTests(unittest.TestCase):
     def test_a_guest_whose_harness_runs_here_serves_the_high_tier(self):
         """Owner, 2026-09-20: "claude and codex weren't showing up under 'high' models" — and
         "for codex planning you pick xhigh". The first usable entry of the High list may be a
-        guest: planning resolves to it, on the harness scheme, at its level in its own words."""
+        guest: the /high role resolves to it, on the harness scheme, at its level in its own
+        words. Since #HR5E a plan turn leaves the pane's own model only for a pin — and a pin
+        onto the tier takes the guest exactly as /high does."""
         made = resolver({'kimi': 'k'}, self.GUESTED, guests=('claude',))
-        planning = made.resolve('planning')
-        self.assertEqual((planning.preset_id, planning.config.base_url, planning.config.model,
-                          planning.effort, planning.tier, planning.source),
+        high = made.resolve('high')
+        self.assertEqual((high.preset_id, high.config.base_url, high.config.model,
+                          high.effort, high.tier, high.source),
                          ('guest:claude', 'harness://claude', 'fable', 'max', 'high', 'default'))
-        self.assertEqual(planning.config.api_key, '')
-        self.assertIsNone(planning.note)
-        self.assertIs(made.planning_target(), planning)
+        self.assertEqual(high.config.api_key, '')
+        self.assertIsNone(high.note)
+        # Planning's default is the pane's own model at max (#HR5E) — the High list is not
+        # consulted — and a pin onto the tier restores the guest for plan turns.
+        planning = made.resolve('planning')
+        self.assertEqual((planning.preset_id, planning.effort), ('glm', 'max'))
+        pinned = resolver({'kimi': 'k'}, self.GUESTED, roles={'planning': {'tier': 'high'}},
+                          guests=('claude',))
+        target = pinned.resolve('planning')
+        self.assertEqual((target.preset_id, target.config.base_url, target.config.model,
+                          target.effort), ('guest:claude', 'harness://claude', 'fable', 'max'))
+        self.assertIs(pinned.planning_target(), target)
+        # Asked to plan without the guests (the harness would not start): the entry below it.
+        without = pinned.planning_target(guests=False)
+        self.assertEqual((without.preset_id, without.effort), ('kimi', 'max'))
         # The GUI greys nothing here: the guest is usable in High, and in Main, and nowhere else.
         summary = made.tier_summary()
         self.assertEqual(summary['high']['preset'], 'guest:claude')
         self.assertEqual([e['usable'] for e in summary['high']['list']], [True, True])
-        # Asked to plan without the guests (the harness would not start): the entry below it.
-        without = made.planning_target(guests=False)
-        self.assertEqual((without.preset_id, without.effort), ('kimi', 'max'))
 
     def test_a_guest_that_cannot_run_here_is_skipped_in_high_without_a_key_note(self):
         made = resolver({'kimi': 'k'}, self.GUESTED, guests=())
+        high = made.resolve('high')
+        self.assertEqual(high.preset_id, 'kimi')
+        self.assertIn('guest that cannot run here', high.note)
+        # Planning never saw the list at all: the pane's own model at max (#HR5E).
         planning = made.resolve('planning')
-        self.assertEqual(planning.preset_id, 'kimi')
-        self.assertIn('guest that cannot run here', planning.note)
+        self.assertEqual((planning.preset_id, planning.effort), ('glm', 'max'))
+        self.assertIsNone(planning.note)
         summary = made.tier_summary()
         self.assertEqual([e['usable'] for e in summary['high']['list']], [False, True])
         # A High list of nothing but a guest that cannot run: Main, as any list with nothing usable.
         alone = resolver({}, {'high': [{'preset': 'guest:codex', 'effort': 'xhigh'}]})
-        self.assertTrue(alone.resolve('planning').is_main)
-        self.assertIsNone(alone.planning_target())
+        self.assertTrue(alone.resolve('high').is_main)
         # Main keeps saying a guest is usable there: it is where a guest serves a pane.
         listed = resolver({}, {'main': [{'preset': 'guest:codex'}]})
         self.assertEqual([e['usable'] for e in listed.tier_summary()['main']['list']], [True])
@@ -327,8 +341,11 @@ class TurnTests(TurnCase):
             'main': [{'preset': 'glm', 'model': 'glm-5.3'}, {'preset': 'minimax', 'model': 'MiniMax-M3'}]}
 
     def test_a_plan_turn_walks_the_high_list(self):
+        # Planning pinned onto the High tier (since #HR5E the pin is what takes a plan turn off
+        # the pane's own model): a failing entry fails over down the list, as before.
         self.stubs.update({'gpt-6-astra': Refuser(), 'kimi-k3': Answerer('the plan'), 'glm-5.3': Answerer('own')})
-        agent = self.agent(resolver({'openai': 'k', 'kimi': 'k', 'minimax': 'k'}, self.HIGH))
+        agent = self.agent(resolver({'openai': 'k', 'kimi': 'k', 'minimax': 'k'}, self.HIGH,
+                                    roles={'planning': {'tier': 'high'}}))
         agent.set_mode('plan')
         agent.ask('plan this')
         self.assertEqual(self.events[-1]['event'], 'done')
@@ -346,7 +363,8 @@ class TurnTests(TurnCase):
 
     def test_a_spent_high_list_returns_the_turn_to_the_panes_own_model(self):
         self.stubs.update({'gpt-6-astra': Refuser(), 'kimi-k3': Refuser(), 'glm-5.3': Answerer('own')})
-        agent = self.agent(resolver({'openai': 'k', 'kimi': 'k'}, self.HIGH))
+        agent = self.agent(resolver({'openai': 'k', 'kimi': 'k'}, self.HIGH,
+                                    roles={'planning': {'tier': 'high'}}))
         agent.set_mode('plan')
         agent.ask('plan this')
         self.assertEqual(self.events[-1]['event'], 'done')
