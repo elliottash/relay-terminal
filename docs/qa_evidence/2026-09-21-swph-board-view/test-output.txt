@@ -23,8 +23,9 @@ test_the_thread_highlights_a_question_and_its_options_prefill_the_reply (tests.t
 test_with_no_pane_to_transcribe_the_sheet_points_to_the_keyboards_dictation (tests.test_board_view.BoardViewTests.test_with_no_pane_to_transcribe_the_sheet_points_to_the_keyboards_dictation) ... ok
 test_a_card_that_is_not_a_card_id_opens_nothing_but_the_app (tests.test_board_view.CardNotificationTapTests.test_a_card_that_is_not_a_card_id_opens_nothing_but_the_app) ... ok
 test_a_tap_opens_the_board_on_that_card (tests.test_board_view.CardNotificationTapTests.test_a_tap_opens_the_board_on_that_card) ... ok
+test_the_board_a_card_and_an_answer_cross_the_real_hub (tests.test_board_view.ThroughTheHubTests.test_the_board_a_card_and_an_answer_cross_the_real_hub) ... ok
 
 ----------------------------------------------------------------------
-Ran 24 tests in 21.763s
+Ran 25 tests in 22.869s
 
 OK

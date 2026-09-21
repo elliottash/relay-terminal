@@ -1202,6 +1202,91 @@ class BoardViewTests(unittest.TestCase):
         self.drive(main())
 
 
+@unittest.skipUnless(find_chrome(), "Chrome is not installed")
+class ThroughTheHubTests(unittest.TestCase):
+    """The three halves met: the real client, paired to the real hub, with the test as the GUI.
+
+    Everything above plays the hub. Here nothing is swapped: the client's `board_request` crosses
+    the Noise session, `remote/host.py` checks the device and `remote/board_state.py` rebuilds the
+    request and hands it to the GUI's pipe; the test answers as `src/BoardRemote.cpp` does — with
+    the worker's own payload, paths and all — and what reaches the phone has been through the
+    scrubber. So this is where a disagreement about a field's name would show."""
+
+    def test_the_board_a_card_and_an_answer_cross_the_real_hub(self):
+        from tests.test_remote_pane_state import Harness
+        from remote import wire
+
+        def from_worker(event: dict, **extra) -> dict:
+            # What the desktop's worker emits, before anything is stripped.
+            return {**event, **extra}
+
+        async def main():
+            async with Harness(capability=wire.FULL) as harness:
+                url, _ = await harness.host.open_pairing()
+                browser = Browser()
+                await browser.start()
+                try:
+                    await browser.call("Emulation.setDeviceMetricsOverride",
+                                       {"width": PHONE[0], "height": PHONE[1], "deviceScaleFactor": 1, "mobile": False})
+                    await browser.navigate(url)
+                    await browser.wait_for(shown("screen-inbox"), timeout=40)
+
+                    async def asked(kind: str) -> dict:
+                        for _ in range(200):
+                            found = [m for m in harness.to_gui if m.get("t") == "board_request"
+                                     and m["request"]["type"] == kind]
+                            if found:
+                                return found[-1]
+                            await asyncio.sleep(0.05)
+                        raise AssertionError(f"no {kind} reached the GUI: {harness.to_gui[-5:]}")
+
+                    # `welcome.features` has `board` for this `full` device, so the client asks at once.
+                    opened = await asked("board_open")
+                    self.assertEqual(opened["request"], {"type": "board_open"})
+                    self.assertIsInstance(opened["device"], str)
+                    rows = [{**card, "path": f"issues/features/{card['id']}.md"} for card in BOARD["cards"]]
+                    board = from_worker({k: v for k, v in BOARD.items() if k != "board_name"},
+                                        cards=rows, root="/home/elliott/repos/relay-terminal/issues",
+                                        workspace="/home/elliott/repos/relay-terminal",
+                                        project="/home/elliott/repos/relay-terminal")
+                    harness.host.board_event_from_gui({"t": "board_event", "rid": opened["rid"], "event": board})
+                    await browser.wait_for("!document.querySelector('.rb-inbox-chip').hidden", timeout=20)
+                    self.assertEqual(await browser.evaluate("document.querySelector('.rb-inbox-chip').textContent"),
+                                     "3 waiting on you")
+                    # The project's path stayed on the desktop; its name is the heading.
+                    self.assertEqual(await browser.evaluate("document.querySelector('#board-row .rb-inbox-sub').textContent"),
+                                     "relay-terminal · 31 open cards")
+
+                    await browser.evaluate("document.getElementById('board-row').click()")
+                    await browser.wait_for(shown("screen-board") + " && document.querySelectorAll('.rb-row').length > 0")
+                    await browser.evaluate(f"document.querySelector('.rb-row[data-card-id=\"{CARD_ID}\"]').click()")
+                    got = await asked("board_card_get")
+                    self.assertEqual(got["request"], {"type": "board_card_get", "id": CARD_ID})
+                    card = from_worker(CARD, path=f"issues/features/{CARD_ID}.md")
+                    harness.host.board_event_from_gui({"t": "board_event", "rid": got["rid"], "event": card})
+                    await browser.wait_for("!!document.querySelector('.rb-thread .rb-entry-question')", timeout=20)
+                    page = await browser.evaluate("document.querySelector('.rb-card-col').textContent")
+                    self.assertNotIn("issues/features", page)
+                    self.assertIn("Two choices before this is built", page)
+
+                    # The answer to the agent's question reaches the GUI as the contract's message.
+                    await browser.evaluate(
+                        "(() => { const b = document.querySelector('.rb-reply-text'); b.value = 'go, both';"
+                        " document.querySelector('.rb-send-comment').click(); })()")
+                    comment = await asked("board_comment")
+                    self.assertEqual(comment["request"], {"type": "board_comment", "id": CARD_ID,
+                                                          "kind": "decision", "text": "go, both"})
+                    written = {"event": "board_written", "id": "remote-3", "kind": "board_comment",
+                               "card_id": CARD_ID, "entry_id": "20260921T024029Z-5k", "write_id": "w-1"}
+                    harness.host.board_event_from_gui({"t": "board_event", "rid": comment["rid"], "event": written})
+                    await browser.wait_for("document.querySelector('.rb-card-line').textContent.includes('Answer recorded')",
+                                           timeout=20)
+                finally:
+                    await browser.stop()
+
+        asyncio.run(asyncio.wait_for(main(), 180))
+
+
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
 class CardNotificationTapTests(unittest.TestCase):
     """A `card_waiting` push (REMOTE-PROTOCOL.md 17.5) tapped: the whole path, as
