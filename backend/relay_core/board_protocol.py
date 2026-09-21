@@ -2034,7 +2034,10 @@ class BoardCommands:
         """Tag a cleanup turn's events so the pane shows them on the board, not on a card."""
         log = self._cleanup_log
         name = event.get("event")
-        if name == "turn_started" or (name == "status" and self._ask_turn is None):
+        # The run's turn id, from the first event that carries one. It used to read
+        # `turn_started` first; nothing emits that event, so the `status` branch was always the
+        # one doing the work and the name is gone with #AGNT.
+        if name == "status" and self._ask_turn is None:
             self._ask_turn = event.get("turn_id") or self._ask_turn
         if name in ("delta", "answer") and isinstance(event.get("text"), str):
             self._ask_text.append(event["text"])
@@ -2044,7 +2047,7 @@ class BoardCommands:
         if name == "tool_started" and self._ask_text and not self._ask_text[-1].endswith("\n\n"):
             self._ask_text.append("\n\n")
         if name in ("delta", "answer", "done", "error", "cancelled", "turn_summary", "thinking",
-                    "thinking_done", "tool_started", "tool_result", "status", "turn_started"):
+                    "thinking_done", "tool_started", "tool_result", "status"):
             event = {**event, "cleanup": True, "run_id": log.run_id}
         if name in ("done", "error", "cancelled"):
             # `error` before the turn ran (a provider refusal) ends the run just as `done` does;

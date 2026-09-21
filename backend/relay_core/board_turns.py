@@ -47,8 +47,10 @@ MAX_SESSIONS = 6
 CARD_TAGGED = ("delta", "done", "error", "cancelled", "turn_summary", "thinking",
                "thinking_delta", "thinking_done", "tool_started", "tool_result", "status")
 
-#: Turn events that also carry the mode.
-MODE_TAGGED = ("delta", "done", "error", "cancelled", "turn_summary", "turn_started")
+#: Turn events that also carry the mode.  `turn_started` was listed here and in `board_chat`
+#: and consumed by the helper panel, and nothing has ever emitted it; #AGNT dropped the name
+#: rather than leave a third copy of a tag no worker sends.
+MODE_TAGGED = ("delta", "done", "error", "cancelled", "turn_summary")
 
 TERMINAL = ("done", "error", "cancelled")
 
