@@ -704,7 +704,7 @@ class PlanModeTests(Base):
         results = [e for e in self.of('tool_result')]
         self.assertIn('not available in plan mode', results[0]['result']['error'])
 
-    def exit_request(self, answers=None, cancel=False):
+    def exit_request(self):
         provider = ScriptedProvider([
             tools_msg(call('write_file', {'path': 'before.txt', 'content': 'blocked'})),
             tools_msg(call('exit_plan_mode', {'reason': 'The implementation plan is ready.'})),
@@ -712,59 +712,24 @@ class PlanModeTests(Base):
             text('Finished.')])
         agent = self.agent(provider)
         agent.set_mode('plan')
-        def answer(event):
-            self.events.append(event)
-            if event.get('event') == 'question':
-                self.assertEqual(agent.mode, 'plan')
-                self.assertFalse((self.root / 'after.txt').exists())
-                if cancel:
-                    agent.cancel_event.set()
-                else:
-                    agent.executor.questions.resolve({'id': event['id'], 'answers': answers or []})
-        agent.executor.questions.emit = answer
-        agent.ask('Implement once I approve leaving planning mode')
+        agent.ask('Implement when the plan is ready')
         return agent, provider
 
-    def test_exit_plan_mode_approval_enables_edits_in_the_same_turn(self):
-        agent, provider = self.exit_request([['Execute']])
+    def test_exit_plan_mode_switches_to_build_and_enables_edits_in_the_same_turn(self):
+        # #XP7N (owner 2026-09-21): the agent decides itself, Warp-style — no ask, the turn
+        # continues with build tools.
+        agent, provider = self.exit_request()
         self.assertFalse((self.root / 'before.txt').exists())
         self.assertEqual((self.root / 'after.txt').read_text(), 'implemented')
         self.assertEqual(agent.mode, 'build')
         self.assertEqual(self.of('mode_changed'), [{'event': 'mode_changed', 'mode': 'build'}])
         self.assertEqual(agent.store.load(agent.session_id)['mode'], 'build')
-        self.assertTrue(self.of('tool_result')[1]['result']['approved'])
+        result = self.of('tool_result')[1]['result']
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['mode'], 'build')
+        self.assertFalse(self.of('question'))
         self.assertTrue(all('exit_plan_mode' in req[1] for req in provider.requests))
         self.assertEqual(provider.requests[0][1], provider.requests[-1][1])
-
-    def test_exit_plan_mode_requires_explicit_execute(self):
-        for answers in ([['Keep planning']], [], [['maybe later']], [['Execute', 'Keep planning']]):
-            with self.subTest(answers=answers):
-                self.events.clear()
-                agent, _ = self.exit_request(answers)
-                self.assertEqual(agent.mode, 'plan')
-                self.assertFalse((self.root / 'after.txt').exists())
-                self.assertFalse(self.of('mode_changed'))
-                self.assertFalse(self.of('tool_result')[1]['result']['approved'])
-                self.assertIn('not available in plan mode', self.of('tool_result')[2]['result']['error'])
-
-    def test_exit_plan_mode_cancellation_never_enables_edits(self):
-        agent, _ = self.exit_request(cancel=True)
-        self.assertEqual(agent.mode, 'plan')
-        self.assertFalse((self.root / 'after.txt').exists())
-        self.assertFalse(self.of('mode_changed'))
-        self.assertTrue(self.of('cancelled'))
-
-    def test_exit_plan_mode_question_limit_does_not_authorize_execution(self):
-        from relay_core.questions import MAX_ASKS_PER_TURN
-        agent = self.agent(ScriptedProvider())
-        agent.set_mode('plan')
-        agent.executor.questions.asks = MAX_ASKS_PER_TURN
-        prepared = agent._prepare('exit_plan_mode', {'reason': 'Ready'})
-        result = agent._execute(prepared, None)
-        self.assertFalse(result['approved'])
-        self.assertEqual(result['refused'], 'cap')
-        self.assertEqual(agent.mode, 'plan')
-        self.assertFalse(self.of('mode_changed'))
 
     def test_exit_plan_mode_validation_and_availability(self):
         agent = self.agent(ScriptedProvider())
@@ -777,10 +742,6 @@ class PlanModeTests(Base):
                 agent._prepare('exit_plan_mode', args)
         agent.set_readonly(True)
         with self.assertRaisesRegex(ValueError, 'writes nothing'):
-            agent._prepare('exit_plan_mode', {'reason': 'Ready'})
-        agent.set_readonly(False)
-        agent.executor.can_ask = False
-        with self.assertRaisesRegex(ValueError, 'cannot reach the user'):
             agent._prepare('exit_plan_mode', {'reason': 'Ready'})
 
     def test_the_execute_prompt_follows_the_plans_orchestration_block(self):

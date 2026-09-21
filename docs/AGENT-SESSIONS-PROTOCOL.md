@@ -152,13 +152,11 @@ the finish time is unknown.
 - Plan-mode turns run on the `planning` role (13.11): by default the pane's own model at `max`
   reasoning, swapped for that turn only and then put back, with `plan_route` / `plan_route_ended` saying
   so in the pane.
-- Tool `exit_plan_mode {reason}` (plan mode only, card #XP7N) requests an explicit user choice
-  through the existing `question` / `question_answer` flow: Execute or Keep planning. Only the
-  exact Execute answer switches to build mode, emits `mode_changed {mode: "build"}`, and returns
-  `approved: true`; the agent can continue implementation in the same turn. The planning model
-  remains routed until that turn ends. Declining, dismissing, an unanswered ask or cancellation
-  never enables edits. Readonly turns and agents unable to ask the user cannot call it. Its schema
-  stays in the tool list in both modes to preserve the prompt cache.
+- Tool `exit_plan_mode {reason}` (plan mode only, card #XP7N) leaves plan mode on the agent's own
+  decision, Warp-style (owner 2026-09-21): no ask. It switches the session to build mode at once,
+  emits `mode_changed {mode: "build"}`, and the agent continues implementation with build tools in
+  the same turn. The planning model remains routed until that turn ends. Readonly turns cannot
+  call it. Its schema stays in the tool list in both modes to preserve the prompt cache.
 - Tool `write_plan {title, content}` (plan mode only) writes `plans_dir/<YYYY-MM-DD-HHMM>-<slug>.md` and emits `plan_written {path, title}`. The GUI opens it in an editable pane. A plan big enough to split across subagents carries an **Orchestration** block — which steps go to which subagent type, which run in parallel, which wait (#K3TY); small plans get none.
 - The GUI executes a plan by sending `set_mode build` then `ask` with text referencing the plan path; "execute in fresh context" sends `reset` first. The Execute prompt appends one standing line: where the plan has an Orchestration block, follow it (start the listed subagents, independent ones together, wait before dependent waves) and name any deviation in the final reply.
 

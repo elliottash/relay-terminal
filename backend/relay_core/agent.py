@@ -35,7 +35,7 @@ from .attachments import format_block as format_attachments
 from .attachments import image_block, images as image_attachments, replace_images
 from .checkpoints import CheckpointStore
 from .context import DEFAULT_THRESHOLD, ContextTracker
-from .planning import (EXIT_PLAN_MODE_SPEC, exit_plan_question,
+from .planning import (EXIT_PLAN_MODE_SPEC, validate_exit_args,
                        PLAN_BLOCKED_TOOLS, PLAN_MODE_NOTE, WRITE_PLAN_SPEC, guest_plan_prompt, plan_from_reply,
                        validate_mode, validate_plan_args, write_plan)
 from .roles import GUEST_BASE_SCHEME, guest_id_of, is_guest_preset
@@ -3345,10 +3345,8 @@ class Agent:
         if name == "exit_plan_mode":
             if self.mode != "plan":
                 raise ValueError("exit_plan_mode is only available in plan mode.")
-            if not self.executor.can_ask:
-                raise ValueError("exit_plan_mode is not available here: you cannot reach the user.")
-            payload, preview = self.executor.questions.prepare(exit_plan_question(args))
-            return Prepared(name, payload, preview)
+            reason = validate_exit_args(args)
+            return Prepared(name, {"reason": reason}, f"EXIT PLAN MODE\n\n{reason}")
         if name == "write_plan":
             if self.mode != "plan":
                 raise ValueError("write_plan is only available in plan mode.")
@@ -3370,18 +3368,12 @@ class Agent:
             ctx = self._turn_ctx or {}
             return self.executor.program.execute(prepared.arguments, ctx.get("turn_id"))
         if prepared.name == "exit_plan_mode":
-            ctx = self._turn_ctx or {}
-            result = self.executor.questions.execute(prepared.arguments, ctx.get("turn_id"))
-            if self.cancel_event.is_set():
-                raise Cancelled("Stopped.")
-            accepted = (result.get("ok") is True
-                        and [a.get("answer") for a in result.get("answers", [])] == ["Execute"])
-            if accepted:
-                self.set_mode("build")
-                self.emit({"event": "mode_changed", "mode": self.mode})
-            return {**result, "approved": accepted, "mode": self.mode,
-                    "note": ("The user approved leaving plan mode. Build mode is active; continue with implementation."
-                             if accepted else "The user did not approve leaving plan mode. Do not execute or ask again; keep planning.")}
+            # The agent's own decision (#XP7N, owner 2026-09-21): no ask — plan mode ends here
+            # and the turn goes on with build tools, Warp-style.
+            self.set_mode("build")
+            self.emit({"event": "mode_changed", "mode": self.mode})
+            return {"ok": True, "mode": self.mode,
+                    "note": "Plan mode is off and build mode is active; continue with implementation in this turn."}
         if prepared.name == "ask_user":
             # The ask is drawn against the turn it belongs to, so the pane can close it if the
             # turn is stopped while the user is still reading it.
