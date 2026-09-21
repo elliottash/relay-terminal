@@ -26,3 +26,15 @@ Tests: 38 in `tests/modelcatalog_test.cpp` (ten new: the design's 1.2 name table
 <!-- relay:entry 20260921T115125Z-f1 author=claude-code kind=note -->
 ### Claude Code · 2026-09-21 11:51
 The owner added: the Switchboard agent's box reads "kimi-k3 (switchboard)" and he does not like it. The suffix is the protocol role name leaking through `modelrows::roleRowText`; folded into t:a5 (the row names the tier the role runs on, never the role's protocol name).
+
+<!-- relay:entry 20260921T121500Z-g1 author=claude-code kind=progress -->
+### Claude Code · 2026-09-21 12:15
+t:a1 landed, `bb19b7b0`, evidence `docs/qa_evidence/2026-09-21-model-box-filter`.
+
+Why nothing was highlighted, since it was not the rows and not the combo's current index: `relay::theme::applyTheme` sets the Fusion style, Fusion answers `SH_ComboBox_Popup` with 1, and Qt then draws a combo's list as a *menu* — `QComboMenuDelegate`, `CE_MenuItem` — which reads none of the stylesheet's `QComboBox … QAbstractItemView` declarations. `selection-background-color: @accent` was never consulted: the selected row was filled `#1d1613` on a `#241c18` list, a 3% step, leaving a 1px focus rectangle as the only mark. `old-popup-probe.cpp` in the evidence is that measurement (breeze `#533927` vs Fusion `#1d1613`, same stylesheet, same selection).
+
+A colour would have been lost again at the next style change, so the list is ours: `src/FilterPopup.{h,cpp}` (`relay-filterpopup`, QtWidgets and the theme tokens, no `Pane`) is a frameless `Qt::Popup` with a visible filter line over rows it paints itself. Up/Down step over separators and switched-off rows, Enter picks, Escape closes with no change and puts the caret back in the prompt box, the row under the pointer takes the highlight, and typing filters case-insensitively and fuzzily (`relayFuzzyScore`) with the first match highlighted, the action rows matching by their own words, and a quiet "no match" line the list shrinks to.
+
+`CurrentTextComboBox::showPopup` opens it instead of `QComboBox`'s — so Alt+M, Alt+E, the Switchboard's box and the mouse all get it — reading the rows out of the combo's own model (text, data, tooltips, separators, disabled state). Nothing that *fills* a box changed, which keeps this clear of t:a5 and t:a6: `ModelRows.cpp`, `conciseModel`, `roleRowModel` and `refreshPickers` were not touched. A pick still emits `activated(index)`, and a chord still reaches `Pane::passHotkeysThrough`'s filter, so Alt+M a second time closes the list as it has since 2026-09-20.
+
+Tests: `ctest -R filterpopup`, 8 cases, one of which renders the popup and measures the pixels so an invisible highlight cannot come back. `manual: docs/qa_evidence/2026-09-21-model-box-filter` (eleven shots, the before shots, the probe and its output).
