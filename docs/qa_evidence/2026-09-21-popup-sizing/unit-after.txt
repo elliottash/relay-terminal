@@ -1,0 +1,29 @@
+# the same test file against this change
+
+********* Start testing of FilterPopupTest *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : FilterPopupTest::initTestCase()
+PASS   : FilterPopupTest::currentRowIsHighlightedOnOpen()
+PASS   : FilterPopupTest::theHighlightIsAVisibleBand()
+PASS   : FilterPopupTest::arrowsSkipSeparatorsAndDisabledRows()
+PASS   : FilterPopupTest::typingFiltersAndHighlightsTheFirstMatch()
+PASS   : FilterPopupTest::noMatchSaysSoAndPicksNothing()
+PASS   : FilterPopupTest::enterReturnsTheOriginalRowIndex()
+PASS   : FilterPopupTest::escapeAnswersWithNothingAndClearsTheFilter()
+PASS   : FilterPopupTest::aShorterListOnTheNextOpenDrawsEveryRow()
+PASS   : FilterPopupTest::aListThatFitsDoesNotScroll()
+PASS   : FilterPopupTest::agrownListIsNotLeftScrolled()
+PASS   : FilterPopupTest::theListStaysInsideTheWindow()
+PASS   : FilterPopupTest::theEffortListIsTheSameControl()
+PASS   : FilterPopupTest::upAndDownStepOverTheClassHeaders()
+PASS   : FilterPopupTest::rightExpandsAClassAndLeftCollapsesIt()
+PASS   : FilterPopupTest::aFilterKeepsTheHeadersWhoseClassStillMatches()
+PASS   : FilterPopupTest::enterAnswersWithTheRowsOwnDataAndEscapePicksNothing()
+PASS   : FilterPopupTest::theViaColumnIsDrawnAtTheEndOfTheRow()
+PASS   : FilterPopupTest::aTypedFilterSearchesTheWiderListTheCallerHandsBack()
+PASS   : FilterPopupTest::withNoHookTheFilterNarrowsTheRowsItWasGiven()
+PASS   : FilterPopupTest::theModelsAreIndentedUnderTheirClassHeader()
+PASS   : FilterPopupTest::theAppStylesheetDoesNotCostTheListARow()
+PASS   : FilterPopupTest::cleanupTestCase()
+Totals: 23 passed, 0 failed, 0 skipped, 0 blacklisted, 99ms
+********* Finished testing of FilterPopupTest *********

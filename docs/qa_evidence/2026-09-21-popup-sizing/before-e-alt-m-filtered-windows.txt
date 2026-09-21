@@ -1,0 +1,12 @@
+
+xwininfo: Window id: 0x1ff (the root window) (has no name)
+
+  Root window id: 0x1ff (the root window) (has no name)
+  Parent window id: 0x0 (none)
+     5 children:
+     0x200022 "relay": ("relay" "relay")  248x143+1205+707  +1205+707
+     0x20001b "relay": ("relay" "relay")  110x117+1459+733  +1459+733
+     0x20000a "Relay — /tmp/claude-1000/pzbefore/project": ("relay" "relay")  1600x900+0+0  +0+0
+     0x20000c "relay": ()  1x1+0+0  +0+0
+     0x200004 "Qt Selection Owner for relay": ()  3x3+0+0  +0+0
+

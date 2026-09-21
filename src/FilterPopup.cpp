@@ -10,6 +10,7 @@
 #include <QKeyEvent>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMargins>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
@@ -122,6 +123,40 @@ public:
     }
 };
 
+// The list, with the one measurement QAbstractScrollArea keeps to itself: how much of the
+// widget's own size the style spends before a row is drawn.
+//
+// This is the whole of card #MDL1's popup fault. The popup is built as a child of the combo box
+// it hangs from (CurrentTextComboBox::filterPopup), so the application stylesheet's
+// `QComboBox QAbstractItemView { border: 1px solid @border; padding: 4px; … }` (src/Theme.cpp)
+// matches this list as a *descendant* of the box. `QListWidget#filterPopupList { border: none }`
+// takes the border back, but nothing takes the padding back, and a padding on a scroll area is
+// answered as PM_DefaultFrameWidth: the styled list spends 8 px of its height on itself, so a
+// widget made exactly as tall as the sum of its rows draws them into a viewport that is 8 px
+// short. The last row was clipped, the list decided it had to scroll, and a list that was longer
+// the previous time it opened kept that offset and started at its second row — Alt+E on a pane
+// with four levels and then on one with three drew `high` and `max` with `low` off the top.
+// Measured in docs/qa_evidence/2026-09-21-popup-sizing.
+//
+// It is asked of the polished widget rather than assumed, because it is the *style's* number: it
+// is 0 with no stylesheet on the popup — which is why the offscreen test never saw any of this —
+// and it would be something else again under another theme or another rule.
+class PopupList final : public QListWidget {
+public:
+    using QListWidget::QListWidget;
+
+    int chromeHeight() const
+    {
+        const QMargins margins = viewportMargins();
+        return 2 * frameWidth() + margins.top() + margins.bottom();
+    }
+    int chromeWidth() const
+    {
+        const QMargins margins = viewportMargins();
+        return 2 * frameWidth() + margins.left() + margins.right();
+    }
+};
+
 }  // namespace
 
 FilterPopup::FilterPopup(QWidget *parent)
@@ -144,7 +179,7 @@ FilterPopup::FilterPopup(QWidget *parent)
     m_edit->installEventFilter(this);
     layout->addWidget(m_edit);
 
-    m_list = new QListWidget(this);
+    m_list = new PopupList(this);
     m_list->setObjectName(QStringLiteral("filterPopupList"));
     m_list->setFrameShape(QFrame::NoFrame);
     m_list->setUniformItemSizes(false);
@@ -461,7 +496,16 @@ void FilterPopup::layoutForAnchor(bool first)
         rows << m_list->sizeHintForRow(r) + 2 * m_list->spacing();
         wanted += rows.last();
     }
-    const int chrome = 2 * m_list->frameWidth() + 2;   // the list's frame and the popup's own 1px
+    // What the *styled* list spends on itself before a row is drawn, and what the popup spends
+    // around its two children. The first is the whole of the Alt+E fault (see PopupList): a list
+    // made exactly as tall as its rows hands them a viewport that is shorter by this much, and
+    // draws one of them short. It is measured, never assumed — and once the popup is on screen
+    // the widget's own answer beats the prediction, which is what `showEvent` re-lays it out for.
+    int listChrome = static_cast<PopupList *>(m_list)->chromeHeight();
+    if (isVisible()) listChrome = std::max(listChrome, m_list->height() - m_list->viewport()->height());
+    const QMargins pad = contentsMargins();
+    const QMargins lay = layout() != nullptr ? layout()->contentsMargins() : QMargins();
+    const int chrome = pad.top() + pad.bottom() + lay.top() + lay.bottom();   // the popup's own 1px border
     // The filter line is pinned as well as the list. applyPalette() re-sets the stylesheet on
     // every open, so the first sizeHint() after it is the unstyled one and the real layout pass a
     // moment later used the styled one — the box then had a spare row's worth of ground under the
@@ -472,18 +516,21 @@ void FilterPopup::layoutForAnchor(bool first)
     m_edit->setFixedHeight(editHeight);
     int cap = 0;
     for (int r = 0; r < rows.size() && r < kMaxRows; ++r) cap += rows.at(r);
-    const int room = std::max(bound.height() - editHeight - chrome - 8, 3 * kRowHeight);
-    const int listHeight = std::min({std::max(wanted, 1), cap, room});
-    const bool scrolls = listHeight < wanted;
+    const int room = std::max(bound.height() - editHeight - listChrome - chrome - 8, 3 * kRowHeight);
+    // `shown` is the room the rows get — the viewport — and the list widget is that plus its own
+    // chrome. Sizing the *widget* to the rows was the bug: the difference went to the style and
+    // came out of the last row.
+    const int shown = std::min({std::max(wanted, 1), cap, room});
+    const bool scrolls = shown < wanted;
     m_list->setVerticalScrollBarPolicy(scrolls ? Qt::ScrollBarAsNeeded : Qt::ScrollBarAlwaysOff);
-    m_list->setFixedHeight(listHeight);
+    m_list->setFixedHeight(shown + listChrome);
     // The layout caches the widget's minimum size and only refreshes it on the next pass, so a
     // setGeometry straight after a shrink was clamped to the height the list used to want.
     if (QLayout *box = layout(); box != nullptr) box->activate();
     // The layout's own total, not a sum of guesses: with the list at a fixed height this is
     // exactly the room the filter line and the rows need, so there is no slack for the layout to
     // leave under the last row and nothing for it to clip.
-    const int height = std::min(bound.height() - 8, editHeight + listHeight + chrome);
+    const int height = std::min(bound.height() - 8, editHeight + shown + listChrome + chrome);
 
     // No narrower than the box it hangs from, no wider than its own longest row — with room for
     // the filter line's own words, which are content too.
@@ -496,6 +543,10 @@ void FilterPopup::layoutForAnchor(bool first)
                                       + (row.trailing.isEmpty() ? 0
                                                                 : metrics.horizontalAdvance(row.trailing) + 24));
     if (scrolls) widest += m_list->verticalScrollBar()->sizeHint().width();
+    // The same again sideways: whatever the style keeps for itself on the left and right of the
+    // rows is width the names do not get, and a name elided eight pixels early is this same fault
+    // in the other direction.
+    widest += static_cast<PopupList *>(m_list)->chromeWidth();
     const int width = std::clamp(widest, 64, std::min(kMaxWidth, bound.width() - 8));
 
     const QPoint corner = anchor->mapToGlobal(QPoint(0, 0));
@@ -512,10 +563,23 @@ void FilterPopup::layoutForAnchor(bool first)
     // that grew keeps whatever offset it scrolled to while it was short: three levels with the
     // middle one current drew as "high", "max" and a row of empty ground, with "low" scrolled off
     // the top — the second half of the Alt+E fault, and the one that survived the sizing fix.
+    m_scrolls = scrolls;
     if (QLayout *box = layout(); box != nullptr) box->activate();
-    if (!scrolls) m_list->verticalScrollBar()->setValue(0);
-    else if (QListWidgetItem *item = m_list->currentItem(); item != nullptr)
-        m_list->scrollToItem(item, QAbstractItemView::EnsureVisible);
+    settleScroll();
+}
+
+// Where the rows start: the top, unless the list is long enough that the highlighted row needs
+// scrolling to. Its own step because it has to be done *after* the list has its real geometry,
+// and a hidden widget does not get one: Qt posts the resize event of a widget that is not on
+// screen yet, so the scroll range this list has while it is being sized is not the range it has
+// when it is drawn. Every open therefore does it twice — once here, once from `showEvent` — and
+// doing it twice is free, because both times it asks for the same thing.
+void FilterPopup::settleScroll()
+{
+    QScrollBar *bar = m_list->verticalScrollBar();
+    bar->setValue(bar->minimum());   // the top, whatever the list was showing when it was longer
+    QListWidgetItem *item = m_list->currentItem();
+    if (m_scrolls && item != nullptr) m_list->scrollToItem(item, QAbstractItemView::EnsureVisible);
 }
 
 // Whether the filter left that row (an index into rows()) in the list at all — scrolled out or
@@ -552,6 +616,11 @@ bool FilterPopup::scrolling() const
 void FilterPopup::showEvent(QShowEvent *event)
 {
     QWidget::showEvent(event);
+    // The children were shown just before this event, so the list finally has a real viewport to
+    // measure rather than a predicted one — and a real scroll range to reset. Laying out again is
+    // idempotent wherever the prediction was right, which is everywhere the style spends what it
+    // says it spends; where it is not, this is the pass that puts the last row back.
+    layoutForAnchor(false);
     m_edit->setFocus(Qt::PopupFocusReason);
 }
 

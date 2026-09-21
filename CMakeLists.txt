@@ -643,7 +643,10 @@ if(BUILD_TESTING)
     # The list Alt+M and Alt+E drop open (2026-09-21): the current row highlighted on open, Up/Down
     # over separators and switched-off rows, the filter, and what Enter gives back.
     add_executable(relay-filterpopup-tests tests/filterpopup_test.cpp)
-    target_link_libraries(relay-filterpopup-tests PRIVATE relay-filterpopup ${RELAY_QT}::Test)
+    # relay-highlight carries src/Theme.cpp: one case drives the popup with the *application's*
+    # stylesheet on it (relay::theme::applyTheme), because that stylesheet is what used to cost
+    # the styled list a row — with no stylesheet the fault is invisible (card #MDL1).
+    target_link_libraries(relay-filterpopup-tests PRIVATE relay-filterpopup relay-highlight ${RELAY_QT}::Test)
     add_test(NAME filterpopup COMMAND relay-filterpopup-tests)
     set_tests_properties(filterpopup PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # The one list both model boxes draw (#PK5Q): the rows, their order and what a pick means.

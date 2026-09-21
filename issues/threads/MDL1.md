@@ -619,3 +619,48 @@ length changes with every model switch now, so this is far easier to hit than it
 `tests/filterpopup_test.cpp :: aShorterListOnTheNextOpenDrawsEveryRow` states the expectation and
 passes headlessly, because the stylesheet — the thing that makes the measurement wrong — is not on
 the popup there. NOTES.md has the reproduction.
+
+<!-- relay:entry 20260921T220116Z-f1 author=claude-code kind=progress -->
+### Claude Code · 2026-09-21 22:01
+Fixed the popup sizing the effort-by-model run found and left for whoever owns
+`src/FilterPopup.cpp` (the entry above, 20260921T211909Z-e1). The list was measured one row short
+of what it drew, so the last row was clipped against the frame and a list that got *shorter*
+between two opens stayed scrolled past its first row.
+
+**Root cause.** The popup is built as a child of the combo box it hangs from
+(`CurrentTextComboBox::filterPopup`), so the app stylesheet's `QComboBox QAbstractItemView {
+border: 1px solid @border; padding: 4px; }` (src/Theme.cpp:386) matches its list as a *descendant*
+of the box. `QListWidget#filterPopupList { border: none }` takes the border back; nothing takes
+the padding back, and a padding on a scroll area is answered as `PM_DefaultFrameWidth`. So the
+styled list keeps 8px of its own height — and `layoutForAnchor` sized the list *widget* to the sum
+of the delegate's row heights, leaving the rows a viewport 8px short. The list then decided it had
+to scroll, and with the current row the last one (`/effort xhigh` then `/model kimi-k3`, which
+snaps to `max`) a whole row went off the top and stayed there on the next open. The popup's total
+height was right all along: the old code added the list's frame to the popup but not to the list,
+so those 8px sat as dead ground under the last row.
+
+**Change.** src/FilterPopup.{h,cpp}: `PopupList::chromeHeight()` reports what the styled widget
+spends on itself (frame width plus viewport margins), `layoutForAnchor` sizes the *viewport* to the
+rows and the widget to that plus the chrome — measured off the polished widget, not assumed, and
+re-measured from `showEvent` where real geometry exists — and the same number goes into the width.
+The scroll reset became `settleScroll()`, run after the resize on every open from both
+`layoutForAnchor` and `showEvent`, because a hidden widget's resize event is posted rather than
+delivered; it starts at the top and scrolls only as far as the current row needs.
+
+**Test.** `tests/filterpopup_test.cpp :: theAppStylesheetDoesNotCostTheListARow` applies
+`relay::theme::applyTheme` and opens the list off a real `QComboBox#statusPicker` — which is what
+reproduces it headlessly, and why the existing `aShorterListOnTheNextOpenDrawsEveryRow` could not.
+Four assertions fail on the unfixed source and none on this one (`unit-before.txt`,
+`unit-after.txt`); `ctest -R filterpopup` is 23/23. The test target links `relay-highlight` for
+`src/Theme.cpp` — the only line outside my own files.
+
+**Evidence.** `docs/qa_evidence/2026-09-21-popup-sizing/` — `drive.sh` runs the five steps under
+Xvfb against two binaries built from clean `git archive main` exports (the checkout's `build/`
+would not link: another session's `src/ModelsPane.cpp` was mid-edit), `measure.py` reads the
+popup's own X geometry and counts the bands of ink in it, `measured.txt` is the whole output.
+Alt+E on four levels: the last band 10px before (the descender of `xhigh` shaved — it reads
+`xhiah` in `before-a-alt-e-four-zoom.png`) and 13px after. Alt+E on three after those four: **two**
+bands before, `low` off the top with 27px of empty ground under `max`; three after, twice over.
+Alt+M and Alt+M with `glm` typed at it: the same clearance under the last row as above the first.
+Every popup is the same height before and after and 8px wider — the width the rows used to lose to
+that padding.

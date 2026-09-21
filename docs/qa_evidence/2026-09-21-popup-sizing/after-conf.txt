@@ -1,0 +1,34 @@
+[agent]
+effort=xhigh
+
+[instructions]
+onboarded=true
+
+[isolation]
+enabled=false
+
+[models]
+fallbacks=kimi-code|k3, glm-coding|glm-5.3
+provider_order=kimi-code, glm-coding, openrouter, openai, guest:claude, guest:codex
+tier\flash=glm-coding|glm-5.3-flash|low
+tier\high=openai|gpt-6-astra|xhigh
+tier\lite=glm-coding|glm-5.3-flash|low
+tier\local=@Invalid()
+tier\main=openai|gpt-6-astra|, kimi-code|k3|, glm-coding|glm-5.3|
+
+[provider]
+base=https://api.kimi.ai/coding/v1
+extra={\"reasoning_effort\":\"high\"}
+model=k3
+preset=kimi-code
+
+[security]
+approvals_ask=@Invalid()
+approvals_chosen=true
+
+[suggestions]
+next_command=false
+next_prompt=false
+
+[url_handler]
+announced=true

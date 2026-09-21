@@ -1,0 +1,37 @@
+# tests/filterpopup_test.cpp against the UNFIXED src/FilterPopup.cpp (git show main:…)
+# built by hand against the same test file, offscreen, 2026-09-21T21:59:30Z
+
+********* Start testing of FilterPopupTest *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : FilterPopupTest::initTestCase()
+PASS   : FilterPopupTest::currentRowIsHighlightedOnOpen()
+PASS   : FilterPopupTest::theHighlightIsAVisibleBand()
+PASS   : FilterPopupTest::arrowsSkipSeparatorsAndDisabledRows()
+PASS   : FilterPopupTest::typingFiltersAndHighlightsTheFirstMatch()
+PASS   : FilterPopupTest::noMatchSaysSoAndPicksNothing()
+PASS   : FilterPopupTest::enterReturnsTheOriginalRowIndex()
+PASS   : FilterPopupTest::escapeAnswersWithNothingAndClearsTheFilter()
+PASS   : FilterPopupTest::aShorterListOnTheNextOpenDrawsEveryRow()
+PASS   : FilterPopupTest::aListThatFitsDoesNotScroll()
+PASS   : FilterPopupTest::agrownListIsNotLeftScrolled()
+PASS   : FilterPopupTest::theListStaysInsideTheWindow()
+PASS   : FilterPopupTest::theEffortListIsTheSameControl()
+PASS   : FilterPopupTest::upAndDownStepOverTheClassHeaders()
+PASS   : FilterPopupTest::rightExpandsAClassAndLeftCollapsesIt()
+PASS   : FilterPopupTest::aFilterKeepsTheHeadersWhoseClassStillMatches()
+PASS   : FilterPopupTest::enterAnswersWithTheRowsOwnDataAndEscapePicksNothing()
+PASS   : FilterPopupTest::theViaColumnIsDrawnAtTheEndOfTheRow()
+PASS   : FilterPopupTest::aTypedFilterSearchesTheWiderListTheCallerHandsBack()
+PASS   : FilterPopupTest::withNoHookTheFilterNarrowsTheRowsItWasGiven()
+PASS   : FilterPopupTest::theModelsAreIndentedUnderTheirClassHeader()
+FAIL!  : FilterPopupTest::theAppStylesheetDoesNotCostTheListARow() 'popup.rowVisible(row)' returned FALSE. (four levels: row 0 is not drawn whole)
+   Loc: [tests/filterpopup_test.cpp(783)]
+FAIL!  : FilterPopupTest::theAppStylesheetDoesNotCostTheListARow() 'popup.rowVisible(row)' returned FALSE. (three levels after four: row 0 is not drawn whole)
+   Loc: [tests/filterpopup_test.cpp(783)]
+FAIL!  : FilterPopupTest::theAppStylesheetDoesNotCostTheListARow() 'popup.rowVisible(row)' returned FALSE. (the top of a scrolling list: row 0 is not drawn whole)
+   Loc: [tests/filterpopup_test.cpp(783)]
+FAIL!  : FilterPopupTest::theAppStylesheetDoesNotCostTheListARow() 'popup.rowVisible(39)' returned FALSE. (the last match is not drawn whole)
+   Loc: [tests/filterpopup_test.cpp(820)]
+PASS   : FilterPopupTest::cleanupTestCase()
+Totals: 22 passed, 4 failed, 0 skipped, 0 blacklisted, 94ms
+********* Finished testing of FilterPopupTest *********

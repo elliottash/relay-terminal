@@ -13,6 +13,7 @@
 #include "Theme.h"
 
 #include <QApplication>
+#include <QComboBox>
 #include <QImage>
 #include <QPixmap>
 #include <QSet>
@@ -731,6 +732,95 @@ private slots:
         const QSet<int> levels = past(render({plainRow(QStringLiteral("high")), plainRow(QStringLiteral("max"))}), caret);
         QVERIFY(!levels.isEmpty());
         QCOMPARE(*std::min_element(levels.cbegin(), levels.cend()), flatAt);
+    }
+
+    // ----- the application's own stylesheet, on the popup (card #MDL1, 2026-09-21) -----------
+
+    // 18. Everything above this drives a popup with **no stylesheet on it**, and that is exactly
+    //     why `aShorterListOnTheNextOpenDrawsEveryRow` passed all the way through a fault two
+    //     agents could see on a screen: Alt+E on a pane with four levels and then on one with
+    //     three drew `high` and `max` with `low` scrolled off the top, and the last row of a
+    //     four-level list came out clipped against the frame.
+    //
+    //     The application stylesheet is what makes the measurement wrong. The popup is a child of
+    //     the combo box it hangs from, so `QComboBox QAbstractItemView { border: 1px solid;
+    //     padding: 4px; }` (src/Theme.cpp) reaches its list, and a padding on a scroll area is
+    //     answered as frame width: the styled list keeps 8 px of its own height, and a list made
+    //     exactly as tall as its rows hands them a viewport a third of a row short. So this case
+    //     applies the real theme — `relay::theme::applyTheme`, the same call `main()` makes — and
+    //     opens the level box off a real `QComboBox#statusPicker`, which is what Pane names it.
+    //
+    //     What is asserted is the invariant and not the arithmetic: every row of a list that fits
+    //     is drawn whole, the list does not scroll, and a list past the cap shows a whole number
+    //     of rows starting at the top. Those hold whatever a theme spends on its borders.
+    void theAppStylesheetDoesNotCostTheListARow()
+    {
+        auto *app = qobject_cast<QApplication *>(QCoreApplication::instance());
+        QVERIFY(app != nullptr);
+        const QString wasStyleSheet = app->styleSheet();
+        theme::applyTheme(*app);
+
+        // The anchor as the pane has it: the level box at the right-hand end of the composer
+        // strip, so the list opens *above* it — the geometry the fault was seen in.
+        QWidget window;
+        window.resize(1600, 900);
+        QComboBox anchor(&window);
+        anchor.setObjectName(QStringLiteral("statusPicker"));   // Pane::buildEffortBox names it this
+        anchor.setGeometry(1460, 862, 70, 22);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+        const auto levels = [](const QStringList &names) {
+            QList<FilterRow> rows;
+            for (const QString &name : names) rows << FilterRow{name, name, {}, false, true};
+            return rows;
+        };
+        // The popup is the combo's child, which is how the stylesheet's `QComboBox
+        // QAbstractItemView` rule reaches it at all.
+        FilterPopup popup(&anchor);
+        const auto everyRowDrawn = [&popup](int count, const char *what) {
+            for (int row = 0; row < count; ++row)
+                QVERIFY2(popup.rowVisible(row),
+                         qPrintable(QStringLiteral("%1: row %2 is not drawn whole").arg(QLatin1String(what)).arg(row)));
+        };
+
+        // openai's four, `xhigh` current: the last row used to be clipped against the frame.
+        popup.setRows(levels({QStringLiteral("low"), QStringLiteral("medium"), QStringLiteral("high"),
+                              QStringLiteral("xhigh")}), 3);
+        popup.openFor(&anchor);
+        QVERIFY(popup.isVisible());
+        QCOMPARE(popup.visibleCount(), 4);
+        QVERIFY2(!popup.scrolling(), "four levels must not need a scrollbar");
+        everyRowDrawn(4, "four levels");
+        popup.dismiss();
+
+        // Then kimi's three, on the same box: the list that got shorter between two opens.
+        popup.setRows(levels({QStringLiteral("low"), QStringLiteral("high"), QStringLiteral("max")}), 2);
+        popup.openFor(&anchor);
+        QCOMPARE(popup.visibleCount(), 3);
+        QVERIFY2(!popup.scrolling(), "three levels must not need a scrollbar");
+        everyRowDrawn(3, "three levels after four");
+        popup.dismiss();
+
+        // A long list still scrolls, and still draws whole rows: the viewport is a whole number of
+        // them, and the open starts at the top rather than wherever the last list had scrolled to.
+        QList<FilterRow> many;
+        for (int i = 0; i < 40; ++i)
+            many << FilterRow{QStringLiteral("model-%1").arg(i), QStringLiteral("entry:%1").arg(i), {}, false, true};
+        popup.setRows(many, 2);
+        popup.openFor(&anchor);
+        QVERIFY2(popup.scrolling(), "forty rows must scroll");
+        everyRowDrawn(3, "the top of a scrolling list");
+
+        // And a filter that leaves a handful of rows shrinks it back to a list that fits.
+        popup.setFilterText(QStringLiteral("model-3"));
+        QVERIFY2(!popup.scrolling(), "thirteen rows must not need a scrollbar");
+        QCOMPARE(popup.visibleCount(), 13);   // model-3, model-30 … model-39, and fuzzily 13 and 23
+        QVERIFY2(popup.rowVisible(3), "the first match is not drawn whole");
+        QVERIFY2(popup.rowVisible(39), "the last match is not drawn whole");
+        popup.dismiss();
+
+        app->setStyleSheet(wasStyleSheet);
     }
 };
 

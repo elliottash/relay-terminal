@@ -140,6 +140,7 @@ protected:
 private:
     void rebuild(int preferRow);       // refill the list for the current filter text
     void layoutForAnchor(bool first);  // size and place it; `first` picks above or below
+    void settleScroll();               // put the rows back at the top (or at the current row)
     bool keyPress(QKeyEvent *key);     // true when the popup consumed it
     void applyPalette();
     int rowOf(const QListWidgetItem *item) const;
@@ -149,6 +150,7 @@ private:
 
     QPointer<QWidget> m_anchor;
     bool m_above = false;              // the list opened upwards, so it shrinks from the top
+    bool m_scrolls = false;            // the rows do not all fit: the last layout said so
     QList<FilterRow> m_base;           // what `setRows` was given: the list with nothing typed
     QList<FilterRow> m_rows;           // what is drawn: `m_base`, or `onQueryRows`'s answer
     int m_current = -1;                // index into m_rows

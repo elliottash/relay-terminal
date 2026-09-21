@@ -1,0 +1,129 @@
+# docs/qa_evidence/2026-09-21-popup-sizing — measure.py over every shot of both runs.
+# BEFORE is main at 2907379e; AFTER is the same tree plus src/FilterPopup.{h,cpp}.
+# The geometry is the popup's own X window, read with xdotool while the list was open.
+
+before-a-alt-e-four-popup.txt: 2097179 110x143+1458+707
+before-b-alt-e-three-popup.txt: 2097179 110x117+1459+733
+before-c-alt-e-three-again-popup.txt: 2097179 110x117+1459+733
+before-d-alt-m-long-popup.txt: 2097186 227x254+1365+596
+before-e-alt-m-filtered-popup.txt: 2097186 248x143+1205+707
+after-a-alt-e-four-popup.txt: 2097179 118x143+1458+707
+after-b-alt-e-three-popup.txt: 2097179 118x117+1459+733
+after-c-alt-e-three-again-popup.txt: 2097179 118x117+1459+733
+after-d-alt-m-long-popup.txt: 2097186 235x254+1365+596
+after-e-alt-m-filtered-popup.txt: 2097186 256x143+1197+707
+
+=== measured ===
+== BEFORE a-alt-e-four ==
+popup 2097179: 110x143 at (1458,707); ground (36, 28, 24)
+filter line rule at y=738, 31 px down the popup
+row bands: 4, expecting 4
+  band 0: y 753..762, 10 px tall
+  band 1: y 779..788, 10 px tall, pitch 26
+  band 2: y 797..822, 26 px tall, pitch 18
+  band 3: y 831..840, 10 px tall, pitch 34
+clear above the first band: 15 px; under the last: 9 px
+VERDICT: every row drawn
+
+== BEFORE b-alt-e-three ==
+popup 2097179: 110x117 at (1459,733); ground (36, 28, 24)
+filter line rule at y=764, 31 px down the popup
+row bands: 2, expecting 3
+  band 0: y 779..791, 13 px tall
+  band 1: y 797..822, 26 px tall, pitch 18
+clear above the first band: 15 px; under the last: 27 px
+VERDICT: ROWS MISSING OR CLIPPED
+
+== BEFORE c-alt-e-three-again ==
+popup 2097179: 110x117 at (1459,733); ground (36, 28, 24)
+filter line rule at y=764, 31 px down the popup
+row bands: 2, expecting 3
+  band 0: y 779..791, 13 px tall
+  band 1: y 797..822, 26 px tall, pitch 18
+clear above the first band: 15 px; under the last: 27 px
+VERDICT: ROWS MISSING OR CLIPPED
+
+== BEFORE d-alt-m-long ==
+popup 2097186: 227x254 at (1365,596); ground (36, 28, 24)
+filter line rule at y=627, 31 px down the popup
+row bands: 8, expecting 8
+  band 0: y 642..654, 13 px tall
+  band 1: y 668..680, 13 px tall, pitch 26
+  band 2: y 694..703, 10 px tall, pitch 26
+  band 3: y 720..732, 13 px tall, pitch 26
+  band 4: y 738..763, 26 px tall, pitch 18
+  band 5: y 772..781, 10 px tall, pitch 34
+  band 6: y 798..810, 13 px tall, pitch 26
+  band 7: y 831..840, 10 px tall, pitch 33
+clear above the first band: 15 px; under the last: 9 px
+VERDICT: every row drawn
+
+== BEFORE e-alt-m-filtered ==
+popup 2097186: 248x143 at (1205,707); ground (36, 28, 24)
+filter line rule at y=738, 31 px down the popup
+row bands: 4, expecting 4
+  band 0: y 753..762, 10 px tall
+  band 1: y 771..796, 26 px tall, pitch 18
+  band 2: y 805..814, 10 px tall, pitch 34
+  band 3: y 831..840, 10 px tall, pitch 26
+clear above the first band: 15 px; under the last: 9 px
+VERDICT: every row drawn
+
+== AFTER a-alt-e-four ==
+popup 2097179: 118x143 at (1458,707); ground (36, 28, 24)
+filter line rule at y=736, 29 px down the popup
+row bands: 4, expecting 4
+  band 0: y 749..758, 10 px tall
+  band 1: y 775..784, 10 px tall, pitch 26
+  band 2: y 793..818, 26 px tall, pitch 18
+  band 3: y 827..839, 13 px tall, pitch 34
+clear above the first band: 13 px; under the last: 10 px
+VERDICT: every row drawn
+
+== AFTER b-alt-e-three ==
+popup 2097179: 118x117 at (1459,733); ground (36, 28, 24)
+filter line rule at y=762, 29 px down the popup
+row bands: 3, expecting 3
+  band 0: y 775..784, 10 px tall
+  band 1: y 801..813, 13 px tall, pitch 26
+  band 2: y 819..844, 26 px tall, pitch 18
+clear above the first band: 13 px; under the last: 5 px
+VERDICT: every row drawn
+
+== AFTER c-alt-e-three-again ==
+popup 2097179: 118x117 at (1459,733); ground (36, 28, 24)
+filter line rule at y=762, 29 px down the popup
+row bands: 3, expecting 3
+  band 0: y 775..784, 10 px tall
+  band 1: y 801..813, 13 px tall, pitch 26
+  band 2: y 819..844, 26 px tall, pitch 18
+clear above the first band: 13 px; under the last: 5 px
+VERDICT: every row drawn
+
+== AFTER d-alt-m-long ==
+popup 2097186: 235x254 at (1365,596); ground (36, 28, 24)
+filter line rule at y=625, 29 px down the popup
+row bands: 8, expecting 8
+  band 0: y 638..650, 13 px tall
+  band 1: y 664..676, 13 px tall, pitch 26
+  band 2: y 690..699, 10 px tall, pitch 26
+  band 3: y 716..728, 13 px tall, pitch 26
+  band 4: y 734..759, 26 px tall, pitch 18
+  band 5: y 768..777, 10 px tall, pitch 34
+  band 6: y 794..806, 13 px tall, pitch 26
+  band 7: y 827..836, 10 px tall, pitch 33
+clear above the first band: 13 px; under the last: 13 px
+VERDICT: every row drawn
+
+== AFTER e-alt-m-filtered ==
+popup 2097186: 256x143 at (1197,707); ground (36, 28, 24)
+filter line rule at y=736, 29 px down the popup
+row bands: 4, expecting 4
+  band 0: y 749..758, 10 px tall
+  band 1: y 767..792, 26 px tall, pitch 18
+  band 2: y 801..810, 10 px tall, pitch 34
+  band 3: y 827..839, 13 px tall, pitch 26
+clear above the first band: 13 px; under the last: 10 px
+VERDICT: every row drawn
+
+
