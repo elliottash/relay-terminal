@@ -108,3 +108,54 @@ blocked** — a different answer changes only the step named.
    phone has no board UI at all, so the row would open onto nothing. Its own card if he wants it.
 5. **Is step 10 (the `.cpp` + library + its own tests) worth doing?** *Recommendation: do it last,
    and drop it without regret if anything above runs long.*
+
+<!-- relay:entry 20260921T005435Z-pw author=claude-code kind=progress -->
+**Step 8 landed — `option:` and `session:` are link kinds of the transcript** (`59319d88`).
+
+`relay::links::Kind` now has `Option` and `Session` beside `Path`, `Url` and `Card`
+(`src/OutputLinks.h:28`), so an answer from *any* agent that names a setting or a saved
+conversation is clickable in a pane's transcript, not only inside the helper panel's
+`QTextBrowser` (the lambda at `src/HelperChat.cpp:585-617`, which step 9 deletes).
+
+The grammar is the one the backend's answers already use, kept byte-for-byte: `option:<section>/<row>`
+and `session:<id>`, each with or without an authority (`option://…`). Recognition is a new *first*
+stage of `candidates()` — first because `option://sec/row` is a URL to the URL regex and would be
+claimed whole. The scheme must open a word, the way `#ID` must, so nothing is claimed inside a URL
+(`https://relay.test/docs/option:a/b` stays one URL link) and `options:` is not the scheme. A row id
+keeps its own slashes (`option:models/provider/glm-coding` is one row, `RelayWindow.h:2472`): the
+split is at the first slash, as the helper's handler split it. A section alone (`option:agent`) is a
+link too. They need no probe and no board — the answer spelled the thing out — so they resolve in
+any pane and in either `Mode`; the *host* decides whether it can show it, which is
+`Context::resolveLink`'s job.
+
+Public API added (`src/OutputLinks.h`):
+
+```cpp
+QString optionTarget(const QString &section, const QString &row);
+bool    optionOf(const QString &target, QString *section, QString *row);
+QString sessionTarget(const QString &id);
+QString sessionIdOf(const QString &target);
+```
+
+They travel as `relay://option/<section>[/<row>]` and `relay://session/<id>` for the same reason a
+card does: the engine carries one string per link (`engine/view/TerminalView.cpp:1870`), so the kind
+has to survive inside it.
+
+**What step 5 must wire**, in `Pane::openOutputTarget` (`src/Pane.h:2628`) / the window's routing:
+beside the `relay://card/` branch, `optionOf(target, &section, &row)` →
+`openSettingsPane(Mode::Options, section)` + `SettingsPane::revealOption(section, row)`, and
+`sessionIdOf(target)` → `openSessions(QString(), id)`. Those are exactly the two bodies
+`RelayWindow.h:6714-6724` already has for `onOpenOption`/`onOpenSession`, so step 5 moves them
+rather than writing them.
+
+Tests: `ctest --test-dir build -R '^outputlinks$'` — 42 slots, all pass. Six new ones cover both
+spellings of each scheme, a row id with slashes, a section on its own, a line sharing card + option
++ path, prose mode, the non-matches (`options:`, a bare word, `option:` with nothing to name,
+mid-token, inside a URL) and the target round trips.
+
+One thing left for another session, because it is in `engine/` and outside this step's file set:
+the link **context menu** (`engine/view/TerminalView.cpp:2765-2780`) still has only a card branch
+and an else branch that reads the target as a file path, so a right-click on an `option:`/`session:`
+link offers "Open <last path segment>", "Open with default application" and "Copy path". Left click,
+Ctrl+click, hover and the keyboard walk (#GWXM) are all correct — they go through
+`linkActivated(link.target, …)`. Worth a two-line branch there when step 5 lands the routing.
