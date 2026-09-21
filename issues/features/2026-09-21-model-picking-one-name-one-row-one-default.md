@@ -1,7 +1,7 @@
 ---
 id: MDL1
 type: work
-status: executing
+status: needs-verification
 labels: [feature, models]
 assignee: claude-code
 rank: k
@@ -57,8 +57,8 @@ and i realized that the model priority chooser is crtical, and currently its too
   dialogue to be the main way to select / prioritize models".
 
 ## Discussion points
-Three calls that are the owner's; work proceeds on the recommendation for each until he says
-otherwise (`docs/MODEL-PICKING-DESIGN.md`, section 4):
+Three calls that were the owner's (`docs/MODEL-PICKING-DESIGN.md`, section 4). All three were
+answered on 2026-09-21 — see Decisions:
 
 1. A guest harness at rank 1 of the main list: does a new pane start it? Recommended: yes, since he
    ranked it first, with the harness process starting on the first turn.
@@ -83,3 +83,52 @@ never returns to the model the owner was using, and its own sentence is overwrit
 - [x] names at every display site, lower-case roles; no protocol role name ("switchboard") in a box <!-- t:a5 -->
 - [x] the box: mode rows "high (model)", Left/Right changes mode in place, that mode's list below, one row per model, `/high` <!-- t:a6 -->
 - [x] the Ctrl+Alt+M dialog is where models are picked AND prioritized: tier tabs, reorder, add, remove, level, profile, "via" <!-- t:a7 -->
+
+## Execution Summary
+Seven tasks, each by an Opus subagent in a named area of the code, each landed through
+`scripts/land.py` with its own tests and an Xvfb run.
+
+- **Names.** `presets.model_name` and `relay::models::nameOf`: lower-case, no spaces, no vendor
+  prefix, never sent on the wire; every catalog row carries `name`; `Pane::modelNameFor` is the one
+  call every status line, tooltip, chip, export, the Sessions list, the info panel and the phone
+  use. The worker's events carry `model_name`. Role and tier words are one lower-case table.
+- **One row per model.** `relay::models::grouped`: entries that share a name are one row, the
+  provider chosen by the tier lists first, then plan, harness, API, OpenRouter, Relay Free; a local
+  entry never joins a cloud row; a row is grey only when every provider in it is spent.
+- **One default.** `startEntry`: a pane, a console and the Switchboard's worker start on rank 1 of
+  the main list — its preset, model and level, a guest harness included (started on the first
+  prompt). A pick in a pane is that pane's; `applyMainDefault` is deleted; a restored pane gets its
+  model and its per-mode picks back; tier-list edits reach running workers.
+- **`/swap`** is a toggle with memory (`swapTarget`), and its sentence survives `model_changed`
+  (`sayAndSwitch`, which `/glm` and `/kimi` use too).
+- **The box (Alt+M, Alt+E).** A popup that paints its own rows (the highlight had been lost to
+  Fusion's menu delegate): current row highlighted, arrows, type to filter. Mode rows
+  "high (model)" then the mode's list in list order; Left/Right change the mode in place; the
+  collapsed box is the model alone on main, `<model> · <mode>` otherwise; the same rows in a
+  console. `/high` and Alt+H; `set_agent_role` may carry one entry, per pane.
+- **The dialog (Ctrl+Alt+M)** picks and prioritizes: tier tabs, reorder, add, remove, level, undo,
+  the profile, "via"; Options › Models has a button to it at the top.
+- Found on the way and fixed: `Ctrl++` in the keybinding catalogue stopped every `configure`
+  (#Z00M's default; `4d540c0e`); the old level box hid a level behind its scrollbar.
+
+## Tests
+`ctest --test-dir build -R "modelrows|filterpopup|modelcatalog|modelpicker|panestate|conversations"`
+(6/6), and `tests/test_presets.py`, `test_roles.py`, `test_keybindings.py`, `test_model_switch.py`,
+`test_conv_index.py`, `test_web_model_name.py`, all run green on 2026-09-21 after the last commit.
+
+## QA checklist
+- [ ] A new pane opens on rank 1 of the main list, model and level; a harness at rank 1 says it
+      starts on the first prompt, and does.
+- [ ] Pick another model in one pane; the next new pane is still rank 1.
+- [ ] Reorder main in Ctrl+Alt+M (Alt+Up/Down); the next new pane follows.
+- [ ] `/swap` from a third model goes to rank 1, the sentence stays, `/swap` again comes back.
+- [ ] Alt+M: current model highlighted; Up/Down; typing filters; Left/Right change mode in place;
+      Enter on a flash-list model gives `<model> · flash`; Escape changes nothing.
+- [ ] Alt+E: current level highlighted, no scrollbar, inside the window.
+- [ ] The Switchboard agent's box is the same list as a pane's, with no "(switchboard)"/"(main)".
+- [ ] A Codex pane's box says the model (`gpt-6-astra`), a Claude Code pane `claude-opus-5`.
+- [ ] Ctrl+Alt+M: add a model by typing + Ctrl+Enter, Delete it, Ctrl+Z; a model served by two
+      providers is one row on `all` with a "via" choice.
+- [ ] Quit and reopen with no arguments: each pane is back on its own model and mode.
+- [ ] The phone shows the same names.
+

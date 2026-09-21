@@ -216,3 +216,7 @@ Shots added to the evidence: `k` (/flash comes back on the pane's own flash mode
 arguments, the pane back on "kimi-k3 · flash" and its box agreeing. Tests: 16 in
 `tests/modelrows_test.cpp`, 19 in `tests/filterpopup_test.cpp`,
 `ctest -R "modelrows|filterpopup|modelcatalog|modelpicker|panestate"` green.
+
+<!-- relay:entry 20260921T141434Z-z1 author=claude-code kind=progress -->
+### Claude Code · 2026-09-21 14:14
+All seven tasks landed; the targeted C++ and Python tests re-run green on the final tree and `build/relay` rebuilt. Card to needs-verification with its Execution Summary, Tests and QA checklist. Left for the owner: three provider labels still carry a model name ("z.ai · glm-5.3 · coding plan"), which are Options › Models' provider headings.
