@@ -584,6 +584,8 @@ class Sidecar:
         self.reason = ""
         self._last_state: dict | None = None
         self._bringing: asyncio.Task | None = None
+        self.pair_code_wait = 2.5           # seconds `pair_code` waits for a move under way
+        self._pair_code_held = ""           # the code that wait produced, for the re-ask it causes
         # The sidecar's own retry bounds, for getting *to* the chosen address; the hub has its
         # own for holding the socket there (host_mod.RECONNECT_*). A test shrinks both.
         self.retry_min = host_mod.RECONNECT_MIN
@@ -1230,11 +1232,40 @@ class Sidecar:
         if self.host is None:
             self.emit({"t": "error", "message": "sharing is not running."})
             return
-        try:
-            record = await self.host.pair_code()
-        except wire.WireError as error:
-            self.emit({"t": "error", "message": error.message})
-            return
+        # One code per look at the dialog (the hosted drive, #FR1C task 4). "Pair a phone…" on a
+        # desktop whose remote control was off sends `start` and then, on the first `started`,
+        # `pair_code` — a second or two before the service has moved to the address it was told
+        # to be at. A code minted now lives at the loopback rendezvous, `Hub.rehome` ends it as
+        # `expired`, and the dialog swaps in another while the person is already reading the
+        # first one out to their phone. So: wait, briefly, for the move that is under way. It is
+        # awaited here rather than in a task because the GUI's next line may be this code's
+        # `pair_code_revoke`, and that has to find the code minted. If the address cannot be
+        # reached in that time the code is made where the service is, exactly as before.
+        bringing, waited = self._bringing, False
+        if self.always and not self.at_wish() and bringing is not None and not bringing.done():
+            await asyncio.wait({bringing}, timeout=self.pair_code_wait)
+            waited = True
+            if self.host is None:          # switched off while we waited
+                self.emit({"t": "error", "message": "sharing is not running."})
+                return
+        # …and the move announces itself with a second `started`, on which the dialog asks again.
+        # That one re-ask is handed the code the wait produced, if nobody has tried it: replacing
+        # it would be the same swap, one step later. Every other `pair_code` still replaces the
+        # live code (one door at a time), and the dialog's "New code" and its closing both revoke
+        # first, so a deliberate new code never finds this one live.
+        held, self._pair_code_held = self._pair_code_held, ""
+        record = self.host.codes.by_code(held) if held else None
+        if record is not None and (record.state != meetcode_mod.LIVE or record.failures
+                                   or record.kind != meetcode_mod.KIND_PAIR):
+            record = None
+        if record is None:
+            try:
+                record = await self.host.pair_code()
+            except wire.WireError as error:
+                self.emit({"t": "error", "message": error.message})
+                return
+            if waited:
+                self._pair_code_held = record.code
         self.emit({"t": "pair_code", "code": record.code, "pin": record.pin,
                    "expires": record.seconds_left()})
 

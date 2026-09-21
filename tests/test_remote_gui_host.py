@@ -1168,6 +1168,59 @@ class PairCodeTests(unittest.TestCase):
                 self.assertEqual(harness.host.codes.by_code(second["code"]).state, "live")
         run(main())
 
+    def test_a_code_asked_for_while_the_service_is_still_moving_is_the_only_code_shown(self):
+        """The hosted drive (#FR1C task 4): "Pair a phone…" on a desktop whose remote control was
+        off asks for a code on the first `started`, before the service has reached
+        relay-terminal.ai. The code used to be minted at the loopback rendezvous, ended as
+        `expired` by the move a second later, and swapped for another under the person's eyes."""
+        async def main():
+            async with Always() as h:
+                self.assertFalse(h.side.at_wish(), "the move is still under way after `start`")
+                await h.side.handle({"t": "pair_code"})
+                first = [m for m in h.out if m.get("t") == "pair_code"]
+                self.assertEqual(len(first), 1)
+                self.assertTrue(h.side.served_by_hosted, "the code waited for the move")
+                self.assertEqual(h.side.host.rendezvous, h.hosted)
+                # The move announced itself with a second `started`; the dialog asks again on it.
+                self.assertEqual(len([m for m in h.out if m.get("t") == "started"]), 2)
+                await h.side.handle({"t": "pair_code"})
+                both = [m for m in h.out if m.get("t") == "pair_code"]
+                self.assertEqual([m["code"] for m in both], [first[0]["code"]] * 2)
+                self.assertEqual([m["pin"] for m in both], [first[0]["pin"]] * 2)
+                self.assertEqual([m for m in h.out if m.get("t") == "pair_code_state"], [],
+                                 "no code ended: the dialog never showed one it had to take back")
+                self.assertEqual(len(h.side.host.codes.live_pairs()), 1)
+                # Only that one re-ask is handed the code back: the next one replaces it.
+                await h.side.handle({"t": "pair_code"})
+                third = [m for m in h.out if m.get("t") == "pair_code"][-1]
+                self.assertNotEqual(third["code"], first[0]["code"])
+                self.assertEqual([m["state"] for m in h.out if m.get("t") == "pair_code_state"],
+                                 ["burned"])
+        run(main(), timeout=60)
+
+    def test_a_code_does_not_wait_for_an_address_that_cannot_be_reached(self):
+        async def main():
+            async with Always(hosted_up=False) as h:
+                h.side.pair_code_wait = 0.3
+                started = asyncio.get_running_loop().time()
+                await h.side.handle({"t": "pair_code"})
+                self.assertLess(asyncio.get_running_loop().time() - started, 3.0)
+                reply = [m for m in h.out if m.get("t") == "pair_code"]
+                self.assertEqual(len(reply), 1, "a code all the same, where the service is")
+                self.assertFalse(h.side.served_by_hosted)
+        run(main(), timeout=60)
+
+    def test_a_tried_code_is_not_handed_back(self):
+        async def main():
+            async with Always() as h:
+                await h.side.handle({"t": "pair_code"})
+                first = [m for m in h.out if m.get("t") == "pair_code"][-1]
+                h.side.host.codes.by_code(first["code"]).failures = 1
+                await h.side.handle({"t": "pair_code"})
+                second = [m for m in h.out if m.get("t") == "pair_code"][-1]
+                self.assertNotEqual(second["code"], first["code"])
+        run(main(), timeout=60)
+
     def test_a_share_code_still_comes_back_as_code_state(self):
         """The other half of the same rule: a pane's code is the sharing panel's news."""
         async def main():
