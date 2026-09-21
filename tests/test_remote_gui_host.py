@@ -121,6 +121,13 @@ class Harness:
     def sent(self, kind: str) -> list[dict]:
         return [message for message in self.to_gui if message.get("t") == kind]
 
+    async def until_pair_codes(self, count: int, timeout: float = 5.0) -> None:
+        deadline = asyncio.get_event_loop().time() + timeout
+        while len(self.sent("pair_code")) < count:
+            if asyncio.get_event_loop().time() > deadline:
+                raise AssertionError(f"only {len(self.sent('pair_code'))} pair_code messages")
+            await asyncio.sleep(0.05)
+
     async def settle(self, kind: str, timeout: float = 5.0):
         deadline = asyncio.get_event_loop().time() + timeout
         while not self.sent(kind):
@@ -1058,3 +1065,137 @@ class AlwaysOnTests(unittest.TestCase):
                 self.assertTrue(h.side.served_by_tailscale)
                 self.assertFalse(h.side.served_by_hosted, "the hosted entry was not chosen")
         run(main(), timeout=90)
+
+
+class PairCodeTests(unittest.TestCase):
+    """Pairing a phone with a typed code (card #FR1C): what crosses the stdio line.
+
+    The code phase itself, and what a correct PIN earns, are tested in
+    tests/test_remote_meetcode.py. What is tested here is the contract the GUI is written
+    against: one message mints a code, one message withdraws it, and the states come back on a
+    name of their own so the pairing dialog and the sharing panel never redraw on each other's
+    news.
+    """
+
+    @staticmethod
+    def sidecar(harness):
+        side = gui_host.Sidecar()
+        side.emit = harness.to_gui.append
+        side.host = harness.host
+        harness.host.codes.on_state(side.code_state)
+        return side
+
+    def test_pair_code_answers_with_the_code_and_pin(self):
+        async def main():
+            async with Harness() as harness:
+                side = self.sidecar(harness)
+                await side.handle({"t": "pair_code"})
+                reply = await harness.settle("pair_code")
+                self.assertEqual(set(reply), {"t", "code", "pin", "expires"})
+                self.assertRegex(reply["code"], r"^[ABCDEFGHJKMNPQRSTUVWXYZ]{4}$")
+                self.assertRegex(reply["pin"], r"^\d{4}$")
+                self.assertGreater(reply["expires"], 0)
+                self.assertLessEqual(reply["expires"], 600)
+                # A pairing code is not a share: nothing about invites or participants moved.
+                self.assertEqual(harness.sent("code"), [])
+                self.assertEqual(harness.sent("invite"), [])
+                self.assertEqual(harness.sent("participants"), [])
+        run(main())
+
+    def test_a_correct_pin_pairs_the_phone_and_the_state_comes_back_used(self):
+        async def main():
+            async with Harness() as harness:
+                side = self.sidecar(harness)
+                await side.handle({"t": "pair_code"})
+                reply = await harness.settle("pair_code")
+                phone = client_mod.Client(harness.base)
+                paired = await phone.pair_with_code(reply["code"], reply["pin"],
+                                                    name="iPhone", platform="Safari")
+                self.assertEqual(paired.capability, harness.capability)
+                self.assertEqual([d.name for d in harness.devices.live()], ["iPhone"])
+                await phone.close()
+                state = await harness.settle("pair_code_state")
+                self.assertEqual(state, {"t": "pair_code_state", "code": reply["code"],
+                                         "state": "used", "failures": 0})
+                self.assertEqual(harness.sent("code_state"), [],
+                                 "the sharing panel hears nothing about a pairing code")
+        run(main())
+
+    def test_pair_code_revoke_burns_the_code_and_the_room_behind_it(self):
+        async def main():
+            async with Harness() as harness:
+                side = self.sidecar(harness)
+                await side.handle({"t": "pair_code"})
+                reply = await harness.settle("pair_code")
+                record = harness.host.codes.by_code(reply["code"])
+                # The sharing panel's revoke is not this code's: the two names do not cross.
+                await side.handle({"t": "code_revoke", "code": reply["code"]})
+                self.assertEqual(record.state, "live")
+                self.assertEqual(harness.sent("pair_code_state"), [])
+
+                await side.handle({"t": "pair_code_revoke", "code": reply["code"].lower()})
+                state = await harness.settle("pair_code_state")
+                self.assertEqual(state, {"t": "pair_code_state", "code": reply["code"],
+                                         "state": "burned", "failures": 0})
+                self.assertIsNone(harness.host.rooms.get(record.pair_room))
+                # And the link it stood for is worth nothing: the phone cannot pair on it.
+                phone = client_mod.Client(harness.base)
+                with self.assertRaises(Exception):
+                    await phone.pair_with_code(reply["code"], reply["pin"], name="iPhone",
+                                               platform="Safari")
+                await phone.close()
+                self.assertEqual(harness.devices.live(), [])
+                # Withdrawing what is already gone, or what never was, says nothing twice.
+                await side.handle({"t": "pair_code_revoke", "code": reply["code"]})
+                await side.handle({"t": "pair_code_revoke", "code": "ZZZZ"})
+                await side.handle({"t": "pair_code_revoke"})
+                self.assertEqual(len(harness.sent("pair_code_state")), 1)
+        run(main())
+
+    def test_a_new_pair_code_replaces_the_live_one(self):
+        async def main():
+            async with Harness() as harness:
+                side = self.sidecar(harness)
+                await side.handle({"t": "pair_code"})
+                first = await harness.settle("pair_code")
+                await side.handle({"t": "pair_code"})
+                await harness.until_pair_codes(2)
+                second = harness.sent("pair_code")[-1]
+                self.assertNotEqual(first["code"], second["code"])
+                state = await harness.settle("pair_code_state")
+                self.assertEqual(state, {"t": "pair_code_state", "code": first["code"],
+                                         "state": "burned", "failures": 0})
+                self.assertEqual(harness.host.codes.by_code(second["code"]).state, "live")
+        run(main())
+
+    def test_a_share_code_still_comes_back_as_code_state(self):
+        """The other half of the same rule: a pane's code is the sharing panel's news."""
+        async def main():
+            async with Harness() as harness:
+                side = self.sidecar(harness)
+                await side.handle({"t": "code_create", "pane": "p1", "role": "viewer"})
+                code = await harness.settle("code")
+                await side.handle({"t": "code_revoke", "code": code["code"]})
+                self.assertEqual(harness.sent("code_state")[-1],
+                                 {"t": "code_state", "code": code["code"], "state": "burned",
+                                  "failures": 0})
+                self.assertEqual(harness.sent("pair_code_state"), [])
+        run(main())
+
+    def test_pair_code_before_the_service_is_up_says_so(self):
+        async def main():
+            side = gui_host.Sidecar()
+            sent = []
+            side.emit = sent.append
+            await side.handle({"t": "pair_code"})
+            await side.handle({"t": "pair_code_revoke", "code": "ABCD"})
+            self.assertEqual([m["t"] for m in sent], ["error"])
+            self.assertIn("not running", sent[0]["message"])
+        run(main())
+
+    def test_both_names_are_owner_only_and_never_from_a_client(self):
+        for kind in ("pair_code", "pair_code_revoke"):
+            self.assertIn(kind, wire.OWNER_ONLY, kind)
+            self.assertIn(kind, wire.NEVER_FROM_CLIENT, kind)
+            self.assertNotIn(kind, wire.CLIENT_TYPES, kind)
+            self.assertNotIn(kind, wire.GUEST_TYPES, kind)

@@ -1300,6 +1300,119 @@ class MeetingCodeTests(unittest.TestCase):
                 self.assertEqual(harness.knocks, [])
         run(main())
 
+    # ---- a code that pairs the owner's own phone (card #FR1C) ---------------------------------
+
+    def test_the_rendezvous_learns_nothing_new_from_a_pairing_code(self):
+        """A pairing code moves the *pairing* secret, which is the one thing section 5 says the
+        rendezvous must never see. Nothing it was sent or relayed holds the PIN, the fragment or
+        the secret in it, and the frames it carried are the same five fields as before: the only
+        difference between the two kinds of code is inside the sealed box."""
+        from remote import meetcode
+
+        async def main():
+            async with self.harness() as harness:
+                record = await harness.pair_code()
+                fragment = record.fragment
+                phone = client_mod.Client(harness.base)
+                url = await phone.join_with_code(record.code, record.pin,
+                                                 app_base="https://app.example")
+                self.assertTrue(url.endswith(fragment))
+                secret = pairing.b64(pairing.parse_pair_url(url)["secret"])
+                paired = await phone.pair(url, name="iPhone", platform="Safari")
+                self.assertTrue(paired.device_id)
+                await phone.close()
+                frames = []
+                for message in harness.seen:
+                    for needle in (fragment.encode(), secret.encode(), record.pin.encode()):
+                        self.assertNotIn(needle, message)
+                    with contextlib.suppress(Exception):
+                        frame = meetcode.decode(message[17:] if message[:1] in (b"\x01",)
+                                                else message)
+                        if frame["t"].startswith("meet_"):
+                            frames.append(frame)
+                self.assertEqual({frame["t"] for frame in frames},
+                                 {"meet_a", "meet_b", "meet_confirm", "meet_invite"})
+                for frame in frames:
+                    self.assertLessEqual(set(frame), {"t", "y", "tag", "nonce", "sealed"}, frame)
+                # Nor does the audit log, which is the desktop's own record of the same events.
+                lines = json.dumps(harness.audit_lines())
+                for needle in (record.pin, fragment, secret):
+                    self.assertNotIn(needle, lines)
+        run(main())
+
+    def test_a_pairing_code_the_rendezvous_does_not_know_answers_like_an_expired_one(self):
+        """The lookup is the only thing the server does with a code, and a stranger must not be
+        able to tell "no such code" from "that one is over" — for a pairing code either answer
+        would say whether this desktop is offering to pair right now."""
+        async def main():
+            async with self.harness() as harness:
+                record = await harness.pair_code()
+                self.assertEqual(await harness.status(record.code), 200)
+                await harness.host.codes.revoke(record.code, "pair")
+                for _ in range(100):
+                    if await harness.status(record.code) == 404:
+                        break
+                    await asyncio.sleep(0.05)
+                over = await harness.lookup(record.code)
+                unknown = await harness.lookup("ZZZZ" if record.code != "ZZZZ" else "YYYY")
+                self.assertEqual(over[0], 404)
+                self.assertEqual(over, unknown)
+        run(main())
+
+    def test_a_pairing_codes_room_never_reaches_the_noise_path_either(self):
+        """The code room is the code handler's, whatever kind of code it is: a Noise handshake
+        sent to one is a failed attempt, not a session, and no hub `Channel` is made for it."""
+        from remote import noise
+
+        async def main():
+            async with self.harness() as harness:
+                record = await harness.pair_code()
+                made = []
+                original = host_mod.Channel.__init__
+
+                def spy(channel, *args, **kwargs):
+                    made.append(channel)
+                    original(channel, *args, **kwargs)
+                host_mod.Channel.__init__ = spy
+                try:
+                    socket = await harness.raw(record.room)
+                    private, _ = noise.generate_keypair()
+                    initiator = noise.Initiator(private, harness.identity.public)
+                    await socket.send(initiator.write_message_1(b""))
+                    self.assertEqual(json.loads(await socket.recv()),
+                                     {"t": "meet_error", "error": "wrong_pin"})
+                    await socket.close()
+                    await harness.until(lambda: record.failures == 1)
+                finally:
+                    host_mod.Channel.__init__ = original
+                self.assertEqual(made, [], "a Noise channel was made for a code room")
+                self.assertEqual(harness.pair_asks, [], "and nobody was asked to allow it")
+                self.assertEqual(harness.devices.live(), [])
+        run(main())
+
+    def test_a_burned_pairing_code_leaves_no_room_anyone_can_prove_a_secret_in(self):
+        """Three wrong PINs end the pairing attempt entirely: the room the fragment named is
+        gone, so the fragment — if a guess had somehow produced it — opens nothing."""
+        async def main():
+            async with self.harness() as harness:
+                record = await harness.pair_code()
+                room, secret = record.pair_room, harness.host.rooms.get(record.pair_room).secret
+                url = pairing.pair_url("https://app.example", harness.identity.public,
+                                       secret, room)
+                for _ in range(3):
+                    with contextlib.suppress(wire.WireError):
+                        await client_mod.Client(harness.base).join_with_code(
+                            record.code, f"{(int(record.pin) + 1) % 10000:04d}")
+                await harness.until(lambda: record.state == "burned")
+                self.assertIsNone(harness.host.rooms.get(room))
+                phone = client_mod.Client(harness.base)
+                with self.assertRaises(Exception):
+                    await phone.pair(url, name="iPhone", platform="Safari")
+                await phone.close()
+                self.assertEqual(harness.pair_asks, [])
+                self.assertEqual(harness.devices.live(), [])
+        run(main())
+
     def test_the_cpace_implementation_matches_the_drafts_published_vectors(self):
         """draft-irtf-cfrg-cpace appendix B.1, X25519/SHA-512, imported from tests/test_cpace.py
         so there is one copy of the vectors: the messages, both sides' ISK in initiator-responder

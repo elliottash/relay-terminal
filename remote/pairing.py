@@ -123,17 +123,55 @@ def invite_url(app_base: str, desktop_public: bytes, secret: bytes, room: str) -
             f"#v=1&d={b64(desktop_public)}&i={b64(secret)}&r={room}")
 
 
-def _fragment_fields(url: str, what: str) -> dict:
-    """The fields of a link's fragment, tolerating the escaping QR readers do to it."""
-    parts = urlsplit(url)
-    if not parts.fragment:
-        raise ValueError(f"that link carries no {what} fragment.")
-    fragment = parts.fragment
+def parse_fragment(fragment: str) -> dict:
+    """The fields of a link fragment, tolerating the escaping QR readers do to it."""
+    fragment = str(fragment or "").lstrip("#")
     # Some QR readers and link handlers percent-encode the fragment, which turns the separators
     # into %26 and leaves one field holding the rest of the link.
     if "&" not in fragment and "%26" in fragment.lower():
         fragment = unquote(fragment)
     return {name: values[0] for name, values in parse_qs(fragment).items()}
+
+
+def fragment_kind(fragment: str) -> str:
+    """Which door a fragment opens, read off its own shape: "pair", "invite", or "" for neither.
+
+    A pairing code and a share invitation are not interchangeable (card #FR1C). Both can arrive
+    the same way — sealed at the end of a meeting code's CPace phase (remote/meetcode.py) — and
+    the code itself says nothing about which is which, so what decides is the fragment: `s=` is
+    the one-time pairing secret of section 5, `i=` is an invite secret of section 10.2. A
+    fragment carrying both, or neither, is neither: it belongs to no page and is refused rather
+    than guessed at, and the desktop refuses it a second time whichever room it is offered on
+    (`Host._on_pair_prove` and `Host._on_knock`).
+    """
+    fields = parse_fragment(fragment)
+    if fields.get("v") != "1" or "d" not in fields or "r" not in fields:
+        return ""
+    pair, invite = "s" in fields, "i" in fields
+    if pair == invite:
+        return ""
+    return "pair" if pair else "invite"
+
+
+def fragment_url(app_base: str, fragment: str) -> str:
+    """The page a fragment belongs on — `/pair` or `/join` — chosen by :func:`fragment_kind`.
+
+    What a meeting code's phase delivers is a fragment and nothing else, so this is where "a
+    pairing code and an invite code are not interchangeable" is decided on the client's side:
+    the fragment picks its own page, not the form it was typed into.
+    """
+    kind = fragment_kind(fragment)
+    if not kind:
+        raise ValueError("that fragment is neither a pairing link nor an invite link.")
+    page = "pair" if kind == "pair" else "join"
+    return f"{app_base.rstrip('/')}/{page}#{str(fragment).lstrip('#')}"
+
+
+def _fragment_fields(url: str, what: str) -> dict:
+    parts = urlsplit(url)
+    if not parts.fragment:
+        raise ValueError(f"that link carries no {what} fragment.")
+    return parse_fragment(parts.fragment)
 
 
 def _link(url: str, secret_field: str, what: str) -> dict:

@@ -1798,6 +1798,23 @@ class Host:
                                                single_knock=True, tab=tab)
         return await self.codes.create(invite, url)
 
+    async def pair_code(self) -> meetcode.CodeRecord:
+        """A pairing code and a PIN for the owner's own phone (card #FR1C).
+
+        The same four letters and four digits a guest is given (#97EG) and the same CPace phase;
+        what a correct PIN earns is this desktop's **pairing** fragment — what the QR holds —
+        rather than an invite. From there section 5 runs unchanged: Noise IK against `d`,
+        `pair_prove` against `s`, the five digits compared on both screens, the capability the
+        owner allows, the connect token in `paired`. A phone that has never seen this desktop is
+        asked for nothing it cannot type.
+
+        The pairing room is opened here, for this code alone, and its link is never shown: a room
+        that were also behind a QR would let a scan and a typed code race for its single use. It
+        lives as long as the code, so the two end together, and burns with it.
+        """
+        url, room = await self.open_pairing(ttl=meetcode.CODE_LIFETIME)
+        return await self.codes.create_pair(url, room)
+
     def invite_revoke(self, invite_id: str) -> bool:
         invite = self.guests.invite(invite_id)
         if invite is None:

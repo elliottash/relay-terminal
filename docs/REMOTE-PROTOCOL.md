@@ -184,8 +184,35 @@ is a separate grant (§5.3).
 
 ### 5.2 Pairing code (no camera)
 
-Three words from a 2 048-word list plus a PAKE (CPace or SPAKE2 over Curve25519), magic-wormhole
-style, ending in the same `pair_prove` step. Five attempts per room, then the room is burned.
+**Built** (card `#FR1C`), as **4 letters and a 4-digit PIN** over CPace — the machinery §10.7
+already describes, pointed at pairing instead of at an invite. A phone that has never seen this
+desktop has no camera aimed at the screen and nowhere to paste a 140-character link; it has a
+keyboard, so `ABCD` and `4829` is what it is asked for.
+
+The desktop mints the code with `Host.pair_code()`: a pairing room of its own (§5.1's room and
+128-bit secret, ttl 600 s), a meeting code for it, and a PIN. What a correct PIN earns, sealed
+under the CPace key, is that room's **pairing fragment** `v=1&d=…&s=…&r=…` — the same string the
+QR holds. From there §5.1 step 2 onward runs unchanged: Noise IK against `d`, `pair_prove` against
+`s`, the five digits on both screens, the capability the owner allows, the connect token in
+`paired`. Everything §10.7 says about codes holds: ten minutes, one use, the desktop counts
+failures and the third burns the code, the rendezvous keeps only the code → room map and answers
+an unknown code exactly as it answers an expired one.
+
+Two rules are this section's own:
+
+* **The pairing room is minted for the code and is in no QR.** A room behind both would let a scan
+  and a typed code race for its single use, and the loser would be told its secret was wrong. One
+  live pairing code at a time; a new one burns the old, and burning a code burns its room, so a
+  fragment that outlives its code opens nothing.
+* **A pairing code and an invite code are not interchangeable**, and the *fragment's own shape*
+  decides which is which — `s=` is a pairing secret, `i=` an invite secret (`pairing.fragment_kind`).
+  A client routes on that, never on the code or the page it was typed into. The desktop then
+  refuses the mismatch a second time on the wire: `pair_prove` on an invite room is
+  `not_permitted` ("that is an invite link, not a pairing code; knock instead"), and a `knock` on
+  a pairing room finds no invite there.
+
+The earlier sketch for this section — three words from a 2 048-word list — is not what was built;
+five attempts per room (`pairing.MAX_ATTEMPTS`) still bounds `pair_prove` itself.
 
 ### 5.3 Capabilities
 
@@ -1194,7 +1221,8 @@ secret), `refused`, `admitted`, `join`, `leave`, `role_set`, `participant_remove
 `guest_prompt` (with the whole text), `prompt_decided` (with `approved` and, when it was not, why),
 `control_request`, `control_grant`, `control_refused`, `control_revoke`, `control_release`,
 `control_take`, `share_pause`, `share_options`, the meeting-code kinds of §10.7 (`code_create`,
-`code_attempt`, `code_used`, `code_burned`, `code_expired`), `scope_grown` and `scope_shrunk` (a
+`code_attempt`, `code_used`, `code_burned`, `code_expired`, each carrying `code_kind` — `invite`
+or `pair`, §5.2 — since the line's own `kind` is already taken), `scope_grown` and `scope_shrunk` (a
 pane joining or leaving a tab shared whole, §10.1, with the tab, the pane and the participant or
 invite), and the input a participant or a device sent:
 `line` with its text, `keys` and `paste` as byte counts. Every one of them carries the participant
@@ -1239,6 +1267,14 @@ ends by handing the browser, sealed under the CPace key, exactly what an invite 
 from the Noise handshake on, a code guest *is* an invite guest: §10.2's knock, the owner's admit
 by hand, roles, §10.3 control, §10.4 prompts, the join notification. There is no second admission
 path and no auto-admit.
+
+**Two kinds of code, told apart by the fragment.** The same phase delivers a **pairing** fragment
+for the owner's own phone (§5.2, card `#FR1C`); the sealed frame is byte-for-byte the same shape,
+so a client reads the fragment it opened and routes on `s=` versus `i=` — never on the code, and
+never on the page the code was typed into. Everything below applies to both; the rest of §10.7 is
+written for the invite kind, and §5.2 says what differs. The desktop's own record of a code carries
+the kind (`meetcode.KIND_INVITE`, `meetcode.KIND_PAIR`), which is what the audit's `code_kind` and
+the two sidecar state names below are.
 
 **Limits.** One use, 10 minutes. The **desktop** counts failed attempts, never the server — the
 server is the party this design declines to trust with the count. The third failure burns the code
@@ -1319,8 +1355,18 @@ one. The PIN is a
 secret: never logged. The QA hook `RELAY_REMOTE_CODE_FILE` names a file the GUI writes `BQRT 4829`
 to, beside `RELAY_REMOTE_INVITE_FILE`.
 
-**Audit** (§10.6), each written before its action: `code_create` (code, invite, role — never the
-PIN), `code_attempt` (a failed attempt, with the count and why — never the PIN), `code_used`,
+A **pairing** code (§5.2) has two names of its own on the same line, because it is a different
+surface — the pairing dialog, not the sharing panel — and neither must redraw on the other's news:
+`{"t":"pair_code"}` → `{"t":"pair_code","code":"ABCD","pin":"4829","expires":600}` (no `invite`:
+there is none), then `{"t":"pair_code_state","code":"ABCD","state":"used"|"burned"|"expired","failures":N}`;
+`{"t":"pair_code_revoke","code":"ABCD"}` withdraws it, and its pairing room burns with it. Both
+names are in `wire.OWNER_ONLY` and `wire.NEVER_FROM_CLIENT`: a message that mints a *device*
+record is the last thing that may arrive from a client. `code_revoke` withdraws only a share code
+and `pair_code_revoke` only a pairing code, so neither surface reaches into the other's.
+
+**Audit** (§10.6), each written before its action and each carrying `code_kind` (`invite` or
+`pair`): `code_create` (code, invite, role — never the PIN; a pairing code's `invite` is `null`),
+`code_attempt` (a failed attempt, with the count and why — never the PIN), `code_used`,
 `code_burned` (with `reason`: `failures`, `revoked` or `replaced`), `code_expired`. A second knock
 on a code's invite is written as `knock_refused`.
 

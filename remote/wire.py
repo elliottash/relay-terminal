@@ -113,6 +113,9 @@ OWNER_ONLY = frozenset({
     "control_take", "control_revoke", "share_options",
     # A meeting code and its PIN (card #97EG): minted on the desktop, read out by the owner.
     "code_create", "code_revoke",
+    # The same, for pairing the owner's own phone (card #FR1C). A code that mints a *device*
+    # record is the last thing that may ever arrive from a client, paired or not.
+    "pair_code", "pair_code_revoke",
 })
 
 # Named so a reader can see they were considered and refused, and so a test can assert it.

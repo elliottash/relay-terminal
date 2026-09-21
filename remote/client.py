@@ -200,14 +200,19 @@ class Client:
 
     async def join_with_code(self, code: str, pin: str, *, app_base: str = "",
                              timeout: float = 20.0) -> str:
-        """Type a meeting code and a PIN (card #97EG); get back the invite link they stand for.
+        """Type a meeting code and a PIN; get back the link the code phase delivered.
 
-        What the join page does before it knocks: look the code up, run CPace on the PIN in the
-        code's room, check the desktop's tag **before** sending ours — a desktop that does not
-        know the PIN learns nothing from this side — and open the sealed invite fragment. The link
-        returned is an ordinary one for :meth:`knock`. A refusal raises ``WireError`` with the
-        desktop's reason (``wrong_pin``, ``burned``, ``expired``), or ``no_such_code`` when the
-        rendezvous does not know the code, which is also what an expired one looks like.
+        What the page does before it knocks or pairs: look the code up, run CPace on the PIN in
+        the code's room, check the desktop's tag **before** sending ours — a desktop that does not
+        know the PIN learns nothing from this side — and open the sealed fragment. A refusal
+        raises ``WireError`` with the desktop's reason (``wrong_pin``, ``burned``, ``expired``),
+        or ``no_such_code`` when the rendezvous does not know the code, which is also what an
+        expired one looks like.
+
+        **The fragment picks its own page** (`pairing.fragment_url`), never the code and never
+        the form it was typed into: a share code's invite fragment comes back as a ``/join`` link
+        for :meth:`knock` (#97EG), a pairing code's as a ``/pair`` link for :meth:`pair` (#FR1C).
+        Nothing else here can tell the two apart, and nothing else here has to.
         """
         from . import meetcode
         from .cpace import CPace, CPaceError
@@ -258,7 +263,25 @@ class Client:
         finally:
             with contextlib.suppress(Exception):
                 await socket.close()
-        return f"{(app_base or self.rendezvous).rstrip('/')}/join#{fragment}"
+        try:
+            return pairing.fragment_url(app_base or self.rendezvous, fragment)
+        except ValueError as error:
+            raise wire.WireError("internal", str(error)) from error
+
+    async def pair_with_code(self, code: str, pin: str, *, name: str,
+                             platform: str) -> Paired:
+        """Type a pairing code and a PIN (card #FR1C), then pair on what it delivered.
+
+        The refusal in the middle is the point: a code that delivered an *invite* fragment never
+        reaches :meth:`pair`, so a share code typed into the pairing box pairs nothing even
+        before the desktop refuses it on the wire.
+        """
+        url = await self.join_with_code(code, pin)
+        if pairing.fragment_kind(url.split("#", 1)[-1]) != "pair":
+            raise wire.WireError("not_permitted",
+                                 "that code is an invitation to a shared pane, not a pairing "
+                                 "code.")
+        return await self.pair(url, name=name, platform=platform)
 
     def _code_room(self, code: str) -> str:
         """``GET /v1/codes/<code>`` → the room, off the event loop like the host's own posts."""

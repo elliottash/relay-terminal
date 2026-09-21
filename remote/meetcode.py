@@ -7,12 +7,28 @@ rendezvous hands it out and uses it to find a room (``/v1/codes`` in rendezvous/
 only way to test a PIN is a live attempt against this desktop, which counts them. Three failures
 burn the code and the invite behind it; a correct PIN burns the code too, because it is one use.
 
-What a correct PIN earns is small on purpose: an ordinary invite fragment (``v=1&d=…&i=…&r=…``),
-sealed under the CPace key, after which the existing path runs unchanged — Noise IK against ``d``,
-``knock``, and the owner admitting the knock by hand (docs/REMOTE-PROTOCOL.md section 10). This
-module never records a participant and never admits anyone. The invite it delivers is minted
-``single_knock``: the first knock claims it and any later one is refused, so the fragment is worth
-nothing once used, even to someone who read it over a shoulder.
+What a correct PIN earns is small on purpose: **one fragment**, sealed under the CPace key, after
+which the existing path runs unchanged. There are two kinds of code and the difference is in the
+fragment, never in the code or the page it was typed on:
+
+* ``KIND_INVITE`` (card #97EG) delivers an invite fragment (``v=1&d=…&i=…&r=…``): Noise IK against
+  ``d``, ``knock``, and the owner admitting the knock by hand (docs/REMOTE-PROTOCOL.md section 10).
+  The invite is minted ``single_knock``: the first knock claims it and any later one is refused, so
+  the fragment is worth nothing once used, even to someone who read it over a shoulder.
+* ``KIND_PAIR`` (card #FR1C) delivers the desktop's **pairing** fragment (``v=1&d=…&s=…&r=…``) —
+  what the pairing QR holds — for the owner's own phone, which has no camera pointed at the
+  desktop and nowhere to paste a 140-character link. From there section 5 runs unchanged: Noise IK
+  against ``d``, ``pair_prove``, the five digits compared on both screens, the capability the owner
+  allows, and the connect token in ``paired``. The pairing room is minted for that code alone and
+  is in no QR, so a scan and a typed code can never race for the same room.
+
+The two are **not interchangeable**, and neither end has to be told which it is holding: the
+fragment's own shape decides (``pairing.fragment_kind``), and the desktop refuses the mismatch a
+second time whichever room it is offered on — ``Host._on_knock`` has no invite for a pairing room,
+``Host._on_pair_prove`` refuses an invite room by name.
+
+This module never records a participant, never pairs a device and never admits anyone: everything
+it hands over is checked again by the handler it is handed to.
 
 A code room is a rendezvous room of its own. A connection to one is an :class:`Attempt`, never a
 Noise channel: ``Host._open_channel`` asks :meth:`CodeBook.is_code_room` first, and a room stays
@@ -64,6 +80,11 @@ MAX_FRAME = 4096                     # the largest code-room frame is a few hund
 FORGET_AFTER = 3600.0                # how long a finished code's room is still recognised
 
 LIVE, USED, BURNED, EXPIRED = "live", "used", "burned", "expired"
+
+# What the code is a door to. The word is the one `pairing.fragment_kind` returns for the fragment
+# the code phase delivers, so a record and its fragment can never disagree about which it is. In
+# the audit log it is written as `code_kind`, because every line's own type is already its `kind`.
+KIND_INVITE, KIND_PAIR = "invite", "pair"
 
 
 class MeetError(Exception):
@@ -146,13 +167,15 @@ def point(message: dict, field: str = "y") -> bytes:
 
 @dataclass
 class CodeRecord:
-    """One meeting code, in memory only. The PIN and the invite fragment are never written down:
-    not to disk, not to the audit log, and the fragment is dropped the moment the code ends."""
+    """One meeting code, in memory only. The PIN and the fragment are never written down: not to
+    disk, not to the audit log, and the fragment is dropped the moment the code ends."""
     room: str
-    invite_id: str
+    invite_id: str                      # the invite behind an invite code; "" for a pairing code
     pin: str
-    fragment: str                       # "v=1&d=…&i=…&r=…"; "" once the code is over
+    fragment: str                       # what a correct PIN earns; "" once the code is over
     panes: tuple[str, ...] = ()
+    kind: str = KIND_INVITE             # KIND_INVITE or KIND_PAIR
+    pair_room: str = ""                 # the pairing room behind a pairing code; "" otherwise
     code: str = ""                      # "" until the rendezvous has allocated one
     expires: float = 0.0                # absolute, time.time()
     state: str = "pending"              # pending → live → used | burned | expired
@@ -214,51 +237,100 @@ class CodeBook:
         return [record for record in self.records.values()
                 if record.state == LIVE and wanted & set(record.panes)]
 
-    async def revoke(self, code: str) -> CodeRecord | None:
-        """The owner withdrew a live code: it burns, and its invite with it. None when there is
-        no such code, or it has already ended."""
+    def live_pairs(self) -> list[CodeRecord]:
+        """The live pairing codes. There is at most one: a pairing code is about this desktop
+        rather than about a pane, so the pane rule below has nothing to key on and "one at a
+        time" takes its place."""
+        return [record for record in self.records.values()
+                if record.state == LIVE and record.kind == KIND_PAIR]
+
+    def _burn_behind(self, record: CodeRecord) -> None:
+        """What the code was a door to dies with it: a pairing code's room (nobody can prove a
+        secret in a room that is gone), an invite code's invite."""
+        if record.kind == KIND_PAIR:
+            if record.pair_room:
+                self.host.rooms.burn(record.pair_room)
+        elif record.invite_id:
+            self.host.guests.burn_invite(record.invite_id)
+
+    async def revoke(self, code: str, kind: str = "") -> CodeRecord | None:
+        """The owner withdrew a live code: it burns, and whatever it was a door to with it. None
+        when there is no such code, or it has already ended.
+
+        ``kind`` is the caller saying which sort of code it means — the sharing panel's
+        ``code_revoke`` withdraws a share code, the pairing dialog's ``pair_code_revoke`` a
+        pairing code — so neither surface can reach past its own codes into the other's.
+        """
         record = self.by_code(code)
-        if record is None or record.state != LIVE:
+        if record is None or record.state != LIVE or (kind and record.kind != kind):
             return None
         await self.burn(record, reason="revoked")
         return record
 
     async def create(self, invite, url: str) -> CodeRecord:
-        """Open a code room, register it, and have the rendezvous allocate a code for it.
-
-        The room is recognised as a code room **before** a code points at it, so there is no
-        moment in which a connection to it could fall through to the Noise channel path.
-        """
-        host = self.host
-        fragment = url.split("#", 1)[1] if "#" in url else ""
-        if not fragment:
-            raise wire.WireError("internal", "the invite link has no fragment.")
+        """A meeting code for a share invitation (card #97EG)."""
         # One live code per pane: a new one replaces the old, which burns as if withdrawn. Two
         # codes for one pane would be two doors, and the owner is only looking at one of them.
         for older in self.live_on(invite.panes):
             await self.burn(older, reason="replaced")
+        return await self._create(self._fragment(url, "invite"), kind=KIND_INVITE,
+                                  invite_id=invite.invite_id, panes=tuple(invite.panes),
+                                  role=invite.role, behind_ttl=float(invite.seconds_left()))
+
+    async def create_pair(self, url: str, room) -> CodeRecord:
+        """A pairing code for the owner's own phone (card #FR1C): what a correct PIN earns is the
+        pairing fragment of ``url``, the one behind the QR.
+
+        ``room`` is the :class:`pairing.Room` that fragment points at, opened for this code and
+        for nothing else — a room that were also in a QR would let a scan and a typed code race
+        for its one use. One live pairing code at a time, for the same reason a pane has one.
+        """
+        for older in self.live_pairs():
+            await self.burn(older, reason="replaced")
+        return await self._create(self._fragment(url, "pairing"), kind=KIND_PAIR,
+                                  pair_room=room.room, behind_ttl=float(room.seconds_left()))
+
+    @staticmethod
+    def _fragment(url: str, what: str) -> str:
+        fragment = url.split("#", 1)[1] if "#" in url else ""
+        if not fragment:
+            raise wire.WireError("internal", f"the {what} link has no fragment.")
+        return fragment
+
+    async def _create(self, fragment: str, *, kind: str, behind_ttl: float,
+                      invite_id: str = "", pair_room: str = "", panes: tuple = (),
+                      role: str = "") -> CodeRecord:
+        """Open a code room, register it, and have the rendezvous allocate a code for it.
+
+        The room is recognised as a code room **before** a code points at it, so there is no
+        moment in which a connection to it could fall through to the Noise channel path. A code
+        that cannot be allocated takes what it was a door to down with it: nobody will ever hold
+        that fragment, and leaving the room open would leave a way in with no way to withdraw it.
+        """
+        host = self.host
+        record = CodeRecord(room="", invite_id=invite_id, pin=new_pin(), fragment=fragment,
+                            panes=panes, kind=kind, pair_room=pair_room)
         try:
             room, granted = await host._open_room(CODE_LIFETIME)
         except Exception:
-            host.guests.burn_invite(invite.invite_id)    # nobody will ever hold its link
+            self._burn_behind(record)
             raise
-        record = CodeRecord(room=room, invite_id=invite.invite_id, pin=new_pin(),
-                            fragment=fragment, panes=tuple(invite.panes))
+        record.room = room
         self.records[room] = record
         try:
             reply = await host._post("/v1/codes", {
                 "desktop_id": host.identity.desktop_id, "token": host.token, "room": room,
-                "ttl": min(CODE_LIFETIME, granted, float(invite.seconds_left()))})
+                "ttl": min(CODE_LIFETIME, granted, behind_ttl)})
             code = str(reply["code"]).upper()
             lifetime = float(reply.get("expires_in", CODE_LIFETIME))
         except Exception:
             record.state, record.fragment, record.expires = BURNED, "", time.time()
-            host.guests.burn_invite(invite.invite_id)
+            self._burn_behind(record)
             raise
         record.code = code
         record.expires = time.time() + lifetime
-        host.audit.record("code_create", code=code, invite=invite.invite_id,
-                          panes=list(invite.panes), role=invite.role,
+        host.audit.record("code_create", code_kind=kind, code=code, invite=invite_id or None,
+                          panes=list(panes), role=role or None,
                           expires=round(record.expires, 3))
         record.state = LIVE
         asyncio.get_running_loop().call_later(
@@ -294,8 +366,9 @@ class CodeBook:
         record.in_flight = max(0, record.in_flight - 1)
         if record.state != LIVE:
             return record.state == BURNED
-        self.host.audit.record("code_attempt", code=record.code, invite=record.invite_id,
-                               peer=peer, reason=reason, failures=record.failures + 1)
+        self.host.audit.record("code_attempt", code_kind=record.kind, code=record.code,
+                               invite=record.invite_id or None, peer=peer, reason=reason,
+                               failures=record.failures + 1)
         record.failures += 1
         if record.failures < MAX_FAILURES:
             return False
@@ -303,35 +376,37 @@ class CodeBook:
         return True
 
     async def burn(self, record: CodeRecord, reason: str = "failures") -> None:
-        """The code stops resolving and its invite dies with it: three failures, the owner
-        withdrawing it (``revoked``), or a newer code for the same pane (``replaced``)."""
+        """The code stops resolving and what it opened dies with it: three failures, the owner
+        withdrawing it (``revoked``), or a newer code in its place (``replaced``)."""
         if record.state != LIVE:
             return
-        self.host.audit.record("code_burned", code=record.code, invite=record.invite_id,
-                               failures=record.failures, reason=reason)
+        self.host.audit.record("code_burned", code_kind=record.kind, code=record.code,
+                               invite=record.invite_id or None, failures=record.failures,
+                               reason=reason)
         record.state, record.fragment = BURNED, ""
-        self.host.guests.burn_invite(record.invite_id)
+        self._burn_behind(record)
         self._tell(record)
         await self._forget_at_rendezvous(record)
 
     async def used(self, record: CodeRecord, peer: str) -> str:
         """A confirmed PIN: the code is spent, and the fragment goes to the caller, once."""
         record.in_flight = max(0, record.in_flight - 1)
-        self.host.audit.record("code_used", code=record.code, invite=record.invite_id,
-                               peer=peer, failures=record.failures)
+        self.host.audit.record("code_used", code_kind=record.kind, code=record.code,
+                               invite=record.invite_id or None, peer=peer,
+                               failures=record.failures)
         fragment, record.fragment, record.state = record.fragment, "", USED
         self._tell(record)
         self.host._spawn(self._forget_at_rendezvous(record))
         return fragment
 
     async def expire(self, record: CodeRecord) -> None:
-        """Ten minutes, unused: the code ends, and so does the invite nobody fetched."""
+        """Ten minutes, unused: the code ends, and so does the door nobody went through."""
         if record.state != LIVE:
             return
-        self.host.audit.record("code_expired", code=record.code, invite=record.invite_id,
-                               failures=record.failures)
+        self.host.audit.record("code_expired", code_kind=record.kind, code=record.code,
+                               invite=record.invite_id or None, failures=record.failures)
         record.state, record.fragment = EXPIRED, ""
-        self.host.guests.burn_invite(record.invite_id)
+        self._burn_behind(record)
         self._tell(record)
         await self._forget_at_rendezvous(record)
 
@@ -349,7 +424,7 @@ class CodeBook:
 
 
 class Attempt:
-    """One connection to a code room: CPace, key confirmation, and the sealed invite.
+    """One connection to a code room: CPace, key confirmation, and the sealed fragment.
 
     It sits in ``Host.channels`` beside the Noise channels, so the rendezvous link's routing, a
     lost link and shutdown all reach it unchanged. Everywhere else the hub looks at a channel it
@@ -495,4 +570,4 @@ class Attempt:
         fragment = await self.book.used(record, self.peer)
         with contextlib.suppress(Exception):
             await self._send(seal(isk, record.code, fragment))
-        await self.close("invite delivered")
+        await self.close("fragment delivered")

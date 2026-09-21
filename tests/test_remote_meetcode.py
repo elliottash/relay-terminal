@@ -44,9 +44,15 @@ class Harness:
     reads and writes the owner's real profile and keyring.
     """
 
-    def __init__(self, admit=True, answer_delay=0.0):
+    def __init__(self, admit=True, answer_delay=0.0, allow_device=True,
+                 capability=wire.FULL):
         self.admit = admit
         self.answer_delay = answer_delay
+        # The owner's answer to a *pairing* dialog (card #FR1C), the seam `approver` fills: a
+        # pairing code ends at the same five-digit compare a scanned QR does.
+        self.allow_device = allow_device
+        self.capability = capability
+        self.pair_asks: list[host_mod.PairRequest] = []
         self.knocks: list[host_mod.KnockRequest] = []
         self.states: list[dict] = []
         # What the rendezvous was sent: HTTP request lines, headers and bodies, and every socket
@@ -73,8 +79,15 @@ class Harness:
                 await asyncio.sleep(self.answer_delay)
             return self.admit, request.role
 
+        async def approver(request):
+            self.pair_asks.append(request)
+            if self.answer_delay:
+                await asyncio.sleep(self.answer_delay)
+            return self.allow_device, self.capability
+
         self.host = host_mod.Host(self.identity, self.devices, self.source,
-                                  app_base="https://app.example", knock_approver=knock_approver,
+                                  app_base="https://app.example", approver=approver,
+                                  knock_approver=knock_approver,
                                   guests=self.guests, name="test desktop")
         self.host.codes.on_state(lambda record: self.states.append(
             {"code": record.code, "state": record.state, "failures": record.failures}))
@@ -124,6 +137,9 @@ class Harness:
 
     async def code(self, pane="pane-1", role=wire.EDITOR):
         return await self.host.code_create([pane], role)
+
+    async def pair_code(self):
+        return await self.host.pair_code()
 
     async def lookup(self, code, headers=None):
         """``GET /v1/codes/<code>`` → (status, body), off the loop the server runs on."""
@@ -601,6 +617,304 @@ class SidecarTests(unittest.TestCase):
             self.assertIn(kind, wire.OWNER_ONLY)
             self.assertIn(kind, wire.NEVER_FROM_CLIENT)
             self.assertNotIn(kind, wire.CLIENT_TYPES)
+
+
+# ---- a code that pairs a phone (card #FR1C) ------------------------------------------------------
+
+class PairCodeTests(unittest.TestCase):
+    """The same four letters and four digits, delivering the *pairing* fragment.
+
+    Everything the code phase does is #97EG's and is tested above; what is tested here is the one
+    thing that differs — what a correct PIN earns — and the rule that keeps the two apart: a
+    pairing code and an invite code are not interchangeable, and it is the fragment's own shape
+    that decides, not the code and not the page it was typed into.
+    """
+
+    def test_a_correct_pin_earns_the_pairing_fragment_and_pairs_the_phone(self):
+        async def main():
+            async with Harness() as harness:
+                record = await harness.pair_code()
+                self.assertEqual(record.kind, meetcode.KIND_PAIR)
+                self.assertEqual(len(record.code), 4)
+                self.assertRegex(record.pin, r"^\d{4}$")
+
+                # What the phone is handed: a pairing link, on the pairing page, for the room the
+                # desktop opened for this code — not an invite.
+                phone = client_mod.Client(harness.base)
+                url = await phone.join_with_code(record.code.lower(), record.pin,
+                                                 app_base="https://app.example")
+                self.assertTrue(url.startswith("https://app.example/pair#v=1&"), url)
+                self.assertEqual(pairing.fragment_kind(url.split("#", 1)[1]), "pair")
+                link = pairing.parse_pair_url(url)
+                self.assertEqual(link["desktop_public"], harness.identity.public)
+                self.assertEqual(link["room"], record.pair_room)
+                with self.assertRaises(ValueError):
+                    pairing.parse_invite_url(url)
+
+                # And from here section 5 unchanged: Noise IK against `d`, `pair_prove`, the
+                # owner's dialog with the five digits, the capability, the connect token.
+                paired = await phone.pair(url, name="iPhone", platform="Safari")
+                self.assertEqual(len(harness.pair_asks), 1)
+                self.assertEqual(harness.pair_asks[0].name, "iPhone")
+                self.assertRegex(harness.pair_asks[0].code, r"^\d{5}$")
+                self.assertEqual(harness.pair_asks[0].code, phone.auth_code,
+                                 "the same five digits on both screens")
+                self.assertEqual(paired.capability, wire.FULL)
+                self.assertTrue(paired.connect_token)
+                self.assertEqual([device.name for device in harness.devices.live()], ["iPhone"])
+                await phone.close()
+
+                # The code was one use, and its record says which sort it was.
+                self.assertEqual(record.state, "used")
+                self.assertEqual(harness.states[-1]["state"], "used")
+                self.assertEqual(await harness.status(record.code), 404)
+                create = [l for l in harness.audit_lines() if l["kind"] == "code_create"][-1]
+                self.assertEqual(create["code_kind"], "pair")
+                self.assertIsNone(create["invite"])
+                kinds = [l["kind"] for l in harness.audit_lines()]
+                self.assertLess(kinds.index("code_used"), kinds.index("pair"))
+        run(main())
+
+    def test_the_paired_device_reconnects_and_reads_the_panes(self):
+        """The point of the exercise: what the phone holds afterwards is an ordinary device
+        record, so the next connection is an ordinary one."""
+        async def main():
+            async with Harness() as harness:
+                record = await harness.pair_code()
+                phone = client_mod.Client(harness.base)
+                paired = await phone.pair_with_code(record.code, record.pin,
+                                                    name="iPad", platform="Safari")
+                await phone.close()
+                again = client_mod.Client(harness.base, static_private=paired.static_private)
+                await again.connect(paired)
+                panes = await again.expect("panes")
+                self.assertTrue(panes["items"])
+                await again.close()
+        run(main())
+
+    def test_the_pairing_room_is_this_codes_alone_and_never_in_a_qr(self):
+        """A room behind both a QR and a typed code would let a scan and the code race for its
+        one use, and the loser would be told the secret was wrong."""
+        async def main():
+            async with Harness() as harness:
+                shown, qr_room = await harness.host.open_pairing()
+                record = await harness.pair_code()
+                self.assertNotEqual(record.pair_room, qr_room.room)
+                self.assertNotEqual(record.pair_room, record.room, "and not the code's own room")
+                self.assertNotIn(record.pair_room, shown)
+                second = await harness.pair_code()
+                self.assertNotEqual(second.pair_room, record.pair_room)
+                self.assertEqual(record.state, "burned", "one live pairing code at a time")
+                burned = [l for l in harness.audit_lines() if l["kind"] == "code_burned"][-1]
+                self.assertEqual((burned["reason"], burned["code_kind"]), ("replaced", "pair"))
+                # The QR the owner already had is untouched by either.
+                self.assertIsNotNone(harness.host.rooms.get(qr_room.room))
+                self.assertIsNone(harness.host.rooms.get(record.pair_room),
+                                  "a burned code's room is gone")
+        run(main())
+
+    def test_three_wrong_pins_burn_the_code_and_the_room_behind_it(self):
+        async def main():
+            async with Harness() as harness:
+                record = await harness.pair_code()
+                for attempt in range(meetcode.MAX_FAILURES):
+                    with self.assertRaises(wire.WireError) as caught:
+                        await client_mod.Client(harness.base).join_with_code(
+                            record.code, wrong_pin(record.pin))
+                    self.assertEqual(caught.exception.code, "wrong_pin")
+                    await harness.until(lambda: record.failures == attempt + 1)
+                await harness.until(lambda: record.state == "burned")
+                self.assertEqual(harness.states[-1],
+                                 {"code": record.code, "state": "burned", "failures": 3})
+                self.assertIsNone(harness.host.rooms.get(record.pair_room),
+                                  "the pairing room dies with the code")
+                for _ in range(100):
+                    if await harness.status(record.code) == 404:
+                        break
+                    await asyncio.sleep(0.05)
+                self.assertEqual(await harness.status(record.code), 404)
+                attempts = [l for l in harness.audit_lines() if l["kind"] == "code_attempt"]
+                self.assertEqual(len(attempts), 3)
+                self.assertEqual({l["code_kind"] for l in attempts}, {"pair"})
+                self.assertTrue(all(l["invite"] is None for l in attempts))
+                self.assertNotIn(record.pin, json.dumps(harness.audit_lines()))
+        run(main())
+
+    def test_revoking_a_pairing_code_burns_it_and_its_room(self):
+        async def main():
+            async with Harness() as harness:
+                record = await harness.pair_code()
+                self.assertIs(await harness.host.codes.revoke(record.code.lower(),
+                                                              meetcode.KIND_PAIR), record)
+                self.assertEqual(record.state, "burned")
+                self.assertIsNone(harness.host.rooms.get(record.pair_room))
+                self.assertEqual(await harness.status(record.code), 404)
+                burned = [l for l in harness.audit_lines() if l["kind"] == "code_burned"][-1]
+                self.assertEqual((burned["reason"], burned["code_kind"]), ("revoked", "pair"))
+                # A withdrawn code is still a code room: a late connection is answered here,
+                # never handed to the Noise path.
+                socket = await harness.raw(record.room)
+                self.assertEqual(await meet_error(socket), "burned")
+                await socket.close()
+                self.assertIsNone(await harness.host.codes.revoke(record.code,
+                                                                  meetcode.KIND_PAIR))
+        run(main())
+
+    def test_neither_surface_can_withdraw_the_others_code(self):
+        """`code_revoke` is the sharing panel's, `pair_code_revoke` the pairing dialog's."""
+        async def main():
+            async with Harness() as harness:
+                share = await harness.code()
+                phone = await harness.pair_code()
+                self.assertIsNone(await harness.host.codes.revoke(share.code,
+                                                                  meetcode.KIND_PAIR))
+                self.assertIsNone(await harness.host.codes.revoke(phone.code,
+                                                                  meetcode.KIND_INVITE))
+                self.assertEqual((share.state, phone.state), ("live", "live"))
+                self.assertIsNotNone(await harness.host.codes.revoke(share.code,
+                                                                     meetcode.KIND_INVITE))
+                self.assertIsNotNone(await harness.host.codes.revoke(phone.code,
+                                                                     meetcode.KIND_PAIR))
+        run(main())
+
+    def test_a_pairing_code_does_not_replace_a_pane_code_or_the_other_way_round(self):
+        async def main():
+            async with Harness() as harness:
+                share = await harness.code("pane-1")
+                phone = await harness.pair_code()
+                self.assertEqual(share.state, "live", "a pairing code is about no pane")
+                again = await harness.code("pane-1")
+                self.assertEqual(share.state, "burned")
+                self.assertEqual(phone.state, "live")
+                self.assertEqual(again.state, "live")
+        run(main())
+
+    def test_an_unused_pairing_code_expires_and_takes_its_room(self):
+        async def main():
+            original = meetcode.CODE_LIFETIME
+            meetcode.CODE_LIFETIME = 1.0
+            try:
+                async with Harness() as harness:
+                    record = await harness.pair_code()
+                    await harness.until(lambda: record.state == "expired", timeout=5)
+                    self.assertIsNone(harness.host.rooms.get(record.pair_room))
+                    self.assertEqual(await harness.status(record.code), 404)
+                    expired = [l for l in harness.audit_lines()
+                               if l["kind"] == "code_expired"][-1]
+                    self.assertEqual(expired["code_kind"], "pair")
+            finally:
+                meetcode.CODE_LIFETIME = original
+        run(main())
+
+
+class TwoShapesTests(unittest.TestCase):
+    """A pairing code and an invite code are not interchangeable (card #FR1C).
+
+    The fragment decides, and it is refused twice: by the page it is handed to, and again by the
+    desktop on whichever room it is offered on. The second refusal is the one that matters — a
+    client is whatever the person on the other end wrote.
+    """
+
+    def test_a_pairing_fragment_delivered_to_join_is_refused(self):
+        async def main():
+            async with Harness() as harness:
+                record = await harness.pair_code()
+                phone = client_mod.Client(harness.base)
+                url = await phone.join_with_code(record.code, record.pin,
+                                                 app_base="https://app.example")
+                await phone.close()
+                as_invite = url.replace("/pair#", "/join#")
+                self.assertEqual(pairing.fragment_kind(as_invite.split("#", 1)[1]), "pair",
+                                 "the path is not what says which it is")
+                # The join page would not get this far: there is no `i` to offer.
+                with self.assertRaises(ValueError):
+                    pairing.parse_invite_url(as_invite)
+                # And a client that does not care: the pairing secret, knocked on the pairing
+                # room. The desktop has no invite there and says so.
+                link = pairing.parse_pair_url(url)
+                impostor = client_mod.Client(harness.base)
+                impostor.socket = await ws.connect(
+                    harness.base.replace("http://", "ws://")
+                    + f"/v1/connect?room={link['room']}")
+                await impostor._handshake(link["desktop_public"])
+                await impostor.send({"t": "knock", "invite": pairing.b64(link["secret"]),
+                                     "name": "alice", "platform": "Chrome"})
+                with self.assertRaises(wire.WireError) as caught:
+                    await impostor.expect("knock_pending", timeout=10)
+                self.assertEqual(caught.exception.code, "not_permitted")
+                await impostor.close()
+                self.assertEqual(harness.knocks, [], "the owner was never asked")
+                self.assertEqual(harness.guests.live(), [])
+                # The room is untouched: the phone this code was for can still pair.
+                real = client_mod.Client(harness.base)
+                paired = await real.pair(url, name="iPhone", platform="Safari")
+                self.assertTrue(paired.device_id)
+                await real.close()
+        run(main())
+
+    def test_an_invite_fragment_delivered_to_the_pairing_path_is_refused(self):
+        async def main():
+            async with Harness() as harness:
+                record = await harness.code()
+                guest = client_mod.Client(harness.base)
+                url = await guest.join_with_code(record.code, record.pin,
+                                                 app_base="https://app.example")
+                await guest.close()
+                self.assertTrue(url.startswith("https://app.example/join#"))
+                as_pair = url.replace("/join#", "/pair#")
+                self.assertEqual(pairing.fragment_kind(as_pair.split("#", 1)[1]), "invite")
+                with self.assertRaises(ValueError):
+                    pairing.parse_pair_url(as_pair)
+                # The wire: the invite secret offered as a pairing secret on the invite's room.
+                link = pairing.parse_invite_url(url)
+                impostor = client_mod.Client(harness.base)
+                impostor.socket = await ws.connect(
+                    harness.base.replace("http://", "ws://")
+                    + f"/v1/connect?room={link['room']}")
+                await impostor._handshake(link["desktop_public"])
+                await impostor.send({"t": "pair_prove", "secret": pairing.b64(link["secret"]),
+                                     "name": "iPhone", "platform": "Safari"})
+                with self.assertRaises(wire.WireError) as caught:
+                    await impostor.expect("paired", timeout=10)
+                self.assertEqual(caught.exception.code, "not_permitted")
+                self.assertIn("not a pairing code", caught.exception.message)
+                await impostor.close()
+                self.assertEqual(harness.pair_asks, [], "the owner was never asked")
+                self.assertEqual(harness.devices.live(), [])
+        run(main())
+
+    def test_the_reference_client_refuses_the_wrong_code_before_the_desktop_does(self):
+        async def main():
+            async with Harness() as harness:
+                share = await harness.code()
+                phone = client_mod.Client(harness.base)
+                with self.assertRaises(wire.WireError) as caught:
+                    await phone.pair_with_code(share.code, share.pin, name="iPhone",
+                                               platform="Safari")
+                self.assertEqual(caught.exception.code, "not_permitted")
+                await phone.close()
+                self.assertEqual(harness.devices.live(), [])
+        run(main())
+
+    def test_a_fragment_that_is_both_or_neither_belongs_to_no_page(self):
+        secret = pairing.b64(bytes(16))
+        desktop = pairing.b64(bytes(32))
+        self.assertEqual(pairing.fragment_kind(
+            f"v=1&d={desktop}&s={secret}&r=room1"), "pair")
+        self.assertEqual(pairing.fragment_kind(
+            f"#v=1&d={desktop}&i={secret}&r=room1"), "invite")
+        for bad in (f"v=1&d={desktop}&s={secret}&i={secret}&r=room1",   # both doors
+                    f"v=1&d={desktop}&r=room1",                          # neither
+                    f"v=2&d={desktop}&s={secret}&r=room1",               # another version
+                    f"v=1&s={secret}&r=room1",                           # no desktop key
+                    f"v=1&d={desktop}&s={secret}",                       # no room
+                    "", "not a fragment"):
+            self.assertEqual(pairing.fragment_kind(bad), "", bad)
+            with self.assertRaises(ValueError, msg=bad):
+                pairing.fragment_url("https://app.example", bad)
+        # Percent-encoded by a QR reader or a link handler, and still itself.
+        self.assertEqual(pairing.fragment_kind(
+            f"v=1%26d={desktop}%26s={secret}%26r=room1"), "pair")
 
 
 if __name__ == "__main__":

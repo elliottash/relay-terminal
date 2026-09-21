@@ -21,6 +21,12 @@ the GUI never links a crypto library and this process never touches a widget.
     {"t":"agent","pane":"p1","event":{...}}                  one worker event, verbatim
     {"t":"unpane","id":"p1"}                                 pane closed or stopped sharing
     {"t":"pair"}                                             open a pairing room, get a QR
+    {"t":"pair_code"}                     a pairing code and PIN for a phone with no camera on
+                                          this screen and nowhere to paste a link (card #FR1C):
+                                          the same four letters and four digits a guest is given,
+                                          delivering this desktop's pairing fragment → `pair_code`
+    {"t":"pair_code_revoke","code":"ABCD"}   withdraw a live pairing code: it and the pairing room
+                                          behind it burn → `pair_code_state`
     {"t":"answer","id":N,"allow":true,"capability":"full"}   the user answered the dialog
     {"t":"address","value":"192.168.1.9"}                    serve the QR on another address;
                                           the value may also be the tailnet name from the
@@ -77,6 +83,15 @@ the GUI never links a crypto library and this process never touches a widget.
                                           `available:false` and a reason when /v1/health did not
                                           answer
     {"t":"pairing","url":"...","qr":[[0,1,...],...],"expires":N}
+    {"t":"pair_code","code":"ABCD","pin":"4829","expires":600}   what to show the phone: four
+                                          letters and four digits, and the seconds they last. The
+                                          PIN is a secret — show it large, never log it. A correct
+                                          PIN earns the pairing fragment, and the `ask` below
+                                          follows exactly as it does after a scan
+    {"t":"pair_code_state","code":"ABCD","state":"used","failures":N}   the pairing code ended:
+                                          "used" (a PIN was confirmed; the `ask` follows),
+                                          "burned" (three wrong PINs, `pair_code_revoke`, or
+                                          replaced by a newer pairing code) or "expired"
     {"t":"ask","id":N,"name":"...","platform":"...","fingerprint":"...","code":"12345","peer":"..."}
     {"t":"paired","device":"...","name":"...","capability":"..."}
     {"t":"devices","items":[...]}
@@ -150,8 +165,8 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from remote import devtls, guests as guests_mod, host as host_mod, identity as identity_mod, \
-    cloudflare as cloudflare_mod, email as email_mod, panes as panes_mod, \
-    tailnet as tailnet_mod, terminal as terminal_mod, wire, ws
+    cloudflare as cloudflare_mod, email as email_mod, meetcode as meetcode_mod, \
+    panes as panes_mod, tailnet as tailnet_mod, terminal as terminal_mod, wire, ws
 from rendezvous.server import Store, build
 
 log = logging.getLogger("relay.gui_host")
@@ -638,6 +653,12 @@ class Sidecar:
             self.source.history_reply(message)
         elif kind == "pair":
             await self.pair()
+        elif kind == "pair_code":
+            await self.pair_code()
+        elif kind == "pair_code_revoke":
+            if self.host is not None:
+                await self.host.codes.revoke(str(message.get("code") or ""),
+                                             meetcode_mod.KIND_PAIR)
         elif kind == "address":
             value = str(message.get("value", ""))
             # While the switch is on, the address the picker sends *is* the new wish: the service
@@ -678,7 +699,8 @@ class Sidecar:
             await self.code_create(message)
         elif kind == "code_revoke":
             if self.host is not None:
-                await self.host.codes.revoke(str(message.get("code") or ""))
+                await self.host.codes.revoke(str(message.get("code") or ""),
+                                             meetcode_mod.KIND_INVITE)
         elif kind == "invite_revoke":
             if self.host is not None and self.host.invite_revoke(str(message.get("id", ""))):
                 self.report_participants()
@@ -1197,6 +1219,25 @@ class Sidecar:
         self.emit({"t": "pairing", "url": url, "qr": qr_matrix(url),
                    "expires": room.seconds_left()})
 
+    async def pair_code(self) -> None:
+        """``pair_code`` → ``pair_code {code, pin, expires}`` (card #FR1C).
+
+        The phone's side of "install once, type the code, compare five digits": no QR to scan and
+        no link to paste. The PIN goes to the GUI and nowhere else — not to a log line, not to the
+        audit log, not to the rendezvous — and a correct one hands the phone this desktop's
+        pairing fragment, after which :meth:`ask` is the same dialog a scan raises.
+        """
+        if self.host is None:
+            self.emit({"t": "error", "message": "sharing is not running."})
+            return
+        try:
+            record = await self.host.pair_code()
+        except wire.WireError as error:
+            self.emit({"t": "error", "message": error.message})
+            return
+        self.emit({"t": "pair_code", "code": record.code, "pin": record.pin,
+                   "expires": record.seconds_left()})
+
     async def ask(self, request: host_mod.PairRequest) -> tuple[bool, str]:
         """Put the question to the GUI and wait for the dialog's answer."""
         self.next_ask += 1
@@ -1274,7 +1315,17 @@ class Sidecar:
         self.report_participants()
 
     def code_state(self, record) -> None:
-        """``code_state {code, state, failures}``: a code was used, burned or expired."""
+        """A code was used, burned or expired — ``code_state`` for a share code (#97EG),
+        ``pair_code_state`` for a pairing code (#FR1C).
+
+        Two names because they are two surfaces: the sharing panel's row and the pairing dialog's
+        countdown, each of which must not redraw on the other's news. A pairing code has no
+        invite and no participant, so nothing below it changes either.
+        """
+        if record.kind == meetcode_mod.KIND_PAIR:
+            self.emit({"t": "pair_code_state", "code": record.code, "state": record.state,
+                       "failures": record.failures})
+            return
         self.emit({"t": "code_state", "code": record.code, "state": record.state,
                    "failures": record.failures})
         if record.state != "used":
