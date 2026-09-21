@@ -109,7 +109,9 @@ private:
     QString providerChoice(const QString &presetId) const;
     QJsonArray choosableProviders() const;
     QStringList effortsFor(const QString &presetId, const QString &modelId) const;
-    QString effortLabel(const QString &presetId, const QString &modelId, const QString &level) const;
+    // Whether this row's level is the provider's to decide rather than this dialog's (card #MDL1,
+    // 2026-09-21): the worker's `effort_fixed`, else no levels at all, else Relay Free.
+    bool effortFixedFor(const QString &presetId, const QString &modelId) const;
     QString effortNoteFor(const QString &presetId) const;
     QString rolePreset(const QString &role) const;
     QString ownProviderFor(const QString &role) const;

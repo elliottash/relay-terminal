@@ -63,7 +63,14 @@ struct Entry {
     QString kind;
     int order = -1;
     QString tier;         // the tier this is the provider's default for: main | flash | lite | ""
-    QStringList efforts;  // reasoning levels the model accepts; empty = no knob
+    // The reasoning levels this *model* takes, in the provider's own order and the provider's own
+    // words (owner, 2026-09-21: "i want the effort options in relay to be determined by the model
+    // … so xhigh shows up for codex for example"). Codex serves low medium high xhigh max ultra,
+    // Claude Code stops at xhigh, Kimi has three, Relay Free two. Empty means the model has no
+    // reasoning knob at all. Relay no longer keeps a vocabulary of its own: this list is the
+    // vocabulary, the wire carries the word as it stands here, and the worker validates it per
+    // model. `effortLadder()` below only says which of two words is the higher one.
+    QStringList efforts;
     // What the provider says this model's own default level is (the worker's `default_effort`: a
     // guest's `default_reasoning_level`, a cloud model's tier extra read back), and the level it
     // starts at in each list — `tier_effort`, `{main, high, flash, lite}` — for the row's `+ add a
@@ -73,11 +80,16 @@ struct Entry {
     QHash<QString, QString> tierEffort;
     int intelligence = -1;   // the owner's ruling (presets.INTELLIGENCE); -1 unknown
     QString openrouter;      // the same model's OpenRouter slug, when it has one (presets.OPENROUTER_TWINS)
-    // What each reasoning level is called by the provider it is sent to (owner, 2026-09-20:
-    // "for codex planning you pick xhigh, not max"): Relay stores its own four levels and
-    // shows these. Empty for a row that sent none; `effortLabel` falls back to the level.
-    QHash<QString, QString> effortLabels;
-    QString effortLabel(const QString &level) const { return effortLabels.value(level, level); }
+    // Whether the level box is greyed for this model (owner, 2026-09-21: "for no knob models, the
+    // effort box should be grayed out. same for relay free."). The worker sends `effort_fixed` per
+    // model row; until it does, the same two cases are derived from the row itself — a model with
+    // no levels, and Relay Free, where the gateway picks the level for the role whatever the pane
+    // asks for. A fixed model still has `efforts` when the provider reports them: they are what the
+    // greyed box shows, not something the pane may change.
+    bool effortFixed = false;
+    // One sentence for the greyed box's tooltip and for what Alt+E and `/effort` say instead of
+    // opening; empty when the level is the pane's to set.
+    QString effortFixedReason() const;
     bool usable = false;     // a stored key, a local server, a runnable harness, Relay Free available
     bool openEnded = false;  // the provider lists more than a few models (OpenRouter's live list)
     bool guest = false, local = false, hosted = false, custom = false;
@@ -91,6 +103,27 @@ struct Entry {
 // wherever there is one; this is what a hand-typed id and an older worker's row get, and it is the
 // same derivation, so `openai/gpt-5.6-sol` typed by hand folds into the existing gpt-5.6-sol row.
 QString nameOf(const QString &modelId);
+
+// ----- reasoning levels: the model's list is the vocabulary (card #MDL1, 2026-09-21) ------------
+//
+// Relay used to own four levels — low, medium, high, max — and every picker validated against
+// them, which is why a codex pane could not be put on `xhigh` or `ultra` and why a Kimi pane
+// offered a `medium` that was the same request as `high`. The levels are the provider's now
+// (`Entry::efforts`). Nothing validates against the ladder below: it is only an order, so that
+// "is xhigh above or below max" has an answer when a pane carrying one model's level moves to a
+// model that does not take it.
+
+// Every level word Relay has seen, lowest first. Codex's own list is the longest and each other
+// provider's is a subset of it in the same order, which is what makes one ladder enough.
+QStringList effortLadder();
+// Where `level` sits on it, -1 for a word the ladder has never heard of.
+int effortRank(const QString &level);
+// The level of `levels` that a stored one lands on when the model does not take it: the model's
+// top when the stored level is above all of them, its lowest when below, and otherwise the nearest
+// by ladder position with ties going up — so `xhigh` on a model serving low/medium/high/max lands
+// on `max`, not `high`. `levels` empty (a model with no knob) answers empty, and a word off the
+// ladder is treated as `high`, which is where a pane sits by default.
+QString nearestEffort(const QStringList &levels, const QString &level);
 
 // One subscription window a provider reported: "5h" or "weekly", how much is spent, when it resets.
 struct LimitWindow {

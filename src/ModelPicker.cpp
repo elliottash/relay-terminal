@@ -422,9 +422,13 @@ void ModelPicker::addSection(const QString &title) {
 
 QString ModelPicker::effectiveEffort(const Entry &entry) const {
     if (entry.efforts.isEmpty()) return QString();
+    // A level stored in a list, or carried by the pane, may be one this model does not take —
+    // `xhigh` from a codex row on a model whose provider stops at `max` (card #MDL1, 2026-09-21).
+    // It snaps to the model's nearest rather than being dropped, so the row shows the level this
+    // pick would really run at.
     const QString listed = curation::listEffortFor(entry.key);
-    if (entry.efforts.contains(listed)) return listed;
-    if (entry.efforts.contains(m_context.currentEffort)) return m_context.currentEffort;
+    if (!listed.isEmpty()) return nearestEffort(entry.efforts, listed);
+    if (!m_context.currentEffort.isEmpty()) return nearestEffort(entry.efforts, m_context.currentEffort);
     return entry.efforts.last();
 }
 
@@ -445,7 +449,7 @@ QTreeWidgetItem *ModelPicker::addListRow(int rank, const curation::TierEntry &it
     else left = percent(percentLeft(m_context.catalog, entry->preset));
     QString level;
     if (entry && !entry->efforts.isEmpty())
-        level = item.effort.isEmpty() ? QStringLiteral("default") : entry->effortLabel(item.effort);
+        level = item.effort.isEmpty() ? QStringLiteral("default") : nearestEffort(entry->efforts, item.effort);
     const double speed = curation::speed(item.key);
     auto *row = new QTreeWidgetItem(m_list, QStringList{
         QString::number(rank), QString(), name, entry ? providerText(*entry) : QString(), level,
@@ -504,7 +508,7 @@ QTreeWidgetItem *ModelPicker::addGroupRow(const Group &group, bool addable) {
     if (until >= 0) leftText = QStringLiteral("0%") + (until > 0 ? QStringLiteral(" · resets ") + resetText(until, now) : QString());
     auto *row = new QTreeWidgetItem(m_list, QStringList{
         addable ? QStringLiteral("+ add") : QString(), QString(), name, via,
-        level.isEmpty() ? QString() : entry.effortLabel(level),
+        level,
         entry.intelligence >= 0 ? QString::number(entry.intelligence) : QString(),
         speed > 0 ? QString::number(qRound(speed)) : QString(), leftText});
     row->setData(0, KeyRole, entry.key);
@@ -838,9 +842,16 @@ void ModelPicker::onRowChanged() {
         }
     m_levels->clear();
     if (!entry) { m_filling = false; m_limits->clear(); return; }
-    if (entry->efforts.isEmpty()) {
-        auto *none = new QListWidgetItem(QStringLiteral("no setting"), m_levels);
+    if (entry->effortFixed || entry->efforts.isEmpty()) {
+        // A model with no knob, or Relay Free, where the gateway picks the level for the role
+        // whatever anyone asks for (owner, 2026-09-21). The list is empty and says which it is,
+        // in the same sentence the pane's greyed box puts in its tooltip.
+        const QString why = entry->effortFixedReason().isEmpty()
+                                ? QStringLiteral("%1 has no reasoning level").arg(entry->name.isEmpty() ? entry->model : entry->name)
+                                : entry->effortFixedReason();
+        auto *none = new QListWidgetItem(why, m_levels);
         none->setFlags(Qt::NoItemFlags);
+        none->setToolTip(why);
     } else {
         // On a row that is in this tab's list, the level list is the level the *entry carries in
         // the list* (TierEntry::effort), "default" included — picking one writes it there. On the
@@ -855,14 +866,23 @@ void ModelPicker::onRowChanged() {
             fallback->setToolTip(QStringLiteral("The model's own default level — what it runs at when this list names none"));
             if (stored.isEmpty()) m_levels->setCurrentItem(fallback);
         }
+        // The model's own levels, in the provider's order and the provider's words — `xhigh` and
+        // `ultra` on a codex row, three on kimi (card #MDL1, 2026-09-21). There is no Relay level
+        // behind them any more and so nothing to label.
         const QString chosen = listed ? stored : effectiveEffort(*entry);
         for (const QString &level : entry->efforts) {
-            auto *item = new QListWidgetItem(entry->effortLabel(level), m_levels);
+            auto *item = new QListWidgetItem(level, m_levels);
             item->setData(Qt::UserRole, level);
             if (level == chosen) m_levels->setCurrentItem(item);
         }
-        // A stored level the provider no longer offers: a listed row falls back to "default",
-        // which is exactly what it will run at, and a flat row to the model's top level.
+        // A stored level this model does not take snaps to its nearest (`xhigh` → `max`), so the
+        // preselected row is the one the pick would run at. A listed row with no level at all
+        // stays on "default", which is exactly what it will run at.
+        if (!m_levels->currentItem() && !chosen.isEmpty()) {
+            const QString snapped = nearestEffort(entry->efforts, chosen);
+            for (int i = 0; i < m_levels->count(); ++i)
+                if (m_levels->item(i)->data(Qt::UserRole).toString() == snapped) m_levels->setCurrentRow(i);
+        }
         if (!m_levels->currentItem() && m_levels->count()) m_levels->setCurrentRow(listed ? 0 : m_levels->count() - 1);
     }
     m_filling = false;
@@ -904,9 +924,8 @@ void ModelPicker::onLevelChanged() {
     if (!moved) return;   // nothing changed, or the key is no longer in the list
     pushUndo(m_tier);
     curation::setTierEffort(m_tier, key, level);
-    const Entry *entry = m_context.catalog.find(key);
-    row->setText(ColReasoning, level.isEmpty() ? QStringLiteral("default")
-                                               : entry ? entry->effortLabel(level) : level);
+    // The word the list now holds is the provider's own, so it is what the column prints.
+    row->setText(ColReasoning, level.isEmpty() ? QStringLiteral("default") : level);
     changed();
 }
 

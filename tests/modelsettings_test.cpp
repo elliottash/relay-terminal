@@ -653,17 +653,15 @@ private Q_SLOTS:
 
     // ----- reasoning effort lists -------------------------------------------------------------
 
-    // Owner, 2026-09-20: "for codex planning you pick xhigh, not max; for glm 5.3 you pick max". The
-    // box shows the provider's own word for each level (`effort_labels`) and stores Relay's level, so
-    // the setting still means something when the job moves to another provider.
-    void anEffortBoxShowsTheProvidersOwnWordAndStoresTheRelayLevel() {
-        const QJsonArray levels{QStringLiteral("low"), QStringLiteral("high"), QStringLiteral("max")};
-        const QJsonObject words{{QStringLiteral("low"), QStringLiteral("low")},
-                                {QStringLiteral("high"), QStringLiteral("high")},
-                                {QStringLiteral("max"), QStringLiteral("xhigh")}};
+    // Owner, 2026-09-21: "i want the effort options in relay to be determined by the model … so
+    // xhigh shows up for codex for example". The box lists the model's own levels, in the
+    // provider's order and the provider's words, and stores the word itself — Relay's four levels
+    // and the `effort_labels` that translated them are retired with card #MDL1.
+    void anEffortBoxListsTheModelsOwnLevelsInTheProvidersWords() {
+        const QJsonArray levels{QStringLiteral("low"), QStringLiteral("high"), QStringLiteral("xhigh")};
         RolesDialog dialog;
         open(dialog, with(presets({QStringLiteral("kimi"), QStringLiteral("openai")}), QStringLiteral("openai"),
-                          {{QStringLiteral("efforts"), levels}, {QStringLiteral("effort_labels"), words}}));
+                          {{QStringLiteral("efforts"), levels}}));
         pin(dialog);
         pick(comboNamed(dialog, QStringLiteral("Summaries provider")), QStringLiteral("openai"));
         QComboBox *effort = comboNamed(dialog, QStringLiteral("Summaries effort"));
@@ -672,25 +670,23 @@ private Q_SLOTS:
                                                QStringLiteral("high"), QStringLiteral("xhigh")}));
         QVERIFY(!itemsOf(effort).contains(QStringLiteral("max")));
         const int xhigh = effort->findText(QStringLiteral("xhigh"));
-        QCOMPARE(effort->itemData(xhigh).toString(), QStringLiteral("max"));
-        QVERIFY(effort->itemData(xhigh, Qt::ToolTipRole).toString().contains(QStringLiteral("max")));
+        QCOMPARE(effort->itemData(xhigh).toString(), QStringLiteral("xhigh"));   // the word, not a Relay level
         effort->setCurrentIndex(xhigh);
         Q_EMIT effort->activated(xhigh);
-        QCOMPARE(stored(QStringLiteral("summaries"), QStringLiteral("effort")), QStringLiteral("max"));
+        QCOMPARE(stored(QStringLiteral("summaries"), QStringLiteral("effort")), QStringLiteral("xhigh"));
         QCOMPARE(comboNamed(dialog, QStringLiteral("Summaries effort"))->currentText(), QStringLiteral("xhigh"));
-        // The same stored level on a provider with no word of its own reads as Relay's: Kimi offers
-        // low and high, so max comes down to high, shown as "high".
+        // The same stored word on a provider that does not take it snaps to that model's nearest:
+        // Kimi offers low and high, and xhigh is above both, so it lands on high.
         pick(comboNamed(dialog, QStringLiteral("Summaries provider")), QStringLiteral("kimi"));
         QCOMPARE(comboNamed(dialog, QStringLiteral("Summaries effort"))->currentText(), QStringLiteral("high"));
     }
 
-    // The picked model's own catalog row decides, where it has one: its levels and its words win over
-    // the provider's, and a model with no levels at all gets no effort box.
-    void thePickedModelsOwnLevelsAndWordsWinOverTheProviders() {
+    // The picked model's own catalog row decides, where it has one: its levels win over the
+    // provider's, and a model with no levels at all gets no effort box.
+    void thePickedModelsOwnLevelsWinOverTheProviders() {
         const QJsonArray models{
             modelRow(QStringLiteral("model-of-openai"), QStringLiteral("GPT-6 Astra"),
-                     {QStringLiteral("high"), QStringLiteral("max")},
-                     {{QStringLiteral("high"), QStringLiteral("high")}, {QStringLiteral("max"), QStringLiteral("xhigh")}}),
+                     {QStringLiteral("high"), QStringLiteral("xhigh")}),
             modelRow(QStringLiteral("gpt-6-mini"), QStringLiteral("GPT-6 mini"), {})};
         RolesDialog dialog;
         open(dialog, with(presets({QStringLiteral("kimi"), QStringLiteral("openai")}), QStringLiteral("openai"),

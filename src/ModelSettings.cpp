@@ -361,33 +361,20 @@ QString KeysDialog::presetLabelFor(const QString &id) const {
 
 namespace {
 
-// Relay's four reasoning levels, low to high. A provider offers some subset of them, which the
-// `presets` event carries per preset as `efforts` (presets.py `effort_levels`).
-QStringList allEfforts() {
-    return {QStringLiteral("low"), QStringLiteral("medium"), QStringLiteral("high"), QStringLiteral("max")};
-}
+// The words Relay has seen from any provider, lowest first. Relay owns no levels of its own since
+// card #MDL1 (owner, 2026-09-21: "i want the effort options in relay to be determined by the
+// model"): a row's levels are its model's `efforts`, and this ladder is the fallback for a
+// provider that reports none at all, and the order `nearestEffort` snaps along.
+QStringList allEfforts() { return relay::models::effortLadder(); }
 
-// The offered level a stored one lands on: itself when the provider offers it, otherwise the nearest
-// of the four above by position, ties going up. This mirrors Pane::nearestEffort, which the pane's
-// own picker and Alt+. / Alt+, already use, and for the same reason: a level stored while another
+// The offered level a stored one lands on: itself when the model takes it, otherwise the nearest by
+// ladder position, ties going up (relay::models::nearestEffort). A level stored while another
 // provider was in use names a request this one cannot make, and showing "Model default" instead hid
 // the effort the job would really run at (owner report, 2026-09-18). An empty `offered` means the
-// provider has no effort knob at all, and then no picker is drawn in the first place.
+// model has no effort knob at all, and then no picker is drawn in the first place.
 QString nearestOffered(const QStringList &offered, const QString &level) {
     if (offered.isEmpty() || offered.contains(level)) return level;
-    int want = allEfforts().indexOf(level);
-    if (want < 0) want = allEfforts().indexOf(QStringLiteral("high"));
-    QString best;
-    int bestDistance = -1;
-    for (const QString &candidate : offered) {
-        const int distance = qAbs(allEfforts().indexOf(candidate) - want);
-        if (bestDistance < 0 || distance < bestDistance
-            || (distance == bestDistance && allEfforts().indexOf(candidate) > allEfforts().indexOf(best))) {
-            best = candidate;
-            bestDistance = distance;
-        }
-    }
-    return best;
+    return relay::models::nearestEffort(offered, level);
 }
 
 // The left column of every row: a title and the lines under it, in one widget, so that rebuilding
@@ -633,23 +620,21 @@ QStringList RolesDialog::effortsFor(const QString &presetId, const QString &mode
     if (preset.isEmpty()) return {};
     const QJsonObject row = modelRow(presetId, modelId);
     const QJsonObject source = row.contains(QStringLiteral("efforts")) ? row : preset;
-    // A provider Relay has never heard of carries no `efforts` at all, and then all four are
-    // offered — the same fallback the pane's own picker makes (Pane::effortsFor).
+    // A provider Relay has never heard of carries no `efforts` at all, and then the whole ladder
+    // is offered — the same fallback the pane's own box makes (Pane::offeredEfforts).
     if (!source.contains(QStringLiteral("efforts"))) return allEfforts();
     QStringList levels;
     for (const auto &level : source.value(QStringLiteral("efforts")).toArray()) levels << level.toString();
     return levels;
 }
 
-// What the provider itself calls a Relay level (`effort_labels`; owner, 2026-09-20: "for codex
-// planning you pick xhigh, not max; for glm 5.3 you pick max"). The box shows this word and stores
-// the Relay level, so moving the job to another provider keeps the setting meaningful.
-QString RolesDialog::effortLabel(const QString &presetId, const QString &modelId, const QString &level) const {
-    const QString key = QStringLiteral("effort_labels");
-    const QString own = modelRow(presetId, modelId).value(key).toObject().value(level).toString();
-    if (!own.isEmpty()) return own;
-    const QString general = presetRow(presetId).value(key).toObject().value(level).toString();
-    return general.isEmpty() ? level : general;
+bool RolesDialog::effortFixedFor(const QString &presetId, const QString &modelId) const {
+    const QString field = QStringLiteral("effort_fixed");
+    const QJsonObject row = modelRow(presetId, modelId);
+    if (row.contains(field)) return row.value(field).toBool();
+    const QJsonObject preset = presetRow(presetId);
+    if (preset.contains(field)) return preset.value(field).toBool();
+    return effortsFor(presetId, modelId).isEmpty() || preset.value(QStringLiteral("hosted")).toBool();
 }
 
 QString RolesDialog::effortNoteFor(const QString &presetId) const {
@@ -665,7 +650,10 @@ QComboBox *RolesDialog::effortBox(const QString &presetId, const QString &modelI
                                   const QString &name, const QString &tip,
                                   std::function<void(const QString &)> onPick) {
     const QStringList levels = effortsFor(presetId, modelId);
-    if (levels.isEmpty()) return nullptr;
+    // A model whose level is not this dialog's to set gets no cell at all: no knob, or Relay Free,
+    // where the gateway picks the level for the role (owner, 2026-09-21). A row with no cell says
+    // the same thing a greyed box does, in a dialog that has no room for a sentence per row.
+    if (levels.isEmpty() || effortFixedFor(presetId, modelId)) return nullptr;
     auto *box = new QComboBox;
     box->setAccessibleName(name);
     box->setMinimumWidth(130);
@@ -675,16 +663,10 @@ QComboBox *RolesDialog::effortBox(const QString &presetId, const QString &modelI
     const QString note = effortNoteFor(presetId);
     if (!note.isEmpty()) tooltip += QStringLiteral("\n%1: %2").arg(providerName(presetId), note);
     box->setToolTip(tooltip);
+    // The model's own words, in the provider's own order (card #MDL1, 2026-09-21): `xhigh` and
+    // `ultra` are rows here on a codex model, and there is no Relay level behind them to label.
     box->addItem(QStringLiteral("model default"), QString());
-    for (const QString &level : levels) {
-        const QString label = effortLabel(presetId, modelId, level);
-        box->addItem(label, level);
-        if (label != level)
-            box->setItemData(box->count() - 1,
-                             QStringLiteral("%1 calls this %2; Relay's level is %3.")
-                                 .arg(providerName(presetId), label, level),
-                             Qt::ToolTipRole);
-    }
+    for (const QString &level : levels) box->addItem(level, level);
     int index = box->findData(stored);
     if (index < 0 && !stored.isEmpty()) index = box->findData(nearestOffered(levels, stored));
     box->setCurrentIndex(index >= 0 ? index : 0);

@@ -68,10 +68,10 @@ QJsonArray solPresets() {
     out << QJsonObject{{QStringLiteral("id"), QStringLiteral("guest:codex")}, {QStringLiteral("label"), QStringLiteral("Codex")},
                        {QStringLiteral("provider"), QStringLiteral("codex")}, {QStringLiteral("model"), QString()},
                        {QStringLiteral("harness"), true},
+                       // Codex's own words (card #MDL1, 2026-09-21): it says xhigh where the API row says max.
                        {QStringLiteral("models"), QJsonArray{QJsonObject{
                            {QStringLiteral("id"), QStringLiteral("gpt-5.6-sol")},
-                           {QStringLiteral("efforts"), QJsonArray{QStringLiteral("low"), QStringLiteral("high"), QStringLiteral("max")}},
-                           {QStringLiteral("effort_labels"), QJsonObject{{QStringLiteral("max"), QStringLiteral("xhigh")}}}}}}};
+                           {QStringLiteral("efforts"), QJsonArray{QStringLiteral("low"), QStringLiteral("high"), QStringLiteral("xhigh")}}}}}};
     out << QJsonObject{{QStringLiteral("id"), QStringLiteral("openai")}, {QStringLiteral("label"), QStringLiteral("openai")},
                        {QStringLiteral("provider"), QStringLiteral("openai")}, {QStringLiteral("plan"), QStringLiteral("pay-as-you-go")},
                        {QStringLiteral("model"), QStringLiteral("gpt-5.6-sol")}, {QStringLiteral("has_stored_key"), true},
@@ -94,6 +94,30 @@ QJsonArray tailPresets() {
     out << QJsonObject{{QStringLiteral("id"), QStringLiteral("openrouter")}, {QStringLiteral("label"), QStringLiteral("openrouter")},
                        {QStringLiteral("provider"), QStringLiteral("openrouter")}, {QStringLiteral("has_stored_key"), true},
                        {QStringLiteral("models"), rows}};
+    return out;
+}
+
+// The levels-per-model catalog (card #MDL1, owner 2026-09-21): codex with its own six, the OpenAI
+// API row with four, Relay Free with two it does not let anyone choose between, and the anthropic
+// row of `presets()` with none at all.
+QJsonArray codexPresets() {
+    QJsonArray out = presets();
+    out << QJsonObject{{QStringLiteral("id"), QStringLiteral("guest:codex")}, {QStringLiteral("label"), QStringLiteral("Codex")},
+                       {QStringLiteral("provider"), QStringLiteral("codex")}, {QStringLiteral("model"), QString()},
+                       {QStringLiteral("harness"), true},
+                       {QStringLiteral("models"), QJsonArray{model(QStringLiteral("gpt-5.6-sol"), QStringLiteral("gpt-5.6-sol"), QString(),
+                                                                   {QStringLiteral("low"), QStringLiteral("medium"), QStringLiteral("high"),
+                                                                    QStringLiteral("xhigh"), QStringLiteral("max"), QStringLiteral("ultra")})}}};
+    out << QJsonObject{{QStringLiteral("id"), QStringLiteral("openai")}, {QStringLiteral("label"), QStringLiteral("openai")},
+                       {QStringLiteral("provider"), QStringLiteral("openai")}, {QStringLiteral("plan"), QStringLiteral("pay-as-you-go")},
+                       {QStringLiteral("model"), QStringLiteral("gpt-6-astra")}, {QStringLiteral("has_stored_key"), true},
+                       {QStringLiteral("models"), QJsonArray{model(QStringLiteral("gpt-6-astra"), QStringLiteral("gpt-6-astra"), QStringLiteral("main"),
+                                                                   {QStringLiteral("low"), QStringLiteral("medium"), QStringLiteral("high"), QStringLiteral("max")}, 53)}}};
+    out << QJsonObject{{QStringLiteral("id"), QStringLiteral("relay-free")}, {QStringLiteral("label"), QStringLiteral("relay free")},
+                       {QStringLiteral("provider"), QStringLiteral("relay free")}, {QStringLiteral("hosted"), true},
+                       {QStringLiteral("available"), true}, {QStringLiteral("model"), QStringLiteral("relay-main")},
+                       {QStringLiteral("models"), QJsonArray{model(QStringLiteral("relay-main"), QStringLiteral("relay-main"), QStringLiteral("main"),
+                                                                   {QStringLiteral("low"), QStringLiteral("medium")})}}};
     return out;
 }
 
@@ -561,17 +585,65 @@ private Q_SLOTS:
         QCOMPARE(picker.pick().effort, QStringLiteral("max"));
     }
 
-    void levelsAreShownInTheProvidersWords() {
+    // ----- the levels are the model's (card #MDL1, owner 2026-09-21) ---------------------------
+
+    void levelsAreTheModelsOwnListInTheProvidersWords() {
         curation::addToTier(QStringLiteral("main"), QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max"));
         ModelPicker::Context ctx = context(QStringLiteral("anthropic|claude-opus-5"), QStringLiteral("max"));
         ctx.tier = QStringLiteral("all");
-        for (Entry &entry : ctx.catalog.entries)
-            if (entry.key == QStringLiteral("glm-coding|glm-5.3")) entry.effortLabels.insert(QStringLiteral("max"), QStringLiteral("xhigh"));
         ModelPicker picker(ctx);
         picker.selectKey(QStringLiteral("glm-coding|glm-5.3"));
-        QCOMPARE(picker.list()->currentItem()->text(ColReasoning), QStringLiteral("xhigh"));   // the provider's word
-        QCOMPARE(picker.levelList()->currentItem()->text(), QStringLiteral("xhigh"));
-        QCOMPARE(picker.selectedEffort(), QStringLiteral("max"));                              // Relay's level is returned
+        QCOMPARE(picker.list()->currentItem()->text(ColReasoning), QStringLiteral("max"));
+        QCOMPARE(picker.levelList()->currentItem()->text(), QStringLiteral("max"));
+        QCOMPARE(picker.selectedEffort(), QStringLiteral("max"));
+        QStringList offered;
+        for (int i = 0; i < picker.levelList()->count(); ++i) offered << picker.levelList()->item(i)->text();
+        QCOMPARE(offered, (QStringList{QStringLiteral("low"), QStringLiteral("high"), QStringLiteral("max")}));
+    }
+
+    // "so xhigh shows up for codex for example": six rows, in codex's order, `ultra` included.
+    void aCodexRowListsXhighAndUltra() {
+        ModelPicker::Context ctx = context(QStringLiteral("anthropic|claude-opus-5"));
+        ctx.catalog = catalogFrom(codexPresets());
+        ctx.tier = QStringLiteral("all");
+        ModelPicker picker(ctx);
+        picker.selectKey(QStringLiteral("guest:codex|gpt-5.6-sol"));
+        QStringList offered;
+        for (int i = 0; i < picker.levelList()->count(); ++i) offered << picker.levelList()->item(i)->text();
+        QCOMPARE(offered, (QStringList{QStringLiteral("low"), QStringLiteral("medium"), QStringLiteral("high"),
+                                       QStringLiteral("xhigh"), QStringLiteral("max"), QStringLiteral("ultra")}));
+        picker.levelList()->setCurrentRow(3);
+        QCOMPARE(picker.selectedEffort(), QStringLiteral("xhigh"));
+    }
+
+    // "for no knob models, the effort box should be grayed out. same for relay free." In the
+    // dialog that is an empty level list with the reason in it, and nothing to pick.
+    void aRelayFreeRowListsNothingAndSaysWhy() {
+        ModelPicker::Context ctx = context(QStringLiteral("anthropic|claude-opus-5"));
+        ctx.catalog = catalogFrom(codexPresets());
+        ctx.tier = QStringLiteral("all");
+        ModelPicker picker(ctx);
+        picker.selectKey(QStringLiteral("relay-free|relay-main"));
+        QCOMPARE(picker.levelList()->count(), 1);
+        QCOMPARE(picker.levelList()->item(0)->text(), QStringLiteral("relay free sets the level for you"));
+        QVERIFY(!(picker.levelList()->item(0)->flags() & Qt::ItemIsSelectable));
+        QVERIFY(picker.selectedEffort().isEmpty());
+        // A model with no knob at all says the other half of the same rule, naming the model.
+        picker.selectKey(QStringLiteral("anthropic|claude-opus-5"));
+        QCOMPARE(picker.levelList()->count(), 1);
+        QCOMPARE(picker.levelList()->item(0)->text(), QStringLiteral("claude-opus-5 has no reasoning level"));
+    }
+
+    // Rule 3: a level the row does not take is preselected as the nearest one it does — the level
+    // the pick would really run at — rather than being dropped.
+    void aLevelTheRowDoesNotTakeSnapsInThePreselect() {
+        ModelPicker::Context ctx = context(QStringLiteral("guest:codex|gpt-5.6-sol"), QStringLiteral("xhigh"));
+        ctx.catalog = catalogFrom(codexPresets());
+        ctx.tier = QStringLiteral("all");
+        ModelPicker picker(ctx);
+        picker.selectKey(QStringLiteral("openai|gpt-6-astra"));   // low, medium, high, max
+        QCOMPARE(picker.levelList()->currentItem()->text(), QStringLiteral("max"));
+        QCOMPARE(picker.selectedEffort(), QStringLiteral("max"));
     }
 
     // ----- the header and the footer ------------------------------------------------------------

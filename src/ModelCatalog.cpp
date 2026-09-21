@@ -47,6 +47,18 @@ bool usableRow(const QJsonObject &preset) {
         || (hosted && preset.value(QStringLiteral("available")).toBool());
 }
 
+// Whether the level box is greyed for this row (owner, 2026-09-21: "for no knob models, the
+// effort box should be grayed out. same for relay free."). The worker states it per model row as
+// `effort_fixed`, with the preset row as its fallback for a provider whose whole endpoint has no
+// knob; where neither says, the same two cases are derived here, which is what an older worker
+// gets. `model` may be an empty object (a preset with no catalog of its own).
+bool effortFixedOf(const QJsonObject &model, const QJsonObject &preset, const QStringList &efforts, bool hosted) {
+    const QString field = QStringLiteral("effort_fixed");
+    if (model.contains(field)) return model.value(field).toBool();
+    if (preset.contains(field)) return preset.value(field).toBool();
+    return efforts.isEmpty() || hosted;
+}
+
 QList<LimitWindow> windowsOf(const QJsonObject &preset) {
     QList<LimitWindow> windows;
     // The worker's guest row carries `limits: {windows, status?, updated_at}` (protocol 29.3): the
@@ -90,6 +102,47 @@ QString nameOf(const QString &modelId) {
 QString Entry::displayName() const {
     if (provider.isEmpty()) return name;
     return name + QStringLiteral(" · ") + provider;
+}
+
+QStringList effortLadder() {
+    // Codex's own list, which every other provider's is a subset of in the same order. It is an
+    // order and nothing else: no picker offers a word off a model's own `efforts`, and the wire
+    // carries the provider's word untouched.
+    static const QStringList ladder{QStringLiteral("low"), QStringLiteral("medium"), QStringLiteral("high"),
+                                    QStringLiteral("xhigh"), QStringLiteral("max"), QStringLiteral("ultra")};
+    return ladder;
+}
+
+int effortRank(const QString &level) { return effortLadder().indexOf(level); }
+
+QString nearestEffort(const QStringList &levels, const QString &level) {
+    if (levels.isEmpty()) return QString();
+    if (levels.contains(level)) return level;
+    int want = effortRank(level);
+    if (want < 0) want = effortRank(QStringLiteral("high"));
+    QString best;
+    int bestDistance = -1;
+    for (const QString &candidate : levels) {
+        // A word this ladder has never heard of sits at the provider's own position in its list,
+        // which keeps a provider-specific level orderable against the ones that are known.
+        int rank = effortRank(candidate);
+        if (rank < 0) rank = std::clamp(levels.indexOf(candidate), 0, effortLadder().size() - 1);
+        const int distance = qAbs(rank - want);
+        if (bestDistance < 0 || distance < bestDistance
+            || (distance == bestDistance && rank > effortRank(best))) {
+            best = candidate;
+            bestDistance = distance;
+        }
+    }
+    return best;
+}
+
+QString Entry::effortFixedReason() const {
+    if (!effortFixed) return QString();
+    // Relay Free first: it does have levels, and saying "no reasoning level" about a model that
+    // plainly has two would read as a bug rather than as the gateway's rule.
+    if (hosted) return QStringLiteral("relay free sets the level for you");
+    return QStringLiteral("%1 has no reasoning level").arg(name.isEmpty() ? model : name);
 }
 
 QString Catalog::keyFor(const QString &preset, const QString &model) { return preset + QLatin1Char('|') + model; }
@@ -208,10 +261,10 @@ Catalog catalogFrom(const QJsonArray &presets) {
             }
             entry.intelligence = row.value(QStringLiteral("intelligence")).isDouble() ? row.value(QStringLiteral("intelligence")).toInt() : -1;
             entry.openrouter = str(row, "openrouter");
-            {
-                const QJsonObject labels = row.value(QStringLiteral("effort_labels")).toObject();
-                for (auto it = labels.begin(); it != labels.end(); ++it) entry.effortLabels.insert(it.key(), it.value().toString());
-            }
+            // `effort_labels` is retired with the same card: the levels above are already the
+            // provider's own words, so there is nothing left to translate and an old worker's map
+            // would translate them twice. It is read by nobody and ignored here.
+            entry.effortFixed = effortFixedOf(row, preset, entry.efforts, hosted);
             entry.usable = usable;
             entry.openEnded = models.size() > 6;
             entry.guest = guest;
@@ -229,6 +282,7 @@ Catalog catalogFrom(const QJsonArray &presets) {
             entry.provider = provider; entry.plan = str(preset, "plan").toLower();
             entry.kind = kind; entry.order = order;
             for (const auto &level : preset.value(QStringLiteral("efforts")).toArray()) entry.efforts << level.toString();
+            entry.effortFixed = effortFixedOf(QJsonObject(), preset, entry.efforts, hosted);
             entry.usable = usable; entry.guest = guest; entry.local = local; entry.hosted = hosted;
             catalog.entries << entry;
         }

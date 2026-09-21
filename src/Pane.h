@@ -916,13 +916,11 @@ public:
         return true;
     }
     bool hasTierListDefaults() const { return !m_tierListDefaults.isEmpty(); }
-    // A reasoning level in the words of the provider this pane is on (owner, 2026-09-20: "for codex
-    // planning you pick xhigh, not max"): Relay keeps its four levels and shows what is sent.
-    QString effortLabel(const QString &level) const {
-        const relay::models::Catalog catalog = modelCatalog();
-        const relay::models::Entry *entry = catalog.find(currentEntryKey());
-        return entry ? entry->effortLabel(level) : level;
-    }
+    // `effortLabel` was here, and is retired with card #MDL1 (owner, 2026-09-21: "i want the effort
+    // options in relay to be determined by the model … so xhigh shows up for codex for example").
+    // It translated one of Relay's four stored levels into the word the provider used for it. There
+    // are no stored Relay levels any more: `offeredEfforts()` is the model's own list, in the
+    // provider's order and the provider's words, and the wire carries the word as it stands.
     // Options › Models drives the keyring through this pane's worker, with the requests the keys
     // dialog sends; the events come back through handleEvent and re-draw every Options pane.
     void storeKey(const QString &preset, const QString &key) { send({{"type", "store_key"}, {"preset", preset}, {"api_key", key}}); }
@@ -1009,8 +1007,10 @@ public:
         // preset serves by default.
         const QString model = spec.value(QStringLiteral("model")).toString();
         if (!model.isEmpty()) m_restoreModel = model;
+        // Any word the provider used: the levels are the model's now, and a restored pane's level
+        // is snapped onto its model once the catalog arrives (`syncEffortToModel`).
         const QString effort = spec.value(QStringLiteral("effort")).toString();
-        if (efforts().contains(effort)) m_effort = effort;
+        if (!effort.isEmpty()) m_effort = effort;
         const QString agentMode = spec.value(QStringLiteral("agent_mode")).toString();
         if (agentMode == QStringLiteral("plan") || agentMode == QStringLiteral("build")) m_agentMode = agentMode;
         const QString input = spec.value(QStringLiteral("input_mode")).toString();
@@ -1665,7 +1665,8 @@ public:
     }
     // Alt+E (agent.effortBox): the level box beside the model box drops open.
     void openEffortBox() {
-        if (!m_effortBox || !m_effortBox->isVisible() || m_effortBox->count() == 0) { status(QStringLiteral("This model has no reasoning setting.")); return; }
+        if (const QString why = effortFixedReason(); !why.isEmpty()) { status(sentenceCase(why)); return; }
+        if (!m_effortBox || !m_effortBox->isVisible() || m_effortBox->count() == 0) { status(QStringLiteral("This model has no reasoning level.")); return; }
         m_effortBox->setFocus(Qt::ShortcutFocusReason);
         m_effortBox->showPopup();
     }
@@ -1737,7 +1738,8 @@ public:
         } else if (model != paneModel()) {
             setMainModel(model);
         }
-        if (!level.isEmpty() && level != m_effort && efforts().contains(level)) setPaneEffort(level);
+        // The list's word for that entry, snapped onto the model it names if it does not take it.
+        if (!level.isEmpty() && level != m_effort) setPaneEffort(level);
     }
     // A command that switches the model **and** has something of its own to say. Every such switch
     // is answered 100–300 ms later by `model_changed`, whose generic "model: … · conversation kept"
@@ -1801,7 +1803,9 @@ public:
             const QString tier = settings.value(roleSetting(role, QStringLiteral("tier"))).toString();
             if (relay::RolesDialog::tierIds().contains(tier)) {
                 QJsonObject entry{{"tier", tier}};
-                if (efforts().contains(effort)) entry.insert(QStringLiteral("effort"), effort);
+                // The word as the list holds it: the worker validates it against the model it
+                // resolves the tier to (card #MDL1, 2026-09-21).
+                if (!effort.isEmpty()) entry.insert(QStringLiteral("effort"), effort);
                 roles.insert(role, entry);
                 continue;
             }
@@ -1810,7 +1814,7 @@ public:
             QJsonObject entry{{"preset", preset}};
             const QString model = settings.value(roleSetting(role, QStringLiteral("model"))).toString().trimmed();
             if (!model.isEmpty()) entry.insert(QStringLiteral("model"), model);
-            if (efforts().contains(effort)) entry.insert(QStringLiteral("effort"), effort);
+            if (!effort.isEmpty()) entry.insert(QStringLiteral("effort"), effort);
             roles.insert(role, entry);
         }
         return roles;
@@ -1834,7 +1838,7 @@ public:
                     QString preset, model;
                     if (!relay::models::Catalog::splitKey(item.key, &preset, &model)) continue;
                     QJsonObject entry{{"preset", preset}, {"model", model}};
-                    if (efforts().contains(item.effort)) entry.insert(QStringLiteral("effort"), item.effort);
+                    if (!item.effort.isEmpty()) entry.insert(QStringLiteral("effort"), item.effort);
                     list.append(entry);
                 }
                 tiers.insert(tier, list);
@@ -1850,7 +1854,7 @@ public:
             if (!preset.isEmpty()) entry.insert(QStringLiteral("preset"), preset);
             if (!model.isEmpty()) entry.insert(QStringLiteral("model"), model);
             const QString effort = settings.value(relay::RolesDialog::tierSetting(tier, QStringLiteral("effort"))).toString();
-            if (efforts().contains(effort)) entry.insert(QStringLiteral("effort"), effort);
+            if (!effort.isEmpty()) entry.insert(QStringLiteral("effort"), effort);
             if (!entry.isEmpty()) tiers.insert(tier, entry);
         }
         return tiers;
@@ -3605,48 +3609,72 @@ public:
     std::function<void(const QString &guest, const QStringList &extra, const QString &cwd)> onOpenGuestPane;
     std::function<void()> onShowAgents;                                    // subagents panel (GUI E2), if present
 
-    // Relay's four levels, in order. This is the vocabulary a *stored* value may hold — a pane, a
-    // tier or a role keeps the level it was set to even on a provider that cannot tell it from its
-    // neighbour — so validation reads this list and every picker reads offeredEfforts() below.
-    static QStringList efforts() { return {QStringLiteral("low"), QStringLiteral("medium"), QStringLiteral("high"), QStringLiteral("max")}; }
+    // ----- reasoning levels are the model's (card #MDL1, owner 2026-09-21) --------------------
+    //
+    // > "i want the effort options in relay to be determined by the model … so xhigh shows up for
+    // > codex for example"; "for no knob models, the effort box should be grayed out. same for
+    // > relay free."
+    //
+    // Relay's own four — low, medium, high, max — are gone, and with them every validation against
+    // them: they were why a codex pane could not be put on `xhigh` or `ultra`, and why a Kimi pane
+    // offered a `medium` that was the same request as `high`. What the box, Alt+E, Alt+. / Alt+,
+    // and `/effort` offer is this model's `efforts` (relay::models::Entry), in the provider's order
+    // and the provider's words, and the word goes on the wire as it stands — the worker validates
+    // it per model. `relay::models::effortLadder()` is an *order* only, for snapping a level from
+    // one model onto another, and is the fallback for a provider that reports no list at all.
 
-    // What this pane's provider can actually be asked for: presets.py `effort_levels`, sent per
-    // preset with the `presets` event. Kimi and GLM send the same request for medium and high, so
-    // they offer three levels; Relay Free caps at medium; Anthropic and MiniMax have no effort knob
-    // at all and offer none. Empty means "this provider has no reasoning setting"; a provider Relay
-    // has never heard of falls back to the four.
-    QStringList offeredEfforts() const { return effortsFor(m_currentPreset); }
+    // The catalog row this pane runs on, or an empty Entry. Copied out, because building the
+    // catalog walks every preset row — OpenRouter's alone is hundreds — so the callers below take
+    // the row rather than each asking for a catalog of their own.
+    relay::models::Entry currentCatalogEntry() const {
+        const relay::models::Catalog catalog = modelCatalog();
+        if (const relay::models::Entry *entry = catalog.find(currentEntryKey())) return *entry;
+        return {};
+    }
+    // The levels this pane's model takes. The catalog answers where it has this model; a pane whose
+    // model is not in it yet (a hand-typed id, the moments before the first `presets`) falls back
+    // to the preset row's own list, and a provider that carries none at all to the ladder.
+    QStringList offeredEfforts() const { return effortsOf(currentCatalogEntry()); }
+    QStringList effortsOf(const relay::models::Entry &entry) const {
+        return entry.key.isEmpty() ? effortsFor(m_currentPreset) : entry.efforts;
+    }
     QStringList effortsFor(const QString &presetId) const {
         const QJsonObject preset = presetById(presetId);
-        if (!preset.contains(QStringLiteral("efforts"))) return efforts();
+        if (!preset.contains(QStringLiteral("efforts"))) return relay::models::effortLadder();
         QStringList levels;
         for (const auto &value : preset.value(QStringLiteral("efforts")).toArray()) levels << value.toString();
         return levels;
     }
-    // One line saying what happens to the levels this provider does not offer ("medium is sent as
-    // high."), or empty when it offers all four.
+    // Whether the level is this pane's to set at all: a model with no reasoning knob, or Relay Free,
+    // where the gateway picks the level for the role whatever the pane asks for. The box is greyed
+    // rather than hidden, and Alt+E and `/effort` say why instead of changing anything.
+    bool effortFixed() const { return !effortFixedReason().isEmpty(); }
+    QString effortFixedReason() const { return effortFixedReasonOf(currentCatalogEntry()); }
+    QString effortFixedReasonOf(const relay::models::Entry &entry) const {
+        if (!entry.key.isEmpty()) {
+            if (!entry.effortFixed) return QString();
+            const QString why = entry.effortFixedReason();
+            if (!why.isEmpty()) return why;
+        } else if (!effortsFor(m_currentPreset).isEmpty() && !onHostedPreset()) {
+            return QString();
+        }
+        // No catalog row yet, or one that says fixed without saying why: the same two cases.
+        if (onHostedPreset()) return QStringLiteral("relay free sets the level for you");
+        const QString name = entry.name.isEmpty() ? modelNameFor(m_currentPreset, paneModel()) : entry.name;
+        return QStringLiteral("%1 has no reasoning level").arg(name.isEmpty() ? QStringLiteral("this model") : name);
+    }
+    // One line saying what happens to a level this provider does not offer, when the worker sends
+    // one. Empty otherwise, which is the normal case now that the box offers the model's own list.
     QString effortNote() const {
         return presetById(m_currentPreset).value(QStringLiteral("effort_note")).toString();
     }
-    // The offered level a stored one lands on: itself when it is offered, otherwise its nearest
-    // neighbour among Relay's four, ties going up. That is the provider's own mapping every time —
-    // GLM sends medium as high, Relay Free sends high and max as medium — so a picker shows the
-    // request the pane will actually make without having to carry the mapping table around.
+    // The level of `offered` a stored one lands on: itself when the model takes it, else the
+    // nearest by ladder position — the model's top when the level is above all of them, its lowest
+    // when below (relay::models::nearestEffort). Kept as a static on Pane because the command
+    // palette's Reasoning submenu asks the pane for it.
     static QString nearestEffort(const QStringList &offered, const QString &level) {
         if (offered.isEmpty() || offered.contains(level)) return level;
-        int want = efforts().indexOf(level);
-        if (want < 0) want = efforts().indexOf(QStringLiteral("high"));
-        QString best;
-        int bestDistance = -1;
-        for (const QString &candidate : offered) {
-            const int distance = qAbs(efforts().indexOf(candidate) - want);
-            if (bestDistance < 0 || distance < bestDistance
-                || (distance == bestDistance && efforts().indexOf(candidate) > efforts().indexOf(best))) {
-                best = candidate;
-                bestDistance = distance;
-            }
-        }
-        return best;
+        return relay::models::nearestEffort(offered, level);
     }
     QString effort() const { return m_effort; }
     QString agentMode() const { return m_agentMode; }
@@ -3667,34 +3695,79 @@ public:
     // An explicit choice of level — Alt+E, Alt+. / Alt+,, /effort, the level box. There is no row
     // in Options for the level new panes start at, so this is the only place that default is
     // written (card #MDL1): a level that merely *came with a model* goes through setPaneEffort.
+    // A model whose level is not the pane's to set says so and keeps the level it had.
     void setEffort(const QString &value) {
-        if (!efforts().contains(value)) return;
-        QSettings().setValue(QStringLiteral("agent/effort"), value);
-        setPaneEffort(value);
+        if (value.isEmpty()) return;
+        if (const QString why = effortFixedReason(); !why.isEmpty()) { status(sentenceCase(why)); return; }
+        const QString level = snapEffort(value, true);
+        if (level.isEmpty()) return;
+        QSettings().setValue(QStringLiteral("agent/effort"), level);
+        setPaneEffort(level);
     }
     // This pane's level and nothing else. The level the main list gives rank 1, the one the picker
     // sent with a model and the one /swap's target carries are this pane's business: until #MDL1
     // each of them rewrote `agent/effort`, so picking a cheap model in one pane quietly moved the
     // level every future pane would start at.
     void setPaneEffort(const QString &value) {
-        if (!efforts().contains(value)) return;
-        m_effort = value;
-        if (m_configured) send({{"type", "set_effort"}, {"effort", value}});
+        if (value.isEmpty() || effortFixed()) return;
+        const QString level = snapEffort(value, true);
+        if (level.isEmpty() || level == m_effort) return;
+        m_effort = level;
+        if (m_configured) send({{"type", "set_effort"}, {"effort", level}});
         changed();
-        toast(QStringLiteral("Effort: ") + effortLabel(value));
+        toast(QStringLiteral("Effort: ") + level);
     }
-    // Alt+. / Alt+, walk the levels this provider offers, not Relay's four: on GLM the step from low
-    // is high, because medium there is the same request as high.
-    void effortStep(int delta) {
-        const QStringList levels = offeredEfforts();
-        if (levels.isEmpty()) {
-            toast(QStringLiteral("This model has no reasoning setting"));
-            return;
+    // A level that came from somewhere else — a tier list, a restored pane, another model's box —
+    // put onto this model: itself when the model takes it, otherwise its nearest (card #MDL1, rule
+    // 3). `say` puts the one sentence that explains it on the status line: "xhigh is not a level of
+    // gpt-6-astra here · using max". Empty when the model has no levels at all.
+    QString snapEffort(const QString &value, bool say = false) { return snapEffort(value, say, offeredEfforts()); }
+    QString snapEffort(const QString &value, bool say, const QStringList &levels) {
+        if (levels.isEmpty() || levels.contains(value)) return levels.isEmpty() ? QString() : value;
+        const QString snapped = relay::models::nearestEffort(levels, value);
+        if (say && !snapped.isEmpty() && snapped != value) {
+            const QString name = modelNameFor(m_currentPreset, paneModel());
+            status(QStringLiteral("%1 is not a level of %2 here · using %3")
+                       .arg(value, name.isEmpty() ? QStringLiteral("this model") : name, snapped));
         }
+        return snapped;
+    }
+    // The pane's own level moved onto the model it is now on, once, when that model does not take
+    // it. A fixed model is left alone on purpose: the pane keeps whatever level it had, ready for
+    // the next model that takes one (owner, 2026-09-21). Called wherever the model can have
+    // changed; after it runs `m_effort` is one of `offeredEfforts()`, so it says nothing twice.
+    void syncEffortToModel() { syncEffortToModel(currentCatalogEntry()); }
+    void syncEffortToModel(const relay::models::Entry &entry) {
+        if (!effortFixedReasonOf(entry).isEmpty()) return;
+        const QStringList levels = effortsOf(entry);
+        if (levels.isEmpty() || levels.contains(m_effort)) return;
+        const QString snapped = snapEffort(m_effort, true, levels);
+        if (snapped.isEmpty() || snapped == m_effort) return;
+        m_effort = snapped;
+        if (m_configured) send({{"type", "set_effort"}, {"effort", snapped}});
+        // Not `changed()`: this runs inside refreshSessionControls, which is about to draw the box
+        // with the snapped level; calling back into it would be a second pass for nothing.
+        if (onStateChanged) onStateChanged();
+    }
+    // Alt+. / Alt+, walk the levels this model takes, in the provider's order: on codex the step up
+    // from high is xhigh, and from there max and ultra.
+    void effortStep(int delta) {
+        if (const QString why = effortFixedReason(); !why.isEmpty()) { status(sentenceCase(why)); return; }
+        const QStringList levels = offeredEfforts();
+        if (levels.isEmpty()) { status(QStringLiteral("This model has no reasoning level.")); return; }
         int index = levels.indexOf(nearestEffort(levels, m_effort));
         if (index < 0) index = levels.indexOf(nearestEffort(levels, QStringLiteral("high")));
         index = std::clamp(index + delta, 0, int(levels.size()) - 1);
         if (levels.at(index) != m_effort) setEffort(levels.at(index));
+    }
+    // "relay free sets the level for you" → "Relay free sets the level for you." The reasons are
+    // written lower-case for a tooltip; the status line is a sentence.
+    static QString sentenceCase(const QString &text) {
+        if (text.isEmpty()) return text;
+        QString out = text;
+        out[0] = out.at(0).toUpper();
+        if (!out.endsWith(QLatin1Char('.'))) out += QLatin1Char('.');
+        return out;
     }
 
     void setAgentMode(const QString &mode) {
@@ -5113,13 +5186,15 @@ private:
         // arrow, nothing more — the levels are short words already (low … xhigh).
         m_effortBox = new CurrentTextComboBox;
         m_effortBox->setObjectName(QStringLiteral("statusPicker"));
-        for (const QString &level : efforts()) m_effortBox->addItem(level, level);
+        // Filled in refreshSessionControls from the model's own levels; this is only what it
+        // shows before the first `presets` answer arrives.
+        for (const QString &level : relay::models::effortLadder()) m_effortBox->addItem(level, level);
         m_effortBox->setAccessibleName(QStringLiteral("Reasoning effort"));
         m_effortBox->setToolTip(QStringLiteral("Reasoning effort for this pane (Alt+. / Alt+,)"));
         m_effortBox->setFocusPolicy(Qt::TabFocus);
         m_effortBox->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
         m_effort = QSettings().value(QStringLiteral("agent/effort"), QStringLiteral("high")).toString();
-        if (!efforts().contains(m_effort)) m_effort = QStringLiteral("high");
+        if (m_effort.isEmpty()) m_effort = QStringLiteral("high");
         connect(m_effortBox, qOverload<int>(&QComboBox::activated), this, [this](int index) {
             setEffort(m_effortBox->itemData(index).toString()); focusInput();
             hint(QStringLiteral("effort.mouse"), relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("agent.effortUp"))
@@ -5138,18 +5213,32 @@ private:
         if (m_modelBox) m_modelBox->setToolTip(modelTooltip());
         updateQuotaLabel();
         if (!m_effortBox) return;
+        // The levels are this *model's*, in the provider's order and words: xhigh and ultra on a
+        // codex pane, three on kimi, two on Relay Free (card #MDL1, owner 2026-09-21). A level the
+        // pane carried from another model snaps here, once, and the status line says so.
+        const relay::models::Entry entry = currentCatalogEntry();
+        syncEffortToModel(entry);
         const QSignalBlocker block(m_effortBox);
-        // The levels follow the pane's provider, so the box never offers a request this endpoint
-        // cannot make; the pane's own level is shown as the level it is sent as.
-        const QStringList levels = offeredEfforts();
+        const QString why = effortFixedReasonOf(entry);
+        const QStringList levels = effortsOf(entry);
+        // A model whose level is not the pane's to set still shows one — the level the pane holds,
+        // ready for the next model that takes one — greyed, with the reason in its tooltip. The
+        // owner asked for greyed rather than gone: an empty slot says nothing about why.
+        const QStringList rows = why.isEmpty() ? levels
+                                 : levels.isEmpty() ? QStringList{m_effort}
+                                                    : QStringList{nearestEffort(levels, m_effort)};
         QStringList shown;
         for (int i = 0; i < m_effortBox->count(); ++i) shown << m_effortBox->itemData(i).toString();
-        if (shown != levels) {
+        if (shown != rows) {
             m_effortBox->clear();
-            for (const QString &level : levels) m_effortBox->addItem(effortLabel(level), level);
+            for (const QString &level : rows) m_effortBox->addItem(level, level);
         }
-        m_effortBox->setCurrentIndex(std::max(0, m_effortBox->findData(nearestEffort(levels, m_effort))));
-        m_effortBox->setVisible(!levels.isEmpty());   // no knob, no box
+        m_effortBox->setCurrentIndex(std::max(0, m_effortBox->findData(nearestEffort(rows, m_effort))));
+        m_effortBox->setEnabled(why.isEmpty());
+        m_effortBox->setToolTip(why.isEmpty()
+                                    ? QStringLiteral("Reasoning level for this pane (Alt+E opens it; Alt+. / Alt+, step)")
+                                    : sentenceCase(why));
+        m_effortBox->setVisible(true);
         m_planChip->setVisible(m_agentMode == QStringLiteral("plan"));
         updateContextLabel();
     }
@@ -5487,8 +5576,9 @@ private:
 
     void onSessionConfigured(const QJsonObject &event) {
         m_agentMode = event.value(QStringLiteral("mode")).toString(QStringLiteral("build"));
+        // The worker's word for the level this session runs at, whatever the provider calls it.
         const QString effort = event.value(QStringLiteral("effort")).toString();
-        if (efforts().contains(effort)) m_effort = effort;
+        if (!effort.isEmpty()) m_effort = effort;
         m_ctxWindow = event.value(QStringLiteral("context_window")).toVariant().toLongLong();
         m_ctxLimit = event.value(QStringLiteral("limit_tokens")).toVariant().toLongLong();
         m_sessionId = event.value(QStringLiteral("session_id")).toString();
@@ -7781,7 +7871,7 @@ private:
             const qint64 window = event.value(QStringLiteral("context_window")).toVariant().toLongLong();
             if (window > 0 && !later) m_ctxWindow = window;
             const QString effort = event.value(QStringLiteral("effort")).toString();
-            if (efforts().contains(effort)) m_effort = effort;
+            if (!effort.isEmpty()) m_effort = effort;
             const QString inFlight = event.value(QStringLiteral("in_flight_model")).toString();
             // Names, not ids, and lower-case (card #MDL1, rule 1): "model: kimi-k3 · conversation
             // kept", "flash: glm-5.3-flash · conversation kept". The worker sends the name it
@@ -7883,7 +7973,7 @@ private:
         }
         if (type == QStringLiteral("effort_changed")) {
             const QString effort = event.value(QStringLiteral("effort")).toString();
-            if (efforts().contains(effort)) m_effort = effort;
+            if (!effort.isEmpty()) m_effort = effort;
             changed();
             return true;
         }
@@ -8715,8 +8805,9 @@ private:
             {QStringLiteral("local"), QString(), QStringLiteral("Run this pane on a model served on this machine")},
             {QStringLiteral("glm"), QString(), QStringLiteral("Switch to the GLM Coding Plan")},
             {QStringLiteral("kimi"), QString(), QStringLiteral("Switch to the Kimi Coding Plan")},
-            {QStringLiteral("effort"), QStringLiteral("[low|medium|high|max]"), QStringLiteral("Set reasoning effort")},
-            {QStringLiteral("reasoning"), QStringLiteral("[low|medium|high|max]"), QStringLiteral("Set reasoning effort (same as /effort)")},
+            // The levels are the model's, so the popup fills these two in per pane (`slashRows`).
+            {QStringLiteral("effort"), QStringLiteral("[level]"), QStringLiteral("Set the reasoning level for this pane")},
+            {QStringLiteral("reasoning"), QStringLiteral("[level]"), QStringLiteral("Set the reasoning level for this pane (same as /effort)")},
             {QStringLiteral("models"), QString(), QStringLiteral("Options › Models: providers, which models the picker shows, their order")},
             {QStringLiteral("profile"), QStringLiteral("[name]"), QStringLiteral("Model profile: switch the five tier lists to a named set (Options › Models › profile); alone, a picker")},
             {QStringLiteral("compact"), QStringLiteral("[focus]"), QStringLiteral("Summarize older turns to free context")},
@@ -8776,8 +8867,21 @@ private:
         QStringList builtins;
         for (const auto &command : slashCommands()) builtins << command.name;   // hidden ones shadow an alias too
         const QStringList shown = relay::slash::offered(builtins, hiddenSlashNames());
-        for (const auto &command : slashCommands())
-            if (shown.contains(command.name)) commands.append(command);
+        // `/effort` offers this pane's model's levels, in the provider's order and words — the only
+        // two rows of the table that are not the same on every pane (card #MDL1, 2026-09-21).
+        const QString effortWhy = effortFixedReason();
+        const QStringList effortLevels = offeredEfforts();
+        for (const auto &command : slashCommands()) {
+            if (!shown.contains(command.name)) continue;
+            if (command.name == QStringLiteral("effort") || command.name == QStringLiteral("reasoning")) {
+                SlashCommand row = command;
+                if (!effortWhy.isEmpty()) { row.args.clear(); row.description = sentenceCase(effortWhy); }
+                else if (!effortLevels.isEmpty()) row.args = QLatin1Char('[') + effortLevels.join(QLatin1Char('|')) + QLatin1Char(']');
+                commands.append(row);
+                continue;
+            }
+            commands.append(command);
+        }
         for (const auto &alias : std::as_const(m_aliasList)) {
             if (alias.shadowed || builtins.contains(alias.name)) continue;
             commands.append({alias.name, alias.params.isEmpty() ? QString() : QStringLiteral("[args]"),
@@ -9190,19 +9294,20 @@ private:
                        ? QStringLiteral("Profile: %1.").arg(chosen)
                        : QStringLiteral("Profile: %1 · main runs on %2 (/swap puts this pane on it).").arg(chosen, main.name));
         } else if (name == QStringLiteral("effort") || name == QStringLiteral("reasoning")) {
+            // The levels are the model's own (card #MDL1, 2026-09-21): `/effort xhigh` works on a
+            // codex pane and `/effort ultra` with it, while a model whose level is not the pane's
+            // to set answers with the reason and changes nothing.
+            const QString why = effortFixedReason();
             const QStringList levels = offeredEfforts();
-            const QString wanted = args.toLower();
-            if (levels.isEmpty() && !wanted.isEmpty()) status(QStringLiteral("This model has no reasoning setting."));
-            else if (efforts().contains(wanted)) {
-                setEffort(wanted);
-                // A level this provider does not have is kept as typed and sent as the one it maps
-                // to; saying so beats silently moving the pane to another level.
-                if (!levels.contains(wanted) && !effortNote().isEmpty())
-                    status(QStringLiteral("This model offers %1 · %2").arg(levels.join(QStringLiteral(", ")), effortNote()));
-            } else if (wanted.isEmpty()) {
-                const QStringList walk = levels.isEmpty() ? efforts() : levels;
-                effortStep(1 - (walk.indexOf(nearestEffort(walk, m_effort)) == walk.size() - 1 ? walk.size() : 0));
-            } else status(QStringLiteral("Effort must be low, medium, high or max."));
+            const QString wanted = args.trimmed().toLower();
+            if (!why.isEmpty()) status(sentenceCase(why));
+            else if (levels.isEmpty()) status(QStringLiteral("This model has no reasoning level."));
+            else if (levels.contains(wanted)) setEffort(wanted);
+            else if (wanted.isEmpty())
+                effortStep(1 - (levels.indexOf(nearestEffort(levels, m_effort)) == levels.size() - 1 ? levels.size() : 0));
+            else if (relay::models::effortRank(wanted) >= 0) setEffort(wanted);   // snaps, and says so
+            else status(QStringLiteral("%1 takes %2.")
+                            .arg(modelNameFor(m_currentPreset, paneModel()), levels.join(QStringLiteral(", "))));
         } else if (name == QStringLiteral("compact")) compactNow(args);
         else if (name == QStringLiteral("context")) {
             if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
@@ -11021,7 +11126,7 @@ private:
                 }
                 // The level rank 1 carries in the main list. With none, the pane keeps the global
                 // default it read when it was built (`agent/effort`), exactly as before.
-                if (!start.effort.isEmpty() && efforts().contains(start.effort)) m_effort = start.effort;
+                if (!start.effort.isEmpty()) m_effort = start.effort;
                 // A harness the owner ranked first is what a new pane starts on — "with the
                 // harness process starting on the first turn, not when the pane opens" (owner,
                 // 2026-09-21, card #MDL1). The worker spawns the CLI inside `configure`
@@ -13130,13 +13235,16 @@ private:
 
     // Chip tooltip: the pane's model plus every role's effective model (protocol 13).
     QString modelTooltip(const QString &extra = QString()) const {
-        // "medium (sent as high)" when this provider has no level of that name: the tooltip is where
-        // the pane's effort is read, so it is where the provider's mapping belongs.
+        // The level this model will actually be asked for, in the provider's own word. A model
+        // whose level is not the pane's to set says so here too, and shows the level the pane is
+        // holding for the next model that takes one (card #MDL1, 2026-09-21).
         const QStringList levels = offeredEfforts();
+        const QString why = effortFixedReason();
         const QString sent = nearestEffort(levels, m_effort);
-        const QString effortText = levels.isEmpty()
-            ? QStringLiteral("%1 (this model has no reasoning setting)").arg(m_effort)
-            : (sent == m_effort ? m_effort : QStringLiteral("%1 (sent as %2)").arg(m_effort, sent));
+        const QString effortText = !why.isEmpty()
+            ? QStringLiteral("%1 (%2)").arg(m_effort, why)
+            : levels.isEmpty() ? QStringLiteral("%1 (this model has no reasoning level)").arg(m_effort)
+                               : sent;
         QStringList lines{QStringLiteral("Agent model for this pane. Switching keeps the conversation."),
                           QStringLiteral("Reasoning effort: %1  (%2 / %3 to change)")
                               .arg(effortText, Keymap::instance().shortcutText(QStringLiteral("agent.effortUp")),

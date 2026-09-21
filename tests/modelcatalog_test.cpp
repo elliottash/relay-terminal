@@ -629,18 +629,117 @@ private Q_SLOTS:
         QCOMPARE(curation::readProfiles(newer, &error).size(), 2);
     }
 
-    void effortLabelsAreTheProvidersWords() {
+    // ----- the levels are the model's (card #MDL1, owner 2026-09-21) ---------------------------
+    // > "i want the effort options in relay to be determined by the model … so xhigh shows up for
+    // > codex for example"
+
+    void theLevelsAreTheModelsOwnListInTheProvidersOrder() {
+        QJsonArray rows;
+        QJsonArray models;
+        models << model(QStringLiteral("gpt-5.6-sol"), QStringLiteral("gpt-5.6-sol"), QString(),
+                        {QStringLiteral("low"), QStringLiteral("medium"), QStringLiteral("high"),
+                         QStringLiteral("xhigh"), QStringLiteral("max"), QStringLiteral("ultra")});
+        rows << preset(QStringLiteral("guest:codex"), QStringLiteral("Codex"), QStringLiteral("codex"),
+                       QString(), models, false);
+        rows << preset(QStringLiteral("kimi-code"), QStringLiteral("kimi code"), QStringLiteral("kimi"),
+                       QStringLiteral("k3"),
+                       {model(QStringLiteral("k3"), QStringLiteral("kimi-k3"), QStringLiteral("main"),
+                              {QStringLiteral("low"), QStringLiteral("high"), QStringLiteral("max")})},
+                       true);
+        const Catalog catalog = catalogFrom(rows);
+        const Entry *sol = catalog.find(QStringLiteral("guest:codex|gpt-5.6-sol"));
+        QVERIFY(sol);
+        // Six, in codex's own order and codex's own words — `xhigh` and `ultra` included. Relay's
+        // four were what kept them out of every picker until this card.
+        QCOMPARE(sol->efforts, (QStringList{QStringLiteral("low"), QStringLiteral("medium"), QStringLiteral("high"),
+                                            QStringLiteral("xhigh"), QStringLiteral("max"), QStringLiteral("ultra")}));
+        const Entry *k3 = catalog.find(QStringLiteral("kimi-code|k3"));
+        QVERIFY(k3);
+        QCOMPARE(k3->efforts.size(), 3);
+        QVERIFY(!k3->efforts.contains(QStringLiteral("medium")));
+    }
+
+    // "for no knob models, the effort box should be grayed out. same for relay free." Until the
+    // worker sends `effort_fixed` the same two cases are derived from the row.
+    void effortFixedIsTheWorkersWordAndOtherwiseDerived() {
+        QJsonArray rows = presets();
+        QJsonObject free{{QStringLiteral("id"), QStringLiteral("relay-free")}, {QStringLiteral("label"), QStringLiteral("relay free")},
+                         {QStringLiteral("provider"), QStringLiteral("relay free")}, {QStringLiteral("hosted"), true},
+                         {QStringLiteral("available"), true}, {QStringLiteral("model"), QStringLiteral("relay-main")},
+                         {QStringLiteral("models"), QJsonArray{model(QStringLiteral("relay-main"), QStringLiteral("relay-main"), QStringLiteral("main"),
+                                                                    {QStringLiteral("low"), QStringLiteral("medium")})}}};
+        rows << free;
+        const Catalog catalog = catalogFrom(rows);
+        // A model with levels, on a provider with a key: the pane's to set.
+        const Entry *astra = catalog.find(QStringLiteral("openai|gpt-6-astra"));
+        QVERIFY(astra && !astra->effortFixed);
+        QVERIFY(astra->effortFixedReason().isEmpty());
+        // No levels at all: greyed, and the sentence names the model.
+        const Entry *sonnet = catalog.find(QStringLiteral("guest:claude|sonnet"));
+        QVERIFY(sonnet && sonnet->efforts.isEmpty());
+        QVERIFY(sonnet->effortFixed);
+        QCOMPARE(sonnet->effortFixedReason(), QStringLiteral("claude-sonnet-5 has no reasoning level"));
+        // Relay Free has two levels and is still greyed: the gateway clamps them per role.
+        const Entry *hosted = catalog.find(QStringLiteral("relay-free|relay-main"));
+        QVERIFY(hosted && hosted->efforts.size() == 2);
+        QVERIFY(hosted->effortFixed);
+        QCOMPARE(hosted->effortFixedReason(), QStringLiteral("relay free sets the level for you"));
+    }
+
+    void theWorkersEffortFixedWinsOverTheDerivation() {
+        QJsonArray rows;
+        QJsonObject knobless = model(QStringLiteral("astra"), QStringLiteral("gpt-6-astra"), QStringLiteral("main"),
+                                     {QStringLiteral("low"), QStringLiteral("high")});
+        knobless.insert(QStringLiteral("effort_fixed"), true);        // the provider decides it
+        QJsonObject free = model(QStringLiteral("sol"), QStringLiteral("gpt-5.6-sol"), QString(), {});
+        free.insert(QStringLiteral("effort_fixed"), false);           // no levels, but not greyed
+        rows << preset(QStringLiteral("openai"), QStringLiteral("openai"), QStringLiteral("openai"),
+                       QString(), {knobless, free}, true);
+        const Catalog catalog = catalogFrom(rows);
+        QVERIFY(catalog.find(QStringLiteral("openai|astra"))->effortFixed);
+        QVERIFY(!catalog.find(QStringLiteral("openai|sol"))->effortFixed);
+    }
+
+    // Rule 3: a remembered level the new model does not take snaps to its nearest — its top when
+    // above, its lowest when below, by position in the ladder, ties going up.
+    void aLevelTheModelDoesNotTakeSnapsToItsNearest() {
+        const QStringList codex{QStringLiteral("low"), QStringLiteral("medium"), QStringLiteral("high"),
+                                QStringLiteral("xhigh"), QStringLiteral("max"), QStringLiteral("ultra")};
+        const QStringList api{QStringLiteral("low"), QStringLiteral("medium"), QStringLiteral("high"), QStringLiteral("max")};
+        const QStringList kimi{QStringLiteral("low"), QStringLiteral("high"), QStringLiteral("max")};
+        const QStringList free{QStringLiteral("low"), QStringLiteral("medium")};
+        // A level the model takes is itself, whichever list it is in.
+        QCOMPARE(nearestEffort(codex, QStringLiteral("ultra")), QStringLiteral("ultra"));
+        QCOMPARE(nearestEffort(api, QStringLiteral("max")), QStringLiteral("max"));
+        // The owner's own case: codex at xhigh, moved to the OpenAI API row. xhigh sits between
+        // high and max; the tie goes up, so it is max.
+        QCOMPARE(nearestEffort(api, QStringLiteral("xhigh")), QStringLiteral("max"));
+        // Above every level the model has: its top. Below every one: its lowest.
+        QCOMPARE(nearestEffort(free, QStringLiteral("ultra")), QStringLiteral("medium"));
+        QCOMPARE(nearestEffort(kimi, QStringLiteral("medium")), QStringLiteral("high"));
+        QCOMPARE(nearestEffort(api, QStringLiteral("ultra")), QStringLiteral("max"));
+        // No knob: nothing to snap to.
+        QVERIFY(nearestEffort(QStringList(), QStringLiteral("high")).isEmpty());
+        // The ladder is an order, not a vocabulary: a word off it is treated as `high`.
+        QCOMPARE(effortRank(QStringLiteral("xhigh")), 3);
+        QVERIFY(effortRank(QStringLiteral("turbo")) < 0);
+        QCOMPARE(nearestEffort(kimi, QStringLiteral("turbo")), QStringLiteral("high"));
+    }
+
+    // An older worker's `effort_labels` is ignored rather than applied: the levels above are
+    // already the provider's own words, so translating them again would rename them twice.
+    void anOldWorkersEffortLabelsAreIgnored() {
         QJsonArray rows = presets();
         QJsonObject openai = rows.at(2).toObject();
         QJsonArray models = openai.value(QStringLiteral("models")).toArray();
         QJsonObject astra = models.at(0).toObject();
-        astra.insert(QStringLiteral("effort_labels"), QJsonObject{{QStringLiteral("max"), QStringLiteral("xhigh")}, {QStringLiteral("high"), QStringLiteral("high")}});
+        astra.insert(QStringLiteral("effort_labels"), QJsonObject{{QStringLiteral("max"), QStringLiteral("xhigh")}});
         models.replace(0, astra); openai.insert(QStringLiteral("models"), models); rows.replace(2, openai);
         const Catalog catalog = catalogFrom(rows);
         const Entry *entry = catalog.find(QStringLiteral("openai|gpt-6-astra"));
         QVERIFY(entry);
-        QCOMPARE(entry->effortLabel(QStringLiteral("max")), QStringLiteral("xhigh"));
-        QCOMPARE(entry->effortLabel(QStringLiteral("low")), QStringLiteral("low"));   // no label: the level itself
+        QVERIFY(entry->efforts.contains(QStringLiteral("max")));
+        QVERIFY(!entry->efforts.contains(QStringLiteral("xhigh")));
     }
 
     // Where a hand-added row starts (card #TKN7). The worker computes it per model (`tier_effort`),
