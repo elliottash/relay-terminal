@@ -24,11 +24,12 @@ Lib/site-packages
 ../../share/relay
 '@ | Set-Content "$Stage/runtime/python/python313._pth" -Encoding ascii
 python -m pip install --only-binary=:all: --platform win_amd64 --python-version 3.13 --implementation cp --target "$Stage/runtime/python/Lib/site-packages" 'cryptography==46.0.5'
-& "$Stage/runtime/python/python.exe" -S -c 'import cryptography; from relay_core import agent, board, keystore; import remote.gui_host'
+& "$Stage/runtime/python/python.exe" -X utf8 -S -c 'import cryptography; from relay_core import agent, board, keystore; import remote.gui_host'
 # Preserve notices for all redistributable components and link the matching source release.
 $qtRoot = Split-Path (Split-Path (Get-Command windeployqt).Source)
 if (Test-Path "$qtRoot/licenses") { Copy-Item "$qtRoot/licenses" "$Stage/Qt-licenses" -Recurse }
 Copy-Item LICENSE "$Stage/LICENSE.txt"
 "Source: https://github.com/elliottash/relay-terminal/releases/tag/v$Version`nRelay: AGPL-3.0-or-later. Qt: see Qt-licenses. Python/PowerShell/dependencies: bundled license files." | Set-Content "$Stage/NOTICE.txt"
+& "$Stage/runtime/python/python.exe" -X utf8 -S tests/test_worker_encoding.py --worker "$Stage/share/relay/backend/worker.py"
 $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
 & $compiler "/DRelayVersion=$Version" "/DRelayStage=$Stage" 'packaging/windows/relay.iss'
