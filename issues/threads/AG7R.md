@@ -56,3 +56,39 @@ turning on, with eight more in a bounded middle where the owner should choose.
 Work started: subagent `safetable` holds src/AppCommands.{h,cpp}, tests/appcommands_test.cpp, the
 §30.2 paragraph and two spots in src/RelayWindow.h for groups 1, 3 (window-scoped), 6 and 7.
 Group 2 follows it (same file), then group 8, then group 4's non-blocking pass.
+
+<!-- relay:entry 20260920T211500Z-ld author=agent kind=progress pane=terminal -->
+**Groups 1, 3 (window-scoped), 6 and 7 landed** — `1a2459ed` (src/AppCommands.{h,cpp},
+tests/appcommands_test.cpp) and `c375a86e` (src/RelayWindow.h, §30.2).
+
+- **Group 1.** `AppCommands` takes `registryLabel` and `runRegistryAction`; `findAction()` falls
+  back to them when the catalog misses, so the twelve registry-only keys run. `catalog()` lists
+  them with `agent_safe: true` under section `Shortcuts` — the same section
+  `app_tools._shortcut_rows` uses, and it already skips any key the catalog holds, so the
+  contradiction closes with no backend change. A registered key outside the table now answers
+  `not_agent_safe`; one neither knows still answers `unknown_action`. `palette.agent` deleted.
+- **Group 3.** `tests.open`, `app.about`, `logs.open`, `theme.folder`, `agent.screenshotPane`,
+  `pane.equalize`, `menu:closed`, `closed:<id>` by prefix; the `declined:<path>` row's **Undo**
+  button marked safe. No pane-scoped key — those wait on group 2.
+- **Group 7.** The table is two explicit sets: `readActions()` (opens, reveals, focuses, restores)
+  and `reversibleWriteActions()`; `actionIsAgentSafe()` is the union and the new `actionIsRead()`
+  is the first. Only non-read keys are gated by `writes_enabled`. `agent.screenshotPane` and
+  `pane.equalize` were deliberately put on the *writing* side — a screenshot changes what the
+  person is about to send, equalize moves every splitter.
+- **Group 6.** The real catalog needs a window, so the rule went into the library rather than a
+  fixture-only test: `appcommands::rowNamedLikeASecret()`, applied in `catalog()` — the one place
+  every row passes through on its way to an agent. An unmarked `Text` row named like a credential
+  is listed `secret: true`, `settable: false`, no value, `set_option` refuses it, and a
+  one-per-row `qWarning` says to mark it. One documented exception:
+  `option:security/secret_patterns`, the guard's own configuration.
+
+Checked independently by the orchestrating session before accepting: `ctest -R "appcommands|settings"`
+5/5, `relay-appcommands-tests` 35 passed / 0 failed, and the group-6 regex applied by hand to every
+`Text` row the shipped catalog builds (11 of them, via `textRow`/`hostListRow`/`listRow` plus
+`local:address`) — `security/secret_patterns` is the only match and it is the exempted one, so the
+guard withholds nothing real today.
+
+Still open and NOT done: `local:address/save` and `found:<n>` **Save** in
+src/LocalModelsSettings.cpp. The implementing session declined to widen them on its own because the
+owner answered group 6 with "not sure what i am supposed to do there" rather than a yes, and I
+agree — it is a one-line question for him, not a gap to close silently.

@@ -8,7 +8,7 @@ waiting_on: owner
 rank: m
 created: '2026-09-20'
 source: 'owner report, 2026-09-20, in the terminal pane after #FEJQ decision 2 was amended'
-links: {plans: [], commits: [], evidence: [], related: [FEJQ, H6VQ, GMCF], github: null}
+links: {plans: [], commits: [ab9e2ab7, 1a2459ed, c375a86e], evidence: [], related: [FEJQ, H6VQ, GMCF], github: null}
 ---
 # What an agent still cannot do in Relay, read off the catalog rather than remembered
 
@@ -335,7 +335,8 @@ since they only destroy the person's own state and the person is the one asking.
 
 ### Order of work
 
-1. **Landing now** — groups 1, 3 (window-scoped), 6, 7, in `src/AppCommands.*`.
+1. **Landed** — groups 1, 3 (window-scoped), 6 and 7, in `1a2459ed` and `c375a86e`. See the
+   thread entry for what each became.
 2. **Next** — group 2: `app_command` carries the asking pane, `runAction` takes a target. Then
    group 3's pane-scoped keys, and every "aim it at a pane" entry above becomes answerable.
 3. **Then** — group 8, which needs a pane to have a name a tool can use, so it follows group 2:
