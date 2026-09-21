@@ -30,10 +30,16 @@ from pathlib import Path
 # The classes a model can be a default for. "local" is not one of them: the local class is the
 # model servers on this machine, in the order they were saved, and belongs to no provider.
 CLASSES = ("high", "main", "flash", "lite")
-# How a provider is reached, lowest cost of the person's own money first (design rule 2.2).
+# The words a `kind` cell may hold: how a provider is reached. This is a **set**, and the order it
+# is written in means nothing — `Ranking.kinds()` is what answers "in which order", and it answers
+# out of the file. It used to be both, spelled as design rule 2.2 (a plan, then a harness, then the
+# first-party API, then the router, then Relay Free), and on 2026-09-21 the owner re-ordered the
+# table to put the harnesses first. A preference order written in two places is a preference order
+# that goes quietly wrong in one of them, and the file is the copy he edits, so the file wins.
 KINDS = ("plan", "harness", "api", "router", "free")
 # Where a provider with no row of its own sorts: after every one that has one. A custom provider
-# the user added by hand is the case that matters.
+# the user added by hand is the case that matters. `check()` says so if a row ever reaches it,
+# because a file that numbered a band this high would make "no row" sort *before* a real one.
 UNKNOWN_PROVIDER_ORDER = 500
 
 DEFAULT_PATH = Path(__file__).resolve().parent / "model-ranking.md"
@@ -100,9 +106,20 @@ class Ranking:
         return row.kind if row is not None else ""
 
     def kinds(self) -> tuple[str, ...]:
-        """The kinds present, in KINDS order."""
-        have = {row.kind for row in self.providers.values()}
-        return tuple(kind for kind in KINDS if kind in have)
+        """The kinds present, **in the file's own order**: each band by its lowest `order`.
+
+        This is the one answer to "which kind of access does Relay prefer", and it is derived
+        rather than declared, so re-numbering the table is all it takes to change it — which is
+        what the table is for. A band's lowest row is what stands for it, because that is the row
+        that wins a tie against another band. Ties between bands (two kinds whose lowest order is
+        the same number, which `check()` reports) fall back to the spelling in KINDS, so the
+        answer is always stable.
+        """
+        lowest: dict[str, int] = {}
+        for row in self.providers.values():
+            if row.order < lowest.get(row.kind, row.order + 1):
+                lowest[row.kind] = row.order
+        return tuple(sorted(lowest, key=lambda kind: (lowest[kind], KINDS.index(kind))))
 
     # ----- is the file still true? -----------------------------------------------------------
     def check(self) -> list[str]:
@@ -132,6 +149,14 @@ class Ranking:
                 problems.append(f"providers {', '.join(sorted(shared))} all have order {order}; "
                                 f"`order` is the tie-break, so two providers at the same number "
                                 f"break the tie by name rather than by the file")
+        # A provider with no row at all sorts at UNKNOWN_PROVIDER_ORDER, which only means "last"
+        # for as long as every row in the file is below it.
+        for preset_id in sorted(self.providers):
+            if self.providers[preset_id].order >= UNKNOWN_PROVIDER_ORDER:
+                problems.append(f"provider {preset_id!r} has order "
+                                f"{self.providers[preset_id].order}, at or past the "
+                                f"{UNKNOWN_PROVIDER_ORDER} a provider with no row sorts at; a row "
+                                f"in the file has to come before one that is not in it")
 
         for name, row in sorted(self.models.items()):
             for word in row.classes:

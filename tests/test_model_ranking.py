@@ -186,23 +186,72 @@ class ShippedFileTests(unittest.TestCase):
         self.assertEqual(self.rank.check(), [])
 
     def test_every_provider_the_worker_has_is_a_row_and_nothing_else_is(self):
+        """What must hold whatever the owner ranks — and nothing more.
+
+        This test used to assert that the bands ascend in `MR.KINDS` order, which made the
+        preference order a thing the code owned and the file merely repeated. On 2026-09-21 the
+        owner put the harnesses ahead of the plans and the test failed on a file that was doing
+        exactly what it exists for. So the order is not asserted here at all: `Ranking.kinds()`
+        derives it from the table (tested below), and what is left is the structure — every
+        provider has a row, nothing that is not a provider does, every kind is a word the parser
+        allows, and the numbers can actually break a tie.
+        """
         self.assertEqual(sorted(self.rank.providers),
                          sorted(list(P.PRESETS) + ['guest:claude', 'guest:codex']))
         for preset_id, row in self.rank.providers.items():
-            self.assertIn(row.kind, MR.KINDS, preset_id)
-        # The kinds are the preference order of design rule 2.2, cheapest use of the person's own
-        # money first, and `order` bands them in that order.
-        self.assertEqual(self.rank.kinds(), MR.KINDS)
-        by_kind = {}
-        for row in self.rank.providers.values():
-            by_kind.setdefault(row.kind, []).append(row.order)
-        self.assertEqual([min(by_kind[kind]) for kind in MR.KINDS],
-                         sorted(min(by_kind[kind]) for kind in MR.KINDS))
+            with self.subTest(preset_id):
+                self.assertIn(row.kind, MR.KINDS)
+                # A row has to sort before a provider that has no row at all.
+                self.assertLess(row.order, MR.UNKNOWN_PROVIDER_ORDER)
+        # `order` is the tie-break, so it decides nothing unless it is unique.
+        orders = [row.order for row in self.rank.providers.values()]
+        self.assertEqual(sorted(orders), sorted(set(orders)))
+        # The two rows nothing else can settle: a guest CLI is a harness and Relay Free is free.
         self.assertEqual(self.rank.provider_kind('guest:codex'), 'harness')
         self.assertEqual(self.rank.provider_kind('relay-free'), 'free')
-        # The coding plan sorts before the standard API of the same company, so the credit that is
-        # already paid for is spent first (design rule 2.2).
+        # Relay's own allowance is spent last, whatever else the owner moves.
+        self.assertEqual(self.rank.kinds()[-1], 'free')
+
+    def test_the_kind_order_is_read_off_the_file_and_not_out_of_KINDS(self):
+        """`MR.KINDS` is the set of words a `kind` cell may hold. It is not the order.
+
+        The order is each band by its lowest `order`, because that is the row that wins a tie
+        against another band, and it changes when the owner re-numbers the table — which is the
+        whole point of the table.
+        """
+        text = MINIMAL.replace('| glm-coding | plan | 11 |\n', '')
+        text = text.replace('|   openai   |  api  |  32  |',
+                            '| openai | api | 10 |\n| guest:codex | harness | 20 |\n'
+                            '| glm-coding | plan | 30 |\n| relay-free | free | 90 |')
+        rank = MR.parse(textwrap.dedent(text), 'ranking.md')
+        self.assertEqual(rank.kinds(), ('api', 'harness', 'plan', 'free'))
+        # Re-number it and the answer follows, with nothing in the code touched.
+        flipped = textwrap.dedent(text).replace('| openai | api | 10 |', '| openai | api | 40 |')
+        self.assertEqual(MR.parse(flipped, 'ranking.md').kinds(),
+                         ('harness', 'plan', 'api', 'free'))
+        # A band is its *lowest* row, not its first or its last.
+        two = textwrap.dedent(text).replace('| glm-coding | plan | 30 |',
+                                            '| glm-coding | plan | 30 |\n| kimi-code | plan | 5 |')
+        self.assertEqual(MR.parse(two, 'ranking.md').kinds()[0], 'plan')
+
+    def test_check_reports_an_order_that_reaches_the_no_row_placeholder(self):
+        # A provider with no row sorts at UNKNOWN_PROVIDER_ORDER, which only means "last" while
+        # every row in the file is below it.
+        text = MINIMAL.replace('|   openai   |  api  |  32  |',
+                               f'| openai | api | {MR.UNKNOWN_PROVIDER_ORDER} |')
+        problems = MR.parse(textwrap.dedent(text), 'ranking.md').check()
+        hit = [line for line in problems if 'at or past' in line]
+        self.assertEqual(len(hit), 1, problems)
+        self.assertIn("'openai'", hit[0])
+        self.assertEqual([l for l in MR.parse(textwrap.dedent(MINIMAL)).check()
+                          if 'at or past' in l], [])
+
+    def test_the_paid_for_plan_is_spent_before_the_metered_api(self):
+        # Design rule 2.2's one claim that is not about band order: two presets of one company,
+        # and the credit already paid for goes first. The owner can re-band the table without
+        # touching this, and if he ever does mean to change it, this is the line that says so.
         self.assertLess(self.rank.provider_order('glm-coding'), self.rank.provider_order('glm'))
+        self.assertLess(self.rank.provider_order('kimi-code'), self.rank.provider_order('kimi'))
         self.assertLess(self.rank.provider_order('kimi-code'), self.rank.provider_order('kimi'))
 
     def test_every_catalog_model_and_every_guest_model_has_a_row(self):
