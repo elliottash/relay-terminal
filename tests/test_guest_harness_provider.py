@@ -191,6 +191,32 @@ class PresetTests(unittest.TestCase):
 
 
 class StartTests(unittest.TestCase):
+    def test_guest_instructions_survive_new_provider_resume_and_fork(self):
+        from relay_core.guest_instructions import GUEST_INSTRUCTIONS
+        for guest in ("claude", "codex"):
+            session = None
+            for fork in (False, False, True):
+                with self.subTest(guest=guest, resume=session, fork=fork):
+                    harness = FakeHarness([{"result": ("ok", "end", {})}] * 2, guest=guest)
+                    with tempfile.TemporaryDirectory() as cwd, \
+                         mock.patch.object(ghp, "make_harness", return_value=harness):
+                        provider = ghp.start_provider("guest:" + guest,
+                            {"guest": {"resume": session, "fork": fork}}, cwd)
+                        try:
+                            self.assertEqual(harness.instructions, GUEST_INSTRUCTIONS)
+                            for prompt in ("hello", "next turn"):
+                                provider.complete([{"role": "user", "content": prompt}], [],
+                                                  lambda event: None, threading.Event())
+                                # The existing bridge-discovery hint is separate; the session
+                                # supplement must never become user text on any turn.
+                                sent = harness.sent[-1]["prompt"]
+                                self.assertTrue(sent.endswith("\n\n" + prompt))
+                                self.assertNotIn(GUEST_INSTRUCTIONS, sent)
+                                self.assertNotIn("[Relay guest context]", sent)
+                            session = provider.session_id
+                        finally:
+                            provider.close()
+
     def test_start_provider_passes_the_effort_and_keeps_what_the_guest_says(self):
         harness = FakeHarness([], session_id="s", model="m")
         with mock.patch.object(ghp, "make_harness", return_value=harness):

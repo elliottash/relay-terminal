@@ -86,8 +86,10 @@ class FakeHarness:
 
     # ----- lifecycle -------------------------------------------------------------------
     def start(self, *, cwd: str, model=None, resume=None, fork: bool = False,
-              permissions: str = "bypass", effort=None, board_bridge=None) -> HarnessStart:
+              permissions: str = "bypass", effort=None, board_bridge=None,
+              instructions=None) -> HarnessStart:
         self.board_bridge = board_bridge
+        self.instructions = instructions
         self.calls.append(("start", cwd, model, resume, fork, permissions, effort))
         self.starts.append({"cwd": cwd, "model": model, "resume": resume, "fork": fork,
                             "permissions": permissions, "effort": effort})

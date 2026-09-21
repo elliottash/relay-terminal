@@ -279,6 +279,25 @@ class HarnessCase(unittest.TestCase):
 
 
 class AvailabilityTest(HarnessCase):
+    def test_instructions_use_native_field_on_start_resume_and_fork(self):
+        text = "Relay guest context\nUse only the tools actually offered."
+        for resume, fork, method in ((None, False, "thread/start"),
+                                    ("prior-thread", False, "thread/resume"),
+                                    ("prior-thread", True, "thread/fork")):
+            entries = load("ok-turn.jsonl")
+            entries[index_of(entries, "->", "thread/start")]["line"]["method"] = method
+            harness, proc = self.harness(entries)
+            harness.start(cwd="/tmp/relay-harness-codex", resume=resume, fork=fork,
+                          instructions=text)
+            params = proc.sent(method)[0]["params"]
+            self.assertEqual(params["developerInstructions"], text)
+            self.assertNotIn("baseInstructions", params)
+            harness.send("Reply with the single word ok.", emit=self.emit,
+                         cancel=threading.Event())
+            self.assertEqual(proc.sent("turn/start")[0]["params"]["input"],
+                             [{"type": "text", "text": "Reply with the single word ok."}])
+            harness.close()
+
     def test_board_bridge_start_resume_fork_overrides(self):
         descriptor = {"command": "/python", "args": ["/proxy", "/capability"]}
         h = gh.CodexHarness()

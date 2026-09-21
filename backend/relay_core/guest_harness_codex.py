@@ -232,8 +232,10 @@ class CodexHarness:
 
     def start(self, *, cwd: str, model: str | None = None, resume: str | None = None,
               fork: bool = False, permissions: str = "bypass",
-              effort: str | None = None, board_bridge: dict | None = None) -> HarnessStart:
+              effort: str | None = None, board_bridge: dict | None = None,
+              instructions: str | None = None) -> HarnessStart:
         self._board_bridge = board_bridge
+        self._instructions = instructions
         effort = validate_effort(effort)
         with self._lock:
             if self._proc is not None:
@@ -510,6 +512,9 @@ class CodexHarness:
                       fork: bool, effort: str | None = None) -> dict:
         policy, sandbox = PERMISSION_MODES[self._permissions]
         params: dict = {"cwd": cwd, "approvalPolicy": policy, "sandbox": sandbox}
+        if getattr(self, "_instructions", None):
+            # Supported by start, resume and fork. Keep Codex's base instructions.
+            params["developerInstructions"] = self._instructions
         if model:
             params["model"] = model
         if effort:

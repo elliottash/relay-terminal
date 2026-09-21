@@ -834,6 +834,14 @@ class StartTest(unittest.TestCase):
                          {"mcpServers": {"relay_board": descriptor}})
         self.assertNotIn("--strict-mcp-config", argv)
 
+    def test_guest_instructions_append_to_defaults_on_start_resume_and_fork(self):
+        text = "Relay guest context\nUse only the tools actually offered."
+        for options in ({}, {"resume": "saved"}, {"resume": "saved", "fork": True}):
+            argv = self._argv_for(instructions=text, **options)
+            self.assertEqual(argv[argv.index("--append-system-prompt") + 1], text)
+            self.assertNotIn("--system-prompt", argv)
+        self.assertNotIn("--append-system-prompt", self._argv_for())
+
     def test_the_bypass_command_line(self):
         argv = self._argv_for()
         for flag in ("-p", "--input-format", "stream-json", "--output-format", "--verbose",
@@ -918,7 +926,7 @@ class SetModelTest(unittest.TestCase):
         first = FakeClaude(script(init_message(), result_message()) + _unsupported("set_model"))
         second = FakeClaude(_handshake("h2"))
         spawner, harness = self._harness(first, second)
-        harness.start(cwd=os.getcwd())
+        harness.start(cwd=os.getcwd(), instructions="Relay guest context")
         harness.send("hello", emit=Collector(), cancel=threading.Event())
         self.assertEqual(harness.set_model("opus"), "opus")
         self.assertEqual(len(spawner.calls), 2)
@@ -927,6 +935,7 @@ class SetModelTest(unittest.TestCase):
         # The id the CLI reported on `init`, which is the one its transcript is filed under.
         self.assertEqual(argv[argv.index("--resume") + 1], harness.session_id)
         self.assertNotIn("--session-id", argv)
+        self.assertEqual(argv[argv.index("--append-system-prompt") + 1], "Relay guest context")
 
     def test_a_restart_before_the_first_turn_keeps_the_id_and_does_not_resume(self):
         """`--resume <id>` on a session claude has never written exits 1 ("No conversation found
@@ -935,11 +944,12 @@ class SetModelTest(unittest.TestCase):
         first = FakeClaude(_handshake("h1") + _unsupported("set_model"))
         second = FakeClaude(_handshake("h2"))
         spawner, harness = self._harness(first, second)
-        start = harness.start(cwd=os.getcwd())
+        start = harness.start(cwd=os.getcwd(), instructions="Relay guest context")
         self.assertEqual(harness.set_model("opus"), "opus")
         argv = spawner.calls[1][0]
         self.assertNotIn("--resume", argv)
         self.assertEqual(argv[argv.index("--session-id") + 1], start.session_id)
+        self.assertEqual(argv[argv.index("--append-system-prompt") + 1], "Relay guest context")
 
 
 class SetEffortTest(unittest.TestCase):
@@ -956,7 +966,7 @@ class SetEffortTest(unittest.TestCase):
         first = FakeClaude(script(init_message(), result_message()))
         second = FakeClaude(_handshake("h2"))
         spawner, harness = self._harness(first, second)
-        harness.start(cwd=os.getcwd(), effort="low")
+        harness.start(cwd=os.getcwd(), effort="low", instructions="Relay guest context")
         harness.send("hello", emit=Collector(), cancel=threading.Event())
         self.assertEqual(harness.set_effort("xhigh"), "xhigh")
         self.assertEqual(harness.effort, "xhigh")
@@ -964,6 +974,7 @@ class SetEffortTest(unittest.TestCase):
         argv = spawner.calls[1][0]
         self.assertEqual(argv[argv.index("--effort") + 1], "xhigh")
         self.assertEqual(argv[argv.index("--resume") + 1], harness.session_id)
+        self.assertEqual(argv[argv.index("--append-system-prompt") + 1], "Relay guest context")
         # No control request was tried: the CLI has none, and asking would only log an error.
         self.assertEqual([m["request"]["subtype"] for m in first.written
                           if m.get("type") == "control_request"], ["initialize"])

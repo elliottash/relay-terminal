@@ -584,13 +584,14 @@ def start_provider(preset_id: str, request: dict, workspace: str,
     options = guest_options(request.get("guest"))
     harness = make_harness(guest_id)
     from .guest_board_bridge import Bridge
+    from .guest_instructions import GUEST_INSTRUCTIONS
     from .board_tools import find_board_root
     bridge = Bridge(available=find_board_root(workspace) is not None)
     try:
         started = harness.start(cwd=workspace, model=options["model"] or None,
                                 resume=options["resume"], fork=options["fork"],
                                 permissions=options["permissions"], effort=options["effort"],
-                                board_bridge=bridge.descriptor)
+                                board_bridge=bridge.descriptor, instructions=GUEST_INSTRUCTIONS)
     except HarnessError as exc:
         bridge.close()
         _close_quietly(harness)

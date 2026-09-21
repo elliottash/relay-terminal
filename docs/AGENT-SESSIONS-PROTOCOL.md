@@ -5723,7 +5723,8 @@ a real guest** — a real turn spends the owner's subscription.
 
 ### 29.1 The contract (`guest_harness.py`)
 
-One `Harness` per pane: `start(cwd, model?, resume?, fork?, permissions)` → `{session_id, model}`;
+One `Harness` per pane: `start(cwd, model?, resume?, fork?, permissions, effort?, board_bridge?,
+instructions?)` → `{session_id, model}`;
 `send(prompt, attachments, emit, cancel)` blocks for one turn and returns `TurnResult{text,
 stop_reason: end|interrupted|error, usage}`; `interrupt()`, `set_model(model)`, `compact()`,
 `answer(request_id, decision)` and `close()` may be called from any thread while `send()` blocks.
@@ -5787,6 +5788,24 @@ process dies or answers nonsense (with the last stderr lines), skip non-JSON lin
 message kinds, and record the flags they use against the versions they were verified with.
 
 ### 29.3 The worker side (`guest_harness_provider.py`)
+
+**Guest instructions (card #GP1N).** `start_provider` passes the stable
+`guest_instructions.GUEST_INSTRUCTIONS` supplement through `Harness.start(instructions=…)` on
+every start, resume and fork. Claude receives `--append-system-prompt`, also retained on internal
+model/effort relaunches; Codex receives `developerInstructions` on `thread/start`, `thread/resume`
+and `thread/fork`, leaving `baseInstructions` untouched. The supplement explains Relay's surface,
+actual guest tool availability, project policy discovery, shared-checkout care and verified
+reporting. It does not copy the native agent's tool/ledger rules or add a delegation policy.
+It is not prepended to user turns and does not change CLAUDE.md or AGENTS.md. The existing
+per-turn board bridge discovery hint remains separate because bridge availability can change.
+
+New sessions receive the supplement before their first turn and Relay supplies it again when
+resuming them. Claude 2.1.278's default system-prompt snapshot retains the original prompt across
+requests/resumes until compaction; the launch flag also supplies the supplement when Claude
+renders the prompt again. There is no migration of older sessions' snapshots and no promise
+that this supplement overrides a guest's own delegation restrictions. Probe harnesses have no
+supplement by default. Installed CLI help and the Codex generated schema establish transport;
+the targeted tests exercise it without paid guest turns.
 
 **A guest is a preset.** The worker's `presets` answer (13.7) carries one row per guest the
 registry knows, `{id: "guest:<id>", label: "<display name>", guest: "<id>", harness: <bool>,

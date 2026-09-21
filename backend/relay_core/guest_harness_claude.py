@@ -318,6 +318,8 @@ class ClaudeHarness:
     def _argv(self, *, model: str | None, session_id: str | None, resume: str | None,
               fork: bool, permissions: str, effort: str | None = None) -> list[str]:
         argv = [self._binary, *BASE_FLAGS]
+        if getattr(self, "_instructions", None):
+            argv += ["--append-system-prompt", self._instructions]
         if model:
             argv += ["--model", model]
         if effort:
@@ -338,8 +340,12 @@ class ClaudeHarness:
 
     def start(self, *, cwd: str, model: str | None = None, resume: str | None = None,
               fork: bool = False, permissions: str = "bypass",
-              effort: str | None = None, board_bridge: dict | None = None) -> HarnessStart:
+              effort: str | None = None, board_bridge: dict | None = None,
+              instructions: str | None = None) -> HarnessStart:
         self._board_bridge = board_bridge
+        # _argv also serves model/effort relaunches, including before the first turn.
+        # Claude snapshots this supplement with its default prompt for new sessions.
+        self._instructions = instructions
         permissions = validate_permissions(permissions)
         effort = self._level(validate_effort(effort)) if effort else None
         if self._proc is not None:
