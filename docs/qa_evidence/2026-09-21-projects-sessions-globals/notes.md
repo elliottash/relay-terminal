@@ -58,3 +58,17 @@ errors and two pre-existing section-heading warnings on #Y2MP; #P7SJ's task mark
 The manager movement followup resolves its current window/tab for project actions and global worker
 requests. With no terminal left, Projects/Globals remain usable; Sessions restores a terminal
 resume destination when needed, including mouse entry into that tab.
+
+## Ctrl+Shift+S followup
+
+Commit `188b5931c9f7f60d3f96487c7cebfcd9a279ae28` removes the legacy picker host.
+Ctrl+Shift+S opens Switchboard directly, using its existing project or the current directory.
+The helper receives the uninitialized board state, so the empty view fully loads.
+Project selection and pending `/card` text use the shared Projects tab.
+
+`switchboard-direct.py`, run against land.py's exact-tree binary, passed in isolated Xvfb.
+Screenshot `07-switchboard-direct.png` shows Switchboard's “No cards yet” state in a loose
+Downloads folder. No board/git files were created, and the worker log has no protocol error.
+An earlier live check caught the missing uninitialized-state block; it was fixed before this final run.
+11 targeted `test_board_protocol.InitTests` passed, recorded in runs
+`20260921T233453Z-1582` and `20260921T233455Z-6953`. The exact-tree application build passed.

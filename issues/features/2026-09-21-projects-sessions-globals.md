@@ -7,7 +7,7 @@ assignee: codex
 rank: m
 created: '2026-09-21'
 source: 'Codex conversation, 2026-09-21'
-links: {plans: [], commits: [237c37f0267e2a3328cf57b61fbbb33511a39494, 60ffc6b2250b, ece82b268bc9, 32721d28, a6319d5e, 7273f7b5, 6e5b2a33, be42269896bc3e0beecff69b28da487e40cfee63, f24b12a728eed750c8bf7031fb7655f162bf29da], evidence: [docs/qa_evidence/2026-09-21-projects-sessions-globals/], related: [916B, TVE1, Y2MP], github: null}
+links: {plans: [], commits: [237c37f0267e2a3328cf57b61fbbb33511a39494, 60ffc6b2250b, ece82b268bc9, 32721d28, a6319d5e, 7273f7b5, 6e5b2a33, be42269896bc3e0beecff69b28da487e40cfee63, f24b12a728eed750c8bf7031fb7655f162bf29da, 188b5931c9f7f60d3f96487c7cebfcd9a279ae28], evidence: [docs/qa_evidence/2026-09-21-projects-sessions-globals/], related: [916B, TVE1, Y2MP], github: null}
 ---
 # One pane for Projects, Sessions, and Globals
 
@@ -35,6 +35,7 @@ Owner, after comparing separate panes, one pane with views, and a persistent sid
 > i dont need the pane screenshot key, not sure why i have that
 
 ## Decisions
+- Owner: "fix it, remove that old project page and move ctrl shift s back to switchboard" — remove the legacy picker; Ctrl+Shift+S always opens the Switchboard for the tab/project or current directory, including its empty state.
 - Owner: "lets go with subagents for efficiency" — proceed with implementation, dividing independent areas between subagents.
 - Owner: "i am liking the middle option. can you include a \"globals\" tab that has our proposed \"swithcboard hq\" functionality" — develop the shared-pane option with three tabs: Projects, Sessions, Globals.
 - Owner: "and ctrl shift g can open globals" — Ctrl+Shift+G selects Globals.
@@ -84,6 +85,8 @@ Research behind the proposal (official documentation reviewed 2026-09-21):
 
 
 ## Plan
+Followup: remove the legacy picker host, route project selection and held `/card` text through the new Projects tab, and make Ctrl+Shift+S open the existing Switchboard or a side-effect-free empty board for the current directory. Verify under isolated Xvfb from a loose folder.
+
 **Goal:** one Projects / Sessions / Globals pane with direct shortcuts, usable project management,
 and working global memories, aliases, and instruction-file access.
 
@@ -119,6 +122,8 @@ application build, and isolated GUI screenshots showing tab selection and CRUD p
 - [x] Targeted tests, GUI evidence and landing <!-- t:qa -->
 
 ## Execution Summary
+Followup `188b5931`: removed the legacy project picker. Ctrl+Shift+S opens Switchboard directly, including an empty board for a loose directory; the helper receives explicit uninitialized state. Project selection and pending `/card` text use the new Projects tab. Opening the board writes no board/git files.
+
 One shared Projects / Sessions / Globals pane is implemented. Projects owns registry management,
 active sessions, pin/forget, declined entries, explicit open/attach/Switchboard actions and session
 filter links. Options now links to Projects. Ctrl+Shift+P/Y/G select the corresponding tab;
@@ -131,6 +136,8 @@ and overridden; global writes preserve existing alias identities and reject stal
 Evidence: [GUI screenshots, driver and notes](../../docs/qa_evidence/2026-09-21-projects-sessions-globals/).
 
 ## Tests
+- `tests/test_board_protocol.py::InitTests`
+- manual: docs/qa_evidence/2026-09-21-projects-sessions-globals/07-switchboard-direct.png
 - `ctest -R conversations` — tests/conversations_test.cpp
 - `ctest -R projectspane` — tests/projectspane_test.cpp
 - `ctest -R globalspane` — tests/globalspane_test.cpp
@@ -142,6 +149,7 @@ Evidence: [GUI screenshots, driver and notes](../../docs/qa_evidence/2026-09-21-
 - manual: docs/qa_evidence/2026-09-21-projects-sessions-globals/
 
 ## QA checklist
+- [ ] Ctrl+Shift+S opens Switchboard directly from a loose folder; Ctrl+Shift+P opens the new Projects tab.
 - [ ] P/Y/G shortcuts select Projects/Sessions/Globals without duplicating the pane.
 - [ ] Project browsing preserves the current attachment; explicit open/attach/Switchboard actions work.
 - [ ] Pin, Forget and declined-project restoration preserve project files.

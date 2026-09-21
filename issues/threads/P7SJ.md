@@ -24,3 +24,11 @@ Claimed for implementation with three subagents, a written plan and bounded file
 <!-- relay:entry 20260921T222440Z-q1 author=codex kind=evidence -->
 ### Codex · 2026-09-21 22:24
 Implemented with three subagents and landed integration be42269896bc. Targeted backend/widget/keymap tests and exact-tree application build pass. Isolated Xvfb verifies all three shortcut tabs, a saved global memory consumed by runtime and draft preservation. Evidence: docs/qa_evidence/2026-09-21-projects-sessions-globals/. Added execution summary, tests and manual QA checklist; moved to needs-verification.
+
+<!-- relay:entry 20260921T233253Z-r1 author=codex kind=decision -->
+### Codex · 2026-09-21 23:32
+Owner: "fix it, remove that old project page and move ctrl shift s back to switchboard". Reclaimed #P7SJ; removing the legacy picker and routing selection through Projects. Ctrl+Shift+S will open Switchboard, including for a directory without a board, without creating files merely by opening it.
+
+<!-- relay:entry 20260921T233735Z-r2 author=codex kind=evidence -->
+### Codex · 2026-09-21 23:37
+Landed 188b5931: Ctrl+Shift+S opens Switchboard directly and the legacy picker is removed. Exact-tree build and 11 init tests pass. Isolated live GUI shows fully loaded empty Switchboard from a loose folder, no filesystem initialization, no worker protocol error. Evidence: docs/qa_evidence/2026-09-21-projects-sessions-globals/07-switchboard-direct.png. Returned to needs-verification.
