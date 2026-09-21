@@ -295,6 +295,9 @@ const QList<Kind> &kinds() {
         {QStringLiteral("settings"), QStringLiteral("Options"), QStringLiteral("tools"), Glyph::Options},
         {QStringLiteral("actions"), QStringLiteral("Actions"), QStringLiteral("tools"), Glyph::Actions},
         {QStringLiteral("sessions"), QStringLiteral("Sessions"), QStringLiteral("tools"), Glyph::Sessions},
+        // The models pane (card #MDL1 t:a11): providers, available models and priorities, beside
+        // the pane it serves. A tool surface like Options, whose gear it borrows.
+        {QStringLiteral("models"), QStringLiteral("Models"), QStringLiteral("tools"), Glyph::Options},
         // The project picker (card #916B): which project a tab that has none attaches to. It wears the
         // Switchboard's jacks because a project is, to Relay, the thing that has a Switchboard.
         {QStringLiteral("projects"), QStringLiteral("Projects"), QStringLiteral("tools"), Glyph::Switchboard},

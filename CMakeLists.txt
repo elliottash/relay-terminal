@@ -128,6 +128,14 @@ add_library(relay-modelpicker STATIC src/ModelPicker.cpp src/ModelPicker.h)
 target_include_directories(relay-modelpicker PUBLIC src)
 target_link_libraries(relay-modelpicker PUBLIC relay-modelcatalog ${RELAY_QT}::Widgets)
 target_compile_options(relay-modelpicker PRIVATE -Wall -Wextra -Wpedantic)
+# The models pane (card #MDL1 t:a11, design 5.8): the three tabs Ctrl+Shift+M opens — providers,
+# available, priorities — over the picker widget above and the settings-row renderer below. Its own
+# library and free of `Pane` and `RelayWindow`, so tests/modelspane_test.cpp drives the whole
+# surface offscreen with a std::function standing in for the pane it serves.
+add_library(relay-modelspane STATIC src/ModelsPane.cpp src/ModelsPane.h)
+target_include_directories(relay-modelspane PUBLIC src)
+target_link_libraries(relay-modelspane PUBLIC relay-modelpicker relay-settings ${RELAY_QT}::Widgets)
+target_compile_options(relay-modelspane PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-modelsettings STATIC src/ModelSettings.cpp src/ModelSettings.h)
 target_include_directories(relay-modelsettings PUBLIC src)
 # relay-modelcatalog: the key-test line names the model that answered (card #MDL1, rule 1).
@@ -555,7 +563,7 @@ if(RELAY_BUILD_APP)
     # What an agent is about (#AGNT): a Pane takes a relay::agent::Context, and supplies the
     # terminal one itself. QtCore only, so this is a link edge and not a dependency.
     target_link_libraries(relay PRIVATE relay-agentcontext)
-    target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-modelcatalog relay-modelrows relay-modelpicker relay-filterpopup relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-queuesubmit relay-logging relay-voice relay-images relay-titles relay-panestatus relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::DBus ${RELAY_QT}::Network)
+    target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-modelcatalog relay-modelrows relay-modelpicker relay-modelspane relay-filterpopup relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-queuesubmit relay-logging relay-voice relay-images relay-titles relay-panestatus relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::DBus ${RELAY_QT}::Network)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -650,6 +658,12 @@ if(BUILD_TESTING)
     target_link_libraries(relay-modelsettings-tests PRIVATE relay-modelsettings ${RELAY_QT}::Test)
     add_test(NAME modelsettings COMMAND relay-modelsettings-tests)
     set_tests_properties(modelsettings PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # The models pane (card #MDL1 t:a11): its three tabs, the class tab it opens on, Enter landing
+    # in the pane it serves, and Escape leaving it open.
+    add_executable(relay-modelspane-tests tests/modelspane_test.cpp)
+    target_link_libraries(relay-modelspane-tests PRIVATE relay-modelspane ${RELAY_QT}::Test)
+    add_test(NAME modelspane COMMAND relay-modelspane-tests)
+    set_tests_properties(modelspane PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # The agent's side of Options and Actions (#FEJQ, §30): the catalog, the command executor, the
     # change log and Undo. No window: the catalogs are the same structs the settings pane takes.
     add_executable(relay-appcommands-tests tests/appcommands_test.cpp)
@@ -795,7 +809,8 @@ if(BUILD_TESTING)
         target_link_libraries(${console_target} PRIVATE
             relay-closedlist relay-localmodels relay-projects relay-escapees relay-appcommands
             relay-agentcontext
-            relay-hints relay-modelsettings relay-modelcatalog relay-modelrows relay-modelpicker relay-filterpopup
+            relay-hints relay-modelsettings relay-modelcatalog relay-modelrows relay-modelpicker
+            relay-modelspane relay-filterpopup
             relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor
             relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations
             relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate

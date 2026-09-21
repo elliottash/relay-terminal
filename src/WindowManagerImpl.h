@@ -21,6 +21,7 @@
 #include <QJsonObject>
 #include <QPointer>
 #include <QScreen>
+#include <QSettings>
 #include <QTabWidget>
 #include <QUrl>
 #include <QUuid>
@@ -231,8 +232,26 @@ inline RelayWindow *WindowManager::newEmptyWindow(const QRect &geometry) {
     return window;
 }
 
+// The window Relay opens when there is no saved layout to restore (main.cpp: `restoreSavedLayout()`
+// answered 0, or --fresh / --workspace asked for a new one).
+//
+// **First run** is one terminal pane at the left and the models pane at the right, serving it
+// (owner, 2026-09-21, card #MDL1 t:a11: "when you open relay for the first time, you have a pane at
+// the left and models at the right"). The condition is the one the app already uses for "this
+// person has not been through the introduction" — `instructions/onboarded`, which Pane writes when
+// the welcome is offered or dismissed — so the models pane greets a fresh profile once and never
+// again, and a person who has used Relay before and asked for a fresh window gets the bare pane.
 inline RelayWindow *WindowManager::newWindowAt(const QString &cwd) {
-    return newWindow(QJsonArray{QJsonObject{{"pane", QJsonObject{{"cwd", cwd}, {"workspace", m_workspace}}}}});
+    const QJsonObject terminal{{"pane", QJsonObject{{"cwd", cwd}, {"workspace", m_workspace}}}};
+    if (QSettings().value(QStringLiteral("instructions/onboarded"), false).toBool())
+        return newWindow(QJsonArray{terminal});
+    return newWindow(QJsonArray{QJsonObject{
+        {"split", "h"},
+        {"children", QJsonArray{terminal, QJsonObject{{"models", QJsonObject{{"cwd", cwd}}}}}},
+        // Wide enough for the three tabs and the level column beside the rows, and narrower than
+        // the terminal: the terminal is what is being worked in, the models pane is what is being
+        // set up. RelayWindow::buildNode applies these only when the splitter has two children.
+        {"sizes", QJsonArray{980, 720}}}});
 }
 
 inline void WindowManager::focusPane(const QString &token) {

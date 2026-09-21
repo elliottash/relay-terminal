@@ -7,6 +7,7 @@
 #include <QCompleter>
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDialog>
 #include <QDialogButtonBox>
 #include <QDropEvent>
 #include <QFormLayout>
@@ -113,11 +114,10 @@ protected:
 
 }  // namespace
 
-ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QDialog(parent), m_context(context) {
-    setWindowTitle(QStringLiteral("models"));
+ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QWidget(parent), m_context(context) {
     setObjectName(QStringLiteral("modelPicker"));
-    resize(980, 620);
     auto *layout = new QVBoxLayout(this);
+    layout->setContentsMargins(0, 0, 0, 0);
 
     // ----- the header: which profile these lists belong to ---------------------------------------
     // Only when there is one to switch: an install with no profile has nothing to say here, and the
@@ -155,13 +155,7 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QDialog(pare
     m_tabs->setExpanding(false);
     m_tabs->setDrawBase(true);
     m_tabs->setFocusPolicy(Qt::StrongFocus);
-    for (const QString &id : tabIds()) {
-        const int index = m_tabs->addTab(id);
-        m_tabs->setTabData(index, id);
-        m_tabs->setTabToolTip(index, id == kAll
-            ? QStringLiteral("every model, one row each — favorites, the ten most recent, and the sort menu")
-            : curation::tierLabel(id) + QStringLiteral(" · rank 1 is what this tier runs on, the rest are its fallbacks"));
-    }
+    populateTabs();
     m_tier = m_tabs->count() ? m_tabs->tabData(0).toString() : kAll;
     layout->addWidget(m_tabs);
 
@@ -264,10 +258,10 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QDialog(pare
     m_favorite->setObjectName(QStringLiteral("modelFavorite"));
     m_favorite->setToolTip(QStringLiteral("Pin this model at the top of the all tab"));
     buttons->addWidget(m_favorite);
-    auto *customize = new QPushButton(QStringLiteral("customize…"));
-    customize->setObjectName(QStringLiteral("modelCustomize"));
-    customize->setToolTip(QStringLiteral("Options › Models: providers, keys, and which models these lists may hold (/models)"));
-    buttons->addWidget(customize);
+    m_customize = new QPushButton(QStringLiteral("customize…"));
+    m_customize->setObjectName(QStringLiteral("modelCustomize"));
+    m_customize->setToolTip(QStringLiteral("Providers and keys — step 1 of the four (/models)"));
+    buttons->addWidget(m_customize);
     // The two buttons that were Options › Models' "fill the lists" row (design 5.5: the lists are
     // edited here now, so the defaults that fill them are here too). The action is the caller's —
     // only a pane knows what its worker computed — so there is one copy of it, not two.
@@ -295,11 +289,13 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QDialog(pare
         connect(m_defaultsOpenrouter, &QPushButton::clicked, this, [fill] { fill(true); });
     }
     buttons->addStretch(1);
+    // No "cancel": a pane is not a modal and there is nothing to cancel — every edit here is
+    // already live and Ctrl+Z takes one back (design 5.8). Escape hands the focus back to the
+    // pane this serves and leaves the pane open, which the host does.
     m_use = new QPushButton(QStringLiteral("use"));
     m_use->setDefault(true);
+    m_use->setToolTip(QStringLiteral("Switch the pane this serves to the highlighted model and level (enter)"));
     buttons->addWidget(m_use);
-    auto *cancel = new QPushButton(QStringLiteral("cancel"));
-    buttons->addWidget(cancel);
     layout->addLayout(buttons);
 
     connect(m_tabs, &QTabBar::currentChanged, this, [this](int index) {
@@ -334,7 +330,7 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QDialog(pare
     connect(m_list, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item) {
         if (!item || item->data(0, SectionRole).toBool()) return;
         if (item->data(0, AddRole).toBool()) { addSelected(); return; }   // a double click on a "+ add" row adds it
-        accept();
+        use();
     });
     m_list->installEventFilter(this);
     connect(m_favorite, &QPushButton::clicked, this, [this] {
@@ -344,18 +340,14 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QDialog(pare
         rebuild();
         selectKey(key);
     });
-    connect(customize, &QPushButton::clicked, this, [this] {
-        reject();
-        if (openModelsPage) openModelsPage();
-    });
+    connect(m_customize, &QPushButton::clicked, this, [this] { if (openModelsPage) openModelsPage(); });
     connect(m_vias, &QListWidget::currentRowChanged, this, [this](int) { onViaChanged(); });
     connect(m_levels, &QListWidget::currentRowChanged, this, [this](int) { onLevelChanged(); });
-    connect(m_levels, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *) { accept(); });
+    connect(m_levels, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *) { use(); });
     m_vias->installEventFilter(this);
     m_levels->installEventFilter(this);
     m_tabs->installEventFilter(this);
-    connect(m_use, &QPushButton::clicked, this, [this] { accept(); });
-    connect(cancel, &QPushButton::clicked, this, &QDialog::reject);
+    connect(m_use, &QPushButton::clicked, this, [this] { use(); });
 
     // Typing goes to the filter; arrows move the list even while the filter has the focus, so Tab
     // is what actually moves the focus along the four controls, in the order they are read.
@@ -403,7 +395,47 @@ QStringList ModelPicker::tabIds() const {
     return ids;
 }
 
+// The tab row this widget draws. Hosted in the models pane the flat tab is the host's own
+// **available** tab (design 5.8), so it is not repeated here and the row holds the five classes;
+// `tabIds()` still lists it, because "all" is a tier this widget can be *put* on.
+QStringList ModelPicker::tabBarIds() const {
+    QStringList ids = tabIds();
+    if (m_hosted) ids.removeAll(kAll);
+    return ids;
+}
+
+void ModelPicker::populateTabs() {
+    const QSignalBlocker block(m_tabs);
+    while (m_tabs->count() > 0) m_tabs->removeTab(0);
+    for (const QString &id : tabBarIds()) {
+        const int index = m_tabs->addTab(id);
+        m_tabs->setTabData(index, id);
+        m_tabs->setTabToolTip(index, id == kAll
+            ? QStringLiteral("every model, one row each — favorites, the ten most recent, and the sort menu")
+            : curation::tierLabel(id) + QStringLiteral(" · rank 1 is what this tier runs on, the rest are its fallbacks"));
+    }
+}
+
+void ModelPicker::setHosted(bool hosted) {
+    if (hosted == m_hosted) return;
+    m_hosted = hosted;
+    // "customize…" was the way out of a modal to Options › Models. In the pane, providers are the
+    // first tab, so the button says where it goes and the host switches the tab.
+    if (m_customize) {
+        m_customize->setText(hosted ? QStringLiteral("providers…") : QStringLiteral("customize…"));
+        m_customize->setToolTip(hosted
+            ? QStringLiteral("The providers tab: keys, logins and custom endpoints — step 1 of the four")
+            : QStringLiteral("Providers and keys — step 1 of the four (/models)"));
+    }
+    populateTabs();
+    syncTabBar();
+    updateFooter();
+}
+
 void ModelPicker::syncTabBar() {
+    // Hosted and on the flat tab, the row would be five classes none of which is in front: the
+    // host's own tab row is saying where you are, so this one steps aside.
+    m_tabs->setVisible(m_tabs->count() > 0 && !(m_hosted && m_tier == kAll));
     for (int i = 0; i < m_tabs->count(); ++i)
         if (m_tabs->tabData(i).toString() == m_tier) {
             if (m_tabs->currentIndex() != i) { QSignalBlocker block(m_tabs); m_tabs->setCurrentIndex(i); }
@@ -420,7 +452,7 @@ void ModelPicker::setTier(const QString &tier) {
 }
 
 void ModelPicker::stepTab(int delta) {
-    const QStringList ids = tabIds();
+    const QStringList ids = tabBarIds();
     const int at = ids.indexOf(m_tier);
     if (at < 0 || ids.size() < 2) return;
     // Wrapping: with six tabs and ←/→ as the way through them, stopping dead at either end reads
@@ -1056,15 +1088,22 @@ void ModelPicker::onLevelChanged() {
 }
 
 void ModelPicker::updateFooter() {
-    m_footer->setText(m_tier == kAll
-        ? QStringLiteral("←→ tab · ↑↓ row · enter uses it · type to search every model, openrouter's long tail "
-                         "included · tab, then → : the providers of a folded row, and the levels · "
-                         "“available” is what the lists, the alt+m box and its filter may offer — un-tick one to "
-                         "take it out everywhere, tick a row under “more from…” to bring one in")
-        : QStringLiteral("←→ tab · ↑↓ row · enter uses it · alt+↑↓ moves it · del removes it · type a name, "
-                         "ctrl+enter adds it · ctrl+z undoes")
+    // Hosted on the flat tab the class row is hidden, so ←→ has no tab of this widget's to walk:
+    // it is the host's three tabs the arrows belong to then, and the footer says so.
+    const QString tabs = !m_hosted                ? QStringLiteral("←→ tab · ")
+                       : m_tier == kAll           ? QStringLiteral("ctrl+tab tab · ")
+                                                  : QStringLiteral("←→ class · ctrl+tab tab · ");
+    QString text = m_tier == kAll
+        ? tabs + QStringLiteral("↑↓ row · enter uses it in the pane · type to search every model, openrouter's "
+                                "long tail included · tab, then → : the providers of a folded row, and the levels · "
+                                "“available” is what the lists, the alt+m box and its filter may offer — un-tick one "
+                                "to take it out everywhere, tick a row under “more from…” to bring one in")
+        : tabs + QStringLiteral("↑↓ row · enter uses it in the pane · alt+↑↓ moves it · del removes it · type a name, "
+                                "ctrl+enter adds it · ctrl+z undoes")
               + (boxClassTab() ? QStringLiteral(" · “in box” is a cutoff: alt+m shows this class down to the last one ticked")
-                               : QString()));
+                               : QString());
+    if (onEscape) text += QStringLiteral(" · esc back to the pane");
+    m_footer->setText(text);
 }
 
 // ----- the list edits ----------------------------------------------------------------------------
@@ -1170,7 +1209,11 @@ bool ModelPicker::handleShortcut(QKeyEvent *event) {
     const Qt::KeyboardModifiers mods = event->modifiers();
     const bool ctrl = mods & Qt::ControlModifier;
     const bool alt = mods & Qt::AltModifier;
+    // Ctrl+Tab walks this widget's own tabs — unless it is hosted in the models pane, where two
+    // rows of tabs need a key each: ←/→ stay the class tabs and ctrl+tab becomes the host's three
+    // (providers · available · priorities), so it is left for the host to answer.
     if (ctrl && (key == Qt::Key_Tab || key == Qt::Key_Backtab)) {
+        if (m_hosted) return false;
         stepTab(key == Qt::Key_Backtab || (mods & Qt::ShiftModifier) ? -1 : 1);
         return true;
     }
@@ -1182,12 +1225,15 @@ bool ModelPicker::handleShortcut(QKeyEvent *event) {
     // with the filter empty, so it stays the key that rubs the filter out.
     if (key == Qt::Key_Delete) { removeSelected(); return true; }
     if (key == Qt::Key_Backspace && m_filter->text().isEmpty()) { removeSelected(); return true; }
+    // Escape belongs to the host: "Escape returns focus to the pane it serves and leaves it open"
+    // (design 5.8). Nothing is closed here, and with no host Escape falls through untouched.
+    if (key == Qt::Key_Escape && !mods && onEscape) { onEscape(); return true; }
     return false;
 }
 
 void ModelPicker::keyPressEvent(QKeyEvent *event) {
     if (handleShortcut(event)) { event->accept(); return; }
-    QDialog::keyPressEvent(event);
+    QWidget::keyPressEvent(event);
 }
 
 bool ModelPicker::eventFilter(QObject *watched, QEvent *event) {
@@ -1200,7 +1246,7 @@ bool ModelPicker::eventFilter(QObject *watched, QEvent *event) {
                 QCoreApplication::sendEvent(m_list, event);
                 return true;
             }
-            if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) { accept(); return true; }
+            if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) { use(); return true; }
             // ←/→ walk the tabs from the filter, which is where the focus starts — unless there is
             // text and the caret is somewhere inside it, when they are a caret's arrows again.
             if (key->key() == Qt::Key_Left && (m_filter->text().isEmpty() || m_filter->cursorPosition() == 0)) { stepTab(-1); return true; }
@@ -1208,7 +1254,7 @@ bool ModelPicker::eventFilter(QObject *watched, QEvent *event) {
         }
         if (watched == m_list) {
             // The view swallows Enter (it emits activated), so the default button never sees it.
-            if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) { accept(); return true; }
+            if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) { use(); return true; }
             if (key->key() == Qt::Key_Right) {                                   // → the providers, then the levels
                 if (m_vias->isVisible() && m_vias->count()) { m_vias->setFocus(); return true; }
                 if (m_levels->count()) { m_levels->setFocus(); return true; }
@@ -1218,20 +1264,20 @@ bool ModelPicker::eventFilter(QObject *watched, QEvent *event) {
         if (watched == m_vias) {
             if (key->key() == Qt::Key_Left) { m_list->setFocus(); return true; }
             if (key->key() == Qt::Key_Right && m_levels->count()) { m_levels->setFocus(); return true; }
-            if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) { accept(); return true; }
+            if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) { use(); return true; }
         }
         if (watched == m_levels) {
             if (key->key() == Qt::Key_Left) {
                 if (m_vias->isVisible() && m_vias->count()) m_vias->setFocus(); else m_list->setFocus();
                 return true;
             }
-            if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) { accept(); return true; }
+            if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) { use(); return true; }
         }
     }
-    return QDialog::eventFilter(watched, event);
+    return QWidget::eventFilter(watched, event);
 }
 
-void ModelPicker::accept() {
+void ModelPicker::use() {
     // "+ add a model by id…" is a row you press, not a model you use: Enter on it asks for the id
     // and leaves the dialog open on what it added.
     if (QTreeWidgetItem *row = currentRow(); row != nullptr && row->data(0, AddByIdRole).toBool()) {
@@ -1248,16 +1294,7 @@ void ModelPicker::accept() {
     if (effort.isEmpty())
         if (const Entry *entry = m_context.catalog.find(key)) effort = effectiveEffort(*entry);
     m_pick.effort = effort;
-    QDialog::accept();
-}
-
-ModelPick pickModel(QWidget *parent, const ModelPicker::Context &context, std::function<void()> openModelsPage,
-                    std::function<void()> onListsChanged) {
-    ModelPicker dialog(context, parent);
-    dialog.openModelsPage = std::move(openModelsPage);
-    dialog.onListsChanged = std::move(onListsChanged);
-    dialog.exec();
-    return dialog.pick();
+    if (onUse) onUse(m_pick);
 }
 
 }  // namespace relay

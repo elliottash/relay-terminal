@@ -868,14 +868,14 @@ private slots:
     // ----- Options › Models keeps providers, keys and profiles (card #MDL1 t:a10) ---------------
 
     // Design 5.5: "The tier lists and the 'models in the picker' checklist leave the page: one row,
-    // 'models and priorities... (Ctrl+Alt+M)', opens the dialog on the main tab." The page is built
+    // 'models and priorities...', opens the models pane on the main tab." The page is built
     // by RelayWindow::modelsSection(), which needs a whole window; read it as text like the tests
     // above, and read only that function so a row of some other page cannot answer for it.
     void theModelsPageHasNoTierListsAndNoChecklist() {
         QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindow.h"));
         QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
         const QString text = QString::fromUtf8(source.readAll());
-        const int start = text.indexOf(QStringLiteral("relay::SettingsSection modelsSection() {"));
+        const int start = text.indexOf(QStringLiteral("relay::SettingsSection modelsSection(bool inModelsPane = false) {"));
         QVERIFY2(start > 0, "modelsSection() is gone");
         const int end = text.indexOf(QStringLiteral("void modelsCurated() {"), start);
         QVERIFY(end > start);
@@ -898,9 +898,10 @@ private slots:
         QVERIFY(page.contains(QStringLiteral("guestSettingKey(cli, QStringLiteral(\"permissions\"))")));
     }
 
-    // The one row that replaced them opens the dialog, and on main -- not on the mode the pane
-    // happens to be in, which is what runAction("agent.model") would do.
-    void theModelsPageButtonOpensTheDialogOnMain() {
+    // The one row that replaced them opens the models pane (card #MDL1 t:a11: it was a modal
+    // dialog until 2026-09-21), and on main -- not on the mode the pane happens to be in, which is
+    // what runAction("agent.modelOptions") would do.
+    void theModelsPageButtonOpensTheModelsPaneOnMain() {
         QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindow.h"));
         QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
         const QString text = QString::fromUtf8(source.readAll());
@@ -909,8 +910,13 @@ private slots:
         const QString block = text.mid(row, 1600);
         QVERIFY2(block.contains(QStringLiteral("models and priorities")), qPrintable(block.left(400)));
         QVERIFY2(block.contains(QStringLiteral("openModelPicker(QStringLiteral(\"main\"))")), qPrintable(block.left(1000)));
+        // …and it is drawn on the Options page alone: inside the models pane, whose providers tab
+        // is this same section, it would be a door to where you already are (design 5.8).
+        QVERIFY2(block.contains(QStringLiteral("if (!inModelsPane)"))
+                     || text.mid(row - 400, 400).contains(QStringLiteral("if (!inModelsPane)")),
+                 qPrintable(text.mid(row - 400, 500)));
         // It is the first row the page appends: the complaint was that the chooser sat too far down.
-        const int section = text.indexOf(QStringLiteral("relay::SettingsSection modelsSection() {"));
+        const int section = text.indexOf(QStringLiteral("relay::SettingsSection modelsSection(bool inModelsPane = false) {"));
         const int firstRow = text.indexOf(QStringLiteral("models.rows << "), section);
         QVERIFY(firstRow > row);
         QVERIFY2(firstRow - row < 1600, "another row is appended before the dialog button");
@@ -927,20 +933,20 @@ private slots:
     // Step 2 of four is reachable from step 1 (card #MDL1, design 5.7). The owner: "there need to
     // be 4 steps of model availability: 1 add provider, 2 add model as available, 3 add model to
     // priority list, 4 include model in box picker." Step 1 is a provider row on this page; the
-    // link under it says how many of that provider's models are available and opens the dialog's
-    // `all` tab on that provider, which is where step 2 is edited.
-    void everyProviderRowHasAModelsLinkIntoTheAllTab() {
+    // link under it says how many of that provider's models are available and opens the models
+    // pane's available tab on that provider, which is where step 2 is edited.
+    void everyProviderRowHasAModelsLinkIntoTheAvailableTab() {
         QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindow.h"));
         QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
         const QString text = QString::fromUtf8(source.readAll());
-        const int start = text.indexOf(QStringLiteral("relay::SettingsSection modelsSection() {"));
+        const int start = text.indexOf(QStringLiteral("relay::SettingsSection modelsSection(bool inModelsPane = false) {"));
         QVERIFY2(start > 0, "modelsSection() is gone");
         const int end = text.indexOf(QStringLiteral("void modelsCurated() {"), start);
         const QString page = text.mid(start, end - start);
         const int row = page.indexOf(QStringLiteral("QStringLiteral(\"models.available:\")"));
         QVERIFY2(row > 0, "the per-provider models link is gone from the Models page");
         const QString block = page.mid(row, 1400);
-        // Its own count, and the dialog's `all` tab filtered to this provider.
+        // Its own count, and the models pane's available tab filtered to this provider.
         QVERIFY2(block.contains(QStringLiteral("of %2 available")), qPrintable(block.left(600)));
         QVERIFY2(block.contains(QStringLiteral("openModelPicker(QStringLiteral(\"all\")")), qPrintable(block.left(900)));
         QVERIFY(page.contains(QStringLiteral("curation::isAvailable(")));

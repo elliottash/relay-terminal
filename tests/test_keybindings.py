@@ -348,6 +348,28 @@ class GuiDefaultsTests(unittest.TestCase):
         for preset in re.findall(r'"tests\.open"\s*:\s*\[', source):
             self.fail('a preset binds tests.open; it ships with no default key')
 
+    def test_one_models_key_and_ctrl_alt_m_is_gone(self):
+        # Card #MDL1 t:a11. The models pane replaced the modal picker, and the owner retired the
+        # modal's key with it: "just remove ctrl alt m, not worth the extra confusion". One key per
+        # surface is the rule here, so `agent.model` is gone from the registry and Ctrl+Shift+M
+        # (`agent.modelOptions`) is the only way in that is not a word typed in the prompt box.
+        source = (ROOT / 'src/Keymap.h').read_text(encoding='utf-8')
+        ids = re.findall(r'^\s*add\("([^"]+)"', source, re.M)
+        self.assertNotIn('agent.model', ids, 'agent.model (Ctrl+Alt+M) was retired with the modal picker')
+        self.assertIn('agent.modelOptions', ids)
+        self.assertEqual(self.defaults('agent.modelOptions'), ['Ctrl+Shift+M'])
+        self.assertEqual(self.defaults('agent.modelBox'), ['Alt+M'])
+        # Nothing else picks the key up, in the registry or in any preset table.
+        for action, block in re.findall(r'add\("([a-zA-Z.]+)", "[a-z]+", "[^"]*",\s*\{(.*?)\}\);', source, re.S):
+            for key in re.findall(r'QStringLiteral\("([^"]+)"\)', block):
+                self.assertNotEqual(key, 'Ctrl+Alt+M', f'{action} took the retired models chord')
+        presets = re.search(r'R"PRESETS\((.*?)\)PRESETS"', source, re.S)
+        self.assertIsNotNone(presets)
+        for name, table in json.loads(presets.group(1)).items():
+            self.assertNotIn('agent.model', table, f'the {name} preset still binds the retired agent.model')
+            for action, keys in table.items():
+                self.assertNotIn('Ctrl+Alt+M', keys, f'the {name} preset binds {action} to the retired models chord')
+
     def test_every_default_key_is_one_the_worker_accepts(self):
         # The twin of the test below, for the keys rather than the ids. The GUI sends every default
         # binding — and every preset table's — with `configure`, and one key the worker refuses

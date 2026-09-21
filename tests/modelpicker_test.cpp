@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The model dialog (Ctrl+Alt+M, card #MDL1 t:a7): the tier tabs that *are* the priority lists —
-// numbered, reordered, added to, taken from, levelled and undone — the flat `all` tab with one row
-// per model and its "via" column, the profile in the header, and what a pick returns.
+// The models widget (card #MDL1 t:a7, re-hosted as a plain widget at t:a11): the tier tabs that
+// *are* the priority lists — numbered, reordered, added to, taken from, levelled and undone — the
+// flat `all` tab with one row per model and its "via" column, the profile in the header, and what
+// a pick hands back. It was a modal dialog on Ctrl+Alt+M until 2026-09-21; `use()` is what
+// `accept()` was, and the modal's own behaviour (exec, reject, "cancel", "customize…" closing the
+// dialog) is gone with it. The pane that hosts it is tests/modelspane_test.cpp.
 #include "ModelPicker.h"
 
 #include <QCheckBox>
@@ -322,7 +325,7 @@ private Q_SLOTS:
         QVERIFY(live->foreground(ColModel).style() == Qt::NoBrush);
         // …and the user may still insist on the spent one.
         picker.selectKey(QStringLiteral("anthropic|claude-opus-5"));
-        picker.accept();
+        picker.use();
         QVERIFY(picker.pick().accepted);
         QCOMPARE(picker.pick().key, QStringLiteral("anthropic|claude-opus-5"));
     }
@@ -430,7 +433,7 @@ private Q_SLOTS:
         QCOMPARE(curation::tierList(QStringLiteral("main")).first().effort, QString());
         QCOMPARE(picker.list()->topLevelItem(0)->text(ColReasoning), QStringLiteral("default"));
         // …and a pane still needs a level to run at, so "default" picks the one the row shows.
-        picker.accept();
+        picker.use();
         QCOMPARE(picker.pick().key, QStringLiteral("glm-coding|glm-5.3"));
         QCOMPARE(picker.pick().effort, QStringLiteral("high"));     // the pane's own, the list naming none
         QCOMPARE(told, 2);
@@ -483,7 +486,7 @@ private Q_SLOTS:
         QCOMPARE(picker.selectedKey(), QStringLiteral("guest:codex|gpt-5.6-sol"));
         QCOMPARE(picker.levelList()->count(), 3);
         QCOMPARE(picker.levelList()->item(2)->text(), QStringLiteral("xhigh"));   // the provider's word
-        picker.accept();
+        picker.use();
         QCOMPARE(picker.pick().key, QStringLiteral("guest:codex|gpt-5.6-sol"));
         // A row with one provider only has no "via" list to open.
         ModelPicker plain(solContext());
@@ -552,7 +555,7 @@ private Q_SLOTS:
         ctx.tier = QStringLiteral("all");
         ModelPicker picker(ctx);
         picker.selectKey(QStringLiteral("glm-coding|glm-5.3-flash"));
-        picker.accept();
+        picker.use();
         QVERIFY(picker.pick().accepted);
         QCOMPARE(picker.pick().key, QStringLiteral("glm-coding|glm-5.3-flash"));
         QCOMPARE(picker.pick().effort, QStringLiteral("max"));
@@ -824,7 +827,7 @@ private Q_SLOTS:
         QVERIFY2(rows.contains(QStringLiteral("[more from openrouter]")), qPrintable(rows.join(QLatin1Char(' '))));
         QVERIFY(rows.contains(QStringLiteral("openrouter|meta/muse-spark-1.3")));
         picker.selectKey(QStringLiteral("openrouter|meta/muse-spark-1.3"));
-        picker.accept();
+        picker.use();
         QCOMPARE(picker.pick().key, QStringLiteral("openrouter|meta/muse-spark-1.3"));
     }
 
@@ -972,13 +975,31 @@ private Q_SLOTS:
                                                       QStringLiteral("glm-coding|glm-5.3-flash")}));
     }
 
-    void customizeClosesAndOpensThePage() {
+    // "customize…" used to close the modal and open Options › Models. There is no modal to close:
+    // it asks the host, which is the models pane switching to its providers tab.
+    void customizeAsksTheHostForTheProvidersPage() {
         ModelPicker picker(context());
         bool opened = false;
         picker.openModelsPage = [&] { opened = true; };
         picker.findChild<QPushButton *>(QStringLiteral("modelCustomize"))->click();
         QVERIFY(opened);
-        QVERIFY(!picker.pick().accepted);
+        QVERIFY(!picker.pick().accepted);   // it is a door, not a pick
+    }
+
+    // Hosted in the models pane the flat tab is the host's own, so it leaves this tab row — and
+    // ctrl+tab, which the host needs for its three tabs, stops being answered here.
+    void hostedTheFlatTabLeavesTheRowAndCtrlTabIsTheHosts() {
+        ModelPicker picker(context());
+        picker.setHosted(true);
+        QCOMPARE(tabs(picker.tabBar()), (QStringList{QStringLiteral("high"), QStringLiteral("main"),
+                                                     QStringLiteral("flash"), QStringLiteral("lite")}));
+        QVERIFY(picker.tabIds().contains(QStringLiteral("all")));   // still a tier it can be put on
+        QTest::keyClick(picker.filter(), Qt::Key_Right);
+        QCOMPARE(picker.tier(), QStringLiteral("flash"));
+        QTest::keyClick(picker.list(), Qt::Key_Tab, Qt::ControlModifier);
+        QCOMPARE(picker.tier(), QStringLiteral("flash"));           // left for the host
+        picker.setTier(QStringLiteral("all"));
+        QCOMPARE(picker.tier(), QStringLiteral("all"));
     }
 };
 

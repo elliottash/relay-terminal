@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
-// The model dialog (Ctrl+Alt+M): pick a model *and* prioritize the lists (card #MDL1, design 5.2).
+// The models widget: pick a model *and* prioritize the lists (card #MDL1, design 5.2 and 5.8).
+//
+// It was a modal dialog on Ctrl+Alt+M until 2026-09-21. The owner retired both the modal and the
+// key — "lets build the models pane … and just remove ctrl alt m, not worth the extra confusion"
+// — so this is now a plain QWidget that `relay::ModelsPane` embeds as its **available** and
+// **priorities** tabs (src/ModelsPane.h). Nothing here opens, closes or focuses anything: the host
+// says which tab is in front (`setTier`), the host is told when a row is used (`onUse`) and when
+// Escape is pressed (`onEscape`), and the host decides what either means.
 //
 // It began as Warp's model picker — a filter line over one list, a sort menu, and the reasoning
 // level as a second pick beside the models (owner, 2026-09-20: "split the model picker into model
@@ -40,12 +47,12 @@
 //   ctrl+z         undo a list edit made in this dialog
 //   the "in box" column is a cutoff: it says how far down this class the Alt+M box shows
 //
-// The dialog reads a relay::models::Catalog and QSettings and returns a key and a level; it never
-// talks to the worker. The pane does the switch (Pane::selectEntry) so that every door — the box,
-// /model <name>, this dialog — takes the same path.
+// It reads a relay::models::Catalog and QSettings and hands back a key and a level; it never talks
+// to the worker. The **served pane** does the switch (Pane::selectEntry) so that every door — the
+// box, /model <name>, this widget — takes the same path.
 #include "ModelCatalog.h"
 
-#include <QDialog>
+#include <QWidget>
 #include <QHash>
 #include <QList>
 #include <QString>
@@ -72,20 +79,20 @@ struct ModelPick {
     QString effort;   // the level chosen for it; empty when the model has no knob
 };
 
-class ModelPicker final : public QDialog {
+class ModelPicker final : public QWidget {
 public:
     struct Context {
         models::Catalog catalog;
         QString currentKey;      // the pane's model now; drawn bold and selected first
         QString currentEffort;   // the pane's level now; the default for a row with no memory
-        // The tab it opens on: the tier the pane is running in (`modelrows::roleTier` of its
-        // agent role), so Ctrl+Alt+M from a /flash pane lands on the flash list. "all" is the
-        // flat tab. An id no tab has falls back to main.
+        // The tab it opens on: the tier the served pane is running in (`modelrows::roleTier` of
+        // its agent role), so Ctrl+Shift+M from a /flash pane lands on the flash list. "all" is
+        // the flat tab. An id no tab has falls back to main.
         QString tier = QStringLiteral("main");
         // What the filter line starts with. Options › Models' per-provider "models… (N of M
-        // available)" link opens the `all` tab with the provider's name typed, so step 2 is one
-        // click from step 1 (card #MDL1, design 5.7). Empty — every other caller — and the filter
-        // opens blank, exactly as before.
+        // available)" link opens the available tab with the provider's name typed, so step 2 is
+        // one click from step 1 (card #MDL1, design 5.7). Empty — every other caller — and the
+        // filter opens blank, exactly as before.
         QString filter;
         qint64 now = 0;          // unix seconds, for the limits line
         // "fill from defaults" (card #MDL1 t:a8, design 5.5): the two buttons Options › Models'
@@ -98,8 +105,14 @@ public:
 
     explicit ModelPicker(const Context &context, QWidget *parent = nullptr);
 
-    // "customize…": the Models page, where providers and keys live.
+    // "providers…": where providers and keys live — the models pane's first tab.
     std::function<void()> openModelsPage;
+    // A row was used: the model and the level together, for the pane this widget serves. The
+    // widget itself switches nothing (design 5.8) — `Pane::selectEntry` is the one door.
+    std::function<void(const ModelPick &)> onUse;
+    // Escape. The host puts the focus back on the pane it serves and leaves itself open (design
+    // 5.8); with no handler Escape does nothing here.
+    std::function<void()> onEscape;
     // A list edit landed. The dialog has already written it through `curation::setTierList`; this
     // is what carries it to the rest of the app — the same exit Options › Models takes
     // (`RelayWindow::modelsCurated`, which a pane reaches through `onProfileApplied`): the page
@@ -108,6 +121,13 @@ public:
 
     ModelPick pick() const { return m_pick; }
     void rebuild();
+
+    // Hosted in `relay::ModelsPane`: the flat tab is the host's own **available** tab, so it
+    // leaves this widget's tab row — which then holds the five classes and nothing else, and
+    // hides itself altogether while the flat tab is in front. `setTier("all")` still reaches it;
+    // it is the host that says so.
+    void setHosted(bool hosted);
+    bool hosted() const { return m_hosted; }
 
     // For tests and for the pane's own tests: the controls by name.
     QLineEdit *filter() const { return m_filter; }
@@ -136,7 +156,8 @@ public:
     QString selectedKey() const;
     QString selectedEffort() const;   // the level list's pick; empty = the model's own default
     void selectKey(const QString &key);
-    void accept() override;
+    // Enter, a double click or the "use" button: the highlighted row and its level go to `onUse`.
+    void use();
 
     // The list edits, as the keys above do them. Public because they are the dialog's second job
     // and a test presses them without a window manager; each one writes through
@@ -163,6 +184,8 @@ private:
         QList<models::curation::TierEntry> list;
     };
 
+    void populateTabs();
+    QStringList tabBarIds() const;   // tabIds(), less the flat tab while hosted
     void addSection(const QString &title);
     QTreeWidgetItem *addListRow(int rank, const models::curation::TierEntry &item, const models::Entry *entry);
     QTreeWidgetItem *addGroupRow(const models::Group &group, bool addable);
@@ -212,6 +235,7 @@ private:
     QPushButton *m_favorite = nullptr;
     QPushButton *m_use = nullptr;
     QCheckBox *m_boxSwitch = nullptr;          // "show this class in the box"
+    QPushButton *m_customize = nullptr;        // "providers…"
     QPushButton *m_defaults = nullptr;         // "fill from defaults"
     QPushButton *m_defaultsOpenrouter = nullptr;
     QList<UndoStep> m_undo;
@@ -219,11 +243,7 @@ private:
     QHash<QString, QString> m_viaChoice;
     bool m_filling = false;   // the right-hand lists are being populated: their signals are not picks
     bool m_building = false;  // the rows are being built: an itemChanged is ours, not a click
+    bool m_hosted = false;    // embedded in the models pane, which owns the flat tab
 };
-
-// Show the picker modally; the result says whether a row was used. `onListsChanged` is optional:
-// without it a list edit is still written, it just reaches nobody until the next read.
-ModelPick pickModel(QWidget *parent, const ModelPicker::Context &context, std::function<void()> openModelsPage,
-                    std::function<void()> onListsChanged = {});
 
 }  // namespace relay

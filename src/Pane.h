@@ -13,6 +13,7 @@
 #include "ModelCatalog.h"
 #include "ModelPicker.h"
 #include "ModelRows.h"
+#include "ModelsPane.h"
 #include "Keymap.h"
 #include "Isolation.h"
 
@@ -770,8 +771,13 @@ public:
     std::function<void()> onOpenInternals;   // the Activity pane beside this one (#QT8C)
     // The Sharing pane (#W5N2): who is on this shared pane, who is knocking, what is waiting.
     std::function<void()> onOpenSharing;
-    // Options, opened at one of its tabs: `/models` lands on Options › Models.
+    // Options, opened at one of its tabs.
     std::function<void(const QString &tab)> onOpenOptions;
+    // The models pane (Ctrl+Shift+M, /model, /models; card #MDL1 t:a11, design 5.8). This pane
+    // hands over what the pane is about — its catalog, its model, its level, its mode and the one
+    // door a pick takes back into it — and the window opens, re-targets or closes the one pane its
+    // window has. Unset (a console with no window behind it) and the keys say so instead.
+    std::function<void(const relay::ModelsPane::Target &target, const QString &tab, const QString &filter)> onOpenModelsPane;
     // `/profile` switched the five tier lists: the window redraws Options › Models, moves the
     // new-pane default to the new rank 1 of main and tells every pane, exactly as a switch made on
     // the page does. Unset, this pane alone re-reads the lists.
@@ -1676,38 +1682,59 @@ public:
         m_effortBox->setFocus(Qt::ShortcutFocusReason);
         m_effortBox->showPopup();
     }
-    // Ctrl+Alt+M (agent.model), /model with no argument, and the box's "more models…" row.
-    // `tier` forces the tab it opens on: Options › Models' "models and priorities…" button asks
-    // for main, because that page is not in a mode (design 5.5). Empty is the ordinary door.
-    // `filter` is what the filter line opens with: Options › Models' per-provider "models…
-    // (N of M available)" link opens the `all` tab on that provider, which is how step 2 is
-    // reached from step 1 (card #MDL1, design 5.7).
+    // Ctrl+Shift+M (agent.modelOptions), /model and /models with no argument, and the box's
+    // "more models…" row: the **models pane** beside this one, serving this one (card #MDL1 t:a11,
+    // design 5.8). It was a modal dialog until 2026-09-21; the name stays because every door into
+    // model picking has always been this call.
+    //
+    // `tier` forces the class tab: Options › Models' "models and priorities…" row asks for main,
+    // because a page is not in a mode the way a pane is, and `"all"` asks for the **available**
+    // tab — that is the per-provider "models… (N of M available)" link, which is how step 2 is
+    // reached from step 1 (design 5.7). Empty is the ordinary door: the priorities tab, on the
+    // class this pane is running in. `filter` is what the filter line opens with.
     void openModelPicker(const QString &tier = QString(), const QString &filter = QString()) {
-        relay::ModelPicker::Context context;
-        context.catalog = modelCatalog();
-        context.currentKey = currentEntryKey();
-        context.currentEffort = m_effort;
-        context.filter = filter;
-        // The tab it opens on is the mode this pane is in (card #MDL1 t:a7): Ctrl+Alt+M from a
-        // /flash pane lands on the flash list, which is the one it would be editing.
-        context.tier = tier.isEmpty() ? relay::modelrows::roleTier(m_agentRole) : tier;
+        if (!onOpenModelsPane) {
+            status(QStringLiteral("The models pane is not available from this pane."));
+            return;
+        }
+        const QString tab = tier == QStringLiteral("all")         ? relay::ModelsPane::availableTab()
+                          : tier == relay::ModelsPane::providersTab() ? relay::ModelsPane::providersTab()
+                                                                    : relay::ModelsPane::prioritiesTab();
+        onOpenModelsPane(modelsTarget(tier), tab, filter);
+    }
+
+    // What the models pane is *about* when it serves this pane: the catalog it draws, the model
+    // and level it starts on, the class tab it opens on, and the one door a pick takes back in
+    // (`selectEntry`). Public because the window builds one of these for a **restored** models
+    // pane too, which has to find a pane to serve without anybody having pressed a key.
+    relay::ModelsPane::Target modelsTarget(const QString &tier = QString()) {
+        relay::ModelsPane::Target target;
+        target.title = paneTitle().isEmpty() ? QFileInfo(cwd()).fileName() : paneTitle();
+        if (target.title.isEmpty()) target.title = cwd();
+        target.token = sessionToken();
+        target.catalog = modelCatalog();
+        target.currentKey = currentEntryKey();
+        target.currentEffort = m_effort;
+        // The class tab it opens on is the mode this pane is in (card #MDL1 t:a7): Ctrl+Shift+M
+        // from a /flash pane lands on the flash list, which is the one it would be editing.
+        target.tier = (tier.isEmpty() || tier == QStringLiteral("all") || tier == relay::ModelsPane::providersTab())
+                          ? relay::modelrows::roleTier(m_agentRole) : tier;
         // "the defaults buttons move into the dialog as 'fill from defaults'" (design 5.5). The
         // action is the pane's, because only a pane holds what its worker computed.
         if (hasTierListDefaults() || !relay::models::curation::tierListsSet())
-            context.fillFromDefaults = [this](bool withOpenrouter) { return fillTierListsFromDefaults(withOpenrouter); };
-        const relay::ModelPick pick = relay::pickModel(this, context, [this] {
-            if (onOpenOptions) onOpenOptions(QStringLiteral("models"));
-        }, [this] {
-            // A list edited in the dialog is a list edited on Options › Models — one storage, one
+            target.fillFromDefaults = [this](bool withOpenrouter) { return fillTierListsFromDefaults(withOpenrouter); };
+        target.listsChanged = [this] {
+            // A list edited in the pane is a list edited on Options › Models — one storage, one
             // exit. The window redraws the page and tells every pane and its worker; on its own,
             // this pane at least re-reads the lists and re-sends its tiers.
             if (onProfileApplied) onProfileApplied();
             else { modelsCurationChanged(); agentOptionsChanged(QStringLiteral("models/fallback")); }
-        });
-        if (!pick.accepted) return;
-        hintSwapForPick(pick.key);
-        selectEntry(pick.key, pick.effort);
-        focusInput();
+        };
+        target.use = [this](const QString &key, const QString &effort) {
+            hintSwapForPick(key);
+            selectEntry(key, effort);
+        };
+        return target;
     }
     // A mouse pick that lands on the ranked Main (rank 1), or steps from it to rank 2, is what
     // /swap types in one word (card #DC4J; WARP.md, "Shortcut hints"). Called with the target key
@@ -8943,7 +8970,7 @@ private:
             // The popup `?` shows in an empty prompt box. `/help` is what people type when they do
             // not know `?` yet, and it is where an unknown command points them (issue #Q4SD).
             {QStringLiteral("help"), QString(), QStringLiteral("The keys and prefixes Relay answers to (same as ?)")},
-            {QStringLiteral("model"), QStringLiteral("[name][@provider]"), QStringLiteral("Switch model by name — /model gpt-5.6-sol, or gpt-5.6-sol@openrouter for one provider's row — keeping the conversation; alone, the picker (same as Ctrl+Shift+M)")},
+            {QStringLiteral("model"), QStringLiteral("[name][@provider]"), QStringLiteral("Switch model by name — /model gpt-5.6-sol, or gpt-5.6-sol@openrouter for one provider's row — keeping the conversation; alone, the models pane (same as Ctrl+Shift+M)")},
             {QStringLiteral("swap"), QString(), QStringLiteral("Swap to the fallback model, or back to the main one")},
             {QStringLiteral("main"), QString(), QStringLiteral("Run this pane on the main model")},
             {QStringLiteral("high"), QString(), QStringLiteral("Run this pane on the high model (same as Alt+H)")},
@@ -8954,7 +8981,7 @@ private:
             // The levels are the model's, so the popup fills these two in per pane (`slashRows`).
             {QStringLiteral("effort"), QStringLiteral("[level]"), QStringLiteral("Set the reasoning level for this pane")},
             {QStringLiteral("reasoning"), QStringLiteral("[level]"), QStringLiteral("Set the reasoning level for this pane (same as /effort)")},
-            {QStringLiteral("models"), QString(), QStringLiteral("Options › Models: providers, which models the picker shows, their order")},
+            {QStringLiteral("models"), QString(), QStringLiteral("The models pane: providers, which models are available, and their order (Ctrl+Shift+M)")},
             {QStringLiteral("profile"), QStringLiteral("[name]"), QStringLiteral("Model profile: switch the five tier lists to a named set (Options › Models › profile); alone, a picker")},
             {QStringLiteral("compact"), QStringLiteral("[focus]"), QStringLiteral("Summarize older turns to free context")},
             {QStringLiteral("context"), QString(), QStringLiteral("Show context usage")},
@@ -9385,11 +9412,12 @@ private:
             status(QStringLiteral("No stored %1 key. Add one in Options › Models › API keys….")
                        .arg(glm ? QStringLiteral("GLM") : QStringLiteral("Kimi")));
         } else if (name == QStringLiteral("models")) {
-            // Owner (card #Y2JW): "/models … should bring to the models options". The page, not a
-            // modal: providers, the checklist of what the picker shows, and their order all live
-            // there, so this is the one door for all three.
-            if (onOpenOptions) onOpenOptions(QStringLiteral("models"));
-            else status(QStringLiteral("Options › Models is not available from this pane."));
+            // Owner (card #Y2JW): "/models … should bring to the models options". Since card #MDL1
+            // t:a11 that is the **models pane** and not a page of Options: providers, which models
+            // are available and their order are its three tabs, so this is one door for all three.
+            // `/models` opens it on providers — the word is about the setup — and `/model` alone
+            // opens the same pane on priorities, where a pick is made.
+            openModelPicker(relay::ModelsPane::providersTab());
         } else if (name == QStringLiteral("profile")) {
             // Owner (2026-09-20 evening): "an 'AI work' profile and an 'admin work' profile that
             // sets different model priorities". A profile is a named set of the five tier lists
@@ -10299,8 +10327,8 @@ public:
             row(keys.shortcutText(QStringLiteral("app.settings")), QStringLiteral("options"));
             row(keys.shortcutText(QStringLiteral("agent.modelBox")).isEmpty() ? QStringLiteral("/model")
                                                                              : keys.shortcutText(QStringLiteral("agent.modelBox")),
-                QStringLiteral("pick a model (%1: the full picker)").arg(keys.shortcutText(QStringLiteral("agent.model")).isEmpty()
-                                                                             ? QStringLiteral("/model") : keys.shortcutText(QStringLiteral("agent.model"))));
+                QStringLiteral("pick a model (%1: the models pane)").arg(keys.shortcutText(QStringLiteral("agent.modelOptions")).isEmpty()
+                                                                             ? QStringLiteral("/model") : keys.shortcutText(QStringLiteral("agent.modelOptions"))));
             row(keys.shortcutText(QStringLiteral("agent.resume")).isEmpty() ? QStringLiteral("/resume")
                                                                            : keys.shortcutText(QStringLiteral("agent.resume")),
                 QStringLiteral("resume a saved session"));
@@ -12647,15 +12675,15 @@ private:
         // (the pane's agent role). Both are handled before selectModel, which only knows presets.
         if (data == QStringLiteral("gear:modelOptions")) {
             refreshPickers();   // put the box back on the pane's model: the gear is not a choice
-            if (onOpenOptions) onOpenOptions(QStringLiteral("models")); else openRolesDialog();
-            hint(QStringLiteral("model.options.mouse"), QStringLiteral("Tip: /models opens Options › Models from the prompt box"));
+            openModelPicker(relay::ModelsPane::providersTab());
+            hint(QStringLiteral("model.options.mouse"), QStringLiteral("Tip: /models opens the models pane's providers tab from the prompt box"));
             return;
         }
         if (data == QStringLiteral("gear:picker")) {
             refreshPickers();
             openModelPicker();
             hint(QStringLiteral("model.picker.mouse"),
-                 relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("agent.model")), QStringLiteral("the model picker")));
+                 relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("agent.modelOptions")), QStringLiteral("the models pane")));
             return;
         }
         // A model of one mode's list (card #MDL1, section 5.1): "this pane, this mode, that

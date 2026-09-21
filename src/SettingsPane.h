@@ -226,6 +226,13 @@ public:
     // mode it switches to Options first, which is what an "Options › …" search row does.
     void revealOption(const QString &sectionId, const QString &rowId);
 
+    // Embedded in another pane that draws its own tab row and its own footer — the models pane's
+    // **providers** tab is this widget over one section (card #MDL1, design 5.8: "one renderer,
+    // two hosts"). Only the chrome goes: the rows, the search, the reset button and the keys are
+    // the same machinery Options draws, which is the point.
+    void setEmbedded(bool embedded);
+    bool embedded() const { return m_embedded; }
+
     void showTab(const QString &id);
     QString currentTab() const;
     void setSearch(const QString &text);
@@ -379,6 +386,7 @@ private:
     QHash<QString, QWidget *> m_groups;   // action submenu key → its header on the Actions tab
     int m_current = -1;
     bool m_building = false;
+    bool m_embedded = false;   // hosted in another pane, which draws the tabs and the footer
 };
 
 }  // namespace relay

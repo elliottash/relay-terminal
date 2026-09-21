@@ -44,6 +44,7 @@
 #include "LocalModelsSettings.h"
 #include "RemoteSettings.h"   // Options › Remote: the always-on switch and the address (#PH0N)
 #include "ModelCatalog.h"      // Options › Models: providers, the checklist, the order (owner, 2026-09-20)
+#include "ModelsPane.h"        // the models pane (Ctrl+Shift+M): providers, available, priorities (#MDL1 t:a11)
 #include "SubagentTranscript.h"
 #include "SubagentsPanel.h"
 #include "Logging.h"
@@ -1220,14 +1221,14 @@ private:
         else if (id == QStringLiteral("remote.openShared")) openSharedPaneDialog();   // Relay-to-Relay
         else if (id == QStringLiteral("remote.pair")) pairPhone();   // #FR1C: one entry point
         else if (id == QStringLiteral("remote.join")) joinSharedSession();
-        // Alt+M and Ctrl+Alt+M in a *helper* prompt box (#PK5Q). The two keys belong to a prompt
+        // Alt+M and Ctrl+Shift+M in a *helper* prompt box (#PK5Q). The two keys belong to a prompt
         // box rather than to a terminal pane: the helper's composer carries the same model box
         // now, so the same keys reach it. Before the `!pane` guard, because Options, Actions,
         // Sessions and the Switchboard are not terminal panes and this is where they answer.
-        else if ((id == QStringLiteral("agent.modelBox") || id == QStringLiteral("agent.model"))
+        else if ((id == QStringLiteral("agent.modelBox") || id == QStringLiteral("agent.modelOptions"))
                  && helperComposerHasFocus()) {
             if (id == QStringLiteral("agent.modelBox")) openConsoleModelBox();
-            else openConsoleModelPicker();
+            else toggleModelsPane(focusedConsole());
         }
         else if (!pane) return;
         else if (id == QStringLiteral("terminal.native")) pane->toggleNative();
@@ -1240,10 +1241,9 @@ private:
         else if (id == QStringLiteral("agent.swap")) pane->swapModel();
         else if (id == QStringLiteral("agent.flashAgent")) pane->toggleFlashAgent();   // model roles
         else if (id == QStringLiteral("agent.highAgent")) pane->toggleHighAgent();     // /high, card #MDL1
-        else if (id == QStringLiteral("agent.model")) pane->openModelPicker();          // Ctrl+Alt+M, /model
         else if (id == QStringLiteral("agent.modelBox")) pane->openModelBox();          // Alt+M
         else if (id == QStringLiteral("agent.effortBox")) pane->openEffortBox();        // Alt+E
-        else if (id == QStringLiteral("agent.modelOptions")) openSettingsPane(relay::SettingsPane::Mode::Options, QStringLiteral("models"));   // Ctrl+Shift+M, /models
+        else if (id == QStringLiteral("agent.modelOptions")) toggleModelsPane(pane);    // Ctrl+Shift+M, /model, /models
         else if (id == QStringLiteral("agent.localAgent")) pane->toggleLocalAgent();   // /local
         else if (id == QStringLiteral("agent.planToggle")) pane->togglePlanMode();
         else if (id == QStringLiteral("agent.effortUp")) pane->effortStep(1);
@@ -1449,9 +1449,9 @@ private:
     // sends its own `set_model`, which is what #PK5Q asked for. The roles dialog is the other
     // writer of that role and still calls `reconfigureBoardWorkers()`.
 
-    // "more models…" on a console's box, and Ctrl+Alt+M in one: the same dialog a terminal
+    // "more models…" on a console's box, and Ctrl+Shift+M in one: the same models pane a terminal
     // pane opens, because a console *is* a terminal pane with no shell. Nothing is kept here —
-    // the console asks its own picker with its own current row.
+    // the console asks with its own catalog and its own current row.
     void openConsoleModelPicker() {
         if (Pane *console = focusedConsole()) console->openModelPicker();
     }
@@ -1565,6 +1565,141 @@ private:
         setActiveLeaf(tool);
         tool->settings()->focusSearch();
         updateTitles();
+    }
+
+    // ----- the models pane (Ctrl+Shift+M; card #MDL1 t:a11, design 5.8) -------------------------
+    //
+    // "lets build the models pane … and just remove ctrl alt m" (owner, 2026-09-21). One pane per
+    // tab, beside the pane it serves, hosted exactly the way Options is. The key is a toggle in
+    // three states:
+    //
+    //   not open                    → open it beside the active pane, serving that pane, on the
+    //                                 priorities tab at that pane's own class, filter focused;
+    //   open and focused            → close it ("typing it again closes the pane");
+    //   open, the focus elsewhere   → re-target it at the pane that asked, and focus it.
+    //
+    // Escape inside it hands the focus back and leaves it open, which is `Target::focusBack`.
+    static ToolPane *modelsPaneIn(QWidget *page) {
+        if (!page) return nullptr;
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->kind() == ToolPane::Kind::Models) return tool;
+        return nullptr;
+    }
+    static relay::ModelsPane *modelsViewOf(ToolPane *tool) {
+        return tool ? dynamic_cast<relay::ModelsPane *>(tool->hosted()) : nullptr;
+    }
+
+    ToolPane *createModelsPane(const QString &cwd) {
+        // The providers tab is Options › Models' own section, drawn by Options' own renderer: one
+        // renderer, two hosts (design 5.8). `true` drops the row that would be a door to here.
+        auto *view = new relay::ModelsPane([this] { return QList<relay::SettingsSection>{modelsSection(true)}; });
+        auto *tool = new ToolPane(ToolPane::Kind::Models, view, view, cwd);
+        tool->setProperty("paneType", QStringLiteral("models"));
+        relay::theme::polishWindow(tool);
+        // The catalog is the served pane's, and it arrives late: a first-run window has no
+        // providers until its worker answers `presets`, and a key added on the providers tab
+        // changes what the other two may draw. Both already end in SettingsWatch::notify(), which
+        // is what every Options pane redraws on, so this pane re-reads its target there too.
+        QPointer<ToolPane> guard(tool);
+        relay::SettingsWatch::instance().listen(tool, [guard] {
+            if (auto *w = windowOf(guard)) w->refreshModelsPane(guard);
+        });
+        return tool;
+    }
+
+    // The served pane's catalog, model and level again, keeping the tab, the filter, the class
+    // list and the undo stack: `setTarget` with the token it already holds is a re-read, not a
+    // re-target (src/ModelsPane.cpp).
+    void refreshModelsPane(ToolPane *tool) {
+        relay::ModelsPane *view = modelsViewOf(tool);
+        if (!view || view->servedToken().isEmpty()) return;
+        Pane *served = findPaneByToken(view->servedToken());
+        if (!served) return;
+        applyModelsTarget(tool, served, served->modelsTarget(), QString(), QString());
+    }
+
+    // Point an open models pane at a pane, with the tab and filter the caller asked for. Shared by
+    // the key, by Options’ rows and by a models pane that came back with a saved layout.
+    void applyModelsTarget(ToolPane *tool, Pane *served, relay::ModelsPane::Target target,
+                           const QString &tab, const QString &filter) {
+        relay::ModelsPane *view = modelsViewOf(tool);
+        if (!view) return;
+        QPointer<ToolPane> guard(tool);
+        QPointer<Pane> back(served);
+        target.now = QDateTime::currentSecsSinceEpoch();
+        target.focusBack = [guard, back] {
+            auto *w = windowOf(guard);
+            if (!w || !back) return;
+            w->setActiveLeaf(back);
+            back->focusInput();
+        };
+        view->setTarget(target);
+        if (!tab.isEmpty()) view->showTab(tab);
+        // An empty filter is "say nothing about the filter", not "rub out what is typed": a
+        // re-target from the same pane must not throw away a search half made.
+        if (!filter.isEmpty()) view->setFilter(filter);
+        updateTitles();
+    }
+
+    // What `Pane::onOpenModelsPane` calls: every door into model picking (the key, /model,
+    // /models, the box’s "more models…", and Options’ own rows through the pane they were
+    // pressed on) arrives here with the served pane’s target already built.
+    void openModelsPaneFor(Pane *served, const relay::ModelsPane::Target &target,
+                           const QString &tab, const QString &filter) {
+        QWidget *page = served ? pageOf(served) : m_tabs->currentWidget();
+        if (!page) return;
+        ToolPane *tool = modelsPaneIn(page);
+        if (!tool) {
+            m_returnPane = m_active;
+            m_returnFocus = QApplication::focusWidget();
+            tool = createModelsPane(served ? served->cwd() : m_manager->workspace());
+            QWidget *anchor = served ? static_cast<QWidget *>(served)
+                                     : (m_activeLeaf ? m_activeLeaf.data() : nullptr);
+            if (anchor) insertBeside(anchor, tool, Qt::Horizontal, false);
+            else if (page->layout()) page->layout()->addWidget(tool);
+        }
+        applyModelsTarget(tool, served, target, tab, filter);
+        setActiveLeaf(tool);
+        if (relay::ModelsPane *view = modelsViewOf(tool)) view->focusFilter();
+        updateTitles();
+    }
+
+    void toggleModelsPane(Pane *served) {
+        if (ToolPane *tool = modelsPaneIn(m_tabs->currentWidget());
+            tool && (m_activeLeaf == tool || tool->isAncestorOf(QApplication::focusWidget()))) {
+            closeModelsPane(tool);
+            return;
+        }
+        Pane *on = served ? served : (m_active ? m_active.data() : focusedConsole());
+        if (!on) { notice(QStringLiteral("Focus a pane first: the models pane always serves one.")); return; }
+        on->openModelPicker();
+    }
+
+    void closeModelsPane(ToolPane *tool) {
+        if (!tool) return;
+        QWidget *page = pageOf(tool);
+        // Esc and the toggle must never close the window: the last leaf of the last tab gets a
+        // terminal beside it first, exactly as the Settings pane has always done.
+        if (page && leavesIn(page).size() <= 1 && m_tabs->count() <= 1) {
+            try { insertBeside(tool, createPane(paneNode(m_manager->workspace())), Qt::Horizontal, true); }
+            catch (const std::exception &error) { notice(QString::fromUtf8(error.what())); }
+        }
+        Pane *back = nullptr;
+        if (relay::ModelsPane *view = modelsViewOf(tool)) back = findPaneByToken(view->servedToken());
+        if (!back) back = m_active;
+        QPointer<Pane> guard(back);
+        closePane(tool, false);
+        if (guard) { setActiveLeaf(guard); guard->focusInput(); }
+    }
+
+    // A models pane that came back with the layout (buildNode): it serves the first terminal pane
+    // of the tab it landed in, which is the pane it was beside when the window closed. Queued,
+    // because buildNode() runs before the page the pane will live in exists.
+    void linkRestoredModelsPane(ToolPane *tool, const QString &tab) {
+        const QList<Pane *> panes = panesIn(pageOf(tool));
+        Pane *served = panes.isEmpty() ? nullptr : panes.first();
+        if (!served) return;
+        applyModelsTarget(tool, served, served->modelsTarget(), tab, QString());
     }
 
     // ----- the agent drives the app (card #FEJQ, protocol §30) ---------------------------------
@@ -2252,7 +2387,10 @@ private:
     // any other, and a guest's model, reasoning level and permission posture sit under its rows.
     // The rows come from relay::models (the catalog every pane's box and the picker read), so a
     // check here is a row there the moment it lands.
-    relay::SettingsSection modelsSection() {
+    // `inModelsPane` is the same section drawn as the models pane's **providers** tab (card #MDL1
+    // t:a11, design 5.8: "one renderer, two hosts"). The only difference is the row at the top
+    // that opens that pane, which inside it would be a door to where you already are.
+    relay::SettingsSection modelsSection(bool inModelsPane = false) {
         relay::SettingsSection models;
         models.id = QStringLiteral("models");
         models.title = QStringLiteral("Models");
@@ -2262,9 +2400,9 @@ private:
                                       "server; Relay Free, the included allowance, is the one exception and goes through "
                                       "Relay's hosted service. A profile names the five lists as a set, so \"AI work\" "
                                       "and \"admin work\" can rank models differently and swap in one switch (/profile). "
-                                      "The lists themselves are the dialog at the top of this page: "
-                                      "Ctrl+Alt+M or /model. Ctrl+Shift+M or /models opens this page, "
-                                      "and Alt+M drops the pane's model box open.");
+                                      "The lists themselves are the models pane: Ctrl+Shift+M, /model "
+                                      "or /models opens it — providers, available models and priorities, "
+                                      "three tabs — and Alt+M drops the pane's model box open.");
         Pane *pane = m_active;
         QSettings settings;
         QWidget *page = m_tabs->currentWidget();
@@ -2294,23 +2432,24 @@ private:
         // (card #MDL1 t:a7 and t:a10, design 5.5) and this row is the door to it. What is left on
         // the page is what the dialog is not about: providers, their keys, and the profiles that
         // name a set of lists. It opens on main, because a page is not in a mode the way a pane is.
-        {
-            const QString chord = Keymap::instance().shortcutText(QStringLiteral("agent.model"));
+        if (!inModelsPane) {
+            const QString chord = Keymap::instance().shortcutText(QStringLiteral("agent.modelOptions"));
             relay::SettingRow row = buttonRow(QStringLiteral("models.prioritize"),
                 QStringLiteral("models and priorities"),
-                QStringLiteral("Every model and the five lists, in one dialog: a tab per list, enter to use a model in "
-                               "this pane, alt+↑↓ or a drag to reorder, delete to take one out, typing to find any "
-                               "model — OpenRouter's long tail included — and ctrl+enter to add it"),
+                QStringLiteral("Every model and the five lists, in the models pane beside this one: a tab per list, "
+                               "enter to use a model in the pane it serves, alt+↑↓ or a drag to reorder, delete to "
+                               "take one out, typing to find any model — OpenRouter's long tail included — and "
+                               "ctrl+enter to add it"),
                 chord.isEmpty() ? QStringLiteral("models and priorities…") : QStringLiteral("models and priorities… (%1)").arg(chord),
                 [this] {
-                    // Not runAction("agent.model"), which opens on the pane's own mode: asked from
-                    // this page, the main list is the one meant.
+                    // Not runAction("agent.modelOptions"), which opens on the pane's own mode and
+                    // toggles: asked from this page, the main list is the one meant.
                     Pane *on = m_active ? m_active.data() : focusedConsole();
                     if (on) on->openModelPicker(QStringLiteral("main"));
-                    else runAction(QStringLiteral("agent.model"));
+                    else notice(QStringLiteral("Focus a pane first: the models pane always serves one."));
                 });
             row.aliases = QStringLiteral("prioritize priority order rank tier lists main list flash lite high local "
-                                         "models picker dialog checklist shown add a model by id ctrl+alt+m");
+                                         "models pane picker checklist shown add a model by id ctrl+shift+m");
             models.rows << row;
         }
 
@@ -2511,7 +2650,7 @@ private:
             // ----- step 2, one click from step 1 (card #MDL1, design 5.7) ----------------------
             // "there need to be 4 steps of model availability: 1 add provider, 2 add model as
             // available, 3 add model to priority list, 4 include model in box picker." Step 1 is
-            // this row; step 2 is the `all` tab of the Ctrl+Alt+M dialog, and nothing on this page
+            // this row; step 2 is the models pane's **available** tab, and nothing on this page
             // said so. The link opens that tab with this provider's name already typed, and its
             // own count is the answer to "how many of this provider's models am I offering".
             {
@@ -2527,11 +2666,14 @@ private:
                     relay::SettingRow link = buttonRow(QStringLiteral("models.available:") + id,
                         QStringLiteral("models"),
                         QStringLiteral("Which of this provider's models your lists, the alt+m box and its filter may "
-                                       "offer. Opens the models dialog on this provider"),
+                                       "offer. Opens the models pane's available tab on this provider"),
                         QStringLiteral("models… (%1 of %2 available)").arg(available).arg(usable),
                         [this, provider, label] {
+                            // From Options *and* from the models pane's own providers tab: both
+                            // land on the available tab of the one models pane this tab has.
                             Pane *on = m_active ? m_active.data() : focusedConsole();
                             if (on) on->openModelPicker(QStringLiteral("all"), provider.isEmpty() ? label : provider);
+                            else notice(QStringLiteral("Focus a pane first: the models pane always serves one."));
                         });
                     link.aliases = QStringLiteral("available models uncheck enable disable which models step 2 ") + id;
                     link.indent = 1;
@@ -7391,6 +7533,10 @@ private:
         pane->onOpenOptions = [guard](const QString &tab) {
             if (auto *w = windowOf(guard)) w->openSettingsPane(relay::SettingsPane::Mode::Options, tab);
         };
+        // The models pane beside this one, serving this one (#MDL1 t:a11).
+        pane->onOpenModelsPane = [guard](const relay::ModelsPane::Target &target, const QString &tab, const QString &filter) {
+            if (auto *w = windowOf(guard)) w->openModelsPaneFor(guard, target, tab, filter);
+        };
         // `/profile` swapped the five lists: the same two steps a switch on Options › Models takes.
         pane->onProfileApplied = [guard] {
             if (auto *w = windowOf(guard)) w->modelsCurated();
@@ -7634,6 +7780,11 @@ private:
         };
         console->onOpenOptions = [guard](const QString &tab) {
             if (auto *w = windowOf(guard)) w->openSettingsPane(relay::SettingsPane::Mode::Options, tab);
+        };
+        // A console is a pane with no shell, so its model box, /model and Ctrl+Shift+M open the
+        // same models pane, serving the console itself (#MDL1 t:a11, #PK5Q).
+        console->onOpenModelsPane = [guard](const relay::ModelsPane::Target &target, const QString &tab, const QString &filter) {
+            if (auto *w = windowOf(guard)) w->openModelsPaneFor(guard, target, tab, filter);
         };
         console->onOpenInfo = [guard] { if (auto *w = windowOf(guard)) w->openInfoPane(w->paneForConsoleOpen(guard)); };
         console->onToggleExplorer = [guard](const QString &path) {
@@ -7894,6 +8045,14 @@ private:
             QPointer<ToolPane> guard(tool);
             const QString owner = saved.value(QStringLiteral("owner")).toString();
             QTimer::singleShot(0, tool, [guard, owner] { if (auto *w = windowOf(guard)) w->linkRestoredSubagentPane(guard, owner); });
+            return tool;
+        }
+        if (node.contains(QStringLiteral("models"))) {   // card #MDL1 t:a11: beside the pane it served
+            const QJsonObject saved = node.value(QStringLiteral("models")).toObject();
+            ToolPane *tool = createModelsPane(saved.value(QStringLiteral("cwd")).toString());
+            QPointer<ToolPane> guard(tool);
+            const QString tab = saved.value(QStringLiteral("tab")).toString();
+            QTimer::singleShot(0, tool, [guard, tab] { if (auto *w = windowOf(guard)) w->linkRestoredModelsPane(guard, tab); });
             return tool;
         }
         if (node.contains(QStringLiteral("settings"))) {   // card #XAME: Options or Actions, back where it was read
@@ -8975,6 +9134,7 @@ private:
             catch (const std::exception &error) { notice(QString::fromUtf8(error.what())); }
         }
         if (tool->kind() == ToolPane::Kind::Sessions) { closeSessionsPane(tool, m_active); return; }
+        if (tool->kind() == ToolPane::Kind::Models) { closeModelsPane(tool); return; }
         if (dynamic_cast<relay::projects::ProjectPicker *>(tool->hosted())) { closeProjectPicker(tool, m_active); return; }
         setActiveLeaf(tool);
         runAction(QStringLiteral("pane.close"));

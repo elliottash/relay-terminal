@@ -263,7 +263,7 @@ private:
         // window walks to the 2nd, and so on. Ctrl+Shift because a program that owns the terminal
         // must not swallow it (actsInsidePrograms) — the moment a bell entry matters is exactly
         // when the user is heads-down somewhere else. No letter is left: every Ctrl+Shift letter
-        // is bound (M is agent.modelOptions, Options › Models, since 2026-09-20) or
+        // is bound (M is agent.modelOptions, the models pane, since 2026-09-20) or
         // reserved (C/V copy and paste, Q quits other terminals, U is the input method's Unicode
         // entry, D/P/Y are claimed in the preset tables), so the digit counts the walk: 1, 2, 3…
         // Free in the default table and all four presets.
@@ -356,12 +356,18 @@ private:
         // Relay's only Alt+letters are Alt+A, Alt+E, Alt+F, Alt+I, Alt+M, Alt+Q and Alt+R, and none
         // of the four preset tables binds an Alt+letter at all, so every preset inherits it.
         add("agent.highAgent", "agent", "Switch this pane between the Main agent and the High agent", {QStringLiteral("Alt+H")});
-        // M for models (owner, 2026-09-20: "models are more central than sessions"), three surfaces on
-        // three chords: Alt+M drops the pane's model box open (the quick pick), Ctrl+Alt+M opens
-        // the picker dialog with its filter, sort and reasoning level (what /model opens), and
-        // Ctrl+Shift+M opens the model options — Options › Models (what /models opens). The two
-        // Alt chords step aside for a program that owns the keyboard, like Alt+I; the Ctrl+Shift
-        // one does not, so the options stay reachable from inside a full-screen program.
+        // M for models (owner, 2026-09-20: "models are more central than sessions"), two surfaces
+        // on two chords: Alt+M drops the pane's model box open (the quick pick) and Ctrl+Shift+M
+        // opens the models pane (what /model and /models open). Alt+M steps aside for a program
+        // that owns the keyboard, like Alt+I; the Ctrl+Shift chord does not, so the models pane
+        // stays reachable from inside a full-screen program.
+        //
+        // There were three until 2026-09-21. Ctrl+Alt+M opened the picker as a modal dialog and
+        // Ctrl+Shift+M opened Options › Models; the owner retired the first of them with the modal
+        // itself (card #MDL1 t:a11): "just remove ctrl alt m, not worth the extra confusion". One
+        // key per surface is the rule here, and the models pane is one surface — providers,
+        // available models and priorities are its three tabs. Plain Ctrl+M is not free and never
+        // will be: it is the terminal's carriage return.
         // Both work in a helper agent's prompt box too, over the box on its own strip (#PK5Q):
         // the Switchboard's composer, an open card's reply box, and the panels in Options,
         // Actions and Sessions. It is the same control, so it answers the same keys.
@@ -369,8 +375,7 @@ private:
         // E for effort (owner, 2026-09-20): the level box beside the model box drops open, the
         // quick pick for the reasoning level the way Alt+M is for the model.
         add("agent.effortBox", "agent", "Reasoning: drop this prompt box's level box open (the quick pick)", {QStringLiteral("Alt+E")});
-        add("agent.model", "agent", "Models: the picker — every model with filter, sort and reasoning level (/model)", {QStringLiteral("Ctrl+Alt+M")});
-        add("agent.modelOptions", "agent", "Model options: Options › Models — providers, which models the picker shows, their order (/models)", {QStringLiteral("Ctrl+Shift+M")});
+        add("agent.modelOptions", "agent", "Models: the models pane — providers, available models, priorities (/models, /model)", {QStringLiteral("Ctrl+Shift+M")});
         // No default key: /local in the prompt box is the fast path, and Alt+L is not worth
         // claiming for a switch most panes never make (card #JH22).
         add("agent.localAgent", "agent", "Switch this pane between the Main agent and the Local agent (a model served on this machine)", {});

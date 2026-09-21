@@ -16,6 +16,7 @@
 #include "SubagentTranscript.h"
 #include "OutputLinks.h"
 #include "PaneView.h"
+#include "ModelsPane.h"   // the models pane is a hosted PaneView, and node() saves which tab it is on
 #include "PaneDimming.h"
 
 #include "PaneStatus.h"
@@ -387,7 +388,7 @@ private:
 // as terminal panes and is saved and restored as {"explorer": {"path"}} or {"preview": {"path"}}.
 class ToolPane final : public QWidget {
 public:
-    enum class Kind { Explorer, Preview, Plan, Subagent, Turn, Board, Settings, Info, Sessions, Diff, Sharing, Internals, TestSuites, Profile };
+    enum class Kind { Explorer, Preview, Plan, Subagent, Turn, Board, Settings, Info, Sessions, Diff, Sharing, Internals, TestSuites, Profile, Models };
 
     ToolPane(Kind kind, const QString &path, bool planActions = true) : m_kind(kind) {
         setObjectName(QStringLiteral("pane"));
@@ -536,6 +537,15 @@ public:
             if (current >= 0 && current < rows.size()) saved.insert(QStringLiteral("row"), rows.at(current));
             return {{QStringLiteral("settings"), saved}};
         }
+        // The models pane (card #MDL1 t:a11): it comes back beside the pane it served, on the tab
+        // it was left on. It serves the first terminal pane of the tab it lands in
+        // (RelayWindow::linkRestoredModelsPane), so nothing about the *served* pane is saved.
+        if (m_kind == Kind::Models) {
+            QJsonObject saved{{QStringLiteral("cwd"), m_subagentCwd}};
+            if (auto *models = dynamic_cast<relay::ModelsPane *>(m_hosted))
+                saved.insert(QStringLiteral("tab"), models->currentTab());
+            return {{QStringLiteral("models"), saved}};
+        }
         if (m_turn || m_diff || m_hosted) return {};
         if (m_plan) return {{"plan", QJsonObject{{"path", path()}}}};
         return {{m_explorer ? "explorer" : "preview", QJsonObject{{"path", path()}}}};
@@ -571,6 +581,7 @@ public:
         case Kind::Plan: return QStringLiteral("plan");
         case Kind::Info: return QStringLiteral("info");
         case Kind::Sessions: return QStringLiteral("sessions");
+        case Kind::Models: return QStringLiteral("models");   // card #MDL1 t:a11
         default: return {};   // a kind added later is plain until it sets paneType itself
         }
     }

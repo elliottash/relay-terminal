@@ -559,9 +559,21 @@ void SettingsPane::applyMode() {
     const QString hint = actions ? QStringLiteral("Search actions") : QStringLiteral("Search options");
     m_search->setPlaceholderText(hint);
     m_search->setAccessibleName(hint);
-    m_tabs->setVisible(!actions);   // Actions is one list; there is nothing to tab between
+    // Actions is one list; there is nothing to tab between. Embedded, the host's own tab row is
+    // already saying where you are and its footer already spells the keys.
+    m_tabs->setVisible(!actions && !m_embedded);
+    m_footer->setVisible(!m_embedded);
     m_footer->setText(actions ? QStringLiteral("↑ ↓ move   ·   Enter runs   ·   Esc closes")
                               : QStringLiteral("↑ ↓ move   ·   Enter changes   ·   ← → tabs   ·   Esc closes"));
+}
+
+void SettingsPane::setEmbedded(bool embedded) {
+    if (embedded == m_embedded) return;
+    m_embedded = embedded;
+    // The host has its own margins; this one would be a second frame inside the first.
+    if (auto *box = layout()) box->setContentsMargins(embedded ? 0 : 12, embedded ? 0 : 10,
+                                                      embedded ? 0 : 12, embedded ? 0 : 8);
+    applyMode();
 }
 
 void SettingsPane::setMode(Mode mode) {
