@@ -1027,8 +1027,20 @@ private slots:
 
         // Trim: the oldest anchors leave the scrollback and the rest renumber.
         h.vt->setScrollbackLines(6);
+        if (core == QStringLiteral("ghostty")) {
+            // Ghostty's documented limit is an approximate byte budget, including
+            // 256KiB page slack (docs/ENGINE.md), not libvterm's exact line count.
+            // Twelve anchors fit in that slack. Force real eviction before checking
+            // its links, and retain a fresh anchor so an empty/broken scan cannot pass.
+            h.feed(QByteArray("plain padding\r\n").repeated(8192));
+            h.feed("\x1b]8;;relay://call/p/1/fresh\x1b\\fresh anchor\x1b]8;;\x1b\\\r\n");
+        }
         const std::vector<VtCore::HyperlinkRun> trimmed = h.vt->hyperlinkRuns(prefix);
         QVERIFY(int(trimmed.size()) < 12);
+        if (core == QStringLiteral("ghostty")) {
+            QCOMPARE(int(trimmed.size()), 1);
+            QCOMPARE(trimmed.front().uri, QStringLiteral("relay://call/p/1/fresh"));
+        }
         for (const VtCore::HyperlinkRun &r : trimmed) {
             QVERIFY(r.startRow >= 0);
             QVERIFY(r.endRow >= r.startRow);
