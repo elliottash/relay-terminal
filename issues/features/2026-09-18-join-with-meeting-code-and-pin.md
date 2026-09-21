@@ -13,7 +13,7 @@ rank: 6e
 created: '2026-09-18'
 acceptance: a friend types a 4-letter meeting code and a 4-digit PIN on the join page and reaches the owner's knock row; the server never learns the PIN and cannot join or sit in the middle without guessing it online; three wrong PINs burn the code
 source: 'owner, 2026-09-18: "is there a way to have like a sync code share, where i tell my friend a code and they type it on relay-terminal.ai to join me" … "i like option 2 from above -- how about 4 letter meeting code, 4 number pin code" … "go and build it, write a card and use subagents"'
-links: {plans: [], commits: [616a47e6], evidence: [docs/qa_evidence/2026-09-18-join-with-meeting-code-and-pin/], related: [W5N2], github: null}
+links: {commits: [616a47e6, 37563ce4], evidence: [docs/qa_evidence/2026-09-18-join-with-meeting-code-and-pin/], github: null, plans: [], related: [W5N2]}
 ---
 # Join a shared pane with a meeting code and a PIN
 
