@@ -7,7 +7,7 @@ assignee: codex
 rank: m
 created: '2026-09-21'
 source: 'Claude Code in a Relay pane, 2026-09-21'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-harness-steering/README.md], related: [], github: null}
+links: {plans: [], commits: [16fd7eddbec2dd261be180fb22714cdb61bdf789], evidence: [docs/qa_evidence/2026-09-21-harness-steering/README.md], related: [], github: null}
 ---
 # The command queue does not work with claude / codex
 
