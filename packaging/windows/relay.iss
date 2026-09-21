@@ -30,3 +30,8 @@ Name: "{autodesktop}\Relay"; Filename: "{app}\bin\relay.exe"; Tasks: desktopicon
 Name: desktopicon; Description: "Create a desktop shortcut"; Flags: unchecked
 [Run]
 Filename: "{app}\bin\relay.exe"; Description: "Open Relay"; Flags: nowait postinstall skipifsilent
+
+[Registry]
+Root: HKCU; Subkey: "Software\Classes\relay"; ValueType: string; ValueData: "URL:Relay"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\relay"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKCU; Subkey: "Software\Classes\relay\shell\open\command"; ValueType: string; ValueData: """{app}\runtime\python\pythonw.exe"" -X utf8 ""{app}\share\relay\scripts\relay-open"" ""%1"""

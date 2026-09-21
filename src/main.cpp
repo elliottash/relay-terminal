@@ -169,6 +169,9 @@
 // Install a user-level x-scheme-handler/relay entry that runs relay-open (idempotent, silent;
 // one status message the first time). RELAY_NO_URL_HANDLER=1 skips it.
 static void registerUrlHandler() {
+#ifdef Q_OS_WIN
+    return; // The per-user installer registers relay:// with the private Python runtime.
+#endif
     if (qEnvironmentVariableIntValue("RELAY_NO_URL_HANDLER")) return;
     const QString helper = qEnvironmentVariable("RELAY_OPEN_HELPER");
     const QString python = relayPython();

@@ -6421,6 +6421,11 @@ public:
     // UPDATED marker, Relay restarts itself: the new binary is started first, then the windows
     // close through their ordinary path so layout and scrollback are saved for it to reopen.
     void updateApp() {
+#ifdef Q_OS_WIN
+        QDesktopServices::openUrl(QUrl(QStringLiteral("https://relay-terminal.ai/#install")));
+        notice(QStringLiteral("Download the Windows installer to update Relay."));
+        return;
+#endif
         if (m_updateProcess) { notice(QStringLiteral("An update is already running.")); return; }
         const QString python = relayPython();
         const QString script = dataRoot() + QStringLiteral("/scripts/relay-update.py");
@@ -6471,7 +6476,7 @@ public:
                     window->close();
                 }
         });
-        process->start(python, {script, QStringLiteral("install"),
+        process->start(python, {QStringLiteral("-X"), QStringLiteral("utf8"), script, QStringLiteral("install"),
                                 QStringLiteral("--channel"), updateChannel()});
         notice(QStringLiteral("Checking GitHub for the latest Relay…"), 20000);
     }
