@@ -169,3 +169,38 @@ Two things found on the way:
 - `tests/test_system_prompt.py::test_the_board_policy_block_stays_tiered` fails on `main` — 3,893
   bytes against a 3,072 budget. Verified pre-existing on a clean `git archive` export of
   `c33df71b^`, and **already tracked on #Z4HR** with the same measurement, so no card was filed.
+
+<!-- relay:entry 20260920T223000Z-g5 author=agent kind=progress pane=terminal -->
+**Group 5 landed** — `14ca3f63`. Done by the orchestrating session directly: the subagent it was
+given to died on an Opus session limit before its first edit.
+
+About thirty keys on, and most of them not undoable, so two things had to change with them.
+
+`reversibleWriteActions()` is now **`writingActions()`**. Decision 2's founding line was "undoable
+in one click" and the owner's answer put `agent.compact`, `agent.clearQueue` and `terminal.clear`
+in the set; a set name that lies is worse than a long one. What replaces the promise is
+**`lossNote()`**: a destructive key gets its own sentence in the notification — "The detail the
+compaction dropped is gone", "The prompts waiting in that pane were removed. They were yours, and
+they are not recoverable" — and `execute()` posts that instead of the palette blurb, which
+describes the button rather than what just happened to you. The turn and shell keys are also in
+`paneScopedActions()`, because "stop that pane" landing on whichever pane has the focus is how an
+agent stops the wrong turn.
+
+The four refusals are **`refusedByTheOwner()`** and the two blocked ones **`waitingOnTheModalPass()`** —
+named rather than merely absent, and `actionIsAgentSafe()` tests both before anything else. A key
+left out is off because nobody put it in; a key named is off because somebody decided, and the next
+person to widen the set gets a contradiction to resolve instead of a silent win.
+
+**Every newly-allowed key was traced to its handler** for a nested event loop, which is the check
+group 4 exists for. Two block and are held back: `startFreshWindowSet()` asks before discarding the
+window set (`QMessageBox::question`), and `closePane()` asks before closing a Preview pane with
+unsaved edits (#SEJ2). `app.update`, `pane.share` (`dialog->show()`), `pane.sharing`,
+`agent.compact`, `hints.reset`, `terminal.clear`, `conversations.rebuild` and `project.detach` are
+all clear. `pane.close` needs one more thing besides the dialog: it still closes the *focused* leaf
+rather than a named pane, so it is not aimable yet.
+
+Two existing group-1 tests used `agent.interrupt` as their example of "a registry key outside the
+table" — the owner's answer made that one safe, so the example moved to `agent.provider` rather
+than the assertion being relaxed, and `agent.interrupt` now tests the other side of the same
+fallback. 57 cases passing, was 54. `land.py`'s build gate built the exact landing tree, and the
+landed diff was audited for the five other sessions' work in the protocol doc (none).

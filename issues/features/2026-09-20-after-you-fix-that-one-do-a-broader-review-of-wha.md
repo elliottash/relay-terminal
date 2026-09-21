@@ -8,7 +8,7 @@ waiting_on: owner
 rank: m
 created: '2026-09-20'
 source: 'owner report, 2026-09-20, in the terminal pane after #FEJQ decision 2 was amended'
-links: {plans: [], commits: [ab9e2ab7, 1a2459ed, c375a86e, 2e51e3b6, cb33a900, c33df71b, 3ce297fe], evidence: [], related: [FEJQ, H6VQ, GMCF], github: null}
+links: {plans: [], commits: [ab9e2ab7, 1a2459ed, c375a86e, 2e51e3b6, cb33a900, c33df71b, 3ce297fe, 14ca3f63], evidence: [], related: [FEJQ, H6VQ, GMCF], github: null}
 ---
 # What an agent still cannot do in Relay, read off the catalog rather than remembered
 
@@ -361,5 +361,8 @@ since they only destroy the person's own state and the person is the one asking.
    send a prompt to a named pane, pre-fill a composer without sending, `app_open` for the remaining
    panes (explorer, Test suites, Activity, info, requests, subagents), naming tabs and renaming
    panes, and the helper reading the pane it is helping.
-4. **Group 4** — the non-blocking `run()` pass, then the marks, then the direct-path tools.
-5. **Group 5** — on the owner's answers to the two lists above.
+4. **Landed** — group 5, in `14ca3f63`: the widening, the four refusals, and the two keys that are
+   off for a reason that is not the owner's.
+5. **Group 4 is the only thing left**, and it now blocks more than itself: `windows.fresh` and
+   `pane.close` are allowed and cannot go on until a modal `run()` returns before the person
+   answers. The owner asked to hear the risk before it starts and has not answered.
