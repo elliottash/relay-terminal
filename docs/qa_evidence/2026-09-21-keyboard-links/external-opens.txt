@@ -1,0 +1,3 @@
+https://example.com/gwxm
+file:///tmp/gwxm-_my8kec8/work/sample.txt
+file:///tmp/gwxm-_my8kec8/work/folder

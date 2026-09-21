@@ -927,8 +927,9 @@ protected:
                 event->accept();
                 if (event->type() != QEvent::KeyPress || key->isAutoRepeat()) return true;
                 const int pressed = key->key();
-                QTimer::singleShot(0, this, [walking, pressed] {
-                    if (pressed == Qt::Key_Return || pressed == Qt::Key_Enter) walking->openOutputLink();
+                const auto modifiers = key->modifiers();
+                QTimer::singleShot(0, walking, [walking, pressed, modifiers] {
+                    if (pressed == Qt::Key_Return || pressed == Qt::Key_Enter) walking->openOutputLink(modifiers);
                     else if (pressed == Qt::Key_Escape) walking->endOutputLinkWalk();
                     else if (pressed == Qt::Key_Down || pressed == Qt::Key_Right) walking->stepOutputLink(1);
                     else walking->stepOutputLink(-1);
@@ -7250,6 +7251,7 @@ private:
         // `exit` (or the shell dying) closes the pane the way × does, so it can be reopened too.
         pane->onShellExited = [guard] { if (auto *w = windowOf(guard)) w->closePane(guard, true); };
         pane->onOpenPath = [guard](const QString &path, int line) { if (auto *w = windowOf(guard)) w->openPath(path, line, guard); };
+        pane->onEditPath = [guard](const QString &path, int line) { if (auto *w = windowOf(guard)) w->openPath(path, line, guard, false, true); };
         pane->onToggleExplorer = [guard](const QString &path) { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->toggleExplorer(path, guard); } };
         pane->onOpenBoard = [guard] { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->toggleBoardPane(); } };
         pane->onChooseTheme = [guard](const QString &id) {
@@ -7601,6 +7603,9 @@ private:
         // context gets first refusal inside the pane, and what it declines arrives here.
         console->onOpenPath = [guard](const QString &path, int line) {
             if (auto *w = windowOf(guard)) w->openPath(path, line, hostLeafOf(guard));
+        };
+        console->onEditPath = [guard](const QString &path, int line) {
+            if (auto *w = windowOf(guard)) w->openPath(path, line, hostLeafOf(guard), false, true);
         };
         console->onOpenCard = [guard](const QString &id) { if (auto *w = windowOf(guard)) w->openBoardCard(id); };
         console->onOpenOption = [guard](const QString &section, const QString &row) {
@@ -10238,7 +10243,7 @@ public:
             m_manager->remember(item);
         }
         if (auto *terminal = dynamic_cast<Pane *>(pane)) {
-            terminal->onStatus = nullptr; terminal->onStateChanged = nullptr; terminal->onShellExited = nullptr; terminal->onOpenPath = nullptr;
+            terminal->onStatus = nullptr; terminal->onStateChanged = nullptr; terminal->onShellExited = nullptr; terminal->onOpenPath = nullptr; terminal->onEditPath = nullptr;
         }
         pane->hide();
         pane->setParent(nullptr);

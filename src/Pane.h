@@ -721,6 +721,7 @@ public:
     std::function<void()> onShellExited;
     // Open a folder (explorer pane) or a file (preview pane); `line` > 0 scrolls the preview there.
     std::function<void(const QString &path, int line)> onOpenPath;
+    std::function<void(const QString &path, int line)> onEditPath;
     std::function<void(const QString &)> onToggleExplorer;   // open the explorer, or close it again
     std::function<void()> onOpenBoard;                 // Switchboard: /switchboard from this pane
     // /light, /dark and /theme: the window decides whether the theme is this tab's or everyone's
@@ -3062,7 +3063,7 @@ public:
                 if (fromMouse)
                     hint(QStringLiteral("links.step"),
                          relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("links.step")),
-                                                        QStringLiteral("step through the links in the output")));
+                                                        QStringLiteral("navigate output links with the arrow keys")));
                 onOpenCard(parts.at(0).toUpper());
                 return;
             }
@@ -3090,7 +3091,7 @@ public:
         if (fromMouse)
             hint(QStringLiteral("links.step"),
                  relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("links.step")),
-                                                QStringLiteral("step through the links in the output")));
+                                                QStringLiteral("navigate output links with the arrow keys")));
         if (onOpenPath) onOpenPath(target, line > 0 ? line : 0);
     }
     bool canWalkOutputLinks() const { return terminalCan(relay::TerminalBackend::LinkWalk); }
@@ -3105,7 +3106,7 @@ public:
         relay::TerminalBackend::Link link;
         int index = 0, count = 0;
         if (!m_backend->stepLink(delta, &link, &index, &count)) {
-            m_walkLink = {};
+            endOutputLinkWalk();
             status(QStringLiteral("No files, folders, links or cards in this pane's output."));
             return;
         }
@@ -3113,16 +3114,64 @@ public:
         const QString where = !link.card.isEmpty() ? cardReferenceLabel(link.card, link.cardTitle)
             : link.line > 0 ? QStringLiteral("%1:%2").arg(link.target).arg(link.line)
                             : link.target;
-        status(QStringLiteral("%1 of %2 · %3 · Enter opens, Esc leaves").arg(index + 1).arg(count).arg(where));
+        const bool local = QDir::isAbsolutePath(link.target);
+        const QString keys = local
+            ? (link.directory ? QStringLiteral("Enter opens in Relay, Shift+Enter opens externally")
+                              : QStringLiteral("Enter opens in Relay, Ctrl+Enter edits, Shift+Enter opens externally"))
+            : QStringLiteral("Enter opens");
+        // The selected target is state, not a queued toast: every arrow must replace it
+        // immediately, and it stays visible until the walk ends.
+        if (!m_walkStatus) {
+            m_walkStatus = new QLabel(this);
+            m_walkStatus->setObjectName(QStringLiteral("toast"));
+            m_walkStatus->setTextFormat(Qt::PlainText);
+            m_walkStatus->setWordWrap(true);
+            m_walkStatus->setAttribute(Qt::WA_TransparentForMouseEvents);
+            connect(&m_walkStatusTimer, &QTimer::timeout, this, [this] {
+                // The engine also ends a walk on a mouse click or terminal input.
+                if (!outputLinkWalkActive()) endOutputLinkWalk();
+                else placeOutputLinkStatus();
+            });
+        }
+        m_walkStatus->setText(QStringLiteral("%1 of %2 · %3\n%4 · Arrows navigate, Esc leaves")
+                                 .arg(index + 1).arg(count).arg(where, keys));
+        placeOutputLinkStatus();
+        m_walkStatus->show();
+        m_walkStatusTimer.start(100);
     }
-    void openOutputLink() {
+    void openOutputLink(Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
         const relay::TerminalBackend::Link link = m_walkLink;
         endOutputLinkWalk();
+        // File actions use the actual path, even when ordinary opening resolves a
+        // Markdown file to a Switchboard card. URLs and card targets keep their routing.
+        if (QDir::isAbsolutePath(link.target)) {
+            const QFileInfo file(link.target);
+            if (!file.exists()) { status(QStringLiteral("No such file or folder: ") + link.target); return; }
+            if (modifiers.testFlag(Qt::ShiftModifier)) {
+                if (!QDesktopServices::openUrl(QUrl::fromLocalFile(link.target)))
+                    status(QStringLiteral("Could not open externally: ") + link.target);
+                return;
+            }
+            if (modifiers.testFlag(Qt::ControlModifier) && file.isFile()) {
+                if (onEditPath) onEditPath(link.target, std::max(0, link.line));
+                return;
+            }
+        }
         openOutputTarget(link.target, link.line, false);
     }
     void endOutputLinkWalk() {
         m_walkLink = {};
+        m_walkStatusTimer.stop();
+        if (m_walkStatus) m_walkStatus->hide();
         if (m_backend) m_backend->endLinkWalk();
+    }
+    void placeOutputLinkStatus() {
+        if (!m_walkStatus) return;
+        const QRect area = overlayArea();
+        m_walkStatus->setFixedWidth(std::max(1, area.width() - 32));
+        m_walkStatus->adjustSize();
+        m_walkStatus->move(area.left() + 16, area.bottom() - m_walkStatus->height() - 12);
+        m_walkStatus->raise();
     }
     // Only the active pane opens a link on a plain click; in any other pane the first click
     // moves the focus and Ctrl+click still follows the link.
@@ -17869,6 +17918,8 @@ private:
     QString m_sshShareProblem;   // why this pane's shells cannot share an ssh connection, if so
     char m_lastPromptMark = 0;      // OSC 133 A/B/C/D, engine panes with the shell integration
     int m_lastMarkExitCode = -1;
+    QLabel *m_walkStatus = nullptr;
+    QTimer m_walkStatusTimer;
     relay::TerminalBackend::Link m_walkLink;   // the link Ctrl+Shift+L is sitting on
     QTimer m_programPoll;
     HideReason m_hideReason = HideReason::None;

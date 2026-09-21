@@ -401,13 +401,34 @@ private slots:
         QVERIFY(t.view->stepLink(-1, &link));          // back into the scrollback
         QCOMPARE(QFileInfo(link.target).fileName(), QStringLiteral("alpha.txt"));
         QCOMPARE(link.line, 3);
-        QVERIFY(!t.backend->selectedText().isEmpty()); // the link is highlighted
+        QCOMPARE(t.backend->selectedText(), QStringLiteral("alpha.txt:3:1"));
         QVERIFY(t.view->stepLink(-1, &link));          // and the walk wraps at the oldest
         QCOMPARE(QFileInfo(link.target).fileName(), QStringLiteral("gamma.txt"));
         QVERIFY(t.view->stepLink(1, &link));           // the arrows go the other way
         QCOMPARE(QFileInfo(link.target).fileName(), QStringLiteral("alpha.txt"));
         t.view->endLinkWalk();
         QVERIFY(!t.view->linkWalkActive());
+    }
+
+    void keyboardLinkWalkNewestHistory()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        QByteArray output;
+        for (int i = 0; i < 2100; ++i)
+            output += "https://example.com/" + QByteArray::number(i) + "\r\n";
+        t.backend->writeToDisplay(output);
+        QVERIFY(t.waitScreen(QStringLiteral("https://example.com/2099")));
+        QTest::qWait(60);
+        TerminalView::Link link;
+        QVERIFY(t.view->stepLink(-1, &link));
+        QCOMPARE(t.view->linkWalkCount(), 500);
+        QCOMPARE(link.target, QStringLiteral("https://example.com/2099"));
+        QCOMPARE(t.backend->selectedText(), link.target);
+        // Forward wraps to the oldest retained link, not the oldest scanned one.
+        QVERIFY(t.view->stepLink(1, &link));
+        QCOMPARE(link.target, QStringLiteral("https://example.com/1600"));
+        QCOMPARE(t.backend->selectedText(), link.target);
     }
 
     // Issue YZTK: a plain left click follows a path, a click that drags still selects, and

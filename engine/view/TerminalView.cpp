@@ -2320,8 +2320,8 @@ void TerminalView::collectFoldLinks(int foldIndex, const QString &cwd, const QSt
             walk.endCol = walk.foldSpans.last().right();
             fillFoundLink(&walk.link, found);
             m_linkWalk.push_back(walk);
-            if (int(m_linkWalk.size()) >= kWalkMaxLinks)
-                return;
+            if (int(m_linkWalk.size()) > kWalkMaxLinks)
+                m_linkWalk.erase(m_linkWalk.begin());
         }
     }
 }
@@ -2330,12 +2330,13 @@ void TerminalView::collectLinks()
 {
     m_linkWalk.clear();
     QStringList rows;
-    int historyRows = 0, columns = 80;
+    int historyRows = 0, firstRow = 0, columns = 80;
     std::vector<VtCore::HyperlinkRun> proseRuns;
     m_session->withCore([&](VtCore &core) {
         historyRows = core.historyRows();
         columns = std::max(1, core.columns());
         rows = core.historyText(kWalkScrollbackLines);
+        firstRow = std::max(0, historyRows - int(rows.size()));
         const QString screen = core.screenText();
         rows += screen.split(QLatin1Char('\n'));
         // The rows Relay printed as prose blocks (#R2WQ): they scan in Prose mode (#SFZC),
@@ -2351,12 +2352,11 @@ void TerminalView::collectLinks()
     };
     // historyText() returns the newest lines, so the first row it gave us sits this far
     // down the scrollback; screen row k follows at historyRows + k.
-    const int firstRow = std::max(0, historyRows - int(rows.size()));
     const QString cwd = currentDirectory();
     const QString home = QDir::homePath();
     const links::Probe probe = m_linkProbe ? m_linkProbe : links::systemProbe();
     const links::CardLookup cardLookup = m_cardLookup;
-    for (int i = 0; i < rows.size() && int(m_linkWalk.size()) < kWalkMaxLinks;) {
+    for (int i = 0; i < rows.size();) {
         // A block that has taken its rows over is scanned from its own lines, not
         // from the grid rows it hides: those rows are not on screen, so a link
         // found there would carry a row and a column nothing paints (#J4WK).
@@ -2392,8 +2392,9 @@ void TerminalView::collectLinks()
             walk.endCol = e % columns;
             fillFoundLink(&walk.link, found);
             m_linkWalk.push_back(walk);
-            if (int(m_linkWalk.size()) >= kWalkMaxLinks)
-                break;
+            // Keep the newest links, including the active screen, at the cap.
+            if (int(m_linkWalk.size()) > kWalkMaxLinks)
+                m_linkWalk.erase(m_linkWalk.begin());
         }
         i = last + 1;
     }

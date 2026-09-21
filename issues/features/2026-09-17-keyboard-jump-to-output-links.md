@@ -1,18 +1,18 @@
 ---
 id: GWXM
 type: work
-status: needs-qa-llm
+status: needs-verification
 labels: [feature]
 component: [gui]
 milestone: desktop-alpha
 workstream: terminal
-assignee: agent
-implemented_by: Claude Opus 5 (Claude Code session), 2026-09-17
+assignee: codex
+implemented_by: openai/gpt-6-astra via codex
 rank: 4n
 created: '2026-09-17'
 acceptance: after `ls`, `grep -n` or a compiler error, Ctrl+Shift+L highlights a path or URL in the pane and repeated presses / arrows move between them, scrolling scrollback as needed; Enter opens it with the same routing as a click (explorer, preview, browser); Esc cancels
 source: '`issues/feature_intake.txt`, "add a shortcut to scroll through files / folders / links in the output, maybe alt page up / alt page down."'
-links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-17-clickable-paths/'], related: ['issues/features/needs_qa_llm/2026-09-17-clickable-paths.md'], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-17-clickable-paths/, docs/qa_evidence/2026-09-21-keyboard-links/], related: [issues/features/needs_qa_llm/2026-09-17-clickable-paths.md], github: null}
 ---
 # Keyboard shortcut to step through files, folders and links in output
 
@@ -102,28 +102,44 @@ space across two wrapped rows; three presses of Up reached `12 of 15 · /tmp/…
 the status line reported the engine limit and nothing else happened.
 
 ## QA checklist
+- [ ] With composer focused, Ctrl+Shift+L selects newest output link; Up/Left and Down/Right navigate and wrap. Indicator follows each key immediately.
+- [ ] File: Enter previews at line; Ctrl+Enter edits at line; Shift+Enter invokes the desktop handler.
+- [ ] Folder: Enter opens Explorer; Shift+Enter invokes the desktop handler. URL: Enter invokes browser.
+- [ ] Escape, typing, and terminal click leave navigation and clear its indicator. Tab indentation and Shift+Tab Plan retain their bindings.
+- [ ] A long log retains newest links and selects exact text in scrollback; run keyboardLinkWalk and keyboardLinkWalkNewestHistory.
+- [ ] Rebound links.step activation and replacement prose/card links continue working. Review implementer evidence; independent QA remains outstanding.
 
-1. In a default pane, run `ls`, then `grep -n <word> <file>`, then something that prints a compiler
-   error. With the **prompt box focused** (do not press F12), press Ctrl+Shift+L: the newest link is
-   highlighted and the status bar shows `N of M · <path> · Enter opens, Esc leaves`.
-2. Press Ctrl+Shift+L repeatedly, then Up/Left and Down/Right: the highlight moves one link at a
-   time in the expected direction, wraps at both ends, and the status count follows.
-3. Step far enough back that a link is above the viewport: the pane scrolls to show it.
-4. Enter on a file link → the preview pane opens at the right line. Repeat for a folder (explorer)
-   and for a URL (`echo https://example.com`, opens the browser).
-5. Esc leaves the walk: the highlight and the underline go, and the next Enter in the prompt box
-   submits normally. Do the same with a click in the terminal, and by typing a letter.
-6. Start a walk, then let the shell print more output: the walk keeps working on the links it had.
-   Leave and press again to pick up the new ones.
-7. While `vim`/`htop` is running (alternate screen, composer hidden), Ctrl+Shift+L should not break
-   anything (see gap 7).
-8. `relay --engine=konsole`: Ctrl+Shift+L reports the engine limit and does nothing.
-9. Shortcuts: Ctrl+? / F1 lists "Step through files, folders and links in the output"; the palette
-   (Ctrl+Shift+A) has "Step through links in the output" with the key next to it; the entry is
-   absent for a Konsole pane. Rebind `links.step` in `keybindings.json`, reload, and confirm the new
-   key works and the palette detail text follows.
-10. Each of the four presets (`relay`, `warp`, `vscode`, `konsole`): Ctrl+Shift+L is free and does
-    the walk; nothing else in that preset stopped working.
-11. Click a path with the mouse a few times and confirm the shortcut hint "Next time: Ctrl+Shift+L …"
-    appears (at most 3 times, per the hint registry).
-12. Nothing regressed: `./scripts/test.sh`, `ctest --test-dir build`.
+## Decisions
+Owner, conversation df8af0c4932e4c1a8120358358571b40:
+- "tab and shift tab are indent and plan mode. i want it to include folders and files as well."
+- "i want ctrl shift l to activate it, then arrow keys to navigate"
+- "for files -- enter opens in relay, ctrl enter edits in relay, shift enter opens externally. \nfor folders -- enter opens in relay, shift enter opens externally."
+
+## Plan
+**Goal:** finish keyboard navigation with the owner's file/folder activation keys.
+
+**Findings:** src/RelayWindow.h currently discards Enter modifiers; src/Pane.h always calls ordinary open. engine/view/TerminalView.cpp miscomputes the history offset and retains oldest rather than newest links at the cap. Existing tests only check a nonempty selection. Concurrent #J4WK work owns prose resize fixes.
+
+**Steps:**
+1. Route Enter/Ctrl+Enter/Shift+Enter through file preview/edit/external actions; show relevant keys with the selected target. Preserve Tab bindings and existing card/URL routing.
+2. Correct history offset and newest-link retention; strengthen navigation tests for exact selected text, files/folders/URLs and capped history.
+3. Build and run targeted tests, exercise keys under isolated Xvfb, record evidence and land through land.py.
+
+**Risks:** shared files contain concurrent changes; snapshot and review only our hunks. Preserve existing replacement-block link behavior.
+
+**Verify:** targeted engine view tests, outputlinks tests, isolated GUI opening/editing/external dispatch and cancellation.
+
+## Tests
+`ctest -R outputlinks`
+
+`RELAY_ENGINE_TEST=ViewTest QT_QPA_PLATFORM=offscreen build/engine/relay-engine-tests keyboardLinkWalk keyboardLinkWalkNewestHistory`
+
+manual: docs/qa_evidence/2026-09-21-keyboard-links/
+
+## Execution Summary
+2026-09-21 update (supersedes the older activation/status description above):
+- Kept Ctrl+Shift+L and arrow navigation; Enter opens, Ctrl+Enter edits files in Relay at the referenced line, Shift+Enter opens local files/folders externally. URLs/cards keep their routing; Tab bindings are unchanged.
+- Selected target and applicable keys update immediately in a persistent indicator, cleared on exit, including mouse cancellation.
+- Fixed history selection coordinates and retained the newest 500 links rather than the oldest at the cap. Added exact-selection and 2,100-line regression tests.
+- Evidence: docs/qa_evidence/2026-09-21-keyboard-links/. Isolated Xvfb drive confirmed preview/edit/explorer, external URL/file/folder dispatch, and Escape then Shift+Tab to Plan. External applications were intercepted by a recorder.
+- Only owned hunks are landed; concurrent model-picker/action changes are excluded.

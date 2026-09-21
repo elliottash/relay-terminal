@@ -1,0 +1,14 @@
+{
+  "card": "GWXM",
+  "findings": [],
+  "actions": [],
+  "ids": [
+    "ctest:outputlinks"
+  ],
+  "files": {
+    "ctest:outputlinks": "tests/outputlinks_test.cpp"
+  },
+  "failing": [],
+  "blocks": [],
+  "open_before": []
+}
