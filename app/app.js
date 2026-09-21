@@ -27,6 +27,11 @@ import { renewIfKeyMoved } from './pushkey.js';
 import { Outbox, pendingLine } from './outbox.js';
 // The two notification switches and what they mean in the protocol's five kinds (section 9.1).
 import { NOTIFY_SWITCHES, ALL_KINDS, switchesFrom, kindsFor } from './notifykinds.js';
+// Pairing by typing the code the desktop shows (#FR1C): the same four letters and four digits
+// #97EG gives a guest, aimed at the owner's own phone. app/meet.js runs the CPace code phase
+// against this origin's rendezvous and comes back with a fragment; a pairing fragment (`s=`) goes
+// into the pairing flow below exactly as a scanned link does.
+import { joinWithCode, cleanCode, cleanPin, validCode, validPin, meetProblem } from './meet.js';
 
 trackViewport();
 
@@ -178,6 +183,209 @@ async function startPairing(link) {
   }
 }
 
+// ---- pairing by typing the code (#FR1C) --------------------------------------------------------
+// The welcome screen leads with this: nothing to scan, nothing to paste, nothing that has to
+// travel from a Linux desktop to a phone. The PIN is secret and stays in its field and in the one
+// call that uses it — never in the address, in history, in storage or in a log line — and the
+// fragment the code phase earns is not put in the URL either: `startPairing` takes the parsed
+// link, which is all a scanned one ever gave it.
+
+let codeBusy = false;
+
+function codeNote(text, error = false) {
+  const node = $('welcome-code-note');
+  if (!node) return;
+  node.textContent = text;
+  node.className = error ? 'note error' : 'note';
+}
+
+function setCodeBusy(busy) {
+  codeBusy = busy;
+  $('welcome-code').disabled = busy;
+  $('welcome-pin').disabled = busy;
+  $('welcome-code-pair').disabled = busy;
+  $('welcome-code-pair').textContent = busy ? 'Pairing…' : 'Pair';
+}
+
+// meet.js's sentences are written for a guest joining somebody else's desktop ("ask the person who
+// gave it to you"). Here the desktop is your own and in front of you, so the kinds that name
+// another person say what to do on it instead; the rest — the relay, the rate limit, a broken
+// exchange — are the same sentences and come from there.
+function pairProblem(error) {
+  switch (error?.kind) {
+    case 'bad_code':
+      return 'The code is four letters, like BQRT.';
+    case 'bad_pin':
+      return 'The PIN is four digits, like 4829.';
+    case 'unknown_code':
+      return 'There is no pairing code with those letters. Codes last ten minutes — if the one '
+        + 'on your desktop is older than that, choose “New code”.';
+    case 'wrong_pin':
+      return 'That PIN is not right. Wrong PINs count: after three, this code stops working. '
+        + 'Check the four digits on your desktop, then try again.';
+    case 'burned':
+      return 'This code has stopped working — it has been used, or too many wrong PINs were '
+        + 'tried. Choose “New code” on your desktop.';
+    case 'expired':
+      return 'This code has expired: codes last ten minutes. Choose “New code” on your desktop.';
+    case 'no_answer':
+      return 'Your desktop is not answering. Relay has to be open on it for the code to work — '
+        + 'check it is, then try again.';
+    default:
+      return meetProblem(error);
+  }
+}
+
+// A code the desktop minted to invite a guest to one pane is not a code that pairs a device: the
+// fragment's own shape decides, `s=` against `i=`, so neither can ever be spent as the other.
+const INVITE_CODE_SENTENCE = 'That is an invite code, not a pairing code. Ask for a pairing code, '
+  + 'or open the join page.';
+
+async function pairWithCode() {
+  if (codeBusy) return;
+  const codeInput = $('welcome-code');
+  const pinInput = $('welcome-pin');
+  const code = cleanCode(codeInput.value);
+  const pin = cleanPin(pinInput.value);
+  codeInput.value = code;
+  if (!validCode(code)) {
+    codeNote('The code is four letters, like BQRT.', true);
+    codeInput.focus();
+    return;
+  }
+  if (!validPin(pin)) {
+    codeNote('The PIN is four digits, like 4829.', true);
+    pinInput.focus();
+    return;
+  }
+  setCodeBusy(true);
+  codeNote('Checking the code with your desktop…');
+  let fragment;
+  try {
+    fragment = await joinWithCode(code, pin);
+  } catch (error) {
+    pinInput.value = '';
+    setCodeBusy(false);
+    codeNote(pairProblem(error), true);
+    const kind = error?.kind || '';
+    (['unknown_code', 'burned', 'expired'].includes(kind) ? codeInput : pinInput).focus();
+    return;
+  }
+  pinInput.value = '';
+  const fields = new URLSearchParams(String(fragment).replace(/^#/, ''));
+  if (!fields.get('s') && fields.get('i')) {
+    setCodeBusy(false);
+    codeNote(INVITE_CODE_SENTENCE, true);
+    return;
+  }
+  let link;
+  try {
+    link = Rrp.parsePairFragment(fragment);
+  } catch (error) {
+    setCodeBusy(false);
+    codeNote(error.message, true);
+    return;
+  }
+  setCodeBusy(false);
+  codeNote('');
+  codeInput.value = '';
+  startPairing(link);
+}
+
+// ---- installing this app (#FR1C) ---------------------------------------------------------------
+// Two platforms, two different jobs. Android (and desktop Chrome) offer the install themselves and
+// only need a button to offer it from. iPhone and iPad have no such event: the person has to use
+// Safari's Share menu, and until they have, this app cannot be notified at all — so there the
+// welcome screen leads with the two steps, and a pairing link that landed in Safari is handed over
+// through the clipboard rather than spent on a tab that gets no push.
+
+let installPrompt = null;             // the browser's own offer, kept so a tap can use it
+
+window.addEventListener('beforeinstallprompt', (event) => {
+  event.preventDefault();             // ours to show, from a button, at a moment that makes sense
+  installPrompt = event;
+  paintInstallButtons();
+});
+window.addEventListener('appinstalled', () => {
+  installPrompt = null;
+  paintInstallButtons();
+});
+
+function paintInstallButtons() {
+  const on = Boolean(installPrompt) && !installedApp();
+  for (const id of ['welcome-install', 'inbox-install']) {
+    const button = $(id);
+    if (button) button.hidden = !on;
+  }
+  paintInboxTop();
+}
+
+async function askToInstall(button) {
+  const offer = installPrompt;
+  if (!offer) return;
+  installPrompt = null;               // a `beforeinstallprompt` event may only be used once
+  button.disabled = true;
+  try {
+    await offer.prompt();
+  } catch {
+    /* the browser withdrew it (it was already installed, or the window went away) */
+  }
+  button.disabled = false;
+  paintInstallButtons();
+}
+
+// The welcome screen on an iPhone or iPad that is not the installed app. `link` is a pairing link
+// this device landed on, which only the clipboard can carry into the installed app.
+function showInstallCard(link = '') {
+  const card = $('install-card');
+  if (!card) return;
+  card.hidden = false;
+  $('install-link-row').hidden = !link;
+  $('install-link').textContent = link;
+  $('install-copy-note').textContent = '';
+  $('install-copy').textContent = 'Copy pairing link';
+  // Scanning lands in Safari, which is the tab this card is asking them to leave, so the line
+  // offering it would be telling them to do the thing that did not work.
+  $('welcome-qr-line').hidden = true;
+}
+
+function selectText(node) {
+  const range = document.createRange();
+  range.selectNodeContents(node);
+  const selection = window.getSelection();
+  if (!selection) return;
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+async function copyPairingLink() {
+  const link = $('install-link').textContent;
+  if (!link) return;
+  try {
+    await navigator.clipboard.writeText(link);
+    $('install-copy').textContent = 'Copied';
+    $('install-copy-note').textContent = '';
+  } catch {
+    // A browser that refuses the clipboard outside its own idea of a gesture, or has no API at
+    // all: the link is selected instead, so a long press can copy it by hand.
+    selectText($('install-link'));
+    $('install-copy-note').textContent = 'Copying was refused. The link is selected: hold it and '
+      + 'choose Copy.';
+  }
+}
+
+// The welcome screen, drawn for the device it is on: the install card first where this app has to
+// be installed before it can be any use, and the browser's install offer where there is one.
+function paintWelcome() {
+  if (IOS && !installedApp()) showInstallCard();
+  paintInstallButtons();
+}
+
+function showWelcome() {
+  show('welcome');
+  paintWelcome();
+}
+
 // ---- connecting -------------------------------------------------------------------------------
 
 async function afterConnect(record) {
@@ -189,6 +397,10 @@ async function afterConnect(record) {
   setStatus('connected', 'ok');
   show('inbox');
   updateNotifyRow().catch(() => {});
+  // The first arrival after pairing is where notifications are offered (#FR1C), and the install
+  // button follows this app onto whichever screen is up.
+  updateNotifyOffer().catch(() => {});
+  paintInstallButtons();
 }
 
 // Where the app lives, for a URL a paired phone can come back to: the manifest's start_url is
@@ -203,7 +415,7 @@ async function connectStored() {
     // No desktop of your own here. A guest record from an invitation is still somebody's live
     // session, and the app's start_url is '/', so it is checked before offering to pair.
     if (await startGuestIfInvited()) return;
-    show('welcome');
+    showWelcome();
     return;
   }
   setStatus('connecting…');
@@ -521,15 +733,14 @@ async function updateNotifyRow() {
   }
 }
 
-async function enableNotifications() {
-  const note = $('notify-note');
-  note.textContent = '';
+// `kinds` is what to subscribe with: the first-arrival button (#FR1C) asks for both switches on,
+// and the settings row below leaves it out, which keeps whatever this phone last chose. A refusal
+// is thrown rather than written to a note, because two different rows call this and each says it
+// in its own place.
+async function enableNotifications(kinds) {
   // First thing in the gesture: Safari drops the user activation across an await.
   const permission = await Notification.requestPermission();
-  if (permission !== 'granted') {
-    note.textContent = 'Notifications are off for this site.';
-    return;
-  }
+  if (permission !== 'granted') throw new Error('Notifications are off for this site.');
   const registration = await navigator.serviceWorker.ready;
   const reply = await fetch(`${rrp.origin}/v1/push/key`);
   const { vapid } = await reply.json();
@@ -544,8 +755,49 @@ async function enableNotifications() {
   await storeValue('push-key', key);
   // Everything on to begin with: one tap turns off what you did not want, and a notification you
   // never saw is not something you can decide about.
-  await sendSubscription(subscription, (await storedValue('push-kinds'))
+  await sendSubscription(subscription, kinds || (await storedValue('push-kinds'))
     || ALL_KINDS);
+}
+
+// ---- notifications, offered on first arrival (#FR1C) -------------------------------------------
+// "Notify me on this phone" at the bottom of the inbox is a second deliberate act nobody knows to
+// do, so the first time this app reaches the inbox with push usable and nothing subscribed, the
+// inbox leads with one button. Granting turns both switches on; the row then collapses and the
+// settings at the bottom are where it is changed afterwards.
+
+function paintInboxTop() {
+  const row = $('inbox-top');
+  if (!row) return;
+  row.hidden = ['notify-offer', 'inbox-install'].every((id) => !$(id) || $(id).hidden);
+}
+
+async function updateNotifyOffer() {
+  const button = $('notify-offer');
+  if (!button) return;
+  // Not on an iPhone or iPad that is not installed — there the permission sheet leads nowhere and
+  // the row at the bottom already says what to do — and not where it has been answered already,
+  // either by subscribing or by blocking the site.
+  const offer = pushUsable() && !(IOS && !installedApp())
+    && Notification.permission !== 'denied' && !(await currentSubscription());
+  button.hidden = !offer;
+  if (!offer) $('notify-offer-note').textContent = '';
+  paintInboxTop();
+}
+
+async function acceptNotifyOffer() {
+  const button = $('notify-offer');
+  const note = $('notify-offer-note');
+  button.disabled = true;
+  note.textContent = '';
+  try {
+    await enableNotifications(ALL_KINDS);      // both switches on: this is the one-tap answer
+  } catch (error) {
+    note.textContent = error.message || 'That did not work.';
+  } finally {
+    button.disabled = false;
+    await updateNotifyOffer();
+    await updateNotifyRow();
+  }
 }
 
 async function disableNotifications() {
@@ -562,6 +814,7 @@ async function disableNotifications() {
 async function toggleNotifications() {
   const button = $('notify');
   button.disabled = true;
+  $('notify-note').textContent = '';
   try {
     if (await currentSubscription()) await disableNotifications();
     else await enableNotifications();
@@ -570,6 +823,7 @@ async function toggleNotifications() {
   } finally {
     button.disabled = false;
     await updateNotifyRow();
+    await updateNotifyOffer();     // subscribed or not, the offer above the panes follows it
   }
 }
 
@@ -1529,7 +1783,10 @@ rrp.addEventListener('welcome', (event) => {
 });
 
 rrp.addEventListener('welcome', () => {
-  renewPushIfMoved().catch(() => {}).finally(() => updateNotifyRow().catch(() => {}));
+  renewPushIfMoved().catch(() => {}).finally(() => {
+    updateNotifyRow().catch(() => {});
+    updateNotifyOffer().catch(() => {});
+  });
 });
 
 rrp.addEventListener('screen_snapshot', (event) => onScreen(event.detail));
@@ -1615,7 +1872,7 @@ rrp.addEventListener('revoked', async () => {
   await forgetDevice();
   outbox.clear();            // nothing staged for a desktop that will not take it
   setStatus('revoked', 'warn');
-  show('welcome');
+  showWelcome();
   $('welcome-note').textContent = 'This device was revoked from the desktop.';
 });
 
@@ -1768,10 +2025,10 @@ window.addEventListener('DOMContentLoaded', () => {
         connectStored();
         return;
       }
-      show('welcome');
+      showWelcome();
       $('welcome-note').textContent = 'This pairing link arrived without its code — usually because '
-        + 'the browser reloaded the page after the certificate warning. Scan the QR code on your '
-        + 'desktop again; it stays valid for five minutes.';
+        + 'the browser reloaded the page after the certificate warning. Enter the code your desktop '
+        + 'is showing instead, or scan the QR code again.';
     });
     return;
   }
@@ -1781,8 +2038,17 @@ window.addEventListener('DOMContentLoaded', () => {
     try {
       link = Rrp.parsePairFragment(location.hash);
     } catch (error) {
-      show('welcome');
+      showWelcome();
       $('welcome-note').textContent = error.message;
+      return;
+    }
+    // An iPhone or iPad that is not the installed app: pairing here would pair this Safari tab,
+    // whose storage the Home Screen app does not share and which iOS gives no push — the exact
+    // thing that left the owner with a paired browser and a silent app (#FR1C). So the link is
+    // handed over instead: install, open, paste — or type the code, which needs no link at all.
+    if (IOS && !installedApp()) {
+      showWelcome();
+      showInstallCard(location.href);
       return;
     }
     startPairing(link);
@@ -1803,11 +2069,11 @@ $('welcome-pair').addEventListener('click', () => {
   try {
     target = new URL(text);
   } catch {
-    $('welcome-note').textContent = 'That is not a link. Paste the whole pairing link, from https:// to the end.';
+    $('welcome-link-note').textContent = 'That is not a link. Paste the whole pairing link, from https:// to the end.';
     return;
   }
   if (at < 0 || !/\/pair\/?$/.test(target.pathname) || target.origin !== location.origin) {
-    $('welcome-note').textContent = target.origin !== location.origin && at >= 0
+    $('welcome-link-note').textContent = target.origin !== location.origin && at >= 0
       ? `That link is for ${target.host}; this app is on ${location.host}. Open it there, or pair from the desktop's share window with this address chosen.`
       : 'That is not a pairing link: it should end in /pair# and the code after it.';
     return;
@@ -1816,12 +2082,12 @@ $('welcome-pair').addEventListener('click', () => {
   try {
     link = Rrp.parsePairFragment(target.hash);
   } catch (error) {
-    $('welcome-note').textContent = error.message;
+    $('welcome-link-note').textContent = error.message;
     return;
   }
   // The same path a scanned link takes at load, without a reload: the URL is put where the
   // scan would have put it and the pairing screen takes over. The pasted text is spent.
-  $('welcome-note').textContent = '';
+  $('welcome-link-note').textContent = '';
   $('welcome-link').value = '';
   history.replaceState(null, '', target.pathname + target.hash);
   startPairing(link);
@@ -1829,6 +2095,42 @@ $('welcome-pair').addEventListener('click', () => {
 // Disabled in the markup until this script is up: the welcome screen is the one drawn before any
 // script runs, and a tap on a button with nobody listening would do nothing and say nothing.
 $('welcome-pair').disabled = false;
+
+// ---- the welcome screen, wired (#FR1C) ---------------------------------------------------------
+// At module scope rather than in DOMContentLoaded: this script is a module, so it runs once the
+// page is parsed and before anyone can type, and the code form must never be able to submit
+// itself — a form that reloads the page would lose the code that was typed into it.
+
+$('welcome-code').addEventListener('input', () => {
+  const field = $('welcome-code');
+  const clean = cleanCode(field.value);
+  if (clean !== field.value) field.value = clean;
+  // Four letters in, the PIN has the focus: the two fields are read as one code.
+  if (clean.length === 4 && document.activeElement === field) $('welcome-pin').focus();
+});
+$('welcome-pin').addEventListener('input', () => {
+  const field = $('welcome-pin');
+  const clean = cleanPin(field.value);
+  if (clean !== field.value) field.value = clean;
+});
+for (const id of ['welcome-code', 'welcome-pin']) {
+  // A phone's keyboard comes up over the lower half of the page; keep the field being typed in
+  // above it.
+  $(id).addEventListener('focus', () => {
+    setTimeout(() => $(id).scrollIntoView({ block: 'nearest' }), 300);
+  });
+}
+$('welcome-code-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  pairWithCode();
+});
+$('welcome-code-pair').disabled = false;
+
+$('install-copy').addEventListener('click', copyPairingLink);
+$('welcome-install').addEventListener('click', () => askToInstall($('welcome-install')));
+$('inbox-install').addEventListener('click', () => askToInstall($('inbox-install')));
+$('notify-offer').addEventListener('click', acceptNotifyOffer);
+
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(() => {});

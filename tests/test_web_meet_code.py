@@ -17,6 +17,9 @@ browser's own code:
   screen, the ordinary knock with its five digits, and the guest's screen. The PIN is never in
   the address, history, storage or console. At 390x450 — a phone with its keyboard up — the form
   is on screen and usable.
+* The welcome screen's own code, which pairs the owner's phone rather than admitting a guest
+  (card #FR1C): the same code phase delivers a **pairing** fragment (`s=`) and goes into the
+  pairing screen as a scanned link does, while an invite fragment (`i=`) is refused by its shape.
 
 Every Identity here is made in a temporary directory (the Harness does that), never the real one.
 """
@@ -501,6 +504,206 @@ class JoinPageTests(unittest.TestCase):
                     self.assertFalse(desktop.used)
                     self.assertFalse(any(PIN in line or "0000" in line
                                          for line in browser.console), browser.console)
+                finally:
+                    await browser.stop()
+        asyncio.run(asyncio.wait_for(main(), 180))
+
+
+# ---- 4: the owner's own phone, pairing with a typed code (card #FR1C) ----------------------------
+
+def _pair_harness():
+    # tests/test_remote_browser.py's harness is the owner's side: a real rendezvous serving the
+    # app, a real hub, and `open_pairing()` for the fragment a pairing code would deliver.
+    from tests.test_remote_browser import Harness
+    return Harness
+
+
+def _serve_code(harness, desktop, code: str = CODE, room: str = ROOM) -> None:
+    """The two things the sidecar adds for a pairing code, standing in on the real rendezvous: the
+    lookup route, and a code room whose client is answered by the code phase."""
+
+    @harness.server.route("GET", f"/v1/codes/{code}")
+    async def lookup(request, body):                      # noqa: ANN001 - the server's signature
+        if desktop.burned:
+            return ws_json_error()
+        return json_reply({"room": room})
+
+    real_connect = harness.server.sockets["/v1/connect"]
+
+    async def connect(socket):
+        query = socket.request.query if socket.request else {}
+        if query.get("room") != room:
+            await real_connect(socket)
+            return
+
+        async def receive():
+            frame = await socket.recv()
+            desktop.frames.append(frame)
+            return frame
+
+        async def send(message):
+            await socket.send(json.dumps(message).encode())
+        await desktop.attempt(receive, send)
+    harness.server.sockets["/v1/connect"] = connect
+
+
+WELCOME_NOTE = "document.getElementById('welcome-code-note').textContent"
+
+
+@unittest.skipUnless(find_chrome(), "no Chrome or Chromium installed")
+@unittest.skipUnless(cpace, "remote/cpace.py is not there yet")
+class PairWithCodeTests(unittest.TestCase):
+    """The welcome screen leads with the code (#FR1C).
+
+    The same code phase #97EG gives a guest, aimed at the owner's own phone: what it delivers is a
+    **pairing** fragment (`s=`), which goes into the pairing screen exactly as a scanned link does.
+    An invite fragment (`i=`) is refused by its shape, so a code minted to share one pane can never
+    be spent on pairing a device.
+    """
+
+    def test_the_code_from_the_desktop_pairs_this_phone(self):
+        async def main():
+            async with _pair_harness()() as harness:
+                url, _ = await harness.host.open_pairing()
+                fragment = url.split("#", 1)[1]
+                self.assertIn("&s=", fragment, "open_pairing gives a pairing fragment")
+                root = url.split("/pair#", 1)[0] + "/"
+                desktop = Desktop(fragment)
+                _serve_code(harness, desktop)
+
+                browser = Browser()
+                await browser.start()
+                try:
+                    await browser.call("Emulation.setDeviceMetricsOverride", {
+                        "width": 390, "height": 844, "deviceScaleFactor": 2, "mobile": True})
+                    await browser.navigate(root)
+                    # Enabled by the script, so waiting on it is waiting for the handler.
+                    await browser.wait_for(
+                        "(e => !!e && !e.disabled)"
+                        "(document.getElementById('welcome-code-pair'))", timeout=40)
+                    self.assertEqual(
+                        await browser.evaluate(
+                            "document.getElementById('welcome-code-lead').textContent"),
+                        "Enter the code from your desktop")
+                    self.assertTrue(await browser.evaluate(shown("welcome-code")))
+                    self.assertEqual(await browser.evaluate(
+                        "document.getElementById('welcome-pin').inputMode"), "numeric")
+
+                    # The code field upper-cases and keeps to the alphabet; the PIN to digits.
+                    await _type(browser, "welcome-code", "bq1ilo")
+                    self.assertEqual(await browser.evaluate(
+                        "document.getElementById('welcome-code').value"), "BQ")
+                    await _type(browser, "welcome-code", "rtx")
+                    self.assertEqual(await browser.evaluate(
+                        "document.getElementById('welcome-code').value"), "BQRT")
+                    # Four letters in, the PIN field has the focus.
+                    self.assertEqual(await browser.evaluate("document.activeElement.id"),
+                                     "welcome-pin")
+
+                    # A PIN that is not four digits is a sentence, not an attempt.
+                    await _type(browser, "welcome-pin", "48")
+                    await browser.evaluate("document.getElementById('welcome-code-pair').click()")
+                    self.assertIn("four digits", await browser.evaluate(WELCOME_NOTE))
+                    self.assertEqual(desktop.failures, 0)
+
+                    # A wrong PIN counts, and says so in this screen's own words: the desktop is
+                    # the owner's own and is in front of them.
+                    await _clear(browser, "welcome-pin")
+                    await _type(browser, "welcome-pin", "1111")
+                    await browser.evaluate("document.getElementById('welcome-code-pair').click()")
+                    said = await browser.wait_for(
+                        f"/PIN is not right/.test({WELCOME_NOTE}) ? {WELCOME_NOTE} : ''")
+                    self.assertIn("Check the four digits on your desktop", said)
+                    for _ in range(50):
+                        if desktop.failures == 1:
+                            break
+                        await asyncio.sleep(0.1)
+                    self.assertEqual(desktop.failures, 1)
+
+                    # At 390x450 — a phone with its keyboard up — the code, the PIN and the
+                    # button are all on screen, and the screen scrolls for what is under them.
+                    await browser.call("Emulation.setDeviceMetricsOverride", {
+                        "width": 390, "height": 450, "deviceScaleFactor": 2, "mobile": True})
+                    await browser.evaluate("document.getElementById('welcome-pin').focus()")
+                    await asyncio.sleep(0.6)
+                    for element in ("welcome-code", "welcome-pin", "welcome-code-pair"):
+                        box = await browser.evaluate(
+                            f"(() => {{ const r = document.getElementById({element!r})"
+                            ".getBoundingClientRect(); const v = window.visualViewport;"
+                            " return {top: r.top, bottom: r.bottom, left: r.left, right: r.right,"
+                            " height: v ? v.height : innerHeight, width: v ? v.width : innerWidth};"
+                            " })()")
+                        self.assertGreaterEqual(box["top"], 0, (element, box))
+                        self.assertLessEqual(box["bottom"], box["height"], (element, box))
+                        self.assertGreaterEqual(box["left"], 0, (element, box))
+                        self.assertLessEqual(box["right"], box["width"], (element, box))
+                    # A thumb can hit it, and the QR and the paste field below can be reached.
+                    self.assertGreaterEqual(await browser.evaluate(
+                        "document.getElementById('welcome-code-pair')"
+                        ".getBoundingClientRect().height"), 40)
+                    self.assertGreater(await browser.evaluate(
+                        "document.getElementById('screen-welcome').scrollHeight"),
+                        await browser.evaluate(
+                            "document.getElementById('screen-welcome').clientHeight"))
+                    await browser.call("Emulation.setDeviceMetricsOverride", {
+                        "width": 390, "height": 844, "deviceScaleFactor": 2, "mobile": True})
+
+                    # The right one: the ordinary pairing screen, the ordinary five digits, the
+                    # inbox. The desktop was asked to approve exactly one device.
+                    await _clear(browser, "welcome-pin")
+                    await _type(browser, "welcome-pin", PIN)
+                    await browser.evaluate("document.getElementById('welcome-code-pair').click()")
+                    await browser.wait_for(shown("screen-inbox"), timeout=60)
+                    self.assertEqual(await browser.evaluate(SCREENS_SHOWN), 1)
+                    self.assertEqual(len(harness.requests), 1)
+                    self.assertTrue(desktop.used)
+                    # The frames reached the desktop as binary: the rendezvous drops text frames.
+                    self.assertTrue(desktop.frames)
+                    self.assertTrue(all(isinstance(f, bytes) for f in desktop.frames))
+
+                    # Nothing typed here outlives the attempt, and the pairing secret never went
+                    # into the address bar: `startPairing` was handed the parsed link.
+                    self.assertEqual(await browser.evaluate("location.href"), root)
+                    leaked = await browser.evaluate(
+                        "JSON.stringify([location.href, document.title, {...localStorage},"
+                        " {...sessionStorage}, document.getElementById('welcome-pin').value,"
+                        " document.getElementById('welcome-code').value])")
+                    self.assertNotIn(PIN, leaked)
+                    self.assertNotIn(fragment.split("s=", 1)[1][:12], leaked)
+                    self.assertFalse(any(PIN in line for line in browser.console),
+                                     browser.console)
+                finally:
+                    await browser.stop()
+        asyncio.run(asyncio.wait_for(main(), 240))
+
+    def test_an_invite_code_is_refused_by_its_shape(self):
+        """The sidecar mints both kinds over the same wire, so the fragment decides: an `i=` one
+        admits a guest to one pane and must never pair a device."""
+        async def main():
+            async with _pair_harness()() as harness:
+                invite = ("v=1&d=" + b64(b"\x33" * 32) + "&i=" + b64(b"\x44" * 16) + "&r=room-9")
+                desktop = Desktop(invite)
+                _serve_code(harness, desktop)
+                root = harness.base + "/"
+
+                browser = Browser()
+                await browser.start()
+                try:
+                    await browser.navigate(root)
+                    await browser.wait_for(
+                        "(e => !!e && !e.disabled)"
+                        "(document.getElementById('welcome-code-pair'))", timeout=40)
+                    await _type(browser, "welcome-code", CODE)
+                    await _type(browser, "welcome-pin", PIN)
+                    await browser.evaluate("document.getElementById('welcome-code-pair').click()")
+                    said = await browser.wait_for(
+                        f"/invite code/.test({WELCOME_NOTE}) ? {WELCOME_NOTE} : ''", timeout=40)
+                    self.assertEqual(said, "That is an invite code, not a pairing code. Ask for a "
+                                           "pairing code, or open the join page.")
+                    # Nothing was paired, and the screen is still the welcome screen.
+                    self.assertTrue(await browser.evaluate(shown("screen-welcome")))
+                    self.assertEqual(await browser.evaluate(SCREENS_SHOWN), 1)
+                    self.assertEqual(len(harness.requests), 0)
                 finally:
                     await browser.stop()
         asyncio.run(asyncio.wait_for(main(), 180))

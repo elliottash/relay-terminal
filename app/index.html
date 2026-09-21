@@ -38,21 +38,78 @@
 </header>
 
 <main>
+  <!-- The welcome screen leads with the typed code (#FR1C): four letters and four digits read off
+       the desktop, which is the one path that needs no camera, no clipboard and no second device
+       to carry a link. The QR and the pasted link stay underneath, smaller, for the devices where
+       scanning is the quicker act. -->
   <section class="screen" id="screen-welcome">
     <div class="pad">
+      <!-- iPhone and iPad, not installed: this app has to be on the Home Screen before it is
+           worth pairing, because iOS delivers Web Push only to an installed app and gives it
+           storage of its own. Shown by app.js; on a `/pair#…` landing it also carries the link,
+           since that is the one thing Safari can hand the installed app. -->
+      <div id="install-card" hidden>
+        <p id="install-lead">Add Relay to your Home Screen first, then open it from there and
+          enter the code. iPhone and iPad only deliver notifications to an installed app.</p>
+        <ol id="install-steps">
+          <li>Tap the <strong>Share</strong> button in Safari.</li>
+          <li>Choose <strong>Add to Home Screen</strong>.</li>
+        </ol>
+        <div id="install-link-row" hidden>
+          <button type="button" id="install-copy">Copy pairing link</button>
+          <p class="muted small">then paste it in the app, or enter the code on your desktop.</p>
+          <p id="install-copy-note" class="muted small"></p>
+          <p id="install-link" class="mono small"></p>
+        </div>
+      </div>
+
       <h1>Relay</h1>
       <p>This phone is not paired with a desktop yet.</p>
-      <p class="muted">On your desktop, click the <strong>share icon</strong> beside the
-        microphone under the prompt box, then scan the QR code with this device's camera.</p>
-      <p class="muted">Both devices have to be on the same network.</p>
       <p id="welcome-note" class="note"></p>
-      <!-- The link the QR carries, pasted. For an installed app on iOS: the camera opens a link
-           in Safari, and a web app on the Home Screen has storage of its own, so the only way a
-           pairing link reaches the installed app is through the clipboard (#PH0N). -->
-      <label class="field-label" for="welcome-link">Or paste the pairing link</label>
-      <input id="welcome-link" type="url" inputmode="url" autocomplete="off" autocapitalize="off"
-             autocorrect="off" spellcheck="false" placeholder="https://join.relay-terminal.ai/pair#…">
-      <button type="button" id="welcome-pair" disabled>Pair with this link</button>
+
+      <form id="welcome-code-form" autocomplete="off" novalidate>
+        <p class="lead" id="welcome-code-lead">Enter the code from your desktop</p>
+        <div class="code-fields">
+          <div>
+            <label class="field-label small" for="welcome-code">Code</label>
+            <input id="welcome-code" class="code-field" type="text" maxlength="4"
+                   inputmode="text" enterkeyhint="next" placeholder="BQRT"
+                   autocomplete="off" autocapitalize="characters" autocorrect="off"
+                   spellcheck="false" aria-label="The four letters on your desktop">
+          </div>
+          <div>
+            <label class="field-label small" for="welcome-pin">PIN</label>
+            <input id="welcome-pin" class="code-field" type="text" maxlength="4"
+                   inputmode="numeric" pattern="[0-9]*" enterkeyhint="go" placeholder="4829"
+                   autocomplete="one-time-code" autocorrect="off" spellcheck="false"
+                   aria-label="The four digits on your desktop">
+          </div>
+        </div>
+        <p id="welcome-code-note" class="note" role="status" aria-live="polite"></p>
+        <!-- Disabled in the markup until this script is up, like the paste button below: the
+             welcome screen is drawn before any script runs, and a form that submits itself would
+             reload the page rather than pair. -->
+        <button type="submit" id="welcome-code-pair" disabled>Pair</button>
+      </form>
+      <p class="muted small">On your desktop: the plug menu at the top right &rarr;
+        <strong>Pair a phone</strong> (or Options &rsaquo; Remote). It shows four letters and
+        four digits.</p>
+
+      <!-- Android and desktop Chrome: the browser offers the install, we only ask (#FR1C). -->
+      <button type="button" id="welcome-install" class="quiet-button" hidden>Install Relay</button>
+
+      <div id="welcome-other">
+        <p class="muted small" id="welcome-qr-line">Or scan the QR code on the desktop with this
+          device's camera.</p>
+        <!-- The link the QR carries, pasted. For an installed app on iOS: the camera opens a link
+             in Safari, and a web app on the Home Screen has storage of its own, so the only way a
+             pairing link reaches the installed app is through the clipboard (#PH0N). -->
+        <label class="field-label small" for="welcome-link">Or paste the pairing link</label>
+        <input id="welcome-link" type="url" inputmode="url" autocomplete="off" autocapitalize="off"
+               autocorrect="off" spellcheck="false" placeholder="https://join.relay-terminal.ai/pair#…">
+        <p id="welcome-link-note" class="note"></p>
+        <button type="button" id="welcome-pair" class="quiet-button" disabled>Pair with this link</button>
+      </div>
     </div>
   </section>
 
@@ -72,6 +129,15 @@
   </section>
 
   <section class="screen" id="screen-inbox" hidden>
+    <!-- Above the panes, and only while there is something to offer (#FR1C): the one button that
+         turns notifications on the first time this app reaches the inbox, and the browser's own
+         install prompt where there is one. Both collapse once they have been used — the settings
+         at the bottom of this screen are where notifications are changed afterwards. -->
+    <div class="pad" id="inbox-top" hidden>
+      <button type="button" id="notify-offer" hidden>Turn on notifications</button>
+      <button type="button" id="inbox-install" class="quiet-button" hidden>Install Relay</button>
+      <p id="notify-offer-note" class="muted small"></p>
+    </div>
     <div id="pane-list"></div>
     <p id="inbox-empty" class="pad muted"></p>
     <!-- Notifications (docs/REMOTE-PROTOCOL.md section 9). The browser only grants permission

@@ -354,6 +354,59 @@ details.tool > summary::marker { color: var(--muted); }
 #term-direct.is-on { background: var(--ok); color: #10131a; }
 #term-direct { background: var(--line); color: var(--text); }
 
+/* ---- the welcome screen: the code first (#FR1C) -------------------------------------------- */
+/* Four letters and four digits read off the desktop, then — smaller, under a rule — the QR and
+   the pasted link. The screen scrolls inside itself: with a phone's keyboard up the page is only
+   as tall as what is left above it, and the Pair button must not go off the bottom. */
+#screen-welcome { overflow-y: auto; }
+.lead { font-weight: 600; font-size: 17px; margin: 18px 0 10px; }
+
+/* The two fields, side by side so the whole code is read in one glance, and big and monospaced
+   because they are copied character by character off another screen. */
+.code-fields { display: flex; gap: 12px; margin-bottom: 4px; }
+.code-fields > div { flex: 1; min-width: 0; }
+.code-field {
+  width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line);
+  border-radius: 10px; padding: 10px 12px; text-align: center; letter-spacing: 6px;
+  font: 600 24px/1.2 ui-monospace, "SF Mono", Menlo, monospace;
+}
+.code-field:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+#welcome-code-pair, #notify-offer, #install-copy {
+  width: 100%; background: var(--accent); color: #10131a; border: 0; border-radius: 10px;
+  padding: 12px 16px; font: inherit; font-weight: 600; cursor: pointer;
+}
+#welcome-code-pair[disabled], #notify-offer[disabled] {
+  background: var(--line); color: var(--muted); cursor: default;
+}
+#welcome-install { display: block; width: 100%; margin-top: 16px; }
+
+/* The older ways in, quieter: a rule, then the QR line and the paste field at small size. */
+#welcome-other { margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--line); }
+#welcome-other .field-label { margin-top: 10px; }
+#welcome-pair { margin-top: 8px; }
+
+/* iPhone and iPad before the app is on the Home Screen: the one thing to do, above everything. */
+#install-card {
+  background: var(--panel); border: 1px solid var(--accent); border-radius: var(--radius);
+  padding: 14px; margin-bottom: 18px;
+}
+#install-lead { margin-bottom: 10px; }
+#install-steps { margin: 0; padding-left: 20px; color: var(--muted); font-size: 14px; }
+#install-steps li { margin-bottom: 4px; }
+#install-link-row { margin-top: 14px; }
+#install-link-row p { margin: 8px 0 0; }
+/* The link itself, for the phone whose clipboard API is refused: it is selectable text, and the
+   Copy button selects it so a long press can copy it by hand. */
+#install-link {
+  overflow-wrap: anywhere; user-select: all; -webkit-user-select: all; color: var(--muted);
+}
+#install-link:empty { display: none; }
+
+/* The inbox's own top row: the notifications offer on first arrival, and the install prompt. */
+#inbox-top { display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid var(--line); }
+#inbox-top p:empty { display: none; }
+#inbox-top p { margin: 0; }
+
 /* ---- a guest, on somebody else's computer (protocol section 10) --------------------------- */
 /* The whole point of this chrome is that it cannot be mistaken for your own machine: a warm rule
    across the top, the desktop's name where your own would be, and the role spelled out under it.
