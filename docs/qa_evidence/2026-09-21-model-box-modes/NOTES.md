@@ -58,6 +58,16 @@ The lists were seeded so each thing the card asks for is visible:
    clicks "Initialize here" instead, which is also a truer test: the console is then a real board's
    console.
 
+## A command's sentence survives the switch it asked for
+
+`drive-sentence.sh` in this folder, a second short run against the same build.
+
+| shot | what it proves |
+|---|---|
+| `m1-glm-said` | half a second after `/glm`: **`model: glm-5.3 · z.ai (glm).`** — the command's own line, which says which key is being spent |
+| `m2-glm-still-said` | the same line three seconds later. `model_changed` has been and gone; before `sayAndSwitch` it replaced this with the generic "model: … · conversation kept", which is the defect `e7cab7d2` fixed for `/swap` alone |
+| `m3-box-after` | and the box is unchanged by the two follow-up commits (`conciseModel`'s removal and the one-shot): the modes, the marker on `main (glm-5.3)`, the list in order, `glm-5.3  z.ai (glm) +1` highlighted because that is now the pane's model |
+
 ## The marker gutter
 
 The mode rows carry their mark in the row's **text** — `"• "` on the mode the pane is in, two spaces
