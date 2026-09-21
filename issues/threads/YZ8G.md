@@ -129,3 +129,6 @@ Owner: "re 3 econometrics -- thats of course my personal interest, but its niche
 <!-- relay:entry 20260921T222650Z-dg author=claude-code kind=decision -->
 ### Claude Code · 2026-09-21 22:26
 Owner answered the four questions ("1 OK", "2 i think cards need to be moveable by agents. are you saying, the verifier is a separate agent?", "3 yes", "4 what do you mean by that? separate LLMs?") and asked whether quiet time in QA is evidence, "eg usage logs indicating usage of features that the card touches". Recorded in `## Decisions`; proven-in-use added to phase 2 of `## Plan`. Card stays in discussing until the owner confirms the plan's phase 2 and 3 scope.
+<!-- relay:entry 20260921T222812Z-dh author=claude-code kind=decision -->
+### Claude Code · 2026-09-21 22:28
+Owner: "i was not looking at knowledge work as a metaphor for verification. i was asking, how will knowlege workers use relay terminal". Recorded; the product question (a researcher's cards, their "done", what the tooling row becomes) is now the open one, with a product pass on three people proposed, economist first.
