@@ -1,0 +1,13 @@
+pair                 device='ccfa15f877c6ce8c' name='Linux Chrome' capability='full' peer='127.0.0.1'
+push_subscribe       device='ccfa15f877c6ce8c'
+push_subscribe       device='ccfa15f877c6ce8c'
+invite_create        invite='3654c7a19d92b168' panes=['ce776bb3-698a-40be-9d4f-1e88861863ba'] tab='' role='editor' uses=1 expires=1790035519.257
+knock                participant='e82abd1febe5ce37' invite='3654c7a19d92b168' name='alice' peer='127.0.0.1' role='editor'
+knock_answer         device='ccfa15f877c6ce8c' participant='e82abd1febe5ce37' admit=True
+admitted             participant='e82abd1febe5ce37' invite='3654c7a19d92b168' role='editor' panes=['ce776bb3-698a-40be-9d4f-1e88861863ba'] uses_left=0
+join                 participant='e82abd1febe5ce37' peer='127.0.0.1'
+guest_prompt         participant='e82abd1febe5ce37' pane='ce776bb3-698a-40be-9d4f-1e88861863ba' prompt='8f9d690e0ca2c92a' text='GUESTQ what is in this folder?' plan=None immediate=None
+prompt_answer        device='ccfa15f877c6ce8c' prompt='8f9d690e0ca2c92a' approved=True
+prompt_decided       participant='e82abd1febe5ce37' pane='ce776bb3-698a-40be-9d4f-1e88861863ba' prompt='8f9d690e0ca2c92a' approved=True reason=None
+join                 participant='e82abd1febe5ce37' peer='127.0.0.1'
+leave                participant='e82abd1febe5ce37'

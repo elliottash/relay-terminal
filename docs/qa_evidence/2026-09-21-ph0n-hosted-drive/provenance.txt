@@ -1,0 +1,15 @@
+HEAD          4cffa9b2 phone: a pairing link can be pasted on the welcome screen (#PH0N)
+build/relay   2026-09-20 19:51:25
+dirty files   69
+   M src/BoardPane.cpp
+   M src/FilePanes.cpp
+   M src/FilePanes.h
+   M src/HelperChat.cpp
+   M src/HelperChat.h
+   M src/Keymap.h
+   M src/ModelRows.cpp
+   M src/Pane.h
+   M src/PaneChrome.h
+   M src/PaneLayout.h
+   M src/RelayWindow.h
+served app.js 7c195862cf60  repo app.js 9729d3652be5
