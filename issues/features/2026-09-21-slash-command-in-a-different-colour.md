@@ -35,11 +35,6 @@ looking like a command. The owner's screenshot is that row.
    actually drawn on, keeping its hue. Both paint paths apply it on a role row: the grid rows and
    the re-wrapped prose rows (#R2WQ).
 
-## Tests
-- `ctest -R relay-engine-tests` — the view test: a coloured run inside a role row keeps a hue of
-  its own, clears 4.5:1 on the band, and is recoloured by a scheme switch like the rest of the row.
-- Evidence: the pane with `/deliver …` echoed, in a light-band and a dark-band theme.
-
 ## Execution Summary
 `Pane::printInline` writes the leading `/command` of a line it echoes to the agent with SGR 96 —
 a palette *index*, so the theme's own palette decides the hue when the view paints and a theme
@@ -56,6 +51,7 @@ configures and builds `relay`. The id first written on this card (`SLQ3`) is not
 to `#SQ3D` in the follow-up commit.
 
 ## Tests
+`xvfb-run ./build/engine/relay-engine-tests` — 181 passed, 0 failed (the whole engine binary).
 `RELAY_ENGINE_TEST=FaintInkTest ./build/engine/relay-engine-tests` — 24 passed.
 `RELAY_ENGINE_TEST=ViewTest ./build/engine/relay-engine-tests aCommandInAUserRowKeepsItsHueAndClearsItsBand`
 — passed, and checked to fail with either of the two view branches disabled, so both paint paths
