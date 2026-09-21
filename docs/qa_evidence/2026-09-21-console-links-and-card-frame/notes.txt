@@ -1,0 +1,35 @@
+===== (a) an option: link in the Options helper's own transcript =====
+PASS a0 the Options helper is a console ("Ask the Options helper" in a01-console.png)
+the page before the link: Thinking display|Reset to defaults|Show tool output|Desktop notifications|Shortcut hints|Recap when you come back|Open items with a single click|Reopen windows on start|Update channel|Log detail|
+PASS a0 Options opens on General ("Thinking display" is a row of the page on screen)
+PASS a0 and the Terminal page is not the one up (no "Copy on select" row: that page is gone)
+PASS a1 the answer carries an option: link ("Clicking" in a02-link.png)
+the page after the link: Command suggestions from history|Reset to defaults|Control when a full-screen program starts|Copy on select|Colour paths and links in output|Band behind what you typed|Shell integration (OSC 7/133)|SSH sessions|Never enhance on|Always enhance on|
+PASS a1 the link revealed the row on the page it names ("Copy on select" is a row of the page on screen)
+PASS a1 and the page it was on is gone (no "Thinking display" row: that page is gone)
+===== (b) an option: link clicked in the Switchboard console =====
+PASS b0 the Switchboard's own console is the prompt box ("Ask the Switchboard agent" in b01-console.png)
+PASS b1 the Switchboard console answers with the same link ("Clicking" in b02-link.png)
+the page the window opened: Command suggestions from history|Reset to defaults|Control when a full-screen program starts|Copy on select|Colour paths and links in output|Band behind what you typed|Shell integration (OSC 7/133)|SSH sessions|Never enhance on|Always enhance on|
+PASS b1 the window opened Options at the row the link names ("Copy on select" is a row of the page on screen)
+PASS b1 on the Terminal page, not the one Options opens on (no "Thinking display" row: that page is gone)
+===== (c) a session: link in the Sessions helper's transcript =====
+PASS c0 the Sessions helper is a console ("the Sessions helper" in c01-console.png)
+PASS c1 the answer carries a session: link ("Clicking" in c02-link.png)
+PASS c1 the link selected that conversation in this pane ("pane header and" in c03-revealed.png)
+PASS c1 and the one that was selected before it is not (no "equalize key" in c03-revealed.png)
+===== (d) a #ID card link in the Switchboard console =====
+PASS d0 the Switchboard's own console is the prompt box ("Ask the Switchboard agent" in d01-console.png)
+PASS d1 the answer names the card ("Clicking" in d02-link.png)
+PASS d1 the card link opened the card page on this board ("Back to board" in d03-card.png)
+PASS d1 …on the card it named ("The console is the prompt box" in d03-card.png)
+===== (e) the card page: one frame, and a plain first action =====
+PASS e0 the card page carries the console's reply box ("Enter discusses" in e02-card.png)
+FRAMES 2 at=782,1464
+BUTTONS row=945 797:2a2e37 833:6db1e3 883:2a2e37 890:b48ef7 997:b48ef7
+PASS e1 the card page draws one frame around the reply box (two rules: its left and its right)
+  Plan (p) border #2a2e37 luma 45
+PASS e2 Plan (p) is the plain card-shaped button (border luma 45)
+PASS e2 and 3 rule(s) past Plan's are still bright: Execute (x) keeps its outline
+
+22 PASS · 0 FAIL
