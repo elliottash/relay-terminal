@@ -112,6 +112,9 @@ public:
         if (entries.isEmpty()) environment += L'\0';
         STARTUPINFOEXW startup{};
         startup.StartupInfo.cb = sizeof(startup);
+        // Explicit null standard handles prevent redirected parent handles (e.g. ctest
+        // or a launcher log) bypassing the pseudoconsole. Windows Terminal does this too.
+        startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
         startup.lpAttributeList = attributes;
         PROCESS_INFORMATION process{};
         const BOOL created = CreateProcessW(nullptr, commandLine.data(), nullptr, nullptr, FALSE,
