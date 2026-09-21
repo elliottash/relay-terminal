@@ -301,7 +301,10 @@ h2 {
   font-family: var(--sans); font-weight: 600; font-size: clamp(1.4rem, 1.1rem + 1.2vw, 1.95rem);
   letter-spacing: -0.025em; margin: 0 0 36px; padding-left: var(--gutter); position: relative;
 }
-h2::before { content: "──"; position: absolute; left: 0; color: var(--line); }
+h2::before {
+  content: ""; position: absolute; left: 0; top: 0.825em;
+  width: calc(var(--gutter) - 0.6rem); border-top: 1px solid var(--line);
+}
 h3 { font-family: var(--mono); font-size: 1rem; font-weight: 600; margin: 0 0 6px; }
 
 /* Why: the six things nothing else does, numbered the way a wiring list is. */

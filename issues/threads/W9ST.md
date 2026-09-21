@@ -13,3 +13,9 @@ Landed e24a7d066c3da9a8b7c2f8439e5ef427134c0d65 and deployed with ./deploy.sh. B
 <!-- relay:entry 20260921T220036Z-a4 author=codex kind=decision -->
 ### Codex · 2026-09-21 22:00
 Owner correction: "its not a linux terminal". Changed the hero, search description and social description to "A workspace for agentic coding". Platform availability remains in installation/status details.
+
+<!-- relay:entry 20260921T220131Z-a5 author=codex kind=progress -->
+### Codex · 2026-09-21 22:01
+Owner: "this line overlapping the words looks bad". Replaced the heading’s font-sized box-drawing characters with a bounded CSS rule inside the existing gutter, leaving 0.6rem clear of the text at every breakpoint.
+
+Verified in Chrome at 360, 720 and 1280px in both themes: every heading retains at least 9.6px between its rule and text. Visually inspected /tmp/relay-heading-fixed.png.
