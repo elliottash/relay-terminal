@@ -1079,6 +1079,14 @@ public:
     // the pair above, so a conversation opened twice does not stack them.
     static QString sessionTextOpenMark() { return QStringLiteral("— saved terminal text from this conversation —"); }
     static QString sessionTextCloseMark() { return QStringLiteral("— end of the conversation's saved text; this shell is new —"); }
+    // And a third pair, for a console putting one surface's transcript away and bringing another
+    // one back (card #CTRN, `clearTranscript`). Neither pair above can be its: a console has no
+    // shell, so "this shell is new" is a sentence about something it does not have, and the text
+    // is not a *conversation's* — the card's conversation is the worker's file and outlives this.
+    static QString surfaceTextOpenMark() { return QStringLiteral("— what was said here before —"); }
+    static QString surfaceTextCloseMark() { return QStringLiteral("— end of what was said here before —"); }
+    // Which pair of rules a queued replay is printed between.
+    enum class RestoredKind { Scrollback, Conversation, Surface };
 
     // Everything this pane is holding, oldest first. Relay's own restore rules are dropped: saving
     // them would stack one set per restore inside the history, and each run prints its own.
@@ -1087,7 +1095,8 @@ public:
                          const QString plain = stripSgr(line);
                          return plain == scrollbackOpenMark() || plain == scrollbackLegacyOpenMark()
                                 || plain == scrollbackCloseMark() || plain == sessionTextOpenMark()
-                                || plain == sessionTextCloseMark();
+                                || plain == sessionTextCloseMark() || plain == surfaceTextOpenMark()
+                                || plain == surfaceTextCloseMark();
                      }),
                      lines->end());
     }
@@ -1248,10 +1257,10 @@ public:
     // here rather than at start-up: a pane that opens one conversation after another replays each.
     // False when there is nothing saved, which is what sends the caller to the transcript.
     bool queueSessionTextReplay(const QString &path) { return queueTextReplay(relay::sessiontext::read(path)); }
-    bool queueTextReplay(const QStringList &lines) {
+    bool queueTextReplay(const QStringList &lines, RestoredKind kind = RestoredKind::Conversation) {
         if (lines.isEmpty()) return false;
         m_restoredScrollback = lines;
-        m_restoredIsSessionText = true;
+        m_restoredKind = kind;
         m_scrollbackReplayed = false;
         QTimer::singleShot(0, this, [this] { replayRestoredScrollback(); });
         return true;
@@ -3629,7 +3638,7 @@ public:
         resetTranscript();
         if (m_backend) { m_backend->clearScrollback(); m_backend->clear(); }
         m_restoredScrollback.clear();
-        queueTextReplay(m_bankedText.value(now));   // nothing banked: nothing is replayed
+        queueTextReplay(m_bankedText.value(now), RestoredKind::Surface);   // nothing banked: nothing is replayed
         rebuildQueueStrip();                        // the strip is the new surface's too
     }
 
@@ -11398,6 +11407,8 @@ private:
             m_queuePaused = event.value(QStringLiteral("paused")).toBool();
             m_workerItems = workerRowsIn(event, QStringLiteral("items"));
             m_workerSteering = workerRowsIn(event, QStringLiteral("steering"));
+            for (const QList<WorkerRow> *group : {&m_workerItems, &m_workerSteering})
+                for (const WorkerRow &row : *group) m_workerPreviews.insert(row.id, row.preview);
             // Forget prompts that are neither running nor queued any more (removed or cleared).
             const auto gone = [this](const QString &id) {
                 const auto named = [&id](const WorkerRow &row) { return row.id == id; };
@@ -11409,6 +11420,8 @@ private:
                 if (gone(it.key())) it = m_itemPrompts.erase(it); else ++it;
             for (auto it = m_workerPrompts.begin(); it != m_workerPrompts.end();)
                 if (gone(it.key())) it = m_workerPrompts.erase(it); else ++it;
+            for (auto it = m_workerPreviews.begin(); it != m_workerPreviews.end();)
+                if (gone(it.key())) it = m_workerPreviews.erase(it); else ++it;
             // The selected row may have started, been withdrawn or been taken by another device.
             if (!m_selectedWorkerRow.isEmpty() && gone(m_selectedWorkerRow)) {
                 m_selectedWorkerRow.clear();
@@ -14402,12 +14415,18 @@ private:
         // Two blocks can be replayed into one pane, and they are not the same thing: the pane's
         // own text from before the restart, and a conversation's text, which followed the
         // conversation here and was printed in some other pane (#0TJ9). Each wears its own rule.
-        const bool conversation = m_restoredIsSessionText;
-        m_restoredIsSessionText = false;
+        const RestoredKind kind = m_restoredKind;
+        m_restoredKind = RestoredKind::Scrollback;
+        const QString openMark = kind == RestoredKind::Surface      ? surfaceTextOpenMark()
+                               : kind == RestoredKind::Conversation ? sessionTextOpenMark()
+                                                                    : scrollbackOpenMark();
+        const QString closeMark = kind == RestoredKind::Surface      ? surfaceTextCloseMark()
+                                : kind == RestoredKind::Conversation ? sessionTextCloseMark()
+                                                                     : scrollbackCloseMark();
         const QStringList lines = m_restoredScrollback;
         m_restoredScrollback.clear();
         QByteArray out = "\r\x1b[2K";
-        out += inkCode(Ink::Note) + (conversation ? sessionTextOpenMark() : scrollbackOpenMark()).toUtf8() + "\x1b[0m\r\n";
+        out += inkCode(Ink::Note) + openMark.toUtf8() + "\x1b[0m\r\n";
         // Saved output is replayed as text: any escape sequence left in the file is stripped, so
         // a hand-edited (or truncated) file cannot drive the terminal. When the backend produced
         // ANSI-formatted scrollback we keep the SGR sequences and strip everything else.
@@ -14415,7 +14434,7 @@ private:
             const QString safe = line.contains(QLatin1Char('\x1b')) ? sanitizeSgrOnly(line) : sanitize(line);
             out += safe.toUtf8() + "\r\n";
         }
-        out += inkCode(Ink::Note) + (conversation ? sessionTextCloseMark() : scrollbackCloseMark()).toUtf8() + "\x1b[0m\r\n";
+        out += inkCode(Ink::Note) + closeMark.toUtf8() + "\x1b[0m\r\n";
         writeTerminal(out);
         // Not redrawPrompt(): Readline still believes its prompt is where it drew it, and the
         // restored block has just scrolled the screen out from under it, so the repaint is a no-op
@@ -14423,7 +14442,9 @@ private:
         // An empty line is the shell's own way of printing a fresh prompt where the cursor now is.
         // A console has no shell to print one.
         if (hasShell()) sendShellInput(QStringLiteral("\n"));
-        status(conversation
+        status(kind == RestoredKind::Surface
+                   ? QStringLiteral("Drew back %1 line(s) of what was said here before.").arg(lines.size())
+               : kind == RestoredKind::Conversation
                    ? QStringLiteral("Restored %1 line(s) of this conversation's saved terminal text.").arg(lines.size())
                    : QStringLiteral("Restored %1 line(s) of scrollback from this pane's previous shell.").arg(lines.size()));
     }
@@ -17221,7 +17242,17 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
     // What the "▸ running" line of the queue strip says: the queue item or agent turn in progress.
     QString runningLabel() const {
         if (m_activeValid) return (m_active.agent ? QStringLiteral("✦ ") : QStringLiteral("$ ")) + m_active.label();
-        if (m_agentBusy) return QStringLiteral("✦ ") + m_itemPrompts.value(m_currentItem).text;
+        // A console's own prompt travels as its context's message (`board_ask`) and is kept out
+        // of `m_itemPrompts` on purpose — that map is what `agent_started` prints its "✦ …" line
+        // from, and a card's question is already on the thread above the console. The running
+        // row still has to say what is running, so it falls back to the same words the §12 rows
+        // are drawn from (card #CTRN).
+        if (m_agentBusy) {
+            if (m_itemPrompts.contains(m_currentItem))
+                return QStringLiteral("✦ ") + m_itemPrompts.value(m_currentItem).text;
+            const QString sent = m_workerPrompts.value(m_currentItem).text;
+            return QStringLiteral("✦ ") + (sent.isEmpty() ? m_workerPreviews.value(m_currentItem) : sent);
+        }
         if (!m_promptReported && !m_pendingCommand.isEmpty()) return QStringLiteral("$ ") + m_pendingCommand;
         return {};
     }
@@ -18124,9 +18155,10 @@ private:
     // The outgoing conversation's text is on disk and the screen has been wiped, so the next
     // change of conversation must not save the blank screen over it (/new, "clear the terminal").
     bool m_sessionTextBanked = false;
-    // True while m_restoredScrollback holds a *conversation's* text rather than this pane's own:
-    // the two wear different rules, because only one of them was printed in this pane.
-    bool m_restoredIsSessionText = false;
+    // Whose text m_restoredScrollback holds: this pane's previous shell, a conversation's (which
+    // may have been printed in another pane, #0TJ9) or a surface's, put away and brought back by
+    // one console (card #CTRN). Each wears its own pair of rules.
+    RestoredKind m_restoredKind = RestoredKind::Scrollback;
     // One console, several surfaces (card #CTRN, `clearTranscript`): which surface the rows on
     // screen were printed for, and what the surfaces before it left behind. Empty and empty for
     // every pane that is not a card page's console, which is every pane but one.
@@ -18332,6 +18364,10 @@ private:
     // 120-character preview and writing that back would truncate the prompt.
     QList<ContextSubmit> m_contextSubmits;
     QHash<QString, ContextSubmit> m_workerPrompts;   // worker item id -> what was typed here
+    // And the preview of every row the worker reported, whoever sent it, kept while that item is
+    // queued or running: it is what the "▸ running" line says for a turn this console did not
+    // submit — a card asked from a phone, say. Never used to *edit* a row: it is 120 characters.
+    QHash<QString, QString> m_workerPreviews;
     QString m_runningItem, m_currentItem;
     bool m_queuePaused = false;
     QList<QueueEntry> m_entries;
