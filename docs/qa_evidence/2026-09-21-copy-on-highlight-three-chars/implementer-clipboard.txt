@@ -1,0 +1,37 @@
+the marker line is at x=75 y=164 (249 px over 31 characters: a cell is about 8px)
+
+--- sweeping the drag at y=164: what each one covers (Ctrl+C on it), and what copy on highlight alone does with it
+    press x=75, release x=77 (2 px) -> an explicit copy of it holds 'A' (1 letters or digits)
+    press x=75, release x=79 (4 px) -> an explicit copy of it holds 'A' (1 letters or digits)
+    press x=75, release x=81 (6 px) -> an explicit copy of it holds 'A' (1 letters or digits)
+    press x=75, release x=83 (8 px) -> an explicit copy of it holds 'AA' (2 letters or digits)
+    press x=75, release x=85 (10 px) -> an explicit copy of it holds 'AA' (2 letters or digits)
+    press x=75, release x=87 (12 px) -> an explicit copy of it holds 'AA' (2 letters or digits)
+    press x=75, release x=89 (14 px) -> an explicit copy of it holds 'AA' (2 letters or digits)
+    press x=75, release x=91 (16 px) -> an explicit copy of it holds 'AA' (2 letters or digits)
+    press x=75, release x=93 (18 px) -> an explicit copy of it holds 'AAA' (3 letters or digits)
+    press x=75, release x=95 (20 px) -> an explicit copy of it holds 'AAA' (3 letters or digits)
+    press x=75, release x=97 (22 px) -> an explicit copy of it holds 'AAA' (3 letters or digits)
+    press x=75, release x=99 (24 px) -> an explicit copy of it holds 'AAA' (3 letters or digits)
+    press x=75, release x=101 (26 px) -> an explicit copy of it holds 'AAAA' (4 letters or digits)
+    press x=75, release x=103 (28 px) -> an explicit copy of it holds 'AAAA' (4 letters or digits)
+    press x=75, release x=105 (30 px) -> an explicit copy of it holds 'AAAA' (4 letters or digits)
+    press x=75, release x=107 (32 px) -> an explicit copy of it holds 'AAAA' (4 letters or digits)
+    press x=75, release x=109 (34 px) -> an explicit copy of it holds 'AAAA' (4 letters or digits)
+    press x=75, release x=111 (36 px) -> an explicit copy of it holds 'AAAAB' (5 letters or digits)
+    press x=75, release x=113 (38 px) -> an explicit copy of it holds 'AAAAB' (5 letters or digits)
+    press x=75, release x=115 (40 px) -> an explicit copy of it holds 'AAAAB' (5 letters or digits)
+
+measured: a highlight of 'AA' (8 px from x=75) and of 'AAA' (18 px from x=75)
+    two characters, copy on highlight alone: CLIPBOARD 'SENTINEL-nothing-was-copied', PRIMARY 'SENTINEL-nothing-was-copied'
+PASS  a two-character highlight copies nothing (got 'SENTINEL-nothing-was-copied')
+PASS  a two-character highlight leaves PRIMARY alone (got 'SENTINEL-nothing-was-copied')
+PASS  an explicit copy of two characters still works (got 'copied')
+    the explicit copy on them holds 'AA'
+    three characters, copy on highlight alone: CLIPBOARD 'AAA', PRIMARY 'AAA'
+PASS  a three-character highlight copies the clipboard (got 'AAA')
+PASS  a three-character highlight copies PRIMARY (got 'AAA')
+    a wide highlight: CLIPBOARD 'AAAABBBBCCCCDDDDEEEEFFFFGGGG'
+PASS  a wide highlight still copies (got 'copied')
+
+6 passed, 0 failed
