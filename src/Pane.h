@@ -4606,12 +4606,15 @@ private:
         routeRow->setContentsMargins(2, 0, 2, 0);
         routeRow->setSpacing(6);
         m_editor = new RichEditor;
-        // The prompt box, by name. Every agent surface in Relay is this widget since card #AGNT —
-        // a terminal pane, the Switchboard, a card, Options, Actions, Sessions — so a QA driver
-        // that wants "the composer of the console I am looking at" asks for `paneComposer` under
-        // that host, rather than for the first `RichEditor` in the window and hoping. The board's
-        // card page finds it by type (`setConsole`); the name is for the drives.
-        m_editor->setObjectName(QStringLiteral("paneComposer"));
+        // **Do not give this editor an objectName.** `RichEditor`'s constructor already sets one
+        // -- `composerEditor` -- and three things read it rather than the type: the stylesheet
+        // rule that makes it borderless in the prompt font, `theme::polishWindow`, which names
+        // the frame around it `composer` and this widget `pane` by finding it, and
+        // `RelayWindow::repolishLeaf`, which follows `relayActive` to that frame. Renaming it to
+        // something a QA driver would rather type cost all three: the drive of card #AGNT caught
+        // the editor painting its own default frame inside the composer's. `composerEditor` **is**
+        // the stable name, in a terminal pane and in every console, and a driver asks for it under
+        // whichever host it is looking at.
         // Up and Down walk this pane's own history, kept in a file under the pane's layout id so
         // it survives a restart and a close-and-reopen, and stays this pane's alone (owner report,
         // 2026-09-19: "the up/down history seems to be getting commands from other panes, not just
