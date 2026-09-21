@@ -13,7 +13,6 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
-#include <QPair>
 #include <QScreen>
 #include <QScrollBar>
 #include <QShowEvent>
@@ -36,38 +35,17 @@ constexpr int kMaxRows = 14;   // past this the list scrolls; below it, it never
 constexpr int kRowRole = Qt::UserRole + 1;
 constexpr int kSeparatorRole = Qt::UserRole + 2;
 constexpr int kTrailingRole = Qt::UserRole + 3;
-// The marker gutter: a fixed-width column at the left of every row of a page that has a marked row,
-// so the names line up whether or not their own row carries the mark. kMarkerRole is 1 on the rows
-// that do; kGutterRole is 1 on every row of such a page. See `markerOf` below for why the mark is
-// carried in the row's text and taken back out here.
-constexpr int kMarkerRole = Qt::UserRole + 4;
-constexpr int kGutterRole = Qt::UserRole + 5;
+// The section columns (card #MDL1, design 5.3). kHeaderRole is 1 on a class label; kIndentRole is
+// 1 on every row of a list that has any header, so the models sit under their class's name and
+// the names still line up with each other whichever class they are in. This replaced the marker
+// gutter of the first design, where the mode the pane was in carried a bullet in its own text.
+constexpr int kHeaderRole = Qt::UserRole + 4;
+constexpr int kIndentRole = Qt::UserRole + 5;
 
-// The mark the model box puts on the mode the pane is in (relay::modelrows::modeRowText). It is in
-// the row's *text* because the combo, the popup and the phone's menu all draw the same string and
-// only one of the three can paint a gutter; the popup takes it back out and draws it itself, which
-// is the only way "high", "main" and "flash" can start at the same x in a proportional font. Two
-// spaces stand in its place on the rows that are not marked.
-const QString kMarker = QStringLiteral("\u2022");
-
-// (marked, the text without the marker column) for one row.
-QPair<bool, QString> markerOf(const QString &text)
+// How far a row under a header is indented: two spaces' worth, and never less than a few pixels.
+int indentWidth(const QFontMetrics &metrics)
 {
-    if (text.startsWith(kMarker + QLatin1Char(' '))) return {true, text.mid(kMarker.size() + 1)};
-    if (text.startsWith(QLatin1String("  "))) return {false, text.mid(2)};
-    return {false, text};
-}
-
-bool hasMarkerColumn(const QString &text)
-{
-    return text.startsWith(kMarker + QLatin1Char(' ')) || text.startsWith(QLatin1String("  "));
-}
-
-// How wide that column is: the mark, with room on either side of it. One number for every row of
-// the page, so the gutter cannot depend on which rows the filter happened to leave.
-int gutterWidth(const QFontMetrics &metrics)
-{
-    return metrics.horizontalAdvance(kMarker) + 7;
+    return std::max(metrics.horizontalAdvance(QLatin1String("  ")), 8);
 }
 
 QColor mix(const QColor &over, const QColor &under, qreal amount)
@@ -105,7 +83,8 @@ public:
         }
         const bool enabled = index.flags().testFlag(Qt::ItemIsEnabled);
         const bool current = option.state.testFlag(QStyle::State_Selected);
-        const int gutter = index.data(kGutterRole).toBool() ? gutterWidth(option.fontMetrics) : 0;
+        const bool header = index.data(kHeaderRole).toBool();
+        const int indent = !header && index.data(kIndentRole).toBool() ? indentWidth(option.fontMetrics) : 0;
 
         if (current) {
             const QRectF band = QRectF(rect).adjusted(3, 1, -3, -1);
@@ -113,33 +92,31 @@ public:
             painter->setPen(QPen(mix(theme::Accent, theme::SurfaceRaised, 0.85), 1));
             painter->drawRoundedRect(band, 4, 4);
         }
-        painter->setFont(option.font);
+        QFont font = option.font;
+        // A class label is a label: the muted ink the section rules use elsewhere, and bold so the
+        // eye finds the four of them without a second colour.
+        if (header) font.setBold(true);
+        painter->setFont(font);
+        const QFontMetrics metrics(font);
         QRect text = rect.adjusted(kSidePad + 3, 0, -(kSidePad + 3), 0);
-        if (gutter > 0) {
-            if (index.data(kMarkerRole).toBool()) {
-                painter->setPen(enabled ? theme::Text : theme::TextMuted);
-                painter->drawText(QRect(text.left(), text.top(), gutter, text.height()),
-                                  Qt::AlignVCenter | Qt::AlignLeft, kMarker);
-            }
-            text.setLeft(text.left() + gutter);
-        }
+        if (indent > 0) text.setLeft(text.left() + indent);
         // The "via" part, at the far end and in the muted ink: which provider this row would
         // actually run on (card #MDL1, rule 2). It is drawn first and the name is elided into
         // what is left, so a narrow box loses the end of a long model id rather than the column
         // that says where the turn is going.
         const QString trailing = index.data(kTrailingRole).toString();
         if (!trailing.isEmpty()) {
-            const int width = option.fontMetrics.horizontalAdvance(trailing);
+            const int width = metrics.horizontalAdvance(trailing);
             if (width + 24 < text.width()) {
                 painter->setPen(theme::TextMuted);
                 painter->drawText(text, Qt::AlignVCenter | Qt::AlignRight, trailing);
                 text.setRight(text.right() - width - 12);
             }
         }
-        painter->setPen(enabled ? theme::Text : theme::TextMuted);
+        painter->setPen(header || !enabled ? theme::TextMuted : theme::Text);
         painter->drawText(text, Qt::AlignVCenter | Qt::AlignLeft,
-                          option.fontMetrics.elidedText(index.data(Qt::DisplayRole).toString(),
-                                                        Qt::ElideRight, text.width()));
+                          metrics.elidedText(index.data(Qt::DisplayRole).toString(),
+                                             Qt::ElideRight, text.width()));
         painter->restore();
     }
 };
@@ -229,13 +206,24 @@ bool FilterPopup::rowMatches(const FilterRow &row, const QString &query)
 {
     if (query.trimmed().isEmpty()) return true;
     if (row.separator) return false;
+    // A header is not matched on its own words: "main" would keep the main class and drop every
+    // other one while its own models are what the user is looking at. `groupHasMatch` decides it.
+    if (row.header) return false;
     return relayFuzzyScore(query.trimmed(), row.text) > 0;
+}
+
+// design 5.3: "typing filters across every listed model of every class (headers stay while their
+// class has a match)".
+bool FilterPopup::groupHasMatch(const QString &group, const QString &query) const
+{
+    if (group.isEmpty()) return false;
+    for (const FilterRow &row : m_rows)
+        if (!row.header && row.group == group && rowMatches(row, query)) return true;
+    return false;
 }
 
 void FilterPopup::setRows(const QList<FilterRow> &rows, int current)
 {
-    m_pages.clear();
-    m_page = 0;
     m_rows = rows;
     m_current = current >= 0 && current < rows.size() && !rows.at(current).separator && rows.at(current).enabled
         ? current
@@ -243,52 +231,29 @@ void FilterPopup::setRows(const QList<FilterRow> &rows, int current)
     rebuild(m_current);
 }
 
-// ----- pages (card #MDL1, section 5.1) ---------------------------------------------------------
-// The whole point of holding every page is that a turn changes nothing but which rows are drawn:
-// the popup stays open, the filter line is untouched and simply re-applied to the new rows, and
-// nothing is said to the caller until Enter. Escape after any number of turns is still "leave
-// everything as it was", because nothing has been sent.
+// ----- Left / Right: a class expands in place (card #MDL1, design 5.3) -------------------------
+// Nothing is asked of the caller until Enter here either: the caller is handed the class and the
+// direction, hands back a new list through setRows(), and the popup puts the highlight back on the
+// row it was on and re-applies whatever had been typed. Escape after any number of expansions is
+// still "leave everything as it was", because nothing has been sent.
 
-void FilterPopup::setPages(const QList<FilterPage> &pages, const QString &currentId)
+bool FilterPopup::expandCurrent(int delta)
 {
-    m_pages = pages;
-    m_page = 0;
-    for (int i = 0; i < m_pages.size(); ++i)
-        if (m_pages.at(i).id == currentId) { m_page = i; break; }
-    if (m_pages.isEmpty()) { setRows({}, -1); return; }
-    const FilterPage &page = m_pages.at(m_page);
-    const QList<FilterPage> keep = m_pages;
-    const int at = m_page;
-    setRows(page.rows, page.current);   // clears m_pages, so put them back
-    m_pages = keep;
-    m_page = at;
-}
-
-QString FilterPopup::currentPageId() const
-{
-    return m_page >= 0 && m_page < m_pages.size() ? m_pages.at(m_page).id : QString();
-}
-
-void FilterPopup::turnPage(int delta)
-{
-    if (m_pages.size() < 2 || delta == 0) return;
-    const int next = std::clamp(m_page + delta, 0, int(m_pages.size()) - 1);
-    if (next == m_page) return;
-    m_page = next;
-    const FilterPage &page = m_pages.at(m_page);
-    m_rows = page.rows;
-    m_current = page.current >= 0 && page.current < m_rows.size() && !m_rows.at(page.current).separator
-                    && m_rows.at(page.current).enabled
-        ? page.current
-        : -1;
-    rebuild(m_current);   // the filter text is untouched and re-applied by rebuild
-    if (onPageChanged) onPageChanged(page.id);
-}
-
-void FilterPopup::showPage(const QString &id)
-{
-    for (int i = 0; i < m_pages.size(); ++i)
-        if (m_pages.at(i).id == id) { turnPage(i - m_page); return; }
+    if (!onExpandKey || m_current < 0 || m_current >= m_rows.size()) return false;
+    const FilterRow &row = m_rows.at(m_current);
+    if (row.group.isEmpty()) return false;
+    // The row to come back to, by its `data` rather than its index: the list is about to be a
+    // different length, and a class that grew moves every row under it.
+    const QString was = row.data;
+    if (!onExpandKey(row.group, delta)) return false;
+    if (!was.isEmpty())
+        for (int i = 0; i < m_rows.size(); ++i)
+            if (m_rows.at(i).data == was && m_rows.at(i).enabled && !m_rows.at(i).separator) {
+                m_current = i;
+                rebuild(m_current);
+                break;
+            }
+    return true;
 }
 
 void FilterPopup::setFilterText(const QString &text)
@@ -306,25 +271,25 @@ void FilterPopup::rebuild(int preferRow)
 {
     const QString query = m_edit->text();
     const bool filtering = !query.trimmed().isEmpty();
-    // Whether this page carries a marker column at all, decided over *every* row rather than the
-    // ones the filter left: a page must not shift sideways as you type. A list with no marked rows
-    // — the Alt+E level box, and every other box — gets no gutter and is drawn exactly as before.
-    bool gutter = false;
+    // Whether this list has sections at all, decided over *every* row rather than the ones the
+    // filter left: the models must not shift sideways as you type. A list with no headers — the
+    // Alt+E level box, and every other box — gets no indent and is drawn exactly as before.
+    bool sections = false;
     for (const FilterRow &row : std::as_const(m_rows))
-        if (!row.separator && hasMarkerColumn(row.text)) { gutter = true; break; }
+        if (row.header) { sections = true; break; }
     m_list->clear();
     for (int i = 0; i < m_rows.size(); ++i) {
         const FilterRow &row = m_rows.at(i);
-        if (!rowMatches(row, query)) continue;
-        const QPair<bool, QString> mark = gutter ? markerOf(row.text) : qMakePair(false, row.text);
-        auto *item = new QListWidgetItem(row.separator ? QString() : mark.second, m_list);
+        // A header lives or dies with its class, never on its own words.
+        if (row.header ? !groupHasMatch(row.group, query) : !rowMatches(row, query)) continue;
+        auto *item = new QListWidgetItem(row.separator ? QString() : row.text, m_list);
         item->setData(kRowRole, i);
         item->setData(kSeparatorRole, row.separator);
         item->setData(kTrailingRole, row.trailing);
-        item->setData(kMarkerRole, mark.first);
-        item->setData(kGutterRole, gutter);
+        item->setData(kHeaderRole, row.header);
+        item->setData(kIndentRole, sections);
         if (!row.tooltip.isEmpty()) item->setToolTip(row.tooltip);
-        if (row.separator || !row.enabled) item->setFlags(Qt::NoItemFlags);
+        if (row.separator || row.header || !row.enabled) item->setFlags(Qt::NoItemFlags);
     }
     if (visibleCount() == 0) {
         // A quiet line rather than an empty box: an empty popup reads as a broken one.
@@ -500,9 +465,9 @@ void FilterPopup::layoutForAnchor(bool first)
     // No narrower than the box it hangs from, no wider than its own longest row — with room for
     // the filter line's own words, which are content too.
     int widest = std::max(anchor->width(), metrics.horizontalAdvance(m_edit->placeholderText()) + 4 * kSidePad);
-    // The marker column is drawn beside the text, not over it, so it is width the rows need.
+    // The class indent is drawn beside the text, not over it, so it is width the rows need.
     for (const FilterRow &row : std::as_const(m_rows))
-        if (!row.separator && hasMarkerColumn(row.text)) { widest += gutterWidth(metrics); break; }
+        if (row.header) { widest += indentWidth(metrics); break; }
     for (const FilterRow &row : std::as_const(m_rows))
         widest = std::max(widest, metrics.horizontalAdvance(row.text) + 4 * kSidePad
                                       + (row.trailing.isEmpty() ? 0
@@ -528,6 +493,15 @@ void FilterPopup::layoutForAnchor(bool first)
     if (!scrolls) m_list->verticalScrollBar()->setValue(0);
     else if (QListWidgetItem *item = m_list->currentItem(); item != nullptr)
         m_list->scrollToItem(item, QAbstractItemView::EnsureVisible);
+}
+
+// Whether the filter left that row (an index into rows()) in the list at all — scrolled out or
+// not, and a header or a separator as well as a model row.
+bool FilterPopup::rowShown(int row) const
+{
+    for (int r = 0; r < m_list->count(); ++r)
+        if (rowOf(m_list->item(r)) == row) return true;
+    return false;
 }
 
 // Whether that row (an index into rows()) is drawn whole, rather than scrolled out of the
@@ -627,15 +601,13 @@ bool FilterPopup::keyPress(QKeyEvent *key)
         return true;
     case Qt::Key_Left:
     case Qt::Key_Right:
-        // The owner's words were "left/right changes mode", with no condition on them, so that is
-        // what they do — **always**, whatever has been typed, and not only while the filter line is
-        // empty. A key that means one thing with an empty box and another with a letter in it is
-        // exactly the sort of guessing this popup replaced. The filter is still editable: typing
-        // appends, Backspace takes the last character back and Ctrl+A / Ctrl+U clear it, so the
-        // caret simply lives at the end of what you typed. A one-page list (the Alt+E level box)
-        // has no modes to turn between, and there Left and Right stay the line edit's own caret
-        // keys, exactly as they were.
-        if (m_pages.size() > 1) { turnPage(key->key() == Qt::Key_Left ? -1 : 1); return true; }
+        // Right opens the highlighted row's class to its whole list, Left closes it again (design
+        // 5.3). As with the paging it replaced, this is **unconditional**: a key that means one
+        // thing with an empty filter line and another with a letter in it is exactly the sort of
+        // guessing this popup was written to remove. The filter is still editable — typing
+        // appends, Backspace takes a character back, Ctrl+A / Ctrl+U clear it. A list with no
+        // sections (the Alt+E level box) leaves Left and Right to the line edit's caret.
+        if (expandCurrent(key->key() == Qt::Key_Left ? -1 : 1)) return true;
         return false;
     case Qt::Key_Tab:
     case Qt::Key_Backtab:

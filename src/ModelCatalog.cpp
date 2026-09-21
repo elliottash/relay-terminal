@@ -550,6 +550,51 @@ QString listEffortFor(const QString &key) {
             if (entry.key == key) return entry.effort;
     return QString();
 }
+// ----- what the box shows of each list (card #MDL1, design 5.3) --------------------------------
+
+QStringList boxClasses() {
+    // The design's order, and `lite` is not among them: it is never a pane mode, so the box has
+    // never had a row for it and it gets no cutoff of its own.
+    return {QStringLiteral("high"), QStringLiteral("main"), QStringLiteral("flash"), QStringLiteral("local")};
+}
+static QString boxCutoffKey(const QString &tier) { return QStringLiteral("models/box/") + tier; }
+static QString boxOffKey(const QString &tier) { return QStringLiteral("models/box_off/") + tier; }
+static QString profileBoxCutoffKey(const QString &name, const QString &tier) {
+    return QStringLiteral("models/profiles/") + name + QStringLiteral("/box/") + tier;
+}
+static QString profileBoxOffKey(const QString &name, const QString &tier) {
+    return QStringLiteral("models/profiles/") + name + QStringLiteral("/box_off/") + tier;
+}
+int boxCutoff(const QString &tier) {
+    if (!boxClasses().contains(tier)) return kBoxCutoffDefault;
+    return qMax(1, QSettings().value(boxCutoffKey(tier), kBoxCutoffDefault).toInt());
+}
+void setBoxCutoff(const QString &tier, int rank) {
+    if (!boxClasses().contains(tier)) return;
+    const int clean = qMax(1, rank);
+    QSettings settings;
+    settings.setValue(boxCutoffKey(tier), clean);
+    // Same invariant as setTierList: what the box shows belongs to the lists, so an edit made
+    // while a profile is current is an edit *of* that profile.
+    if (const QString name = currentProfile(); !name.isEmpty())
+        settings.setValue(profileBoxCutoffKey(name, tier), clean);
+}
+bool boxShown(const QString &tier) {
+    if (!boxClasses().contains(tier)) return true;
+    return !QSettings().value(boxOffKey(tier), false).toBool();
+}
+void setBoxShown(const QString &tier, bool on) {
+    if (!boxClasses().contains(tier)) return;
+    QSettings settings;
+    // Switching a class back on is the absence of the key again, so an install that never touched
+    // it and one that switched it off and on look the same.
+    if (on) settings.remove(boxOffKey(tier)); else settings.setValue(boxOffKey(tier), true);
+    if (const QString name = currentProfile(); !name.isEmpty()) {
+        if (on) settings.remove(profileBoxOffKey(name, tier));
+        else settings.setValue(profileBoxOffKey(name, tier), true);
+    }
+}
+
 void applyTierDefaults(const QJsonObject &lists) {
     for (const QString &tier : tierIds()) {
         QList<TierEntry> entries;
@@ -594,6 +639,13 @@ void saveProfile(const QString &name) {
     QSettings settings;
     for (const QString &tier : tierIds())
         settings.setValue(profileTierKey(clean, tier), settings.value(tierKey(tier)).toStringList());
+    // What the box shows of each class travels with the lists (design 5.3): a profile whose main
+    // list is four models deep and whose box shows three of them is one thing, not two.
+    for (const QString &klass : boxClasses()) {
+        settings.setValue(profileBoxCutoffKey(clean, klass), boxCutoff(klass));
+        if (boxShown(klass)) settings.remove(profileBoxOffKey(clean, klass));
+        else settings.setValue(profileBoxOffKey(clean, klass), true);
+    }
     QStringList names = profiles();
     if (!names.contains(clean)) { names << clean; store(kProfileOrder, names); }
     settings.setValue(kProfile, clean);
@@ -616,6 +668,12 @@ void applyProfile(const QString &name) {
         // holds nothing for is empty here too and not whatever the profile before it left behind.
         setTierList(tier, entries);
     }
+    // And the same for the box: a class the profile says nothing about is back at the defaults,
+    // not at whatever the profile before it showed.
+    for (const QString &klass : boxClasses()) {
+        setBoxCutoff(klass, settings.value(profileBoxCutoffKey(name, klass), kBoxCutoffDefault).toInt());
+        setBoxShown(klass, !settings.value(profileBoxOffKey(name, klass), false).toBool());
+    }
 }
 
 void renameProfile(const QString &from, const QString &to) {
@@ -627,6 +685,15 @@ void renameProfile(const QString &from, const QString &to) {
         settings.setValue(profileTierKey(clean, tier), settings.value(profileTierKey(from, tier)).toStringList());
         if (clean != from) settings.remove(profileTierKey(from, tier));
     }
+    for (const QString &klass : boxClasses()) {
+        settings.setValue(profileBoxCutoffKey(clean, klass),
+                          settings.value(profileBoxCutoffKey(from, klass), kBoxCutoffDefault).toInt());
+        if (settings.value(profileBoxOffKey(from, klass), false).toBool())
+            settings.setValue(profileBoxOffKey(clean, klass), true);
+        else
+            settings.remove(profileBoxOffKey(clean, klass));
+        if (clean != from) { settings.remove(profileBoxCutoffKey(from, klass)); settings.remove(profileBoxOffKey(from, klass)); }
+    }
     names[names.indexOf(from)] = clean;     // renaming keeps its place in the list
     store(kProfileOrder, names);
     if (settings.value(kProfile).toString() == from) settings.setValue(kProfile, clean);
@@ -637,6 +704,10 @@ void deleteProfile(const QString &name) {
     if (!names.contains(name)) return;
     QSettings settings;
     for (const QString &tier : tierIds()) settings.remove(profileTierKey(name, tier));
+    for (const QString &klass : boxClasses()) {
+        settings.remove(profileBoxCutoffKey(name, klass));
+        settings.remove(profileBoxOffKey(name, klass));
+    }
     names.removeAll(name);
     store(kProfileOrder, names);
     // The lists themselves stay: this machine goes on running on what it was running on, unnamed.
@@ -673,7 +744,15 @@ QJsonObject exportProfiles(const QStringList &names) {
         // "lite" missing could not tell "no lite models" from "this file predates the lite list".
         for (const QString &tier : tierIds())
             lists.insert(tier, listToJson(settings.value(profileTierKey(name, tier)).toStringList()));
-        out << QJsonObject{{QStringLiteral("name"), name}, {QStringLiteral("lists"), lists}};
+        // What the box shows of each class, every class written out for the same reason the empty
+        // lists are: a reader must not have to tell "two by default" from "this file is older".
+        QJsonObject box;
+        for (const QString &klass : boxClasses())
+            box.insert(klass, QJsonObject{
+                {QStringLiteral("cutoff"), qMax(1, settings.value(profileBoxCutoffKey(name, klass), kBoxCutoffDefault).toInt())},
+                {QStringLiteral("shown"), !settings.value(profileBoxOffKey(name, klass), false).toBool()}});
+        out << QJsonObject{{QStringLiteral("name"), name}, {QStringLiteral("lists"), lists},
+                           {QStringLiteral("box"), box}};
     }
     if (out.isEmpty()) return {};
     return QJsonObject{{QStringLiteral("relay"), kProfileDocMarker},
@@ -699,6 +778,17 @@ static ProfileDoc profileFromJson(const QJsonObject &object) {
             entries << TierEntry{Catalog::keyFor(preset, model), item.value(QStringLiteral("effort")).toString()};
         }
         if (!entries.isEmpty()) doc.lists.insert(tier, entries);
+    }
+    const QJsonObject box = object.value(QStringLiteral("box")).toObject();
+    for (const QString &klass : boxClasses()) {
+        if (!box.value(klass).isObject()) continue;   // absent, or a shape we do not read: the defaults
+        const QJsonObject item = box.value(klass).toObject();
+        BoxSetting setting;
+        if (item.value(QStringLiteral("cutoff")).isDouble())
+            setting.cutoff = qMax(1, item.value(QStringLiteral("cutoff")).toInt(kBoxCutoffDefault));
+        if (item.value(QStringLiteral("shown")).isBool())
+            setting.shown = item.value(QStringLiteral("shown")).toBool();
+        doc.box.insert(klass, setting);
     }
     return doc;
 }
@@ -740,6 +830,12 @@ void writeProfile(const ProfileDoc &profile) {
         for (const TierEntry &entry : profile.lists.value(tier))
             items << entry.key + QLatin1Char('|') + entry.effort;
         settings.setValue(profileTierKey(clean, tier), items);
+    }
+    for (const QString &klass : boxClasses()) {
+        const BoxSetting setting = profile.box.value(klass);
+        settings.setValue(profileBoxCutoffKey(clean, klass), qMax(1, setting.cutoff));
+        if (setting.shown) settings.remove(profileBoxOffKey(clean, klass));
+        else settings.setValue(profileBoxOffKey(clean, klass), true);
     }
     QStringList names = profiles();
     if (!names.contains(clean)) { names << clean; store(kProfileOrder, names); }

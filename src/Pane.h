@@ -903,6 +903,18 @@ public:
     QJsonArray allPresets() const { return m_presets; }
     // {plain: {tier: [entries]}, openrouter: {…}} — what the page's two "defaults" buttons apply.
     QJsonObject tierListDefaults() const { return m_tierListDefaults; }
+    // The two "fill the lists" buttons, as one call (card #MDL1 t:a8). Options › Models'
+    // `models.tier.defaults` row and the Ctrl+Alt+M dialog's "fill from defaults" are the same
+    // action over the same lists, so it lives here, where the worker's answer is held, and both
+    // doors call it. False means the worker has not sent defaults yet and nothing was written.
+    bool fillTierListsFromDefaults(bool withOpenrouter) {
+        const QJsonObject lists = m_tierListDefaults.value(withOpenrouter ? QStringLiteral("openrouter")
+                                                                          : QStringLiteral("plain")).toObject();
+        if (lists.isEmpty()) return false;
+        relay::models::curation::applyTierDefaults(lists);
+        return true;
+    }
+    bool hasTierListDefaults() const { return !m_tierListDefaults.isEmpty(); }
     // A reasoning level in the words of the provider this pane is on (owner, 2026-09-20: "for codex
     // planning you pick xhigh, not max"): Relay keeps its four levels and shows what is sent.
     QString effortLabel(const QString &level) const {
@@ -1613,6 +1625,9 @@ public:
     // Alt+M (agent.modelBox): the quick pick — the model box drops open where it is.
     void openModelBox() {
         if (!m_modelBox) return;
+        // "the expansion lasts while the box is open" (design 5.3): every Alt+M starts from the
+        // cutoffs again, so the box is the same short list every time it is reached for.
+        m_boxExpanded.clear();
         m_modelBox->setFocus(Qt::ShortcutFocusReason);
         m_modelBox->showPopup();
     }
@@ -1662,6 +1677,10 @@ public:
         // The tab it opens on is the mode this pane is in (card #MDL1 t:a7): Ctrl+Alt+M from a
         // /flash pane lands on the flash list, which is the one it would be editing.
         context.tier = relay::modelrows::roleTier(m_agentRole);
+        // "the defaults buttons move into the dialog as 'fill from defaults'" (design 5.5). The
+        // action is the pane's, because only a pane holds what its worker computed.
+        if (hasTierListDefaults() || !relay::models::curation::tierListsSet())
+            context.fillFromDefaults = [this](bool withOpenrouter) { return fillTierListsFromDefaults(withOpenrouter); };
         const relay::ModelPick pick = relay::pickModel(this, context, [this] {
             if (onOpenOptions) onOpenOptions(QStringLiteral("models"));
         }, [this] {
@@ -12552,9 +12571,10 @@ private:
         relay::modelrows::Context rows;
         rows.catalog = modelCatalog();
         rows.now = QDateTime::currentSecsSinceEpoch();
-        rows.modes = paneModes();
+        rows.classes = paneModes();
         rows.mode = paneMode();
-        for (const QString &mode : std::as_const(rows.modes)) {
+        rows.expanded = m_boxExpanded;
+        for (const QString &mode : std::as_const(rows.classes)) {
             const QString role = modeRoleOf(mode);
             rows.modeRole.insert(mode, role);
             rows.roleModel.insert(role, roleModelText(role));
@@ -12583,24 +12603,49 @@ private:
         return rows;
     }
 
-    // The pages the popup turns between with Left and Right: one per mode, every one carrying the
-    // same mode rows with the marker on the mode this pane is in.
-    QList<relay::FilterPage> modelBoxPages() const {
-        const relay::modelrows::Context rows = modelRowsContext();
-        QList<relay::FilterPage> pages;
-        for (const relay::modelrows::Page &page : relay::modelrows::pages(rows)) {
-            relay::FilterPage out;
-            out.id = page.mode;
-            out.label = page.mode;
-            for (int i = 0; i < page.rows.size(); ++i) {
-                const relay::modelrows::Row &row = page.rows.at(i);
-                if (row.separatorBefore) out.rows << relay::FilterRow{{}, {}, {}, true, false, {}};
-                if (i == page.current) out.current = int(out.rows.size());
-                out.rows << relay::FilterRow{row.text, row.data, row.tooltip, false, row.enabled, row.trailing};
+    // The rows the list drops open with (card #MDL1, design 5.3): every class's header and its
+    // models, the guest rows, then "more models…". `current` comes back as the index of the row
+    // this pane is on, which is the one the box opens highlighted.
+    QList<relay::FilterRow> modelBoxRows(int *current) const {
+        const relay::modelrows::Box shown = relay::modelrows::box(modelRowsContext());
+        QList<relay::FilterRow> out;
+        if (current != nullptr) *current = -1;
+        for (int i = 0; i < shown.rows.size(); ++i) {
+            const relay::modelrows::Row &row = shown.rows.at(i);
+            if (row.separatorBefore) {
+                relay::FilterRow rule;
+                rule.separator = true;
+                rule.enabled = false;
+                out << rule;
             }
-            pages << out;
+            if (i == shown.current && current != nullptr) *current = int(out.size());
+            relay::FilterRow item;
+            item.text = row.text;
+            item.data = row.data;
+            item.tooltip = row.tooltip;
+            item.enabled = row.enabled;
+            item.trailing = row.trailing;
+            item.group = row.group;
+            item.header = row.header;
+            out << item;
         }
-        return pages;
+        return out;
+    }
+    // Right on a model row opens its class to the whole list, Left closes it again. The expansion
+    // is this pane's, it lasts only while the box is open (openModelBox clears it), and it never
+    // reaches the settings: what the box shows *by default* is the dialog's cutoff.
+    bool expandModelClass(const QString &klass, int delta) {
+        if (klass.isEmpty() || !m_modelBox) return false;
+        const bool open = delta > 0;
+        if (open == m_boxExpanded.contains(klass)) return false;
+        // Nothing to open: a class the box is already showing whole. Saying so rather than
+        // redrawing the same list keeps Right from looking as if it did something.
+        if (open && !relay::modelrows::expandable(modelRowsContext(), klass)) return false;
+        if (open) m_boxExpanded.insert(klass); else m_boxExpanded.remove(klass);
+        int current = -1;
+        const QList<relay::FilterRow> rows = modelBoxRows(&current);
+        m_modelBox->replaceRows(rows, current);
+        return true;
     }
 
     void refreshPickers() {
@@ -12634,15 +12679,15 @@ private:
         const relay::modelrows::Context rows = modelRowsContext();
         const QString liveGuest = m_guestLeaving ? QString() : m_guest.isEmpty() ? m_guestWanted : m_guest;
         relay::modelrows::fill(m_modelBox, rows);
-        // Left and Right turn between the modes without closing the list, so the popup is handed
-        // every page at once and answers a pick by the row's own data (card #MDL1, section 5.1).
-        m_modelBox->pageId = rows.mode;
-        // Read again the moment the list is about to be drawn: the box always opens on the mode
-        // this pane is in, whatever page the last Escape happened to be over.
-        m_modelBox->onPages = [this] { m_modelBox->pageId = paneMode(); return modelBoxPages(); };
+        // The rows are read again the moment the list is about to be drawn, so the box always
+        // opens on this pane's own model with no class expanded (card #MDL1, design 5.3).
+        m_modelBox->onRows = [this](int *current) { return modelBoxRows(current); };
+        m_modelBox->onExpandKey = [this](const QString &klass, int delta) { return expandModelClass(klass, delta); };
         m_modelBox->onPickedData = [this](const QString &data) { modelBoxPicked(data); };
-        // The chip is the model alone on main and "<model> · <mode>" on any other mode, while the
-        // row it sits on is a mode row: that is what CurrentTextComboBox::setCollapsedText is for.
+        // The chip is **the model alone**, on every mode (owner, 2026-09-21: "no need to show the
+        // model class in the pane header"), while the row it sits on carries its class's header
+        // above it: that is what CurrentTextComboBox::setCollapsedText is for. The mode is in the
+        // box's tooltip instead.
         m_modelBox->setCollapsedText(m_serving.isEmpty() ? relay::modelrows::collapsedText(rows) : QString());
         m_modelBox->setEnabled(true);
         // The model actually serving the turn, when it is not the pane's own (C5): plan mode's
@@ -12655,8 +12700,12 @@ private:
                                    QStringLiteral("serving:") + serving.model);
             m_modelBox->setCurrentIndex(0);
         }
+        const QString onList = relay::modelrows::collapsedTooltip(rows);
         m_modelBox->setToolTip(modelTooltip(!m_serving.isEmpty()
             ? servingTooltip()
+            : !onList.isEmpty() && liveGuest.isEmpty() && !onGuestPreset()
+            // The mode left the chip with design 5.3, so this is where it is said.
+            ? onList
             : !liveGuest.isEmpty()
             ? QStringLiteral("%1 is this pane's agent: the prompt box is its input. Pick a model to leave it.").arg(guestName(liveGuest))
             : onGuestPreset()
@@ -13109,19 +13158,21 @@ public:
         // own order (owner, 2026-09-19): the roles as "model (role)", then the other presets —
         // the pane's own preset is the main row already. Not the gear (desktop settings) and not
         // the "this turn" image row, which is not a choice.
-        // The same strings the desktop box draws (card #MDL1): the chip is the model alone on main
-        // and "<model> · <mode>" on any other mode, and the menu is the mode rows followed by the
-        // models of the mode this pane is in — the page the box would open on. A phone is a view of
-        // this pane, so it cannot be a different list.
+        // The same strings the desktop box draws (card #MDL1, design 5.3): the chip is the model
+        // alone on every mode, and the menu is every class's models, the ones the box draws. A
+        // phone is a view of this pane, so it cannot be a different list. The class headers are
+        // labels and are not choices; a row of a class this pane is not in says which class it is,
+        // because a phone has no headers above it to say so.
         const relay::modelrows::Context phoneRows = modelRowsContext();
         const QString collapsed = relay::modelrows::collapsedText(phoneRows);
         in.modelLabel = !collapsed.isEmpty() ? collapsed
                         : m_modelBox        ? m_modelBox->displayText()
                                             : m_model;
         for (const relay::modelrows::Row &row : relay::modelrows::build(phoneRows)) {
-            if (row.data.startsWith(QStringLiteral("gear:")) || !row.enabled) continue;
-            const QString text = row.trailing.isEmpty() ? row.text
-                                                        : QStringLiteral("%1  ·  %2").arg(row.text, row.trailing);
+            if (row.header || row.data.startsWith(QStringLiteral("gear:")) || !row.enabled) continue;
+            QString text = row.text;
+            if (!row.group.isEmpty() && row.group != phoneRows.mode) text += QStringLiteral("  ·  ") + row.group;
+            if (!row.trailing.isEmpty()) text += QStringLiteral("  ·  ") + row.trailing;
             in.choices << relay::panestate::Choice{row.data, text,
                                                    row.data == QStringLiteral("role:") + m_agentRole
                                                        || row.data == QStringLiteral("pick:%1|%2")
@@ -17629,6 +17680,9 @@ private:
     // "main" is not kept here, because main's model is the pane's own (`currentEntryKey`). This
     // pane's, not the machine's: the tier lists are never rewritten by a pick.
     QHash<QString, relay::modelrows::ModePick> m_modePick;
+    // The classes Right has opened to their whole list while the model box is open (design 5.3).
+    // Not a setting and not saved: openModelBox empties it.
+    QSet<QString> m_boxExpanded;
     // Whether the restored picks have been checked against a catalog yet. One check, at the first
     // refresh that has one: a pick whose entry has left the catalog or lost its key is dropped
     // silently, and the mode reads rank 1 of its list again.

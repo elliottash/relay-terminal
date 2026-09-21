@@ -39,40 +39,33 @@ QList<FilterRow> modelRows()
     return rows;
 }
 
-// The model box's three mode pages (card #MDL1, section 5.1): the four mode rows, a separator,
-// then that mode's own models, then the two action rows. Each page opens on its own current row.
-QList<FilterPage> modePages()
+// The model box as design 5.3 draws it: a header per class, that class's top models indented
+// under it, then a separator and "more models…". `expandMain` is the same list with the main class
+// opened to its whole length, which is what the caller hands back from onExpandKey.
+QList<FilterRow> classRows(bool expandMain = false)
 {
-    const auto modeRows = [](const QString &marked) {
-        QList<FilterRow> rows;
-        for (const QString &mode : {QStringLiteral("high"), QStringLiteral("main"), QStringLiteral("flash")})
-            rows << FilterRow{(mode == marked ? QStringLiteral("• ") : QStringLiteral("  ")) + mode,
-                              QStringLiteral("role:") + mode, {}, false, true, {}};
-        rows << FilterRow{{}, {}, {}, true, false, {}};
-        return rows;
+    const auto head = [](const QString &klass, const QString &mark) {
+        return FilterRow{klass, QStringLiteral("class:") + klass, {}, false, false, mark, klass, true};
     };
-    QList<FilterPage> pages;
-    FilterPage high{QStringLiteral("high"), QStringLiteral("high"), modeRows(QStringLiteral("high")), -1};
-    high.rows << FilterRow{QStringLiteral("gpt-6-astra"), QStringLiteral("pick:high|openai|gpt-6-astra"),
-                           {}, false, true, QStringLiteral("codex")};
-    high.current = high.rows.size() - 1;
-    pages << high;
-    FilterPage main{QStringLiteral("main"), QStringLiteral("main"), modeRows(QStringLiteral("main")), -1};
-    main.rows << FilterRow{QStringLiteral("kimi-k3"), QStringLiteral("pick:main|kimi|kimi-k3"),
-                           {}, false, true, QStringLiteral("kimi")};
-    main.rows << FilterRow{QStringLiteral("glm-5.3"), QStringLiteral("pick:main|glm|glm-5.3"),
-                           {}, false, true, QStringLiteral("z.ai +1")};
-    main.current = 4;   // kimi-k3
-    pages << main;
-    FilterPage flash{QStringLiteral("flash"), QStringLiteral("flash"), modeRows(QStringLiteral("flash")), -1};
-    flash.rows << FilterRow{QStringLiteral("glm-5.3-flash"), QStringLiteral("pick:flash|glm|glm-5.3-flash"),
-                            {}, false, true, QStringLiteral("z.ai")};
-    flash.rows << FilterRow{QStringLiteral("kimi-k3-turbo"), QStringLiteral("pick:flash|kimi|turbo"),
-                            {}, false, true, QStringLiteral("kimi")};
-    flash.current = 5;   // kimi-k3-turbo
-    pages << flash;
-    return pages;
+    const auto model = [](const QString &klass, const QString &name, const QString &via) {
+        return FilterRow{name, QStringLiteral("pick:%1|%2").arg(klass, name), {}, false, true, via, klass, false};
+    };
+    QList<FilterRow> rows;
+    rows << head(QStringLiteral("high"), QString());
+    rows << model(QStringLiteral("high"), QStringLiteral("gpt-6-astra"), QStringLiteral("codex"));
+    rows << head(QStringLiteral("main"), expandMain ? QStringLiteral("\u2304") : QStringLiteral("\u203a"));
+    rows << model(QStringLiteral("main"), QStringLiteral("kimi-k3"), QStringLiteral("kimi"));
+    rows << model(QStringLiteral("main"), QStringLiteral("glm-5.3"), QStringLiteral("z.ai +1"));
+    if (expandMain) rows << model(QStringLiteral("main"), QStringLiteral("claude-opus-5"), QStringLiteral("anthropic"));
+    rows << head(QStringLiteral("flash"), QString());
+    rows << model(QStringLiteral("flash"), QStringLiteral("glm-5.3-flash"), QStringLiteral("z.ai"));
+    rows << FilterRow{{}, {}, {}, true, false, {}, {}, false};
+    rows << FilterRow{QStringLiteral("more models…"), QStringLiteral("gear:picker"), {}, false, true};
+    return rows;
 }
+
+// Where kimi-k3 sits in that list, collapsed: the row the box opens highlighted.
+constexpr int kMainModelRow = 3;
 
 }  // namespace
 
@@ -342,8 +335,8 @@ private slots:
     }
 
     // 11. The short list Alt+E opens is the same popup: four rows, no separators, and the pane's
-    //    level highlighted. It has no pages, so Left and Right are not the popup's at all — they
-    //    stay the filter line's caret keys, and nothing about this box changed.
+    //    level highlighted. It has no sections, so Left and Right are not the popup's at all —
+    //    they stay the filter line's caret keys, and nothing about this box changed.
     void theEffortListIsTheSameControl()
     {
         QList<FilterRow> levels;
@@ -351,11 +344,12 @@ private slots:
                                     QStringLiteral("high"), QStringLiteral("max")})
             levels << FilterRow{name, name, {}, false, true};
         FilterPopup popup;
+        int asked = 0;
+        popup.onExpandKey = [&asked](const QString &, int) { ++asked; return true; };
         popup.setRows(levels, 2);
-        QCOMPARE(popup.pageCount(), 0);
-        QCOMPARE(popup.currentPageId(), QString());
         QCOMPARE(popup.currentRow(), 2);
-        popup.turnPage(1);                        // nothing to turn to: a no-op, not a crash
+        QVERIFY(!popup.expandCurrent(1));   // no group on the row: never offered to the caller
+        QCOMPARE(asked, 0);
         QCOMPARE(popup.currentRow(), 2);
         popup.setFilterText(QStringLiteral("ma"));
         QCOMPARE(popup.visibleCount(), 2);        // "max", and "minimal" fuzzily
@@ -365,86 +359,114 @@ private slots:
         QCOMPARE(popup.activate(), 3);
     }
 
-    // ----- pages: Left / Right change the mode in place (card #MDL1, owner: "left/right changes
-    // mode") ---------------------------------------------------------------------------------
+    // ----- classes: headers are labels, Right opens one (card #MDL1, design 5.3) -----------
 
-    // 12. The box opens on the page the caller named, with that page's rows and that page's own
-    //     current row highlighted — not the first row, and not the row another page was on.
-    void pagesOpenOnTheNamedPageAndItsCurrentRow()
+    // 12. Up and Down never land on a header (owner: "the class header rows are not selectable in
+    //     the picker. thats redundant."), and the list opens on the row the caller named.
+    void upAndDownStepOverTheClassHeaders()
     {
         FilterPopup popup;
-        popup.setPages(modePages(), QStringLiteral("main"));
-        QCOMPARE(popup.pageCount(), 3);
-        QCOMPARE(popup.currentPageId(), QStringLiteral("main"));
-        QCOMPARE(popup.currentRow(), 4);
-        QCOMPARE(popup.rows().at(popup.currentRow()).data, QStringLiteral("pick:main|kimi|kimi-k3"));
-        QCOMPARE(popup.rows().at(1).text, QStringLiteral("• main"));   // the marker is on this mode
-        // A page id nobody knows opens the first page rather than nothing at all.
-        popup.setPages(modePages(), QStringLiteral("nope"));
-        QCOMPARE(popup.currentPageId(), QStringLiteral("high"));
+        popup.setRows(classRows(), kMainModelRow);
+        QCOMPARE(popup.rows().at(popup.currentRow()).data, QStringLiteral("pick:main|kimi-k3"));
+        QCOMPARE(popup.visibleCount(), 5);   // four models and "more models…"; the headers are not rows to land on
+
+        // Up from kimi-k3 skips the "main" header and lands on the high class's model.
+        popup.moveCurrent(-1);
+        QCOMPARE(popup.rows().at(popup.currentRow()).data, QStringLiteral("pick:high|gpt-6-astra"));
+        popup.moveCurrent(-1);               // nothing above it: the header is not a stop
+        QCOMPARE(popup.rows().at(popup.currentRow()).data, QStringLiteral("pick:high|gpt-6-astra"));
+
+        // And all the way down, every stop is a model or the action row — never a header.
+        QStringList walked;
+        popup.moveCurrent(-99);
+        for (int i = 0; i < 8; ++i) {
+            walked << popup.rows().at(popup.currentRow()).data;
+            popup.moveCurrent(1);
+        }
+        for (const QString &data : walked) QVERIFY2(!data.startsWith(QStringLiteral("class:")), qPrintable(data));
+        QCOMPARE(walked.last(), QStringLiteral("gear:picker"));
+        // The caller cannot force one either: a header handed in as the current row is refused.
+        popup.setRows(classRows(), 2);
+        QVERIFY(popup.currentRow() != 2);
     }
 
-    // 13. Right and Left turn the page in place: the rows below are the new mode's, the highlight
-    //     is that mode's own model, the popup never closes and nothing is picked.
-    void leftAndRightTurnThePageInPlace()
+    // 13. Right opens the highlighted row's class, Left closes it. The popup asks the caller, the
+    //     caller hands back a new list, and the highlight goes back on the row it was on.
+    void rightExpandsAClassAndLeftCollapsesIt()
     {
         QWidget anchor;
         anchor.resize(160, 22);
         anchor.show();
         FilterPopup popup(&anchor);
-        int picked = -2;
-        QStringList turns;
-        popup.onPicked = [&picked](int row) { picked = row; };
-        popup.onPageChanged = [&turns](const QString &id) { turns << id; };
-        popup.setPages(modePages(), QStringLiteral("main"));
+        QStringList asked;
+        bool expanded = false;
+        popup.onExpandKey = [&](const QString &group, int delta) {
+            asked << (delta > 0 ? QStringLiteral("+") : QStringLiteral("-")) + group;
+            if (group != QStringLiteral("main")) return false;
+            if ((delta > 0) == expanded) return false;      // already where it would go
+            expanded = delta > 0;
+            popup.setRows(classRows(expanded), -1);
+            return true;
+        };
+        popup.setRows(classRows(), kMainModelRow);
         popup.openFor(&anchor);
 
-        popup.turnPage(1);
-        QVERIFY(popup.isVisible());
-        QCOMPARE(popup.currentPageId(), QStringLiteral("flash"));
-        QCOMPARE(popup.rows().at(popup.currentRow()).data, QStringLiteral("pick:flash|kimi|turbo"));
-        QCOMPARE(popup.rows().at(2).text, QStringLiteral("• flash"));
-        QVERIFY(popup.rows().last().data.startsWith(QStringLiteral("pick:flash")));
+        popup.expandCurrent(1);
+        QCOMPARE(asked, QStringList({QStringLiteral("+main")}));
+        QVERIFY(popup.isVisible());                          // nothing closed, nothing was picked
+        QCOMPARE(popup.visibleCount(), 6);                   // the third main model joined the list
+        QVERIFY(popup.rows().at(5).data.endsWith(QStringLiteral("claude-opus-5")));
+        // The highlight is still on the row it was on, found by its data rather than its index.
+        QCOMPARE(popup.rows().at(popup.currentRow()).data, QStringLiteral("pick:main|kimi-k3"));
+        // And the header now says so the other way round.
+        QCOMPARE(popup.rows().at(2).trailing, QStringLiteral("⌄"));
 
-        popup.turnPage(-1);
-        popup.turnPage(-1);
-        QCOMPARE(popup.currentPageId(), QStringLiteral("high"));
-        QCOMPARE(popup.rows().at(popup.currentRow()).data, QStringLiteral("pick:high|openai|gpt-6-astra"));
-        popup.turnPage(-1);                                   // clamped: the first page holds
-        QCOMPARE(popup.currentPageId(), QStringLiteral("high"));
-        QCOMPARE(turns, QStringList({QStringLiteral("flash"), QStringLiteral("main"),
-                                     QStringLiteral("high")}));
-        QCOMPARE(picked, -2);                                 // nothing was picked by any of it
+        popup.expandCurrent(-1);
+        QCOMPARE(popup.visibleCount(), 5);
+        QCOMPARE(popup.rows().at(popup.currentRow()).data, QStringLiteral("pick:main|kimi-k3"));
+        QCOMPARE(popup.rows().at(2).trailing, QStringLiteral("›"));
+
+        // Left again: the caller says "nothing changed" and the list is left exactly as it is.
+        const int before = popup.visibleCount();
+        QVERIFY(!popup.expandCurrent(-1));
+        QCOMPARE(popup.visibleCount(), before);
+        QCOMPARE(asked, QStringList({QStringLiteral("+main"), QStringLiteral("-main"), QStringLiteral("-main")}));
         popup.dismiss();
     }
 
-    // 14. The filter survives a turn and is re-applied to the new page: typing "k" then Right
-    //     leaves "k" in the line and narrows the flash list by it.
-    void aTurnKeepsTheFilterAndReAppliesIt()
+    // 14. Typing filters across every class, and a header stays exactly as long as its own class
+    //     still has a match (design 5.3).
+    void aFilterKeepsTheHeadersWhoseClassStillMatches()
     {
         FilterPopup popup;
-        popup.setPages(modePages(), QStringLiteral("main"));
-        popup.setFilterText(QStringLiteral("kimi"));
-        QCOMPARE(popup.visibleCount(), 1);
-        QCOMPARE(popup.rows().at(popup.currentRow()).data, QStringLiteral("pick:main|kimi|kimi-k3"));
+        popup.setRows(classRows(), kMainModelRow);
+        popup.setFilterText(QStringLiteral("glm"));
+        // glm-5.3 under main and glm-5.3-flash under flash, with both of their headers — and
+        // nothing of the high class, whose one model does not match.
+        QCOMPARE(popup.visibleCount(), 2);
+        QCOMPARE(popup.rows().at(popup.currentRow()).data, QStringLiteral("pick:main|glm-5.3"));
+        QVERIFY(popup.rowShown(2));    // the main header
+        QVERIFY(popup.rowShown(5));    // the flash header
+        QVERIFY(!popup.rowShown(0));   // high has no match: its header goes with it
 
-        popup.turnPage(1);
-        QCOMPARE(popup.filterText(), QStringLiteral("kimi"));
-        QCOMPARE(popup.currentPageId(), QStringLiteral("flash"));
+        // A header is never kept on its own words: typing a class's name finds its models, not it.
+        popup.setFilterText(QStringLiteral("flash"));
         QCOMPARE(popup.visibleCount(), 1);
-        QCOMPARE(popup.rows().at(popup.currentRow()).data, QStringLiteral("pick:flash|kimi|turbo"));
+        QCOMPARE(popup.rows().at(popup.currentRow()).data, QStringLiteral("pick:flash|glm-5.3-flash"));
+        QVERIFY(popup.rowShown(5));
+        QVERIFY(!popup.rowShown(2));
 
-        // Cleared, the whole of the page that is showing is back — mode rows and all.
+        popup.setFilterText(QStringLiteral("zzz"));
+        QCOMPARE(popup.visibleCount(), 0);
+        QCOMPARE(popup.currentRow(), -1);
+
         popup.setFilterText(QString());
         QCOMPARE(popup.visibleCount(), 5);
-        // And the page's own current row takes the highlight again once it is asked for.
-        popup.showPage(QStringLiteral("main"));
-        QCOMPARE(popup.currentRow(), 4);
+        QVERIFY(popup.rowShown(0));
     }
 
-    // 15. Enter on a mode row and Enter on a model row are told apart by the row's own data, which
-    //     is what the caller acts on: the mode row says "switch the mode", the model row says
-    //     "this pane, this mode, that model". Escape after any number of turns picks nothing.
+    // 15. Enter answers with the row's own data — the class and the model together — and Escape,
+    //     after any number of expansions, picks nothing.
     void enterAnswersWithTheRowsOwnDataAndEscapePicksNothing()
     {
         QWidget anchor;
@@ -453,24 +475,34 @@ private slots:
         FilterPopup popup(&anchor);
         QStringList picked;
         popup.onPicked = [&popup, &picked](int row) { picked << popup.rows().at(row).data; };
-        popup.setPages(modePages(), QStringLiteral("main"));
+        bool expanded = false;
+        popup.onExpandKey = [&](const QString &group, int delta) {
+            if (group != QStringLiteral("main") || (delta > 0) == expanded) return false;
+            expanded = delta > 0;
+            popup.setRows(classRows(expanded), -1);
+            return true;
+        };
+        popup.setRows(classRows(), kMainModelRow);
         popup.openFor(&anchor);
-        popup.turnPage(1);
-        popup.activate();                                     // the flash page's own model
-        QCOMPARE(picked, QStringList({QStringLiteral("pick:flash|kimi|turbo")}));
-
-        popup.setPages(modePages(), QStringLiteral("main"));
-        popup.openFor(&anchor);
-        popup.moveCurrent(-99);                               // up to the first mode row
+        popup.moveCurrent(1);
         popup.activate();
-        QCOMPARE(picked.last(), QStringLiteral("role:high"));
+        QCOMPARE(picked, QStringList({QStringLiteral("pick:main|glm-5.3")}));
+
+        // A row that only the expansion put there is picked the same way.
+        popup.setRows(classRows(), kMainModelRow);
+        popup.openFor(&anchor);
+        popup.expandCurrent(1);
+        popup.moveCurrent(2);
+        popup.activate();
+        QCOMPARE(picked.last(), QStringLiteral("pick:main|claude-opus-5"));
 
         bool cancelled = false;
         popup.onCancelled = [&cancelled] { cancelled = true; };
-        popup.setPages(modePages(), QStringLiteral("main"));
+        expanded = false;
+        popup.setRows(classRows(), kMainModelRow);
         popup.openFor(&anchor);
-        popup.turnPage(1);
-        popup.turnPage(-1);
+        popup.expandCurrent(1);
+        popup.expandCurrent(-1);
         popup.dismiss();
         QVERIFY(cancelled);
         QCOMPARE(picked.size(), 2);                           // still only the two
@@ -516,17 +548,13 @@ private slots:
         QVERIFY(popup.width() > 120);
     }
 
-    // 17. The marker column. The mode rows carry their mark in the *text* — one string for the
-    //     popup, the combo and the phone — and the popup takes it back out and draws it in a
-    //     fixed-width gutter, so "high", "main" and "flash" start at the same x however wide a
-    //     bullet happens to be in the font. Rendered and measured, because that is the only way to
-    //     say it.
-    //
-    //     Measured as a *difference* between two renders of the same three words, one of them with
-    //     a marker: the names must land on exactly the columns they landed on without it, and the
-    //     marker must be to the left of all of them. Comparing the same word to itself is what
-    //     keeps a glyph's own shape (an "f" leans right at the top) out of the measurement.
-    void theMarkerSitsInAGutterSoTheNamesLineUp()
+    // 17. The class indent. A header is drawn at the left margin and the models under it are
+    //     stepped in, so the picture on the screen is the picture in the design. Rendered and
+    //     measured, and measured as a *difference* between two renders of the same three words,
+    //     one of them under a header, so a glyph's own shape (an "f" leans right at the top)
+    //     stays out of the measurement. The header itself is drawn in the muted ink and so is not
+    //     counted: what is asserted is where the *models* land.
+    void theModelsAreIndentedUnderTheirClassHeader()
     {
         theme::SurfaceRaised = QColor(0x24, 0x1c, 0x18);
         theme::Accent = QColor(0xc0, 0x7a, 0x4a);
@@ -536,8 +564,8 @@ private slots:
         anchor.resize(240, 22);
         anchor.show();
 
-        // Every scanline's leftmost pixel that is the theme's text ink (the highlight band is a
-        // different colour and is stepped over).
+        // Every scanline's leftmost pixel that is the theme's text ink (the muted header and the
+        // highlight band are other colours and are stepped over).
         const auto leftEdges = [](const QImage &shot) {
             QSet<int> edges;
             for (int y = 0; y < shot.height(); ++y)
@@ -549,48 +577,49 @@ private slots:
                 }
             return edges;
         };
-        const auto render = [&anchor, &leftEdges](const QStringList &texts, int current) {
-            QList<FilterRow> rows;
-            for (const QString &text : texts) rows << FilterRow{text, text, {}, false, true, {}};
+        const auto render = [&anchor, &leftEdges](const QList<FilterRow> &rows) {
             FilterPopup popup(&anchor);
-            popup.setRows(rows, current);
+            popup.setRows(rows, 0);
             popup.openFor(&anchor);
             const QSet<int> edges = leftEdges(popup.grab().toImage());
             popup.dismiss();
             return edges;
         };
+        const auto plainRow = [](const QString &text) {
+            return FilterRow{text, text, {}, false, true, {}, {}, false};
+        };
+        const auto modelRow = [](const QString &text) {
+            return FilterRow{text, text, {}, false, true, {}, QStringLiteral("main"), false};
+        };
 
-        // The same word twice over, once with the middle row marked. Comparing a word to itself is
-        // what keeps a glyph's own shape (an "f" leans right at the top) out of the measurement,
-        // and comparing two renders is what keeps the filter line's caret — which is drawn in the
-        // text ink at the far left of every render — out of it as well.
-        const QString mark = QString(QChar(0x2022)) + QLatin1Char(' ');
-        const QSet<int> plainRows = render({QStringLiteral("  main"), QStringLiteral("  main"),
-                                            QStringLiteral("  main")}, 0);
-        const QSet<int> marked = render({QStringLiteral("  main"), mark + QStringLiteral("main"),
-                                         QStringLiteral("  main")}, 0);
-        QVERIFY2(!plainRows.isEmpty() && !marked.isEmpty(), "the rows were not drawn at all");
-        const int caret = *std::min_element(plainRows.cbegin(), plainRows.cend());
+        // The same three words twice over, once with a "main" header above them. Comparing two
+        // renders is what keeps the filter line's caret — drawn in the text ink at the far left of
+        // every render — out of the measurement.
+        const QSet<int> flat = render({plainRow(QStringLiteral("main")), plainRow(QStringLiteral("main")),
+                                       plainRow(QStringLiteral("main"))});
+        const QSet<int> sectioned = render({FilterRow{QStringLiteral("main"), QStringLiteral("class:main"),
+                                                      {}, false, false, {}, QStringLiteral("main"), true},
+                                            modelRow(QStringLiteral("main")), modelRow(QStringLiteral("main")),
+                                            modelRow(QStringLiteral("main"))});
+        QVERIFY2(!flat.isEmpty() && !sectioned.isEmpty(), "the rows were not drawn at all");
+        const int caret = *std::min_element(flat.cbegin(), flat.cend());
         const auto past = [](const QSet<int> &columns, int from) {
             QSet<int> out;
             for (const int x : columns) if (x > from) out << x;
             return out;
         };
-        const QSet<int> plainNames = past(plainRows, caret);
-        const QSet<int> markedAll = past(marked, caret);
-        QVERIFY(!plainNames.isEmpty() && !markedAll.isEmpty());
-        const int markerAt = *std::min_element(markedAll.cbegin(), markedAll.cend());
-        const int namesAt = *std::min_element(plainNames.cbegin(), plainNames.cend());
-        QVERIFY2(markerAt < namesAt - 2,
-                 qPrintable(QStringLiteral("the marker is at %1, the names at %2").arg(markerAt).arg(namesAt)));
-        // The names did not move by so much as a pixel when one of them gained a marker.
-        QCOMPARE(past(markedAll, markerAt), plainNames);
+        const QSet<int> flatNames = past(flat, caret);
+        const QSet<int> indented = past(sectioned, caret);
+        QVERIFY(!flatNames.isEmpty() && !indented.isEmpty());
+        const int flatAt = *std::min_element(flatNames.cbegin(), flatNames.cend());
+        const int indentedAt = *std::min_element(indented.cbegin(), indented.cend());
+        QVERIFY2(indentedAt > flatAt + 2,
+                 qPrintable(QStringLiteral("flat names at %1, indented at %2").arg(flatAt).arg(indentedAt)));
 
-        // A list with no marked row gets no gutter: the Alt+E level box is drawn exactly as it was,
-        // its names starting where the marker column would have begun.
-        const QSet<int> levels = past(render({QStringLiteral("high"), QStringLiteral("max")}, 0), caret);
+        // A list with no header gets no indent: the Alt+E level box is drawn exactly as it was.
+        const QSet<int> levels = past(render({plainRow(QStringLiteral("high")), plainRow(QStringLiteral("max"))}), caret);
         QVERIFY(!levels.isEmpty());
-        QCOMPARE(*std::min_element(levels.cbegin(), levels.cend()), markerAt);
+        QCOMPARE(*std::min_element(levels.cbegin(), levels.cend()), flatAt);
     }
 };
 

@@ -50,11 +50,12 @@ public:
     }
     QSize sizeHint() const override { return hintFor(displayText()); }
 
-    // ----- the collapsed chip says something else than the row (card #MDL1, section 5.1) -------
-    // "The collapsed box is the model alone on main, and `<model> · <mode>` on any other mode",
-    // while the row it sits on is a mode row reading "flash (glm-5.3-flash)". This class exists
-    // precisely so the two can differ: the override is what the chip draws, what it is measured
-    // for, and what the phone is told (Pane::remoteState). Empty puts the current row's text back.
+    // ----- the collapsed chip says something else than the row (card #MDL1, design 5.3) -------
+    // "The collapsed box is **the model alone**", on every mode (owner, 2026-09-21: "no need to
+    // show the model class in the pane header"), while the row it sits on carries the "via" column
+    // and sits under its class's header. This class exists precisely so the two can differ: the
+    // override is what the chip draws, what it is measured for, and what the phone is told
+    // (Pane::remoteState). Empty puts the current row's text back.
     void setCollapsedText(const QString &text) {
         if (m_collapsed == text) return;
         m_collapsed = text;
@@ -75,24 +76,33 @@ public:
     // PopupHotkeys: Alt+M closes the box, any other chord closes it and goes on to the window.
     std::function<bool(QKeyEvent *)> onChordKey;
 
-    // A list of several pages, turned by Left and Right (the model box's modes; card #MDL1). Unset
-    // — which it is for the level box and every other box — the list is the combo's own model,
-    // exactly as before. `pageId` is the page the box OPENS on and belongs to the owner: turning a
-    // page does not change it, so Escape leaves the next Alt+M where the pane actually is. A pick
-    // is answered by the row's `data` through `onPickedData`, because an index into one page is not
-    // an index into the combo.
-    std::function<QList<relay::FilterPage>()> onPages;
-    QString pageId;
+    // The rows the list drops open with, when they are not simply the combo's own (the model box:
+    // its rows carry class headers, and Right rebuilds them while the list is open; card #MDL1,
+    // design 5.3). `current` is an index into the list that comes back. Unset — which it is for
+    // the level box and every other box — the list is the combo's own model, exactly as before.
+    // A pick is then answered by the row's `data` through `onPickedData`, because an index into
+    // that list is not an index into the combo.
+    std::function<QList<relay::FilterRow>(int *current)> onRows;
     std::function<void(const QString &data)> onPickedData;
-    std::function<void(const QString &pageId)> onPageTurned;
+    // Left / Right on a row: see relay::FilterPopup::onExpandKey. The owner answers by calling
+    // `replaceRows` and returning true.
+    std::function<bool(const QString &group, int delta)> onExpandKey;
+    // The open list's rows again, from inside `onExpandKey`. The popup keeps the filter line and
+    // puts the highlight back on the row it was on.
+    void replaceRows(const QList<relay::FilterRow> &rows, int current) {
+        if (m_popup != nullptr) m_popup->setRows(rows, current);
+    }
 
     void showPopup() override {
         if (onBeforePopup) onBeforePopup();
-        const QList<relay::FilterPage> pages = onPages ? onPages() : QList<relay::FilterPage>();
-        if (!pages.isEmpty()) {
-            filterPopup()->setPages(pages, pageId);
-            filterPopup()->openFor(this);
-            return;
+        if (onRows) {
+            int current = -1;
+            const QList<relay::FilterRow> rows = onRows(&current);
+            if (!rows.isEmpty()) {
+                filterPopup()->setRows(rows, current);
+                filterPopup()->openFor(this);
+                return;
+            }
         }
         if (count() == 0) return;
         filterPopup()->setRows(rowsFromModel(), currentIndex());
@@ -132,6 +142,8 @@ private:
             row.data = itemData(i).toString();
             row.tooltip = itemData(i, Qt::ToolTipRole).toString();
             row.trailing = itemData(i, relay::kTrailingItemRole).toString();
+            row.group = itemData(i, relay::kGroupItemRole).toString();
+            row.header = itemData(i, relay::kHeaderItemRole).toBool();
             row.separator = itemData(i, Qt::AccessibleDescriptionRole).toString()
                             == QLatin1String("separator");
             row.enabled = model()->index(i, modelColumn(), rootModelIndex()).flags().testFlag(Qt::ItemIsEnabled)
@@ -152,12 +164,8 @@ private:
             setCurrentIndex(index);
             emit activated(index);
         };
-        m_popup->onPageChanged = [this](const QString &id) {
-            // `pageId` is deliberately *not* written here. It is the page the box OPENS on, and the
-            // owner sets it from the state the box is a view of (the pane's mode). A turn that is
-            // then abandoned with Escape must leave everything as it was, and remembering it here
-            // did not: the next Alt+M opened on whatever page the last Escape happened to be over.
-            if (onPageTurned) onPageTurned(id);
+        m_popup->onExpandKey = [this](const QString &group, int delta) {
+            return onExpandKey ? onExpandKey(group, delta) : false;
         };
         m_popup->onCancelled = [this] { restoreFocus(); };
         m_popup->onChordKey = [this](QKeyEvent *key) {

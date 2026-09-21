@@ -35,6 +35,7 @@
 //   delete         take the row out of the list (backspace does it while the filter is empty)
 //   ctrl+enter     add the highlighted model to this list, at the end
 //   ctrl+z         undo a list edit made in this dialog
+//   the "in box" column is a cutoff: it says how far down this class the Alt+M box shows
 //
 // The dialog reads a relay::models::Catalog and QSettings and returns a key and a level; it never
 // talks to the worker. The pane does the switch (Pane::selectEntry) so that every door — the box,
@@ -48,6 +49,7 @@
 #include <QStringList>
 #include <functional>
 
+class QCheckBox;
 class QComboBox;
 class QKeyEvent;
 class QLabel;
@@ -78,6 +80,12 @@ public:
         // flat tab. An id no tab has falls back to main.
         QString tier = QStringLiteral("main");
         qint64 now = 0;          // unix seconds, for the limits line
+        // "fill from defaults" (card #MDL1 t:a8, design 5.5): the two buttons Options › Models'
+        // `models.tier.defaults` row presses, handed in rather than copied — the lists a worker
+        // computed are the pane's, not this dialog's. `withOpenrouter` picks the second button;
+        // false back means the worker has not sent defaults yet. Unset, and the buttons are not
+        // drawn, which is what a caller with no worker behind it wants.
+        std::function<bool(bool withOpenrouter)> fillFromDefaults;
     };
 
     explicit ModelPicker(const Context &context, QWidget *parent = nullptr);
@@ -102,6 +110,13 @@ public:
     QListWidget *viaList() const { return m_vias; }
     QListWidget *levelList() const { return m_levels; }
     QLabel *footer() const { return m_footer; }
+    QCheckBox *classSwitch() const { return m_boxSwitch; }
+    QPushButton *defaultsButton(bool withOpenrouter) const { return withOpenrouter ? m_defaultsOpenrouter : m_defaults; }
+    // The "show in box" column of a tier tab, as a cutoff (owner, 2026-09-21, design 5.3):
+    // checking rank n shows ranks 1..n of this class in the Alt+M box, unchecking n hides n and
+    // everything under it. Unchecking rank 1 switches the class off altogether, which is the same
+    // statement. Public because a test presses it without a window manager.
+    void setBoxCutoffFromRow(int rank, bool on);
     QString tier() const { return m_tier; }
     void setTier(const QString &tier);
     QStringList tabIds() const;
@@ -135,6 +150,10 @@ private:
     QTreeWidgetItem *addGroupRow(const models::Group &group, bool addable);
     void buildTier(const QString &query);
     void buildAll(const QString &query);
+    void onBoxCheckChanged(QTreeWidgetItem *item, int column);
+    void refreshBoxChecks();   // the ticks again from the stored cutoff, without rebuilding the rows
+    bool boxClassTab() const;        // this tab is one of the four classes the box can draw
+    void syncClassSwitch();
     void onRowChanged();
     void onViaChanged();
     void onLevelChanged();
@@ -166,10 +185,14 @@ private:
     QLabel *m_footer = nullptr;
     QPushButton *m_favorite = nullptr;
     QPushButton *m_use = nullptr;
+    QCheckBox *m_boxSwitch = nullptr;          // "show this class in the box"
+    QPushButton *m_defaults = nullptr;         // "fill from defaults"
+    QPushButton *m_defaultsOpenrouter = nullptr;
     QList<UndoStep> m_undo;
     // The provider chosen by hand for a folded row, by group name, so it survives a rebuild.
     QHash<QString, QString> m_viaChoice;
     bool m_filling = false;   // the right-hand lists are being populated: their signals are not picks
+    bool m_building = false;  // the rows are being built: an itemChanged is ours, not a click
 };
 
 // Show the picker modally; the result says whether a row was used. `onListsChanged` is optional:

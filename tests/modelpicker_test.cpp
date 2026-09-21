@@ -4,6 +4,7 @@
 // per model and its "via" column, the profile in the header, and what a pick returns.
 #include "ModelPicker.h"
 
+#include <QCheckBox>
 #include <QApplication>
 #include <QDateTime>
 #include <QComboBox>
@@ -25,7 +26,8 @@ using namespace relay::models;
 namespace {
 
 // The dialog's columns, as ModelPicker.cpp orders them.
-enum Column { ColRank, ColModel, ColVia, ColReasoning, ColIntelligence, ColSpeed, ColLeft };
+// ColBox is the "show in box" cutoff a tier tab gained with card #MDL1, design 5.3.
+enum Column { ColRank, ColBox, ColModel, ColVia, ColReasoning, ColIntelligence, ColSpeed, ColLeft };
 
 QJsonObject model(const QString &id, const QString &label, const QString &tier, const QStringList &efforts, int intelligence = -1) {
     QJsonObject row{{QStringLiteral("id"), id}, {QStringLiteral("label"), label}, {QStringLiteral("tier"), tier},
@@ -582,6 +584,124 @@ private Q_SLOTS:
         picker.setTier(QStringLiteral("all"));
         QVERIFY(!picker.footer()->text().contains(QStringLiteral("alt+↑↓")));
         QVERIFY(picker.footer()->text().contains(QStringLiteral("the providers of a folded row")));
+    }
+
+    // ----- what the Alt+M box shows of each class (card #MDL1, design 5.3) ----------------------
+
+    // "each row of a class tab gets a 'show in box' checkbox column that behaves as a CUTOFF:
+    // checking row n checks 1..n, unchecking row n unchecks n..end".
+    void theShowInBoxColumnIsACutoffBothWays() {
+        setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()},
+                                         {QStringLiteral("kimi|kimi-k3"), QString()},
+                                         {QStringLiteral("anthropic|claude-opus-5"), QString()},
+                                         {QStringLiteral("guest:claude|opus"), QString()}});
+        ModelPicker picker(context());
+        const auto checks = [&picker] {
+            QString out;
+            for (int i = 0; i < picker.list()->topLevelItemCount(); ++i) {
+                QTreeWidgetItem *row = picker.list()->topLevelItem(i);
+                if (row->data(0, Qt::UserRole).toString().isEmpty()) continue;
+                out += row->checkState(ColBox) == Qt::Checked ? QLatin1Char('x') : QLatin1Char('.');
+            }
+            return out;
+        };
+        // Two per class by default, and the column is visible because main is one of the classes
+        // the box draws.
+        QVERIFY(!picker.list()->isColumnHidden(ColBox));
+        QCOMPARE(checks(), QStringLiteral("xx.."));
+
+        int told = 0;
+        picker.onListsChanged = [&told] { ++told; };
+        // Checking rank 4 checks 1..4.
+        picker.list()->topLevelItem(3)->setCheckState(ColBox, Qt::Checked);
+        QCOMPARE(curation::boxCutoff(QStringLiteral("main")), 4);
+        QCOMPARE(checks(), QStringLiteral("xxxx"));
+        QCOMPARE(told, 1);
+        // Unchecking rank 2 unchecks 2..end.
+        picker.list()->topLevelItem(1)->setCheckState(ColBox, Qt::Unchecked);
+        QCOMPARE(curation::boxCutoff(QStringLiteral("main")), 1);
+        QCOMPARE(checks(), QStringLiteral("x..."));
+        QCOMPARE(told, 2);
+        // Unchecking rank 1 leaves nothing to show, which is the class switched off — said from
+        // the other control, so the two can never disagree.
+        picker.list()->topLevelItem(0)->setCheckState(ColBox, Qt::Unchecked);
+        QVERIFY(!curation::boxShown(QStringLiteral("main")));
+        QCOMPARE(checks(), QStringLiteral("...."));
+        QVERIFY(!picker.classSwitch()->isChecked());
+        // And checking one again switches the class back on at that cutoff.
+        picker.list()->topLevelItem(2)->setCheckState(ColBox, Qt::Checked);
+        QVERIFY(curation::boxShown(QStringLiteral("main")));
+        QCOMPARE(curation::boxCutoff(QStringLiteral("main")), 3);
+        QCOMPARE(checks(), QStringLiteral("xxx."));
+        QVERIFY(picker.classSwitch()->isChecked());
+    }
+
+    // "a class tab gets a 'show this class in the box' switch in its header" — and the tabs the
+    // box never draws (lite, all) have neither it nor the column.
+    void theClassSwitchIsOnlyOnTheTabsTheBoxDraws() {
+        setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()}});
+        ModelPicker picker(context());
+        int told = 0;
+        picker.onListsChanged = [&told] { ++told; };
+        QVERIFY(picker.classSwitch()->isVisible() || !picker.isVisible());   // shown on a class tab
+        QVERIFY(picker.classSwitch()->isChecked());
+        picker.classSwitch()->setChecked(false);
+        QVERIFY(!curation::boxShown(QStringLiteral("main")));
+        QCOMPARE(told, 1);
+        // Nothing of the class is ticked any more; the cutoff it had is remembered.
+        QCOMPARE(picker.list()->topLevelItem(0)->checkState(ColBox), Qt::Unchecked);
+        picker.classSwitch()->setChecked(true);
+        QVERIFY(curation::boxShown(QStringLiteral("main")));
+        QCOMPARE(picker.list()->topLevelItem(0)->checkState(ColBox), Qt::Checked);
+
+        // lite is never a pane mode, so the box never draws it: no switch, no column.
+        picker.setTier(QStringLiteral("lite"));
+        QVERIFY(picker.list()->isColumnHidden(ColBox));
+        QVERIFY(picker.classSwitch()->isHidden() || !picker.isVisible());
+        picker.setTier(QStringLiteral("all"));
+        QVERIFY(picker.list()->isColumnHidden(ColBox));
+    }
+
+    // The two "fill the lists" buttons of Options › Models, moved into the dialog (design 5.5).
+    // The action belongs to the caller — only a pane holds what its worker computed — so what is
+    // asserted here is that each button presses it and that a "no defaults yet" answer is said
+    // rather than swallowed.
+    void fillFromDefaultsPressesTheCallersAction() {
+        setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()}});
+        ModelPicker::Context ctx = context();
+        QList<bool> pressed;
+        bool answer = true;
+        ctx.fillFromDefaults = [&pressed, &answer](bool withOpenrouter) {
+            pressed << withOpenrouter;
+            if (answer) curation::setTierList(QStringLiteral("main"), {{QStringLiteral("kimi|kimi-k3"), QString()}});
+            return answer;
+        };
+        ModelPicker picker(ctx);
+        int told = 0;
+        picker.onListsChanged = [&told] { ++told; };
+        QVERIFY(picker.defaultsButton(false) != nullptr);
+        picker.defaultsButton(false)->click();
+        QCOMPARE(pressed, QList<bool>({false}));
+        QCOMPARE(rowKeys(picker.list()), QStringList{QStringLiteral("kimi|kimi-k3")});
+        QCOMPARE(told, 1);
+        picker.defaultsButton(true)->click();
+        QCOMPARE(pressed, QList<bool>({false, true}));
+
+        // Ctrl+Z takes one list back, so the fill is not a one-way door.
+        picker.undo();
+        QVERIFY(picker.undoDepth() > 0);
+
+        // A caller that answers false has no defaults yet: nothing is written and the dialog says so.
+        answer = false;
+        const int depth = picker.undoDepth();
+        picker.defaultsButton(false)->click();
+        QCOMPARE(picker.undoDepth(), depth);
+        QVERIFY(picker.findChild<QLabel *>(QStringLiteral("modelLimits"))->text().contains(QStringLiteral("No defaults yet")));
+
+        // A caller that offers none gets no buttons at all.
+        ModelPicker bare(context());
+        QCOMPARE(bare.defaultsButton(false), nullptr);
+        QCOMPARE(bare.defaultsButton(true), nullptr);
     }
 
     void customizeClosesAndOpensThePage() {

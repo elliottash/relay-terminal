@@ -206,6 +206,26 @@ void setTierEffort(const QString &tier, const QString &key, const QString &effor
 // The level a model runs at when picked: the main list's entry for it, else the first other list
 // that names it, else empty (the pane keeps its own level, moved to one the model offers).
 QString listEffortFor(const QString &key);
+
+// ----- what the box shows of each list (card #MDL1, design 5.3) --------------------------------
+// The Alt+M box draws a **class** per header — high, main, flash, and local where this machine
+// serves one — and under it that class's list down to a **cutoff**: two rows by default. A class
+// can also be switched off entirely. Both are the dialog's "show in box" column and its "show this
+// class in the box" switch, and both belong to the lists, so they are stored beside them and
+// travel with the profile:
+//
+//   models/box/<tier>      the cutoff rank — how many of that list the box draws. Absent = 2.
+//   models/box_off/<tier>  true when the class is switched off. Absent = the class is shown.
+//
+// `lite` is never a pane mode and never appears in the box, so it has neither setting; asking for
+// it answers the defaults and setting it is a no-op.
+constexpr int kBoxCutoffDefault = 2;
+// high, main, flash, local — the classes the box can draw, in the order it draws them.
+QStringList boxClasses();
+int boxCutoff(const QString &tier);              // >= 1; kBoxCutoffDefault when nothing is stored
+void setBoxCutoff(const QString &tier, int rank);   // clamped at 1; writes through to the profile
+bool boxShown(const QString &tier);              // true when nothing is stored
+void setBoxShown(const QString &tier, bool on);
 // Apply one of the worker's `tier_list_defaults` ({tier: [{preset, model, effort}]}).
 void applyTierDefaults(const QJsonObject &lists);
 void clearTierLists();
@@ -242,15 +262,26 @@ bool validProfileName(const QString &name);
 //
 //   {"relay": "model profiles", "version": 1, "exported": "<ISO 8601>",
 //    "profiles": [{"name": "AI work",
-//                  "lists": {"main": [{"preset": "glm-coding", "model": "glm-5.3", "effort": "max"}]}}]}
+//                  "lists": {"main": [{"preset": "glm-coding", "model": "glm-5.3", "effort": "max"}]},
+//                  "box": {"main": {"cutoff": 3, "shown": true}}}]}
 //
 // The list entries are the same {preset, model, effort} objects the worker sends as
 // `tier_list_defaults`, so a default the worker computed and a profile the user exported read the
 // same. A model the importing machine has no provider for is kept, not dropped: the file may well
 // arrive before the key does, and an entry nothing can run is skipped at failover time anyway.
+// What the box draws of one class: how far down its list, and whether it is drawn at all. The
+// defaults here are the same "absent key" the settings have, so a profile written before the box
+// had classes imports as "two per class, all four on".
+struct BoxSetting {
+    int cutoff = kBoxCutoffDefault;
+    bool shown = true;
+    bool operator==(const BoxSetting &other) const { return cutoff == other.cutoff && shown == other.shown; }
+};
 struct ProfileDoc {
     QString name;
     QHash<QString, QList<TierEntry>> lists;   // tier id -> its entries, in order; absent = empty
+    // class id -> what the box shows of it (`"box"` in the file); absent = the defaults above.
+    QHash<QString, BoxSetting> box;
 };
 // The document for those profiles, in the order given; names that are not profiles are skipped.
 QJsonObject exportProfiles(const QStringList &names);

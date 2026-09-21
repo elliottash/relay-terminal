@@ -146,16 +146,6 @@ QHash<QString, ModePick> usableModePicks(const models::Catalog &catalog,
     return out;
 }
 
-QString modeRowText(const QString &mode, const QString &model, bool current)
-{
-    // The marker the design draws in the gutter (section 5.1). It is in the text rather than in the
-    // delegate so that every box — the popup, the combo's own model, the phone's menu — says the
-    // same thing about which mode the pane is in, and two spaces stand in its place elsewhere so
-    // the names line up under each other.
-    const QString mark = current ? QStringLiteral("\u2022 ") : QStringLiteral("  ");
-    return model.isEmpty() ? mark + mode : QStringLiteral("%1%2 (%3)").arg(mark, mode, model);
-}
-
 // The tier's own list as catalog entries, in list order and including the ones that cannot be
 // used. Empty when the user has ranked nothing there — which is a different thing from "no models",
 // and the two callers below want different answers to it.
@@ -219,11 +209,18 @@ QString modeModel(const Context &context, const QString &mode)
 QString collapsedText(const Context &context)
 {
     const QString model = modeModel(context, context.mode);
+    // Owner, 2026-09-21: "no need to show the model class in the pane header". The chip is the
+    // model and nothing else, on every mode — the class is in the tooltip (`collapsedTooltip`),
+    // and the box itself says it, since the highlighted row sits under its class's header. With no
+    // model known at all the mode's own word is better than an empty chip.
     if (model.isEmpty()) return context.mode == QStringLiteral("main") ? QString() : context.mode;
-    // Owner, 2026-09-21: the model alone on main — "i dont want it to say (main) either" — and
-    // "<model> · <mode>" on any other mode, so a pane that is not on its own model always says so.
-    return context.mode == QStringLiteral("main") ? model
-                                                  : QStringLiteral("%1 · %2").arg(model, context.mode);
+    return model;
+}
+
+QString collapsedTooltip(const Context &context)
+{
+    if (context.mode.isEmpty() || context.mode == QStringLiteral("main")) return QString();
+    return QStringLiteral("This pane runs on the %1 list.").arg(context.mode);
 }
 
 int indexOf(const QList<Row> &rows, const QString &data)
@@ -233,116 +230,153 @@ int indexOf(const QList<Row> &rows, const QString &data)
     return -1;
 }
 
-Page page(const Context &context, const QString &mode)
+namespace {
+
+// One class's models as the box draws them: list order, one row per model, and **nothing that
+// cannot take a turn** (owner, 2026-09-21: "exhausted models dont show up"). That is the one place
+// this module differs from the dialog, which keeps a spent row greyed in its rank.
+QList<models::Group> liveGroupsOf(const Context &context, const QString &klass, qint64 now)
 {
-    Page out;
-    out.mode = mode;
+    QList<models::Group> out;
+    for (const models::Group &group : models::grouped(context.catalog, modeEntries(context, klass), now))
+        if (!group.spent(context.catalog, now)) out << group;
+    return out;
+}
+
+bool holdsKey(const models::Group &group, const QString &key)
+{
+    if (key.isEmpty()) return false;
+    return std::any_of(group.entries.cbegin(), group.entries.cend(),
+                       [&key](const models::Entry &entry) { return entry.key == key; });
+}
+
+// The groups of one class the box draws: the first `cutoff` of them, plus this pane's own model
+// wherever it sits, because the box opens with that row highlighted and the highlight needs a home.
+// Expanded, it is the whole list.
+QList<models::Group> shownGroupsOf(const QList<models::Group> &live, int cutoff, bool expanded,
+                                   const QString &paneKey)
+{
+    if (expanded) return live;
+    QList<models::Group> out = live.mid(0, qMax(1, cutoff));
+    for (int i = qMax(1, cutoff); i < live.size(); ++i)
+        if (holdsKey(live.at(i), paneKey)) out << live.at(i);
+    return out;
+}
+
+}  // namespace
+
+bool expandable(const Context &context, const QString &klass)
+{
+    if (!models::curation::boxShown(klass)) return false;
     const qint64 now = context.now > 0 ? context.now : QDateTime::currentSecsSinceEpoch();
-    // 1. The modes, every page carrying the same four with the marker on the one the pane is in.
-    for (const QString &id : context.modes) {
-        Row row;
-        row.text = modeRowText(id, modeModel(context, id), id == context.mode);
-        row.data = QStringLiteral("role:") + context.modeRole.value(id, id);
-        row.tooltip = context.roleNote.value(context.modeRole.value(id, id));
-        row.enabled = true;
-        out.rows << row;
-    }
-    // 2. This page's models, in list order, one row per model (rule 2). The pane's own model is the
-    //    row that opens highlighted, and it keeps its own entry rather than the group's preferred
-    //    one — the pane is on the provider it is on.
-    const QString paneKey = modeKey(context, mode);
+    const QList<models::Group> live = liveGroupsOf(context, klass, now);
+    return live.size() > shownGroupsOf(live, models::curation::boxCutoff(klass), false,
+                                       modeKey(context, klass)).size();
+}
+
+Box box(const Context &context)
+{
+    Box out;
+    const qint64 now = context.now > 0 ? context.now : QDateTime::currentSecsSinceEpoch();
     bool first = true;
-    for (const models::Group &group : models::grouped(context.catalog, modeEntries(context, mode), now)) {
-        const bool holdsPane = std::any_of(group.entries.cbegin(), group.entries.cend(),
-                                           [&paneKey](const models::Entry &entry) { return entry.key == paneKey; });
-        const models::Entry preferred = group.preferred(context.catalog, now);
-        Row row;
-        row.text = group.name.isEmpty() ? preferred.model : group.name;
-        row.data = QStringLiteral("pick:%1|%2").arg(mode, holdsPane ? paneKey : preferred.key);
-        row.trailing = viaText(group, context.catalog, now);
-        row.tooltip = viaTooltip(group, context.catalog, now);
-        // Greyed in place, never dropped (design 1.3): a subscription running out moves the turn to
-        // the next provider in the row, and only when every one is spent does the row go grey.
-        row.enabled = !group.spent(context.catalog, now);
-        row.separatorBefore = first;
-        first = false;
-        if (holdsPane) out.current = int(out.rows.size());
-        out.rows << row;
-    }
-    // 3. Guest agents (26.9) the worker cannot run as a harness, plus whichever one is in the pane.
-    //    A guest the worker *can* run is a catalog entry and is already one of the rows above, so
-    //    it is not offered twice. They belong to the main page: a guest is the pane's own agent.
-    if (mode == QStringLiteral("main")) {
-        bool firstGuest = first;
-        for (const QString &id : context.guests) {
+    // 1. One section per class: a header that is a label, then that class's list down to its
+    //    cutoff. A class switched off is not drawn, and neither is one with nothing left to draw
+    //    once the spent and keyless rows are gone — an empty header is a promise of nothing.
+    for (const QString &klass : context.classes) {
+        if (klass == QStringLiteral("lite")) continue;          // never a pane mode, never in the box
+        if (!models::curation::boxShown(klass)) continue;
+        const QList<models::Group> live = liveGroupsOf(context, klass, now);
+        const QString paneKey = modeKey(context, klass);
+        const bool expanded = context.expanded.contains(klass);
+        const QList<models::Group> shown =
+            shownGroupsOf(live, models::curation::boxCutoff(klass), expanded, paneKey);
+        if (shown.isEmpty()) continue;
+        Row head;
+        head.text = klass;
+        head.data = QStringLiteral("class:") + klass;
+        head.group = klass;
+        head.header = true;
+        head.enabled = false;   // a label: Up and Down step over it and it is never highlighted
+        // The design's "› / ⌄ at the right to say it expands". `trailing` is the column the
+        // popup already draws at the far end in the muted ink, so it needs no third mechanism.
+        if (live.size() > shown.size()) head.trailing = QStringLiteral("\u203a");
+        else if (expanded && live.size() > models::curation::boxCutoff(klass)) head.trailing = QStringLiteral("\u2304");
+        head.tooltip = head.trailing.isEmpty()
+            ? QStringLiteral("the %1 list").arg(klass)
+            : QStringLiteral("the %1 list · → shows all %2, ← goes back to %3")
+                  .arg(klass).arg(live.size()).arg(models::curation::boxCutoff(klass));
+        out.rows << head;
+        for (const models::Group &group : shown) {
+            const bool holdsPane = holdsKey(group, paneKey);
+            const models::Entry preferred = group.preferred(context.catalog, now);
             Row row;
-            row.text = context.guestText.value(id, id);
-            row.data = QStringLiteral("guest:") + id;
-            row.separatorBefore = firstGuest;
-            row.enabled = true;
-            firstGuest = false;
-            first = false;
+            row.text = group.name.isEmpty() ? preferred.model : group.name;
+            row.data = QStringLiteral("pick:%1|%2").arg(klass, holdsPane ? paneKey : preferred.key);
+            row.trailing = viaText(group, context.catalog, now);
+            row.tooltip = viaTooltip(group, context.catalog, now);
+            row.group = klass;
+            row.enabled = true;   // a row the box draws at all is a row that can take the turn
+            if (holdsPane && klass == context.mode) out.current = int(out.rows.size());
             out.rows << row;
         }
+        first = false;
     }
-    // 4. The picker (every model with filter, sort and reasoning level — the same dialog Ctrl+Alt+M
-    //    opens) and Options › Models (providers, the checklist, the order). Both stay reachable
-    //    with no stored key, which is exactly when they are needed most.
+    // 2. Guest agents (26.9) the worker cannot run as a harness, plus whichever one is in the
+    //    pane. A guest the worker *can* run is a catalog entry and is already one of the rows
+    //    above. They belong under the classes: a guest is the pane's own agent, not a tier.
+    bool firstGuest = true;
+    for (const QString &id : context.guests) {
+        Row row;
+        row.text = context.guestText.value(id, id);
+        row.data = QStringLiteral("guest:") + id;
+        row.separatorBefore = firstGuest && !first;
+        row.enabled = true;
+        firstGuest = false;
+        out.rows << row;
+    }
+    // 3. The dialog (every model, with the lists, the levels and the providers). "customize…" is
+    //    gone from the box with this design: the dialog has the Options button (design 5.3, 5.5).
     Row more;
     more.text = QStringLiteral("more models…");
     more.data = QStringLiteral("gear:picker");
     more.separatorBefore = true;
     more.enabled = true;
     out.rows << more;
-    Row gear;
-    gear.text = QString(QChar(0x2699)) + QStringLiteral("  customize…");
-    gear.data = QStringLiteral("gear:modelOptions");
-    gear.enabled = true;
-    out.rows << gear;
     // The caller's own current row wins where it has one (a guest in the pane's foreground).
-    if (!context.current.isEmpty()) {
+    if (!context.current.isEmpty())
         if (const int at = indexOf(out.rows, context.current); at >= 0) out.current = at;
-    }
-    // Nothing named the pane's model on this page: the mode row is what it is on.
-    if (out.current < 0)
-        out.current = indexOf(out.rows, QStringLiteral("role:") + context.modeRole.value(mode, mode));
-    return out;
-}
-
-QList<Page> pages(const Context &context)
-{
-    QList<Page> out;
-    for (const QString &mode : context.modes) out << page(context, mode);
     return out;
 }
 
 QList<Row> build(const Context &context)
 {
-    return page(context, context.mode).rows;
+    return box(context).rows;
 }
 
-int fill(QComboBox *box, const Context &context)
+int fill(QComboBox *combo, const Context &context)
 {
-    if (box == nullptr) return -1;
-    box->clear();
-    const Page shown = page(context, context.mode);
+    if (combo == nullptr) return -1;
+    combo->clear();
+    const Box shown = box(context);
     int current = -1;
     for (int i = 0; i < shown.rows.size(); ++i) {
         const Row &row = shown.rows.at(i);
-        if (row.separatorBefore) box->insertSeparator(box->count());
-        box->addItem(row.text, row.data);
-        const int at = box->count() - 1;
-        if (!row.tooltip.isEmpty()) box->setItemData(at, row.tooltip, Qt::ToolTipRole);
-        if (!row.trailing.isEmpty()) box->setItemData(at, row.trailing, kTrailingItemRole);
+        if (row.separatorBefore) combo->insertSeparator(combo->count());
+        combo->addItem(row.text, row.data);
+        const int at = combo->count() - 1;
+        if (!row.tooltip.isEmpty()) combo->setItemData(at, row.tooltip, Qt::ToolTipRole);
+        if (!row.trailing.isEmpty()) combo->setItemData(at, row.trailing, kTrailingItemRole);
+        if (!row.group.isEmpty()) combo->setItemData(at, row.group, kGroupItemRole);
+        if (row.header) combo->setItemData(at, true, kHeaderItemRole);
         if (!row.enabled) {
             // The combo's own way of switching a row off: its model is a QStandardItemModel, and
             // the flag is what CurrentTextComboBox reads back out for the popup.
-            if (auto *model = qobject_cast<QStandardItemModel *>(box->model()); model != nullptr)
+            if (auto *model = qobject_cast<QStandardItemModel *>(combo->model()); model != nullptr)
                 if (QStandardItem *item = model->item(at); item != nullptr) item->setEnabled(false);
         }
         if (i == shown.current) current = at;
     }
-    if (current >= 0) box->setCurrentIndex(current);
+    if (current >= 0) combo->setCurrentIndex(current);
     return current;
 }
 

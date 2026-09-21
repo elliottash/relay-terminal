@@ -2,6 +2,7 @@
 #include "ModelPicker.h"
 
 #include <QAbstractItemView>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QDateTime>
@@ -29,7 +30,9 @@ namespace {
 // mouse has the affordance Ctrl+Enter is for the keyboard. On the `all` tab it is simply empty
 // (and so, resized to its contents, a few pixels wide): hiding it would take the spanned section
 // rows, which draw in column 0, with it.
-enum Column { ColRank, ColModel, ColVia, ColReasoning, ColIntelligence, ColSpeed, ColLeft, ColCount };
+// ColBox is the "show in box" cutoff of a tier tab (card #MDL1, design 5.3); it is hidden on the
+// `all` and `lite` tabs, which the Alt+M box never draws.
+enum Column { ColRank, ColBox, ColModel, ColVia, ColReasoning, ColIntelligence, ColSpeed, ColLeft, ColCount };
 constexpr int KeyRole = Qt::UserRole;          // the entry this row would use
 constexpr int SectionRole = Qt::UserRole + 1;  // a rule, not a model
 constexpr int ViaRole = Qt::UserRole + 2;      // the keys of every provider folded into this row
@@ -143,13 +146,20 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QDialog(pare
     for (Sort sort : allSorts()) m_sort->addItem(sortLabel(sort), sortId(sort));
     m_sort->setCurrentIndex(qMax(0, m_sort->findData(sortId(curation::sort()))));
     top->addWidget(m_sort);
+    // "a class tab has a 'show this class in the box' switch" (design 5.3). Beside the filter,
+    // where the tab's own settings belong; hidden on `all` and `lite`, which the box never draws.
+    m_boxSwitch = new QCheckBox(QStringLiteral("show this class in the box"));
+    m_boxSwitch->setObjectName(QStringLiteral("modelBoxClass"));
+    m_boxSwitch->setToolTip(QStringLiteral("Whether Alt+M shows this class at all. The “in box” column says how far down it"));
+    top->addWidget(m_boxSwitch);
     layout->addLayout(top);
 
     auto *dragList = new DragList;
     m_list = dragList;
     m_list->setObjectName(QStringLiteral("modelList"));
-    m_list->setHeaderLabels({QString(), QStringLiteral("model"), QStringLiteral("via"), QStringLiteral("reasoning"),
-                             QStringLiteral("intelligence"), QStringLiteral("tok/s"), QStringLiteral("left")});
+    m_list->setHeaderLabels({QString(), QStringLiteral("in box"), QStringLiteral("model"), QStringLiteral("via"),
+                             QStringLiteral("reasoning"), QStringLiteral("intelligence"), QStringLiteral("tok/s"),
+                             QStringLiteral("left")});
     m_list->setRootIsDecorated(false);
     m_list->setUniformRowHeights(true);
     m_list->setAllColumnsShowFocus(true);
@@ -224,6 +234,32 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QDialog(pare
     customize->setObjectName(QStringLiteral("modelCustomize"));
     customize->setToolTip(QStringLiteral("Options › Models: providers, keys, and which models these lists may hold (/models)"));
     buttons->addWidget(customize);
+    // The two buttons that were Options › Models' "fill the lists" row (design 5.5: the lists are
+    // edited here now, so the defaults that fill them are here too). The action is the caller's —
+    // only a pane knows what its worker computed — so there is one copy of it, not two.
+    if (m_context.fillFromDefaults) {
+        m_defaults = new QPushButton(QStringLiteral("fill from defaults"));
+        m_defaults->setObjectName(QStringLiteral("modelDefaults"));
+        m_defaults->setToolTip(QStringLiteral("Replace every list with your own providers' models, best first"));
+        buttons->addWidget(m_defaults);
+        m_defaultsOpenrouter = new QPushButton(QStringLiteral("…with openrouter"));
+        m_defaultsOpenrouter->setObjectName(QStringLiteral("modelDefaultsOpenrouter"));
+        m_defaultsOpenrouter->setToolTip(QStringLiteral("The same, with each model's cheaper OpenRouter twin behind it, and OpenRouter leading lite (recommended)"));
+        buttons->addWidget(m_defaultsOpenrouter);
+        const auto fill = [this](bool withOpenrouter) {
+            for (const QString &tier : curation::tierIds()) pushUndo(tier);
+            if (!m_context.fillFromDefaults(withOpenrouter)) {
+                m_limits->setText(QStringLiteral("No defaults yet — open a pane's agent first, so its worker can compute them."));
+                for (int i = 0; i < curation::tierIds().size(); ++i) m_undo.removeLast();
+                return;
+            }
+            m_viaChoice.clear();
+            rebuild();
+            changed();
+        };
+        connect(m_defaults, &QPushButton::clicked, this, [fill] { fill(false); });
+        connect(m_defaultsOpenrouter, &QPushButton::clicked, this, [fill] { fill(true); });
+    }
     buttons->addStretch(1);
     m_use = new QPushButton(QStringLiteral("use"));
     m_use->setDefault(true);
@@ -245,6 +281,13 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QDialog(pare
         rebuild();
     });
     connect(m_list, &QTreeWidget::currentItemChanged, this, [this] { onRowChanged(); });
+    connect(m_list, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem *item, int column) { onBoxCheckChanged(item, column); });
+    connect(m_boxSwitch, &QCheckBox::toggled, this, [this](bool on) {
+        if (m_building || !boxClassTab() || on == curation::boxShown(m_tier)) return;
+        curation::setBoxShown(m_tier, on);
+        refreshBoxChecks();
+        changed();
+    });
     // A click only highlights (owner, 2026-09-20: "don't pick immediately on click … so you can
     // pick effort as well"). Enter, the "use" button or a double click commit the pair. The two
     // cells that *are* controls — "+ add" and "via" — are the exception, and they add or open
@@ -389,13 +432,19 @@ QTreeWidgetItem *ModelPicker::addListRow(int rank, const curation::TierEntry &it
         level = item.effort.isEmpty() ? QStringLiteral("default") : entry->effortLabel(item.effort);
     const double speed = curation::speed(item.key);
     auto *row = new QTreeWidgetItem(m_list, QStringList{
-        QString::number(rank), name, entry ? providerText(*entry) : QString(), level,
+        QString::number(rank), QString(), name, entry ? providerText(*entry) : QString(), level,
         entry && entry->intelligence >= 0 ? QString::number(entry->intelligence) : QString(),
         speed > 0 ? QString::number(qRound(speed)) : QString(), left});
     row->setData(0, KeyRole, item.key);
     row->setData(0, ListedRole, true);
     row->setData(0, ViaRole, QStringList{item.key});
-    row->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
+    row->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled
+                  | (boxClassTab() ? Qt::ItemIsUserCheckable : Qt::NoItemFlags));
+    // The cutoff, as a column of checkboxes: rank 1..cutoff checked, the rest not, and clicking
+    // one moves the cutoff to it (design 5.3, `setBoxCutoffFromRow`).
+    if (boxClassTab())
+        row->setCheckState(ColBox, curation::boxShown(m_tier) && rank <= curation::boxCutoff(m_tier)
+                                       ? Qt::Checked : Qt::Unchecked);
     row->setToolTip(0, !entry ? QStringLiteral("%1 is not in the catalog right now: its provider has no key, or it left the listing")
                                     .arg(item.key)
                    : !entry->usable ? QStringLiteral("No key for %1 · skipped until you add one").arg(entry->provider)
@@ -438,7 +487,7 @@ QTreeWidgetItem *ModelPicker::addGroupRow(const Group &group, bool addable) {
     QString leftText = percent(percentLeft(m_context.catalog, entry.preset));
     if (until >= 0) leftText = QStringLiteral("0%") + (until > 0 ? QStringLiteral(" · resets ") + resetText(until, now) : QString());
     auto *row = new QTreeWidgetItem(m_list, QStringList{
-        addable ? QStringLiteral("+ add") : QString(), name, via,
+        addable ? QStringLiteral("+ add") : QString(), QString(), name, via,
         level.isEmpty() ? QString() : entry.effortLabel(level),
         entry.intelligence >= 0 ? QString::number(entry.intelligence) : QString(),
         speed > 0 ? QString::number(qRound(speed)) : QString(), leftText});
@@ -535,16 +584,72 @@ void ModelPicker::buildAll(const QString &query) {
     for (const Group &group : groups) if (!placed.contains(&group)) addGroupRow(group, false);
 }
 
+bool ModelPicker::boxClassTab() const {
+    return m_tier != kAll && curation::boxClasses().contains(m_tier);
+}
+
+void ModelPicker::syncClassSwitch() {
+    if (!m_boxSwitch) return;
+    m_boxSwitch->setVisible(boxClassTab());
+    const QSignalBlocker block(m_boxSwitch);
+    m_boxSwitch->setChecked(!boxClassTab() || curation::boxShown(m_tier));
+}
+
+void ModelPicker::setBoxCutoffFromRow(int rank, bool on) {
+    if (!boxClassTab() || rank < 1) return;
+    // Checking rank n checks 1..n; unchecking n unchecks n and everything below it. Unchecking
+    // rank 1 leaves nothing to show, which is the class switched off — the same statement said
+    // from the other control, so the two can never disagree.
+    if (on) {
+        curation::setBoxCutoff(m_tier, rank);
+        curation::setBoxShown(m_tier, true);
+    } else if (rank == 1) {
+        curation::setBoxShown(m_tier, false);
+    } else {
+        curation::setBoxCutoff(m_tier, rank - 1);
+    }
+    // The ticks are moved in place rather than by a rebuild: this runs inside the itemChanged of
+    // the row that was clicked, and clearing the list under it deletes the item mid-signal.
+    refreshBoxChecks();
+    changed();
+}
+
+void ModelPicker::refreshBoxChecks() {
+    if (m_list == nullptr) return;
+    const bool wasBuilding = m_building;
+    m_building = true;   // our own setCheckState calls are not clicks
+    for (int i = 0; i < m_list->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *row = m_list->topLevelItem(i);
+        if (!row->data(0, ListedRole).toBool()) continue;
+        const int rank = row->text(ColRank).toInt();
+        row->setCheckState(ColBox, boxClassTab() && curation::boxShown(m_tier)
+                                           && rank >= 1 && rank <= curation::boxCutoff(m_tier)
+                                       ? Qt::Checked : Qt::Unchecked);
+    }
+    m_building = wasBuilding;
+    syncClassSwitch();
+}
+
+void ModelPicker::onBoxCheckChanged(QTreeWidgetItem *item, int column) {
+    if (m_building || column != ColBox || item == nullptr || !boxClassTab()) return;
+    if (!item->data(0, ListedRole).toBool()) return;
+    setBoxCutoffFromRow(item->text(ColRank).toInt(), item->checkState(ColBox) == Qt::Checked);
+}
+
 void ModelPicker::rebuild() {
     const QString keep = selectedKey();
     const bool all = m_tier == kAll;
+    m_building = true;
     m_list->clear();
     const QString query = m_filter->text().trimmed();
     m_sortLabel->setVisible(all);
     m_sort->setVisible(all);
+    syncClassSwitch();
+    m_list->setColumnHidden(ColBox, !boxClassTab());
     // Dragging is how a list is reordered; on the flat tab there is no order to write down.
     m_list->setDragDropMode(all ? QAbstractItemView::NoDragDrop : QAbstractItemView::InternalMove);
     if (all) buildAll(query); else buildTier(query);
+    m_building = false;
     if (!keep.isEmpty()) selectKey(keep);
     // A tab that does not hold the row you were on opens on the pane's own model where it has it —
     // the one row you are most likely to want — and on rank 1 otherwise.
@@ -689,7 +794,9 @@ void ModelPicker::updateFooter() {
     m_footer->setText(m_tier == kAll
         ? QStringLiteral("←→ tab · ↑↓ row · enter uses it · tab, then → : the providers of a folded row, and the levels")
         : QStringLiteral("←→ tab · ↑↓ row · enter uses it · alt+↑↓ moves it · del removes it · type a name, "
-                         "ctrl+enter adds it · ctrl+z undoes"));
+                         "ctrl+enter adds it · ctrl+z undoes")
+              + (boxClassTab() ? QStringLiteral(" · “in box” is a cutoff: alt+m shows this class down to the last one ticked")
+                               : QString()));
 }
 
 // ----- the list edits ----------------------------------------------------------------------------

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The one list every model box draws (#PK5Q, owner 2026-09-20: "can you have the picker be the
-// same as in the main terminal"; #MDL1, owner 2026-09-21: modes first, then the models of the mode
-// you are in). The point of the module is that a terminal pane's box and a console's box built
-// from the same catalog are the *same rows*, so that is what is asserted here — plus what the
-// modes say, what the collapsed chip says, and that a spent model keeps its row.
+// same as in the main terminal"; #MDL1, owner 2026-09-21, design 5.3: a header per class and its
+// top-ranked models under it). The point of the module is that a terminal pane's box and a
+// console's box built from the same catalog are the *same rows*, so that is what is asserted here
+// — plus the four rulings that shaped the second design: headers are not selectable, two per
+// class by default, exhausted models do not show up, and the chip is the model alone.
 #include "FilterPopup.h"   // kTrailingItemRole: the via column, as a combo row carries it
 #include "ModelRows.h"
 
@@ -77,9 +78,13 @@ QJsonArray presets()
 void seedTierLists()
 {
     const auto entry = [](const QString &key) { return curation::TierEntry{key, QString()}; };
+    // Four entries, folding to three rows: kimi-k3, glm-5.3 (z.ai and its OpenRouter twin are one
+    // row, rule 2) and gpt-6-astra. Three rows against a cutoff of two is what makes the cutoff
+    // visible at all.
     curation::setTierList(QStringLiteral("main"), {entry(QStringLiteral("kimi-code|kimi-k3")),
                                                    entry(QStringLiteral("glm-coding|glm-5.3")),
-                                                   entry(QStringLiteral("openrouter|z-ai/glm-5.3"))});
+                                                   entry(QStringLiteral("openrouter|z-ai/glm-5.3")),
+                                                   entry(QStringLiteral("openai|gpt-6-astra"))});
     curation::setTierList(QStringLiteral("high"), {entry(QStringLiteral("openai|gpt-6-astra")),
                                                    entry(QStringLiteral("anthropic|claude-opus-5"))});
     curation::setTierList(QStringLiteral("flash"), {entry(QStringLiteral("glm-coding|glm-5.3-flash"))});
@@ -119,6 +124,27 @@ QStringList dataOf(const QList<modelrows::Row> &rows)
     return out;
 }
 
+// The box as a person reads it down the screen: a header is its own name, a model row is indented
+// under it. One string per row, so a whole shape can be compared in one line.
+QStringList shapeOf(const QList<modelrows::Row> &rows)
+{
+    QStringList out;
+    for (const modelrows::Row &row : rows)
+        out << (row.header ? row.text : QStringLiteral("  ") + row.text);
+    return out;
+}
+
+void setBox(const QString &klass, int cutoff, bool shown)
+{
+    curation::setBoxCutoff(klass, cutoff);
+    curation::setBoxShown(klass, shown);
+}
+
+void resetBox()
+{
+    for (const QString &klass : curation::boxClasses()) setBox(klass, curation::kBoxCutoffDefault, true);
+}
+
 }  // namespace
 
 class ModelRowsTest : public QObject {
@@ -133,75 +159,177 @@ private slots:
         seedTierLists();
     }
 
-    // The shape the owner asked for: the modes first, each with the model *this pane* would run in
-    // it in parentheses, then a separator, then the models of the mode the pane is in, then the two
-    // action rows. The marker is on the mode the pane is in and nowhere else.
-    void modesFirstThenTheModelsOfTheModeYouAreIn()
+    void cleanup() { resetBox(); }
+
+    // The shape the owner confirmed (design 5.3): a header per class, that class's list under it
+    // down to the cutoff, then a separator and "more models…". "customize…" is gone — the dialog
+    // has the Options button.
+    void classesWithTheirTopModelsUnderThem()
     {
-        const modelrows::Page main = modelrows::page(paneContext(), QStringLiteral("main"));
-        const QStringList data = dataOf(main.rows);
-        QCOMPARE(data.mid(0, 3), QStringList({QStringLiteral("role:high"), QStringLiteral("role:main"),
-                                              QStringLiteral("role:flash")}));
-        QCOMPARE(data.at(data.size() - 2), QStringLiteral("gear:picker"));
-        QCOMPARE(data.last(), QStringLiteral("gear:modelOptions"));
-        // "high (gpt-6-astra)": rank 1 of the high list, because this pane has picked nothing there.
-        QCOMPARE(main.rows.at(0).text, QStringLiteral("  high (gpt-6-astra)"));
-        // The pane's own pick, with the marker: the mode it is in.
-        QCOMPARE(main.rows.at(1).text, QString(QChar(0x2022)) + QStringLiteral(" main (kimi-k3)"));
-        QCOMPARE(main.rows.at(2).text, QStringLiteral("  flash (glm-5.3-flash)"));
-        // A separator opens the model list.
-        QVERIFY(main.rows.at(3).separatorBefore);
+        const modelrows::Box shown = modelrows::box(paneContext());
+        QCOMPARE(shapeOf(shown.rows),
+                 QStringList({QStringLiteral("high"), QStringLiteral("  gpt-6-astra"),
+                              QStringLiteral("main"), QStringLiteral("  kimi-k3"), QStringLiteral("  glm-5.3"),
+                              QStringLiteral("flash"), QStringLiteral("  glm-5.3-flash"),
+                              QStringLiteral("  more models…")}));
+        QCOMPARE(dataOf(shown.rows).last(), QStringLiteral("gear:picker"));
+        QVERIFY(shown.rows.last().separatorBefore);
+        QVERIFY2(modelrows::indexOf(shown.rows, QStringLiteral("gear:modelOptions")) < 0,
+                 "customize… is no longer a row of the box");
+        // A model row carries the class it belongs to and, in list order, what it would spend.
+        const int glm = modelrows::indexOf(shown.rows, QStringLiteral("pick:main|glm-coding|glm-5.3"));
+        QVERIFY(glm > 0);
+        QCOMPARE(shown.rows.at(glm).group, QStringLiteral("main"));
+        QCOMPARE(shown.rows.at(glm).trailing, QStringLiteral("z.ai (glm) +1"));
+        // Enter on a row switches the pane to that class *and* that model.
+        QCOMPARE(dataOf(shown.rows).at(1), QStringLiteral("pick:high|openai|gpt-6-astra"));
+        // The pane's own model opens highlighted, and it is the one in the pane's own class.
+        QCOMPARE(shown.rows.at(shown.current).data, QStringLiteral("pick:main|kimi-code|kimi-k3"));
     }
 
-    // The models are the mode's list, in **list order** — not alphabetical (Claude proposed list
-    // order and the owner took it): the order is the information, rank 1 is the default.
-    void theModelsAreTheModesListInListOrder()
+    // Owner, 2026-09-21: "the class header rows are not selectable in the picker. thats
+    // redundant." So a header is flagged, and it is flagged disabled — which is what every list in
+    // Relay reads as "Up and Down step over this".
+    void headersAreLabelsAndNeverSelectable()
     {
-        const modelrows::Context context = paneContext();
-        const QStringList mainModels = textsOf(modelrows::page(context, QStringLiteral("main")).rows).mid(3, 2);
-        QCOMPARE(mainModels.at(0), QStringLiteral("kimi-k3\tkimi"));
-        // glm-5.3 is served by z.ai and by OpenRouter: one row, and it says both (rule 2).
-        QCOMPARE(mainModels.at(1), QStringLiteral("glm-5.3\tz.ai (glm) +1"));
-        QVERIFY(!mainModels.at(0).startsWith(QStringLiteral("glm")));   // list order, not alphabetical
-
-        // The flash page is the flash list, and the high page the high list.
-        QCOMPARE(dataOf(modelrows::page(context, QStringLiteral("flash")).rows).at(3),
-                 QStringLiteral("pick:flash|glm-coding|glm-5.3-flash"));
-        QCOMPARE(dataOf(modelrows::page(context, QStringLiteral("high")).rows).at(3),
-                 QStringLiteral("pick:high|openai|gpt-6-astra"));
-    }
-
-    // Every page carries the same mode rows, so Left and Right only move the marker and the list
-    // below it; and the page the pane is on highlights the pane's own model.
-    void everyPageCarriesTheModesAndHighlightsThePanesModel()
-    {
-        const QList<modelrows::Page> pages = modelrows::pages(paneContext());
-        QCOMPARE(pages.size(), 3);
-        QCOMPARE(pages.at(0).mode, QStringLiteral("high"));
-        for (const modelrows::Page &page : pages) {
-            QCOMPARE(dataOf(page.rows).mid(0, 3), QStringList({QStringLiteral("role:high"),
-                                                               QStringLiteral("role:main"),
-                                                               QStringLiteral("role:flash")}));
-            // The marker says which mode the pane is in, whatever page is being shown.
-            QVERIFY(page.rows.at(1).text.startsWith(QChar(0x2022)));
+        int headers = 0;
+        for (const modelrows::Row &row : modelrows::build(paneContext())) {
+            if (!row.header) { QVERIFY2(row.enabled, qPrintable(row.data)); continue; }
+            ++headers;
+            QVERIFY2(!row.enabled, qPrintable(row.data));
+            QCOMPARE(row.data, QStringLiteral("class:") + row.text);
+            QCOMPARE(row.group, row.text);
         }
-        // The main page opens on the pane's own model; the flash page on rank 1 of the flash list.
-        const modelrows::Page main = pages.at(1);
-        QCOMPARE(main.rows.at(main.current).data, QStringLiteral("pick:main|kimi-code|kimi-k3"));
-        const modelrows::Page flash = pages.at(2);
-        QCOMPARE(flash.rows.at(flash.current).data, QStringLiteral("pick:flash|glm-coding|glm-5.3-flash"));
+        QCOMPARE(headers, 3);   // high, main, flash — local only where this machine serves one
     }
 
-    // A mode row's parentheses name what *this pane* would run: its own pick where it has one,
-    // rank 1 of the list where it has not.
-    void theParenthesesNameWhatThisPaneWouldRun()
+    // "Two per class by default", and the cutoff the dialog's "show in box" column writes moves it.
+    void theCutoffIsTwoByDefaultAndStored()
+    {
+        QCOMPARE(curation::boxCutoff(QStringLiteral("main")), 2);
+        const modelrows::Context context = paneContext();
+        QCOMPARE(shapeOf(modelrows::build(context)).mid(2, 3),
+                 QStringList({QStringLiteral("main"), QStringLiteral("  kimi-k3"), QStringLiteral("  glm-5.3")}));
+        // The third row of main is behind the cutoff, so the header says Right opens it.
+        const QList<modelrows::Row> rows = modelrows::build(context);
+        QCOMPARE(rows.at(modelrows::indexOf(rows, QStringLiteral("class:main"))).trailing, QStringLiteral("›"));
+        QVERIFY(modelrows::expandable(context, QStringLiteral("main")));
+
+        curation::setBoxCutoff(QStringLiteral("main"), 3);
+        QCOMPARE(shapeOf(modelrows::build(context)).mid(2, 4),
+                 QStringList({QStringLiteral("main"), QStringLiteral("  kimi-k3"), QStringLiteral("  glm-5.3"),
+                              QStringLiteral("  gpt-6-astra")}));
+        // Nothing left behind it: the header stops offering to open.
+        QVERIFY(!modelrows::expandable(context, QStringLiteral("main")));
+        QCOMPARE(modelrows::build(context).at(2).trailing, QString());
+        // A cutoff longer than the list is not an error, and draws no empty rows.
+        curation::setBoxCutoff(QStringLiteral("main"), 9);
+        QCOMPARE(shapeOf(modelrows::build(context)).mid(2, 4),
+                 QStringList({QStringLiteral("main"), QStringLiteral("  kimi-k3"), QStringLiteral("  glm-5.3"),
+                              QStringLiteral("  gpt-6-astra")}));
+    }
+
+    // Right expands a class to its whole list, Left collapses it. The state is the caller's, so
+    // this module only has to answer what the expanded box looks like.
+    void expandingAClassShowsItsWholeList()
+    {
+        modelrows::Context context = paneContext();
+        context.expanded.insert(QStringLiteral("main"));
+        const QList<modelrows::Row> rows = modelrows::build(context);
+        QCOMPARE(shapeOf(rows).mid(2, 4),
+                 QStringList({QStringLiteral("main"), QStringLiteral("  kimi-k3"), QStringLiteral("  glm-5.3"),
+                              QStringLiteral("  gpt-6-astra")}));
+        // Expanded, the header says so the other way round.
+        QCOMPARE(rows.at(modelrows::indexOf(rows, QStringLiteral("class:main"))).trailing, QStringLiteral("⌄"));
+        // And only that class: high and flash are untouched.
+        QCOMPARE(shapeOf(rows).mid(0, 2), QStringList({QStringLiteral("high"), QStringLiteral("  gpt-6-astra")}));
+    }
+
+    // A class switched off is not drawn at all — no header, no rows (design 5.3, the tab's
+    // "show this class in the box" switch).
+    void aClassSwitchedOffLeavesTheBox()
+    {
+        curation::setBoxShown(QStringLiteral("high"), false);
+        const QStringList shape = shapeOf(modelrows::build(paneContext()));
+        QVERIFY2(!shape.contains(QStringLiteral("high")), qPrintable(shape.join(QLatin1Char('/'))));
+        QVERIFY(shape.startsWith(QStringLiteral("main")));
+        QVERIFY(shape.contains(QStringLiteral("flash")));
+        // gpt-6-astra is rank 4 of main and behind its cutoff, so switching high off really does
+        // take it out of the box rather than moving it.
+        QVERIFY(!shape.contains(QStringLiteral("  gpt-6-astra")));
+    }
+
+    // Owner, 2026-09-21: "exhausted models dont show up." Neither do the unusable ones — this is
+    // the one place that differs from the dialog and the tier lists, which grey them in rank.
+    void spentAndKeylessModelsAreNotInTheBox()
+    {
+        modelrows::Context context = paneContext();
+        context.catalog.status.insert(QStringLiteral("kimi-code"), QStringLiteral("rejected"));
+        const QList<modelrows::Row> rows = modelrows::build(context);
+        QCOMPARE(modelrows::indexOf(rows, QStringLiteral("pick:main|kimi-code|kimi-k3")), -1);
+        // glm-5.3 has two providers and only needs one of them, so its row stays.
+        QVERIFY(modelrows::indexOf(rows, QStringLiteral("pick:main|glm-coding|glm-5.3")) > 0);
+        // The third rank moves up into the room the spent one left: two per class, always two.
+        QCOMPARE(shapeOf(rows).mid(2, 3),
+                 QStringList({QStringLiteral("main"), QStringLiteral("  glm-5.3"), QStringLiteral("  gpt-6-astra")}));
+        // claude-opus-5 is rank 2 of high and has no stored key: absent, not greyed.
+        QCOMPARE(modelrows::indexOf(rows, QStringLiteral("pick:high|anthropic|claude-opus-5")), -1);
+        QVERIFY(modelrows::indexOf(rows, QStringLiteral("pick:high|openai|gpt-6-astra")) > 0);
+    }
+
+    // "If the pane's own model is below the cutoff its row is shown anyway, so the highlight has
+    // a home."
+    void thePanesOwnModelSurvivesTheCutoff()
+    {
+        modelrows::Context context = paneContext();
+        context.modePick.insert(QStringLiteral("main"), QStringLiteral("openai|gpt-6-astra"));   // rank 3 of main
+        const modelrows::Box shown = modelrows::box(context);
+        QCOMPARE(shapeOf(shown.rows).mid(2, 4),
+                 QStringList({QStringLiteral("main"), QStringLiteral("  kimi-k3"), QStringLiteral("  glm-5.3"),
+                              QStringLiteral("  gpt-6-astra")}));
+        QCOMPARE(shown.rows.at(shown.current).data, QStringLiteral("pick:main|openai|gpt-6-astra"));
+        // It is the *pane's* row, so the same model ranked below the cutoff of a class the pane is
+        // not in does not get the same favour.
+        modelrows::Context other = paneContext();
+        other.mode = QStringLiteral("flash");
+        QCOMPARE(shapeOf(modelrows::build(other)).mid(2, 3),
+                 QStringList({QStringLiteral("main"), QStringLiteral("  kimi-k3"), QStringLiteral("  glm-5.3")}));
+    }
+
+    // A console's box is a terminal pane's box, row for row — only the worker role behind the main
+    // class differs, and that is not something the box says (owner, 2026-09-21: the Switchboard
+    // agent's box had read "kimi-k3 (switchboard)"; "(main)" was not wanted either).
+    void aConsoleBuildsTheSameRowsAsAPane()
+    {
+        const QList<modelrows::Row> pane = modelrows::build(paneContext());
+        const QList<modelrows::Row> console = modelrows::build(consoleContext());
+        QCOMPARE(textsOf(console), textsOf(pane));
+        QCOMPARE(dataOf(console), dataOf(pane));
+        for (const modelrows::Row &row : console) QVERIFY(!row.text.contains(QStringLiteral("switchboard")));
+    }
+
+    // The collapsed chip is **the model alone**, on every mode (owner, 2026-09-21: "no need to
+    // show the model class in the pane header"). The mode moved into the tooltip.
+    void theCollapsedChipIsTheModelAlone()
+    {
+        modelrows::Context context = paneContext();
+        QCOMPARE(modelrows::collapsedText(context), QStringLiteral("kimi-k3"));
+        QVERIFY(modelrows::collapsedTooltip(context).isEmpty());
+        context.mode = QStringLiteral("flash");
+        QCOMPARE(modelrows::collapsedText(context), QStringLiteral("glm-5.3-flash"));
+        QCOMPARE(modelrows::collapsedTooltip(context), QStringLiteral("This pane runs on the flash list."));
+        context.mode = QStringLiteral("high");
+        QCOMPARE(modelrows::collapsedText(context), QStringLiteral("gpt-6-astra"));
+    }
+
+    // A mode row's parentheses named what this pane would run; the classes replaced them, but
+    // `modeModel` is still what the chip and the phone read.
+    void modeModelNamesWhatThisPaneWouldRun()
     {
         modelrows::Context context = paneContext();
         QCOMPARE(modelrows::modeModel(context, QStringLiteral("flash")), QStringLiteral("glm-5.3-flash"));
         context.modePick.insert(QStringLiteral("flash"), QStringLiteral("kimi-code|kimi-k3"));
         QCOMPARE(modelrows::modeModel(context, QStringLiteral("flash")), QStringLiteral("kimi-k3"));
-        QCOMPARE(modelrows::page(context, QStringLiteral("main")).rows.at(2).text,
-                 QStringLiteral("  flash (kimi-k3)"));
         // Nothing in the catalog and no pick: the worker's role summary answers, named by the one
         // rule — which is the ordinary case for `high` with no high list.
         modelrows::Context bare;
@@ -210,95 +338,44 @@ private slots:
         QCOMPARE(modelrows::modeModel(bare, QStringLiteral("high")), QStringLiteral("gpt-6-astra"));
     }
 
-    // Owner, 2026-09-21: the Switchboard agent's box said "kimi-k3 (switchboard)"; "(main)" was not
-    // wanted either. A console's box is the terminal pane's box, row for row — only the worker role
-    // behind the main mode differs, and that is not something the box says.
-    void aConsoleBuildsTheSameRowsAsAPaneOnMain()
-    {
-        const QList<modelrows::Row> pane = modelrows::build(paneContext());
-        const QList<modelrows::Row> console = modelrows::build(consoleContext());
-        QCOMPARE(textsOf(console), textsOf(pane));
-        for (const modelrows::Row &row : console) QVERIFY(!row.text.contains(QStringLiteral("switchboard")));
-        // The one difference is where a pick on the main mode row goes: the console's own role.
-        QCOMPARE(dataOf(console).at(1), QStringLiteral("role:switchboard"));
-        QCOMPARE(dataOf(pane).at(1), QStringLiteral("role:main"));
-    }
-
-    // The collapsed chip: the model alone on main, "<model> · <mode>" anywhere else (design 5.1).
-    void theCollapsedChipSaysTheModeUnlessItIsMain()
+    // A local class only where this machine serves one, and guest rows under the classes.
+    void localClassAndGuestRows()
     {
         modelrows::Context context = paneContext();
-        QCOMPARE(modelrows::collapsedText(context), QStringLiteral("kimi-k3"));
-        context.mode = QStringLiteral("flash");
-        QCOMPARE(modelrows::collapsedText(context), QStringLiteral("glm-5.3-flash · flash"));
-        context.mode = QStringLiteral("high");
-        QCOMPARE(modelrows::collapsedText(context), QStringLiteral("gpt-6-astra · high"));
-    }
-
-    // A spent subscription is greyed **in place**, with the reason, never dropped (design 1.3):
-    // the list the user ranked must not quietly lose a row because a plan ran out today.
-    void aSpentModelKeepsItsRowGreyed()
-    {
-        modelrows::Context context = paneContext();
-        context.catalog.status.insert(QStringLiteral("kimi-code"), QStringLiteral("rejected"));
-        const modelrows::Page main = modelrows::page(context, QStringLiteral("main"));
-        const int at = modelrows::indexOf(main.rows, QStringLiteral("pick:main|kimi-code|kimi-k3"));
-        QVERIFY2(at > 0, "the spent row was dropped instead of greyed");
-        QVERIFY(!main.rows.at(at).enabled);
-        QVERIFY(main.rows.at(at).tooltip.contains(QStringLiteral("spent")));
-        // glm-5.3 has two providers and only needs one of them, so it stays live.
-        const int glm = modelrows::indexOf(main.rows, QStringLiteral("pick:main|glm-coding|glm-5.3"));
-        QVERIFY(main.rows.at(glm).enabled);
-        // And a model whose only provider has no key is greyed with that reason rather than hidden.
-        const modelrows::Page high = modelrows::page(context, QStringLiteral("high"));
-        const int opus = modelrows::indexOf(high.rows, QStringLiteral("pick:high|anthropic|claude-opus-5"));
-        QVERIFY2(opus > 0, "the keyless row was dropped instead of greyed");
-        QVERIFY(!high.rows.at(opus).enabled);
-        QVERIFY(high.rows.at(opus).tooltip.contains(QStringLiteral("no stored key")));
-        QVERIFY(high.rows.at(modelrows::indexOf(high.rows, QStringLiteral("pick:high|openai|gpt-6-astra"))).enabled);
-    }
-
-    // A Local mode only where this machine serves one, and guest rows only on the main page.
-    void localModeAndGuestRows()
-    {
-        modelrows::Context context = paneContext();
-        context.modes << QStringLiteral("local");
+        // Nothing is ranked on the local list and this catalog serves nothing locally, so the
+        // class has nothing to draw and is left out rather than drawn empty.
+        context.classes << QStringLiteral("local");
         context.roleModel.insert(QStringLiteral("local"), QStringLiteral("bonsai-2-27b"));
-        context.roleNote.insert(QStringLiteral("local"), QStringLiteral("no local model: using Main"));
+        QVERIFY(!shapeOf(modelrows::build(context)).contains(QStringLiteral("local")));
+
         context.guests << QStringLiteral("claude");
         context.guestText.insert(QStringLiteral("claude"), QStringLiteral("Claude Code"));
-        const modelrows::Page main = modelrows::page(context, QStringLiteral("main"));
-        // Nothing is ranked on the local list here, so the parentheses are what the *worker*
-        // resolved the role to — never a cloud model guessed out of the catalog.
-        QCOMPARE(main.rows.at(3).text, QStringLiteral("  local (bonsai-2-27b)"));
-        QCOMPARE(main.rows.at(3).tooltip, QStringLiteral("no local model: using Main"));
-        // And the local page offers no cloud model either ("local" is a promise about where the
-        // text goes, design 3.2): it is the mode rows and the two action rows, nothing between.
-        for (const modelrows::Row &row : modelrows::page(context, QStringLiteral("local")).rows)
-            QVERIFY2(!row.data.startsWith(QStringLiteral("pick:")), qPrintable(row.data));
-        QVERIFY(modelrows::indexOf(main.rows, QStringLiteral("guest:claude")) > 0);
-        // Not on the flash page: a guest is the pane's own agent, not a tier.
-        QCOMPARE(modelrows::indexOf(modelrows::page(context, QStringLiteral("flash")).rows,
-                                    QStringLiteral("guest:claude")), -1);
+        const QList<modelrows::Row> rows = modelrows::build(context);
+        const int guest = modelrows::indexOf(rows, QStringLiteral("guest:claude"));
+        QVERIFY(guest > 0);
+        QVERIFY(rows.at(guest).separatorBefore);        // its own section under the classes
+        QVERIFY(rows.at(guest).group.isEmpty());        // a guest is the pane's agent, not a class
         // A console passes none (#GH5T).
         QCOMPARE(modelrows::indexOf(modelrows::build(consoleContext()), QStringLiteral("guest:claude")), -1);
     }
 
-    // Into a QComboBox: the same rows, the via column on its own role, a greyed row switched off,
-    // and the current row selected.
+    // Into a QComboBox: the same rows, the via column and the class on their own roles, the header
+    // switched off, and the current row selected.
     void fillCarriesEverythingIntoTheBox()
     {
-        modelrows::Context context = paneContext();
-        context.catalog.status.insert(QStringLiteral("kimi-code"), QStringLiteral("rejected"));
         QComboBox box;
-        const int index = modelrows::fill(&box, context);
+        const int index = modelrows::fill(&box, paneContext());
         QVERIFY(index > 0);
         const int kimi = box.findData(QStringLiteral("pick:main|kimi-code|kimi-k3"));
-        QVERIFY(kimi > 0);
+        QCOMPARE(index, kimi);
         QCOMPARE(box.itemData(kimi, relay::kTrailingItemRole).toString(), QStringLiteral("kimi"));
-        QVERIFY(!box.model()->index(kimi, 0).flags().testFlag(Qt::ItemIsEnabled));
-        QVERIFY(box.model()->index(box.findData(QStringLiteral("role:main")), 0)
-                    .flags().testFlag(Qt::ItemIsEnabled));
+        QCOMPARE(box.itemData(kimi, relay::kGroupItemRole).toString(), QStringLiteral("main"));
+        QVERIFY(!box.itemData(kimi, relay::kHeaderItemRole).toBool());
+        QVERIFY(box.model()->index(kimi, 0).flags().testFlag(Qt::ItemIsEnabled));
+        const int head = box.findData(QStringLiteral("class:main"));
+        QVERIFY(head >= 0);
+        QVERIFY(box.itemData(head, relay::kHeaderItemRole).toBool());
+        QVERIFY(!box.model()->index(head, 0).flags().testFlag(Qt::ItemIsEnabled));
     }
 
     // A main-tier role row is the model alone, in a console exactly as in a pane; the parentheses

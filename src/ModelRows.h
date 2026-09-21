@@ -25,6 +25,7 @@
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QList>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 
@@ -32,38 +33,47 @@ class QComboBox;
 
 namespace relay::modelrows {
 
-// ----- the box since card #MDL1 (owner, 2026-09-21) --------------------------------------------
+// ----- the box since card #MDL1 (owner, 2026-09-21, second design: section 5.3) ---------------
 //
-// "first it just says high, main, flash, with the first model in parens, eg high (gpt-6-astra).
-// then it lists the models for the mode you are in … with your selected model highlighted. so it
-// shows the models from main if a pane is on /main, or if its on /high, it shows the high models."
-// And then: "great, left/right changes mode. add /high."
+// The first design put the modes at the top and paged between them with Left and Right. The owner
+// replaced it the same day with one that shows every class at once:
 //
-//     high (gpt-6-astra)
-//   • main (kimi-k3)              ← the mode this pane is in
-//     flash (glm-5.3-flash)
-//     local (bonsai-2-27b)        only where this machine serves one
-//     ─────────────────────
-//     gpt-6-astra   codex
-//   ▌ kimi-k3       kimi          ← this pane's model, highlighted when the box opens
-//     glm-5.3       z.ai +1
-//     ─────────────────────
-//     more models…   customize…
+//     high
+//       gpt-6-astra        codex
+//       glm-5.3            z.ai +1
+//     main
+//     ▌ kimi-k3            kimi           ← this pane's model, highlighted on open
+//       glm-5.3            z.ai +1
+//     flash
+//       glm-5.3-flash      z.ai
+//     local                               only where this machine serves one
+//       bonsai-2-27b       spark
+//     ───────────────────────
+//     more models…
 //
-// So the box is a small stack of **pages**, one per mode, and every page carries the same mode rows
-// at the top with the marker on a different one. Left and Right turn between them in place
-// (relay::FilterPopup::setPages); nothing reaches the worker until Enter. What a mode row's
-// parentheses name is what **this pane** would run in that mode — its own pick when it has one,
-// else rank 1 of that tier's list, else what the worker's role summary resolved. `lite` is not a
-// pane mode and has no page.
+// So a class is a **header row** — a label, not a choice: "the class header rows are not selectable
+// in the picker. thats redundant." — followed by that class's list, in list order, one row per
+// model (`models::grouped` folds the providers that serve one name, and `trailing` says which of
+// them the turn would go to), down to that class's **cutoff**, two by default
+// (`models::curation::boxCutoff`). A class switched off (`boxShown`) is not drawn at all, and
+// neither is one whose list has nothing left to draw.
 //
-// Below the separator are the models of that page's mode, **in list order** — the order is the
-// information: rank 1 is the default and the rest is the failover order — and **one row per model**
-// (rule 2): `relay::models::grouped` folds the providers that serve one name into a single row, and
-// the row's right-hand `trailing` part says which of them the turn would go to. A row whose every
-// provider is spent or unusable is greyed **in place**, with the reason in its tooltip, never
-// dropped: a subscription running out must not make a model disappear from the list the user
-// ranked (design 1.3, rule 2).
+// Two rulings shape what is *left out*. "exhausted models dont show up": a row whose every
+// provider is spent, or has no key, is **dropped** here — which is the opposite of what the dialog
+// and the tier lists do, and deliberately so. A list is an order the user wrote down and the dialog
+// shows it whole; the box is the short answer to "what can I run right now", and a row that cannot
+// take the turn is not part of that answer. And "no need to show the model class in the pane
+// header": the collapsed chip is the model alone on every mode, with the mode in the tooltip.
+//
+// The one row that survives the cutoff whatever its rank is **this pane's own model** for its
+// class: the box opens with it highlighted, so the highlight needs a home.
+//
+// Right on a model row expands its class to the whole list and Left collapses it (`Context::
+// expanded`); the expansion lasts while the box is open and is the caller's state, not a setting.
+// Typing filters across every listed model of every class, and a header stays while its class has
+// a match — that is `FilterRow::group`, which this module fills in for every row.
+// Enter on a model row switches the pane to that class **and** that model: `pick:<class>|<key>`,
+// the same word the first design used, so `Pane::modelBoxPicked` is unchanged.
 
 // What one pane picked for one mode, and the level it runs it at. The level is stored beside the
 // key rather than read back off the tier list every time, because the list is the *machine's* and
@@ -89,29 +99,40 @@ QHash<QString, ModePick> usableModePicks(const models::Catalog &catalog,
 
 // One row as the box wants it. `data` is what a pick means, and is the same word in every box:
 //
-//   role:<role>                           put this pane on that mode (a mode row)
-//   pick:<mode>|<preset>|<model>          that mode **and** that model, in this pane
+//   class:<class>                         a header — a label, never a pick (see `header`)
+//   pick:<class>|<preset>|<model>         that class **and** that model, in this pane
+//   role:<role>                           put this pane on that mode; the phone's menu still sends it
 //   entry:<preset>|<model>                that provider and that model, on the pane's own mode
 //   guest:<id>                            Claude Code or Codex as a TUI in this pane's shell
 //   gear:picker                           "more models…" — the relay::ModelPicker dialog
-//   gear:modelOptions                     the gear — Options › Models
+//   gear:modelOptions                     Options › Models (no longer a row of the box)
 struct Row {
     QString text;
     QString data;
     QString tooltip;             // the row's own tooltip (a tier's step-down note); usually empty
     QString trailing;            // the "via" column: the provider this row would run on
+    // The class this row belongs to ("main"), on the header and on every model row under it, so a
+    // filter can keep a header whose class still has a match and Left/Right know which class the
+    // highlighted row would expand. Empty on the action rows.
+    QString group;
+    // A class label: not selectable, never highlighted, skipped by Up and Down (owner, 2026-09-21:
+    // "the class header rows are not selectable in the picker. thats redundant.").
+    bool header = false;
     bool separatorBefore = false;
-    bool enabled = false;        // set by build(); false is a row greyed in place, with the reason
+    bool enabled = false;        // set by build(); false is a row that cannot be picked
 };
 
 // Everything a caller has to say. Every box reads the same `catalog`; the rest is who is asking.
 struct Context {
     models::Catalog catalog;
-    // The modes this box offers, in order (the design's high, main, flash, and local only where
-    // this machine serves a model — card #JH22: a row that always resolved back to main would be a
-    // promise the box cannot keep). "lite" is not a pane mode.
-    QStringList modes{QStringLiteral("high"), QStringLiteral("main"), QStringLiteral("flash")};
-    QString mode{QStringLiteral("main")};   // the mode this pane is in: the marker, and the page
+    // The classes this box draws, in order (the design's high, main, flash, and local only where
+    // this machine serves a model — card #JH22: a class that always resolved back to main would be
+    // a promise the box cannot keep). "lite" is never a pane mode and is never one of them.
+    QStringList classes{QStringLiteral("high"), QStringLiteral("main"), QStringLiteral("flash")};
+    QString mode{QStringLiteral("main")};   // the class this pane is in: the row that opens highlighted
+    // The classes Right has expanded to their whole list, while the box is open (design 5.3). The
+    // caller owns it: it is not a setting, and closing the box forgets it.
+    QSet<QString> expanded;
     // mode → the worker role that mode means *for this caller*. A console runs under a main-tier
     // role of its own ("switchboard"), and that role IS its main mode, so its box is the same list
     // as a terminal pane's (owner, 2026-09-21: not "(switchboard)", "those should be the same
@@ -136,45 +157,44 @@ struct Context {
     qint64 now = 0;                      // unix seconds for `exhausted`; 0 means the clock
 };
 
-// One page of the box: a mode, its rows, and the row that is current on it.
-struct Page {
-    QString mode;
+// The whole box: every class's header and rows, the guest rows, the separator and "more models…",
+// and which row opens highlighted.
+struct Box {
     QList<Row> rows;
     int current = -1;            // an index into `rows`; -1 when nothing there is the pane's
 };
 
-// The page for one mode — the mode rows (marker on `context.mode`), that mode's models, the
-// guests where the caller has any, then "more models…" and the gear.
-Page page(const Context &context, const QString &mode);
-// Every page, in `context.modes` order. This is what the popup is given.
-QList<Page> pages(const Context &context);
-
-// The rows of the page the caller is on (`context.mode`), with the separators marked.
+// The box for this pane, as design 5.3 draws it.
+Box box(const Context &context);
+// Its rows alone — what the phone's menu and the tests read.
 QList<Row> build(const Context &context);
 
-// `build`, then into the box: text, data, per-row tooltips, the via column, separators, greyed
-// rows and the current row. The caller blocks the box's signals and owns everything else about the
-// widget. Returns the index the current row landed on, or -1.
+// `build`, then into the box: text, data, per-row tooltips, the via column, separators, the header
+// and greyed rows switched off, and the current row selected. The caller blocks the box's signals
+// and owns everything else about the widget. Returns the index the current row landed on, or -1.
 int fill(QComboBox *box, const Context &context);
 
-// A mode row's text: "high (gpt-6-astra)", with the marker on the mode the pane is in and two
-// spaces in its place on the others, so the names line up. With no model known it is the mode
-// alone.
-QString modeRowText(const QString &mode, const QString &model, bool current);
+// Whether Right has anything to open on that class: its list holds more models than the box is
+// drawing of it. False for a class that is off, or one the box is already showing whole.
+bool expandable(const Context &context, const QString &klass);
 // The entry key this pane would run in that mode: its own pick, else the first live entry of that
 // tier's list. Empty when neither answers — then only the worker's role summary knows.
 QString modeKey(const Context &context, const QString &mode);
 // The model name to print for that mode: `modeKey`'s entry, else the role summary's model, run
 // through the one naming rule (`models::nameOf`). Empty when nothing has said yet.
 QString modeModel(const Context &context, const QString &mode);
-// The models of one mode, in list order and including the ones that cannot be used — the box greys
-// them in place. A mode whose list is empty falls back to the whole shown catalog in rank order,
-// which is what the box drew before the lists existed and is the only useful answer for a tier the
-// user has never ranked.
+// The models of one class, in list order and including the ones that cannot be used — what is
+// dropped, and where, is `box`'s business. A class whose list is empty falls back to the whole
+// shown catalog in rank order, which is what the box drew before the lists existed and is the only
+// useful answer for a tier the user has never ranked.
 QList<models::Entry> modeEntries(const Context &context, const QString &mode);
-// What the collapsed chip says (design 5.1): the model alone on main, "<model> · <mode>" on any
-// other mode. Empty only when no model is known at all.
+// What the collapsed chip says: **the model alone**, on every mode (owner, 2026-09-21: "no need
+// to show the model class in the pane header"). The mode is in the box's tooltip instead. Empty
+// only when no model is known at all — and then, as before, the mode's own name where it is not
+// main, so the chip is never blank on a pane that is somewhere other than its own model.
 QString collapsedText(const Context &context);
+// The mode's own word for the chip's tooltip, empty on main: "running on the flash list".
+QString collapsedTooltip(const Context &context);
 // The index of the row carrying that `data`, or -1.
 int indexOf(const QList<Row> &rows, const QString &data);
 

@@ -476,8 +476,65 @@ private Q_SLOTS:
         QCOMPARE(curation::currentProfile(), admin);
     }
 
+    // ----- what the box shows of each class (card #MDL1, design 5.3) ---------------------------
+    // Two per class unless the dialog's "show in box" column says otherwise, a class can be
+    // switched off, and both belong to the lists — so they travel with the profile.
+    void theBoxCutoffIsStoredWithTheListsPerProfile() {
+        // An absent key is "two, on", so a fresh install and one that was set back agree.
+        for (const QString &klass : curation::boxClasses()) {
+            QCOMPARE(curation::boxCutoff(klass), curation::kBoxCutoffDefault);
+            QVERIFY(curation::boxShown(klass));
+        }
+        QCOMPARE(curation::boxClasses(), (QStringList{QStringLiteral("high"), QStringLiteral("main"),
+                                                      QStringLiteral("flash"), QStringLiteral("local")}));
+        // lite is never a pane mode and never in the box: it has no setting to write.
+        curation::setBoxCutoff(QStringLiteral("lite"), 5);
+        curation::setBoxShown(QStringLiteral("lite"), false);
+        QCOMPARE(curation::boxCutoff(QStringLiteral("lite")), curation::kBoxCutoffDefault);
+        QVERIFY(curation::boxShown(QStringLiteral("lite")));
+
+        curation::setBoxCutoff(QStringLiteral("main"), 4);
+        curation::setBoxShown(QStringLiteral("flash"), false);
+        QCOMPARE(curation::boxCutoff(QStringLiteral("main")), 4);
+        QVERIFY(!curation::boxShown(QStringLiteral("flash")));
+        QVERIFY(curation::boxShown(QStringLiteral("main")));
+        curation::setBoxCutoff(QStringLiteral("main"), 0);          // clamped: a class shows at least its rank 1
+        QCOMPARE(curation::boxCutoff(QStringLiteral("main")), 1);
+
+        // A profile is a whole snapshot of the lists, and these are part of them. Both are saved
+        // first and only then edited, because an edit made while one is current belongs to it.
+        curation::setBoxCutoff(QStringLiteral("main"), 3);
+        curation::saveProfile(QStringLiteral("deep work"));
+        curation::saveProfile(QStringLiteral("admin work"));
+        curation::setBoxCutoff(QStringLiteral("main"), 2);
+        curation::setBoxShown(QStringLiteral("flash"), true);
+        curation::applyProfile(QStringLiteral("deep work"));
+        QCOMPARE(curation::boxCutoff(QStringLiteral("main")), 3);
+        QVERIFY(!curation::boxShown(QStringLiteral("flash")));
+        curation::applyProfile(QStringLiteral("admin work"));
+        QCOMPARE(curation::boxCutoff(QStringLiteral("main")), 2);
+        QVERIFY(curation::boxShown(QStringLiteral("flash")));
+        // An edit while a profile is current is an edit *of* it — the same invariant the lists have.
+        curation::setBoxCutoff(QStringLiteral("high"), 5);
+        curation::applyProfile(QStringLiteral("deep work"));
+        QCOMPARE(curation::boxCutoff(QStringLiteral("high")), curation::kBoxCutoffDefault);
+        curation::applyProfile(QStringLiteral("admin work"));
+        QCOMPARE(curation::boxCutoff(QStringLiteral("high")), 5);
+
+        // Renaming carries them; deleting takes them with it and leaves the live ones alone.
+        curation::renameProfile(QStringLiteral("admin work"), QStringLiteral("admin"));
+        QCOMPARE(curation::boxCutoff(QStringLiteral("high")), 5);
+        curation::applyProfile(QStringLiteral("deep work"));
+        curation::applyProfile(QStringLiteral("admin"));
+        QCOMPARE(curation::boxCutoff(QStringLiteral("high")), 5);
+        curation::deleteProfile(QStringLiteral("admin"));
+        QCOMPARE(curation::boxCutoff(QStringLiteral("high")), 5);
+    }
+
     // Owner, 2026-09-21: "allow exporting and importing profiles."
     void profilesTravelAsJson() {
+        curation::setBoxCutoff(QStringLiteral("main"), 3);          // and what the box shows of each
+        curation::setBoxShown(QStringLiteral("flash"), false);      // class, which travels with them
         curation::addToTier(QStringLiteral("main"), QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max"));
         curation::addToTier(QStringLiteral("main"), QStringLiteral("kimi-code|k3"), QStringLiteral("high"));
         curation::addToTier(QStringLiteral("lite"), QStringLiteral("glm-coding|glm-5.3-flash"), QString());
@@ -504,6 +561,15 @@ private Q_SLOTS:
                               {QStringLiteral("effort"), QStringLiteral("max")}}));
         QVERIFY(lists.value(QStringLiteral("flash")).toArray().isEmpty());
         QVERIFY(curation::exportProfiles(QStringList{QStringLiteral("nobody")}).isEmpty());
+        // And what the box shows of each class, every class written out for the same reason the
+        // empty lists are (card #MDL1, design 5.3).
+        const QJsonObject box = written.at(0).toObject().value(QStringLiteral("box")).toObject();
+        QStringList classes = curation::boxClasses();
+        classes.sort();
+        QCOMPARE(box.keys(), classes);
+        QCOMPARE(box.value(QStringLiteral("main")).toObject().value(QStringLiteral("cutoff")).toInt(), 3);
+        QVERIFY(!box.value(QStringLiteral("flash")).toObject().value(QStringLiteral("shown")).toBool());
+        QVERIFY(box.value(QStringLiteral("high")).toObject().value(QStringLiteral("shown")).toBool());
 
         // It survives a round trip through text onto a machine that has never seen it.
         const QJsonObject reread = QJsonDocument::fromJson(QJsonDocument(document).toJson()).object();
@@ -520,6 +586,8 @@ private Q_SLOTS:
         curation::applyProfile(QStringLiteral("AI work"));
         QCOMPARE(curation::tierList(QStringLiteral("main")).size(), 2);
         QCOMPARE(curation::tierList(QStringLiteral("main")).first().effort, QStringLiteral("max"));
+        QCOMPARE(curation::boxCutoff(QStringLiteral("main")), 3);       // it came across the wire
+        QVERIFY(!curation::boxShown(QStringLiteral("flash")));
         QCOMPARE(curation::tierList(QStringLiteral("lite")).first().key, QStringLiteral("glm-coding|glm-5.3-flash"));
         QVERIFY(curation::tierList(QStringLiteral("flash")).isEmpty());
 
@@ -541,6 +609,12 @@ private Q_SLOTS:
         QCOMPARE(one.size(), 1);
         QCOMPARE(one.first().lists.value(QStringLiteral("main")).first().key, QStringLiteral("glm-coding|glm-5.3"));
         QVERIFY(one.first().lists.value(QStringLiteral("main")).first().effort.isEmpty());
+        // A file written before the box had classes says nothing about them, and imports as the
+        // defaults rather than as nothing at all.
+        for (const QString &klass : curation::boxClasses()) {
+            QCOMPARE(one.first().box.value(klass).cutoff, curation::kBoxCutoffDefault);
+            QVERIFY(one.first().box.value(klass).shown);
+        }
 
         // Anything else is refused with a sentence, and nothing is stored.
         QVERIFY(curation::readProfiles(QJsonObject(), &error).isEmpty());
