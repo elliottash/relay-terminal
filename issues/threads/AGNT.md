@@ -1058,3 +1058,102 @@ Left for whoever takes the next item: whether an `option:` link in a **console's
 reveals its row is still unproven either way. It did not in the earlier drive — the pane stayed
 on General — and this drive reaches the row by its tab instead, because what it is the gate for
 is the announcement. It belongs with the console's link resolution, not with this item.
+
+<!-- relay:entry 20260921T092804Z-k8 author=claude-code kind=evidence -->
+The three finishing items the integration drive left, done — and the first of them was not a bug
+in Relay (`3f0a81ff`, evidence `cb2bc825`,
+`docs/qa_evidence/2026-09-21-console-links-and-card-frame/`, 22 PASS / 0 FAIL).
+
+**1 — "an `option:` link in a console's transcript does not reveal its row." It does, and it
+always did.** The designed path is whole, every step of it: the engine reports the activated run
+(`engine/view/TerminalView.cpp:1476`) → `Pane::openOutputTarget` builds the `links::Target` with
+its kind (`src/Pane.h:2761`) → the context gets first refusal (`src/Pane.h:2778`) → the window's
+wrapper forwards it (`TabConsoleContext::resolveLink`, `src/RelayWindow.h:7573`) →
+`OptionsContext::resolveLink` calls `revealOption` in its own pane (`src/SettingsPane.cpp:364`),
+and what a context declines reaches the window (`src/RelayWindow.h:7637`).
+
+**What the drive clicked was the markdown label.** `[OPENROW](option:terminal/copy_on_select)`
+prints as `OPENROW (option:terminal/copy_on_select)`: `MarkdownAnsi` paints the **label** in
+`[ui] link`'s dark green and then prints the target after it, and the run the engine underlines
+and a click opens is the **target** — `relay::links::candidates`' `option:` stage finds it in
+the text and `resolve` turns it into `relay://option/terminal/copy_on_select`. The label is not a
+link and opens nothing. The drive aimed at it on purpose: `stub-provider.py` says of that scene
+"the link's label is a word that appears nowhere else on screen, so a driver that has to click it
+cannot land on the same words in the prose". So both readings of `punch/c07-revealed.png` — the
+one that passed on the wrong words and the one that failed — were of a click that had opened
+nothing at all.
+
+Clicked on the target, live, one console each, and the Options gates read the page out of
+`RELAY_QA_RECTS` — the `settingsRowLabel`s that are actually **drawn**, by their `text` — never a
+word out of a transcript, so a page passes only when its own rows are there and the other page's
+rows are gone:
+
+| | clicked in | read |
+|---|---|---|
+| `option:terminal/copy_on_select` | the **Options** helper's own transcript | revealed in place: General's rows (`Thinking display`, `Show tool output`, …) give way to Terminal's (`Copy on select`, `Colour paths and links in output`, …) |
+| the same link | the **Switchboard's** console, which is not Options | the window opens an Options pane on Terminal, at the row |
+| `session:2222…` | the **Sessions** helper | the list selects that conversation; the detail beside it reads "The pane header and its labels", and the one selected before it is gone |
+| `#<id>` | the **Switchboard's** console | the card page opens, on the card it named |
+
+`TabConsoleContext` forwards every virtual of `relay::agent::Context` and both directions of
+`onChanged`, and `boardworkspace`'s `theWindowsWrapperForwardsEveryContextVirtual` already reads
+the virtuals out of `src/AgentContext.h` and fails if one is not forwarded — that is the test
+against a future unforwarded virtual and it needed nothing. What had no test was the **pane's**
+half: `consolemode`'s new `theContextGetsFirstRefusalOnEveryLinkKind` drives a real console's
+`openOutputTarget` for `option:`, `session:`, `card:` and a path, and asserts the context is
+offered each one with the right `links::Kind`, that a refusal reaches `onOpenOption` /
+`onOpenSessions` / `onOpenCard` / `onOpenPath` at the thing it names, and that a context which
+swallows stops all four. The stub context's `seen` list in that file had never been read by any
+case.
+
+**2 — the card page's second frame was the console's own, not `boardReply`'s.** Measured
+(`reply-frames.py`: a frame is a one-pixel column lighter than the pixel either side of it, and a
+frame's column runs the height of the reply block while a button's runs only the button's). On
+`punch/b02-card.png`: `FRAMES 4 at=774,782,1464,1472`. The outer pair is eight pixels out, which
+is `boardReply`'s content margin, so it looked like `boardReply` — but the ground between the two
+is `#0f1115` (`@bg`) and `QFrame#boardReply` paints `@surface`. `@bg` + `1px @border` +
+`border-radius: 8px` is `QWidget#pane`.
+
+A console **is** a `Pane`; `wireAgentConsole` ends in `theme::polishWindow(console)`
+(`src/RelayWindow.h:7710`); `Pane` declares no `Q_OBJECT`, so `metaObject()->className()` is
+`"QWidget"`, `polishWindow` takes that branch, finds a `composerEditor` under it and renames the
+console `pane` — over the `agentConsole` name `createAgentConsole` gave it. That is right
+everywhere the transcript is drawn: it is what makes a console wear a pane's face on the
+Switchboard's list page, in Options and in Sessions, and `punch/c02-console.png` has the same two
+columns at x=775 and x=1471 with the transcript between them. On a **card** the transcript is
+hidden until it is used (decision 2), so the pane frame came down to eight pixels outside the
+composer's own. `CardDetail::setConsole` stamps `cardConsole` beside the `hasConsole` it already
+stamps, one rule keys the frame on it, and no other console has the property.
+
+**3 — Plan's bright outline was a missing colour, not a focus ring.** The row's buttons are
+already `Qt::NoFocus` (`Pane::rebuildActionRow`, `src/Pane.h:3298`) and a `QToolButton` has no
+auto-default, so nothing was taking focus from the composer.
+`QToolButton[actionRow="true"] { background: @raised; color: @text; }` declared a ground and an
+ink and no `border-color`, and the shape rule above it declares the border's **width** and
+deliberately not its colour, so Qt framed the button in its own ink: Plan's edges read `#e5e8eb`
+(`@text`) beside Execute's `#b38df6`. Check, Clean up, Tests and Profile escaped it only because
+their id rules say `border: 1px solid @border`; the card's Plan could not, because its id rule is
+`QPushButton#boardReplyButton` and the row is tool buttons now. One declaration, and
+`[leaves="true"]`, `:hover` and `:disabled` keep theirs.
+
+Read again on the fixed build: `FRAMES 2 at=782,1464`, Plan's edges `#2a2e37` (`@border`),
+Execute's `#b48ef7`. The Options, Sessions and Switchboard consoles are byte-identical in the
+only thing that changed for them — their own pane frame is still at x=775/1471 in `@border`.
+
+**The terminal pane is untouched**: both rules are keyed on `[cardConsole="true"]` and
+`[actionRow="true"]`, a terminal pane's action row is empty and no terminal pane is a card's
+console, and `src/Pane.h` was not edited.
+
+**Left open, and it is the owner's call.** A markdown link's **label** is not clickable — only
+the target printed beside it is. Making the label the link means an OSC 8 run around it, and a
+prose block is **already** one OSC 8 run (`relay://prose/<pane>/<n>`, the anchor the engine's
+fold layer re-wraps the block from: `Pane::openProse`, `TerminalView::setProseBlock`). OSC 8 runs
+do not nest, so a link inside a block would end the block's anchor at the label and the rest of
+the paragraph would stop re-wrapping. That is a change to the prose anchor, not to the renderer.
+It is on the QA checklist with this reason.
+
+**And one thing for whoever drives this card next.** The `option:` phase of
+`docs/qa_evidence/2026-09-21-agents-are-consoles/drive.sh` still clicks `openrow` — the label. It
+is another session's file and has uncommitted edits in it, so it was left alone; click the
+`option:` token instead, the way
+`docs/qa_evidence/2026-09-21-console-links-and-card-frame/drive.sh` does.

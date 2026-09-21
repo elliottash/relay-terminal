@@ -7,7 +7,7 @@ assignee: claude-code
 rank: zzzzzzzzzzx
 created: '2026-09-20'
 source: Owner, terminal, 2026-09-20, comparing the helper panels with a terminal pane
-links: {plans: [], commits: [fe9435b3, 59319d88, f0f9c6b7, 34ff0830, bb1221a2, ece42d07, ca4e5162, de54a761, cbf06cc0, dd104c3b, 24042b5b, 81e889c1, 137f748f, 1265b76f, 7a35a498, 769cc4a4, 694470f8, fe9eea62, '28581709', c4a1625d, 21fbcc5b, bc2db91e, cb0e7d5e, 67837ec9, 6e0179f2, 0df2b685, b8453c97, d52a9d54, db186adc, d0c974aa, 6f0f80a7, 999a8398, 7c51b9dc, b62b9f34, 37eae815, efe55518], evidence: [docs/qa_evidence/2026-09-21-agents-are-consoles], related: [FEJQ, 8YQ9, PBX1, PK5Q, H6VQ, BRD3, R5TC, GH5T, N8VK], github: null}
+links: {plans: [], commits: [fe9435b3, 59319d88, f0f9c6b7, 34ff0830, bb1221a2, ece42d07, ca4e5162, de54a761, cbf06cc0, dd104c3b, 24042b5b, 81e889c1, 137f748f, 1265b76f, 7a35a498, 769cc4a4, 694470f8, fe9eea62, '28581709', c4a1625d, 21fbcc5b, bc2db91e, cb0e7d5e, 67837ec9, 6e0179f2, 0df2b685, b8453c97, d52a9d54, db186adc, d0c974aa, 6f0f80a7, 999a8398, 7c51b9dc, b62b9f34, 37eae815, efe55518, e7a2bfe3, 3f0a81ff, cb2bc825], evidence: [docs/qa_evidence/2026-09-21-agents-are-consoles, docs/qa_evidence/2026-09-21-console-write-undo, docs/qa_evidence/2026-09-21-console-links-and-card-frame], related: [FEJQ, 8YQ9, PBX1, PK5Q, H6VQ, BRD3, R5TC, GH5T, N8VK], github: null}
 ---
 # An agent is the prompt box: one agent surface, one context per setting, and the helper becomes a pane
 
@@ -744,5 +744,27 @@ answer changes only the step named.
       `docs/qa_evidence/2026-09-21-console-write-undo/` — 19 PASS, 0 FAIL.
 - [ ] Ctrl+Shift+Enter on a card, on its own and after a Discuss turn: it did not land in the
       implementer drive and whether that is the page or the drive is not settled.
+- [x] **A link in a console's transcript opens what it names** — checked 2026-09-21
+      (`3f0a81ff`, `cb2bc825`). All four kinds, driven live, one console each: `option:` in the
+      Options helper reveals the row **in that same pane** (General → Terminal), the same link
+      clicked in the Switchboard's console opens Options at the row through the window,
+      `session:` in the Sessions helper selects that conversation, and `#ID` in the board
+      console opens the card page. Nothing was broken: what the earlier drives clicked was the
+      markdown **label**, and `[LABEL](option:…)` prints as `LABEL (option:…)` with only the
+      target beside it clickable. The gate reads the page out of `RELAY_QA_RECTS` — the
+      `settingsRowLabel`s that are actually drawn — never a word the transcript also says.
+      `docs/qa_evidence/2026-09-21-console-links-and-card-frame/` — 22 PASS, 0 FAIL.
+- [x] **One frame on a card, and a first action that is not wearing a ring** — 2026-09-21
+      (`3f0a81ff`). The second frame was the console's own `QWidget#pane`, not `boardReply`'s:
+      `wireAgentConsole` ends in `theme::polishWindow` and `Pane` has no `Q_OBJECT`, so every
+      console is named `pane`. Right wherever the transcript is drawn, wrong on a card where it
+      is hidden until used. And Plan's ring was a missing `border-color` on
+      `QToolButton[actionRow="true"]`, not focus. Measured: 4 rules across the reply box → 2,
+      Plan's edges `#e5e8eb` → `#2a2e37`, Execute's `#b48ef7` unchanged.
+- [ ] **A markdown link's label is not clickable** — only the target printed beside it is.
+      Making the label the link needs an OSC 8 run around it, and a prose block is already one
+      (`relay://prose/<pane>/<n>`, the anchor the fold layer re-wraps from). OSC 8 runs do not
+      nest, so this is a change to the prose anchor rather than to `MarkdownAnsi`, and it is the
+      owner's call whether it is worth one.
 - [ ] A restart with two tabs on one project: each tab's helper conversation comes back to the
       file it had. The drive read a new file instead; the store is keyed (workspace, tab).
