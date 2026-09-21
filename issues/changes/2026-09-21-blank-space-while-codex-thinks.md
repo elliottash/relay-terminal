@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: m7s
 created: '2026-09-21'
 source: Codex in a Relay pane, 2026-09-21
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-terminal-bottom-gap/], related: [], github: null}
+links: {plans: [], commits: [a5e1613724fb08354fe1a71ee5992c8a790fc5f6], evidence: [docs/qa_evidence/2026-09-21-terminal-bottom-gap/], related: [W7DC], github: null}
 ---
 # Blank space at the bottom while Codex thinks
 
@@ -38,7 +38,7 @@ Reproduced lower rows missing after prose compression. TerminalView now fetches 
 
 ## Tests
 `RELAY_ENGINE_TEST=ViewTest QT_QPA_PLATFORM=xcb xvfb-run -a build/engine/relay-engine-tests compressedProseKeepsFollowingOutputVisible foldOpensUnderItsAnchorAndShutsAgain foldRowsCountInTheScrollRangeAndScrollOneByOne aFoldStaysUnderItsLineAcrossAResize proseReflowsOnResize selectionCrossesTheFoldBoundaryInVisualOrder markdownLinkLabelsAreClickable`
-manual: docs/qa_evidence/2026-09-21-terminal-bottom-gap/README.md
+manual: docs/qa_evidence/2026-09-21-terminal-bottom-gap/README.md — engine/tests/ViewTest.cpp
 
 ## QA checklist
 - [ ] In a newly built Relay, run a Codex turn after resizing a pane containing prose; confirm no approximately seven-row black gap appears below output during a quiet interval.

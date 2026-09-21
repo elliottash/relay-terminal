@@ -40,3 +40,9 @@ Reproduced missing lower terminal rows with compressed prose followed by ordinar
 
 <!-- relay:entry 20260921T210000Z-ce author=agent kind=event model=gpt-6-astra pane=7281bb88 turn=d51b78b277a64a1b92bf122370d5cf42/581fe9d5e7404af1aaf8c09fbb567e80 -->
 - ✦ agent moved this card · Executing → Needs verification · Matching blank-row fault reproduced and fixed; seven focused engine GUI tests pass under Xvfb/libvterm. Original Codex scenario awaits visual confirmation. · evidence docs/qa_evidence/2026-09-21-terminal-bottom-gap/ · implemented_by openai/gpt-6-astra via codex
+
+<!-- relay:entry 20260921T210000Z-cf author=agent kind=event model=gpt-6-astra pane=7281bb88 turn=d51b78b277a64a1b92bf122370d5cf42/581fe9d5e7404af1aaf8c09fbb567e80 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-21-terminal-… → {"plans": [], "commits": ["a5e1613724fb08354fe1a71ee5992c8a790fc5f6"], "evidence…; replaced `## Tests`
+
+<!-- relay:entry 20260921T210000Z-cg author=agent kind=evidence model=gpt-6-astra pane=7281bb88 turn=d51b78b277a64a1b92bf122370d5cf42/581fe9d5e7404af1aaf8c09fbb567e80 -->
+Landed a5e1613724fb on main. The exact committed tree built via land.py and all seven focused ViewTest functions passed on that tree (9 passes including setup/cleanup). Xvfb run and screenshot also passed. tests_check now reports no findings, failing tests, or blocking signals for B7SP. Board format check has no diagnostics on B7SP/W7DC; three pre-existing errors remain elsewhere.
