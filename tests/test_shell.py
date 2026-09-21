@@ -15,6 +15,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# Relay's row role for a line the user typed (OSC 7772, engine/core/CellTypes.h MarkUserShell).
+OSC_ROW_MARK = b'\x1b]7772;shell\x1b\\'
+
 def wait_for_foreground(master, name, timeout=4.0):
     """True once a process called `name` leads the terminal's foreground process group."""
     import termios
@@ -143,6 +146,31 @@ class ShellTests(unittest.TestCase):
         self.assertTrue(wait_for_foreground(s.master, 'sleep'), 'sleep never reached the foreground')
         os.write(s.master, b'\x03')
         self.assertEqual(s.wait('ready')['status'], 130)
+
+    def test_staged_command_rows_marked(self):
+        # The row role behind what you typed (#7QFW): the rows a staged command's echo
+        # occupies are marked OSC 7772;shell before the command runs — cursor up to the
+        # echo's first row, one mark per row, then back down to the fresh row.
+        s = self.session
+        s.submit("printf 'RELAY_OK\\n'")
+        s.wait('ready'); s.drain()
+        self.assertIn(b'\x1b[1A' + OSC_ROW_MARK + b'\x1b[B', s.output)
+        self.assertEqual(s.output.count(OSC_ROW_MARK), 1)
+
+    def test_staged_multiline_rows_marked(self):
+        s = self.session
+        s.submit("printf 'ONE\\n'\nprintf 'TWO\\n'\n")   # two rows of text + a trailing blank row
+        s.wait('ready'); s.drain()
+        self.assertIn(b'\x1b[3A', s.output)
+        self.assertEqual(s.output.count(OSC_ROW_MARK), 3)
+
+    def test_typed_command_rows_marked(self):
+        # A command typed by hand (not staged) counts its rows from history instead.
+        s = self.session
+        os.write(s.master, b"printf 'TYPED_OK\\n'\r")
+        s.wait('ready'); s.drain()
+        self.assertIn(b'\x1b[1A' + OSC_ROW_MARK + b'\x1b[B', s.output)
+        self.assertIn(b'TYPED_OK', s.output)
 
     def test_aliases_reported(self):
         s = self.session

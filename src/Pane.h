@@ -13345,8 +13345,10 @@ private:
             for (const QChar ch : clean) { if (ch == '\n') body += QStringLiteral("\x1b[0m\n\x1b[1m"); else body += ch; }
             body += QStringLiteral("\x1b[0m");
             // The word wrapper breaks a long line into rows of its own, so the mark goes at the
-            // head of each row that holds something — never after the last newline, which would
-            // hand the role to whatever prints next.
+            // head of each row — never after the last newline, which would hand the role to
+            // whatever prints next. A blank row the cursor leaves (it ends in \r\n) is a line
+            // break *inside* the block and is marked too, so a multi-paragraph prompt is one
+            // solid band rather than banded lines with ground-coloured gaps (#7QFW).
             out += proseStart(ink, body);
             const QByteArray rows = wrapped(body) + terminalLines(m_wrap.flush());
             int from = 0;
@@ -13355,7 +13357,8 @@ private:
                 end = end < 0 ? rows.size() : end + 2;
                 const QByteArray row = rows.mid(from, end - from);
                 const bool empty = QByteArray(row).replace("\x1b[0m", "").replace("\x1b[1m", "").trimmed().isEmpty();
-                out += empty ? row : mark + row;
+                const bool cursorLeaves = row.endsWith("\r\n");
+                out += (empty && !cursorLeaves) ? row : mark + row;
                 from = end;
             }
             m_atLineStart = clean.endsWith('\n');

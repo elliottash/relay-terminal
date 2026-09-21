@@ -239,10 +239,62 @@ fi
 __relay_at_prompt=0
 __relay_in_prompt=0
 __relay_status=0
+__relay_staged_rows=
+
+# How many display rows a command line's echo occupies: each line takes at least one row, a
+# wrapped one ceil(chars/COLUMNS). Counted in characters, not cells — wide glyphs and tabs can
+# miscount by a row at a wrap boundary, which only under/over-marks the band below.
+__relay_rows_for() {
+    local text=$1 line width rows=0 cols=${COLUMNS:-80}
+    (( cols > 0 )) || cols=80
+    while IFS= read -r line || [[ -n $line ]]; do
+        width=${#line}
+        (( width == 0 )) && width=1
+        (( rows += (width + cols - 1) / cols ))
+    done <<< "$text"
+    printf '%s' "$rows"
+}
+
+# The rows a hand-typed command's echo occupies, estimated from history. A staged count wins:
+# Relay knows that text exactly. History joins a typed multi-line command with ';' (lithist
+# off), which under-marks; a line HISTCONTROL kept out of history can mis-count, which caps
+# below make harmless at worst.
+__relay_command_rows() {
+    if [[ -n $__relay_staged_rows ]]; then
+        printf '%s' "$__relay_staged_rows"
+        return
+    fi
+    local h num cmd
+    h=$(HISTTIMEFORMAT= builtin history 1 2>/dev/null) || return 1
+    read -r num cmd <<< "$h"
+    [[ $num =~ ^[0-9]+$ && -n $cmd ]] || return 1
+    __relay_rows_for "$cmd"
+}
+
+# First simple command of a line just entered: the cursor sits on the fresh row below the
+# command's echo, so the echo's rows are directly above. Mark each with Relay's row role
+# (OSC 7772;shell) and the engine paints the cyan band behind what was typed, the same block
+# an agent prompt wears in violet. CUU/CUD stay inside the screen, so nothing scrolls; past
+# the top of the screen only the visible tail is marked.
+__relay_mark_typed_rows() {
+    local rows up i
+    rows=$(__relay_command_rows) || return 0
+    [[ $rows =~ ^[0-9]+$ ]] || return 0
+    up=$rows
+    (( up > ${LINES:-24} - 1 )) && up=$(( ${LINES:-24} - 1 ))
+    (( up >= 1 )) || return 0
+    printf '\033[%dA' "$up"
+    for (( i = 1; i <= up; i++ )); do
+        printf '\033]7772;shell\033\\'
+        (( i < up )) && printf '\033[B'
+    done
+    printf '\033[B'
+}
 
 __relay_prompt_begin() {
     __relay_status=$?
     __relay_in_prompt=1
+    __relay_staged_rows=   # a staged line that was cleared never marks a later command
     return "$__relay_status"
 }
 
@@ -255,6 +307,8 @@ __relay_prompt_end() {
 __relay_debug() {
     if [[ $__relay_at_prompt == 1 && $__relay_in_prompt == 0 && $BASH_COMMAND != __relay_* ]]; then
         __relay_at_prompt=0
+        __relay_mark_typed_rows
+        __relay_staged_rows=
         __relay_event running 0 < /dev/null
     fi
     return 0
@@ -267,6 +321,7 @@ __relay_load() {
     # read -d '' preserves embedded/trailing newlines, unlike command substitution.
     IFS= read -r -d '' READLINE_LINE < "$RELAY_RUNTIME_DIR/input.txt" || :
     READLINE_POINT=${#READLINE_LINE}
+    __relay_staged_rows=$(__relay_rows_for "$READLINE_LINE")
     __relay_event loaded 0 < /dev/null
 }
 

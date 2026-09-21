@@ -3018,16 +3018,22 @@ everywhere: hover still underlines, and the walk still selects.
 Claude Code's grey band behind each prompt; then "use the 'relaying...' violet or cyan color as the
 user-box highlight"; then "can we change the design that the background highlights shift with theme
 changes"). The line carries a *role*, not a colour: `Pane::printInline` marks every row of a `User`
-or `UserAgent` line with the private `OSC 7772;shell` / `OSC 7772;agent`, which the libvterm fork
+or `UserAgent` line with the private `OSC 7772;shell` / `OSC 7772;agent` — blank rows between
+paragraphs included, so a multi-paragraph prompt is one solid block, not banded lines with
+ground-coloured gaps (owner, 2026-09-21, #7QFW) — which the libvterm fork
 keeps in the line's `relay_marks` beside the OSC 133 bits (`MarkUserShell`, `MarkUserAgent`), so it
 scrolls into history and reflows with the line. `TerminalView::paintRow` fills a marked row across
 the grid with `ColorScheme::userAgentBand` / `userShellBand` and paints every cell that brought no
 colour of its own in the matching ink; `EngineBackend::applyThemeColors` sets those from the live
 theme — the destination colour itself with `chipInk()` on it, the pair the prefix chips wear — and
 runs again on `themeChanged()`. Nothing is rewritten: the same rows are repainted in the new
-theme's colours, scrollback included. A shell command is echoed by the shell, not by Relay, so with
-shell integration on its row (OSC 133;A) sits on `promptBand`, a tint of the shell colour, since
-that row's ink is the shell's own PS1. Options › Terminal › "Band behind what you typed": channel,
+theme's colours, scrollback included. A shell command is echoed by the shell, not by Relay, so the pane's own bash integration
+marks it instead (#7QFW): `__relay_load` counts the display rows the staged text will occupy, and
+at the first DEBUG-trap fire of a command line `__relay_mark_typed_rows` walks the cursor up over
+the echo's rows and marks each `OSC 7772;shell` (a hand-typed line counts its rows from `history
+1`), so the command sits on the same solid block in the shell's cyan. With generic shell
+integration (relay-integration.bash, opt-in) the prompt row (OSC 133;A) sits on `promptBand`, a
+tint of the shell colour, since that row's ink is the shell's own PS1. Options › Terminal › "Band behind what you typed": channel,
 the theme's raised surface, or none (no band, the destination colour as the ink). GhosttyCore
 parses OSC 7772 too, though libghostty-vt itself ignores it: the SequenceScanner (which already
 splits `feed()` for the OSC 133 events) hands the role to the adapter, which keeps every marked
