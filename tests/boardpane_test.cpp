@@ -7,9 +7,11 @@
 // together. The one set of files is still one board; only each pane's own navigation is its own.
 #include "BoardPane.h"
 
+#include <QCoreApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMouseEvent>
 #include <QtTest>
 
 namespace {
@@ -64,6 +66,7 @@ class BoardPaneTests : public QObject {
 private slots:
     void aCardOpenedInOnePaneDoesNotOpenInTheOther();
     void boardDataStillReachesBothPanes();
+    void theCardPagesFlagClicksThroughToBoardPriority();
 };
 
 // The report behind the card: two tabs, one Switchboard each, the same project. A card opened in
@@ -159,6 +162,52 @@ void BoardPaneTests::boardDataStillReachesBothPanes()
     QVERIFY(a.detailOpen());
     QVERIFY(!b.detailOpen());
     QCOMPARE(b.selectedCard(), QStringLiteral("M3XJ"));
+}
+
+// The card page's flag (#DPJB). The detail header draws the row's own flag and a click on it
+// writes through the row's own path — one `board_priority`, clamped at −1…+3 — so a card can be
+// flagged from the page it is read on and not only from its row. The pane is never shown in this
+// test, so the press goes to the widget itself rather than through a window.
+void BoardPaneTests::theCardPagesFlagClicksThroughToBoardPriority()
+{
+    relay::BoardView a(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    a.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    a.handleEvent(opened({row(QStringLiteral("K7Q2"), QStringLiteral("inbox"))}));
+    a.setCollapsedSections(QJsonArray{});
+    a.selectCard(QStringLiteral("K7Q2"));
+    a.openSelected();
+    QJsonObject answer = cardArrived(QStringLiteral("K7Q2"));
+    answer.insert(QStringLiteral("id"), sent.last().value(QStringLiteral("id")).toString());
+    a.handleEvent(answer);
+    QVERIFY(a.detailOpen());
+
+    QWidget *flag = a.findChild<QWidget *>(QStringLiteral("boardCardFlag"));
+    QVERIFY(flag);
+    const auto press = [flag](Qt::MouseButton button) {
+        const QPointF at(flag->rect().center());
+        QMouseEvent event(QEvent::MouseButtonPress, at, flag->mapToGlobal(at.toPoint()),
+                          button, button, Qt::NoModifier);
+        QCoreApplication::sendEvent(flag, &event);
+    };
+    const auto prioritySent = [&sent] {
+        return sent.last().value(QStringLiteral("priority")).toInt();
+    };
+
+    press(Qt::LeftButton);
+    QCOMPARE(sent.last().value(QStringLiteral("type")).toString(), QStringLiteral("board_priority"));
+    QCOMPARE(sent.last().value(QStringLiteral("card")).toString(), QStringLiteral("K7Q2"));
+    QCOMPARE(prioritySent(), 1);
+    // The page shows the click at once, before the worker's `board_changed` settles it.
+    QVERIFY(flag->toolTip().contains(QStringLiteral("+1")));
+    // Right-click lowers it, and the ends clamp exactly as the row's click does.
+    press(Qt::RightButton);
+    QCOMPARE(prioritySent(), 0);
+    QVERIFY(flag->toolTip().contains(QStringLiteral("Priority 0")));
+    press(Qt::RightButton);
+    QCOMPARE(prioritySent(), -1);
+    press(Qt::RightButton);
+    QCOMPARE(prioritySent(), -1);
 }
 
 QTEST_MAIN(BoardPaneTests)
