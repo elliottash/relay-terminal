@@ -1,7 +1,6 @@
 # Releasing Relay
 
-How to cut a Linux beta (Beta 0 in `docs/DISTRIBUTION-RESEARCH.md`). Only the owner pushes
-tags, publishes releases, updates the AUR and enables GitHub Pages.
+How to cut a Linux and native Windows beta. Publishing requires the owner’s authorization.
 
 ## What gets built
 
@@ -10,10 +9,11 @@ tags, publishes releases, updates the AUR and enables GitHub Pages.
 | Ubuntu 24.04 (Qt5/KF5) | `release.yml`, `ubuntu:24.04` container | `relay_<version>_ubuntu24.04_{amd64,arm64}.deb` |
 | Debian 13 (Qt6/KF6) | `release.yml`, `debian:trixie` container | `relay_<version>_debian13_{amd64,arm64}.deb` |
 | Ubuntu 26.04 (Qt6/KF6) | `release.yml`, `ubuntu:26.04` container | `relay_<version>_ubuntu26.04_{amd64,arm64}.deb` |
+| Windows x64 (Qt6, ConPTY, PowerShell 7) | `windows.yml`, Windows Server 2022 runner | `relay_<version>_windows_x64_setup.exe` |
 | Source | `release.yml`, `git archive` | `relay-<version>.tar.gz` |
 | Checksums | `release.yml` | `SHA256SUMS` |
 | Arch (AUR) | the owner, or the disabled `aur` job | `packaging/arch/relay-terminal`, `packaging/arch/relay-terminal-git` |
-| Website | `pages.yml` (inactive until enabled) | `site/` |
+| Website | `./deploy.sh` (authorized production rsync) | `site/` |
 
 Packaging pieces:
 
@@ -44,6 +44,30 @@ Packaging pieces:
 Why CPack rather than a `debian/` directory: one CMake install manifest serves `cmake --install`,
 the `.deb`s, the PKGBUILD and a future Flatpak, and a per-distro `.deb` needs only a container.
 A `debian/` source package becomes worthwhile for a Launchpad PPA or a Debian upload; add it then.
+
+## Native Windows installer
+
+`windows.yml` is both a main-branch check and a reusable release job. It builds the native Qt6
+application with MSVC and the ConPTY backend; it does not require WSL. The installer is per-user
+under `%LOCALAPPDATA%/Programs/Relay` and requires Windows x64 with ConPTY (Windows 10 1809 or newer).
+Use a Windows version still supported by its vendor.
+
+`packaging/windows/package.ps1` stages the CMake install, deploys Qt DLLs, bundles pinned and
+SHA256-checked Python 3.13.13 and PowerShell 7.6.6 archives, and invokes Inno Setup. Private runtime
+paths leave existing Python and PowerShell installations unchanged. API keys use Windows Credential
+Manager. The Windows beta uses the libvterm emulator; Linux packages include libghostty-vt as well.
+
+Release gates exercise ConPTY process lifecycle, real PSReadLine multiline load/acknowledge/execute,
+native process metrics, crash logs, concurrent file locks, credential storage, worker startup,
+PowerShell command jobs and process-tree cancellation. They then silently install the generated
+installer, launch its GUI, await a real PowerShell ready event, capture a screenshot, close normally,
+and uninstall. `windows-evidence` is uploaded for inspection. Release publication depends on both
+this job and all six Linux package jobs succeeding; the installer is included in `SHA256SUMS`.
+
+Windows beta limitations: voice recording, SSH connection multiplexing, systemd resource limits,
+and remote terminal typing are unavailable. Remote typing is refused because ConPTY does not expose
+a reliable child password-input mode. Local PowerShell and normal SSH commands remain available.
+The installer is unsigned; code signing is a separate release setup task.
 
 ## Version scheme
 
