@@ -181,12 +181,18 @@ private:
     // The entry a group row stands for, honouring the guest rule: the provider this job would
     // really run on if it were pointed at that name.
     models::Entry entryFor(const models::Group &group, bool background) const;
+    QWidget *anchorForCurrentRow();
 
     Data m_data;
     QLabel *m_blurb = nullptr;
     QTreeWidget *m_list = nullptr;
     QLabel *m_footer = nullptr;
     FilterPopup *m_popup = nullptr;
+    // A one-cell-sized invisible child of the list's viewport, moved over the row being picked
+    // for: `FilterPopup::openFor` drops under its anchor, and anchoring on the whole list put the
+    // model list at the top-left corner of the tree, off the pane and away from the row the eye
+    // was on. It paints nothing and takes no mouse events.
+    QWidget *m_anchor = nullptr;
     // Which row a popup was opened for, so the answer lands on the right job even if the tree is
     // rebuilt by a worker report while the list is open.
     QString m_picking;

@@ -16,6 +16,8 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+#include <algorithm>
+
 namespace relay {
 
 namespace {
@@ -220,10 +222,17 @@ JobsTab::JobsTab(QWidget *parent) : QWidget(parent) {
     m_list->setAllColumnsShowFocus(true);
     m_list->setSelectionMode(QAbstractItemView::SingleSelection);
     m_list->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    m_list->setColumnWidth(ColJob, 150);
-    m_list->setColumnWidth(ColWhat, 330);
-    m_list->setColumnWidth(ColRuns, 190);
-    m_list->header()->setStretchLastSection(true);
+    // "what it does" takes the slack and the other three keep a width: the column this tab exists
+    // for must not be the one that goes off the edge when the pane is narrow, and the first Xvfb
+    // run had "runs on" and the override behind a horizontal scrollbar with Options open beside it.
+    m_list->setColumnWidth(ColJob, 130);
+    m_list->setColumnWidth(ColRuns, 165);
+    m_list->setColumnWidth(ColOverride, 175);
+    m_list->header()->setStretchLastSection(false);
+    m_list->header()->setSectionResizeMode(ColJob, QHeaderView::Interactive);
+    m_list->header()->setSectionResizeMode(ColWhat, QHeaderView::Stretch);
+    m_list->header()->setSectionResizeMode(ColRuns, QHeaderView::Interactive);
+    m_list->header()->setSectionResizeMode(ColOverride, QHeaderView::Interactive);
     m_list->installEventFilter(this);
     layout->addWidget(m_list, 1);
 
@@ -449,6 +458,23 @@ void JobsTab::focusList() {
     m_list->setFocus(Qt::OtherFocusReason);
 }
 
+// Where the model list drops: over the row's own override cell.
+QWidget *JobsTab::anchorForCurrentRow() {
+    if (!m_anchor) {
+        m_anchor = new QWidget(m_list->viewport());
+        m_anchor->setAttribute(Qt::WA_TransparentForMouseEvents);
+    }
+    QTreeWidgetItem *item = m_list->currentItem();
+    const QRect rect = item ? m_list->visualItemRect(item) : QRect();
+    if (rect.isValid())
+        m_anchor->setGeometry(m_list->columnViewportPosition(ColOverride), rect.top(),
+                              std::max(120, m_list->columnWidth(ColOverride)), rect.height());
+    else
+        m_anchor->setGeometry(0, 0, m_list->viewport()->width(), 1);
+    m_anchor->show();
+    return m_anchor;
+}
+
 bool JobsTab::openOverride() {
     const QString role = currentRole();
     const Job *job = jobFor(role);
@@ -473,7 +499,7 @@ bool JobsTab::openOverride() {
     };
     m_popup->onCancelled = [this] { m_picking.clear(); m_list->setFocus(Qt::OtherFocusReason); };
     m_popup->setRows(rows, at);
-    m_popup->openFor(m_list);
+    m_popup->openFor(anchorForCurrentRow());
     return true;
 }
 
@@ -491,7 +517,7 @@ void JobsTab::openLevels(const QString &role, const QString &key) {
     };
     m_popup->onCancelled = [this] { m_picking.clear(); m_list->setFocus(Qt::OtherFocusReason); };
     m_popup->setRows(rows, at);
-    m_popup->openFor(m_list);
+    m_popup->openFor(anchorForCurrentRow());
 }
 
 bool JobsTab::clearOverride() {
