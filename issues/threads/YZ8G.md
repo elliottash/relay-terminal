@@ -126,3 +126,6 @@ Owner: "re 3 econometrics -- thats of course my personal interest, but its niche
 2. May the AI verifier ever move a card on its own? Recommendation: no — it produces evidence and a recommendation only, until phase 5 gives it a measured record.
 3. Build through phase 3 and then pause to use it? Recommendation: yes; phases 4–6 should be decided by where you were asked something you did not need to be asked.
 4. "The implementer may not verify or write the checklist" — adopt as a rule now? It costs nothing (Relay already recommends a different model family) but it means the implementing agent hands the checklist to the verifier instead of writing it, as this session did on #7BM4. Recommendation: yes.
+<!-- relay:entry 20260921T222650Z-dg author=claude-code kind=decision -->
+### Claude Code · 2026-09-21 22:26
+Owner answered the four questions ("1 OK", "2 i think cards need to be moveable by agents. are you saying, the verifier is a separate agent?", "3 yes", "4 what do you mean by that? separate LLMs?") and asked whether quiet time in QA is evidence, "eg usage logs indicating usage of features that the card touches". Recorded in `## Decisions`; proven-in-use added to phase 2 of `## Plan`. Card stays in discussing until the owner confirms the plan's phase 2 and 3 scope.
