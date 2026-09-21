@@ -2079,22 +2079,27 @@ public:
         // The frame lights up when the box has the keyboard, exactly as it did when the editor
         // was this page's own widget; the console's own frame is inside it.
         m_reply->installEventFilter(this);
-        // Ctrl+Shift+Enter is the composer's "terminal, never the model" chord; on a card it
-        // means the same thing — a note on the thread with no model call. Enter discusses,
-        // Ctrl+Enter plans, with what was typed as the owner's note.
-        //
-        // The console has no hook of its own for a host-defined chord yet, so the host keeps the
-        // chord: the editor's `onSubmit` route is what the pane itself reads, and taking it here
-        // is what stops a card's Enter being sent as an ordinary console `ask` instead of the
-        // `board_ask` (19.10) that writes the thread and advances the stage.
-        m_reply->onSubmit = [this](const QString &route) {
-            if (route == QStringLiteral("shell"))
-                submit(QString());
-            else if (route == QStringLiteral("agent"))
-                plan();
-            else
-                submit(QStringLiteral("discuss"));
-        };
+    }
+
+    // The three chords, offered to this page by the console before it routes the line
+    // (`relay::agent::Context::submit`, card #AGNT step 5). Ctrl+Shift+Enter is the composer's
+    // "terminal, never the model" chord; on a card it means the same thing — a note on the thread
+    // with no model call. Enter discusses, Ctrl+Enter plans, with what was typed as the owner's
+    // note. Always handled: a card's Enter must travel as the `board_ask` of 19.10, which writes
+    // the thread and advances the stage, never as an ordinary console `ask`.
+    //
+    // The text is read out of the reply box rather than taken as an argument because that box is
+    // the console's own composer (`setConsole`), and `submit`/`plan` clear it themselves — which
+    // is also what tells the pane there is nothing left for it to clear.
+    bool submitFromConsole(const QString &route)
+    {
+        if (route == QStringLiteral("shell"))
+            submit(QString());              // Ctrl+Shift+Enter: a note, with no model call
+        else if (route == QStringLiteral("agent"))
+            plan();                          // Ctrl+Enter
+        else
+            submit(QStringLiteral("discuss"));   // "auto": plain Enter
+        return true;
     }
     RichEditor *replyEditor() const { return m_reply; }
     // The console embedded in this page, or null before the view has one.
@@ -3960,6 +3965,15 @@ class CardContext final : public relay::agent::Context {
 
     QList<relay::agent::Action> actions() const override { return m_view->cardActions(); }
 
+    // Enter, Ctrl+Enter and Ctrl+Shift+Enter on a card are the card's, not the console's: the
+    // line travels as `board_ask` (19.10). Before step 5 the page took the composer's own
+    // `onSubmit` to get this, which took the box away from everything else that speaks through
+    // it; the console now offers the submit to its context first.
+    bool submit(const QString &route, const QString &) override
+    {
+        return m_view->cardSubmitFromConsole(route);
+    }
+
     bool resolveLink(const relay::links::Target &target) override
     {
         return m_view->resolveAgentLink(target);
@@ -4782,7 +4796,9 @@ void BoardView::ensureCardConsole()
         return;
     // The composer inside the console *is* the card's reply box from here on. There is no hook on
     // the console for a host-defined chord yet, so the host takes the editor's submit route —
-    // see CardDetail::setConsole for why a card's Enter may not travel as an ordinary `ask`.
+    // The editor is still handed over: it *is* this page's reply box from here on (drafts,
+    // history, the Esc walk). What no longer travels with it is the submit — `CardContext::submit`
+    // takes that, so the box goes on answering everything else that speaks through it.
     m_detail->setConsole(handle.widget, handle.widget->findChild<RichEditor *>());
 }
 
@@ -4897,6 +4913,11 @@ QString BoardView::openCardId() const
 QList<relay::agent::Action> BoardView::cardActions() const
 {
     return m_detail != nullptr ? m_detail->cardActions() : QList<relay::agent::Action>();
+}
+
+bool BoardView::cardSubmitFromConsole(const QString &route)
+{
+    return m_detail != nullptr && m_detail->submitFromConsole(route);
 }
 
 // A card turn ended. The thread entry is the worker's write (19.10's `_card_answer`, with the

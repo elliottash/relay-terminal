@@ -1469,7 +1469,15 @@ void SettingsPane::updateHelperRow() {
 void SettingsPane::updateConsoleHeight() {
     if (m_helperBody == nullptr) return;
     const int line = QFontMetrics(font()).lineSpacing();
-    m_helperBody->setMaximumHeight(std::max(10 * line, height() * 2 / 5));
+    const int cap = std::max(10 * line, height() * 2 / 5);
+    m_helperBody->setMaximumHeight(cap);
+    // And a floor, because a maximum alone is not a size: the strip is added with no stretch, so
+    // it takes the console's own size hint — a `Pane`'s, which is a terminal's and small. The
+    // first live run of card #AGNT step 5 drew a whole answer into the three rows that left, and
+    // the shot showed the pane header wearing the answer's auto-generated title over an empty
+    // vterm. Fourteen lines is a conversation; never more than the cap, so a short pane is
+    // unchanged.
+    m_helperBody->setMinimumHeight(std::min(cap, 14 * line));
 }
 
 // ----- public surface ------------------------------------------------------------------------------

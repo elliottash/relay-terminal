@@ -378,6 +378,10 @@ private:
     bool resolveAgentLink(const relay::links::Target &target);
     QString openCardId() const;
     QList<relay::agent::Action> cardActions() const;
+    // Enter, Ctrl+Enter and Ctrl+Shift+Enter in the card page's console, offered to `CardContext`
+    // before the pane routes the line (#AGNT step 5): a card's submit travels as `board_ask`
+    // (19.10), which writes the thread and advances the stage. Always true.
+    bool cardSubmitFromConsole(const QString &route);
     // A card turn started or ended, or a cleanup did: the row's Plan, Execute and Verify wait
     // while one runs. One name for what used to be `syncModelBoxEnabled`, which disabled the two
     // model boxes for the same reason.

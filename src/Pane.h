@@ -3207,8 +3207,18 @@ public:
         if (!m_actionRow) return;
         const QList<relay::agent::Action> actions = contextActions();
         while (QLayoutItem *item = m_actionRowLayout->takeAt(0)) {
-            delete item->widget();   // null for the trailing stretch, which the next line frees
-            delete item;
+            // `deleteLater`, never `delete`: an `Action::run` may raise `Context::changed()` —
+            // Clean up ending turns its own button into Stop — and a plain delete then frees the
+            // button whose `clicked` signal is still on the stack. That is a SIGSEGV, and it is
+            // the pane's to avoid: a context must not have to know when it is safe to say that
+            // something moved. Unparented first, so the row is empty the moment this returns and
+            // a button waiting to be freed can never be found in it.
+            if (QWidget *widget = item->widget()) {
+                widget->hide();
+                widget->setParent(nullptr);
+                widget->deleteLater();
+            }
+            delete item;   // the layout item itself is not a QObject and holds nothing else
         }
         m_actionKeys = actions;
         for (const relay::agent::Action &action : actions) {
@@ -3235,7 +3245,12 @@ public:
     bool runActionLetter(const QString &letter) {
         const int at = relay::agent::actionForLetter(m_actionKeys, letter);
         if (at < 0 || !m_actionKeys.at(at).run) return false;
-        m_actionKeys.at(at).run();
+        // Copied out of the list first, for the same reason the row frees its buttons with
+        // `deleteLater`: an action that moves its own row — Clean up becoming Stop — raises
+        // `Context::changed()`, `rebuildActionRow` assigns a new `m_actionKeys`, and the
+        // `std::function` being called is destroyed while it is running.
+        const std::function<void()> run = m_actionKeys.at(at).run;
+        run();
         return true;
     }
 
@@ -10239,6 +10254,29 @@ private:
         // worker's to lend. Both are dispatched locally below; only `auto`, which has a real
         // question for the router, is refused — and it says what is wrong and how to send anyway.
         const bool routerDown = !m_workerReady;
+        // What this console is about gets the line before the pane does (#AGNT step 5). A card's
+        // Enter travels as `board_ask` — the owner's words are written to the card's thread and
+        // the stage advances before the model sees them (19.10) — so `CardContext::submit`
+        // answers true and nothing below runs. A terminal context answers false, which is why a
+        // terminal pane is byte-for-byte what it was. The text is cleared and remembered here,
+        // exactly as `submitAgent` would have done, so the composer behaves the same either way.
+        if (submit && m_context && !m_editor->toPlainText().trimmed().isEmpty()) {
+            const QString typed = m_editor->toPlainText();
+            // `overrideMode`, not the resolved `mode`: the raw route is which **key** was pressed
+            // — "auto" for Enter, "agent" for Ctrl+Enter, "shell" for Ctrl+Shift+Enter — and a
+            // card's three chords are exactly that distinction. Resolved, every console submit
+            // would read "agent", because a console's mode is locked there, and Enter on a card
+            // would plan instead of discuss.
+            if (m_context->submit(overrideMode, typed)) {
+                // The box is the context's from here: it clears and remembers the line when it
+                // took it, and **leaves it alone when it refused** — a card ask that arrives
+                // while a cleanup is running keeps the words the owner typed, which is the whole
+                // difference between "handled" and "consumed". The pane clearing it would throw
+                // away a prompt nobody sent.
+                if (!m_prefixMode.isEmpty()) clearPrefixMode(true);
+                return;
+            }
+        }
         if (submit && mode != QStringLiteral("agent")
             && (!m_pendingSubmit.isEmpty() || !m_heldDecision.isEmpty() || m_loading)) return;
         const QString id = QString::number(++m_requestId);

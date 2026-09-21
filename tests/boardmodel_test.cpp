@@ -215,6 +215,20 @@ public:
         column->addWidget(m_editor);
         // The pane owns this callback while it holds the context (src/Pane.h, setContext).
         context->onChanged = [this] { rebuild(); };
+        // And the pane offers a submitted line to its context before it routes it (src/Pane.h,
+        // `requestRoute`), with the **raw** route — "auto" for Enter, "agent" for Ctrl+Enter,
+        // "shell" for Ctrl+Shift+Enter — so a card's three chords can be told apart. The card
+        // page reads them in `CardContext::submit`; before card #AGNT step 5 it took this
+        // editor's `onSubmit` for itself, which took the box away from everything else that
+        // speaks through it.
+        // The box is the context's while it handles the line — it clears what it took and
+        // leaves what it refused — so nothing is cleared here either.
+        m_editor->onSubmit = [this](const QString &route) {
+            const QString typed = m_editor->toPlainText();
+            if (typed.trimmed().isEmpty())
+                return;
+            m_context->submit(route, typed);
+        };
         rebuild();
     }
 

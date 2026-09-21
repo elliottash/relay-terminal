@@ -75,10 +75,16 @@ public:
     }
     void turnFinished(const relay::agent::TurnRecord &record) override { finished << record.id; }
 
+    bool submit(const QString &route, const QString &text) override
+    {
+        submitted << route + QLatin1Char('|') + text;
+        return takeSubmit;
+    }
+
     QString workspace;
     QList<relay::agent::Action> rows;
-    QStringList seen, finished;
-    bool swallow = false;
+    QStringList seen, finished, submitted;
+    bool swallow = false, takeSubmit = false;
 };
 
 }  // namespace
@@ -187,6 +193,68 @@ void aChangedContextRebuildsTheRow()
     CHECK(row->isVisibleTo(&console));
     }
 
+    // An action that moves its own row. "Clean up" becomes "Stop" the moment it starts, so
+    // `Action::run` raises `Context::changed()` and the row is rebuilt from inside the button's
+    // own `clicked` — with that button still on the stack, and its `std::function` still running.
+    // Freeing either there is a SIGSEGV, and it is the **pane's** to avoid: a context must not
+    // have to know when it is safe to say that something moved (card #AGNT step 6 met this).
+void anActionThatRebuildsItsOwnRowIsSafe()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    int runs = 0;
+    context.rows = {{QStringLiteral("cleanup"), QStringLiteral("u"), QStringLiteral("Clean up"),
+                     QString(), false, true, [&context, &runs] {
+                         ++runs;
+                         context.rows = {{QStringLiteral("stop"), QStringLiteral("u"),
+                                          QStringLiteral("Stop"), QString(), false, true, [] {}}};
+                         context.changed();
+                     }}};
+    context.changed();
+    auto *row = console.findChild<QWidget *>(QStringLiteral("agentActionRow"));
+    auto buttons = row->findChildren<QToolButton *>(QString(), Qt::FindDirectChildrenOnly);
+    CHECK_EQ(buttons.size(), 1);
+    QPointer<QToolButton> first = buttons.isEmpty() ? nullptr : buttons.first();
+    if (first) first->click();
+    CHECK_EQ(runs, 1);
+    CHECK(first);   // only queued for deletion, so the click it is still inside can return
+    buttons = row->findChildren<QToolButton *>(QString(), Qt::FindDirectChildrenOnly);
+    CHECK_EQ(buttons.size(), 1);
+    if (!buttons.isEmpty()) CHECK_EQ(buttons.first()->text(), QStringLiteral("Stop (u)"));
+    // The keyboard half runs the same action through the same rebuild.
+    context.rows = {{QStringLiteral("cleanup"), QStringLiteral("u"), QStringLiteral("Clean up"),
+                     QString(), false, true, [&context, &runs] {
+                         ++runs;
+                         context.rows = {{QStringLiteral("stop"), QStringLiteral("u"),
+                                          QStringLiteral("Stop"), QString(), false, true, [] {}}};
+                         context.changed();
+                     }}};
+    context.changed();
+    CHECK(console.runActionLetter(QStringLiteral("u")));
+    CHECK_EQ(runs, 2);
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    CHECK(!first);   // and it is freed once the event loop reaches it
+    }
+
+    // A context that takes the line before the pane routes it: a card's Enter travels as
+    // `board_ask`, not as an ordinary `ask` (19.10, owner decision 2). The pane clears and
+    // remembers the draft either way, so the composer behaves the same.
+void aContextMaySwallowASubmit()
+{
+    StubContext context;
+    context.workspace = home->path();
+    context.takeSubmit = true;
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    console.draftInComposer(QStringLiteral("discuss this card"));
+    console.interruptAgentWithPrompt();   // Ctrl+Enter with an idle agent: the ordinary submit
+    CHECK_EQ(context.submitted, QStringList{QStringLiteral("agent|discuss this card")});
+    // The box is the context's while it handles the line: this stub took it and cleared nothing,
+    // so the words are still there. A card that refuses an ask mid-cleanup relies on exactly
+    // that — the pane clearing the box would throw away a prompt nobody sent.
+    CHECK_EQ(console.composerText(), QStringLiteral("discuss this card"));
+    }
+
     // What the worker is told, and what rides on an ask.
 void theContextBlockAndTheAskFieldsAreTheContextsOwn()
 {
@@ -260,11 +328,13 @@ int main(int argc, char **argv)
     cases::aTerminalPaneIsUnchanged();
     cases::theActionRowIsBuiltFromTheContext();
     cases::aChangedContextRebuildsTheRow();
+    cases::anActionThatRebuildsItsOwnRowIsSafe();
+    cases::aContextMaySwallowASubmit();
     cases::theContextBlockAndTheAskFieldsAreTheContextsOwn();
     cases::theHostsHandlesWork();
     cases::aConsoleIsAnOrdinaryChildOfItsHost();
 
     if (failures == 0)
-    std::fprintf(stdout, "consolemode: 9 cases, all passed\n");
+    std::fprintf(stdout, "consolemode: 11 cases, all passed\n");
     return failures == 0 ? 0 : 1;
 }

@@ -260,6 +260,25 @@ class Context {
     // `AgentConsole` puts the list through `withUniqueLetters` and builds the row from it.
     virtual QList<Action> actions() const { return {}; }
 
+    // A line the owner submitted in this console, offered to the context **before** the pane
+    // routes it. True means "handled, send nothing": the card page's Enter travels as
+    // `board_ask` rather than as an ordinary `ask`, because a card turn writes the owner's words
+    // to `issues/threads/<ID>.md` and advances the stage before the model sees them (19.10, and
+    // card #AGNT decision 2). `route` is which **key** was pressed, not where the line would
+    // have gone: "auto" for Enter, "agent" for Ctrl+Enter, "shell" for Ctrl+Shift+Enter. A card's
+    // three chords are exactly that distinction — Enter discusses, Ctrl+Enter plans,
+    // Ctrl+Shift+Enter leaves a note with no model call — and a route resolved against the
+    // surface's mode could not tell them apart, because a console's mode is locked to the agent.
+    //
+    // The composer is the context's while it is handling the line: a context that takes it
+    // clears and remembers it, and one that refuses (a card asked while a cleanup runs) leaves
+    // the words where the owner typed them. The pane touches neither.
+    //
+    // It exists so a host does not have to reach into the pane for its composer:
+    // `findChild<RichEditor *>()->onSubmit` was what the card page did first, and it takes the
+    // box away from everything else that speaks through it (history, the queue, the ask).
+    virtual bool submit(const QString & /*route*/, const QString & /*text*/) { return false; }
+
     // A link the owner activated in the transcript, offered to the context **before** the
     // console's own handling: `option:sec/row` reveals a settings row, `session:<id>` reveals a
     // session, `card:`/`#ID` opens a card. True means "handled, stop"; false lets the console open

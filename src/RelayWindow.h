@@ -1457,6 +1457,9 @@ private:
     // the same catalog, the same favourites and recents, the same reasoning level remembered per
     // model — with its answer applied to the helper's role rather than to a pane's own model.
     void openHelperModelPicker() {
+        // In a console it is that console's picker, with that console's current row: the same
+        // dialog Ctrl+Alt+M opens over a terminal pane, because a console *is* one.
+        if (Pane *console = focusedConsole()) { console->openModelPicker(); return; }
         const relay::helpermodel::State state = helperModelState(m_tabs->currentWidget());
         const relay::modelrows::Context rows = relay::helpermodel::context(state);
         relay::ModelPicker::Context context;
@@ -1505,23 +1508,28 @@ private:
     // clicking into the Switchboard's composer and pressing Alt+M dropped open the *terminal
     // pane's* box, because the window still called the terminal pane the active leaf. The widget
     // the key actually went to cannot be wrong about this.
-    QComboBox *focusedHelperModelBox() const {
-        for (QWidget *widget = QApplication::focusWidget(); widget != nullptr; widget = widget->parentWidget()) {
-            // dynamic_cast, not qobject_cast: nothing in this stack declares Q_OBJECT.
-            if (auto *panel = dynamic_cast<relay::HelperChatPanel *>(widget)) return panel->modelBox();
-            // The card page's reply box is not inside a panel — it is the page's own (#BRD3), and
-            // the view knows which of its two boxes the cursor is next to.
-            if (auto *tool = dynamic_cast<ToolPane *>(widget))
-                return tool->board() ? tool->board()->focusedModelBox() : nullptr;
-        }
+    // The console the keyboard is in, or null. Since card #AGNT every prompt box in Relay is a
+    // `Pane` — a terminal pane, or a console embedded in the Switchboard, a card, Options,
+    // Actions or Sessions — so the walk stops at the first `Pane` above the focus widget and that
+    // pane answers with its own model box, its own `/model` and its own picker. It used to ask
+    // `HelperChatPanel` for a box, and then `BoardView` for one; with the panels gone both
+    // answered null and **Alt+M inside a console did nothing at all**.
+    //
+    // Which prompt box the cursor is in is asked of the *keyboard*, by walking up from the focus
+    // widget, rather than of the window's idea of which leaf is active. A live run found out why:
+    // clicking into the Switchboard's composer and pressing Alt+M dropped open the terminal
+    // pane's box, because the window still called the terminal pane the active leaf. The widget
+    // the key actually went to cannot be wrong about this.
+    //
+    // dynamic_cast, not qobject_cast: nothing in this stack declares Q_OBJECT.
+    Pane *focusedConsole() const {
+        for (QWidget *widget = QApplication::focusWidget(); widget != nullptr; widget = widget->parentWidget())
+            if (auto *pane = dynamic_cast<Pane *>(widget)) return pane == m_active ? nullptr : pane;
         return nullptr;
     }
-    bool helperComposerHasFocus() const { return focusedHelperModelBox() != nullptr; }
+    bool helperComposerHasFocus() const { return focusedConsole() != nullptr; }
     void openHelperModelBox() {
-        if (QComboBox *box = focusedHelperModelBox()) {
-            box->setFocus(Qt::ShortcutFocusReason);
-            box->showPopup();
-        }
+        if (Pane *console = focusedConsole()) console->openModelBox();
     }
 
     // `/model`, `/models` typed in any helper prompt box. False for a word neither of them, so
@@ -7103,6 +7111,21 @@ public:
         view->onOpenSession = [guard](const QString &id) {
             if (auto *w = windowOf(guard)) w->openSessions(QString(), id);
         };
+        // The agent consoles of this board (#AGNT steps 5 and 6): the list page's and an open
+        // card's. The view asks for one lazily — the first time the chat area is shown, and the
+        // first time a card opens — so a Switchboard nobody talks to pays for no console at all.
+        // The tab id is the conversation's key, pushed a turn of the event loop later because
+        // this pane is not in a tab yet (insertBeside comes afterwards).
+        view->onCreateConsole = [guard](relay::agent::Context *context, QWidget *parent) {
+            auto *w = windowOf(guard);
+            return w ? w->createAgentConsole(context, parent) : relay::agent::ConsoleHandle();
+        };
+        QPointer<relay::BoardView> viewGuard(view);
+        QTimer::singleShot(0, this, [guard, viewGuard] {
+            auto *w = windowOf(guard);
+            if (!w || !viewGuard) return;
+            if (QWidget *page = w->pageOf(guard)) viewGuard->setTabId(w->tabIdOf(page));
+        });
         // The Tests button on the panel's tool row (#7BM4): the Test suites pane is the window's,
         // a splitter pane beside this one on the same tab's worker.
         view->onOpenTestSuites = [guard] {
