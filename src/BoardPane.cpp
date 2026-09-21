@@ -2309,7 +2309,10 @@ public:
                 onFocusPane(m_sessionToken);
             return;
         }
-        if (m_id.isEmpty() || m_editing || m_busy || !onReply)
+        // **Not** refused while a turn runs: a Plan pressed during a Discuss queues as a `plan`
+        // item, and the mode rides the queue item, so the brief and the stage constraint are the
+        // queued turn's rather than the running one's (card #CTRN, Planning notes 5).
+        if (m_id.isEmpty() || m_editing || !onReply)
             return;
         const QString text = takeReply();
         m_error->hide();
@@ -2790,7 +2793,15 @@ private:
         if (m_reply == nullptr)
             return;
         const QString text = m_reply->toPlainText().trimmed();
-        if (text.isEmpty() || !onReply || (!mode.isEmpty() && m_busy))
+        // A second Enter while the card is working used to do nothing at all — the words stayed
+        // in the box and the worker would have refused them with `board_busy` anyway. A card has
+        // a queue of its own since card #CTRN, so the prompt goes and runs when the turn before
+        // it ends: the Issue #AGNT was filed for, arriving on the last surface that did not have
+        // it. What it has **not** got yet is a row on screen while it waits: the console's §12
+        // strip draws the pane's own client-side queue, and a card's prompt travels as
+        // `board_ask` to the worker's, so the row needs `src/Pane.h` — which no step of #CTRN
+        // may open (the plan's Risks 8). The live drive records it.
+        if (text.isEmpty() || !onReply)
             return;
         m_reply->remember(text);
         m_reply->clear();
@@ -2827,7 +2838,9 @@ public:
             plan.tooltip = QStringLiteral("A pane is already planning this card — the click reveals it");
         } else {
             plan.label = QStringLiteral("Plan");
-            plan.enabled = !m_busy;
+            // Offered while a turn runs: it queues behind it (card #CTRN). Execute and Verify
+            // below still wait, because they hand the card to a terminal pane rather than asking
+            // this card's agent for another turn.
             plan.tooltip = QStringLiteral("The agent reads the code and writes the card's plan; it "
                                           "changes no code and no other card. Anything typed goes "
                                           "with it (p, or Ctrl+Enter)");
@@ -4287,8 +4300,12 @@ void BoardView::buildChrome(QVBoxLayout *layout)
                 QTimer::singleShot(0, this, [this] { placeNotice(); });
                 return;
             }
-            m_cardTurns.insert(card, CardTurn{mode, text});
-            m_detail->setBusy(true, mode);
+            // A card that is already working keeps the *running* turn's mode on its strip: the
+            // prompt just sent is queued behind it and is not what "✦ Switchboarding · planning…"
+            // is about (card #CTRN, Planning notes 5).
+            const QString running = m_cardTurns.contains(card) ? m_cardTurns.value(card).mode : mode;
+            m_cardTurns.insert(card, CardTurn{running, text});
+            m_detail->setBusy(true, running);
             cardBusyChanged();
             // protocol 19.10: one `board_ask`, its mode "discuss" or "plan"; a plan may be
             // wordless. The verb stays what a phone sends (card #CTRN, decision 6) and what
@@ -4633,14 +4650,24 @@ void BoardView::ensureConsole()
 // `placeQueueStrip` stops drawing the strip at all (`roomForBubble(0)` is false), so a second
 // prompt queues with nothing on screen to say so. Twenty lines is a conversation: the header,
 // the action row, the box and its chips take about half of it.
+//
+// **Both consoles, since card #CTRN.** The card page's console was left at its size hint because
+// a card turn was drawn in the thread view above it and the transcript was hidden until the tab's
+// *other* turns printed in it. The card's turn is drawn in it now — the thinking fold, the tool
+// rows — and the live drive found the card's console two lines tall, with the fold and the tool
+// rows scrolled out of a window that had room for neither. The rule is the same one, applied to
+// the page that is on screen.
 void BoardView::updateConsoleHeight()
 {
-    if (m_console == nullptr)
-        return;
     const int line = QFontMetrics(font()).lineSpacing();
     const int cap = std::max(10 * line, height() * 2 / 5);
-    m_console->setMaximumHeight(cap);
-    m_console->setMinimumHeight(std::min(cap, 20 * line));
+    const int floor = std::min(cap, 20 * line);
+    for (QWidget *console : {m_console, m_detail != nullptr ? m_detail->console() : nullptr}) {
+        if (console == nullptr)
+            continue;
+        console->setMaximumHeight(cap);
+        console->setMinimumHeight(floor);
+    }
 }
 
 // The open card's console (card #AGNT step 6). A second console, not the list page's one: the
@@ -4679,6 +4706,7 @@ void BoardView::ensureCardConsole()
     // turn and a card page that looks like it has no agent in it.
     m_detail->setConsole(handle.widget,
                          handle.widget->findChild<RichEditor *>(QStringLiteral("composerEditor")));
+    updateConsoleHeight();   // a maximum alone is not a size, and this one draws the turn
 }
 
 // What the board's key legend adds for the console's action row, read off the context rather

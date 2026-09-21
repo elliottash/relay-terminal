@@ -2678,12 +2678,22 @@ void BoardModelTests::theBoxDiscussesAndTheRowPlansOrLeavesTheBoard()
     // the turn is submitted to that card's own supervisor and its events come back tagged with it.
     QCOMPARE(sent.last().value("surface").toString(), QStringLiteral("card:K7Q2"));
     // While it runs, the strip over the box says which turn it is and carries the one control
-    // that ends it; the buttons that would start another turn wait.
+    // that ends it. Plan is still offered — it **queues** behind the Discuss (card #CTRN,
+    // Planning notes 5) — and a second Enter queues too, in the §12 strip of the card's console;
+    // Execute waits, because it hands the card to a terminal pane rather than asking for a turn.
     QVERIFY(!strip->isHidden());
     QCOMPARE(busy->text(), QStringLiteral("✦ Switchboarding · discussing…"));
     QCOMPARE(stop->text(), QStringLiteral("✕ Stop discussing"));
-    QTRY_VERIFY(!button(view, QStringLiteral("Plan"))->isEnabled());
+    QTRY_VERIFY(button(view, QStringLiteral("Plan"))->isEnabled());
     QVERIFY(!button(view, QStringLiteral("Execute"))->isEnabled());
+    sent.clear();
+    reply->setPlainText(QStringLiteral("and this as well"));
+    QTest::keyClick(reply, Qt::Key_Return);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_ask"));
+    QCOMPARE(sent.last().value("text").toString(), QStringLiteral("and this as well"));
+    QVERIFY2(reply->toPlainText().isEmpty(), "the queued prompt was left in the box");
+    // The strip goes on naming the turn that is *running*: the one just sent is waiting.
+    QCOMPARE(busy->text(), QStringLiteral("✦ Switchboarding · discussing…"));
     view.handleEvent(QJsonObject{{"event", "done"}, {"card_id", "K7Q2"}, {"mode", "discuss"}});
     QVERIFY(strip->isHidden());
     QTRY_VERIFY(button(view, QStringLiteral("Plan"))->isEnabled());
@@ -2697,7 +2707,6 @@ void BoardModelTests::theBoxDiscussesAndTheRowPlansOrLeavesTheBoard()
     QVERIFY(!strip->isHidden());
     QCOMPARE(busy->text(), QStringLiteral("✦ Switchboarding · planning…"));
     QCOMPARE(stop->text(), QStringLiteral("✕ Stop planning"));
-    QVERIFY(!button(view, QStringLiteral("Plan"))->isEnabled());
     stop->click();
     // It stops *this card's* turn by name (protocol 19.16): the worker-wide `cancel` would stop
     // whichever turn the worker's own agent is running, which is a cleanup, and would leave the
@@ -3829,18 +3838,19 @@ void BoardModelTests::theCardPageAsksForACardConsoleAndItsActionsFollowTheCard()
     QVERIFY2(handedTask.contains(QStringLiteral("start with the parser")), qPrintable(handedTask));
     QVERIFY(console->editor()->toPlainText().isEmpty());     // taken out of the box with it
 
-    // While a turn runs on the card, the actions that would start another one wait — and the row
-    // is rebuilt because the context said something moved, not because the page poked a widget.
+    // While a turn runs on the card, Execute waits — it hands the card to a terminal pane — and
+    // Plan does not: it queues behind the running turn (card #CTRN). The row is rebuilt because
+    // the context said something moved, not because the page poked a widget.
     sent.clear();
     console->editor()->setPlainText(QStringLiteral("is this still wanted?"));
     QTest::keyClick(console->editor(), Qt::Key_Return);
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_ask"));
     QCOMPARE(sent.last().value("mode").toString(), QStringLiteral("discuss"));
     QCOMPARE(sent.last().value("text").toString(), QStringLiteral("is this still wanted?"));
-    QTRY_VERIFY(!rowButton(view, QStringLiteral("boardReplyButton"))->isEnabled());
-    QVERIFY(!rowButton(view, QStringLiteral("boardExecute"))->isEnabled());
+    QTRY_VERIFY(!rowButton(view, QStringLiteral("boardExecute"))->isEnabled());
+    QVERIFY(rowButton(view, QStringLiteral("boardReplyButton"))->isEnabled());
     view.handleEvent(QJsonObject{{"event", "done"}, {"card_id", "K7Q2"}, {"mode", "discuss"}});
-    QTRY_VERIFY(rowButton(view, QStringLiteral("boardReplyButton"))->isEnabled());
+    QTRY_VERIFY(rowButton(view, QStringLiteral("boardExecute"))->isEnabled());
 
     // Ctrl+Enter plans and Ctrl+Shift+Enter is a comment with no model call — the three chords
     // the card page has always had, in the box that now answers them.
