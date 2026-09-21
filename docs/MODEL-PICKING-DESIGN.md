@@ -435,6 +435,20 @@ available model no class lists, folded one row per model. Enter on one of those 
 `pick:main|<key>` — a model in no list becomes this pane's own model, on main, at the level the
 Levels rule gives it. With the filter empty the box is exactly what it was.
 
+### 5.8 The models pane (owner, 2026-09-21: "lets build the models pane")
+
+The modal dialog becomes a **pane** — a `ToolPane` beside the active pane, the way Options and
+Sessions are hosted — with three tabs for the first three steps of §5.7: **providers** (the
+Options › Models provider rows, keys included), **available** (the `all` tab with its tick
+column and the tail behind typing), **priorities** (the tier tabs: reorder, add, remove, level,
+the cutoff column and the class switch; the `all`-tab picker's favorites/recents/sort live on the
+available tab). Enter or "use" on a row switches the pane the manager serves — the one it was
+opened from, named in its header — and a click only highlights; the filter line and the key map
+carry over. **Ctrl+Shift+M** opens it (Ctrl+Alt+M goes: "not worth the extra confusion"); pressed
+again it closes the pane; Escape returns focus to the pane it serves and leaves it open. One per
+window; opened again from another pane it re-targets. Options › Models becomes one row that opens
+it. **First run** opens with a terminal pane at the left and the models pane at the right.
+
 ## 6. Order of work
 
 1. `/swap` and the defaults (Rule 3): bugs the owner is hitting now; no visible redesign.

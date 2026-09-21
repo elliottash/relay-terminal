@@ -552,3 +552,7 @@ model. So un-ticking `gpt-5.6-sol` un-ticks it on Codex, the OpenAI API and Open
 That is what "i probably want to uncheck sonnet and haiku" reads as — the model, not the route —
 and the storage can already say otherwise if the answer is "no, per provider": it would want a
 second control (the `via` list), not a different setting.
+
+<!-- relay:entry 20260921T211250Z-r1 author=claude-code kind=decision -->
+### Claude Code · 2026-09-21 21:12
+Owner, 2026-09-21: "lets build the models pane. and we can make it where, when you open relay for the first time, you have a pane at the left and models at the right. and just remove ctrl alt m, not worth the extra confusion. just ctrl m or ctrl shift m … typing it again closes the pane (or esc as you mentioned). ticks per model is OK for now." Design §5.8, task t:a11. Key: Ctrl+Shift+M alone — Relay binds one key per surface (Options is Ctrl+Shift+O, no plain twin), and plain Ctrl+M is the carriage-return code in a terminal.
