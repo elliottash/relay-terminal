@@ -637,7 +637,7 @@ class SessionsContext final : public relay::agent::Context {
     relay::agent::ContextSpec spec() const override {
         relay::agent::ContextSpec spec;
         spec.name = QStringLiteral("sessions");
-        spec.surface = spec.name;
+        spec.surface = m_pane->currentTab();
         spec.agentRole = QStringLiteral("switchboard");
         spec.workspace = m_workspace;
         // Named, never inferred: a board-less helper that falls through the worker's inference
@@ -657,7 +657,7 @@ class SessionsContext final : public relay::agent::Context {
         return spec;
     }
 
-    QString placeholder() const override { return QStringLiteral("Ask the Sessions helper…"); }
+    QString placeholder() const override { return QStringLiteral("Ask the %1 helper…").arg(m_pane->paneTitle()); }
 
     // `session:<id>` is this pane's own business: the helper was asked about what is in the list
     // and answered with a row of it, so the row is selected *here* rather than the window being
@@ -670,7 +670,8 @@ class SessionsContext final : public relay::agent::Context {
         return true;
     }
 
-    QString title() const { return QStringLiteral("Sessions helper"); }
+    QString title() const { return QStringLiteral("%1 helper").arg(m_pane->paneTitle()); }
+    void tabChanged() { changed(); }
 
     void setTabId(const QString &tabId) { if (tabId != m_tabId) { m_tabId = tabId; changed(); } }
     void setWorkspace(const QString &workspace) {
@@ -1005,6 +1006,16 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_tabs->addTab(list, QStringLiteral("Sessions"));
     m_tabs->widget(0)->setProperty("tabId", QStringLiteral("sessions"));
     m_tabs->tabBar()->setVisible(false);   // shown once another tab is added
+    connect(m_tabs, &QTabWidget::currentChanged, this, [this] {
+        if (m_context) m_context->tabChanged();
+        if (m_helperHead) m_helperHead->setText(QStringLiteral("%1 helper").arg(paneTitle()));
+        if (onTabActivated) onTabActivated(currentTab());
+        focusSearch();
+    });
+    connect(m_tabs->tabBar(), &QTabBar::tabBarClicked, this, [this](int index) {
+        if (index >= 0 && onTabSelectedByUser)
+            onTabSelectedByUser(m_tabs->widget(index)->property("tabId").toString());
+    });
     // The pane chrome's buttons sit over the top-right corner: keep the tab bar's end clear.
     m_inset = new QWidget;
     m_inset->setFixedSize(0, 1);
@@ -1098,6 +1109,13 @@ void SessionManager::setQuery(const QString &text) {
 }
 
 void SessionManager::focusSearch() {
+    if (currentTab() != QLatin1String("sessions")) {
+        if (auto *page = m_tabs->currentWidget()) {
+            if (auto *field = page->findChild<QLineEdit *>()) { field->setFocus(); field->selectAll(); }
+            else page->setFocus(Qt::OtherFocusReason);
+        }
+        return;
+    }
     m_search->setFocus();
     m_search->selectAll();
 }
@@ -1106,11 +1124,15 @@ bool SessionManager::threadsShown() const { return m_threads->isChecked(); }
 void SessionManager::setThreadsShown(bool on) { m_threads->setChecked(on); }
 
 void SessionManager::addTab(const QString &id, const QString &label, QWidget *widget) {
+    insertTab(m_tabs->count(), id, label, widget);
+}
+
+void SessionManager::insertTab(int index, const QString &id, const QString &label, QWidget *widget) {
     if (!widget || id.isEmpty() || id == QLatin1String("sessions")) return;
     for (int i = 0; i < m_tabs->count(); ++i)
         if (m_tabs->widget(i)->property("tabId").toString() == id) return;
     widget->setProperty("tabId", id);
-    m_tabs->addTab(widget, label);
+    m_tabs->insertTab(index, widget, label);
     m_tabs->tabBar()->setVisible(true);
 }
 
@@ -1126,11 +1148,12 @@ QString SessionManager::currentTab() const {
     return m_tabs->currentWidget() ? m_tabs->currentWidget()->property("tabId").toString() : QString();
 }
 
-QString SessionManager::paneTitle() const { return QStringLiteral("Sessions"); }
+QString SessionManager::paneTitle() const {
+    return m_tabs->tabText(m_tabs->currentIndex());
+}
 
 void SessionManager::focusView() {
-    if (currentTab() == QLatin1String("sessions")) focusSearch();
-    else if (m_tabs->currentWidget()) m_tabs->currentWidget()->setFocus(Qt::OtherFocusReason);
+    focusSearch();
 }
 
 // ----- the helper agent (#FEJQ; a console since card #AGNT step 7) -----------------------------
@@ -1189,6 +1212,10 @@ void SessionManager::helperDraft(const QString &text) {
 // force and the row that is selected. A hint about what is being read, not a dump of the list —
 // the rows themselves are the worker's to fetch.
 QString SessionManager::agentScreen() const {
+    if (currentTab() != QLatin1String("sessions")) {
+        if (onTabScreen) return onTabScreen(currentTab());
+        return QStringLiteral("The %1 view").arg(paneTitle());
+    }
     QStringList lines{QStringLiteral("The Sessions list")};
     if (const QString query = m_search ? m_search->text().trimmed() : QString(); !query.isEmpty())
         lines << QStringLiteral("Search: %1").arg(query);
@@ -1365,6 +1392,7 @@ void SessionManager::updateConsoleHeight() {
 // does not draw it, searching for the id is what a person would do next, and `m_pendingSelect`
 // picks the row out when the results land.
 void SessionManager::revealSession(const QString &sessionId) {
+    showTab(QStringLiteral("sessions"));
     if (sessionId.isEmpty()) return;
     if (QTreeWidgetItem *row = m_rows.value(sessionId)) {
         m_tree->setCurrentItem(row);
@@ -1378,8 +1406,11 @@ void SessionManager::revealSession(const QString &sessionId) {
 void SessionManager::setHeaderRightInset(int pixels) {
     m_inset->setFixedSize(std::max(0, pixels), 1);
     // With no tab bar the search row is the first row; its right end must stay clear too.
-    if (auto *list = m_tabs->widget(0); list && list->layout())
-        list->layout()->setContentsMargins(8, 8, 8 + (m_tabs->tabBar()->isVisible() ? 0 : std::max(0, pixels)), 8);
+    for (int i = 0; i < m_tabs->count(); ++i) {
+        auto *list = m_tabs->widget(i);
+        if (list->property("tabId").toString() == QLatin1String("sessions") && list->layout())
+            list->layout()->setContentsMargins(8, 8, 8 + (m_tabs->tabBar()->isVisible() ? 0 : std::max(0, pixels)), 8);
+    }
 }
 
 void SessionManager::scheduleQuery() { m_debounce->start(); }
@@ -2324,6 +2355,15 @@ void SessionManager::setProject(const QString &project) {
     if (m_project == project) return;
     m_project = project;
     if (!m_items.isEmpty()) rebuildTree(selectedId());
+}
+
+void SessionManager::selectProject(const QString &path) {
+    const QString value = path.isEmpty() ? QStringLiteral("none") : path;
+    if (m_projectFilter->findData(value) < 0) m_projectFilter->addItem(value, value);
+    m_scope->setCurrentIndex(1);  // Across sessions, not just the previously selected scope.
+    m_projectFilter->setCurrentIndex(m_projectFilter->findData(value));
+    showTab(QStringLiteral("sessions"));
+    refresh();
 }
 
 void SessionManager::setKnownProjects(const QList<QPair<QString, QString>> &projects) {

@@ -241,6 +241,8 @@ public:
     // on the request as `project`; "No project" sends every folder as `outside_projects`
     // (protocol 14.3), so the worker answers with rows under none of them.
     void setKnownProjects(const QList<QPair<QString, QString>> &projects);
+    // Empty path selects No project; browsing this filter never attaches a tab.
+    void selectProject(const QString &path);
     void setOpenSessions(const QStringList &sessionIds);
     // What each open conversation's pane is using, as a labelled tag on its row (issue #D03W).
     // Pushed by the window's status poll; a session with no entry shows nothing.
@@ -299,6 +301,10 @@ public:
     // Tabs beside the list. The list is the tab "sessions"; addTab puts a widget (owned by the
     // pane from then on) after it, and showTab brings one to the front. Unknown ids are ignored.
     void addTab(const QString &id, const QString &label, QWidget *widget);
+    void insertTab(int index, const QString &id, const QString &label, QWidget *widget);
+    std::function<void(const QString &)> onTabActivated;
+    std::function<void(const QString &)> onTabSelectedByUser;
+    std::function<QString(const QString &)> onTabScreen;
     void showTab(const QString &id);
     QString currentTab() const;
 

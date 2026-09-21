@@ -166,6 +166,36 @@ static double cpuMs() {
 class ConversationsTest : public QObject {
     Q_OBJECT
 private slots:
+    void projectTabsPreserveSearchAndContext() {
+        SessionManager pane;
+        auto *projects = new QWidget;
+        auto *search = new QLineEdit(projects);
+        projects->setFocusProxy(search);
+        pane.insertTab(0, QStringLiteral("projects"), QStringLiteral("Projects"), projects);
+        pane.addTab(QStringLiteral("globals"), QStringLiteral("Globals"), new QWidget);
+        pane.setQuery(QStringLiteral("retained"));
+        QString activated;
+        int userSelections = 0;
+        pane.onTabActivated = [&](const QString &tab) { activated = tab; };
+        pane.onTabSelectedByUser = [&](const QString &) { ++userSelections; };
+        pane.onTabScreen = [](const QString &tab) { return tab + QStringLiteral(" screen"); };
+        pane.showTab(QStringLiteral("projects"));
+        QCOMPARE(activated, QStringLiteral("projects"));
+        QCOMPARE(userSelections, 0);
+        QCOMPARE(pane.query(), QStringLiteral("retained"));
+        QCOMPARE(pane.agentContext()->spec().screen, QStringLiteral("projects screen"));
+        QCOMPARE(pane.paneTitle(), QStringLiteral("Projects"));
+        pane.setKnownProjects({{QStringLiteral("demo"), QStringLiteral("/tmp/demo")}});
+        QJsonObject request;
+        pane.onQuery = [&](const QJsonObject &r) { request = r; };
+        pane.selectProject(QStringLiteral("/tmp/demo"));
+        QCOMPARE(pane.currentTab(), QStringLiteral("sessions"));
+        QCOMPARE(request.value(QStringLiteral("project")).toString(), QStringLiteral("/tmp/demo"));
+        QCOMPARE(pane.query(), QStringLiteral("retained"));
+        pane.selectProject(QString());
+        QVERIFY(request.value(QStringLiteral("outside_projects")).toArray().contains(QStringLiteral("/tmp/demo")));
+    }
+
     void kindLabels() {
         QCOMPARE(kindLabel(QStringLiteral("prompt")), QStringLiteral("You"));
         QCOMPARE(kindLabel(QStringLiteral("reply")), QStringLiteral("Agent"));
