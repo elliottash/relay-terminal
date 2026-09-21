@@ -250,6 +250,7 @@ class CodexHarness:
         try:
             argv = [exe, "app-server"]
             if board_bridge:
+                argv += ["-c", "features.multi_agent=false", "-c", "features.multi_agent_v2=false"]
                 for key, value in board_bridge.items():
                     argv += ["-c", "mcp_servers.relay_board." + key + "=" + json.dumps(value)]
             proc = self._spawn(argv, cwd)
@@ -523,6 +524,7 @@ class CodexHarness:
             params["config"] = {EFFORT_CONFIG_KEY: effort}
         if getattr(self, "_board_bridge", None):
             overrides = params.setdefault("config", {})
+            overrides.update({"features.multi_agent": False, "features.multi_agent_v2": False})
             for key, value in self._board_bridge.items():
                 overrides["mcp_servers.relay_board." + key] = value
         if resume:

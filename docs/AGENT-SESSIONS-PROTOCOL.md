@@ -5969,15 +5969,28 @@ its transcript, its request ledger, titles, summaries and the sessions index are
 `complete` the provider takes the last user message (its text and its images), runs one harness
 turn, forwards each harness event as the Relay event in the table, and returns the guest's final
 text as the assistant message with the usage the guest reported. The guest runs its own command
-and file tools. Since card #4NXH, a process-local `relay_board` MCP server exposes exactly
+and file tools. Since card #4NXH, a process-local `relay_board` MCP server exposes
 `board_list`, `board_read`, `board_comment`, `board_update_card`, and `board_move_card`.
+Card #GD8K adds `agent`, `agent_message`, `agent_wait`, and `update_todos`: Relay owns the
+children, task links, progress events, transcripts and completion handoffs. These tools also work
+without a Switchboard. Initial discovery supplies provisional delegation schemas before the
+worker binds its configured manager; execution always checks the bound agent's actual tools.
+Guest launches always run in the background and waits are capped at ten seconds; wait on the
+returned child id again to retrieve a later result. Native plan/read-only/card-scope gates apply.
+Bridge-enabled Codex launches and thread start/resume/fork set `features.multi_agent=false` and
+`features.multi_agent_v2=false` without changing the user's configuration. Guest instructions
+require Relay delegation and forbid shell-launched replacement agents. A child inheriting a
+guest model starts its own harness on the child's worker thread, closes it after each turn and
+resumes its guest session for follow-ups. Child bridges expose no delegation or task tools;
+read-only definitions use the guest's deny posture. See [GUEST-TOOLS.md](GUEST-TOOLS.md) for
+the remaining native/guest tool differences and the verification boundary.
 
 `guest_board_bridge.py` owns an ephemeral Unix socket and capability file in a mode-0700 directory.
 The stdio proxy is launched by Codex through app-server/thread config overrides and by Claude
 through `--mcp-config`; neither writes user configuration or replaces other MCP servers. The
 absolute proxy path works in both source and installed backend layouts. Probes have no bridge.
 The bridge starts before the harness and binds to the pane's Agent afterward. Discovery derives
-schemas from BoardTools; calls require a live provider turn and run through native `_prepare` /
+schemas from BoardTools and the subagent/task catalog; calls require a live provider turn and run through native `_prepare` /
 `_execute`, including deferred-group resolution, plan/read-only/card scopes, write budgets,
 verification gates and worker-owned attribution. There is no second board turn or owner bypass.
 
@@ -5990,7 +6003,7 @@ Provider close/replacement/start failure closes the socket and removes credentia
 exits when the guest closes stdin. Each replacement gets a fresh capability.
 
 Opening context and generated board policy prefer discovered namespaced tools, with file edits
-as fallback for unavailable connections and operations outside the five-tool scope (create/claim).
+as fallback for unavailable connections and board operations outside the five-tool scope (create/claim).
 A turn without discovery emits a status notice instead of claiming connectivity. Relay's automatic
 Execute/Verify actions retain their existing claims; this server does not add a claim tool.
 

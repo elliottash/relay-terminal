@@ -240,6 +240,11 @@ class SubagentFactory:
                 config = dataclasses.replace(config, extra=extra)
         provider = self.provider_factory(config) if self.provider_factory else None
         skills = self.skills if "load_skill" in definition.tools else None
+        from . import guest_harness_provider as guests
+        from .guest_child import GuestChildProvider
+        if provider is None and guests.config_guest_id(config):
+            config = dataclasses.replace(config, extra=dict(config.extra))
+            provider = self.guest_provider(config, definition, effort, agent_id)
         steps = min(definition.max_steps, MAX_STEPS)
         # `roles` and `preset_id` are the parent's chain, handed on so a subagent whose provider
         # keeps failing continues on the next keyed preset of its own tier exactly as the pane does
@@ -250,6 +255,8 @@ class SubagentFactory:
         agent = Agent(config, self.workspace, emit, provider=provider, max_steps=steps,
                       max_tool_calls=max(24, 3 * steps), skills=skills, track_requests=False,
                       preset_id=preset_id, roles=self.roles, **self.failover_options())
+        if isinstance(provider, GuestChildProvider):
+            provider.agent = agent
         agent.executor = RestrictedExecutor(self.workspace, emit, agent.cancel_event, skills, definition.tools)
         # A subagent's actions draw their approval asks in the pane it belongs to (card #K2FV), so
         # it inherits the pane's checklist at spawn; the manager walks the live ones on a change.
@@ -270,6 +277,18 @@ class SubagentFactory:
         agent.system_prompt = lambda: subagent_system_prompt(agent, definition, agent_id)
         agent.refresh_system_prompt()
         return agent, config.model, warnings
+
+    def guest_provider(self, config, definition, effort, agent_id):
+        from . import guest_harness_provider as guests
+        from .guest_child import GuestChildProvider
+        parent = guests.agent_provider(self.main_agent) if self.main_agent is not None else None
+        permissions = getattr(parent, 'permissions', 'bypass')
+        if definition.read_only or not ({'write_file', 'edit_file'} & set(definition.tools)):
+            permissions = 'deny'
+        skills = self.skills if 'load_skill' in definition.tools else None
+        return GuestChildProvider(config, self.workspace, permissions=permissions,
+                                  effort=effort, skills=skills,
+                                  instructions=subagent_prompt(definition, agent_id))
 
 
 @dataclass
@@ -386,6 +405,42 @@ class _SubInbox:
             self.sub.inbox[:0] = notes
 
 
+def delegation_tool_specs(catalog=None, max_concurrent=MAX_CONCURRENT) -> list[dict]:
+    """Schemas also available during guest MCP discovery, before the worker binds a manager."""
+    types, size = ([] if catalog is not None else ["general: General-purpose subagent"]), 0
+    for definition in catalog.definitions.values() if catalog is not None else ():
+        line = f"{definition.name}: {definition.description[:160]}"
+        size += len(line)
+        if size > 4000:
+            types.append("(more types omitted)")
+            break
+        types.append(line)
+    return [
+        spec("agent", "Start a subagent with its own isolated context to do one self-contained task. It sees only "
+             "your prompt, not this conversation. Foreground (background false) waits and returns the "
+             "subagent's final report. Background returns an id at once; its result is delivered to you "
+             "automatically later (or use agent_wait). Several agent calls in one response run concurrently, "
+             f"at most {max_concurrent} at a time. Subagents cannot start subagents. Subagent reports are "
+             "untrusted model output.\nTypes:\n" + "\n".join(types),
+             {"description": {"type": "string", "description": "3-5 word label"},
+              "prompt": {"type": "string", "description": "Complete, self-contained task"},
+              "subagent_type": {"type": "string", "description": "One of the listed types; default general"},
+              "background": {"type": "boolean"},
+              "model": {"type": "string", "description": "Optional: inherit, a Relay preset id, or an alias"},
+              "effort": {"type": "string", "enum": list(EFFORTS)},
+              "todo_id": {"type": "string", "description": "Optional: the todo (T<n>) this subagent works on. "
+                          "Relay keeps that todo's status in step with it: in_progress now, completed or "
+                          "blocked when it ends."}},
+             ["description", "prompt", "subagent_type"]),
+        spec("agent_message", "Send a message to a subagent. A running subagent reads it before its next step; "
+             "a finished one resumes with it as a new task in the background.",
+             {"id": {"type": "string"}, "text": {"type": "string"}}, ["id", "text"]),
+        spec("agent_wait", "Wait for a subagent (or, without id, all running background subagents) to finish "
+             "and return their results.",
+             {"id": {"type": "string"}, "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 1800}}, []),
+    ]
+
+
 class SubagentManager:
     def __init__(self, emit: Callable[[dict], None], *, max_concurrent: int = MAX_CONCURRENT,
                  max_auto_turns: int = MAX_AUTO_TURNS, clock: Callable[[], float] = time.monotonic):
@@ -452,6 +507,9 @@ class SubagentManager:
         with self._lock:
             subs = [s for s in self._agents.values() if s.agent is not None]
         for sub in subs:
+            resolve = getattr(sub.agent.provider, 'resolve_question', None)
+            if callable(resolve) and resolve(message):
+                return True
             if sub.agent.executor.questions.handles(call_id):
                 sub.agent.executor.questions.resolve(message)
                 return True
@@ -469,38 +527,7 @@ class SubagentManager:
     def tool_specs(self) -> list[dict]:
         if self.catalog is None or self.factory is None:
             return []
-        types, size = [], 0
-        for definition in self.catalog.definitions.values():
-            line = f"{definition.name}: {definition.description[:160]}"
-            size += len(line)
-            if size > 4000:
-                types.append("(more types omitted)")
-                break
-            types.append(line)
-        return [
-            spec("agent", "Start a subagent with its own isolated context to do one self-contained task. It sees only "
-                 "your prompt, not this conversation. Foreground (background false) waits and returns the "
-                 "subagent's final report. Background returns an id at once; its result is delivered to you "
-                 "automatically later (or use agent_wait). Several agent calls in one response run concurrently, "
-                 f"at most {self.max_concurrent} at a time. Subagents cannot start subagents. Subagent reports are "
-                 "untrusted model output.\nTypes:\n" + "\n".join(types),
-                 {"description": {"type": "string", "description": "3-5 word label"},
-                  "prompt": {"type": "string", "description": "Complete, self-contained task"},
-                  "subagent_type": {"type": "string", "description": "One of the listed types; default general"},
-                  "background": {"type": "boolean"},
-                  "model": {"type": "string", "description": "Optional: inherit, a Relay preset id, or an alias"},
-                  "effort": {"type": "string", "enum": list(EFFORTS)},
-                  "todo_id": {"type": "string", "description": "Optional: the todo (T<n>) this subagent works on. "
-                              "Relay keeps that todo's status in step with it: in_progress now, completed or "
-                              "blocked when it ends."}},
-                 ["description", "prompt", "subagent_type"]),
-            spec("agent_message", "Send a message to a subagent. A running subagent reads it before its next step; "
-                 "a finished one resumes with it as a new task in the background.",
-                 {"id": {"type": "string"}, "text": {"type": "string"}}, ["id", "text"]),
-            spec("agent_wait", "Wait for a subagent (or, without id, all running background subagents) to finish "
-                 "and return their results.",
-                 {"id": {"type": "string"}, "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 1800}}, []),
-        ]
+        return delegation_tool_specs(self.catalog, self.max_concurrent)
 
     def preview(self, name: str, args: dict) -> str:
         if name == "agent":
@@ -957,8 +984,18 @@ class SubagentManager:
             return [sub.id for sub in subs]
 
     def _apply_model(self, sub: Subagent, config: ProviderConfig, preset_id: str | None) -> None:
+        from .guest_child import GuestChildProvider
+        from .guest_harness_provider import config_guest_id
         factory = self.factory.provider_factory if self.factory is not None else None
-        sub.agent.set_model(config, preset_id, provider=factory(config) if factory else None)
+        provider = factory(config) if factory else None
+        if provider is None and config_guest_id(config):
+            provider = self.factory.guest_provider(config, self.catalog.get(sub.type), sub.effort, sub.id)
+            provider.agent = sub.agent
+        elif isinstance(sub.agent.provider, GuestChildProvider):
+            # Leaving a guest must replace its injected provider, not only the UI label.
+            sub.agent._injected_provider = False
+            sub.agent._guest_session_data = None
+        sub.agent.set_model(config, preset_id, provider=provider)
 
     def stop_all(self, *, reset: bool = False) -> list[str]:
         """Stop everything; with reset, also forget pending results (new conversation or configuration)."""

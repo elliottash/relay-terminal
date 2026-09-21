@@ -586,7 +586,8 @@ _SKILLS_UNSET = object()
 
 def start_provider(preset_id: str, request: dict, workspace: str,
                    stall_timeout: float = DEFAULT_STALL_TIMEOUT,
-                   config: ProviderConfig | None = None, *, skill_index=_SKILLS_UNSET) -> "HarnessProvider":
+                   config: ProviderConfig | None = None, *, skill_index=_SKILLS_UNSET,
+                   instruction_suffix: str = "", delegation: bool = True) -> "HarnessProvider":
     """Build and start the harness a `configure`/`set_model` asked for, and wrap it as a provider.
 
     Every failure is a `ValueError`, which is what the worker's protocol loop already turns into an
@@ -601,11 +602,14 @@ def start_provider(preset_id: str, request: dict, workspace: str,
     from .guest_board_bridge import Bridge
     from .guest_instructions import build_instructions
     from .board_tools import find_board_root
-    bridge = Bridge(available=find_board_root(workspace) is not None)
+    bridge = Bridge(available=delegation and find_board_root(workspace) is not None,
+                    delegation=delegation)
     try:
         instructions = (build_instructions(request.get("skills"), workspace)
                         if skill_index is _SKILLS_UNSET else
                         build_instructions(None, workspace, skill_index=skill_index))
+        if instruction_suffix:
+            instructions += "\n\n" + instruction_suffix
         started = harness.start(cwd=workspace, model=options["model"] or None,
                                 resume=options["resume"], fork=options["fork"],
                                 permissions=options["permissions"], effort=options["effort"],
@@ -761,6 +765,20 @@ class HarnessProvider:
             # caller already reads "" as "no title / no summary / nothing compacted".
             return {"role": "assistant", "content": ""}
         prompt, attachments = last_user_message(messages)
+        # Inbox notes can follow the owner's prompt at the same step boundary. Send
+        # all pending user messages, so a completed child cannot hide that prompt.
+        pending = []
+        has_notes = False
+        for message in reversed(messages):
+            if message.get("role") == "assistant":
+                break
+            if message.get("role") == "user":
+                has_notes = has_notes or message.get('relay_kind') == 'note'
+                text, images = last_user_message([message])
+                pending.append((text, images))
+        if has_notes and len(pending) > 1:
+            prompt = "\n\n".join(text for text, _ in reversed(pending))
+            attachments = [image for _, images in reversed(pending) for image in images]
         opening, self.opening = self.opening, None
         if opening is not None:
             prompt = opening(messages) if callable(opening) else str(opening)
@@ -774,7 +792,14 @@ class HarnessProvider:
                       "use its board_list, board_read, board_comment, board_update_card and "
                       "board_move_card tools in preference to file edits. Other board operations "
                       "(including create/claim), or an unavailable connection, use POLICY.md's "
-                      "file fallback. Never claim connection success without discovery.\n\n" + prompt)
+                      "file fallback. Never claim connection success without discovery. "
+                      "Delegate only through this server's agent, agent_message and agent_wait; "
+                      "use update_todos and link delegated tasks with todo_id. Do not use native "
+                      "harness subagents or another agent CLI. If Relay delegation is unavailable, "
+                      "work locally and report that limitation.\n\n" + prompt)
+            if agent is not None and agent._todos_enabled():
+                prompt += "\n\n[Relay tasks: current state, preserve when updating]\n" + json.dumps(
+                    agent.todos.snapshot(), ensure_ascii=False)
         try:
             result = self.harness.send(prompt, attachments=attachments or None,
                                        emit=turn.on_event, cancel=cancel)
@@ -792,7 +817,8 @@ class HarnessProvider:
             if self.board_bridge is not None:
                 self.board_bridge.end()
         turn.close_thinking()
-        if self.board_bridge is not None and not self.board_bridge.ready.is_set():
+        if (self.board_bridge is not None and self.board_bridge.specs()
+                and not self.board_bridge.ready.is_set()):
             emit({"event": "status", "text": "Guest board tools were not discovered; use the board policy's file fallback."})
         stop_reason = getattr(result, "stop_reason", "end")
         if stop_reason == "interrupted" or cancel.is_set():
@@ -999,6 +1025,13 @@ class _Turn:
         ok = data.get("ok") is not False
         diff = data.get("diff") if isinstance(data.get("diff"), str) and data["diff"].strip() else ""
         result = tool_result(data.get("output"), ok, diff)
+        from .guest_board_bridge import ALLOW
+        if call['name'] in ALLOW:
+            # Preserve native result fields (child id, task state, errors) through
+            # the MCP envelope so the existing labels open Relay's child/task view.
+            native = bridge_result(data.get('output'))
+            if native is not None:
+                result.update(native)
         ms = data.get("ms")
         if not isinstance(ms, int) or isinstance(ms, bool) or ms < 0:
             ms = int((time.monotonic() - call["started"]) * 1000) if call["started"] else None
@@ -1009,6 +1042,15 @@ class _Turn:
         if self.agent is not None and isinstance(self.record, dict):
             self.agent._record_tool(self.record, call_id, call["name"], call["preview"], result,
                                     ms, label=label, args=call["args"], diff=diff or None)
+        if self.agent is not None and getattr(self.agent.provider, 'record_guest_tools', False):
+            # Child thread views read messages (not the pane's turn records). Keep
+            # guest tool activity there too, so opening a child after completion or
+            # subscribing halfway through does not lose the work already observed.
+            self.agent.messages.extend([
+                {'role': 'assistant', 'content': '', 'tool_calls': [
+                    {'id': call_id, 'type': 'function', 'function': {
+                        'name': call['name'], 'arguments': json.dumps(call['args'])}}]},
+                {'role': 'tool', 'tool_call_id': call_id, 'content': json.dumps(result)}])
         event = {"event": "tool_result", "tool": call["name"], "result": result, "label": label,
                  "ms": ms, "call_id": call_id}
         if self.turn_id is not None:
@@ -1355,7 +1397,7 @@ def label_arguments(source) -> dict:
         if isinstance(value, str) and value.strip():
             args["path"] = value
             break
-    for key in ("pattern", "query", "url", "description", "subagent_type", "intent"):
+    for key in ("pattern", "query", "url", "description", "subagent_type", "intent", "id", "todo_id"):
         value = source.get(key)
         if isinstance(value, str) and value.strip():
             args[key] = value
@@ -1371,6 +1413,18 @@ def tool_preview(name: str, guest_tool: str, args: dict, label) -> str:
     if not body and isinstance(label, str):
         body = label
     return f"{title}\n\n{body}" if body else title
+
+
+def bridge_result(output) -> dict | None:
+    try:
+        value = json.loads(output) if isinstance(output, str) else output
+        if isinstance(value, dict) and isinstance(value.get('content'), list):
+            text = '\n'.join(p.get('text', '') for p in value['content']
+                             if isinstance(p, dict) and p.get('type') == 'text')
+            value = json.loads(text)
+        return value if isinstance(value, dict) else None
+    except (ValueError, TypeError):
+        return None
 
 
 def tool_result(output, ok: bool, diff: str = "") -> dict:

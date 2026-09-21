@@ -8,6 +8,7 @@ replays a mutation. Calls and turn teardown share a lock.
 from __future__ import annotations
 
 import hmac
+import copy
 import json
 import os
 from pathlib import Path
@@ -23,8 +24,11 @@ import tempfile
 import threading
 import uuid
 
-ALLOW = frozenset(('board_list', 'board_read', 'board_comment',
+BOARD_ALLOW = frozenset(('board_list', 'board_read', 'board_comment',
                    'board_update_card', 'board_move_card'))
+DELEGATION_ALLOW = frozenset(('agent', 'agent_message', 'agent_wait', 'update_todos'))
+ALLOW = BOARD_ALLOW | DELEGATION_ALLOW
+WAIT_SECONDS = 10
 MAX_MESSAGE = 2 * 1024 * 1024
 VERSIONS = ('2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05')
 
@@ -34,9 +38,10 @@ def failure(code, message):
 
 
 class Bridge:
-    def __init__(self, available=False):
+    def __init__(self, available=False, *, delegation=True):
         self.agent = None
         self.available = available
+        self.delegation = delegation
         self.ready = threading.Event()
         self.lock = threading.RLock()
         self.active = None
@@ -82,14 +87,31 @@ class Bridge:
             self.agent = agent
 
     def specs(self):
+        from relay_core.subagents import delegation_tool_specs
+        from relay_core.todos import SPEC as TODO_SPEC
         if self.agent is not None:
             board = getattr(self.agent, 'board', None)
             specs = board.tool_specs() if board is not None else []
-        elif self.available:
-            from relay_core.board_tools import TOOL_SPECS
-            specs = TOOL_SPECS
+            manager = self.agent.subagents
+            if self.delegation and manager is not None:
+                specs = specs + manager.tool_specs()
+            if self.delegation and self.agent._todos_enabled():
+                specs = specs + [TODO_SPEC]
         else:
-            specs = []
+            from relay_core.board_tools import TOOL_SPECS
+            specs = (list(TOOL_SPECS) if self.available else [])
+            if self.delegation:
+                specs += delegation_tool_specs() + [TODO_SPEC]
+        specs = copy.deepcopy(specs)
+        for spec in specs:
+            f = spec['function']
+            if f['name'] == 'agent':
+                f['description'] += (' In a guest, launches always run in the background. '
+                                     'Use agent_wait to read the result; link a Relay task with todo_id.')
+                f['parameters']['properties']['background'] = {'type': 'boolean', 'enum': [True]}
+            elif f['name'] == 'agent_wait':
+                f['description'] += ' Guest waits return within 10 seconds; call again if still running.'
+                f['parameters']['properties']['timeout_seconds']['maximum'] = WAIT_SECONDS
         return [{'name': f['name'], 'description': f.get('description', ''),
                  'inputSchema': f['parameters']}
                 for spec in specs for f in [spec['function']] if f['name'] in ALLOW]
@@ -148,6 +170,18 @@ class Bridge:
                 return remember(failure('unknown_tool', 'This board tool is not exposed.'))
             args = params.get('arguments', {})
             try:
+                if not isinstance(args, dict):
+                    raise ValueError('Tool arguments must be an object.')
+                args = dict(args)
+                # Never hold the bridge for an entire model turn. Background children use
+                # Relay's normal manager, task links, transcripts, Stop and idle wake-ups.
+                if name == 'agent':
+                    args['background'] = True
+                elif name == 'agent_wait':
+                    timeout = args.get('timeout_seconds', WAIT_SECONDS)
+                    if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout < 1:
+                        raise ValueError('timeout_seconds must be a positive integer.')
+                    args['timeout_seconds'] = min(timeout, WAIT_SECONDS)
                 # Resolve the deferred group, then use precisely the native policy path.
                 from relay_core import tool_groups
                 group = tool_groups.group_of(name)

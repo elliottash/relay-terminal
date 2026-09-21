@@ -9,7 +9,7 @@ from unittest import mock
 
 from relay_core import board as B, board_tools as T
 from relay_core.agent import Agent
-from relay_core.guest_board_bridge import ALLOW, Bridge, exchange
+from relay_core.guest_board_bridge import BOARD_ALLOW, Bridge, exchange
 from relay_core import guest_harness_provider as P
 from relay_core.guest_harness import TurnResult
 from tests.test_board_tools import CONFIG
@@ -50,7 +50,7 @@ class BridgeTests(unittest.TestCase):
 
     def test_discovery_allowlist_and_unavailable(self):
         specs = exchange(self.cap, 'tools/list')['tools']
-        self.assertEqual({s['name'] for s in specs}, ALLOW)
+        self.assertEqual({s['name'] for s in specs}, BOARD_ALLOW)
         self.assertTrue(all(s['inputSchema']['type']=='object' for s in specs))
         self.assertEqual(self.call()['code'], 'unavailable')
         self.active()

@@ -63,6 +63,7 @@ class Hub:
         self.active = 0
         self.max_active = 0
         self.seen = []      # (task, messages, tool names)
+        self.started = threading.Event()
 
     def open(self, name):
         with self.lock:
@@ -88,6 +89,7 @@ class SubProvider:
             hub.active += 1
             hub.max_active = max(hub.max_active, hub.active)
             hub.seen.append((task, json.loads(json.dumps(messages)), names))
+            hub.started.set()
         try:
             if self.calls == 1:
                 for word in task.split():
@@ -324,7 +326,9 @@ class StopAndMessageTests(Base):
 
     def test_message_reaches_running_subagent_at_next_step(self):
         self.spawn('M tool gate:g1')
-        self.rec.wait(lambda e: e['event'] == 'subagent_progress' and e['status'] == 'running')
+        # The running event precedes ask() and its first inbox drain. Send only
+        # once the model is actually waiting, so this tests the *next* step.
+        self.assertTrue(self.hub.started.wait(5))
         result = self.manager.send_message('a1', 'also check README', origin='user')
         self.assertEqual(result['delivered'], 'next_step')
         self.hub.open('g1')
@@ -348,7 +352,7 @@ class StopAndMessageTests(Base):
 
     def test_subscribe_streams_wrapped_events(self):
         self.spawn('W tool gate:g1')
-        self.rec.wait(lambda e: e['event'] == 'subagent_progress' and e['status'] == 'running')
+        self.assertTrue(self.hub.started.wait(5))
         self.manager.subscribe('a1', True)
         transcript = self.rec.wait(lambda e: e['event'] == 'subagent_transcript')
         self.assertEqual(transcript['messages'][0]['role'], 'user')

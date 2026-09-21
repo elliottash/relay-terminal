@@ -3483,9 +3483,16 @@ class Agent:
             return Prepared(name, {"title": title, "content": content}, f"WRITE PLAN\n\n{self.plans_dir}\n\n{title}")
         if self.mode == "plan" and name in PLAN_BLOCKED_TOOLS:
             raise ValueError(f"{name} is not available in plan mode. Investigate, then call write_plan.")
+        if self.subagents is not None and self.subagents.handles(name):
+            if not isinstance(args, dict):
+                raise ValueError("Tool arguments must be an object.")
+            return Prepared(name, args, self.subagents.preview(name, args))
         return self.executor.prepare(name, args)
 
     def _execute(self, prepared: Prepared, turn: dict) -> dict:
+        if self.subagents is not None and self.subagents.handles(prepared.name):
+            return self.subagents.run_tool(prepared.name, prepared.arguments, None, None,
+                                           self.cancel_event)
         if prepared.name == tool_groups.LOAD_TOOLS:
             # The schemas reach the model with the next request's tool list, which `tools()`
             # appends them to: nothing above them moves, which is the whole point (#GMCF 9).

@@ -1,0 +1,29 @@
+#GD8K implementer evidence, 2026-09-21
+
+PYTHONPATH=backend python3 -m unittest tests.test_guest_delegation tests.test_guest_board_bridge tests.test_guest_harness_codex tests.test_guest_harness_provider tests.test_subagents -q
+Ran 182 tests in 6.057s
+OK
+
+codex -c features.multi_agent=false -c features.multi_agent_v2=false features list
+multi_agent stable false
+multi_agent_v2 stable false
+
+Tests use real Relay bridge/manager/task/session machinery, a real stdio proxy where applicable,
+scripted fake guest/HTTP providers, and Codex app-server protocol replay. No live model turn.
+Verified: pre-bind discovery; board-independent tasks/delegation; Relay task/child links; persisted
+child report and tool transcript; follow-ups; duplicate launch suppression; scope and cancellation
+gates; bounded waits; no owner-prompt loss to child reports; clickable child tool labels; inherited
+guest startup/resume/cleanup; read-only guest posture; startup failure; model switching; child Stop
+and question routing; Codex native multi-agent flags on launch/start/resume/fork.
+
+Regression fixtures fixed: native tests previously waited for a running event emitted before ask()
+started, so a message could enter the first step (instead of the next step) and subscription could
+see an empty transcript. They now wait for the fake provider's first model request.
+
+Not verified: live Codex delegation inside the running GUI. Restart worker/guest to load this code;
+verify task rows, child badge and transcript in the existing subagent view. Existing Codex-owned
+subagents are not migrated. Native/guest inventory: docs/GUEST-TOOLS.md.
+
+Relay test tracker run 20260921T205514Z-deb4: four named card tests passed, zero failures,
+zero opened signals. TestsCommands.check_card(GD8K): no findings, failing tests or blocks.
+relay-board.py check --json: no findings for GD8K card/thread; other existing board warnings remain.
