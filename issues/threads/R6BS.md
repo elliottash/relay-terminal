@@ -25,3 +25,7 @@ Owner: "ok, sounds good, deliver it with a subagent". PowerShell 7 accepted. Del
 <!-- relay:entry 20260921T232856Z-a7 author=codex kind=progress -->
 ### Codex · 2026-09-21 23:28
 Native desktop and installer ran on Windows Server 2022 (35666469644); inspected screenshot and logs, found and fixed a masked PowerShell cwd fixture failure. Final release 35667599551 uses immutable fcf44e13, with native tests, actual install/start/uninstall and all six Linux package gates required before publication. Desktop/mobile download layouts checked; links remain unpublished until assets exist.
+
+<!-- relay:entry 20260921T234250Z-a8 author=codex kind=progress -->
+### Codex · 2026-09-21 23:42
+Native installer launch and worker startup passed again with clean logs. Runtime tests found module-heavy command discovery truncation (fixed 694ab9a8) and then an event publication failure under a deliberately held Windows file lock. Test cleanup now preserves the original assertion (e8fb83a3); shell integration owner is fixing publication. Linux builds continue; website links remain staged until all release gates pass. These failures occur on Windows x64, not the owner’s ARM64 system.
