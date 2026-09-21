@@ -384,6 +384,19 @@ target_include_directories(relay-outputlinks PUBLIC src)
 target_link_libraries(relay-outputlinks PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-outputlinks PRIVATE -Wall -Wextra -Wpedantic)
 
+# What an agent is *about* (#AGNT): `relay::agent::Context`, its `ContextSpec` — the block that
+# rides on the worker's `configure` — and the `Action` row of things that need no typing. The
+# agent *surface* is the prompt box and is one unit (`relay::AgentConsole`); this is the small
+# other half that says which setting it is drawn in. QtCore only, and deliberately its own
+# library: relay-board, relay-settings and relay-conversations each supply a context and must be
+# able to link one without pulling in a window — a `Pane` exists only inside the `relay`
+# executable's translation unit. relay-outputlinks: `Context::resolveLink` takes the same
+# `relay::links::Target` an activated link in the transcript already resolves to.
+add_library(relay-agentcontext STATIC src/AgentContext.cpp src/AgentContext.h)
+target_include_directories(relay-agentcontext PUBLIC src)
+target_link_libraries(relay-agentcontext PUBLIC relay-outputlinks ${RELAY_QT}::Core)
+target_compile_options(relay-agentcontext PRIVATE -Wall -Wextra -Wpedantic)
+
 # Agent replies in the terminal: streaming Markdown to ANSI (headings, emphasis, code, lists,
 # quotes, links, tables), word-wrapped to the pane's width. Plain QtCore so chunk boundaries can
 # be tested without a terminal.
@@ -764,6 +777,12 @@ if(BUILD_TESTING)
     add_executable(relay-outputlinks-tests tests/outputlinks_test.cpp)
     target_link_libraries(relay-outputlinks-tests PRIVATE relay-outputlinks ${RELAY_QT}::Test)
     add_test(NAME outputlinks COMMAND relay-outputlinks-tests)
+    # What an agent is about (#AGNT step 2): the action row's letters and labels, and the exact
+    # bytes of the `context` block the worker is configured with — a golden the backend is checked
+    # against, so the two halves of the seam cannot drift apart quietly. No GUI: QtCore only.
+    add_executable(relay-agentcontext-tests tests/agentcontext_test.cpp)
+    target_link_libraries(relay-agentcontext-tests PRIVATE relay-agentcontext ${RELAY_QT}::Test)
+    add_test(NAME agentcontext COMMAND relay-agentcontext-tests)
     add_executable(relay-markdown-tests tests/markdownansi_test.cpp)
     target_link_libraries(relay-markdown-tests PRIVATE relay-markdown ${RELAY_QT}::Test)
     add_test(NAME markdown COMMAND relay-markdown-tests)

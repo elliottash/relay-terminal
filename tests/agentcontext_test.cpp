@@ -1,0 +1,456 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// `relay::agent::Context`, `ContextSpec` and `Action` (card #AGNT step 2): what an agent is about,
+// tested without a window, a worker or a widget — which is the point of the interface being
+// QtCore-only.
+//
+// The golden `context` block is the load-bearing case. Those bytes are what `configure` carries to
+// `backend/worker.py` (protocol 30.7 and the section card #AGNT step 4 writes), so the C++ and the
+// Python are checked against **one written-down shape** rather than against each other; a field
+// renamed on either side fails here with the diff in the message.
+#include "AgentContext.h"
+
+#include <QJsonDocument>
+#include <QTest>
+
+using namespace relay::agent;
+
+namespace {
+
+// A terminal pane's context: the only one with a shell, and the only one that routes `auto`.
+ContextSpec terminalSpec()
+{
+    ContextSpec spec;
+    spec.name = QStringLiteral("terminal");
+    spec.agentRole = QStringLiteral("main");
+    spec.workspace = QStringLiteral("/home/dev/project");
+    spec.persistScope = QStringLiteral("/home/dev/project");
+    spec.persistKey = QStringLiteral("s-7f3a");
+    spec.shell = true;
+    spec.routing = QStringLiteral("auto");
+    return spec;
+}
+
+// A card's: the helper role, no shell, the board tool scope, and a surface id of its own because a
+// tab may have two cards open on one worker.
+ContextSpec cardSpec()
+{
+    ContextSpec spec;
+    spec.name = QStringLiteral("card");
+    spec.surface = QStringLiteral("card:AGNT");
+    spec.agentRole = QStringLiteral("switchboard");
+    spec.workspace = QStringLiteral("/home/dev/project");
+    spec.scope = QStringLiteral("board");
+    spec.persistScope = QStringLiteral("/home/dev/project");
+    spec.persistKey = QStringLiteral("AGNT");
+    spec.briefKey = QStringLiteral("card");
+    spec.briefTitle = QStringLiteral("Card #AGNT");
+    spec.routing = QStringLiteral("agent");
+    return spec;
+}
+
+QString compact(const QJsonObject &json)
+{
+    return QString::fromUtf8(QJsonDocument(json).toJson(QJsonDocument::Compact));
+}
+
+// The card page's row, as `CardContext::actions()` will hand it over.
+QList<Action> cardActions()
+{
+    Action plan;
+    plan.key = QStringLiteral("boardPlan");
+    plan.letter = QStringLiteral("p");
+    plan.label = QStringLiteral("Plan");
+    plan.tooltip = QStringLiteral("The agent reads the code and writes the card's plan");
+    Action execute;
+    execute.key = QStringLiteral("boardExecute");
+    execute.letter = QStringLiteral("x");
+    execute.label = QStringLiteral("Execute");
+    execute.leaves = true;   // it hands the card to a terminal pane
+    Action verify;
+    verify.key = QStringLiteral("boardVerify");
+    verify.letter = QStringLiteral("v");
+    verify.label = QStringLiteral("Verify");
+    verify.leaves = true;
+    return {plan, execute, verify};
+}
+
+// A context written the way a host will write one: everything defaulted but the two pure virtuals.
+class FakeContext final : public Context {
+  public:
+    ContextSpec spec() const override { return m_spec; }
+    QString placeholder() const override { return QStringLiteral("Ask about this card"); }
+    QList<Action> actions() const override { return m_actions; }
+    bool resolveLink(const relay::links::Target &target) override
+    {
+        m_lastLink = target.target;
+        return target.kind == relay::links::Kind::Card;
+    }
+    void turnFinished(const TurnRecord &record) override { m_turns.append(record); }
+
+    ContextSpec m_spec = cardSpec();
+    QList<Action> m_actions;
+    QString m_lastLink;
+    QList<TurnRecord> m_turns;
+};
+
+} // namespace
+
+class AgentContextTests : public QObject {
+    Q_OBJECT
+
+private slots:
+    // ---- construction and defaults ------------------------------------------------------------
+
+    void aFreshSpecIsEmptyAndHasNoShell()
+    {
+        const ContextSpec spec;
+        QVERIFY(spec.name.isEmpty());
+        QVERIFY(spec.surface.isEmpty());
+        QVERIFY(spec.workspace.isEmpty());
+        QVERIFY(spec.scope.isEmpty());
+        QVERIFY(spec.routing.isEmpty());
+        QVERIFY(!spec.shell);       // only the terminal spawns one
+        QVERIFY(!spec.readonly);
+        QVERIFY(spec.persistId().isEmpty());   // no key means no store (30.7)
+        // No `persist` and no `brief` blocks, and nothing invented for the rest.
+        QCOMPARE(compact(spec.toJson()),
+                 QStringLiteral(R"({"agent_role":"","name":"","routing":"","scope":"",)"
+                                R"("shell":false,"surface":"","workspace":""})"));
+        QVERIFY(spec.askFields().isEmpty());
+    }
+
+    void aFreshActionIsKeylessEnabledAndStaysOnItsSurface()
+    {
+        const Action action;
+        QVERIFY(!action.keyed());
+        QVERIFY(action.enabled);
+        QVERIFY(!action.leaves);
+        QVERIFY(!action.run);
+        QVERIFY(action.fullLabel().isEmpty());
+    }
+
+    void aContextDefaultsToNoActionsNoLinksAndNoTurnHandling()
+    {
+        // The defaults a terminal context takes: it adds nothing to the console's own behaviour.
+        class Bare final : public Context {
+          public:
+            ContextSpec spec() const override { return terminalSpec(); }
+            QString placeholder() const override { return QStringLiteral("Type a command"); }
+        } bare;
+        QVERIFY(bare.actions().isEmpty());
+        relay::links::Target card;
+        card.valid = true;
+        card.kind = relay::links::Kind::Card;
+        card.target = QStringLiteral("relay://card/AGNT");
+        QVERIFY(!bare.resolveLink(card));   // false: the console opens it the ordinary way
+        bare.turnFinished(TurnRecord{});    // a no-op, not a crash
+        QCOMPARE(bare.placeholder(), QStringLiteral("Type a command"));
+    }
+
+    void aContextTellsItsConsoleWhenItHasMoved()
+    {
+        FakeContext context;
+        int changes = 0;
+        context.onChanged = [&changes] { ++changes; };
+        context.changed();
+        context.m_spec.briefTitle = QStringLiteral("Card #AGNT — executing");
+        context.changed();
+        QCOMPARE(changes, 2);
+        // And a context nobody has taken calls nothing rather than crashing.
+        FakeContext orphan;
+        orphan.changed();
+    }
+
+    // ---- an action's label ---------------------------------------------------------------------
+
+    void aKeyedActionWearsItsLetterAndANarrowRowShedsIt()
+    {
+        Action check;
+        check.key = QStringLiteral("boardChatCheck");
+        check.letter = QStringLiteral("k");
+        check.label = QStringLiteral("Check");
+        QVERIFY(check.keyed());
+        QCOMPARE(check.fullLabel(), QStringLiteral("Check (k)"));
+        // `fullLabel` is what the button keeps in its property and what a row that runs out of
+        // room shortens *from* — it sheds the keys before it cuts a word (CardDetail::fitButtons).
+        QCOMPARE(labelWithoutKey(check.fullLabel()), QStringLiteral("Check"));
+
+        Action cleanup;
+        cleanup.letter = QStringLiteral("u");
+        cleanup.label = QStringLiteral("Clean up");
+        QCOMPARE(cleanup.fullLabel(), QStringLiteral("Clean up (u)"));
+        QCOMPARE(labelWithoutKey(cleanup.fullLabel()), QStringLiteral("Clean up"));
+
+        // A keyless action's label is its label, and shedding it changes nothing.
+        Action tests;
+        tests.label = QStringLiteral("Tests");
+        QVERIFY(!tests.keyed());
+        QCOMPARE(tests.fullLabel(), QStringLiteral("Tests"));
+        QCOMPARE(labelWithoutKey(tests.fullLabel()), QStringLiteral("Tests"));
+
+        // A label that merely contains a bracketed word keeps it: only a trailing "(…)" is a key.
+        QCOMPARE(labelWithoutKey(QStringLiteral("Planning (a1b2c3d4)")), QStringLiteral("Planning"));
+        QCOMPARE(labelWithoutKey(QStringLiteral("Clean (up) now")), QStringLiteral("Clean (up) now"));
+        QCOMPARE(labelWithoutKey(QStringLiteral("(x)")), QStringLiteral("(x)"));
+    }
+
+    // ---- the letters a row may answer -----------------------------------------------------------
+
+    void aDuplicateLetterIsRefusedAndItsActionStays()
+    {
+        Action check;
+        check.key = QStringLiteral("boardChatCheck");
+        check.letter = QStringLiteral("k");
+        check.label = QStringLiteral("Check");
+        Action keep = check;           // a second session's button, same letter
+        keep.key = QStringLiteral("boardKeep");
+        keep.label = QStringLiteral("Keep");
+        Action shout = check;
+        shout.key = QStringLiteral("boardShout");
+        shout.label = QStringLiteral("Shout");
+        shout.letter = QStringLiteral("K");   // the same letter in another case
+        Action chord;
+        chord.key = QStringLiteral("boardChord");
+        chord.label = QStringLiteral("Chord");
+        chord.letter = QStringLiteral("Ctrl+K");   // not a row letter at all
+
+        const QList<Action> row = withUniqueLetters({check, keep, shout, chord});
+        QCOMPARE(row.size(), 4);                       // the *letter* is refused, never the action
+        QCOMPARE(row.at(0).letter, QStringLiteral("k"));
+        QVERIFY(!row.at(1).keyed());
+        QVERIFY(!row.at(2).keyed());
+        QVERIFY(!row.at(3).keyed());
+        QCOMPARE(row.at(1).label, QStringLiteral("Keep"));   // still on the row, still clickable
+        QCOMPARE(row.at(1).fullLabel(), QStringLiteral("Keep"));
+    }
+
+    void aLetterFindsItsActionAndADisabledOneAnswersNothing()
+    {
+        QList<Action> row = withUniqueLetters(cardActions());
+        QCOMPARE(row.size(), 3);
+        QCOMPARE(actionForLetter(row, QStringLiteral("p")), 0);
+        QCOMPARE(actionForLetter(row, QStringLiteral("x")), 1);
+        QCOMPARE(actionForLetter(row, QStringLiteral("V")), 2);   // case-insensitive
+        QCOMPARE(actionForLetter(row, QStringLiteral("z")), -1);
+        QCOMPARE(actionForLetter(row, QString()), -1);
+        QCOMPARE(actionForLetter(row, QStringLiteral("px")), -1);
+        // Busy: the key can do no more than the mouse can, so a greyed Execute answers nothing.
+        row[1].enabled = false;
+        QCOMPARE(actionForLetter(row, QStringLiteral("x")), -1);
+        QCOMPARE(row.at(1).fullLabel(), QStringLiteral("Execute (x)"));   // the label is unchanged
+        QVERIFY(row.at(1).leaves);      // and it still wears the accent outline
+        QVERIFY(!row.at(0).leaves);     // Plan stays on the board
+    }
+
+    // ---- the block that crosses to the worker -----------------------------------------------------
+
+    void theContextBlockOfATerminalPaneIsTheseBytes()
+    {
+        QCOMPARE(compact(terminalSpec().toJson()),
+                 QStringLiteral(R"({"agent_role":"main","name":"terminal",)"
+                                R"("persist":{"key":"s-7f3a","scope":"/home/dev/project"},)"
+                                R"("routing":"auto","scope":"","shell":true,"surface":"terminal",)"
+                                R"("workspace":"/home/dev/project"})"));
+    }
+
+    void theContextBlockOfACardIsTheseBytes()
+    {
+        QCOMPARE(compact(cardSpec().toJson()),
+                 QStringLiteral(R"({"agent_role":"switchboard",)"
+                                R"("brief":{"key":"card","title":"Card #AGNT"},"name":"card",)"
+                                R"("persist":{"key":"AGNT","scope":"/home/dev/project"},)"
+                                R"("routing":"agent","scope":"board","shell":false,)"
+                                R"("surface":"card:AGNT","workspace":"/home/dev/project"})"));
+    }
+
+    void everySpecRoundTrips()
+    {
+        for (const ContextSpec &spec : {terminalSpec(), cardSpec(), ContextSpec{}}) {
+            const ContextSpec back = ContextSpec::fromJson(spec.toJson());
+            QCOMPARE(back.name, spec.name);
+            QCOMPARE(back.agentRole, spec.agentRole);
+            QCOMPARE(back.workspace, spec.workspace);
+            QCOMPARE(back.scope, spec.scope);
+            QCOMPARE(back.persistScope, spec.persistScope);
+            QCOMPARE(back.persistKey, spec.persistKey);
+            QCOMPARE(back.briefKey, spec.briefKey);
+            QCOMPARE(back.briefTitle, spec.briefTitle);
+            QCOMPARE(back.shell, spec.shell);
+            QCOMPARE(back.routing, spec.routing);
+            // `surface` comes back filled in even when the host left it empty, because that is
+            // what went on the wire: the default *is* the name.
+            QCOMPARE(back.surface, spec.surface.isEmpty() ? spec.name : spec.surface);
+        }
+        // An unknown key is ignored and a missing one leaves its field at the default, so a GUI
+        // reading a newer worker's block does not fall over.
+        QJsonObject json = cardSpec().toJson();
+        json.insert(QStringLiteral("something_later"), 7);
+        json.remove(QStringLiteral("brief"));
+        const ContextSpec back = ContextSpec::fromJson(json);
+        QCOMPARE(back.name, QStringLiteral("card"));
+        QVERIFY(back.briefKey.isEmpty());
+        QVERIFY(back.briefTitle.isEmpty());
+    }
+
+    void aSpecWithNoWorkspaceSaysSoAndStillKeepsItsConversation()
+    {
+        // A tab with no project attached: board-less, keyed ("", tab), and a supported state.
+        ContextSpec spec;
+        spec.name = QStringLiteral("options");
+        spec.agentRole = QStringLiteral("switchboard");
+        spec.persistKey = QStringLiteral("t0a1b2c3d4e5");
+        spec.briefKey = QStringLiteral("options");
+        spec.briefTitle = QStringLiteral("Options helper");
+        spec.routing = QStringLiteral("agent");
+        const QJsonObject json = spec.toJson();
+        QCOMPARE(json.value(QStringLiteral("workspace")).toString(), QString());
+        QCOMPARE(json.value(QStringLiteral("persist")).toObject().value(QStringLiteral("scope")).toString(),
+                 QString());
+        QCOMPARE(json.value(QStringLiteral("persist")).toObject().value(QStringLiteral("key")).toString(),
+                 QStringLiteral("t0a1b2c3d4e5"));
+        QVERIFY(!spec.persistId().isEmpty());
+    }
+
+    void theSameTabInsideAndOutsideAProjectAreTwoConversations()
+    {
+        // 30.7: a board-less tab is keyed ("", tab). The scope is part of the identity, so the
+        // same tab id must not resolve to the conversation the project's tab is keeping — nor may
+        // any pair of (scope, key) be able to spell the same string as another pair.
+        ContextSpec loose;
+        loose.persistKey = QStringLiteral("t0a1b2c3d4e5");
+        ContextSpec attached = loose;
+        attached.persistScope = QStringLiteral("/home/dev/project");
+        QVERIFY(loose.persistId() != attached.persistId());
+
+        ContextSpec split;                              // the separator cannot be typed into either
+        split.persistScope = QStringLiteral("/home/dev");
+        split.persistKey = QStringLiteral("project/t0a1b2c3d4e5");
+        ContextSpec whole;
+        whole.persistScope = QStringLiteral("/home/dev/project");
+        whole.persistKey = QStringLiteral("t0a1b2c3d4e5");
+        QVERIFY(split.persistId() != whole.persistId());
+
+        // And the move test protocol 30.7 describes: a model swap leaves the conversation where it
+        // is, a new tab does not.
+        ContextSpec swapped = attached;
+        swapped.agentRole = QStringLiteral("main");
+        QCOMPARE(swapped.persistId(), attached.persistId());
+        QVERIFY(swapped != attached);
+        ContextSpec moved = attached;
+        moved.persistKey = QStringLiteral("t9f8e7d6c5b4");
+        QVERIFY(moved.persistId() != attached.persistId());
+    }
+
+    // ---- what rides on the ask -------------------------------------------------------------------
+
+    void theAskCarriesTheSurfaceTheScreenAndNothingElseByDefault()
+    {
+        ContextSpec spec = cardSpec();
+        QCOMPARE(compact(spec.askFields()), QStringLiteral(R"({"surface":"card:AGNT"})"));
+
+        spec.screen = QStringLiteral("  In progress · 4 cards · search: queue  ");
+        spec.readonly = true;
+        QCOMPARE(compact(spec.askFields()),
+                 QStringLiteral(R"({"readonly":true,"screen":"In progress · 4 cards · )"
+                                R"(search: queue","surface":"card:AGNT"})"));
+        // Neither is in the `context` block: they are the turn's, not the context's.
+        const QJsonObject configure = spec.toJson();
+        QVERIFY(!configure.contains(QStringLiteral("screen")));
+        QVERIFY(!configure.contains(QStringLiteral("readonly")));
+
+        // A host that leaves the surface empty still names one: the context's own name.
+        ContextSpec terminal = terminalSpec();
+        QCOMPARE(compact(terminal.askFields()), QStringLiteral(R"({"surface":"terminal"})"));
+    }
+
+    void anOnScreenHintIsCutAtTwoThousandCharacters()
+    {
+        ContextSpec spec = cardSpec();
+        spec.screen = QString(kScreenLimit + 500, QLatin1Char('r'));
+        const QString sent = spec.askFields().value(QStringLiteral("screen")).toString();
+        QCOMPARE(sent.size(), kScreenLimit);
+        // Whitespace-only is no hint at all.
+        spec.screen = QStringLiteral("   \n  ");
+        QVERIFY(!spec.askFields().contains(QStringLiteral("screen")));
+    }
+
+    // ---- a finished turn ---------------------------------------------------------------------------
+
+    void aFinishedTurnReachesTheContextWithItsProvenance()
+    {
+        FakeContext context;
+        TurnRecord record;
+        record.id = QStringLiteral("8f2c1a");
+        record.surface = QStringLiteral("card:AGNT");
+        record.prompt = QStringLiteral("what is left on this card?");
+        record.answer = QStringLiteral("Steps 3 and 5 are not landed yet.");
+        record.model = QStringLiteral("kimi-k3");
+        record.sessionId = QStringLiteral("20260921-0045");
+        record.turnId = QStringLiteral("7");
+        record.mode = QStringLiteral("discuss");
+        record.outcome = QStringLiteral("done");
+        context.turnFinished(record);
+        QCOMPARE(context.m_turns.size(), 1);
+        // `turn=<session>/<turn>`, the shape board_protocol._card_answer writes on the thread.
+        QCOMPARE(context.m_turns.first().turnRef(), QStringLiteral("20260921-0045/7"));
+
+        TurnRecord bare;
+        QVERIFY(bare.turnRef().isEmpty());
+        QVERIFY(!bare.readonly);
+        bare.sessionId = QStringLiteral("20260921-0045");
+        QVERIFY(bare.turnRef().isEmpty());   // half a reference is no reference
+    }
+
+    void aContextSeesALinkBeforeTheConsoleDoes()
+    {
+        FakeContext context;
+        relay::links::Target card;
+        card.valid = true;
+        card.kind = relay::links::Kind::Card;
+        card.target = QStringLiteral("relay://card/AGNT");
+        QVERIFY(context.resolveLink(card));            // handled here, the console stops
+        QCOMPARE(context.m_lastLink, QStringLiteral("relay://card/AGNT"));
+
+        relay::links::Target path;
+        path.valid = true;
+        path.kind = relay::links::Kind::Path;
+        path.target = QStringLiteral("/home/dev/project/src/AgentContext.h");
+        QVERIFY(!context.resolveLink(path));           // not this context's: the console opens it
+        QCOMPARE(context.m_lastLink, path.target);
+    }
+
+    void theCardsActionRowIsTheOnePbx1Settled()
+    {
+        FakeContext context;
+        context.m_actions = cardActions();
+        const QList<Action> row = withUniqueLetters(context.actions());
+        QCOMPARE(row.size(), 3);
+        // Plan, then Execute, then Verify — the reading order is the workflow — each with its
+        // letter in its label, and the two that leave the board marked as doing so.
+        QCOMPARE(row.at(0).fullLabel(), QStringLiteral("Plan (p)"));
+        QCOMPARE(row.at(1).fullLabel(), QStringLiteral("Execute (x)"));
+        QCOMPARE(row.at(2).fullLabel(), QStringLiteral("Verify (v)"));
+        QCOMPARE(row.at(0).key, QStringLiteral("boardPlan"));
+        QVERIFY(!row.at(0).leaves);
+        QVERIFY(row.at(1).leaves && row.at(2).leaves);
+    }
+
+    void anActionRunsWhatItsContextGaveIt()
+    {
+        int ran = 0;
+        Action check;
+        check.key = QStringLiteral("boardChatCheck");
+        check.letter = QStringLiteral("k");
+        check.label = QStringLiteral("Check");
+        check.run = [&ran] { ++ran; };
+        const QList<Action> row = withUniqueLetters({check});
+        const int at = actionForLetter(row, QStringLiteral("k"));
+        QCOMPARE(at, 0);
+        QVERIFY(row.at(at).run);
+        row.at(at).run();
+        QCOMPARE(ran, 1);
+    }
+};
+
+QTEST_MAIN(AgentContextTests)
+#include "agentcontext_test.moc"
