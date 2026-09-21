@@ -318,6 +318,21 @@ class GuiDefaultsTests(unittest.TestCase):
         self.assertIsNotNone(match, f'{action} is not in the action registry')
         return re.findall(r'QStringLiteral\("([^"]+)"\)', match.group(1))
 
+    def test_workspace_views_have_dedicated_keys_without_preset_collisions(self):
+        expected = {'projects.open': 'Ctrl+Shift+P', 'globals.open': 'Ctrl+Shift+G'}
+        source = (ROOT / 'src/Keymap.h').read_text(encoding='utf-8')
+        for action, key in expected.items():
+            self.assertEqual(self.defaults(action), [key])
+        self.assertEqual(self.defaults('agent.screenshotPane'), [])
+        defaults = {action: re.findall(r'QStringLiteral\("([^\"]+)"\)', block)
+                    for action, block in re.findall(r'add\("([a-zA-Z.]+)", "[a-z]+", "[^\"]*",\s*\{(.*?)\}\);', source, re.S)}
+        presets = re.search(r'R"PRESETS\((.*?)\)PRESETS"', source, re.S)
+        for name, table in {'default': {}, **json.loads(presets.group(1))}.items():
+            effective = {**defaults, **table}
+            for owner, key in expected.items():
+                self.assertEqual([action for action, keys in effective.items() if key in keys],
+                                 [owner], f'{name} must reserve {key} for {owner}')
+
     def test_the_shortcuts_overlay_binds_every_spelling_of_ctrl_question(self):
         # #T9ZS: "Ctrl+?" is one gesture with several spellings. Qt reports the main-row key as
         # Key_Question on a US layout but as Key_Slash on others and on the keypad, always with

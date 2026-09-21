@@ -25,6 +25,8 @@
 #include "BoardWorkspace.h"   // which project's Switchboard a pane is looking at
 #include "Projects.h"         // which project a tab is attached to, and the registry of known ones
 #include "ProjectInit.h"      // when "Initialize a project … here?" is asked, and by which trigger
+#include "ProjectsPane.h"
+#include "GlobalsPane.h"
 #include "ProjectPicker.h"    // the project picker pane: which project a tab with none attaches to (#916B)
 #include "Hints.h"
 #include "Notifications.h"
@@ -1201,6 +1203,8 @@ private:
         else if (id == QStringLiteral("tests.open")) openTestSuitesPane();   // card #7BM4
         else if (id == QStringLiteral("helper.ask")) focusHelperOfActiveLeaf();
         else if (id == QStringLiteral("notifications.jump")) jumpToNotification();   // #NQP9
+        else if (id == QStringLiteral("projects.open")) openSessions(QStringLiteral("projects"));
+        else if (id == QStringLiteral("globals.open")) openSessions(QStringLiteral("globals"));
         else if (id == QStringLiteral("project.pick")) openProjectPicker(m_active, QString());
         else if (id == QStringLiteral("palette.open")) toggleSettingsPane(true);
         else if (id == QStringLiteral("keybindings.reload")) Keymap::instance().reload();
@@ -3518,70 +3522,20 @@ private:
             agent.rows << defaultProject;
         }
         {
-            // The known-projects list (#916B; the lesson of Warp's #11899, where the list only
-            // grows): every project Relay knows, why it became known and when, each with a Remove
-            // that forgets the registry record and nothing else — the project's files, its board
-            // included, are not touched. The projects the user said no to ("do not make a
-            // Switchboard here") follow, each with an Undo, so a no is as reversible as a yes.
-            relay::projects::Registry &registry = m_manager->projects();
-            const QList<relay::projects::Record> known = registry.knownProjects();
-            const QStringList declined = registry.declined();
-            const qint64 now = QDateTime::currentSecsSinceEpoch();
-            if (known.isEmpty() && declined.isEmpty()) {
-                relay::SettingRow none;
-                none.kind = relay::SettingRow::Info;
-                none.id = QStringLiteral("info:known_projects");
-                none.label = QStringLiteral("No known projects yet");
-                none.detail = QStringLiteral("A project becomes known when a tab attaches to it: opening its Switchboard, "
-                                             "/card, the # card picker, or the project picker");
-                none.aliases = QStringLiteral("known projects registry");
-                agent.rows << none;
-            }
-            for (const relay::projects::Record &record : known) {
-                relay::SettingRow row;
-                row.kind = relay::SettingRow::Buttons;
-                row.id = QStringLiteral("project:") + record.key;
-                row.label = record.name.isEmpty() ? relay::projects::nameFor(record.path) : record.name;
-                QStringList detail{record.path};
-                if (!record.reason.isEmpty())
-                    detail << QStringLiteral("known because %1, %2").arg(relay::projects::reasonText(record.reason),
-                                                                          relay::projects::agoText(record.knownSince, now));
-                if (record.lastAttached > 0 && record.lastAttached != record.knownSince)
-                    detail << QStringLiteral("last attached %1").arg(relay::projects::agoText(record.lastAttached, now));
-                // The filesystem, not the record: a board made after the attach (the picker's
-                // "Initialize new project here") is on disk before the record is refreshed.
-                if (relay::projects::boardDirOf(record.path).isEmpty()) detail << QStringLiteral("no Switchboard yet");
-                row.detail = detail.join(QStringLiteral(" · "));
-                row.aliases = QStringLiteral("known project forget remove registry switchboard ") + record.path;
-                row.buttonTexts = QStringList{QStringLiteral("Remove")};
-                const QString path = record.path;
-                row.onButton = [this, path](int) {
-                    m_manager->projects().forget(path);
-                    notice(QStringLiteral("Forgot %1 · its files, Switchboard included, are untouched; an attached tab stays attached")
-                               .arg(relay::projects::nameFor(path)), 7000);
-                };
-                agent.rows << row;
-            }
-            for (const QString &path : declined) {
-                relay::SettingRow row;
-                row.kind = relay::SettingRow::Buttons;
-                row.id = QStringLiteral("declined:") + relay::projects::keyFor(path);
-                row.label = relay::projects::nameFor(path);
-                row.detail = QStringLiteral("%1 · you said no to a Switchboard here, so Relay does not ask again").arg(path);
-                row.aliases = QStringLiteral("known projects declined undo ask again switchboard ") + path;
-                row.buttonTexts = QStringList{QStringLiteral("Undo")};
-                // Undo is the reversible class by definition, and this row's one button is
-                // literally labelled it; it was off only because the row never marked it
-                // (owner decision 2, #AG7R group 3). All it does is let Relay ask about this
-                // folder again — nothing is created, and saying no when it asks declines it
-                // once more.
-                row.agentSafeButtons = QList<int>{0};
-                row.onButton = [this, path](int) {
-                    m_manager->projects().undecline(path);
-                    notice(QStringLiteral("%1 may be asked about again.").arg(relay::projects::nameFor(path)), 5000);
-                };
-                agent.rows << row;
-            }
+            relay::SettingRow projects;
+            projects.kind = relay::SettingRow::Buttons;
+            projects.id = QStringLiteral("projects:manage");
+            projects.label = QStringLiteral("Projects");
+            projects.detail = QStringLiteral("Manage known projects, active sessions and global knowledge");
+            projects.aliases = QStringLiteral("known projects forget remove registry declined switchboard globals");
+            projects.buttonTexts = QStringList{QStringLiteral("Open Projects")};
+            projects.agentSafeButtons = QList<int>{0};
+            projects.onButton = [this](int) {
+                openSessions(QStringLiteral("projects"));
+                hint(QStringLiteral("projects.options"), relay::ShortcutHints::nextTime(
+                    Keymap::instance().shortcutText(QStringLiteral("projects.open"))));
+            };
+            agent.rows << projects;
         }
         agent.rows << headingRow(QStringLiteral("Turn limits"));
         agent.rows << textRow(QStringLiteral("agent/compact_threshold"), QStringLiteral("Compaction threshold"),
@@ -4464,6 +4418,10 @@ private:
             tests.aliases = QStringLiteral("tests test suites ctest unittest flaky slow failing suite coverage runs");
             items << tests;
         }
+        items << actionItem(panes, QStringLiteral("Projects"),
+                            QStringLiteral("Known projects, active sessions and project actions"), QStringLiteral("projects.open"));
+        items << actionItem(panes, QStringLiteral("Globals"),
+                            QStringLiteral("Switchboard HQ: global memories, aliases and instructions"), QStringLiteral("globals.open"));
         // Offered only while this tab is attached to a project (#JN7X): with no project there is
         // nothing to detach from, and the quiet state must not advertise itself. No shortcut —
         // detaching is rare, so there is no fast path to teach and no hint entry.
@@ -4669,7 +4627,7 @@ private:
                                    "tab.next tab.previous pane.equalize pane.moveLeft pane.moveRight pane.moveUp pane.moveDown "
                                    "pane.moveToNewTab tab.moveToNewWindow pane.close closed.restore closed.list").split(' ')},
             {QStringLiteral("Files and projects"), QStringLiteral("files.explorer files.open board.open tests.open "
-                                   "project.pick project.init project.detach").split(' ')},
+                                   "projects.open globals.open project.pick project.init project.detach").split(' ')},
             {QStringLiteral("Remote and sharing"), QStringLiteral("ssh.connect ssh.splitSameHost remote.pair "
                                    "pane.share pane.sharing remote.openShared remote.join").split(' ')},
             {QStringLiteral("Appearance"), QStringLiteral("pane.focusMode pane.autoDim pane.dimToggle pane.brighten "
@@ -5731,7 +5689,14 @@ public:
     // Open this tab's session manager on `tab` ("" is the session list), bound to the active pane.
     void openSessions(const QString &tab = QString(), const QString &query = QString()) {
         Pane *owner = m_active;
-        if (!owner) { const auto panes = panesIn(m_tabs->currentWidget()); owner = panes.isEmpty() ? nullptr : panes.first(); }
+        if (!owner || !owner->hasShell()) {
+            ToolPane *existing = sessionsPaneIn(m_tabs->currentWidget());
+            owner = existing ? dynamic_cast<Pane *>(existing->property("workspaceOwner").value<QObject *>()) : nullptr;
+            if (!owner || !panesIn(m_tabs->currentWidget()).contains(owner)) {
+                const auto panes = panesIn(m_tabs->currentWidget());
+                owner = panes.isEmpty() ? nullptr : panes.first();
+            }
+        }
         if (owner) openSessionsFor(owner, query, tab);
     }
 
@@ -5744,11 +5709,47 @@ public:
     void toggleSessionsPane(Pane *owner) {
         if (!owner) return;
         ToolPane *tool = sessionsPaneIn(pageOf(owner));
-        if (tool && (m_activeLeaf == tool || tool->isAncestorOf(QApplication::focusWidget()))) {
+        if (tool && sessionsViewOf(tool)->currentTab() == QStringLiteral("sessions")
+            && (m_activeLeaf == tool || tool->isAncestorOf(QApplication::focusWidget()))) {
             closeSessionsPane(tool, owner);
             return;
         }
-        owner->openResume();   // opens it, or brings the open one forward and rebinds it here
+        openSessions(QStringLiteral("sessions"));
+    }
+
+    // Refresh the project browser from the one registry and live panes, without changing scope.
+    void feedProjects(relay::projects::ProjectsPane *projects,
+                      relay::conversations::SessionManager *sessions) {
+        if (!projects || !sessions) return;
+        const auto known = m_manager->projects().knownProjects();
+        projects->setProjects(known);
+        projects->setDeclined(m_manager->projects().declined());
+        QList<QPair<QString, QString>> filter;
+        for (const auto &record : known)
+            filter.append({record.name.isEmpty() ? relay::projects::nameFor(record.path) : record.name, record.path});
+        sessions->setKnownProjects(filter);
+        QJsonArray active;
+        for (QWidget *top : QApplication::topLevelWidgets()) {
+            auto *window = dynamic_cast<RelayWindow *>(top);
+            if (!window) continue;
+            for (Pane *pane : window->allPanes()) {
+                const QString project = window->tabProject(window->pageOf(pane));
+                active.append(QJsonObject{{"session_id", pane->sessionId()}, {"session_dir", pane->sessionDir()},
+                    {"pane_token", pane->sessionToken()}, {"workspace", pane->workspace()},
+                    {"project_path", project},
+                    {"title", pane->paneTitle().isEmpty() ? shortPath(pane->cwd()) : pane->paneTitle()},
+                    {"status", pane->dimmingAgentBusy() ? QStringLiteral("Working") : QStringLiteral("Open")}});
+            }
+        }
+        projects->setActiveSessions(active);
+    }
+
+    void openProjectTab(const QString &path, bool board = false) {
+        if (!QFileInfo(path).isDir()) { notice(QStringLiteral("That project folder is no longer available.")); return; }
+        if (!addTab(paneNode(path), m_tabs->currentIndex() + 1)) return;
+        QWidget *page = m_tabs->currentWidget();
+        attachTab(page, path, QString::fromLatin1(relay::projects::kReasonPicker));
+        if (board && m_active) afterProjectPicked(m_active, QString());
     }
 
     void openSessionsFor(Pane *owner, const QString &query, const QString &tab = QString()) {
@@ -5762,6 +5763,30 @@ public:
             tool = new ToolPane(ToolPane::Kind::Sessions, view, view, owner->cwd());
             tool->setProperty("paneType", QStringLiteral("sessions"));
             relay::theme::polishWindow(tool);
+            auto *projects = new relay::projects::ProjectsPane;
+            projects->setObjectName(QStringLiteral("workspaceProjects"));
+            auto *globals = new relay::globals::GlobalsPane;
+            globals->setObjectName(QStringLiteral("workspaceGlobals"));
+            view->insertTab(0, QStringLiteral("projects"), QStringLiteral("Projects"), projects);
+            view->addTab(QStringLiteral("globals"), QStringLiteral("Globals"), globals);
+            QPointer<QWidget> pageGuard(page);
+            QPointer<relay::globals::GlobalsPane> globalGuard(globals);
+            QPointer<RelayWindow> window(this);
+            globals->onRequest = [window, pageGuard](const QJsonObject &request) {
+                if (window && pageGuard) window->sendToHelper(pageGuard, request);
+            };
+            listenToHelper(page, globals, [globalGuard](const QJsonObject &event) {
+                if (globalGuard) globalGuard->handleEvent(event);
+            });
+            QPointer<relay::projects::ProjectsPane> projectGuard(projects);
+            QPointer<relay::conversations::SessionManager> sessionsGuard(view);
+            auto *refresh = new QTimer(projects);
+            refresh->setInterval(2000);
+            connect(refresh, &QTimer::timeout, projects, [window, projectGuard, sessionsGuard] {
+                if (window && projectGuard && sessionsGuard && projectGuard->isVisible())
+                    window->feedProjects(projectGuard, sessionsGuard);
+            });
+            refresh->start();
             for (const SessionsTab &extra : sessionsTabs())
                 if (QWidget *widget = extra.make ? extra.make(this) : nullptr) view->addTab(extra.id, extra.label, widget);
             // The agent console at the foot of the pane (#AGNT step 5, replacing #FEJQ's panel):
@@ -5771,6 +5796,12 @@ public:
             wireConsoleHost(view, tool, QStringLiteral("sessions.ask"));
             insertBeside(owner, tool, owner->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
         }
+        tool->setProperty("workspaceOwner", QVariant::fromValue<QObject *>(owner));
+        QPointer<ToolPane> ownerTool(tool);
+        connect(owner, &QObject::destroyed, tool, [ownerTool, owner] {
+            if (ownerTool && ownerTool->property("workspaceOwner").value<QObject *>() == owner)
+                ownerTool->setProperty("workspaceOwner", QVariant());
+        });
         // What is open and what was closed is the window's knowledge, not the list's: it is pushed
         // in here, and again whenever the recently-closed list changes, so the "open" and
         // "closed 5 min ago" tags on the rows stay true (card #R6J0).
@@ -5820,9 +5851,82 @@ public:
             w->openInfoPane(ownerGuard, item.value(QStringLiteral("session_id")).toString(),
                             item.value(QStringLiteral("session_dir")).toString());
         };
+        auto *projects = dynamic_cast<relay::projects::ProjectsPane *>(view->findChild<QWidget *>(QStringLiteral("workspaceProjects")));
+        auto *globals = dynamic_cast<relay::globals::GlobalsPane *>(view->findChild<QWidget *>(QStringLiteral("workspaceGlobals")));
+        QPointer<relay::projects::ProjectsPane> projectGuard(projects);
+        QPointer<relay::globals::GlobalsPane> globalGuard(globals);
+        auto refreshProjects = [windowGuard, projectGuard, viewGuard] {
+            if (windowGuard && projectGuard && viewGuard) windowGuard->feedProjects(projectGuard, viewGuard);
+        };
+        if (projects) {
+            projects->onOpenProject = [windowGuard](const QString &path) { if (windowGuard) windowGuard->openProjectTab(path); };
+            projects->onAttachProject = [windowGuard, ownerGuard, refreshProjects](const QString &path) {
+                if (!windowGuard || !ownerGuard) return;
+                if (!QFileInfo(path).isDir()) { windowGuard->notice(QStringLiteral("That project folder is no longer available.")); return; }
+                windowGuard->attachTab(windowGuard->pageOf(ownerGuard), path, QString::fromLatin1(relay::projects::kReasonPicker));
+                refreshProjects();
+            };
+            projects->onOpenBoard = [windowGuard](const QString &path) { if (windowGuard) windowGuard->openProjectTab(path, true); };
+            projects->onShowSessions = [viewGuard](const QString &path) {
+                if (viewGuard) { viewGuard->selectProject(path); viewGuard->showTab(QStringLiteral("sessions")); viewGuard->focusSearch(); }
+            };
+            projects->onForget = [windowGuard, refreshProjects](const QString &path) {
+                if (!windowGuard) return;
+                QString error;
+                if (!windowGuard->m_manager->projects().forget(path, &error)) windowGuard->notice(error);
+                else windowGuard->notice(QStringLiteral("Forgot the project; its files and open tabs are unchanged."));
+                refreshProjects();
+            };
+            projects->onUndecline = [windowGuard, refreshProjects](const QString &path) {
+                if (!windowGuard) return;
+                QString error;
+                if (!windowGuard->m_manager->projects().undecline(path, &error)) windowGuard->notice(error);
+                refreshProjects();
+            };
+            projects->onResume = [viewGuard](const QJsonObject &row) {
+                for (QWidget *top : QApplication::topLevelWidgets())
+                    if (auto *window = dynamic_cast<RelayWindow *>(top))
+                        if (Pane *pane = window->findPaneByToken(row.value(QStringLiteral("pane_token")).toString())) {
+                            window->revealPane(pane); return;
+                        }
+                if (viewGuard && viewGuard->onResume && !row.value(QStringLiteral("session_id")).toString().isEmpty())
+                    viewGuard->onResume(row, false);
+            };
+            projects->onBrowse = [windowGuard] {
+                if (!windowGuard) return;
+                const QString folder = QFileDialog::getExistingDirectory(windowGuard, QStringLiteral("Open project"));
+                if (!folder.isEmpty()) windowGuard->openProjectTab(folder);
+            };
+            projects->onInit = [ownerGuard] { if (ownerGuard) ownerGuard->initProjectHere(QString()); };
+        }
+        view->onTabScreen = [projectGuard, globalGuard](const QString &id) {
+            if (id == QStringLiteral("projects") && projectGuard) return projectGuard->agentScreen();
+            if (id == QStringLiteral("globals") && globalGuard) return globalGuard->agentScreen();
+            return QString();
+        };
+        view->onTabActivated = [windowGuard, refreshProjects, globalGuard, ownerGuard](const QString &id) {
+            if (id == QStringLiteral("projects")) refreshProjects();
+            if (id == QStringLiteral("globals") && globalGuard) {
+                globalGuard->setWorkspace(ownerGuard ? ownerGuard->workspace() : QString());
+                globalGuard->refresh();
+            }
+            if (windowGuard) windowGuard->updateTitles();
+        };
+        view->onTabSelectedByUser = [windowGuard](const QString &id) {
+            if (!windowGuard) return;
+            const QString action = id == QStringLiteral("projects") ? QStringLiteral("projects.open")
+                : id == QStringLiteral("globals") ? QStringLiteral("globals.open") : QStringLiteral("agent.resume");
+            windowGuard->hint(QStringLiteral("workspace.tab.") + id,
+                relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(action)));
+        };
+        refreshProjects();
         view->showTab(tab);
+        if (globals && view->currentTab() == QStringLiteral("globals")) {
+            globals->setWorkspace(owner->workspace());
+            globals->refresh();
+        }
         if (!query.isEmpty()) view->setQuery(query);
-        view->refresh();
+        if (view->currentTab() == QStringLiteral("sessions")) view->refresh();
         setActiveLeaf(tool);
         focusLeaf(tool);
         updateTitles();

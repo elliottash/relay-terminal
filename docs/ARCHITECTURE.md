@@ -848,14 +848,14 @@ Default window shortcuts:
 | Next / previous window | Alt+Tab / Alt+Shift+Tab | Restore closed | Ctrl+Shift+Z |
 | New tab | Ctrl+T | Actions pane / Options pane | Ctrl+Shift+A / Ctrl+Shift+O |
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | Take control (from composer) | Ctrl+H |
-| Split right / down | Ctrl+P / Ctrl+Shift+P | Back to the prompt | Ctrl+Shift+H |
+| Split right | Ctrl+P | Back to the prompt | Ctrl+Shift+H |
 | Focus neighbor pane | Alt+Arrows | Native input toggle (same hand-over as Ctrl+H) | F12 |
 | Toggle terminal/agent input | Ctrl+I | Restart stopped shell/agent | Ctrl+Shift+R |
 | Interrupt agent with prompt | Ctrl+Alt+Enter | Step through links in the output | Ctrl+Shift+L |
 | Conversation info (the ⓘ view) | Alt+I | Subagents / Flash / Reasoning panes | Alt+A / Alt+F / Alt+R |
 | Activity pane | Alt+Shift+R | | |
 
-The session manager (`/resume`, `agent.resume`), titled "Sessions", is Ctrl+Shift+Y, Warp's key for
+The session manager (`/resume`, `agent.resume`), inside the Projects and Sessions pane, is Ctrl+Shift+Y, Warp's key for
 its conversations menu. It was Ctrl+Shift+M for one day (2026-09-19) until the owner gave M to the
 model options (`agent.modelOptions`, 2026-09-20: "models are more central than sessions"; since
 card #MDL1 t:a11 that key opens the **models pane**, and the model box is Alt+M — Ctrl+Alt+M went
@@ -1585,8 +1585,8 @@ projects Relay knows, most recently attached first and fuzzy-filtered as you typ
 project for loose cards" preselected when set, and "Initialize new project here" on top, which
 attaches the tab to the pane's own directory and sends `board_init {git_init: true}` with no second
 question — the choice is the consent (`docs/PROJECT-INIT-AND-IMPORT.md` §1). Options › Agent ›
-Switchboard lists the known projects (why each became known and when; Remove forgets the registry
-record and nothing else) and the declined ones (Undo).
+Switchboard links to Projects, whose details explain why each project became known and when;
+Forget removes only the registry entry, and declined projects offer Allow initialization.
 
 - **`src/BoardModel.{h,cpp}`** (`relay-board`): the pure logic — the rows the worker sends, the tab
   and column a card falls into, the filter language (`label:`, `status:`, `@assignee`,
@@ -1980,6 +1980,20 @@ staged: the command line, its exit status, the directory, and the output capture
 window, cut at the next `OSC 133;A` so the redrawn prompt is not part of the output, control
 sequences stripped by `relay::conversations::stripAnsi`). Commands typed straight into the terminal
 in native mode never pass through Relay and are not indexed.
+
+The shared Projects and Sessions pane has three primary tabs (card #P7SJ): Projects
+(`projects.open`, Ctrl+Shift+P), Sessions (`agent.resume`, Ctrl+Shift+Y), and Globals
+(`globals.open`, Ctrl+Shift+G). Each shortcut selects its tab in the existing pane. The
+Projects page (`ProjectsPane`) manages known/pinned projects, attachment, Switchboard access,
+and live panes including No project; its Sessions action applies the matching project filter.
+Options links to this page rather than repeating the project registry. Globals (`GlobalsPane`)
+is Switchboard HQ: it edits global memory/alias cards and existing instruction sources through
+`globals_*` worker messages. The same pane helper gets the selected tab's context. Page state
+and unsaved Globals drafts survive tab switches. Screenshot capture remains an unbound action.
+
+Global memories are loaded by `relay_core.memories` on prompt refresh: pinned or workspace-matched
+active cards, with bounded text, project overrides and supersession; team scope is excluded.
+Global instructions remain in their existing source files. Global work-card routing is unchanged.
 
 The GUI side is `src/Conversations.{h,cpp}`: the **session manager pane**
 (`relay::conversations::SessionManager`, a `ToolPane` of kind `Sessions`, `paneType` `sessions`;

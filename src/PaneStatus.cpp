@@ -294,7 +294,7 @@ const QList<Kind> &kinds() {
         {QStringLiteral("options"), QStringLiteral("Options"), QStringLiteral("tools"), Glyph::Options},
         {QStringLiteral("settings"), QStringLiteral("Options"), QStringLiteral("tools"), Glyph::Options},
         {QStringLiteral("actions"), QStringLiteral("Actions"), QStringLiteral("tools"), Glyph::Actions},
-        {QStringLiteral("sessions"), QStringLiteral("Sessions"), QStringLiteral("tools"), Glyph::Sessions},
+        {QStringLiteral("sessions"), QStringLiteral("Projects and Sessions"), QStringLiteral("tools"), Glyph::Sessions},
         // The models pane (card #MDL1 t:a11): providers, available models and priorities, beside
         // the pane it serves. A tool surface like Options, whose gear it borrows.
         {QStringLiteral("models"), QStringLiteral("Models"), QStringLiteral("tools"), Glyph::Options},
@@ -397,7 +397,7 @@ const QList<ToolButton> &toolButtons() {
          QStringLiteral("Actions: everything you can do now"), QStringLiteral("Close Actions"),
          QStringLiteral("actions")},
         {QStringLiteral("sessions"), QStringLiteral("agent.resume"),
-         QStringLiteral("Sessions: resume and search"), QStringLiteral("Close Sessions"),
+         QStringLiteral("Projects, Sessions and Globals"), QStringLiteral("Close Projects and Sessions"),
          QStringLiteral("sessions")},
         {QStringLiteral("board"), QStringLiteral("board.open"),
          QStringLiteral("Switchboard: cards, threads and plans"), QStringLiteral("Close the Switchboard"),

@@ -33,7 +33,7 @@ Sources:
 | pane.focusLeft/Right/Up/Down | Ctrl+Alt+Left/Right/Up/Down | W1 "Switch Panes", W3 |
 | pane.close | Ctrl+Shift+W | W3 closes the pane, W2 closes the tab |
 | closed.restore | Ctrl+Alt+T | W1/W2 "Reopen Closed Tab" (Ctrl+Shift+T is taken by new tab) |
-| palette.open | Ctrl+Shift+P | W1 Toggle Command Palette |
+| palette.open | Ctrl+Shift+A | W1 Toggle Command Palette |
 | terminal.native | F12 | none in Warp. Kept Relay default: an F-key still works inside programs |
 | terminal.interrupt | — | Warp uses contextual Ctrl+C (W4). Unbound: Ctrl+C already reaches the shell |
 | agent.resume | Ctrl+Shift+Y | W5 Conversations menu. Relay's own default again since 2026-09-20 (it was Ctrl+Shift+M for one day; M is now `agent.modelOptions`, Options › Models). A toggle: pressed again with the Sessions pane focused it closes it, and from anywhere else it brings it forward |
@@ -76,7 +76,7 @@ the registrations that "Preferences: Open Default Keyboard Shortcuts (JSON)" is 
 | pane.focusRight / focusDown | Alt+Right / Alt+Down | V2 `terminal.focusNextPane`. Chords for editor groups: `Ctrl+K Ctrl+←/→/↑/↓` (V1, V4); VS Code's single-key versions are these Alt+arrow terminal keys |
 | pane.close | Ctrl+W | V1, V5 `closeActiveEditor`, V2 `terminal.killEditor`. The panel terminal's kill has no default |
 | closed.restore | Ctrl+Shift+T | V1, V4 `reopenClosedEditor` |
-| palette.open | Ctrl+Shift+P | V1. F1 was left out on purpose: F-keys act inside programs and would take F1 (help) from nano, mc and htop |
+| palette.open | Ctrl+Shift+A | V1. F1 was left out on purpose: F-keys act inside programs and would take F1 (help) from nano, mc and htop |
 | terminal.native | Ctrl+`, F12 | **adapt:** Ctrl+` is "toggle/focus terminal" (V1, V3). F12 is kept from Relay (in VS Code it is Go to Definition, which has nothing to do with the terminal) |
 | terminal.interrupt | — | none |
 | agent.newChat | Ctrl+N | V9 `chat.newChat` (in chat; secondary Ctrl+L left out because it clears the shell screen) |
@@ -126,7 +126,7 @@ Sources:
     "tab.new": ["Ctrl+Shift+T"], "tab.next": ["Ctrl+PgDown", "Ctrl+Tab"], "tab.previous": ["Ctrl+PgUp", "Ctrl+Shift+Tab"],
     "pane.splitRight": ["Ctrl+Shift+D"], "pane.splitDown": [], "pane.splitLeft": [], "pane.splitUp": [],
     "pane.focusLeft": ["Ctrl+Alt+Left"], "pane.focusRight": ["Ctrl+Alt+Right"], "pane.focusUp": ["Ctrl+Alt+Up"], "pane.focusDown": ["Ctrl+Alt+Down"],
-    "pane.close": ["Ctrl+Shift+W"], "closed.restore": ["Ctrl+Alt+T"], "palette.open": ["Ctrl+Shift+P"],
+    "pane.close": ["Ctrl+Shift+W"], "closed.restore": ["Ctrl+Alt+T"], "palette.open": ["Ctrl+Shift+A"],
     "terminal.native": ["F12"], "terminal.interrupt": [],
     "agent.newChat": [], "agent.stop": [], "agent.provider": [],
     "input.modeAuto": [], "input.modeTerminal": ["Ctrl+Shift+I"], "input.modeAgent": [], "input.toggle": ["Ctrl+I"],
@@ -137,7 +137,7 @@ Sources:
     "tab.new": ["Ctrl+Shift+~"], "tab.next": ["Ctrl+PgDown", "Ctrl+Tab"], "tab.previous": ["Ctrl+PgUp", "Ctrl+Shift+Tab"],
     "pane.splitRight": ["Ctrl+Shift+%", "Ctrl+\\"], "pane.splitDown": [], "pane.splitLeft": [], "pane.splitUp": [],
     "pane.focusLeft": ["Alt+Left"], "pane.focusRight": ["Alt+Right"], "pane.focusUp": ["Alt+Up"], "pane.focusDown": ["Alt+Down"],
-    "pane.close": ["Ctrl+W"], "closed.restore": ["Ctrl+Shift+T"], "palette.open": ["Ctrl+Shift+P"],
+    "pane.close": ["Ctrl+W"], "closed.restore": ["Ctrl+Shift+T"], "palette.open": ["Ctrl+Shift+A"],
     "terminal.native": ["Ctrl+`", "F12"], "terminal.interrupt": [],
     "agent.newChat": ["Ctrl+N"], "agent.stop": ["Ctrl+Esc"], "agent.provider": ["Ctrl+Alt+."],
     "input.modeAuto": [], "input.modeTerminal": [], "input.modeAgent": ["Ctrl+Shift+Alt+I"],
@@ -216,3 +216,8 @@ a program owns the terminal under the default `program_keys: "shift-only"`.
 - **F12**: grabbed globally by drop-down terminals (Yakuake, Guake, Tilda) when they are running.
 - **Super combos:** none of the presets use Super/Meta. GNOME and Plasma reserve most of them (overview, tiling, workspaces), so keep presets free of Meta.
 - **Ctrl+Alt+Del, Ctrl+Alt+Backspace, Ctrl+Alt+F1–F12** (session, VT): not used.
+
+Card #P7SJ: all built-in presets reserve Ctrl+Shift+P for Projects, Ctrl+Shift+Y for Sessions,
+and Ctrl+Shift+G for Globals, selecting tabs in one shared pane. Warp/VS Code presets use
+Ctrl+Shift+A for Actions to avoid the Projects collision. Pane screenshot capture is unbound
+by default. Explicit user overrides still take precedence.

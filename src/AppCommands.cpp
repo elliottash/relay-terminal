@@ -44,6 +44,7 @@ const QSet<QString> &readActions() {
         QStringLiteral("palette.open"),        // Actions
         QStringLiteral("board.open"),          // the Switchboard
         QStringLiteral("conversations.open"),  // the session manager
+        QStringLiteral("projects.open"), QStringLiteral("globals.open"),
         QStringLiteral("closed.list"),
         QStringLiteral("files.explorer"),
         QStringLiteral("agent.info"),

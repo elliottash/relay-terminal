@@ -296,6 +296,17 @@ target_include_directories(relay-conversations PUBLIC src)
 target_link_libraries(relay-conversations PUBLIC relay-agentcontext relay-modelcatalog ${RELAY_QT}::Widgets)
 target_compile_options(relay-conversations PRIVATE -Wall -Wextra -Wpedantic)
 
+# Shared workspace manager pages (card #P7SJ). Callback-only widgets, independently testable.
+add_library(relay-projectspane STATIC src/ProjectsPane.cpp src/ProjectsPane.h)
+target_include_directories(relay-projectspane PUBLIC src)
+target_link_libraries(relay-projectspane PUBLIC relay-projectpicker ${RELAY_QT}::Widgets)
+target_compile_options(relay-projectspane PRIVATE -Wall -Wextra -Wpedantic)
+add_library(relay-globalspane STATIC src/GlobalsPane.cpp src/GlobalsPane.h)
+target_include_directories(relay-globalspane PUBLIC src)
+target_link_libraries(relay-globalspane PUBLIC ${RELAY_QT}::Widgets)
+target_compile_options(relay-globalspane PRIVATE -Wall -Wextra -Wpedantic)
+
+
 # Notification centre: the list behind the bell in the window header. Plain QtCore so the
 # rules (order, unread count, cap) can be tested without a window.
 add_library(relay-notifications STATIC src/Notifications.cpp src/Notifications.h)
@@ -564,6 +575,7 @@ if(RELAY_BUILD_APP)
     # terminal one itself. QtCore only, so this is a link edge and not a dependency.
     target_link_libraries(relay PRIVATE relay-agentcontext)
     target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-modelcatalog relay-modelrows relay-modelpicker relay-modelspane relay-filterpopup relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-queuesubmit relay-logging relay-voice relay-images relay-titles relay-panestatus relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::DBus ${RELAY_QT}::Network)
+    target_link_libraries(relay PRIVATE relay-projectspane relay-globalspane)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -786,6 +798,13 @@ if(BUILD_TESTING)
     target_link_libraries(relay-conversations-tests PRIVATE relay-conversations ${RELAY_QT}::Test)
     add_test(NAME conversations COMMAND relay-conversations-tests)
     set_tests_properties(conversations PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-projectspane-tests tests/projectspane_test.cpp)
+    target_link_libraries(relay-projectspane-tests PRIVATE relay-projectspane ${RELAY_QT}::Test)
+    add_test(NAME projectspane COMMAND relay-projectspane-tests)
+    add_executable(relay-globalspane-tests tests/globalspane_test.cpp)
+    target_link_libraries(relay-globalspane-tests PRIVATE relay-globalspane ${RELAY_QT}::Test)
+    add_test(NAME globalspane COMMAND relay-globalspane-tests)
+    set_tests_properties(projectspane globalspane PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-queuenav-tests tests/queuenav_test.cpp)
     target_link_libraries(relay-queuenav-tests PRIVATE relay-queuenav ${RELAY_QT}::Test)
     add_test(NAME queuenav COMMAND relay-queuenav-tests)
