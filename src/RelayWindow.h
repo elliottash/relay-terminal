@@ -1261,7 +1261,20 @@ private:
         // The key (Alt+I), the ⓘ button, the Actions pane and /status all land here. Nothing is
         // taught from here: this is also the keyboard path, and the two slow paths teach the key
         // themselves (the button below in syncChrome, the Actions pane through runFromSettings).
-        else if (id == QStringLiteral("agent.info")) pane->openInfo();
+        else if (id == QStringLiteral("agent.info")) {
+            // The focused info view can belong to a different terminal from the last active
+            // one. Toggle that view's owner, while explicit action targets keep their owner.
+            if (!target)
+                if (auto *info = dynamic_cast<ToolPane *>(m_activeLeaf.data());
+                    info && info->kind() == ToolPane::Kind::Info)
+                    if (auto *owner = dynamic_cast<Pane *>(info->property("infoOwner").value<QObject *>()))
+                        pane = owner;
+            if (ToolPane *info = infoPaneOf(pane)) {
+                closePane(info, false);
+                setActiveLeaf(pane);
+                focusLeaf(pane);
+            } else pane->openInfo();
+        }
         else if (id == QStringLiteral("conversations.open")) toggleSessionsPane(pane);
         else if (id == QStringLiteral("find.inView")) pane->openFindInView();
         else if (id == QStringLiteral("agent.recap")) pane->requestRecap();
