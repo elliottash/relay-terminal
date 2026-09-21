@@ -3,8 +3,9 @@ id: XP7N
 type: work
 status: needs-verification
 labels: [feature, agent]
-assignee: codex
-implemented_by: openai/gpt-6-astra via codex
+assignee: agent
+implemented_by: kimi/kimi-k3
+session: 8d16eb6c-8bf3-4b06-acab-9e886d6621bd
 rank: mpx
 created: '2026-09-21'
 source: Codex in a Relay pane, 2026-09-21
@@ -37,12 +38,18 @@ bug / feature request -- the agent needs to be able to request to exit planning 
 Related plan-turn regression run: baseline guest prompt assertion failure tracked separately in #GPF7; all other tests passed.
 
 ## Execution Summary
-Added exit_plan_mode with an Execute / Keep planning ask. Explicit Execute switches to build and emits the existing mode_changed event; the agent can edit in the same turn. Refusal, missing answers, cancellation and question limits never authorize execution. Readonly and unreachable-user checks remain enforced. Tool schemas remain stable across modes.
+`exit_plan_mode {reason}` (plan mode only) leaves plan mode on the agent's own decision, Warp-style: it validates the reason, switches the session to build mode at once, emits the existing `mode_changed {mode: "build"}` event, and the turn continues with build tools — no question flow. An edit before the call is still refused; one after it succeeds in the same turn. Readonly turns and build-mode calls are refused; the schema is identical on every request of the turn (prompt cache). First landed as an Execute / Keep planning ask (97add146), reworked per the owner's 2026-09-21 decision.
 
 Evidence: docs/qa_evidence/2026-09-21-plan-exit/verification.md
 
 ## QA checklist
-- [ ] In a native Relay plan-mode turn, have the agent call exit_plan_mode; verify the inline ask offers Execute and Keep planning.
-- [ ] Choose Execute: PLAN clears, Build mode appears, and implementation continues.
-- [ ] Repeat with Keep planning and with dismissal: PLAN stays active and edits remain blocked.
-- [ ] Stop while the ask is open: the ask closes and no edit runs.
+- [ ] In a native Relay plan-mode turn, have the agent call exit_plan_mode: no ask appears, the PLAN indicator clears, Build mode shows, and implementation continues in the same turn.
+- [ ] The reason text is visible with the tool call in the pane.
+- [ ] Edits attempted before exit_plan_mode are still refused; edits after it run.
+- [ ] A readonly plan turn cannot call exit_plan_mode.
+
+## Decisions
+- 2026-09-21, owner: "or actually, i woudl like it if the agent could decide itself ot leave planning mode, more like warp" — exit_plan_mode switches to build mode on the agent's own decision; the Execute / Keep planning ask from the first implementation is removed.
+
+## Tasks
+
