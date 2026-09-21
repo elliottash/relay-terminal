@@ -1,0 +1,25 @@
+===== an option written from the Options helper's console =====
+PASS b1 Alt+Q expands the Options helper into a console ("Ask the Options helper" in b01a-console.png)
+PASS b1 the console says what it changed ("turned Copy on select on" in b01-changed.png)
+relay.conf: copy_on_select=true
+PASS b1 the write from a console reached the setting
+PASS b2 the row says an agent changed it ("changed by the agent" in b02-row-marked.png)
+PASS b2 and says from what to what ("off" in b02-row-marked.png)
+PASS b3 the list carries the agent's change ("Agent changed Copy on select" in b03-notice.png)
+PASS b3 and says from what to what ("off" in b03-notice.png)
+PASS b3 the Undo button is inside the list's viewport (popupTextButton#2 y=216..243 viewport y=90..268)
+relay.conf after Undo: copy_on_select=false
+PASS b4 Undo put Copy on select back
+PASS b4 and the row's marker went with the change (no "changed by the agent" in b04-undone.png)
+PASS b5 a second write lands ("turned Copy on select on" in b05a-again.png)
+PASS b5 the agent says it put the setting back ("put Copy on select back" in b05b-reverted.png)
+relay.conf after the agent's own undo: copy_on_select=false
+PASS b5 the agent's app_undo put the setting back
+PASS b5 the agent's own revert is announced ("Agent changed Copy on select" in b05-agent-undo.png)
+PASS b5 and the offer it answered says it was taken ("Undone: Copy on select" in b05-agent-undo.png)
+PASS b5 with a way back from the revert, in the viewport (popupTextButton#2 y=216..243 viewport y=90..550)
+PASS b5 the row is still the agent's until the person touches it ("changed by the agent" in b05c-row.png)
+PASS b6 the console ran the action ("reloaded the themes" in b06a-action.png)
+PASS b6 the list says which action it ran ("Agent ran Reload themes" in b06-action.png)
+----
+PASS 19  FAIL 0

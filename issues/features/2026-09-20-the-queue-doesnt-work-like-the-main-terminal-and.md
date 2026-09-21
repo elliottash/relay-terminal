@@ -7,7 +7,7 @@ assignee: claude-code
 rank: zzzzzzzzzzx
 created: '2026-09-20'
 source: Owner, terminal, 2026-09-20, comparing the helper panels with a terminal pane
-links: {plans: [], commits: [fe9435b3, 59319d88, f0f9c6b7, 34ff0830, bb1221a2, ece42d07, ca4e5162, de54a761, cbf06cc0, dd104c3b, 24042b5b, 81e889c1, 137f748f, 1265b76f, 7a35a498, 769cc4a4, 694470f8, fe9eea62, '28581709', c4a1625d, 21fbcc5b, bc2db91e, cb0e7d5e, 67837ec9, 6e0179f2, 0df2b685, b8453c97, d52a9d54, db186adc, d0c974aa, 6f0f80a7, 999a8398, 7c51b9dc, b62b9f34, 37eae815], evidence: [docs/qa_evidence/2026-09-21-agents-are-consoles], related: [FEJQ, 8YQ9, PBX1, PK5Q, H6VQ, BRD3, R5TC, GH5T, N8VK], github: null}
+links: {plans: [], commits: [fe9435b3, 59319d88, f0f9c6b7, 34ff0830, bb1221a2, ece42d07, ca4e5162, de54a761, cbf06cc0, dd104c3b, 24042b5b, 81e889c1, 137f748f, 1265b76f, 7a35a498, 769cc4a4, 694470f8, fe9eea62, '28581709', c4a1625d, 21fbcc5b, bc2db91e, cb0e7d5e, 67837ec9, 6e0179f2, 0df2b685, b8453c97, d52a9d54, db186adc, d0c974aa, 6f0f80a7, 999a8398, 7c51b9dc, b62b9f34, 37eae815, efe55518], evidence: [docs/qa_evidence/2026-09-21-agents-are-consoles], related: [FEJQ, 8YQ9, PBX1, PK5Q, H6VQ, BRD3, R5TC, GH5T, N8VK], github: null}
 ---
 # An agent is the prompt box: one agent surface, one context per setting, and the helper becomes a pane
 
@@ -733,11 +733,15 @@ answer changes only the step named.
 - [ ] The owner's own Main on a guest harness (#GH5T): a `guest:` row in a console's model box is
       still refused in one sentence.
 - [ ] `relay.log`'s `pane_usage` for a tab with four consoles open (Risks 4).
-- [ ] **An agent's option write is not announced.** `app_option_set` reaches the setting, and
-      neither the "Agent changed <row> · Undo" notice nor the row's "changed by the agent" marker
-      appears — `src/AppCommands.cpp:829-833` posts both unconditionally once the write lands, so
-      something between them swallows it (#FEJQ decision 3, protocol 30.6). Ruled out: the row id
-      (the write lands), the notification list (readable and clickable now), and the drive's aim.
+- [x] **An agent's option write is announced after all** — closed 2026-09-21 (`efe55518`).
+      Nothing swallowed anything: the write reached the setting, the row was marked, and the
+      notice was posted. `NotificationsPopup::rebuild` sized the list's viewport at
+      `min(6, count) * 56` px, which is what a one-line entry measures, so the entry carrying
+      Undo was drawn under the bottom edge — and the earlier marker check read a screenshot in
+      which Options had not left its General page. The list is now as tall as its rows measure,
+      and an agent's own `app_undo` posts its own notice with a way back (#FEJQ decision 6,
+      protocol 30.6). Driven again in
+      `docs/qa_evidence/2026-09-21-console-write-undo/` — 19 PASS, 0 FAIL.
 - [ ] Ctrl+Shift+Enter on a card, on its own and after a Discuss turn: it did not land in the
       implementer drive and whether that is the page or the drive is not settled.
 - [ ] A restart with two tabs on one project: each tab's helper conversation comes back to the

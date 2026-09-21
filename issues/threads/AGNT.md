@@ -989,3 +989,72 @@ list does not contain is the entry: after an `app_option_set` that **reaches the
 no "Agent changed Copy on select · Undo", and no "changed by the agent" on the row.
 `src/AppCommands.cpp:829-833` posts both unconditionally once the write lands, so something
 between the two is swallowing them. Added to the QA checklist with what has been ruled out.
+
+<!-- relay:entry 20260921T083016Z-be author=claude-code kind=evidence -->
+The QA item this card left open — **"An agent's option write is not announced"** — closed, and it
+was not the write, the route or the marker (`efe55518`, evidence
+`docs/qa_evidence/2026-09-21-console-write-undo/`).
+
+**Nothing was swallowing anything.** The notice and the mark were both there. The bell's list drew
+one of them outside itself.
+
+`NotificationsPopup::rebuild()` (`src/WindowChrome.h`) sized the list's viewport at
+`min(6, count) * 56` pixels. 56 px is what an entry with a one-line body measures; an entry whose
+body wraps is nearer ninety, and one that carries an offer — "Agent changed Copy on select ·
+off → on · [Undo]" — is over a hundred. Measured on the build before the fix, with the `option`
+phase driven again and the rectangles taken from `RELAY_QA_RECTS`:
+
+```
+notificationsScroll  y =  90 … 202      the viewport, 112 px for min(6,2)*56
+notificationRow      y =  90 … 179      "Agent finished"
+notificationRow#2    y = 183 … 268      "Agent changed Copy on select"   66 px of it drawn
+popupTextButton#2    y = 234 … 261      its Undo button                  entirely outside
+```
+
+The drive's own two turns each post an "Agent finished", so by the time the bell was opened the
+change was the **third** entry and none of it was visible. `AppCommands.cpp:829-833` was right all
+along, and so was the console's route: one worker per tab, the window answers that pipe once as
+`helper`, and one executor marks the row and posts the notice for a terminal pane, the
+Switchboard, a card, Options, Actions and Sessions alike.
+
+**The marker was never missing either.** Driven on the unfixed build, with Options on its
+*Terminal* page, the row reads "changed by the agent just now: off → on". The earlier check read
+`c07-revealed.png`, in which the Options pane is still on its **General** page — the `option:`
+link clicked to get there had not moved it — so what it matched was the words "Copy on select" in
+the console's own transcript. Both halves of the QA note were reading the wrong pixels; the
+report of what was on screen was exact, and the conclusion was not.
+
+**The fix**, in the smallest place: the list is as tall as its rows measure, clamped between
+64 px and `kMaxListHeight`, and scrolls past that. A row being replaced leaves the layout at once
+instead of when `deleteLater` runs, or it is counted twice; and rows are shown before they are
+measured, because `rebuild()` runs while the popup is still hidden and a hidden item has no
+height in its layout.
+
+**One real gap beside it**, and it is the owner's decision 6 rather than a pixel:
+`AppCommands::undo` with an **agent** as `who` only amended the entry whose offer it answered,
+and that amendment carries no offer at all. So an agent putting a setting back left the person
+nothing to press — and if the original entry had been dismissed, the agent's write was announced
+nowhere. It now posts its own "Agent changed <row>: <before> → <after> · Undo" as well. A person
+pressing Undo still only amends: they did it, and they are looking at it.
+
+**Tests** (`ctest --test-dir build -R appcommands`): `aConsolesWriteIsAnnouncedAndMarkedLikeAPanesOwn`
+and `aConsolesActionIsAnnouncedToo` drive a `set_option` and an `app_action_run` in the **tab
+worker's** own wire shape — `event: "app_command"` with the fields beside it, executed with
+`who = "helper"`, which is the path a console's command really takes — and assert the change-log
+entry, the notice with its Undo, the row's marker, and the offer restoring the value and clearing
+the mark. `undoByHandClearsTheMarkAndUndoByTheAgentKeepsIt` gained the agent's own `app_undo`
+notice and a press of it.
+
+**Driven live** under Xvfb with the stub provider and the deterministic rectangles
+(`docs/qa_evidence/2026-09-21-console-write-undo/`, `drive.sh`, 19 PASS / 0 FAIL): the Options helper's
+console writes the setting; the row on Options › Terminal wears the mark; the bell's list carries
+"Agent changed Copy on select · off → on" with its Undo **inside the list's own viewport** —
+checked by comparing rectangles, not by reading words, so "the notice is there" can never again
+mean "the notice exists somewhere off the visible list"; Undo clicked by rectangle puts the
+setting back and takes the mark with it; the agent's own `app_undo` is announced with a way back
+of its own; and `app_action_run` says "Agent ran Reload themes".
+
+Left for whoever takes the next item: whether an `option:` link in a **console's** transcript
+reveals its row is still unproven either way. It did not in the earlier drive — the pane stayed
+on General — and this drive reaches the row by its tab instead, because what it is the gate for
+is the announcement. It belongs with the console's link resolution, not with this item.
