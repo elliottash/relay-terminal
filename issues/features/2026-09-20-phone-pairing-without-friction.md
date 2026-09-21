@@ -11,7 +11,7 @@ rank: 6b
 created: '2026-09-20'
 source: 'owner, 2026-09-20, Claude Code session (after #PH0N landed)'
 acceptance: on an iPhone or iPad that has never seen Relay, the owner gets from nothing to a paired, notifying Home Screen app in three acts — install once, type the code the desktop shows, compare five digits — with no switch to find, no QR to scan and nothing to paste; and on the desktop, "Pair a phone" is one click from the window chrome and turns remote control on by itself
-links: {plans: [], commits: [], evidence: [], related: [PH0N, 97EG, W5N2, KBFT], github: null}
+links: {plans: [], commits: [7fc3f58d, 546bda03, 07367a19, 3bbb1bb8, e5ee36e2, 1ee6b653], evidence: [docs/qa_evidence/2026-09-20-fr1c-pair-a-phone/], related: [PH0N, 97EG, W5N2, KBFT], github: null}
 ---
 # Pairing a phone without friction: one entry point on the desktop, a typed code on the phone
 
@@ -57,7 +57,7 @@ Not taken: a native app (nothing here needs one); Universal Links into the insta
 
 ## Tasks
 
-- [ ] 1 Desktop: "Pair a phone…" in the plug menu and the palette turns remote control on and shows the code beside the QR <!-- t:p1 -->
-- [ ] 2 Sidecar: `pair_code`, a meeting code that delivers a pairing fragment <!-- t:p2 -->
-- [ ] 3 Phone: welcome screen leads with the code; iOS install-first landing; Android install button; notifications offered on first arrival <!-- t:p3 -->
+- [x] 1 Desktop: "Pair a phone…" in the plug menu and the palette turns remote control on and shows the code beside the QR <!-- t:p1 -->
+- [x] 2 Sidecar: `pair_code`, a meeting code that delivers a pairing fragment <!-- t:p2 -->
+- [x] 3 Phone: welcome screen leads with the code; iOS install-first landing; Android install button; notifications offered on first arrival <!-- t:p3 -->
 - [ ] 4 Drive, deploy, evidence <!-- t:p4 -->
