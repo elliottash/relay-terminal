@@ -1277,25 +1277,54 @@ class ModeTests(ProtocolTest):
 
 
 class CardScopeAgentTests(unittest.TestCase):
-    """The worker's Agent offers only what the card turn's mode allows (protocol 19.10)."""
+    """A card turn is offered the console's tools and refused at call time (19.10, #CTRN).
+
+    It used to be offered the mode's list and nothing else, which is what
+    `test_a_card_turn_offers_no_commands_no_writes_and_no_subagents` pinned here. The owner's
+    decision 3 on card #CTRN replaced it: *a Plan turn is offered the full tool list and refused
+    at call time, with the refusal naming Execute* — for the prompt cache (a tool that appears or
+    disappears re-prefills the whole request, 13–14 s on the Local tier) and because a context
+    specialises an agent without fencing it.
+    """
 
     setUp, tearDown, agent = AgentWiringTests.setUp, AgentWiringTests.tearDown, AgentWiringTests.agent
 
-    def test_a_card_turn_offers_no_commands_no_writes_and_no_subagents(self):
+    def console(self):
         tools = T.BoardTools.for_workspace(self.repo, state_path=self.repo / ".relay" / "r.json")
+        tools.begin_console()
         agent = self.agent(tools)
-        tools.begin_card_turn("plan", "ABCD")
-        names = {t["function"]["name"] for t in agent.tools()}
-        self.assertIn("read_file", names)
-        self.assertIn("search_files", names)
-        self.assertFalse({"run_command", "write_file", "edit_file", "board_move_card"} & names)
-        with self.assertRaises(ValueError) as refused:
-            agent._prepare("run_command", {"command": "ls"})
-        self.assertIn("Execute", str(refused.exception))
+        agent.tool_scope = "console"
+        return agent, tools
+
+    def test_a_discuss_a_plan_and_a_console_turn_are_offered_the_same_tools(self):
+        agent, tools = self.console()
+        between = agent.tools()
+        for mode in ("discuss", "plan"):
+            agent.set_card_turn(mode, "ABCD")
+            self.assertEqual(agent.tools(), between, mode)      # byte for byte, both ways
+            agent.set_card_turn(None, None)
+            self.assertEqual(agent.tools(), between, mode)
+        names = {t["function"]["name"] for t in between}
+        self.assertTrue({"read_file", "search_files", "run_command", "write_file",
+                         "board_move_card"} <= names, sorted(names))
+
+    def test_a_plan_turn_is_refused_the_writers_when_it_calls_them_and_told_about_execute(self):
+        agent, tools = self.console()
+        agent.set_card_turn("plan", "ABCD")
+        for name, args in (("run_command", {"command": "ls"}),
+                           ("write_file", {"path": "x", "content": "y"}),
+                           ("edit_file", {"path": "x", "old": "a", "new": "b"})):
+            with self.assertRaises(ValueError) as refused:
+                agent._prepare(name, args)
+            self.assertIn("Execute", str(refused.exception))
+            self.assertIn("#ABCD", str(refused.exception))
+        # What a card turn reads is not refused, and the board's own rule is the board's.
         prepared = agent._prepare("search_files", {"pattern": "x"})
         self.assertIn("matches", agent._execute(prepared, {}))
-        tools.end_card_turn()
-        self.assertIn("run_command", {t["function"]["name"] for t in agent.tools()})
+        moved = tools.run("board_move_card", {"id": "ABCD", "status": "ready", "reason": "r"})
+        self.assertEqual(moved["code"], "board_mode_refused")
+        agent.set_card_turn(None, None)
+        agent._prepare("run_command", {"command": "ls"})          # no longer a card turn
 
 
 # ------------------------------------------ the board is per project, not per process

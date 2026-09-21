@@ -525,7 +525,14 @@ TAIL_TOOLS = ("set_keybinding", "type_into_program", "run_in_terminal")
 
 
 def validate_tool_scope(value) -> str:
-    """The named tool scope of `configure {context: {scope}}` (protocol 33, card #AGNT)."""
+    """The named tool scope of `configure {context: {scope}}` (protocol 33, card #AGNT).
+
+    A retired name is mapped rather than refused, for the release a GUI takes to catch up:
+    `card` was one Discuss or Plan turn's own tool list until card #CTRN, and a card turn is an
+    ordinary console turn now (`agent_context.RETIRED_SCOPES`).
+    """
+    if isinstance(value, str):
+        value = agent_context.RETIRED_SCOPES.get(value, value)
     if not isinstance(value, str) or value not in agent_context.SCOPES:
         raise ValueError("tool scope must be one of " + ", ".join(agent_context.SCOPES) + ".")
     return value
@@ -916,9 +923,9 @@ class Agent:
         **Only a terminal pane defers** (#AGNT; #GMCF decision 9 for the reason). Deferral is a
         pane's bargain — the app tools are on every request and a minority of turns use them — and
         a console is the other side of it: it is the agent Options, Actions and Sessions ask, so
-        its first action is an app call and the hold-back only buys it a round trip. A card turn
-        holds its stage's tools and has nothing to fetch. One line says both, because both are the
-        same question — which scope is this — and answering it twice is what let a console take
+        its first action is an app call and the hold-back only buys it a round trip. A card
+        console is a console and defers nothing either (#CTRN). One line says it, because it is
+        one question — which scope is this — and answering it twice is what let a console take
         the pane branch in one place and the scope branch in another (a `load_tools` named in the
         prompt that the tool list never offered).
         """
@@ -926,9 +933,7 @@ class Agent:
             return ()
         if getattr(self, "preset", None) is not None and getattr(self.preset, "local", False):
             return ()
-        # A per-turn stage scope is open on the board tools: a card turn, whatever the agent was
-        # configured as. Its list is the mode's, and there is nothing to fetch.
-        if self.profile() != "full" or getattr(getattr(self, "board", None), "card_scope", None) is not None:
+        if self.profile() != "full":
             return ()
         have = {"app": getattr(self, "app", None) is not None,
                 "own_session": getattr(self, "activity", None) is not None,
@@ -1124,28 +1129,14 @@ class Agent:
         self.refresh_system_prompt()
 
     def tools(self) -> list[dict]:
-        scope = getattr(self.board, "card_scope", None)
-        if scope is not None and self.tool_scope != "console":
-            # A Switchboard card's Discuss or Plan turn (protocol 19.10): the mode's tools and
-            # nothing else. That is the stage machine of 19.20 — a Plan writes its own `## Plan`
-            # — and it is the one thing this card leaves fenced, because it is a rule about the
-            # *stage* rather than about the surface. The agent is configured `scope: "card"`;
-            # the per-turn scope on its board tools is what says *which* mode, and a **console**
-            # is the one agent that never takes this branch — that is the fence #AGNT took down.
-            # The app tools ride alongside the scope rather than inside it: protocol 30.4 is that
-            # the tool set is the same everywhere.
-            offered = self.executor.tools()
-            specs = scope.tool_specs(offered) + (
-                self.app.tool_specs() if self.app is not None else [])
-            # #GMCF (owner, 2026-09-20): a scope that allows `set_keybinding` gets it — last, for
-            # TAIL_TOOLS' reason. It exists only while the GUI has sent a keybinding catalogue,
-            # so from here it can only ever append.
-            return specs + [t for t in offered if t["function"]["name"] in TAIL_TOOLS
-                            and scope.allows(t["function"]["name"])]
-        # Every other agent — a terminal pane and an agent **console** alike — takes the list
-        # below (#AGNT). A console is not a narrower pane: it holds the whole executor, and the
-        # board's own `tool_specs` answers a console's set (merge, split, import, `search_files`)
-        # because its `card_scope` is a `ConsoleScope`. One order, one tool set, one place.
+        # **Every** agent takes the list below (#AGNT, and card #CTRN for the last of them). A
+        # console is not a narrower pane: it holds the whole executor, and the board's own
+        # `tool_specs` answers a console's set (merge, split, import, `search_files`). A card's
+        # Discuss or Plan turn branched here until #CTRN, for the mode's tools and nothing else
+        # — the last fence, and the one the owner took down on 2026-09-21: what a mode may touch
+        # is a rule about the *stage*, so it is refused at call time (`set_card_turn`,
+        # `CardScope.refusal`, which names Execute) and the list does not move. A Discuss, a Plan
+        # and an ordinary console turn on one agent are offered byte-identical tools.
         #
         # One order for the life of the pane (#GMCF, distillation 4.2). The mode changes nothing
         # here: a tool that appears or disappears re-prefills the whole request, and on the Local

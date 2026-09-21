@@ -38,8 +38,14 @@ class ParsingTests(unittest.TestCase):
             self.assertEqual(spec.routing, "agent", name)
             self.assertFalse(spec.shell, name)
 
-    def test_a_card_context_defaults_to_the_card_scope(self):
-        self.assertEqual(AC.ContextSpec.from_json({"name": "card"}).scope, "card")
+    def test_a_card_context_is_a_console_and_a_gui_that_still_says_card_is_answered(self):
+        """Card #CTRN: `card` left `SCOPES`. A card turn is an ordinary console turn, and what
+        a Discuss or a Plan may touch is refused at call time rather than withheld from the
+        list. A `configure` that still names the retired scope is mapped, not refused, for the
+        release it takes a GUI to catch up."""
+        self.assertEqual(AC.ContextSpec.from_json({"name": "card"}).scope, "console")
+        self.assertEqual(AC.ContextSpec.from_json({"name": "card", "scope": "card"}).scope, "console")
+        self.assertNotIn("card", AC.SCOPES)
 
     def test_the_block_round_trips(self):
         spec = AC.ContextSpec.from_json(SWITCHBOARD)

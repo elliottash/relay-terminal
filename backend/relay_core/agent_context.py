@@ -40,9 +40,16 @@ NAMES = ("terminal", "switchboard", "card", "options", "actions", "sessions")
 #:   It has the shell and the file tools since the owner's decision of 2026-09-20 — a context
 #:   specialises an agent without fencing it, and the gates are the ones he chose (the
 #:   `agent_safe` / `settable` markers and the Options › Agent toggle).
-#: * ``card``    — one Discuss, Plan or Verify turn on one card: the stage machine of 19.20,
-#:   which is a rule about the *stage*, not a fence around the surface.
-SCOPES = ("pane", "console", "card")
+#:
+#: A card's Discuss or Plan turn was a third scope, ``card``, until card #CTRN: the mode's board
+#: tools and the read-only file tools, and nothing else.  A card turn is an ordinary console
+#: turn now, and 19.20 — a rule about the *stage*, never a fence around the surface — is
+#: refused at call time instead (`Agent.set_card_turn`, `board_tools.CardScope.refusal`).
+SCOPES = ("pane", "console")
+
+#: Scopes a GUI may still name that no longer exist, and what they mean now.  A `configure` that
+#: names one is answered rather than refused, for the release it takes a GUI to catch up.
+RETIRED_SCOPES = {"card": "console"}
 
 #: What the composer does with a line that is not obviously a prompt.  The terminal is the only
 #: context that can run it as a command, so it is the only one that says `auto`.
@@ -266,15 +273,12 @@ def validate_screen(value) -> str:
 def default_scope(name: str) -> str:
     """The scope a context takes when `configure` names none.
 
-    A terminal pane is a `pane`; a card turn is a `card`; everything else is a `console`.  It is
-    a default and not a rule — the GUI may name any of the three — but it is the one that makes a
-    `configure` from a GUI that knows about contexts and not about scopes do the right thing.
+    A terminal pane is a `pane` and everything else — a card's console included, since card
+    #CTRN — is a `console`.  It is a default and not a rule — the GUI may name either — but it
+    is the one that makes a `configure` from a GUI that knows about contexts and not about
+    scopes do the right thing.
     """
-    if name == "terminal":
-        return "pane"
-    if name == "card":
-        return "card"
-    return "console"
+    return "pane" if name == "terminal" else "console"
 
 
 @dataclass
@@ -319,6 +323,7 @@ class ContextSpec:
         if persist_scope and not persist_key:
             raise ValueError("context persist.scope was given without a persist.key.")
         scope = _string(block.get("scope"), "scope", MAX_NAME) or default_scope(name)
+        scope = RETIRED_SCOPES.get(scope, scope)
         if scope not in SCOPES:
             raise ValueError("context scope must be one of " + ", ".join(SCOPES) + ".")
         routing = _string(block.get("routing"), "routing", MAX_NAME) or (

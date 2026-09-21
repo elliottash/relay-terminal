@@ -975,19 +975,20 @@ def console_board_specs() -> list[dict]:
 
 @dataclass
 class CardScope:
-    """One Discuss or Plan turn on one card: the tools it may call and the card it is about."""
+    """One Discuss or Plan turn on one card: the tools it may call and the card it is about.
+
+    It had a `tool_specs` of its own until card #CTRN — the mode's board tools and the read-only
+    file tools, which is what the turn was *offered*.  A card turn is an ordinary console turn
+    now: it is offered the console's list, every turn, and what the stage forbids is refused when
+    it is called (`Agent.set_card_turn`, `_check_card_scope`, and `refusal` below, which names
+    Execute).  `allows` and `refusal` did not move an inch; only the list did.
+    """
     mode: str
     card_id: str
 
     def allows(self, name: str) -> bool:
         return (name in CARD_READ_TOOLS or name == "search_files"
                 or name in CARD_MODE_BOARD_TOOLS.get(self.mode, ()))
-
-    def tool_specs(self, executor_specs: list[dict]) -> list[dict]:
-        """The turn's tool list: the executor's read-only tools, search_files, the mode's board tools."""
-        keep = [t for t in executor_specs if t["function"]["name"] in CARD_READ_TOOLS]
-        board = [dict(s) for s in TOOL_SPECS if s["function"]["name"] in CARD_MODE_BOARD_TOOLS[self.mode]]
-        return keep + [dict(SEARCH_SPEC)] + board
 
     def refusal(self, name: str) -> str:
         what = "Plan" if self.mode == "plan" else "Discuss"
@@ -1376,11 +1377,20 @@ class BoardTools:
         #: Set while a `board_cleanup` turn runs (protocol 19.9): it raises the per-turn
         #: ceilings, offers the merge/split/sections tools, and records every write.
         self.cleanup: CleanupLog | None = None
-        #: Set while a card's Discuss or Plan turn runs (protocol 19.10, #XS6Q): the tools that
-        #: mode offers, and the card a Plan turn may write to. None for a pane's own turns. The
-        #: An agent console sets it to a `ConsoleScope` once and for good (#AGNT), which is why
-        #: the type is loose and why `begin_console` has no closing half.
+        #: Set while a card's Discuss or Plan turn runs (protocol 19.10, #XS6Q): what that mode
+        #: may call, and the card a Plan turn may write to. None for a pane's own turns. An
+        #: agent console sets it to a `ConsoleScope` when it is configured, which is why the
+        #: type is loose; a **card** console has both — the `ConsoleScope` between turns and a
+        #: `CardScope` for the length of each one (#CTRN) — and `end_card_turn` puts the
+        #: console's back.
         self.card_scope: CardScope | ConsoleScope | None = None
+        #: Whether these tools belong to an agent **console** (#AGNT). Asked directly since card
+        #: #CTRN rather than inferred from whatever is in the `card_scope` slot: a card console
+        #: opens a `CardScope` for each turn, and reading "is this a console" off that slot made
+        #: the board's half of the tool list change under the turn — the one place a per-turn
+        #: scope could still re-prefill a cached request, which is the whole thing #CTRN's
+        #: decision 3 is about.
+        self.console = False
         #: Set while a turn that writes nothing runs (the survey of a fresh board, 19.18): every
         #: write tool refuses, so what the agent offers stays an offer until the owner says yes.
         self.readonly = False
@@ -1498,9 +1508,11 @@ class BoardTools:
             # bring one into being is offered, and calling it asks the user (protocol 19.12).
             return [dict(s) for s in TOOL_SPECS
                     if s["function"]["name"] in UNINITIALIZED_TOOLS]
-        if getattr(self.card_scope, "chat", False):
+        if self.console:
             # An agent console (#AGNT): the ordinary set plus merge, split and the import, and
             # `search_files`, which a console reaches through the board rather than the executor.
+            # The flag rather than the scope, so a card turn's `CardScope` does not switch this
+            # list out from under a conversation that is mid-prefix (#CTRN).
             return console_board_specs()
         specs = list(TOOL_SPECS) + (list(CLEANUP_TOOL_SPECS) if self.cleanup is not None else [])
         return [dict(s) for s in specs]
@@ -1516,7 +1528,13 @@ class BoardTools:
         return self.card_scope
 
     def end_card_turn(self) -> None:
-        self.card_scope = None
+        """The turn is over: the console's own scope comes back, or nothing does (#CTRN).
+
+        A card's tools are a console's, so taking the `CardScope` away has to leave the
+        `ConsoleScope` that was there before it — otherwise `search_files` and the console's
+        board set disappear between one turn on a card and the next.
+        """
+        self.card_scope = ConsoleScope() if self.console else None
 
     def begin_console(self) -> ConsoleScope:
         """These tools belong to an agent console (#AGNT): board tools, merge and split included.
@@ -1527,6 +1545,7 @@ class BoardTools:
         of one turn — nothing is written until the owner confirms, and that is enforced here
         rather than asked for in the brief.
         """
+        self.console = True
         self.card_scope = ConsoleScope()
         return self.card_scope
 
@@ -1537,6 +1556,7 @@ class BoardTools:
         return scope
 
     def end_chat_turn(self) -> None:
+        self.console = False
         self.card_scope = None
         self.readonly = False
 

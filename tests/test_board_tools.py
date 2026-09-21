@@ -2333,16 +2333,32 @@ class CardTurnScopeTests(BoardToolsTest):
         with self.assertRaises(T.BoardToolError):
             self.tools.begin_card_turn("execute", "ABCD")
 
-    def test_the_offered_tools_are_read_only_files_search_and_the_modes_board_tools(self):
-        executor = [T.spec(n, "d", {}, []) for n in
-                    ("run_command", "read_file", "list_directory", "write_file", "edit_file",
-                     "command_output", "stop_command", "load_skill", "run_in_terminal")]
-        plan = {t["function"]["name"] for t in T.CardScope("plan", "ABCD").tool_specs(executor)}
-        self.assertEqual(plan, {"read_file", "list_directory", "load_skill", "search_files",
-                                "board_list", "board_read", "board_update_card", "board_comment"})
-        discuss = {t["function"]["name"] for t in T.CardScope("discuss", "ABCD").tool_specs(executor)}
-        self.assertEqual(discuss - plan, {"board_create_card", "board_move_card"})
-        self.assertFalse({"run_command", "write_file", "edit_file", "run_in_terminal"} & discuss)
+    def test_a_card_turn_does_not_move_a_consoles_tool_list(self):
+        """Card #CTRN: `CardScope.tool_specs` is gone — what a mode may call is refused instead.
+
+        This is the hole the decision is really about. A card console opens a `CardScope` for
+        the length of each turn, and while "is this a console" was read off that same slot, the
+        board's half of the tool list changed under the turn — a re-prefill of every cached
+        request below it, for a rule that is enforced at call time anyway. `allows` and
+        `refusal` are untouched, which is what the cases above check.
+        """
+        card_id = self.create()
+        self.tools.begin_console()
+        console = [s["function"]["name"] for s in self.tools.tool_specs()]
+        self.assertIn("board_merge_cards", console)
+        for mode in ("discuss", "plan"):
+            self.tools.begin_card_turn(mode, card_id)
+            self.assertEqual([s["function"]["name"] for s in self.tools.tool_specs()], console, mode)
+            self.assertTrue(self.tools.handles("search_files"))
+            self.tools.end_card_turn()
+            self.assertEqual([s["function"]["name"] for s in self.tools.tool_specs()], console, mode)
+            self.assertTrue(self.tools.handles("search_files"))
+        # And the stage rule is where it always was: on the scope, refused when it is called.
+        self.tools.begin_card_turn("plan", card_id)
+        refused = self.tools.run("board_move_card", {"id": card_id, "status": "ready", "reason": "r"})
+        self.assertEqual(refused["code"], "board_mode_refused")
+        self.assertFalse(T.CardScope("plan", card_id).allows("run_command"))
+        self.assertFalse(hasattr(T.CardScope("plan", card_id), "tool_specs"))
 
 
 class SearchFilesTests(BoardToolsTest):
