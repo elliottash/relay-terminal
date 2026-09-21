@@ -462,6 +462,64 @@ public:
     };
     // Why the prompt box is hidden, so it can come back by itself when the reason ends.
     enum class HideReason { None, AltScreen, Remote, Manual };
+
+    // What the agent in a terminal pane is about (#AGNT step 3, src/AgentContext.h).
+    //
+    // The terminal is one context, not the base case: everything here is a thing the agent block
+    // used to read straight off the pane -- the workspace, the directory, the role, the routing,
+    // where the conversation is kept -- and those are the agent's *subject*, not the surface it
+    // is drawn on. They go through this rather than growing relay::agent::Host, so that the
+    // board, Options and Sessions consoles never have to answer a question about a shell.
+    //
+    // It supplies **no actions** (a terminal pane has no row of things that need no typing),
+    // **no link resolver** (the pane's own openOutputTarget is the terminal's link behaviour and
+    // is unchanged), and **no turnFinished** (the answer is already in the transcript). It sets
+    // no `screen` either: the helper surfaces send what is being read as a hint, and a terminal
+    // pane already sends what the agent may see -- the cwd, the foreground program, the
+    // program-control grant -- on the ask itself. Adding the grid on top of that would be new
+    // data in front of the model, which is not what this step is for.
+    //
+    // A nested class because its bodies need the complete Pane, which is exactly what a class
+    // nested in Pane gets.
+    class TerminalContext final : public relay::agent::Context {
+    public:
+        explicit TerminalContext(Pane *pane) : m_pane(pane) {}
+
+        relay::agent::ContextSpec spec() const override {
+            relay::agent::ContextSpec spec;
+            spec.name = QStringLiteral("terminal");
+            // One console per worker here, so the pane's own token is a surface id that is
+            // unique wherever it is read and stable across a reconfigure.
+            spec.surface = m_pane->sessionToken();
+            spec.agentRole = m_pane->agentRole();
+            spec.workspace = m_pane->workspace();
+            // Named rather than inferred: the accident card #AGNT found is that `Agent.tools()`
+            // guesses a scope from whether a board has a card scope, so a board-less agent
+            // silently took the pane branch.
+            spec.scope = QStringLiteral("pane");
+            // The conversation is the pane's own session, under the project it belongs to. The
+            // scope is part of the identity, never decoration: the same pane id in two projects
+            // is two conversations.
+            spec.persistScope = m_pane->workspace();
+            spec.persistKey = m_pane->scrollbackId();
+            spec.shell = true;                 // the only context that spawns one
+            // "auto" is the terminal's routing -- a typed line may be a command or a prompt --
+            // and it is the pane's live setting rather than a constant, because Ctrl+I moves it.
+            spec.routing = m_pane->mode();
+            return spec;
+        }
+
+        // What the composer says when it is empty. The wording is RichEditor's own today
+        // (src/RichEditor.cpp, the `composer` list, which shortens it as the pane narrows), and
+        // this is what the console will ask for once the composer moves into it.
+        QString placeholder() const override {
+            return QStringLiteral("Shell commands or agent prompts…      ?  for help");
+        }
+
+    private:
+        Pane *m_pane;
+    };
+
     Pane(const QString &workspace, const QString &cwd, bool cleanShell,
          const QString &engineCore = relay::defaultEngineCore())
         : m_workspace(workspace), m_cwd(cwd.isEmpty() ? workspace : cwd), m_cleanShell(cleanShell) {
@@ -478,6 +536,9 @@ public:
         // The saved scrollback is filed under the pane's token unless a restore hands it the id
         // its saved text already has (initRestore).
         m_scrollbackId = m_token;
+        // The console learns what it is about before the worker is started, so the very first
+        // `configure` already carries the context block (#AGNT step 3).
+        m_agent.setContext(&m_terminalContext);
         buildUi();
         startWorker();
         startTerminal(cleanShell);
@@ -2466,7 +2527,7 @@ private:
     // top-right (placeTakeControl), so both can be up at once without overlapping.
     void placeGuestBar() {
         if (!m_guestBar || !m_guestBar->isVisible() || !m_terminalHost) return;
-        const QRect host(m_terminalHost->mapTo(this, QPoint(0, 0)), m_terminalHost->size());
+        const QRect host = overlayArea();
         const QSize size = m_guestBar->sizeHint();
         const int barWidth = std::min(size.width(), std::max(240, host.width() - 20));
         m_guestBar->setGeometry(host.left() + 10, host.top() + 8, barWidth, size.height());
@@ -2648,6 +2709,23 @@ public:
     // Where a clicked or keyboard-selected link goes. `fromMouse` teaches the keyboard path.
     void openOutputTarget(const QString &target, int line, bool fromMouse) {
         if (target.isEmpty()) return;
+        // What this console is about gets first refusal (#AGNT step 3): a card page resolves
+        // `card:` to itself, Options reveals an `option:` row, Sessions opens a `session:`.
+        // A terminal context resolves nothing, so every link below travels exactly the path it
+        // did before — which is the property this step is measured on.
+        if (m_agent.context()) {
+            QString section, row;
+            relay::links::Target activated;
+            activated.valid = true;
+            activated.target = target;
+            activated.line = line;
+            activated.kind = !relay::links::cardIdOf(target).isEmpty()      ? relay::links::Kind::Card
+                             : !relay::links::sessionIdOf(target).isEmpty() ? relay::links::Kind::Session
+                             : relay::links::optionOf(target, &section, &row) ? relay::links::Kind::Option
+                             : QUrl(target).scheme().isEmpty() ? relay::links::Kind::Path
+                                                               : relay::links::Kind::Url;
+            if (m_agent.resolveLink(activated)) return;
+        }
         if (target.startsWith(QStringLiteral("relay://"))) {
             const QUrl url(target);
             const QStringList parts = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
@@ -2966,6 +3044,16 @@ public:
     void sendText(const QString &text) override { if (m_backend) m_backend->sendText(text, false); }
     void paste() override { if (m_backend) m_backend->paste(); }
     int foregroundProcessId() const override { return foregroundPid(); }
+
+    // Where the floating overlays go: the terminal host's rectangle in this pane's coordinates,
+    // which is what "Take control", the guest bar, the request ledger and the toast were each
+    // computing for themselves. The fallback is the whole pane, which is what the toast already
+    // used when there was no terminal host; the other three still return early without one, as
+    // they always have.
+    QRect overlayArea() const override {
+        return m_terminalHost ? QRect(m_terminalHost->mapTo(this, QPoint(0, 0)), m_terminalHost->size())
+                              : rect();
+    }
 
     // ===== agent sessions UI: model/effort, context, plan mode, rewind, fork, resume, recaps, =====
     // ===== instructions, suggestions and steering (docs/AGENT-SESSIONS-PROTOCOL.md)          =====
@@ -4785,6 +4873,14 @@ private:
         // as the board block and for the same reason: a `configure` that leaves without it makes
         // an agent with no app tools at all, which is a silent loss of half the feature.
         if (onAppCatalog) request.insert(QStringLiteral("app"), onAppCatalog());
+        // What this agent is *about* (#AGNT step 3, protocol 30.7): the name of the context, its
+        // surface id, the role, the workspace, the named tool scope, where the conversation is
+        // kept, whether there is a shell and how a typed line routes. One line here because
+        // `withSessionFields` is the one funnel every configure goes through — the same reason
+        // the board and app blocks are here. The console answers `{}` until it has a context, and
+        // a configure with no block behaves exactly as one sent before this existed.
+        if (const QJsonObject context = m_agent.configureBlock(); !context.isEmpty())
+            request.insert(QStringLiteral("context"), context);
         return request;
     }
 
@@ -5555,21 +5651,21 @@ private:
     // The height the terminal and the queue strip share. Heights are measured against this rather
     // than against the terminal host alone, so showing the strip does not shrink the number the
     // next call sizes it from and leave the two chasing each other.
-    int bubbleSpan() const {
+    int bubbleSpan() const override {
         int span = m_terminalHost ? m_terminalHost->height() : 0;
         const int spacing = layout() ? layout()->spacing() : 0;
         if (m_queueStrip && m_queueStrip->isVisible()) span += m_queueStrip->height() + spacing;
         return span;
     }
 
-    void showBubble(QWidget *bubble) {
+    void showBubble(QWidget *bubble) override {
         if (!bubble || bubble->isVisible()) return;
         const bool bottom = terminalAtBottom();
         keepPaneSizes([bubble] { bubble->show(); });
         pinTerminalBottom(bottom);
     }
 
-    void hideBubble(QWidget *bubble) {
+    void hideBubble(QWidget *bubble) override {
         if (!bubble || bubble->isHidden()) return;
         const bool bottom = terminalAtBottom();
         keepPaneSizes([bubble] { bubble->hide(); });
@@ -5580,7 +5676,7 @@ private:
     // that it is hidden instead, because a half-drawn header reads as a broken window rather than
     // as a small one (owner, 2026-09-18, from a three-high stack where both bubbles came out as
     // 14px slivers with their titles sliced through).
-    int bubbleRow() const { return std::max(30, fontMetrics().height() + 14); }
+    int bubbleRow() const override { return std::max(30, fontMetrics().height() + 14); }
 
     // What the pane could give to bubbles without squeezing the rows around them: what is left once
     // the header, the prompt box and two lines of terminal have what they need. Measured from the
@@ -5598,7 +5694,7 @@ private:
     }
 
     // Room for another bubble beside `taken` pixels of bubble already spoken for?
-    bool roomForBubble(int taken) const { return bubbleRoom() - taken >= bubbleRow(); }
+    bool roomForBubble(int taken) const override { return bubbleRoom() - taken >= bubbleRow(); }
 
     // A bubble asks for its height as a maximum over a one-row minimum, never as a fixed height: a
     // row's minimum is part of this pane's minimum, and a fixed one made a pane in a three-high
@@ -9393,7 +9489,7 @@ public:
 private:
     void placeRequestsPanel() {
         if (!m_requestsPanel || !m_terminalHost) return;
-        const QRect host(m_terminalHost->mapTo(this, QPoint(0, 0)), m_terminalHost->size());
+        const QRect host = overlayArea();
         const int w = std::min(host.width() - 16, std::max(380, host.width() * 3 / 5));
         m_requestsPanel->setGeometry(host.right() - w - 8, host.top() + 8, w, std::max(180, host.height() - 16));
     }
@@ -10277,6 +10373,23 @@ private:
             }
             if (m_activeValid && m_active.agent) m_activeValid = false;
             QTimer::singleShot(0, this, [this] { pumpQueue(); rebuildQueueStrip(); });
+            // The turn, handed to whatever this console is about (#AGNT step 3). A terminal
+            // context wants nothing — the answer is already in the transcript — so this does
+            // nothing at all here; it is the seam a card's Discuss turn is written to its thread
+            // through (card #AGNT decision 2), and it is built before m_itemPrompts drops the
+            // prompt below.
+            {
+                relay::agent::TurnRecord record;
+                record.id = event.value(QStringLiteral("id")).toString();
+                record.surface = m_agent.spec().surface;
+                record.prompt = m_itemPrompts.value(record.id).text;
+                record.answer = m_turnText;
+                record.model = m_model;
+                record.sessionId = m_sessionId;
+                record.turnId = m_lastTurnId;
+                record.outcome = outcome;
+                m_agent.turnFinished(record);
+            }
             m_itemPrompts.remove(event.value(QStringLiteral("id")).toString());
             m_turnShellPrompt.clear();
             m_runCommands.clear();
@@ -11124,9 +11237,12 @@ public:
     // composer that grows under it (the fix loop's agent transcript) neither strands nor buries it.
     void placeToast() {
         if (!m_toast) return;
-        const QWidget *anchor = m_terminalHost ? m_terminalHost : this;
-        const QPoint corner = anchor->mapTo(this, QPoint(anchor->width(), anchor->height()));
-        m_toast->move(corner.x() - m_toast->width() - 16, corner.y() - m_toast->height() - 12);
+        // The bottom-right corner of the overlay area, exclusive -- left+width, top+height,
+        // which is exactly what mapTo(this, {width, height}) answered when this read the
+        // terminal host directly.
+        const QRect area = overlayArea();
+        m_toast->move(area.left() + area.width() - m_toast->width() - 16,
+                      area.top() + area.height() - m_toast->height() - 12);
         m_toast->raise();
     }
 
@@ -13203,6 +13319,12 @@ private:
         prompt.handoff = entry.agent && entry.handoff;
         if (!entry.fix) { m_subagents.clearFinished(); m_jobs.clearFinished(); }   // finished rows linger until a new user turn
         QJsonObject request{{"type", "ask"}, {"text", entry.text}, {"when", when}};
+        // Which console asked, and what it had on screen (#AGNT step 3, protocol 33). A terminal
+        // pane sets `surface` and nothing else: what the agent may see here — the directory, the
+        // foreground program, the program-control grant — is the `context` object built below,
+        // and the grid is not put in front of the model on top of it.
+        for (const QJsonObject fields = m_agent.askFields(); const QString &key : fields.keys())
+            request.insert(key, fields.value(key));
         relay::models::curation::noteUse(currentEntryKey());   // the picker's "recent" and "most used"
         if (!entry.attachments.isEmpty()) request.insert(QStringLiteral("attachments"), entry.attachments);
         if (!entry.cards.isEmpty()) request.insert(QStringLiteral("cards"), entry.cards);
@@ -15466,7 +15588,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
     // not take layout space away from the program drawing there.
     void placeTakeControl() {
         if (!m_programBar || !m_programBar->isVisible() || !m_terminalHost) return;
-        const QRect host(m_terminalHost->mapTo(this, QPoint(0, 0)), m_terminalHost->size());
+        const QRect host = overlayArea();
         const QSize size = m_programBar->sizeHint();
         const int width = std::min(size.width(), std::max(240, host.width() - 20));
         m_programBar->setGeometry(host.right() - width - 10, host.top() + 8, width, size.height());
@@ -16589,6 +16711,10 @@ private:
     // console's constructor must therefore not call back into the host, and does not. The agent
     // block above moves into it wave by wave (scripts/split-agent-console.py); until a wave has
     // run, the code is still here and this member is what the moved code will be reached through.
+    // What that agent is about (#AGNT step 3). Declared **before** the console so that it is
+    // destroyed after it -- members go in reverse -- because ~AgentConsole clears the context's
+    // `onChanged`, and a context that had already gone would be a write through a dead pointer.
+    TerminalContext m_terminalContext{this};
     relay::AgentConsole m_agent{*this};
 };
 
