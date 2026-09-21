@@ -399,3 +399,7 @@ Whoever lands that hunk should carry these with it:
   `docs/qa_evidence/2026-09-21-models-page-trimmed`.
 
 Only `t:a10`'s tick is landed from this session. Every task on the card is now ticked.
+
+<!-- relay:entry 20260921T201657Z-p1 author=claude-code kind=decision -->
+### Claude Code · 2026-09-21 20:16
+The owner's rulings of 2026-09-21 on the ranking file, in his words: the Models classes he arranged per vendor ("anthropic: fable for high, opus for main, sonnet for flash …"); "deepseek pro is never used … use deepseek-flash for all"; "for lite … everybody is on relay free by default, or openrouter if they want privacy"; "the worker should allow the harness for flash, and defaults should be the same across plans / apis / harnesses"; background flash jobs skip a harness and "if somebody just has a harness, the flash chores run on relay flash? … i agree", "and yes to the rule on the relay free fallbacks as well"; "i want gemini latest aliases"; a `## Levels` table ("a similar defaults file for the reasoning levels across model X class"), which he filled in; "i want the effort options in relay to be determined by the model … so xhigh shows up for codex"; "for no knob models, the effort box should be grayed out. same for relay free"; `## Provider picks` ("provider picks looks good, so we could add that for cerebras for example later on"). Two agents are on it: `fable-lvl` (worker, and landing his file) and `fable-effort` (the GUI's effort box).
