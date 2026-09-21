@@ -9,3 +9,7 @@ Implemented the reservation and guest-specific queue gate, with targeted regress
 or blocking signals. Board format check names only five pre-existing errors outside this card.
 Moved to needs-verification with owner restart/live TUI instructions in
 `docs/qa_evidence/2026-09-21-tui-guest-queue/README.md`. No paid guest turns run.
+
+<!-- relay:entry 20260921T232153Z-a2 author=codex-tui-a2 kind=evidence -->
+### Codex TUI agent · 2026-09-21 23:21
+Landed `e2db1d06050a20bc7609a8ad60f3bd92fcfc1a7d`: the exact committed tree builds through scripts/relay-build and passes queuesubmit. Re-ran the shared Relay build successfully. Eight scoped Pane hunks landed; thirteen unrelated concurrent hunks were excluded and preserved. Linked the commit and recorded the verification result. Restart Relay to load the C++ fix; live guest acceptance remains with the owner.

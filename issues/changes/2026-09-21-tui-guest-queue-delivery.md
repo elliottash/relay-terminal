@@ -7,7 +7,7 @@ assignee: codex-tui-a2
 rank: m
 created: '2026-09-21'
 source: 'Relay delegated TUI task, 2026-09-21'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-tui-guest-queue/README.md], related: [QG4C], github: null}
+links: {plans: [], commits: [e2db1d06050a20bc7609a8ad60f3bd92fcfc1a7d], evidence: [docs/qa_evidence/2026-09-21-tui-guest-queue/README.md], related: [QG4C], github: null}
 ---
 # Serialize TUI guest prompts independently of the launch command
 

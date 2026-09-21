@@ -29,3 +29,6 @@ The guest's busy hooks/rollout tail must be operational. The frontend does not i
 from terminal output or a timeout: if no progress signal arrives it retains the reservation to
 avoid overwriting input. Commands handled entirely inside the guest (including local slash
 menus) may emit no turn signal; verify those interactions in the live acceptance pass as well.
+
+Landed implementation: `e2db1d06050a20bc7609a8ad60f3bd92fcfc1a7d`.
+The land gate built its exact committed tree with `scripts/relay-build --target relay relay-queuesubmit-tests` and ran `ctest --test-dir build -R "^queuesubmit$" --output-on-failure`, all successful. The shared `scripts/relay-build --target relay` also passed after the final source edit.
