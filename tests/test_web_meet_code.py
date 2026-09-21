@@ -487,9 +487,15 @@ class JoinPageTests(unittest.TestCase):
                     for attempt in (1, 2, 3):
                         await _type(browser, "meet-pin", "0000")
                         await browser.evaluate("document.getElementById('meet-join').click()")
+                        # The third wrong PIN is the one that burns the code, and the page says
+                        # that rather than "try again": it is the page that finds a PIN wrong, so
+                        # it is the page that has to count (the hosted drive, #FR1C task 4).
+                        sentence = "PIN is not right" if attempt < 3 else "stopped working"
                         await browser.wait_for(
-                            f"/PIN is not right/.test({NOTE}) && "
+                            f"/{sentence}/.test({NOTE}) && "
                             "!document.getElementById('meet-join').disabled")
+                        if attempt == 3:
+                            self.assertNotIn("trying again", await browser.evaluate(NOTE))
                         for _ in range(50):
                             if desktop.failures == attempt:
                                 break

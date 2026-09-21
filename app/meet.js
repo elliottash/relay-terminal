@@ -281,6 +281,16 @@ export function openCodeRoom(room, { origin = location.origin, connectWait = CON
   });
 }
 
+// Wrong PINs this page has tried, per code. A wrong PIN is found out *here* — the desktop's tag does
+// not check out, and the page hangs up, which is the failure the desktop counts — so the desktop
+// never gets to say `burned` to the try that burned the code, and the page went on saying "check
+// the PIN, then try again" about a code that had just stopped existing (the hosted drive, #FR1C
+// task 4). Three is the desktop's number (remote/meetcode.py MAX_FAILURES); a count kept here can
+// only be low — somebody else may have used up a try — and then the next attempt is told by the
+// desktop or the rendezvous, as before.
+const MAX_WRONG_PINS = 3;
+const wrongPins = new Map();
+
 // The whole code phase from two typed strings: find the room, run the exchange, close the room.
 export async function joinWithCode(code, pin, { origin = location.origin, fetcher,
                                                  connectWait = CONNECT_WAIT } = {}) {
@@ -294,6 +304,11 @@ export async function joinWithCode(code, pin, { origin = location.origin, fetche
   } catch (error) {
     // The room closing before the desktop's first answer means nobody was there to run it.
     if (error instanceof MeetError && error.kind === 'closed') throw new MeetError('no_answer');
+    if (error instanceof MeetError && error.kind === 'wrong_pin') {
+      const tried = (wrongPins.get(clean) || 0) + 1;
+      wrongPins.set(clean, tried);
+      if (tried >= MAX_WRONG_PINS) throw new MeetError('burned');
+    }
     throw error;
   } finally {
     channel.close();
