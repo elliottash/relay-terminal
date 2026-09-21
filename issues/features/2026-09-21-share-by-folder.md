@@ -7,12 +7,15 @@ assignee: codex
 rank: m
 created: '2026-09-21'
 source: 'Codex in Relay, 2026-09-21'
-links: {plans: [], commits: [42b1f54ff2345ae6a9f0bf01caf1d067c733367b], evidence: [docs/qa_evidence/2026-09-21-share-by-folder/], related: [], github: null}
+links: {plans: [], commits: [42b1f54ff2345ae6a9f0bf01caf1d067c733367b, de8714c131a8e0e0c9af3f0bb8e7477228027dea], evidence: [docs/qa_evidence/2026-09-21-share-by-folder/], related: [], github: null}
 ---
 # Move pane sharing beside the folder
 
 ## Issue
 how about we move the share button down next to the folder, rather than where it is at the top right
+
+## Decisions
+“no need to have the purple outline on it, make it look like the other buttons”
 
 ## Plan
 Move the existing share action and live state into the composer strip immediately after the folder. Remove the chrome share button and its L-shaped panel outline. Build and inspect the GUI with isolated settings.
@@ -22,12 +25,10 @@ Moved sharing into the prompt strip immediately after the folder path, preservin
 
 ## Tests
 manual: docs/qa_evidence/2026-09-21-share-by-folder/notes.md
+manual: docs/qa_evidence/2026-09-21-share-by-folder/neutral.md
 
 ## QA checklist
 - Confirm sharing is immediately right of the folder in the prompt strip, with no duplicate at top right.
 - Click sharing in an unshared pane and verify the sharing dialog opens.
 - On a shared pane, verify neutral styling and guest tooltip updates and clicking opens Sharing.
 - Check narrow panes and plan mode retain a usable strip layout.
-
-## Decisions
-“no need to have the purple outline on it, make it look like the other buttons”
