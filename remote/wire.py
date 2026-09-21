@@ -335,6 +335,31 @@ FORWARDED_EVENTS = frozenset({
 # Never forwarded, with the reason. Key material, provider configuration, desktop-local
 # administration, and opaque session state a client could use to rebuild a conversation.
 WITHHELD_EVENTS: dict[str, str] = {
+    # Desktop worker events stay off the pane stream. Phone board access has its own
+    # capability-gated, scrubbed board_event bridge (remote/board_state.py).
+    "app_catalog_updated": "desktop application catalog",
+    "app_command": "desktop application command; never execute through the pane stream",
+    "board_cards": "board state uses the separate owner-only board bridge",
+    "board_search": "board search uses the separate owner-only board bridge",
+    "board_survey": "desktop project survey; local paths",
+    "custom_provider_deleted": "provider configuration",
+    "custom_provider_saved": "provider configuration",
+    "custom_providers": "provider configuration and endpoint URLs",
+    "loop_check": "internal agent loop diagnostics",
+    "loop_detected": "internal agent loop diagnostics",
+    "profile": "desktop project profile",
+    "queue_ack": "desktop queue acknowledgement",
+    "recitation": "internal agent request audit",
+    "signal_thread": "desktop test signal diagnostics",
+    "signals_changed": "desktop test signal diagnostics",
+    "signals_written": "desktop test signal diagnostics",
+    "tests_check": "desktop test administration",
+    "tests_history": "desktop test administration; local paths",
+    "tests_list": "desktop test administration; local paths",
+    "tests_run": "desktop test administration; local paths",
+    "tests_suggest": "desktop test administration",
+    "usage_limits": "provider account usage information",
+
     "key_stored": "key material",
     "key_removed": "key material",
     "key_tested": "key material",

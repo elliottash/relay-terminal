@@ -22,16 +22,13 @@
 
 Switchboard rules (the `board_*` tools write to the repository's `issues/` tracker, in git):
 
-1. **Capture, and work through a card sized to the work.** Every distinct request the user makes
-   that you do not finish inside this turn becomes a card, or updates the card that already covers
-   it: `board_list` with a query first, one card per request, and never a card for your own working
-   steps (that is `update_todos`). *Small* — finished in this turn, verified by you (built, a test
-   run, or seen working), no design choice, no question for the user — gets no card; the commit is
-   the record. *Medium* (more than one turn or more than two files, no decision needed, a test
-   proves it) and *large* (needs a plan, a decision from the user, or changes UI) are started only
-   after you have checked the work is not already done and claimed the card that asks for it
-   (`board_claim`, on the card you found or the one you just created). Load the **`deliver`** skill
-   for the procedure; `/deliver` makes any request large, "just do it" or "no card" makes it small.
+1. **Capture work at its size.** Check code, history and `board_list` first; do not redo done work.
+   Each unfinished user request gets a card, or updates its existing card. One card per request,
+   never for your steps (`update_todos`). *Small*: finished and verified this turn, no design choice
+   or question; no card, the commit is the record. *Medium*: more than one turn or two files,
+   no decision needed, proved by a test. *Large*: needs a plan, a user decision or changes UI.
+   Before medium/large work, find or create the card and `board_claim` it. Load **`deliver`** for
+   the procedure. `/deliver` makes work large; "just do it" or "no card" makes it small.
 2. **The user's words are the record.** `request` is what they wrote, verbatim — do not paraphrase,
    correct or tidy it. The title is yours.
 3. **Questions** for the user go on the card as a `question` comment, and the card goes to
@@ -54,13 +51,7 @@ Switchboard rules (the `board_*` tools write to the repository's `issues/` track
    writing and summarize the rest of the requests in your reply.
 9. **Report what you did.** After a card write, name the card as `#ID` in your reply with one line
    about the change, so the user can find it.
-10. **A card body is one section per stage**, written as the stage produces it, in this order:
-    `## Issue` (the request, verbatim — the owner's words), `## Decisions` (owner decisions,
-    quoted, whenever they happen), `## Discussion points` (what the owner is considering),
-    `## Planning notes` (decision factors, options not taken, questions asked with their
-    options, the owner's answers), `## Plan`, `## Tasks` (the live checklist), `## Execution
-    Summary` (what was built, links to the outputs), `## Tests` (what was automated),
-    `## QA checklist` (what a verifier must check by hand; the verifier may adjust it),
-    `## Verdict` (the verifier: how it was checked, and the result — a `## Resolution` is not
-    one), `## Resolution` (when and why the card closed). Write the section your stage
-    produces and invent no others; `relay-board.py check` warns on any heading outside the set.
+10. **One body section per stage**, produced in order: Issue (user's verbatim request), Decisions
+    (quoted), Discussion points, Planning notes, Plan, Tasks, Execution Summary, Tests, QA checklist,
+    Verdict, Resolution. Write only the section the current stage produces; invent no headings.
+    A verifier writes Verdict, not Resolution; Resolution records when and why the card closed.

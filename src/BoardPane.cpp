@@ -4705,7 +4705,7 @@ void BoardView::ensureCardConsole()
     // queue strip, Esc — and hiding it until the first byte would be a flicker on every first
     // turn and a card page that looks like it has no agent in it.
     m_detail->setConsole(handle.widget,
-                         handle.widget->findChild<RichEditor *>(QStringLiteral("composerEditor")));
+                         dynamic_cast<RichEditor *>(handle.widget->findChild<QPlainTextEdit *>(QStringLiteral("composerEditor"))));
     updateConsoleHeight();   // a maximum alone is not a size, and this one draws the turn
 }
 
