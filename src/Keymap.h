@@ -233,7 +233,7 @@ private:
         add("pane.darken", "pane", "Dim pane", {QStringLiteral("Alt+-")});
         add("pane.dimToggle", "pane", "Toggle manual pane dimming", {QStringLiteral("Alt+D")});
         add("pane.focusMode", "pane", "Toggle focus mode", {});
-        add("pane.autoDim", "pane", "Toggle hide until you need me", {QStringLiteral("Ctrl+Alt+D")});
+        add("pane.autoDim", "pane", "Toggle dim while working", {QStringLiteral("Ctrl+Alt+D")});
         add("terminal.zoomIn", "terminal", "Zoom terminal in", {QStringLiteral("Ctrl++"), QStringLiteral("Ctrl+="), QStringLiteral("Ctrl+Shift+=")});
         add("terminal.zoomOut", "terminal", "Zoom terminal out", {QStringLiteral("Ctrl+-"), QStringLiteral("Ctrl+Shift+-")});
         add("terminal.zoomReset", "terminal", "Reset terminal zoom", {QStringLiteral("Ctrl+0"), QStringLiteral("Ctrl+Shift+0")});

@@ -3117,7 +3117,7 @@ private:
             usage.aliases = QStringLiteral("cpu memory ram usage load percent meter resource");
             appearance.rows << usage;
         }
-        appearance.rows << toggleRow(QStringLiteral("appearance/auto_dim"), QStringLiteral("Hide until you need me"),
+        appearance.rows << toggleRow(QStringLiteral("appearance/auto_dim"), QStringLiteral("Dim while working"),
             QStringLiteral("Dim working agents; reveal questions, blocked work and completion. Manual dimming survives completion."), false);
         appearance.rows << toggleRow(QStringLiteral("appearance/focus_mode"), QStringLiteral("Focus mode"),
             QStringLiteral("Dim other panes while you work in the selected pane. Attention reveals a pane without moving focus."), false);
@@ -4371,7 +4371,7 @@ private:
         items << actionItem(panes, QStringLiteral("Brighten pane"), QStringLiteral("Reduce dimming by 5%"), QStringLiteral("pane.brighten"));
         items << actionItem(panes, QStringLiteral("Dim pane more"), QStringLiteral("Increase dimming by 5%"), QStringLiteral("pane.darken"));
         items << actionItem(panes, QStringLiteral("Focus mode"), QStringLiteral("Dim other panes"), QStringLiteral("pane.focusMode"), relay::settings::boolValue(QStringLiteral("appearance/focus_mode"), false));
-        items << actionItem(panes, QStringLiteral("Hide until you need me"), QStringLiteral("Dim working agents"), QStringLiteral("pane.autoDim"), relay::settings::boolValue(QStringLiteral("appearance/auto_dim"), false));
+        items << actionItem(panes, QStringLiteral("Dim while working"), QStringLiteral("Dim working agents"), QStringLiteral("pane.autoDim"), relay::settings::boolValue(QStringLiteral("appearance/auto_dim"), false));
         items << actionItem(panes, QStringLiteral("Close pane"), QStringLiteral("Then the tab, then the window"), QStringLiteral("pane.close"));
         items << actionItem(panes, QStringLiteral("Move pane to new tab"), QStringLiteral("Keeps the shell and agent running"), QStringLiteral("pane.moveToNewTab"));
         {
