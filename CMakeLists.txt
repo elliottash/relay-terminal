@@ -520,8 +520,8 @@ if(RELAY_BUILD_APP)
     # IDEs see them.
     add_executable(relay src/main.cpp
         src/AppPaths.h src/CopyOnSelect.h src/Keymap.h src/Isolation.h src/GuestBridge.h src/Pane.h src/ApprovalsPane.h
-        # The agent surface and the seam it is drawn through (#AGNT step 1, scripts/split-agent-console.py).
-        src/AgentHost.h src/AgentConsole.h
+        # The seam a console makes its surface calls through (#AGNT).
+        src/AgentHost.h
         src/TranscriptReplay.h
         src/PaneChrome.h
         src/WindowChrome.h src/RelayWindow.h src/WindowManagerImpl.h
@@ -535,8 +535,8 @@ if(RELAY_BUILD_APP)
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
     target_link_libraries(relay PRIVATE relay-closedlist relay-localmodels relay-projects relay-escapees relay-appcommands)
-    # What an agent is about (#AGNT step 3): src/AgentConsole.h takes a relay::agent::Context, and
-    # Pane supplies the terminal one. QtCore only, so this is a link edge and not a dependency.
+    # What an agent is about (#AGNT): a Pane takes a relay::agent::Context, and supplies the
+    # terminal one itself. QtCore only, so this is a link edge and not a dependency.
     target_link_libraries(relay PRIVATE relay-agentcontext)
     target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-modelcatalog relay-modelrows relay-modelpicker relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-queuesubmit relay-logging relay-voice relay-images relay-titles relay-panestatus relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::DBus ${RELAY_QT}::Network)
     target_compile_definitions(relay PRIVATE
@@ -767,6 +767,50 @@ if(BUILD_TESTING)
     target_include_directories(relay-transcriptreplay-tests PRIVATE src)
     target_link_libraries(relay-transcriptreplay-tests PRIVATE ${RELAY_QT}::Test)
     add_test(NAME transcriptreplay COMMAND relay-transcriptreplay-tests)
+    # A pane with no shell is still the whole console (#AGNT): it builds real `Pane`s, so it
+    # compiles src/Pane.h as a translation unit of its own and links what the `relay` target
+    # links. The two extra targets here are the price of proving the console mode without a
+    # `RelayWindow`, which is exactly the property being proved.
+    add_executable(relay-consolemode-tests tests/consolemode_test.cpp)
+    add_executable(relay-console-harness tests/console_harness.cpp)
+    foreach(console_target relay-consolemode-tests relay-console-harness)
+        target_include_directories(${console_target} PRIVATE src engine)
+        target_link_libraries(${console_target} PRIVATE
+            relay-closedlist relay-localmodels relay-projects relay-escapees relay-appcommands
+            relay-agentcontext
+            relay-hints relay-modelsettings relay-modelcatalog relay-modelrows relay-modelpicker
+            relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor
+            relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations
+            relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate
+            relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav
+            relay-queuesubmit relay-logging relay-voice relay-images relay-titles relay-panestatus
+            relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig
+            relay-terminal-engine relay-screen relay-slash relay-board relay-aliases
+            relay-calllines relay-diffview relay-sharing relay-remotepane relay-internals
+            relay-panestate relay-remotesettings
+            ${RELAY_QT}::DBus ${RELAY_QT}::Network ${RELAY_QT}::Widgets)
+        target_compile_definitions(${console_target} PRIVATE
+            RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
+            RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+            RELAY_VERSION="${PROJECT_VERSION}")
+    endforeach()
+    # The headers are listed for the same reason the `relay` target lists them: AUTOMOC reads the
+    # source list, and a header it meets only through an include is parsed by moc instead --
+    # which trips over the raw string in src/Keymap.h ("Ctrl+Shift+(").
+    foreach(console_target relay-consolemode-tests relay-console-harness)
+        target_sources(${console_target} PRIVATE
+            src/AppPaths.h src/CopyOnSelect.h src/Keymap.h src/Isolation.h src/GuestBridge.h
+            src/Pane.h src/ApprovalsPane.h src/AgentHost.h src/TranscriptReplay.h src/RelayMark.h
+            src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h
+            src/TurnTranscript.cpp src/TurnTranscript.h src/SkillsDialog.cpp src/SkillsDialog.h
+            src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
+            src/TestSuitesModel.cpp src/TestSuitesModel.h src/TestSuitesPane.cpp src/TestSuitesPane.h
+            src/ProfilePane.cpp src/ProfilePane.h
+            src/RemoteShare.cpp src/RemoteShare.h)
+    endforeach()
+    add_test(NAME consolemode COMMAND relay-consolemode-tests)
+    set_tests_properties(consolemode PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
     add_executable(relay-panestate-tests tests/panestate_test.cpp)
     target_link_libraries(relay-panestate-tests PRIVATE relay-panestate ${RELAY_QT}::Test)
     add_test(NAME panestate COMMAND relay-panestate-tests)
