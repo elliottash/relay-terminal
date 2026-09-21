@@ -407,3 +407,65 @@ The owner's rulings of 2026-09-21 on the ranking file, in his words: the Models 
 <!-- relay:entry 20260921T202545Z-q1 author=claude-code kind=decision -->
 ### Claude Code · 2026-09-21 20:25
 Owner, 2026-09-21: "the text filter isnt working -- its supposed to show all available models, not just the ones selected for the box picker … there need to be 4 steps of model availability: 1 add provider, 2 add model as available, 3 add model to priority list, 4 include model in box picker. we currently only have 1, 3, 4. and its step 2 that determines the models available in the text filter. for branded providers, all models are included by default and you can uncheck them (eg i probably want to uncheck sonnet and haiku and gpt 5.5). but then for openrouter, you have to select specific models -- and maybe there are some recommended ones by default, deepseek 4.1 and gemini 3.8 flash for example." Step 2 comes back (t:a10 had retired `models/shown`); the box filter searches step 2.
+
+<!-- relay:entry 20260921T204836Z-w1 author=claude-fable kind=progress -->
+### Claude Fable · 2026-09-21 20:48
+**The worker half of the owner's 2026-09-21 rulings is landed** (`fable-lvl`), in five commits.
+
+`36a7972c` — **his ranking file, unchanged.** His Providers re-numbering (harnesses first), his
+Models classes per vendor, and the two tables he added and filled in: `## Provider picks` and
+`## Levels`. Landed whole, as his edit, before any code read them.
+
+`f022d3a7` — **the parser.** `Ranking.pick(provider, klass)` and `Ranking.level(name, klass)`. One
+reader serves both tables: a fixed key column, then one column per class in whatever order the file
+writes them (a class may be left out, the four may be re-ordered, a trailing `notes` is read by
+nobody), and blank / `-` / `none` all mean "nothing said". Both tables are **optional**, so a copy
+of the file without them parses and every rule falls back to code — which is what lets him add or
+empty one table at a time.
+
+`a8fd95c4` — **effort levels are the model's own.** *"i want the effort options in relay to be
+determined by the model … so xhigh shows up for codex."* `EFFORT_MAP` and `effort_labels` are gone:
+`EFFORT_LEVELS` is the words each endpoint takes, and the word offered is the word sent. The whole
+compatibility read is `nearest_effort` — the weakest listed level that is at least as much work,
+the top of the list when there is none — which reproduces every answer the old mapping table gave,
+so a GUI still sending `max` to the OpenAI API gets `xhigh`. `effort_fixed` is new on every model
+row and every provider row: true for a model with no knob, and for every Relay Free model, whose
+gateway clamps each role whatever is asked (*"for no knob models, the effort box should be grayed
+out. same for relay free"*). The Levels table now decides the level on every default-filled entry,
+on a hand-added model and on a pane's own pick; the Provider picks table replaces a provider's
+candidate for a class (OpenRouter's Main is `glm-5.3-flash` however the Models table classes it) and
+absorbed `LITE_LIST_FIRST`. Lite is `relay-lite` for everyone while Relay Free can run, with the
+other button leading on OpenRouter's own lite pick. Gemini gained `gemini-pro-latest` and
+`gemini-flash-latest`, with the concrete rows left a default for nothing, and DeepSeek runs
+`deepseek-flash` on all three tiers with Pro classed for nothing.
+
+`edb4a21b` — **the harness in flash, and the Relay Free fall-through.** `GUEST_TIERS` gains
+`flash`, so a `/flash` pane can run on Claude Code; `BACKGROUND_ROLES` (terminal use, summaries,
+suggestions, chores, audit, loop check — derived from `ROLE_TIERS`, so a new role on either tier is
+covered) skip a guest entry and take the next one, and refuse a pin onto one. On a pane whose own
+model *is* a harness, with nothing usable left in the list, they run on `relay-flash` / `relay-lite`
+instead of a "using main" that is no answer at all.
+
+and the docs commit that follows these — protocol §3 (rewritten: the levels table is now what each endpoint takes), §13.2, §13.7,
+§13.8 and §15.2.2; design §5.6; the ranking file's "How to edit" header, which now describes four
+tables and says `order` must be unique; README; `docs/RELAY-FREE.md` and `docs/ARCHITECTURE.md`,
+which named the retired symbols.
+
+**Two things for whoever picks this up.**
+
+1. `src/Pane.h`'s BYOK dialog keeps its own copy of the preset table, and it still reads
+   `{"deepseek", "deepseek · v4 pro", …, "deepseek-v4-pro"}`. It needs to say
+   `deepseek · v4.1 flash` / `deepseek-flash`, and until it does
+   `test_presets.GuiMirrorTests.test_the_cpp_preset_table_matches_presets_py` fails. Two string
+   literals; `fable-effort` holds that header and this session was told not to touch `src/`.
+2. The Relay Free fall-through is narrower than the sentence that asked for it. It fires only where
+   "using main" is not an answer — a pane whose own model is a harness — because a pane on a custom
+   endpoint or a local server also has no tier defaults, and there its own model is the better
+   answer: `suggestions` carries recent command output and its `ACTIONS` row promises it "stays on
+   your own provider". The one line to widen is marked in `roles._relay_free_role`.
+
+Targeted tests green: `test_model_ranking` 40, `test_presets` 51 (bar the mirror above),
+`test_tier_lists` 44, `test_roles` 74, `test_failover` 56, `test_session_protocol` 35,
+`test_guest_harness_provider` 63, `test_openrouter_catalog` 13, plus `test_agent`, `test_subagents`,
+`test_local_tier` and every other Python test that mentions `effort`. `test_images` (2) and
+`test_plan_turns` (1) fail on a clean export of `main` as well and are not this work.

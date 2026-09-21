@@ -76,7 +76,11 @@ that conflict.
    with the cheaper OpenRouter twins after your own models; those defaults
    come out of `backend/relay_core/model-ranking.md`, a file you can read and edit — with no
    provider set up you get Relay's three included models, with one you get one model per list, and
-   with two or more you get two, by score and never twice from the same provider. A **profile**
+   with two or more you get two, by score and never twice from the same provider — and **lite** is
+   Relay's included model for everyone by default, since a title or a duplicate check is not worth
+   your own key. That file also says where each model starts on the reasoning dial, in the words
+   its provider uses: Relay no longer has four levels of its own, so codex offers `xhigh` and Kimi
+   offers `max` because those are the levels those models have. A **profile**
    names the five lists as a set — "AI work", "admin work" — and switching one in, there or with
    `/profile`, swaps every list at once for every pane; a profile exports to a JSON file you can
    mail, commit or carry to another machine, and imports back. Claude Code

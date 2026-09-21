@@ -24,9 +24,11 @@ Relay desktop ── Bearer <short-lived token> ──▶ api.relay-terminal.ai 
 ```
 
 **Reasoning is medium and below** (owner, 2026-09-18). The desktop's effort picker offers Low
-and Medium on Relay Free (`EFFORT_MAP["relay"]` in `presets.py`; Main defaults to Medium, Flash to
-Low, Lite to the gateway's minimal), and the gateway clamps whatever it is sent to each role's
-`max_effort`, so a modified client asking for more gets medium, not an error.
+and Medium on Relay Free (`EFFORT_LEVELS["relay"]` in `presets.py`; Main defaults to Medium, Flash
+to Low, Lite to the gateway's minimal), and the gateway clamps whatever it is sent to each role's
+`max_effort`, so a modified client asking for more gets medium, not an error. Since 2026-09-21 the
+picker is greyed on every Relay Free row (`effort_fixed`, card #MDL1): the clamp that decides is
+the gateway's, per role, so a control the user could move would only pretend.
 
 The desktop knows three abstract models, `relay-main`, `relay-flash` and `relay-lite`. They are the
 Main, Flash and Lite tiers of one more provider row, `relay-free`, in `backend/relay_core/presets.py`;

@@ -74,28 +74,46 @@ of them. Sending an endpoint with no preset is unchanged: the key is looked up f
   - Idle, it applies at once as before: `applies: "now"`, then `context`. An idle switch that must compact first runs that compaction as an exclusive task (queued prompts wait for it, like `/compact`): `model_changed {applies: "after_compaction", in_flight_model, will_compact: true}`, then the compaction, then `model_applied {at: "now", compacted: true}`. A turn-end landing that must compact does the same, before the next queued turn starts. `set_agent_role` goes through all of this too.
 - `set_effort {effort}` → event `effort_changed {effort, applied: {...provider params}}`.
 
-## 3. Effort mapping
+## 3. Effort levels (v3.11, 2026-09-21: the model's own words)
 
-| Relay effort | Kimi K3 | GLM-5.3 (Z.AI) | OpenRouter DeepSeek |
-|---|---|---|---|
-| low | `reasoning_effort: low` | `thinking: enabled`, `reasoning_effort: low` | `reasoning: {effort: low}` |
-| medium | `high` | `high` | `medium` |
-| high | `high` | `high` | `high` |
-| max | `max` | `max` | `high` (or `xhigh` if supported) |
+**A level is the provider's own word, and the word offered is the word sent.** Until v3.11 Relay had
+four levels of its own — low, medium, high, max — every provider's knob was mapped onto them, and a
+second table (`effort_labels`) said what each one was really sent as. The owner ended that (card
+#MDL1): *"i want the effort options in relay to be determined by the model … so xhigh shows up for
+codex for example."* `presets.EFFORT_LEVELS` is now the list of words each endpoint takes, weakest
+first, and there is nothing to translate:
+
+| Endpoint | Levels offered, which are the levels sent |
+|---|---|
+| OpenAI, OpenRouter | `low`, `medium`, `high`, `xhigh` |
+| Kimi, GLM, DeepSeek | `low`, `high`, `max` |
+| Gemini | `low`, `medium`, `high` |
+| Relay Free (13.9) | `low`, `medium` |
+| Anthropic's compat layer, MiniMax | none at all (`[]`) |
+| Claude Code (29.3) | `low`, `medium`, `high`, `xhigh`, `max` |
+| codex (29.3) | `low`, `medium`, `high`, `xhigh`, `max`, `ultra`, narrowed per model |
 
 Verify against provider docs before shipping; keep the table in `backend/relay_core/presets.py`.
+The two guest CLIs are not in it — each reports its own list over its own protocol, which is the
+shape this table now has for everyone else.
 
-**What a picker offers** (v2.10, 2026-09-18). Every preset in the `presets` event carries `efforts` —
-`presets.effort_levels`, one entry per request that endpoint can actually make — and `effort_note`, one
-line naming the levels it does not have ("medium is sent as high."). Two levels that send the same
-request are one entry, and the entry keeps the name the provider itself sends: Kimi and GLM offer
-`["low", "high", "max"]`, Gemini `["low", "medium", "high"]`, Relay Free `["low", "medium"]` (13.9),
-and a provider with no effort knob at all (Anthropic, MiniMax) offers `[]`. Keeping the *first* of a
-group instead offered "medium" on Kimi and GLM and dropped "high" — Relay's own default, and the level
-every other picker shows — so the roles modal could not display the pane's effort at all (owner report,
-2026-09-18: "in the models options page, there was low, medium, high, max reasoning. but in the model
-roles, there were only 3 options"). A *stored* level is still any of the four: a pane, a tier or a role
-keeps what it was set to across a provider switch, and the GUI shows it as the level it is sent as.
+**What a client may send.** Any word the model it names offers. A word it does not — an older GUI
+still holding Relay's four, or a level carried over from another provider — is read as *the weakest
+level the model has that is at least as much work, and its top level when there is none*
+(`presets.nearest_effort`): `max` on the OpenAI API is `xhigh`, `max` on Gemini is `high`, `medium`
+on Kimi is `high`, `high` on Relay Free is `medium`. Those are, one for one, what the old mapping
+table sent, so nothing a v3.10 client sends changes meaning. A word no provider has at all is a
+typo: `configure`, `set_effort`, a `roles` entry and `resolve_entry` refuse it naming the model's
+own levels, a `tiers` list entry drops the level and keeps the entry, and nothing is ever sent that
+the endpoint is known not to take.
+
+**`effort_fixed`: when the box is greyed** (v3.11, owner: *"for no knob models, the effort box
+should be grayed out. same for relay free"*). Every preset row of the `presets` event and every
+`models` row carries it. It is `true` for a model with no levels at all, and for every Relay Free
+model: those have two levels and send them, but the gateway clamps each role to its own ceiling
+(13.9), so a control the user could move would only pretend. The GUI still shows the level; it just
+cannot be changed. `effort_note` survives for the one thing that is not about vocabulary — Relay
+Free's ceiling — and is `""` everywhere else, because nothing is silently sent as anything now.
 
 ## 4. Context and compaction
 
@@ -959,7 +977,7 @@ the pane's own model). Each value is `null`, `{}` or `{"inherit": true}` for "sa
 | `base_url` + `model` | string | a custom endpoint instead of a preset (both required together) |
 | `model` | string | with `preset`: a different model id on that provider |
 | `extra` | object | provider params; defaults to the preset's `extra`, or — when `model` names one of that provider's *other* models — to that model's own (`presets.model_extra`, the rule a tier list entry follows: glm-5.3-flash is the same request whether it was ranked under Flash or picked by hand) |
-| `effort` | `low`/`medium`/`high`/`max` | mapped as in section 3; omitted means the provider's own default, and a level asked of a model with no effort knob (Kimi's high-speed ones) is not sent |
+| `effort` | string | one of the levels **that model** offers (section 3), in the provider's own word; omitted means the provider's own default, a level the model does not have is read through `nearest_effort`, and a level asked of a model with no effort knob (Kimi's high-speed ones) is not sent |
 
 A role may name a provider **and** a model **and** a level together, and does routinely since card
 #PK5Q: every helper agent's model box lists a provider's models one by one, the way a terminal
@@ -1073,9 +1091,11 @@ be picked manually."). `configure` and `set_agent_options` accept
           "local": [{"preset": "local:bonsai", "model": "bonsai-2-27b"}]}
 ```
 
-where an entry is `{"preset": <id>, "model": <id or "">, "effort": <Relay level, or absent>}` — a model
-**plus a reasoning level** ("for codex planning you pick xhigh, not max; for glm 5.3 you pick max": the
-level stored is Relay's, the word shown is the provider's, see `effort_labels` in 13.8). An empty `model`
+where an entry is `{"preset": <id>, "model": <id or "">, "effort": <that model's own level, or
+absent>}` — a model **plus a reasoning level** ("for codex planning you pick xhigh, not max; for glm 5.3
+you pick max"). Since v3.11 the level is stored and sent in the provider's own word (section 3): a level
+that model does not have is read through `nearest_effort` on the way in, and one no provider has is
+dropped, leaving the entry and the model's own default. An empty `model`
 is that provider's model for the tier; an absent `effort` is the model's own default; a `guest:<id>`
 entry keeps its `effort` as written, because a guest's levels are its CLI's own words (29.3).
 **A list never errors on shape** (`roles.validate_tiers`): an entry that is not an object, has no
@@ -1105,22 +1125,41 @@ built-in default**: `high` is the pane's own model at `max`, `flash` / `lite` th
 order the helper agent leaves a guest by (`leave_guest`, 30.7). It supersedes the `fallbacks` option
 (12.1), which is still accepted and **is** the Main chain whenever no `tiers.main` list was sent.
 
-**Guests.** A `guest:<id>` entry (Claude Code, Codex; 29.3) is usable in **`main` and `high`** and
-nowhere else (`roles.GUEST_TIERS`). In `main` it holds its place (the GUI's default model, and the point
-a walk starts after when the pane is that guest). In `high` (v4.4, 2026-09-20; owner: "claude and codex
-weren't showing up under 'high' models", and "for codex planning you pick xhigh") it is **usable when its
-harness runs here** — the adapter imports, the CLI is on PATH and has not said it is signed out
-(`roles.guest_runnable`, the guest counterpart of the key lookup) — and a plan turn that resolves to it
-**starts that guest's harness for the turn** (13.11): a fresh session in the pane's workspace, at the
-entry's level in the guest's own words, ended when the turn is over, and the pane's own model comes back
-as after any plan route. A guest whose harness cannot run is skipped for the entry below, and the tier's
-`note` says so ("… cannot be used right now (no stored key, or a guest that cannot run here)"). In
-`flash`, `lite` and `local` a guest is skipped at resolution and at failover alike, without a note,
-because it is not a missing key: those tiers are side calls (a title, a summary, the audit) and per-turn
-swaps of a conversation already under way, and a harness is a whole agent of its own with its own
-transcript — it can take a turn from its first step, never one half-way through. For the same reason a
-guest is **never a failover target** on any list, `high` included (15.2.2): a turn cannot be moved onto
-a harness mid-way.
+**Guests.** A `guest:<id>` entry (Claude Code, Codex; 29.3) is usable in **`main`, `high` and
+`flash`** and nowhere else (`roles.GUEST_TIERS`). In `main` it holds its place (the GUI's default model,
+and the point a walk starts after when the pane is that guest). In `high` (v4.4, 2026-09-20; owner:
+"claude and codex weren't showing up under 'high' models", and "for codex planning you pick xhigh") it is
+**usable when its harness runs here** — the adapter imports, the CLI is on PATH and has not said it is
+signed out (`roles.guest_runnable`, the guest counterpart of the key lookup) — and a plan turn that
+resolves to it **starts that guest's harness for the turn** (13.11): a fresh session in the pane's
+workspace, at the entry's level in the guest's own words, ended when the turn is over, and the pane's own
+model comes back as after any plan route. A guest whose harness cannot run is skipped for the entry
+below, and the tier's `note` says so ("… cannot be used right now (no stored key, or a guest that cannot
+run here)").
+
+`flash` joined the two on 2026-09-21 (v3.11; owner: "the worker should allow the harness for flash, and
+defaults should be the same across plans / apis / harnesses"), and it is the tier where the distinction
+has to be drawn, because it is both a pane and a set of chores. The **`flash` role** is the pane `/flash`
+switches to, and a harness can own that conversation from its first turn, so a guest entry of the Flash
+list serves it exactly as one serves High. Every **other** role on the Flash tier and every role on Lite
+— `terminal_use`, `summaries`, `suggestions`, `chores`, `audit`, `loop_check`: `roles.BACKGROUND_ROLES`
+— is a side call *into* a conversation already under way, or a per-turn swap of one, and a harness is a
+whole agent of its own with its own transcript: it can take a turn from its first step, never one
+half-way through. Those roles skip a guest entry at resolution and at failover alike, without a note,
+because it is not a missing key, and take the next entry of the list instead; a role pinned to a guest
+is refused the same way. `lite` and `local` are never a guest's at all. For the same reason a guest is
+**never a failover target** on any list, `high` included (15.2.2): a turn cannot be moved onto a harness
+mid-way.
+
+**A harness pane's background jobs run on Relay Free** (v3.11, 2026-09-21; owner: "so if somebody just
+has a harness, the flash chores run on relay flash?" — "i agree"). When a background role finds nothing
+usable in its tier's list *and* the pane's own model is a harness — which cannot take a side call either,
+so stepping down to Main is no answer at all — it resolves to Relay Free's role for its own tier,
+`relay-flash` for a Flash job and `relay-lite` for a Lite one, with the `note` "Nothing in the … list can
+take this job; using relay free." It needs Relay Free to be usable here (13.9) and is never reached from a
+pane's own turn. It is deliberately no wider than that: a pane on a provider Relay cannot name also has
+no tier defaults, and there the pane's own model *is* an answer and the better one — `suggestions`
+carries recent command output and promises to stay on your own provider.
 
 **The High tier** (v3.9, 2026-09-20; owner: "there needs to be a 'high' default on top of main, used by
 the planner by default") sits above Main and is listed first in `tier_defaults.tiers`, so the roles modal
@@ -1179,12 +1218,24 @@ buttons only apply one of them and send it back as `tiers`:
                        "openrouter": {"main": [entry…], "high": […], "flash": […], "lite": […], "local": […]}}
 ```
 
-- **`plain`** (v4.5, card #MDL1) — computed from `backend/relay_core/model-ranking.md`, a file in
-  the repo the owner reviews and edits: a **Providers** table (`provider | kind | order`, kind one of
-  `plan`, `harness`, `api`, `router`, `free`, `order` the tie-break, lower first) and a **Models**
-  table (`name | classes | score | notes`), keyed by the one name a model has (rule 1) and
-  classed by `high`, `main`, `flash`, `lite`. Its `score` column *is* `presets.INTELLIGENCE`, which
-  is now a view over it, and its `order` column replaces the old group order.
+- **`plain`** (v4.5, card #MDL1; two more tables in v3.11, 2026-09-21) — computed from
+  `backend/relay_core/model-ranking.md`, a file in the repo the owner reviews and edits. Four pipe
+  tables: **Providers** (`provider | kind | order`, kind one of `plan`, `harness`, `api`, `router`,
+  `free`, `order` the tie-break, lower first and unique), **Models** (`name | classes | score |
+  notes`), keyed by the one name a model has (rule 1) and classed by `high`, `main`, `flash`,
+  `lite`, **Provider picks** (`provider | high | main | flash | lite`) and **Levels**
+  (`name | high | main | flash | lite | notes`). Its `score` column *is* `presets.INTELLIGENCE`,
+  which is now a view over it, and its `order` column replaces the old group order.
+
+  **Provider picks** is a provider whose defaults differ from the shared Models rows: a cell names
+  a model by its Models-table name and replaces that provider's candidate for that class outright,
+  a blank cell follows the Models table, and a provider with no row follows it entirely. Only
+  `openrouter` has a row today. **Levels** is where a model starts in each class, in the words of
+  whichever provider runs it (`presets.nearest_effort` maps the cell, because the table is keyed by
+  name and one name can be served two ways); a blank cell is the rule below. Both tables are
+  optional — a file without them parses and every rule stays in code — and `check()` reports a
+  column that is not one of the four classes, a key neither older table names, a pick its provider
+  does not serve, and a level no provider that serves the model offers.
 
   The worker counts the providers that can take a turn right now — a built-in preset with a stored
   key, a guest harness that runs here and has not said it is signed out, a keyed custom provider;
@@ -1197,18 +1248,27 @@ buttons only apply one of them and send it back as `tiers`:
   Two presets of one company (`glm` and `glm-coding`) are **one provider**, and the plan wins the
   tie, so the credit already paid for is spent first. A guest's models are scored by **name** like
   anyone else's (`opus` is `claude-opus-5`, `gpt-6-astra` through codex scores what the OpenAI API's
-  does) and a guest is offered for `high` and `main` only — the tiers a guest entry may serve
-  (`roles.GUEST_TIERS`), because a Flash or Lite call is a side call to a running conversation.
-  Relay Free appears nowhere once anything else can take a turn.
+  does) and a guest is offered for `high`, `main` and `flash` — the tiers a guest entry may serve
+  (`roles.GUEST_TIERS`; `flash` since 2026-09-21, owner: "the worker should allow the harness for
+  flash, and defaults should be the same across plans / apis / harnesses") — and never for `lite`,
+  which is nothing but background jobs.
 
-  The **levels** are unchanged: `main` the provider's own default level for that model (absent
-  where it has none), `high` the top level it offers (`max`; `high` on Gemini; `medium` on Relay
-  Free), a guest's in its own word — Claude Code's the last its `efforts` list names (`max`),
-  Codex's `xhigh` when its model offers it (`presets._guest_top_level`). Every `flash` and `lite`
-  entry says its **lowest level outright** (`low`; owner, 2026-09-20: Lite is "with no reasoning"),
-  so the GUI never shows a blank level; only a model with no knob at all (Kimi's high-speed ones,
-  MiniMax's) carries none (`presets._low_level`). `local`: the saved endpoints, in their own order
-  — the local class belongs to no provider and is not ranked.
+  **`lite` is Relay Free** while Relay Free can run here, however many keys are stored (owner,
+  2026-09-21: "for lite, i am thinking to simplify that and just everybody is on relay free by
+  default, or openrouter if they want privacy"): the list is `relay-lite` and nothing else. That is
+  the one exception to "Relay Free appears nowhere once anything else can take a turn", which holds
+  for `high`, `main` and `flash` as before. Without Relay Free, `lite` is ranked out of the file
+  like every other class.
+
+  The **levels** are the file's **Levels** row for that model's name, in the words of the provider
+  that will run it. A blank cell is the rule that was there before the table: `main` the provider's
+  own default level for that model (absent where it has none), `high` the top level it offers
+  (`max`; `xhigh` on the OpenAI API; `high` on Gemini; `medium` on Relay Free), a guest's in its own
+  word — Claude Code's the last its `efforts` list names, Codex's `xhigh` when its model offers it
+  (`presets._guest_top_level`) — and `flash` and `lite` the **lowest level** (owner, 2026-09-20:
+  Lite is "with no reasoning"), so the GUI never shows a blank level; only a model with no knob at
+  all (Kimi's high-speed ones, MiniMax's) carries none (`presets._low_level`). `local`: the saved
+  endpoints, in their own order — the local class belongs to no provider and is not ranked.
 - **`openrouter`** (owner: "openrouter twins are after the subscription models, and are cost sensitive;
   the openrouter one is most important for chores and transcription") — the plain lists, and then,
   **only when the `openrouter` preset has a key**, the OpenRouter twins (`OPENROUTER_TWINS`) of each
@@ -1219,12 +1279,13 @@ buttons only apply one of them and send it back as `tiers`:
   `openai/gpt-6-astra` and `anthropic/claude-opus-5` are out). A twin whose price is unknown (no listing
   fetched yet) is left out of `main` and `high` and kept in `flash` and `lite`. A `flash` or `lite` twin
   says `low` like the rest of its list, unless the listing says the model takes no level. `lite`
-  **starts with** Gemini 3.5 Flash-Lite through OpenRouter at `low` (`google/gemini-3.5-flash-lite`,
-  `presets.LITE_LIST_FIRST`; owner, 2026-09-20: "I thought it's 3.5 flash lite with no reasoning"),
-  ahead of the providers' own. That is the *list's* first entry only: the built-in Lite row a pane
-  resolves to with no list at all (`presets._LITE_VIA_OPENROUTER`, `google/gemini-3.8-flash`) is
-  unchanged, and so is `plain`, which ranks `lite` out of the ranking file like every other class:
-  putting OpenRouter first for chores is what pressing *this* button means (v4.5). Without the key
+  **starts with OpenRouter's own Lite pick** — the `## Provider picks` row in the ranking file,
+  `google/gemini-3.5-flash-lite` today, at `low` — with `relay-lite` behind it, so a router that is
+  refusing calls does not leave Lite empty. (`presets.LITE_LIST_FIRST`, which said the same thing
+  as that cell, is retired in v3.11.) That is the *list's* first entry only: the built-in Lite row a
+  pane resolves to with no list at all (`presets._LITE_VIA_OPENROUTER`, `google/gemini-3.8-flash`)
+  is unchanged, and so is `plain`, whose Lite is Relay Free: choosing the router over Relay's
+  allowance for chores is what pressing *this* button means (v4.5). Without the key
   the two are identical.
 
 The prices arrive with OpenRouter's listing, so the worker's unasked `presets` push when that lands
@@ -1293,12 +1354,13 @@ says, because the row itself settles those two. A client that sees neither field
 — falls back to its own ordering, which is what it did before this pair existed.
 
 Since 2026-09-20 every cloud preset row also carries `models`: the models that row can be set to, as
-`[{id, name, label, tier, efforts, effort_labels, intelligence, openrouter}]` from `presets.MODEL_CATALOG` — `id` is what
+`[{id, name, label, tier, efforts, effort_fixed, intelligence, openrouter}]` from `presets.MODEL_CATALOG` — `id` is what
 the API takes, `name` is what a person reads (below) and `label` is the same string, `tier` is `main` / `flash` / `lite` for a model the tier table
 (13.7) names on that preset (a Lite that points at OpenRouter puts its row on `openrouter`) and
-`null` otherwise, `efforts` is the Relay levels that model accepts (already resolved: `["low",
-"medium"]` on Relay Free, `[]` where there is no effort knob), `effort_labels` names each of those levels
-in the provider's own words (below), `intelligence` is the owner's
+`null` otherwise, `efforts` is the levels that model accepts in its provider's own words (already
+resolved: `["low", "medium", "high", "xhigh"]` on OpenAI, `["low", "medium"]` on Relay Free, `[]`
+where there is no effort knob), `effort_fixed` says whether the effort box must be greyed (section
+3: no knob, or Relay Free), `intelligence` is the owner's
 hand-entered index or `null`, and `openrouter` is the OpenRouter slug that serves the same model
 (`presets.OPENROUTER_TWINS`, each verified against `openrouter.ai/api/v1/models`) or `null` where
 there is none — the GUI offers the per-model "fall back to the same model on OpenRouter" toggle
@@ -1337,7 +1399,7 @@ whatever the cache holds (a stale cache is still served), the fetch runs only wh
 and when it lands the worker pushes a fresh `presets` unasked, the way it does when the codex
 catalogue lands (29.3). A fetch that fails leaves what was there and is logged at debug;
 `RELAY_OPENROUTER_CATALOG=off` never fetches. A live row is `{id, label, tier: null, efforts,
-effort_labels, intelligence: null, openrouter: null, context_window, price_prompt_per_mtok,
+effort_fixed, intelligence: null, openrouter: null, context_window, price_prompt_per_mtok,
 price_completion_per_mtok}` — `label` is the API's name lower-cased,
 `efforts` is the openrouter style's levels, or `[]` for a model whose `supported_parameters` has
 no `reasoning`, `context_window` is the listing's `context_length`, and the two prices (v3.10) are US
@@ -1347,17 +1409,13 @@ dollars per million tokens from the API's per-token `pricing.prompt` / `pricing.
 a cache written before the prices were carried has none, counts as stale and is refreshed. The preset itself is
 labelled plain `openrouter` since the same day: the model is one of hundreds, not the row's name.
 
-**`effort_labels`: levels in the provider's own words** (v3.10, owner, 2026-09-20: "for codex planning
-you pick xhigh, not max; for glm 5.3 you pick max"). Every preset row and every `models` row — the
-built-in catalog and OpenRouter's live rows alike — carries
-`"effort_labels": {<Relay level>: <what is sent for it>}` for exactly the levels in its `efforts`, read
-off `presets.EFFORT_MAP`: `{"low": "low", "medium": "medium", "high": "high", "max": "xhigh"}` on
-OpenAI and OpenRouter, `{"low", "medium", "high"}` as themselves on Gemini (whose top *is* `high`),
-`{"low": "low", "high": "high", "max": "max"}` on Kimi and GLM, `{"low", "medium"}` on Relay Free, and
-`{}` where there is no knob. **The GUI displays the label and stores the Relay level**: `effort` in
-`configure`, `set_effort`, a `roles` entry and a `tiers` entry is always one of `low|medium|high|max`,
-and the label is only ever what the user reads. A guest row has no `effort_labels` and needs none: its
-`efforts` are already its CLI's own words (29.3), and a guest entry's `effort` is stored as written.
+**`effort_labels` is retired** (v3.11, 2026-09-21). It said `{<Relay level>: <what is sent for it>}`
+for each row, because the level the GUI stored and the word the provider took were two different
+things. They are one thing now (section 3): `efforts` holds the provider's own words, and `effort`
+in `configure`, `set_effort`, a `roles` entry and a `tiers` entry is one of them, stored and sent as
+written — which is what a guest row always did (29.3). A v3.10 client that still keeps Relay's four
+and sends `max` to a model whose top is `xhigh` gets `xhigh`, and the row it reads carries
+`effort_fixed` where `effort_labels` used to be.
 
 **`default_effort` and `tier_effort`: where a model starts** (card #TKN7, 2026-09-21). Every `models`
 row — the built-in catalog, OpenRouter's live rows and a guest's own (29.3) — carries
@@ -1366,10 +1424,11 @@ row — the built-in catalog, OpenRouter's live rows and a guest's own (29.3) �
 extra; `null` where neither states one), and `tier_effort`, `{main, high, flash, lite}`, the level
 that model starts at when the user adds it to that list by hand (Options › Models' `+ add a model…`).
 One rule computes both, `presets.tier_start_efforts`, which is the same rule `tier_list_defaults`
-(13.7) fills the lists by: Main is the provider's own default, High the level a plan turn uses
-(`xhigh`, not `ultra`, on a codex model), Flash and Lite the lowest level. A tier is `null` where the
-model states no level there, and the GUI then stores no level at all — the model's own default
-applies at run time. The GUI takes the worker's answer rather than the top of `efforts` because
+(13.7) fills the lists by: **`model-ranking.md`'s `## Levels` row for that model's name** where it
+has one, mapped into this provider's own vocabulary, and otherwise Main is the provider's own
+default, High the level a plan turn uses (`xhigh`, not `ultra`, on a codex model), and Flash and
+Lite the lowest level. A tier is `null` where neither the file nor the model states a level there,
+and the GUI then stores no level at all — the model's own default applies at run time. The GUI takes the worker's answer rather than the top of `efforts` because
 Main's and High's rules are not readable off a row (owner, 2026-09-21: a hand-added gpt-5.6-sol
 "defaulted effort to ultra reasoning").
 
@@ -2080,7 +2139,12 @@ OpenRouter where the user opted that model in, and then nowhere: the turn fails.
 | a pane's own turn (Main), and a subagent's | `tiers.main`; with none sent, the `fallbacks` option (12.1) | the entry **after** the pane's current `(preset, model)` when the list names it — the entries above were ranked higher and the user chose not to be on them — else **the top**: a model picked by hand, off the list, falls back to the Main list from the top |
 | a pane on a Flash or Local model (`RoleResolver.turn_tier`: the list that names it, else the provider's own tier table) | `tiers.flash` / `tiers.local`; with none sent, the Main list as above | the same rule |
 | a plan turn (High) | `tiers.high` | the entry after the one the turn is running on — after the guest entry, for a turn that started on a guest's harness (13.7, v4.4; a guest entry matches the guest whatever model its CLI reported), onto ordinary providers only: the harness is ended as the turn leaves it, and a guest is never a target. With the list spent — or none sent, High's default being the pane's own model — the routing is dropped and the turn finishes on the pane's own model (15.2.3), and only if that fails too does the Main list start |
-| a side call on a tiered role (`flash` / `lite` / `local` / `high`: summaries, suggestions, chores, the audit, the loop check) | that tier's list, when one was sent | the entry after the one it resolved to; then the call fails as it always did, with its own model's error. No list, or a role pinned to its own endpoint: no chain |
+| a side call on a tiered role (`flash` / `lite` / `local` / `high`: summaries, suggestions, chores, the audit, the loop check) | that tier's list, when one was sent | the entry after the one it resolved to; then the call fails as it always did, with its own model's error. No list, or a role pinned to its own endpoint: no chain. A guest entry is skipped here as it is at resolution (13.7): a background role cannot be handed a harness, and no turn can be moved onto one mid-way |
+
+**Resolution is not failover.** A background role that found nothing usable in its list never reaches
+this table: it resolved to the pane's own model, or — on a pane whose own model is a harness — to Relay
+Free's role for its tier (13.7, v3.11). That happens *before* the call, so what fails here is whatever
+it resolved to, and the chain is that entry's list as above.
 
 Each entry is asked once, at **its own level** when it names one (the pane's level otherwise, in the
 new provider's words), and never one

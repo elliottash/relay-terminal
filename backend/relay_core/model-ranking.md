@@ -1,14 +1,25 @@
 # Model ranking
 
-The two tables below are what Relay's **default** priority lists are built from: the model box's
+The four tables below are what Relay's **default** priority lists are built from: the model box's
 "fill from defaults", Options › Models' two `defaults` buttons, and the lists a fresh install
 starts with. They are data, not code — edit them, restart the worker, press `defaults`, and the
-lists change. Nothing else in the repo holds a model's score or a provider's rank any more
-(`presets.INTELLIGENCE` and the old `_MAIN_GROUP_ORDER` are views over this file).
+lists change. Nothing else in the repo holds a model's score, a provider's rank or the level a
+model starts at any more (`presets.INTELLIGENCE` and the old `_MAIN_GROUP_ORDER` are views over
+this file, and `LITE_LIST_FIRST` was deleted when the Provider picks table took its place).
 
-What they do **not** hold: request bodies, reasoning levels, endpoints and the OpenRouter twin
-map, which stay in `presets.py` — they are what a provider's API takes, not an opinion about which
-model is better.
+- **Providers** — who is offered, and in which order ties break.
+- **Models** — which class each model is a default for, and how good it is.
+- **Provider picks** — a provider whose defaults differ from the shared Models rows.
+- **Levels** — the reasoning level a model starts at in each class.
+
+The last two were added on 2026-09-21 and are **optional**: a copy of this file without them
+parses, and every rule they carry falls back to the one in code. That is what lets a table be
+added, or emptied, one at a time.
+
+What they do **not** hold: request bodies, endpoints and the OpenRouter twin map, which stay in
+`presets.py` — they are what a provider's API takes, not an opinion about which model is better.
+Nor the *set* of levels a model has: that is the provider's own list, reported by its API or its
+CLI (`presets.EFFORT_LEVELS`), and the Levels table below only says which of them to start at.
 
 How the defaults are computed from them (`presets.tier_list_defaults`, design section 5.4). Count
 the providers that can take a turn *right now* — a built-in preset with a stored key, a guest
@@ -22,21 +33,49 @@ this machine, and **not** Relay Free:
   class** and never the same model twice. A blank score sorts last; ties break by the provider's
   `order`, then by name.
 
-Relay Free is never listed once any other provider can take a turn. The `local` class is the model
-servers on this machine, in the order they were saved, and is not ranked here. A guest harness is
-counted as a provider and its models are scored by **name** like anyone else's — `gpt-6-astra`
-through codex scores what `gpt-6-astra` through the OpenAI API scores — but it is only ever
-offered for `high` and `main`: a flash or lite call is a side call to a running conversation, and
-a harness is a whole agent of its own that cannot be handed one (`roles.GUEST_TIERS`).
+Relay Free is never listed once any other provider can take a turn — **except in `lite`**, which is
+`relay-lite` and nothing else whenever Relay Free can run, however many keys are stored (owner,
+2026-09-21: "for lite, i am thinking to simplify that and just everybody is on relay free by
+default, or openrouter if they want privacy"). That is why the providers' own `lite` cells below
+are empty. The `local` class is the model servers on this machine, in the order they were saved,
+and is not ranked here.
+
+A guest harness is counted as a provider and its models are scored by **name** like anyone else's
+— `gpt-6-astra` through codex scores what `gpt-6-astra` through the OpenAI API scores — and is
+offered for `high`, `main` and `flash` (`roles.GUEST_TIERS`; flash since 2026-09-21, owner: "the
+worker should allow the harness for flash"). Never for `lite`: a flash *pane* is a conversation a
+harness can own from its first turn, while every background job on those two tiers — terminal use,
+summaries, suggestions, chores, the audit, the loop check — is a side call into a conversation
+already running elsewhere, which a whole agent of its own cannot be handed. Those jobs skip a
+guest entry and take the next one; on a pane whose own model is a harness, with nothing left in
+the list, they run on Relay Free's role for the tier instead.
 
 ## How to edit
 
 - **Providers** — one row per preset id the worker knows, plus the two guest harnesses.
   `kind` is one of `plan` (a subscription), `harness` (a guest CLI), `api` (a first-party
   pay-as-you-go endpoint), `router` (OpenRouter) or `free` (Relay's own hosted allowance).
-  `order` is the tie-break, **lower first**; the bands (10s plan, 20s harness, 30s api, 40s
-  router, 90s free) are the preference order of design rule 2.2, so two providers serving the
-  same model at the same score pick the one that costs least.
+  `order` is the tie-break, **lower first, and every row's number must be its own**: two
+  providers at the same number decide nothing, the sort falls through to the name, and the file
+  reads as a ruling it is not making (`check()` says so). The bands as they stand are 10s
+  harness, 20s plan, 30s api, 50s router, 90s free — the owner re-ordered them on 2026-09-21, and
+  `Ranking.kinds()` derives the preference order from this column, so re-numbering the table is
+  the whole of changing it.
+- **Provider picks** — one row per provider whose defaults differ from the shared Models rows. A
+  cell names a model by its **name** in the Models table and replaces that provider's candidate
+  for that class outright, whatever the Models table classes it as; a blank cell follows the
+  Models table, and a provider with no row follows it entirely. Only `openrouter` has a row
+  today; the owner asked for the table so that "we could add that for cerebras for example later
+  on". A pick must be a model that provider actually serves — for OpenRouter that includes
+  anything in the twin map — and `check()` says so when it is not.
+- **Levels** — one row per model **name**, giving the level it starts at in each class, in the
+  words its provider uses (`xhigh` through codex, `max` through Kimi). A blank cell is the rule in
+  code: the model's top level for `high`, the provider's own default for `main`, its lowest for
+  `flash` and `lite`. A model with no reasoning knob ignores its row. The table is keyed by name
+  and one name can be served two ways, so a cell is mapped onto whichever provider is about to run
+  the model (`presets.nearest_effort`): `gpt-5.6-luna | high = max` is `max` through codex and
+  `xhigh` through the OpenAI API, which is that model's top there. `check()` reports a level no
+  provider that serves the model offers.
 - **Models** — one row per **name** (design rule 1: one model has one name, lower-case, no spaces,
   no vendor prefix, whoever serves it). `classes` is any of `high`, `main`, `flash`, `lite`,
   comma-separated, or `-` for a model that is a default for nothing. `score` is the owner's
@@ -45,9 +84,13 @@ a harness is a whole agent of its own that cannot be handed one (`roles.GUEST_TI
   sorts last rather than zero. `notes` is free text and is read by nobody.
 - Rows are kept sorted by score descending, then by name. Nothing depends on the order — the
   parser reads the whole table — but a diff is easier to read when the file stays sorted.
+- Both per-class tables read their classes off the **header**, so a class may be left out and the
+  four may be written in any order; a trailing `notes` column is read by nobody. `-`, `none` and a
+  blank cell all mean "nothing said here".
 - `python3 -m unittest tests.test_model_ranking` checks this file: every model the worker's
   catalog names has a row, every provider row is a preset the worker has, no duplicate names, no
-  class word outside the four.
+  class word outside the four, no pick a provider does not serve, and no level a model has not
+  got.
 - A serving variant (`-highspeed`, `k3-256k`, `:batch`) is a different model to the person picking
   one, so it gets its own row (design section 3.3). It may share a score; it rarely shares a class.
 

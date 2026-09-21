@@ -337,6 +337,52 @@ priorities… (Ctrl+Alt+M)", opens the dialog on the main tab, and the defaults 
 the dialog as "fill from defaults". The checklist's setting (`models/shown`) retires; the dialog's
 `all` tab shows every usable model and keeps OpenRouter's long tail behind typing.
 
+### 5.6 Levels are the model's own, and the file says where each starts (owner, 2026-09-21)
+
+Four rulings, all landed in the worker on 2026-09-21.
+
+**1. The effort options are the model's.** *"i want the effort options in relay to be determined by
+the model … so xhigh shows up for codex for example."* Relay's own four — low, medium, high, max —
+stop being the universe. A model's levels are exactly what its provider reports: codex low/medium/
+high/xhigh/max/ultra, Claude Code the same without ultra, the OpenAI API and OpenRouter low/medium/
+high/xhigh, Kimi, GLM and DeepSeek low/high/max, Gemini low/medium/high, Relay Free low/medium. The
+word the picker offers is the word that is sent, so `effort_labels` — the table that said what each
+Relay level was *really* sent as — is retired, and `EFFORT_MAP` with it. The compatibility read is
+one function, `presets.nearest_effort`: a level the model does not have becomes the weakest it does
+have that is at least as much work, and its top level when there is none. That reproduces, one for
+one, every answer the old mapping table gave, so a client still holding Relay's four loses nothing.
+
+**2. A box that cannot move is greyed.** *"for no knob models, the effort box should be grayed out.
+same for relay free."* Every model row of the `presets` event carries `effort_fixed`. Two different
+kinds of no: a model with no levels at all, and every Relay Free model — it has two levels and
+sends them, but the gateway clamps each role to its own ceiling, so a control the user could move
+would only pretend.
+
+**3. A `## Levels` table, beside the Models one.** *"can we have a similar defaults file for the
+reasoning levels across model X class."* `name | high | main | flash | lite | notes`: the level a
+model starts at in each class, which the owner filled in himself. It decides the level on every
+default-filled list entry, the starting level of a hand-added model, and a pane's own pick in the
+model box. A blank cell is the rule that was there before it (top level for high, the provider's
+own default for main, the lowest for flash and lite), and a cell is mapped into the vocabulary of
+whoever runs the model, because the table is keyed by name and one name can be served two ways.
+
+**4. A `## Provider picks` table.** *"provider picks looks good, so we could add that for cerebras
+for example later on."* `provider | high | main | flash | lite`: a provider whose defaults differ
+from the shared Models rows, by model name, replacing its candidate for that class outright. Only
+`openrouter` has a row today, and it absorbed `LITE_LIST_FIRST`, which had said the same thing in
+code.
+
+Three rulings about the lists themselves landed with them. **Lite is Relay Free by default** —
+*"for lite, i am thinking to simplify that and just everybody is on relay free by default, or
+openrouter if they want privacy"* — the one exception to "Relay Free only with no providers", with
+the other button leading on OpenRouter's own lite pick. **A harness may serve Flash**, because a
+`/flash` pane is a conversation it can own from its first turn, while every background job on Flash
+and Lite skips it and takes the next entry; on a pane whose own model *is* a harness, and with
+nothing left in the list, those jobs run on Relay Free's role for the tier (*"so if somebody just
+has a harness, the flash chores run on relay flash?"* — *"i agree"*). And **DeepSeek runs Flash for
+everything** while **gemini gains its two moving `-latest` aliases**, with the concrete versions
+left a default for nothing so the defaults follow Google forward.
+
 ## 6. Order of work
 
 1. `/swap` and the defaults (Rule 3): bugs the owner is hitting now; no visible redesign.

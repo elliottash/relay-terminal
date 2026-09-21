@@ -2077,8 +2077,9 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   per job showing the model it resolves to, a box for what it follows (`default (<its tier>)`,
   high, main, flash, lite, local, or "its own provider…"), and — once it has a provider of its own
   — that provider, a model picked from the provider's catalog (`models` on the preset row; Model…
-  and a typed id only when the provider sent none) and a reasoning level shown in the provider's
-  own word (`effort_labels`: xhigh on OpenAI) and stored as Relay's. "its own provider…" pins the
+  and a typed id only when the provider sent none) and a reasoning level in the provider's own
+  word (`efforts`: xhigh on OpenAI), which since card #MDL1 is also the word stored and sent —
+  there is no second table of labels any more. "its own provider…" pins the
   job to the provider it already resolves to, so the pick alone changes nothing. The vision row is
   the same minus the tier. `onProviderChosen` / `onMainModelChosen` / `onMainEffortChosen` are
   still members only because `Pane::openRolesDialog` assigns them; nothing calls them. Reached
