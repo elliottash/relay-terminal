@@ -221,6 +221,27 @@ click_rect() {   # objectName
 # Relay is a `composerEditor` — and their order in the dump is the object tree's, which is not
 # the screen's: `composerEditor#2` turned out to be the *terminal pane's*, so the card's Enter
 # went to the wrong agent and the drive read it as "the card wrote no thread".
+# What page of Options is showing, out of RELAY_QA_RECTS: every row drawn on the page that is
+# *up* has a `settingsRowLabel` whose `text` is its title, so the set of those titles names the
+# page. Nothing here reads the transcript, which is the point — "Copy on select" is in the
+# console's own answer, and in the prompt that asked for it, on every page.
+page_rows() {
+    python3 - "$RELAY_QA_RECTS" <<'ROWS' 2>/dev/null
+import json, re, sys
+try:
+    rows = json.load(open(sys.argv[1]))
+except Exception:
+    raise SystemExit
+for key, row in rows.items():
+    if re.fullmatch(r"settingsRowLabel(Strong)?(#\d+)?", key):
+        text = (row.get("text") or "").strip()
+        if text:
+            print(text)
+ROWS
+}
+page_has() { if page_rows | grep -qix -- "$2"; then ok "$1 (\"$2\" is a row of the page on screen)"
+             else bad "$1: no row \"$2\" on the page that is showing"; fi; }
+
 click_rect_in() {   # objectName minx miny
     local xy
     xy=$(python3 - "$RELAY_QA_RECTS" "$1" "$2" "$3" <<'PY' 2>/dev/null
@@ -498,10 +519,16 @@ focus_console c03c-focus "Ask"
 ask "where is copy on select?"
 awaited "c3 an option: link is in the answer" c06-link "Clicking that opens" 240
 sleep 4; shot c06-link
+# The **label**, `OPENROW`, and that is now the link: card #MDKN made a markdown link's label
+# carry its target, so this click opens the row rather than landing on paint (before that
+# card it opened nothing, and this gate was reading the words of the prompt echoed above).
+# The page is read out of the rectangles, never off the transcript, because "Copy on select"
+# is in the question that was asked and in the answer, whichever page is up.
 at=$(word_xy c06-link "openrow")
 if [[ -n $at ]]; then
     click_at ${at% *} ${at#* }; sleep 2; shot c07-revealed
-    has "c3 the link revealed the row in this same pane" c07-revealed "Copy on select"
+    note "the page after the label: $(page_rows | tr '\n' '|')"
+    page_has "c3 the label revealed the row in this same pane" "Copy on select"
     has "c2 and the row is marked changed by the agent" c07-revealed "changed by the agent"
     # …and again after the Undo, to say the marker goes with the change it was about.
     marked_before=1
@@ -528,9 +555,10 @@ focus_console c10-focus "Ask"
 ask "where is copy on select?"
 awaited "c5 the link is offered again" c11-link "Clicking that opens" 240
 sleep 3; shot c11-link
-at=$(word_xy c11-link "openrow")
+at=$(word_xy c11-link "openrow")   # the label again (#MDKN)
 if [[ -n $at ]]; then
     click_at ${at% *} ${at#* }; sleep 2; shot c12-unmarked
+    page_has "c5 the label reveals the row again" "Copy on select"
     hasnt "c5 the marker went with the change it was about" c12-unmarked "changed by the agent"
 else
     bad "c5 no link to click in c11-link.png"; shot c12-unmarked
