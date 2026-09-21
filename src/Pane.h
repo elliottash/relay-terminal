@@ -8980,8 +8980,12 @@ private:
                 // gpt-5.6-sol@openrouter` names which of them takes it. `findByName` folds the
                 // shown rows into one group per name and answers the part after the "@"; the
                 // older matches below still take a preset id, a key or words of a label.
-                if (const relay::models::Entry *named =
-                        relay::models::findByName(catalog, relay::models::shown(catalog), args)) {
+                // The rows must outlive the pointer into them: `findByName` returns an entry of
+                // the list it was handed, and a temporary in an `if` condition is destroyed before
+                // the body runs — which segfaulted in `splitKey` on the freed key (Xvfb run,
+                // docs/qa_evidence/2026-09-21-model-names-everywhere).
+                const QList<relay::models::Entry> rows = relay::models::shown(catalog);
+                if (const relay::models::Entry *named = relay::models::findByName(catalog, rows, args)) {
                     selectEntry(named->key);
                     return;
                 }
