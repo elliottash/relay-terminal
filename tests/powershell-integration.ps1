@@ -2,6 +2,12 @@
 $ErrorActionPreference = 'Stop'
 $root = Join-Path ([IO.Path]::GetTempPath()) ('relay-shell-' + [guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($root)
+# Windows TEMP can contain an 8.3 name (RUNNER~1) while PowerShell expands it in PWD.
+# Ask the provider for its canonical location before returning to the original directory,
+# so the test still proves that integration changes to RELAY_START_DIR.
+Push-Location -LiteralPath $root
+$expectedCwd = $PWD.Path
+Pop-Location
 try {
     $env:RELAY_RUNTIME_DIR = $root
     $env:RELAY_SESSION_TOKEN = 'test-token'
@@ -10,9 +16,13 @@ try {
     . (Join-Path $PSScriptRoot '../shell/integration.ps1')
     __relay_event 'ready' 7
     $state = Get-Content -Raw -LiteralPath (Join-Path $root 'state.json') | ConvertFrom-Json
-    if ($state.token -ne 'test-token' -or $state.status -ne 7 -or $state.cwd -ne $root -or
-        $state.shell_pid -ne $PID -or $state.known_commands -notcontains 'Write-Output') {
-        throw 'Ready event lost shell context'
+    foreach ($field in @{token = 'test-token'; status = 7; cwd = $expectedCwd; shell_pid = $PID}.GetEnumerator()) {
+        if ($state.($field.Key) -ne $field.Value) {
+            throw "Ready event $($field.Key): expected '$($field.Value)', got '$($state.($field.Key))'"
+        }
+    }
+    if ($state.known_commands -notcontains 'Write-Output') {
+        throw "Ready event omitted Write-Output from $($state.known_commands.Count) commands"
     }
     $bytes = [Text.Encoding]::UTF8.GetBytes("Write-Output 'héllo 世界'`n`n")
     __relay_event 'loaded' 0 $bytes
