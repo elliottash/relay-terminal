@@ -5044,7 +5044,7 @@ private:
             }
             m_modeChip->setMenu(menu);
         }
-        setupWorkChip(routeRow);               // Switchboard: this pane's issues, tasks and plan
+        setupTaskUpdates();
         // `!` / `*` typed first in an empty prompt: terminal / agent mode for this submission.
         m_prefixChip = new QLabel;
         m_prefixChip->setObjectName(QStringLiteral("prefixChip"));
@@ -5297,10 +5297,8 @@ private:
         m_planChip->setObjectName(QStringLiteral("planChip"));
         m_planChip->setToolTip(QStringLiteral("Plan mode: the agent investigates and writes a plan (Shift+Tab to leave)"));
         m_planChip->hide();
-        // At the strip's left, right after the Switchboard chip (owner, 2026-09-20: "this plan
-        // indicator should be at the left (just to the right of the issues button)"): plan mode
-        // is the pane's state, not a property of the model it sat beside on the right.
-        row->insertWidget(row->indexOf(m_workChip) + 1, m_planChip);
+        // Plan mode is the pane's state: keep its indicator at the strip's left.
+        row->insertWidget(0, m_planChip);
         m_ctxLabel = new QLabel;
         m_ctxLabel->setObjectName(QStringLiteral("stripChipLabel"));
         m_ctxLabel->setTextFormat(Qt::PlainText);
@@ -8250,8 +8248,6 @@ private:
         }
         if (type == QStringLiteral("plan_written")) {
             const QString path = event.value(QStringLiteral("path")).toString();
-            m_lastPlanPath = path;
-            updateWorkChip();
             ensureLineStart();
             printInline(QStringLiteral("Plan written: %1\n").arg(QDir(m_workspace).relativeFilePath(path)), Ink::Note);
             if (onPlanWritten) QTimer::singleShot(0, this, [this, path] { if (onPlanWritten) onPlanWritten(path, this); });
@@ -10122,47 +10118,24 @@ private:
     }
 
     // ----- request ledger UI (protocol section 12) ----------------------------------------------
-    // One Switchboard chip for what this pane is working on (owner, 2026-09-17): the cards it
-    // referenced, the agent's task list and its plan, summed up as "#K7Q2 · 2/5 · plan". A click
-    // opens a menu with each part and a way into the Switchboard itself.
-    void setupWorkChip(QHBoxLayout *row) {
-        m_workChip = new QToolButton;
-        m_workChip->setObjectName(QStringLiteral("workChip"));
-        m_workChip->setFocusPolicy(Qt::NoFocus);
-        m_workChip->setAccessibleName(QStringLiteral("Switchboard: issues, tasks and plan"));
-        m_workChip->setIcon(stripIcon(QStringLiteral("board")));
-        m_workChip->setIconSize(QSize(14, 14));
-        m_workChip->setCursor(Qt::PointingHandCursor);
-        m_workChip->setPopupMode(QToolButton::InstantPopup);
-        auto *menu = new QMenu(m_workChip);
-        connect(menu, &QMenu::aboutToShow, this, [this, menu] { fillWorkMenu(menu); });
-        m_workChip->setMenu(menu);
-        row->addWidget(m_workChip);
+    void setupTaskUpdates() {
         m_ledger.onChanged = [this] {
-            updateWorkChip();
             if (m_requestsPanel) m_requestsPanel->refresh();
             // The task half of the strip under the prompt. The guard is required: this lambda is
             // installed while the composer is still being built, long before setupSubagentsUi().
             if (m_agentsPanel) { m_agentsPanel->refresh(); placeSubagentsPanel(); }
         };
-        Keymap::instance().listen(this, [this] { updateWorkChip(); });
-        updateWorkChip();
     }
 
     void noteWorkCard(const QString &id) {
         if (id.isEmpty()) return;
-        m_workCards.removeAll(id);
-        m_workCards.prepend(id);
-        while (m_workCards.size() > 8) m_workCards.removeLast();
-        updateWorkChip();
         refreshCardChip();   // every attach path runs through here (#C7PF)
     }
 
     // ----- header card chip (#C7PF) ------------------------------------------------------------
     // While this pane's agent turn works a Switchboard card — handed over by the Switchboard's
     // Execute, attached to a prompt with `#id`, or carried by a steer — the header names it
-    // beside the title and a click opens it. The prompt box's work chip keeps the history of
-    // every card the pane touched; this one states what is happening now, so it goes when the
+    // beside the title and a click opens it. It states what is happening now, so it goes when the
     // turn ends. A card handed to a pane whose agent is not configured yet (startBoardTask
     // parks it until then) is named from the moment it arrives.
     QString cardChipCard() const { return !m_turnCard.isEmpty() ? m_turnCard : m_boardTaskCard; }
@@ -10207,86 +10180,6 @@ private:
         refreshCardChip();
     }
 
-    // The icon alone until there is something to show.
-    void updateWorkChip() {
-        if (!m_workChip) return;
-        QStringList parts;
-        if (m_workCards.size() == 1) parts << QStringLiteral("#") + m_workCards.first();
-        else if (!m_workCards.isEmpty()) parts << QStringLiteral("%1 cards").arg(m_workCards.size());
-        const bool tasks = m_ledger.hasTasks();
-        if (tasks) parts << m_ledger.summary().progress();
-        if (!m_lastPlanPath.isEmpty()) parts << QStringLiteral("plan");
-        m_workChip->setText(parts.join(QStringLiteral(" · ")));
-        m_workChip->setToolButtonStyle(parts.isEmpty() ? Qt::ToolButtonIconOnly : Qt::ToolButtonTextBesideIcon);
-        // The Switchboard sentence only in a pane whose tab is attached to a project: with no
-        // project there is no board for that key to open, and the chip must not imply one (#JN7X).
-        const QString keys = hasBoard() ? Keymap::instance().shortcutText(QStringLiteral("board.open")) : QString();
-        m_workChip->setToolTip((tasks ? m_ledger.chipToolTip() + '\n' : QString())
-                               + QStringLiteral("Issues, tasks and plan for this pane")
-                               + (keys.isEmpty() ? QString() : QStringLiteral(" · %1 opens the Switchboard").arg(keys)));
-        m_workChip->setProperty("state", m_ledger.chipState());
-        m_workChip->style()->unpolish(m_workChip); m_workChip->style()->polish(m_workChip);
-    }
-
-    void fillWorkMenu(QMenu *menu) {
-        menu->clear();
-        auto &keys = Keymap::instance();
-        // addSection draws a bare line in Relay's menu style, so each section is a disabled bold
-        // row of its own, with a separator above it.
-        auto section = [menu](const QString &title) {
-            if (!menu->isEmpty()) menu->addSeparator();
-            QAction *head = menu->addAction(title);
-            head->setEnabled(false);
-            QFont bold = head->font();
-            bold.setBold(true);
-            head->setFont(bold);
-        };
-        section(QStringLiteral("Issues"));
-        if (m_workCards.isEmpty()) {
-            menu->addAction(QStringLiteral("Type # in the prompt to reference a card"))->setEnabled(false);
-        }
-        for (const QString &id : m_workCards) {
-            const relay::board::Card *card = m_cardIndex.card(id);
-            const QString label = card ? QStringLiteral("#%1  %2  ·  %3").arg(id, card->title, relay::board::statusTitle(card->status))
-                                       : QStringLiteral("#") + id;
-            menu->addAction(label, this, [this, id] { if (onOpenCard) onOpenCard(id); });
-        }
-        section(QStringLiteral("Tasks"));
-        QList<relay::TaskItem> tasks = m_ledger.tasks();
-        int batch = 0;
-        for (const auto &task : tasks) batch = std::max(batch, task.batch);
-        int shown = 0;
-        for (const auto &task : tasks) {
-            if (task.batch != batch) continue;
-            if (++shown > 8) break;
-            QAction *row = menu->addAction(relay::RequestLedgerModel::todoGlyph(task.status) + QStringLiteral("  ") + task.text,
-                                           this, [this] {
-                                               openRequests();
-                                               // The slow path to a task now has a fast one: the strip under the prompt.
-                                               hint(QStringLiteral("tasks.strip.open.mouse"),
-                                                    relay::ShortcutHints::nextTime(QStringLiteral("↓ from the prompt, then →"),
-                                                                                   QStringLiteral("the open tasks are under the prompt")));
-                                           });
-            row->setToolTip(task.note);
-        }
-        if (!shown) menu->addAction(QStringLiteral("No task list yet"))->setEnabled(false);
-        QAction *list = menu->addAction(QStringLiteral("Show task list"), this, [this] { toggleRequests(); });
-        if (const QString k = keys.keysFor(QStringLiteral("agent.requests")).value(0); !k.isEmpty()) list->setShortcut(QKeySequence(k));
-        section(QStringLiteral("Plan"));
-        if (!m_lastPlanPath.isEmpty()) {
-            const QString path = m_lastPlanPath;
-            menu->addAction(QStringLiteral("Open %1").arg(QDir(m_workspace).relativeFilePath(path)), this,
-                            [this, path] { if (onPlanWritten) onPlanWritten(path, this); });
-        }
-        QAction *plan = menu->addAction(QStringLiteral("Plan mode"), this, [this] { togglePlanMode(); });
-        plan->setCheckable(true);
-        plan->setChecked(m_agentMode == QStringLiteral("plan"));
-        if (const QString k = keys.keysFor(QStringLiteral("agent.planToggle")).value(0); !k.isEmpty()) plan->setShortcut(QKeySequence(k));
-        menu->addSeparator();
-        QAction *board = menu->addAction(stripIcon(QStringLiteral("board")), QStringLiteral("Open the Switchboard"), this,
-                                         [this] { if (onOpenBoard) onOpenBoard(); });
-        if (const QString k = keys.keysFor(QStringLiteral("board.open")).value(0); !k.isEmpty()) board->setShortcut(QKeySequence(k));
-    }
 
 public:
     bool requestsOpen() const { return m_requestsPanel && m_requestsPanel->isVisible(); }
@@ -15821,12 +15714,10 @@ private:
             // worker sends it at turn end, which is exactly when the yes is meant to take effect.
             if (event.contains(QStringLiteral("git"))) m_initGitNote = event.value(QStringLiteral("git")).toString();
             projectInitBoardState(board);
-            // Another project's cards are not this one's: drop the picker index and the work
-            // chip's card list, and ask again the next time something needs them.
+            // Another project's cards are not this one's: drop the picker index and ask
+            // again the next time something needs it.
             m_cardIndex.reset({});
             m_cardIndexAsked = false;
-            m_workCards.clear();
-            updateWorkChip();
             return true;
         }
         return false;
@@ -18152,8 +18043,6 @@ private:
     relay::SubagentModel m_subagents;
     // request ledger UI
     relay::RequestLedgerModel m_ledger;
-    QToolButton *m_workChip = nullptr;
-    QStringList m_workCards;     // cards this pane referenced or the agent changed, newest first
     QString m_boardTask, m_boardTaskCard;   // Execute's task, until the agent is configured (#XS6Q)
     // The running agent turn's cards (#C7PF): the first is the header chip's #id, the rest ride
     // in its tooltip. `m_turnCardAsk` is the request id the turn was sent under and
@@ -18173,7 +18062,6 @@ private:
         if (relay::queuesubmit::decide(queueSubmitState()) == relay::queuesubmit::Decision::StartNow) startAgentEntry(entry, false);
         else enqueue(entry);
     }
-    QString m_lastPlanPath;      // the plan this pane's agent wrote last
     Ask m_ask;                   // the ask up in this pane, if any (#MQ9C)
     QPointer<relay::RequestsPanel> m_requestsPanel;
     bool m_limitReached = false;   // the last turn stopped at the step or tool-call limit
