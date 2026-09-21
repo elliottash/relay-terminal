@@ -6,3 +6,6 @@ Build and isolated GUI inspection passed. Evidence and QA checklist recorded; mo
 
 <!-- relay:entry 20260921T230817Z-cc author=codex kind=evidence -->
 Landed 42b1f54ff234. Exact committed tree builds; unrelated Windows hunks excluded. tests_check returned no findings or blocks.
+
+<!-- relay:entry 20260921T231131Z-aa author=codex kind=decision -->
+Owner: "no need to have the purple outline on it, make it look like the other buttons". Removed the share button’s agent destination property, which selected the purple border in Theme.cpp; retained its ordinary stripChip styling and live tooltip.
