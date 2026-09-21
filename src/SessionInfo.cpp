@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SessionInfo.h"
 #include "CopyOnSelect.h"
+#include "ModelCatalog.h"
 
 #include <QApplication>
 #include <QEvent>
@@ -28,6 +29,35 @@ namespace {
 constexpr auto kScheme = "relay-info";
 
 QString esc(const QString &text) { return text.toHtmlEscaped(); }
+
+// The one name a model has (card #MDL1, rule 1). A saved conversation records the id the API took
+// — "k3", "openai/gpt-5.6-sol", "MiniMax-M3" — and that stays on disk; this panel reads to a
+// person, so it prints "kimi-k3", "gpt-5.6-sol", "minimax-m3". No preset is recorded per model
+// here, so it is the derivation off the id, which is the same answer for every id a catalog row
+// does not override.
+QString modelName(const QString &modelId) { return relay::models::nameOf(modelId); }
+
+// The worker's own name for the model this object is about, when it sent one (`model_name` /
+// `models_named`, protocol 13): it knows the catalog row, so it can name a model the derivation
+// alone cannot — the Kimi Coding Plan's "k3" is "kimi-k3". Without one, the derivation.
+QString modelNameOf(const QJsonObject &object, const QString &field = QStringLiteral("model")) {
+    const QString sent = object.value(field + QStringLiteral("_name")).toString();
+    return sent.isEmpty() ? modelName(object.value(field).toString()) : sent;
+}
+
+// "Models used": the names, each once and in the order they were first used, so one model that
+// two providers served does not read as two. The worker's `models_named` is already exactly that;
+// `models` is the older field, and its ids are named here.
+QStringList modelNames(const QJsonObject &info) {
+    QStringList out;
+    const QJsonArray named = info.value(QStringLiteral("models_named")).toArray();
+    const QJsonArray ids = named.isEmpty() ? info.value(QStringLiteral("models")).toArray() : named;
+    for (const auto &value : ids) {
+        const QString name = named.isEmpty() ? modelName(value.toString()) : value.toString();
+        if (!name.isEmpty() && !out.contains(name)) out << name;
+    }
+    return out;
+}
 
 // relay-info:<path>?key=value&... with every value percent-encoded by hand, so a path holding
 // '&', '=', '#' or '+' comes back exactly as it went in (see linkQuery).
@@ -123,7 +153,7 @@ QString threadLine(const QJsonObject &thread, const QString &dir, int depth) {
              link(QStringLiteral("thread"), {{QStringLiteral("id"), id}, {QStringLiteral("dir"), dir},
                                              {QStringLiteral("owner"), owner}}, label),
              esc(status), thread.value(QStringLiteral("model")).toString().isEmpty() ? QString()
-                 : QStringLiteral(" · ") + esc(thread.value(QStringLiteral("model")).toString()));
+                 : QStringLiteral(" · ") + esc(modelNameOf(thread)));
     if (thread.value(QStringLiteral("live")).toBool())
         html += QStringLiteral(" · ") + link(QStringLiteral("live"), {{QStringLiteral("agent"), agent}, {QStringLiteral("thread"), id}},
                                           QStringLiteral("open in the subagents pane"));
@@ -153,7 +183,7 @@ QString sessionHtml(const QJsonObject &info, const QDateTime &now) {
     if (!info.value(QStringLiteral("live")).toBool())
         html += QStringLiteral("<p class=m><span class=m>A saved session, not the one in this pane.</span></p>");
     html += QStringLiteral("<table>");
-    QString model = esc(info.value(QStringLiteral("model")).toString());
+    QString model = esc(modelNameOf(info));
     const QString provider = info.value(QStringLiteral("provider")).toString();
     if (!provider.isEmpty()) model += QStringLiteral(" <span class=m>· %1</span>").arg(esc(provider));
     const QString effort = info.value(QStringLiteral("effort")).toString();
@@ -165,8 +195,7 @@ QString sessionHtml(const QJsonObject &info, const QDateTime &now) {
     if (info.value(QStringLiteral("prompt_profile")).toString() == QLatin1String("short"))
         model += QStringLiteral(" <span class=m>· short prompt</span>");
     html += row(QStringLiteral("Model"), model);
-    QStringList models;
-    for (const auto &value : info.value(QStringLiteral("models")).toArray()) models << value.toString();
+    const QStringList models = modelNames(info);
     if (models.size() > 1) html += row(QStringLiteral("Models used"), esc(models.join(QStringLiteral(", "))));
     const QJsonObject context = info.value(QStringLiteral("context")).toObject();
     if (!context.isEmpty()) {
@@ -262,9 +291,8 @@ QString threadHtml(const QJsonObject &info, const QDateTime &now) {
     html += row(QStringLiteral("Status"), statusCell);
     html += row(QStringLiteral("Type"), esc(info.value(QStringLiteral("type")).toString())
                 + (info.value(QStringLiteral("background")).toBool() ? QStringLiteral(" <span class=m>· background</span>") : QString()));
-    QStringList models;
-    for (const auto &value : info.value(QStringLiteral("models")).toArray()) models << value.toString();
-    html += row(QStringLiteral("Model"), esc(models.isEmpty() ? info.value(QStringLiteral("model")).toString() : models.join(QStringLiteral(", ")))
+    const QStringList models = modelNames(info);
+    html += row(QStringLiteral("Model"), esc(models.isEmpty() ? modelNameOf(info) : models.join(QStringLiteral(", ")))
                 + (info.value(QStringLiteral("effort")).toString().isEmpty() ? QString()
                    : QStringLiteral(" <span class=m>· effort %1</span>").arg(esc(info.value(QStringLiteral("effort")).toString()))));
     const QJsonObject usage = info.value(QStringLiteral("usage")).toObject();

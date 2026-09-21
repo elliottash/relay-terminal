@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Conversations.h"
+#include "ModelCatalog.h"
 #include "CopyOnSelect.h"
 #include "OutputLinks.h"     // `session:` in an answer is this pane's own link (#AGNT step 8)
 #include "Theme.h"           // the collapsed row's ink
@@ -343,10 +344,23 @@ bool isGuestItem(const QJsonObject &item) {
     return isGuestSource(item.value(QStringLiteral("source")).toString());
 }
 
+// Lower-case, like every other label Relay writes (card #MDL1, rule 1). `conv_index._MODEL_KEY`
+// spells these the same way, because the Model sort has to order the column the eye reads.
 QString guestLabel(const QString &source) {
-    if (source == QLatin1String("claude")) return QStringLiteral("Claude Code");
-    if (source == QLatin1String("codex")) return QStringLiteral("Codex");
+    if (source == QLatin1String("claude")) return QStringLiteral("claude code");
+    if (source == QLatin1String("codex")) return QStringLiteral("codex");
     return source;
+}
+
+// The one name a model has (card #MDL1, rule 1). History recorded the id the API took and that
+// stays on disk; a column, a cell and a filter menu read to a person, so they print the name.
+QString modelName(const QString &modelId) { return relay::models::nameOf(modelId); }
+
+// A row's model by name: the worker's own `model_name` (it knows the catalog row, so it can name
+// the Kimi Coding Plan's "k3" as "kimi-k3"), else the derivation off the id it recorded.
+QString rowModelName(const QJsonObject &item) {
+    const QString sent = item.value(QStringLiteral("model_name")).toString();
+    return sent.isEmpty() ? modelName(item.value(QStringLiteral("model")).toString()) : sent;
 }
 
 // One argv word for a POSIX shell. Relay builds the words itself from the worker's answer, but a
@@ -419,7 +433,9 @@ QString estimateText(const QJsonObject &event) {
                               ? QStringLiteral("all projects") : QStringLiteral("this project");
     if (count <= 0)
         return QStringLiteral("Every conversation in %1 already has a summary. There is nothing to do.").arg(scope);
-    QString model = event.value(QStringLiteral("model")).toString();
+    // The model by name (card #MDL1, rule 1). With none reported it is the tier that will run
+    // them, in the word the rest of Relay uses for that tier.
+    QString model = modelName(event.value(QStringLiteral("model")).toString());
     if (model.isEmpty()) model = QStringLiteral("the chores model");
     return QStringLiteral("%1 conversation%2 in %3 %4 no summary. Summarising them costs about %5 input "
                           "and %6 output tokens on %7. Nothing is summarised unless you press Start.")
@@ -1543,6 +1559,10 @@ void SessionManager::fillFacets(const QJsonObject &facets) {
         combo->setCurrentIndex(std::max(0, combo->findData(keep)));
         return combo->count() - 1;
     };
+    // The models facet holds *names*, one per model, since card #MDL1 (rule 1): the worker folds
+    // the ids history recorded — `k3` and `kimi-k3`, `openai/gpt-5.6-sol` and `gpt-5.6-sol` — into
+    // one entry, and takes the name straight back as the filter. So the menu has one line per
+    // model rather than one per spelling, and picking it selects every row of that model.
     if (facets.contains(QStringLiteral("models")))
         fill(m_model, facets.value(QStringLiteral("models")).toArray(), QStringLiteral("Any model"));
     if (facets.contains(QStringLiteral("branches"))) {
@@ -1562,7 +1582,7 @@ QTreeWidgetItem *SessionManager::addSessionRow(QTreeWidgetItem *parent, const QJ
     const QString source = item.value(QStringLiteral("source")).toString();
     row->setText(3, terminal ? QStringLiteral("terminal")
                  : isGuestSource(source) ? guestLabel(source)
-                                         : item.value(QStringLiteral("model")).toString());
+                                         : rowModelName(item));
     decorate(row, item);
     // An arrow to unfold the quick look: the row needs a child before it has one.
     auto *placeholder = new QTreeWidgetItem(row);
@@ -1808,7 +1828,7 @@ void SessionManager::rebuildTree(const QString &keep) {
             auto *row = new QTreeWidgetItem(parent, {QString(),
                 whenText(item.value(QStringLiteral("updated")).toDouble(), now),
                 status.isEmpty() ? QStringLiteral("thread") : status,
-                item.value(QStringLiteral("model")).toString()});
+                rowModelName(item)});
             row->setForeground(0, m_tree->palette().color(QPalette::PlaceholderText));
             parent->setExpanded(true);
             decorate(row, item);

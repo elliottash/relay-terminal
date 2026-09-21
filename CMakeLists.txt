@@ -280,7 +280,9 @@ add_library(relay-conversations STATIC src/Conversations.cpp src/Conversations.h
 target_include_directories(relay-conversations PUBLIC src)
 # relay-agentcontext: the Sessions pane supplies a context for the console the window embeds at
 # the foot of it (#FEJQ, card #AGNT step 7).
-target_link_libraries(relay-conversations PUBLIC relay-agentcontext ${RELAY_QT}::Widgets)
+# relay-modelcatalog: history records the model id the API took, and both panes print its *name*
+# (card #MDL1, rule 1) — `relay::models::nameOf`, the same derivation as everywhere else.
+target_link_libraries(relay-conversations PUBLIC relay-agentcontext relay-modelcatalog ${RELAY_QT}::Widgets)
 target_compile_options(relay-conversations PRIVATE -Wall -Wextra -Wpedantic)
 
 # Notification centre: the list behind the bell in the window header. Plain QtCore so the

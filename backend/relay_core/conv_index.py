@@ -2578,7 +2578,12 @@ def _item(row) -> dict:
             # path resolved, which is the one grouping and filters use — and the wrong one to
             # resume a guest in when it reached its own cwd through a symlink (GT7X).
             "raw_cwd": row["raw_cwd"] or "",
-            "model": row["model"], "preset": row["preset"],
+            # The id history recorded, and the one name that model has (card #MDL1, rule 1): the
+            # Model column, the quick look and the filter menu then all say the same word, and a
+            # name the derivation cannot reach — the Kimi Coding Plan's "k3" is "kimi-k3" — comes
+            # from here rather than being re-derived, wrongly, in the GUI.
+            "model": row["model"], "model_name": _sql_model_name(row["model"] or ""),
+            "preset": row["preset"],
             "created": row["created"], "updated": row["updated"],
             "turns": row["turns"], "open_requests": row["open_requests"],
             "session_dir": row["session_dir"], "pinned": int(row["pinned"] or 0),

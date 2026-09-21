@@ -812,6 +812,49 @@ private slots:
         QCOMPARE(continueItems(items, QStringLiteral("nothing-here"), {}).size(), 0);
     }
 
+    // Card #MDL1, rule 1: history recorded the id the API took and that stays on disk, but every
+    // cell a person reads prints the model's name.
+    void theModelColumnAndTheInfoPanelPrintNames() {
+        SessionManager manager;
+        manager.setResults(QJsonObject{
+            {QStringLiteral("items"), QJsonArray{
+                QJsonObject{{QStringLiteral("session_id"), QStringLiteral("aaaaaaaa")},
+                            {QStringLiteral("title"), QStringLiteral("On OpenRouter")},
+                            {QStringLiteral("project"), QStringLiteral("relay")},
+                            {QStringLiteral("model"), QStringLiteral("openai/gpt-5.6-sol")},
+                            {QStringLiteral("updated"), 1000.0}},
+                // The worker names the one the derivation cannot reach: the Kimi Coding Plan's
+                // "k3" is Kimi K3, and only its catalog row says so.
+                QJsonObject{{QStringLiteral("session_id"), QStringLiteral("bbbbbbbb")},
+                            {QStringLiteral("title"), QStringLiteral("On the coding plan")},
+                            {QStringLiteral("project"), QStringLiteral("relay")},
+                            {QStringLiteral("model"), QStringLiteral("k3")},
+                            {QStringLiteral("model_name"), QStringLiteral("kimi-k3")},
+                            {QStringLiteral("updated"), 900.0}}}}});
+        QStringList cells;
+        for (QTreeWidgetItem *row : manager.findChildren<QTreeWidget *>().first()->findItems(
+                 QString(), Qt::MatchContains | Qt::MatchRecursive))
+            if (!row->text(3).isEmpty()) cells << row->text(3);
+        QVERIFY(cells.contains(QStringLiteral("gpt-5.6-sol")));    // no vendor prefix
+        QVERIFY(cells.contains(QStringLiteral("kimi-k3")));        // the coding plan's "k3"
+        QVERIFY(!cells.contains(QStringLiteral("openai/gpt-5.6-sol")));
+        QVERIFY(!cells.contains(QStringLiteral("k3")));
+        // The ⓘ panel names it the same way, and lists one model once however it was spelled.
+        const QString html = relay::sessioninfo::renderInfo(
+            QJsonObject{{QStringLiteral("kind"), QStringLiteral("session")},
+                        {QStringLiteral("title"), QStringLiteral("A conversation")},
+                        {QStringLiteral("model"), QStringLiteral("MiniMax-M3")},
+                        {QStringLiteral("models"), QJsonArray{QStringLiteral("k3"),
+                                                              QStringLiteral("kimi-k3"),
+                                                              QStringLiteral("openai/gpt-5.6-sol")}},
+                        {QStringLiteral("models_named"), QJsonArray{QStringLiteral("kimi-k3"),
+                                                                    QStringLiteral("gpt-5.6-sol")}}},
+            QDateTime::currentDateTime());
+        QVERIFY(html.contains(QStringLiteral("minimax-m3")));
+        QVERIFY(!html.contains(QStringLiteral("MiniMax-M3")));
+        QVERIFY(html.contains(QStringLiteral("kimi-k3, gpt-5.6-sol")));
+    }
+
     void estimateSentenceAlwaysAsksFirst() {
         const QJsonObject event{{QStringLiteral("scope"), QStringLiteral("project")}, {QStringLiteral("count"), 12},
                                 {QStringLiteral("approx_input_tokens"), 45000},
@@ -1266,8 +1309,9 @@ private slots:
         QVERIFY(isGuestSource(QStringLiteral("codex")));
         QVERIFY(!isGuestSource(QStringLiteral("agent")));
         QVERIFY(!isGuestSource(QStringLiteral("terminal")));
-        QCOMPARE(guestLabel(QStringLiteral("claude")), QStringLiteral("Claude Code"));
-        QCOMPARE(guestLabel(QStringLiteral("codex")), QStringLiteral("Codex"));
+        // Lower-case since card #MDL1 (rule 1), like every other label Relay writes.
+        QCOMPARE(guestLabel(QStringLiteral("claude")), QStringLiteral("claude code"));
+        QCOMPARE(guestLabel(QStringLiteral("codex")), QStringLiteral("codex"));
         // Ordinary words are left alone; anything else is single-quoted, and a quote of its own
         // is closed and reopened rather than escaped.
         QCOMPARE(shellWord(QStringLiteral("claude")), QStringLiteral("claude"));
@@ -1359,7 +1403,7 @@ private slots:
         auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
         QTreeWidgetItem *row = tree->topLevelItem(0)->child(0);
         QCOMPARE(row->text(0), QStringLiteral("Wire the pane"));
-        QCOMPARE(row->text(3), QStringLiteral("Claude Code"));      // where a session shows its model
+        QCOMPARE(row->text(3), QStringLiteral("claude code"));      // where a session shows its model
         // Enter resumes it here, Shift+Enter in a new pane, Ctrl+Enter forks — all with the row,
         // which is what carries the argv.
         QString resumed, newPaned, forked;

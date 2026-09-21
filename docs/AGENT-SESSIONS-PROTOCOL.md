@@ -1719,6 +1719,12 @@ the rows the **filters** select (the query text is not applied, so a menu does n
 the user types), most recently used first, at most 30 each. It is there so the filter menus need
 no second request.
 
+Each item also carries `model_name` beside `model`: the same one name, so the Model column, the
+quick look and the filter menu all print the same word, and a name only a catalog row knows (the
+Kimi Coding Plan's `k3` is `kimi-k3`) is not re-derived, wrongly, in the GUI. `session_info` gains
+`model_name` and `models_named` the same way — the latter deduplicated, so one model that two
+providers served is one entry in "Models used".
+
 `facets.models` holds model **names**, not the ids history recorded (card #MDL1, rule 1): the rows
 written as `k3` and as `kimi-k3` are one entry, and `openai/gpt-5.6-sol` is `gpt-5.6-sol`. The
 stored ids are untouched — nothing is migrated — and the `model` filter and the `model:` operator

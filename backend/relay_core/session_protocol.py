@@ -1429,6 +1429,21 @@ class SessionCommands:
             raise ValueError("Configure a provider and workspace first.")
         return self._live_session_info(agent)
 
+    @staticmethod
+    def _named_once(preset_id, model_ids) -> list:
+        """The models a conversation used, by name, each once and in the order first used.
+
+        History records the id each turn's provider took, so one model can be in there twice under
+        two spellings (`k3` and `kimi-k3`). The panel reads to a person, so it says the name, once
+        (card #MDL1, rule 1).
+        """
+        out: list[str] = []
+        for model_id in model_ids or ():
+            named = model_name(preset_id, model_id if isinstance(model_id, str) else "")
+            if named and named not in out:
+                out.append(named)
+        return out
+
     def _session_fields(self, store: SessionStore, data: dict) -> dict:
         session_id = data["id"]
         threads = store.threads(session_id)
@@ -1441,6 +1456,12 @@ class SessionCommands:
                 "workspace": data.get("workspace") or "", "created": data.get("created"),
                 "updated": data.get("updated"), "turns": data.get("turns") or len(turns),
                 "model": data.get("model") or "", "models": data.get("models") or ([data["model"]] if data.get("model") else []),
+                # The names beside the ids (card #MDL1, rule 1): the ⓘ panel reads to a person and
+                # the ids on disk are what the API took. `models_named` is deduplicated, so one
+                # model that two providers served is one entry.
+                "model_name": model_name(data.get("preset"), data.get("model") or ""),
+                "models_named": self._named_once(data.get("preset"),
+                                            data.get("models") or ([data["model"]] if data.get("model") else [])),
                 "preset": data.get("preset") or "", "effort": data.get("effort"), "mode": data.get("mode"),
                 "usage": usage, "instructions": data.get("instructions") or [],
                 "forked_from": data.get("forked_from"), "history": turns, "unplaced_threads": unplaced,
