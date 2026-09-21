@@ -464,6 +464,26 @@ class ModelCatalogTests(unittest.TestCase):
         self.assertNotIn("k3", P.INTELLIGENCE)     # scored through the name now, not by hand twice
         self.assertEqual(P.INTELLIGENCE["kimi-k3"], 44)
 
+    def test_the_scores_and_the_group_order_come_out_of_the_ranking_file(self):
+        # Card #MDL1: the numbers left presets.py for `model-ranking.md`, the file the owner asked
+        # to be able to review and edit. INTELLIGENCE is a view over its `score` column, so every
+        # reader goes on saying .get / [] / `in` — and the old hand-written _MAIN_GROUP_ORDER is a
+        # view over its `order`. tests/test_model_ranking.py tests the file and the rules.
+        from relay_core import model_ranking
+        rank = model_ranking.load()
+        self.assertEqual(dict(P.INTELLIGENCE),
+                         {name: row.score for name, row in rank.models.items()})
+        self.assertEqual(P.INTELLIGENCE.get("glm-5.3"), rank.score("glm-5.3"))
+        # A group is the first order of the built-ins that carry it, and `guest` the first harness:
+        # plans before harnesses before pay-as-you-go before the router, Relay Free last.
+        self.assertEqual(P._MAIN_GROUP_ORDER["subscription"], rank.provider_order("kimi-code"))
+        self.assertEqual(P._MAIN_GROUP_ORDER["payg"], rank.provider_order("kimi"))
+        self.assertEqual(P._MAIN_GROUP_ORDER["guest"], rank.provider_order("guest:claude"))
+        self.assertEqual(P._MAIN_GROUP_ORDER["included"], rank.provider_order("relay-free"))
+        order = [P._MAIN_GROUP_ORDER[g] for g in ("subscription", "guest", "payg", "aggregator",
+                                                  "included")]
+        self.assertEqual(order, sorted(order))
+
     def test_every_openrouter_twin_names_a_catalog_model_and_a_real_slug(self):
         # OPENROUTER_TWINS (owner, 2026-09-20): keyed by a cloud catalog model id, valued by the
         # OpenRouter slug serving the same model (verified against openrouter.ai/api/v1/models).

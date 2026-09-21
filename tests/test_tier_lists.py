@@ -106,7 +106,7 @@ class ResolutionTests(unittest.TestCase):
         flash = made.resolve('summaries')
         self.assertEqual((flash.preset_id, flash.config.model, flash.effort), ('glm', 'glm-5.3-flash', 'max'))
         self.assertEqual(flash.config.extra['reasoning_effort'], 'max')
-        self.assertIn('first 2 of the Flash list', flash.note)
+        self.assertIn('first 2 of the flash list', flash.note)   # TIER_LABELS, lower-case (#MDL1 rule 1)
 
     def test_a_level_is_not_sent_to_a_model_with_no_knob(self):
         made = resolver({'kimi': 'k'}, self.FLASH)
@@ -457,30 +457,30 @@ class DefaultsTests(unittest.TestCase):
         return P.tier_list_defaults(usable, **kwargs)
 
     def test_plain(self):
+        # Six providers here (openai, kimi, z.ai, minimax, Claude Code, the custom one), so two per
+        # class — the rules themselves are tested in tests/test_model_ranking.py; this is the shape
+        # the `presets` event carries. Relay Free is in `usable` and appears nowhere: it is what
+        # "no providers" means, never one of them (card #MDL1, design 5.4).
         plain = self.defaults(self.USABLE, guests=GUESTS, local=[('local:bonsai', 'bonsai-2-27b')],
                               custom=[('custom:acme', 'acme-1')])['plain']
-        # Subscriptions (the usable guest among them) by intelligence, unknown last; then
-        # pay-as-you-go the same way; Relay Free last. Each at the provider's own default level.
+        # By score (model-ranking.md), one per provider: gpt-6-astra 53, then claude-opus-5 51 —
+        # which is what the guest's `opus` is, so it is ranked by name like anyone else's model.
+        # Each at the provider's own default level.
         self.assertEqual(pairs(plain['main']),
-                         [('guest:claude', 'fable', None), ('glm-coding', 'glm-5.3', 'high'),
-                          ('minimax', 'MiniMax-M3', None), ('openai', 'gpt-6-astra', 'high'),
-                          ('kimi', 'kimi-k3', 'high'), ('custom:acme', 'acme-1', None),
-                          ('relay-free', 'relay-main', 'medium')])
-        # The same models at their top level, the usable guest among them at its own top word
-        # (a plan turn runs through its harness, 13.7): Claude Code's is the last it lists.
+                         [('openai', 'gpt-6-astra', 'high'), ('guest:claude', 'opus', None)])
+        # The same models at their top level, the usable guest at its own top word (a plan turn
+        # runs through its harness, 13.7): Claude Code's is the last it lists.
         self.assertEqual(pairs(plain['high']),
-                         [('guest:claude', 'fable', 'max'), ('glm-coding', 'glm-5.3', 'max'),
-                          ('minimax', 'MiniMax-M3', None), ('openai', 'gpt-6-astra', 'max'),
-                          ('kimi', 'kimi-k3', 'max'), ('custom:acme', 'acme-1', None),
-                          ('relay-free', 'relay-main', 'medium')])
+                         [('openai', 'gpt-6-astra', 'max'), ('guest:claude', 'opus', 'max')])
         # Flash and Lite say their lowest level outright (owner, 2026-09-20: Lite is "with no
-        # reasoning"), and leave it out only for a model with no knob at all.
+        # reasoning"), and leave it out only for a model with no knob at all. Nobody's flash model
+        # is scored, so the tie goes to the provider order: the coding plan, then minimax.
         self.assertEqual(pairs(plain['flash']),
-                         [('glm-coding', 'glm-5.3-flash', 'low'), ('minimax', 'MiniMax-M2.7-highspeed', None),
-                          ('openai', 'gpt-5.6-terra', 'low'), ('kimi', 'kimi-k2.7-code-highspeed', None),
-                          ('relay-free', 'relay-flash', 'low')])
-        # Lite only where the provider has one of its own: GLM, Kimi and MiniMax borrow OpenRouter's.
-        self.assertEqual(pairs(plain['lite']), [('openai', 'gpt-5.6-luna', 'low'), ('relay-free', 'relay-lite', 'low')])
+                         [('glm-coding', 'glm-5.3-flash', 'low'),
+                          ('minimax', 'MiniMax-M2.7-highspeed', None)])
+        # Lite only where the provider has one of its own: GLM, Kimi and MiniMax borrow OpenRouter's,
+        # and OpenRouter has no key here. A guest is never offered for flash or lite.
+        self.assertEqual(pairs(plain['lite']), [('openai', 'gpt-5.6-luna', 'low')])
         self.assertEqual(pairs(plain['local']), [('local:bonsai', 'bonsai-2-27b', None)])
         # Every entry is one `tiers` takes back unchanged.
         with mock.patch('relay_core.roles._preset', side_effect=lambda p: PRESETS.get(p) or mock.Mock()), \
@@ -489,48 +489,57 @@ class DefaultsTests(unittest.TestCase):
         json.dumps(plain)
 
     def test_codex_plans_at_xhigh_when_its_model_offers_it_else_at_its_last_level(self):
-        # Owner, 2026-09-20: "for codex planning you pick xhigh, not max". With the subscriptions,
-        # ahead of pay-as-you-go, as in Main.
-        high = pairs(self.defaults(self.USABLE, guests=[CODEX])['plain']['high'])
-        self.assertEqual(high[:3], [('glm-coding', 'glm-5.3', 'max'), ('guest:codex', 'gpt-5.5-codex', 'xhigh'),
-                                    ('minimax', 'MiniMax-M3', None)])
-        main = pairs(self.defaults(self.USABLE, guests=[CODEX])['plain']['main'])
+        # Owner, 2026-09-20: "for codex planning you pick xhigh, not max". Two providers here (the
+        # coding plan and codex), so one model each: codex's own catalogue names a model
+        # model-ranking.md has never heard of, and an unscored guest is still the provider it is —
+        # it falls back to the first model its list names, as it always did.
+        WITH_CODEX = ['glm-coding']
+        high = pairs(self.defaults(WITH_CODEX, guests=[CODEX])['plain']['high'])
+        self.assertEqual(high, [('glm-coding', 'glm-5.3', 'max'),
+                                ('guest:codex', 'gpt-5.5-codex', 'xhigh')])
+        main = pairs(self.defaults(WITH_CODEX, guests=[CODEX])['plain']['main'])
         self.assertIn(('guest:codex', 'gpt-5.5-codex', 'medium'), main)      # Main: its own default
         capped = dict(CODEX, models=[{'id': 'gpt-5.5-mini', 'efforts': ['low', 'medium', 'high']}])
-        high = pairs(self.defaults(self.USABLE, guests=[capped])['plain']['high'])
+        high = pairs(self.defaults(WITH_CODEX, guests=[capped])['plain']['high'])
         self.assertIn(('guest:codex', 'gpt-5.5-mini', 'high'), high)
         # A guest whose model names no levels falls back to the row's; none at all means no level.
         bare = dict(CODEX, models=[{'id': 'gpt-5.5-codex'}])
-        self.assertIn(('guest:codex', 'gpt-5.5-codex', 'xhigh'), pairs(self.defaults(self.USABLE, guests=[bare])['plain']['high']))
+        self.assertIn(('guest:codex', 'gpt-5.5-codex', 'xhigh'), pairs(self.defaults(WITH_CODEX, guests=[bare])['plain']['high']))
         none = dict(CODEX, efforts=[], models=[{'id': 'gpt-5.5-codex'}])
-        self.assertIn(('guest:codex', 'gpt-5.5-codex', None), pairs(self.defaults(self.USABLE, guests=[none])['plain']['high']))
-        # ... and a signed-out or harness-less guest is in neither list.
+        self.assertIn(('guest:codex', 'gpt-5.5-codex', None), pairs(self.defaults(WITH_CODEX, guests=[none])['plain']['high']))
+        # ... and a signed-out or harness-less guest is in neither list, and is not a provider.
         both = self.defaults(self.USABLE, guests=GUESTS)['plain']
         self.assertNotIn('guest:codex', [e['preset'] for e in both['main'] + both['high']])
         self.assertNotIn('guest:other', [e['preset'] for e in both['main'] + both['high']])
 
     def test_without_an_openrouter_key_the_two_are_the_same(self):
-        both = self.defaults(self.USABLE, guests=GUESTS)
+        both = self.defaults([p for p in self.TWINS if p != 'openrouter'], guests=GUESTS)
         self.assertEqual(both['openrouter'], both['plain'])
 
+    # Four providers whose twins the LISTING above prices, so every branch of the cost rule is
+    # exercised: since card #MDL1 each plain list holds two models, and the twins follow them.
+    TWINS = ['glm-coding', 'minimax', 'openai', 'openrouter']
+
     def test_openrouter_appends_the_cheap_twins_after_everything(self):
-        both = self.defaults(self.USABLE + ['openrouter'], guests=GUESTS)
+        both = self.defaults(self.TWINS)
         plain, routed = both['plain'], both['openrouter']
         self.assertEqual(P.OPENROUTER_TWIN_MAX_COMPLETION_USD_PER_MTOK, 3.0)
         for tier in ('main', 'high', 'flash'):
             self.assertEqual(routed[tier][:len(plain[tier])], plain[tier], tier)     # after ALL of them
-        # $2.86 and exactly $3.00 are in; Kimi K3 ($8.50) and GPT-6 ($50) are not.
+        # $2.86 is in; GPT-6 ($50) is not, so main's two models yield one twin.
+        self.assertEqual(pairs(plain['main']),
+                         [('openai', 'gpt-6-astra', 'high'), ('glm-coding', 'glm-5.3', 'high')])
         self.assertEqual(pairs(routed['main'][len(plain['main']):]),
-                         [('openrouter', 'z-ai/glm-5.3', None), ('openrouter', 'minimax/minimax-m3', None)])
+                         [('openrouter', 'z-ai/glm-5.3', None)])
         # High runs a twin at max too, unless the listing says the model takes no level.
         self.assertEqual(pairs(routed['high'][len(plain['high']):]),
-                         [('openrouter', 'z-ai/glm-5.3', 'max'), ('openrouter', 'minimax/minimax-m3', None)])
-        # Flash: glm's is cheap; terra is $12; minimax m2.7 and kimi k2.7 have no price here, and
-        # an unknown price is kept in Flash and Lite (and was left out of Main and High above).
-        # A Flash or Lite twin says "low" like the rest of its list.
+                         [('openrouter', 'z-ai/glm-5.3', 'max')])
+        # Flash: glm's is cheap; minimax m2.7 has no price here, and an unknown price is kept in
+        # Flash and Lite (and was left out of Main and High above). A Flash or Lite twin says
+        # "low" like the rest of its list.
         self.assertEqual(pairs(routed['flash'][len(plain['flash']):]),
-                         [('openrouter', 'z-ai/glm-5.3-flash', 'low'), ('openrouter', 'minimax/minimax-m2.7', 'low'),
-                          ('openrouter', 'moonshotai/kimi-k2.7-code', 'low')])
+                         [('openrouter', 'z-ai/glm-5.3-flash', 'low'),
+                          ('openrouter', 'minimax/minimax-m2.7', 'low')])
         # Lite starts with Gemini 3.5 Flash-Lite at low (owner, 2026-09-20: "I thought it's 3.5
         # flash lite with no reasoning"), ahead of the providers' own, and names it once.
         self.assertEqual(pairs(routed['lite'])[0], ('openrouter', 'google/gemini-3.5-flash-lite', 'low'))

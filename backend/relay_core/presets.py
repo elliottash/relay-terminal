@@ -8,7 +8,10 @@ provider's own documentation on 2026-09-17; the doc URL sits next to the entry i
 from __future__ import annotations
 
 import copy
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+
+from . import model_ranking
 
 EFFORTS = ("low", "medium", "high", "max")
 
@@ -457,25 +460,38 @@ def model_name(preset_id, model_id) -> str:
     return _NAME_OVERRIDES.get(text) or derived_name(text)
 
 
-# Seeded by the owner from the Artificial Analysis index; edited by hand. Keyed by `model_name`
-# (card #MDL1) rather than by API id, so one model is scored once however many providers serve it:
-# "k3" on Kimi Code and "kimi-k3" on the Kimi platform used to be two hand-kept 44s. None until a
-# number is entered, and the GUI shows nothing for None rather than a zero.
-INTELLIGENCE: dict[str, int | None] = {
-    model_name(preset_id, row["id"]): None
-    for preset_id, rows in MODEL_CATALOG.items() for row in rows
-}
-# The owner's ruling, seeded 2026-09-20 from the Artificial Analysis Intelligence Index v4.3.2
-# (https://artificialanalysis.ai/leaderboards/models), each model at its highest reasoning level,
-# as the picker's "intelligence" sort. Edit by hand; a model not listed here sorts last, blank.
-INTELLIGENCE.update({
-    "claude-fable-5.1": 53,
-    "gpt-6-astra": 53,
-    "claude-opus-5": 51,
-    "gpt-5.6-sol": 47,
-    "glm-5.3": 45,
-    "kimi-k3": 44,
-})
+# The owner's intelligence ruling, seeded 2026-09-20 from the Artificial Analysis Intelligence
+# Index v4.3.2 (https://artificialanalysis.ai/leaderboards/models), each model at its highest
+# reasoning level, as the picker's "intelligence" sort. Keyed by `model_name` (card #MDL1) rather
+# than by API id, so one model is scored once however many providers serve it: "k3" on Kimi Code
+# and "kimi-k3" on the Kimi platform used to be two hand-kept 44s.
+#
+# The numbers are no longer here. They are the `score` column of `model-ranking.md`, the file the
+# owner asked to be able to "review and edit" (card #MDL1, design section 5.4), and this is a
+# **view** over it: every reader — `catalog_rows`, the sort in `tier_list_defaults`, the GUI's
+# `intelligence` field — goes on saying `INTELLIGENCE.get(name)` and `name in INTELLIGENCE` and
+# gets the file's answer. None for a model whose row leaves the score blank *and* for a name with
+# no row at all, which are the same thing to a sort: last, and blank in the GUI rather than a zero.
+class _Scores(Mapping):
+    """`model-ranking.md`'s Models table as `{name: score}`."""
+
+    def _rows(self) -> dict:
+        return model_ranking.load().models
+
+    def __getitem__(self, name) -> int | None:
+        return self._rows()[name].score
+
+    def __iter__(self):
+        return iter(self._rows())
+
+    def __len__(self) -> int:
+        return len(self._rows())
+
+    def __repr__(self) -> str:
+        return f"INTELLIGENCE({dict(self)!r})"
+
+
+INTELLIGENCE: Mapping[str, int | None] = _Scores()
 
 
 # --- the same model on OpenRouter (owner, 2026-09-20) ---------------------------------------------
@@ -669,12 +685,38 @@ def model_efforts(preset_id, model: str) -> list[str] | None:
 # Flash and Lite, where every twin there is cheap.
 OPENROUTER_TWIN_MAX_COMPLETION_USD_PER_MTOK = 3.0
 
-_MAIN_GROUP_ORDER = {"guest": 0, "subscription": 0, "payg": 1, "aggregator": 1, "custom": 1,
-                     "included": 2}
+# Which *kind* of access comes first, by the `group` a preset carries. Hand-written until card
+# #MDL1; now read off `model-ranking.md`'s Providers table, whose `order` column is the group order
+# (design section 5.4: "the provider order replaces the group order"). A group is the lowest order
+# of the built-ins that carry it — so `subscription` is the first plan, `payg` the first api — and
+# `guest` is the first harness, because no entry of PRESETS is one. A group no row covers
+# (`custom`, `local`) sorts after everything that has one.
+#
+# The ranking itself goes through `Ranking.provider_order` per provider; this is only for a
+# provider with no row of its own, which is the custom ones.
+def _group_orders() -> dict[str, int]:
+    rank = model_ranking.load()
+    out: dict[str, int] = {}
+    for preset_id, preset in PRESETS.items():
+        order = rank.provider_order(preset_id)
+        if order < out.get(preset.group, order + 1):
+            out[preset.group] = order
+    harnesses = [row.order for row in rank.providers.values() if row.kind == "harness"]
+    out["guest"] = min(harnesses, default=model_ranking.UNKNOWN_PROVIDER_ORDER)
+    return out
+
+
+_MAIN_GROUP_ORDER = _group_orders()
 
 # What the openrouter default puts first in the Lite list (owner, 2026-09-20: "I thought it's 3.5
 # flash lite with no reasoning"): the cheapest Gemini, at its lowest level. Not `_LITE_VIA_OPENROUTER`,
 # which is the built-in Lite row a pane resolves to with no list at all and is left as it was.
+#
+# It survives card #MDL1's ranking file, and it stays in the **openrouter variant only** — the one
+# the user presses when they have chosen to spend an OpenRouter key on chores. The plain lists rank
+# lite the same way they rank every other class, out of `model-ranking.md`, with no provider put
+# first by name; the owner's "openrouter first for chores" is exactly what pressing the other
+# button means.
 LITE_LIST_FIRST = ("openrouter", "google/gemini-3.5-flash-lite")
 
 
@@ -737,88 +779,219 @@ def tier_start_efforts(efforts, default_effort: str | None = None, guest_id: str
     return {"main": main, "high": high, "flash": low, "lite": low}
 
 
+# The classes a guest harness may be a default for (`roles.GUEST_TIERS`, spelled here rather than
+# imported: roles imports this module). Main is the pane's own agent and High is a plan turn, both
+# of which start the harness deliberately; Flash and Lite are side calls and per-turn swaps of a
+# running conversation, which a whole agent of its own cannot be handed — `roles._tier_entries`
+# drops a guest from those lists, so ranking one into them would only leave a row that never runs.
+GUEST_CLASSES = ("high", "main")
+
+
+@dataclass(frozen=True)
+class _Candidate:
+    """One (provider, model) pair the defaults may choose, with what `model-ranking.md` says about
+    it.
+
+    ``provider`` is the company rather than the preset — `glm` and `glm-coding` are one z.ai, and
+    both serve `glm-5.3` — because "at most one per provider per class" (owner, 2026-09-21: "dont
+    pick 2 options from the same provider") is about who is being paid, not about which key is
+    stored.
+    """
+    preset: str
+    model: str
+    name: str
+    provider: str
+    order: int
+    score: int | None
+    classes: tuple[str, ...]
+    guest: str = ""                       # the guest id ("codex"), "" for everything else
+    default_effort: str | None = None     # a guest model row's own default level
+    levels: tuple[str, ...] = ()          # a guest model's own levels, for its High word
+
+
+def _provider_identity(preset_id: str) -> str:
+    """Who is being paid: a built-in preset's `provider` (the company), else the id itself — a
+    guest harness is its own provider, and so is each custom endpoint."""
+    preset = PRESETS.get(preset_id)
+    return (preset.provider or preset.id) if preset is not None else preset_id
+
+
+def _ranked_classes(rank, name: str, allowed=model_ranking.CLASSES) -> tuple[str, ...]:
+    return tuple(cls for cls in rank.classes(name) if cls in allowed)
+
+
+def _builtin_candidates(preset_id: str, rank) -> list[_Candidate]:
+    """Every model of a built-in preset's catalog, scored and classed by `model-ranking.md`."""
+    preset = PRESETS[preset_id]
+    identity, order = _provider_identity(preset_id), rank.provider_order(preset_id)
+    out = [_Candidate(preset_id, row["id"], model_name(preset_id, row["id"]), identity, order,
+                      rank.score(model_name(preset_id, row["id"])),
+                      _ranked_classes(rank, model_name(preset_id, row["id"])))
+           for row in MODEL_CATALOG.get(preset_id) or []]
+    if not any("main" in c.classes for c in out):
+        # A provider the file puts in no Main class still has to be able to run a pane, so its
+        # built-in Main entry stands in — what this function answered before the file existed.
+        entry = tier_default(preset_id, "main") or (preset_id, preset.model, preset.extra)
+        name = model_name(preset_id, entry[1])
+        out.append(_Candidate(preset_id, entry[1], name, identity, order, rank.score(name),
+                              GUEST_CLASSES))
+    return out
+
+
+def _usable_guest(row) -> bool:
+    """A guest row of the `presets` event that can take a turn here: its harness runs on this
+    machine and the CLI has not said it is signed out (protocol 29.3)."""
+    return bool(isinstance(row, dict) and row.get("harness") and row.get("logged_in") is not False
+                and isinstance(row.get("id"), str))
+
+
+def _guest_candidates(row: dict, rank) -> list[_Candidate]:
+    """A guest harness's own models, scored by **name** through the same table as everyone else's
+    (owner, 2026-09-21): `gpt-6-astra` through codex scores what `gpt-6-astra` through the OpenAI
+    API scores, and claude code's `opus` is `claude-opus-5`.
+
+    Only the classes a guest may serve (GUEST_CLASSES). A guest whose list the file has never heard
+    of — codex's catalogue is whatever the CLI ships — falls back to the first model its own list
+    names, as this function always did, so an unscored guest is still the provider it is.
+    """
+    preset_id = row["id"]
+    guest_id = row.get("guest") if isinstance(row.get("guest"), str) else preset_id.split(":", 1)[-1]
+    order = rank.provider_order(preset_id)
+    row_levels = tuple(level for level in (row.get("efforts") or []) if isinstance(level, str))
+
+    def levels_of(model_row: dict) -> tuple[str, ...]:
+        own = model_row.get("efforts") if isinstance(model_row.get("efforts"), list) else None
+        return tuple(level for level in (own or row_levels) if isinstance(level, str))
+
+    models = [m for m in row.get("models") or [] if isinstance(m, dict) and m.get("id")]
+    out = [_Candidate(preset_id, m["id"], model_name(preset_id, m["id"]), preset_id, order,
+                      rank.score(model_name(preset_id, m["id"])),
+                      _ranked_classes(rank, model_name(preset_id, m["id"]), GUEST_CLASSES),
+                      guest_id, m.get("default_effort") or None, levels_of(m))
+           for m in models]
+    if not any("main" in c.classes for c in out):
+        first = models[0] if models else {}
+        model = first.get("id") or ""          # "" is the guest's own default, as `tiers` reads it
+        name = model_name(preset_id, model)
+        out.append(_Candidate(preset_id, model, name, preset_id, order, rank.score(name),
+                              GUEST_CLASSES, guest_id, first.get("default_effort") or None,
+                              levels_of(first)))
+    return out
+
+
+def _custom_candidates(preset_id: str, model: str, rank) -> list[_Candidate]:
+    """A custom provider (protocol 28.6): the one model the user gave it. Scored and classed by
+    name where the file knows it — a hand-added `glm-5.3` is the same model — and High and Main
+    otherwise, because a provider the user configured deliberately is a provider."""
+    name = model_name(preset_id, model)
+    return [_Candidate(preset_id, model or "", name, preset_id, rank.provider_order(preset_id),
+                       rank.score(name), _ranked_classes(rank, name) or GUEST_CLASSES)]
+
+
+def _pick(candidates: list[_Candidate], cls: str, limit: int) -> list[_Candidate]:
+    """The `limit` models of one class: score descending (blank last), then the provider's `order`,
+    then the name; at most one per provider, and never the same model twice."""
+    ordered = sorted((c for c in candidates if cls in c.classes),
+                     key=lambda c: (-(c.score if isinstance(c.score, int) else -1), c.order, c.name))
+    out: list[_Candidate] = []
+    providers: set[str] = set()
+    names: set[str] = set()
+    for candidate in ordered:
+        if candidate.provider in providers or (candidate.name and candidate.name in names):
+            continue
+        providers.add(candidate.provider)
+        names.add(candidate.name)
+        out.append(candidate)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _class_effort(candidate: _Candidate, cls: str) -> str | None:
+    """The level a default entry carries, by the same three rules `tier_start_efforts` applies to a
+    hand-added row: Main the provider's own default, High the model's top level (in a guest's own
+    word), Flash and Lite the lowest."""
+    if cls == "main":
+        if candidate.guest:
+            return candidate.default_effort
+        preset = PRESETS.get(candidate.preset)
+        if preset is None or model_efforts(candidate.preset, candidate.model) == []:
+            return None
+        return infer_effort(preset.effort_style, model_extra(candidate.preset, candidate.model))
+    if cls == "high":
+        if candidate.guest:
+            return _guest_top_level(candidate.guest, list(candidate.levels))
+        levels = model_efforts(candidate.preset, candidate.model)
+        return _top_level(levels) if levels is not None else None
+    return _low_level(candidate.preset, candidate.model)
+
+
 def tier_list_defaults(usable, *, local=(), custom=(), guests=(), listing=None) -> dict:
-    """``{"plain": {tier: [entry…]}, "openrouter": {tier: [entry…]}}``: what Options › Models' two
-    default buttons fill the five lists with, from what can take a turn right now.
+    """``{"plain": {tier: [entry…]}, "openrouter": {tier: [entry…]}}``: what the two `defaults`
+    buttons fill the five lists with, from `model-ranking.md` and what can take a turn right now.
 
     ``usable`` is the built-in preset ids that can (a stored key; Relay Free where it works);
     ``local`` the saved endpoints and ``custom`` the keyed custom providers, each as
     ``(id, model)``; ``guests`` the guest rows of the same ``presets`` event
     (guest_harness_provider.preset_rows), of which the usable ones — the harness runs here and the
-    CLI has not said it is signed out — are subscriptions too, and sit with them, each on the
-    first model its own list names (none yet: the guest's own default) at that model's own
-    default level, in the CLI's words. ``listing`` is OpenRouter's live rows
-    (openrouter_catalog.rows(), the default), read for each twin's ``price_completion_per_mtok``
-    and for whether it takes a reasoning level at all. Every entry is
-    ``{"preset", "model", "effort"?}``, the shape ``tiers`` takes, with ``effort`` a Relay level
-    and absent where the model has no knob or the provider's default is no level at all.
+    CLI has not said it is signed out — count as providers like any other. ``listing`` is
+    OpenRouter's live rows (openrouter_catalog.rows(), the default), read for each twin's
+    ``price_completion_per_mtok`` and for whether it takes a reasoning level at all. Every entry is
+    ``{"preset", "model", "effort"?}``, the shape ``tiers`` takes, with ``effort`` a Relay level and
+    absent where the model has no knob or the provider's default is no level at all.
 
-    plain — `main`: each provider's Main-tier model; subscriptions (and guests) first, then
-    pay-as-you-go, Relay Free last; by INTELLIGENCE descending within a group, unknown last; each
-    at the provider's own default level. `high`: the same models at their top level, the guests
-    included at theirs in the CLI's own words (_guest_top_level: a plan turn runs through the
-    guest's harness, protocol 13.7). `flash` / `lite`: each provider's Flash model, and its Lite
-    model when that is on the provider itself, every entry at the model's lowest level
-    (_low_level; owner, 2026-09-20: Lite is "with no reasoning"). `local`: the saved endpoints.
+    **How many** (owner, 2026-09-21; design section 5.4). Count the providers that can take a turn:
+    a built-in with a key, a usable guest harness, a keyed custom provider — **not** a model server
+    on this machine, and **not** Relay Free, which is what "none" means.
+
+    * **none** → Relay Free's three rows (`relay-main` in high and main, `relay-flash`,
+      `relay-lite`), and empty lists where Relay Free itself cannot run;
+    * **one** → one model per class from that provider, the highest score whose `classes` names
+      the class;
+    * **two or more** → two per class, by score descending, at most one per provider per class and
+      never the same model twice; a blank score sorts last and ties break by the provider's
+      `order`, then by name.
+
+    Two presets of one company (`glm` and `glm-coding`) are one provider, so a class never holds
+    the same model twice over; the plan wins the tie on `order`, so the credit is spent first.
+    A guest's models are scored by name through the same table, and a guest is offered for High and
+    Main only (GUEST_CLASSES). Relay Free never appears once anything else can take a turn.
+
+    **The levels** are unchanged: `main` the provider's own default for that model, `high` its top
+    level (a guest's in the CLI's own word, `_guest_top_level`: codex plans at `xhigh`), `flash`
+    and `lite` its lowest (owner, 2026-09-20: Lite is "with no reasoning"). `local` is the saved
+    endpoints in their own order — it belongs to no provider and is not ranked.
 
     openrouter — the plain lists, then, only with an `openrouter` key, the OpenRouter twins of each
     list's models *after all of them*, cost-sensitive ones only
     (OPENROUTER_TWIN_MAX_COMPLETION_USD_PER_MTOK), a Flash or Lite twin at "low" where the listing
     says it takes a level. `lite` starts with LITE_LIST_FIRST (Gemini 3.5 Flash-Lite through
     OpenRouter, at low), ahead of the providers' own: chores and transcription are where the owner
-    wants OpenRouter first. Without the key the two are equal.
+    wants OpenRouter first, and this button is where he said so. Without the key the two are equal.
     """
+    rank = model_ranking.load()
     usable = [p for p in PRESETS if p in set(usable)]             # PRESETS order, built-ins only
-    ranked: list[tuple[tuple, str, str, str | None, bool]] = []    # (sort key, preset, model, effort, guest)
-    guest_top: dict[str, str | None] = {}                          # preset -> its High level
-    order = 0
-    for row in guests:
-        if not (isinstance(row, dict) and row.get("harness") and row.get("logged_in") is not False
-                and isinstance(row.get("id"), str)):
-            continue
-        first = next((m for m in row.get("models") or [] if isinstance(m, dict) and m.get("id")), {})
-        model = first.get("id") or ""
-        score = INTELLIGENCE.get(model_name(row["id"], model))
-        ranked.append(((0, -(score or -1), order), row["id"], model, first.get("default_effort") or None, True))
-        levels = first.get("efforts") if isinstance(first.get("efforts"), list) else None
-        if not levels:
-            levels = row.get("efforts") if isinstance(row.get("efforts"), list) else []
-        guest_id = row.get("guest") if isinstance(row.get("guest"), str) else row["id"].split(":", 1)[-1]
-        guest_top[row["id"]] = _guest_top_level(guest_id, [l for l in levels if isinstance(l, str)])
-        order += 1
+    candidates: list[_Candidate] = []
     for preset_id in usable:
-        preset = PRESETS[preset_id]
-        entry = tier_default(preset_id, "main") or (preset_id, preset.model, preset.extra)
-        effort = infer_effort(preset.effort_style, entry[2]) if model_efforts(preset_id, entry[1]) != [] else None
-        ranked.append(((_MAIN_GROUP_ORDER.get(preset.group, 1),
-                        -(INTELLIGENCE.get(model_name(preset_id, entry[1])) or -1), order),
-                       preset_id, entry[1], effort, False))
-        order += 1
+        if PRESETS[preset_id].hosted:
+            continue                      # Relay Free is what "no providers" means, not a provider
+        candidates.extend(_builtin_candidates(preset_id, rank))
+    for row in guests:
+        if _usable_guest(row):
+            candidates.extend(_guest_candidates(row, rank))
     for preset_id, model in custom:
-        ranked.append(((1, 1, order), preset_id, model or "", None, False))
-        order += 1
-    ranked.sort(key=lambda item: item[0])
-    providers = [item[1] for item in ranked if item[1] in PRESETS]
+        candidates.extend(_custom_candidates(preset_id, model or "", rank))
 
-    main = [_list_entry(preset_id, model, effort) for _, preset_id, model, effort, _ in ranked]
-    high = []
-    for _, preset_id, model, effort, guest in ranked:
-        if guest:
-            high.append(_list_entry(preset_id, model, guest_top.get(preset_id)))
-            continue
-        levels = model_efforts(preset_id, model)
-        high.append(_list_entry(preset_id, model, _top_level(levels) if levels is not None else None))
-    flash, lite = [], []
-    for preset_id in providers:
-        for tier, out in (("flash", flash), ("lite", lite)):
-            entry = tier_default(preset_id, tier)
-            if entry is None or entry[0] != preset_id:
-                continue              # Lite through OpenRouter is OpenRouter's row, not this one's
-            made = _list_entry(preset_id, entry[1], _low_level(preset_id, entry[1]))
-            if made not in out:
-                out.append(made)
-    plain = {"main": main, "high": high, "flash": flash, "lite": lite,
-             "local": [_list_entry(endpoint_id, model or "", None) for endpoint_id, model in local]}
+    providers = {candidate.provider for candidate in candidates}
+    limit = 2 if len(providers) > 1 else 1
+    if not providers:
+        hosted = next((p for p in usable if PRESETS[p].hosted), "")
+        candidates = _builtin_candidates(hosted, rank) if hosted else []
+
+    plain = {cls: [_list_entry(c.preset, c.model, _class_effort(c, cls))
+                   for c in _pick(candidates, cls, limit)]
+             for cls in ("main", "high", "flash", "lite")}
+    plain["local"] = [_list_entry(endpoint_id, model or "", None) for endpoint_id, model in local]
 
     routed = {tier: [dict(entry) for entry in entries] for tier, entries in plain.items()}
     if "openrouter" in usable:
