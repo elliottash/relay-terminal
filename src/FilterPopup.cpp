@@ -42,10 +42,11 @@ constexpr int kTrailingRole = Qt::UserRole + 3;
 constexpr int kHeaderRole = Qt::UserRole + 4;
 constexpr int kIndentRole = Qt::UserRole + 5;
 
-// How far a row under a header is indented: two spaces' worth, and never less than a few pixels.
+// How far a row under a header is indented: two spaces' worth, and never less than the width a
+// proportional font's two spaces would fall short of being visible as a step.
 int indentWidth(const QFontMetrics &metrics)
 {
-    return std::max(metrics.horizontalAdvance(QLatin1String("  ")), 8);
+    return std::max(metrics.horizontalAdvance(QLatin1String("  ")), 12);
 }
 
 QColor mix(const QColor &over, const QColor &under, qreal amount)

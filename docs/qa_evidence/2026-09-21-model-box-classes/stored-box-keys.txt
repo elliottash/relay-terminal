@@ -1,0 +1,11 @@
+[models]
+box\main=3
+box_off\flash=true
+fallbacks=glm-coding|glm-5.3, kimi-code|k3-256k, kimi-code|kimi-for-coding
+provider_order=kimi-code, glm, glm-coding, openrouter, guest:claude, guest:codex
+tier\flash=glm-coding|glm-5.3-flash|low, kimi-code|kimi-for-coding-highspeed|
+tier\high=glm-coding|glm-5.3|max, openai|gpt-6-astra|max
+tier\lite=glm-coding|glm-5.3-flash|low
+tier\local=@Invalid()
+tier\main=kimi-code|k3|high, glm-coding|glm-5.3|max, kimi-code|k3-256k|high, kimi-code|kimi-for-coding|
+
