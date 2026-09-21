@@ -1615,6 +1615,25 @@ class SetBoardTests(AttachTest):
                          identity)
         self.assertEqual(agent.messages[-1]["content"], "a question from before")
 
+    def test_a_console_that_gains_a_board_gains_a_consoles_board_tools(self):
+        """The tools that arrive mid-conversation are the surface's own (#AGNT, #CTRN).
+
+        `configure` calls `begin_console` on the tools it builds; a project attached to a tab
+        that was already talking came through `_attach_agent_tools` and got a *pane's* set, so
+        the console lost merge, split and the import — the tool list moving under a conversation,
+        which is the thing card #CTRN is otherwise about not doing.
+        """
+        here = self.project("nowhere")
+        there = self.project("project", "switchboard")
+        self.commands.configure(str(here), {})
+        self.commands.console = True
+        agent = self.agent(here)
+        self.commands.set_board({"type": "set_board", "id": "s1", "board": {"dir": str(there)}})
+        self.assertTrue(agent.board.console)
+        names = {t["function"]["name"] for t in agent.tools()}
+        self.assertTrue({"board_merge_cards", "board_split_card", "board_import_items",
+                         "search_files"} <= names, sorted(names))
+
     def test_board_null_detaches_and_the_tools_and_the_policy_go_with_it(self):
         there = self.project("project", "issues")
         self.commands.configure(str(there), {})

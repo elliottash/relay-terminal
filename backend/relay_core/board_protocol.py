@@ -620,6 +620,13 @@ class BoardCommands:
         if agent is None or not hasattr(agent, "refresh_system_prompt"):
             return
         agent.board = self.agent_tools(workspace, {"board": settings["raw"]})
+        if self.console and agent.board is not None:
+            # A console's board tools are a console's, whenever they arrive (#AGNT): merge,
+            # split, the import and `search_files`. `configure` calls `begin_console` on the
+            # tools it builds; a project attached to a tab that is already talking came through
+            # here and got a pane's set instead, which is the tool list changing under a
+            # conversation that this card is otherwise about not doing (#CTRN).
+            agent.board.begin_console()
         cancel = getattr(agent, "cancel_event", None)
         if cancel is not None:
             self.init.cancel = cancel
