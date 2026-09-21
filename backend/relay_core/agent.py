@@ -35,7 +35,8 @@ from .attachments import format_block as format_attachments
 from .attachments import image_block, images as image_attachments, replace_images
 from .checkpoints import CheckpointStore
 from .context import DEFAULT_THRESHOLD, ContextTracker
-from .planning import (PLAN_BLOCKED_TOOLS, PLAN_MODE_NOTE, WRITE_PLAN_SPEC, guest_plan_prompt, plan_from_reply,
+from .planning import (EXIT_PLAN_MODE_SPEC, exit_plan_question,
+                       PLAN_BLOCKED_TOOLS, PLAN_MODE_NOTE, WRITE_PLAN_SPEC, guest_plan_prompt, plan_from_reply,
                        validate_mode, validate_plan_args, write_plan)
 from .roles import GUEST_BASE_SCHEME, guest_id_of, is_guest_preset
 from .presets import (apply_effort, context_window_for, effort_style, infer_effort, model_name,
@@ -535,7 +536,7 @@ def validate_tool_scope(value) -> str:
 #: turn this exists for: it presents what a probe found and offers to import it, and nothing is
 #: written until the owner answers, so the rule is enforced rather than asked for in the brief.
 READONLY_BLOCKED = frozenset(PLAN_BLOCKED_TOOLS) | {
-    "run_command", "run_in_terminal", "type_into_program", "write_plan"}
+    "run_command", "run_in_terminal", "type_into_program", "write_plan", "exit_plan_mode"}
 
 READONLY_REFUSAL = (
     "This turn writes nothing by design — the owner has not confirmed anything yet. Say what you "
@@ -1117,7 +1118,7 @@ class Agent:
         tail = [t for name in TAIL_TOOLS for t in offered if t["function"]["name"] == name]
         tools = [t for t in offered if t["function"]["name"] not in TAIL_TOOLS]
         extra = [todo_tool.SPEC] if self._todos_enabled() else []
-        extra = extra + [WRITE_PLAN_SPEC]
+        extra = extra + [WRITE_PLAN_SPEC, EXIT_PLAN_MODE_SPEC]
         # #GMCF decision 9: `load_tools` itself is a fixture of the list — it is the same spec for
         # every pane and every turn — so it sits here with the stable tools. Only the schemas it
         # fetches are appended, at the very end, where an append costs nothing above them.
@@ -3340,6 +3341,13 @@ class Agent:
             items = args.get("items") if isinstance(args.get("items"), list) else []
             lines = [f"[{i.get('status')}] {str(i.get('text'))[:80]}" for i in items[:20] if isinstance(i, dict)]
             return Prepared(name, args, "UPDATE TODOS\n\n" + ("\n".join(lines) or "(empty list)"))
+        if name == "exit_plan_mode":
+            if self.mode != "plan":
+                raise ValueError("exit_plan_mode is only available in plan mode.")
+            if not self.executor.can_ask:
+                raise ValueError("exit_plan_mode is not available here: you cannot reach the user.")
+            payload, preview = self.executor.questions.prepare(exit_plan_question(args))
+            return Prepared(name, payload, preview)
         if name == "write_plan":
             if self.mode != "plan":
                 raise ValueError("write_plan is only available in plan mode.")
@@ -3360,6 +3368,19 @@ class Agent:
         if prepared.name == "type_into_program":
             ctx = self._turn_ctx or {}
             return self.executor.program.execute(prepared.arguments, ctx.get("turn_id"))
+        if prepared.name == "exit_plan_mode":
+            ctx = self._turn_ctx or {}
+            result = self.executor.questions.execute(prepared.arguments, ctx.get("turn_id"))
+            if self.cancel_event.is_set():
+                raise Cancelled("Stopped.")
+            accepted = (result.get("ok") is True
+                        and [a.get("answer") for a in result.get("answers", [])] == ["Execute"])
+            if accepted:
+                self.set_mode("build")
+                self.emit({"event": "mode_changed", "mode": self.mode})
+            return {**result, "approved": accepted, "mode": self.mode,
+                    "note": ("The user approved leaving plan mode. Build mode is active; continue with implementation."
+                             if accepted else "The user did not approve leaving plan mode. Do not execute or ask again; keep planning.")}
         if prepared.name == "ask_user":
             # The ask is drawn against the turn it belongs to, so the pane can close it if the
             # turn is stopped while the user is still reading it.

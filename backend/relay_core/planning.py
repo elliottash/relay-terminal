@@ -22,7 +22,30 @@ PLAN_MODE_NOTE = """
 
 PLAN MODE is active. Investigate before proposing changes: you may read files, list directories, load skills and run commands, but commands must be read-only (no edits, installs, git commits, deletions, or writes of any kind). Do not modify the workspace.
 Ask the user clarifying questions with ask_user rather than making large assumptions about what they want. Once you have read enough to know what is actually ambiguous — which of two directions, how far the change goes, a trade-off worth their opinion, wording only they can choose — ask it, in one call, before you write the plan. Give options when the decision has a few known branches and leave them out when it does not; an open question is better than three invented choices. Do not ask what the code can tell you, and do not ask whether the plan is any good: write it and let them edit it.
-When you understand the task, call write_plan exactly once with a short title and a complete Markdown plan: goal, findings with exact file paths, numbered steps, risks, and how to verify. When the work is big enough to split across subagents, the plan also carries an Orchestration block: each subagent (its type and a one-line task), which steps run in parallel, and which wait for which. Only steps that touch no shared files may run in parallel, and writes stay with the main agent; a small plan gets no block. Then reply with a two-sentence summary. The user reviews and edits the plan file before anything is executed."""
+When you understand the task, call write_plan exactly once with a short title and a complete Markdown plan: goal, findings with exact file paths, numbered steps, risks, and how to verify. When the work is big enough to split across subagents, the plan also carries an Orchestration block: each subagent (its type and a one-line task), which steps run in parallel, and which wait for which. Only steps that touch no shared files may run in parallel, and writes stay with the main agent; a small plan gets no block. The user reviews and edits the plan file before anything is executed. When ready to implement, call exit_plan_mode with a concise reason to offer Execute or Keep planning. Continue implementation only if its result says approved and build mode is active. A declined, dismissed or unanswered request leaves plan mode active; do not repeat the request. Otherwise reply with a two-sentence summary."""
+
+EXIT_PLAN_MODE_SPEC = {"type": "function", "function": {
+    "name": "exit_plan_mode",
+    "description": "Request the user's permission to leave plan mode and execute. Explain what is ready to execute; only an explicit Execute answer enables build mode.",
+    "parameters": {"type": "object", "properties": {
+        "reason": {"type": "string", "maxLength": 250, "description": "What is ready to execute and why planning is complete."}},
+        "required": ["reason"], "additionalProperties": False}}}
+
+
+def exit_plan_question(args) -> dict:
+    if not isinstance(args, dict) or set(args) != {"reason"}:
+        raise ValueError("exit_plan_mode takes one argument, reason.")
+    reason = args["reason"]
+    if not isinstance(reason, str) or not reason.strip() or "\x00" in reason or len(reason) > 250:
+        raise ValueError("reason must be non-empty text of at most 250 characters.")
+    return {"questions": [{
+        "header": "Exit plan mode",
+        "question": reason.strip() + "\nLeave planning mode and execute?",
+        "options": [
+            {"label": "Execute", "description": "Switch to build mode and continue with implementation."},
+            {"label": "Keep planning", "description": "Stay in plan mode without enabling edits."}],
+    }]}
+
 
 WRITE_PLAN_SPEC = {"type": "function", "function": {
     "name": "write_plan",
