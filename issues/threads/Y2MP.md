@@ -30,3 +30,15 @@ the user a memory card is in use. It is not. That is a false statement on screen
 of everything above.
 
 Status `discussing`, `waiting_on: owner`.
+
+<!-- relay:entry 20260921T220533Z-a3 author=codex kind=decision -->
+### Codex · 2026-09-21 22:05
+Owner: "i am liking the middle option. can you include a \"globals\" tab that has our proposed \"swithcboard hq\" functionality"
+
+Owner: "and ctrl shift g can open globals"
+
+Card #P7SJ captures the shared Projects / Sessions / Globals pane proposal. Globals is the requested
+UI home for this card's HQ functionality, with Ctrl+Shift+G as its direct entry. The owner also said
+"i dont need the pane screenshot key, not sure why i have that", releasing its current binding.
+This settles the requested UI placement; this card's existing memory/runtime and scope questions
+remain open. Its original body and implementation status are unchanged.
