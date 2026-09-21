@@ -714,7 +714,7 @@ public:
         scan->setWorkingDirectory(m_cwd);
         scan->setProcessEnvironment(guestHelperEnvironment());
         scan->setProgram(m_python);
-        scan->setArguments({QStringLiteral("-m"), QStringLiteral("relay_core.guest_slash"),
+        scan->setArguments({QStringLiteral("-X"), QStringLiteral("utf8"), QStringLiteral("-m"), QStringLiteral("relay_core.guest_slash"),
                             QStringLiteral("--emit"), guest, QStringLiteral("--cwd"), m_cwd});
         connect(scan, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
                 [this, scan, guest](int code, QProcess::ExitStatus exit) {
@@ -2368,7 +2368,7 @@ private:
         m_guestTail->setWorkingDirectory(m_cwd);
         m_guestTail->setProcessEnvironment(guestHelperEnvironment());
         m_guestTail->setProgram(m_python);
-        m_guestTail->setArguments({QStringLiteral("-m"), QStringLiteral("relay_core.guest_codex"),
+        m_guestTail->setArguments({QStringLiteral("-X"), QStringLiteral("utf8"), QStringLiteral("-m"), QStringLiteral("relay_core.guest_codex"),
                                    QStringLiteral("tail"), QStringLiteral("--cwd"), m_cwd});
         m_guestTail->setStandardOutputFile(QProcess::nullDevice());
         m_guestTail->setStandardErrorFile(QProcess::nullDevice());
@@ -10528,7 +10528,7 @@ private:
         if (sharesWorker()) return;   // the tab's worker is the window's; this pane has none
         if (!m_workerConnected) connectWorker();
         m_workerBuffer.clear(); m_workerPending.clear();
-        const QStringList command{m_python, QStringLiteral("-S"), QStringLiteral("-u"), m_data + QStringLiteral("/backend/worker.py")};
+        const QStringList command{m_python, QStringLiteral("-X"), QStringLiteral("utf8"), QStringLiteral("-S"), QStringLiteral("-u"), m_data + QStringLiteral("/backend/worker.py")};
         // The worker writes worker.log itself; it needs this pane's id and the chosen detail level.
         // Passed per process rather than with qputenv, which would leak between panes.
         QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
@@ -13345,7 +13345,7 @@ public:
         launch->setWorkingDirectory(QFileInfo(directory).isDir() ? directory : m_cwd);
         launch->setProcessEnvironment(guestHelperEnvironment());
         launch->setProgram(m_python);
-        QStringList arguments{QStringLiteral("-m"), QStringLiteral("relay_core.guest_launch"), guest,
+        QStringList arguments{QStringLiteral("-X"), QStringLiteral("utf8"), QStringLiteral("-m"), QStringLiteral("relay_core.guest_launch"), guest,
                               QStringLiteral("--runtime-dir"), m_runtime.path(), QStringLiteral("--cwd"), directory,
                               QStringLiteral("--port"), QString::number(port), QStringLiteral("--python"), m_python};
         // The same defaults as the harness route (Options › Claude Code and Codex), as the CLI's
