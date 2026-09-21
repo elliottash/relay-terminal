@@ -25,6 +25,8 @@
 #include "ProjectInit.h"        // when "Initialize a project … here?" is asked, and what it shows
 #include "ProjectInitBlock.h"   // …and the inline block that asks it, under the terminal
 #include "AgentUi.h"
+#include "AgentHost.h"      // relay::agent::Host: what the agent console is drawn on (#AGNT step 1)
+#include "AgentConsole.h"   // …and the console itself, the prompt box as one unit
 #include "Completion.h"
 #include "FileIndex.h"
 #include "ShellHighlighter.h"
@@ -427,7 +429,12 @@ private:
 
 // One terminal pane: a shell behind relay::TerminalBackend (Relay's own engine, engine/), its
 // Bash bridge, a composer, and its own agent worker and conversation. Windows arrange panes in tabs and splits; the toolbar acts on the active pane.
-class Pane final : public QWidget {
+//
+// The terminal is one context for an agent, not the base case (#AGNT): the pane is also the first
+// relay::agent::Host, and it owns the relay::AgentConsole the agent block is moving into. Pane has
+// no Q_OBJECT -- nothing in this translation unit does -- so the second base costs a vtable and
+// nothing else, and every `dynamic_cast<Pane *>` in src/RelayWindow.h goes on working.
+class Pane final : public QWidget, public relay::agent::Host {
 public:
     struct QueueEntry {
         quint64 id = 0; bool agent = false, fix = false, watch = false;
@@ -766,7 +773,7 @@ public:
     }
     // The pane's shell and the process group in the terminal's foreground, through whichever
     // engine this pane uses. 0 when there is no terminal.
-    int shellPid() const { return m_backend ? int(m_backend->shellPid()) : 0; }
+    int shellPid() const override { return m_backend ? int(m_backend->shellPid()) : 0; }
     int foregroundPid() const { return m_backend ? int(m_backend->foregroundProcessId()) : 0; }
     void sendShellInput(const QString &text) { if (m_backend) m_backend->sendText(text, false); }
     QList<QPair<QString, QString>> storedModels() const { return m_stored; }
@@ -2904,6 +2911,47 @@ public:
         }
         status(QStringLiteral("Saved ") + path);
     }
+
+    // ===== relay::agent::Host: the seam the agent console is drawn through (#AGNT step 1) =======
+    //
+    // Everything below the "agent sessions UI" banner is moving into relay::AgentConsole
+    // (src/AgentConsole.h), and a console never names the widget it lives in: it reaches this
+    // pane through the pure-virtual in src/AgentHost.h. These are that interface's terminal half,
+    // written once here in terms of the backend the pane already holds. The other half --
+    // writeTerminal, terminalFolds, status, toast, hint, bubbleRoom, setBubbleHeight, shellPid,
+    // terminalMode -- is already spelled the same way further down and overrides in place; that
+    // is why this block is short. A host with no shell answers 0 / Unknown to the shell calls
+    // rather than being asked not to make them.
+    int columns() const override { return m_backend ? m_backend->columns() : 0; }
+    bool atLineStart() const override { return m_atLineStart; }
+
+    bool foldExpanded(const QString &uri) const override {
+        return m_backend && m_backend->foldExpanded(uri);
+    }
+    void setFoldExpanded(const QString &uri, bool expanded) override {
+        if (m_backend) m_backend->setFoldExpanded(uri, expanded);
+    }
+    void setFoldContent(const QString &uri, const QVector<relay::FoldLine> &lines) override {
+        if (m_backend && terminalFolds()) m_backend->setFoldContent(uri, lines);
+    }
+    bool toggleFold(const QString &uri) override { return m_backend && m_backend->toggleFold(uri); }
+
+    bool viewportAtBottom() const override { return terminalAtBottom(); }
+    // Queued behind the view's own grid change, which it batches onto the next turn of the event
+    // loop -- the same singleShot pinTerminalBottom() has always used.
+    void scrollToBottom() override {
+        QTimer::singleShot(0, this, [this] {
+            if (m_backend && (m_backend->capabilities() & relay::TerminalBackend::ScrollControl))
+                m_backend->scrollToBottom();
+        });
+    }
+
+    QString screenText() const override { return m_backend ? m_backend->screenText() : QString(); }
+    QPoint cursorPosition() const override { return m_backend ? m_backend->cursorPosition() : QPoint(); }
+
+    void sendText(const QString &text) override { if (m_backend) m_backend->sendText(text, false); }
+    void paste() override { if (m_backend) m_backend->paste(); }
+    int foregroundProcessId() const override { return foregroundPid(); }
 
     // ===== agent sessions UI: model/effort, context, plan mode, rewind, fork, resume, recaps, =====
     // ===== instructions, suggestions and steering (docs/AGENT-SESSIONS-PROTOCOL.md)          =====
@@ -5526,7 +5574,7 @@ private:
     // bubble comes and goes — so the answer cannot oscillate. Measuring the terminal instead let a
     // strip be shown in a pane too short to draw it, and Qt squeezed it past its own minimum: the
     // header came out sliced through by the prompt box.
-    int bubbleRoom() const {
+    int bubbleRoom() const override {
         const QMargins margins = layout() ? layout()->contentsMargins() : QMargins();
         const int spacing = layout() ? layout()->spacing() : 0;
         int room = height() - margins.top() - margins.bottom() - 2 * spacing;
@@ -5543,7 +5591,7 @@ private:
     // stack overflow its own column, with the queue strip drawn through the prompt box. As a
     // maximum the bubble is squeezed along with the terminal and the prompt box when the pane is
     // too short for all three, and takes exactly what it asked for whenever there is room.
-    void setBubbleHeight(QWidget *bubble, int height) {
+    void setBubbleHeight(QWidget *bubble, int height) override {
         height = std::max(0, height);
         const int floor = std::min(height, bubbleRow());
         if (!bubble || (bubble->maximumHeight() == height && bubble->minimumHeight() == floor)) return;
@@ -5611,7 +5659,7 @@ private:
         QVector<relay::calllines::RunMember> members;     // a merged run's lines, for its fold
     };
 
-    bool terminalFolds() const { return terminalCan(relay::TerminalBackend::Folds); }
+    bool terminalFolds() const override { return terminalCan(relay::TerminalBackend::Folds); }
 
     // How wide a row may be drawn: the pane's columns, less the "▸ " placeholder and one column
     // the engine never draws into. Zero when the width is not known, which means "do not cut".
@@ -10911,7 +10959,7 @@ private:
     // the gates are asked again then, so two hints queued together still keep the global gap.
     // Public: RelayWindow::hint() puts window-level hints on the active pane this way too.
 public:
-    bool hint(const QString &id, const QString &text, int limit = 3) {
+    bool hint(const QString &id, const QString &text, int limit = 3) override {
         if (text.isEmpty()) return false;
         if (!relay::ShortcutHints::instance().mayShow(id, limit)) return false;
         if (toastHintPending(id)) return false;   // already waiting or up: one showing, not a pile
@@ -11054,7 +11102,7 @@ public:
     // up is cut to at least kToastMinMs (or its own time, if shorter) so the wait stays short. An
     // identical toast right behind the last one collapses into it. Ongoing state (the turn clock)
     // has a home of its own in the prompt-box strip and never comes through here.
-    void toast(const QString &text, int milliseconds = 1600) {
+    void toast(const QString &text, int milliseconds = 1600) override {
         enqueueToast({text, milliseconds, QString(), 0, 0});
     }
 
@@ -11156,7 +11204,7 @@ private:
     // ----- fix and re-run loop (terminal mode) -----------------------------------------
     static constexpr int kMaxFixAttempts = 3;
 
-    void status(const QString &text) { if (onStatus) onStatus(text); }
+    void status(const QString &text) override { if (onStatus) onStatus(text); }
     void changed() { refreshPickers(); refreshSessionControls(); if (onStateChanged) onStateChanged(); }
 
     // The strip stays quiet: one word ("TERMINAL", "AGENT", "COMMAND"), the full sentence on hover.
@@ -12410,7 +12458,7 @@ private:
     // Inline agent output: bytes go to the terminal emulator as if the program had printed
     // them. Nothing is typed into the shell, so agent text never reaches shell history and is
     // never executed: the engine feeds them to its parser.
-    void writeTerminal(const QByteArray &bytes) {
+    void writeTerminal(const QByteArray &bytes) override {
         if (m_backend && (m_backend->capabilities() & relay::TerminalBackend::DisplayInjection))
             m_backend->writeToDisplay(bytes);
         else
@@ -15066,7 +15114,7 @@ private:
     }
 
     using TerminalMode = relay::input::TerminalMode;
-    TerminalMode terminalMode() const {
+    TerminalMode terminalMode() const override {
         if (!m_backend) return TerminalMode::Unknown;
         const int pid = shellPid();
         if (pid <= 0) return TerminalMode::Unknown;
@@ -16520,6 +16568,13 @@ private:
     relay::JobsPanel *m_jobsPanel = nullptr;
     QList<QPointer<relay::SubagentTranscriptView>> m_subagentViews;
     QPointer<relay::SubagentTabsView> m_subagentTabs;   // this pane's subagent pane, while open
+
+    // The agent surface this pane hosts (#AGNT step 1). It is held by value and takes the pane as
+    // its relay::agent::Host, so the reference is bound before the pane's own body runs; the
+    // console's constructor must therefore not call back into the host, and does not. The agent
+    // block above moves into it wave by wave (scripts/split-agent-console.py); until a wave has
+    // run, the code is still here and this member is what the moved code will be reached through.
+    relay::AgentConsole m_agent{*this};
 };
 
 

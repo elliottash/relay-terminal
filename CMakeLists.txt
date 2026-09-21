@@ -507,6 +507,8 @@ if(RELAY_BUILD_APP)
     # IDEs see them.
     add_executable(relay src/main.cpp
         src/AppPaths.h src/CopyOnSelect.h src/Keymap.h src/Isolation.h src/GuestBridge.h src/Pane.h src/ApprovalsPane.h
+        # The agent surface and the seam it is drawn through (#AGNT step 1, scripts/split-agent-console.py).
+        src/AgentHost.h src/AgentConsole.h
         src/TranscriptReplay.h
         src/PaneChrome.h
         src/WindowChrome.h src/RelayWindow.h src/WindowManagerImpl.h
