@@ -279,6 +279,22 @@ class HarnessCase(unittest.TestCase):
 
 
 class AvailabilityTest(HarnessCase):
+    def test_board_bridge_start_resume_fork_overrides(self):
+        descriptor = {"command": "/python", "args": ["/proxy", "/capability"]}
+        h = gh.CodexHarness()
+        h._permissions = "bypass"
+        h._board_bridge = descriptor
+        from unittest.mock import Mock
+        h._request = Mock(return_value={})
+        for resume, fork, method in [(None, False, "thread/start"),
+                                     ("saved", False, "thread/resume"),
+                                     ("saved", True, "thread/fork")]:
+            h._start_thread(cwd="/tmp", model=None, resume=resume, fork=fork, effort="high")
+            name, params = h._request.call_args.args
+            self.assertEqual(name, method)
+            self.assertEqual(params["config"]["mcp_servers.relay_board.args"], descriptor["args"])
+            self.assertEqual(params["config"][gh.EFFORT_CONFIG_KEY], "high")
+
     def test_start_raises_not_available_when_codex_is_not_on_path(self):
         harness = gh.CodexHarness(codex_path="codex")
         with tempfile.TemporaryDirectory(prefix="hcodex-path-") as empty:

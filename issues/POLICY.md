@@ -11,7 +11,10 @@ asked and what was done, so work goes through a card.
 The board is `issues/`: plain Markdown in git, one file per card, one append-only thread per
 card under `issues/threads/`, and a generated index in `issues/BOARD.md`. Below are the rules;
 then the procedure they point at; then an appendix that says how to make each `board_*` call by
-editing files, which is how you will make all of them.
+editing files, which is the fallback for unavailable tools. When the `relay_board` MCP server is
+connected, prefer its namespaced board_list, board_read, board_comment, board_update_card and
+board_move_card tools. Relay owns their identity and guardrails. Creation and claims still use
+the file fallback.
 
 ## The rules
 
@@ -183,10 +186,10 @@ the detail; do not repeat it in the terminal.
 
 ## Without the board tools
 
-Everything above names Relay's `board_*` tools. You do not have them — they are the worker's,
-and a guest session reaches the board by editing files. Here is each call as a file edit. The
-bytes are specified in `docs/SWITCHBOARD-FORMAT.md`; invent no field and no heading that is not
-there.
+Everything above names Relay's `board_*` tools. When a tool is unavailable — including
+create/claim outside the five-tool bridge — reach the board by editing files. Here is each call
+as a file edit. The bytes are specified in `docs/SWITCHBOARD-FORMAT.md`; invent no field and no
+heading that is not there.
 
 ### Read the board — `board_list`, `board_read`, `board_card_get`
 

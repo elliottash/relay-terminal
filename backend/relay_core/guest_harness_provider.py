@@ -583,14 +583,20 @@ def start_provider(preset_id: str, request: dict, workspace: str,
         raise ValueError(f"Unknown guest preset {preset_id!r}.")
     options = guest_options(request.get("guest"))
     harness = make_harness(guest_id)
+    from .guest_board_bridge import Bridge
+    from .board_tools import find_board_root
+    bridge = Bridge(available=find_board_root(workspace) is not None)
     try:
         started = harness.start(cwd=workspace, model=options["model"] or None,
                                 resume=options["resume"], fork=options["fork"],
-                                permissions=options["permissions"], effort=options["effort"])
+                                permissions=options["permissions"], effort=options["effort"],
+                                board_bridge=bridge.descriptor)
     except HarnessError as exc:
+        bridge.close()
         _close_quietly(harness)
         raise ValueError(str(exc) or f"{guest.spec(guest_id).name} could not be started.") from None
     except Exception as exc:
+        bridge.close()
         _close_quietly(harness)
         raise ValueError(f"{guest.spec(guest_id).name} could not be started "
                          f"({type(exc).__name__}).") from None
@@ -600,6 +606,7 @@ def start_provider(preset_id: str, request: dict, workspace: str,
     config = config if config is not None else config_for_preset(preset_id, request)
     config.model = started.model or options["model"] or guest_id
     provider = HarnessProvider(config, harness, guest_id, stall_timeout=stall_timeout)
+    provider.board_bridge = bridge
     provider.session_id = started.session_id or ""
     provider.permissions = options["permissions"]
     provider.effort = _harness_effort(harness) or options["effort"] or ""
@@ -667,6 +674,7 @@ class HarnessProvider:
         # A string, or a callable given the conversation and returning the prompt; None once used.
         self.opening = None
         self._agent = None
+        self.board_bridge = None
         self._asker = _Asker()
         self._closed = False
 
@@ -688,6 +696,8 @@ class HarnessProvider:
 
     def cancel(self) -> None:
         """`Agent.stop()` → `provider.cancel()`. For a guest that is `interrupt()` (29.3)."""
+        if self.board_bridge is not None:
+            self.board_bridge.end()
         try:
             self.harness.interrupt()
         except HarnessError as exc:
@@ -699,6 +709,8 @@ class HarnessProvider:
         if self._closed:
             return
         self._closed = True
+        if self.board_bridge is not None:
+            self.board_bridge.close()
         self._asker.fail_pending()
         _close_quietly(self.harness)
         logs.event(_log, "guest_harness_closed", guest=self.guest_id)
@@ -714,6 +726,8 @@ class HarnessProvider:
         """Remember the pane's Agent, for the turn id the events carry, for the per-call records
         the fold and `tool_output` read, and to tell a pane turn from a side call."""
         self._agent = agent
+        if self.board_bridge is not None:
+            self.board_bridge.bind(agent)
 
     # ----- one turn ---------------------------------------------------------------------------
     def complete(self, messages: list[dict], tools: list[dict], emit, cancel: threading.Event) -> dict:
@@ -734,6 +748,13 @@ class HarnessProvider:
             raise ProviderError("There is nothing to send to the guest: the last message has no text.")
         record = getattr(agent, "_turn_record", None) if agent is not None else None
         turn = _Turn(self, agent, record, emit, cancel)
+        if self.board_bridge is not None:
+            self.board_bridge.begin(cancel)
+            prompt = ("Relay offers an MCP server named relay_board. If its tools are visible, "
+                      "use its board_list, board_read, board_comment, board_update_card and "
+                      "board_move_card tools in preference to file edits. Other board operations "
+                      "(including create/claim), or an unavailable connection, use POLICY.md's "
+                      "file fallback. Never claim connection success without discovery.\n\n" + prompt)
         try:
             result = self.harness.send(prompt, attachments=attachments or None,
                                        emit=turn.on_event, cancel=cancel)
@@ -747,7 +768,12 @@ class HarnessProvider:
             turn.close_thinking()
             raise ProviderError(f"{guest.spec(self.guest_id).name}'s harness failed "
                                 f"({type(exc).__name__}).") from None
+        finally:
+            if self.board_bridge is not None:
+                self.board_bridge.end()
         turn.close_thinking()
+        if self.board_bridge is not None and not self.board_bridge.ready.is_set():
+            emit({"event": "status", "text": "Guest board tools were not discovered; use the board policy's file fallback."})
         stop_reason = getattr(result, "stop_reason", "end")
         if stop_reason == "interrupted" or cancel.is_set():
             # Same end as a stopped HTTP turn: the Agent records it as cancelled and keeps the
@@ -884,7 +910,10 @@ class _Turn:
         self.close_thinking()
         call_id = str(data.get("call_id") or "") or "guest-" + uuid.uuid4().hex[:12]
         name, guest_tool = self._tool_name(data)
-        args = label_arguments(data.get("input"))
+        source = data.get("input")
+        if isinstance(source, dict) and source.get("server") == "relay_board":
+            source = source.get("arguments")
+        args = label_arguments(source)
         preview = tool_preview(name, guest_tool, args, data.get("label"))
         self.calls[call_id] = {"name": name, "guest_tool": guest_tool, "args": args,
                                "preview": preview, "started": time.monotonic()}
@@ -963,6 +992,12 @@ class _Turn:
         raw = str(data.get("tool") or "")
         source = data.get("input") if isinstance(data.get("input"), dict) else {}
         guest_tool = str(source.get("_guest_tool") or "") or (raw if raw not in TOOL_NAMES else "")
+        from .guest_board_bridge import ALLOW
+        board_name = (source.get("tool") if source.get("server") == "relay_board" else
+                      guest_tool.removeprefix("mcp__relay_board__")
+                      if guest_tool.startswith("mcp__relay_board__") else None)
+        if isinstance(board_name, str) and board_name in ALLOW:
+            return board_name, guest_tool
         name = raw if raw in TOOL_NAMES else map_tool_name(self.provider.guest_id, raw)
         return name, guest_tool
 

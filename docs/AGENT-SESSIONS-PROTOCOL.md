@@ -5779,8 +5779,32 @@ uses — `complete(messages, tools, emit, cancel)`, `config`, `cancel()` — so 
 its transcript, its request ledger, titles, summaries and the sessions index are unchanged. On
 `complete` the provider takes the last user message (its text and its images), runs one harness
 turn, forwards each harness event as the Relay event in the table, and returns the guest's final
-text as the assistant message with the usage the guest reported. The Agent's own tools are not
-offered to the guest (it has its own); Relay's `run_command`/file tools never run in a guest turn.
+text as the assistant message with the usage the guest reported. The guest runs its own command
+and file tools. Since card #4NXH, a process-local `relay_board` MCP server exposes exactly
+`board_list`, `board_read`, `board_comment`, `board_update_card`, and `board_move_card`.
+
+`guest_board_bridge.py` owns an ephemeral Unix socket and capability file in a mode-0700 directory.
+The stdio proxy is launched by Codex through app-server/thread config overrides and by Claude
+through `--mcp-config`; neither writes user configuration or replaces other MCP servers. The
+absolute proxy path works in both source and installed backend layouts. Probes have no bridge.
+The bridge starts before the harness and binds to the pane's Agent afterward. Discovery derives
+schemas from BoardTools; calls require a live provider turn and run through native `_prepare` /
+`_execute`, including deferred-group resolution, plan/read-only/card scopes, write budgets,
+verification gates and worker-owned attribution. There is no second board turn or owner bypass.
+
+Calls serialize with turn teardown. Stop revokes dispatch, while later turns can reuse the harness.
+A cancellation received before dispatch prevents the write; committed writes remain committed.
+Proxy-generation/request-id/payload deduplication returns the first result on retry and refuses
+changed arguments; ambiguous errors are cached and never automatically replayed. The adapters'
+ordinary MCP events provide one visible call/result, without a second bridge event stream.
+Provider close/replacement/start failure closes the socket and removes credentials. The proxy
+exits when the guest closes stdin. Each replacement gets a fresh capability.
+
+Opening context and generated board policy prefer discovered namespaced tools, with file edits
+as fallback for unavailable connections and operations outside the five-tool scope (create/claim).
+A turn without discovery emits a status notice instead of claiming connectivity. Relay's automatic
+Execute/Verify actions retain their existing claims; this server does not add a claim tool.
+
 `configured` gains `guest: "<id>"` and `guest_session: "<the guest's session id>"`; `model` is the
 model the guest reports. `cancel` → `interrupt()`. `compact` → `harness.compact()` and Relay's own
 compaction of the transcript. `set_model` to another `guest:` preset restarts the harness (the

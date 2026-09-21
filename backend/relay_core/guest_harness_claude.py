@@ -331,12 +331,15 @@ class ClaudeHarness:
         argv += list(PERMISSION_FLAGS[permissions])
         if self._settings:
             argv += ["--settings", self._settings]
+        if getattr(self, "_board_bridge", None):
+            argv += ["--mcp-config", json.dumps({"mcpServers": {"relay_board": self._board_bridge}})]
         argv += self._extra_args
         return argv
 
     def start(self, *, cwd: str, model: str | None = None, resume: str | None = None,
               fork: bool = False, permissions: str = "bypass",
-              effort: str | None = None) -> HarnessStart:
+              effort: str | None = None, board_bridge: dict | None = None) -> HarnessStart:
+        self._board_bridge = board_bridge
         permissions = validate_permissions(permissions)
         effort = self._level(validate_effort(effort)) if effort else None
         if self._proc is not None:

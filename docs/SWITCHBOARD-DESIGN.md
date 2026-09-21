@@ -538,8 +538,8 @@ reads it, so the order can change without touching a widget. Protocol: 19. Evide
   pane's shell with the brief as its **first positional prompt** (both CLIs take one, and
   `relay_core.guest_launch` passes a launch's `extra` through after the flags). A pane that was just
   created does not know which until the worker's presets arrive, so the task waits for them. A
-  guest has no `board_*` tools on either route, so the brief says where the card and its thread
-  live and what to do without them.
+  Tier A guest receives the five-tool `relay_board` MCP surface (card #4NXH, protocol 29.3).
+  A Tier B/unmanaged CLI or failed connection uses the brief's card/thread file fallback.
 - **The brief** (`board::verifyTask`): read the card and its `## QA checklist`, run every item and
   write down what was actually seen, put the evidence under the card's
   `docs/qa_evidence/<date>-<slug>/` in files named `qa-…`, write `## Verdict` with
@@ -558,9 +558,9 @@ reads it, so the order can change without touching a widget. Protocol: 19. Evide
   observable from outside. The pane cannot fill the model in for the guest: the pane that will run
   the brief does not exist when the brief is written, and the guest's model is only observable once
   it has started, so the brief asks in words instead.
-- **A guest verifier writes its own `verified_by`.** Nothing stamps it for a CLI with no `board_*`
-  tools, so the Verify brief tells it to put the same signature in the card's front matter when it
-  closes the card. Without that the card would land in Done rather than Verified.
+- **Managed guest attribution is worker-owned.** The five-tool MCP bridge runs the pane's
+  BoardTools and stamps the actual guest model/session; guest arguments do not replace that
+  identity. An unmanaged CLI follows the file fallback in the board policy.
 - **Keys**: `v` on the open card and on the list (which opens the card first), the hint
   `board.verify` on a click, and `v` in both key legends.
 

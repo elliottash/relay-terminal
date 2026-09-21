@@ -232,7 +232,8 @@ class CodexHarness:
 
     def start(self, *, cwd: str, model: str | None = None, resume: str | None = None,
               fork: bool = False, permissions: str = "bypass",
-              effort: str | None = None) -> HarnessStart:
+              effort: str | None = None, board_bridge: dict | None = None) -> HarnessStart:
+        self._board_bridge = board_bridge
         effort = validate_effort(effort)
         with self._lock:
             if self._proc is not None:
@@ -245,7 +246,11 @@ class CodexHarness:
                 f"Codex is not installed here: {self._codex_path!r} is not on PATH. "
                 "Install it with `npm i -g @openai/codex` and sign in with `codex login`.")
         try:
-            proc = self._spawn([exe, "app-server"], cwd)
+            argv = [exe, "app-server"]
+            if board_bridge:
+                for key, value in board_bridge.items():
+                    argv += ["-c", "mcp_servers.relay_board." + key + "=" + json.dumps(value)]
+            proc = self._spawn(argv, cwd)
         except OSError as exc:
             raise HarnessNotAvailable(f"Codex could not be started: {exc}") from exc
         with self._lock:
@@ -511,6 +516,10 @@ class CodexHarness:
             # `thread/start` has no `effort` field; `config` is the overrides map, and this is the
             # key the TUI's `-c` sets. The response then reports `reasoningEffort: "<level>"`.
             params["config"] = {EFFORT_CONFIG_KEY: effort}
+        if getattr(self, "_board_bridge", None):
+            overrides = params.setdefault("config", {})
+            for key, value in self._board_bridge.items():
+                overrides["mcp_servers.relay_board." + key] = value
         if resume:
             params["threadId"] = resume
             method = "thread/fork" if fork else "thread/resume"

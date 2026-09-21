@@ -188,7 +188,7 @@ class Harness(Protocol):
 
     def start(self, *, cwd: str, model: str | None = None, resume: str | None = None,
               fork: bool = False, permissions: str = "bypass",
-              effort: str | None = None) -> HarnessStart:
+              effort: str | None = None, board_bridge: dict | None = None) -> HarnessStart:
         """Start the guest process in `cwd`. `resume` is a guest session id to continue (with
         `fork`, as a new session branched from it); `permissions` is one of PERMISSIONS; `effort`
         is a reasoning level the guest has (None leaves the guest's own default alone).

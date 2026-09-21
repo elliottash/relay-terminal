@@ -1,0 +1,868 @@
+{
+  "guest": "codex",
+  "model": "gpt-6-astra",
+  "discovered": true,
+  "comment_found": true,
+  "status": "ready",
+  "body": "# Disposable MCP acceptance\n\n## Issue\nTest guest board tools\n\n## QA checklist\n- [ ] Review live acceptance\n",
+  "events": [
+    {
+      "root": "/tmp/4nxh-live-jxq9ke_n/issues",
+      "event": "board_activity",
+      "write_id": "w-1a0c3fb1ad9-5c9a",
+      "id": "1YBR",
+      "action": "create",
+      "actor": "agent",
+      "model": null,
+      "pane": null,
+      "turn_id": "setup",
+      "summary": "created \u00b7 Inbox",
+      "path": "issues/features/2026-09-21-disposable-mcp-acceptance.md",
+      "undo_seconds": 30
+    },
+    {
+      "root": "/tmp/4nxh-live-jxq9ke_n/issues",
+      "event": "board_changed",
+      "upserts": [
+        "1YBR"
+      ],
+      "removed": [],
+      "write_id": "w-1a0c3fb1ad9-5c9a"
+    },
+    {
+      "event": "status",
+      "text": "Requesting model \u00b7 step 1/500"
+    },
+    {
+      "event": "delta",
+      "text": "I"
+    },
+    {
+      "event": "delta",
+      "text": "\u2019ll"
+    },
+    {
+      "event": "delta",
+      "text": " discover"
+    },
+    {
+      "event": "delta",
+      "text": " the"
+    },
+    {
+      "event": "delta",
+      "text": " Relay"
+    },
+    {
+      "event": "delta",
+      "text": " board"
+    },
+    {
+      "event": "delta",
+      "text": " tools"
+    },
+    {
+      "event": "delta",
+      "text": ","
+    },
+    {
+      "event": "delta",
+      "text": " then"
+    },
+    {
+      "event": "delta",
+      "text": " run"
+    },
+    {
+      "event": "delta",
+      "text": " the"
+    },
+    {
+      "event": "delta",
+      "text": " five"
+    },
+    {
+      "event": "delta",
+      "text": " requested"
+    },
+    {
+      "event": "delta",
+      "text": " operations"
+    },
+    {
+      "event": "delta",
+      "text": " using"
+    },
+    {
+      "event": "delta",
+      "text": " only"
+    },
+    {
+      "event": "delta",
+      "text": " those"
+    },
+    {
+      "event": "delta",
+      "text": " MCP"
+    },
+    {
+      "event": "delta",
+      "text": " tools"
+    },
+    {
+      "event": "delta",
+      "text": "."
+    },
+    {
+      "event": "usage_limits",
+      "preset": "guest:codex",
+      "guest": "codex",
+      "windows": [
+        {
+          "kind": "weekly",
+          "used_percent": 2.0,
+          "resets_at": 1790594041
+        }
+      ]
+    },
+    {
+      "event": "tool_started",
+      "tool": "board_list",
+      "preview": "MCPTOOLCALL\n\nrelay_board.board_list",
+      "label": {
+        "kind": "board",
+        "running": "searching the board",
+        "title": "searched the board"
+      },
+      "call_id": "exec-0dfa0e4e-aeb8-4ab8-bad1-529bcc999869",
+      "turn_id": "t5588a03a-1"
+    },
+    {
+      "event": "tool_result",
+      "tool": "board_list",
+      "result": {
+        "output": "{\"content\": [{\"type\": \"text\", \"text\": \"{\\\"cards\\\": [{\\\"id\\\": \\\"1YBR\\\", \\\"title\\\": \\\"Disposable MCP acceptance\\\", \\\"type\\\": \\\"work\\\", \\\"status\\\": \\\"inbox\\\", \\\"section\\\": null, \\\"tab\\\": \\\"features\\\", \\\"labels\\\": [], \\\"assignee\\\": null, \\\"waiting_on\\\": null, \\\"rank\\\": \\\"i\\\", \\\"private\\\": false, \\\"priority\\\": 0, \\\"path\\\": \\\"issues/features/2026-09-21-disposable-mcp-acceptance.md\\\", \\\"thread_entries\\\": 1, \\\"created\\\": \\\"2026-09-21\\\", \\\"updated\\\": \\\"2026-09-21T12:40:08Z\\\", \\\"milestone\\\": null, \\\"topic\\\": null, \\\"implemented_by\\\": null, \\\"verified_by\\\": null, \\\"session\\\": null, \\\"tasks_total\\\": 0, \\\"tasks_done\\\": 0}], \\\"total\\\": 1, \\\"truncated\\\": false, \\\"tabs\\\": [\\\"features\\\", \\\"bugs\\\", \\\"planning\\\", \\\"done\\\"], \\\"autonomy\\\": \\\"auto\\\"}\"}], \"structuredContent\": null, \"_meta\": null}",
+        "ok": true
+      },
+      "label": {
+        "kind": "board",
+        "running": "searching the board",
+        "title": "searched the board",
+        "ok": true,
+        "open": {
+          "type": "fold"
+        }
+      },
+      "ms": 2,
+      "call_id": "exec-0dfa0e4e-aeb8-4ab8-bad1-529bcc999869",
+      "turn_id": "t5588a03a-1"
+    },
+    {
+      "event": "tool_started",
+      "tool": "board_read",
+      "preview": "MCPTOOLCALL\n\nrelay_board.board_read",
+      "label": {
+        "kind": "board",
+        "running": "reading card ",
+        "title": "read card "
+      },
+      "call_id": "exec-ea64408f-8e17-4b82-9ce9-2ea86eb91a32",
+      "turn_id": "t5588a03a-1"
+    },
+    {
+      "event": "tool_result",
+      "tool": "board_read",
+      "result": {
+        "output": "{\"content\": [{\"type\": \"text\", \"text\": \"{\\\"id\\\": \\\"1YBR\\\", \\\"hash\\\": \\\"c176be686c01c6ae08fe9ac88262a42064475bb16d8d26a9f61539adc73de987\\\", \\\"type\\\": \\\"work\\\", \\\"tab\\\": \\\"features\\\", \\\"status\\\": \\\"inbox\\\", \\\"path\\\": \\\"issues/features/2026-09-21-disposable-mcp-acceptance.md\\\", \\\"front\\\": {\\\"id\\\": \\\"1YBR\\\", \\\"type\\\": \\\"work\\\", \\\"status\\\": \\\"inbox\\\", \\\"rank\\\": \\\"i\\\", \\\"created\\\": \\\"2026-09-21\\\", \\\"links\\\": {\\\"plans\\\": [], \\\"commits\\\": [], \\\"evidence\\\": [], \\\"related\\\": [], \\\"github\\\": null}}, \\\"title\\\": \\\"Disposable MCP acceptance\\\", \\\"body\\\": \\\"# Disposable MCP acceptance\\\\n\\\\n## Issue\\\\nTest guest board tools\\\\n\\\", \\\"body_truncated\\\": false, \\\"sections\\\": [\\\"Issue\\\"], \\\"issue\\\": \\\"Test guest board tools\\\", \\\"issue_heading\\\": \\\"Issue\\\", \\\"tasks\\\": [], \\\"thread_total\\\": 1, \\\"thread\\\": [{\\\"entry_id\\\": \\\"20260921T124008Z-0h\\\", \\\"author\\\": \\\"agent\\\", \\\"kind\\\": \\\"event\\\", \\\"attrs\\\": {\\\"author\\\": \\\"agent\\\", \\\"kind\\\": \\\"event\\\", \\\"turn\\\": \\\"setup\\\"}, \\\"text\\\": \\\"- \\\\u2726 agent created this card in Inbox \\\\u00b7 issues/features/2026-09-21-disposable-mcp-acceptance.md\\\"}]}\"}], \"structuredContent\": null, \"_meta\": null}",
+        "ok": true
+      },
+      "label": {
+        "kind": "board",
+        "running": "reading card ",
+        "title": "read card ",
+        "ok": true,
+        "open": {
+          "type": "fold"
+        }
+      },
+      "ms": 2,
+      "call_id": "exec-ea64408f-8e17-4b82-9ce9-2ea86eb91a32",
+      "turn_id": "t5588a03a-1"
+    },
+    {
+      "event": "usage_limits",
+      "preset": "guest:codex",
+      "guest": "codex",
+      "windows": [
+        {
+          "kind": "weekly",
+          "used_percent": 2.0,
+          "resets_at": 1790594041
+        }
+      ]
+    },
+    {
+      "event": "tool_started",
+      "tool": "board_comment",
+      "preview": "MCPTOOLCALL\n\nrelay_board.board_comment",
+      "label": {
+        "kind": "board",
+        "running": "commenting on card ",
+        "title": "commented on card  \u00b7 note"
+      },
+      "call_id": "exec-28991863-915e-4bdf-8004-f55a174fb542",
+      "turn_id": "t5588a03a-1"
+    },
+    {
+      "root": "/tmp/4nxh-live-jxq9ke_n/issues",
+      "event": "board_activity",
+      "write_id": "w-1a0c3fb5023-fd47",
+      "id": "1YBR",
+      "action": "comment",
+      "actor": "agent",
+      "model": "gpt-6-astra",
+      "pane": null,
+      "turn_id": "t5588a03a-1",
+      "summary": "progress: live codex bridge acceptance",
+      "path": "issues/features/2026-09-21-disposable-mcp-acceptance.md",
+      "undo_seconds": 30
+    },
+    {
+      "root": "/tmp/4nxh-live-jxq9ke_n/issues",
+      "event": "board_changed",
+      "upserts": [
+        "1YBR"
+      ],
+      "removed": [],
+      "write_id": "w-1a0c3fb5023-fd47"
+    },
+    {
+      "root": "/tmp/4nxh-live-jxq9ke_n/issues",
+      "event": "board_activity",
+      "write_id": "w-1a0c3fb502c-020a",
+      "id": "1YBR",
+      "action": "move",
+      "actor": "agent",
+      "model": "gpt-6-astra",
+      "pane": null,
+      "turn_id": "t5588a03a-1",
+      "summary": "Inbox \u2192 Discussing \u00b7 the discussion started",
+      "path": "issues/features/2026-09-21-disposable-mcp-acceptance.md",
+      "undo_seconds": 30
+    },
+    {
+      "root": "/tmp/4nxh-live-jxq9ke_n/issues",
+      "event": "board_changed",
+      "upserts": [
+        "1YBR"
+      ],
+      "removed": [],
+      "write_id": "w-1a0c3fb502c-020a"
+    },
+    {
+      "event": "tool_result",
+      "tool": "board_comment",
+      "result": {
+        "output": "{\"content\": [{\"type\": \"text\", \"text\": \"{\\\"id\\\": \\\"1YBR\\\", \\\"entry_id\\\": \\\"20260921T124022Z-0v\\\", \\\"kind\\\": \\\"progress\\\", \\\"write_id\\\": \\\"w-1a0c3fb5023-fd47\\\"}\"}], \"structuredContent\": null, \"_meta\": null}",
+        "ok": true
+      },
+      "label": {
+        "kind": "board",
+        "running": "commenting on card ",
+        "title": "commented on card  \u00b7 note",
+        "ok": true,
+        "open": {
+          "type": "fold"
+        }
+      },
+      "ms": 24,
+      "call_id": "exec-28991863-915e-4bdf-8004-f55a174fb542",
+      "turn_id": "t5588a03a-1"
+    },
+    {
+      "event": "tool_started",
+      "tool": "board_read",
+      "preview": "MCPTOOLCALL\n\nrelay_board.board_read",
+      "label": {
+        "kind": "board",
+        "running": "reading card ",
+        "title": "read card "
+      },
+      "call_id": "exec-efa5f569-8f92-4b52-bd33-678aaf98510a",
+      "turn_id": "t5588a03a-1"
+    },
+    {
+      "event": "tool_result",
+      "tool": "board_read",
+      "result": {
+        "output": "{\"content\": [{\"type\": \"text\", \"text\": \"{\\\"id\\\": \\\"1YBR\\\", \\\"hash\\\": \\\"a9a23ab1a79dbfc754b82f5a9dedeb8139bc007cdddd643aa9429ab0180058de\\\", \\\"type\\\": \\\"work\\\", \\\"tab\\\": \\\"features\\\", \\\"status\\\": \\\"discussing\\\", \\\"path\\\": \\\"issues/features/2026-09-21-disposable-mcp-acceptance.md\\\", \\\"front\\\": {\\\"id\\\": \\\"1YBR\\\", \\\"type\\\": \\\"work\\\", \\\"status\\\": \\\"discussing\\\", \\\"rank\\\": \\\"i\\\", \\\"created\\\": \\\"2026-09-21\\\", \\\"links\\\": {\\\"plans\\\": [], \\\"commits\\\": [], \\\"evidence\\\": [], \\\"related\\\": [], \\\"github\\\": null}}, \\\"title\\\": \\\"Disposable MCP acceptance\\\", \\\"body\\\": \\\"# Disposable MCP acceptance\\\\n\\\\n## Issue\\\\nTest guest board tools\\\\n\\\", \\\"body_truncated\\\": false, \\\"sections\\\": [\\\"Issue\\\"], \\\"issue\\\": \\\"Test guest board tools\\\", \\\"issue_heading\\\": \\\"Issue\\\", \\\"tasks\\\": [], \\\"thread_total\\\": 3, \\\"thread\\\": [{\\\"entry_id\\\": \\\"20260921T124008Z-0h\\\", \\\"author\\\": \\\"agent\\\", \\\"kind\\\": \\\"event\\\", \\\"attrs\\\": {\\\"author\\\": \\\"agent\\\", \\\"kind\\\": \\\"event\\\", \\\"turn\\\": \\\"setup\\\"}, \\\"text\\\": \\\"- \\\\u2726 agent created this card in Inbox \\\\u00b7 issues/features/2026-09-21-disposable-mcp-acceptance.md\\\"}, {\\\"entry_id\\\": \\\"20260921T124022Z-0v\\\", \\\"author\\\": \\\"agent\\\", \\\"kind\\\": \\\"progress\\\", \\\"attrs\\\": {\\\"author\\\": \\\"agent\\\", \\\"kind\\\": \\\"progress\\\", \\\"model\\\": \\\"gpt-6-astra\\\", \\\"turn\\\": \\\"53b6473bee804232bdc8b20ae0cf2033/t5588a03a-1\\\"}, \\\"text\\\": \\\"live codex bridge acceptance\\\"}, {\\\"entry_id\\\": \\\"20260921T124022Z-cv\\\", \\\"author\\\": \\\"agent\\\", \\\"kind\\\": \\\"event\\\", \\\"attrs\\\": {\\\"author\\\": \\\"agent\\\", \\\"kind\\\": \\\"event\\\", \\\"model\\\": \\\"gpt-6-astra\\\", \\\"turn\\\": \\\"53b6473bee804232bdc8b20ae0cf2033/t5588a03a-1\\\"}, \\\"text\\\": \\\"- \\\\u2726 agent moved this card \\\\u00b7 Inbox \\\\u2192 Discussing \\\\u00b7 the discussion started\\\"}]}\"}], \"structuredContent\": null, \"_meta\": null}",
+        "ok": true
+      },
+      "label": {
+        "kind": "board",
+        "running": "reading card ",
+        "title": "read card ",
+        "ok": true,
+        "open": {
+          "type": "fold"
+        }
+      },
+      "ms": 2,
+      "call_id": "exec-efa5f569-8f92-4b52-bd33-678aaf98510a",
+      "turn_id": "t5588a03a-1"
+    },
+    {
+      "event": "usage_limits",
+      "preset": "guest:codex",
+      "guest": "codex",
+      "windows": [
+        {
+          "kind": "weekly",
+          "used_percent": 2.0,
+          "resets_at": 1790594041
+        }
+      ]
+    },
+    {
+      "event": "tool_started",
+      "tool": "board_update_card",
+      "preview": "MCPTOOLCALL\n\nrelay_board.board_update_card",
+      "label": {
+        "kind": "board",
+        "running": "updating card ",
+        "title": "updated card "
+      },
+      "call_id": "exec-6beaabca-9a8a-466c-a5a6-66cadf0b41e2",
+      "turn_id": "t5588a03a-1"
+    },
+    {
+      "root": "/tmp/4nxh-live-jxq9ke_n/issues",
+      "event": "board_activity",
+      "write_id": "w-1a0c3fb636f-6cec",
+      "id": "1YBR",
+      "action": "update",
+      "actor": "agent",
+      "model": "gpt-6-astra",
+      "pane": null,
+      "turn_id": "t5588a03a-1",
+      "summary": "appended to `## QA checklist`",
+      "path": "issues/features/2026-09-21-disposable-mcp-acceptance.md",
+      "undo_seconds": 30
+    },
+    {
+      "root": "/tmp/4nxh-live-jxq9ke_n/issues",
+      "event": "board_changed",
+      "upserts": [
+        "1YBR"
+      ],
+      "removed": [],
+      "write_id": "w-1a0c3fb636f-6cec"
+    },
+    {
+      "event": "tool_result",
+      "tool": "board_update_card",
+      "result": {
+        "output": "{\"content\": [{\"type\": \"text\", \"text\": \"{\\\"id\\\": \\\"1YBR\\\", \\\"hash\\\": \\\"e63a466c587302c0c1e1fd97e58a6eee92f0f3bf42b8b53c1a4c9e18dc2dd5bc\\\", \\\"changes\\\": [\\\"appended to `## QA checklist`\\\"], \\\"write_id\\\": \\\"w-1a0c3fb636f-6cec\\\", \\\"logged_rewrites\\\": []}\"}], \"structuredContent\": null, \"_meta\": null}",
+        "ok": true
+      },
+      "label": {
+        "kind": "board",
+        "running": "updating card ",
+        "title": "updated card ",
+        "ok": true,
+        "open": {
+          "type": "fold"
+        }
+      },
+      "ms": 21,
+      "call_id": "exec-6beaabca-9a8a-466c-a5a6-66cadf0b41e2",
+      "turn_id": "t5588a03a-1"
+    },
+    {
+      "event": "tool_started",
+      "tool": "board_move_card",
+      "preview": "MCPTOOLCALL\n\nrelay_board.board_move_card",
+      "label": {
+        "kind": "board",
+        "running": "moving card ",
+        "title": "moved card "
+      },
+      "call_id": "exec-4be67256-505b-48cc-82f3-a89b36fa7cce",
+      "turn_id": "t5588a03a-1"
+    },
+    {
+      "root": "/tmp/4nxh-live-jxq9ke_n/issues",
+      "event": "board_activity",
+      "write_id": "w-1a0c3fb63ad-a8ef",
+      "id": "1YBR",
+      "action": "move",
+      "actor": "agent",
+      "model": "gpt-6-astra",
+      "pane": null,
+      "turn_id": "t5588a03a-1",
+      "summary": "Discussing \u2192 Ready to start",
+      "path": "issues/features/2026-09-21-disposable-mcp-acceptance.md",
+      "undo_seconds": 30
+    },
+    {
+      "root": "/tmp/4nxh-live-jxq9ke_n/issues",
+      "event": "board_changed",
+      "upserts": [
+        "1YBR"
+      ],
+      "removed": [],
+      "write_id": "w-1a0c3fb63ad-a8ef"
+    },
+    {
+      "event": "tool_result",
+      "tool": "board_move_card",
+      "result": {
+        "output": "{\"content\": [{\"type\": \"text\", \"text\": \"{\\\"id\\\": \\\"1YBR\\\", \\\"status\\\": \\\"ready\\\", \\\"section\\\": null, \\\"tab\\\": \\\"features\\\", \\\"rank\\\": \\\"i\\\", \\\"path\\\": \\\"issues/features/2026-09-21-disposable-mcp-acceptance.md\\\", \\\"hash\\\": \\\"b57821790faf521378ef76351115ddc49f7073c8017866aa82e2fc1685517f04\\\", \\\"moved\\\": false, \\\"write_id\\\": \\\"w-1a0c3fb63ad-a8ef\\\", \\\"summary\\\": \\\"Discussing \\\\u2192 Ready to start\\\"}\"}], \"structuredContent\": null, \"_meta\": null}",
+        "ok": true
+      },
+      "label": {
+        "kind": "board",
+        "running": "moving card ",
+        "title": "moved card ",
+        "ok": true,
+        "open": {
+          "type": "fold"
+        }
+      },
+      "ms": 11,
+      "call_id": "exec-4be67256-505b-48cc-82f3-a89b36fa7cce",
+      "turn_id": "t5588a03a-1"
+    },
+    {
+      "event": "usage_limits",
+      "preset": "guest:codex",
+      "guest": "codex",
+      "windows": [
+        {
+          "kind": "weekly",
+          "used_percent": 2.0,
+          "resets_at": 1790594041
+        }
+      ]
+    },
+    {
+      "event": "delta",
+      "text": "All"
+    },
+    {
+      "event": "delta",
+      "text": " five"
+    },
+    {
+      "event": "delta",
+      "text": " Relay"
+    },
+    {
+      "event": "delta",
+      "text": " MCP"
+    },
+    {
+      "event": "delta",
+      "text": " tools"
+    },
+    {
+      "event": "delta",
+      "text": " succeeded"
+    },
+    {
+      "event": "delta",
+      "text": ":"
+    },
+    {
+      "event": "delta",
+      "text": " `"
+    },
+    {
+      "event": "delta",
+      "text": "board"
+    },
+    {
+      "event": "delta",
+      "text": "_list"
+    },
+    {
+      "event": "delta",
+      "text": "`,"
+    },
+    {
+      "event": "delta",
+      "text": " `"
+    },
+    {
+      "event": "delta",
+      "text": "board"
+    },
+    {
+      "event": "delta",
+      "text": "_read"
+    },
+    {
+      "event": "delta",
+      "text": "`,"
+    },
+    {
+      "event": "delta",
+      "text": " `"
+    },
+    {
+      "event": "delta",
+      "text": "board"
+    },
+    {
+      "event": "delta",
+      "text": "_comment"
+    },
+    {
+      "event": "delta",
+      "text": "`,"
+    },
+    {
+      "event": "delta",
+      "text": " `"
+    },
+    {
+      "event": "delta",
+      "text": "board"
+    },
+    {
+      "event": "delta",
+      "text": "_update"
+    },
+    {
+      "event": "delta",
+      "text": "_card"
+    },
+    {
+      "event": "delta",
+      "text": "`,"
+    },
+    {
+      "event": "delta",
+      "text": " and"
+    },
+    {
+      "event": "delta",
+      "text": " `"
+    },
+    {
+      "event": "delta",
+      "text": "board"
+    },
+    {
+      "event": "delta",
+      "text": "_move"
+    },
+    {
+      "event": "delta",
+      "text": "_card"
+    },
+    {
+      "event": "delta",
+      "text": "`.\n\n"
+    },
+    {
+      "event": "delta",
+      "text": "Card"
+    },
+    {
+      "event": "delta",
+      "text": " `"
+    },
+    {
+      "event": "delta",
+      "text": "1"
+    },
+    {
+      "event": "delta",
+      "text": "Y"
+    },
+    {
+      "event": "delta",
+      "text": "BR"
+    },
+    {
+      "event": "delta",
+      "text": "`"
+    },
+    {
+      "event": "delta",
+      "text": " received"
+    },
+    {
+      "event": "delta",
+      "text": " the"
+    },
+    {
+      "event": "delta",
+      "text": " exact"
+    },
+    {
+      "event": "delta",
+      "text": " progress"
+    },
+    {
+      "event": "delta",
+      "text": " comment"
+    },
+    {
+      "event": "delta",
+      "text": " and"
+    },
+    {
+      "event": "delta",
+      "text": " QA"
+    },
+    {
+      "event": "delta",
+      "text": " checklist"
+    },
+    {
+      "event": "delta",
+      "text": " item"
+    },
+    {
+      "event": "delta",
+      "text": ","
+    },
+    {
+      "event": "delta",
+      "text": " and"
+    },
+    {
+      "event": "delta",
+      "text": " moved"
+    },
+    {
+      "event": "delta",
+      "text": " to"
+    },
+    {
+      "event": "delta",
+      "text": " `"
+    },
+    {
+      "event": "delta",
+      "text": "ready"
+    },
+    {
+      "event": "delta",
+      "text": "`"
+    },
+    {
+      "event": "delta",
+      "text": " with"
+    },
+    {
+      "event": "delta",
+      "text": " reason"
+    },
+    {
+      "event": "delta",
+      "text": " \u201c"
+    },
+    {
+      "event": "delta",
+      "text": "Live"
+    },
+    {
+      "event": "delta",
+      "text": " bridge"
+    },
+    {
+      "event": "delta",
+      "text": " acceptance"
+    },
+    {
+      "event": "delta",
+      "text": "\u201d."
+    },
+    {
+      "event": "delta",
+      "text": " No"
+    },
+    {
+      "event": "delta",
+      "text": " shell"
+    },
+    {
+      "event": "delta",
+      "text": " commands"
+    },
+    {
+      "event": "delta",
+      "text": " or"
+    },
+    {
+      "event": "delta",
+      "text": " file"
+    },
+    {
+      "event": "delta",
+      "text": " edits"
+    },
+    {
+      "event": "delta",
+      "text": " were"
+    },
+    {
+      "event": "delta",
+      "text": " used"
+    },
+    {
+      "event": "delta",
+      "text": "."
+    },
+    {
+      "event": "usage_limits",
+      "preset": "guest:codex",
+      "guest": "codex",
+      "windows": [
+        {
+          "kind": "weekly",
+          "used_percent": 2.0,
+          "resets_at": 1790594041
+        }
+      ]
+    },
+    {
+      "event": "usage",
+      "usage": {
+        "prompt_tokens": 109337,
+        "completion_tokens": 385,
+        "cached_tokens": 94336,
+        "cache_write_tokens": 0,
+        "total_tokens": 109722,
+        "guest_context_tokens": 24656,
+        "guest_context_window": 258400,
+        "guest_context_pct": 9.5
+      }
+    },
+    {
+      "event": "context",
+      "used_tokens": 109722,
+      "window": 128000,
+      "percent": 85.7,
+      "threshold": 0.8,
+      "limit_tokens": 71232,
+      "estimated": false,
+      "guest": "codex",
+      "guest_context": {
+        "used_tokens": 24656,
+        "window": 258400,
+        "percent": 9.5
+      }
+    },
+    {
+      "event": "turn_summary",
+      "turn_id": "t5588a03a-1",
+      "elapsed_ms": 21908,
+      "thinking_ms": 0,
+      "thinking_chars": 0,
+      "outcome": "done",
+      "tools": [
+        {
+          "call_id": "exec-0dfa0e4e-aeb8-4ab8-bad1-529bcc999869",
+          "name": "board_list",
+          "preview": "relay_board.board_list",
+          "ok": true,
+          "label": {
+            "kind": "board",
+            "running": "searching the board",
+            "title": "searched the board",
+            "ok": true,
+            "open": {
+              "type": "fold"
+            }
+          }
+        },
+        {
+          "call_id": "exec-ea64408f-8e17-4b82-9ce9-2ea86eb91a32",
+          "name": "board_read",
+          "preview": "relay_board.board_read",
+          "ok": true,
+          "label": {
+            "kind": "board",
+            "running": "reading card ",
+            "title": "read card ",
+            "ok": true,
+            "open": {
+              "type": "fold"
+            }
+          }
+        },
+        {
+          "call_id": "exec-28991863-915e-4bdf-8004-f55a174fb542",
+          "name": "board_comment",
+          "preview": "relay_board.board_comment",
+          "ok": true,
+          "label": {
+            "kind": "board",
+            "running": "commenting on card ",
+            "title": "commented on card  \u00b7 note",
+            "ok": true,
+            "open": {
+              "type": "fold"
+            }
+          }
+        },
+        {
+          "call_id": "exec-efa5f569-8f92-4b52-bd33-678aaf98510a",
+          "name": "board_read",
+          "preview": "relay_board.board_read",
+          "ok": true,
+          "label": {
+            "kind": "board",
+            "running": "reading card ",
+            "title": "read card ",
+            "ok": true,
+            "open": {
+              "type": "fold"
+            }
+          }
+        },
+        {
+          "call_id": "exec-6beaabca-9a8a-466c-a5a6-66cadf0b41e2",
+          "name": "board_update_card",
+          "preview": "relay_board.board_update_card",
+          "ok": true,
+          "label": {
+            "kind": "board",
+            "running": "updating card ",
+            "title": "updated card ",
+            "ok": true,
+            "open": {
+              "type": "fold"
+            }
+          }
+        },
+        {
+          "call_id": "exec-4be67256-505b-48cc-82f3-a89b36fa7cce",
+          "name": "board_move_card",
+          "preview": "relay_board.board_move_card",
+          "ok": true,
+          "label": {
+            "kind": "board",
+            "running": "moving card ",
+            "title": "moved card ",
+            "ok": true,
+            "open": {
+              "type": "fold"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "event": "done",
+      "turn_id": "t5588a03a-1",
+      "open_items": []
+    }
+  ],
+  "thread": "<!-- relay:entry 20260921T124008Z-0h author=agent kind=event turn=setup -->\n- \u2726 agent created this card in Inbox \u00b7 issues/features/2026-09-21-disposable-mcp-acceptance.md\n\n<!-- relay:entry 20260921T124022Z-0v author=agent kind=progress model=gpt-6-astra turn=53b6473bee804232bdc8b20ae0cf2033/t5588a03a-1 -->\nlive codex bridge acceptance\n\n<!-- relay:entry 20260921T124022Z-cv author=agent kind=event model=gpt-6-astra turn=53b6473bee804232bdc8b20ae0cf2033/t5588a03a-1 -->\n- \u2726 agent moved this card \u00b7 Inbox \u2192 Discussing \u00b7 the discussion started\n\n<!-- relay:entry 20260921T124027Z-wp author=agent kind=event model=gpt-6-astra turn=53b6473bee804232bdc8b20ae0cf2033/t5588a03a-1 -->\n- \u2726 agent updated this card \u00b7 appended to `## QA checklist`\n\n<!-- relay:entry 20260921T124027Z-wq author=agent kind=event model=gpt-6-astra turn=53b6473bee804232bdc8b20ae0cf2033/t5588a03a-1 -->\n- \u2726 agent moved this card \u00b7 Discussing \u2192 Ready to start \u00b7 Live bridge acceptance\n",
+  "resume_discovery": true
+}

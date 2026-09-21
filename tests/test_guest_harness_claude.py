@@ -827,6 +827,13 @@ class StartTest(unittest.TestCase):
         harness.start(cwd=os.getcwd(), **kwargs)
         return spawner.calls[0][0]
 
+    def test_board_bridge_is_launch_local_and_survives_resume(self):
+        descriptor = {"command": "/python", "args": ["/proxy", "/capability"]}
+        argv = self._argv_for(board_bridge=descriptor, resume="saved-session")
+        self.assertEqual(json.loads(argv[argv.index("--mcp-config") + 1]),
+                         {"mcpServers": {"relay_board": descriptor}})
+        self.assertNotIn("--strict-mcp-config", argv)
+
     def test_the_bypass_command_line(self):
         argv = self._argv_for()
         for flag in ("-p", "--input-format", "stream-json", "--output-format", "--verbose",

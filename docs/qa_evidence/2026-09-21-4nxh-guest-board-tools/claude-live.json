@@ -1,0 +1,758 @@
+{
+  "guest": "claude",
+  "model": "claude-fable-5-1",
+  "discovered": true,
+  "comment_found": true,
+  "status": "ready",
+  "body": "# Disposable MCP acceptance\n\n## Issue\nTest guest board tools\n\n## QA checklist\n- [ ] Review live acceptance\n",
+  "events": [
+    {
+      "root": "/tmp/4nxh-live-7tvle8al/issues",
+      "event": "board_activity",
+      "write_id": "w-1a0c3fb751b-47d1",
+      "id": "7EQ5",
+      "action": "create",
+      "actor": "agent",
+      "model": null,
+      "pane": null,
+      "turn_id": "setup",
+      "summary": "created \u00b7 Inbox",
+      "path": "issues/features/2026-09-21-disposable-mcp-acceptance.md",
+      "undo_seconds": 30
+    },
+    {
+      "root": "/tmp/4nxh-live-7tvle8al/issues",
+      "event": "board_changed",
+      "upserts": [
+        "7EQ5"
+      ],
+      "removed": [],
+      "write_id": "w-1a0c3fb751b-47d1"
+    },
+    {
+      "event": "status",
+      "text": "Requesting model \u00b7 step 1/500"
+    },
+    {
+      "event": "model_changed",
+      "model": "claude-fable-5-1",
+      "applies": "now",
+      "preset": "guest:claude",
+      "guest": "claude",
+      "guest_session": "59443c88-001c-47fd-b9b0-61ad70105258"
+    },
+    {
+      "event": "tool_started",
+      "tool": "other",
+      "preview": "TOOLSEARCH\n\nselect:mcp__relay_board__board_list,mcp__relay_board__board_read,mcp__relay_board__board_comment,mcp__relay_board__board_update_card,mcp__relay_board__board_move_card",
+      "label": {
+        "kind": "other",
+        "running": "running ToolSearch",
+        "title": "ToolSearch"
+      },
+      "call_id": "toolu_01BG1YiL22EWuuKbYRiEH3Vd",
+      "turn_id": "t5588a03a-2"
+    },
+    {
+      "event": "usage_limits",
+      "preset": "guest:claude",
+      "guest": "claude",
+      "windows": [
+        {
+          "kind": "5h",
+          "used_percent": 50.0,
+          "resets_at": 1790009400
+        },
+        {
+          "kind": "weekly",
+          "used_percent": 92.0,
+          "resets_at": 1790438400
+        }
+      ],
+      "status": "allowed_warning"
+    },
+    {
+      "event": "tool_result",
+      "tool": "other",
+      "result": {
+        "output": "",
+        "ok": true
+      },
+      "label": {
+        "kind": "other",
+        "running": "running ToolSearch",
+        "title": "ToolSearch",
+        "ok": true,
+        "open": {
+          "type": "fold"
+        }
+      },
+      "ms": 35,
+      "call_id": "toolu_01BG1YiL22EWuuKbYRiEH3Vd",
+      "turn_id": "t5588a03a-2"
+    },
+    {
+      "event": "tool_started",
+      "tool": "board_list",
+      "preview": "MCP__RELAY_BOARD__BOARD_LIST",
+      "label": {
+        "kind": "board",
+        "running": "searching the board",
+        "title": "searched the board"
+      },
+      "call_id": "toolu_01CRrMSd2GTDE4uB1sJNcWLZ",
+      "turn_id": "t5588a03a-2"
+    },
+    {
+      "event": "tool_result",
+      "tool": "board_list",
+      "result": {
+        "output": "{\"cards\": [{\"id\": \"7EQ5\", \"title\": \"Disposable MCP acceptance\", \"type\": \"work\", \"status\": \"inbox\", \"section\": null, \"tab\": \"features\", \"labels\": [], \"assignee\": null, \"waiting_on\": null, \"rank\": \"i\", \"private\": false, \"priority\": 0, \"path\": \"issues/features/2026-09-21-disposable-mcp-acceptance.md\", \"thread_entries\": 1, \"created\": \"2026-09-21\", \"updated\": \"2026-09-21T12:40:31Z\", \"milestone\": null, \"topic\": null, \"implemented_by\": null, \"verified_by\": null, \"session\": null, \"tasks_total\": 0, \"tasks_done\": 0}], \"total\": 1, \"truncated\": false, \"tabs\": [\"features\", \"bugs\", \"planning\", \"done\"], \"autonomy\": \"auto\"}",
+        "ok": true
+      },
+      "label": {
+        "kind": "board",
+        "running": "searching the board",
+        "title": "searched the board",
+        "ok": true,
+        "open": {
+          "type": "fold"
+        }
+      },
+      "ms": 41,
+      "call_id": "toolu_01CRrMSd2GTDE4uB1sJNcWLZ",
+      "turn_id": "t5588a03a-2"
+    },
+    {
+      "event": "tool_started",
+      "tool": "board_read",
+      "preview": "MCP__RELAY_BOARD__BOARD_READ",
+      "label": {
+        "kind": "board",
+        "running": "reading card ",
+        "title": "read card "
+      },
+      "call_id": "toolu_01N4QnEEpHLihAR5VAHQ7JMw",
+      "turn_id": "t5588a03a-2"
+    },
+    {
+      "event": "tool_result",
+      "tool": "board_read",
+      "result": {
+        "output": "{\"id\": \"7EQ5\", \"hash\": \"bf8d4493e4a5ef026ec37d9d9a484975156cdc92794a227a4bcee071234a2d04\", \"type\": \"work\", \"tab\": \"features\", \"status\": \"inbox\", \"path\": \"issues/features/2026-09-21-disposable-mcp-acceptance.md\", \"front\": {\"id\": \"7EQ5\", \"type\": \"work\", \"status\": \"inbox\", \"rank\": \"i\", \"created\": \"2026-09-21\", \"links\": {\"plans\": [], \"commits\": [], \"evidence\": [], \"related\": [], \"github\": null}}, \"title\": \"Disposable MCP acceptance\", \"body\": \"# Disposable MCP acceptance\\n\\n## Issue\\nTest guest board tools\\n\", \"body_truncated\": false, \"sections\": [\"Issue\"], \"issue\": \"Test guest board tools\", \"issue_heading\": \"Issue\", \"tasks\": [], \"thread_total\": 1, \"thread\": [{\"entry_id\": \"20260921T124031Z-w3\", \"author\": \"agent\", \"kind\": \"event\", \"attrs\": {\"author\": \"agent\", \"kind\": \"event\", \"turn\": \"setup\"}, \"text\": \"- \\u2726 agent created this card in Inbox \\u00b7 issues/features/2026-09-21-disposable-mcp-acceptance.md\"}]}",
+        "ok": true
+      },
+      "label": {
+        "kind": "board",
+        "running": "reading card ",
+        "title": "read card ",
+        "ok": true,
+        "open": {
+          "type": "fold"
+        }
+      },
+      "ms": 39,
+      "call_id": "toolu_01N4QnEEpHLihAR5VAHQ7JMw",
+      "turn_id": "t5588a03a-2"
+    },
+    {
+      "event": "tool_started",
+      "tool": "board_comment",
+      "preview": "MCP__RELAY_BOARD__BOARD_COMMENT",
+      "label": {
+        "kind": "board",
+        "running": "commenting on card ",
+        "title": "commented on card  \u00b7 note"
+      },
+      "call_id": "toolu_01M6LaUNKuUaMBddjpYmeZDz",
+      "turn_id": "t5588a03a-2"
+    },
+    {
+      "root": "/tmp/4nxh-live-7tvle8al/issues",
+      "event": "board_activity",
+      "write_id": "w-1a0c3fb93b5-4525",
+      "id": "7EQ5",
+      "action": "comment",
+      "actor": "agent",
+      "model": "claude-fable-5-1",
+      "pane": null,
+      "turn_id": "t5588a03a-2",
+      "summary": "progress: live claude bridge acceptance",
+      "path": "issues/features/2026-09-21-disposable-mcp-acceptance.md",
+      "undo_seconds": 30
+    },
+    {
+      "root": "/tmp/4nxh-live-7tvle8al/issues",
+      "event": "board_changed",
+      "upserts": [
+        "7EQ5"
+      ],
+      "removed": [],
+      "write_id": "w-1a0c3fb93b5-4525"
+    },
+    {
+      "root": "/tmp/4nxh-live-7tvle8al/issues",
+      "event": "board_activity",
+      "write_id": "w-1a0c3fb93be-9123",
+      "id": "7EQ5",
+      "action": "move",
+      "actor": "agent",
+      "model": "claude-fable-5-1",
+      "pane": null,
+      "turn_id": "t5588a03a-2",
+      "summary": "Inbox \u2192 Discussing \u00b7 the discussion started",
+      "path": "issues/features/2026-09-21-disposable-mcp-acceptance.md",
+      "undo_seconds": 30
+    },
+    {
+      "root": "/tmp/4nxh-live-7tvle8al/issues",
+      "event": "board_changed",
+      "upserts": [
+        "7EQ5"
+      ],
+      "removed": [],
+      "write_id": "w-1a0c3fb93be-9123"
+    },
+    {
+      "event": "tool_result",
+      "tool": "board_comment",
+      "result": {
+        "output": "{\"id\": \"7EQ5\", \"entry_id\": \"20260921T124039Z-hn\", \"kind\": \"progress\", \"write_id\": \"w-1a0c3fb93b5-4525\"}",
+        "ok": true
+      },
+      "label": {
+        "kind": "board",
+        "running": "commenting on card ",
+        "title": "commented on card  \u00b7 note",
+        "ok": true,
+        "open": {
+          "type": "fold"
+        }
+      },
+      "ms": 56,
+      "call_id": "toolu_01M6LaUNKuUaMBddjpYmeZDz",
+      "turn_id": "t5588a03a-2"
+    },
+    {
+      "event": "tool_started",
+      "tool": "board_read",
+      "preview": "MCP__RELAY_BOARD__BOARD_READ",
+      "label": {
+        "kind": "board",
+        "running": "reading card ",
+        "title": "read card "
+      },
+      "call_id": "toolu_01BdfotcQZDNKmN5Wwbqjgsm",
+      "turn_id": "t5588a03a-2"
+    },
+    {
+      "event": "tool_result",
+      "tool": "board_read",
+      "result": {
+        "output": "{\"id\": \"7EQ5\", \"hash\": \"6bdc4615ce3e6db0a7abb59b3e2eeee0d5cc44f770b93a80d645a148170bb522\", \"type\": \"work\", \"tab\": \"features\", \"status\": \"discussing\", \"path\": \"issues/features/2026-09-21-disposable-mcp-acceptance.md\", \"front\": {\"id\": \"7EQ5\", \"type\": \"work\", \"status\": \"discussing\", \"rank\": \"i\", \"created\": \"2026-09-21\", \"links\": {\"plans\": [], \"commits\": [], \"evidence\": [], \"related\": [], \"github\": null}}, \"title\": \"Disposable MCP acceptance\", \"body\": \"# Disposable MCP acceptance\\n\\n## Issue\\nTest guest board tools\\n\", \"body_truncated\": false, \"sections\": [\"Issue\"], \"issue\": \"Test guest board tools\", \"issue_heading\": \"Issue\", \"tasks\": [], \"thread_total\": 3, \"thread\": [{\"entry_id\": \"20260921T124031Z-w3\", \"author\": \"agent\", \"kind\": \"event\", \"attrs\": {\"author\": \"agent\", \"kind\": \"event\", \"turn\": \"setup\"}, \"text\": \"- \\u2726 agent created this card in Inbox \\u00b7 issues/features/2026-09-21-disposable-mcp-acceptance.md\"}, {\"entry_id\": \"20260921T124039Z-hn\", \"author\": \"agent\", \"kind\": \"progress\", \"attrs\": {\"author\": \"agent\", \"kind\": \"progress\", \"model\": \"claude-fable-5-1\", \"turn\": \"e6e6b524dbc248e3ba1d46e835c5b8a6/t5588a03a-2\"}, \"text\": \"live claude bridge acceptance\"}, {\"entry_id\": \"20260921T124039Z-ho\", \"author\": \"agent\", \"kind\": \"event\", \"attrs\": {\"author\": \"agent\", \"kind\": \"event\", \"model\": \"claude-fable-5-1\", \"turn\": \"e6e6b524dbc248e3ba1d46e835c5b8a6/t5588a03a-2\"}, \"text\": \"- \\u2726 agent moved this card \\u00b7 Inbox \\u2192 Discussing \\u00b7 the discussion started\"}]}",
+        "ok": true
+      },
+      "label": {
+        "kind": "board",
+        "running": "reading card ",
+        "title": "read card ",
+        "ok": true,
+        "open": {
+          "type": "fold"
+        }
+      },
+      "ms": 38,
+      "call_id": "toolu_01BdfotcQZDNKmN5Wwbqjgsm",
+      "turn_id": "t5588a03a-2"
+    },
+    {
+      "event": "delta",
+      "text": "Comment landed;"
+    },
+    {
+      "event": "delta",
+      "text": " now appending the QA chec"
+    },
+    {
+      "event": "delta",
+      "text": "klist section with the fresh"
+    },
+    {
+      "event": "delta",
+      "text": " hash,"
+    },
+    {
+      "event": "delta",
+      "text": " then moving the card."
+    },
+    {
+      "event": "tool_started",
+      "tool": "board_update_card",
+      "preview": "MCP__RELAY_BOARD__BOARD_UPDATE_CARD",
+      "label": {
+        "kind": "board",
+        "running": "updating card ",
+        "title": "updated card "
+      },
+      "call_id": "toolu_01Via8YqwoFhYXGJATvhh1Um",
+      "turn_id": "t5588a03a-2"
+    },
+    {
+      "root": "/tmp/4nxh-live-7tvle8al/issues",
+      "event": "board_activity",
+      "write_id": "w-1a0c3fba2b3-1c45",
+      "id": "7EQ5",
+      "action": "update",
+      "actor": "agent",
+      "model": "claude-fable-5-1",
+      "pane": null,
+      "turn_id": "t5588a03a-2",
+      "summary": "appended to `## QA checklist`",
+      "path": "issues/features/2026-09-21-disposable-mcp-acceptance.md",
+      "undo_seconds": 30
+    },
+    {
+      "root": "/tmp/4nxh-live-7tvle8al/issues",
+      "event": "board_changed",
+      "upserts": [
+        "7EQ5"
+      ],
+      "removed": [],
+      "write_id": "w-1a0c3fba2b3-1c45"
+    },
+    {
+      "event": "tool_result",
+      "tool": "board_update_card",
+      "result": {
+        "output": "{\"id\": \"7EQ5\", \"hash\": \"1a1f2fdcc16552e6b36900a901e07fec11677bd48c471b8a58382f5d1af2bcf9\", \"changes\": [\"appended to `## QA checklist`\"], \"write_id\": \"w-1a0c3fba2b3-1c45\", \"logged_rewrites\": []}",
+        "ok": true
+      },
+      "label": {
+        "kind": "board",
+        "running": "updating card ",
+        "title": "updated card ",
+        "ok": true,
+        "open": {
+          "type": "fold"
+        }
+      },
+      "ms": 47,
+      "call_id": "toolu_01Via8YqwoFhYXGJATvhh1Um",
+      "turn_id": "t5588a03a-2"
+    },
+    {
+      "event": "tool_started",
+      "tool": "board_move_card",
+      "preview": "MCP__RELAY_BOARD__BOARD_MOVE_CARD",
+      "label": {
+        "kind": "board",
+        "running": "moving card ",
+        "title": "moved card "
+      },
+      "call_id": "toolu_01VXwfbEaM8a3ZHmHQwQZknB",
+      "turn_id": "t5588a03a-2"
+    },
+    {
+      "root": "/tmp/4nxh-live-7tvle8al/issues",
+      "event": "board_activity",
+      "write_id": "w-1a0c3fba9f9-4594",
+      "id": "7EQ5",
+      "action": "move",
+      "actor": "agent",
+      "model": "claude-fable-5-1",
+      "pane": null,
+      "turn_id": "t5588a03a-2",
+      "summary": "Discussing \u2192 Ready to start",
+      "path": "issues/features/2026-09-21-disposable-mcp-acceptance.md",
+      "undo_seconds": 30
+    },
+    {
+      "root": "/tmp/4nxh-live-7tvle8al/issues",
+      "event": "board_changed",
+      "upserts": [
+        "7EQ5"
+      ],
+      "removed": [],
+      "write_id": "w-1a0c3fba9f9-4594"
+    },
+    {
+      "event": "tool_result",
+      "tool": "board_move_card",
+      "result": {
+        "output": "{\"id\": \"7EQ5\", \"status\": \"ready\", \"section\": null, \"tab\": \"features\", \"rank\": \"i\", \"path\": \"issues/features/2026-09-21-disposable-mcp-acceptance.md\", \"hash\": \"21d051ac874f327b812eb91d51ac32a40faffc45165492ac833be55dd3ab5a1d\", \"moved\": false, \"write_id\": \"w-1a0c3fba9f9-4594\", \"summary\": \"Discussing \\u2192 Ready to start\"}",
+        "ok": true
+      },
+      "label": {
+        "kind": "board",
+        "running": "moving card ",
+        "title": "moved card ",
+        "ok": true,
+        "open": {
+          "type": "fold"
+        }
+      },
+      "ms": 51,
+      "call_id": "toolu_01VXwfbEaM8a3ZHmHQwQZknB",
+      "turn_id": "t5588a03a-2"
+    },
+    {
+      "event": "delta",
+      "text": "All five relay_board tools"
+    },
+    {
+      "event": "delta",
+      "text": " succeeded. I used no"
+    },
+    {
+      "event": "delta",
+      "text": " shell comm"
+    },
+    {
+      "event": "delta",
+      "text": "ands or file edits."
+    },
+    {
+      "event": "delta",
+      "text": "\n\n- **`board_list`"
+    },
+    {
+      "event": "delta",
+      "text": "**"
+    },
+    {
+      "event": "delta",
+      "text": ": returned one card, "
+    },
+    {
+      "event": "delta",
+      "text": "7EQ5 "
+    },
+    {
+      "event": "delta",
+      "text": "\""
+    },
+    {
+      "event": "delta",
+      "text": "Disposable MCP ac"
+    },
+    {
+      "event": "delta",
+      "text": "ceptance\", in the in"
+    },
+    {
+      "event": "delta",
+      "text": "box on the features tab."
+    },
+    {
+      "event": "delta",
+      "text": "\n- **`board_read`"
+    },
+    {
+      "event": "delta",
+      "text": "**: read "
+    },
+    {
+      "event": "delta",
+      "text": "7EQ5 before"
+    },
+    {
+      "event": "delta",
+      "text": " the comment,"
+    },
+    {
+      "event": "delta",
+      "text": " then again af"
+    },
+    {
+      "event": "delta",
+      "text": "terwards to get the current"
+    },
+    {
+      "event": "delta",
+      "text": " hash `"
+    },
+    {
+      "event": "delta",
+      "text": "6bdc4615\u2026`"
+    },
+    {
+      "event": "delta",
+      "text": ".\n- **`board_com"
+    },
+    {
+      "event": "delta",
+      "text": "ment`**: appended the prog"
+    },
+    {
+      "event": "delta",
+      "text": "ress ent"
+    },
+    {
+      "event": "delta",
+      "text": "ry \"live claude bridge"
+    },
+    {
+      "event": "delta",
+      "text": " acceptance\" (entry"
+    },
+    {
+      "event": "delta",
+      "text": " `20260921T124039"
+    },
+    {
+      "event": "delta",
+      "text": "Z-hn`). The board"
+    },
+    {
+      "event": "delta",
+      "text": " moved the card from"
+    },
+    {
+      "event": "delta",
+      "text": " Inbox to Discussing"
+    },
+    {
+      "event": "delta",
+      "text": " on its own when the comment land"
+    },
+    {
+      "event": "delta",
+      "text": "ed.\n- **`board_"
+    },
+    {
+      "event": "delta",
+      "text": "update_card`**: appended"
+    },
+    {
+      "event": "delta",
+      "text": " `"
+    },
+    {
+      "event": "delta",
+      "text": "- [ ] Review live"
+    },
+    {
+      "event": "delta",
+      "text": " acceptance` to a `"
+    },
+    {
+      "event": "delta",
+      "text": "## QA checklist` section"
+    },
+    {
+      "event": "delta",
+      "text": " using that hash.\n- **"
+    },
+    {
+      "event": "delta",
+      "text": "`board_move_card`**"
+    },
+    {
+      "event": "delta",
+      "text": ": moved the card from Disc"
+    },
+    {
+      "event": "delta",
+      "text": "ussing to Ready to start"
+    },
+    {
+      "event": "delta",
+      "text": ","
+    },
+    {
+      "event": "delta",
+      "text": " status"
+    },
+    {
+      "event": "delta",
+      "text": " `ready`, with reason"
+    },
+    {
+      "event": "delta",
+      "text": " \"Live bridge acce"
+    },
+    {
+      "event": "delta",
+      "text": "ptance\". The response sh"
+    },
+    {
+      "event": "delta",
+      "text": "ows `\""
+    },
+    {
+      "event": "delta",
+      "text": "moved\": false`, which I"
+    },
+    {
+      "event": "delta",
+      "text": " read"
+    },
+    {
+      "event": "delta",
+      "text": " as the file sta"
+    },
+    {
+      "event": "delta",
+      "text": "ying at"
+    },
+    {
+      "event": "delta",
+      "text": " the same path; the"
+    },
+    {
+      "event": "delta",
+      "text": " status change itself went through."
+    },
+    {
+      "event": "usage",
+      "usage": {
+        "prompt_tokens": 187790,
+        "completion_tokens": 1055,
+        "cached_tokens": 172829,
+        "cache_write_tokens": 14943,
+        "total_tokens": 188845,
+        "cost": 0.39499724999999997,
+        "guest_context_tokens": 187790,
+        "guest_context_window": 1000000,
+        "guest_context_pct": 18.8
+      }
+    },
+    {
+      "event": "context",
+      "used_tokens": 188845,
+      "window": 128000,
+      "percent": 147.5,
+      "threshold": 0.8,
+      "limit_tokens": 71232,
+      "estimated": false,
+      "guest": "claude",
+      "guest_context": {
+        "used_tokens": 187790,
+        "window": 1000000,
+        "percent": 18.8
+      }
+    },
+    {
+      "event": "turn_summary",
+      "turn_id": "t5588a03a-2",
+      "elapsed_ms": 17476,
+      "thinking_ms": 0,
+      "thinking_chars": 0,
+      "outcome": "done",
+      "tools": [
+        {
+          "call_id": "toolu_01BG1YiL22EWuuKbYRiEH3Vd",
+          "name": "other",
+          "preview": "select:mcp__relay_board__board_list,mcp__relay_board__board_read,mcp__relay_board__board_comment,mcp__relay_board__board_update_card,mcp__relay_board__board_mov",
+          "ok": true,
+          "label": {
+            "kind": "other",
+            "running": "running ToolSearch",
+            "title": "ToolSearch",
+            "ok": true,
+            "open": {
+              "type": "fold"
+            }
+          }
+        },
+        {
+          "call_id": "toolu_01CRrMSd2GTDE4uB1sJNcWLZ",
+          "name": "board_list",
+          "preview": "MCP__RELAY_BOARD__BOARD_LIST",
+          "ok": true,
+          "label": {
+            "kind": "board",
+            "running": "searching the board",
+            "title": "searched the board",
+            "ok": true,
+            "open": {
+              "type": "fold"
+            }
+          }
+        },
+        {
+          "call_id": "toolu_01N4QnEEpHLihAR5VAHQ7JMw",
+          "name": "board_read",
+          "preview": "MCP__RELAY_BOARD__BOARD_READ",
+          "ok": true,
+          "label": {
+            "kind": "board",
+            "running": "reading card ",
+            "title": "read card ",
+            "ok": true,
+            "open": {
+              "type": "fold"
+            }
+          }
+        },
+        {
+          "call_id": "toolu_01M6LaUNKuUaMBddjpYmeZDz",
+          "name": "board_comment",
+          "preview": "MCP__RELAY_BOARD__BOARD_COMMENT",
+          "ok": true,
+          "label": {
+            "kind": "board",
+            "running": "commenting on card ",
+            "title": "commented on card  \u00b7 note",
+            "ok": true,
+            "open": {
+              "type": "fold"
+            }
+          }
+        },
+        {
+          "call_id": "toolu_01BdfotcQZDNKmN5Wwbqjgsm",
+          "name": "board_read",
+          "preview": "MCP__RELAY_BOARD__BOARD_READ",
+          "ok": true,
+          "label": {
+            "kind": "board",
+            "running": "reading card ",
+            "title": "read card ",
+            "ok": true,
+            "open": {
+              "type": "fold"
+            }
+          }
+        },
+        {
+          "call_id": "toolu_01Via8YqwoFhYXGJATvhh1Um",
+          "name": "board_update_card",
+          "preview": "MCP__RELAY_BOARD__BOARD_UPDATE_CARD",
+          "ok": true,
+          "label": {
+            "kind": "board",
+            "running": "updating card ",
+            "title": "updated card ",
+            "ok": true,
+            "open": {
+              "type": "fold"
+            }
+          }
+        },
+        {
+          "call_id": "toolu_01VXwfbEaM8a3ZHmHQwQZknB",
+          "name": "board_move_card",
+          "preview": "MCP__RELAY_BOARD__BOARD_MOVE_CARD",
+          "ok": true,
+          "label": {
+            "kind": "board",
+            "running": "moving card ",
+            "title": "moved card ",
+            "ok": true,
+            "open": {
+              "type": "fold"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "event": "done",
+      "turn_id": "t5588a03a-2",
+      "open_items": []
+    }
+  ],
+  "thread": "<!-- relay:entry 20260921T124031Z-w3 author=agent kind=event turn=setup -->\n- \u2726 agent created this card in Inbox \u00b7 issues/features/2026-09-21-disposable-mcp-acceptance.md\n\n<!-- relay:entry 20260921T124039Z-hn author=agent kind=progress model=claude-fable-5-1 turn=e6e6b524dbc248e3ba1d46e835c5b8a6/t5588a03a-2 -->\nlive claude bridge acceptance\n\n<!-- relay:entry 20260921T124039Z-ho author=agent kind=event model=claude-fable-5-1 turn=e6e6b524dbc248e3ba1d46e835c5b8a6/t5588a03a-2 -->\n- \u2726 agent moved this card \u00b7 Inbox \u2192 Discussing \u00b7 the discussion started\n\n<!-- relay:entry 20260921T124043Z-ne author=agent kind=event model=claude-fable-5-1 turn=e6e6b524dbc248e3ba1d46e835c5b8a6/t5588a03a-2 -->\n- \u2726 agent updated this card \u00b7 appended to `## QA checklist`\n\n<!-- relay:entry 20260921T124045Z-jg author=agent kind=event model=claude-fable-5-1 turn=e6e6b524dbc248e3ba1d46e835c5b8a6/t5588a03a-2 -->\n- \u2726 agent moved this card \u00b7 Discussing \u2192 Ready to start \u00b7 Live bridge acceptance\n",
+  "resume_discovery": true
+}
