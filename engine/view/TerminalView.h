@@ -365,9 +365,22 @@ private:
         int col = 0;
         int endRow = 0;
         int endCol = 0;
+        // A link inside a replacement block (#J4WK). The block hides the real
+        // rows its text came from, so the link's place on screen is a fold row
+        // and a fold column, and the selection that shows the walk is the
+        // view's own, not the emulator's. One QRect per wrapped row the link
+        // covers: x = first grid column, y = the fold's row index, width = its
+        // columns. Empty for an ordinary link in the grid.
+        QString foldUri;
+        QVector<QRect> foldSpans;
         Link link;
     };
     void collectLinks();
+    // The links of one replacement block, scanned from the block's own logical
+    // lines — the walk's half of what linkAt() does for the mouse (#J4WK).
+    void collectFoldLinks(int foldIndex, const QString &cwd, const QString &home,
+                          const relay::links::Probe &probe,
+                          const relay::links::CardLookup &cardLookup);
     void showWalkLink(const WalkLink &walk);
     // The columns of one frame row that lie inside a link that resolves: *cols is sized to the
     // row and set where the link colour applies. Scans are cached per logical line and directory

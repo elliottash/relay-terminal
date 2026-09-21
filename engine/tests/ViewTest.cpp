@@ -1782,6 +1782,137 @@ private slots:
         }
     }
 
+    // ---- a block's own rows: selecting them, and walking their links ----
+    //
+    // Relay prints a block of its own prose at one width and FoldLayer re-wraps
+    // it at any other (#R2WQ), so each of these happens twice: at the print
+    // width, where the grid rows are what shows, and after a resize, where the
+    // block's rows are. The two have to agree, and these are the three ways
+    // they came apart.
+
+    // One block of prose, printed at 100 columns and handed to the layer, the
+    // way Pane does it.
+    static void printProse(Term &t, const QString &markdown)
+    {
+        t.backend->resizeTerminal(14, 100);
+        const QString anchor = QStringLiteral("relay://prose/t/7");
+        MarkdownAnsi md;
+        md.setLinkAnchor(anchor);
+        const QString rendered = md.feed(markdown) + md.finish();
+        ProseCollector collector;
+        collector.feed(rendered);
+        WordWrap wrap;
+        wrap.setColumns(100);
+        QByteArray bytes = QStringLiteral("\x1b]8;;%1\x1b\\").arg(anchor).toUtf8();
+        bytes += QString(wrap.feed(rendered) + wrap.flush()).replace(QLatin1Char('\n'), QStringLiteral("\r\n")).toUtf8();
+        bytes += QByteArrayLiteral("\x1b]8;;\x1b\\");
+        t.backend->writeToDisplay(bytes);
+        QTest::qWait(100);
+        t.backend->setProseBlock(anchor, collector.take(), 100);
+        QTest::qWait(100);
+    }
+
+    // Drag from one cell to another, and read back what the drag selected.
+    static QString dragSelect(Term &t, int row1, int col1, int row2, int col2)
+    {
+        QTest::qWait(QApplication::doubleClickInterval() + 50); // not read as a repeat click
+        const QPoint from = t.cellPoint(row1, col1), to = t.cellPoint(row2, col2);
+        QTest::mousePress(t.view, Qt::LeftButton, Qt::NoModifier, from);
+        QMouseEvent move(QEvent::MouseMove, to, Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+        QApplication::sendEvent(t.view, &move);
+        QTest::mouseRelease(t.view, Qt::LeftButton, Qt::NoModifier, to);
+        return t.backend->selectedText();
+    }
+
+    // A cell is one or two grid columns wide, so a column offset is not a cell
+    // offset: adding one to the other read three graphemes too far to the right
+    // once a wide character sat to the left of the drag (#C7WP).
+    void copyingAfterAWideCharacterSurvivesResize()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        printProse(t, QString::fromUtf8("中ABCDEF\n"));
+        int row = t.rowOf(QString::fromUtf8("中ABCDEF"));
+        QVERIFY(row >= 0);
+        QCOMPARE(dragSelect(t, row, 2, row, 4), QStringLiteral("ABC"));
+        t.backend->resizeTerminal(14, 62);
+        QTest::qWait(120);
+        row = t.rowOf(QString::fromUtf8("中ABCDEF"));
+        QVERIFY(row >= 0);
+        QCOMPARE(dragSelect(t, row, 2, row, 4), QStringLiteral("ABC"));
+    }
+
+    // The space a line wraps at belongs to neither row, so a selection across
+    // the wrap came back with the two words glued together (#8SBD). A wrap
+    // inside a token has no such cell and must still join with nothing, or a
+    // wrapped path stops being one path.
+    void copyingAcrossAWrappedEdgeKeepsItsSpace()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        const QString text = QStringLiteral("alpha beta gamma xyz delta");
+        printProse(t, text + QLatin1Char('\n'));
+        const int row = t.rowOf(text);
+        QVERIFY(row >= 0);
+        QCOMPARE(dragSelect(t, row, 0, row, text.size() - 1), text);
+        t.backend->resizeTerminal(14, 20);
+        QTest::qWait(120);
+        const int first = t.rowOf(QStringLiteral("alpha beta gamma xyz"));
+        const int last = t.rowOf(QStringLiteral("delta"));
+        QVERIFY(first >= 0 && last >= 0);
+        QCOMPARE(dragSelect(t, first, 0, last, 4), text);
+    }
+
+    // A token that wraps mid-word keeps copying whole: the join takes whatever
+    // was printed at the wrap, which there is nothing (#8SBD).
+    void copyingAcrossAWrappedTokenInsertsNothing()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        const QString text = QStringLiteral("see https://example.org/a/very/long/path/indeed now");
+        printProse(t, text + QLatin1Char('\n'));
+        t.backend->resizeTerminal(14, 20);
+        QTest::qWait(120);
+        t.backend->selectAll();
+        QVERIFY2(t.backend->selectedText().contains(QStringLiteral("https://example.org/a/very/long/path/indeed")),
+                 "the wrapped URL did not copy whole");
+    }
+
+    // The walk selected the emulator rows the block hides, so its target stayed
+    // right while nothing on screen showed which link was current (#J4WK).
+    void theKeyboardWalkHighlightsALinkOnABlocksOwnRows()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.view->setCardLookup([](const QString &id, QString *) { return id == QStringLiteral("GWXM"); });
+        printProse(t, QStringLiteral("See #GWXM\n"));
+        auto scheme = t.view->colorScheme();
+        scheme.selection = QColor(QStringLiteral("#ff00fe")); // a colour nothing else paints
+        t.view->setColorScheme(scheme);
+        auto highlighted = [&t, &scheme] {
+            const QImage img = t.grab();
+            for (int row = 0; row < t.view->rows(); ++row)
+                if (rowHasColor(img, row, t.view->cellHeight(), scheme.selection))
+                    return true;
+            return false;
+        };
+        TerminalView::Link link;
+        QVERIFY(t.view->stepLink(-1, &link));
+        QCOMPARE(link.target, QStringLiteral("relay://card/GWXM"));
+        QVERIFY2(highlighted(), "the keyboard walk is not highlighted at the print width");
+        t.view->endLinkWalk();
+        QTest::qWait(60);
+        QVERIFY2(!highlighted(), "the walk's highlight outlived the walk");
+
+        t.backend->resizeTerminal(14, 62);
+        QTest::qWait(120);
+        QVERIFY(t.view->stepLink(-1, &link));
+        QCOMPARE(link.target, QStringLiteral("relay://card/GWXM"));
+        QVERIFY2(highlighted(), "the walk selected the hidden rows, not the block's own");
+        // And what it highlighted is what copies.
+        QCOMPARE(t.backend->selectedText(), QStringLiteral("#GWXM"));
+    }
+
     // A label can be the only thing on the block's first grid row, which cuts the block's OSC 8
     // run into pieces that do not start where the block does. The view merges the pieces by the
     // anchor they share, or the layer hides the wrong rows on a resize and the row is painted

@@ -1,0 +1,11 @@
+********* Start testing of AuditTest *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : AuditTest::initTestCase()
+PASS   : AuditTest::missingLabelTargetStillAllowsKnownCard()
+PASS   : AuditTest::copyingAfterWideCharacterSurvivesResize()
+QINFO  : AuditTest::copyPreservesSpaceAtWrappedEdge() ("alpha beta gamma xyz", "delta", "", "", "", "", "", "", "", "", "", "", "", "")
+PASS   : AuditTest::copyPreservesSpaceAtWrappedEdge()
+PASS   : AuditTest::keyboardLinkSelectionVisibleAfterResize()
+PASS   : AuditTest::cleanupTestCase()
+Totals: 6 passed, 0 failed, 0 skipped, 0 blacklisted, 3300ms
+********* Finished testing of AuditTest *********

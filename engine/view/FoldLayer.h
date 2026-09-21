@@ -206,6 +206,16 @@ public:
     QString lineText(int foldIndex, int lineIndex) const;
     // Cells [from, to) of a logical line as text.
     QString cellsText(int foldIndex, int lineIndex, int from, int to) const;
+    // The cells of one wrapped row that grid columns [fromCol, toCol] cover, as
+    // [*first, *last). A cell is one or two columns wide, so a column offset is
+    // not a cell offset: adding one to the other reads the wrong graphemes as
+    // soon as a wide character sits to the left (#C7WP). A cell counts as
+    // covered when the column it *starts* at is in range, which is the rule
+    // paintProseRow highlights by, so what is painted is what copies. Returns
+    // false when the row has no cell in those columns (*first == *last).
+    bool rowCellRange(int foldIndex, int foldRow, int fromCol, int toCol, int *first, int *last) const;
+    // The fold whose replacement block has taken over this real row, or -1.
+    int foldHidingRow(int realRow) const;
 
     // Grid columns one grapheme cluster occupies (1 or 2).
     static int clusterWidth(const QString &cluster);

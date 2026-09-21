@@ -1,0 +1,18 @@
+Internal ctest changing into directory: /home/elliott/repos/relay-terminal/build
+Test project /home/elliott/repos/relay-terminal/build
+    Start 46: markdown
+1/6 Test #46: markdown .........................   Passed    0.01 sec
+    Start 47: wordwrap
+2/6 Test #47: wordwrap .........................   Passed    0.00 sec
+    Start 48: transcriptgaps
+3/6 Test #48: transcriptgaps ...................   Passed    0.00 sec
+    Start 57: panestatus
+4/6 Test #57: panestatus .......................   Passed    0.01 sec
+    Start 66: board
+5/6 Test #66: board ............................   Passed    2.34 sec
+    Start 84: calllines
+6/6 Test #84: calllines ........................   Passed    0.12 sec
+
+100% tests passed, 0 tests failed out of 6
+
+Total Test time (real) =   2.50 sec

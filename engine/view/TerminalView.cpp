@@ -2256,6 +2256,76 @@ TerminalView::Link TerminalView::linkAtPoint(const QPoint &pos)
 static constexpr int kWalkScrollbackLines = 2000;
 static constexpr int kWalkMaxLinks = 500;
 
+// What one scanned candidate says about the link it found: the same fields
+// whether the text came from the grid or from a replacement block's own lines.
+static void fillFoundLink(TerminalView::Link *link, const links::Found &found)
+{
+    link->target = found.target.target;
+    link->text = found.candidate.text;
+    link->card = found.target.kind == links::Kind::Card ? found.candidate.path : QString();
+    link->cardTitle = found.target.label;
+    link->url = found.target.kind == links::Kind::Url;
+    link->directory = found.target.directory;
+    link->line = found.target.line;
+    link->column = found.target.column;
+}
+
+void TerminalView::collectFoldLinks(int foldIndex, const QString &cwd, const QString &home,
+                                    const links::Probe &probe, const links::CardLookup &cardLookup)
+{
+    if (foldIndex < 0 || foldIndex >= int(m_folds.folds().size()))
+        return;
+    const FoldLayer::Fold &f = m_folds.folds()[size_t(foldIndex)];
+    for (int lineIndex = 0; lineIndex < int(f.cells.size()); ++lineIndex) {
+        const std::vector<FoldLayer::Cell> &cells = f.cells[size_t(lineIndex)];
+        // The whole logical line, and where each cell's characters start in it,
+        // so a reference split across two wrapped rows is still one candidate.
+        QString text;
+        QVector<int> offsets;
+        offsets.reserve(int(cells.size()) + 1);
+        for (const FoldLayer::Cell &c : cells) {
+            offsets.append(text.size());
+            text += c.text;
+        }
+        offsets.append(text.size());
+        // A block is prose by construction, so a bare folder word is not a link (#SFZC).
+        for (const links::Found &found : links::scan(text, cwd, home, probe, cardLookup,
+                                                     links::Mode::Prose)) {
+            const int begin = found.candidate.start;
+            const int end = begin + found.candidate.length;
+            WalkLink walk;
+            walk.foldUri = f.uri;
+            for (int r = 0; r < int(f.rows.size()); ++r) {
+                const FoldLayer::Row &part = f.rows[size_t(r)];
+                if (part.line != lineIndex)
+                    continue;
+                int x = m_folds.rowStartCol(foldIndex, r), left = -1, right = -1;
+                for (int i = part.first; i < part.first + part.count && i < int(cells.size()); ++i) {
+                    if (offsets[i] < end && offsets[i + 1] > begin) {
+                        if (left < 0)
+                            left = x;
+                        right = x + cells[size_t(i)].width - 1;
+                    }
+                    x += cells[size_t(i)].width;
+                }
+                if (left >= 0)
+                    walk.foldSpans.append(QRect(left, r, right - left + 1, 1));
+            }
+            if (walk.foldSpans.isEmpty())
+                continue; // the candidate is on no painted row
+            // The block's real rows, for anything that still thinks in them.
+            walk.row = f.anchorStartRow;
+            walk.endRow = f.anchorRow;
+            walk.col = walk.foldSpans.first().x();
+            walk.endCol = walk.foldSpans.last().right();
+            fillFoundLink(&walk.link, found);
+            m_linkWalk.push_back(walk);
+            if (int(m_linkWalk.size()) >= kWalkMaxLinks)
+                return;
+        }
+    }
+}
+
 void TerminalView::collectLinks()
 {
     m_linkWalk.clear();
@@ -2287,6 +2357,16 @@ void TerminalView::collectLinks()
     const links::Probe probe = m_linkProbe ? m_linkProbe : links::systemProbe();
     const links::CardLookup cardLookup = m_cardLookup;
     for (int i = 0; i < rows.size() && int(m_linkWalk.size()) < kWalkMaxLinks;) {
+        // A block that has taken its rows over is scanned from its own lines, not
+        // from the grid rows it hides: those rows are not on screen, so a link
+        // found there would carry a row and a column nothing paints (#J4WK).
+        const int hiding = foldsVisible() ? m_folds.foldHidingRow(firstRow + i) : -1;
+        if (hiding >= 0) {
+            collectFoldLinks(hiding, cwd, home, probe, cardLookup);
+            while (i < rows.size() && m_folds.foldHidingRow(firstRow + i) == hiding)
+                ++i;
+            continue;
+        }
         // Rows the emulator filled to the last column continue on the next row: a path
         // that wrapped is one logical line again.
         int last = i;
@@ -2310,14 +2390,7 @@ void TerminalView::collectLinks()
             walk.col = s % columns;
             walk.endRow = firstRow + i + e / columns;
             walk.endCol = e % columns;
-            walk.link.target = found.target.target;
-            walk.link.text = found.candidate.text;
-            walk.link.card = found.target.kind == links::Kind::Card ? found.candidate.path : QString();
-            walk.link.cardTitle = found.target.label;
-            walk.link.url = found.target.kind == links::Kind::Url;
-            walk.link.directory = found.target.directory;
-            walk.link.line = found.target.line;
-            walk.link.column = found.target.column;
+            fillFoundLink(&walk.link, found);
             m_linkWalk.push_back(walk);
             if (int(m_linkWalk.size()) >= kWalkMaxLinks)
                 break;
@@ -2328,6 +2401,41 @@ void TerminalView::collectLinks()
 
 void TerminalView::showWalkLink(const WalkLink &walk)
 {
+    if (!walk.foldUri.isEmpty()) {
+        // A link on a replacement block's own rows. The emulator rows the block
+        // hides are not painted, so a core selection there shows nothing: the
+        // selection that makes this link visible is the view's (#J4WK), in the
+        // same fold coordinates the mouse builds when it drags over a block.
+        const int foldIndex = m_folds.indexOf(walk.foldUri);
+        if (foldIndex < 0)
+            return; // the block went away under the walk
+        const int start = m_folds.foldVisualStart(foldIndex);
+        if (start < 0)
+            return;
+        const int first = start + walk.foldSpans.first().y();
+        const int last = start + walk.foldSpans.last().y();
+        if (first < m_visualTop || last > m_visualTop + m_rows - 1)
+            scrollToVisualRow(std::max(0, first - m_rows / 3));
+        m_visualSelUnit = SelectionUnit::Cell;
+        m_selAnchor = FoldSelPos{true, 0, walk.foldUri, walk.foldSpans.first().y(),
+                                 walk.foldSpans.first().x()};
+        m_selExtent = FoldSelPos{true, 0, walk.foldUri, walk.foldSpans.last().y(),
+                                 walk.foldSpans.last().right()};
+        m_visualSelection = true;
+        applyVisualSelection(); // clears the core's selection: this one is all fold
+        // The underline the mouse would draw, on every row the link covers.
+        m_hoverSegments.clear();
+        m_hoverRow = m_hoverStart = m_hoverEnd = -1;
+        for (const QRect &span : walk.foldSpans) {
+            const int screenRow = start + span.y() - m_visualTop;
+            if (screenRow >= 0 && screenRow < m_rows)
+                m_hoverSegments.append(QRect(span.x(), screenRow, span.width(), 1));
+        }
+        m_hoverCellRow = m_hoverCellCol = -2;
+        m_forceFull = true;
+        scheduleFrame();
+        return;
+    }
     // Put the link in the viewport, a third of the way down when it has to scroll.
     int top = m_session->withCore([](VtCore &core) { return core.viewportTop(); });
     if (walk.row < top || walk.endRow > top + m_rows - 1) {
@@ -2382,6 +2490,7 @@ void TerminalView::endLinkWalk()
     m_linkCursor.cancel();
     m_linkWalk.clear();
     m_session->withCore([](VtCore &core) { core.selectionClear(); });
+    clearVisualSelection(); // a link walked inside a block was selected here, not in the core (#J4WK)
     m_hoverSegments.clear();
     m_hoverRow = m_hoverStart = m_hoverEnd = -1;
     m_hoverCellRow = m_hoverCellCol = -2;
@@ -2908,6 +3017,7 @@ QString TerminalView::visualSelectedText() const
             // selection covers, so the line comes back whole.
             QString line;
             const int lineIndex = fr.line;
+            int prevEnd = -1; // the cell after the last one taken, for the wrap join
             while (v <= ev) {
                 const FoldLayer::VisualRow rr = m_folds.at(v);
                 if (!rr.fold || rr.foldIndex != r.foldIndex)
@@ -2917,12 +3027,22 @@ QString TerminalView::visualSelectedText() const
                     break;
                 int from = 0, to = m_cols - 1;
                 foldSelectionRange(r.foldIndex, rr.foldRow, &from, &to);
-                // Grid columns back to cell indices: the row starts at its own
-                // first column (a prose continuation row hangs, a fold indents).
-                const int indent = m_folds.rowStartCol(r.foldIndex, rr.foldRow);
-                const int firstCell = row.first + std::max(0, from - indent);
-                const int lastCell = row.first + std::min(row.count, std::max(0, to - indent + 1));
-                line += m_folds.cellsText(r.foldIndex, lineIndex, firstCell, lastCell);
+                // Grid columns back to cell indices, walking the row's own cells:
+                // adding a column offset to a cell index reads the wrong
+                // graphemes as soon as a wide character sits to the left (#C7WP).
+                int firstCell = 0, lastCell = 0;
+                if (m_folds.rowCellRange(r.foldIndex, rr.foldRow, from, to, &firstCell, &lastCell)) {
+                    // The space a line wrapped at belongs to no row (#8SBD): it
+                    // is a cell between the previous row's end and this row's
+                    // first, so a selection crossing the wrap has to carry it or
+                    // the two words come back glued together. A wrap inside a
+                    // token leaves no such cell and joins with nothing, so a
+                    // wrapped path or URL still copies whole.
+                    if (prevEnd >= 0 && firstCell > prevEnd)
+                        line += m_folds.cellsText(r.foldIndex, lineIndex, prevEnd, firstCell);
+                    line += m_folds.cellsText(r.foldIndex, lineIndex, firstCell, lastCell);
+                    prevEnd = lastCell;
+                }
                 ++v;
             }
             parts << line;

@@ -525,6 +525,49 @@ QString FoldLayer::cellsText(int foldIndex, int lineIndex, int from, int to) con
     return s;
 }
 
+bool FoldLayer::rowCellRange(int foldIndex, int foldRow, int fromCol, int toCol,
+                             int *first, int *last) const
+{
+    if (first) *first = 0;
+    if (last) *last = 0;
+    if (foldIndex < 0 || foldIndex >= int(m_folds.size()))
+        return false;
+    const Fold &f = m_folds[size_t(foldIndex)];
+    if (foldRow < 0 || foldRow >= int(f.rows.size()))
+        return false;
+    const Row &r = f.rows[size_t(foldRow)];
+    if (r.line < 0 || r.line >= int(f.cells.size()))
+        return false;
+    const std::vector<Cell> &cells = f.cells[size_t(r.line)];
+    const int end = std::min(r.first + r.count, int(cells.size()));
+    int col = rowStartCol(foldIndex, foldRow);
+    int lo = -1, hi = -1;
+    for (int i = std::max(0, r.first); i < end; ++i) {
+        if (col >= fromCol && col <= toCol) {
+            if (lo < 0)
+                lo = i;
+            hi = i;
+        }
+        col += cells[size_t(i)].width;
+        if (col > toCol)
+            break;
+    }
+    if (lo < 0)
+        return false;
+    if (first) *first = lo;
+    if (last) *last = hi + 1;
+    return true;
+}
+
+int FoldLayer::foldHidingRow(int realRow) const
+{
+    for (const Anchor &a : m_anchors) {
+        if (a.replacement && realRow >= a.startRow && realRow <= a.row)
+            return a.foldIndex;
+    }
+    return -1;
+}
+
 QString FoldLayer::rowText(int foldIndex, int rowIndex) const
 {
     if (foldIndex < 0 || foldIndex >= int(m_folds.size()))

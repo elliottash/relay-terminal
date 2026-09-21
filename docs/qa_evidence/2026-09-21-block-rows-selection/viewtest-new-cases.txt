@@ -1,0 +1,10 @@
+********* Start testing of ViewTest *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : ViewTest::initTestCase()
+PASS   : ViewTest::copyingAfterAWideCharacterSurvivesResize(libvterm)
+PASS   : ViewTest::copyingAcrossAWrappedEdgeKeepsItsSpace(libvterm)
+PASS   : ViewTest::copyingAcrossAWrappedTokenInsertsNothing(libvterm)
+PASS   : ViewTest::theKeyboardWalkHighlightsALinkOnABlocksOwnRows(libvterm)
+PASS   : ViewTest::cleanupTestCase()
+Totals: 6 passed, 0 failed, 0 skipped, 0 blacklisted, 3414ms
+********* Finished testing of ViewTest *********
