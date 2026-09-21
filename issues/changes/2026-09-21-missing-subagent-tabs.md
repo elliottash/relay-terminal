@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: m
 created: '2026-09-21'
 source: User request in Relay, 2026-09-21
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-subagent-tabs/], related: [WD83, S8FT], github: null}
+links: {plans: [], commits: [05a6ac725852f130fa24233e0cae632366442c1f], evidence: [docs/qa_evidence/2026-09-21-subagent-tabs/], related: [WD83, S8FT], github: null}
 ---
 # Show all subagents in the tabbed pane
 
