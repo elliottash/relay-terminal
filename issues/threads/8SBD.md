@@ -43,3 +43,11 @@ Plan this card.
 <!-- relay:entry 20260921T210756Z-a1 author=codex kind=evidence -->
 ### Codex · 2026-09-21 21:07
 The #K9KC commit audit confirmed the fold-selection path independently: print "alpha beta gamma xyz delta" at 100 columns, resize to 20, then select both rows. Actual copy: "alpha beta gamma xyzdelta". With prose replacement disabled, the same resize preserves the space. In 8147cc55, wrap::rows drops the edge-space cell and visualSelectedText concatenates the displayed row ranges, omitting it. This is distinct from the native trim path already in the plan. Reproducer: run-audit-probe.py copyPreservesSpaceAtWrappedEdge under docs/qa_evidence/2026-09-21-card-file-links/.
+
+<!-- relay:entry 20260921T212648Z-b1 author=claude-code kind=progress -->
+### Claude Code · 2026-09-21 17:26
+Claimed this card. Fixing the dropped edge space, in both the core's selectedText and the fold path; the audit probe under docs/qa_evidence/2026-09-21-card-file-links/ is the reproduction and will be the before/after evidence.
+
+<!-- relay:entry 20260921T214022Z-c1 author=claude-code kind=evidence -->
+### Claude Code · 2026-09-21 17:40
+Landed in two commits: 4e622af8 (the core's selectedText, plan steps 1–3) and 4a4663e0 (the re-wrapped block's own path, step 4). Character-exact join in both. Step 3 could not be run here — this build has RELAY_ENGINE_WITH_GHOSTTY=OFF and no prebuilt libghostty-vt, so GhosttyCore was left alone and the new cases are written to run against it on a build that has it. Tests: CoreTest::selectionKeepsThePrintedSpaceAtASoftWrap (fails with "the quickbrown" when the fix is reverted), CoreTest::selectionAcrossAMidTokenWrapJoinsWithNothing, ViewTest::copyingAcrossAWrappedEdgeKeepsItsSpace, ViewTest::copyingAcrossAWrappedTokenInsertsNothing. On the landed tree ViewTest 56/56, CoreTest 45/45, FoldLayerTest 32/32, audit probe 6/6 both ways. Evidence: docs/qa_evidence/2026-09-21-block-rows-selection/. Moved to needs-verification with a QA checklist.

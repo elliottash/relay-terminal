@@ -1,0 +1,12 @@
+# Both halves of #8SBD on the landed tree (4a4663e0)
+
+$ for t in ViewTest CoreTest FoldLayerTest; do RELAY_ENGINE_TEST=$t build/engine/relay-engine-tests; done
+ViewTest       Totals: 56 passed, 0 failed
+CoreTest       Totals: 45 passed, 0 failed
+FoldLayerTest  Totals: 32 passed, 0 failed
+
+$ python3 docs/qa_evidence/2026-09-21-card-file-links/run-audit-probe.py
+Totals: 6 passed, 0 failed  (the block's own rows)
+
+$ AUDIT_NATIVE_ROWS=1 python3 docs/qa_evidence/2026-09-21-card-file-links/run-audit-probe.py
+Totals: 6 passed, 0 failed  (the grid rows, the control the audit filed the findings against)
