@@ -3695,6 +3695,16 @@ public:
     }
 
     void setAgentMode(const QString &mode) {
+        if (!m_configured && (!m_deferredPreset.isEmpty() || m_configuring)) {
+            // Picking Plan is not a prompt: keep lazy harness startup, but remember the
+            // choice and send it before any queued ask when configuration completes.
+            m_pendingAgentMode = mode;
+            m_agentMode = mode;
+            changed();
+            status(mode == QStringLiteral("plan") ? QStringLiteral("Plan mode · ready for your first prompt")
+                                                   : QStringLiteral("Build mode · ready for your first prompt"));
+            return;
+        }
         if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
         send({{"type", "set_mode"}, {"mode", mode}});
     }
@@ -10283,7 +10293,7 @@ private:
             status(QStringLiteral("Local worker failed: ") + m_worker.errorString());
         });
         connect(&m_worker, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int code, QProcess::ExitStatus exit) {
-            m_workerReady = false; m_configured = false; m_agentBusy = false;
+            m_workerReady = false; m_configured = false; m_configuring = false; m_agentBusy = false;
             // A `route` that was in flight will never be answered. Left behind, m_pendingSubmit
             // is a one-submission guard that no reply can ever release, so every later terminal
             // submit in this pane is dropped in silence — the worst version of the bug the local
@@ -10296,6 +10306,10 @@ private:
             relay::log::error(QStringLiteral("worker_exit pane=%1 code=%2 crashed=%3")
                                   .arg(paneLogId()).arg(code).arg(exit == QProcess::CrashExit ? 1 : 0));
             if (m_closing) return;
+            if (m_restartConfigure) {
+                QTimer::singleShot(250, this, [this] { if (!m_closing) startWorker(); });
+                return;
+            }
             const bool oom = isolation::takeResult(m_agentUnit) == QStringLiteral("oom-kill");
             const bool killed = exit == QProcess::CrashExit || code == 137 || code == 143;
             showBanner(oom ? QStringLiteral("The agent worker stopped because it ran out of memory (limit %1).")
@@ -10514,6 +10528,8 @@ private:
         // A console writes to its tab's worker through the window (#AGNT step 5): one process,
         // one conversation, and each ask tagged with this console's `surface`.
         if (onWorkerLine) { onWorkerLine(object); return; }
+        if (object.value(QStringLiteral("type")) == QStringLiteral("configure"))
+            m_lastConfigure = object;   // memory only; includes transient credentials
         const QByteArray line = QJsonDocument(object).toJson(QJsonDocument::Compact) + '\n';
         if (m_worker.state() == QProcess::Running) m_worker.write(line);
         // The worker's first output can be handled before QProcess reports Running.
@@ -10776,6 +10792,11 @@ private:
         if (handleAliasEvent(type, event)) return;   // aliases (issue G8DK)
         if (type == QStringLiteral("ready")) {
             m_workerReady = true; requestRoute(false, QStringLiteral("auto"));
+            if (m_restartConfigure) {
+                m_restartConfigure = false;
+                m_configuring = true;
+                send(m_lastConfigure);
+            }
             send({{"type", "presets"}});
             refreshAliases();   // the palette and `/name` need the list before anything is typed
         } else if (type == QStringLiteral("route")) {
@@ -10831,6 +10852,7 @@ private:
             }
         } else if (type == QStringLiteral("configured")) {
             m_configured = true; m_configuring = false;
+            m_configureAutoRetried = false;
             m_model = event.value(QStringLiteral("model")).toString();
             m_skillCount = event.value(QStringLiteral("skills")).toInt();
             setSkillCommands(event.value(QStringLiteral("skill_commands")).toArray());
@@ -10864,6 +10886,11 @@ private:
                 if (!pick.key.isEmpty() && pick.key != currentEntryKey()) sendAgentRole(m_agentRole, pick);
             }
             onSessionConfigured(event);
+            if (!m_pendingAgentMode.isEmpty()) {
+                m_agentMode = m_pendingAgentMode;
+                m_pendingAgentMode.clear();
+                send({{"type", "set_mode"}, {"mode", m_agentMode}});
+            }
             noteGuestPreset(event);   // Tier A (29.4): the guest is this pane's agent from here on
             discloseHosted();   // Relay Free: where the prompts go, said once per installation
             runBoardTask();   // a card handed over by the Switchboard's Execute, if any (#XS6Q)
@@ -11400,6 +11427,32 @@ private:
             finishFixTurn(type == QStringLiteral("done"));
         } else if (type == QStringLiteral("error")) {
             const auto text = event.value(QStringLiteral("text")).toString();
+            if (event.value(QStringLiteral("code")) == QStringLiteral("configure_failed")
+                && event.value(QStringLiteral("restart_worker")).toBool()
+                && !sharesWorker() && !m_agentBusy && !m_lastConfigure.isEmpty()) {
+                m_configured = false;
+                // Keep presets refreshes from choosing a different provider while this
+                // failed configuration waits for a fresh process or the person's retry.
+                m_configuring = true;
+                auto retry = [this] {
+                    hideBanner();
+                    if (m_pendingAgentMode.isEmpty()) m_pendingAgentMode = m_agentMode;
+                    m_restartConfigure = true;
+                    if (m_worker.state() == QProcess::NotRunning) startWorker();
+                    else m_worker.kill();  // finished() starts the replacement asynchronously
+                };
+                status(QStringLiteral("Agent configuration failed: ") + text);
+                ensureLineStart();
+                printInline(QStringLiteral("✗ Agent configuration failed: ") + text + '\n', Ink::Error);
+                if (!m_configureAutoRetried) {
+                    m_configureAutoRetried = true;
+                    retry();
+                } else {
+                    showBanner(QStringLiteral("Agent configuration failed: ") + text,
+                               QStringLiteral("Retry agent"), retry);
+                }
+                return;
+            }
             if (event.value(QStringLiteral("id")).toString() == m_pendingSubmit) m_pendingSubmit.clear();
             const bool wasBusy = m_agentBusy;
             // A rejected ask (queue full, invalid prompt) never started; forget it.
@@ -14064,6 +14117,7 @@ private:
     void configurePreset(const QString &id, bool announce, const QString &modelOverride = QString()) {
         const auto preset = presetById(id);
         if (preset.isEmpty()) return;
+        m_configureAutoRetried = false;
         m_deferredPreset.clear(); m_deferredModel.clear();   // whatever was being held, this replaces it
         if (m_workspace.isEmpty()) m_workspace = QDir::currentPath();
         QSettings settings;
@@ -14111,7 +14165,7 @@ private:
                      const QString &shellText = QString()) {
         // A harness this pane is holding starts here, on the first prompt (card #MDL1). The
         // prompt itself waits in the queue, which `configured` pumps.
-        if (!m_configured && !startDeferred()) {
+        if (!m_configured && !m_configuring && !startDeferred()) {
             if (fromEditor) { configure(); return; }
             status(QStringLiteral("No agent provider is configured."));
             return;
@@ -17633,6 +17687,9 @@ private:
     bool m_turnSaw429 = false;
     QString m_failoverTarget;   // the preset the last failover of this turn moved to
     bool m_configuring = false;
+    bool m_restartConfigure = false, m_configureAutoRetried = false;
+    QJsonObject m_lastConfigure;
+    QString m_pendingAgentMode;
     bool m_seenShell = false, m_refocus = true, m_configured = false, m_agentBusy = false;
     // agent sessions UI
     QLabel *m_planChip = nullptr, *m_ctxLabel = nullptr;

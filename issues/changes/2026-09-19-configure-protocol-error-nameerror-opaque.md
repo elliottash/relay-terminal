@@ -1,17 +1,17 @@
 ---
 id: 40SN
 type: work
-status: planned
+status: needs-verification
 labels: [bug]
 component: [worker, gui]
 milestone: desktop-alpha
 workstream: agent
-assignee: agent
+assignee: codex
 rank: zzzz111
 created: '2026-09-19'
 acceptance: a pane whose configure dies on an unexpected worker exception shows the exception's own message (e.g. "name 'os' is not defined"), recovers without being closed once the backend file is repaired, and a test covers the reporting and the recovery
 source: 'conversation, 2026-09-19: "im getting this bug, protocol error (nameerror) when im trying to work in a new pane"'
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-pane-startup-recovery/README.md], related: [], github: null}
 ---
 # A failed configure shows only "Protocol error (NameError)." and the pane never recovers
 
@@ -19,7 +19,9 @@ links: {plans: [], commits: [], evidence: [], related: [], github: null}
 
 "im getting this bug, protocol error (nameerror) when im trying to work in a new pane"
 
-## What happened (2026-09-19, 04:43–04:45 UTC)
+## Planning notes
+
+Incident: 2026-09-19, 04:43–04:45 UTC
 
 New panes (`99394410`, `612b49a7`) failed their first `configure` with `Protocol error (NameError).`
 eleven times, ~every 5–20 s, until the panes were given up on. `worker.log` has what the pane does not:
@@ -39,7 +41,7 @@ tree is fixed, until the pane is closed. The same shape occurred 2026-09-18 19:0
 The current tree is clean: `configure` run end-to-end against the real worker succeeds (kimi and
 openrouter presets), and every backend module compiles. Nothing is left to fix in the code that raised.
 
-## The two real gaps
+The two gaps identified at planning:
 
 1. **The message is thrown away.** `worker.py`'s handler emits the exception text only for
    `ValueError`/`OSError`/`KeystoreError` — anything else is redacted to
@@ -51,21 +53,47 @@ openrouter presets), and every backend module compiles. Nothing is left to fix i
    unexpected exception the worker process is the broken unit (cached import); the only fix is a
    restart, which the GUI already knows how to do when a worker dies.
 
+## Plan
+**Goal:** Show why initial configuration failed and recover in a fresh worker without closing the pane.
+**Findings:** `backend/worker.py` redacts unexpected exceptions; `src/Pane.h` retries in the same process.
+**Steps:**
+1. Report structured configure failures with the exception kind and diagnostic text.
+2. Restart the pane worker once automatically and replay the failed configuration; provide an explicit retry after repeated failure.
+3. Preserve deferred Plan/Build selection before the first prompt (#MDL1).
+4. Test worker diagnostics, fresh-process recovery, repeated failures, and pre-start planning; document the wire fields.
+**Risks:** Do not restart a shared worker or a worker with an active turn. Bound automatic retries and preserve queued prompts and provider selection.
+**Verify:** Targeted Python tests, the application build, and isolated Xvfb checks with a deterministic fake worker.
+
 ## Tasks
 
-- [ ] `worker.py`: include `str(exc)` in the `error` event for unexpected exception types whose <!-- t:t9 -->
+- [x] `worker.py`: include `str(exc)` in the `error` event for unexpected exception types whose <!-- t:t9 -->
       messages are code, not prompts (`NameError`, `AttributeError`, `TypeError`, `ImportError`),
-      keeping the redaction for `ValueError`/`OSError`/`KeystoreError`; keep `worker.log` as the full
+      keeping existing `ValueError`/`OSError`/`KeystoreError` reporting; keep `worker.log` as the full
       record
-- [ ] `src/Pane.h`: on a configure error of that unexpected kind, surface the message in the status <!-- t:bh -->
+- [x] `src/Pane.h`: on a configure error of that unexpected kind, surface the message in the status <!-- t:bh -->
       line (attributed, like the #308N suggestion line) instead of the bare "Protocol error (…)"
-- [ ] `src/Pane.h`: after a configure failure of that kind, restart the pane's worker (or restart <!-- t:ph -->
+- [x] `src/Pane.h`: after a configure failure of that kind, restart the pane's worker (or restart <!-- t:ph -->
       after N consecutive configure failures) so a repaired tree is picked up without closing the pane
-- [ ] `docs/AGENT-SESSIONS-PROTOCOL.md`: document the error-event shape for unexpected exceptions <!-- t:7t -->
-- [ ] Test: a worker whose configure path raises `NameError` reports the message (not the redacted <!-- t:0h -->
+- [x] `docs/AGENT-SESSIONS-PROTOCOL.md`: document the error-event shape for unexpected exceptions <!-- t:7t -->
+- [x] Test: a worker whose configure path raises `NameError` reports the message (not the redacted <!-- t:0h -->
       line) and the pane retries configure in a fresh worker process, which then succeeds
 
 ## Decisions
 
+- Owner: "claim all of these and implement them".
+
 - 2026-09-19, agent: filed from a live incident; the redaction is kept for the three prompt-carrying
   types and widened only for exception types whose message is a code symbol — not a blanket unmask.
+
+## Execution Summary
+The worker reports structured `configure_failed` diagnostics for NameError, AttributeError, TypeError and ImportError. A pane retries the identical configuration once in a fresh process, then offers Retry agent after repeated failure. Queued prompts and Plan/Build selection survive; shared workers and active turns are not restarted. The mode chosen before a deferred guest starts is applied before its first ask (#MDL1).
+
+## Tests
+`tests/test_configure_recovery.py`
+`tests/test_session_protocol.py`
+manual: docs/qa_evidence/2026-09-21-pane-startup-recovery/README.md
+
+## QA checklist
+- [ ] Open a new Codex pane; select Plan before typing; the first prompt runs in Plan.
+- [ ] Inject an initial configure defect; verify its diagnostic is visible and a fresh process recovers without reopening the pane.
+- [ ] Repeated failure stops after one automatic retry; after repair, Retry agent (or Ctrl+Shift+R) submits the queued prompt once.

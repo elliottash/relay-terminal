@@ -10,6 +10,16 @@ Owner decisions this implements are recorded in
 
 ## 1. Configure additions
 
+An unexpected `NameError`, `AttributeError`, `TypeError` or `ImportError` during `configure`
+answers with `error {id, text, agent_busy, code: "configure_failed", exception,
+restart_worker}` (#40SN). `text` carries the diagnostic (up to 2,000 characters), `exception`
+names its class, and `restart_worker` is true only while no turn is running. Validation and
+provider refusals retain their existing error shape; other unexpected exceptions stay redacted.
+A pane owning its worker retries once in a fresh process, replaying the same configuration from
+memory. A second failure offers an explicit retry; it does not loop or restart a shared worker.
+Plan/Build selected while a guest's startup is deferred is kept locally and sent as `set_mode`
+after `configured`, before the queued first `ask` (#MDL1).
+
 `configure` accepts, all optional:
 
 | Field | Type | Meaning |

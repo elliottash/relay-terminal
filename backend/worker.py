@@ -728,9 +728,15 @@ def main():
             # The message, not the request: a request carries prompt text and must not be logged.
             logs.event(log, "protocol_error", level_name="error", kind=locals().get("kind"),
                        error=type(exc).__name__, msg=str(exc)[:300])
-            emit({"event": "error", "id": request.get("id") if isinstance(locals().get("request"), dict) else None,
-                  "agent_busy": turns.busy,
-                  "text": str(exc)[:2000] if isinstance(exc, (ValueError, OSError, keystore.KeystoreError)) else f"Protocol error ({type(exc).__name__})."})
+            configure_fault = (locals().get("kind") == "configure"
+                               and isinstance(exc, (NameError, AttributeError, TypeError, ImportError)))
+            error = {"event": "error", "id": request.get("id") if isinstance(locals().get("request"), dict) else None,
+                     "agent_busy": turns.busy,
+                     "text": str(exc)[:2000] if configure_fault or isinstance(exc, (ValueError, OSError, keystore.KeystoreError))
+                     else f"Protocol error ({type(exc).__name__})."}
+            if configure_fault:
+                error.update(code="configure_failed", exception=type(exc).__name__, restart_worker=not turns.busy)
+            emit(error)
     logs.event(log, "worker_stop", pid=os.getpid())
     # The guest is a process of this worker's (protocol 29.3): it goes when the worker goes.
     if turns.agent is not None:

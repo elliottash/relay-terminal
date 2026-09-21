@@ -1,0 +1,9 @@
+test_cached_failure_needs_a_fresh_process_then_configures (test_configure_recovery.ConfigureRecoveryTests.test_cached_failure_needs_a_fresh_process_then_configures) ... ok
+test_configure_defects_report_diagnostics_and_restart_hint (test_configure_recovery.ConfigureRecoveryTests.test_configure_defects_report_diagnostics_and_restart_hint) ... ok
+test_unclassified_exceptions_remain_redacted (test_configure_recovery.ConfigureRecoveryTests.test_unclassified_exceptions_remain_redacted) ... ok
+test_validation_failures_do_not_request_restart (test_configure_recovery.ConfigureRecoveryTests.test_validation_failures_do_not_request_restart) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.659s
+
+OK
