@@ -133,6 +133,28 @@ class ParseTests(unittest.TestCase):
         self.assertTrue(any("'kimi' has no row in the Providers table" in line for line in problems), problems)
         self.assertTrue(any("'kimi-k3'" in line and 'Models table' in line for line in problems), problems)
 
+    def test_check_reports_two_providers_sharing_an_order(self):
+        """`order` is the tie-break, so it decides nothing when two rows share a number.
+
+        It is the slip a re-numbering makes — a band is renumbered and one row keeps its old
+        value, or two bands are given the same first number — and it is well-formed Markdown, so
+        parsing cannot catch it. It is a finding rather than a raise: the owner edits this file by
+        hand and a worker that refuses to start over a repeated number would be worse than one
+        that sorts two providers by name for an afternoon.
+        """
+        text = MINIMAL.replace('|   openai   |  api  |  32  |', '| openai | api | 11 |')
+        ranking = MR.parse(textwrap.dedent(text), 'ranking.md')
+        self.assertEqual(ranking.provider_order('openai'), 11)      # parsed, not refused
+        problems = ranking.check()
+        shared = [line for line in problems if 'order 11' in line]
+        self.assertEqual(len(shared), 1, problems)
+        self.assertIn('glm-coding', shared[0])
+        self.assertIn('openai', shared[0])
+        self.assertIn('tie-break', shared[0])
+        # Distinct numbers say nothing at all.
+        clean = MR.parse(textwrap.dedent(MINIMAL), 'ranking.md').check()
+        self.assertEqual([line for line in clean if 'tie-break' in line], [])
+
     def test_a_missing_file_says_so_rather_than_ranking_nothing(self):
         # With no file there is no score, no class and no provider order, so every default list
         # would come out blank and read like a ranking decision. It ships with the worker.

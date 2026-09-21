@@ -15,9 +15,10 @@ rules are and how to edit the tables.
 What raises and what only reports. A row that cannot be read at all — the wrong number of cells, a
 score that is not a number, a `kind` outside the five — is a `ValueError` naming the line, because
 a half-parsed table would silently drop a model. Everything else is `check()`'s: an unknown class
-word, a provider the worker has never heard of, a catalog model with no row, a duplicate name. So
-a typo in a class word gives a readable report from the test rather than a worker that will not
-start.
+word, a provider the worker has never heard of, a preset with no row, a catalog model with no row,
+a duplicate name and two providers sharing an `order`. So a typo in a class word gives a readable
+report from the test rather than a worker that will not start — and the file stays editable by
+hand, half-finished, without taking the worker or the model picker down with it.
 """
 from __future__ import annotations
 
@@ -117,6 +118,20 @@ class Ranking:
             problems.append(f"provider {name!r} has more than one row; only the last one counts")
         for name in self.duplicate_models:
             problems.append(f"model {name!r} has more than one row; only the last one counts")
+
+        # `order` is the tie-break between two providers serving the same model at the same score,
+        # so two providers at the same number decide nothing: the sort falls through to the name
+        # and the file reads as a ruling it is not making. Parsing lets it through — a repeated
+        # number is a perfectly well-formed row, and it is usually a slip made while re-numbering
+        # a band — so it is reported here rather than raised, and the worker starts either way.
+        by_order: dict[int, list[str]] = {}
+        for preset_id, row in self.providers.items():
+            by_order.setdefault(row.order, []).append(preset_id)
+        for order, shared in sorted(by_order.items()):
+            if len(shared) > 1:
+                problems.append(f"providers {', '.join(sorted(shared))} all have order {order}; "
+                                f"`order` is the tie-break, so two providers at the same number "
+                                f"break the tie by name rather than by the file")
 
         for name, row in sorted(self.models.items()):
             for word in row.classes:
