@@ -1403,7 +1403,10 @@ public:
         const auto preset = presetById(id);
         // A full configure starts a new conversation, which a running turn cannot have.
         if (!m_configured || preset.isEmpty()) {
-            if (m_agentBusy) { status(QStringLiteral("Stop the current agent turn before configuring a new provider.")); changed(); return; }
+            if (m_agentBusy) {
+                relay::log::info(QStringLiteral("model_pick_refused pane=%1 preset=%2 why=agent_busy").arg(paneLogId(), id));
+                status(QStringLiteral("Stop the current agent turn before configuring a new provider.")); changed(); return;
+            }
             configurePreset(id, true, model); return;
         }
         // Switch the provider, keeping the conversation. Allowed while a turn runs (issue 3ES1): the
@@ -1699,6 +1702,12 @@ public:
         QString preset, model;
         if (!relay::models::Catalog::splitKey(key, &preset, &model)) return;
         const QString level = effort.isEmpty() ? relay::models::curation::listEffortFor(key) : effort;   // the tier lists' level for it
+        // One line per pick, whichever door: a pick the owner made that never reached the worker
+        // (2026-09-21, "changed with the picker to kimi … and it went to astra anyway") left no
+        // trace at all, so which branch below it took could not be told from the log.
+        relay::log::info(QStringLiteral("model_pick pane=%1 key=%2 level=%3 current=%4 configured=%5 deferred=%6 guest_in_front=%7")
+                             .arg(paneLogId(), key, level, m_currentPreset, m_configured ? QStringLiteral("1") : QStringLiteral("0"),
+                                  m_deferredPreset, guestInFront() ? m_guest : QString()));
         if (const QString guest = guestOfPreset(preset); !guest.isEmpty()) {
             if (preset != m_currentPreset || model != m_guestModel) pickGuest(guest, model);
         } else if (preset != m_currentPreset) {
@@ -10975,6 +10984,7 @@ private:
                     m_deferredPreset = choice;
                     m_deferredModel = startModel;
                     m_currentPreset = choice;   // the box says what this pane is on
+                    relay::log::info(QStringLiteral("harness_deferred pane=%1 preset=%2 model=%3").arg(paneLogId(), choice, startModel));
                     status(QStringLiteral("%1 is this pane's agent; it starts on your first prompt.")
                                .arg(guestName(guest)));
                     changed();
@@ -13996,6 +14006,7 @@ private:
     bool startDeferred() {
         if (m_deferredPreset.isEmpty() || m_configuring) return false;
         const QString preset = m_deferredPreset, model = m_deferredModel;
+        relay::log::info(QStringLiteral("harness_deferred_start pane=%1 preset=%2 model=%3").arg(paneLogId(), preset, model));
         configurePreset(preset, false, model);
         return m_configuring;
     }
@@ -14013,6 +14024,8 @@ private:
         settings.setValue("provider/extra", QString::fromUtf8(QJsonDocument(preset.value(QStringLiteral("extra")).toObject()).toJson(QJsonDocument::Compact)));
         rememberPresetBeforeGuest(id);
         m_apiKey.clear(); m_configured = false; m_configuring = true; m_currentPreset = id; changed();
+        relay::log::info(QStringLiteral("configure_sent pane=%1 preset=%2 model=%3 worker=%4")
+                             .arg(paneLogId(), id, model, QString::number(int(m_worker.state()))));
         if (announce) status(QStringLiteral("Switching model. This starts a new conversation."));
         // Through the funnel, spelled the way tests/boardworkspace_test.cpp counts it: every
         // `configure` this pane sends is `withSessionFields(QJsonObject{{"type", "configure"} …`,
