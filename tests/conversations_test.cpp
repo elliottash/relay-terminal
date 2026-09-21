@@ -184,6 +184,11 @@ private slots:
         QCOMPARE(userSelections, 0);
         QCOMPARE(pane.query(), QStringLiteral("retained"));
         QCOMPARE(pane.agentContext()->spec().screen, QStringLiteral("projects screen"));
+        QCOMPARE(pane.agentContext()->spec().name, QStringLiteral("projects"));
+        QCOMPARE(pane.agentContext()->spec().briefKey, QStringLiteral("projects"));
+        pane.showTab(QStringLiteral("globals"));
+        QCOMPARE(pane.agentContext()->spec().name, QStringLiteral("globals"));
+        pane.showTab(QStringLiteral("projects"));
         QCOMPARE(pane.paneTitle(), QStringLiteral("Projects"));
         pane.setKnownProjects({{QStringLiteral("demo"), QStringLiteral("/tmp/demo")}});
         QJsonObject request;

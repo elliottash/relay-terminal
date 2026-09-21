@@ -636,7 +636,9 @@ class SessionsContext final : public relay::agent::Context {
 
     relay::agent::ContextSpec spec() const override {
         relay::agent::ContextSpec spec;
-        spec.name = QStringLiteral("sessions");
+        const QString tab = m_pane->currentTab();
+        spec.name = (tab == QLatin1String("projects") || tab == QLatin1String("globals"))
+                        ? tab : QStringLiteral("sessions");
         spec.surface = m_pane->currentTab();
         spec.agentRole = QStringLiteral("switchboard");
         spec.workspace = m_workspace;
