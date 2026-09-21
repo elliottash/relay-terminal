@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Two switches over the five notification kinds (docs/REMOTE-PROTOCOL.md section 9.1).
+// Two switches over the six notification kinds (docs/REMOTE-PROTOCOL.md section 9.1).
 //
 // The protocol's unit is a kind — `agent_finished`, `waiting_input`, `password`, `failed`,
-// `plan` — and it stays that way: the desktop stores the list, `remote/notify.py` decides per
+// `plan`, `card_waiting` — and it stays that way: the desktop stores the list, `remote/notify.py` decides per
 // kind, and nothing here changes what a push is or when one is sent. What changes is the
 // question the phone asks.
 //
@@ -27,8 +27,10 @@ export const NOTIFY_SWITCHES = [
   {
     name: 'needs',
     label: 'When something needs me',
-    // The two where nothing more happens until the person answers.
-    kinds: ['waiting_input', 'password'],
+    // The three where nothing more happens until the person answers: a pane asking, a password
+    // prompt, and — since the Switchboard reached the phone (#SWPH) — a card that has started
+    // waiting on its owner. The same decision as `waiting_input`, so the same switch.
+    kinds: ['waiting_input', 'password', 'card_waiting'],
   },
 ];
 
