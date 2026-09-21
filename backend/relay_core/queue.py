@@ -108,6 +108,7 @@ class TurnSupervisor:
         self._surface = ""
         # Steering prompts waiting for the running turn's next step boundary.
         self._steer: list[dict] = []
+        self._steer_inflight: list[dict] = []
         self._thread = threading.Thread(target=self._dispatch, name="relay-turns", daemon=True)
         self._thread.start()
 
@@ -138,6 +139,8 @@ class TurnSupervisor:
             self._agent = agent
             if agent is not None:
                 agent.steer_source = self.take_steer
+                agent.steer_reserve = self.reserve_steer
+                agent.steer_settle = self.settle_steer
             self._clear_locked()
 
     def reset(self) -> None:
@@ -351,6 +354,27 @@ class TurnSupervisor:
             if entry is not None:
                 entry["queue_item"] = item["id"]
 
+    def reserve_steer(self) -> list[dict]:
+        """Lease input to a harness without claiming that the guest accepted it."""
+        with self._lock:
+            if self._steer_inflight:
+                return []
+            self._steer_inflight, self._steer = self._steer, []
+            return list(self._steer_inflight)
+
+    def settle_steer(self, delivered: bool) -> None:
+        with self._lock:
+            items, self._steer_inflight = self._steer_inflight, []
+            if not items:
+                return
+            if delivered:
+                self._emit({"event": "steer_delivered", "ids": [i["id"] for i in items],
+                            "request_ids": [i.get("request_id") for i in items],
+                            "ledger_ids": [i.get("ledger_id") for i in items]})
+            else:
+                self._steer = items + self._steer
+            self._changed_locked()
+
     def take_steer(self) -> list[dict]:
         """Called by the running agent at a step boundary: the steering items to add now
         ({prompt, ledger_id, context, attachments}); the agent frames them."""
@@ -561,7 +585,7 @@ class TurnSupervisor:
                               for i in self._queue],
                     "steering": [{"id": i["id"], "preview": _preview_of(i)[:PREVIEW],
                                   "origin": i.get("origin", "user"), **_surface_of(i), **_card_of(i)}
-                                 for i in self._steer]})
+                                 for i in self._steer_inflight + self._steer]})
 
     def _next_locked(self):
         if self._closed or self._running is not None or not self._queue or self._agent is None:

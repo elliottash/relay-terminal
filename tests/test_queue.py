@@ -196,7 +196,8 @@ class SupervisorTests(unittest.TestCase):
     def test_cancel_pauses_queue_until_resume(self):
         p = self.use(GatedProvider())
         first = self.sup.submit('first', 'now')
-        self.rec.wait(lambda e: e['event'] == 'agent_started')
+        # Cancellation must race a provider already entered, not the earlier start event.
+        self.rec.wait(lambda e: e['event'] == 'delta')
         second = self.sup.submit('second', 'queue')
         self.sup.cancel()
         self.assertEqual(self.finished(first)['outcome'], 'cancelled')
@@ -211,7 +212,8 @@ class SupervisorTests(unittest.TestCase):
     def test_now_runs_while_queue_paused(self):
         p = self.use(GatedProvider())
         first = self.sup.submit('first', 'now')
-        self.rec.wait(lambda e: e['event'] == 'agent_started')
+        # Cancellation must race a provider already entered, not the earlier start event.
+        self.rec.wait(lambda e: e['event'] == 'delta')
         waiting = self.sup.submit('waiting', 'queue')
         self.sup.cancel(); self.finished(first)
         direct = self.sup.submit('direct', 'now')

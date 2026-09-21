@@ -151,6 +151,10 @@ class HarnessError(RuntimeError):
     died, the protocol was not what the adapter expects. The text is for the person."""
 
 
+class HarnessSteerUncertain(HarnessError):
+    """Input may have reached the guest. End the turn and pause before any replay."""
+
+
 class HarnessNotAvailable(HarnessError):
     """The guest is not installed here, or its harness mode is not usable (say why)."""
 
@@ -203,6 +207,11 @@ class Harness(Protocol):
         base64 attachments) in, events out through `emit`, the final answer back. Returns with
         stop_reason "interrupted" when `cancel` is set or `interrupt()` was called; raises
         HarnessError when the guest died or answered nonsense."""
+
+    def steer(self, prompt: str, *, accepted: Callable[[], None]) -> None:
+        """Submit input at a tool boundary. Call accepted on the turn thread only when the
+        guest acknowledges it. A write alone is not delivery; send must retain any native
+        follow-up across result boundaries until acknowledged and completed."""
 
     def interrupt(self) -> None:
         """Ask the guest to stop the running turn. Idempotent; a no-op when nothing runs."""

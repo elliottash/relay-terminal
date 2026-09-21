@@ -1,14 +1,13 @@
 ---
 id: QG4C
 type: work
-status: discussing
+status: needs-verification
 labels: [bug, guest, terminal]
-assignee: claude-code
-waiting_on: owner
+assignee: codex
 rank: m
 created: '2026-09-21'
 source: 'Claude Code in a Relay pane, 2026-09-21'
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-harness-steering/README.md], related: [], github: null}
 ---
 # The command queue does not work with claude / codex
 
@@ -28,3 +27,33 @@ Two different surfaces answer to "claude / codex", and the queue is a different 
 The GUI log for this evening shows only harness panes in Relay (`preset=guest:claude`,
 `guest_in_front=` empty), and the three TUI `claude`/`codex` processes on the machine belong to
 Warp, not to Relay — so the reproduction matters before anything is changed.
+
+## Plan
+**Goal:** Deliver harness steering during the guest turn and acknowledge only accepted input.
+**Findings:** `HarnessProvider.complete` spans the whole CLI turn; `Agent.ask` drains steering only outside it. `TurnSupervisor.take_steer` currently acknowledges immediately.
+**Steps:**
+1. Validate installed native steering protocols.
+2. Add transactional queue delivery and harness tool-boundary injection, preserving request context.
+3. Cover timing, failures, duplicates and unchanged ordinary queue behavior using fake processes.
+**Risks:** Guest protocols differ; an input accepted near completion must never be discarded as stale.
+**Verify:** Targeted Python harness/queue tests, then owner live acceptance test; no paid guest turn.
+
+## Tasks
+- [x] Implement and test harness steering. <!-- t:h1 -->
+- [ ] Owner tests harness and separately implemented TUI fixes live. <!-- t:h2 -->
+
+## Execution Summary
+Harness steering now uses native Codex turn/steer and Claude UUID-correlated stream input at tool events. Queue and ledger delivery wait for acknowledgement. Unaccepted input is retained, ambiguous transport failures pause the turn, and Claude result boundaries do not discard follow-ups. Two existing cancellation test fixtures now wait for provider entry, removing start-event timing races. TUI changes are owned by the separate sibling agent.
+
+## Tests
+`tests/test_guest_harness_steer.py`
+`tests/test_guest_harness_provider.py`
+`tests/test_guest_harness_codex.py`
+`tests/test_guest_harness_claude.py`
+`tests/test_queue.py`
+`manual: docs/qa_evidence/2026-09-21-harness-steering/README.md`
+
+## QA checklist
+- [ ] Owner tests next-tool-call steering in fresh Claude and Codex harness panes.
+- [ ] Verify normal queued prompts still wait and no steering appears twice.
+- [ ] Owner tests separately implemented TUI fixes.

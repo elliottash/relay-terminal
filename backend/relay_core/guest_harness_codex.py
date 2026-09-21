@@ -85,7 +85,7 @@ import threading
 import time
 from collections import deque
 
-from .guest_harness import (Emit, HarnessError, HarnessEvent, HarnessNotAvailable, HarnessStart,
+from .guest_harness import (Emit, HarnessError, HarnessSteerUncertain, HarnessEvent, HarnessNotAvailable, HarnessStart,
                             TurnResult, approval_scope, chunk_tool_output, map_tool_name,
                             validate_effort, validate_permissions,
                             window_kind_for_minutes)
@@ -387,6 +387,17 @@ class CodexHarness:
         finally:
             with self._lock:
                 self._turn = None
+
+    def steer(self, prompt: str, *, accepted) -> None:
+        """Native active-turn input; the RPC reply, not the write, acknowledges delivery."""
+        with self._lock:
+            turn = self._turn
+        if turn is None or not turn.turn_id or turn.interrupt_requested:
+            raise HarnessError("No active Codex turn to steer")
+        self._request("turn/steer", {"threadId": self._session_id,
+                                     "expectedTurnId": turn.turn_id,
+                                     "input": self._build_input(prompt, None)}, steering=True)
+        accepted()
 
     def interrupt(self) -> None:
         with self._lock:
@@ -1085,18 +1096,21 @@ class CodexHarness:
         pending.on_result = on_result
         self._write(message)
 
-    def _request(self, method: str, params: dict, timeout: float | None = None) -> dict:
+    def _request(self, method: str, params: dict, timeout: float | None = None, *, steering=False) -> dict:
         pending, message = self._prepare(method, params)
         try:
             self._write(message)
-        except HarnessError:
+        except HarnessError as exc:
             with self._lock:
                 self._pending.pop(pending.key, None)
+            if steering:
+                raise HarnessSteerUncertain("Codex steering write failed; delivery is uncertain") from exc
             raise
         if not pending.event.wait(timeout if timeout is not None else self._request_timeout):
             with self._lock:
                 self._pending.pop(pending.key, None)
-            raise HarnessError(f"Codex did not answer {method} in time.")
+            error = HarnessSteerUncertain if steering else HarnessError
+            raise error(f"Codex did not answer {method} in time.")
         if pending.error is not None:
             raise pending.error
         return pending.result or {}
@@ -1128,6 +1142,8 @@ class CodexHarness:
     def _emit(self, turn: _TurnState, kind: str, data: dict) -> None:
         try:
             turn.emit(HarnessEvent(kind, data))
+        except HarnessSteerUncertain:
+            raise
         except Exception:                                                  # pragma: no cover
             log.warning("codex harness: a %s event could not be delivered.", kind, exc_info=True)
 

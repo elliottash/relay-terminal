@@ -88,7 +88,7 @@ import threading
 import time
 import uuid
 
-from .guest_harness import (HarnessError, HarnessEvent, HarnessNotAvailable, HarnessStart,
+from .guest_harness import (HarnessError, HarnessSteerUncertain, HarnessEvent, HarnessNotAvailable, HarnessStart,
                             TurnResult, approval_scope, map_tool_name, validate_effort,
                             validate_permissions)
 from .presets import model_name
@@ -312,12 +312,14 @@ class ClaudeHarness:
         self._started_emitted = False
         self._interrupted = False
         self._readers: list[threading.Thread] = []
+        self._steer_pending: dict[str, object] = {}
+        self._sending = False
 
     # ----- lifecycle ---------------------------------------------------------------------
 
     def _argv(self, *, model: str | None, session_id: str | None, resume: str | None,
               fork: bool, permissions: str, effort: str | None = None) -> list[str]:
-        argv = [self._binary, *BASE_FLAGS]
+        argv = [self._binary, *BASE_FLAGS, "--replay-user-messages"]
         if getattr(self, "_instructions", None):
             argv += ["--append-system-prompt", self._instructions]
         if model:
@@ -557,10 +559,28 @@ class ClaudeHarness:
             if self._proc is None:
                 raise HarnessError("the guest is not running.")
             self._interrupted = False
+            self._sending = True
             try:
                 return self._run_turn(prompt, attachments or [], emit, cancel)
             finally:
+                self._sending = False
+                if self._steer_pending:
+                    self.close()
+                self._steer_pending.clear()
                 self._deny_stale_approvals()
+
+    def steer(self, prompt: str, *, accepted) -> None:
+        if not self._sending or self._interrupted:
+            raise HarnessError("No active Claude turn to steer")
+        message = self._user_message(prompt, [])
+        key = str(uuid.uuid4())
+        message.update(uuid=key, priority="next")
+        self._steer_pending[key] = accepted
+        try:
+            self._write(message)
+        except Exception as exc:
+            self._steer_pending.pop(key, None)
+            raise HarnessSteerUncertain("Claude steering write failed; delivery is uncertain") from exc
 
     def _user_message(self, prompt: str, attachments: list[dict]) -> dict:
         content: list[dict] = [{"type": "text", "text": prompt or ""}]
@@ -590,7 +610,11 @@ class ClaudeHarness:
         state = {"text": [], "saw_delta": False, "asked_stop": False}
         for message in held[-1:]:                      # only the newest figure is a figure
             self._dispatch(message, state, emit)
+        result_wait_started = None
         while True:
+            if result_wait_started is not None and time.monotonic() - result_wait_started > 30:
+                self.close()
+                raise HarnessError("Claude did not acknowledge steering after its result; input retained")
             if cancel.is_set() and not state["asked_stop"]:
                 state["asked_stop"] = True
                 self.interrupt()
@@ -601,7 +625,21 @@ class ClaudeHarness:
             if message is _EOF:
                 raise HarnessError("the guest stopped in the middle of a turn."
                                    + self._stderr_tail())
+            if message.get("type") == "user" and message.get("isReplay"):
+                accepted = self._steer_pending.pop(message.get("uuid"), None)
+                if accepted is not None:
+                    accepted()
+                    result_wait_started = None
             if message.get("type") == "result":
+                if self._steer_pending and not state["asked_stop"]:
+                    # Stdin crossed the end of the previous native turn. Keep reading its
+                    # queued continuation, rather than discarding it as stale on next send.
+                    self._finish(message, state, lambda e: emit(e) if e.kind != "done" else None)
+                    state = {"text": [], "saw_delta": False, "asked_stop": False}
+                    result_wait_started = time.monotonic()
+                    continue
+                if self._steer_pending:
+                    self.close()  # no unconsumed stdin survives cancellation into the next send
                 return self._finish(message, state, emit)
             try:
                 self._dispatch(message, state, emit)

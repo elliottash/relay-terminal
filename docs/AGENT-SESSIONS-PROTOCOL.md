@@ -596,7 +596,17 @@ while todos are open: … ignore this if it is current"). No event; no extra mod
 - **Steers** reach the model as one user message per step boundary, each steer framed:
   `[Sent by the user while you were working (R7, 14:02). Keep your current task (R5) unless this changes it. Add it to your todos if it is a new ask. Say briefly how you handled it in your final answer.]`
   followed by the program-context note, the attachment blocks and the verbatim text. Steer `attachments` and
-  `context` are no longer dropped.
+  `context` are no longer dropped. Guest harness turns also drain steers on `tool_started` and
+  `tool_result`, within the CLI turn (#QG4C). Codex uses `turn/steer` with `expectedTurnId`;
+  Claude sends stream-json input with a UUID and `priority: next`, then waits for its
+  `--replay-user-messages` echo. `steer_delivered` and ledger delivery follow native acknowledgement,
+  not the pipe write. Input in flight remains visible in `queue_changed.steering`, but cannot be
+  withdrawn or escalated while guest acceptance is pending. Rejected input remains pending for
+  the usual `steer_returned` path; uncertain transport delivery ends the turn and pauses the queue
+  before replay. Claude keeps reading a continuation that crosses a native result boundary;
+  unacknowledged input never gets discarded as stale by the next send. A tool event is an
+  observation, not an execution barrier: a tool already started may finish before the guest
+  incorporates the input.
 - **Escalating a steer** (`queue_unsteer {request, as_request}`, v1.5): a steer the running turn has not taken
   yet leaves the hold, stops that turn and runs as its own prompt instead — the third Enter on an empty prompt
   box, after the Enter that queued it and the Enter that made it a steer. The prompt is resubmitted with

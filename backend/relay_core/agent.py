@@ -3260,7 +3260,7 @@ class Agent:
             "Tool actions may already have run; reinspect state before further changes. Continue that request "
             "only if the user asks.]")})
 
-    def _steer_message(self, steered: list, ctx: dict, turn: dict) -> dict:
+    def _steer_message(self, steered: list, ctx: dict, turn: dict, *, record: bool = True) -> dict:
         """G3: frame steers, keep their attachments and context, and link them to the ledger."""
         parts, ids = [], []
         current = ", ".join(ctx["opening"])
@@ -3268,7 +3268,7 @@ class Agent:
             if isinstance(entry, str):
                 entry = {"prompt": entry}
             rid = entry.get("ledger_id")
-            if self.track_requests:
+            if self.track_requests and record:
                 item = self.requests.find(rid) if rid else None
                 if item is None:
                     item = self.requests.add(entry["prompt"], "steer", attachments=entry.get("attachments"))

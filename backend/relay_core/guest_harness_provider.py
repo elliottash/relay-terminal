@@ -34,7 +34,7 @@ import uuid
 
 from . import guest, logs, questions as questions_mod, tool_labels
 from .presets import effort_fixed, model_name, provider_rank, tier_start_efforts
-from .guest_harness import (HARNESS_GUESTS, HarnessError, HarnessNotAvailable, HarnessEvent,
+from .guest_harness import (HARNESS_GUESTS, HarnessError, HarnessSteerUncertain, HarnessNotAvailable, HarnessEvent,
                             limit_windows,
                             TOOL_NAMES, chunk_tool_output, map_tool_name, validate_effort,
                             validate_permissions)
@@ -773,7 +773,7 @@ class HarnessProvider:
             if message.get("role") == "assistant":
                 break
             if message.get("role") == "user":
-                has_notes = has_notes or message.get('relay_kind') == 'note'
+                has_notes = has_notes or message.get('relay_kind') in {'note', 'steer'}
                 text, images = last_user_message([message])
                 pending.append((text, images))
         if has_notes and len(pending) > 1:
@@ -814,6 +814,7 @@ class HarnessProvider:
             raise ProviderError(f"{guest.spec(self.guest_id).name}'s harness failed "
                                 f"({type(exc).__name__}).") from None
         finally:
+            turn.release_steer()
             if self.board_bridge is not None:
                 self.board_bridge.end()
         turn.close_thinking()
@@ -864,9 +865,51 @@ class _Turn:
         self.error_text = ""
         self._thinking_started = None
         self._thinking_chars = 0
+        self._pending_steer = []
+        self._steer_failed = False
+
+    def release_steer(self) -> None:
+        if self._pending_steer:
+            self.agent.steer_settle(False)
+            self._pending_steer = []
+
+    def deliver_steer(self) -> None:
+        agent = self.agent
+        steer = getattr(self.provider.harness, "steer", None)
+        reserve = getattr(agent, "steer_reserve", None)
+        if (self._steer_failed or self._pending_steer or self.cancel.is_set()
+                or not callable(steer) or not callable(reserve)
+                or not getattr(agent, "_turn_ctx", None)):
+            return
+        items = reserve()
+        if not items:
+            return
+        self._pending_steer = items
+
+        def accepted():
+            if self._pending_steer is not items:
+                return  # a late duplicate must not acknowledge a newer batch
+            message = agent._steer_message(items, agent._turn_ctx, agent._turn)
+            agent.messages.append(message)
+            agent.steer_settle(True)
+            self._pending_steer = []
+
+        try:
+            message = agent._steer_message(items, agent._turn_ctx, agent._turn, record=False)
+            steer(message["content"], accepted=accepted)
+        except Exception as exc:
+            self._steer_failed = True
+            self.release_steer()
+            if isinstance(exc, HarnessSteerUncertain):
+                self.provider.harness.close()
+                raise
+            self.emit({"event": "status", "text": f"Guest steering was not acknowledged: {exc}. "
+                       "The input is retained for return at the end of the turn."})
 
     # ----- dispatch -----------------------------------------------------------------------
     def on_event(self, event: HarnessEvent) -> None:
+        if event.kind in {"tool_started", "tool_result"}:
+            self.deliver_steer()
         handler = getattr(self, "_on_" + event.kind, None)
         if handler is None:
             return
