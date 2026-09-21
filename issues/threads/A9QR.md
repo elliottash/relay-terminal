@@ -13,3 +13,6 @@ Created and claimed to review and organize Actions.
 
 <!-- relay:entry 20260921T221024Z-n1 author=agent kind=event model=gpt-6-astra pane=d6f3632a turn=d02d825321e54a62b25b87a3999f13c2/140627ad72744f72816599f204ba4e28 -->
 - ✦ agent moved this card · Executing → Needs verification · Reviewed catalog, regrouped common actions, passed settings tests and GUI section-navigation check. · evidence docs/qa_evidence/2026-09-21-actions-organization/ · implemented_by openai/gpt-6-astra via codex
+
+<!-- relay:entry 20260921T221152Z-qb author=agent kind=event model=gpt-6-astra pane=d6f3632a turn=d02d825321e54a62b25b87a3999f13c2/140627ad72744f72816599f204ba4e28 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-21-actions-o… → {"plans": [], "commits": ["b44a76049e83739c55a5e942ecb7e132e81db6ba"], "evidence…

@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: m
 created: '2026-09-21'
 source: Codex in Relay, 2026-09-21
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-actions-organization/], related: [C8KM], github: null}
+links: {plans: [], commits: [b44a76049e83739c55a5e942ecb7e132e81db6ba], evidence: [docs/qa_evidence/2026-09-21-actions-organization/], related: [C8KM], github: null}
 ---
 # Organize Actions around common tasks
 
