@@ -1958,11 +1958,12 @@ private:
     };
     QHash<QString, ProfileCardWrite> m_profileWrites;
     quint64 m_profileWriteSeq = 0;
-    // The helper worker's last `presets` answer per tab, and the defaults that came with it:
-    // Options › Models reads these when no pane's agent is up (owner, 2026-09-20: "if there is
-    // no agent loaded yet, load the helper agent").
+    // The helper worker's last `presets` answer per tab: Options › Models reads it when no pane's
+    // agent is up (owner, 2026-09-20: "if there is no agent loaded yet, load the helper agent").
+    // The `tier_list_defaults` that arrive with it are not kept here any more — "fill from
+    // defaults" is a button of the Ctrl+Alt+M dialog now, and only a pane holds what its own
+    // worker computed (card #MDL1 t:a10, design 5.5).
     QHash<QString, QJsonArray> m_helperPresets;
-    QHash<QString, QJsonObject> m_helperTierDefaults;
 
     PaletteItem actionItem(const QString &section, const QString &label, const QString &detail, const QString &action, bool checked = false) {
         PaletteItem item;
@@ -2284,21 +2285,29 @@ private:
         auto str = [](const QJsonObject &object, const char *field) { return object.value(QLatin1String(field)).toString(); };
 
         // ----- 0. the way to the dialog -----------------------------------------------------------
-        // The five lists are section 4 of this page, under the providers and the checklist — owner,
-        // 2026-09-21: "the model priority chooser is crtical, and currently its too hard to find --
-        // model options, then scroll down." Ctrl+Alt+M is now that chooser (card #MDL1 t:a7, design
-        // 5.2) and this is the door to it from here; the rows below still edit the same storage, so
-        // whichever you use the other agrees.
+        // The five lists and the "models in the picker" checklist were sections 2 and 4 of this
+        // page — owner, 2026-09-21: "the model priority chooser is crtical, and currently its too
+        // hard to find -- model options, then scroll down." They are the Ctrl+Alt+M dialog now
+        // (card #MDL1 t:a7 and t:a10, design 5.5) and this row is the door to it. What is left on
+        // the page is what the dialog is not about: providers, their keys, and the profiles that
+        // name a set of lists. It opens on main, because a page is not in a mode the way a pane is.
         {
             const QString chord = Keymap::instance().shortcutText(QStringLiteral("agent.model"));
             relay::SettingRow row = buttonRow(QStringLiteral("models.prioritize"),
-                QStringLiteral("prioritize models"),
-                QStringLiteral("The dialog these five lists live in: a tab per list, enter to use a model in this pane, "
-                               "alt+↑↓ or a drag to reorder, delete to take one out, and typing to find any model and "
-                               "add it. The same lists this page shows"),
-                chord.isEmpty() ? QStringLiteral("prioritize models…") : QStringLiteral("prioritize models… (%1)").arg(chord),
-                [this] { runAction(QStringLiteral("agent.model")); });
-            row.aliases = QStringLiteral("prioritize priority order rank models picker dialog tier lists ctrl+alt+m");
+                QStringLiteral("models and priorities"),
+                QStringLiteral("Every model and the five lists, in one dialog: a tab per list, enter to use a model in "
+                               "this pane, alt+↑↓ or a drag to reorder, delete to take one out, typing to find any "
+                               "model — OpenRouter's long tail included — and ctrl+enter to add it"),
+                chord.isEmpty() ? QStringLiteral("models and priorities…") : QStringLiteral("models and priorities… (%1)").arg(chord),
+                [this] {
+                    // Not runAction("agent.model"), which opens on the pane's own mode: asked from
+                    // this page, the main list is the one meant.
+                    Pane *on = m_active ? m_active.data() : focusedConsole();
+                    if (on) on->openModelPicker(QStringLiteral("main"));
+                    else runAction(QStringLiteral("agent.model"));
+                });
+            row.aliases = QStringLiteral("prioritize priority order rank tier lists main list flash lite high local "
+                                         "models picker dialog checklist shown add a model by id ctrl+alt+m");
             models.rows << row;
         }
 
@@ -2493,6 +2502,37 @@ private:
                 };
             }
             models.rows << row;
+            if (guest) {
+                // What the guest does when it wants to run a command or change a file. Relay's own
+                // agent has no per-action approvals and neither does a guest by default (the
+                // owner's rule, 29.1) — but a pane watching a guest work in somebody else's checkout
+                // is a fair reason to want the question, so it is offered rather than assumed. It
+                // sat under the guest's models until the checklist left the page (t:a10); it is a
+                // statement about the provider, so it belongs under the provider's own row.
+                const QString cli = id.mid(6);
+                const QString key = guestSettingKey(cli, QStringLiteral("permissions"));
+                const QString current = QSettings().value(key).toString().trimmed();
+                relay::SettingRow ask = choiceRow(QStringLiteral("option:") + key,
+                    QStringLiteral("when it wants to use a tool"),
+                    QStringLiteral("%1 runs with no per-action approvals, like Relay's own agent. "
+                                   "Ask me puts each one to you: Allow, Allow for session, "
+                                   "Deny, or Deny and stop the turn").arg(str(preset, "provider").toLower()),
+                    {QStringLiteral("bypass"), QStringLiteral("ask"), QStringLiteral("deny")},
+                    {QStringLiteral("just run it"), QStringLiteral("ask me"), QStringLiteral("refuse it")},
+                    current.isEmpty() ? QStringLiteral("bypass") : current, QStringLiteral("bypass"),
+                    [this, key, cli](const QString &value) {
+                        if (value.isEmpty() || value == QStringLiteral("bypass")) QSettings().remove(key);
+                        else QSettings().setValue(key, value);
+                        for (Pane *each : allPanes()) each->guestOptionsChanged(cli);
+                        refreshSettingsPanes();
+                    });
+                ask.aliases = QStringLiteral("claude codex guest permissions approval ask bypass yolo tools sandbox");
+                ask.indent = 1;
+                // One line like the provider row above it: the explanation is the hover.
+                ask.tooltip = ask.detail;
+                ask.detail.clear();
+                models.rows << ask;
+            }
         }
         {
             // The providers without a key, one pick away — and "custom endpoint…" first, always
@@ -2520,131 +2560,7 @@ private:
                 });
         }
 
-        // ----- 2. which models the picker shows -------------------------------------------------
-        // One checkbox per provider (owner, 2026-09-20): off hides every model and folds the group.
-        // No per-model "openrouter fallback" here any more (owner, later that day): an OpenRouter
-        // model is a model like any other — add it to the picker and rank it above the line.
-        // A provider whose catalog is open-ended (more than six models — OpenRouter's live list)
-        // shows only the models you checked plus an id box that completes from the whole list;
-        // one whose list is complete (Claude Code, Codex, a plan's three tiers) shows them all and
-        // needs no box.
-        // No paragraph under the heading and no count under a provider (owner, 2026-09-20): the
-        // heading says what the checkboxes do, and the count is the provider row's hover.
-        { relay::SettingRow head = headingRow(QStringLiteral("models in the picker")); head.collapsible = true; models.rows << head; }
-        constexpr int kOpenEnded = 6;   // more catalog models than this: an id box, only the checked shown
-        for (const QString &presetId : catalog.presets()) {
-            const QList<relay::models::Entry> rows = catalog.ofPreset(presetId);
-            if (rows.isEmpty() || !rows.first().usable || rows.first().local) continue;
-            const bool collapsed = relay::models::curation::isCollapsed(presetId);
-            int shownCount = 0;
-            for (const relay::models::Entry &entry : rows) if (relay::models::curation::isShown(entry)) ++shownCount;
-            relay::SettingRow head;
-            head.kind = relay::SettingRow::Toggle;
-            head.id = QStringLiteral("option:models/provider/") + presetId;
-            head.label = catalog.presetLabels.value(presetId, presetId);
-            head.tooltip = collapsed ? QStringLiteral("Hidden from the picker · check to show its models")
-                                     : QStringLiteral("%1 of %2 models in the picker · uncheck to hide them all").arg(shownCount).arg(rows.size());
-            head.aliases = QStringLiteral("provider models picker show hide ") + rows.first().provider;
-            head.strong = true;
-            head.checked = !collapsed && shownCount > 0;
-            head.onToggle = [catalog, presetId, rows, curated](bool on) {
-                relay::models::curation::setCollapsed(presetId, !on);
-                for (const relay::models::Entry &entry : rows) relay::models::curation::setShown(entry.key, on, catalog);
-                curated();
-            };
-            models.rows << head;
-            if (collapsed) continue;
-            const bool openEnded = rows.size() > kOpenEnded;
-            QStringList unlisted;   // the ids the box completes from
-            for (const relay::models::Entry &entry : rows) {
-                if (openEnded && !relay::models::curation::isShown(entry) && !entry.custom) { unlisted << entry.model; continue; }
-                relay::SettingRow row;
-                row.kind = relay::SettingRow::Toggle;
-                row.id = QStringLiteral("option:models/shown/") + entry.key;
-                row.indent = 1;
-                row.label = entry.label + (entry.custom ? QStringLiteral(" (added by you)") : QString());
-                QStringList notes;
-                if (!entry.tier.isEmpty()) notes << QStringLiteral("%1 model").arg(entry.tier);
-                notes << (entry.efforts.isEmpty() ? QStringLiteral("no reasoning setting")
-                                                  : QStringLiteral("reasoning ") + entry.efforts.join(QStringLiteral(" · ")));
-                if (entry.intelligence >= 0) notes << QStringLiteral("intelligence %1").arg(entry.intelligence);
-                if (entry.label != entry.model.toLower()) notes << entry.model;
-                // One line per model (owner, 2026-09-20): the levels, the score and the id are the
-                // hover, and ⓘ opens the model's OpenRouter page — one page shape for every model,
-                // with context, pricing and the providers behind it — when OpenRouter serves it.
-                row.tooltip = notes.join(QStringLiteral(" · "));
-                if (entry.preset == QStringLiteral("openrouter")) row.infoUrl = QStringLiteral("https://openrouter.ai/") + entry.model;
-                else if (!entry.openrouter.isEmpty()) row.infoUrl = QStringLiteral("https://openrouter.ai/") + entry.openrouter;
-                row.aliases = QStringLiteral("model picker show hide ") + entry.model + QLatin1Char(' ') + entry.provider + QLatin1Char(' ') + row.tooltip;
-                row.checked = relay::models::curation::isShown(entry);
-                row.onToggle = [catalog, key = entry.key, curated](bool on) {
-                    relay::models::curation::setShown(key, on, catalog);
-                    curated();
-                };
-                models.rows << row;
-                if (entry.custom) {
-                    relay::SettingRow remove;
-                    remove.kind = relay::SettingRow::Buttons;
-                    remove.id = QStringLiteral("models/custom/") + entry.key;
-                    remove.indent = 1;
-                    remove.label = QStringLiteral("remove %1").arg(entry.label);
-                    remove.detail = QStringLiteral("Forget this id; the provider's own list is unaffected");
-                    remove.buttonTexts = QStringList{QStringLiteral("remove")};
-                    remove.onButton = [key = entry.key, curated](int) { relay::models::curation::removeCustom(key); curated(); };
-                    models.rows << remove;
-                }
-            }
-            if (openEnded) {
-                // opencode's box: type part of an id and pick from what the provider serves; an id
-                // it does not list is added as typed.
-                relay::SettingRow add = textRow(QStringLiteral("models/add/") + presetId, QStringLiteral("add a model"),
-                    QStringLiteral("%1 more on %2 · type to search their ids; an unlisted id is added as typed")
-                        .arg(unlisted.size()).arg(rows.first().provider),
-                    QStringLiteral("model id"), [catalog, presetId, curated](const QString &value) {
-                        const QString id = value.trimmed();
-                        if (id.isEmpty()) return;
-                        const QString key = relay::models::Catalog::keyFor(presetId, id);
-                        if (catalog.find(key)) relay::models::curation::setShown(key, true, catalog);
-                        else relay::models::curation::addCustom(presetId, id, catalog);
-                        QSettings().remove(QStringLiteral("models/add/") + presetId);   // the box empties: the row is above now
-                        curated();
-                    });
-                add.completions = unlisted;
-                add.indent = 1;
-                add.text.clear(); add.changed = false;
-                models.rows << add;
-            }
-            if (const QString guest = presetId.startsWith(QStringLiteral("guest:")) ? presetId.mid(6) : QString(); !guest.isEmpty()) {
-                // What the guest does when it wants to run a command or change a file. Relay's own
-                // agent has no per-action approvals and neither does a guest by default (the
-                // owner's rule, 29.1) — but a pane watching a guest work in somebody else's checkout
-                // is a fair reason to want the question, so it is offered rather than assumed.
-                const QString key = guestSettingKey(guest, QStringLiteral("permissions"));
-                const QString current = QSettings().value(key).toString().trimmed();
-                relay::SettingRow ask = choiceRow(QStringLiteral("option:") + key,
-                    QStringLiteral("when it wants to use a tool"),
-                    QStringLiteral("%1 runs with no per-action approvals, like Relay's own agent. "
-                                   "Ask me puts each one to you: Allow, Allow for session, "
-                                   "Deny, or Deny and stop the turn").arg(rows.first().provider),
-                    {QStringLiteral("bypass"), QStringLiteral("ask"), QStringLiteral("deny")},
-                    {QStringLiteral("just run it"), QStringLiteral("ask me"), QStringLiteral("refuse it")},
-                    current.isEmpty() ? QStringLiteral("bypass") : current, QStringLiteral("bypass"),
-                    [this, key, guest](const QString &value) {
-                        if (value.isEmpty() || value == QStringLiteral("bypass")) QSettings().remove(key);
-                        else QSettings().setValue(key, value);
-                        for (Pane *each : allPanes()) each->guestOptionsChanged(guest);
-                        refreshSettingsPanes();
-                    });
-                ask.aliases = QStringLiteral("claude codex guest permissions approval ask bypass yolo tools sandbox");
-                ask.indent = 1;
-                // One line like the models above it (owner, 2026-09-20): the explanation is the hover.
-                ask.tooltip = ask.detail;
-                ask.detail.clear();
-                models.rows << ask;
-            }
-        }
-
-        // ----- 3. profiles ----------------------------------------------------------------------
+        // ----- 2. profiles ----------------------------------------------------------------------
         // Owner (2026-09-20 evening): "we need model user profiles like warp for the priority lists
         // … so I can have an 'AI work' profile and an 'admin work' profile that sets different model
         // priorities." Warp's Agent Profile is a whole posture — base model, planning model,
@@ -2862,136 +2778,7 @@ private:
             }
         }
 
-        // ----- 4. the five lists ----------------------------------------------------------------
-        // Main, high, flash, lite, local (owner, 2026-09-20), in place of one priority list and its
-        // line. Each is ordered: rank 1 is what the tier runs on, the rest are its fallbacks, and a
-        // model in no list is only ever used when you pick it by hand. A row is a model and the
-        // reasoning level it runs at *there* — the provider's own word for it (xhigh, not max, on a
-        // GPT entry) — so "glm at max for plans, codex at xhigh" is two rows of the high list.
-        const QHash<QString, QString> tierBlurbs{
-            {QStringLiteral("main"), QStringLiteral("New panes start on the first; /swap and a failing turn step down the rest")},
-            {QStringLiteral("high"), QStringLiteral("Plan mode and the hardest turns. Empty: the main model at its top level")},
-            {QStringLiteral("flash"), QStringLiteral("Driving programs in the terminal, quick side calls, Alt+F and /flash")},
-            {QStringLiteral("lite"), QStringLiteral("Titles, labels, duplicate checks and other chores")},
-            {QStringLiteral("local"), QStringLiteral("Models served on this machine, for /local")}};
-        const bool listsSet = relay::models::curation::tierListsSet();
-        for (const QString &tier : relay::models::curation::tierIds()) {
-            relay::SettingRow heading = headingRow(relay::models::curation::tierLabel(tier));
-            heading.collapsible = true;
-            models.rows << heading;
-            const QList<relay::models::curation::TierEntry> list = relay::models::curation::tierList(tier);
-            int rank = 0;
-            for (const relay::models::curation::TierEntry &item : list) {
-                const relay::models::Entry *entry = catalog.find(item.key);
-                ++rank;
-                relay::SettingRow row;
-                row.id = QStringLiteral("models/tier/") + tier + QLatin1Char('/') + item.key;
-                const qint64 until = entry ? relay::models::exhaustedUntil(catalog, entry->preset, now) : -1;
-                row.label = QStringLiteral("%1. %2").arg(rank).arg(entry ? entry->displayName() : item.key);
-                row.tooltip = !entry ? QStringLiteral("This model is not available right now: its provider has no key, or it left the catalog")
-                            : !entry->usable ? QStringLiteral("Skipped: no key for %1").arg(entry->provider)
-                            : until >= 0 ? QStringLiteral("Exhausted%1 · skipped until then")
-                                               .arg(until > 0 ? QStringLiteral(" · resets ") + relay::models::resetText(until, now) : QString())
-                            : rank == 1 ? tierBlurbs.value(tier)
-                                        : QStringLiteral("Fallback %1 of the %2 list").arg(rank - 1).arg(tier);
-                if (!entry || !entry->usable || until >= 0) row.label += QStringLiteral("  · skipped");
-                row.aliases = tier + QStringLiteral(" models list priority fallback ") + item.key;
-                row.dragGroup = QStringLiteral("tier:") + tier;
-                const int index = rank - 1;
-                row.onDropBefore = [tier, index, curated](const QString &draggedRowId) {
-                    const QString prefix = QStringLiteral("models/tier/") + tier + QLatin1Char('/');
-                    if (!draggedRowId.startsWith(prefix)) return;
-                    relay::models::curation::moveInTier(tier, draggedRowId.mid(prefix.size()), index);
-                    curated();
-                };
-                const QStringList levels = entry ? entry->efforts : QStringList();
-                if (levels.isEmpty()) {
-                    row.kind = relay::SettingRow::Buttons;
-                    row.buttonTexts = QStringList{QStringLiteral("×")};
-                    row.onButton = [tier, key = item.key, curated](int) { relay::models::curation::removeFromTier(tier, key); curated(); };
-                } else {
-                    row.kind = relay::SettingRow::Choice;
-                    // An entry with no level of its own runs at the model's default, and says so —
-                    // not at the top level, which is what a lite row looked like it was set to.
-                    QStringList options{QString()}, labels{QStringLiteral("default")};
-                    for (const QString &level : levels) { options << level; labels << entry->effortLabel(level); }
-                    row.options = options;
-                    row.optionLabels = labels;
-                    row.current = levels.contains(item.effort) ? item.effort : QString();
-                    row.onChoose = [tier, key = item.key, curated](const QString &level) {
-                        relay::models::curation::setTierEffort(tier, key, level);
-                        curated();
-                    };
-                    row.buttonTexts = QStringList{QStringLiteral("×")};
-                    row.onButton = [tier, key = item.key, curated](int) { relay::models::curation::removeFromTier(tier, key); curated(); };
-                }
-                models.rows << row;
-            }
-            // The button is the row (owner, 2026-09-20: "make '+ add a model…' a button rather than
-            // the separate 'add…' button on the right"); what the list is for is its hover.
-            relay::SettingRow add;
-            add.kind = relay::SettingRow::Buttons;
-            add.id = QStringLiteral("models.tier.add.") + tier;
-            add.tooltip = tierBlurbs.value(tier);
-            add.aliases = QStringLiteral("add a model ") + tier + QStringLiteral(" models list");
-            add.buttonTexts = QStringList{QStringLiteral("+ add a model…")};
-            add.onButton = [this, tier, catalog, list, curated](int) {
-                    QList<relay::agentui::PickerRow> rows;
-                    QList<relay::models::Entry> offered;
-                    for (const relay::models::Entry &entry : relay::models::shown(catalog)) {
-                        if ((tier == QStringLiteral("local")) != entry.local) continue;      // local models in local, the rest elsewhere
-                        // A guest is a whole agent of its own: it can be a pane's own agent (main) or run a
-                        // plan turn (high, owner 2026-09-20: "codex planning at xhigh"), never a side call.
-                        if (entry.guest && tier != QStringLiteral("main") && tier != QStringLiteral("high")) continue;
-                        bool already = false;
-                        for (const auto &item : list) already = already || item.key == entry.key;
-                        if (already) continue;
-                        offered << entry;
-                        rows << relay::agentui::PickerRow{{entry.label, entry.provider + (entry.plan.isEmpty() ? QString() : QStringLiteral(" · ") + entry.plan)},
-                                                          entry.model, entry.key};
-                    }
-                    const auto result = relay::agentui::pick(this, relay::models::curation::tierLabel(tier),
-                        QStringLiteral("Checked models from the list above. A model you have not checked is not offered here."),
-                        {QStringLiteral("model"), QStringLiteral("provider")}, rows, {{QStringLiteral("add"), QStringLiteral("add"), true}});
-                    if (result.row < 0) return;
-                    const relay::models::Entry &entry = offered.at(result.row);
-                    // Where the new row starts: the level this model starts at *in this list*, which
-                    // the worker computes (tierStartEffort). Not the model's top level, which is what
-                    // this button used to take — Main is the provider's own default (codex's
-                    // gpt-5.6-sol starts at `low`, not the `ultra` that gave, owner report
-                    // 2026-09-21), High the level a plan turn uses, Flash and Lite the lowest
-                    // (card #TKN7).
-                    relay::models::curation::addToTier(tier, entry.key, relay::models::tierStartEffort(entry, tier));
-                    curated();
-                };
-            models.rows << add;
-        }
-        {
-            // The two defaults (owner, 2026-09-20), computed by the worker from the providers you
-            // can use: your own, or your own with the cost-sensitive OpenRouter twins after them and
-            // OpenRouter leading the lite list, which chores lean on most.
-            const QJsonObject defaults = !viaHelper ? pane->tierListDefaults() : m_helperTierDefaults.value(tabIdOf(page));
-            auto apply = [this, catalog, curated](const QJsonObject &lists) {
-                relay::models::curation::applyTierDefaults(lists);
-                curated();
-            };
-            relay::SettingRow row;
-            row.kind = relay::SettingRow::Buttons;
-            row.id = QStringLiteral("models.tier.defaults");
-            row.label = QStringLiteral("fill the lists");
-            row.tooltip = QStringLiteral("defaults: your own providers' models, best first. with openrouter: the same, then their "
-                                         "cheaper OpenRouter twins, and OpenRouter first for lite. Voice transcription uses the "
-                                         "OpenRouter key either way");
-            row.buttonTexts = QStringList{QStringLiteral("defaults"), QStringLiteral("defaults with openrouter (recommended)")};
-            row.onButton = [defaults, apply, this](int index) {
-                const QJsonObject lists = defaults.value(index == 0 ? QStringLiteral("plain") : QStringLiteral("openrouter")).toObject();
-                if (lists.isEmpty()) { hint(QStringLiteral("models.defaults.none"), QStringLiteral("The worker has not sent defaults yet; open a pane's agent first")); return; }
-                apply(lists);
-            };
-            if (!listsSet || !defaults.isEmpty()) models.rows << row;
-        }
-
-        // ----- 4. defaults ----------------------------------------------------------------------
+        // ----- 3. defaults ----------------------------------------------------------------------
         { relay::SettingRow head = headingRow(QStringLiteral("defaults")); head.collapsible = true; models.rows << head; }
         {
             relay::SettingRow failover = toggleRow(QStringLiteral("agent/failover"), QStringLiteral("Fall over to a fallback model"),
@@ -6609,7 +6396,6 @@ public:
             // test and custom-provider requests come back down this pipe (owner, 2026-09-20).
             if (type == QStringLiteral("presets")) {
                 guard->m_helperPresets[tab] = event.value(QStringLiteral("presets")).toArray();
-                guard->m_helperTierDefaults[tab] = event.value(QStringLiteral("tier_list_defaults")).toObject();
                 relay::SettingsWatch::instance().notify();
             } else if (type == QStringLiteral("key_stored") || type == QStringLiteral("key_removed")
                        || type == QStringLiteral("custom_provider_saved") || type == QStringLiteral("custom_provider_deleted")) {

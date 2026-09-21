@@ -756,6 +756,65 @@ private slots:
         QVERIFY(next > row);
     }
 
+    // ----- Options › Models keeps providers, keys and profiles (card #MDL1 t:a10) ---------------
+
+    // Design 5.5: "The tier lists and the 'models in the picker' checklist leave the page: one row,
+    // 'models and priorities... (Ctrl+Alt+M)', opens the dialog on the main tab." The page is built
+    // by RelayWindow::modelsSection(), which needs a whole window; read it as text like the tests
+    // above, and read only that function so a row of some other page cannot answer for it.
+    void theModelsPageHasNoTierListsAndNoChecklist() {
+        QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindow.h"));
+        QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
+        const QString text = QString::fromUtf8(source.readAll());
+        const int start = text.indexOf(QStringLiteral("relay::SettingsSection modelsSection() {"));
+        QVERIFY2(start > 0, "modelsSection() is gone");
+        const int end = text.indexOf(QStringLiteral("void modelsCurated() {"), start);
+        QVERIFY(end > start);
+        const QString page = text.mid(start, end - start);
+        // The five lists: no numbered rows, no "+ add a model..." button, no "fill the lists".
+        for (const QString &gone : {QStringLiteral("models/tier/"), QStringLiteral("models.tier.add."),
+                                    QStringLiteral("models.tier.defaults"), QStringLiteral("models.defaults.none"),
+                                    QStringLiteral("curation::tierList("), QStringLiteral("curation::addToTier(")})
+            QVERIFY2(!page.contains(gone), qPrintable(gone + QStringLiteral(" is still on the Models page")));
+        // The checklist: no per-model checkbox, no provider fold, no per-provider id box.
+        for (const QString &gone : {QStringLiteral("headingRow(QStringLiteral(\"models in the picker\"))"),
+                                    QStringLiteral("option:models/shown/"),
+                                    QStringLiteral("curation::setShown("), QStringLiteral("curation::isShown("),
+                                    QStringLiteral("curation::isCollapsed("), QStringLiteral("models/add/")})
+            QVERIFY2(!page.contains(gone), qPrintable(gone + QStringLiteral(" is still on the Models page")));
+        // What stays: the providers, their keys, the guest permission row and the profiles.
+        QVERIFY(page.contains(QStringLiteral("headingRow(QStringLiteral(\"providers\"))")));
+        QVERIFY(page.contains(QStringLiteral("headingRow(QStringLiteral(\"profiles\"))")));
+        QVERIFY(page.contains(QStringLiteral("\"type\", \"store_key\"")));
+        QVERIFY(page.contains(QStringLiteral("guestSettingKey(cli, QStringLiteral(\"permissions\"))")));
+    }
+
+    // The one row that replaced them opens the dialog, and on main -- not on the mode the pane
+    // happens to be in, which is what runAction("agent.model") would do.
+    void theModelsPageButtonOpensTheDialogOnMain() {
+        QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindow.h"));
+        QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
+        const QString text = QString::fromUtf8(source.readAll());
+        const int row = text.indexOf(QStringLiteral("QStringLiteral(\"models.prioritize\")"));
+        QVERIFY2(row > 0, "the models-and-priorities row is gone from the Models page");
+        const QString block = text.mid(row, 1600);
+        QVERIFY2(block.contains(QStringLiteral("models and priorities")), qPrintable(block.left(400)));
+        QVERIFY2(block.contains(QStringLiteral("openModelPicker(QStringLiteral(\"main\"))")), qPrintable(block.left(1000)));
+        // It is the first row the page appends: the complaint was that the chooser sat too far down.
+        const int section = text.indexOf(QStringLiteral("relay::SettingsSection modelsSection() {"));
+        const int firstRow = text.indexOf(QStringLiteral("models.rows << "), section);
+        QVERIFY(firstRow > row);
+        QVERIFY2(firstRow - row < 1600, "another row is appended before the dialog button");
+        // Searching for what left the page still finds this row.
+        const int aliases = text.indexOf(QStringLiteral("row.aliases = QStringLiteral(\"prioritize"), row);
+        QVERIFY(aliases > row);
+        const QString terms = text.mid(aliases, 400);
+        for (const QString &word : {QStringLiteral("priority"), QStringLiteral("tier lists"),
+                                    QStringLiteral("main list"), QStringLiteral("checklist"),
+                                    QStringLiteral("add a model by id")})
+            QVERIFY2(terms.contains(word), qPrintable(word));
+    }
+
     // ----- Settings \u203a Local models (card #24XJ) -------------------------------------------------
 
     // The placement is one line of RelayWindow::settingsSections(), which needs a whole window to

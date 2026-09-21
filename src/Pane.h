@@ -1670,14 +1670,16 @@ public:
         m_effortBox->showPopup();
     }
     // Ctrl+Alt+M (agent.model), /model with no argument, and the box's "more models…" row.
-    void openModelPicker() {
+    // `tier` forces the tab it opens on: Options › Models' "models and priorities…" button asks
+    // for main, because that page is not in a mode (design 5.5). Empty is the ordinary door.
+    void openModelPicker(const QString &tier = QString()) {
         relay::ModelPicker::Context context;
         context.catalog = modelCatalog();
         context.currentKey = currentEntryKey();
         context.currentEffort = m_effort;
         // The tab it opens on is the mode this pane is in (card #MDL1 t:a7): Ctrl+Alt+M from a
         // /flash pane lands on the flash list, which is the one it would be editing.
-        context.tier = relay::modelrows::roleTier(m_agentRole);
+        context.tier = tier.isEmpty() ? relay::modelrows::roleTier(m_agentRole) : tier;
         // "the defaults buttons move into the dialog as 'fill from defaults'" (design 5.5). The
         // action is the pane's, because only a pane holds what its worker computed.
         if (hasTierListDefaults() || !relay::models::curation::tierListsSet())
