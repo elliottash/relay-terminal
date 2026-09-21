@@ -815,6 +815,38 @@ private slots:
             QVERIFY2(terms.contains(word), qPrintable(word));
     }
 
+    // Step 2 of four is reachable from step 1 (card #MDL1, design 5.7). The owner: "there need to
+    // be 4 steps of model availability: 1 add provider, 2 add model as available, 3 add model to
+    // priority list, 4 include model in box picker." Step 1 is a provider row on this page; the
+    // link under it says how many of that provider's models are available and opens the dialog's
+    // `all` tab on that provider, which is where step 2 is edited.
+    void everyProviderRowHasAModelsLinkIntoTheAllTab() {
+        QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindow.h"));
+        QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
+        const QString text = QString::fromUtf8(source.readAll());
+        const int start = text.indexOf(QStringLiteral("relay::SettingsSection modelsSection() {"));
+        QVERIFY2(start > 0, "modelsSection() is gone");
+        const int end = text.indexOf(QStringLiteral("void modelsCurated() {"), start);
+        const QString page = text.mid(start, end - start);
+        const int row = page.indexOf(QStringLiteral("QStringLiteral(\"models.available:\")"));
+        QVERIFY2(row > 0, "the per-provider models link is gone from the Models page");
+        const QString block = page.mid(row, 1400);
+        // Its own count, and the dialog's `all` tab filtered to this provider.
+        QVERIFY2(block.contains(QStringLiteral("of %2 available")), qPrintable(block.left(600)));
+        QVERIFY2(block.contains(QStringLiteral("openModelPicker(QStringLiteral(\"all\")")), qPrintable(block.left(900)));
+        QVERIFY(page.contains(QStringLiteral("curation::isAvailable(")));
+        // It sits under the provider it is about, indented, and the page reads the stored list
+        // once rather than once per model.
+        QVERIFY(block.contains(QStringLiteral("link.indent = 1")));
+        QVERIFY(page.contains(QStringLiteral("curation::availableKeys()")));
+        // Searching Options for "available models" finds it.
+        const int aliases = page.indexOf(QStringLiteral("link.aliases = "), row);
+        QVERIFY(aliases > row);
+        const QString terms = page.mid(aliases, 300);
+        for (const QString &word : {QStringLiteral("available"), QStringLiteral("uncheck")})
+            QVERIFY2(terms.contains(word), qPrintable(word));
+    }
+
     // ----- Settings \u203a Local models (card #24XJ) -------------------------------------------------
 
     // The placement is one line of RelayWindow::settingsSections(), which needs a whole window to

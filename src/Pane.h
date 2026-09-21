@@ -1674,11 +1674,15 @@ public:
     // Ctrl+Alt+M (agent.model), /model with no argument, and the box's "more models…" row.
     // `tier` forces the tab it opens on: Options › Models' "models and priorities…" button asks
     // for main, because that page is not in a mode (design 5.5). Empty is the ordinary door.
-    void openModelPicker(const QString &tier = QString()) {
+    // `filter` is what the filter line opens with: Options › Models' per-provider "models…
+    // (N of M available)" link opens the `all` tab on that provider, which is how step 2 is
+    // reached from step 1 (card #MDL1, design 5.7).
+    void openModelPicker(const QString &tier = QString(), const QString &filter = QString()) {
         relay::ModelPicker::Context context;
         context.catalog = modelCatalog();
         context.currentKey = currentEntryKey();
         context.currentEffort = m_effort;
+        context.filter = filter;
         // The tab it opens on is the mode this pane is in (card #MDL1 t:a7): Ctrl+Alt+M from a
         // /flash pane lands on the flash list, which is the one it would be editing.
         context.tier = tier.isEmpty() ? relay::modelrows::roleTier(m_agentRole) : tier;
@@ -9163,7 +9167,15 @@ private:
                 // the body runs — which segfaulted in `splitKey` on the freed key (Xvfb run,
                 // docs/qa_evidence/2026-09-21-model-names-everywhere).
                 const QList<relay::models::Entry> rows = relay::models::shown(catalog);
-                if (const relay::models::Entry *named = relay::models::findByName(catalog, rows, args)) {
+                // Available first (step 2 of four), then every usable entry: a model you
+                // un-ticked is out of the lists and the box, not forbidden — typing its name is
+                // asking for that model (card #MDL1, design 5.7). Both lists are named locals for
+                // the lifetime reason above.
+                const relay::models::Entry *named = relay::models::findByName(catalog, rows, args);
+                const QList<relay::models::Entry> every =
+                    named != nullptr ? QList<relay::models::Entry>() : relay::models::allUsable(catalog);
+                if (named == nullptr) named = relay::models::findByName(catalog, every, args);
+                if (named != nullptr) {
                     selectEntry(named->key);
                     return;
                 }
@@ -12771,7 +12783,16 @@ private:
     // models, the guest rows, then "more models…". `current` comes back as the index of the row
     // this pane is on, which is the one the box opens highlighted.
     QList<relay::FilterRow> modelBoxRows(int *current) const {
-        const relay::modelrows::Box shown = relay::modelrows::box(modelRowsContext());
+        return filterRowsOf(relay::modelrows::box(modelRowsContext()), current);
+    }
+    // The rows a typed filter searches: every class whole and every **available** model that no
+    // class lists, under `other models` (card #MDL1, design 5.7; owner: "the text filter isnt
+    // working -- its supposed to show all available models, not just the ones selected for the box
+    // picker"). The popup asks per keystroke and filters the answer itself.
+    QList<relay::FilterRow> modelBoxFilterRows() const {
+        return filterRowsOf(relay::modelrows::filtered(modelRowsContext()), nullptr);
+    }
+    QList<relay::FilterRow> filterRowsOf(const relay::modelrows::Box &shown, int *current) const {
         QList<relay::FilterRow> out;
         if (current != nullptr) *current = -1;
         for (int i = 0; i < shown.rows.size(); ++i) {
@@ -12847,6 +12868,7 @@ private:
         // opens on this pane's own model with no class expanded (card #MDL1, design 5.3).
         m_modelBox->onRows = [this](int *current) { return modelBoxRows(current); };
         m_modelBox->onExpandKey = [this](const QString &klass, int delta) { return expandModelClass(klass, delta); };
+        m_modelBox->onQueryRows = [this](const QString &) { return modelBoxFilterRows(); };
         m_modelBox->onPickedData = [this](const QString &data) { modelBoxPicked(data); };
         // The chip is **the model alone**, on every mode (owner, 2026-09-21: "no need to show the
         // model class in the pane header"), while the row it sits on carries its class's header

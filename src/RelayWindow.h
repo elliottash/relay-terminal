@@ -2421,6 +2421,9 @@ private:
                 return order.indexOf(str(a, "id")) < order.indexOf(str(b, "id"));
             });
         }
+        // Read once for the whole loop, not once per entry: every `isAvailable` would otherwise be
+        // its own QSettings lookup (the same trap as `shown`, #PPR4).
+        const QStringList availableKeys = relay::models::curation::availableKeys();
         for (const QJsonObject &preset : std::as_const(listed)) {
             const QString id = str(preset, "id");
             const QString label = str(preset, "label").toLower();
@@ -2503,6 +2506,38 @@ private:
                 };
             }
             models.rows << row;
+            // ----- step 2, one click from step 1 (card #MDL1, design 5.7) ----------------------
+            // "there need to be 4 steps of model availability: 1 add provider, 2 add model as
+            // available, 3 add model to priority list, 4 include model in box picker." Step 1 is
+            // this row; step 2 is the `all` tab of the Ctrl+Alt+M dialog, and nothing on this page
+            // said so. The link opens that tab with this provider's name already typed, and its
+            // own count is the answer to "how many of this provider's models am I offering".
+            {
+                const QList<relay::models::Entry> ofPreset = catalog.ofPreset(id);
+                int usable = 0, available = 0;
+                for (const relay::models::Entry &entry : ofPreset) {
+                    if (!entry.usable) continue;
+                    ++usable;
+                    if (relay::models::curation::isAvailable(entry, availableKeys)) ++available;
+                }
+                if (usable > 0) {
+                    const QString provider = str(preset, "provider").toLower();
+                    relay::SettingRow link = buttonRow(QStringLiteral("models.available:") + id,
+                        QStringLiteral("models"),
+                        QStringLiteral("Which of this provider's models your lists, the alt+m box and its filter may "
+                                       "offer. Opens the models dialog on this provider"),
+                        QStringLiteral("models… (%1 of %2 available)").arg(available).arg(usable),
+                        [this, provider, label] {
+                            Pane *on = m_active ? m_active.data() : focusedConsole();
+                            if (on) on->openModelPicker(QStringLiteral("all"), provider.isEmpty() ? label : provider);
+                        });
+                    link.aliases = QStringLiteral("available models uncheck enable disable which models step 2 ") + id;
+                    link.indent = 1;
+                    link.tooltip = link.detail;
+                    link.detail.clear();
+                    models.rows << link;
+                }
+            }
             if (guest) {
                 // What the guest does when it wants to run a command or change a file. Relay's own
                 // agent has no per-action approvals and neither does a guest by default (the
