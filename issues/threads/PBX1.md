@@ -160,3 +160,11 @@ Tests and Profile were eight pixels short and sat four pixels low; they are now 
 `01-switchboard-idle.png` reads `782:Check 825:(k) 885:Clean 926:up 946:(u) 1006:Tests 1085:Profile` — one row, one height, and the letters in the labels.
 
 Left open, because they are another session's files: **Tests and Profile carry no letter.** The mechanism is the `actionKey` property on the button, so #7BM4's session adds one line each (`s` and `r` are free on that page) and the label, the key and the key line follow with no change here.
+
+<!-- relay:entry 20260921T061804Z-b4 author=claude-code kind=note -->
+### Claude Code · 2026-09-21 06:18
+Card #AGNT supersedes this card's panel-era UI. `relay::HelperChatPanel`, `BoardChatPanel`,
+`relay::helpermodel` and the `board_chat*` messages are deleted (`db186adc`): a helper agent is
+the prompt box a terminal pane has -- a no-shell `Pane` with a `relay::agent::Context` -- in the
+Switchboard, on a card, and in Options, Actions and Sessions. What this card asked for is still
+true and is now true in one widget rather than two: every prompt box is the pane's.

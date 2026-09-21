@@ -33,3 +33,11 @@ Local row read "stub · local (local)" against the pane's "stub (local)", becaus
 its Main row through the concise wording. `drive.sh` now proves the cursor is in the composer (it
 types a word and reads it back) and checks *where* the popup opened, so the false pass that hid
 the first of those cannot happen again. 30 checks, 0 failures; `_rows.diff` is empty over 23 rows.
+
+<!-- relay:entry 20260921T061804Z-da author=claude-code kind=note -->
+### Claude Code · 2026-09-21 06:18
+Card #AGNT supersedes this card's panel-era UI. `relay::HelperChatPanel`, `BoardChatPanel`,
+`relay::helpermodel` and the `board_chat*` messages are deleted (`db186adc`): a helper agent is
+the prompt box a terminal pane has -- a no-shell `Pane` with a `relay::agent::Context` -- in the
+Switchboard, on a card, and in Options, Actions and Sessions. What this card asked for is still
+true and is now true in one widget rather than two: every model box is the pane's.

@@ -26,3 +26,11 @@ Re-ran the live drive against the binary with all five commits in: 12 PASS, 0 FA
 for the whole tab — and protocol §30.7 now states the three rules this card settled: the queue is
 every panel's, `board_chat_cancelled` carries the pane that pressed Stop, and a worker that dies
 mid-turn puts its panels back.
+
+<!-- relay:entry 20260921T061804Z-xz author=claude-code kind=note -->
+### Claude Code · 2026-09-21 06:18
+Card #AGNT supersedes this card's panel-era UI. `relay::HelperChatPanel`, `BoardChatPanel`,
+`relay::helpermodel` and the `board_chat*` messages are deleted (`db186adc`): a helper agent is
+the prompt box a terminal pane has -- a no-shell `Pane` with a `relay::agent::Context` -- in the
+Switchboard, on a card, and in Options, Actions and Sessions. What this card asked for is still
+true and is now true in one widget rather than two: the queue in every panel.

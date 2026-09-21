@@ -805,3 +805,143 @@ deferral was off for "a tab's helper in every scope" rather than "only a termina
   row says "Helper Agent (Alt+Q)" in the live wording and teaches its own shortcut (step 7's
   decision). Either drop the parameter or give the row a hint; leaving an unused id in the call is
   what makes the next grep of the registry misleading.
+
+<!-- relay:entry 20260921T061804Z-hh author=claude-code kind=evidence -->
+### Claude Code · 2026-09-21 06:18
+**Card #AGNT is done: every agent in Relay is the prompt box, and the helper's second
+implementation is deleted.** Steps 1-9 and the card's Verify section, driven live.
+
+## The commits, oldest first
+
+| commit | what |
+|---|---|
+| `fe9435b3` | the card: the seam the owner asked for, eleven steps, the five questions |
+| `59319d88` | step 8 -- `option:` and `session:` are link kinds of the transcript |
+| `f0f9c6b7` | step 4 -- `relay_core.agent_context`: the `context` block, and the scope is named |
+| `34ff0830` | step 4 -- one named tool scope, and the console's fences come down |
+| `bb1221a2` | step 4 -- the pane's queue is the console's, with `surface`, `screen` and reorder |
+| `ece42d07` | step 4 -- `PageAgent` and `board_chat*` retire; a console is a pane worker |
+| `ca4e5162` | step 4 -- the dead `turn_started` tag |
+| `de54a761` | step 2 -- `Context`, `ContextSpec`, `Action`: what an agent is *about* |
+| `cbf06cc0` | step 1 wave 1a -- `relay::agent::Host`, the seam a console is drawn through |
+| `dd104c3b` | step 1 -- the mover, and what the move would actually cost |
+| `24042b5b` `81e889c1` | step 3 -- the console takes a `Context`; the terminal supplies one |
+| `137f748f` | step 3's live gate, and the measurement that says waves 1b-1e are the wrong cut |
+| `1265b76f` | the decision: `Pane` **is** the console; the terminal is one routing of it |
+| `7a35a498` `769cc4a4` | a pane with no shell is the whole console, driven live |
+| `694470f8` | step 5 -- `ConsoleHandle` and `ConsoleFactory`: how a host gets one |
+| `fe9eea62` | step 5 -- a console writes to its tab's worker; `option:`/`session:` open |
+| `28581709` | step 5 -- the window makes consoles and stops making helper panels |
+| `c4a1625d` `21fbcc5b` | step 5 -- `Context::submit`, a safe action row, Alt+M, and the two the live gate caught |
+| `bc2db91e` | step 7 -- Options, Actions and Sessions are contexts with an embedded console |
+| `cb0e7d5e` | step 6 -- the list page and an open card are contexts |
+| `67837ec9` | step 5's evidence: the window's consoles live, and the terminal pane unchanged |
+| `6e0179f2` `0df2b685` | step 11 -- the docs, and the three places the code disagreed |
+| `b8453c97` | **integration** -- the Switchboard console had three rows to draw in, and a card's Enter was not a card's |
+| `d52a9d54` | **integration** -- the composer's objectName is `composerEditor` and nothing else may have it |
+| `db186adc` | **step 9** -- the helper's panel, its model box and the library they lived in, retired |
+| `d0c974aa` | **integration** -- the context library stops naming five things that no longer exist |
+| `6f0f80a7` | **integration** -- a console is not a leaf, and a card's box says what the card's box is for |
+| `7c51b9dc` | **evidence** -- the integration drive |
+
+## What the live drive found that nothing else could
+
+Six things, all of them invisible to the build and to the suites:
+
+1. **The Switchboard's console had three rows.** Its column takes the console's own size hint --
+   a `Pane`'s -- so a whole answer, its thinking fold and its tool row went into three lines, and
+   `placeQueueStrip` hid the §12 strip outright because there was no bubble room. That is half
+   this card's Issue reappearing one level up. (`b8453c97`)
+2. **A card's Enter was an ordinary `ask`.** The window wraps every host's context in
+   `TabConsoleContext`, and the wrapper forwarded every virtual but `submit` -- so `board_ask`
+   never happened: no thread write, no stage advance (19.10, decision 2). (`b8453c97`)
+3. **A click in a console made it the window's active pane.** `isLeaf` is `Pane || ToolPane` and
+   a console *is* a `Pane`, so `leafOf()` -- the walk **up** from a clicked widget -- answered the
+   console. "Open the three sessions about panes in new panes" then answered ok and opened
+   nothing, because `m_active->openSavedSession()` reached a console with no
+   `onOpenSessionInNewPane`. `panesIn` stopping at a `ToolPane` fixed the walk down; this is the
+   walk up. (`6f0f80a7`)
+4. **A card page's prompt box said "..." and nothing else.** `RichEditor` takes the first rung
+   that fits, so a line plus "..." is all-or-nothing and `CardContext`'s line does not fit a card
+   page's box -- the three chords the owner asked to be said *there* (#VZ69) were said nowhere
+   near it. `relay::agent::placeholderRungs` sheds clauses instead. (`6f0f80a7`)
+5. **The card page wore two headers**, the console's "project" under the card's own title.
+   (`6f0f80a7`)
+6. **And one of my own**: renaming the composer's `objectName` for a QA driver broke the
+   stylesheet rule, `theme::polishWindow` and `repolishLeaf`, which all find the prompt box by
+   `composerEditor`. (`d52a9d54`)
+
+## Retirement (step 9)
+
+`src/HelperChat.{h,cpp}` (2,763 lines), `src/HelperModelBox.{h,cpp}`, `src/BoardChat.h`,
+`tests/helpermodelbox_test.cpp` and `relay-helperchat` are gone, with the window's
+`pickHelperModel` / `applyHelperEntry` / `helperModelState` / `helperModelCommand` /
+`helperSlashCommand` / `m_helperModels`, `BoardView::onModelPick` / `onSlashCommand`,
+`CardDetail::onSlashCommand`, eleven dead `boardChat*` rules in `src/Theme.cpp` (including the
+ten-rule copy of the pane's composer that existed because "a panel is not a pane"), and
+`BoardRemote`'s `board_chat_*` forwarding. `board::fixRequest` moved to `src/BoardPane.h`.
+`helperWorkerGone`'s `chat: true` / `pane` event nobody read is replaced by the one surface the
+consoles cannot answer for: a **card** turn in flight, which now gets the ordinary end-of-turn
+error addressed to its card instead of a busy strip that never comes down.
+
+`grep -rn "HelperChat\|HelperModelBox\|BoardChatPanel\|board_chat" src tests backend docs
+scripts` comes back with history notes, `backend/relay_core/board_chat.py` (what step 4 kept of
+it: the board seed, the survey state and its prompt) and the protocol's retired sections.
+
+## What QA should still check
+
+- **A real provider.** Every turn in this drive is a loopback stub; nothing here has met a rate
+  limit, a refusal, a tool-call loop or a long reasoning block from a real model.
+- **The phone.** `app_panes` answers `count=1` with two consoles on screen, which is the walk the
+  phone is published from -- but no device was paired in this run. #SWPH's own drive is the one
+  that proves the inbox.
+- **A long session's queue under load.** The strip was driven with two prompts; the ledger,
+  steers, escalation and withdrawal are the pane's own machinery and are tested there, not here.
+- **The owner's own Main on a guest harness** (#GH5T): a `guest:` row in a console's model box
+  should still be refused in one sentence.
+- **Four consoles in one tab, measured.** Risk 4 asks for the `pane_usage` number; this drive
+  ran at most two consoles at a time.
+
+Evidence: `docs/qa_evidence/2026-09-21-agents-are-consoles/`
+
+<!-- relay:entry 20260921T061831Z-sa author=claude-code kind=evidence -->
+### Claude Code · 2026-09-21 06:18
+A seventh thing the live gate found, after the entry above was written, and the commit that
+carries it: **Enter on a card did nothing at all** (`999a8398`).
+
+`RichEditor` declares no `Q_OBJECT`, so `findChild<RichEditor *>()` matches on `QPlainTextEdit`'s
+metaobject and answers the first plain text edit under the widget — in a console that is the
+transcript's fallback view, not the prompt box. `CardDetail::m_reply` pointed at it,
+`CardDetail::submit` read it empty and returned, and the words stayed in the box: no `board_ask`,
+no thread entry, no stage advance. It was reachable only once the wrapper's missing `submit`
+(finding 2) was fixed, which is why it is late. The reply box is found by `composerEditor` now,
+and `boardworkspace` refuses both the bare `findChild<RichEditor *>()` and the absence of the
+named one.
+
+Driven again afterwards (`docs/qa_evidence/2026-09-21-agents-are-consoles/rerun-card/`): typing
+in the card's box and pressing Enter writes the owner's words to `issues/threads/<ID>.md`, moves
+the card Inbox → Discussing, and appends the answer with `model=stub` and
+`turn=<session>/<turn>` — owner decision 2, live.
+
+Two things the drive could not close, both written down in the evidence rather than guessed at:
+Ctrl+Shift+Enter (the comment-only chord, `board_comment`) did not land when sent straight after
+a Discuss turn; and a restart wrote a **new** helper conversation file rather than coming back to
+the one the tab had — the store is keyed (workspace, tab) and the run's own store shows one tab
+id under two workspace digests, which is #FEJQ's keying rather than this card's wiring.
+
+## QA checklist
+
+- [ ] A real provider, in every console: a rate limit, a refusal, a long reasoning block, a
+      tool-call loop. Every turn in the implementer drive is a loopback stub.
+- [ ] Options › Remote on, a tab with a Switchboard and an expanded helper: the phone's inbox
+      lists the terminal panes and **no** console. `app_panes` answers `count=1` with two
+      consoles on screen, but no device was paired in the drive.
+- [ ] A long session's queue in a console under load: steers, escalation, withdrawal, pause and
+      the request ledger. The drive queued two prompts.
+- [ ] The owner's own Main on a guest harness (#GH5T): a `guest:` row in a console's model box is
+      still refused in one sentence.
+- [ ] `relay.log`'s `pane_usage` for a tab with four consoles open, which is Risk 4's number. The
+      drive ran two.
+- [ ] Ctrl+Shift+Enter on a card, on its own and after a Discuss turn (see above).
+- [ ] A restart with two tabs on one project: each tab's helper conversation comes back to the
+      file it had (see above).

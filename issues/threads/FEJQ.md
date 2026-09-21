@@ -157,3 +157,11 @@ Landed in `relay::appcommands::actionIsAgentSafe()` with
 executor, `pane.close` is refused `not_agent_safe`) and the §30.2 list in
 docs/AGENT-SESSIONS-PROTOCOL.md. `ctest -R appcommands` green. `writes_enabled` is unchanged: with
 Options › Agent's toggle off, `run_action` is still refused for every key.
+
+<!-- relay:entry 20260921T061804Z-ws author=claude-code kind=note -->
+### Claude Code · 2026-09-21 06:18
+Card #AGNT supersedes this card's panel-era UI. `relay::HelperChatPanel`, `BoardChatPanel`,
+`relay::helpermodel` and the `board_chat*` messages are deleted (`db186adc`): a helper agent is
+the prompt box a terminal pane has -- a no-shell `Pane` with a `relay::agent::Context` -- in the
+Switchboard, on a card, and in Options, Actions and Sessions. What this card asked for is still
+true and is now true in one widget rather than two: the helper system.
