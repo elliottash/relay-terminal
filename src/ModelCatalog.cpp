@@ -593,6 +593,111 @@ void deleteProfile(const QString &name) {
     if (settings.value(kProfile).toString() == name) settings.remove(kProfile);
 }
 
+// ----- profiles on disk (owner, 2026-09-21: "allow exporting and importing profiles") -----------
+
+static const QString kProfileDocMarker = QStringLiteral("model profiles");
+
+// One list as the file carries it: the same {preset, model, effort} objects the worker sends as
+// `tier_list_defaults`, so the two shapes never drift apart.
+static QJsonArray listToJson(const QStringList &items) {
+    QJsonArray rows;
+    for (const QString &item : items) {
+        const int last = item.lastIndexOf(QLatin1Char('|'));
+        if (last <= 0) continue;
+        QString preset, model;
+        if (!Catalog::splitKey(item.left(last), &preset, &model)) continue;
+        rows << QJsonObject{{QStringLiteral("preset"), preset}, {QStringLiteral("model"), model},
+                            {QStringLiteral("effort"), item.mid(last + 1)}};
+    }
+    return rows;
+}
+
+QJsonObject exportProfiles(const QStringList &names) {
+    const QStringList existing = profiles();
+    QSettings settings;
+    QJsonArray out;
+    for (const QString &name : names) {
+        if (!existing.contains(name)) continue;
+        QJsonObject lists;
+        // Every tier, empty ones included: a profile is a whole snapshot, and a reader that saw
+        // "lite" missing could not tell "no lite models" from "this file predates the lite list".
+        for (const QString &tier : tierIds())
+            lists.insert(tier, listToJson(settings.value(profileTierKey(name, tier)).toStringList()));
+        out << QJsonObject{{QStringLiteral("name"), name}, {QStringLiteral("lists"), lists}};
+    }
+    if (out.isEmpty()) return {};
+    return QJsonObject{{QStringLiteral("relay"), kProfileDocMarker},
+                       {QStringLiteral("version"), 1},
+                       {QStringLiteral("exported"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate)},
+                       {QStringLiteral("profiles"), out}};
+}
+
+static ProfileDoc profileFromJson(const QJsonObject &object) {
+    ProfileDoc doc;
+    doc.name = object.value(QStringLiteral("name")).toString().trimmed();
+    const QJsonObject lists = object.value(QStringLiteral("lists")).toObject();
+    for (const QString &tier : tierIds()) {
+        QList<TierEntry> entries;
+        for (const auto &value : lists.value(tier).toArray()) {
+            const QJsonObject item = value.toObject();
+            QString preset = item.value(QStringLiteral("preset")).toString();
+            QString model = item.value(QStringLiteral("model")).toString();
+            // A hand-written file may carry the key whole, the way QSettings stores it.
+            if (preset.isEmpty())
+                Catalog::splitKey(item.value(QStringLiteral("key")).toString(), &preset, &model);
+            if (preset.isEmpty() || model.isEmpty()) continue;
+            entries << TierEntry{Catalog::keyFor(preset, model), item.value(QStringLiteral("effort")).toString()};
+        }
+        if (!entries.isEmpty()) doc.lists.insert(tier, entries);
+    }
+    return doc;
+}
+
+QList<ProfileDoc> readProfiles(const QJsonObject &document, QString *error) {
+    const QList<ProfileDoc> none;
+    auto fail = [&](const QString &why) { if (error) *error = why; return none; };
+    if (error) error->clear();
+    if (document.isEmpty())
+        return fail(QStringLiteral("That file is empty, or is not JSON."));
+    QJsonArray rows;
+    if (document.contains(QStringLiteral("profiles"))) {
+        if (document.value(QStringLiteral("relay")).toString() != kProfileDocMarker)
+            return fail(QStringLiteral("That is JSON, but not a Relay model-profile file."));
+        rows = document.value(QStringLiteral("profiles")).toArray();
+    } else if (document.contains(QStringLiteral("lists"))) {
+        rows << document;   // a lone profile, hand-written or cut out of a bigger file
+    } else {
+        return fail(QStringLiteral("That is JSON, but not a Relay model-profile file."));
+    }
+    // A newer `version` is read anyway: the shape only ever gains keys, and refusing a file a later
+    // Relay wrote would be worse than importing the lists it does understand.
+    QList<ProfileDoc> out;
+    for (const auto &value : rows) {
+        const ProfileDoc doc = profileFromJson(value.toObject());
+        if (validProfileName(doc.name)) out << doc;
+    }
+    if (out.isEmpty())
+        return fail(QStringLiteral("That file holds no profiles Relay can read."));
+    return out;
+}
+
+void writeProfile(const ProfileDoc &profile) {
+    const QString clean = profile.name.trimmed();
+    if (!validProfileName(clean)) return;
+    QSettings settings;
+    for (const QString &tier : tierIds()) {
+        QStringList items;
+        for (const TierEntry &entry : profile.lists.value(tier))
+            items << entry.key + QLatin1Char('|') + entry.effort;
+        settings.setValue(profileTierKey(clean, tier), items);
+    }
+    QStringList names = profiles();
+    if (!names.contains(clean)) { names << clean; store(kProfileOrder, names); }
+    // Importing does not change what this machine runs on - except when it lands on the profile the
+    // live lists belong to, where leaving them behind would break the one-thing invariant.
+    if (settings.value(kProfile).toString() == clean) applyProfile(clean);
+}
+
 QStringList collapsedProviders() { return list(kCollapsed); }
 bool isCollapsed(const QString &preset) { return collapsedProviders().contains(preset); }
 void setCollapsed(const QString &preset, bool on) {

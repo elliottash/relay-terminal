@@ -198,6 +198,33 @@ void deleteProfile(const QString &name);
 // Whether this is a usable profile name: non-empty, no "/" or "\" (they would make QSettings groups).
 bool validProfileName(const QString &name);
 
+// ----- profiles on disk (owner, 2026-09-21: "allow exporting and importing profiles") -----------
+// A profile leaves this machine as JSON, so one can be mailed to a colleague, kept in a dotfiles
+// repo or carried to a second machine:
+//
+//   {"relay": "model profiles", "version": 1, "exported": "<ISO 8601>",
+//    "profiles": [{"name": "AI work",
+//                  "lists": {"main": [{"preset": "glm-coding", "model": "glm-5.3", "effort": "max"}]}}]}
+//
+// The list entries are the same {preset, model, effort} objects the worker sends as
+// `tier_list_defaults`, so a default the worker computed and a profile the user exported read the
+// same. A model the importing machine has no provider for is kept, not dropped: the file may well
+// arrive before the key does, and an entry nothing can run is skipped at failover time anyway.
+struct ProfileDoc {
+    QString name;
+    QHash<QString, QList<TierEntry>> lists;   // tier id -> its entries, in order; absent = empty
+};
+// The document for those profiles, in the order given; names that are not profiles are skipped.
+QJsonObject exportProfiles(const QStringList &names);
+// The profiles a document holds, in file order. On a document that is not one of ours the list is
+// empty and `*error` (when given) says why, in a sentence fit to show. A lone {"name", "lists"}
+// object is read too, so a hand-written one-profile file works.
+QList<ProfileDoc> readProfiles(const QJsonObject &document, QString *error = nullptr);
+// Store it under its name, creating or replacing. It does not become current - importing must not
+// change what this machine is running on - but replacing the *current* profile does move the live
+// lists onto it, because the lists and the current profile are one thing.
+void writeProfile(const ProfileDoc &profile);
+
 // A provider whose checkbox on Options › Models is off: every model hidden and the group folded.
 QStringList collapsedProviders();
 bool isCollapsed(const QString &preset);

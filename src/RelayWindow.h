@@ -2754,6 +2754,114 @@ private:
                 }
                 return name;
             };
+            // ----- a profile on disk (owner, 2026-09-21: "allow exporting and importing profiles")
+            // JSON, so a profile can be mailed, committed to a dotfiles repo or carried to another
+            // machine. The file is the export of one profile or of all of them; the reader takes
+            // either, so "export all" and "export this one" import the same way.
+            const QString kProfileFilter = QStringLiteral("Relay model profiles (*.json);;All files (*)");
+            auto profileDir = [] {
+                const QString docs = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+                return docs.isEmpty() ? QDir::homePath() : docs;
+            };
+            auto exportProfiles = [this, kProfileFilter, profileDir](const QStringList &names, const QString &suggestion) {
+                const QJsonObject document = relay::models::curation::exportProfiles(names);
+                const QString title = QStringLiteral("export model profiles");
+                if (document.isEmpty()) {
+                    QMessageBox::warning(this, title, QStringLiteral("There is nothing to export yet."));
+                    return;
+                }
+                // A profile name is free text; a file name is not. Anything awkward becomes "-".
+                QString stem = suggestion;
+                stem.replace(QRegularExpression(QStringLiteral("[^\\w .()-]"), QRegularExpression::UseUnicodePropertiesOption),
+                             QStringLiteral("-"));
+                QString path = QFileDialog::getSaveFileName(this, title,
+                                                            QDir(profileDir()).filePath(stem + QStringLiteral(".json")),
+                                                            kProfileFilter);
+                if (path.isEmpty()) return;
+                if (!path.endsWith(QStringLiteral(".json"), Qt::CaseInsensitive)) path += QStringLiteral(".json");
+                QFile file(path);
+                if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                    QMessageBox::warning(this, title, QStringLiteral("Relay could not write %1:\n%2").arg(path, file.errorString()));
+                    return;
+                }
+                file.write(QJsonDocument(document).toJson(QJsonDocument::Indented));
+                file.close();
+                if (file.error() != QFile::NoError) {
+                    QMessageBox::warning(this, title, QStringLiteral("Relay could not write %1:\n%2").arg(path, file.errorString()));
+                    return;
+                }
+                statusBar()->showMessage(names.size() == 1
+                                             ? QStringLiteral("Exported “%1” to %2").arg(names.first(), path)
+                                             : QStringLiteral("Exported %1 profiles to %2").arg(names.size()).arg(path), 6000);
+            };
+            auto importProfiles = [this, catalog, curated, kProfileFilter, profileDir] {
+                const QString title = QStringLiteral("import model profiles");
+                const QString path = QFileDialog::getOpenFileName(this, title, profileDir(), kProfileFilter);
+                if (path.isEmpty()) return;
+                QFile file(path);
+                if (!file.open(QIODevice::ReadOnly)) {
+                    QMessageBox::warning(this, title, QStringLiteral("Relay could not read %1:\n%2").arg(path, file.errorString()));
+                    return;
+                }
+                QJsonParseError parse{};
+                const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parse);
+                QString error = parse.error == QJsonParseError::NoError ? QString() : parse.errorString();
+                const QList<relay::models::curation::ProfileDoc> incoming =
+                    error.isEmpty() ? relay::models::curation::readProfiles(document.object(), &error)
+                                    : QList<relay::models::curation::ProfileDoc>();
+                if (incoming.isEmpty()) {
+                    QMessageBox::warning(this, title, QStringLiteral("%1\n\n%2").arg(path, error));
+                    return;
+                }
+                // A name this machine already uses is the one thing that needs an answer: replacing
+                // somebody's "AI work" silently is exactly the accident an import should not have.
+                auto freeName = [](const QString &base) {
+                    const QStringList taken = relay::models::curation::profiles();
+                    if (!taken.contains(base)) return base;
+                    for (int n = 2; n < 1000; ++n) {
+                        const QString candidate = QStringLiteral("%1 (%2)").arg(base).arg(n);
+                        if (!taken.contains(candidate)) return candidate;
+                    }
+                    return base;
+                };
+                const QString wasCurrent = relay::models::curation::currentProfile();
+                QStringList added, skipped;
+                bool currentChanged = false;
+                for (relay::models::curation::ProfileDoc profile : incoming) {
+                    if (relay::models::curation::profiles().contains(profile.name)) {
+                        QMessageBox box(QMessageBox::Question, title,
+                                        QStringLiteral("This machine already has a profile called “%1”.")
+                                            .arg(profile.name),
+                                        QMessageBox::NoButton, this);
+                        box.setInformativeText(profile.name == wasCurrent
+                                                   ? QStringLiteral("Replacing it also moves the five lists onto the imported "
+                                                                    "ones — they are the lists this profile names.")
+                                                   : QStringLiteral("Replacing it overwrites its five lists."));
+                        // All three are ActionRole bar the last, so they keep this order in every
+                        // button layout: the destructive one first, the safe one default.
+                        box.addButton(QStringLiteral("replace"), QMessageBox::ActionRole);
+                        QPushButton *both = box.addButton(QStringLiteral("keep both"), QMessageBox::ActionRole);
+                        QPushButton *skip = box.addButton(QStringLiteral("skip"), QMessageBox::RejectRole);
+                        box.setDefaultButton(both);
+                        box.exec();
+                        if (box.clickedButton() == skip) { skipped << profile.name; continue; }
+                        if (box.clickedButton() == both) profile.name = freeName(profile.name);
+                    }
+                    if (profile.name == wasCurrent) currentChanged = true;
+                    relay::models::curation::writeProfile(profile);
+                    added << profile.name;
+                }
+                if (added.isEmpty()) return;
+                // The lists only moved if the import landed on the profile they belong to.
+                if (currentChanged) applyMainDefault(catalog);
+                curated();
+                QMessageBox::information(this, title,
+                                         QStringLiteral("Imported %1.%2\nChoose one in the profile box to switch the five "
+                                                        "lists onto it.")
+                                             .arg(QStringLiteral("“") + added.join(QStringLiteral("”, “")) + QStringLiteral("”"),
+                                                  skipped.isEmpty() ? QString()
+                                                                    : QStringLiteral(" Skipped %1.").arg(skipped.size())));
+            };
             const QString kNew = QStringLiteral("\x01new");   // never a profile name: validProfileName trims
             relay::SettingRow row;
             row.kind = relay::SettingRow::Choice;
@@ -2791,8 +2899,8 @@ private:
                 actions.indent = 1;
                 actions.tooltip = QStringLiteral("The profile the five lists below belong to right now");
                 actions.aliases = QStringLiteral("rename delete profile ") + currentProfile;
-                actions.buttonTexts = QStringList{QStringLiteral("rename…"), QStringLiteral("delete")};
-                actions.onButton = [this, currentProfile, curated, saveAs](int index) {
+                actions.buttonTexts = QStringList{QStringLiteral("rename…"), QStringLiteral("export…"), QStringLiteral("delete")};
+                actions.onButton = [this, currentProfile, curated, saveAs, exportProfiles](int index) {
                     if (index == 0) {
                         const QString name = saveAs(currentProfile, QStringLiteral("rename profile"));
                         if (name.isEmpty()) return;
@@ -2800,6 +2908,7 @@ private:
                         curated();
                         return;
                     }
+                    if (index == 1) { exportProfiles(QStringList{currentProfile}, currentProfile); return; }
                     if (QMessageBox::question(this, QStringLiteral("delete profile"),
                                               QStringLiteral("Delete the profile “%1”?\nThe five lists stay exactly as they are; "
                                                              "they simply stop belonging to a profile.").arg(currentProfile))
@@ -2809,6 +2918,24 @@ private:
                     curated();
                 };
                 models.rows << actions;
+            }
+            {
+                // Always here, profiles or none: importing is how the first profile arrives on a
+                // second machine. "export all" only appears once there is more than one to mean.
+                relay::SettingRow file;
+                file.kind = relay::SettingRow::Buttons;
+                file.id = QStringLiteral("models.profile.file");
+                file.label = QStringLiteral("profiles file");
+                file.tooltip = QStringLiteral("JSON you can mail, commit to your dotfiles, or carry to another machine. "
+                                              "A file holds one profile or all of them; either imports.");
+                file.aliases = QStringLiteral("import export profile profiles file json backup share carry");
+                file.buttonTexts = QStringList{QStringLiteral("import…")};
+                if (names.size() > 1) file.buttonTexts << QStringLiteral("export all…");
+                file.onButton = [names, exportProfiles, importProfiles](int index) {
+                    if (index == 0) { importProfiles(); return; }
+                    exportProfiles(names, QStringLiteral("relay model profiles"));
+                };
+                models.rows << file;
             }
         }
 

@@ -1,0 +1,72 @@
+{
+    "exported": "2026-09-21T02:30:17Z",
+    "profiles": [
+        {
+            "lists": {
+                "flash": [
+                    {
+                        "effort": "low",
+                        "model": "glm-5.3-flash",
+                        "preset": "glm-coding"
+                    },
+                    {
+                        "effort": "",
+                        "model": "kimi-for-coding-highspeed",
+                        "preset": "kimi-code"
+                    },
+                    {
+                        "effort": "low",
+                        "model": "relay-flash",
+                        "preset": "relay-free"
+                    }
+                ],
+                "high": [
+                    {
+                        "effort": "max",
+                        "model": "glm-5.3",
+                        "preset": "glm-coding"
+                    },
+                    {
+                        "effort": "max",
+                        "model": "k3",
+                        "preset": "kimi-code"
+                    },
+                    {
+                        "effort": "medium",
+                        "model": "relay-main",
+                        "preset": "relay-free"
+                    }
+                ],
+                "lite": [
+                    {
+                        "effort": "low",
+                        "model": "relay-lite",
+                        "preset": "relay-free"
+                    }
+                ],
+                "local": [
+                ],
+                "main": [
+                    {
+                        "effort": "high",
+                        "model": "glm-5.3",
+                        "preset": "glm-coding"
+                    },
+                    {
+                        "effort": "high",
+                        "model": "k3",
+                        "preset": "kimi-code"
+                    },
+                    {
+                        "effort": "medium",
+                        "model": "relay-main",
+                        "preset": "relay-free"
+                    }
+                ]
+            },
+            "name": "AI work"
+        }
+    ],
+    "relay": "model profiles",
+    "version": 1
+}

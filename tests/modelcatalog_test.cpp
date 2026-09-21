@@ -6,6 +6,7 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QSettings>
 #include <QTemporaryDir>
@@ -389,6 +390,88 @@ private Q_SLOTS:
         // A profile that does not exist is not applied, and is never current.
         curation::applyProfile(QStringLiteral("nobody"));
         QCOMPARE(curation::currentProfile(), admin);
+    }
+
+    // Owner, 2026-09-21: "allow exporting and importing profiles."
+    void profilesTravelAsJson() {
+        curation::addToTier(QStringLiteral("main"), QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max"));
+        curation::addToTier(QStringLiteral("main"), QStringLiteral("kimi-code|k3"), QStringLiteral("high"));
+        curation::addToTier(QStringLiteral("lite"), QStringLiteral("glm-coding|glm-5.3-flash"), QString());
+        curation::saveProfile(QStringLiteral("AI work"));
+        // A second profile, then an edit: the edit belongs to whichever is current, so "AI work"
+        // keeps the two-model main list the file below is checked against.
+        curation::saveProfile(QStringLiteral("admin work"));
+        curation::setTierList(QStringLiteral("main"), {{QStringLiteral("kimi-code|k3"), QString()}});
+
+        // The file: one object per profile, entries as {preset, model, effort} — the shape the
+        // worker's tier_list_defaults already use — and every tier present, empty ones included.
+        const QJsonObject document = curation::exportProfiles(curation::profiles());
+        QCOMPARE(document.value(QStringLiteral("relay")).toString(), QStringLiteral("model profiles"));
+        const QJsonArray written = document.value(QStringLiteral("profiles")).toArray();
+        QCOMPARE(written.size(), 2);
+        QCOMPARE(written.at(0).toObject().value(QStringLiteral("name")).toString(), QStringLiteral("AI work"));
+        const QJsonObject lists = written.at(0).toObject().value(QStringLiteral("lists")).toObject();
+        QStringList tiers = curation::tierIds();
+        tiers.sort();
+        QCOMPARE(lists.keys(), tiers);   // QJsonObject keys come back sorted; all five are there
+        QCOMPARE(lists.value(QStringLiteral("main")).toArray().at(0).toObject(),
+                 (QJsonObject{{QStringLiteral("preset"), QStringLiteral("glm-coding")},
+                              {QStringLiteral("model"), QStringLiteral("glm-5.3")},
+                              {QStringLiteral("effort"), QStringLiteral("max")}}));
+        QVERIFY(lists.value(QStringLiteral("flash")).toArray().isEmpty());
+        QVERIFY(curation::exportProfiles(QStringList{QStringLiteral("nobody")}).isEmpty());
+
+        // It survives a round trip through text onto a machine that has never seen it.
+        const QJsonObject reread = QJsonDocument::fromJson(QJsonDocument(document).toJson()).object();
+        QSettings().clear();
+        QVERIFY(curation::profiles().isEmpty());
+        QString error = QStringLiteral("untouched");
+        const QList<curation::ProfileDoc> incoming = curation::readProfiles(reread, &error);
+        QVERIFY(error.isEmpty());
+        QCOMPARE(incoming.size(), 2);
+        for (const curation::ProfileDoc &profile : incoming) curation::writeProfile(profile);
+        QCOMPARE(curation::profiles(), (QStringList{QStringLiteral("AI work"), QStringLiteral("admin work")}));
+        QCOMPARE(curation::currentProfile(), QString());        // importing runs nothing new
+        QVERIFY(curation::tierList(QStringLiteral("main")).isEmpty());
+        curation::applyProfile(QStringLiteral("AI work"));
+        QCOMPARE(curation::tierList(QStringLiteral("main")).size(), 2);
+        QCOMPARE(curation::tierList(QStringLiteral("main")).first().effort, QStringLiteral("max"));
+        QCOMPARE(curation::tierList(QStringLiteral("lite")).first().key, QStringLiteral("glm-coding|glm-5.3-flash"));
+        QVERIFY(curation::tierList(QStringLiteral("flash")).isEmpty());
+
+        // Importing over the profile the lists belong to moves the lists with it.
+        curation::ProfileDoc replacement;
+        replacement.name = QStringLiteral("AI work");
+        replacement.lists.insert(QStringLiteral("main"), {{QStringLiteral("kimi-code|k3"), QStringLiteral("low")}});
+        curation::writeProfile(replacement);
+        QCOMPARE(curation::profiles().size(), 2);               // replaced, not added
+        QCOMPARE(curation::tierList(QStringLiteral("main")).size(), 1);
+        QCOMPARE(curation::tierList(QStringLiteral("main")).first().effort, QStringLiteral("low"));
+        QVERIFY(curation::tierList(QStringLiteral("lite")).isEmpty());   // a whole snapshot again
+
+        // A lone profile object, hand-written, with the key unsplit and no effort.
+        const QJsonObject lone{{QStringLiteral("name"), QStringLiteral("borrowed")},
+                               {QStringLiteral("lists"), QJsonObject{{QStringLiteral("main"), QJsonArray{
+                                   QJsonObject{{QStringLiteral("key"), QStringLiteral("glm-coding|glm-5.3")}}}}}}};
+        const QList<curation::ProfileDoc> one = curation::readProfiles(lone, &error);
+        QCOMPARE(one.size(), 1);
+        QCOMPARE(one.first().lists.value(QStringLiteral("main")).first().key, QStringLiteral("glm-coding|glm-5.3"));
+        QVERIFY(one.first().lists.value(QStringLiteral("main")).first().effort.isEmpty());
+
+        // Anything else is refused with a sentence, and nothing is stored.
+        QVERIFY(curation::readProfiles(QJsonObject(), &error).isEmpty());
+        QVERIFY(error.contains(QStringLiteral("empty")));
+        QVERIFY(curation::readProfiles(QJsonObject{{QStringLiteral("hello"), 1}}, &error).isEmpty());
+        QVERIFY(error.contains(QStringLiteral("not a Relay model-profile file")));
+        QVERIFY(curation::readProfiles(QJsonObject{{QStringLiteral("profiles"), QJsonArray{}}}, &error).isEmpty());
+        QVERIFY(curation::readProfiles(QJsonObject{{QStringLiteral("relay"), QStringLiteral("model profiles")},
+                                                   {QStringLiteral("profiles"), QJsonArray{QJsonObject{
+                                                       {QStringLiteral("name"), QStringLiteral("a/b")}}}}}, &error).isEmpty());
+        QCOMPARE(curation::profiles().size(), 2);
+        // A version from a later Relay is read, not refused: the shape only gains keys.
+        QJsonObject newer = reread;
+        newer.insert(QStringLiteral("version"), 9);
+        QCOMPARE(curation::readProfiles(newer, &error).size(), 2);
     }
 
     void effortLabelsAreTheProvidersWords() {

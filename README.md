@@ -74,7 +74,8 @@ that conflict.
    in no list is only used when you pick it by hand. "fill the lists" applies Relay's defaults,
    or the recommended ones with the cheaper OpenRouter twins after your own models. A **profile**
    names the five lists as a set — "AI work", "admin work" — and switching one in, there or with
-   `/profile`, swaps every list at once for every pane. Claude Code
+   `/profile`, swaps every list at once for every pane; a profile exports to a JSON file you can
+   mail, commit or carry to another machine, and imports back. Claude Code
    and Codex, when installed, are providers there like any other.
 2. Type `git status` and press Enter. It runs in the terminal.
 3. Type `why is this build failing?` and press Enter. The agent answers inline.

@@ -1887,7 +1887,13 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   / `deleteProfile`, and `setTierList` writes through to the current profile so the live lists and
   the profile are one thing with no unsaved state. The page's **profile** choice row and `/profile
   [name]` (alone, a picker) both end in `RelayWindow::modelsCurated`, which redraws the page and
-  re-sends the lists to every pane; `models/collapsed` folds a provider's group (the priority list, its
+  re-sends the lists to every pane. A profile travels between machines as JSON (owner, 2026-09-21:
+  "allow exporting and importing profiles") — `curation::exportProfiles` / `readProfiles` /
+  `writeProfile`, the page's **export…** button and its **profiles file** row's **import…**, with
+  the entries in the same `{preset, model, effort}` shape as `tier_list_defaults`; an imported name
+  that is already taken asks replace / keep both (" (2)") / skip, and importing never changes which
+  profile is current.
+  `models/collapsed` folds a provider's group (the priority list, its
   "fallbacks end here" line and the per-model "openrouter fallback" switch of earlier that day are
   gone — an OpenRouter model is a list entry like any other); custom ids, favorites, recent, sort,
   a remembered reasoning level per entry, use counts and a tokens/s estimate. `src/ModelPicker.*`
