@@ -29,6 +29,7 @@
 #include <QPointer>
 #include <QScrollBar>
 #include <QStyleOptionComboBox>
+#include <QStylePainter>
 #include <QStyle>
 
 #include <algorithm>
@@ -47,7 +48,20 @@ public:
             if (now == this && m_lastReason == Qt::ShortcutFocusReason && old != nullptr) m_focusBefore = old;
         });
     }
-    QSize sizeHint() const override { return hintFor(currentText()); }
+    QSize sizeHint() const override { return hintFor(displayText()); }
+
+    // ----- the collapsed chip says something else than the row (card #MDL1, section 5.1) -------
+    // "The collapsed box is the model alone on main, and `<model> · <mode>` on any other mode",
+    // while the row it sits on is a mode row reading "flash (glm-5.3-flash)". This class exists
+    // precisely so the two can differ: the override is what the chip draws, what it is measured
+    // for, and what the phone is told (Pane::remoteState). Empty puts the current row's text back.
+    void setCollapsedText(const QString &text) {
+        if (m_collapsed == text) return;
+        m_collapsed = text;
+        updateGeometry();
+        update();
+    }
+    QString displayText() const { return m_collapsed.isEmpty() ? currentText() : m_collapsed; }
     // A squeeze clips the text, as it always has in a narrow pane: the strip's Ignored policy
     // keeps the box off the pane's own minimum width (#G152).
     QSize minimumSizeHint() const override { return hintFor(QStringLiteral("MM")); }
@@ -61,8 +75,23 @@ public:
     // PopupHotkeys: Alt+M closes the box, any other chord closes it and goes on to the window.
     std::function<bool(QKeyEvent *)> onChordKey;
 
+    // A list of several pages, turned by Left and Right (the model box's modes; card #MDL1). Unset
+    // — which it is for the level box and every other box — the list is the combo's own model,
+    // exactly as before. `pageId` is the page to open on; a pick is answered by the row's `data`
+    // through `onPickedData`, because an index into one page is not an index into the combo.
+    std::function<QList<relay::FilterPage>()> onPages;
+    QString pageId;
+    std::function<void(const QString &data)> onPickedData;
+    std::function<void(const QString &pageId)> onPageTurned;
+
     void showPopup() override {
         if (onBeforePopup) onBeforePopup();
+        const QList<relay::FilterPage> pages = onPages ? onPages() : QList<relay::FilterPage>();
+        if (!pages.isEmpty()) {
+            filterPopup()->setPages(pages, pageId);
+            filterPopup()->openFor(this);
+            return;
+        }
         if (count() == 0) return;
         filterPopup()->setRows(rowsFromModel(), currentIndex());
         filterPopup()->openFor(this);
@@ -77,6 +106,16 @@ protected:
         m_lastReason = event->reason();
         QComboBox::focusInEvent(event);
     }
+    // The chip's text, when it is not the current row's (see setCollapsedText). QComboBox paints
+    // QStyleOptionComboBox::currentText, so that is the one field to say it in.
+    void paintEvent(QPaintEvent *) override {
+        QStylePainter painter(this);
+        QStyleOptionComboBox option;
+        initStyleOption(&option);
+        option.currentText = displayText();
+        painter.drawComplexControl(QStyle::CC_ComboBox, option);
+        painter.drawControl(QStyle::CE_ComboBoxLabel, option);
+    }
 
 private:
     // Whatever the box holds, as the popup wants it. Qt marks a separator by its accessible
@@ -90,6 +129,7 @@ private:
             row.text = itemText(i);
             row.data = itemData(i).toString();
             row.tooltip = itemData(i, Qt::ToolTipRole).toString();
+            row.trailing = itemData(i, relay::kTrailingItemRole).toString();
             row.separator = itemData(i, Qt::AccessibleDescriptionRole).toString()
                             == QLatin1String("separator");
             row.enabled = model()->index(i, modelColumn(), rootModelIndex()).flags().testFlag(Qt::ItemIsEnabled)
@@ -104,9 +144,15 @@ private:
         m_popup = new relay::FilterPopup(this);
         m_popup->onPicked = [this](int index) {
             restoreFocus();
-            if (index < 0 || index >= count()) return;
+            if (index < 0 || index >= m_popup->rows().size()) return;
+            if (onPickedData) { onPickedData(m_popup->rows().at(index).data); return; }
+            if (index >= count()) return;
             setCurrentIndex(index);
             emit activated(index);
+        };
+        m_popup->onPageChanged = [this](const QString &id) {
+            pageId = id;
+            if (onPageTurned) onPageTurned(id);
         };
         m_popup->onCancelled = [this] { restoreFocus(); };
         m_popup->onChordKey = [this](QKeyEvent *key) {
@@ -139,6 +185,7 @@ private:
         return style()->sizeFromContents(QStyle::CT_ComboBox, &option, content, this);
     }
 
+    QString m_collapsed;
     relay::FilterPopup *m_popup = nullptr;
     QPointer<QWidget> m_focusBefore;
     Qt::FocusReason m_lastReason = Qt::OtherFocusReason;

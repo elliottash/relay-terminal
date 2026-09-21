@@ -38,6 +38,41 @@ QList<FilterRow> modelRows()
     return rows;
 }
 
+// The model box's three mode pages (card #MDL1, section 5.1): the four mode rows, a separator,
+// then that mode's own models, then the two action rows. Each page opens on its own current row.
+QList<FilterPage> modePages()
+{
+    const auto modeRows = [](const QString &marked) {
+        QList<FilterRow> rows;
+        for (const QString &mode : {QStringLiteral("high"), QStringLiteral("main"), QStringLiteral("flash")})
+            rows << FilterRow{(mode == marked ? QStringLiteral("• ") : QStringLiteral("  ")) + mode,
+                              QStringLiteral("role:") + mode, {}, false, true, {}};
+        rows << FilterRow{{}, {}, {}, true, false, {}};
+        return rows;
+    };
+    QList<FilterPage> pages;
+    FilterPage high{QStringLiteral("high"), QStringLiteral("high"), modeRows(QStringLiteral("high")), -1};
+    high.rows << FilterRow{QStringLiteral("gpt-6-astra"), QStringLiteral("pick:high|openai|gpt-6-astra"),
+                           {}, false, true, QStringLiteral("codex")};
+    high.current = high.rows.size() - 1;
+    pages << high;
+    FilterPage main{QStringLiteral("main"), QStringLiteral("main"), modeRows(QStringLiteral("main")), -1};
+    main.rows << FilterRow{QStringLiteral("kimi-k3"), QStringLiteral("pick:main|kimi|kimi-k3"),
+                           {}, false, true, QStringLiteral("kimi")};
+    main.rows << FilterRow{QStringLiteral("glm-5.3"), QStringLiteral("pick:main|glm|glm-5.3"),
+                           {}, false, true, QStringLiteral("z.ai +1")};
+    main.current = 4;   // kimi-k3
+    pages << main;
+    FilterPage flash{QStringLiteral("flash"), QStringLiteral("flash"), modeRows(QStringLiteral("flash")), -1};
+    flash.rows << FilterRow{QStringLiteral("glm-5.3-flash"), QStringLiteral("pick:flash|glm|glm-5.3-flash"),
+                            {}, false, true, QStringLiteral("z.ai")};
+    flash.rows << FilterRow{QStringLiteral("kimi-k3-turbo"), QStringLiteral("pick:flash|kimi|turbo"),
+                            {}, false, true, QStringLiteral("kimi")};
+    flash.current = 5;   // kimi-k3-turbo
+    pages << flash;
+    return pages;
+}
+
 }  // namespace
 
 class FilterPopupTest : public QObject {
@@ -306,7 +341,8 @@ private slots:
     }
 
     // 11. The short list Alt+E opens is the same popup: four rows, no separators, and the pane's
-    //    level highlighted.
+    //    level highlighted. It has no pages, so Left and Right are not the popup's at all — they
+    //    stay the filter line's caret keys, and nothing about this box changed.
     void theEffortListIsTheSameControl()
     {
         QList<FilterRow> levels;
@@ -315,6 +351,10 @@ private slots:
             levels << FilterRow{name, name, {}, false, true};
         FilterPopup popup;
         popup.setRows(levels, 2);
+        QCOMPARE(popup.pageCount(), 0);
+        QCOMPARE(popup.currentPageId(), QString());
+        QCOMPARE(popup.currentRow(), 2);
+        popup.turnPage(1);                        // nothing to turn to: a no-op, not a crash
         QCOMPARE(popup.currentRow(), 2);
         popup.setFilterText(QStringLiteral("ma"));
         QCOMPARE(popup.visibleCount(), 2);        // "max", and "minimal" fuzzily
@@ -322,6 +362,157 @@ private slots:
         popup.setFilterText(QStringLiteral("max"));
         QCOMPARE(popup.visibleCount(), 1);
         QCOMPARE(popup.activate(), 3);
+    }
+
+    // ----- pages: Left / Right change the mode in place (card #MDL1, owner: "left/right changes
+    // mode") ---------------------------------------------------------------------------------
+
+    // 12. The box opens on the page the caller named, with that page's rows and that page's own
+    //     current row highlighted — not the first row, and not the row another page was on.
+    void pagesOpenOnTheNamedPageAndItsCurrentRow()
+    {
+        FilterPopup popup;
+        popup.setPages(modePages(), QStringLiteral("main"));
+        QCOMPARE(popup.pageCount(), 3);
+        QCOMPARE(popup.currentPageId(), QStringLiteral("main"));
+        QCOMPARE(popup.currentRow(), 4);
+        QCOMPARE(popup.rows().at(popup.currentRow()).data, QStringLiteral("pick:main|kimi|kimi-k3"));
+        QCOMPARE(popup.rows().at(1).text, QStringLiteral("• main"));   // the marker is on this mode
+        // A page id nobody knows opens the first page rather than nothing at all.
+        popup.setPages(modePages(), QStringLiteral("nope"));
+        QCOMPARE(popup.currentPageId(), QStringLiteral("high"));
+    }
+
+    // 13. Right and Left turn the page in place: the rows below are the new mode's, the highlight
+    //     is that mode's own model, the popup never closes and nothing is picked.
+    void leftAndRightTurnThePageInPlace()
+    {
+        QWidget anchor;
+        anchor.resize(160, 22);
+        anchor.show();
+        FilterPopup popup(&anchor);
+        int picked = -2;
+        QStringList turns;
+        popup.onPicked = [&picked](int row) { picked = row; };
+        popup.onPageChanged = [&turns](const QString &id) { turns << id; };
+        popup.setPages(modePages(), QStringLiteral("main"));
+        popup.openFor(&anchor);
+
+        popup.turnPage(1);
+        QVERIFY(popup.isVisible());
+        QCOMPARE(popup.currentPageId(), QStringLiteral("flash"));
+        QCOMPARE(popup.rows().at(popup.currentRow()).data, QStringLiteral("pick:flash|kimi|turbo"));
+        QCOMPARE(popup.rows().at(2).text, QStringLiteral("• flash"));
+        QVERIFY(popup.rows().last().data.startsWith(QStringLiteral("pick:flash")));
+
+        popup.turnPage(-1);
+        popup.turnPage(-1);
+        QCOMPARE(popup.currentPageId(), QStringLiteral("high"));
+        QCOMPARE(popup.rows().at(popup.currentRow()).data, QStringLiteral("pick:high|openai|gpt-6-astra"));
+        popup.turnPage(-1);                                   // clamped: the first page holds
+        QCOMPARE(popup.currentPageId(), QStringLiteral("high"));
+        QCOMPARE(turns, QStringList({QStringLiteral("flash"), QStringLiteral("main"),
+                                     QStringLiteral("high")}));
+        QCOMPARE(picked, -2);                                 // nothing was picked by any of it
+        popup.dismiss();
+    }
+
+    // 14. The filter survives a turn and is re-applied to the new page: typing "k" then Right
+    //     leaves "k" in the line and narrows the flash list by it.
+    void aTurnKeepsTheFilterAndReAppliesIt()
+    {
+        FilterPopup popup;
+        popup.setPages(modePages(), QStringLiteral("main"));
+        popup.setFilterText(QStringLiteral("kimi"));
+        QCOMPARE(popup.visibleCount(), 1);
+        QCOMPARE(popup.rows().at(popup.currentRow()).data, QStringLiteral("pick:main|kimi|kimi-k3"));
+
+        popup.turnPage(1);
+        QCOMPARE(popup.filterText(), QStringLiteral("kimi"));
+        QCOMPARE(popup.currentPageId(), QStringLiteral("flash"));
+        QCOMPARE(popup.visibleCount(), 1);
+        QCOMPARE(popup.rows().at(popup.currentRow()).data, QStringLiteral("pick:flash|kimi|turbo"));
+
+        // Cleared, the whole of the page that is showing is back — mode rows and all.
+        popup.setFilterText(QString());
+        QCOMPARE(popup.visibleCount(), 5);
+        // And the page's own current row takes the highlight again once it is asked for.
+        popup.showPage(QStringLiteral("main"));
+        QCOMPARE(popup.currentRow(), 4);
+    }
+
+    // 15. Enter on a mode row and Enter on a model row are told apart by the row's own data, which
+    //     is what the caller acts on: the mode row says "switch the mode", the model row says
+    //     "this pane, this mode, that model". Escape after any number of turns picks nothing.
+    void enterAnswersWithTheRowsOwnDataAndEscapePicksNothing()
+    {
+        QWidget anchor;
+        anchor.resize(160, 22);
+        anchor.show();
+        FilterPopup popup(&anchor);
+        QStringList picked;
+        popup.onPicked = [&popup, &picked](int row) { picked << popup.rows().at(row).data; };
+        popup.setPages(modePages(), QStringLiteral("main"));
+        popup.openFor(&anchor);
+        popup.turnPage(1);
+        popup.activate();                                     // the flash page's own model
+        QCOMPARE(picked, QStringList({QStringLiteral("pick:flash|kimi|turbo")}));
+
+        popup.setPages(modePages(), QStringLiteral("main"));
+        popup.openFor(&anchor);
+        popup.moveCurrent(-99);                               // up to the first mode row
+        popup.activate();
+        QCOMPARE(picked.last(), QStringLiteral("role:high"));
+
+        bool cancelled = false;
+        popup.onCancelled = [&cancelled] { cancelled = true; };
+        popup.setPages(modePages(), QStringLiteral("main"));
+        popup.openFor(&anchor);
+        popup.turnPage(1);
+        popup.turnPage(-1);
+        popup.dismiss();
+        QVERIFY(cancelled);
+        QCOMPARE(picked.size(), 2);                           // still only the two
+    }
+
+    // 16. The "via" column is drawn at the far end of the row, in the muted ink, and the row is
+    //     wide enough for both. Rendered and measured: the column is the only thing that says
+    //     which provider a one-row-per-model list would actually spend (card #MDL1, rule 2).
+    void theViaColumnIsDrawnAtTheEndOfTheRow()
+    {
+        theme::SurfaceRaised = QColor(0x24, 0x1c, 0x18);
+        theme::Accent = QColor(0xc0, 0x7a, 0x4a);
+        theme::Text = QColor(0xf0, 0xe6, 0xdd);
+        theme::TextMuted = QColor(0x9a, 0x8b, 0x7f);
+        QWidget anchor;
+        anchor.resize(120, 22);
+        anchor.show();
+        FilterPopup popup(&anchor);
+        QList<FilterRow> rows;
+        rows << FilterRow{QStringLiteral("kimi-k3"), QStringLiteral("a"), {}, false, true,
+                          QStringLiteral("kimi")};
+        rows << FilterRow{QStringLiteral("kimi-k3"), QStringLiteral("b"), {}, false, true, QString()};
+        popup.setRows(rows, 0);
+        popup.openFor(&anchor);
+        const QImage shot = popup.grab().toImage();
+        popup.dismiss();
+        // Ink in the right-hand third of the first row and none in the same band of the second.
+        const auto inkInBand = [&shot](int fromY, int toY) {
+            int ink = 0;
+            for (int y = std::max(0, fromY); y < std::min(shot.height(), toY); ++y)
+                for (int x = shot.width() * 2 / 3; x < shot.width() - 6; ++x) {
+                    const QColor pixel = shot.pixelColor(x, y);
+                    if (std::abs(pixel.red() - theme::SurfaceRaised.red())
+                            + std::abs(pixel.green() - theme::SurfaceRaised.green())
+                            + std::abs(pixel.blue() - theme::SurfaceRaised.blue()) > 60) ++ink;
+                }
+            return ink;
+        };
+        const int top = shot.height() - 2 * 23;
+        QVERIFY2(inkInBand(top, top + 23) > 0, "nothing was drawn in the via column");
+        QCOMPARE(inkInBand(top + 23, shot.height()), 0);
+        // And the box is wide enough that the two never overlap.
+        QVERIFY(popup.width() > 120);
     }
 };
 

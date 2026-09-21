@@ -44,15 +44,51 @@ struct FilterRow {
     QString tooltip;
     bool separator = false;
     bool enabled = true;
+    // A muted right-hand part, drawn at the far end of the row and elided last: the model box's
+    // "via" column, which names the provider a model row would actually run on ("codex",
+    // "z.ai +1"; card #MDL1, rule 2). Empty on every other row, and never matched by the filter —
+    // typing a provider is the caller's job to fold into `text` if it wants that.
+    QString trailing;
+};
+
+// The item-data role a QComboBox row carries its `trailing` part in, so a box whose rows are read
+// back out of its own model (CurrentTextComboBox::rowsFromModel) keeps the "via" column. Qt::UserRole
+// itself is `data`, which QComboBox::addItem writes.
+constexpr int kTrailingItemRole = Qt::UserRole + 1;
+
+// A page of rows, for a list whose Left and Right keys turn between several of them (card #MDL1,
+// section 5.1: the model box's modes). The popup holds every page at once, so a turn is instant
+// and nothing is asked of the caller mid-keystroke.
+struct FilterPage {
+    QString id;                // the caller's own word for it ("flash"); given back by currentPageId()
+    QString label;             // what it is called, for a caller that draws a header; unused here
+    QList<FilterRow> rows;
+    int current = -1;          // the row this page opens on, an index into `rows`
 };
 
 class FilterPopup final : public QWidget {
 public:
     explicit FilterPopup(QWidget *parent = nullptr);
 
-    // The rows and which of them is current, as an index into `rows`. -1 for none.
+    // The rows and which of them is current, as an index into `rows`. -1 for none. This is the
+    // one-page form and it clears whatever pages were set: Left and Right then do nothing here and
+    // stay the filter line's own caret keys, which is what the Alt+E level box wants.
     void setRows(const QList<FilterRow> &rows, int current);
     const QList<FilterRow> &rows() const { return m_rows; }
+
+    // ----- pages: Left / Right turn between several lists in place (card #MDL1) -------------
+    // Every page's rows up front, and which one to open on. The pages are a short ring the user
+    // steps along — the model box's high / main / flash / local — so the list below redraws, the
+    // highlight lands on that page's own current row, the popup stays open and whatever was typed
+    // is kept and re-applied. Nothing is asked of the caller until Enter.
+    void setPages(const QList<FilterPage> &pages, const QString &currentId);
+    int pageCount() const { return int(m_pages.size()); }
+    QString currentPageId() const;
+    // Left / Right. Clamped, never wrapped, like every other list in Relay: two Lefts from the
+    // third page land on the first and stay there.
+    void turnPage(int delta);
+    void showPage(const QString &id);
+    std::function<void(const QString &id)> onPageChanged;   // after a turn, with the new page's id
 
     // Drop open under `anchor` (above it when there is no room below), as wide as the widest row
     // and no wider than the screen, with `anchor`'s font. Clears whatever was typed last time.
@@ -96,7 +132,9 @@ private:
 
     QPointer<QWidget> m_anchor;
     bool m_above = false;              // the list opened upwards, so it shrinks from the top
-    QList<FilterRow> m_rows;
+    QList<FilterRow> m_rows;           // the page being shown (the only rows, with no pages set)
+    QList<FilterPage> m_pages;         // empty for a one-page list
+    int m_page = 0;                    // index into m_pages
     int m_current = -1;                // index into m_rows
     QLineEdit *m_edit = nullptr;
     QListWidget *m_list = nullptr;

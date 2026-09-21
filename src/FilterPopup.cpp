@@ -34,6 +34,7 @@ constexpr int kMaxRows = 14;   // past this the list scrolls; below it, it never
 // Which original row an item stands for; -1 for the "no match" line.
 constexpr int kRowRole = Qt::UserRole + 1;
 constexpr int kSeparatorRole = Qt::UserRole + 2;
+constexpr int kTrailingRole = Qt::UserRole + 3;
 
 QColor mix(const QColor &over, const QColor &under, qreal amount)
 {
@@ -77,9 +78,22 @@ public:
             painter->setPen(QPen(mix(theme::Accent, theme::SurfaceRaised, 0.85), 1));
             painter->drawRoundedRect(band, 4, 4);
         }
-        painter->setPen(enabled ? theme::Text : theme::TextMuted);
         painter->setFont(option.font);
-        const QRect text = rect.adjusted(kSidePad + 3, 0, -(kSidePad + 3), 0);
+        QRect text = rect.adjusted(kSidePad + 3, 0, -(kSidePad + 3), 0);
+        // The "via" part, at the far end and in the muted ink: which provider this row would
+        // actually run on (card #MDL1, rule 2). It is drawn first and the name is elided into
+        // what is left, so a narrow box loses the end of a long model id rather than the column
+        // that says where the turn is going.
+        const QString trailing = index.data(kTrailingRole).toString();
+        if (!trailing.isEmpty()) {
+            const int width = option.fontMetrics.horizontalAdvance(trailing);
+            if (width + 24 < text.width()) {
+                painter->setPen(theme::TextMuted);
+                painter->drawText(text, Qt::AlignVCenter | Qt::AlignRight, trailing);
+                text.setRight(text.right() - width - 12);
+            }
+        }
+        painter->setPen(enabled ? theme::Text : theme::TextMuted);
         painter->drawText(text, Qt::AlignVCenter | Qt::AlignLeft,
                           option.fontMetrics.elidedText(index.data(Qt::DisplayRole).toString(),
                                                         Qt::ElideRight, text.width()));
@@ -177,11 +191,61 @@ bool FilterPopup::rowMatches(const FilterRow &row, const QString &query)
 
 void FilterPopup::setRows(const QList<FilterRow> &rows, int current)
 {
+    m_pages.clear();
+    m_page = 0;
     m_rows = rows;
     m_current = current >= 0 && current < rows.size() && !rows.at(current).separator && rows.at(current).enabled
         ? current
         : -1;
     rebuild(m_current);
+}
+
+// ----- pages (card #MDL1, section 5.1) ---------------------------------------------------------
+// The whole point of holding every page is that a turn changes nothing but which rows are drawn:
+// the popup stays open, the filter line is untouched and simply re-applied to the new rows, and
+// nothing is said to the caller until Enter. Escape after any number of turns is still "leave
+// everything as it was", because nothing has been sent.
+
+void FilterPopup::setPages(const QList<FilterPage> &pages, const QString &currentId)
+{
+    m_pages = pages;
+    m_page = 0;
+    for (int i = 0; i < m_pages.size(); ++i)
+        if (m_pages.at(i).id == currentId) { m_page = i; break; }
+    if (m_pages.isEmpty()) { setRows({}, -1); return; }
+    const FilterPage &page = m_pages.at(m_page);
+    const QList<FilterPage> keep = m_pages;
+    const int at = m_page;
+    setRows(page.rows, page.current);   // clears m_pages, so put them back
+    m_pages = keep;
+    m_page = at;
+}
+
+QString FilterPopup::currentPageId() const
+{
+    return m_page >= 0 && m_page < m_pages.size() ? m_pages.at(m_page).id : QString();
+}
+
+void FilterPopup::turnPage(int delta)
+{
+    if (m_pages.size() < 2 || delta == 0) return;
+    const int next = std::clamp(m_page + delta, 0, int(m_pages.size()) - 1);
+    if (next == m_page) return;
+    m_page = next;
+    const FilterPage &page = m_pages.at(m_page);
+    m_rows = page.rows;
+    m_current = page.current >= 0 && page.current < m_rows.size() && !m_rows.at(page.current).separator
+                    && m_rows.at(page.current).enabled
+        ? page.current
+        : -1;
+    rebuild(m_current);   // the filter text is untouched and re-applied by rebuild
+    if (onPageChanged) onPageChanged(page.id);
+}
+
+void FilterPopup::showPage(const QString &id)
+{
+    for (int i = 0; i < m_pages.size(); ++i)
+        if (m_pages.at(i).id == id) { turnPage(i - m_page); return; }
 }
 
 void FilterPopup::setFilterText(const QString &text)
@@ -206,6 +270,7 @@ void FilterPopup::rebuild(int preferRow)
         auto *item = new QListWidgetItem(row.separator ? QString() : row.text, m_list);
         item->setData(kRowRole, i);
         item->setData(kSeparatorRole, row.separator);
+        item->setData(kTrailingRole, row.trailing);
         if (!row.tooltip.isEmpty()) item->setToolTip(row.tooltip);
         if (row.separator || !row.enabled) item->setFlags(Qt::NoItemFlags);
     }
@@ -384,7 +449,9 @@ void FilterPopup::layoutForAnchor(bool first)
     // the filter line's own words, which are content too.
     int widest = std::max(anchor->width(), metrics.horizontalAdvance(m_edit->placeholderText()) + 4 * kSidePad);
     for (const FilterRow &row : std::as_const(m_rows))
-        widest = std::max(widest, metrics.horizontalAdvance(row.text) + 4 * kSidePad);
+        widest = std::max(widest, metrics.horizontalAdvance(row.text) + 4 * kSidePad
+                                      + (row.trailing.isEmpty() ? 0
+                                                                : metrics.horizontalAdvance(row.trailing) + 24));
     if (scrolls) widest += m_list->verticalScrollBar()->sizeHint().width();
     const int width = std::clamp(widest, 64, std::min(kMaxWidth, bound.width() - 8));
 
@@ -503,6 +570,18 @@ bool FilterPopup::keyPress(QKeyEvent *key)
     case Qt::Key_End:
         moveCurrent(m_rows.size() + 1);
         return true;
+    case Qt::Key_Left:
+    case Qt::Key_Right:
+        // The owner's words were "left/right changes mode", with no condition on them, so that is
+        // what they do — **always**, whatever has been typed, and not only while the filter line is
+        // empty. A key that means one thing with an empty box and another with a letter in it is
+        // exactly the sort of guessing this popup replaced. The filter is still editable: typing
+        // appends, Backspace takes the last character back and Ctrl+A / Ctrl+U clear it, so the
+        // caret simply lives at the end of what you typed. A one-page list (the Alt+E level box)
+        // has no modes to turn between, and there Left and Right stay the line edit's own caret
+        // keys, exactly as they were.
+        if (m_pages.size() > 1) { turnPage(key->key() == Qt::Key_Left ? -1 : 1); return true; }
+        return false;
     case Qt::Key_Tab:
     case Qt::Key_Backtab:
         return true;   // a popup has nothing to tab to
