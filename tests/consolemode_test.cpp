@@ -287,6 +287,10 @@ void theComposerSaysWhatTheContextSays()
     context.workspace = home->path();
     Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
     console.resize(1400, 700);
+    // Hidden widgets defer resize delivery. Realize the viewport before checking the
+    // width-dependent placeholder, as a user sees it (also on headless CI fonts/styles).
+    console.show();
+    QApplication::processEvents();
     if (QLayout *layout = console.layout()) layout->activate();
     auto *editor = console.findChild<QPlainTextEdit *>(QStringLiteral("composerEditor"));
     CHECK(editor != nullptr);
@@ -297,6 +301,8 @@ void theComposerSaysWhatTheContextSays()
     // rung would stop it shortening as the pane narrows.
     Pane terminal(context.workspace, context.workspace, false, relay::defaultEngineCore());
     terminal.resize(1400, 700);
+    terminal.show();
+    QApplication::processEvents();
     if (QLayout *layout = terminal.layout()) layout->activate();
     auto *plain = terminal.findChild<QPlainTextEdit *>(QStringLiteral("composerEditor"));
     CHECK(plain != nullptr);

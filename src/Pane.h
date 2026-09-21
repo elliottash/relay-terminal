@@ -1222,7 +1222,7 @@ public:
         // later and keep the smaller: the count only falls when a clear lands, and only rises
         // when the new conversation prints, so the smaller reading is always the right boundary.
         QTimer::singleShot(400, this, [this] {
-            m_sessionTextMark = std::min(m_sessionTextMark, paneHistoryLines(kSessionTextScan).size());
+            m_sessionTextMark = std::min(m_sessionTextMark, int(paneHistoryLines(kSessionTextScan).size()));
         });
         // A forked guest names itself only once it is running, and this is where that id lands:
         // the pane it forked from stashed its text, and the fork takes it from here (#0TJ9).
