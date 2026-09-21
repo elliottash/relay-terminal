@@ -551,3 +551,71 @@ in-pane and the other kind refused; the fold, the re-expand and a draft.
 
 No live GUI drive here, as briefed — it needs the window's factory in the same binary. The
 integration pass is where the console is driven inside Options for real.
+
+<!-- relay:entry 20260921T031604Z-ka author=claude-code kind=progress -->
+Step 6 landed: **the board and the card are contexts, and the agent is a console** (`cb0e7d5e`).
+
+`src/BoardPane.cpp` no longer builds a chat widget. Each page supplies a `relay::agent::Context`
+and the window hands back a console — step 5's `ConsoleFactory`, a no-shell `Pane` — to draw it.
+
+**`board::BoardContext`** (the list page). `spec()`: name/surface `switchboard`, role
+`switchboard`, scope `console` (named, never inferred), `persist {helper, <tab id>}`,
+brief `switchboard`/"Switchboard agent", `shell: false`, `routing: "agent"`, and a `screen` hint
+that is the filter, the visible sections and their counts. `actions()`: **Check (k)**, **Clean up
+(u)**, **Tests**, **Profile** — the four reparented `QToolButton`s of the old tool row, same
+words, same letters, same tooltips, Tests and Profile still keyless. Clean up keeps its run, its
+preview rule and its Stop in the view; saying "Stop" is now one `changed()`. Profile's menu is
+anchored by finding the button under the action's `key`, which is its `objectName`.
+
+**`board::CardContext`** (the open card). `spec()`: name `card`, surface `card:<ID>` — the same
+string `board_turns.surface_of` puts on every card turn event — scope `card`, its own persist key,
+so a card is a different conversation from the board. `actions()`: **Plan (p)**, **Execute (x)**,
+**Verify (v)** *only in a QA lane*, `leaves` on the two that hand the card to a pane, with #48S3's
+"Executing (a1b2c3d4)" labels and the busy rules unchanged. `CardDetail::fitButtons` is gone: the
+console's row shortens itself.
+
+**The console's composer is the card's reply box.** `CardDetail::m_reply` points at the editor
+inside the embedded console, so the per-card drafts, the prompt history, `restoreReply` and Esc
+all go on reading the one box. Execute and Verify take `composerText()` as their note.
+
+**The three chords stay on the host's side**, and this is the one hook I could not take. A card's
+Enter must travel as `board_ask` (19.10) — thread write before and after, stage advance — not as
+an ordinary console `ask`, and `Pane`/`ConsoleHandle` expose no way for a host to claim a submit
+route. `CardDetail::setConsole` therefore takes the composer's own `onSubmit` (`auto` → discuss,
+`agent` → plan, `shell` → comment). **The hook wanted is one line**: `ConsoleHandle::onSubmit`, or
+a `virtual bool Context::submit(route, text)` offered before the pane's own send.
+
+**Board widgets, not turns.** The Check findings and the survey offer moved out of the panel and
+above the console with their object names (`boardChatFindings`, `boardChatSurvey`,
+`boardChatImport`, `boardChatForgeLook`, …); a click still drafts `board::fixRequest` into the
+composer and sends nothing. `board_survey`, `forge_sync_planned` and the forge `error` are now
+handled in `BoardView::handleEvent`.
+
+**Removed:** `HelperChatPanel`/`BoardChatPanel` use, `buildChatPanel`, `handleChatEvent` and the
+`chat: true` routing, both model boxes with `rebuildModelBox`/`pickModel`/`syncModelBoxEnabled`
+(the console carries the pane's own picker), `helperPanel()` and `chatRunning()`. `relay-board`
+links `relay-agentcontext`.
+
+**One hazard found, worth knowing before steps 7 and 9.** `Pane::rebuildActionRow` deletes each
+button outright, so a `Context::changed()` raised from inside an `Action::run` frees the button
+whose `clicked` is still on the stack — Clean up turning into Stop deletes itself mid-click, and
+the test crashed with SIGSEGV before the guard. `BoardView::refreshContexts` posts the refresh to
+the next turn of the event loop when an action is running and does it immediately otherwise. The
+real fix is `deleteLater()` in `rebuildActionRow` (src/Pane.h, not this step's file).
+
+**Left for the integration pass**, both needing the window in the same binary: the card console's
+transcript is empty, because the card turn's `delta`/`thinking` still stream into the thread view
+as they always have — one of the two has to give, and which is a live-drive decision; and
+`RelayWindow::focusedHelperModelBox` walks up to the `ToolPane` and asks `BoardView` for a model
+box, which is now null, so Alt+M inside a console does nothing until the window routes that key
+to the pane.
+
+Tests: `tests/boardmodel_test.cpp` drives a **fake console** — a `ConsoleHandle` over a widget
+with a real `RichEditor` and a row built from `Context::actions()` exactly as `rebuildActionRow`
+builds it — so what is asserted is what the board asked the window for. 23 panel-era cases
+replaced by 12 (the spec and its persist key, the four actions and their letters, Check/triage
+findings and the draft, the survey and the GitHub look, an empty board, the `a` key, the card
+console and its actions, Verify only in a QA lane, link resolution through the context, and a
+board with no factory at all). `ctest -R '^board$|^boardpane$|^boardsections$|^boardworkspace$|^boardsignals$|^boardremote$|^buttonfit$'` — 7/7 green, and green again inside land.py's verify
+build of the exact tree that went on main. No live GUI drive in this step, by the plan: it needs
+step 5's factory in the same binary.
