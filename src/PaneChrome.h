@@ -627,7 +627,13 @@ public:
     explicit PaneChrome(QWidget *leaf) : QFrame(leaf) {
         setObjectName(QStringLiteral("paneChrome"));
         setAttribute(Qt::WA_StyledBackground);
-        auto *row = new QHBoxLayout(this); row->setContentsMargins(3, 2, 3, 2); row->setSpacing(1);
+        // The share button hangs below the close button (owner, 2026-09-20: "moved and put below
+        // the x (so it was a sideways L)"): one row of the pane buttons, and the share button
+        // alone beneath the last of them. The row is one button narrower than it was, which is
+        // room the pane's title gets back.
+        auto *column = new QVBoxLayout(this); column->setContentsMargins(3, 2, 3, 2); column->setSpacing(1);
+        m_row = new QHBoxLayout; m_row->setSpacing(1);
+        column->addLayout(m_row);
         // The + makes it obvious that these open a new pane (a new shell and chat), not a layout
         // toggle. Every button is here at all times: the row no longer grows, lifts onto a tile or
         // rearranges itself under the pointer (owner, 2026-09-18). The drag grip is gone with the
@@ -635,14 +641,15 @@ public:
         // One "new pane" button, not one per side (owner, 2026-09-18, card #803C). It makes the
         // pane on the right at once, like Ctrl+E; the mouse is already in hand, so the pane is
         // placed by dragging its header. Its tooltip shows the key (pane.splitRight).
-        button(row, QStringLiteral("⊞"), QStringLiteral("pane.newByMouse"), QStringLiteral("New pane (drag its header to place it)"))
+        button(m_row, QStringLiteral("⊞"), QStringLiteral("pane.newByMouse"), QStringLiteral("New pane (drag its header to place it)"))
             ->setProperty("keysFrom", QStringLiteral("pane.splitRight"));
-        button(row, QStringLiteral("⇱"), QStringLiteral("pane.moveToNewTab"), QStringLiteral("Move to new tab"));
-        button(row, QStringLiteral("×"), QStringLiteral("pane.close"), QStringLiteral("Close pane"));
+        button(m_row, QStringLiteral("⇱"), QStringLiteral("pane.moveToNewTab"), QStringLiteral("Move to new tab"));
+        button(m_row, QStringLiteral("×"), QStringLiteral("pane.close"), QStringLiteral("Close pane"));
         // Sharing moved here from the prompt-box strip (owner, 2026-09-19: it no longer fit
-        // beside the model and the microphone). First in the row, before the ⓘ RelayWindow
-        // adds: shared-or-not is the one pane state worth seeing from across the window.
-        if (auto *pane = dynamic_cast<Pane *>(leaf)) buildShare(row, pane);
+        // beside the model and the microphone), and on 2026-09-20 below the row's last button:
+        // shared-or-not is the one pane state worth seeing from across the window, and the row
+        // itself stays short for the title's sake.
+        if (auto *pane = dynamic_cast<Pane *>(leaf)) buildShare(column, pane);
         // The header gives up exactly this much room for good, so the title and the folder line
         // never re-elide.
         adjustSize();
@@ -685,6 +692,10 @@ public:
         });
         timer->start();
     }
+
+    // The row of pane buttons, for the window's ⓘ (RelayWindow::syncChrome inserts it first).
+    // The share button is not on it: it hangs below the row's last button (owner, 2026-09-20).
+    QHBoxLayout *buttonRow() const { return m_row; }
 
     void place() {
         auto *leaf = parentWidget();
@@ -963,11 +974,12 @@ private:
         pane->installEventFilter(this);
     }
 
-    // A terminal pane's share button (owner, 2026-09-19: it outgrew the prompt-box strip). The
-    // pane keeps every bit of the share logic — Pane::shareChipPressed, the RemoteShare state —
-    // and repaints this button through Pane::onShareChipChanged; the chrome owns only the button.
-    void buildShare(QHBoxLayout *row, Pane *pane) {
-        if (!row || !pane) return;
+    // A terminal pane's share button (owner, 2026-09-19: it outgrew the prompt-box strip; since
+    // 2026-09-20 it sits on its own under the row's close button). The pane keeps every bit of
+    // the share logic — Pane::shareChipPressed, the RemoteShare state — and repaints this button
+    // through Pane::onShareChipChanged; the chrome owns only the button.
+    void buildShare(QVBoxLayout *column, Pane *pane) {
+        if (!column || !pane) return;
         m_share = new QToolButton(this);
         m_share->setObjectName(QStringLiteral("paneChromeButton"));
         m_share->setAutoRaise(true);
@@ -979,7 +991,7 @@ private:
         m_share->setProperty("liveTooltip", true);   // refreshTooltips() leaves its state text alone
         m_share->setAccessibleName(QStringLiteral("Share this pane with a phone"));
         connect(m_share, &QToolButton::clicked, pane, [pane] { pane->shareChipPressed(); });
-        row->insertWidget(0, m_share);
+        column->addWidget(m_share, 0, Qt::AlignRight);   // under the close button, the L's foot
         QPointer<PaneChrome> guard(this);
         pane->onShareChipChanged = [guard] { if (guard) guard->refreshShare(); };
         refreshShareFor(pane);
@@ -1384,6 +1396,7 @@ private:
     };
 
     int m_fullWidth = 0;
+    QHBoxLayout *m_row = nullptr;     // the button row the ⓘ joins; the share button hangs below it
     PaneStateGlyph *m_glyph = nullptr;
     PaneSubagentBadge *m_subagentBadge = nullptr;
     PaneHeaderChip *m_remoteChip = nullptr, *m_phoneChip = nullptr;
