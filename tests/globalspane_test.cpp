@@ -12,6 +12,15 @@ using relay::globals::GlobalsPane;
 class GlobalsPaneTest : public QObject {
     Q_OBJECT
 private slots:
+    void protocolEventsExposeProblems() {
+        GlobalsPane pane;
+        QJsonObject request;
+        pane.onRequest = [&](const QJsonObject &r) { request = r; };
+        pane.refresh();
+        pane.handleEvent({{"event", "globals_state"}, {"id", request.value("id")},
+            {"records", QJsonArray{}}, {"problems", QJsonArray{QJsonObject{{"path", "/hq/bad.md"}, {"message", "Invalid card"}}}}});
+        QCOMPARE(pane.findChild<QLabel *>("globalsNotice")->text(), QString("/hq/bad.md: Invalid card"));
+    }
     void draftSurvivesSelectionRefreshAndConflict() {
         GlobalsPane pane;
         QList<QJsonObject> requests;

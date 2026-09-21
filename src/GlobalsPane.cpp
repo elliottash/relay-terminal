@@ -190,14 +190,21 @@ void GlobalsPane::updateButtons() {
         && m_record.value("kind").toString() != "instruction" && m_record.value("status").toString() != "retired");
 }
 void GlobalsPane::handleEvent(const QJsonObject &event) {
-    const QString type = event.value("type").toString();
+    const QString type = event.value("event").toString(event.value("type").toString());
     const QString id = event.value("id").toString();
     if (type == "globals_state" && id == m_listRequest && !id.isEmpty()) {
         m_listRequest.clear();
         m_records = event.value("records").toArray();
         rebuild();
         QStringList problems;
-        for (const auto &problem : event.value("problems").toArray()) problems << problem.toString();
+        for (const auto &problem : event.value("problems").toArray()) {
+            if (problem.isString()) problems << problem.toString();
+            else {
+                const auto detail = problem.toObject();
+                const QString path = detail.value("path").toString();
+                problems << (path.isEmpty() ? QString() : path + ": ") + detail.value("message").toString();
+            }
+        }
         if (!problems.isEmpty()) m_notice->setText(problems.join("\n"));
         else if (!m_dirty && !m_loading && m_writeRequest.isEmpty())
             m_notice->setText(m_records.isEmpty() ? tr("No global records yet. Create a memory or alias to begin.") : QString());
