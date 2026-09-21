@@ -478,6 +478,17 @@ class SessionCommands:
 
     def _start_recap(self, agent, reason: str, request_id) -> None:
         messages, turns = list(agent.messages), agent.turns
+        # One recap per stretch of work (card #TKKA): the pane guards against a second away recap
+        # by comparing its own finished-turn count with the worker's, and the two diverge on any
+        # errored or interrupted turn, so the worker keeps the marker itself. An away or resume
+        # recap over turns the last recap already covered is skipped, never printed again; a
+        # manual recap always runs.
+        if reason in ("away", "resume") and 0 < turns == agent.recap_turn:
+            event = {"event": "recap", "skipped": "no_new_turns", "reason": reason, "turns_covered": turns}
+            if request_id is not None:
+                event["id"] = request_id
+            self.emit(event)
+            return
         provider = agent.side_provider(cheap=True, role="summaries")
         open_items = open_request_items(agent)
         # The span the recap states comes off the recorded turn stamps, never the model's text
@@ -488,6 +499,10 @@ class SessionCommands:
 
         def work():
             event = suggestions.recap(provider, messages, turns, reason, turn_items=turn_items)
+            if "skipped" not in event:
+                # The marker the dedupe above reads, set before the event lands (#TKKA). An int
+                # write from this thread is safe under the GIL; the next autosave persists it.
+                agent.recap_turn = turns
             event["open_items"] = open_items
             return event
         self._background("recap", request_id, work,

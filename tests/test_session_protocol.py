@@ -261,7 +261,10 @@ class ProtocolHandlerTests(unittest.TestCase):
         self.assertRegex(recap['span_text'], r'\d\d:\d\d → .*\d\d:\d\d · ')
         self.assertRegex(recap['finished_text'], r'\d\d:\d\d')  # resume recaps state the finish (#MVGR)
         self.cmds.handle('recap_request', {'id': 'r', 'reason': 'away'})
-        self.rec.wait(lambda e: e['event'] == 'recap' and e.get('id') == 'r')
+        away = self.rec.wait(lambda e: e['event'] == 'recap' and e.get('id') == 'r')
+        # The resume recap just covered these turns: an away recap over them again is a
+        # duplicate and is skipped (#TKKA).
+        self.assertEqual(away['skipped'], 'no_new_turns')
         # plan execute re-reads the file from disk and switches to build mode
         fresh.set_mode('plan')
         plan = self.ws / 'plan.md'
@@ -273,6 +276,43 @@ class ProtocolHandlerTests(unittest.TestCase):
         self.assertTrue(sent[-1]['content'].startswith(f'Execute the plan in {plan}'))
         self.assertIn('edited by user', sent[-1]['content'])
         self.assertEqual(len([m for m in sent if m['role'] == 'user']), 1)
+
+    def test_away_recap_not_repeated(self):
+        # Card #TKKA: the pane and the worker count turns differently (the pane only turns that
+        # ended `done`), so the pane's dedupe can stay open forever; the worker skips an away or
+        # resume recap over turns the last recap already covered.
+        provider = ScriptedProvider(side_reply='{"summary": "Did three things.", "next_action": null}')
+        agent = self.make_agent(provider)
+        for p in ['one', 'two', 'three']:
+            self.run_turn(p)
+        side_before = len(provider.side_requests)
+        self.cmds.handle('recap_request', {'id': 'a', 'reason': 'away'})
+        first = self.rec.wait(lambda e: e['event'] == 'recap' and e.get('id') == 'a')
+        self.assertNotIn('skipped', first)
+        self.assertEqual(agent.recap_turn, 3)
+        # A second away recap over the same turns is a duplicate and costs no model call.
+        self.cmds.handle('recap_request', {'id': 'b', 'reason': 'away'})
+        dupe = self.rec.wait(lambda e: e['event'] == 'recap' and e.get('id') == 'b')
+        self.assertEqual(dupe['skipped'], 'no_new_turns')
+        self.assertEqual(len(provider.side_requests), side_before + 1)
+        # A manual recap always runs.
+        self.cmds.handle('recap_request', {'id': 'm', 'reason': 'manual'})
+        manual = self.rec.wait(lambda e: e['event'] == 'recap' and e.get('id') == 'm')
+        self.assertNotIn('skipped', manual)
+        # A turn since the recap re-arms the away one.
+        self.run_turn('four')
+        self.cmds.handle('recap_request', {'id': 'c', 'reason': 'away'})
+        again = self.rec.wait(lambda e: e['event'] == 'recap' and e.get('id') == 'c')
+        self.assertNotIn('skipped', again)
+        self.assertEqual(again['turns_covered'], 4)
+        # The marker survives a save and resume: a resumed session with no new turns does not
+        # recap again either.
+        agent.autosave()
+        self.make_agent(ScriptedProvider(side_reply='{"summary": "x"}'))
+        self.cmds.handle('resume', {'id': agent.session_id})
+        self.rec.wait(lambda e: e['event'] == 'state_loaded')
+        resumed = self.rec.wait(lambda e: e['event'] == 'recap' and e.get('reason') == 'resume')
+        self.assertEqual(resumed.get('skipped'), 'no_new_turns')
 
     def test_busy_refusals_and_effort_while_idle(self):
         gate = threading.Event()

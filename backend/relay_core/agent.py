@@ -727,6 +727,9 @@ class Agent:
         self.summary_time = 0.0
         self._summary_stale = False
         self._summary_running = False
+        # The turn count the last written recap covered (card #TKKA): an away or resume recap
+        # over the same turns is a duplicate and is skipped instead of printed again.
+        self.recap_turn = 0
         self.branch = ""
         self.epoch = 0
         self.snapshots: dict[str, list[dict]] = {}
@@ -3732,6 +3735,8 @@ class Agent:
         self.summary = session_titles.clean_summary(data.get("summary"))
         summary_turn = data.get("summary_turn")
         self.summary_turn = summary_turn if type(summary_turn) is int and summary_turn >= 0 else 0
+        recap_turn = data.get("recap_turn")
+        self.recap_turn = recap_turn if type(recap_turn) is int and recap_turn >= 0 else 0
         self.summary_time = float(data["summary_time"]) if isinstance(data.get("summary_time"), (int, float)) else 0.0
         if not self.summary and keep_id and self.store is not None:
             # Summarised on demand while nobody had it open: that summary lives in the meta file,
@@ -3783,6 +3788,7 @@ class Agent:
                 "title_source": self.title_source, "title_turn": self.title_turn,
                 # The agent-written summary for the session list, and the branch it was written on.
                 "summary": self.summary, "summary_turn": self.summary_turn, "summary_time": self.summary_time,
+                "recap_turn": self.recap_turn,
                 "branch": self.refresh_branch(),
                 "created": self.created, "updated": time.time(), "workspace": str(self.executor.workspace.root),
                 "model": model, "preset": preset.id if preset else None,
