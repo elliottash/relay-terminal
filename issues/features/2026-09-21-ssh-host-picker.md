@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: m
 created: '2026-09-21'
 source: Codex in Relay, 2026-09-21
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-ssh-host-picker/evidence.md], related: [], github: null}
+links: {plans: [], commits: [597a8fbaa6bda923f7b8239f9174093574178528], evidence: [docs/qa_evidence/2026-09-21-ssh-host-picker/evidence.md], related: [], github: null}
 ---
 # Open SSH hosts in a modal instead of expanding Actions
 
@@ -20,6 +20,7 @@ Replace the SSH submenu with one Connect to SSH action. Open saved/recent hosts 
 
 ## Execution Summary
 Actions now contains one Connect to SSH entry instead of expanded host rows. It opens a searchable modal of saved and recent hosts, with validated new-host entry and Connect/Cancel buttons. Selecting a host retains the existing new-tab SSH command path. Explicit ssh host/user@host searches in Actions remain available; the shortcut hint and SSH docs name the new action.
+Committed as 597a8fba; the exact committed tree passed the C++ build gate.
 
 ## Tests
 ctest:sshconfig
