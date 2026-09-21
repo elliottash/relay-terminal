@@ -1,0 +1,5 @@
+$ ./probe relay-stylesheet.qss           # the default style on this machine (breeze)
+SH_ComboBox_Popup 0 delegate QItemDelegate selected rows 1 palette Highlight #c07a4a | current row #533927 other row #241c18
+
+$ ./probe relay-stylesheet.qss fusion    # the style relay::theme::applyTheme sets
+SH_ComboBox_Popup 1 delegate QComboMenuDelegate selected rows 1 palette Highlight #c07a4a | current row #1d1613 other row #241c18
