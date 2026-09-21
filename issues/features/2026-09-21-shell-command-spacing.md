@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: msg4p
 created: '2026-09-21'
 source: Codex in a Relay pane, 2026-09-21
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-shell-command-spacing/], related: [7QFW], github: null}
+links: {plans: [], commits: [b773633fa3a0d1da97cdb6475765998eb9f1813c], evidence: [docs/qa_evidence/2026-09-21-shell-command-spacing/], related: [7QFW], github: null}
 ---
 # Blank lines around shell commands
 
