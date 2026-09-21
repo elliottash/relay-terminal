@@ -64,7 +64,9 @@ function global:__relay_event([string] $Stage, [int] $Status = 0, [byte[]] $Inpu
             try {
                 [IO.File]::Move($temporary, (Join-Path $env:RELAY_RUNTIME_DIR 'state.json'), $true)
                 break
-            } catch [IO.IOException] {
+            } catch [IO.IOException], [UnauthorizedAccessException] {
+                # File.Move(overwrite) reports a denied exclusive destination handle as
+                # UnauthorizedAccessException on Windows, not only as IOException.
                 if ($attempt -ge 39 -or ![IO.Directory]::Exists($env:RELAY_RUNTIME_DIR)) { throw }
                 [Threading.Thread]::Sleep(10)
             }

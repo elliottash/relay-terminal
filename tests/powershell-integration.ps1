@@ -68,6 +68,14 @@ public static class RelayReleaseFile {
                                   [IO.FileAccess]::Read, [IO.FileShare]::Read)
         $releaseThread = $null
         try {
+            $probe = Join-Path $root 'rename-probe'
+            [IO.File]::WriteAllText($probe, 'probe')
+            $blockedType = $null
+            try { [IO.File]::Move($probe, (Join-Path $root 'state.json'), $true) } catch {
+                $blockedType = $_.Exception.GetBaseException().GetType().FullName
+            }
+            if (!$blockedType) { throw 'Fixture did not lock atomic replacement' }
+            Write-Output "Windows locked rename exception: $blockedType"
             $releaseThread = [RelayReleaseFile]::Later($locked)
             __relay_event 'running' 9
         } finally {
