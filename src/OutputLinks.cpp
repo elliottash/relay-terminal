@@ -18,8 +18,9 @@ const QLatin1String kSessionScheme("relay://session/");
 // names something the app can show (#FEJQ; the backend tells it to, `board_chat.py:140`). Both
 // spellings arrive, with and without an authority (`option:agent/allow_writes`,
 // `option://agent/allow_writes`), because they are typed into prose by a model and Qt puts the
-// first in the path and the second in the host; `HelperChat.cpp:585-617` accepted both and this
-// keeps that, so every answer already in a transcript still links.
+// first in the path and the second in the host; the helper panel's own link handler accepted both
+// before card #AGNT retired it, and this keeps that, so every answer already in a transcript
+// still links.
 //
 // Like the card rule, the scheme must *open* a word: the character before it is the start of the
 // line or one of the openers below. That is what keeps `https://relay.test/option:a/b` whole —

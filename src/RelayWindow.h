@@ -20,7 +20,6 @@
 #include "BoardPane.h"
 // The helper agent's panel, whose composer answers Alt+M and Ctrl+Alt+M over its own model box
 // (#PK5Q): the window needs the class, not just its name.
-#include "HelperChat.h"
 #include "BoardRemote.h"   // the Switchboard on the owner's devices (#SWPH)
 #include "BoardWorker.h"
 #include "BoardWorkspace.h"   // which project's Switchboard a pane is looking at
@@ -39,7 +38,6 @@
 #include "AgentInternalsView.h"   // the Activity pane beside a terminal (#QT8C)
 #include "SettingsPane.h"
 #include "AppCommands.h"   // the agent drives the app: the catalog, the executor, the change log (#FEJQ, §30)
-#include "HelperModelBox.h"   // the helper panels' model box: one set of rows for all four (#BRD3, #FEJQ)
 #include "CurrentTextComboBox.h"   // the box itself, as the Switchboard and the terminal panes build it
 #include "Isolation.h"        // the per-pane memory limits this page edits
 #include "EscapeeCaps.h"     // the opt-in cap on tmux and Chrome, which leave their pane (#Y4RX)
@@ -1185,8 +1183,8 @@ private:
         // Sessions and the Switchboard are not terminal panes and this is where they answer.
         else if ((id == QStringLiteral("agent.modelBox") || id == QStringLiteral("agent.model"))
                  && helperComposerHasFocus()) {
-            if (id == QStringLiteral("agent.modelBox")) openHelperModelBox();
-            else openHelperModelPicker();
+            if (id == QStringLiteral("agent.modelBox")) openConsoleModelBox();
+            else openConsoleModelPicker();
         }
         else if (!pane) return;
         else if (id == QStringLiteral("terminal.native")) pane->toggleNative();
@@ -1320,7 +1318,7 @@ private:
     // ----- the helper's panels are gone; its worker is not (card #AGNT step 5) ----------------
     //
     // `wireHelperPanel` lived here: one template that gave the Options, Actions and Sessions
-    // panes the Switchboard's `HelperChatPanel`, its own `board_chat` FIFO and its own model box.
+    // panes the Switchboard's helper panel, its own `board_chat` FIFO and its own model box.
     // `board_chat` is retired on the wire (step 4) and the panel is replaced by an embedded
     // agent console (`createAgentConsole`, above), so the template had nothing left to wire: a
     // panel's `onHelperSend` now has no message the worker would answer. The three hosts each
@@ -1392,117 +1390,18 @@ private:
         }
     }
 
-    // A pick in any helper model box (#BRD3, §30.7). It writes the persisted `switchboard` role
-    // — the same keys the roles dialog's Advanced row writes, through the same helpers — and
-    // reconfigures the board workers, because only a configure moves a running agent. The gear row
-    // is the roles dialog itself.
-    // The rows are a terminal pane's rows since #PK5Q, so the words a pick arrives in are the
-    // pane's too: `role:<tier>`, `entry:<preset>|<model>`, `gear:picker`, `gear:modelOptions`.
-    // Each one does to the helper's role what the pane's handler does to the pane.
-    // True when the box that was clicked should be put back on the row the helper is actually on:
-    // the two gear rows are not choices, and a refused guest row is not one either. A real pick
-    // stays showing until the reconfigure's `configured` event redraws every box on the new role.
-    bool pickHelperModel(const QString &data) {
-        if (data == QStringLiteral("gear:modelOptions")) {
-            openSettingsPane(relay::SettingsPane::Mode::Options, QStringLiteral("models"));
-            hint(QStringLiteral("helper.model.options.mouse"),
-                 QStringLiteral("Tip: /models opens Options › Models from a helper's prompt box"));
-            return true;
-        }
-        if (data == QStringLiteral("gear:picker")) { openHelperModelPicker(); return true; }
-        if (data.startsWith(QStringLiteral("role:"))) {
-            // The Main row is the role's built-in default tier rather than a stored "main": with
-            // nothing stored the helper follows the pane's own model wherever it goes, which is
-            // what "Follow Main" meant before the rows were shared.
-            const QString role = data.mid(5);
-            relay::RolesDialog::writeRoleTier(relay::helpermodel::kRole(),
-                                              role == QStringLiteral("main") ? QString() : role);
-            hint(QStringLiteral("helper.model.role.mouse"),
-                 relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("agent.modelBox")),
-                                                QStringLiteral("a helper's model box")));
-        } else if (data.startsWith(QStringLiteral("entry:"))) {
-            if (!applyHelperEntry(data.mid(6), QString())) return true;
-            relay::models::curation::noteUse(data.mid(6));
-            hint(QStringLiteral("helper.model.mouse"),
-                 QStringLiteral("Tip: /model switches the helper's model from its prompt box"));
-        } else {
-            return true;
-        }
-        reconfigureBoardWorkers();
-        return false;
-    }
+    // `pickHelperModel`, `applyHelperEntry` and `helperModelState` were here: the window kept the
+    // helper's model-box state per tab, drew every helper panel's box from it, and wrote the
+    // persisted `switchboard` role on a pick. Every prompt box in Relay is a `Pane` now
+    // (card #AGNT), so each console draws **its own** box from its own worker's `configured` and
+    // sends its own `set_model`, which is what #PK5Q asked for. The roles dialog is the other
+    // writer of that role and still calls `reconfigureBoardWorkers()`.
 
-    // One catalog entry onto the helper's role. False when nothing was written, so the caller
-    // leaves the worker alone: a guest harness is a row like any other (the owner asked for the
-    // same list) but never a helper's model, so picking one says why instead (card #GH5T).
-    bool applyHelperEntry(const QString &key, const QString &effort) {
-        QString preset, model;
-        if (!relay::models::Catalog::splitKey(key, &preset, &model)) return false;
-        if (const QString guest = Pane::guestOfPreset(preset); !guest.isEmpty()) {
-            notice(relay::helpermodel::guestRefusal(Pane::guestDisplayName(guest)), 8000);
-            return false;
-        }
-        relay::RolesDialog::writeRoleEntry(relay::helpermodel::kRole(), preset, model,
-                                           effort.isEmpty() ? relay::models::curation::effortFor(key) : effort);
-        return true;
-    }
-
-    // What a helper's box knows about models, for the tab a widget is in. The tab's worker is
-    // started at the **first ask** and never merely to fill a box (owner decision 5, §30.7), so a
-    // panel opened in a tab nobody has asked anything has heard nothing at all — and a box with no
-    // models in it is not the box a terminal pane has, which is the whole of card #PK5Q. The
-    // catalog is the machine's rather than any one worker's, so a terminal pane's `presets` is the
-    // same list: it is lent to the box until the helper speaks for itself, and the tiers and the
-    // current row follow the moment it does.
-    relay::helpermodel::State helperModelState(QWidget *page) {
-        relay::helpermodel::State state = m_helperModels.value(tabIdOf(page));
-        if (!state.presets.isEmpty()) return state;
-        const QList<Pane *> panes = panesIn(page ? page : m_tabs->currentWidget());
-        for (Pane *pane : panes)
-            if (!pane->presets().isEmpty()) { state.presets = pane->presets(); return state; }
-        if (m_active) state.presets = m_active->presets();
-        return state;
-    }
-
-    // "more models…" on a helper's box: the same dialog Ctrl+Alt+M opens over a terminal pane —
-    // the same catalog, the same favourites and recents, the same reasoning level remembered per
-    // model — with its answer applied to the helper's role rather than to a pane's own model.
-    void openHelperModelPicker() {
-        // In a console it is that console's picker, with that console's current row: the same
-        // dialog Ctrl+Alt+M opens over a terminal pane, because a console *is* one.
-        if (Pane *console = focusedConsole()) { console->openModelPicker(); return; }
-        const relay::helpermodel::State state = helperModelState(m_tabs->currentWidget());
-        const relay::modelrows::Context rows = relay::helpermodel::context(state);
-        relay::ModelPicker::Context context;
-        context.catalog = rows.catalog;
-        QString current = relay::helpermodel::currentRow(state);
-        if (current.startsWith(QStringLiteral("entry:"))) context.currentKey = current.mid(6);
-        else context.currentKey = rows.mainKey;
-        context.currentEffort = state.roles.value(relay::helpermodel::kRole()).toObject()
-                                    .value(QStringLiteral("effort")).toString();
-        context.now = QDateTime::currentSecsSinceEpoch();
-        const relay::ModelPick pick = relay::pickModel(this, context, [this] {
-            openSettingsPane(relay::SettingsPane::Mode::Options, QStringLiteral("models"));
-        });
-        if (!pick.accepted) return;
-        if (!applyHelperEntry(pick.key, pick.effort)) return;
-        relay::models::curation::noteUse(pick.key);
-        reconfigureBoardWorkers();
-    }
-
-    // `/model <words>` in a helper's composer, the same match the pane's own composer makes.
-    // Empty words open the dialog, exactly as they do in a pane.
-    void helperModelCommand(const QString &args) {
-        if (args.trimmed().isEmpty()) { openHelperModelPicker(); return; }
-        const relay::helpermodel::State state = helperModelState(m_tabs->currentWidget());
-        const QString key = relay::modelrows::resolve(relay::helpermodel::context(state).catalog, args);
-        if (key.isEmpty()) {
-            notice(QStringLiteral("No model matches “%1”. /model opens the picker.").arg(args.trimmed()));
-            return;
-        }
-        if (!applyHelperEntry(key, QString())) return;
-        relay::models::curation::noteUse(key);
-        reconfigureBoardWorkers();
+    // "more models…" on a console's box, and Ctrl+Alt+M in one: the same dialog a terminal
+    // pane opens, because a console *is* a terminal pane with no shell. Nothing is kept here —
+    // the console asks its own picker with its own current row.
+    void openConsoleModelPicker() {
+        if (Pane *console = focusedConsole()) console->openModelPicker();
     }
 
     // The ask key (Keymap `helper.ask`): open the helper of the pane the keyboard is in and put
@@ -1523,7 +1422,7 @@ private:
     // `Pane` — a terminal pane, or a console embedded in the Switchboard, a card, Options,
     // Actions or Sessions — so the walk stops at the first `Pane` above the focus widget and that
     // pane answers with its own model box, its own `/model` and its own picker. It used to ask
-    // `HelperChatPanel` for a box, and then `BoardView` for one; with the panels gone both
+    // the helper panel for a box, and then `BoardView` for one; with the panels gone both
     // answered null and **Alt+M inside a console did nothing at all**.
     //
     // Which prompt box the cursor is in is asked of the *keyboard*, by walking up from the focus
@@ -1539,19 +1438,8 @@ private:
         return nullptr;
     }
     bool helperComposerHasFocus() const { return focusedConsole() != nullptr; }
-    void openHelperModelBox() {
+    void openConsoleModelBox() {
         if (Pane *console = focusedConsole()) console->openModelBox();
-    }
-
-    // `/model`, `/models` typed in any helper prompt box. False for a word neither of them, so
-    // the line goes to the agent as it always did.
-    bool helperSlashCommand(const QString &name, const QString &args) {
-        if (name == QStringLiteral("model")) { helperModelCommand(args); return true; }
-        if (name == QStringLiteral("models")) {
-            openSettingsPane(relay::SettingsPane::Mode::Options, QStringLiteral("models"));
-            return true;
-        }
-        return false;
     }
 
     void focusHelperOfActiveLeaf() {
@@ -1993,7 +1881,8 @@ private:
     // window, wired lazily by appCommands(); a pane's worker and the tab's helper both go
     // through it, so Undo works whichever of them made the change.
     relay::AppCommands m_appCommands;
-    // The helper panels of this window that are not Switchboards (listenToHelper).
+    // The panes of this window that asked for their tab worker's events (listenToHelper):
+    // Test suites and Profile. Not the consoles, which `deliverToConsoles` reaches.
     struct HelperListener {
         QPointer<QWidget> page;
         QPointer<QObject> owner;
@@ -2019,10 +1908,6 @@ private:
     };
     QHash<QString, ProfileCardWrite> m_profileWrites;
     quint64 m_profileWriteSeq = 0;
-    // What each tab's helper last said about its own model (#BRD3): `configured`, `model_roles`
-    // and `presets`. A panel opened into a tab whose worker has been running for an hour would
-    // otherwise show an empty box until the next reconfigure, because those events are sent once.
-    QHash<QString, relay::helpermodel::State> m_helperModels;
     // The helper worker's last `presets` answer per tab, and the defaults that came with it:
     // Options › Models reads these when no pane's agent is up (owner, 2026-09-20: "if there is
     // no agent loaded yet, load the helper agent").
@@ -6635,9 +6520,6 @@ public:
             // once per configure and would otherwise never reach one (attachConsoleToTab).
             if (type == QStringLiteral("ready") || type == QStringLiteral("configured"))
                 guard->m_workerHandshake.insert(handshakeKey(tab, type), event);
-            // What this worker says about its own model is kept for the panels that are not
-            // open yet: it is said on configure and not again (#BRD3).
-            guard->m_helperModels[tab].take(type, event);
             // Options › Models on a tab with no pane agent reads the helper's presets, and its key,
             // test and custom-provider requests come back down this pipe (owner, 2026-09-20).
             if (type == QStringLiteral("presets")) {
@@ -6694,11 +6576,11 @@ public:
         return worker;
     }
 
-    // A helper panel embedded in a pane that is *not* a Switchboard — the collapsed "Ask about
-    // this pane" row in Options, Actions and Sessions — registers here, so its tab's worker events
-    // reach it too (§30.7). Everything the helper says is tagged with the `pane` that asked, and a
-    // panel draws its own and drops the rest; the conversation is one, so the Options panel sees
-    // the board's turns going by and must ignore them.
+    // A pane that wants the **tab worker's** events — not the agent's, the worker's — registers
+    // here: the Test suites pane's `tests_*` and the Profile pane's `profile_*`, which ride the
+    // same process because it is the tab's one worker (§30.7). The helper panels registered here
+    // too and filtered by a `pane` tag; they are gone with card #AGNT, and a console is told
+    // through `deliverToConsoles` instead, which needs no tag because the conversation is one.
     //
     // `owner` owns the subscription the way SettingsWatch's context does: a pane that closes is
     // dropped rather than called.
@@ -6747,7 +6629,8 @@ public:
         return nullptr;
     }
 
-    // One helper event to the panels of its own tab, dropping the ones whose pane has closed.
+    // One tab-worker event to the panes of that tab that asked for them (`listenToHelper`),
+    // dropping the ones that have closed.
     void deliverToHelperPanels(QWidget *page, const QJsonObject &event) {
         for (int i = int(m_helperListeners.size()) - 1; i >= 0; --i)
             if (!m_helperListeners.at(i).owner || !m_helperListeners.at(i).page)
@@ -6782,18 +6665,26 @@ public:
                              "kept — ask again and a fresh helper starts.")
             : QStringLiteral("The helper stopped before it answered. Your message is kept — ask "
                              "again and a fresh helper starts.");
-        for (const QString &pane : waiting) {
+        // A **card** turn that was in flight is the one surface the consoles cannot answer for:
+        // the card page follows its own turn by card id (`m_cardTurns`), so with the worker gone
+        // its busy strip would stay up for ever and `p`/`x`/`v` would stay disabled. It is given
+        // the ordinary end-of-turn error it already knows, addressed to the card. The surface a
+        // card turn carries is `card:<ID>` (protocol 33, `board_turns.surface_of`).
+        //
+        // The other surfaces used to get the same event tagged `chat: true` and `pane: <name>`,
+        // for the panels to filter on; the panels are gone (card #AGNT) and the consoles are told
+        // once, below.
+        for (const QString &surface : waiting) {
+            if (!surface.startsWith(QStringLiteral("card:"))) continue;
             const QJsonObject event{{QStringLiteral("event"), QStringLiteral("error")},
-                                    {QStringLiteral("chat"), true},
-                                    {QStringLiteral("pane"), pane},
-                                    // The worker's queue went with the worker, so the panel drops
+                                    {QStringLiteral("card_id"), surface.mid(5)},
+                                    // The worker's queue went with the worker, so the page drops
                                     // its rows rather than offering prompts nobody holds.
                                     {QStringLiteral("worker_gone"), true},
                                     {QStringLiteral("text"), text}};
             for (QWidget *leaf : leavesIn(page))
                 if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board())
                     tool->board()->handleEvent(event);
-            deliverToHelperPanels(page, event);
         }
         // And the consoles of this tab, once rather than per waiting surface: it is one agent
         // that died and every console of the tab is on it. An `error` with no request id is what
@@ -6812,7 +6703,6 @@ public:
         if (!page) return;
         const QString tab = page->property("relayTabId").toString();
         if (tab.isEmpty()) return;                       // nothing ever asked: no worker to stop
-        m_helperModels.remove(tab);                      // what it said about its model goes with it
         m_helperWaiting.remove(tab);
         m_tabConsole.remove(tab);
         m_workerHandshake.remove(handshakeKey(tab, QStringLiteral("ready")));
@@ -7083,19 +6973,6 @@ public:
             auto *w = windowOf(guard);
             if (!w) return;
             if (relay::BoardWorker *worker = w->helperWorker(w->pageOf(guard), true)) worker->send(message);
-        };
-        // The Switchboard agent's model box (#BRD3): a pick writes the persisted `switchboard`
-        // role — the same keys the roles dialog's Advanced row writes, through the same helpers
-        // — and reconfigures the board workers, because only a configure moves the running
-        // agent. The gear row is the roles dialog itself.
-        view->onModelPick = [guard](const QString &data) {
-            auto *w = windowOf(guard);
-            return w != nullptr && w->pickHelperModel(data);
-        };
-        // `/model` and `/models` typed in the page agent's composer or an open card's reply box.
-        view->onSlashCommand = [guard](const QString &name, const QString &args) {
-            auto *w = windowOf(guard);
-            return w != nullptr && w->helperSlashCommand(name, args);
         };
         // A Switchboard put away no longer stops the worker: it is the tab's helper, and the tab's
         // Options, Actions and Sessions panes go on asking it (§30.7). Closing the tab is what

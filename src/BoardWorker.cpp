@@ -124,11 +124,11 @@ void BoardWorker::start(const QJsonObject &configure)
 // Nothing overtakes `configure`. start() holds the configure back until the worker answers
 // `ready`, so that it never races the handshake — and until 2026-09-20 a message written in that
 // window went out *in front of* it, because the process is already running by then and the
-// configure is not. That is exactly what a helper panel's **first** ask does: it starts the tab's
-// worker and sends its `board_chat` in the same breath (§30.7, "started on the first ask"), and
-// the worker refused it with "Configure a provider and workspace first" while the panel sat there
-// running, waiting for an answer that was never coming. The Switchboard never hit it because
-// `open()` already waited for `ready`.
+// configure is not. That is exactly what a console's **first** ask does: it starts the tab's
+// worker and sends its `ask` in the same breath (§33, "started on the first ask"), and the worker
+// refused it with "Configure a provider and workspace first" while the surface sat there running,
+// waiting for an answer that was never coming. The Switchboard never hit it because `open()`
+// already waited for `ready`.
 //
 // So everything but the configure itself waits for `ready` and is then written in order.
 void BoardWorker::send(const QJsonObject &message)

@@ -49,33 +49,23 @@ target_include_directories(relay-editor PUBLIC src)
 target_link_libraries(relay-editor PUBLIC relay-prompthistory ${RELAY_QT}::Widgets)
 target_compile_options(relay-editor PRIVATE -Wall -Wextra -Wpedantic)
 
-# The helper agent's chat panel (#8YQ9, 19.18; generalised by #FEJQ): the Switchboard's page
-# agent and the helpers in Options, Actions and Sessions are one surface, so it is its own library
-# rather than the board's — relay-conversations embeds it too and must not link the card board to
-# get it. relay-toollabel: a turn's progress line is the call's concise line (protocol 23).
-# relay-voice: the composer has the same microphone chip as a terminal pane's (#8YQ9) — the
-# capture process and where a transcript lands in the text, nothing else.
-add_library(relay-helperchat STATIC src/HelperChat.cpp src/HelperChat.h
-    # The model box over the `switchboard` role: one set of rows for all four panels (#BRD3, #FEJQ).
-    src/HelperModelBox.cpp src/HelperModelBox.h
-    src/CurrentTextComboBox.h)   # the box itself, shared with the terminal pane
-target_include_directories(relay-helperchat PUBLIC src)
-# relay-modelrows: the helper's box draws the terminal pane's rows, from the one builder (#PK5Q).
-target_link_libraries(relay-helperchat PUBLIC relay-editor relay-toollabel relay-voice relay-modelrows ${RELAY_QT}::Widgets)
-target_compile_options(relay-helperchat PRIVATE -Wall -Wextra -Wpedantic)
+# `relay-helperchat` was here: src/HelperChat.{h,cpp} (the helper agent's chat panel, #8YQ9 and
+# #FEJQ), src/HelperModelBox.{h,cpp} (its model box, #BRD3) and src/BoardChat.h (the Switchboard's
+# name for the panel). Card #AGNT retired all five: a helper is the same prompt box a terminal
+# pane has — a no-shell `Pane` with a `relay::agent::Context` — so the panel, its `board_chat`
+# FIFO and its own model box had nothing left to be. `tests/helpermodelbox_test.cpp` went with
+# them; `relay-modelrows`, the one row builder both boxes drew from, stays and is the pane's.
 
 # Switchboard pane: the card board, its detail view and the per-window Switchboard worker.
 # BoardModel holds the logic (tabs, columns, filters, search) so it can be tested headless.
 add_library(relay-board STATIC src/BoardModel.cpp src/BoardModel.h src/BoardPane.cpp src/BoardPane.h
-    src/CurrentTextComboBox.h   # the model box, shared with the terminal pane (#BRD3)
     src/BoardSections.cpp src/BoardSections.h
     # Signals (#AQ6X): the machine's own faults as rows the board draws, and the page one opens.
     src/BoardSignals.cpp src/BoardSignals.h
     src/BoardWorker.cpp src/BoardWorker.h src/BoardWorkspace.cpp src/BoardWorkspace.h
     # The Switchboard on the owner's phone (#SWPH): the bridge between the tab's BoardWorker and
     # the remote sidecar. Widget-free and RemoteShare-free; the window hands both in as functions.
-    src/BoardRemote.cpp src/BoardRemote.h
-    src/BoardChat.h)   # the Switchboard's name for the helper panel (#8YQ9, #FEJQ)
+    src/BoardRemote.cpp src/BoardRemote.h)
 target_include_directories(relay-board PUBLIC src)
 # relay-projects: boardRootFor() asks projects::boardDirOf() which folder of a directory is a board,
 # so the GUI's walk and the registry's can never disagree (#JN7X). The dependency only goes this
@@ -87,7 +77,10 @@ target_include_directories(relay-board PUBLIC src)
 # `relay::agent::Context` (card #AGNT step 6), so this library names one — and only one — without
 # pulling in a window: the console that draws it is a `Pane`, which exists only inside the `relay`
 # executable's translation unit, and reaches this view as a `QWidget *` and a `ConsoleHandle`.
-target_link_libraries(relay-board PUBLIC relay-helperchat relay-projects relay-notifications relay-agentcontext ${RELAY_QT}::Widgets)
+# relay-editor: the card page's reply box is the console's own `RichEditor`, handed down by the
+# window (`CardDetail::setConsole`); relay-toollabel: a turn's progress line is the call's concise
+# line (protocol 23). Both came in through relay-helperchat until card #AGNT step 9 retired it.
+target_link_libraries(relay-board PUBLIC relay-editor relay-toollabel relay-projects relay-notifications relay-agentcontext ${RELAY_QT}::Widgets)
 target_compile_options(relay-board PRIVATE -Wall -Wextra -Wpedantic)
 
 # Which project a pane is in, where that project's Switchboard folder is (or would be), and the
@@ -114,9 +107,9 @@ add_library(relay-modelcatalog STATIC src/ModelCatalog.cpp src/ModelCatalog.h)
 target_include_directories(relay-modelcatalog PUBLIC src)
 target_link_libraries(relay-modelcatalog PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-modelcatalog PRIVATE -Wall -Wextra -Wpedantic)
-# The rows of the model box (#PK5Q): one list for the terminal pane's box and for the helper
-# agent's four. Its own library because relay-helperchat needs the rows and must not link the
-# picker dialog to get them — the dialog a helper's "more models…" opens is the window's.
+# The rows of the model box (#PK5Q): one list, drawn by every prompt box in Relay — which since
+# card #AGNT is one widget, `Pane`, in a terminal pane and in every console. Its own library so
+# the rows can be had without the picker dialog, which is the window's.
 add_library(relay-modelrows STATIC src/ModelRows.cpp src/ModelRows.h)
 target_include_directories(relay-modelrows PUBLIC src)
 target_link_libraries(relay-modelrows PUBLIC relay-modelcatalog ${RELAY_QT}::Widgets)
@@ -625,12 +618,6 @@ if(BUILD_TESTING)
     target_link_libraries(relay-modelpicker-tests PRIVATE relay-modelpicker ${RELAY_QT}::Test)
     add_test(NAME modelpicker COMMAND relay-modelpicker-tests)
     set_tests_properties(modelpicker PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
-    # The helper agent's box over that list (#PK5Q): what its worker's events make of it, and
-    # that the rows come out the same as a terminal pane's.
-    add_executable(relay-helpermodelbox-tests tests/helpermodelbox_test.cpp)
-    target_link_libraries(relay-helpermodelbox-tests PRIVATE relay-helperchat ${RELAY_QT}::Test)
-    add_test(NAME helpermodelbox COMMAND relay-helpermodelbox-tests)
-    set_tests_properties(helpermodelbox PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # The one list both model boxes draw (#PK5Q): the rows, their order and what a pick means.
     add_executable(relay-modelrows-tests tests/modelrows_test.cpp)
     target_link_libraries(relay-modelrows-tests PRIVATE relay-modelrows ${RELAY_QT}::Test)

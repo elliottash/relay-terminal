@@ -258,9 +258,16 @@ void BoardRemoteTests::onlyTheAllowListedEventsGoBackAndWithoutPaths()
     QVERIFY(rig.toHub.isEmpty());
 
     for (const char *type : {"board", "board_cards", "board_changed", "board_thread_appended", "board_written",
-                             "board_activity", "board_chat_started", "board_chat_queued", "board_cancelled"})
+                             "board_activity", "board_busy", "board_conflict", "board_cancelled"})
         rig.event({{"event", QString::fromLatin1(type)}, {"removed", QJsonArray{"AAAA"}}});
     QCOMPARE(rig.toHub.size(), 9);
+    // `board_chat_started` and `board_chat_queued` were in that list until card #AGNT retired
+    // them from the wire; a `board_chat_*` prefix rule forwarded anything else of that shape and
+    // is gone with them. Nothing named `board_chat` reaches a device now.
+    rig.toHub.clear();
+    rig.event({{"event", "board_chat_started"}, {"removed", QJsonArray{"AAAA"}}});
+    rig.event({{"event", "board_chat_queued"}, {"removed", QJsonArray{"AAAA"}}});
+    QVERIFY(rig.toHub.isEmpty());
     // A refresh that found nothing is not news — unless a device asked for it.
     rig.toHub.clear();
     rig.event({{"event", "board_changed"}, {"rev", 4}, {"upserts", QJsonArray{}}, {"removed", QJsonArray{}}});

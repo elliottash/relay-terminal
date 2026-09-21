@@ -3,12 +3,6 @@
 #include "Projects.h"   // which folder of a project is its board: `switchboard/`, else `issues/`
 #include "ToolLabel.h"
 
-// The Switchboard agent's panel is retired here (card #AGNT step 6): the agent is a no-shell
-// `Pane` the window makes, and this view supplies its context. What is still wanted from that
-// header is one free function, `board::fixRequest` — the wording a clicked problem drafts — which
-// step 9 moves as it deletes the rest.
-#include "HelperChat.h"
-
 #include <QApplication>
 #include <QCheckBox>
 #include <QClipboard>
@@ -2115,10 +2109,6 @@ public:
 
     // `mode` is "discuss" or "plan" for an agent turn (protocol 19.10), empty for a plain comment.
     std::function<void(const QString &text, const QString &mode)> onReply;
-    // A slash command typed in the reply box (#PK5Q). This is a prompt box for the same helper
-    // agent the Switchboard's composer talks to, so the words that work there work here: `/model`
-    // and `/models` reach the box on this very strip rather than being sent as a comment.
-    std::function<bool(const QString &name, const QString &args)> onSlashCommand;
     // Execute: hand the card to a terminal pane. `note` is what was in the reply box.
     std::function<void(const QString &note)> onExecute;
     // Verify (#T71W): hand the card to a terminal pane on the *recommended verifier*, which is a
@@ -2866,15 +2856,6 @@ private:
         const QString text = m_reply->toPlainText().trimmed();
         if (text.isEmpty() || !onReply || (!mode.isEmpty() && m_busy))
             return;
-        if (text.startsWith(QLatin1Char('/')) && onSlashCommand) {
-            const QString line = text.mid(1);
-            const QString name = line.section(QLatin1Char(' '), 0, 0);
-            if (!name.isEmpty() && onSlashCommand(name, line.section(QLatin1Char(' '), 1).trimmed())) {
-                m_reply->remember(text);
-                m_reply->clear();
-                return;
-            }
-        }
         m_reply->remember(text);
         m_reply->clear();
         m_error->hide();
@@ -3185,9 +3166,9 @@ private:
         m_checkFailing = QJsonArray();
     }
 
-    // One finding: severity, the test, the message — the helper panel's findings shape
-    // (HelperChatPanel::showFindings), and a click on a test whose source the worker named
-    // opens that file through the card's own opener.
+    // One finding: severity, the test, the message — the findings shape the helper panel drew
+    // before the console replaced it, and a click on a test whose source the worker named opens
+    // that file through the card's own opener.
     void addFindingRow(const QJsonObject &finding)
     {
         const QString test = finding.value(QStringLiteral("test")).toString();
@@ -7429,9 +7410,9 @@ void BoardView::updateDetailLayout()
     const bool stacked = width() < kStackedWidth;
     const QString keys = detailOpen() && stacked ? cardKeys : boardKeys;
     // Wherever the board's own line is the one on screen, it ends with the Switchboard agent's
-    // action row — read off the row itself (HelperChatPanel::actionKeyLine) rather than written
-    // out above, so a session that puts a keyed button there gets its entry in the line for free
-    // and a keyless one adds nothing.
+    // action row — read off the context's own `actions()` (agentActionKeyLine) rather than
+    // written out above, so a session that puts a keyed button there gets its entry in the line
+    // for free and a keyless one adds nothing.
     const QString line = keys == boardKeys ? keys + agentActionKeyLine() : keys;
     if (m_keys->text() != line)
         m_keys->setText(line);

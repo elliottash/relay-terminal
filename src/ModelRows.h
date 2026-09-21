@@ -6,7 +6,8 @@
 // There were two boxes over one idea. A terminal pane's (Pane::refreshPickers) drew the role rows
 // — "glm-5.3 (main)", "glm-5.3 flash (flash)", a Local row where this machine serves one — then
 // the per-model catalog in rank order, then "more models…" and the gear. The helper agent's
-// (relay::helpermodel) drew Follow Main, Flash, Lite, one row per usable *provider* and a gear.
+// (`relay::helpermodel`, retired with the panel by card #AGNT) drew Follow Main, Flash, Lite, one
+// row per usable *provider* and a gear.
 // Same control, same setting underneath, two different lists: which model a thing runs on read
 // differently depending on which box you happened to be looking at.
 //

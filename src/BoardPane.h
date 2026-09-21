@@ -60,6 +60,29 @@ class CardContext;
 // go below it — it is what the organize and dock arithmetic ask for, not a minimumSizeHint.
 inline constexpr int kCardSplitWidth = 900;
 
+// The fix request a clicked problem drafts for the agent's composer (#8YQ9). One wording for the
+// banner over the list and for the Check/triage findings above the console, so the two paths
+// cannot drift: it names the card when the path has an id in it, quotes the checker, and asks —
+// the owner reads it and presses Enter, or does not. Never a send (owner, 2026-09-19: "draft you
+// confirm").
+//
+// It lived in `src/HelperChat.h` while the helper was a panel, and moved here with card #AGNT
+// step 9 when that file was retired: both callers are in this view.
+inline QString fixRequest(const QString &path, const QString &message, int total = 1)
+{
+    const QString file = path.trimmed();
+    // A card file is `<something>/<id>-<slug>.md` or carries `#ID` in the message; the checker
+    // names the file, which is what the agent needs to open it either way.
+    QString request = file.isEmpty()
+        ? QStringLiteral("The board's check reports: %1").arg(message)
+        : QStringLiteral("Fix %1: %2").arg(file, message);
+    request += QStringLiteral(" \u2014 please fix this card.");
+    if (total > 1)
+        request += QStringLiteral(" (%1 problems are reported in all; the Check button lists "
+                                  "them.)").arg(total);
+    return request;
+}
+
 }  // namespace board
 
 class BoardView : public QWidget {
@@ -71,18 +94,11 @@ public:
 
     // ---- wiring
     std::function<void(const QJsonObject &)> onSend;         // a worker protocol message (board_*, presets, …)
-    // The model box's pick (#BRD3, #PK5Q): the terminal pane's own words, because the box draws
-    // the terminal pane's own rows — "role:main", "role:flash", "role:local",
-    // "entry:<preset>|<model>", "gear:picker" (the model picker dialog) or "gear:modelOptions".
-    // The view holds no QSettings: the window writes the `switchboard` role and reconfigures the
-    // board workers. It answers true when the box should go back to the row the helper is on —
-    // a gear row, or a pick it refused — and false when a real pick is now on its way.
-    std::function<bool(const QString &data)> onModelPick;
-    // A slash command typed in either of this view's prompt boxes — the page agent's composer or
-    // an open card's reply box (#PK5Q). `name` is without the slash. The window answers `/model`
-    // and `/models`, the pane's own words for the box beside the text; anything it does not know
-    // answers false and is sent as an ordinary prompt.
-    std::function<bool(const QString &name, const QString &args)> onSlashCommand;
+    // `onModelPick` and `onSlashCommand` were here: the view owned two model boxes and two prompt
+    // boxes, and had to hand a pick and a `/model` back to the window because it held no
+    // QSettings. Both prompt boxes are consoles now — a `Pane` — so the model box, the picker and
+    // `/model` are the pane's own in both of them (#PK5Q, card #AGNT step 9). The window keeps
+    // `reconfigureBoardWorkers()` for the roles dialog, which is the other writer of that role.
     std::function<void(const QString &reference)> onSendToTerminal;  // `t`: insert #ID in the composer
     std::function<void(const QString &path)> onOpenFile;     // `o`: open the card file in a pane
     // The two link schemes the helper answers with that are not the board's (#FEJQ, §30.4):

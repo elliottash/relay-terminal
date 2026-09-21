@@ -670,7 +670,7 @@ QToolButton#boardAddButton:hover { border-color: @accent; }
 /* ---- the action row: one shape for every no-typing button above a prompt box ---------------
    An action row is the row of buttons over a prompt box that need no typing: the card page's
    Plan / Execute / Verify, and the Switchboard agent's Check, Clean up and whatever another
-   session reparents in beside them (HelperChatPanel::addToolWidget). Whoever makes the button,
+   session puts on the row (`relay::agent::Context::actions()`). Whoever makes the button,
    the row gives it one shape — owner, 2026-09-20: "make the buttons consistent, can you use the
    styling from the card agent", and then, of the colours, "not the colors though". So this rule
    carries the card button's geometry and type **only** and declares no colour: a widget joining
@@ -723,31 +723,24 @@ QWidget#boardCleanupPanel[failed="true"] { border-color: @error; }
 QLabel#boardCleanupHead { color: @text; }
 QTextBrowser#boardCleanupBody { background: transparent; color: @text; border: none; }
 QTextBrowser#boardCleanupBody QScrollBar:vertical { width: 8px; margin: 0; }
-/* The Switchboard page agent's panel (#8YQ9, protocol 19.18): the conversation about the whole
-   board, pinned under the list on the list page. It reads as part of the page — a hairline over
-   it and the board's own face behind it — rather than as a card or a floating strip, because the
-   list above it is what it is talking about. */
+/* The helper agent's fold in Options, Actions and Sessions, and the Switchboard's chat area: the
+   surface an agent console is embedded in. It reads as part of the page — a hairline over it and
+   the pane's own face behind it — rather than as a card or a floating strip, because what is
+   above it is what the agent is talking about. The `boardChat*` names are the panel's and are
+   kept: the widgets they name are still these (card #AGNT step 9 retired the rest of them with
+   src/HelperChat.cpp, and the console inside brings a terminal pane's own rules with it). */
 QWidget#boardChatPanel { background: transparent; border-top: 1px solid @boardMetalDim; }
 QLabel#boardChatHead { color: @muted; font-family: "@mono"; font-size: 9pt; }
-/* The head row's actions — Check, the Clean up the board reparents in beside it, and Tests and
-   Profile. They wear the card page's Plan/Execute face, because they are the same kind of thing
-   in the same place: an action above a prompt box that needs no typing (owner, 2026-09-20).
-   Their shape comes from the `actionRow` rule and their ground from the plain-ground list, both
-   up beside `boardCleanup` — one look, so every action row in the app reads the same. */
-QTextBrowser#boardChatLog { background: transparent; color: @text; border: none; }
-QTextBrowser#boardChatLog QScrollBar:vertical { width: 8px; margin: 0; }
-/* Violet while the agent is turning, as everywhere else on the board: amber is reserved for what
-   is waiting on a person (docs/ARCHITECTURE.md, "What the colours mean"). Colour and border only
-   — a rule that changed the font would paint one width and measure another. */
-QWidget#boardChatBusy { background: transparent; }
-QLabel#boardChatBusyWhat { color: @muted; font-family: "@mono"; font-size: 9pt; }
-QToolButton#boardChatStop { color: @agent; background: transparent; border: 1px solid @agentBorder; border-radius: 4px; padding: 2px 8px; }
-QToolButton#boardChatStop:hover { border-color: @agent; }
-/* The queue, in delivery order (19.18's FIFO): one muted row per waiting prompt, the same idiom
-   as a terminal pane's queue strip, so a prompt that is waiting looks the same in both places. */
-QWidget#boardChatQueue { background: transparent; }
-QWidget#boardChatQueueRow { background: @raised; border: 1px solid @border; border-radius: 6px; }
-QLabel#boardChatQueueText { color: @muted; font-size: 9pt; }
+/* The action row's buttons — Check, Clean up, Tests and Profile — wear the card page's
+   Plan/Execute face, because they are the same kind of thing in the same place: an action above a
+   prompt box that needs no typing (owner, 2026-09-20). Their shape comes from the `actionRow`
+   rule and their ground from the plain-ground list, both up beside `boardCleanup` — one look, so
+   every action row in the app reads the same.
+
+   The panel's own log, busy strip, Stop and queue rows had rules here and have none now: a
+   console is a `Pane`, so its transcript, its busy line, its Esc and its §12 queue strip are the
+   terminal pane's widgets and the terminal pane's rules paint them. That is the point of the
+   card — "the queue doesn't work like the main terminal" — held down in this file as well. */
 /* Check and triage findings, and the survey's import offer: lists in the page that a click turns
    into a draft in the composer below them. */
 QWidget#boardChatFindings, QWidget#boardChatSurvey { background: @surface; border: 1px solid @border; border-radius: 8px; }
@@ -757,23 +750,12 @@ QLabel#boardChatFinding:hover { color: @text; }
 QCheckBox#boardChatProposal { color: @text; spacing: 5px; }
 QToolButton#boardChatImport { background: @raised; color: @text; border: 1px solid @accentBorder; border-radius: 6px; padding: 4px 10px; }
 QToolButton#boardChatImport:hover { border-color: @accent; }
-/* The prompt box, rule for rule the pane's (owner, 2026-09-20: "make it like the pane agent").
-   One rounded frame on @surface with the accent border while the cursor is in it, a borderless
-   editor in the prompt font inside it, and the chips under that at the pane's chip height — so a
-   helper's box and a terminal pane's are the same control in two places. The values are copied
-   from `QFrame#composer`, `QPlainTextEdit#composerEditor`, `QToolButton#stripChip` and
-   `QLabel#stripChipLabel` above rather than shared with them, because those selectors are what
-   theme::polishWindow() stamps onto a *pane's* widgets and a panel is not a pane. */
-QFrame#boardChatBox { background: @surface; border: 1px solid @border; border-radius: 10px; }
-QFrame#boardChatBox[relayActive="true"] { background: @raised; border: 1px solid @accentBorder; }
-QPlainTextEdit#boardChatComposer { background: transparent; border: none; padding: 2px 4px; font-family: "@mono"; font-size: 11pt; }
-QToolButton#boardChatMic { background: @raised; border: 1px solid @border; border-radius: 6px; padding: 2px 8px;
-                           color: @muted; font-size: 9pt; min-height: 17px; }
-QToolButton#boardChatMic:hover { color: @text; border-color: @accent; }
-QToolButton#boardChatMic[recording="true"] { color: @error; border-color: @error; }
-QLabel#boardChatContext { background: @raised; border: 1px solid @border; border-radius: 6px; padding: 2px 8px;
-                          color: @muted; font-size: 9pt; }
-QLabel#boardChatContext[warn="true"] { color: @warning; border-color: @warning; }
+/* The helper's prompt box had ten rules here — a frame, an editor, a mic chip and a context chip
+   — copied value for value from `QFrame#composer`, `QPlainTextEdit#composerEditor`,
+   `QToolButton#stripChip` and `QLabel#stripChipLabel` above, because "make it like the pane
+   agent" (owner, 2026-09-20) and a panel was not a pane. It is a pane now (card #AGNT), so the
+   copies are gone and the originals paint it: one control, one rule, and no second place for the
+   two to drift apart. */
 /* The list page's own tools (the count, the filter, the buttons, the section checkboxes) sit on
    a hairline over the rows; the pane's header carries nothing but the way back from a card. */
 QWidget#boardListTools { background: transparent; border-bottom: 1px solid @boardMetalDim; }

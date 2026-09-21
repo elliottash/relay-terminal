@@ -63,6 +63,7 @@ private slots:
     void theWindowMakesConsolesAndWiresThemAsPanesExceptWhereItMustNot();
     void theConsolesOfATabShareOneWorkerAndOneConversation();
     void theWindowsWrapperForwardsEveryContextVirtual();
+    void theHelperPanelAndItsModelBoxAreGoneFromTheTree();
     void anOptionOrSessionLinkOpensWhereItNames();
     void theBoardPanePaintsFromTheBoardMaterials();
     void tabMetersGiveWayOnlyWhenFullLabelsDoNotFit();
@@ -327,13 +328,22 @@ void BoardWorkspaceTests::aHelperThatDiesMidTurnPutsItsPanelsBack()
              "nothing is listening for a helper worker's death");
     const QString gone = bodyOf(text, QStringLiteral("void helperWorkerGone(const QString &tab, bool crashed) {"));
     QVERIFY2(!gone.isEmpty(), "RelayWindow::helperWorkerGone() is gone");
-    // It ends the turn the way a turn ends, so every panel already knows how to draw it…
+    // It ends the turn the way a turn ends, so every surface already knows how to draw it…
     QVERIFY2(gone.contains(QStringLiteral("QStringLiteral(\"error\")")), qPrintable(gone));
-    QVERIFY2(gone.contains(QStringLiteral("{QStringLiteral(\"chat\"), true}")), qPrintable(gone));
-    QVERIFY2(gone.contains(QStringLiteral("{QStringLiteral(\"pane\"), pane}")), qPrintable(gone));
-    // …and it reaches the embedded panels of Options, Actions and Sessions, not only the board.
-    QVERIFY2(gone.contains(QStringLiteral("deliverToHelperPanels(page, event)")), qPrintable(gone));
     QVERIFY2(gone.contains(QStringLiteral("m_helperWaiting.take(tab)")), qPrintable(gone));
+    // …including a **card** turn, which the consoles cannot answer for: the card page follows its
+    // own turn by card id, so with the worker gone its busy strip would stay up for ever and
+    // p/x/v would stay disabled. The surface a card turn carries is `card:<ID>` (protocol 33).
+    QVERIFY2(gone.contains(QStringLiteral("QStringLiteral(\"card:\")")), qPrintable(gone));
+    QVERIFY2(gone.contains(QStringLiteral("{QStringLiteral(\"card_id\"), surface.mid(5)}")), qPrintable(gone));
+    // The `chat: true` / `pane: <name>` tags the panels filtered on are gone with the panels
+    // (card #AGNT step 9), and so is the second delivery to them: nothing reads either.
+    QVERIFY2(!gone.contains(QStringLiteral("{QStringLiteral(\"chat\"), true}")), qPrintable(gone));
+    QVERIFY2(!gone.contains(QStringLiteral("QStringLiteral(\"pane\")")), qPrintable(gone));
+    QVERIFY2(!gone.contains(QStringLiteral("deliverToHelperPanels(page, event)")), qPrintable(gone));
+    // `deliverToHelperPanels` itself stays: the Test suites pane's `tests_*` and the Profile
+    // pane's `profile_*` ride the same tab worker and subscribe through `listenToHelper`.
+    QVERIFY(text.contains(QStringLiteral("void deliverToHelperPanels(QWidget *page, const QJsonObject &event) {")));
     // The waiting list is kept from the worker's own events. Since card #AGNT the wire says it in
     // one word: `board_chat_started`/`board_chat_queued` are retired, a console's turn is an
     // ordinary pane turn, and `surface` rides on `queued`, `agent_started` and `agent_finished`.
@@ -527,6 +537,36 @@ void BoardWorkspaceTests::theWindowsWrapperForwardsEveryContextVirtual()
     }
     // And the other direction: a card going busy or Options swapping mode still reaches the row.
     QVERIFY2(body.contains(QStringLiteral("m_host->onChanged = [this] { changed(); }")), qPrintable(body));
+}
+
+// Card #AGNT step 9. The helper was a second implementation of the prompt box — its own panel,
+// its own `board_chat` FIFO, its own model box — and the card is about there being one. These
+// five files are the second implementation, and a file that comes back is a second one coming
+// back, which is the thing to notice on the day it happens rather than a year later.
+void BoardWorkspaceTests::theHelperPanelAndItsModelBoxAreGoneFromTheTree()
+{
+    for (const char *gone : {"src/HelperChat.h", "src/HelperChat.cpp", "src/HelperModelBox.h",
+                             "src/HelperModelBox.cpp", "src/BoardChat.h",
+                             "tests/helpermodelbox_test.cpp"})
+        QVERIFY2(!QFile::exists(QStringLiteral(RELAY_SOURCE_DIR "/") + QLatin1String(gone)),
+                 qPrintable(QStringLiteral("%1 is back").arg(QLatin1String(gone))));
+
+    QFile lists(QStringLiteral(RELAY_SOURCE_DIR "/CMakeLists.txt"));
+    QVERIFY2(lists.open(QIODevice::ReadOnly | QIODevice::Text), "CMakeLists.txt could not be read");
+    const QString cmake = QString::fromUtf8(lists.readAll());
+    QVERIFY2(!cmake.contains(QStringLiteral("add_library(relay-helperchat")), "the library is back");
+    QVERIFY2(!cmake.contains(QStringLiteral("relay-helpermodelbox-tests")), "its test target is back");
+    // relay-board linked the panel's library for `relay-editor` and `relay-toollabel`; it names
+    // those two itself now, so the card page's reply box and a turn's progress line still build.
+    QVERIFY2(cmake.contains(QStringLiteral("target_link_libraries(relay-board PUBLIC relay-editor relay-toollabel")),
+             "relay-board lost the two libraries relay-helperchat used to bring it");
+
+    // And nothing in the window still names them. `relay::helpermodel` went with the box: every
+    // prompt box in Relay draws its own rows from its own worker now (#PK5Q).
+    const QString text = windowSource();
+    QVERIFY2(!text.contains(QStringLiteral("helpermodel")), "the window still names that namespace");
+    QVERIFY2(!text.contains(QStringLiteral("HelperModelBox")), "the window still includes HelperModelBox.h");
+    QVERIFY2(!text.contains(QStringLiteral("m_helperModels")), "the per-tab helper model state is back");
 }
 
 // `option:sec/row` and `session:<id>` are kinds of the transcript since step 8, so an answer that

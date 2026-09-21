@@ -10,7 +10,7 @@
 // hands the question to the owning pane through the view's `onAskOwner`, the pane puts it at its
 // composer's cursor and focuses it, and the person presses Enter — or does not. A **draft**,
 // never a send, exactly as a clicked Check finding drafts `board::fixRequest` into the
-// Switchboard's composer (src/BoardChat.h, owner 2026-09-19: "draft you confirm").
+// Switchboard's composer (src/BoardPane.h, owner 2026-09-19: "draft you confirm").
 //
 // The wording of every question lives in this one header, and both panes call it, so the Info row
 // and the Activity row cannot drift apart the way two hand-written strings would. The questions

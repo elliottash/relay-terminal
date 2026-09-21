@@ -230,7 +230,7 @@ bool eventForwarded(const QString &type, bool answersRequest)
         QStringLiteral("board_written"),  QStringLiteral("board_activity"),
         QStringLiteral("board_cancelled"), QStringLiteral("board_busy"),
         QStringLiteral("board_conflict")};
-    if (broadcast.contains(type) || type.startsWith(QStringLiteral("board_chat_")))
+    if (broadcast.contains(type))
         return true;
     static const QStringList answers{QStringLiteral("board_card"), QStringLiteral("board_search"),
                                      QStringLiteral("error")};
