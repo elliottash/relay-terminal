@@ -486,3 +486,68 @@ a non-zero `shellPid()` from an emulator with no program.
 `--check` is retired with the mover: nothing was moved, and `src/AgentConsole.h` is gone.
 `scripts/split-agent-console.py` keeps `--index`, `--coupling` and `--closure`, and says in its
 first paragraph why the waves were abandoned.
+
+<!-- relay:entry 20260921T025940Z-3v author=claude-code kind=progress -->
+Step 7 landed: **Options, Actions and Sessions are contexts, and their helper is a console**
+(`bc2db91e`).
+
+The three `HelperChatPanel`s are gone from `src/SettingsPane.{h,cpp}` and
+`src/Conversations.{h,cpp}`. Each host owns a `relay::agent::Context` and the window turns it into
+a no-shell `Pane` through `relay::agent::ConsoleFactory onCreateConsole` — **on first expand**, so
+a tab nobody asks anything pays for nothing (§33, owner decision 5).
+
+**`OptionsContext` is one class for both modes**, because Options and Actions are one widget:
+`spec().name`, `briefKey`, `briefTitle` and `placeholder()` all read `mode()`, and `setMode` calls
+`changed()` rather than swapping a pane string. `SessionsContext` is the Sessions pane's. Both:
+`agentRole "switchboard"`, `scope "console"` (named, never inferred — the accident that gave a
+board-less helper the full executor), `shell false`, `routing "agent"`, and
+`persist {scope: "helper", key: <tab id>}` with **no `persist` block at all** when no tab id is
+set, which is how a pane with no window says "no store".
+
+`screen` is what is being read, inside `kScreenLimit`: for Options the open section (`Options ›
+general`), the search text and as many visible row ids as fit; for Sessions the query, the filters
+actually narrowing (the first row of each box is its "any" and is skipped) and the selected row's
+title and id. `resolveLink` keeps each pane's own kind — `option:<sec>/<row>` reveals the row
+*here*, `session:<id>` selects it *here* — and returns false for everything else, which is how the
+console hands it to the window's routing (`openOutputTarget`, step 5).
+
+**What each host now exposes to the window**, name for name in both, so one template still wires
+them: `relay::agent::ConsoleFactory onCreateConsole`, `setHelperTabId(id)`,
+`setHelperWorkspace(path)`, `setHelperShortcut(hintId, keys)`, `focusHelper()`,
+`helperDraft(text)` (now `draftInComposer` through the handle), `agentConsole()` (the
+`ConsoleHandle`; its widget is null until the first expand) and `agentContext()`.
+
+**The collapsed row is the host's**, as the owner set it: one question-mark button at the bottom
+right reading "Helper Agent (Alt+Q)" in the live key wording, a `⌄` fold back to it, and the body
+bounded at ~40 % of the pane and never fewer than a few lines. `boardChatPanel`,
+`boardChatAskRow`, `boardChatAsk`, `boardChatBody`, `boardChatHead` and `boardChatFold` keep their
+object names and the icon's painter was copied rather than linked, so `src/Theme.cpp`'s rules and
+`relay-helperchat`'s retirement are both unaffected. With no factory there is no row at all — the
+libraries and their tests stand on their own.
+
+**One thing for step 5 to delete.** land.py builds *the tip plus my files*, and the tip's
+`RelayWindow::wireHelperPanel` still names `onHelperSend`, `nextHelperRequestId`, `helperEvent`,
+`setHelperPresets`, `addHelperComposerWidget`, `onHelperOpenCard/File/Session/Option`,
+`onHelperHint` and `helperPanel()`. Removing them outright would have put a non-compiling `main`
+on the branch, and the window rewrite could not land first because the tip had no
+`onCreateConsole`. So each of those names survives as a **stub that does nothing**, in one marked
+block per header headed "a bridge for card #AGNT step 5, and nothing else"; `helperPanel()`
+returns `nullptr` behind a forward declaration, so nothing links `relay-helperchat`, and
+`addHelperComposerWidget(box)` adopts and hides the box so the old wiring's model box cannot leak.
+**Delete the whole block in the window commit.** `onHelperHint` is not coming back: the key is in
+the button's own text, so the row teaches its own shortcut and there is no notice to fire.
+
+`relay-settings` and `relay-conversations` link `relay-agentcontext` instead of `relay-helperchat`
+(only my two hunks landed; step 6's `relay-board` hunk was left in the tree untouched).
+
+Tests: `ctest --test-dir build -R '^settings$|^conversations$'` — 2/2 green, and green again inside
+land.py's verify build of the exact tree. Each pane's helper case is rewritten against a fake
+`ConsoleHandle` (a plain `QWidget` and recording lambdas): no factory means no row and no handle;
+one factory means a collapsed row at the bottom right with the icon and "Helper Agent (Alt+Q)" /
+"(Ctrl+/)" and nothing built yet; expanding builds it exactly **once**, calls `setCollapsed(false)`
+and `focusComposer()`, and bounds the body; the spec's every field including the persist key; the
+mode swap leaving the same console in place; the `screen` hint; `option:`/`session:` resolving
+in-pane and the other kind refused; the fold, the re-expand and a draft.
+
+No live GUI drive here, as briefed — it needs the window's factory in the same binary. The
+integration pass is where the console is driven inside Options for real.
