@@ -22,11 +22,21 @@ from collections import deque
 from typing import Callable
 
 from .agent import validate_context
+from .agent_context import screen_line, validate_screen, validate_surface
 
 MAX_QUEUE = 32
 MAX_PROMPT = 131072
 PREVIEW = 120
 TERMINAL = {"done", "error", "cancelled"}
+
+
+def _surface_of(item: dict) -> dict:
+    """`{"surface": …}` when the item has one, `{}` when it has not (protocol 33).
+
+    Absent rather than empty, so a terminal pane's events are byte-for-byte what they were
+    before the field existed and a client that does not know it never has to skip it.
+    """
+    return {"surface": item["surface"]} if item.get("surface") else {}
 
 
 def validate_prompt(prompt) -> str:
@@ -46,6 +56,12 @@ class TurnSupervisor:
         self._closed = False
         self._outcome: str | None = None
         self._stop_reason: str | None = None
+        #: Which console the running turn was asked from (`ask {surface}`, protocol 33), or "".
+        #: Every event of that turn carries it, so several consoles can share one conversation
+        #: and each still knows which of its own asks an event belongs to — owner decision 1 on
+        #: card #AGNT: one conversation, drawn everywhere. A pane sends no surface and its
+        #: events are byte-for-byte what they always were.
+        self._surface = ""
         # Steering prompts waiting for the running turn's next step boundary.
         self._steer: list[dict] = []
         self._thread = threading.Thread(target=self._dispatch, name="relay-turns", daemon=True)
@@ -53,10 +69,12 @@ class TurnSupervisor:
 
     # ----- agent wiring -------------------------------------------------
     def agent_emit(self, event: dict) -> None:
-        """Emit callback to give the Agent; records how each turn ended."""
+        """Emit callback to give the Agent; records how each turn ended, and tags the surface."""
         if event.get("event") in TERMINAL:
             self._outcome = event["event"]
             self._stop_reason = event.get("stop_reason")
+        if self._surface:
+            event = {**event, "surface": self._surface}
         self._emit(event)
 
     @property
@@ -109,18 +127,36 @@ class TurnSupervisor:
                 ledger.set_status(item["ledger_id"], "cancelled_by_user", reason)
 
     def submit(self, prompt, when: str = "now", request_id=None, context=None, attachments=None,
-               origin: str = "user", requeue: bool = True, ledger_id=None) -> str:
+               origin: str = "user", requeue: bool = True, ledger_id=None,
+               surface: str = "", screen: str = "", readonly: bool = False) -> str:
         """origin "relay" marks prompts Relay queued itself (e.g. a background subagent finished).
 
         when="steer" delivers the prompt inside the running turn at its next step boundary. If no
         turn is running it is queued like "queue". A steer prompt the turn never reached (the model
         answered without another tool call, or the turn stopped) is reported with steer_returned and,
         when requeue is true, becomes the next queued turn.
+
+        `surface`, `screen` and `readonly` are protocol 33 (card #AGNT), and all three are the
+        *console's* fields rather than the terminal's:
+
+        * `surface` names which console asked. It rides on `queued`, on the queue rows and on
+          every event of the turn, so four consoles sharing one conversation each know which of
+          their own asks an event belongs to. A pane sends none and nothing changes for it.
+        * `screen` is at most 2 000 characters of what the asking surface is showing — the rows
+          being read, the search in the box. It reaches the model as an "On screen now:" line
+          above the prompt and is **not** put into the prompt the queue and the ledger keep: the
+          record is what the person typed. (It is not `context`, which is already the program
+          context object.)
+        * `readonly` is the turn that writes nothing by design — the Switchboard's survey, which
+          offers an import and waits for the owner's answer.
         """
         if when not in {"now", "queue", "interrupt", "steer"}:
             raise ValueError('"when" must be "now", "queue", "interrupt", or "steer".')
         if type(requeue) is not bool:
             raise ValueError("requeue must be a boolean.")
+        if type(readonly) is not bool:
+            raise ValueError("readonly must be a boolean.")
+        surface, screen = validate_surface(surface), validate_screen(screen)
         requested_steer = when == "steer"
         with self._lock:
             if when == "steer":
@@ -130,7 +166,9 @@ class TurnSupervisor:
                 if self._running is not None and not self._running.startswith(("compact-",)):
                     validate_context(context)
                     item = {"id": uuid.uuid4().hex, "prompt": prompt, "request_id": request_id,
-                            "context": context, "attachments": attachments, "origin": origin, "requeue": requeue}
+                            "context": context, "attachments": attachments, "origin": origin,
+                            "requeue": requeue, "surface": surface, "screen": screen,
+                            "readonly": readonly}
                     item["ledger_id"] = self._ledger_add(prompt, "steer", origin, attachments, ledger_id)
                     if ledger_id is not None and item["ledger_id"] is not None:
                         self._agent.requests.queued(ledger_id, item["id"])
@@ -139,7 +177,7 @@ class TurnSupervisor:
                     self._steer.append(item)
                     self._emit({"event": "queued", "id": item["id"], "request_id": request_id,
                                 "when": "steer", "position": len(self._steer) - 1, "origin": origin,
-                                "ledger_id": item["ledger_id"]})
+                                "ledger_id": item["ledger_id"], **_surface_of(item)})
                     self._changed_locked()
                     return item["id"]
                 when = "queue"
@@ -156,7 +194,8 @@ class TurnSupervisor:
             if when == "now" and busy:
                 raise ValueError("An agent turn is already active.")
             item = {"id": uuid.uuid4().hex, "prompt": prompt, "force": when != "queue", "context": context,
-                    "attachments": attachments, "origin": origin}
+                    "attachments": attachments, "origin": origin, "surface": surface,
+                    "screen": screen, "readonly": readonly}
             item["ledger_id"] = self._ledger_add(prompt, "steer" if requested_steer else when, origin, attachments,
                                                  ledger_id)
             if ledger_id is not None and item["ledger_id"] is not None:
@@ -171,7 +210,8 @@ class TurnSupervisor:
                 self._queue.append(item)
                 position = len(self._queue) - 1
             self._emit({"event": "queued", "id": item["id"], "request_id": request_id,
-                        "when": when, "position": position, "origin": origin, "ledger_id": item["ledger_id"]})
+                        "when": when, "position": position, "origin": origin,
+                        "ledger_id": item["ledger_id"], **_surface_of(item)})
             if when == "interrupt" and self._running is not None:
                 self._emit({"event": "interrupting", "id": self._running, "by": item["id"]})
                 self._stop_locked()
@@ -301,14 +341,17 @@ class TurnSupervisor:
         try:
             self.submit(item["prompt"], "interrupt", as_request_id or request_id, item.get("context"),
                         item.get("attachments"), origin=item.get("origin", "user"),
-                        ledger_id=item.get("ledger_id"))
+                        ledger_id=item.get("ledger_id"), surface=item.get("surface", ""),
+                        screen=item.get("screen", ""), readonly=bool(item.get("readonly")))
         except Exception:
             # Never lose the prompt: it goes back to the head of the queue instead (the invariant
             # at the top of this file), and the caller still sees the error.
             with self._lock:
                 self._queue.appendleft({"id": item["id"], "prompt": item["prompt"], "force": False,
                                         "context": item.get("context"), "attachments": item.get("attachments"),
-                                        "origin": item.get("origin", "user"), "ledger_id": item.get("ledger_id")})
+                                        "origin": item.get("origin", "user"), "ledger_id": item.get("ledger_id"),
+                                        "surface": item.get("surface", ""), "screen": item.get("screen", ""),
+                                        "readonly": bool(item.get("readonly"))})
                 self._changed_locked()
                 self._lock.notify_all()
             raise
@@ -326,7 +369,9 @@ class TurnSupervisor:
             if item.get("requeue", True):
                 front.append({"id": item["id"], "prompt": item["prompt"], "force": False,
                               "context": item.get("context"), "attachments": item.get("attachments"),
-                              "origin": item.get("origin", "user"), "ledger_id": item.get("ledger_id")})
+                              "origin": item.get("origin", "user"), "ledger_id": item.get("ledger_id"),
+                              "surface": item.get("surface", ""), "screen": item.get("screen", ""),
+                              "readonly": bool(item.get("readonly"))})
         for item in reversed(front):
             self._queue.appendleft(item)
 
@@ -347,7 +392,7 @@ class TurnSupervisor:
             self._changed_locked()
             self._lock.notify_all()
 
-    def remove(self, item_id) -> None:
+    def remove(self, item_id, request_id=None) -> None:
         """queue_remove: a queued prompt, or a steer the running turn has not taken yet (the ×
         on the pane's "next tool call" row). A steer the turn already took cannot be withdrawn."""
         with self._lock:
@@ -358,6 +403,7 @@ class TurnSupervisor:
                 self._emit({"event": "steer_removed", "id": steer["id"], "request_id": steer.get("request_id"),
                             "ledger_id": steer.get("ledger_id")})
                 self._changed_locked()
+                self._ack_locked("remove", item_id, request_id)
                 return
             for item in self._queue:
                 if item["id"] == item_id:
@@ -369,12 +415,50 @@ class TurnSupervisor:
             if not self._queue:
                 self._paused = False
             self._changed_locked()
+            self._ack_locked("remove", item_id, request_id)
 
-    def clear(self) -> None:
+    def move(self, item_id, to, request_id=None) -> None:
+        """queue_move: drag a queued prompt to another place in the line (protocol 33, #AGNT).
+
+        The helper's own FIFO had reorder and the pane's queue did not, which is one line of the
+        Issue's table. It moves a *queued* prompt only: a steer is already inside the running
+        turn and a forced item is an interrupt, so reordering either would mean something else.
+        `to` is clamped rather than refused — a drag past the end of a list that shrank under it
+        means "last", not "error".
+        """
+        with self._lock:
+            index = next((i for i, item in enumerate(self._queue) if item["id"] == item_id), -1)
+            if index < 0:
+                raise ValueError("That prompt is not queued (it may already have started).")
+            if not isinstance(to, int) or isinstance(to, bool):
+                raise ValueError("queue_move `to` must be a position in the queue.")
+            to = max(0, min(len(self._queue) - 1, to))
+            item = self._queue[index]
+            del self._queue[index]
+            self._queue.insert(to, item)
+            self._changed_locked()
+            self._ack_locked("move", item_id, request_id, to=to)
+
+    def clear(self, request_id=None) -> None:
         """queue_clear (and before a session load): waiting prompts are cancelled by the user."""
         with self._lock:
             self._ledger_cancel(list(self._queue) + list(self._steer), "Cleared from the queue by the user.")
             self._clear_locked()
+            self._ack_locked("clear", None, request_id)
+
+    def _ack_locked(self, op: str, item_id, request_id, **extra) -> None:
+        """The queue op's own answer, carrying its request id (protocol 33, #AGNT).
+
+        `queue_changed` says what the queue is now, but it carries no request id, so a client
+        that sent three ops could not tell which of them had landed — `board_chat_queue_remove`
+        and `_move` answered with nothing at all, which is one of the dead ends this card
+        collected. Sent only when the caller gave an id, so nothing new appears on the wire for
+        a GUI that does not ask.
+        """
+        if request_id is None:
+            return
+        self._emit({"event": "queue_ack", "id": request_id, "op": op,
+                    **({"item": item_id} if item_id is not None else {}), **extra})
 
     def shutdown(self, timeout: float = 1.0) -> None:
         with self._lock:
@@ -406,9 +490,10 @@ class TurnSupervisor:
     def _changed_locked(self) -> None:
         self._emit({"event": "queue_changed", "running": self._running, "paused": self._paused,
                     "items": [{"id": i["id"], "preview": i["prompt"][:PREVIEW], "forced": i["force"],
-                               "origin": i.get("origin", "user")}
+                               "origin": i.get("origin", "user"), **_surface_of(i)}
                               for i in self._queue],
-                    "steering": [{"id": i["id"], "preview": i["prompt"][:PREVIEW], "origin": i.get("origin", "user")}
+                    "steering": [{"id": i["id"], "preview": i["prompt"][:PREVIEW],
+                                  "origin": i.get("origin", "user"), **_surface_of(i)}
                                  for i in self._steer]})
 
     def _next_locked(self):
@@ -433,27 +518,45 @@ class TurnSupervisor:
                 agent.cancel_event.clear()
                 if not self._queue:
                     self._paused = False
+                # Protocol 33: this turn's console, so every event of it is addressed. Set under
+                # the lock with `_running`, because `agent_emit` reads it from the agent's own
+                # thread the moment the first delta arrives.
+                self._surface = item.get("surface", "")
                 # The queue item id doubles as the turn id (protocol 11).
-                self._emit({"event": "agent_started", "id": item["id"], "turn_id": item["id"]})
+                self._emit({"event": "agent_started", "id": item["id"], "turn_id": item["id"],
+                            **_surface_of(item)})
                 self._changed_locked()
+            readonly = bool(item.get("readonly"))
+            set_readonly = getattr(agent, "set_readonly", None)
             try:
                 extra = {"attachments": item["attachments"]} if item.get("attachments") else {}
                 if item.get("ledger_id"):
                     extra["ledger_id"] = item["ledger_id"]
-                agent.ask(item["prompt"], reset_cancellation=False, context=item.get("context"),
+                if readonly and set_readonly is not None:
+                    set_readonly(True)
+                # The "On screen now:" hint goes to the model and not into the prompt the queue
+                # and the ledger hold: the record is the person's own words (protocol 33).
+                hint = screen_line(item.get("screen"))
+                prompt = f"{hint}\n\n{item['prompt']}" if hint else item["prompt"]
+                agent.ask(prompt, reset_cancellation=False, context=item.get("context"),
                           turn_id=item["id"], **extra)
             except Exception as exc:  # ask() handles its own errors; this is defensive.
                 self._emit({"event": "error", "text": f"Agent error ({type(exc).__name__})."})
                 self._outcome = "error"
+            finally:
+                if readonly and set_readonly is not None:
+                    set_readonly(False)
             with self._lock:
                 outcome = self._outcome or "error"
-                finished = {"event": "agent_finished", "id": item["id"], "outcome": outcome}
+                finished = {"event": "agent_finished", "id": item["id"], "outcome": outcome,
+                            **_surface_of(item)}
                 if self._stop_reason:
                     finished["stop_reason"] = self._stop_reason
                 self._emit(finished)
                 if self._steer:
                     self._return_steer_locked()
                 self._running = None
+                self._surface = ""
                 self._settle_model_locked(agent, item["id"])
                 if outcome == "error" and any(not i["force"] for i in self._queue):
                     # Tool actions may already have run; do not fire queued prompts blindly.

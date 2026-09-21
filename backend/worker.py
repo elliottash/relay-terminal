@@ -13,7 +13,8 @@ from pathlib import Path
 from relay_core import (__version__, board_protocol, customproviders, hosted, keystore, keytest, localmodels, logs,
                         observe_protocol, roles as model_roles, session_protocol, skills, voice)
 from relay_core.agent import Agent, validate_turn_options
-from relay_core import activity_tools, agents_defs, app_tools, guest_harness_provider, openrouter_catalog
+from relay_core import activity_tools, agent_context, agents_defs, app_tools, guest_harness_provider
+from relay_core import openrouter_catalog
 from relay_core import request_stream, tool_stream
 from relay_core.subagents import SubagentFactory, SubagentManager
 from relay_core.keybindings import KeybindingCatalog
@@ -218,10 +219,22 @@ def main():
                 # so a missing key still lets the pane open and browse the cards (only board_ask
                 # needs the agent). Before 2026-09-17 a keyless window sat on "Loading…" forever.
                 board_summary = board.configure(board_workspace, request)
+                # Protocol 33 (card #AGNT): what this agent is *about*. One `configure` builds a
+                # terminal pane's agent or an agent console's, and the difference is this block —
+                # the surface's name, the role, the brief, where the conversation is kept, the
+                # named tool scope. A GUI that sends none gets a terminal pane, which is every
+                # worker before this card.
+                context = agent_context.from_request(request)
                 # Protocol 30.7: which tab this worker is the helper of. It keys the helper's
                 # conversation with the workspace `board.configure` has just settled, so the
-                # same tab comes back with its own history after a restart.
-                board.set_tab(request.get("tab"))
+                # same tab comes back with its own history after a restart. The context's
+                # `persist.key` is the same id by another name and wins when both are sent.
+                board.set_tab((context.persist_key if context is not None else "")
+                              or request.get("tab"))
+                # A console's board tools offer the console's set — merge, split, the import and
+                # `search_files` — for as long as the console exists, rather than for one turn
+                # the way a card's stage scope does (`ConsoleScope`, #AGNT).
+                board.console = context is not None and context.is_console()
                 config = session_protocol.provider_config(request)
                 # Tier A (protocol 29.3): a `guest:` preset makes the guest's own headless harness
                 # this pane's agent. `is_guest` here, the process started further down — after
@@ -233,7 +246,12 @@ def main():
                 # --- model roles (protocol 13) ---
                 role_table = model_roles.validate_roles(request.get("roles"))
                 tier_table = model_roles.validate_tiers(request.get("tiers"))
-                agent_role = model_roles.validate_role(request.get("agent_role") or "main")
+                # The role may be named at the top level (every GUI before #AGNT) or inside the
+                # context block; they say the same thing and the top level wins, so a GUI that
+                # sends both cannot contradict itself.
+                agent_role = model_roles.validate_role(
+                    request.get("agent_role")
+                    or (context.agent_role if context is not None else "") or "main")
                 # Protocol 23.10: stated in full by every `configure`, so a GUI that does not know
                 # the option — or one whose pane has just stopped needing the text — gets the
                 # default back rather than whatever the last pane asked for.
@@ -247,6 +265,16 @@ def main():
                 requests_stream.reset()
                 options = session_protocol.agent_options(request, workspace)
                 options["board"] = board.agent_tools(board_workspace, request)
+                if board.console and options["board"] is not None:
+                    options["board"].begin_console()
+                # Protocol 33: a console's conversation is kept where its context says, not in
+                # `relay/sessions/` — a console's chatter is not one of the person's own
+                # conversations and is not listed as one (14). The file layout is #FEJQ's,
+                # unchanged, so a tab's history from before this card is found by the same name.
+                console_dir, console_session = (context.store(board_workspace or "")
+                                                if context is not None else (None, None))
+                if console_dir:
+                    options["session_dir"] = console_dir
                 # Protocol 30.2: the `app` block, or None for a GUI that sent none — then this
                 # worker has no app tools at all, which is what every worker had before 30.
                 options["app"] = app.configure(request, workspace)
@@ -304,13 +332,30 @@ def main():
                 try:
                     agent = Agent(config, workspace, turns.agent_emit,
                                   provider=guest_provider or stand_in,
-                                  keybindings=catalog, skills=skill_index, roles=resolver, **options)
+                                  keybindings=catalog, skills=skill_index, roles=resolver,
+                                  # Protocol 33: the named scope and the brief. `tool_scope`
+                                  # decides the tool set in one place (`Agent.tools`) instead of
+                                  # being read off whether a board happens to be attached, and
+                                  # the brief goes into the system prompt rather than in front
+                                  # of every prompt.
+                                  tool_scope=(context.scope if context is not None else None),
+                                  context_spec=context, **options)
                 except Exception:
                     if guest_provider is not None:
                         guest_provider.close()   # never leave a guest with no pane to own it
                     raise
                 if guest_provider is not None:
                     guest_harness_provider.attach(agent, guest_provider)
+                if console_session:
+                    # The conversation this console had last time, loaded now that the agent
+                    # exists; a key nothing has been said under yet starts empty under that id,
+                    # and the ordinary end-of-turn autosave keeps it from then on (30.7). Never
+                    # fatal: a console whose history cannot be read is a console with no history,
+                    # not a surface that cannot be talked to.
+                    try:
+                        agent.adopt_session(console_session)
+                    except (ValueError, OSError):
+                        logs.event(log, "console_session_unreadable", level_name="warning")
                 # --- subagents ---
                 agents_request = request.get("agents") or {}
                 if not isinstance(agents_request, dict):
@@ -327,8 +372,10 @@ def main():
                 # agent's cancel_event, so Stop ends a turn that is waiting on the dialog.
                 board.bind_agent(agent)
                 # Protocol 30.3: Stop ends an `app_command` this agent is waiting on. And 30.5:
-                # `session_info` and `activity` are the *pane* agent's, so they are attached
-                # here and nowhere else — the helper worker's agents never get them.
+                # `session_info` and `activity` read this agent's *own* session — which is every
+                # agent's to read since #AGNT. They used to be attached to a pane's agent alone,
+                # so a console could not answer "why was that turn slow" about a turn of its own;
+                # now there is one agent per worker and it gets them whatever surface it serves.
                 app.bind_agent(agent)
                 activity_tools.ActivityTools.attach(agent, live_info=sessions.live_info)
                 subagents.configure(agent_catalog, subagent_factory)
@@ -341,6 +388,10 @@ def main():
                          "stream_tool_output": stream_tool_output[0],
                          **session_protocol.configured_fields(agent)}
                 event["agents"] = len(agent_catalog.definitions)  # subagents
+                if context is not None:
+                    # Echoed so the GUI can see that the worker read the surface it is drawn on
+                    # — the scope it settled on above all, since that is what decides the tools.
+                    event["context"] = {**context.to_json(), "scope": agent.tool_scope}
                 if board_summary is not None:
                     event["board"] = board_summary   # Switchboard (protocol 17)
                 if agent.executor.skills is not None:
@@ -450,7 +501,12 @@ def main():
                         raise ValueError(f"Skill: {exc}") from None
                 turns.submit(request.get("text", ""), request.get("when", "now"), request.get("id"),
                              request.get("context"), loaded or None,
-                             requeue=request.get("requeue", True))
+                             requeue=request.get("requeue", True),
+                             # Protocol 33 (#AGNT): which console asked, what it is showing, and
+                             # whether this turn writes anything. A terminal pane sends none of
+                             # the three and its turn is exactly what it was.
+                             surface=request.get("surface"), screen=request.get("screen"),
+                             readonly=bool(request.get("readonly", False)))
             elif kind == "queue_steer":
                 turns.steer(request.get("item"))
             elif kind == "queue_unsteer":
@@ -460,9 +516,14 @@ def main():
             elif kind == "resume_queue":
                 turns.resume()
             elif kind == "queue_remove":
-                turns.remove(request.get("item"))
+                turns.remove(request.get("item"), request.get("id"))
+            elif kind == "queue_move":
+                # Protocol 33: drag a queued prompt up or down the line. The helper's own FIFO
+                # had reorder and the pane's queue did not (#AGNT's Issue, itemised); now there
+                # is one queue and it has it.
+                turns.move(request.get("item"), request.get("to"), request.get("id"))
             elif kind == "queue_clear":
-                turns.clear()
+                turns.clear(request.get("id"))
             elif kind == "reset":
                 turns.reset()
                 subagents.stop_all(reset=True)

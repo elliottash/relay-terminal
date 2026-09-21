@@ -533,3 +533,134 @@ class SteerTests(unittest.TestCase):
         self.assertTrue(p.seen[1][-1]['content'].endswith('\nupgrade me'))
         with self.assertRaises(ValueError):
             self.sup.steer('nope')
+
+
+class ConsoleFieldTests(unittest.TestCase):
+    """`surface`, `screen`, `readonly` and `queue_move` — protocol 33, card #AGNT.
+
+    The helper's own FIFO had reorder and no steering; the pane's queue had steering and no
+    reorder; neither could say which of four consoles had asked. There is one queue now, and
+    these are the four things it gained on the way.
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.rec = Recorder()
+        self.sup = TurnSupervisor(self.rec)
+
+    def tearDown(self):
+        self.sup.shutdown(timeout=3)
+        self.temp.cleanup()
+
+    def use(self, provider):
+        self.agent = Agent(CONFIG, self.temp.name, self.sup.agent_emit, provider=provider)
+        self.sup.set_agent(self.agent)
+        return provider
+
+    def test_every_event_of_a_turn_carries_the_surface_that_asked(self):
+        p = self.use(GatedProvider())
+        item = self.sup.submit('what is in Options?', 'now', surface='options')
+        started = self.rec.wait(lambda e: e['event'] == 'agent_started')
+        self.assertEqual(started['surface'], 'options')
+        delta = self.rec.wait(lambda e: e['event'] == 'delta')
+        self.assertEqual(delta['surface'], 'options')     # through `agent_emit`, not only here
+        p.release.release()
+        finished = self.rec.wait(lambda e: e['event'] == 'agent_finished' and e['id'] == item)
+        self.assertEqual(finished['surface'], 'options')
+        self.assertEqual(self.rec.of('queued')[0]['surface'], 'options')
+
+    def test_a_pane_sends_no_surface_and_no_event_grows_the_field(self):
+        p = self.use(GatedProvider())
+        item = self.sup.submit('ls', 'now')
+        self.rec.wait(lambda e: e['event'] == 'agent_started')
+        p.release.release()
+        self.rec.wait(lambda e: e['event'] == 'agent_finished' and e['id'] == item)
+        self.assertFalse([e for e in self.rec.events if 'surface' in e])
+
+    def test_the_queue_rows_say_which_console_is_waiting(self):
+        p = self.use(GatedProvider())
+        self.sup.submit('first', 'queue', surface='switchboard')
+        self.rec.wait(lambda e: e['event'] == 'agent_started')
+        self.sup.submit('second', 'queue', surface='sessions')
+        rows = self.rec.of('queue_changed')[-1]['items']
+        self.assertEqual([r.get('surface') for r in rows], ['sessions'])
+        p.release.release(); p.release.release()
+
+    def test_the_screen_hint_reaches_the_model_and_not_the_record(self):
+        p = self.use(GatedProvider())
+        item = self.sup.submit('which row is that?', 'now', surface='options',
+                               screen='  Appearance ›  Copy on select  ')
+        self.rec.wait(lambda e: e['event'] == 'agent_started')
+        p.release.release()
+        self.rec.wait(lambda e: e['event'] == 'agent_finished' and e['id'] == item)
+        # The model is told what is on screen…
+        self.assertTrue(p.prompts[0].startswith('On screen now: Appearance › Copy on select\n\n'))
+        self.assertTrue(p.prompts[0].endswith('which row is that?'))
+        # …and what the queue and the pane hold is the person's own words.
+        self.sup.submit('and this one?', 'queue', surface='options', screen='another row')
+        row = self.rec.of('queue_changed')[-1]['items'][-1]
+        self.assertEqual(row['preview'], 'and this one?')
+        self.assertNotIn('On screen', json.dumps(self.rec.of('queue_changed')))
+        p.release.release()
+
+    def test_a_readonly_turn_is_read_only_for_exactly_that_turn(self):
+        seen = []
+        p = self.use(GatedProvider())
+        original = self.agent.set_readonly
+
+        def record(on, original=original):
+            seen.append(on)
+            original(on)
+        self.agent.set_readonly = record
+        item = self.sup.submit('survey the project', 'now', readonly=True)
+        self.rec.wait(lambda e: e['event'] == 'agent_started')
+        p.release.release()
+        self.rec.wait(lambda e: e['event'] == 'agent_finished' and e['id'] == item)
+        self.assertEqual(seen, [True, False])
+        self.assertFalse(self.agent.readonly_turn)
+
+    def test_queue_move_reorders_a_waiting_prompt(self):
+        p = self.use(GatedProvider())
+        self.sup.submit('running', 'queue')
+        self.rec.wait(lambda e: e['event'] == 'agent_started')
+        second = self.sup.submit('second', 'queue')
+        third = self.sup.submit('third', 'queue')
+        self.sup.move(third, 0, request_id='m1')
+        rows = self.rec.of('queue_changed')[-1]['items']
+        self.assertEqual([r['id'] for r in rows], [third, second])
+        ack = self.rec.of('queue_ack')[-1]
+        self.assertEqual((ack['id'], ack['op'], ack['item'], ack['to']), ('m1', 'move', third, 0))
+        for _ in range(3):
+            p.release.release()
+
+    def test_queue_move_clamps_rather_than_refusing_and_refuses_what_is_not_queued(self):
+        p = self.use(GatedProvider())
+        self.sup.submit('running', 'queue')
+        self.rec.wait(lambda e: e['event'] == 'agent_started')
+        second = self.sup.submit('second', 'queue')
+        self.sup.move(second, 99)                       # a drag past the end means "last"
+        self.assertEqual([r['id'] for r in self.rec.of('queue_changed')[-1]['items']], [second])
+        with self.assertRaises(ValueError):
+            self.sup.move('nope', 0)
+        with self.assertRaises(ValueError):
+            self.sup.move(second, 'first')
+        p.release.release(); p.release.release()
+
+    def test_remove_and_clear_answer_with_the_request_id_when_one_is_given(self):
+        p = self.use(GatedProvider())
+        self.sup.submit('running', 'queue')
+        self.rec.wait(lambda e: e['event'] == 'agent_started')
+        second = self.sup.submit('second', 'queue')
+        self.sup.remove(second, 'r7')
+        self.assertEqual(self.rec.of('queue_ack')[-1], {'event': 'queue_ack', 'id': 'r7',
+                                                        'op': 'remove', 'item': second})
+        self.sup.submit('third', 'queue')
+        self.sup.clear('r8')
+        self.assertEqual(self.rec.of('queue_ack')[-1], {'event': 'queue_ack', 'id': 'r8',
+                                                        'op': 'clear'})
+        # Nothing new on the wire for a caller that sends no id, as every GUI before #AGNT does.
+        self.sup.submit('fourth', 'queue')
+        before = len(self.rec.of('queue_ack'))
+        self.sup.clear()
+        self.assertEqual(len(self.rec.of('queue_ack')), before)
+        p.release.release()
