@@ -99,7 +99,7 @@ never returns to the model the owner was using, and its own sentence is overwrit
 - [x] the Ctrl+Alt+M dialog is where models are picked AND prioritized: tier tabs, reorder, add, remove, level, profile, "via" <!-- t:a7 -->
 - [x] the box as classes: top-N per class, Right expands, headers not selectable, exhausted hidden, model alone in the chip <!-- t:a8 -->
 - [x] defaults from a ranking file in the repo: 0 providers → Relay Free's three; 1 → one per class; 2+ → two per class, one per provider per class <!-- t:a9 -->
-- [ ] Options › Models: the tier lists and the checklist leave the page for the dialog <!-- t:a10 -->
+- [x] Options › Models: the tier lists and the checklist leave the page for the dialog <!-- t:a10 -->
 
 ## Execution Summary
 Seven tasks, each by an Opus subagent in a named area of the code, each landed through

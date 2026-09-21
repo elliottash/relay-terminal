@@ -329,3 +329,73 @@ test_guest_harness_provider (63), and `ctest -R modelcatalog` 55 cases including
 a file order that contradicts `accessRank` wins outright, a ranked entry still leads, and a pair
 where one side has no number falls back. No live call: the owner has no DeepSeek key stored, so
 the proof is the `presets` row built with a fake `RELAY_DEEPSEEK_API_KEY` and the socket poisoned.
+
+<!-- relay:entry 20260921T194000Z-v1 author=claude-fable kind=progress -->
+### Claude Fable · 2026-09-21 19:40
+**t:a10 — Options › Models keeps providers, keys and profiles** (design 5.5). Landed as five
+commits: `ef5417d5` the page, `b88e8282` the catalog and the dialog, `dd74b49a` a box follow-up,
+`f5cbf8f5` the docs, `d8605b83` the evidence.
+
+**Off the page.** The five tier-list groups — the numbered `models/tier/<tier>/<key>` rows, drag
+reorder, ×, the level choice, "+ add a model…" — and "fill the lists" (`models.tier.defaults`,
+with the `models.defaults.none` hint that only served it). And the whole "models in the picker"
+checklist: the provider heading toggle, the per-model checkboxes, the `models/collapsed` fold and
+the per-provider "add a model by id" box.
+
+**Where each one now lives.** The lists, the levels, reorder, remove and add are the Ctrl+Alt+M
+dialog, over the same `models/tier/<tier>` storage, so the two doors can never disagree. "fill the
+lists" is its **fill from defaults** / **…with openrouter** (t:a8 had already wired
+`ModelPicker::Context::fillFromDefaults` to `Pane::fillTierListsFromDefaults`). The checklist has
+no successor and needs none — see the next paragraph. "add a model by id" is the last row of the
+`all` tab, **+ add a model by id…** (`ModelPicker::addModelById`): pick a provider, type an id, and
+an id the catalog already holds is simply selected while one it does not is stored in
+`models/custom` as before. The guest permission row ("when it wants to use a tool") sat under its
+guest's models; it moved up under that guest's own provider row, which is what it is about.
+
+**`models/shown` is retired, and `shown()` is one rule.** `curation::shownKeys/isShown/setShown/
+resetShown` and `collapsedProviders/isCollapsed/setCollapsed` are gone; a settings file that still
+holds `models/shown` or `models/collapsed` is **ignored, not migrated**, because there is nothing
+left to migrate into. `models::shown(catalog)` is now: *every usable entry, in rank order, minus an
+open-ended provider's long tail* — an OpenRouter row that is not one of its tier defaults, that no
+tier list names and that you did not type yourself. That exception is the only one, and it exists
+because 446 live rows would be most of every list they appear in. `models::allUsable(catalog)` is
+the same walk without it, and only the dialog's filter reads it: the `all` tab searches it when
+something is typed and puts what `shown()` held back under **more from openrouter**, and a tier
+tab does the same below "not in this list", so ctrl+enter can put a tail model into a list — which
+is what makes it a listed model from then on.
+
+**A follow-up t:a8 left.** "Show this class in the box" took a class out of Alt+M even when the
+pane was *running* it, so a /high pane with high switched off opened a box with its own model
+nowhere in it and nothing highlighted. Same case as design 5.3's "if the pane's own model is below
+the cutoff its row is shown anyway": a switched-off class is drawn when, and only when, it is the
+class the pane is in, with the pane's own row and nothing else, no expansion, and a header tooltip
+that says why it is there.
+
+**Tests.** settings `theModelsPageHasNoTierListsAndNoChecklist`,
+`theModelsPageButtonOpensTheDialogOnMain`; modelcatalog `shownIsEveryUsableEntry`,
+`aStoredModelsShownListIsIgnored`, `anOpenEndedProvidersLongTailIsBehindTyping`,
+`theFallbackThreshold`; modelpicker `theAllTabKeepsTheLongTailBehindTyping`,
+`aTierTabsFilterReachesTheTailAndCtrlEnterAddsIt`, `addAModelByIdIsTheLastRowOfTheAllTab`;
+modelrows `aSwitchedOffClassKeepsThePanesOwnRow`.
+`ctest -R "modelrows|modelcatalog|modelpicker|modelsettings|settings"` 7/7.
+
+**Evidence.** `docs/qa_evidence/2026-09-21-models-page-trimmed/` — drive.sh, NOTES.md and seven
+Xvfb shots, with the owner's real 446-row OpenRouter cache copied into the sandbox and fetching
+switched off. The page top to bottom with no list and no checklist, the button opening the dialog
+on **main**, the `all` tab without the tail, "muse-spark" typed and five rows appearing under
+"more from openrouter", and "+ add a model by id…" as the last row.
+
+<!-- relay:entry 20260921T194001Z-v2 author=claude-fable kind=note -->
+### Claude Fable · 2026-09-21 19:40
+**The card's `links` line is still short, and I could not land it.** The front-matter line is
+inside a hunk another live session (`codex-startup`) is holding uncommitted — it is changing
+`status`, `assignee` and `links` together — so touching it here would land their change with mine.
+Whoever lands that hunk should carry these with it:
+
+- `links.commits` is missing `274078a8, 394b282d, 1fb79d59, 572684e1, a63f33f1, dfed0146,
+  edb298d3, 05b5ba4b` (the first two are already in their working copy), and now also t:a10's
+  `ef5417d5, b88e8282, dd74b49a, f5cbf8f5, d8605b83`.
+- `links.evidence` is missing `docs/qa_evidence/2026-09-21-model-box-classes`, and now also
+  `docs/qa_evidence/2026-09-21-models-page-trimmed`.
+
+Only `t:a10`'s tick is landed from this session. Every task on the card is now ticked.
