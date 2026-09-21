@@ -21,3 +21,6 @@ Implemented nested default-off option and policy; targeted panedimming tests pas
 
 <!-- relay:entry 20260921T213607Z-26 author=agent kind=event model=gpt-6-astra pane=805ecc13 turn=effa41d2945347edbbff9c46482b23a3/d64e72d3687d4a7eaacb367ec382b394 -->
 - ✦ agent moved this card · Executing → Needs verification · Targeted policy tests, exact app build, isolated Xvfb toggle/persistence checks pass; QA checklist and evidence recorded. · evidence docs/qa_evidence/2026-09-21-dim-active-pane/ · implemented_by openai/gpt-6-astra via codex
+
+<!-- relay:entry 20260921T213700Z-mx author=agent kind=event model=gpt-6-astra pane=805ecc13 turn=effa41d2945347edbbff9c46482b23a3/d64e72d3687d4a7eaacb367ec382b394 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-21-dim-activ… → {"plans": [], "commits": ["c9b00e167d9a19530d860acffb384500e2cfd885"], "evidence…

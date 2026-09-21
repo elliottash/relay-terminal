@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: zzzzzzzzzzzzzzzzx
 created: '2026-09-21'
 source: User request in Relay, 2026-09-21
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-dim-active-pane/], related: [RG0Z], github: null}
+links: {plans: [], commits: [c9b00e167d9a19530d860acffb384500e2cfd885], evidence: [docs/qa_evidence/2026-09-21-dim-active-pane/], related: [RG0Z], github: null}
 ---
 # Include the active pane in dim while working
 
