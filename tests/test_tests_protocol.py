@@ -761,7 +761,7 @@ class GateTest(TestsProtocolTest):
         error = self.errors()[0]
         self.assertEqual(error["code"], "tests_gate")
         self.assertEqual(error["tests"], ["ctest:vanished"])
-        self.assertIn("ctest:vanished", error["text"])
+        self.assertIn("(vanished)", error["text"])          # short in the sentence, full in `tests`
         self.assertEqual(self.board.card_by_id("EEE1").status, "needs-verification")
         self.assertEqual([e for e in self.events if e.get("event") == "board_written"], [])
 

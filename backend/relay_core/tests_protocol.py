@@ -1055,7 +1055,10 @@ class TestsCommands:
                 reasons.append(f"{test_id} last failed here")
         if not offending:
             return None
-        shown = ", ".join(offending[:3]) + ("…" if len(offending) > 3 else "")
+        # Short names in the sentence (the notice is one narrow box, and a unittest id is a
+        # whole dotted path); `tests` keeps the full ids for whoever needs them.
+        short = [name.split(":", 1)[-1].rsplit(".", 1)[-1] for name in offending]
+        shown = ", ".join(short[:3]) + ("…" if len(short) > 3 else "")
         return {"card": result["card"], "status": str(status or ""),
                 "tests": offending, "findings": result.get("findings") or [],
                 "message": (f"#{result['card']} still has {len(offending)} test(s) that do not "
