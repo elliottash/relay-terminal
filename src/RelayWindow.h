@@ -6998,6 +6998,7 @@ public:
             if (auto *w = windowOf(guard); w && !text.isEmpty()) w->statusBar()->showMessage(text, 9000);
         };
         view->onTitleChanged = [guard](const QString &) { if (auto *w = windowOf(guard)) w->updateTitles(); };
+        view->onNavigationChanged = [guard] { if (auto *w = windowOf(guard)) w->m_manager->scheduleSave(); };
         view->onOpenFile = [guard](const QString &path) {
             if (auto *w = windowOf(guard)) w->openPath(path, 0, guard);
         };
@@ -7823,8 +7824,10 @@ private:
                                                  board.value(QStringLiteral("self_closed")).toArray());
                 // Which of the signals rows were open (#AQ6X), set on the view rather than through
                 // one more argument: both are folded by default, so an older node opens nothing.
-                if (relay::BoardView *board_view = tool->board())
+                if (relay::BoardView *board_view = tool->board()) {
                     board_view->setOpenSignals(board.value(QStringLiteral("signals")).toArray());
+                    board_view->restoreNavigation(board.value(QStringLiteral("navigation")).toObject());
+                }
                 // A restored Switchboard attaches its tab, unless the tab already has a project —
                 // the saved `project` on the tab wins, and a tab holds one. Queued, because
                 // buildNode() runs before the page the pane will live in exists.

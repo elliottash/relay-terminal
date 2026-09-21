@@ -321,6 +321,9 @@ public:
     void openSelectedFile();
     void selectCard(const QString &id);
     QString selectedCard() const { return m_selected; }
+    std::function<void()> onNavigationChanged;
+    QJsonObject navigationState() const;
+    void restoreNavigation(const QJsonObject &state);
     // The notice line over the list: "Moved #K7Q2 to Ready · Undo", or a refused write.
     QString notice() const;
     // One line in that same notice area for a tool the *window* drives — the Profile run's
@@ -518,6 +521,7 @@ private:
     QString m_root;
     board::Model m_model;
     QString m_selected;
+    QJsonObject m_restoreNavigation;
     // The section whose fold row the selection is on (#93WR), or empty. Exactly one of this and
     // m_selected is ever set: the fold row is a selectable row that is not a card.
     QString m_selectedFold;

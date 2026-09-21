@@ -503,6 +503,7 @@ public:
                                                    {"collapsed", m_board->collapsedSections()},
                                                    {"hidden", m_board->hiddenSections()},
                                                    {"labels", m_board->labelFilter()},
+                                                   {"navigation", m_board->navigationState()},
                                                    {"self_closed", m_board->openSelfClosed()},
                                                    // Which of the two signal rows are open
                                                    // (#AQ6X): "signals", "dismissed". Same shape

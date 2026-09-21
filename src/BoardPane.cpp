@@ -4632,6 +4632,7 @@ void BoardView::buildListTools(QVBoxLayout *layout)
 
     connect(m_filter, &QLineEdit::textChanged, this, [this](const QString &text) {
         m_model.setFilter(text);
+        if (onNavigationChanged) onNavigationChanged();
         // The list redraws on this keystroke from the rows alone — the scoped terms and the
         // fields — and the worker's answer about the card bodies settles it a moment later
         // (#7M6E). The rows stopped carrying each card's text, which was 2.2 MB scanned on this
@@ -6165,6 +6166,7 @@ void BoardView::handleEvent(const QJsonObject &event)
         m_model.setConfig(m_config);
         m_model.reset(event.value(QStringLiteral("cards")).toArray());
         m_pendingDeletes.clear();
+        const QJsonObject navigation = m_restoreNavigation;
         const bool hadFocus = hasFocus();   // opened with Ctrl+Shift+S before the cards arrived
         rebuild();
         // A pane reopened with words already in its filter asks about them again: the answer it
@@ -6182,6 +6184,8 @@ void BoardView::handleEvent(const QJsonObject &event)
         if (hadFocus)
             focusInput();
         showProblems(event.value(QStringLiteral("problems")).toArray());
+        if (!navigation.isEmpty())
+            restoreNavigation(navigation);
         watchCardFiles();   // which cards are executing is only known once the rows are in (#N5JJ)
         if (onTitleChanged)
             onTitleChanged(title());
@@ -6284,6 +6288,7 @@ void BoardView::handleEvent(const QJsonObject &event)
         }
         const bool wasOpen = detailOpen();
         m_detail->setVisible(true);
+        if (onNavigationChanged) onNavigationChanged();
         if (!wasOpen)
             m_detailSized = false;
         updateDetailLayout();
@@ -7822,6 +7827,7 @@ void BoardView::closeDetail()
     m_follow->stop();
     m_detail->hide();
     m_signalDetail->hide();
+    if (onNavigationChanged) onNavigationChanged();
     updateDetailLayout();
     watchCardFiles();   // the card that was open no longer needs a watch of its own (#N5JJ)
     focusInput();
@@ -7898,6 +7904,31 @@ void BoardView::copyTag(const QString &tag)
 
 // Zoom to a card by id (#3ZAP): a `#ID` reference in a card's text takes the same path the
 // cleanup panel's `card:` anchors do.
+QJsonObject BoardView::navigationState() const
+{
+    if (!m_restoreNavigation.isEmpty())
+        return m_restoreNavigation;
+    return {{QStringLiteral("filter"), m_filter->text()},
+            {QStringLiteral("selected"), m_selected},
+            {QStringLiteral("card"), detailOpen() ? m_detail->cardId() : QString()}};
+}
+
+void BoardView::restoreNavigation(const QJsonObject &state)
+{
+    if (!m_open) {
+        m_restoreNavigation = state;
+        return;
+    }
+    m_restoreNavigation = {};
+    m_filter->setText(state.value(QStringLiteral("filter")).toString());
+    const QString selected = state.value(QStringLiteral("selected")).toString();
+    if (m_model.card(selected))
+        selectCard(selected);
+    const QString card = state.value(QStringLiteral("card")).toString();
+    if (m_model.card(card))
+        openCard(card);
+}
+
 void BoardView::openCard(const QString &id)
 {
     if (id.isEmpty())

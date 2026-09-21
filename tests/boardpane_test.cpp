@@ -64,10 +64,56 @@ class BoardPaneTests : public QObject {
     Q_OBJECT
 
 private slots:
+    void navigationSurvivesReload();
     void aCardOpenedInOnePaneDoesNotOpenInTheOther();
     void boardDataStillReachesBothPanes();
     void theCardPagesFlagClicksThroughToBoardPriority();
 };
+
+void BoardPaneTests::navigationSurvivesReload()
+{
+    const auto board = opened({row(QStringLiteral("K7Q2"), QStringLiteral("inbox"))});
+    relay::BoardView original(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    original.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    original.handleEvent(board);
+    original.openCard(QStringLiteral("K7Q2"));
+    auto reply = cardArrived(QStringLiteral("K7Q2"));
+    reply.insert(QStringLiteral("id"), sent.last().value(QStringLiteral("id")));
+    original.handleEvent(reply);
+    QVERIFY(original.detailOpen());
+    auto saved = original.navigationState();
+    saved.insert(QStringLiteral("filter"), QStringLiteral("label:bug"));
+
+    relay::BoardView restored(QStringLiteral("/tmp/workspace"));
+    sent.clear();
+    restored.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    restored.restoreNavigation(saved);
+    QCOMPARE(restored.navigationState(), saved); // also survives a save before loading finishes
+    QVERIFY(sent.isEmpty());
+    restored.handleEvent(board);
+    QCOMPARE(sent.last().value(QStringLiteral("type")).toString(), QStringLiteral("board_card_get"));
+    QCOMPARE(sent.last().value(QStringLiteral("card")).toString(), QStringLiteral("K7Q2"));
+    reply.insert(QStringLiteral("id"), sent.last().value(QStringLiteral("id")));
+    restored.handleEvent(reply);
+    QVERIFY(restored.detailOpen());
+    QCOMPARE(restored.navigationState(), saved);
+    restored.closeDetail();
+    QVERIFY(restored.navigationState().value(QStringLiteral("card")).toString().isEmpty());
+    sent.clear();
+    restored.handleEvent(board);
+    for (const auto &message : sent)
+        QVERIFY(message.value(QStringLiteral("type")) != QStringLiteral("board_card_get"));
+
+    relay::BoardView missing(QStringLiteral("/tmp/workspace"));
+    missing.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    missing.restoreNavigation(saved);
+    sent.clear();
+    missing.handleEvent(opened({}));
+    QVERIFY(!missing.detailOpen());
+    for (const auto &message : sent)
+        QVERIFY(message.value(QStringLiteral("type")) != QStringLiteral("board_card_get"));
+}
 
 // The report behind the card: two tabs, one Switchboard each, the same project. A card opened in
 // tab A opened in tab B too, because B handled the answer to A's own `board_card_get`. The fix is
