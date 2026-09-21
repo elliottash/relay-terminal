@@ -2700,7 +2700,10 @@ class BoardTools:
         except ValueError as exc:
             raise BoardToolError(str(exc), code="tests_refused") from exc
         return {"card": result["card"], "text": TP.format_findings(result),
-                "findings": result["findings"], "actions": result["actions"]}
+                # The statuses are the answer (#PR4Q), so the agent decides what the card page
+                # decides: `passed`, `failed`, `missing-evidence` or `not-applicable` per check.
+                "statuses": result.get("statuses") or [], "findings": result["findings"],
+                "actions": result["actions"]}
 
     def _tests_run(self, args: dict) -> dict:
         """`tests_run`: run the named tests and wait for the table.

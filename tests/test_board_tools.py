@@ -2630,7 +2630,10 @@ class TestsToolsTest(BoardToolsTest):
             "id": card_id, "base_hash": card_hash,
             "append_section": {"heading": "Tests", "text": "- `ctest -R nosuchtest`"}})
         result = self.tools.run("tests_check", {"card": card_id})
-        self.assertEqual([f["verdict"] for f in result["findings"]], ["gone"])
+        # #PR4Q: a retired check is `not-applicable` with an advisory notice beside it, and the
+        # agent's tool answers with the same four statuses the card page shows.
+        self.assertEqual([f["verdict"] for f in result["findings"]], ["retired"])
+        self.assertEqual([row["status"] for row in result["statuses"]], ["not-applicable"])
         self.assertIn("nosuchtest", result["text"])
 
     def test_tests_check_needs_a_card_that_exists(self):

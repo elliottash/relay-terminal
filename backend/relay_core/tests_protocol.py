@@ -75,7 +75,7 @@ SIGNALS_TYPES = frozenset({"signals_list", "signals_claim", "signals_release",
 
 #: The requests this class answers.  `board_protocol.TYPES` includes them and delegates here.
 TYPES = frozenset({"tests_list", "tests_run", "tests_stop", "tests_history", "tests_check",
-                   "tests_suggest"}) | SIGNALS_TYPES
+                   "tests_suggest", "tests_accept"}) | SIGNALS_TYPES
 
 #: The card section that lists what proves a card, and the statuses at which not having one is
 #: worth reporting: a card being worked, or waiting for a verifier, with no tests named is the
@@ -84,15 +84,35 @@ TESTS_HEADING = "Tests"
 UNTESTED_STATUSES = ("executing", "in-progress", "needs-verification",
                      "needs-qa-llm", "needs-qa-human")
 
-#: The dated block Check leaves under `## Tests` (#7BM4 phase 4).  A durable artefact rather
-#: than a toast — the Trunk shape — so the card itself says when it was last checked and what
-#: was wrong.  `### Check YYYY-MM-DD HH:MM`, local time, to the minute.
+#: The `### Check` block under `## Tests` (#7BM4 phase 4, rewritten by #PR4Q).  **One** current
+#: status, replaced in place — Codex's review §B: "show the latest status; retain history behind
+#: a link" — so a day of checking leaves one answer instead of a pile of dated blocks.  The
+#: history is the thread's `evidence` entries, which is what the block's last line points at.
+#: `### Check YYYY-MM-DD HH:MM`, local time, to the minute.
 CHECK_HEADING = "Check"
 CHECK_BLOCK_RE = re.compile(
     r"^###[ \t]+Check[ \t]+(?P<date>\d{4}-\d{2}-\d{2})[ \t]+(?P<time>\d{2}:\d{2})[ \t]*$", re.M)
-#: At most one block per card per hour: a Check pressed twice in a minute is one answer, not two
-#: entries in the card's history.  Inside the hour the findings are still sent to the GUI.
-CHECK_MIN_GAP_SECONDS = 3600.0
+#: The one line that ends a block: every earlier answer is a thread entry, not another block.
+CHECK_HISTORY_LINE = "history: thread"
+
+#: "Use this existing result" (#PR4Q): a run of another machine's that this card accepted as
+#: evidence for one revision.  It lives in the `### Check` block, so accepting writes no new
+#: front-matter field and a block rewritten by the next check carries it forward.
+ACCEPT_RE = re.compile(r"<!--\s*relay:accept\s+test=(?P<test>\S+)\s+run=(?P<run>\S+)"
+                       r"\s+rev=(?P<rev>\S+)\s*-->")
+#: A recorded override, in the `decision` entry the move left on the thread.  Scoped to the
+#: check **and** the revision and given an expiry, so the same known flake cannot be waved
+#: through for ever (§C: "an override becomes a rubber stamp when the same known flake …
+#: prompts it repeatedly").
+OVERRIDE_RE = re.compile(r"<!--\s*relay:override\s+test=(?P<test>\S+)\s+rev=(?P<rev>\S+)"
+                         r"\s+until=(?P<until>\d{4}-\d{2}-\d{2})\s*-->")
+OVERRIDE_DAYS = 14
+#: The note a card with no `## Tests` gets, once, when it is first moved towards a QA lane.
+TESTS_NONE_RE = re.compile(r"<!--\s*relay:tests-none\s+card=(?P<card>\S+)\s*-->")
+#: Characters of the commit an override and an accept are keyed to, and what stands in a
+#: marker for a card that has no commits yet — `rev=` with nothing after it would not parse.
+REVISION_CHARS = 12
+NO_REVISION = "none"
 
 #: The gate (#7BM4, owner 2026-09-20: Check "is a gate on leaving `needs-verification`, with a
 #: recorded override").  Moving *out of* `needs-verification` towards one of these is a landing:
@@ -100,9 +120,11 @@ CHECK_MIN_GAP_SECONDS = 3600.0
 GATE_FROM_STATUS = "needs-verification"
 GATE_TO_STATUSES = ("needs-qa", "needs-qa-llm", "needs-qa-human", "needs-review", "done",
                     "verified")
-#: The verdicts that stop a landing.  `skipped-forever`, `edited`, `flaky` and `slow` are worth
-#: reading and are not worth blocking on: they say a test is weak, not that the card is unproven.
-GATE_VERDICTS = ("gone", "never-run")
+#: The statuses that stop a landing (#PR4Q).  `not-applicable` never does — a retired check is
+#: a thing to replace, not evidence that the work is unfinished — and the advisory verdicts
+#: (`skipped-forever`, `edited`, `flaky`, `slow`) say a test is weak, not that the card is
+#: unproven, so they are read and not blocked on.
+GATE_STATUSES = H.BLOCKING_STATUSES
 
 #: Ceilings.  A run is the owner's or the agent's deliberate act, so these are about what can
 #: be typed by mistake, not about what is allowed to take time.
@@ -115,6 +137,7 @@ MAX_HISTORY_LIMIT = 500         # executions one `tests_history` may carry
 MAX_COMMITS = 20                # commits of a card read for their changed files
 MAX_CHANGED_FILES = 400
 MAX_SUGGESTED = 20           # lines one `tests_suggest` appends to a card
+MAX_REFRESHED_CARDS = 20     # cards one finished run re-checks (#PR4Q)
 #: Decision 3's re-run is a **separate** run in the store, so a fail-fail really is two
 #: consecutive failing executions and a fail-pass really is one tree disagreeing with itself.
 RERUN_SUFFIX = "-rerun"
@@ -226,6 +249,11 @@ class TestsCommands:
         self.pane_token = pane_token or None
         self._signals_sent: dict | None = None
         self._tools = None
+        #: Accepted results not yet written into a card's `### Check` block: `{card: {run_id:
+        #: {test, rev, host, commit, ts}}}`.  `accept_result` puts one here and immediately
+        #: re-checks, and the block rewrite that follows carries it into the card, where it
+        #: lives from then on.
+        self._accepts: dict[str, dict[str, dict]] = {}
         #: How a signal thread is started (#AQ6X step 7b).  Set by whoever built this instance and
         #: has a `SubagentManager` — `board_protocol._tests()` in the worker, a fake in a test, and
         #: nothing at all for the agent's own tool instance, which must not start background work.
@@ -304,6 +332,11 @@ class TestsCommands:
         elif kind == "tests_suggest":
             self.emit_suggest(request.get("card"), request.get("id"),
                               apply=request.get("apply", True))
+        elif kind == "tests_accept":
+            # `id` is the **test** here, as it is on `tests_history` (31.8): one JSON object
+            # cannot carry the name twice, and the answer is a fresh `tests_check` event.
+            self.accept_result(request.get("card"), request.get("id") or request.get("test"),
+                               request.get("run_id"))
         elif kind in SIGNALS_TYPES:
             self.dispatch_signal(kind, request)
         return True
@@ -484,14 +517,19 @@ class TestsCommands:
                             f"`tests/test_board.py::CardTests::test_roundtrip`."),
                 "severity": "warning"}],
                 "actions": ["Add the tests this card's commits touched"],
-                "ids": [], "files": {}, "failing": [],
+                "ids": [], "files": {}, "failing": [], "statuses": [],
+                "revision": self.card_revision(ident, card)[2],
                 **self.signal_block(ident, card)}
         lines = section_lines(card.body, span)
         discovered = P.discover(self.project, build_dir=self.build_dir(build_dir))
         executions = H.read(self.store_path())
         index, _ = self.card_index()
         records = H.records(discovered, executions, index)
-        result = H.check_card(lines, self.card_files(ident, card), records)
+        commits, since, revision = self.card_revision(ident, card)
+        accepted = self.accepted_runs(ident, card, revision)
+        result = H.check_card(lines, self.card_files(ident, card), records, commits=commits,
+                              since=since, accepted=sorted(accepted), host=_hostname())
+        result["revision"] = revision
         extra = resolved_tests(lines, records)
         # A test whose last stored result was not a pass is a finding here, not only an action.
         # `test_history.check_card` answers "is this list stale?", and a failing test is not
@@ -502,6 +540,63 @@ class TestsCommands:
                 extra["failing"], {f.get("test") for f in result.get("findings") or []}, records)
         return {"card": ident, **result, **extra,
                 **self.signal_block(ident, card, discovered=discovered, executions=executions)}
+
+    def card_revision(self, card_id: str, card=None) -> tuple[list[str], str, str]:
+        """`(commits, since, revision)`: what "this revision" means for one card.
+
+        `commits` are the card's own commits (`links.commits`, then `git log --grep '#ID'`, the
+        way `card_files` finds them), `since` is the ISO time of the newest of them, and
+        `revision` is that commit's first `REVISION_CHARS` characters — the key an override and
+        an accepted result are scoped to.  A card with no commits yet has no revision: `("", "")`
+        and an empty list, which `test_history.applicable` reads as "every run of today's test
+        counts", the answer this gave before statuses existed.
+        """
+        from . import qa_verifiers as QA
+        links = (card.front.get("links") if card is not None else None) or {}
+        try:
+            rows = QA.card_commits(self.project, card_id,
+                                   links if isinstance(links, dict) else {})
+        except Exception:                                    # pragma: no cover - defensive
+            rows = []
+        commits = [str(row.get("hash") or "") for row in rows[:MAX_COMMITS] if row.get("hash")]
+        if not commits:
+            return [], "", ""
+        return commits, self._newest_commit_time(commits), commits[0][:REVISION_CHARS]
+
+    def _newest_commit_time(self, commits: Sequence[str]) -> str:
+        """The newest of these commits' commit times, ISO-8601, or "" when git cannot say.
+
+        One `git log --no-walk` for the whole list rather than one call per commit: a check runs
+        on every button press and on every finished run.
+        """
+        try:
+            done = subprocess.run(["git", "-C", str(self.project), "log", "--no-walk",
+                                   "--format=%cI", *commits],
+                                  capture_output=True, text=True, timeout=GIT_TIMEOUT)
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        if done.returncode != 0:
+            return ""
+        stamps = [line.strip() for line in done.stdout.splitlines() if line.strip()]
+        return max(stamps) if stamps else ""
+
+    def accepted_runs(self, card_id: str, card=None, revision: str = "") -> set[str]:
+        """The run ids this card's `### Check` status accepts as evidence for `revision`.
+
+        The markers live in the block itself (`<!-- relay:accept … -->`), so "Use this existing
+        result" adds no front-matter field, and an accept made for an older revision simply
+        stops counting when the card gets a new commit.
+        """
+        out: set[str] = {run for run, row in (self._accepts.get(card_id) or {}).items()
+                         if not revision or row.get("rev") == revision}
+        body = getattr(card, "body", "") or ""
+        span = B.section_span(body, TESTS_HEADING)
+        if span is None:
+            return out
+        for match in ACCEPT_RE.finditer(body[span[0]:span[1]]):
+            if match.group("rev") in (revision or NO_REVISION, ""):
+                out.add(match.group("run"))
+        return out
 
     def signal_block(self, card_id: str, card, *, discovered=None, executions=None) -> dict:
         """`{"blocks": […], "open_before": […]}` for one card (decision 8, #AQ6X step 5).
@@ -539,14 +634,18 @@ class TestsCommands:
                    **({"block": written} if written else {})})
         return result
 
-    # ---- the dated `### Check` block -------------------------------------------
+    # ---- the one current `### Check` block --------------------------------------
     def write_check_block(self, result: dict) -> str:
-        """Append (or replace) `### Check <date>` under the card's `## Tests`.  "" when it did not.
+        """Write the card's **one** `### Check` status, in place.  "" when it wrote none.
 
-        Two rules, both about not turning a card into a log: **at most one block an hour** — a
-        button pressed twice in a minute is one answer — and, when an hour has passed but the
-        newest block is from **today**, that block is *replaced* rather than stacked on, so a day
-        of checking leaves one current line instead of twelve historical ones.
+        Codex's review §B: "show the latest status; retain history behind a link".  So there is
+        no pile of dated blocks any more and no one-an-hour rule: every check replaces the block
+        where it stands (and removes any older ones the card still carries), and the history is
+        the thread's `evidence` entries, which the block's last line names.
+
+        The block is one line per listed test with its **status**, then the advisory findings,
+        then any accepted results — those carry a `<!-- relay:accept … -->` marker and are
+        carried forward, so "Use this existing result" survives the next check.
         """
         ident = str(result.get("card") or "")
         if not ident or any(f.get("verdict") == "no-tests" for f in result.get("findings") or []):
@@ -559,25 +658,84 @@ class TestsCommands:
         if span is None:
             return ""
         section = card.body[span[0]:span[1]]
-        now = datetime.datetime.now()
-        newest = _newest_check(section)
-        if newest is not None and (now - newest[1]).total_seconds() < CHECK_MIN_GAP_SECONDS:
-            return ""                       # inside the hour: the GUI still has the findings
-        stamp = now.strftime("%Y-%m-%d %H:%M")
-        block = f"### {CHECK_HEADING} {stamp}\n" + _check_lines(result)
-        if newest is not None and newest[1].date() == now.date():
-            start, end = newest[0]
-            body = card.body[:span[0] + start] + block + card.body[span[0] + end:]
-        else:
-            body = B.append_body_section(card.body, TESTS_HEADING, block)
-        card.body = body
+        stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        block = (f"### {CHECK_HEADING} {stamp}\n"
+                 + _check_lines(result)
+                 + self._accept_lines(ident, section, result.get("revision") or "")
+                 + CHECK_HISTORY_LINE + "\n")
+        card.body = card.body[:span[0]] + replace_check_blocks(section, block) + card.body[span[1]:]
         try:
             board.save(card)
             board.append_thread(ident, f"Check · {_check_sentence(result)}",
                                 author="agent", kind="evidence")
         except (B.BoardError, OSError):                   # pragma: no cover - defensive
             return ""
+        self._accepts.pop(ident, None)                    # it is in the card now
         return stamp
+
+    def _accept_lines(self, card_id: str, section: str, revision: str) -> str:
+        """The `- accepted ·` lines of the new block: the card's own, plus any just made.
+
+        An accept made for another revision is dropped rather than carried: the card moved on,
+        and a result accepted for the code before it is not evidence about the code after it.
+        """
+        rows: dict[str, dict] = {}
+        for match in ACCEPT_RE.finditer(section):
+            if match.group("rev") != (revision or NO_REVISION):
+                continue
+            rows[match.group("run")] = {"test": match.group("test"), "rev": match.group("rev")}
+        for run, row in (self._accepts.get(card_id) or {}).items():
+            if not revision or row.get("rev") == revision:
+                rows[run] = row
+        out = []
+        for run, row in rows.items():
+            where = f" from {row['host']}" if row.get("host") else ""
+            when = f", {row['ts']}" if row.get("ts") else ""
+            out.append(f"- accepted · {row.get('test', '')} — run {run}{where}{when} accepted as "
+                       f"evidence for this revision "
+                       f"<!-- relay:accept test={row.get('test', '')} run={run} "
+                       f"rev={row.get('rev') or revision or NO_REVISION} -->")
+        return ("\n".join(out) + "\n") if out else ""
+
+    # ---- tests_accept -----------------------------------------------------------
+    def accept_result(self, card_id, test_id, run_id) -> dict:
+        """"Use this existing result": record that a run already in the store proves this card.
+
+        The run is one another machine produced — ingested from `.private/tests/incoming/` by
+        `ingest_incoming`, or simply run elsewhere — so nothing is executed here.  The acceptance
+        is written into the card's `### Check` status (no new front-matter field) and quoted on
+        the thread, and the answer is a fresh `tests_check` event, so the strip updates itself.
+        """
+        ident = str(card_id or "").strip().lstrip("#").upper()
+        run = str(run_id or "").strip()
+        test = str(test_id or "").strip()
+        if not ident or not run:
+            raise ValueError("tests_accept needs `card` and `run_id`: the card, and the run "
+                             "whose result it accepts.")
+        board = self.board()
+        card = board.card_by_id(ident) if board is not None else None
+        if card is None:
+            raise ValueError(f"No card #{ident} on this board.")
+        rows = [row for row in H.read(self.store_path()) if row.run_id == run]
+        if not rows:
+            raise ValueError(f"Run {run} is not in this board's test history, so there is no "
+                             f"result to accept.")
+        picked = next((row for row in reversed(rows) if not test or row.id == test), rows[-1])
+        revision = self.card_revision(ident, card)[2]
+        self._accepts.setdefault(ident, {})[run] = {
+            "test": test or picked.id, "rev": revision, "host": picked.host,
+            "commit": picked.commit, "ts": picked.ts}
+        try:
+            board.append_thread(
+                ident,
+                f"Accepted run `{run}` of `{test or picked.id}` from "
+                f"{picked.host or 'another machine'} ({picked.commit[:12] or 'unknown commit'}, "
+                f"{picked.result}) as evidence for "
+                f"{('revision ' + revision) if revision else 'this card'}.",
+                author="agent", kind="evidence")
+        except (B.BoardError, OSError):                   # pragma: no cover - defensive
+            pass
+        return self.emit_check(ident)
 
     # ---- tests_suggest ---------------------------------------------------------
     def suggest_tests(self, card_id, *, build_dir=None) -> dict:
@@ -1032,39 +1190,109 @@ class TestsCommands:
     def gate_move(self, card_id, status) -> dict | None:
         """Why this card may not leave `needs-verification` yet, or None when it may.
 
-        The owner's rule (#7BM4): a card does not land while the tests it *names* are gone,
-        have never run, or last failed.  A card that names **no** tests is not gated — the
-        `no-tests` finding is advisory, because gating on it would stop every card that predates
-        the section from ever closing.
+        The rule (#PR4Q, Codex's review §C: "block acceptance for explicitly required checks
+        with applicable failures or missing evidence"): a listed test whose status is `failed`
+        or `missing-evidence` stops the landing.  `not-applicable` never does — a retired check
+        is a thing to replace — and the advisory verdicts never did.
+
+        Two things get past it.  A **recorded override** scoped to (check, revision): a decision
+        entry on the thread carrying `<!-- relay:override test=… rev=… until=… -->`, which this
+        reads, so the same override is never asked for twice for the same check and the same
+        revision, and expires with `until`.  And a card with **no `## Tests` section**, which is
+        no longer waved through in silence (§C: "a card without `## Tests` is ungated. That
+        rewards omitting evidence"): the first landing move is answered with the one-sentence
+        `tests_none` advisory — *which checks prove this card?* — recorded on the thread as a
+        note so it is asked exactly once, and a second attempt goes through.
         """
         result = self.check_card(card_id)
+        ident = str(result.get("card") or card_id)
         if any(f.get("verdict") == "no-tests" for f in result.get("findings") or []):
-            return None
+            if self.tests_none_asked(ident):
+                return None
+            self._note_tests_none(ident)
+            return {"code": "tests_none", "card": ident, "status": str(status or ""),
+                    "tests": [], "findings": result.get("findings") or [], "statuses": [],
+                    "revision": result.get("revision") or "",
+                    "message": (f"#{ident} names no checks, so nothing here says it works: "
+                                f"which checks prove it? Add them to `## Tests`, or say that "
+                                f"none apply and move it again."),
+                    "reasons": []}
+        revision = str(result.get("revision") or "")
+        overridden = self.live_overrides(ident, revision)
         offending: list[str] = []
         reasons: list[str] = []
-        for finding in result.get("findings") or []:
-            if finding.get("verdict") not in GATE_VERDICTS:
+        for row in result.get("statuses") or []:
+            if row.get("status") not in GATE_STATUSES:
                 continue
-            name = str(finding.get("test") or "")
-            if name and name not in offending:
-                offending.append(name)
-            reasons.append(str(finding.get("message") or ""))
-        for test_id in result.get("failing") or []:
-            if test_id not in offending:
-                offending.append(test_id)
-                reasons.append(f"{test_id} last failed here")
+            name = str(row.get("test") or "")
+            if not name or name in overridden or name in offending:
+                continue
+            offending.append(name)
+            reasons.append(f"{row.get('status')}: {row.get('message') or name}")
         if not offending:
             return None
         # Short names in the sentence (the notice is one narrow box, and a unittest id is a
         # whole dotted path); `tests` keeps the full ids for whoever needs them.
         short = [name.split(":", 1)[-1].rsplit(".", 1)[-1] for name in offending]
         shown = ", ".join(short[:3]) + ("…" if len(short) > 3 else "")
-        return {"card": result["card"], "status": str(status or ""),
+        counts = {}
+        for row in result.get("statuses") or []:
+            if str(row.get("test") or "") in offending:
+                counts[row.get("status")] = counts.get(row.get("status"), 0) + 1
+        words = ", ".join(f"{n} {kind}" for kind, n in sorted(counts.items()))
+        return {"code": "tests_gate", "card": ident, "status": str(status or ""),
                 "tests": offending, "findings": result.get("findings") or [],
-                "message": (f"#{result['card']} still has {len(offending)} test(s) that do not "
-                            f"prove it ({shown}): run or fix them, or move it with an override "
-                            f"that says why."),
+                "statuses": result.get("statuses") or [], "revision": revision,
+                "message": (f"#{ident} is not proven yet: {words} ({shown}). Run them, use an "
+                            f"existing result, or move it with an override that says why."),
                 "reasons": reasons}
+
+    # ---- the two things recorded on the thread ---------------------------------
+    def live_overrides(self, card_id: str, revision: str) -> set[str]:
+        """The checks this card has a live override for at `revision`.
+
+        Live means the marker names this revision and its `until` date has not passed.  An
+        override recorded for another revision is not one for this one: the code changed, so the
+        reason it was waved through may not hold any more (§C: "invalidate it when those
+        conditions change").
+        """
+        out: set[str] = set()
+        today = datetime.date.today().isoformat()
+        for match in OVERRIDE_RE.finditer(self._thread_text(card_id)):
+            if match.group("rev") != (revision or NO_REVISION):
+                continue
+            if match.group("until") < today:
+                continue
+            out.add(match.group("test"))
+        return out
+
+    def tests_none_asked(self, card_id: str) -> bool:
+        """Has this card already been asked which checks prove it?  Asked once, ever."""
+        return bool(TESTS_NONE_RE.search(self._thread_text(card_id)))
+
+    def _note_tests_none(self, card_id: str) -> None:
+        board = self.board()
+        if board is None:
+            return
+        try:
+            board.append_thread(
+                card_id,
+                "Moving this card towards a QA lane asked which checks prove it: it has no "
+                "`## Tests` section. Add the checks to `## Tests`, or answer that none apply — "
+                "either way the move goes through next time, and this is asked once.\n\n"
+                f"<!-- relay:tests-none card={card_id} -->",
+                author="agent", kind="note")
+        except (B.BoardError, OSError):                   # pragma: no cover - defensive
+            pass
+
+    def _thread_text(self, card_id: str) -> str:
+        board = self.board()
+        if board is None or not card_id:
+            return ""
+        try:
+            return "\n".join(entry.text or "" for entry in board.thread(card_id))
+        except (B.BoardError, OSError):                   # pragma: no cover - unreadable thread
+            return ""
 
     def card_files(self, card_id: str, card=None) -> list[str]:
         """The repo-relative files this card's commits touched, newest commit first.
@@ -1232,6 +1460,10 @@ class TestsCommands:
                 self.fold_signals(run=run)
             except Exception:                                # pragma: no cover - defensive
                 pass
+            try:
+                self.refresh_checks([row.id for row in executions])
+            except Exception:                                # pragma: no cover - defensive
+                pass
         except Exception as exc:                             # pragma: no cover - belt and braces
             run.state = "error"
             run.message = f"The test run failed: {type(exc).__name__}: {str(exc)[:300]}"
@@ -1247,6 +1479,37 @@ class TestsCommands:
             except Exception:                                # pragma: no cover - defensive
                 pass
             run.finished.set()
+
+    def refresh_checks(self, ran: Sequence[str]) -> list[str]:
+        """Re-check every card whose `## Tests` names a test this run touched.  The cards it did.
+
+        Codex's review §B: "update evidence status automatically after runs".  The card page
+        routes a `tests_check` event by its card, so the open card's strip redraws itself
+        without anybody pressing Check, and the card file's own status is current for whoever
+        reads it next.  The index is already resolved for the run, so this costs one check per
+        affected card and nothing at all when a run touched no card's tests.
+        """
+        ids = {str(one) for one in ran or [] if one}
+        if not ids:
+            return []
+        index, _ = self.card_index()
+        done: list[str] = []
+        for card_id, lines in index.items():
+            named = {str(entry.get("id") or "") for entry in
+                     (H.parse_test_line(line) for line in lines) if entry}
+            # A line may name a whole file or a ctest regex, so an exact id is not enough: a
+            # prefix of a dotted unittest id, or the id the line resolved to, both count.
+            if not any(one in named or any(one.startswith(name + ".") or name.startswith(one)
+                                           for name in named) for one in ids):
+                continue
+            try:
+                self.emit_check(card_id)
+                done.append(card_id)
+            except (ValueError, B.BoardError, OSError):      # pragma: no cover - defensive
+                continue
+            if len(done) >= MAX_REFRESHED_CARDS:
+                break
+        return done
 
     def _note_run(self, run_id: str) -> None:
         """Leave one `run` line in the signal log: this run, and the pane whose it was.
@@ -1531,10 +1794,29 @@ def _hostname() -> str:
 
 
 def format_findings(result: dict) -> str:
-    """A `tests_check` answer as the text an agent reads: one line per finding, then the actions."""
+    """A `tests_check` answer as the text an agent reads: the statuses, then what is advisory."""
     findings = result.get("findings") or []
+    statuses = result.get("statuses") or []
     card = result.get("card") or ""
     signals = _signal_lines(result)
+    if statuses:
+        counts = status_counts(result)
+        head = [f"#{card}: " + ", ".join(f"{n} {kind}" for kind, n in sorted(counts.items()))
+                + (f" (revision {result['revision']})" if result.get("revision") else "") + "."]
+        for row in statuses:
+            head.append(f"- {row.get('status', '')} · {row.get('test', '')}: "
+                        f"{row.get('message', '')}"
+                        + ("  [a result from another machine is offered: "
+                           "Use this existing result]" if row.get("use_existing") else ""))
+        for item in findings:
+            test = item.get("test") or ""
+            head.append(f"- [{item.get('severity', 'notice')}] {item.get('verdict', '')}"
+                        f"{f' · {test}' if test else ''}: {item.get('message', '')}")
+        head += signals
+        actions = result.get("actions") or []
+        if actions:
+            head.append("Offered: " + "; ".join(str(a) for a in actions) + ".")
+        return "\n".join(head)
     if not findings:
         head = (f"#{card}: every test its `## Tests` section names is collected, has run, and is "
                 "neither flaky nor slow. Nothing to fix.")
@@ -1626,43 +1908,88 @@ def section_lines(body: str, span) -> list[str]:
     return section[:first.start() if first else len(section)].splitlines()
 
 
-def _newest_check(section: str):
-    """`((start, end), when)` of the newest `### Check` block in a section, or None."""
+def replace_check_blocks(section: str, block: str) -> str:
+    """The `## Tests` section with `block` standing where its `### Check` blocks stood.
+
+    One current status (#PR4Q): every `### Check` block in the section is taken out and the new
+    one put where the first of them was, so the block keeps its place under the test lines and a
+    card that still carries a pile of dated blocks is collapsed into one by the next check.  A
+    section that has none gets the block appended.
+    """
+    spans = []
     blocks = list(CHECK_BLOCK_RE.finditer(section))
-    if not blocks:
-        return None
-    newest, when = None, None
     for index, match in enumerate(blocks):
-        try:
-            stamp = datetime.datetime.strptime(
-                f"{match.group('date')} {match.group('time')}", "%Y-%m-%d %H:%M")
-        except ValueError:                                   # pragma: no cover - regex-guarded
-            continue
         end = blocks[index + 1].start() if index + 1 < len(blocks) else len(section)
-        if when is None or stamp >= when:
-            newest, when = (match.start(), end), stamp
-    return None if when is None else (newest, when)
+        spans.append((match.start(), end))
+    if not spans:
+        return section.rstrip("\n") + "\n\n" + block
+    out, cut = [], 0
+    for start, end in spans:
+        out.append(section[cut:start])
+        cut = end
+    out.append(section[cut:])
+    head = out[0].rstrip("\n")
+    tail = "".join(out[1:]).strip("\n")
+    return head + "\n\n" + block + (("\n" + tail + "\n") if tail else "")
+
+
+def override_entry_text(tests: Sequence[str], revision: str, reason: str, status: str = "",
+                        days: int = OVERRIDE_DAYS) -> str:
+    """The `decision` entry a recorded override leaves on the thread, markers and all.
+
+    The markers are what `TestsCommands.live_overrides` reads back, so an override is scoped to
+    the checks it was asked for **and** to the revision they were asked about, and expires
+    `days` days later (§C: "record an exception scoped to the check, relevant environment and
+    revision or expiry; invalidate it when those conditions change").
+    """
+    until = (datetime.date.today() + datetime.timedelta(days=days)).isoformat()
+    lines = [f'Moved to `{status}` with the Check gate overridden: "{reason}"' if status
+             else f'Check gate overridden: "{reason}"']
+    if tests:
+        lines.append("")
+        lines.append(f"It covers {'this check' if len(tests) == 1 else 'these checks'} at "
+                     f"revision `{revision or 'unknown'}` until {until}, and nothing else:")
+        for test in tests:
+            lines.append(f"- `{test}` "
+                         f"<!-- relay:override test={test} rev={revision or NO_REVISION} "
+                         f"until={until} -->")
+    return "\n".join(lines)
 
 
 def _check_lines(result: dict) -> str:
-    """The body of one dated block: one line per finding, or the one line that says there are none."""
-    findings = result.get("findings") or []
-    if not findings:
-        return "- no findings\n"
+    """The body of the block: one line per listed test's status, then the advisory findings."""
     out = []
-    for item in findings:
+    for row in result.get("statuses") or []:
+        out.append(f"- {row.get('status', '')} · {row.get('test') or 'card'} — "
+                   f"{str(row.get('message') or '').strip()}")
+    for item in result.get("findings") or []:
         test = str(item.get("test") or "").strip()
         out.append(f"- {item.get('severity', 'notice')} · {test or 'card'} — "
                    f"{str(item.get('message', '')).strip()}")
+    if not out:
+        return "- no findings\n"
     return "\n".join(out) + "\n"
 
 
+def status_counts(result: dict) -> dict:
+    """`{status: how many listed tests have it}` — the header both the block and the GUI use."""
+    counts: dict[str, int] = {}
+    for row in result.get("statuses") or []:
+        key = str(row.get("status") or "")
+        if key:
+            counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
 def _check_sentence(result: dict) -> str:
-    count = len(result.get("findings") or [])
-    if not count:
-        return "no findings; every test this card names is collected, has run and passed."
-    verdicts = ", ".join(dict.fromkeys(str(f.get("verdict") or "") for f in result["findings"]))
-    return f"{count} finding{'' if count == 1 else 's'} ({verdicts}); the block is under `## Tests`."
+    counts = status_counts(result)
+    notices = len(result.get("findings") or [])
+    if not counts:
+        return ("no findings; every test this card names is collected, has run and passed."
+                if not notices else f"{notices} advisory finding(s).")
+    words = ", ".join(f"{n} {kind}" for kind, n in sorted(counts.items()))
+    tail = f"; {notices} advisory finding(s)" if notices else ""
+    return f"{words}{tail}. The status is under `## Tests`; earlier checks are in this thread."
 
 
 def _suggest_sentence(result: dict) -> str:
@@ -1688,7 +2015,7 @@ def _failing_findings(failing: Sequence[str], already: set, records_list: Sequen
         record = by_id.get(test_id) or {}
         shown = record.get("invocation") or record.get("name") or test_id
         when = str(record.get("last_run") or "")
-        out.append({"test": test_id, "verdict": "failing", "severity": "failure",
+        out.append({"test": test_id, "verdict": "failing", "severity": "notice",
                     "message": f"{shown} failed the last time it ran"
                                + (f", {when}" if when else "")})
     return out

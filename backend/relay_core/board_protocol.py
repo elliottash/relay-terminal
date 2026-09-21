@@ -43,6 +43,9 @@ from .board_tools import (BOARD_STATES, CARD_MODES, PLAN_HEADING, BoardInit,
 #: as `tests_protocol.TYPES`, and `tests/test_tests_protocol.py` fails if the two drift.
 TESTS_TYPES = ("tests_list", "tests_run", "tests_stop", "tests_history", "tests_check",
                "tests_suggest",
+               # #PR4Q: "Use this existing result" — a run already in the store, accepted as
+               # this card's evidence for this revision.
+               "tests_accept",
                # Protocol 32 (#AQ6X): the signals are folded out of the same run history and
                # driven from the same handler, so they arrive through the same door.
                "signals_list", "signals_claim", "signals_release", "signals_dismiss",
@@ -1529,27 +1532,28 @@ class BoardCommands:
         return sub.thread_id, sub.id, sub.owner_session or "", sub.done
 
     def _tests_gate(self, request: dict, rid) -> bool:
-        """The Check gate on leaving `needs-verification` (#7BM4).  True when it refused.
+        """The Check gate on leaving `needs-verification` (#7BM4, #PR4Q).  True when it refused.
 
         The owner's decision, 2026-09-20: Check "is a gate on leaving `needs-verification`, with
-        a recorded override", "because a report nobody must read is what every CI product ends up
-        ignoring".  So a landing move is refused while a test the card *names* is gone, has never
-        run, or last failed — one sentence, the offending tests, and nothing written.
+        a recorded override".  What it blocks on is `tests_protocol.gate_move`'s answer: a
+        listed check whose status for **this revision** is `failed` or `missing-evidence`, with
+        no live override for that (check, revision) pair.
 
-        Three deliberate holes.  A card with **no** `## Tests` section is not gated: the missing
-        section is a warning on the card, not a reason nothing may ever close, and gating on it
-        would strand every card filed before the section existed.  An `override` string lets the
-        move through and is quoted onto the thread by `_record_override`.  And any failure of the
-        check itself — no discovery, no build directory, an unreadable store — lets the move
-        through: a gate that fires when its own evidence is missing is a gate that stops work for
-        reasons nobody can act on.
+        Two holes and one question.  An `override` string lets the move through and is quoted
+        onto the thread by `_record_override`, which also records the markers that stop the same
+        override being asked for twice.  Any failure of the check itself — no discovery, no
+        build directory, an unreadable store — lets the move through: a gate that fires when its
+        own evidence is missing is a gate that stops work for reasons nobody can act on.  And a
+        card with **no `## Tests` section** is asked, once, which checks prove it: the refusal
+        carries `code: "tests_none"` and a second attempt goes through (#PR4Q; Codex's review
+        §C: "a card without `## Tests` is ungated. That rewards omitting evidence").
         """
+        self._override_note = None
         status = request.get("status")
         if not isinstance(status, str) or status not in TP_GATE_TO:
             return False
         override = request.get("override")
-        if isinstance(override, str) and override.strip():
-            return False
+        has_override = isinstance(override, str) and bool(override.strip())
         try:
             card_id = normalize_id(request.get("card") or "")
             card = self._need().board.card_by_id(card_id)
@@ -1560,24 +1564,46 @@ class BoardCommands:
             return False
         if not blocked:
             return False
-        self.emit({"event": "error", "id": rid, "code": "tests_gate",
+        if has_override:
+            # The move goes through, and what it waived is recorded per check and revision so
+            # the same override is never asked for again while it holds.
+            self._override_note = {"card": blocked["card"], "tests": blocked.get("tests") or [],
+                                   "revision": blocked.get("revision") or ""}
+            return False
+        self.emit({"event": "error", "id": rid,
+                   "code": blocked.get("code") or "tests_gate",
                    "text": blocked["message"], "card": blocked["card"],
                    "card_id": blocked["card"], "status": status,
-                   "tests": blocked["tests"], "findings": blocked["findings"]})
+                   "tests": blocked["tests"], "findings": blocked["findings"],
+                   "statuses": blocked.get("statuses") or [],
+                   "revision": blocked.get("revision") or ""})
         return True
 
     def _record_override(self, request: dict, card_id, author: str) -> None:
-        """A move that carried an `override` is a decision, so the thread quotes it verbatim."""
+        """A move that carried an `override` is a decision, so the thread quotes it verbatim.
+
+        It also carries the markers `tests_protocol.live_overrides` reads: one per check the
+        gate named, scoped to the revision the card is at and expiring in
+        `tests_protocol.OVERRIDE_DAYS` days.  Nothing is recorded when the gate did not refuse —
+        an override on a move that would have gone through anyway waives nothing.
+        """
         override = request.get("override")
         if not isinstance(override, str) or not override.strip() or not card_id:
             return
         reason = override.strip()[:2000]
+        note = getattr(self, "_override_note", None)
+        note = note if isinstance(note, dict) else None
+        self._override_note = None
+        status = str(request.get("status") or "")
         try:
-            self._need().board.append_thread(
-                str(card_id),
-                f'Moved to `{request.get("status") or ""}` with the Check gate overridden: '
-                f'"{reason}"',
-                author=author or "owner", kind="decision")
+            if note and normalize_id(str(note.get("card") or "")) == normalize_id(str(card_id)):
+                from . import tests_protocol as TP
+                text = TP.override_entry_text(note.get("tests") or [],
+                                              str(note.get("revision") or ""), reason, status)
+            else:
+                text = (f'Moved to `{status}` with the Check gate overridden: "{reason}"')
+            self._need().board.append_thread(str(card_id), text,
+                                             author=author or "owner", kind="decision")
         except Exception:                                    # pragma: no cover - defensive
             pass
 

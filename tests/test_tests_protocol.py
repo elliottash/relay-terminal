@@ -484,6 +484,8 @@ class CheckTest(TestsProtocolTest):
         event = self.of("tests_check")[0]
         self.assertEqual(set(event), {"event", "id", "card", "findings", "actions",
                                       "ids", "files", "failing",
+                                      # #PR4Q: the four statuses, and the revision they are about
+                                      "statuses", "revision",
                                       # protocol 32 (#AQ6X step 5): what a signal says about it
                                       "blocks", "open_before"})
         self.assertEqual(event["card"], "AAA1")
@@ -494,15 +496,19 @@ class CheckTest(TestsProtocolTest):
         self.assertIn("has no `## Tests` section", finding["message"])
         self.assertEqual(event["actions"], ["Add the tests this card's commits touched"])
 
-    def test_a_card_whose_test_is_gone(self):
+    def test_a_card_whose_test_is_retired(self):
         self.card("AAA2", "Names a test that is not there", "needs-verification",
                   body="\n## Tests\n- `ctest -R vanished`\n")
         self.send(type="tests_check", card="AAA2")
         # No request id, so the event carries no `id` key at all rather than a null one.
         self.assertNotIn("id", self.of("tests_check")[0])
-        findings = self.of("tests_check")[0]["findings"]
-        self.assertEqual([f["verdict"] for f in findings], ["gone"])
-        self.assertEqual(findings[0]["severity"], "failure")
+        event = self.of("tests_check")[0]
+        self.assertEqual([f["verdict"] for f in event["findings"]], ["retired"])
+        self.assertEqual(event["findings"][0]["severity"], "notice")
+        # #PR4Q: retired is `not-applicable`, and the action replaces it.
+        self.assertEqual([row["status"] for row in event["statuses"]], ["not-applicable"])
+        self.assertTrue(event["statuses"][0]["retired"])
+        self.assertIn("Replace retired check", event["actions"])
 
     def test_a_card_whose_tests_have_never_run(self):
         self.card("AAA3", "Lists a real test", "needs-verification",
@@ -584,13 +590,14 @@ class CheckPayloadTest(TestsProtocolTest):
         failing = [f for f in findings if f["verdict"] == "failing"]
         self.assertEqual(len(failing), 1, findings)
         self.assertEqual(failing[0]["test"], "ctest:beta")
-        self.assertEqual(failing[0]["severity"], "failure")
+        self.assertEqual(failing[0]["severity"], "notice")     # the status carries the weight
         self.assertIn("failed the last time it ran", failing[0]["message"])
         # And it is not said twice: a test that is *gone* keeps its own single finding.
         self.card("BBB6", "Gone and never run", "needs-verification",
                   body="\n## Tests\n- `ctest -R vanished`\n")
         self.send(type="tests_check", card="BBB6")
-        self.assertEqual([f["verdict"] for f in self.of("tests_check")[1]["findings"]], ["gone"])
+        self.assertEqual([f["verdict"] for f in self.of("tests_check")[1]["findings"]],
+                         ["retired"])
 
     def test_a_card_without_a_tests_section_still_carries_the_three_keys(self):
         self.card("BBB4", "No tests named", "needs-verification")
@@ -600,43 +607,47 @@ class CheckPayloadTest(TestsProtocolTest):
 
 
 class CheckBlockTest(TestsProtocolTest):
-    """The dated `### Check` block the **worker** leaves under `## Tests`."""
+    """The **one** `### Check` status the worker leaves under `## Tests` (#7BM4, #PR4Q)."""
 
     def body_of(self, card_id):
         return self.board.card_by_id(card_id).body
 
-    def test_a_check_writes_a_dated_block_with_one_line_per_finding(self):
+    def test_a_check_writes_one_line_per_listed_test_and_its_status(self):
         self.card("CCC1", "Names a test that is gone", "needs-verification",
                   body="\n## Tests\n- `ctest -R vanished`\n")
         self.send(type="tests_check", card="CCC1")
         body = self.body_of("CCC1")
         self.assertRegex(body, r"### Check \d{4}-\d{2}-\d{2} \d{2}:\d{2}")
-        self.assertIn("- failure · ctest:vanished — ", body)
-        # And the thread says it happened, so the audit trail is not only the body.
+        self.assertIn("- not-applicable · ctest:vanished — ", body)
+        self.assertIn("- notice · ctest:vanished — ", body)     # the advisory finding beside it
+        # The history is the thread, and the block says so in its last line.
+        self.assertTrue(body.rstrip().endswith("history: thread"), body)
         kinds = [(e.kind, e.text) for e in self.board.thread("CCC1")]
         self.assertTrue(any(k == "evidence" and "Check ·" in text for k, text in kinds), kinds)
 
-    def test_a_clean_card_gets_a_block_that_says_no_findings(self):
+    def test_a_clean_card_says_passed_not_no_findings(self):
         self.card("CCC2", "A test that passed", "needs-verification",
                   body="\n## Tests\n- `ctest -R alpha`\n")
         H.append([H.Execution(ts="2026-09-20T10:00:00Z", id="ctest:alpha", result="pass",
                               duration=0.2, runner="ctest", run_id="r1", host="spark")],
                  self.tests.store_path())
         self.send(type="tests_check", card="CCC2")
-        self.assertIn("- no findings", self.body_of("CCC2"))
+        self.assertIn("- passed · ctest:alpha", self.body_of("CCC2"))
 
-    def test_a_second_check_inside_the_hour_writes_nothing(self):
+    def test_a_second_check_replaces_the_block_rather_than_adding_one(self):
         self.card("CCC3", "Checked twice", "needs-verification",
                   body="\n## Tests\n- `ctest -R alpha`\n")
         self.send(type="tests_check", card="CCC3")
-        first = self.body_of("CCC3")
         self.send(type="tests_check", card="CCC3")
-        self.assertEqual(self.body_of("CCC3"), first)
-        self.assertEqual(first.count("### Check "), 1)
-        # The GUI still got both answers: only the card file is quiet.
+        body = self.body_of("CCC3")
+        self.assertEqual(body.count("### Check "), 1)
+        self.assertEqual(body.count("history: thread"), 1)
         self.assertEqual(len(self.of("tests_check")), 2)
+        # …and both answers are in the thread, which is where the history lives now.
+        checks = [e for e in self.board.thread("CCC3") if e.kind == "evidence"]
+        self.assertEqual(len(checks), 2)
 
-    def test_an_older_block_from_today_is_replaced_not_stacked(self):
+    def test_the_block_stays_where_it_was_and_the_test_lines_are_untouched(self):
         stamp = datetime.datetime.now().strftime("%Y-%m-%d")
         self.card("CCC4", "Checked this morning", "needs-verification",
                   body=f"\n## Tests\n- `ctest -R alpha`\n\n### Check {stamp} 01:02\n"
@@ -646,15 +657,18 @@ class CheckBlockTest(TestsProtocolTest):
         self.assertEqual(body.count("### Check "), 1)
         self.assertNotIn("an older answer", body)
         self.assertNotIn("01:02", body)
+        self.assertIn("- `ctest -R alpha`", body)
+        self.assertLess(body.index("- `ctest -R alpha`"), body.index("### Check "))
 
-    def test_a_block_from_another_day_is_kept_and_a_new_one_appended(self):
-        self.card("CCC5", "Checked last week", "needs-verification",
+    def test_a_pile_of_dated_blocks_is_collapsed_into_one(self):
+        self.card("CCC5", "Checked every day last week", "needs-verification",
                   body="\n## Tests\n- `ctest -R alpha`\n\n### Check 2026-09-01 09:00\n"
-                       "- notice · ctest:alpha — last week's answer\n")
+                       "- notice · ctest:alpha — last week's answer\n\n"
+                       "### Check 2026-09-02 09:00\n- no findings\n")
         self.send(type="tests_check", card="CCC5")
         body = self.body_of("CCC5")
-        self.assertEqual(body.count("### Check "), 2)
-        self.assertIn("last week's answer", body)
+        self.assertEqual(body.count("### Check "), 1)
+        self.assertNotIn("last week's answer", body)
 
     def test_the_block_is_not_read_back_as_a_test(self):
         self.card("CCC6", "Checked twice over", "needs-verification",
@@ -670,6 +684,61 @@ class CheckBlockTest(TestsProtocolTest):
         self.send(type="tests_check", card="CCC7")
         self.assertEqual(self.body_of("CCC7"), before)
         self.assertNotIn("block", self.of("tests_check")[0])
+
+
+class AcceptResultTest(TestsProtocolTest):
+    """"Use this existing result": a run from another machine, accepted for this revision."""
+
+    def remote_run(self, test_id="ctest:alpha", result="pass", run_id="sphinxpad-7"):
+        H.append([H.Execution(ts="2026-09-20T10:00:00Z", id=test_id, result=result,
+                              duration=0.2, runner="ctest", run_id=run_id, host="sphinxpad",
+                              commit="deadbeefcafe")], self.tests.store_path())
+
+    def test_the_event_offers_the_other_machines_result(self):
+        self.card("DDD1", "Proven elsewhere", "needs-verification",
+                  body="\n## Tests\n- `ctest -R alpha`\n")
+        self.remote_run()
+        self.send(type="tests_check", card="DDD1")
+        row = self.of("tests_check")[0]["statuses"][0]
+        self.assertEqual(row["status"], "passed")
+        self.assertTrue(row["use_existing"])
+        self.assertEqual(row["evidence"][0]["host"], "sphinxpad")
+        self.assertEqual(row["evidence"][0]["run_id"], "sphinxpad-7")
+
+    def test_accepting_it_records_it_in_the_check_status_and_the_thread(self):
+        self.card("DDD2", "Proven elsewhere", "needs-verification",
+                  body="\n## Tests\n- `ctest -R alpha`\n")
+        self.remote_run()
+        self.send(type="tests_accept", card="DDD2", id="ctest:alpha", run_id="sphinxpad-7")
+        body = self.board.card_by_id("DDD2").body
+        self.assertIn("- accepted · ctest:alpha — run sphinxpad-7 from sphinxpad", body)
+        self.assertIn("<!-- relay:accept test=ctest:alpha run=sphinxpad-7 rev=", body)
+        self.assertEqual(len(self.board.card_by_id("DDD2").front.get("links", {}).get("commits")
+                              or []), 0)                       # no new front-matter field
+        texts = [e.text for e in self.board.thread("DDD2") if e.kind == "evidence"]
+        self.assertTrue(any("Accepted run `sphinxpad-7`" in t for t in texts), texts)
+        # The answer is a fresh check, so the card page redraws without another click.
+        self.assertTrue(self.of("tests_check"))
+        self.assertFalse(self.of("tests_check")[-1]["statuses"][0]["use_existing"])
+
+    def test_an_accepted_run_is_evidence_and_the_next_check_carries_it_forward(self):
+        self.card("DDD3", "Accepted", "needs-verification",
+                  body="\n## Tests\n- `ctest -R alpha`\n")
+        self.remote_run()
+        self.send(type="tests_accept", card="DDD3", id="ctest:alpha", run_id="sphinxpad-7")
+        self.send(type="tests_check", card="DDD3")
+        body = self.board.card_by_id("DDD3").body
+        self.assertEqual(body.count("relay:accept"), 1)
+        self.assertEqual(self.of("tests_check")[-1]["statuses"][0]["status"], "passed")
+        self.assertTrue(self.of("tests_check")[-1]["statuses"][0]["accepted"])
+
+    def test_a_run_nobody_has_is_one_sentence(self):
+        self.card("DDD4", "Nothing to accept", "needs-verification",
+                  body="\n## Tests\n- `ctest -R alpha`\n")
+        with self.assertRaises(ValueError) as caught:
+            self.tests.dispatch({"type": "tests_accept", "card": "DDD4", "id": "ctest:alpha",
+                                 "run_id": "no-such-run"})
+        self.assertIn("is not in this board's test history", str(caught.exception))
 
 
 class SuggestTest(TestsProtocolTest):
@@ -753,27 +822,39 @@ class GateTest(TestsProtocolTest):
     def test_the_gate_and_the_move_path_agree_on_their_two_ends(self):
         self.assertEqual(BP.TP_GATE_FROM, TP.GATE_FROM_STATUS)
         self.assertEqual(tuple(BP.TP_GATE_TO), tuple(TP.GATE_TO_STATUSES))
+        self.assertEqual(tuple(TP.GATE_STATUSES), ("failed", "missing-evidence"))
 
-    def test_a_gone_test_refuses_the_landing_and_writes_nothing(self):
+    def test_a_retired_test_does_not_block_the_landing(self):
+        # #PR4Q: "gone" used to refuse the move. A check somebody retired on purpose is a thing
+        # to replace, not evidence that the work is unfinished.
         self.card("EEE1", "Names a test that is gone", "needs-verification",
                   body="\n## Tests\n- `ctest -R vanished`\n")
         self.move("EEE1")
-        error = self.errors()[0]
-        self.assertEqual(error["code"], "tests_gate")
-        self.assertEqual(error["tests"], ["ctest:vanished"])
-        self.assertIn("(vanished)", error["text"])          # short in the sentence, full in `tests`
-        self.assertEqual(self.board.card_by_id("EEE1").status, "needs-verification")
-        self.assertEqual([e for e in self.events if e.get("event") == "board_written"], [])
+        self.assertEqual(self.errors(), [])
+        self.assertEqual(self.board.card_by_id("EEE1").status, "done")
 
-    def test_a_test_that_last_failed_refuses_it_too(self):
+    def test_a_test_that_failed_for_this_revision_refuses_it(self):
         self.card("EEE2", "Its test failed", "needs-verification",
                   body="\n## Tests\n- `ctest -R beta`\n")
         H.append([H.Execution(ts="2026-09-20T10:00:00Z", id="ctest:beta", result="fail",
                               duration=0.5, runner="ctest", run_id="r1", host="spark")],
                  self.tests.store_path())
         self.move("EEE2", status="needs-qa-llm")
-        self.assertEqual(self.errors()[0]["code"], "tests_gate")
-        self.assertEqual(self.errors()[0]["tests"], ["ctest:beta"])
+        error = self.errors()[0]
+        self.assertEqual(error["code"], "tests_gate")
+        self.assertEqual(error["tests"], ["ctest:beta"])
+        self.assertIn("1 failed", error["text"])
+        self.assertEqual(self.board.card_by_id("EEE2").status, "needs-verification")
+        self.assertEqual([e for e in self.events if e.get("event") == "board_written"], [])
+
+    def test_a_test_with_no_evidence_for_this_revision_refuses_it(self):
+        self.card("EEE8", "Nothing has run", "needs-verification",
+                  body="\n## Tests\n- `ctest -R alpha`\n")
+        self.move("EEE8")
+        error = self.errors()[0]
+        self.assertEqual(error["code"], "tests_gate")
+        self.assertIn("1 missing-evidence", error["text"])
+        self.assertEqual([row["status"] for row in error["statuses"]], ["missing-evidence"])
 
     def test_a_card_whose_tests_passed_lands(self):
         self.card("EEE3", "Proven", "needs-verification",
@@ -785,35 +866,117 @@ class GateTest(TestsProtocolTest):
         self.assertEqual(self.errors(), [])
         self.assertEqual(self.board.card_by_id("EEE3").status, "done")
 
-    def test_a_card_with_no_tests_section_is_not_gated(self):
+    def test_a_run_from_another_host_proves_it_too(self):
+        # Codex §C: "'never run here' is not 'never run'." A result fetched from the second
+        # runner is an execution like any other, so the gate does not fire on it.
+        self.card("EEE9", "Proven elsewhere", "needs-verification",
+                  body="\n## Tests\n- `ctest -R alpha`\n")
+        H.append([H.Execution(ts="2026-09-20T10:00:00Z", id="ctest:alpha", result="pass",
+                              duration=0.2, runner="ctest", run_id="sphinxpad-3",
+                              host="sphinxpad")], self.tests.store_path())
+        self.move("EEE9")
+        self.assertEqual(self.errors(), [])
+        self.assertEqual(self.board.card_by_id("EEE9").status, "done")
+
+    def test_a_card_with_no_tests_section_is_asked_once_and_then_moves(self):
+        # §C: "a card without `## Tests` is ungated. That rewards omitting evidence."
         self.card("EEE4", "Older than the section", "needs-verification")
         self.move("EEE4")
-        self.assertEqual(self.errors(), [])
+        error = self.errors()[0]
+        self.assertEqual(error["code"], "tests_none")
+        self.assertIn("which checks prove it", error["text"])
+        self.assertEqual(self.board.card_by_id("EEE4").status, "needs-verification")
+        notes = [e.text for e in self.board.thread("EEE4") if e.kind == "note"]
+        self.assertTrue(any("relay:tests-none" in text for text in notes), notes)
+        # Asked once: the second attempt goes through, whatever the answer was.
+        self.move("EEE4")
+        self.assertEqual(len(self.errors()), 1)
         self.assertEqual(self.board.card_by_id("EEE4").status, "done")
 
-    def test_an_override_lands_it_and_quotes_the_reason_on_the_thread(self):
-        self.card("EEE5", "Gone test, overridden", "needs-verification",
-                  body="\n## Tests\n- `ctest -R vanished`\n")
-        self.move("EEE5", override="the test moved into the suite next door")
+    def test_an_override_lands_it_and_records_what_it_waived(self):
+        self.card("EEE5", "Missing evidence, overridden", "needs-verification",
+                  body="\n## Tests\n- `ctest -R alpha`\n")
+        self.move("EEE5", override="sphinxpad is down; the CI run of this commit is green")
         self.assertEqual(self.errors(), [])
         self.assertEqual(self.board.card_by_id("EEE5").status, "done")
         decisions = [e for e in self.board.thread("EEE5") if e.kind == "decision"]
         self.assertEqual(len(decisions), 1, [e.kind for e in self.board.thread("EEE5")])
-        self.assertIn('"the test moved into the suite next door"', decisions[0].text)
+        self.assertIn('"sphinxpad is down; the CI run of this commit is green"',
+                      decisions[0].text)
+        # Scoped to (check, revision) and given an expiry, so it cannot become a rubber stamp.
+        self.assertRegex(decisions[0].text,
+                         r"<!-- relay:override test=ctest:alpha rev=\S+ until=\d{4}-\d{2}-\d{2} -->")
+
+    def test_the_same_override_is_never_asked_for_twice(self):
+        self.card("EE10", "Overridden once", "needs-verification",
+                  body="\n## Tests\n- `ctest -R alpha`\n")
+        self.move("EE10", override="known flake on this runner")
+        self.assertEqual(self.board.card_by_id("EE10").status, "done")
+        self.commands().dispatch({"type": "board_move", "id": "m2", "card": "EE10",
+                                  "status": "needs-verification", "reason": "back"})
+        self.move("EE10")                     # no override this time
+        self.assertEqual(self.errors(), [])
+        self.assertEqual(self.board.card_by_id("EE10").status, "done")
+
+    def test_an_override_recorded_for_another_revision_does_not_hold(self):
+        self.card("EE11", "Overridden at an older revision", "needs-verification",
+                  body="\n## Tests\n- `ctest -R alpha`\n")
+        self.board.append_thread(
+            "EE11",
+            'Moved to `done` with the Check gate overridden: "it was fine last week"\n\n'
+            "- `ctest:alpha` <!-- relay:override test=ctest:alpha rev=0123456789ab "
+            "until=2099-01-01 -->",
+            author="owner", kind="decision")
+        self.assertEqual(self.tests.live_overrides("EE11", ""), set())
+        self.move("EE11")
+        self.assertEqual(self.errors()[0]["code"], "tests_gate")
+
+    def test_an_expired_override_does_not_hold_either(self):
+        self.card("EE12", "Overridden last month", "needs-verification",
+                  body="\n## Tests\n- `ctest -R alpha`\n")
+        self.board.append_thread(
+            "EE12",
+            'Check gate overridden: "a fortnight ago"\n\n'
+            "- `ctest:alpha` <!-- relay:override test=ctest:alpha rev=none "
+            "until=2020-01-01 -->",
+            author="owner", kind="decision")
+        self.assertEqual(self.tests.live_overrides("EE12", ""), set())
 
     def test_a_move_that_is_not_a_landing_is_never_gated(self):
         self.card("EEE6", "Back to work", "needs-verification",
-                  body="\n## Tests\n- `ctest -R vanished`\n")
+                  body="\n## Tests\n- `ctest -R alpha`\n")
         self.move("EEE6", status="in-progress")
         self.assertEqual(self.errors(), [])
         self.assertEqual(self.board.card_by_id("EEE6").status, "in-progress")
 
     def test_a_card_that_is_not_in_needs_verification_is_never_gated(self):
         self.card("EEE7", "Straight from executing", "in-progress",
-                  body="\n## Tests\n- `ctest -R vanished`\n")
+                  body="\n## Tests\n- `ctest -R alpha`\n")
         self.move("EEE7")
         self.assertEqual(self.errors(), [])
         self.assertEqual(self.board.card_by_id("EEE7").status, "done")
+
+
+class RefreshAfterRunTest(TestsProtocolTest):
+    """A finished run updates every card the tests it ran belong to (Codex §B)."""
+
+    def test_a_finished_run_re_checks_the_cards_whose_tests_it_ran(self):
+        self.card("FFF1", "Its test just ran", "needs-verification",
+                  body="\n## Tests\n- `ctest -R alpha`\n")
+        self.card("FFF2", "About something else", "needs-verification",
+                  body="\n## Tests\n- `ctest -R beta`\n")
+        self.send(type="tests_run", ids=["ctest:alpha"])
+        self.wait_for_run()
+        cards = [e["card"] for e in self.of("tests_check")]
+        self.assertIn("FFF1", cards)
+        self.assertNotIn("FFF2", cards)
+        # …and the card's own status is current, with nobody pressing Check.
+        self.assertIn("- passed · ctest:alpha", self.board.card_by_id("FFF1").body)
+
+    def test_a_run_of_a_test_no_card_names_re_checks_nothing(self):
+        self.send(type="tests_run", ids=["ctest:alpha"])
+        self.wait_for_run()
+        self.assertEqual(self.of("tests_check"), [])
 
 
 class WordingTest(unittest.TestCase):
