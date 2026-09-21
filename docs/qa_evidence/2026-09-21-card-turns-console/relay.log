@@ -1,0 +1,87 @@
+2026-09-21T22:11:03.887Z INFO relay.gui gui_start version=0.1.0 build=2026-09-21.18H.05 pid=1440485 level=debug
+2026-09-21T22:11:03.932Z INFO relay.gui worker_start pane=f4aac32d workspace_set=1
+2026-09-21T22:11:04.054Z INFO relay.gui event type=ready pane=f4aac32d
+2026-09-21T22:11:04.055Z DEBUG relay.gui event type=route pane=f4aac32d reason=Type a shell command or an agent request.
+2026-09-21T22:11:04.077Z DEBUG relay.gui event type=presets pane=f4aac32d
+2026-09-21T22:11:04.115Z INFO relay.gui harness_deferred pane=f4aac32d preset=guest:claude model=opus
+2026-09-21T22:11:04.122Z DEBUG relay.gui event type=aliases pane=f4aac32d
+2026-09-21T22:11:04.331Z DEBUG relay.gui event type=presets pane=f4aac32d
+2026-09-21T22:11:04.336Z INFO relay.gui harness_deferred pane=f4aac32d preset=guest:claude model=opus
+2026-09-21T22:11:04.395Z DEBUG relay.gui event type=presets pane=f4aac32d
+2026-09-21T22:11:04.414Z INFO relay.gui harness_deferred pane=f4aac32d preset=guest:claude model=opus
+2026-09-21T22:11:24.520Z DEBUG relay.gui event type=board pane=cac6f594
+2026-09-21T22:11:24.539Z INFO relay.gui event type=ready pane=cac6f594
+2026-09-21T22:11:24.539Z INFO relay.gui event type=configured pane=cac6f594 model=stub
+2026-09-21T22:11:24.556Z DEBUG relay.gui event type=signals_changed pane=cac6f594
+2026-09-21T22:11:24.562Z INFO relay.gui event type=configured pane=cac6f594 model=stub
+2026-09-21T22:11:24.564Z DEBUG relay.gui event type=route pane=cac6f594 reason=Type a shell command or an agent request.
+2026-09-21T22:11:24.566Z DEBUG relay.gui event type=presets pane=cac6f594
+2026-09-21T22:11:24.600Z DEBUG relay.gui event type=aliases pane=cac6f594
+2026-09-21T22:11:24.600Z DEBUG relay.gui event type=agents pane=cac6f594
+2026-09-21T22:11:24.600Z DEBUG relay.gui event type=agents pane=cac6f594
+2026-09-21T22:11:24.603Z DEBUG relay.gui event type=app_catalog_updated pane=cac6f594
+2026-09-21T22:11:24.664Z DEBUG relay.gui event type=route pane=cac6f594 reason=Type a shell command or an agent request.
+2026-09-21T22:11:24.751Z DEBUG relay.gui event type=presets pane=cac6f594
+2026-09-21T22:11:24.785Z DEBUG relay.gui event type=app_catalog_updated pane=cac6f594
+2026-09-21T22:11:36.334Z DEBUG relay.gui event type=board_changed pane=cac6f594
+2026-09-21T22:11:45.254Z DEBUG relay.gui event type=board_card pane=cac6f594
+2026-09-21T22:11:45.254Z DEBUG relay.gui event type=board_card pane=9caa6e13
+2026-09-21T22:11:45.265Z INFO relay.gui event type=ready pane=9caa6e13
+2026-09-21T22:11:45.266Z INFO relay.gui event type=configured pane=9caa6e13 model=stub
+2026-09-21T22:11:45.277Z DEBUG relay.gui event type=board_card pane=cac6f594
+2026-09-21T22:11:45.277Z DEBUG relay.gui event type=board_card pane=9caa6e13
+2026-09-21T22:11:45.288Z INFO relay.gui event type=configured pane=cac6f594 model=stub
+2026-09-21T22:11:45.313Z INFO relay.gui event type=configured pane=9caa6e13 model=stub
+2026-09-21T22:11:45.315Z DEBUG relay.gui event type=route pane=cac6f594 reason=Type a shell command or an agent request.
+2026-09-21T22:11:45.315Z DEBUG relay.gui event type=route pane=9caa6e13 reason=Type a shell command or an agent request.
+2026-09-21T22:11:45.316Z DEBUG relay.gui event type=presets pane=cac6f594
+2026-09-21T22:11:45.333Z DEBUG relay.gui event type=presets pane=9caa6e13
+2026-09-21T22:11:45.364Z DEBUG relay.gui event type=aliases pane=cac6f594
+2026-09-21T22:11:45.364Z DEBUG relay.gui event type=aliases pane=9caa6e13
+2026-09-21T22:11:45.364Z DEBUG relay.gui event type=agents pane=cac6f594
+2026-09-21T22:11:45.364Z DEBUG relay.gui event type=agents pane=9caa6e13
+2026-09-21T22:11:45.364Z DEBUG relay.gui event type=agents pane=cac6f594
+2026-09-21T22:11:45.364Z DEBUG relay.gui event type=agents pane=9caa6e13
+2026-09-21T22:11:45.364Z DEBUG relay.gui event type=agents pane=cac6f594
+2026-09-21T22:11:45.364Z DEBUG relay.gui event type=agents pane=9caa6e13
+2026-09-21T22:11:45.367Z DEBUG relay.gui event type=app_catalog_updated pane=cac6f594
+2026-09-21T22:11:45.367Z DEBUG relay.gui event type=app_catalog_updated pane=9caa6e13
+2026-09-21T22:11:45.400Z DEBUG relay.gui event type=route pane=cac6f594 reason=Type a shell command or an agent request.
+2026-09-21T22:11:45.400Z DEBUG relay.gui event type=route pane=9caa6e13 reason=Type a shell command or an agent request.
+2026-09-21T22:11:50.643Z DEBUG relay.gui event type=board_activity pane=cac6f594
+2026-09-21T22:11:50.644Z DEBUG relay.gui event type=board_activity pane=9caa6e13
+2026-09-21T22:11:50.645Z DEBUG relay.gui event type=board_changed pane=cac6f594
+2026-09-21T22:11:50.645Z DEBUG relay.gui event type=board_changed pane=9caa6e13
+2026-09-21T22:11:50.652Z DEBUG relay.gui event type=board_thread_appended pane=cac6f594
+2026-09-21T22:11:50.652Z DEBUG relay.gui event type=board_thread_appended pane=9caa6e13
+2026-09-21T22:11:50.652Z DEBUG relay.gui event type=requests pane=cac6f594
+2026-09-21T22:11:50.652Z DEBUG relay.gui event type=requests pane=9caa6e13
+2026-09-21T22:11:50.652Z DEBUG relay.gui event type=queued pane=9caa6e13
+2026-09-21T22:11:50.679Z INFO relay.gui event type=agent_started pane=9caa6e13 turn_id=9a225f82fed34d7b90924cd1a21f5c22
+2026-09-21T22:11:50.707Z DEBUG relay.gui event type=requests pane=9caa6e13
+2026-09-21T22:11:50.708Z DEBUG relay.gui event type=status pane=9caa6e13
+2026-09-21T22:11:50.750Z DEBUG relay.gui event type=route pane=cac6f594 reason=Type a shell command or an agent request.
+2026-09-21T22:11:50.750Z DEBUG relay.gui event type=route pane=9caa6e13 reason=Type a shell command or an agent request.
+2026-09-21T22:11:50.962Z DEBUG relay.gui event type=status pane=9caa6e13
+2026-09-21T22:11:51.056Z DEBUG relay.gui event type=board_changed pane=cac6f594
+2026-09-21T22:11:51.056Z DEBUG relay.gui event type=board_changed pane=9caa6e13
+2026-09-21T22:11:51.069Z DEBUG relay.gui event type=board_card pane=cac6f594
+2026-09-21T22:11:51.069Z DEBUG relay.gui event type=board_card pane=9caa6e13
+2026-09-21T22:11:51.763Z DEBUG relay.gui event type=thinking_done pane=9caa6e13 turn_id=9a225f82fed34d7b90924cd1a21f5c22
+2026-09-21T22:11:51.763Z DEBUG relay.gui event type=context pane=9caa6e13
+2026-09-21T22:11:51.777Z DEBUG relay.gui event type=tool_started pane=9caa6e13 turn_id=9a225f82fed34d7b90924cd1a21f5c22 tool=read_file
+2026-09-21T22:11:51.777Z DEBUG relay.gui event type=tool_result pane=9caa6e13 turn_id=9a225f82fed34d7b90924cd1a21f5c22 tool=read_file
+2026-09-21T22:11:51.777Z DEBUG relay.gui event type=status pane=9caa6e13
+2026-09-21T22:12:06.769Z DEBUG relay.gui event type=context pane=9caa6e13
+2026-09-21T22:12:06.778Z DEBUG relay.gui event type=requests pane=9caa6e13
+2026-09-21T22:12:06.778Z INFO relay.gui event type=turn_summary pane=9caa6e13 turn_id=9a225f82fed34d7b90924cd1a21f5c22 outcome=done ms=16123
+2026-09-21T22:12:06.789Z DEBUG relay.gui event type=board_thread_appended pane=cac6f594 turn_id=9a225f82fed34d7b90924cd1a21f5c22
+2026-09-21T22:12:06.789Z DEBUG relay.gui event type=board_thread_appended pane=9caa6e13 turn_id=9a225f82fed34d7b90924cd1a21f5c22
+2026-09-21T22:12:06.791Z DEBUG relay.gui event type=done pane=9caa6e13 turn_id=9a225f82fed34d7b90924cd1a21f5c22
+2026-09-21T22:12:06.791Z INFO relay.gui event type=agent_finished pane=9caa6e13 outcome=done
+2026-09-21T22:12:06.848Z DEBUG relay.gui event type=board_card pane=cac6f594
+2026-09-21T22:12:06.848Z DEBUG relay.gui event type=board_card pane=9caa6e13
+2026-09-21T22:12:07.181Z DEBUG relay.gui event type=board_changed pane=cac6f594
+2026-09-21T22:12:07.181Z DEBUG relay.gui event type=board_changed pane=9caa6e13
+2026-09-21T22:12:07.188Z DEBUG relay.gui event type=board_card pane=cac6f594
+2026-09-21T22:12:07.188Z DEBUG relay.gui event type=board_card pane=9caa6e13

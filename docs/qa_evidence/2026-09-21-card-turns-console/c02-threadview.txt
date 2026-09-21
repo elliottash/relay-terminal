@@ -1,0 +1,6 @@
+Issue
+the console's brief has a board
+THREAD -2
+owner Discuss - just now
+trace the card please
++ owner moved this card - Inbox > Discussing - the discussion started - just now

@@ -1,0 +1,47 @@
+===== the card console draws the turn, the thread view settles =====
+PASS c1 the card page is open with its console (boardCardDocument is on screen)
+  the console's first rows, as OCR reads them: THREAD -2 » + thought for 1s >» read fixture.txt + 1 line 
+PASS c2 the busy strip is up while the turn runs (boardBusyStrip is on screen)
+  boardBusyLabel: ✦ Switchboarding · discussing…
+PASS c2 the strip names the mode ("✦ Switchboarding · discussing…")
+PASS c2 and carries the ✕ ("✕ Stop discussing")
+PASS c2 the strip has no progress line any more (no boardBusyWhat on screen)
+PASS c3 the thread view draws nothing of the running turn (c02-threadview.txt)
+PASS c4 the owner's words are on the thread, written at submit (19.10)
+PASS c4 the answer carries its mode=/model= provenance (owner decision 2)
+PASS c4 and its turn=<session>/<turn>
+PASS c4 the answer itself is the entry's text
+PASS c5 the settled entry appears in the thread view when the turn ends
+PASS c5 the busy strip goes when the turn ends (no boardBusyStrip on screen)
+  panes handed the card turn's tool_started: 9caa6e13 
+  panes handed the card turn's agent_started: 9caa6e13 
+  panes handed the card turn's agent_finished: 9caa6e13 
+PASS c6 the card turn's events reached exactly one console (deliverToConsoles routes by surface)
+===== two cards at once in one tab, and ✕ Stop on one =====
+PASS d1 the first card is working (boardBusyStrip is on screen)
+PASS d2 the other card is idle even while the first one works (no boardBusyStrip on screen)
+PASS d2 and it starts its own turn — two cards work at once (#DR4K, #0Z13) (boardBusyStrip is on screen)
+PASS d3 ✕ Stop ends the turn on the card it is on (no boardBusyStrip on screen)
+FAIL d3 and the other card is still working: no widget named boardBusyStrip on screen
+===== a second Enter on a busy card queues in that card's console =====
+FAIL q1 the second prompt queues in the §12 strip: no widget named queueStrip on screen
+FAIL q1 0 queue strips on screen: the worker's queue has no row in the pane's strip (NOTES.md)
+FAIL q1 the strip is not under the card's thread view (y=, thread at 274)
+PASS q2 the second prompt was not refused with board_busy (no boardCardError on screen)
+PASS q3 both questions are on the thread
+PASS q3 and both turns answered (4 agent entries)
+===== a Plan turn is offered the writers and refused at call time (decision 3) =====
+PASS p1 the refused write is refused in CardScope's sentence, which names Execute (p01-refused.png)
+PASS p2 the Plan turn carried on and its answer is on the thread with mode=plan
+===== a restart brings the card's own conversation back (the per-(tab, card) key) =====
+PASS r1 the card's turn is in a helper conversation file of its own
+  tab ids before the restart: "tab_id": "t1467f1ac7300" 
+PASS r2 the thread is complete after the restart
+  tab ids before the restart: "tab_id": "t1467f1ac7300" 
+  tab ids after the restart:  "tab_id": "t8fa47eabdd96" 
+  the card's conversation before: /tmp/rl-ctrn.R1E9/home/.local/share/relay/helper-sessions/75d45c980ea7fb99/e5e6baa294bbc6aa7f9f7c16277bf363.json
+  and the file the turn after the restart went into: /tmp/rl-ctrn.R1E9/home/.local/share/relay/helper-sessions/75d45c980ea7fb99/cad599875fea6ff87f1f4c845ce6110f.json
+FAIL r3 a fresh conversation — but the **tab id** did not survive the restart either, so this run cannot say whether the key is right (r06/r07-tab-*.txt)
+  HISTORY turns=1 (what the model was actually handed)
+
+24 passed, 5 failed
