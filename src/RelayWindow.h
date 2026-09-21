@@ -21,6 +21,7 @@
 // The helper agent's panel, whose composer answers Alt+M and Ctrl+Alt+M over its own model box
 // (#PK5Q): the window needs the class, not just its name.
 #include "HelperChat.h"
+#include "BoardRemote.h"   // the Switchboard on the owner's devices (#SWPH)
 #include "BoardWorker.h"
 #include "BoardWorkspace.h"   // which project's Switchboard a pane is looking at
 #include "Projects.h"         // which project a tab is attached to, and the registry of known ones
@@ -381,6 +382,7 @@ public:
                 updateRemotePlug();
                 refreshSettingsPanes();   // Options › Remote is showing the state that has moved
             });
+            registerBoardRemote();   // this window can serve its boards to the owner's devices (#SWPH)
         }
         // No toolbar: the tab bar starts at the top. Its actions live in the palette (Ctrl+Shift+A).
         Keymap::instance().listen(this, [this] { syncChromeButtons(); });
@@ -6720,6 +6722,9 @@ public:
                 if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board())
                     tool->board()->handleEvent(status);
         };
+        // The owner's devices see this tab's board through the same worker (#SWPH): the bridge
+        // taps `onEvent` — the handler above runs first and unchanged — and never replaces it.
+        relay::BoardRemote::instance().tap(worker, this, tab);
         return worker;
     }
 
@@ -6932,6 +6937,132 @@ public:
             if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board())
                 return tool->board()->workspace();
         return {};
+    }
+
+    // ----- the Switchboard on the owner's devices (#SWPH, src/BoardRemote.h) --------------------
+    //
+    // The bridge is widget-free; this is the window's half of it. A device's request goes down the
+    // tab's own helper worker — `helperWorker(page, true)`, the call a Switchboard pane makes, so
+    // the worker is started on demand and configured by the one startBoardWorker() there is — and
+    // Execute and Verify open their pane through the board pane's own hooks.
+    void registerBoardRemote() {
+        relay::BoardRemote &bridge = relay::BoardRemote::instance();
+        static bool wired = false;      // once for the application: RemoteShare is one, windows are many
+        if (!wired) {
+            wired = true;
+            bridge.remoteOn = [] {
+                const relay::RemoteShare &share = relay::RemoteShare::instance();
+                return share.alwaysOn() && share.running();
+            };
+            bridge.sendEvent = [](const QJsonValue &rid, const QJsonObject &event) {
+                relay::RemoteShare::instance().sendBoardEvent(rid, event);
+            };
+            QObject::connect(&relay::RemoteShare::instance(), &relay::RemoteShare::boardRequest, &bridge,
+                             [](const QJsonObject &line) { relay::BoardRemote::instance().handleRequest(line); });
+        }
+        QPointer<RelayWindow> guard(this);
+        relay::BoardRemote::Host host;
+        host.active = [guard] { return guard && guard->isActiveWindow(); };
+        host.boardTab = [guard] { return guard ? guard->remoteBoardTab(false) : QString(); };
+        host.adoptBoard = [guard] { return guard ? guard->remoteBoardTab(true) : QString(); };
+        host.hasBoard = [guard](const QString &tab) { return guard && guard->tabHasBoard(guard->pageOfTabId(tab)); };
+        host.send = [guard](const QString &tab, const QJsonObject &message) {
+            QWidget *page = guard ? guard->pageOfTabId(tab) : nullptr;
+            relay::BoardWorker *worker = page ? guard->helperWorker(page, true) : nullptr;
+            if (!worker) return false;
+            worker->send(message);
+            return true;
+        };
+        host.executeCard = [guard](const QString &tab, const QString &card, const QString &task) {
+            return guard ? guard->remoteCardPane(tab, card, QString(), task) : QString();
+        };
+        host.verifyCard = [guard](const QString &tab, const QString &card, const QString &runner, const QString &task) {
+            return guard && !runner.isEmpty() ? guard->remoteCardPane(tab, card, runner, task) : QString();
+        };
+        host.paneExists = [guard](const QString &token) {
+            return guard && !token.isEmpty() && guard->findPaneByToken(token) != nullptr;
+        };
+        // The bridge watches the board folder only while no Switchboard pane of the tab does.
+        host.boardDir = [guard](const QString &tab) {
+            QWidget *page = guard ? guard->pageOfTabId(tab) : nullptr;
+            return page ? relay::projects::boardDirOf(guard->boardWorkspaceOfTab(page)) : QString();
+        };
+        host.paneWatches = [guard](const QString &tab) {
+            QWidget *page = guard ? guard->pageOfTabId(tab) : nullptr;
+            if (page) for (QWidget *leaf : leavesIn(page))
+                if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board()) return true;
+            return false;
+        };
+        host.status = [guard](const QString &text) {
+            if (guard && !text.isEmpty()) guard->statusBar()->showMessage(text, 9000);
+        };
+        bridge.addHost(this, host);
+    }
+
+    // A tab a device can work on: attached to a project whose board exists. A project with no
+    // board yet is not one — creating a Switchboard is asked on the desktop, never from a phone.
+    bool tabHasBoard(QWidget *page) const {
+        if (!page) return false;
+        const QString workspace = boardWorkspaceOfTab(page);
+        return !workspace.isEmpty() && !relay::projects::boardDirOf(workspace).isEmpty();
+    }
+
+    // The tab whose board a device sees: the current tab when it has one, else the first that has.
+    // `adopt` is the bridge's second question, asked only when no window answered the first: the
+    // active pane stands in a project that has a Switchboard nobody has opened, and opening it
+    // from a device attaches the tab exactly as Ctrl+Shift+S does (toggleBoardPane) — minus the
+    // pane, which a phone has no use for.
+    QString remoteBoardTab(bool adopt) {
+        QWidget *current = m_tabs->currentWidget();
+        if (!adopt) {
+            if (tabHasBoard(current)) return tabIdOf(current);
+            for (int i = 0; i < m_tabs->count(); ++i)
+                if (tabHasBoard(m_tabs->widget(i))) return tabIdOf(m_tabs->widget(i));
+            return {};
+        }
+        if (!current || !tabProject(current).isEmpty()) return {};
+        const QString workspace = boardWorkspace();
+        if (workspace.isEmpty() || relay::projects::boardDirOf(workspace).isEmpty()) return {};
+        attachTab(current, workspace, QString::fromLatin1(relay::projects::kReasonSwitchboard));
+        statusBar()->showMessage(QStringLiteral("Switchboard opened from a paired device: this tab is now %1's.")
+                                     .arg(relay::projects::nameFor(workspace)), 9000);
+        return tabHasBoard(current) ? tabIdOf(current) : QString();
+    }
+
+    // Execute (`runner` empty) or Verify from a device. With a Switchboard pane in the tab this
+    // *is* the desktop's code path: the pane's own onExecuteCard / onVerifyCard, as createBoardPane()
+    // installed them. With none, the same pane is opened beside whatever the tab was last using —
+    // there is no board to keep a split for — and handed the same task the same way.
+    QString remoteCardPane(const QString &tab, const QString &card, const QString &runner, const QString &task) {
+        QWidget *page = pageOfTabId(tab);
+        if (!page) return {};
+        m_tabs->setCurrentWidget(page);     // the new pane takes the focus, as it does on the desktop
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board()) {
+                relay::BoardView *view = tool->board();
+                if (runner.isEmpty()) return view->onExecuteCard ? view->onExecuteCard(card, task) : QString();
+                return view->onVerifyCard ? view->onVerifyCard(card, runner, task) : QString();
+            }
+        const QString workspace = boardWorkspaceOfTab(page);
+        const bool guest = runner.startsWith(QStringLiteral("guest:"));
+        const QString runnerId = runner.section(QLatin1Char(':'), 1);
+        if (!runner.isEmpty() && runnerId.isEmpty()) return {};
+        QJsonObject spec{{"cwd", workspace}, {"workspace", workspace}, {"agent_role", "main"}};
+        if (!runner.isEmpty() && !guest) spec.insert(QStringLiteral("preset"), runnerId);
+        Pane *pane = nullptr;
+        try { pane = createPane(spec); }
+        catch (const std::exception &error) { statusBar()->showMessage(QString::fromUtf8(error.what()), 9000); return {}; }
+        QWidget *anchor = m_lastActive.value(page);
+        const QList<QWidget *> leaves = leavesIn(page);
+        if (!anchor || !leaves.contains(anchor)) anchor = leaves.isEmpty() ? nullptr : leaves.first();
+        if (anchor) insertBeside(anchor, pane, Qt::Horizontal, false);
+        else if (page->layout()) page->layout()->addWidget(pane);
+        setActive(pane);
+        focusLeaf(pane);
+        if (guest) pane->startGuestBoardTask(runnerId, task, card);
+        else pane->startBoardTask(task, card);
+        updateTitles();
+        return pane->sessionToken();
     }
 
     // A setting the helper workers carry changed: re-send `configure` to every live one.

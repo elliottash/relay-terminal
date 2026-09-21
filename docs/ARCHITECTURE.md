@@ -1595,6 +1595,24 @@ record and nothing else) and the declined ones (Undo).
   `agent_role: "switchboard"`, so card threads never enter a pane's conversation. It is started
   lazily on the first ask and answers every `board_*` message of protocol 17. It is the tab's
   helper, not the board's alone: "The helper system" below.
+- **`src/BoardRemote.{h,cpp}`** (card #SWPH): the Switchboard on the owner's paired devices. The
+  sidecar hands `RemoteShare` a `board_request {rid, device, name, request}` line; the bridge
+  re-checks `request.type` against the device allow-list (`board_open`, `board_refresh`,
+  `board_card_get`, `board_search`, `board_comment`, `board_move`, `board_create`, `board_ask`,
+  `board_cancel`, `board_action`), refuses anything carrying a path-like field, **rebuilds** the
+  request as the worker's own message (a device's `id` is the card; on the worker's wire `id` is
+  the request and the card is `card`) and sends it down the tab's one `BoardWorker` —
+  `helperWorker(page, true)`, started on demand, never a second worker. It **taps** that worker's
+  `onEvent` (the window's handler runs first, unchanged) and writes the allow-listed events back as
+  `board_event {rid|null, event}` with every path field removed. `board_action` is GUI-level like
+  `x` and `v`: it reads the card, builds `board::executeTask` / `verifyTask`, opens the pane through
+  the board pane's own `onExecuteCard` / `onVerifyCard` (or the same pane beside the last active
+  one when the tab has no Switchboard pane), sends the `board_claim` / Verify note, and answers
+  `board_action_result`. A device stays on the board its last `board_open` found; the bridge
+  watches that board folder itself while no Switchboard pane does, so a card an agent writes
+  still reaches the phone. A device's write is said in the status line ("Card #K7Q2 moved to Done
+  from iPhone"). All of it is refused, and nothing forwarded, while remote control is off.
+  `tests/boardremote_test.cpp`.
 
 Opening: **Ctrl+Shift+S** (`board.open`) splits it in beside the anchor pane, focuses the one the
 tab already has, or, pressed on it, returns to the last terminal pane. Also the palette
@@ -3063,6 +3081,7 @@ of the platform and of the engine itself.
 | `src/BoardModel.*`, `src/BoardPane.*`, `src/BoardWorker.*` | the Switchboard: card rows, tabs, columns, filters; the pane and card detail; the per-tab helper worker that serves the board and the Options, Actions and Sessions helpers |
 | `src/HelperChat.*`, `src/BoardChat.h` | the helper agent's panel (`relay::HelperChatPanel`, library `relay-helperchat`): the log, the worker-side queue, the composer that queues rather than refuses, and the collapsed "Ask about this pane" row outside the Switchboard. `BoardChat.h` is the board's name for the same class — `relay::BoardChatPanel`, the `switchboard` pane, where the survey, the queue box and Check live |
 | `src/AppCommands.*` | the agent drives the app (protocol 30): the `app` catalog the window sends its workers, what is settable and which actions are agent-safe, the executor that carries out an `app_command`, and the change log behind Undo. No window is named here, so it is a library tested headless |
+| `src/BoardRemote.*` | the Switchboard on the owner's paired devices (#SWPH): `board_request` lines allow-listed and rebuilt into the tab worker's messages, the worker's events tapped and sent back as `board_event`, Execute/Verify through the board pane's hooks |
 | `src/BoardWorkspace.*` | which project's Switchboard a pane is looking at: the walk up to `/`, trying every folder of `projects::boardFolders()` (`.switchboard/board.yaml`, `switchboard/board.yaml`, `issues/board.yaml`) at each level |
 | `src/Projects.*` | which project a pane is in (`candidateFor`, a filesystem walk with no `git` subprocess), where its board folder is or would be, and the removable registry of known projects in `state/projects.json` |
 | `src/Theme.*` | live tokens, palette, stylesheet, the theme switch |

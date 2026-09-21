@@ -10,6 +10,7 @@
 
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QTemporaryDir>
 #include <QtTest>
 
 using relay::BoardRemote;
@@ -102,6 +103,7 @@ private slots:
     void everythingIsRefusedWhileRemoteControlIsOff();
     void noBoardOnTheDesktopIsSaid();
     void aDeviceStaysOnTheBoardItOpened();
+    void theBoardIsWatchedWhenNoPaneWatchesIt();
 };
 
 void BoardRemoteTests::theAllowListIsTheCardsAndNothingElse()
@@ -163,10 +165,21 @@ void BoardRemoteTests::eachRequestBecomesTheWorkersOwnMessage_data()
                                     << QJsonObject{{"type", "board_card_get"}, {"card", "K7Q2"}};
     QTest::newRow("board_search") << QJsonObject{{"type", "board_search"}, {"query", "phone"}}
                                   << QJsonObject{{"type", "board_search"}, {"query", "phone"}};
-    QTest::newRow("board_comment") << QJsonObject{{"type", "board_comment"}, {"id", "K7Q2"}, {"text", "yes, do it"}, {"kind", "decision"}}
-                                   << QJsonObject{{"type", "board_comment"}, {"card", "K7Q2"}, {"text", "yes, do it"}, {"kind", "decision"}};
-    QTest::newRow("a machine's kind is a comment") << QJsonObject{{"type", "board_comment"}, {"id", "K7Q2"}, {"text", "x"}, {"kind", "evidence"}}
-                                                   << QJsonObject{{"type", "board_comment"}, {"card", "K7Q2"}, {"text", "x"}, {"kind", "comment"}};
+    QTest::newRow("board_comment") << QJsonObject{{"type", "board_comment"}, {"id", "K7Q2"}, {"text", "is it done?"}, {"kind", "question"}}
+                                   << QJsonObject{{"type", "board_comment"}, {"card", "K7Q2"}, {"text", "is it done?"}, {"kind", "question"}};
+    // `note` is what the desktop's reply box sends; the worker has no `comment` kind.
+    QTest::newRow("no kind is a note") << QJsonObject{{"type", "board_comment"}, {"id", "K7Q2"}, {"text", "x"}}
+                                       << QJsonObject{{"type", "board_comment"}, {"card", "K7Q2"}, {"text", "x"}, {"kind", "note"}};
+    QTest::newRow("a machine's kind is a note") << QJsonObject{{"type", "board_comment"}, {"id", "K7Q2"}, {"text", "x"}, {"kind", "evidence"}}
+                                                << QJsonObject{{"type", "board_comment"}, {"card", "K7Q2"}, {"text", "x"}, {"kind", "note"}};
+    // The worker refuses a decision that quotes nobody; the owner's own typing is the quote.
+    QTest::newRow("a decision is the owner's words") << QJsonObject{{"type", "board_comment"}, {"id", "K7Q2"}, {"text", "yes, do it"}, {"kind", "decision"}}
+                                                     << QJsonObject{{"type", "board_comment"}, {"card", "K7Q2"}, {"kind", "decision"},
+                                                                    {"text", QString::fromUtf8("owner, from iPhone: \u201cyes, do it\u201d")}};
+    QTest::newRow("a decision already quoted") << QJsonObject{{"type", "board_comment"}, {"id", "K7Q2"}, {"text", "I said \"cloud is fine\""}, {"kind", "decision"}}
+                                               << QJsonObject{{"type", "board_comment"}, {"card", "K7Q2"}, {"text", "I said \"cloud is fine\""}, {"kind", "decision"}};
+    QTest::newRow("a decision too short to quote") << QJsonObject{{"type", "board_comment"}, {"id", "K7Q2"}, {"text", "ok"}, {"kind", "decision"}}
+                                                   << QJsonObject{{"type", "board_comment"}, {"card", "K7Q2"}, {"text", "ok"}, {"kind", "note"}};
     QTest::newRow("board_move") << QJsonObject{{"type", "board_move"}, {"id", "K7Q2"}, {"status", "done"}, {"reason", "shipped"}}
                                 << QJsonObject{{"type", "board_move"}, {"card", "K7Q2"}, {"status", "done"}, {"reason", "shipped (from iPhone)"}};
     QTest::newRow("board_move, no reason") << QJsonObject{{"type", "board_move"}, {"id", "K7Q2"}, {"status", "planned"}}
@@ -218,7 +231,7 @@ void BoardRemoteTests::anAnswerCarriesItsRidAndABroadcastCarriesNull()
     const QString id = rig.lastWorkerId();
     rig.event({{"event", "board"}, {"id", id}, {"rev", 1}, {"cards", QJsonArray{QJsonObject{{"id", "K7Q2"}}}}, {"more", true}});
     rig.event({{"event", "board_cards"}, {"id", id}, {"cards", QJsonArray{}}, {"more", false}});
-    rig.event({{"event", "board_changed"}, {"rev", 2}, {"upserts", QJsonArray{}}});
+    rig.event({{"event", "board_changed"}, {"rev", 2}, {"upserts", QJsonArray{QJsonObject{{"id", "K7Q2"}}}}});
     QCOMPARE(rig.toHub.size(), 3);
     QCOMPARE(rig.toHub.at(0).rid.toInt(), 41);
     QCOMPARE(rig.toHub.at(0).event.value("event").toString(), QStringLiteral("board"));
@@ -246,8 +259,16 @@ void BoardRemoteTests::onlyTheAllowListedEventsGoBackAndWithoutPaths()
 
     for (const char *type : {"board", "board_cards", "board_changed", "board_thread_appended", "board_written",
                              "board_activity", "board_chat_started", "board_chat_queued", "board_cancelled"})
-        rig.event({{"event", QString::fromLatin1(type)}});
+        rig.event({{"event", QString::fromLatin1(type)}, {"removed", QJsonArray{"AAAA"}}});
     QCOMPARE(rig.toHub.size(), 9);
+    // A refresh that found nothing is not news — unless a device asked for it.
+    rig.toHub.clear();
+    rig.event({{"event", "board_changed"}, {"rev", 4}, {"upserts", QJsonArray{}}, {"removed", QJsonArray{}}});
+    QVERIFY(rig.toHub.isEmpty());
+    rig.request(2, {{"type", "board_refresh"}});
+    rig.event({{"event", "board_changed"}, {"id", rig.lastWorkerId()}, {"rev", 4}, {"upserts", QJsonArray{}}});
+    QCOMPARE(rig.toHub.size(), 1);
+    QCOMPARE(rig.toHub.first().rid.toInt(), 2);
 
     rig.toHub.clear();
     rig.event({{"event", "board"}, {"root", "/home/o/p/issues"}, {"workspace", "/home/o/p"}, {"project", "/home/o/p"},
@@ -294,7 +315,7 @@ void BoardRemoteTests::thePaneStillGetsEveryEvent()
         {{"event", "board"}, {"id", rig.lastWorkerId()}, {"root", "/r"}, {"cards", QJsonArray{}}},
         {{"event", "configured"}, {"model", "m"}},
         {{"event", "delta"}, {"card_id", "K7Q2"}, {"text", "streaming"}},
-        {{"event", "board_changed"}, {"rev", 2}}};
+        {{"event", "board_changed"}, {"rev", 2}, {"upserts", QJsonArray{QJsonObject{{"id", "K7Q2"}}}}}};
     for (const QJsonObject &event : events)
         worker.onEvent(event);
     QCOMPARE(pane, events);                       // all of them, untouched — paths and all
@@ -482,7 +503,7 @@ void BoardRemoteTests::everythingIsRefusedWhileRemoteControlIsOff()
         QCOMPARE(sent.rid.toInt(), 8);
     }
     rig.toHub.clear();
-    rig.event({{"event", "board_changed"}, {"rev", 3}});
+    rig.event({{"event", "board_changed"}, {"rev", 3}, {"upserts", QJsonArray{QJsonObject{{"id", "K7Q2"}}}}});
     rig.event({{"event", "board"}, {"cards", QJsonArray{}}});
     QVERIFY(rig.toHub.isEmpty());
 
@@ -505,8 +526,32 @@ void BoardRemoteTests::noBoardOnTheDesktopIsSaid()
     QCOMPARE(rig.toHub.first().event.value("code").toString(), QStringLiteral("board_not_found"));
     // Nothing is forwarded from a board no device is on.
     rig.toHub.clear();
-    rig.event({{"event", "board_changed"}, {"rev", 3}});
+    rig.event({{"event", "board_changed"}, {"rev", 3}, {"upserts", QJsonArray{QJsonObject{{"id", "K7Q2"}}}}});
     QVERIFY(rig.toHub.isEmpty());
+
+    // A window whose pane stands in a project with a Switchboard nobody has opened yet adopts it,
+    // as the desktop's own key would — asked only because no tab had a board.
+    int asked = 0;
+    BoardRemote::Host adopting;
+    adopting.active = [] { return true; };
+    adopting.boardTab = [] { return QString(); };
+    adopting.adoptBoard = [&asked] { ++asked; return QStringLiteral("tab-9"); };
+    adopting.hasBoard = [](const QString &tab) { return tab == QStringLiteral("tab-9"); };
+    QStringList sent;
+    adopting.send = [&sent](const QString &tab, const QJsonObject &message) {
+        sent << tab + QLatin1Char(':') + message.value("type").toString();
+        return true;
+    };
+    QObject other;
+    rig.bridge.addHost(&other, adopting);
+    rig.request(2, {{"type", "board_open"}});
+    rig.request(3, {{"type", "board_refresh"}});
+    QCOMPARE(asked, 1);                       // the refresh stays on the board the open found
+    QCOMPARE(sent, (QStringList{"tab-9:board_open", "tab-9:board_refresh"}));
+    rig.hasBoard = true;                      // a tab with a board is never passed over for an adoption
+    rig.request(4, {{"type", "board_open"}});
+    QCOMPARE(asked, 1);
+    QCOMPARE(rig.bridge.currentTab(), QStringLiteral("tab-1"));
 }
 
 void BoardRemoteTests::aDeviceStaysOnTheBoardItOpened()
@@ -540,14 +585,66 @@ void BoardRemoteTests::aDeviceStaysOnTheBoardItOpened()
     secondActive = true;
     bridge.handleRequest({{"rid", 2}, {"request", QJsonObject{{"type", "board_move"}, {"id", "K7Q2"}, {"status", "done"}}}});
     QCOMPARE(sentTo, (QStringList{"tab-a:board_open", "tab-a:board_move"}));
-    bridge.workerEvent(&second, QStringLiteral("tab-b"), {{"event", "board_changed"}, {"rev", 9}});
+    bridge.workerEvent(&second, QStringLiteral("tab-b"), {{"event", "board_changed"}, {"rev", 9}, {"upserts", QJsonArray{QJsonObject{{"id", "K7Q2"}}}}});
     QVERIFY(toHub.isEmpty());
-    bridge.workerEvent(&first, QStringLiteral("tab-a"), {{"event", "board_changed"}, {"rev", 2}});
+    bridge.workerEvent(&first, QStringLiteral("tab-a"), {{"event", "board_changed"}, {"rev", 2}, {"upserts", QJsonArray{QJsonObject{{"id", "K7Q2"}}}}});
     QCOMPARE(toHub.size(), 1);
 
     bridge.handleRequest({{"rid", 3}, {"request", QJsonObject{{"type", "board_open"}}}});
     QCOMPARE(bridge.currentTab(), QStringLiteral("tab-b"));
     QCOMPARE(sentTo.last(), QStringLiteral("tab-b:board_open"));
+}
+
+void BoardRemoteTests::theBoardIsWatchedWhenNoPaneWatchesIt()
+{
+    // A pane's agent (or a `git pull`) writes a card and no Switchboard pane is open: the bridge's
+    // own watch asks the worker to look again, and the `board_changed` that answers is a broadcast.
+    QTemporaryDir board;
+    QVERIFY(board.isValid());
+    QVERIFY(QDir(board.path()).mkpath(QStringLiteral("features")));
+    Rig rig;
+    bool paneOpen = false;
+    BoardRemote::Host host;
+    host.active = [] { return true; };
+    host.boardTab = [] { return QStringLiteral("tab-w"); };
+    host.hasBoard = [](const QString &tab) { return tab == QStringLiteral("tab-w"); };
+    host.boardDir = [&board](const QString &) { return board.path(); };
+    host.paneWatches = [&paneOpen](const QString &) { return paneOpen; };
+    QList<QJsonObject> sent;
+    host.send = [&sent](const QString &, const QJsonObject &message) { sent.append(message); return true; };
+    BoardRemote bridge;
+    bridge.remoteOn = [&rig] { return rig.remote; };
+    QList<Sent> toHub;
+    bridge.sendEvent = [&toHub](const QJsonValue &rid, const QJsonObject &event) { toHub.append({rid, event}); };
+    QObject window;
+    bridge.addHost(&window, host);
+    bridge.handleRequest({{"rid", 1}, {"request", QJsonObject{{"type", "board_open"}}}});
+    QCOMPARE(sent.size(), 1);
+
+    auto touch = [&board](const QString &name) {
+        QFile card(board.path() + QStringLiteral("/features/") + name);
+        QVERIFY(card.open(QIODevice::WriteOnly));
+        card.write("x");
+    };
+    touch(QStringLiteral("one.md"));
+    QTRY_COMPARE_WITH_TIMEOUT(sent.size(), 2, 5000);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_refresh"));
+    bridge.workerEvent(&window, QStringLiteral("tab-w"),
+                       {{"event", "board_changed"}, {"id", sent.last().value("id")}, {"rev", 2},
+                        {"upserts", QJsonArray{QJsonObject{{"id", "K7Q2"}, {"waiting_on", "owner"}}}}});
+    QCOMPARE(toHub.size(), 1);
+    QVERIFY(toHub.first().rid.isNull());
+
+    // A Switchboard pane in the tab does this itself; and with remote control off nobody is told.
+    paneOpen = true;
+    touch(QStringLiteral("two.md"));
+    QTest::qWait(900);
+    QCOMPARE(sent.size(), 2);
+    paneOpen = false;
+    rig.remote = false;
+    touch(QStringLiteral("three.md"));
+    QTest::qWait(900);
+    QCOMPARE(sent.size(), 2);
 }
 
 QTEST_MAIN(BoardRemoteTests)

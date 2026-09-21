@@ -43,6 +43,9 @@
 #include <QStringList>
 #include <functional>
 
+class QFileSystemWatcher;
+class QTimer;
+
 namespace relay {
 
 class BoardWorker;
@@ -100,6 +103,12 @@ public:
         // The tab whose board a device works on — the current tab when it has a board, otherwise
         // the first one that has — as that tab's id; empty when this window has no board at all.
         std::function<QString()> boardTab;
+        // Asked only when no window has a board tab at all: the current tab's active pane may be
+        // standing in a project that has a Switchboard nobody has opened yet. Opening it from a
+        // device is the same explicit act as opening it with the key, so the window attaches the
+        // tab to that project exactly as the key does and answers with the tab's id; empty when
+        // there is no such project.
+        std::function<QString()> adoptBoard;
         // Whether that tab still exists and still has a board.
         std::function<bool(const QString &tab)> hasBoard;
         // The tab's worker, started on demand exactly as a Switchboard pane starts it, handed one
@@ -110,6 +119,13 @@ public:
         std::function<QString(const QString &tab, const QString &card, const QString &task)> executeCard;
         std::function<QString(const QString &tab, const QString &card, const QString &runner,
                               const QString &task)> verifyCard;
+        // The tab's board folder, for the bridge's own watch: a card written by a pane's agent, a
+        // guest CLI or a `git pull` reaches a device only if somebody asks the worker to look
+        // again (`board_refresh`, 19.2). A Switchboard pane does that for its tab; `paneWatches`
+        // says one is open, and the bridge then leaves it to the pane. The path never leaves the
+        // desktop.
+        std::function<QString(const QString &tab)> boardDir;
+        std::function<bool(const QString &tab)> paneWatches;
         // Whether a pane with this session token is still open (a claimed card's pane).
         std::function<bool(const QString &token)> paneExists;
         // One line for the window's status area.
@@ -149,6 +165,8 @@ private:
     void act(const Pending &pending, const QJsonObject &card);
     void actionResult(const Pending &pending, bool ok, const QString &pane, const QString &message);
     static QString who(const QString &deviceName);
+    void watchBoard();
+    void boardTouched();
 
     QList<Entry> m_hosts;
     QPointer<QObject> m_owner;       // the window whose tab `m_tab` is
@@ -157,6 +175,8 @@ private:
     QStringList m_order;                  // oldest first, to bound m_requests
     QSet<QString> m_turns;                // cards with a Discuss or Plan running on this board
     quint64 m_seq = 0;
+    QFileSystemWatcher *m_watcher = nullptr;
+    QTimer *m_refresh = nullptr;          // debounce: a burst of writes is one board_refresh
 };
 
 }  // namespace relay

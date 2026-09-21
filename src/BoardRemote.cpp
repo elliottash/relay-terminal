@@ -5,9 +5,12 @@
 #include "BoardWorker.h"
 
 #include <QDir>
+#include <QDirIterator>
 #include <QFileInfo>
+#include <QFileSystemWatcher>
 #include <QJsonArray>
 #include <QRegularExpression>
+#include <QTimer>
 
 namespace relay {
 
@@ -164,13 +167,30 @@ Translated toWorker(const QJsonObject &request, const QString &workerId, const Q
         const QString text = request.value(QStringLiteral("text")).toString().left(kMaxText);
         if (text.trimmed().isEmpty())
             return refused(QStringLiteral("An empty comment is not written."));
-        // A person's kinds only. `progress`, `evidence`, `event`, `task`, `plan` and `rewrite` are
-        // what agents and the board itself write, and a device is neither.
-        static const QStringList kinds{QStringLiteral("comment"), QStringLiteral("question"),
-                                       QStringLiteral("decision"), QStringLiteral("note")};
-        const QString kind = request.value(QStringLiteral("kind")).toString();
-        message.insert(QStringLiteral("text"), text);
-        message.insert(QStringLiteral("kind"), kinds.contains(kind) ? kind : QStringLiteral("comment"));
+        // A person's kinds only, in the worker's own words (`board_tools.COMMENT_KINDS`): `note` is
+        // what the desktop's reply box sends, and what a kind this file does not know becomes —
+        // `progress` and `evidence` are what agents and the board itself write, and a device is
+        // neither.
+        static const QStringList kinds{QStringLiteral("note"), QStringLiteral("question"), QStringLiteral("decision")};
+        QString kind = request.value(QStringLiteral("kind")).toString();
+        if (!kinds.contains(kind))
+            kind = QStringLiteral("note");
+        QString said = text;
+        if (kind == QStringLiteral("decision")) {
+            // The worker refuses a decision that does not quote the owner (`_QUOTE_RE`): the rule
+            // is there so that an *agent* cannot paraphrase him. Typed on his own phone the words
+            // are the quote, so they are written as one; too short to be one, they are a note.
+            static const QRegularExpression quoted(
+                QStringLiteral("[\"\u201c\u201d\u2018\u2019']([^\"\u201c\u201d\u2018\u2019']{3,})[\"\u201c\u201d\u2018\u2019']"));
+            if (!quoted.match(said).hasMatch())
+                said = QStringLiteral("owner, from %1: \u201c%2\u201d").arg(name, text.trimmed());
+            if (!quoted.match(said).hasMatch()) {
+                said = text;
+                kind = QStringLiteral("note");
+            }
+        }
+        message.insert(QStringLiteral("text"), said);
+        message.insert(QStringLiteral("kind"), kind);
         return {message, QString(), QString()};
     }
 
@@ -259,6 +279,7 @@ QString writeNotice(const QString &requestType, const QJsonObject &written, cons
 
 namespace {
 constexpr int kMaxRemembered = 256;
+constexpr int kMaxWatched = 200;      // the board pane's own budget (BoardView::watchIssues)
 }
 
 BoardRemote::BoardRemote(QObject *parent) : QObject(parent) {}
@@ -328,6 +349,20 @@ BoardRemote::Entry *BoardRemote::hostFor(bool reopen)
         if (active)
             break;
     }
+    // No tab anywhere has a board. The window the owner last worked in is asked first whether its
+    // pane stands in a project that has one; then the others, in the order they opened.
+    for (int pass = 0; pass < 2 && !found; ++pass)
+        for (Entry &entry : m_hosts) {
+            if (!entry.owner || !entry.host.adoptBoard)
+                continue;
+            if ((entry.host.active && entry.host.active()) != (pass == 0))
+                continue;
+            tab = entry.host.adoptBoard();
+            if (!tab.isEmpty()) {
+                found = &entry;
+                break;
+            }
+        }
     if (!found)
         return nullptr;
     if (m_owner != found->owner || m_tab != tab) {
@@ -336,6 +371,68 @@ BoardRemote::Entry *BoardRemote::hostFor(bool reopen)
         m_tab = tab;
     }
     return found;
+}
+
+// The board a device is on is watched the way a Switchboard pane watches its own (BoardView::
+// watchIssues): the folder and its subfolders, one debounced `board_refresh` per burst, which the
+// worker answers with the rows that changed — and that `board_changed` is what a phone's list, and
+// the hub's "a card is waiting on you" push, are made from. With no Switchboard pane open on the
+// desktop nobody else would ask.
+void BoardRemote::watchBoard()
+{
+    QString root;
+    for (const Entry &entry : std::as_const(m_hosts))
+        if (entry.owner && entry.owner == m_owner && entry.host.boardDir)
+            root = entry.host.boardDir(m_tab);
+    if (!m_watcher) {
+        m_watcher = new QFileSystemWatcher(this);
+        m_refresh = new QTimer(this);
+        m_refresh->setSingleShot(true);
+        m_refresh->setInterval(400);
+        connect(m_watcher, &QFileSystemWatcher::directoryChanged, this, [this] { m_refresh->start(); });
+        connect(m_refresh, &QTimer::timeout, this, [this] { boardTouched(); });
+    }
+    QStringList wanted;
+    if (!root.isEmpty() && QFileInfo(root).isDir()) {
+        wanted << root;
+        QDirIterator it(root, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+        while (it.hasNext() && wanted.size() < kMaxWatched)
+            wanted << it.next();
+    }
+    const QStringList known = m_watcher->directories();
+    QStringList fresh, stale;
+    for (const QString &path : std::as_const(wanted))
+        if (!known.contains(path))
+            fresh << path;
+    for (const QString &path : known)
+        if (!wanted.contains(path))
+            stale << path;                 // another board's, or a folder that has gone
+    if (!stale.isEmpty())
+        m_watcher->removePaths(stale);
+    if (!fresh.isEmpty())
+        m_watcher->addPaths(fresh);
+}
+
+void BoardRemote::boardTouched()
+{
+    Entry *entry = nullptr;
+    for (Entry &candidate : m_hosts)
+        if (candidate.owner && candidate.owner == m_owner)
+            entry = &candidate;
+    const bool alive = entry && entry->host.hasBoard && entry->host.hasBoard(m_tab);
+    if (!alive) {
+        if (m_watcher && !m_watcher->directories().isEmpty())
+            m_watcher->removePaths(m_watcher->directories());
+        return;
+    }
+    // Remote control off: nobody to tell, so the worker is not woken for it.
+    const bool paneDoesIt = entry->host.paneWatches && entry->host.paneWatches(m_tab);
+    if (!paneDoesIt && remoteOn && remoteOn() && entry->host.send)
+        entry->host.send(m_tab, QJsonObject{{QStringLiteral("type"), QStringLiteral("board_refresh")},
+                                            {QStringLiteral("id"), remember({QJsonValue(QJsonValue::Null),
+                                                                             QStringLiteral("board_watch"),
+                                                                             QString(), QString(), QString()})}});
+    watchBoard();                          // folders come and go as cards move between them
 }
 
 QString BoardRemote::remember(const Pending &pending)
@@ -434,6 +531,8 @@ void BoardRemote::handleRequest(const QJsonObject &line)
                QStringLiteral("The desktop's Switchboard could not be reached."));
         return;
     }
+    if (type == QStringLiteral("board_open"))
+        watchBoard();
     // Said when it is asked, for the requests that start something rather than write a line: the
     // writes are said when they land (workerEvent), with the id the worker gave the card.
     if (type == QStringLiteral("board_ask") && entry->host.status)
@@ -513,13 +612,21 @@ void BoardRemote::workerEvent(QObject *owner, const QString &tab, const QJsonObj
     // The bridge's own hand-off writes (the claim, the Verify note) answer no device: a refusal is
     // the desktop's to see, and the `board_action_result` has already gone.
     if (answers && type == QStringLiteral("error")
-        && (pending.type == QStringLiteral("board_claim") || pending.type == QStringLiteral("board_verify_note"))) {
-        for (const Entry &entry : std::as_const(m_hosts))
-            if (entry.owner == m_owner && entry.host.status)
-                entry.host.status(event.value(QStringLiteral("text")).toString());
+        && (pending.type == QStringLiteral("board_claim") || pending.type == QStringLiteral("board_verify_note")
+            || pending.type == QStringLiteral("board_watch"))) {
+        if (pending.type != QStringLiteral("board_watch"))   // the watch's refresh failing is nobody's news
+            for (const Entry &entry : std::as_const(m_hosts))
+                if (entry.owner == m_owner && entry.host.status)
+                    entry.host.status(event.value(QStringLiteral("text")).toString());
         return;
     }
     if (!boardremote::eventForwarded(type, answers))
+        return;
+    // A refresh that found nothing new — the watch firing after a write whose `board_changed` has
+    // already gone — is not news to a device. One a device asked for is still its answer.
+    if (type == QStringLiteral("board_changed") && (!answers || pending.rid.isNull())
+        && event.value(QStringLiteral("upserts")).toArray().isEmpty()
+        && event.value(QStringLiteral("removed")).toArray().isEmpty())
         return;
     sendEvent(answers ? pending.rid : QJsonValue(QJsonValue::Null), boardremote::withoutPaths(event));
 }
