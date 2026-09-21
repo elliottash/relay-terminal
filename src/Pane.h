@@ -1463,8 +1463,22 @@ public:
             if (onOpenOptions) onOpenOptions(QStringLiteral("models"));
         });
         if (!pick.accepted) return;
+        hintSwapForPick(pick.key);
         selectEntry(pick.key, pick.effort);
         focusInput();
+    }
+    // A mouse pick that swaps the ranked Main (rank 1) for its fallback (rank 2), or back, is
+    // what /swap types in one word (card #DC4J; WARP.md, "Shortcut hints"). Called with the
+    // target key before selectEntry moves the pane, so currentEntryKey() is still the old model.
+    void hintSwapForPick(const QString &key) {
+        const relay::models::Catalog catalog = modelCatalog();
+        const relay::models::Entry main = relay::models::mainDefault(catalog);
+        const relay::models::Entry fallback = relay::models::fallback(catalog);
+        if (main.key.isEmpty() || fallback.key.isEmpty()) return;
+        const QString current = currentEntryKey();
+        if ((current == main.key && key == fallback.key) || (current == fallback.key && key == main.key))
+            hint(QStringLiteral("model.swap.slash"),
+                 relay::ShortcutHints::nextTime(QStringLiteral("/swap"), QStringLiteral("swapping main ↔ fallback")));
     }
     // One door for every pick of a catalog entry. The level is the one the pick named, else the
     // one remembered for that entry (models/effort/<key>), else the pane keeps its own.
@@ -11402,6 +11416,7 @@ private:
         }
         // A catalog entry (owner, 2026-09-20): a provider and one of its models.
         if (data.startsWith(QStringLiteral("entry:"))) {
+            hintSwapForPick(data.mid(6));
             selectEntry(data.mid(6));
             focusInput();
             hint(QStringLiteral("model.mouse"), QStringLiteral("Tip: /model switches models from the prompt box"));
