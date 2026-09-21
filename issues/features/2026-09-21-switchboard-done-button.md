@@ -7,7 +7,7 @@ assignee: codex
 rank: m
 created: '2026-09-21'
 source: 'Codex in a Relay pane, 2026-09-21'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-switchboard-done/README.md], related: [], github: null}
+links: {plans: [], commits: [832e48498357f3e00f19e67996245873445e3f7c], evidence: [docs/qa_evidence/2026-09-21-switchboard-done/README.md], related: [], github: null}
 ---
 # Switchboard Done button with undo
 
