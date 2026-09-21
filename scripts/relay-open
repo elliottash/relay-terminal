@@ -13,6 +13,7 @@ import re
 import socket
 import subprocess
 import sys
+import time
 
 
 def socket_address() -> str:
@@ -21,7 +22,8 @@ def socket_address() -> str:
         return address
     # Launched by the desktop (link click) without Relay's environment: use the last address
     # Relay published for this user.
-    runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    runtime = (os.path.expanduser("~") if os.name == "nt" else
+               os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}")
     try:
         with open(os.path.join(runtime, "relay", "open-socket"), encoding="utf-8") as handle:
             return handle.read().strip()
@@ -34,6 +36,8 @@ def send(request: dict) -> bool:
     if not address:
         return False
     try:
+        if os.name == "nt":
+            return send_windows(address, (json.dumps(request) + "\n").encode("utf-8"))
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
             conn.settimeout(3)
             conn.connect(address)
@@ -41,6 +45,95 @@ def send(request: dict) -> bool:
             return conn.recv(256).decode("utf-8", "replace").strip() == "ok"
     except OSError:
         return False
+
+
+def send_windows(address: str, payload: bytes, timeout: float = 3.0) -> bool:
+    """Exchange one NDJSON request over Qt's Windows named pipe within one deadline."""
+    import ctypes
+    from ctypes import wintypes as W
+
+    class Overlapped(ctypes.Structure):
+        _fields_ = [("Internal", ctypes.c_size_t), ("InternalHigh", ctypes.c_size_t),
+                    ("Offset", W.DWORD), ("OffsetHigh", W.DWORD), ("hEvent", W.HANDLE)]
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    signatures = {
+        "CreateFileW": ([W.LPCWSTR, W.DWORD, W.DWORD, W.LPVOID, W.DWORD, W.DWORD, W.HANDLE], W.HANDLE),
+        "WaitNamedPipeW": ([W.LPCWSTR, W.DWORD], W.BOOL),
+        "CreateEventW": ([W.LPVOID, W.BOOL, W.BOOL, W.LPCWSTR], W.HANDLE),
+        "CloseHandle": ([W.HANDLE], W.BOOL),
+        "WaitForSingleObject": ([W.HANDLE, W.DWORD], W.DWORD),
+        "ResetEvent": ([W.HANDLE], W.BOOL),
+        "ReadFile": ([W.HANDLE, W.LPVOID, W.DWORD, ctypes.POINTER(W.DWORD), ctypes.POINTER(Overlapped)], W.BOOL),
+        "WriteFile": ([W.HANDLE, W.LPCVOID, W.DWORD, ctypes.POINTER(W.DWORD), ctypes.POINTER(Overlapped)], W.BOOL),
+        "GetOverlappedResult": ([W.HANDLE, ctypes.POINTER(Overlapped), ctypes.POINTER(W.DWORD), W.BOOL], W.BOOL),
+        "CancelIoEx": ([W.HANDLE, ctypes.POINTER(Overlapped)], W.BOOL),
+    }
+    for name, (args, result) in signatures.items():
+        getattr(kernel, name).argtypes = args
+        getattr(kernel, name).restype = result
+    prefix = "\\\\.\\pipe\\"
+    address = address if address.startswith(prefix) else prefix + address
+    # Only local named pipes, never a remote UNC path supplied by the discovery file.
+    if "\\" in address[len(prefix):] or "/" in address[len(prefix):]:
+        return False
+    deadline = time.monotonic() + timeout
+
+    def remaining():
+        return max(0, int((deadline - time.monotonic()) * 1000))
+
+    invalid = ctypes.c_void_p(-1).value
+    while True:
+        handle = kernel.CreateFileW(address, 0xC0000000, 0, None, 3, 0x40000000, None)
+        if handle != invalid:
+            break
+        if ctypes.get_last_error() != 231 or not remaining():  # ERROR_PIPE_BUSY
+            return False
+        if not kernel.WaitNamedPipeW(address, remaining()):
+            return False
+    event = kernel.CreateEventW(None, True, False, None)
+    if not event:
+        kernel.CloseHandle(handle)
+        return False
+    try:
+        def transfer(function, buffer, size):
+            if not remaining():
+                return None
+            kernel.ResetEvent(event)
+            operation = Overlapped(hEvent=event)
+            count = W.DWORD()
+            if not function(handle, buffer, size, ctypes.byref(count), ctypes.byref(operation)):
+                if ctypes.get_last_error() != 997:  # ERROR_IO_PENDING
+                    return None
+                if kernel.WaitForSingleObject(event, remaining()) != 0:
+                    kernel.CancelIoEx(handle, ctypes.byref(operation))
+                    # Keep the OVERLAPPED and buffer alive until cancellation completes.
+                    kernel.GetOverlappedResult(handle, ctypes.byref(operation), ctypes.byref(count), True)
+                    return None
+            if not kernel.GetOverlappedResult(handle, ctypes.byref(operation), ctypes.byref(count), False):
+                return None
+            return count.value
+
+        sent = 0
+        while sent < len(payload):
+            chunk = ctypes.create_string_buffer(payload[sent:])
+            count = transfer(kernel.WriteFile, chunk, len(payload) - sent)
+            if not count:
+                return False
+            sent += count
+        reply = bytearray()
+        while len(reply) < 256:
+            chunk = ctypes.create_string_buffer(256 - len(reply))
+            count = transfer(kernel.ReadFile, chunk, len(chunk))
+            if not count:
+                return False
+            reply.extend(chunk.raw[:count])
+            if b"\n" in reply:
+                return bytes(reply).strip() == b"ok"
+        return False
+    finally:
+        kernel.CloseHandle(event)
+        kernel.CloseHandle(handle)
 
 
 def main() -> int:
@@ -70,10 +163,13 @@ def main() -> int:
     if send(request):
         return 0
     try:
-        subprocess.Popen(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        if os.name == "nt":
+            os.startfile(path)
+        else:
+            subprocess.Popen(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         return 0
     except OSError:
-        print("relay-open: Relay is not reachable and xdg-open is unavailable", file=sys.stderr)
+        print("relay-open: Relay is not reachable and the desktop could not open the file", file=sys.stderr)
         return 1
 
 
