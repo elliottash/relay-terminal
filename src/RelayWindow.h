@@ -1202,6 +1202,7 @@ private:
         else if (id == QStringLiteral("program.delegate")) pane->delegateProgram();
         else if (id == QStringLiteral("input.toggle")) pane->toggleInputMode();
         else if (id == QStringLiteral("agent.flashAgent")) pane->toggleFlashAgent();   // model roles
+        else if (id == QStringLiteral("agent.highAgent")) pane->toggleHighAgent();     // /high, card #MDL1
         else if (id == QStringLiteral("agent.model")) pane->openModelPicker();          // Ctrl+Alt+M, /model
         else if (id == QStringLiteral("agent.modelBox")) pane->openModelBox();          // Alt+M
         else if (id == QStringLiteral("agent.effortBox")) pane->openEffortBox();        // Alt+E

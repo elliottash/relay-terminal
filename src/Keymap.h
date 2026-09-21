@@ -336,6 +336,10 @@ private:
         // the average session is not worth claiming (the same reasoning as agent.localAgent).
         add("app.update", "window", "Update: download and install the latest Relay, then restart", {});
         add("agent.flashAgent", "agent", "Switch this pane between the Main agent and the Flash agent", {QStringLiteral("Alt+F")});   // model roles
+        // /high's key, in Alt+F's shape (card #MDL1; owner, 2026-09-21: "add /high"). Alt+H is free:
+        // Relay's only Alt+letters are Alt+A, Alt+E, Alt+F, Alt+I, Alt+M, Alt+Q and Alt+R, and none
+        // of the four preset tables binds an Alt+letter at all, so every preset inherits it.
+        add("agent.highAgent", "agent", "Switch this pane between the Main agent and the High agent", {QStringLiteral("Alt+H")});
         // M for models (owner, 2026-09-20: "models are more central than sessions"), three surfaces on
         // three chords: Alt+M drops the pane's model box open (the quick pick), Ctrl+Alt+M opens
         // the picker dialog with its filter, sort and reasoning level (what /model opens), and

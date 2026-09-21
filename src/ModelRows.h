@@ -30,10 +30,44 @@ class QComboBox;
 
 namespace relay::modelrows {
 
-// One row as the box wants it. `data` is what a pick means, and is the same word in both boxes:
+// ----- the box since card #MDL1 (owner, 2026-09-21) --------------------------------------------
 //
-//   role:main | role:flash | role:local   follow that tier
-//   entry:<preset>|<model>                that provider and that model
+// "first it just says high, main, flash, with the first model in parens, eg high (gpt-6-astra).
+// then it lists the models for the mode you are in … with your selected model highlighted. so it
+// shows the models from main if a pane is on /main, or if its on /high, it shows the high models."
+// And then: "great, left/right changes mode. add /high."
+//
+//     high (gpt-6-astra)
+//   • main (kimi-k3)              ← the mode this pane is in
+//     flash (glm-5.3-flash)
+//     local (bonsai-2-27b)        only where this machine serves one
+//     ─────────────────────
+//     gpt-6-astra   codex
+//   ▌ kimi-k3       kimi          ← this pane's model, highlighted when the box opens
+//     glm-5.3       z.ai +1
+//     ─────────────────────
+//     more models…   customize…
+//
+// So the box is a small stack of **pages**, one per mode, and every page carries the same mode rows
+// at the top with the marker on a different one. Left and Right turn between them in place
+// (relay::FilterPopup::setPages); nothing reaches the worker until Enter. What a mode row's
+// parentheses name is what **this pane** would run in that mode — its own pick when it has one,
+// else rank 1 of that tier's list, else what the worker's role summary resolved. `lite` is not a
+// pane mode and has no page.
+//
+// Below the separator are the models of that page's mode, **in list order** — the order is the
+// information: rank 1 is the default and the rest is the failover order — and **one row per model**
+// (rule 2): `relay::models::grouped` folds the providers that serve one name into a single row, and
+// the row's right-hand `trailing` part says which of them the turn would go to. A row whose every
+// provider is spent or unusable is greyed **in place**, with the reason in its tooltip, never
+// dropped: a subscription running out must not make a model disappear from the list the user
+// ranked (design 1.3, rule 2).
+
+// One row as the box wants it. `data` is what a pick means, and is the same word in every box:
+//
+//   role:<role>                           put this pane on that mode (a mode row)
+//   pick:<mode>|<preset>|<model>          that mode **and** that model, in this pane
+//   entry:<preset>|<model>                that provider and that model, on the pane's own mode
 //   guest:<id>                            Claude Code or Codex as a TUI in this pane's shell
 //   gear:picker                           "more models…" — the relay::ModelPicker dialog
 //   gear:modelOptions                     the gear — Options › Models
@@ -41,37 +75,84 @@ struct Row {
     QString text;
     QString data;
     QString tooltip;             // the row's own tooltip (a tier's step-down note); usually empty
+    QString trailing;            // the "via" column: the provider this row would run on
     bool separatorBefore = false;
+    bool enabled = false;        // set by build(); false is a row greyed in place, with the reason
 };
 
-// Everything the two callers have to say. Both read the same `catalog`; the rest is who is asking.
+// Everything a caller has to say. Every box reads the same `catalog`; the rest is who is asking.
 struct Context {
     models::Catalog catalog;
-    // The role rows, in order. "main" and "flash" always; "local" only where this machine serves
-    // a model (card #JH22) — a row that always resolved back to Main would be a promise the box
-    // cannot keep. A pane adds the role a restored session put it on, when that is another one.
-    QStringList roles{QStringLiteral("main"), QStringLiteral("flash")};
-    QHash<QString, QString> roleModel;   // role → the model it runs now; empty → the role's name alone
+    // The modes this box offers, in order (the design's high, main, flash, and local only where
+    // this machine serves a model — card #JH22: a row that always resolved back to main would be a
+    // promise the box cannot keep). "lite" is not a pane mode.
+    QStringList modes{QStringLiteral("high"), QStringLiteral("main"), QStringLiteral("flash")};
+    QString mode{QStringLiteral("main")};   // the mode this pane is in: the marker, and the page
+    // mode → the worker role that mode means *for this caller*. A console runs under a main-tier
+    // role of its own ("switchboard"), and that role IS its main mode, so its box is the same list
+    // as a terminal pane's (owner, 2026-09-21: not "(switchboard)", "those should be the same
+    // systems"). Absent → the mode's own name, which is what a terminal pane wants.
+    QHash<QString, QString> modeRole;
+    // mode → the entry key this pane picked for that mode, when it picked one. "main" is the
+    // pane's own model. A mode with no pick reads rank 1 of its list.
+    QHash<QString, QString> modePick;
+    QHash<QString, QString> roleModel;   // role → what the worker's role summary resolved it to
     QHash<QString, QString> roleNote;    // role → the tier's step-down note, as that row's tooltip
-    // The entry the Main row already names, so the catalog below never repeats it. For a pane
-    // that is its own model; for a helper, the model its Main tier landed on.
-    QString mainKey;
     // Claude Code and Codex as rows of their own (26.9): only a guest this machine has on PATH
-    // that the worker cannot run as a harness, plus whichever one is actually in the pane. A
-    // helper has none — it works through Relay's own tools, which a guest does not take (#GH5T).
+    // that the worker cannot run as a harness, plus whichever one is actually in the pane — a
+    // guest the worker *can* run is a catalog entry and is already one of the rows above. They
+    // belong to the main page: a guest is the pane's own agent, not a tier. A console has none —
+    // it works through Relay's own tools, which a guest does not take (#GH5T).
     QStringList guests;
     QHash<QString, QString> guestText;   // guest id → its row's text ("Claude Code · opus")
-    QString current;                     // the `data` of the row that is current
+    // The `data` of the row that is current, when the caller knows better than this module does
+    // (a guest in the pane's foreground, a helper pinned to one entry). Empty — the usual case —
+    // and the page highlights the pane's own model for that page's mode.
+    QString current;
     qint64 now = 0;                      // unix seconds for `exhausted`; 0 means the clock
 };
 
-// The rows, in order, with the separators marked.
+// One page of the box: a mode, its rows, and the row that is current on it.
+struct Page {
+    QString mode;
+    QList<Row> rows;
+    int current = -1;            // an index into `rows`; -1 when nothing there is the pane's
+};
+
+// The page for one mode — the mode rows (marker on `context.mode`), that mode's models, the
+// guests where the caller has any, then "more models…" and the gear.
+Page page(const Context &context, const QString &mode);
+// Every page, in `context.modes` order. This is what the popup is given.
+QList<Page> pages(const Context &context);
+
+// The rows of the page the caller is on (`context.mode`), with the separators marked.
 QList<Row> build(const Context &context);
 
-// `build`, then into the box: text, data, per-row tooltips, separators, and the current row. The
-// caller blocks the box's signals and owns everything else about the widget. Returns the index the
-// current row landed on, or -1.
+// `build`, then into the box: text, data, per-row tooltips, the via column, separators, greyed
+// rows and the current row. The caller blocks the box's signals and owns everything else about the
+// widget. Returns the index the current row landed on, or -1.
 int fill(QComboBox *box, const Context &context);
+
+// A mode row's text: "high (gpt-6-astra)", with the marker on the mode the pane is in and two
+// spaces in its place on the others, so the names line up. With no model known it is the mode
+// alone.
+QString modeRowText(const QString &mode, const QString &model, bool current);
+// The entry key this pane would run in that mode: its own pick, else the first live entry of that
+// tier's list. Empty when neither answers — then only the worker's role summary knows.
+QString modeKey(const Context &context, const QString &mode);
+// The model name to print for that mode: `modeKey`'s entry, else the role summary's model, run
+// through the one naming rule (`models::nameOf`). Empty when nothing has said yet.
+QString modeModel(const Context &context, const QString &mode);
+// The models of one mode, in list order and including the ones that cannot be used — the box greys
+// them in place. A mode whose list is empty falls back to the whole shown catalog in rank order,
+// which is what the box drew before the lists existed and is the only useful answer for a tier the
+// user has never ranked.
+QList<models::Entry> modeEntries(const Context &context, const QString &mode);
+// What the collapsed chip says (design 5.1): the model alone on main, "<model> · <mode>" on any
+// other mode. Empty only when no model is known at all.
+QString collapsedText(const Context &context);
+// The index of the row carrying that `data`, or -1.
+int indexOf(const QList<Row> &rows, const QString &data);
 
 // A role row's text. The pane's own model is the model and nothing else — "glm-5.3" — and a row
 // that is something else says what in parentheses: "glm-5.3-flash (flash)". The parentheses name

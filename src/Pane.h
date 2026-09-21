@@ -1723,7 +1723,7 @@ public:
     // Mirrors relay_core.roles.ROLES minus "main" (the pane's own model).
     static QStringList roleIds() {
         return {QStringLiteral("terminal_use"), QStringLiteral("subagent"), QStringLiteral("switchboard"),
-                QStringLiteral("flash"), QStringLiteral("local"), QStringLiteral("planning"),
+                QStringLiteral("high"), QStringLiteral("flash"), QStringLiteral("local"), QStringLiteral("planning"),
                 QStringLiteral("summaries"), QStringLiteral("suggestions"), QStringLiteral("chores"),
                 QStringLiteral("audit"), QStringLiteral("loop_check"), QStringLiteral("vision"),
                 QStringLiteral("route_assist")};
@@ -1825,21 +1825,69 @@ public:
     QString rolePreset(const QString &role) const {
         return m_roleSummary.value(role).toObject().value(QStringLiteral("preset")).toString();
     }
-    void setAgentRole(const QString &role, bool announce = true) {
-        if (role == m_agentRole) return;
+    // `pick` is this pane's own model for that role (protocol 13.5, card #MDL1): the entry key a
+    // model row of the box's high / flash / local page carries. Empty — every other caller — and
+    // the role takes the first usable entry of its tier list, exactly as it always has. The pick is
+    // remembered per mode so the box's parentheses keep naming what this pane would run there.
+    void setAgentRole(const QString &role, bool announce = true, const QString &pick = QString()) {
+        const QString mode = relay::modelrows::roleTier(role);
+        if (!pick.isEmpty()) m_modePick.insert(mode, pick);
+        if (role == m_agentRole && pick.isEmpty()) return;
         // Allowed mid-turn (issue 3ES1): the worker applies it before the turn's next request.
         m_agentRole = role;
-        if (m_configured) send({{"type", "set_agent_role"}, {"role", role}});
+        // The model this mode runs in this pane: the one just picked, else the one this pane last
+        // picked for that mode. "Enter on a mode row switches the mode and keeps that mode's
+        // model" (design 5.1), and /flash, /high, /local and Alt+F come back the same way. Main is
+        // the pane's own model and is never pinned here.
+        const QString use = !pick.isEmpty()                  ? pick
+                          : mode == QStringLiteral("main")   ? QString()
+                                                             : m_modePick.value(mode);
+        if (m_configured) {
+            QJsonObject request{{"type", "set_agent_role"}, {"role", role}};
+            QString preset, model;
+            if (!use.isEmpty() && relay::models::Catalog::splitKey(use, &preset, &model)) {
+                request.insert(QStringLiteral("preset"), preset);
+                request.insert(QStringLiteral("model"), model);
+                // The level the tier lists give that entry, when they give one: a pick carries the
+                // level it was ranked with, as a list entry does.
+                if (const QString level = relay::models::curation::listEffortFor(use); !level.isEmpty())
+                    request.insert(QStringLiteral("effort"), level);
+            }
+            send(request);
+        }
         if (announce) {
-            const QString model = roleModel(role);
             // Lower-case, and the model by name (card #MDL1, rule 1): "flash for this pane ·
-            // glm-5.3-flash". Main takes the same shape rather than a sentence of its own.
+            // glm-5.3-flash". Main takes the same shape rather than a sentence of its own. A pick
+            // names itself rather than waiting for the worker's report.
+            QString named;
+            if (!use.isEmpty()) {
+                const relay::models::Catalog catalog = modelCatalog();
+                if (const relay::models::Entry *entry = catalog.find(use)) named = entry->name;
+                if (named.isEmpty()) {
+                    QString preset, model;
+                    if (relay::models::Catalog::splitKey(use, &preset, &model))
+                        named = relay::models::nameOf(model);
+                }
+            } else if (const QString model = roleModel(role); !model.isEmpty()) {
+                named = modelNameFor(rolePreset(role), model);
+            }
             toast(QStringLiteral("%1 for this pane%2")
-                      .arg(roleLabel(role), model.isEmpty() ? QString()
-                               : QStringLiteral(" · ") + modelNameFor(rolePreset(role), model)));
+                      .arg(roleLabel(role), named.isEmpty() ? QString() : QStringLiteral(" · ") + named));
         }
         changed();
     }
+    // The modes this pane's box offers, in the design's order (section 5.1): high, main, flash, and
+    // local only where this machine serves a model (card #JH22) — a mode that always resolved back
+    // to main would be a promise the box cannot keep. "lite" is not a pane mode.
+    QStringList paneModes() const {
+        QStringList modes{QStringLiteral("high"), QStringLiteral("main"), QStringLiteral("flash")};
+        if (hasLocalEndpoint()) modes << QStringLiteral("local");
+        return modes;
+    }
+    // The mode this pane is in: the tier its worker role runs on. A console's role is a main-tier
+    // one of its own ("switchboard"), so it reads as main and its box is a terminal pane's box
+    // (owner, 2026-09-21: "those should be the same systems").
+    QString paneMode() const { return relay::modelrows::roleTier(m_agentRole); }
     // The model to print beside a role in the model box: the pane's live model when the pane is
     // running that role, otherwise the model the worker resolved the role to. Empty until the
     // worker has reported one (no key yet), and then the row is just the role's name.
@@ -1859,6 +1907,12 @@ public:
     void initAgentRole(const QString &role) { if (!m_configured) m_agentRole = role; }
     void toggleFlashAgent() {
         setAgentRole(m_agentRole == QStringLiteral("flash") ? QStringLiteral("main") : QStringLiteral("flash"));
+    }
+    // The High agent, the same switch as the Flash one (owner, 2026-09-21: "add /high"). Always
+    // offered: with no high list the tier is the pane's own model at its top level, so the mode
+    // always has something to run — unlike Local, which needs an endpoint on this machine.
+    void toggleHighAgent() {
+        setAgentRole(m_agentRole == QStringLiteral("high") ? QStringLiteral("main") : QStringLiteral("high"));
     }
     // What /local and the Local row say when this machine serves nothing: both ways to fix it.
     static QString noLocalModelMessage() {
@@ -8584,6 +8638,7 @@ private:
             {QStringLiteral("model"), QStringLiteral("[name][@provider]"), QStringLiteral("Switch model by name — /model gpt-5.6-sol, or gpt-5.6-sol@openrouter for one provider's row — keeping the conversation; alone, the picker (same as Ctrl+Shift+M)")},
             {QStringLiteral("swap"), QString(), QStringLiteral("Swap to the fallback model, or back to the main one")},
             {QStringLiteral("main"), QString(), QStringLiteral("Run this pane on the main model")},
+            {QStringLiteral("high"), QString(), QStringLiteral("Run this pane on the high model (same as Alt+H)")},
             {QStringLiteral("flash"), QString(), QStringLiteral("Run this pane on the flash model (same as Alt+F)")},
             {QStringLiteral("local"), QString(), QStringLiteral("Run this pane on a model served on this machine")},
             {QStringLiteral("glm"), QString(), QStringLiteral("Switch to the GLM Coding Plan")},
@@ -8960,11 +9015,13 @@ private:
             m_swapSentence = step.message;
             selectEntry(step.target.key);
             status(step.message);
-        } else if (name == QStringLiteral("main") || name == QStringLiteral("flash")
-                   || name == QStringLiteral("local")) {
+        } else if (name == QStringLiteral("main") || name == QStringLiteral("high")
+                   || name == QStringLiteral("flash") || name == QStringLiteral("local")) {
             // The pane's own agent, not the tier table: /flash runs this conversation on the Flash
             // model and /main puts it back, both keeping the conversation (the same switch as Alt+F).
-            // /local is the same switch onto a model served on this machine (owner, 2026-09-18).
+            // /local is the same switch onto a model served on this machine (owner, 2026-09-18),
+            // and /high the same switch onto the High tier (owner, 2026-09-21: "add /high") — the
+            // hardest turns, which with no high list is the pane's own model at its top level.
             // Saying so even when the pane is already there means the command always reports where
             // it ended up, rather than looking like it did nothing.
             if (m_agentRole == name) {
@@ -12221,6 +12278,32 @@ private:
                  relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("agent.model")), QStringLiteral("the model picker")));
             return;
         }
+        // A model of one mode's list (card #MDL1, section 5.1): "this pane, this mode, that
+        // model". Enter on such a row switches the mode too when the box was turned to another
+        // page — which is the whole point of Left and Right — and the model it names is this
+        // pane's own for that mode from then on, without touching the tier list, which belongs to
+        // every other pane (protocol 13.5).
+        if (data.startsWith(QStringLiteral("pick:"))) {
+            const QString rest = data.mid(5);
+            const int bar = rest.indexOf(QLatin1Char('|'));
+            if (bar <= 0) return;
+            const QString mode = rest.left(bar);
+            const QString key = rest.mid(bar + 1);
+            const QString role = modeRoleOf(mode);
+            if (mode == QStringLiteral("main")) {
+                // Main is the pane's own model: the ordinary pick, and it puts the pane back on
+                // its main role if a mode had taken it off.
+                if (m_agentRole != role) setAgentRole(role, false);
+                hintSwapForPick(key);
+                selectEntry(key);
+            } else {
+                m_modePick.insert(mode, key);
+                setAgentRole(role, true, key);
+            }
+            focusInput();
+            hint(QStringLiteral("model.mouse"), QStringLiteral("Tip: /model switches models from the prompt box"));
+            return;
+        }
         // A catalog entry (owner, 2026-09-20): a provider and one of its models.
         if (data.startsWith(QStringLiteral("entry:"))) {
             hintSwapForPick(data.mid(6));
@@ -12381,12 +12464,82 @@ private:
     // main row, so it takes the first place rather than a fourth — the box is then the same list
     // in a console as in a terminal pane (owner, 2026-09-21: "those should be the same systems").
     QStringList paneRoleRows() const {
-        const bool ownMain = m_agentRole != QStringLiteral("main")
-            && relay::modelrows::roleTier(m_agentRole) == QStringLiteral("main");
-        QStringList roles{ownMain ? m_agentRole : QStringLiteral("main"), QStringLiteral("flash")};
-        if (hasLocalEndpoint()) roles << QStringLiteral("local");
+        QStringList roles;
+        for (const QString &mode : paneModes()) roles << modeRoleOf(mode);
         if (!roles.contains(m_agentRole)) roles << m_agentRole;
         return roles;
+    }
+
+    // ----- the box's modes (card #MDL1, section 5.1) ------------------------------------------
+    // The worker role a mode means *in this pane*. Every mode is named after its tier and there is
+    // a role of the same name for each — except main, which in a console is that console's own
+    // main-tier role ("switchboard"). That is the one line that makes a console's box the same
+    // list as a terminal pane's (owner, 2026-09-21: "those should be the same systems").
+    QString modeRoleOf(const QString &mode) const {
+        if (mode != QStringLiteral("main")) return mode;
+        return relay::modelrows::roleTier(m_agentRole) == QStringLiteral("main") ? m_agentRole : mode;
+    }
+    // The step-down note the worker sent for a role ("The first 2 of the Flash list cannot be used
+    // right now…"), as that mode row's tooltip.
+    QString roleNote(const QString &role) const {
+        return m_roleSummary.value(role).toObject().value(QStringLiteral("note")).toString();
+    }
+
+    // Everything the row builder needs from this pane. One place, because the box, the popup's
+    // pages, the collapsed chip and the phone's menu must all be the same list.
+    relay::modelrows::Context modelRowsContext() const {
+        relay::modelrows::Context rows;
+        rows.catalog = modelCatalog();
+        rows.now = QDateTime::currentSecsSinceEpoch();
+        rows.modes = paneModes();
+        rows.mode = paneMode();
+        for (const QString &mode : std::as_const(rows.modes)) {
+            const QString role = modeRoleOf(mode);
+            rows.modeRole.insert(mode, role);
+            rows.roleModel.insert(role, roleModelText(role));
+            if (const QString note = roleNote(role); !note.isEmpty()) rows.roleNote.insert(role, note);
+        }
+        // Main is always the pane's own model — that is what "main" means — and the other modes
+        // carry whatever this pane last picked for them (`setAgentRole`'s `pick`).
+        rows.modePick.insert(QStringLiteral("main"), currentEntryKey());
+        for (auto it = m_modePick.cbegin(); it != m_modePick.cend(); ++it)
+            if (it.key() != QStringLiteral("main") && !it.value().isEmpty())
+                rows.modePick.insert(it.key(), it.value());
+        // Guest agents (26.9): Claude Code and Codex the worker cannot run as a harness, plus
+        // whichever one is actually in the pane's foreground. A guest the worker *can* run is a
+        // catalog entry and is already one of the model rows — the same tool offered twice is what
+        // this list used to do, and is what `tierBGuests` is still needed for.
+        rows.guests = tierBGuests();
+        const QString liveGuest = m_guestLeaving ? QString() : m_guest.isEmpty() ? m_guestWanted : m_guest;
+        if (!liveGuest.isEmpty() && !rows.guests.contains(liveGuest)) rows.guests << liveGuest;   // run by a path
+        for (const QString &id : std::as_const(rows.guests)) {
+            const QString model = id == m_guest && !m_guestModel.isEmpty() ? QStringLiteral(" · ") + m_guestModel : QString();
+            rows.guestText.insert(id, guestDisplayName(id) + model);
+        }
+        // A guest in the foreground is the row the box sits on, whatever the mode says.
+        if (!liveGuest.isEmpty() && rows.guests.contains(liveGuest))
+            rows.current = QStringLiteral("guest:") + liveGuest;
+        return rows;
+    }
+
+    // The pages the popup turns between with Left and Right: one per mode, every one carrying the
+    // same mode rows with the marker on the mode this pane is in.
+    QList<relay::FilterPage> modelBoxPages() const {
+        const relay::modelrows::Context rows = modelRowsContext();
+        QList<relay::FilterPage> pages;
+        for (const relay::modelrows::Page &page : relay::modelrows::pages(rows)) {
+            relay::FilterPage out;
+            out.id = page.mode;
+            out.label = page.mode;
+            for (int i = 0; i < page.rows.size(); ++i) {
+                const relay::modelrows::Row &row = page.rows.at(i);
+                if (row.separatorBefore) out.rows << relay::FilterRow{{}, {}, {}, true, false, {}};
+                if (i == page.current) out.current = int(out.rows.size());
+                out.rows << relay::FilterRow{row.text, row.data, row.tooltip, false, row.enabled, row.trailing};
+            }
+            pages << out;
+        }
+        return pages;
     }
 
     void refreshPickers() {
@@ -12401,36 +12554,23 @@ private:
                                        .arg(Keymap::instance().shortcutText(QStringLiteral("input.toggle")),
                                             m_routeLabel ? m_routeLabel->toolTip() : QString()).trimmed());
         }
-        // The rows are relay::modelrows' (src/ModelRows.h, card #PK5Q): the role rows, then the
-        // catalog's shown entries in rank order, then "more models…" and the gear. The helper
-        // agent's four boxes draw the same list from the same builder, because the owner asked
-        // for exactly that on 2026-09-20 — "can you have the picker be the same as in the main
-        // terminal". What is decided here is only what this pane alone knows: which role it is
-        // on, the guest running as a TUI in its shell, and the model serving this one turn.
-        relay::modelrows::Context rows;
-        rows.catalog = modelCatalog();
-        rows.now = QDateTime::currentSecsSinceEpoch();
-        rows.roles = paneRoleRows();
-        for (const QString &role : std::as_const(rows.roles)) rows.roleModel.insert(role, roleRowModel(role));
-        rows.mainKey = currentEntryKey();   // the Main row names it already; never twice
-        // Guest agents (26.9): Claude Code and Codex, when installed, as rows like any model — no
-        // tier, no key, no worker, so they are offered in a pane with no provider at all. The row
-        // is the box's current item while that guest is in the pane's foreground (picked or typed
-        // by hand) or was just picked and not yet detected.
-        // Tier A (29.4) takes a guest out of this group: when the worker offers it as a usable
-        // harness preset, that preset *is* the row — it sits with the models above, and a second
-        // row here would be the same tool offered twice. Only the guest actually running as a TUI
-        // in this pane keeps its row either way (tierBGuests).
-        rows.guests = tierBGuests();
+        // The rows are relay::modelrows' (src/ModelRows.h, cards #PK5Q and #MDL1): the modes, then
+        // the models of the mode this pane is in, then "more models…" and the gear. Every console's
+        // box draws the same list from the same builder, because the owner asked for exactly that
+        // on 2026-09-20 — "can you have the picker be the same as in the main terminal". What is
+        // decided here is only what this pane alone knows: which mode it is in, what it picked for
+        // each mode, the guest running as a TUI in its shell, and the model serving this one turn.
+        const relay::modelrows::Context rows = modelRowsContext();
         const QString liveGuest = m_guestLeaving ? QString() : m_guest.isEmpty() ? m_guestWanted : m_guest;
-        if (!liveGuest.isEmpty() && !rows.guests.contains(liveGuest)) rows.guests << liveGuest;   // run by a path
-        for (const QString &id : std::as_const(rows.guests)) {
-            const QString model = id == m_guest && !m_guestModel.isEmpty() ? QStringLiteral(" · ") + m_guestModel : QString();
-            rows.guestText.insert(id, guestDisplayName(id) + model);
-        }
-        rows.current = !liveGuest.isEmpty() && rows.guests.contains(liveGuest)
-            ? QStringLiteral("guest:") + liveGuest : QStringLiteral("role:") + m_agentRole;
         relay::modelrows::fill(m_modelBox, rows);
+        // Left and Right turn between the modes without closing the list, so the popup is handed
+        // every page at once and answers a pick by the row's own data (card #MDL1, section 5.1).
+        m_modelBox->pageId = rows.mode;
+        m_modelBox->onPages = [this] { return modelBoxPages(); };
+        m_modelBox->onPickedData = [this](const QString &data) { modelBoxPicked(data); };
+        // The chip is the model alone on main and "<model> · <mode>" on any other mode, while the
+        // row it sits on is a mode row: that is what CurrentTextComboBox::setCollapsedText is for.
+        m_modelBox->setCollapsedText(m_serving.isEmpty() ? relay::modelrows::collapsedText(rows) : QString());
         m_modelBox->setEnabled(true);
         // The model actually serving the turn, when it is not the pane's own (C5): plan mode's
         // planning model, an image turn's vision model, or the provider a failover moved to. One
@@ -12913,15 +13053,24 @@ public:
         // own order (owner, 2026-09-19): the roles as "model (role)", then the other presets —
         // the pane's own preset is the main row already. Not the gear (desktop settings) and not
         // the "this turn" image row, which is not a choice.
-        in.modelLabel = m_modelBox ? m_modelBox->currentText() : m_model;
-        const QStringList roles = paneRoleRows();
-        for (const QString &role : std::as_const(roles))
-            in.choices << relay::panestate::Choice{QStringLiteral("role:") + role, roleRowText(role),
-                                                   role == m_agentRole};
-        for (const auto &model : std::as_const(m_stored))
-            if (model.first != m_currentPreset)
-                in.choices << relay::panestate::Choice{QStringLiteral("preset:") + model.first, conciseModel(model.first, model.second),
-                                                       false};
+        // The same strings the desktop box draws (card #MDL1): the chip is the model alone on main
+        // and "<model> · <mode>" on any other mode, and the menu is the mode rows followed by the
+        // models of the mode this pane is in — the page the box would open on. A phone is a view of
+        // this pane, so it cannot be a different list.
+        const relay::modelrows::Context phoneRows = modelRowsContext();
+        const QString collapsed = relay::modelrows::collapsedText(phoneRows);
+        in.modelLabel = !collapsed.isEmpty() ? collapsed
+                        : m_modelBox        ? m_modelBox->displayText()
+                                            : m_model;
+        for (const relay::modelrows::Row &row : relay::modelrows::build(phoneRows)) {
+            if (row.data.startsWith(QStringLiteral("gear:")) || !row.enabled) continue;
+            const QString text = row.trailing.isEmpty() ? row.text
+                                                        : QStringLiteral("%1  ·  %2").arg(row.text, row.trailing);
+            in.choices << relay::panestate::Choice{row.data, text,
+                                                   row.data == QStringLiteral("role:") + m_agentRole
+                                                       || row.data == QStringLiteral("pick:%1|%2")
+                                                              .arg(phoneRows.mode, currentEntryKey())};
+        }
 
         in.mode = m_modeValue;
         if (m_editor) in.placeholder = m_editor->placeholderText().isEmpty() ? m_savedPlaceholder : m_editor->placeholderText();
@@ -13024,6 +13173,12 @@ public:
             const QString role = key.mid(5);
             if (role == QLatin1String("local") && !hasLocalEndpoint()) return false;
             chooseAgentRole(role);
+        } else if (key.startsWith(QLatin1String("pick:")) || key.startsWith(QLatin1String("guest:"))) {
+            // A row of the model box, by the same word the desktop uses (card #MDL1): the mode and
+            // the model in one token. It goes through the same door, so the phone can never reach
+            // something the box would not have done.
+            if (!m_configured) return false;
+            modelBoxPicked(key);
         } else if (key.startsWith(QLatin1String("preset:"))) {
             const QString preset = key.mid(7);
             const bool stored = std::any_of(m_stored.cbegin(), m_stored.cend(), [&](const auto &model) { return model.first == preset; });
@@ -17194,7 +17349,9 @@ private:
     relay::WordWrap m_wrap;   // between m_markdown (and the other inks) and the terminal
     bool m_shellResizeHeld = false;   // holdShellResize()
     QList<QPair<QString, QString>> m_stored;
-    QComboBox *m_modelBox = nullptr;
+    // Typed as what it is, since the model box's list is pages now (card #MDL1): the modes it can
+    // be turned between and the collapsed text that differs from the row are both this class's.
+    CurrentTextComboBox *m_modelBox = nullptr;
     QToolButton *m_cwdChip = nullptr, *m_modeChip = nullptr;
     relay::InputHighlighter *m_highlighter = nullptr;
     QLabel *m_toast = nullptr;
@@ -17396,6 +17553,12 @@ private:
     // `m_swapFrom` is where the last /swap (or a pick that landed on rank 1) came from, and
     // `m_swapSentence` the line the next `model_changed` prints in place of its own.
     QString m_paneModel, m_swapFrom, m_swapSentence;
+    // What this pane picked for each mode of the model box, by tier id — "flash" → the entry key a
+    // model row of the flash page named (card #MDL1, section 5.1). It is what the mode row's
+    // parentheses say and what `set_agent_role` carries as this pane's own pick; "main" is not
+    // kept here, because main's model is the pane's own (`currentEntryKey`). This pane's, not the
+    // machine's: the tier lists are never rewritten by a pick.
+    QHash<QString, QString> m_modePick;
     // The harness this pane is on but has not started: rank 1 of the main list, waiting for the
     // first prompt (card #MDL1, owner 2026-09-21).
     QString m_deferredPreset, m_deferredModel;
