@@ -104,9 +104,12 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QDialog(pare
         rebuild();
     });
     connect(m_list, &QTreeWidget::currentItemChanged, this, [this] { onRowChanged(); });
-    connect(m_list, &QTreeWidget::itemActivated, this, [this](QTreeWidgetItem *item) {
+    // A click only highlights (owner, 2026-09-20: "don't pick immediately on click … so you can
+    // pick effort as well"). Enter, the "use" button or a double click commit the pair.
+    connect(m_list, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item) {
         if (item && !item->data(0, SectionRole).toBool()) accept();
     });
+    m_list->installEventFilter(this);
     connect(m_favorite, &QPushButton::clicked, this, [this] {
         const QString key = selectedKey();
         if (key.isEmpty()) return;
@@ -118,7 +121,7 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QDialog(pare
         reject();
         if (openModelsPage) openModelsPage();
     });
-    connect(m_levels, &QListWidget::itemActivated, this, [this](QListWidgetItem *) { accept(); });
+    connect(m_levels, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *) { accept(); });
     m_levels->installEventFilter(this);
     connect(m_use, &QPushButton::clicked, this, [this] { accept(); });
     connect(cancel, &QPushButton::clicked, this, &QDialog::reject);
@@ -141,6 +144,12 @@ bool ModelPicker::eventFilter(QObject *watched, QEvent *event) {
             QCoreApplication::sendEvent(m_list, event);
             return true;
         }
+        if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) { accept(); return true; }
+        if (key->key() == Qt::Key_Right && m_levels->count() > 0) { m_levels->setFocus(); return true; }   // → the level
+    }
+    if (watched == m_list && event->type() == QEvent::KeyPress) {
+        auto *key = static_cast<QKeyEvent *>(event);
+        // The view swallows Enter (it emits activated), so the default button never sees it.
         if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) { accept(); return true; }
         if (key->key() == Qt::Key_Right && m_levels->count() > 0) { m_levels->setFocus(); return true; }   // → the level
     }

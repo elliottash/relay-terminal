@@ -4,9 +4,11 @@
 // pane's model box. Warp's shape: a filter over one list and a sort menu. The reasoning level is
 // a second, separate pick (owner, 2026-09-20: "split the model picker into model and effort"): a
 // short list beside the models, preset to the level the tier lists give the highlighted model,
-// else the pane's own. → moves into it, ← back; Enter uses both. opencode's additions: favorites and the ten most recent picks
-// above the rest, sections that give way to one flat list the moment you type, and the reasoning
-// level remembered per model.
+// else the pane's own. → moves into it, ← back; Enter uses both. A single click on either list
+// only highlights — nothing is picked until Enter, "use" or a double click, so the model and the
+// level are chosen together (owner, 2026-09-20). opencode's additions: favorites and the ten most
+// recent picks above the rest, sections that give way to one flat list the moment you type, and
+// the reasoning level remembered per model.
 //
 // The dialog reads a relay::models::Catalog and QSettings and returns a key and a level; it never
 // talks to the worker. The pane does the switch (Pane::selectEntry) so that every door — the box,

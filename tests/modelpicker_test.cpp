@@ -117,6 +117,34 @@ private Q_SLOTS:
         QCOMPARE(picker.pick().effort, QStringLiteral("max"));
     }
 
+    void aClickOnlyHighlights() {
+        // Owner, 2026-09-20: clicking a row must not close the dialog, so the level can be picked
+        // after the model. Enter commits; a double click is the shortcut for both.
+        ModelPicker picker(context());
+        picker.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&picker));
+        QTreeWidgetItem *flash = picker.list()->topLevelItem(1);
+        const QRect rect = picker.list()->visualItemRect(flash);
+        QTest::mouseClick(picker.list()->viewport(), Qt::LeftButton, Qt::NoModifier, rect.center());
+        QCOMPARE(picker.selectedKey(), QStringLiteral("glm-coding|glm-5.3-flash"));
+        QVERIFY(!picker.pick().accepted);
+        QVERIFY(picker.isVisible());
+        // A desktop that activates on a single click must not commit either: the dialog no longer
+        // listens to itemActivated at all.
+        Q_EMIT picker.list()->itemActivated(flash, 0);
+        Q_EMIT picker.levelList()->itemActivated(picker.levelList()->item(0));
+        QVERIFY(!picker.pick().accepted);
+        picker.levelList()->setCurrentRow(0);
+        QTest::mouseClick(picker.levelList()->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          picker.levelList()->visualItemRect(picker.levelList()->item(2)).center());
+        QVERIFY(!picker.pick().accepted);
+        QCOMPARE(picker.selectedEffort(), QStringLiteral("max"));
+        QTest::keyClick(picker.list(), Qt::Key_Return);            // the list swallows Enter itself
+        QVERIFY(picker.pick().accepted);
+        QCOMPARE(picker.pick().key, QStringLiteral("glm-coding|glm-5.3-flash"));
+        QCOMPARE(picker.pick().effort, QStringLiteral("max"));
+    }
+
     void typingFiltersToOneFlatList() {
         curation::toggleFavorite(QStringLiteral("guest:claude|opus"));
         curation::noteUse(QStringLiteral("anthropic|claude-opus-5"));
