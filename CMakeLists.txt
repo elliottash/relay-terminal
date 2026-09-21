@@ -83,7 +83,11 @@ target_include_directories(relay-board PUBLIC src)
 # relay-notifications: a signal thread's pickup posts to the notification centre from the board
 # pane itself (#AQ6X phase 3), so the wording and the amend are read in tests/signals_test.cpp
 # rather than by starting an agent. The centre is QtCore-only, as relay-appcommands' use of it is.
-target_link_libraries(relay-board PUBLIC relay-helperchat relay-projects relay-notifications ${RELAY_QT}::Widgets)
+# relay-agentcontext: the Switchboard's list page and an open card each supply a
+# `relay::agent::Context` (card #AGNT step 6), so this library names one — and only one — without
+# pulling in a window: the console that draws it is a `Pane`, which exists only inside the `relay`
+# executable's translation unit, and reaches this view as a `QWidget *` and a `ConsoleHandle`.
+target_link_libraries(relay-board PUBLIC relay-helperchat relay-projects relay-notifications relay-agentcontext ${RELAY_QT}::Widgets)
 target_compile_options(relay-board PRIVATE -Wall -Wextra -Wpedantic)
 
 # Which project a pane is in, where that project's Switchboard folder is (or would be), and the

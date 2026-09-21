@@ -6,11 +6,15 @@
 
 #include "Projects.h"
 #include "BoardPane.h"
-#include "BoardChat.h"   // the page agent's panel (#8YQ9, protocol 19.18)
+#include "AgentContext.h"   // what the agent on each of the two pages is about (#AGNT step 6)
+#include "RichEditor.h"     // the console's composer, which is the board's prompt box
 #include "Theme.h"      // the real stylesheet, for the action-row face (#PBX1)
 
+#include <QAbstractButton>
 #include <QApplication>
 #include <QCheckBox>
+#include <QHBoxLayout>
+#include <QVBoxLayout>
 #include <QClipboard>
 #include <QComboBox>
 #include <QFocusEvent>
@@ -183,6 +187,135 @@ QListWidget *listOf(relay::BoardView &view)
     return view.findChild<QListWidget *>(QStringLiteral("boardList"));
 }
 
+// ---- the agent console the window makes (card #AGNT steps 5 and 6) --------------------------
+//
+// `BoardView` does not build its own chat widget any more. It asks the window for a console —
+// a no-shell `Pane`, which lives only in the app's translation unit and cannot be constructed
+// from `relay-board` — and is handed back a `QWidget *` and a `relay::agent::ConsoleHandle`.
+//
+// This is that console, minus the pane: the two things the board actually drives are the
+// composer, which is the prompt box, and the action row, which the console builds from
+// `Context::actions()` and rebuilds whenever the context says something moved. Everything else
+// on the handle records what it was asked to do, so a test can say what the board asked for
+// rather than what a widget looks like.
+class FakeConsole : public QWidget {
+public:
+    FakeConsole(relay::agent::Context *context, QWidget *parent)
+        : QWidget(parent), m_context(context), m_spec(context->spec())
+    {
+        setObjectName(QStringLiteral("agentConsole"));
+        auto *column = new QVBoxLayout(this);
+        column->setContentsMargins(0, 0, 0, 0);
+        m_row = new QWidget(this);
+        m_row->setObjectName(QStringLiteral("agentActionRow"));
+        m_rowLayout = new QHBoxLayout(m_row);
+        m_rowLayout->setContentsMargins(0, 0, 0, 0);
+        column->addWidget(m_row);
+        m_editor = new RichEditor(this);
+        column->addWidget(m_editor);
+        // The pane owns this callback while it holds the context (src/Pane.h, setContext).
+        context->onChanged = [this] { rebuild(); };
+        rebuild();
+    }
+
+    // The row, exactly as `Pane::rebuildActionRow` builds it: the action's `key` is the button's
+    // object name, its `fullLabel()` is the text and what a narrow row shortens from, and
+    // `leaves` rides as a property.
+    void rebuild()
+    {
+        qDeleteAll(m_row->findChildren<QAbstractButton *>(QString(), Qt::FindDirectChildrenOnly));
+        m_actions = relay::agent::withUniqueLetters(m_context->actions());
+        for (const relay::agent::Action &action : std::as_const(m_actions)) {
+            auto *button = new QToolButton(m_row);
+            button->setObjectName(action.key);
+            button->setText(action.fullLabel());
+            button->setProperty("fullLabel", action.fullLabel());
+            button->setProperty("leaves", action.leaves);
+            button->setToolTip(action.tooltip);
+            button->setEnabled(action.enabled);
+            if (action.run)
+                connect(button, &QToolButton::clicked, this, action.run);
+            m_rowLayout->addWidget(button);
+        }
+        m_editor->setPlaceholders({m_context->placeholder(), QStringLiteral("…")});
+        ++m_rebuilds;
+    }
+
+    relay::agent::Context *context() const { return m_context; }
+    // The spec as it was when the window made this console: what would have gone out in
+    // `configure`'s `context` block.
+    relay::agent::ContextSpec spec() const { return m_spec; }
+    relay::agent::ContextSpec liveSpec() const { return m_context->spec(); }
+    RichEditor *editor() const { return m_editor; }
+    QList<relay::agent::Action> actions() const { return m_actions; }
+    int rebuilds() const { return m_rebuilds; }
+    QStringList drafts;          // every `draftInComposer`, in order
+    int focusCalls = 0;
+
+    relay::agent::ConsoleHandle handle()
+    {
+        relay::agent::ConsoleHandle out;
+        out.widget = this;
+        out.focusComposer = [this] { ++focusCalls; m_editor->setFocus(); };
+        out.draftInComposer = [this](const QString &text) {
+            drafts << text;
+            m_editor->setPlainText(text);
+        };
+        out.composerText = [this] { return m_editor->toPlainText(); };
+        out.setCollapsed = [this](bool collapse) { setVisible(!collapse); };
+        out.collapsed = [this] { return isHidden(); };
+        out.runActionLetter = [this](const QString &letter) {
+            const int at = relay::agent::actionForLetter(m_actions, letter);
+            if (at < 0 || !m_actions.at(at).run)
+                return false;
+            m_actions.at(at).run();
+            return true;
+        };
+        return out;
+    }
+
+private:
+    relay::agent::Context *m_context;
+    relay::agent::ContextSpec m_spec;
+    QWidget *m_row = nullptr;
+    QHBoxLayout *m_rowLayout = nullptr;
+    RichEditor *m_editor = nullptr;
+    QList<relay::agent::Action> m_actions;
+    int m_rebuilds = 0;
+};
+
+// Give a view the consoles the window would make, and keep what it asked for. On the stack
+// beside the view: the widgets belong to the view, this only holds pointers at them.
+struct Consoles {
+    explicit Consoles(relay::BoardView &view)
+    {
+        view.onCreateConsole = [this](relay::agent::Context *context, QWidget *parent) {
+            auto *console = new FakeConsole(context, parent);
+            made << console;
+            return console->handle();
+        };
+    }
+    QList<FakeConsole *> made;
+    // The console of a given context name — "switchboard" for the list page, "card" for an
+    // open card. Null before the board has asked for one.
+    FakeConsole *of(const QString &name) const
+    {
+        for (FakeConsole *console : made)
+            if (console->spec().name == name)
+                return console;
+        return nullptr;
+    }
+    FakeConsole *board() const { return of(QStringLiteral("switchboard")); }
+    FakeConsole *card() const { return of(QStringLiteral("card")); }
+};
+
+// The card page's reply box: the composer inside the console the card page embedded.
+QPlainTextEdit *replyBox(relay::BoardView &view)
+{
+    QWidget *console = view.cardConsole();
+    return console ? console->findChild<RichEditor *>() : nullptr;
+}
+
 }  // namespace
 
 class BoardModelTests : public QObject {
@@ -263,31 +396,19 @@ private slots:
     void aSelfClosedCardReachedByIdUnfoldsItsGroup();
     void theBriefsAskForTheExactModelAndTheGuestHarness();
     void relayFreeSaysWhyItCannotVerifyAndAWeakPickWarns();
-    // The Switchboard page agent's panel (#8YQ9, protocol 19.18)
-    void thePanelSeedsItselfFromTheBoardEventsChatBlock();
-    void aPromptSendsBoardChatAndASecondOneQueuesInsteadOfBeingRefused();
-    void theQueueRowsRemoveAndReorderThroughTheWorker();
-    void cleanUpMovedIntoThePageAgentsRowBesideCheck();
+    // The board and the card as contexts (card #AGNT step 6, protocol 33)
+    void theListPageAsksForASwitchboardConsoleKeyedByTheTab();
+    void theBoardsRowIsCheckCleanUpTestsAndProfileWithTheirLetters();
     void checkIsUnscopedAndASectionsTriageNamesItsSection();
-    void aProblemDraftsAFixInTheComposerWithoutSendingIt();
+    void aProblemDraftsAFixInTheConsoleWithoutSendingIt();
     void theSurveysImportButtonSendsBoardImportApply();
     void theSurveyOffersToLookOnGithubAndThatLookWritesNothing();
-    void theContextChipFollowsTheConversation();
-    void thePageAgentsEventsNeverReachACardThread();
-    void anEmptyBoardStillShowsThePageAgentBecauseThatIsWhereTheSurveyRuns();
-    void theAskKeyFocusesTheComposerAndACardGoesBackFirst();
-    void theModelBoxSitsInTheComposerRowWithTheMicAndTheContextChip();
-    void theHelpersPromptBoxIsTheSameShapeAsAPanes();
-    void everyButtonOnAnActionRowWearsTheCardPagesFace();
-    void everyActionOnTheSwitchboardsRowHasALetter();
-    void theCardPageCarriesTheSameModelBoxAsTheListPage();
-    void theCardsModelBoxGivesTheRowItsWidthBackBeforeAButtonIsClipped();
-    // The panel outside the Switchboard (#FEJQ): one worker, four panels.
-    void aHelperTagsWhatItSendsWithItsPaneAndTakesOnlyThatPanesEvents();
-    void aHelperOpensAsOneRowThatExpandsIntoTheWholePanel();
-    void everyHelperPanelDrawsTheQueueAndCanStopItsOwnTurn();
-    void aHelperWorkerThatDiedPutsThePanelBack();
-    void anAnswersOptionAndSessionLinksResolveIntoThePane();
+    void anEmptyBoardStillShowsTheAgentBecauseThatIsWhereTheSurveyRuns();
+    void theAskKeyFocusesTheConsoleAndACardGoesBackFirst();
+    void theCardPageAsksForACardConsoleAndItsActionsFollowTheCard();
+    void theCardsRowCarriesVerifyOnlyInAQaLane();
+    void anAnswersCardOptionAndSessionLinksResolveThroughTheContext();
+    void aBoardWithNoConsoleFactoryStillWorks();
 };
 
 void BoardModelTests::categoryFoldersComeFromTheConfig()
@@ -1435,6 +1556,7 @@ void BoardModelTests::aSectionCheckboxTakesItsSectionOffThePageAndTheCountSaysSo
 void BoardModelTests::theListToolsSitOnTheListPageAndTheHeaderIsTheWayBack()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    Consoles consoles(view);   // Clean up and Check are the console's row now (#AGNT)
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.resize(500, 600);          // narrow enough that an open card takes the whole pane
@@ -1637,13 +1759,14 @@ void BoardModelTests::theOpenCardRefetchesOnlyForItsOwnChanges()
 void BoardModelTests::aQuestionTheAgentCannotTakeIsReportedOnTheCard()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    Consoles consoles(view);   // the console the window would make (#AGNT)
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
     openCard(view, sent, QJsonObject{{"event", "board_card"}, {"card_id", "K7Q2"}, {"title", "K7Q2 card"},
                                  {"status", "inbox"}, {"tab", "features"}, {"body", "text"},
                                  {"thread", QJsonArray{}}, {"thread_total", 0}});
-    auto *reply = view.findChild<QPlainTextEdit *>(QStringLiteral("boardReplyEditor"));
+    QPlainTextEdit *reply = replyBox(view);
     QVERIFY(reply);
     reply->setPlainText(QStringLiteral("Which layout?"));
     QTest::keyClick(reply, Qt::Key_Return);
@@ -1665,6 +1788,7 @@ void BoardModelTests::aQuestionTheAgentCannotTakeIsReportedOnTheCard()
 void BoardModelTests::theThinkingTraceRunsInTheCardsThread()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    Consoles consoles(view);   // the console the window would make (#AGNT)
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
@@ -1678,7 +1802,7 @@ void BoardModelTests::theThinkingTraceRunsInTheCardsThread()
     QVERIFY(doc);
     const auto text = [doc] { return doc->toPlainText(); };
 
-    auto *reply = view.findChild<QPlainTextEdit *>(QStringLiteral("boardReplyEditor"));
+    QPlainTextEdit *reply = replyBox(view);
     QVERIFY(reply);
     reply->setPlainText(QStringLiteral("Plan the trace."));
     QTest::keyClick(reply, Qt::Key_Return);
@@ -1859,6 +1983,7 @@ void BoardModelTests::hashtagClicksCopyAndCardRefsZoom()
 void BoardModelTests::theRefCopyButtonCopiesTheIdInTheRowsAndTheHeader()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    Consoles consoles(view);   // Clean up and Check are the console's row now (#AGNT)
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     QStringList hinted;
@@ -1980,6 +2105,7 @@ QToolButton *cleanupButton(relay::BoardView &view)
 void BoardModelTests::aCleanupPreviewsFirstAndItsEventsNeverReachACardThread()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    Consoles consoles(view);   // Clean up and Check are the console's row now (#AGNT)
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row("K7Q2", "inbox", "features"), row("M3XJ", "inbox", "features")}));
@@ -1989,13 +2115,14 @@ void BoardModelTests::aCleanupPreviewsFirstAndItsEventsNeverReachACardThread()
     QVERIFY(document);
     const QString threadBefore = document->toPlainText();
 
-    QToolButton *button = cleanupButton(view);
-    QVERIFY(button);
+    QVERIFY(cleanupButton(view));
     // The label carries the letter that clicks it from the list (#PBX1, owner: "it should
     // have the letter hotkeys for each switchboard action as well").
-    QCOMPARE(button->text(), QStringLiteral("Clean up (u)"));
+    QCOMPARE(cleanupButton(view)->text(), QStringLiteral("Clean up (u)"));
     sent.clear();
-    button->click();
+    // The button is looked up again after every click: the row is rebuilt from
+    // `BoardContext::actions()` whenever the run's state moves, so the widget is a new one.
+    cleanupButton(view)->click();
 
     // A preview, not the real thing: a cleanup rewrites the owner's files, so the button never
     // starts one that writes.
@@ -2005,7 +2132,7 @@ void BoardModelTests::aCleanupPreviewsFirstAndItsEventsNeverReachACardThread()
     const QString runId = sent.last().value("id").toString();
     QVERIFY(!runId.isEmpty());
     QVERIFY(view.cleanupRunning());
-    QCOMPARE(button->text(), QStringLiteral("Stop (u)"));   // the word changes, the letter does not
+    QTRY_COMPARE(cleanupButton(view)->text(), QStringLiteral("Stop (u)"));   // the word changes, the letter does not
 
     view.handleEvent(cleanupStarted(runId, true));
     QVERIFY(view.cleanupRunning());
@@ -2042,7 +2169,7 @@ void BoardModelTests::aCleanupPreviewsFirstAndItsEventsNeverReachACardThread()
     view.handleEvent(cleanupEvent(QStringLiteral("done")));
     view.handleEvent(cleanupSummary(runId, true, QStringLiteral("done"), twoChanges(true)));
     QVERIFY(!view.cleanupRunning());
-    QCOMPARE(button->text(), QStringLiteral("Clean up (u)"));
+    QTRY_COMPARE(cleanupButton(view)->text(), QStringLiteral("Clean up (u)"));
     auto *panel = view.findChild<QWidget *>(QStringLiteral("boardCleanupPanel"));
     auto *head = view.findChild<QLabel *>(QStringLiteral("boardCleanupHead"));
     auto *body = view.findChild<QTextBrowser *>(QStringLiteral("boardCleanupBody"));
@@ -2066,6 +2193,7 @@ void BoardModelTests::aCleanupPreviewsFirstAndItsEventsNeverReachACardThread()
 void BoardModelTests::applyingAPreviewRunsTheCleanupForReal()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    Consoles consoles(view);   // Clean up and Check are the console's row now (#AGNT)
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
@@ -2106,11 +2234,12 @@ void BoardModelTests::applyingAPreviewRunsTheCleanupForReal()
 void BoardModelTests::aCleanupAndACardsAskRefuseEachOther()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    Consoles consoles(view);   // the console the window would make (#AGNT)
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
     openCard(view, sent, card("K7Q2", "K7Q2 card", "the issue", "h1"));
-    auto *reply = view.findChild<QPlainTextEdit *>(QStringLiteral("boardReplyEditor"));
+    QPlainTextEdit *reply = replyBox(view);
     auto *error = view.findChild<QLabel *>(QStringLiteral("boardCardError"));
     QVERIFY(reply && error);
 
@@ -2131,6 +2260,7 @@ void BoardModelTests::aCleanupAndACardsAskRefuseEachOther()
 
     // The other way round: an ask is running and the worker refuses the cleanup.
     relay::BoardView second(QStringLiteral("/tmp/workspace"));
+    Consoles secondConsoles(second);
     QList<QJsonObject> theirs;
     second.onSend = [&theirs](const QJsonObject &message) { theirs << message; };
     second.handleEvent(opened({row("K7Q2", "inbox", "features")}));
@@ -2141,17 +2271,18 @@ void BoardModelTests::aCleanupAndACardsAskRefuseEachOther()
                                    {"card_id", "K7Q2"},
                                    {"text", "the agent is answering about #K7Q2"}});
     QVERIFY(!second.cleanupRunning());
-    QCOMPARE(cleanupButton(second)->text(), QStringLiteral("Clean up (u)"));
+    QTRY_COMPARE(cleanupButton(second)->text(), QStringLiteral("Clean up (u)"));
     QVERIFY(second.notice().contains(QStringLiteral("answering on #K7Q2")));
     QVERIFY(second.notice().contains(QStringLiteral("did not start")));
 
     // And an ask refused by a cleanup someone else started: off the card, and back in the box.
     relay::BoardView third(QStringLiteral("/tmp/workspace"));
+    Consoles thirdConsoles(third);
     QList<QJsonObject> mine;
     third.onSend = [&mine](const QJsonObject &message) { mine << message; };
     third.handleEvent(opened({row("K7Q2", "inbox", "features")}));
     openCard(third, mine, card("K7Q2", "K7Q2 card", "the issue", "h1"));
-    auto *box = third.findChild<QPlainTextEdit *>(QStringLiteral("boardReplyEditor"));
+    QPlainTextEdit *box = replyBox(third);
     box->setPlainText(QStringLiteral("Still relevant?"));
     QTest::keyClick(box, Qt::Key_Return);
     QCOMPARE(mine.last().value("type").toString(), QStringLiteral("board_ask"));
@@ -2168,17 +2299,19 @@ void BoardModelTests::aCleanupAndACardsAskRefuseEachOther()
 void BoardModelTests::stoppingACleanupSendsCancelAndTheSummarySaysSo()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    Consoles consoles(view);   // Clean up and Check are the console's row now (#AGNT)
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
-    QToolButton *button = cleanupButton(view);
-    button->click();
+    cleanupButton(view)->click();
     const QString runId = sent.last().value("id").toString();
     view.handleEvent(cleanupStarted(runId, false));
-    QCOMPARE(button->text(), QStringLiteral("Stop (u)"));   // the word changes, the letter does not
+    // The row is rebuilt from the context whenever the run's state moves, so the button is a new
+    // widget each time: it is looked up again rather than held.
+    QTRY_COMPARE(cleanupButton(view)->text(), QStringLiteral("Stop (u)"));   // the word changes, the letter does not
 
     sent.clear();
-    button->click();
+    cleanupButton(view)->click();
     QCOMPARE(sent.size(), 1);
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("cancel"));
     QVERIFY(view.cleanupRunning());      // still running until the summary says otherwise
@@ -2186,7 +2319,7 @@ void BoardModelTests::stoppingACleanupSendsCancelAndTheSummarySaysSo()
     view.handleEvent(cleanupEvent(QStringLiteral("cancelled")));
     view.handleEvent(cleanupSummary(runId, false, QStringLiteral("cancelled"), twoChanges(false)));
     QVERIFY(!view.cleanupRunning());
-    QCOMPARE(button->text(), QStringLiteral("Clean up (u)"));
+    QTRY_COMPARE(cleanupButton(view)->text(), QStringLiteral("Clean up (u)"));
     auto *head = view.findChild<QLabel *>(QStringLiteral("boardCleanupHead"));
     QVERIFY(head->text().contains(QStringLiteral("stopped part way")));
     QVERIFY(view.notice().isEmpty());    // the progress line goes with the run
@@ -2197,6 +2330,7 @@ void BoardModelTests::stoppingACleanupSendsCancelAndTheSummarySaysSo()
 void BoardModelTests::theProgressLineKeepsOffAnOpenCardsControls()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    Consoles consoles(view);   // Clean up is the console's row now (#AGNT)
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.resize(500, 700);          // narrow: an open card takes the whole pane
@@ -2424,10 +2558,13 @@ void BoardModelTests::anEditIsKeptWhenTheCardChangedUnderIt()
 // ---- Discuss / Plan / Execute (#XS6Q, protocol 19.10) --------------------------------------
 
 namespace {
-QPushButton *button(relay::BoardView &view, const QString &text)
+// The action row is the console's since card #AGNT step 6, so its buttons are `QToolButton`s
+// built from `Context::actions()` rather than this page's own `QPushButton`s. The text and the
+// rule are unchanged, which is the point: `QAbstractButton` is what both have in common.
+QAbstractButton *button(relay::BoardView &view, const QString &text)
 {
-    const auto buttons = view.findChildren<QPushButton *>();
-    for (QPushButton *candidate : buttons)
+    const auto buttons = view.findChildren<QAbstractButton *>();
+    for (QAbstractButton *candidate : buttons)
         // Buttons carry their shortcut in parentheses (#QG60): "Execute (x)". A query matches
         // a bare label ("Stop", while a run is going) or the suffixed one.
         if (candidate->text() == text || candidate->text().startsWith(text + QStringLiteral(" (")))
@@ -2442,6 +2579,7 @@ QPushButton *button(relay::BoardView &view, const QString &text)
 void BoardModelTests::theBoxDiscussesAndTheRowPlansOrLeavesTheBoard()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    Consoles consoles(view);   // the console the window would make (#AGNT)
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
@@ -2463,7 +2601,7 @@ void BoardModelTests::theBoxDiscussesAndTheRowPlansOrLeavesTheBoard()
     QVERIFY(strip->isHidden());
 
     // Enter in the reply box discusses.
-    auto *reply = view.findChild<QPlainTextEdit *>(QStringLiteral("boardReplyEditor"));
+    QPlainTextEdit *reply = replyBox(view);
     reply->setPlainText(QStringLiteral("Is this still wanted?"));
     QTest::keyClick(reply, Qt::Key_Return);
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_ask"));
@@ -2474,11 +2612,11 @@ void BoardModelTests::theBoxDiscussesAndTheRowPlansOrLeavesTheBoard()
     QVERIFY(!strip->isHidden());
     QCOMPARE(busy->text(), QStringLiteral("✦ Switchboarding · discussing…"));
     QCOMPARE(stop->text(), QStringLiteral("✕ Stop discussing"));
-    QVERIFY(!button(view, QStringLiteral("Plan"))->isEnabled());
+    QTRY_VERIFY(!button(view, QStringLiteral("Plan"))->isEnabled());
     QVERIFY(!button(view, QStringLiteral("Execute"))->isEnabled());
     view.handleEvent(QJsonObject{{"event", "done"}, {"card_id", "K7Q2"}, {"mode", "discuss"}});
     QVERIFY(strip->isHidden());
-    QVERIFY(button(view, QStringLiteral("Plan"))->isEnabled());
+    QTRY_VERIFY(button(view, QStringLiteral("Plan"))->isEnabled());
 
     // `p` plans with an empty box: no text travels, the strip names the plan, and its ✕ cancels.
     sent.clear();
@@ -2548,6 +2686,7 @@ void BoardModelTests::theBoxDiscussesAndTheRowPlansOrLeavesTheBoard()
 void BoardModelTests::aCardKeepsItsOwnTurnWhileAnotherCardIsOnScreen()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    Consoles consoles(view);   // the console the window would make (#AGNT)
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row("K7Q2", "inbox", "features"), row("M3XJ", "inbox", "features")}));
@@ -2596,7 +2735,7 @@ void BoardModelTests::aCardKeepsItsOwnTurnWhileAnotherCardIsOnScreen()
     QCOMPARE(what->toolTip(), QStringLiteral("Requesting model · step 2/256"));
 
     // A fourth card refused while three run says which cards are working, and keeps the text.
-    auto *reply = view.findChild<QPlainTextEdit *>(QStringLiteral("boardReplyEditor"));
+    QPlainTextEdit *reply = replyBox(view);
     reply->setPlainText(QStringLiteral("what about this one?"));
     QTest::keyClick(reply, Qt::Key_Return);
     view.handleEvent(QJsonObject{{"event", "error"}, {"code", "board_busy"},
@@ -2610,6 +2749,7 @@ void BoardModelTests::aCardKeepsItsOwnTurnWhileAnotherCardIsOnScreen()
 void BoardModelTests::executeHandsTheCardToAPaneAndMovesItToExecuting()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    Consoles consoles(view);   // the console the window would make (#AGNT)
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     QString handedCard, handedTask;
@@ -2907,6 +3047,7 @@ void BoardModelTests::theVerifyTaskIsTheQaChecklistAndAsksForTheVerifiedByTraile
 void BoardModelTests::aQaLaneCardOffersVerifyOnTheRecommendedRunner()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    Consoles consoles(view);   // the console the window would make (#AGNT)
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     QString handedCard, handedRunner, handedTask;
@@ -2932,7 +3073,7 @@ void BoardModelTests::aQaLaneCardOffersVerifyOnTheRecommendedRunner()
              qPrintable(line->text()));
 
     // The button carries its key like the others (#QG60), and is live because a runner exists.
-    QPushButton *verify = button(view, QStringLiteral("Verify"));
+    QAbstractButton *verify = button(view, QStringLiteral("Verify"));
     QVERIFY(verify);
     QCOMPARE(verify->text(), QStringLiteral("Verify (v)"));
     QVERIFY(!verify->isHidden());
@@ -2965,7 +3106,7 @@ void BoardModelTests::aQaLaneCardOffersVerifyOnTheRecommendedRunner()
     // `v` on the card's document does the same, and the reply box goes with it as the owner's note.
     auto *doc = view.findChild<QTextBrowser *>(QStringLiteral("boardCardDocument"));
     QVERIFY(doc);
-    auto *reply = view.findChild<QPlainTextEdit *>(QStringLiteral("boardReplyEditor"));
+    QPlainTextEdit *reply = replyBox(view);
     QVERIFY(reply);
     reply->setPlainText(QStringLiteral("watch the Xvfb run"));
     sent.clear();
@@ -2982,21 +3123,23 @@ void BoardModelTests::aQaLaneCardOffersVerifyOnTheRecommendedRunner()
     view.cardAction(QStringLiteral("verify"));
     QCOMPARE(opened, 3);
 
-    // A card the worker sent no `qa` for: no line, and nothing to press.
+    // A card the worker sent no `qa` for: no line, and nothing to press. The row is rebuilt from
+    // the context on every card, so the button is looked up again rather than held.
     openCard(view, sent, qaCard(QJsonObject()));
     QVERIFY(line->isHidden());
-    QVERIFY(!verify->isEnabled());
+    QVERIFY(button(view, QStringLiteral("Verify")));
+    QVERIFY(!button(view, QStringLiteral("Verify"))->isEnabled());
     sent.clear();
     opened = 0;
-    verify->click();
+    button(view, QStringLiteral("Verify"))->click();
     QCOMPARE(opened, 0);
     QVERIFY(sent.isEmpty());
 
-    // And a card that is not in a QA lane at all does not offer it: there is nothing to verify yet.
+    // And a card that is not in a QA lane at all does not offer it at all: an action the row must
+    // not draw is an action the context does not list, so the button is gone rather than greyed.
     openCard(view, sent, card("K7Q2", "Voice mode", "the issue", QString(64, QLatin1Char('a'))));
     QVERIFY(line->isHidden());
-    QVERIFY(verify->isHidden());
-    QVERIFY(!verify->isEnabled());
+    QVERIFY(!button(view, QStringLiteral("Verify")));
 }
 
 
@@ -3136,6 +3279,8 @@ void BoardModelTests::relayFreeSaysWhyItCannotVerifyAndAWeakPickWarns()
     QCOMPARE(relay::board::verifyLine(none), free);        // the whole line, not a list of reasons
 
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+
+    Consoles consoles(view);   // the console the window would make (#AGNT)
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(::opened({row("K7Q2", "needs-qa-llm", "features")}));
@@ -3145,7 +3290,7 @@ void BoardModelTests::relayFreeSaysWhyItCannotVerifyAndAWeakPickWarns()
     QVERIFY(line);
     QVERIFY(!line->isHidden());
     QVERIFY2(line->text().contains(free), qPrintable(line->text()));
-    QPushButton *verify = button(view, QStringLiteral("Verify"));
+    QAbstractButton *verify = button(view, QStringLiteral("Verify"));
     QVERIFY(verify);
     QVERIFY(!verify->isEnabled());
     QVERIFY2(verify->toolTip().contains(free), qPrintable(verify->toolTip()));
@@ -3161,81 +3306,14 @@ void BoardModelTests::relayFreeSaysWhyItCannotVerifyAndAWeakPickWarns()
     QVERIFY(button(view, QStringLiteral("Verify"))->isEnabled());
 }
 
-// ------------------------------------------- the page agent's panel (#8YQ9, protocol 19.18)
+// ----------------------------------- the board and the card as contexts (#AGNT step 6) ------
+//
+// The list page and an open card no longer hold a chat widget of their own. Each supplies a
+// `relay::agent::Context` — a spec, an action row, a link resolver, a placeholder — and the
+// window hands back a console to draw it in. These drive the fake console above, so what is
+// tested is what the board *asked the window for*, not what a widget of its own looks like.
 
 namespace {
-
-// The `chat` block of a `board` event or a `board_chat_*` answer: what the worker's PageAgent
-// reports as its state (board_chat.py, `PageAgent.state()`).
-QJsonObject chatState(bool running, const QJsonArray &queue = {}, const QJsonArray &history = {})
-{
-    return QJsonObject{{"running", running}, {"turn_id", running ? "chat-9f1c2a" : QJsonValue()},
-                       {"model", QJsonValue()}, {"survey", false}, {"seconds", 0.0},
-                       {"queue", queue}, {"history", history}};
-}
-
-// A `board` event that also carries the conversation, the way the worker sends it (19.18).
-QJsonObject openedWithChat(const QList<QJsonObject> &cards, const QJsonObject &chat)
-{
-    QJsonObject event = opened(cards);
-    event.insert(QStringLiteral("chat"), chat);
-    return event;
-}
-
-// One turn event of the page agent: `chat: true` and a `turn_id`, never a `card_id` (19.18).
-QJsonObject chatEvent(const QString &type, const QJsonObject &extra = {})
-{
-    QJsonObject out{{"event", type}, {"chat", true}, {"turn_id", "chat-9f1c2a"}};
-    for (auto it = extra.begin(); it != extra.end(); ++it)
-        out.insert(it.key(), it.value());
-    return out;
-}
-
-QWidget *chatPanel(relay::BoardView &view)
-{
-    return view.findChild<QWidget *>(QStringLiteral("boardChatPanel"));
-}
-
-QPlainTextEdit *composerOf(relay::BoardView &view)
-{
-    return view.findChild<QPlainTextEdit *>(QStringLiteral("boardChatComposer"));
-}
-
-QTextBrowser *chatLog(relay::BoardView &view)
-{
-    return view.findChild<QTextBrowser *>(QStringLiteral("boardChatLog"));
-}
-
-// The two model boxes (#BRD3): the list page's, in the page agent's composer, and the card page's,
-// on the reply strip. Both are `statusPicker` — one control, one stylesheet rule — so each is
-// found through the page it is on rather than by name from the view, which would give whichever
-// happens to come first in the child list.
-QComboBox *listModelBox(relay::BoardView &view)
-{
-    QWidget *panel = chatPanel(view);
-    return panel ? panel->findChild<QComboBox *>(QStringLiteral("statusPicker")) : nullptr;
-}
-
-QComboBox *cardModelBox(relay::BoardView &view)
-{
-    auto *detail = view.findChild<QWidget *>(QStringLiteral("boardDetail"));
-    return detail ? detail->findChild<QComboBox *>(QStringLiteral("statusPicker")) : nullptr;
-}
-
-QList<QWidget *> queueRows(relay::BoardView &view)
-{
-    return view.findChildren<QWidget *>(QStringLiteral("boardChatQueueRow"));
-}
-
-// Type into the composer and press Enter, the way the owner asks a question.
-void ask(relay::BoardView &view, const QString &text)
-{
-    QPlainTextEdit *box = composerOf(view);
-    QVERIFY(box);
-    box->setPlainText(text);
-    QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
-    QApplication::sendEvent(box, &enter);
-}
 
 QJsonObject problem(const QString &path, const QString &message)
 {
@@ -3243,156 +3321,148 @@ QJsonObject problem(const QString &path, const QString &message)
                        {"severity", "error"}};
 }
 
+// `board_survey {root, project, hints, counts, proposals, git}` (19.18).
+QJsonObject surveyEvent(const QJsonArray &proposals, const QJsonObject &git,
+                        const QJsonArray &hints = {}, int items = 0)
+{
+    return QJsonObject{{"event", "board_survey"}, {"root", "/tmp/workspace/issues"},
+                       {"project", "/tmp/workspace"}, {"hints", hints},
+                       {"counts", QJsonObject{{"items", items}}},
+                       {"proposals", proposals}, {"git", git}};
+}
+
+QToolButton *rowButton(relay::BoardView &view, const QString &objectName)
+{
+    return view.findChild<QToolButton *>(objectName);
+}
+
 }  // namespace
 
-// A pane opened while the agent is half way through an answer draws the whole panel from the one
-// `board` event: the conversation so far, the queue behind it, and the fact that it is running.
-void BoardModelTests::thePanelSeedsItselfFromTheBoardEventsChatBlock()
+// What the list page asks the window for: one console, over a `switchboard` context, keyed by the
+// tab (§30.7). The spec is the only part of a context that crosses to the worker, so this is the
+// `configure` block the board is responsible for.
+void BoardModelTests::theListPageAsksForASwitchboardConsoleKeyedByTheTab()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
-    QVERIFY(chatPanel(view));
-    const QJsonArray history{QJsonObject{{"role", "owner"}, {"text", "merge the two voice cards"}},
-                             QJsonObject{{"role", "agent"}, {"text", "They are #K7Q2 and #M3XJ."}}};
-    const QJsonArray queue{QJsonObject{{"id", "c1"}, {"text", "then sort Inbox"}}};
-    view.handleEvent(openedWithChat({row("K7Q2", "inbox", "features")},
-                                    chatState(true, queue, history)));
-    QVERIFY(view.chatRunning());
-    QTextBrowser *log = chatLog(view);
-    QVERIFY(log);
-    QVERIFY(log->toPlainText().contains(QStringLiteral("merge the two voice cards")));
-    QVERIFY(log->toPlainText().contains(QStringLiteral("They are #K7Q2 and #M3XJ.")));
-    QCOMPARE(queueRows(view).size(), 1);
-}
-
-// #N8VK's rule, which the page agent takes from the terminal panes: a second prompt typed while a
-// turn runs is *queued*, never refused. The panel sends it exactly like the first — the worker
-// owns the queue — and the row appears from the event the worker sends back.
-void BoardModelTests::aPromptSendsBoardChatAndASecondOneQueuesInsteadOfBeingRefused()
-{
-    relay::BoardView view(QStringLiteral("/tmp/workspace"));
-    QList<QJsonObject> sent;
-    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    Consoles consoles(view);
+    view.setTabId(QStringLiteral("tab-7"));
+    view.onSend = [](const QJsonObject &) {};
     view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
-    sent.clear();
 
-    ask(view, QStringLiteral("what is in Inbox?"));
-    QCOMPARE(sent.size(), 1);
-    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_chat"));
-    QCOMPARE(sent.last().value("text").toString(), QStringLiteral("what is in Inbox?"));
-    QVERIFY(!sent.last().value("id").toString().isEmpty());
-    QVERIFY(composerOf(view)->toPlainText().isEmpty());     // the box is cleared on send
+    FakeConsole *console = consoles.board();
+    QVERIFY(console);
+    QCOMPARE(consoles.made.size(), 1);            // asked for once, not once per redraw
+    const relay::agent::ContextSpec spec = console->spec();
+    QCOMPARE(spec.name, QStringLiteral("switchboard"));
+    QCOMPARE(spec.surface, QStringLiteral("switchboard"));
+    QCOMPARE(spec.agentRole, QStringLiteral("switchboard"));
+    QCOMPARE(spec.workspace, QStringLiteral("/tmp/workspace"));
+    // Named, never inferred — the accident this card found was `Agent.tools()` branching on
+    // whether the board had a card scope, so a board-less helper got the full executor.
+    QCOMPARE(spec.scope, QStringLiteral("console"));
+    // `persist.scope` is a wire enum ("", "pane", "helper"), not a path, and the key is the tab's.
+    QCOMPARE(spec.persistScope, QStringLiteral("helper"));
+    QCOMPARE(spec.persistKey, QStringLiteral("tab-7"));
+    QCOMPARE(spec.briefKey, QStringLiteral("switchboard"));
+    QCOMPARE(spec.briefTitle, QStringLiteral("Switchboard agent"));
+    QVERIFY(!spec.shell);                         // no shell: the console is the whole surface
+    QCOMPARE(spec.routing, QStringLiteral("agent"));
+    QVERIFY(console->context()->placeholder().contains(QStringLiteral("a second prompt queues")));
 
-    view.handleEvent(QJsonObject{{"event", "board_chat_started"}, {"turn_id", "chat-9f1c2a"},
-                                 {"model", "switchboard"}, {"chat", chatState(true)}});
-    QVERIFY(view.chatRunning());
+    // What is on screen rides on each ask as `screen`: the sections and their counts, the filter,
+    // the open card. It is a hint about what is being read, not a dump of the board.
+    QVERIFY2(spec.screen.contains(QStringLiteral("Inbox 1")), qPrintable(spec.screen));
 
-    // The answer streams in. The log re-renders on a timer — at most 25 times a second, so a
-    // fast stream does not repaint per token — so this waits for it rather than for one event.
-    view.handleEvent(chatEvent(QStringLiteral("delta"), {{"text", "Two cards."}}));
-    QTRY_VERIFY(chatLog(view)->toPlainText().contains(QStringLiteral("Two cards.")));
-
-    // A second prompt while it runs: still one `board_chat`, no refusal anywhere in the panel.
-    sent.clear();
-    ask(view, QStringLiteral("then sort it"));
-    QCOMPARE(sent.size(), 1);
-    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_chat"));
-    QCOMPARE(queueRows(view).size(), 0);                    // nothing is queued until the worker says so
-    view.handleEvent(QJsonObject{{"event", "board_chat_queued"}, {"id", "c1"}, {"position", 1},
-                                 {"text", "then sort it"}, {"chat", true}});
-    QCOMPARE(queueRows(view).size(), 1);
-
-    // There is no Send button anywhere in the panel (owner, 2026-09-20: "[remove] the send button
-    // on all, make it like the pane agent"). Enter sent both prompts above; what stops a turn is
-    // the busy strip's ✕ Stop, which is on screen only while one runs.
-    QVERIFY(!view.findChild<QToolButton *>(QStringLiteral("boardChatSend")));
-    auto *busy = view.findChild<QWidget *>(QStringLiteral("boardChatBusy"));
-    auto *stop = view.findChild<QToolButton *>(QStringLiteral("boardChatStop"));
-    QVERIFY(busy && stop);
-    QVERIFY(!busy->isHidden());
-    QCOMPARE(stop->text(), QStringLiteral("✕ Stop"));
-    sent.clear();
-    stop->click();
-    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_chat_cancel"));
-
-    view.handleEvent(QJsonObject{{"event", "board_chat_cancelled"}, {"stopped", true},
-                                 {"chat", chatState(false, QJsonArray{
-                                     QJsonObject{{"id", "c1"}, {"text", "then sort it"}}})}});
-    QVERIFY(!view.chatRunning());
-    QVERIFY(busy->isHidden());                              // and the strip goes with the turn
-    QCOMPARE(queueRows(view).size(), 1);                    // the queue survived the stop
-
-    // Esc in the box is the keyboard's way to the same call, as it is in a pane's prompt box.
-    view.handleEvent(QJsonObject{{"event", "board_chat_started"}, {"turn_id", "chat-9f1c2b"},
-                                 {"model", "switchboard"}, {"chat", chatState(true)}});
-    sent.clear();
-    QTest::keyClick(composerOf(view), Qt::Key_Escape);
-    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_chat_cancel"));
+    // A tab id that moves is a different conversation (§30.7's move test), so the context says so
+    // and the console re-reads it.
+    const int before = console->rebuilds();
+    view.setTabId(QStringLiteral("tab-9"));
+    QTRY_VERIFY(console->rebuilds() > before);
+    QCOMPARE(console->liveSpec().persistKey, QStringLiteral("tab-9"));
+    QVERIFY(console->liveSpec().persistId() != spec.persistId());
 }
 
-// The worker's queue is authoritative (19.18): a click sends the op and the redraw comes back as
-// `board_chat_state`. The panel never reorders its own rows optimistically.
-void BoardModelTests::theQueueRowsRemoveAndReorderThroughTheWorker()
+// The row of things that need no typing (owner, 2026-09-20: "we put the 'clean up' button there
+// for the main switchboard agent, for example", and "it should have the letter hotkeys for each
+// switchboard action as well"). Four actions, two letters, and the letters answer from the board.
+void BoardModelTests::theBoardsRowIsCheckCleanUpTestsAndProfileWithTheirLetters()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    Consoles consoles(view);
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
-    const QJsonArray queue{QJsonObject{{"id", "c1"}, {"text", "first"}},
-                           QJsonObject{{"id", "c2"}, {"text", "second"}}};
-    view.handleEvent(openedWithChat({row("K7Q2", "inbox", "features")}, chatState(true, queue)));
-    QCOMPARE(queueRows(view).size(), 2);
-
-    sent.clear();
-    QList<QToolButton *> removes;
-    for (QWidget *rowWidget : queueRows(view))
-        for (QToolButton *button : rowWidget->findChildren<QToolButton *>())
-            if (button->text() == QStringLiteral("×"))
-                removes << button;
-    QCOMPARE(removes.size(), 2);
-    removes.first()->click();
-    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_chat_queue_remove"));
-    QCOMPARE(sent.last().value("item").toString(), QStringLiteral("c1"));
-    QCOMPARE(queueRows(view).size(), 2);                    // not until the worker answers
-
-    view.handleEvent(QJsonObject{{"event", "board_chat_state"},
-                                 {"chat", chatState(true, QJsonArray{queue.at(1)})}});
-    QCOMPARE(queueRows(view).size(), 1);
-}
-
-// Owner, 2026-09-19: "put the clean up button down there" — beside the page agent, with the other
-// board-wide button the survey of that row turned up. It keeps all of its own behaviour.
-void BoardModelTests::cleanUpMovedIntoThePageAgentsRowBesideCheck()
-{
-    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    int tests = 0;
+    QWidget *profiled = nullptr;
+    bool profileCalled = false;
+    view.onOpenTestSuites = [&tests] { ++tests; };
+    view.onProfile = [&profiled, &profileCalled](QWidget *anchor) {
+        profiled = anchor;
+        profileCalled = true;
+    };
     view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
-    QWidget *panel = chatPanel(view);
-    QToolButton *cleanup = cleanupButton(view);
-    auto *check = view.findChild<QToolButton *>(QStringLiteral("boardChatCheck"));
-    QVERIFY(panel && cleanup && check);
-    QVERIFY(panel->isAncestorOf(cleanup));
-    QVERIFY(panel->isAncestorOf(check));
-    // It is out of the filter row for good, not shown in both places.
-    QWidget *tools = view.findChild<QWidget *>(QStringLiteral("boardListTools"));
-    QVERIFY(tools && !tools->isAncestorOf(cleanup));
-    // And it still runs a preview first (19.9).
-    QList<QJsonObject> sent;
-    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
-    cleanup->click();
+
+    FakeConsole *console = consoles.board();
+    QVERIFY(console);
+    QStringList labels;
+    for (const relay::agent::Action &action : console->actions())
+        labels << action.fullLabel();
+    QCOMPARE(labels, QStringList({QStringLiteral("Check (k)"), QStringLiteral("Clean up (u)"),
+                                  QStringLiteral("Tests"), QStringLiteral("Profile")}));
+
+    // Each button carries the action's key as its object name, which is what the theme and the
+    // tests find it by; Tests and Profile are keyless, and the row does not invent a letter.
+    QVERIFY(rowButton(view, QStringLiteral("boardChatCheck")));
+    QVERIFY(rowButton(view, QStringLiteral("boardCleanup")));
+    sent.clear();
+    rowButton(view, QStringLiteral("boardChatCheck"))->click();
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_check"));
+    QVERIFY(!sent.last().contains(QStringLiteral("section")));
+
+    rowButton(view, QStringLiteral("boardTests"))->click();
+    QCOMPARE(tests, 1);
+    rowButton(view, QStringLiteral("boardProfile"))->click();
+    QVERIFY(profileCalled);
+    // The menu is anchored under the button, and an Action carries no widget — so the button is
+    // found by the one name it is guaranteed to have, the action's key.
+    QCOMPARE(profiled, static_cast<QWidget *>(rowButton(view, QStringLiteral("boardProfile"))));
+
+    // Clean up runs, and the word on the row becomes Stop while it does. The letter does not move.
+    sent.clear();
+    rowButton(view, QStringLiteral("boardCleanup"))->click();
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_cleanup"));
-    QCOMPARE(sent.last().value("dry_run").toBool(), true);
+    QVERIFY(sent.last().value("dry_run").toBool());       // the first run is always a preview
+    QTRY_COMPARE(rowButton(view, QStringLiteral("boardCleanup"))->text(), QStringLiteral("Stop (u)"));
+    const QString runId = sent.last().value("id").toString();
+    view.handleEvent(cleanupStarted(runId, true));
+    view.handleEvent(cleanupSummary(runId, true, QStringLiteral("done"), QJsonArray{}));
+    QVERIFY(!view.cleanupRunning());
+    QTRY_COMPARE(rowButton(view, QStringLiteral("boardCleanup"))->text(), QStringLiteral("Clean up (u)"));
+
+    // A letter typed on the board page reaches the row through the console's handle, and the key
+    // legend names every keyed action without this page listing them.
+    sent.clear();
+    QKeyEvent key(QEvent::KeyPress, Qt::Key_K, Qt::NoModifier, QStringLiteral("k"));
+    QApplication::sendEvent(&view, &key);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_check"));
+    auto *keys = view.findChild<QLabel *>(QStringLiteral("boardKeys"));
+    QVERIFY(keys);
+    QVERIFY2(keys->text().contains(QStringLiteral("<b>k</b> check")), qPrintable(keys->text()));
+    QVERIFY(keys->text().contains(QStringLiteral("<b>u</b> clean up")));
 }
 
-// Check is the whole board; a section's ⚠ is that section alone (`board_check {section}`). A
-// scoped answer is drawn as that section's triage and is never allowed to rewrite the banner over
-// the list, which counts the board-level problems a scoped check leaves out.
+// Check's findings are a board widget above the console — a list to act on, not a turn — and a
+// click on one drafts a fix into the composer without sending it (owner, 2026-09-19: "draft you
+// confirm").
 void BoardModelTests::checkIsUnscopedAndASectionsTriageNamesItsSection()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    Consoles consoles(view);
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row("K7Q2", "inbox", "features"), row("M3XJ", "ready", "features")}));
 
     sent.clear();
-    view.findChild<QToolButton *>(QStringLiteral("boardChatCheck"))->click();
+    rowButton(view, QStringLiteral("boardChatCheck"))->click();
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_check"));
     QVERIFY(!sent.last().contains(QStringLiteral("section")));
     const QString unscoped = sent.last().value("id").toString();
@@ -3402,6 +3472,19 @@ void BoardModelTests::checkIsUnscopedAndASectionsTriageNamesItsSection()
                                  {"section", QJsonValue()}});
     auto *findings = view.findChild<QWidget *>(QStringLiteral("boardChatFindings"));
     QVERIFY(findings && !findings->isHidden());
+
+    // A click on the finding drafts the fix in the console's composer. Nothing is sent.
+    sent.clear();
+    QLabel *finding = nullptr;
+    for (QLabel *label : findings->findChildren<QLabel *>())
+        if (label->objectName() == QStringLiteral("boardChatFinding"))
+            finding = label;
+    QVERIFY(finding);
+    finding->linkActivated(QStringLiteral("fix"));
+    QCOMPARE(consoles.board()->drafts.size(), 1);
+    QVERIFY(consoles.board()->drafts.constLast().contains(QStringLiteral("no id")));
+    QVERIFY(consoles.board()->editor()->toPlainText().contains(QStringLiteral("a.md")));
+    QVERIFY(sent.isEmpty());
 
     // The ⚠ on the Ready header. The rect it is clicked in is the delegate's; what it does is this.
     sent.clear();
@@ -3420,11 +3503,11 @@ void BoardModelTests::checkIsUnscopedAndASectionsTriageNamesItsSection()
     QVERIFY(findings->findChildren<QLabel *>().size() > 0);
 }
 
-// Owner, 2026-09-19: "if there are problems, when you click on them, it sends a fix note to the
-// switchboard agent" — and "draft you confirm". So a click fills the composer and stops there.
-void BoardModelTests::aProblemDraftsAFixInTheComposerWithoutSendingIt()
+// The problems banner over the list drafts the same request into the same box.
+void BoardModelTests::aProblemDraftsAFixInTheConsoleWithoutSendingIt()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    Consoles consoles(view);
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     QJsonObject event = opened({row("K7Q2", "inbox", "features")});
@@ -3437,38 +3520,33 @@ void BoardModelTests::aProblemDraftsAFixInTheComposerWithoutSendingIt()
     sent.clear();
     banner->linkActivated(QStringLiteral("issues/features/2026-09-19-broken.md"));
 
-    QPlainTextEdit *box = composerOf(view);
-    QVERIFY(box);
+    QPlainTextEdit *box = consoles.board()->editor();
     QVERIFY(box->toPlainText().contains(QStringLiteral("2026-09-19-broken.md")));
     QVERIFY(box->toPlainText().contains(QStringLiteral("front matter has no id")));
     QVERIFY(sent.isEmpty());                      // a draft, never a send
 }
 
-// The survey is the page agent's opening turn on a board that was just created (19.18). Its
-// proposals are an offer: nothing is written until the owner ticks and presses the button, which
-// goes through the same never-twice import path as everything else (19.13).
+// The survey is an import form, not a turn (19.18), so it stays a board widget above the console.
 void BoardModelTests::theSurveysImportButtonSendsBoardImportApply()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    Consoles consoles(view);
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({}));
     sent.clear();
 
-    view.handleEvent(QJsonObject{
-        {"event", "board_survey"}, {"root", "/tmp/workspace/issues"}, {"project", "/tmp/workspace"},
-        {"hints", QJsonArray{QJsonObject{{"kind", "vendor"}, {"message", "node_modules/ is left alone"}}}},
-        {"counts", QJsonObject{{"items", 2}}},
-        {"proposals", QJsonArray{
-            QJsonObject{{"title", "Fix the flaky test"},
-                        {"source", QJsonObject{{"kind", "todo-md"}, {"path", "TODO.md"},
-                                               {"key", "todo-md:TODO.md#0"}}}},
-            QJsonObject{{"title", "Ship the board"},
-                        {"source", QJsonObject{{"kind", "todo-md"}, {"path", "TODO.md"},
-                                               {"key", "todo-md:TODO.md#1"}}}}}},
-        {"git", QJsonObject{{"is_repo", true}, {"primary", "origin"}, {"forge", "github"},
-                            {"owner", "relay"}, {"repo", "relay-terminal"},
-                            {"url", "git@github.com:relay/relay-terminal.git"}}}});
+    view.handleEvent(surveyEvent(
+        QJsonArray{QJsonObject{{"title", "Fix the flaky test"},
+                               {"source", QJsonObject{{"kind", "todo-md"}, {"path", "TODO.md"},
+                                                      {"key", "todo-md:TODO.md#0"}}}},
+                   QJsonObject{{"title", "Ship the board"},
+                               {"source", QJsonObject{{"kind", "todo-md"}, {"path", "TODO.md"},
+                                                      {"key", "todo-md:TODO.md#1"}}}}},
+        QJsonObject{{"is_repo", true}, {"primary", "origin"}, {"forge", "github"},
+                    {"owner", "relay"}, {"repo", "relay-terminal"},
+                    {"url", "git@github.com:relay/relay-terminal.git"}},
+        QJsonArray{QJsonObject{{"kind", "vendor"}, {"message", "node_modules/ is left alone"}}}, 2));
 
     auto *survey = view.findChild<QWidget *>(QStringLiteral("boardChatSurvey"));
     QVERIFY(survey && !survey->isHidden());
@@ -3492,19 +3570,18 @@ void BoardModelTests::theSurveysImportButtonSendsBoardImportApply()
 
 // Owner, 2026-09-19: "if its .git, it should offer to look on github.com for an issues corpus to
 // sync". Looking is `forge_sync_plan` (19.14, landed by #GDQN), which writes to neither side; the
-// sync itself is #ZKR0's surface, so the panel never sends `forge_sync_run`.
+// sync itself is #ZKR0's surface, so nothing here ever sends `forge_sync_run`.
 void BoardModelTests::theSurveyOffersToLookOnGithubAndThatLookWritesNothing()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    Consoles consoles(view);
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({}));
-    view.handleEvent(QJsonObject{
-        {"event", "board_survey"}, {"root", "/tmp/workspace/issues"}, {"project", "/tmp/workspace"},
-        {"hints", QJsonArray{}}, {"counts", QJsonObject{{"items", 0}}}, {"proposals", QJsonArray{}},
-        {"git", QJsonObject{{"is_repo", true}, {"primary", "origin"}, {"forge", "github"},
-                            {"owner", "relay"}, {"repo", "relay-terminal"},
-                            {"url", "git@github.com:relay/relay-terminal.git"}}}});
+    view.handleEvent(surveyEvent({}, QJsonObject{{"is_repo", true}, {"primary", "origin"},
+                                                 {"forge", "github"}, {"owner", "relay"},
+                                                 {"repo", "relay-terminal"},
+                                                 {"url", "git@github.com:relay/relay-terminal.git"}}));
 
     auto *look = view.findChild<QToolButton *>(QStringLiteral("boardChatForgeLook"));
     QVERIFY(look);
@@ -3512,129 +3589,81 @@ void BoardModelTests::theSurveyOffersToLookOnGithubAndThatLookWritesNothing()
     look->click();
     QCOMPARE(sent.size(), 1);
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("forge_sync_plan"));
-    // The repo comes from the probe's own `git` block, so a board with no `github:` in its
-    // board.yaml — which a board created a minute ago will not have — can still be asked.
     QCOMPARE(sent.last().value("repo").toString(), QStringLiteral("relay/relay-terminal"));
     const QString request = sent.last().value("id").toString();
     QVERIFY(!request.isEmpty());
-    QVERIFY(!look->isEnabled());                 // one look at a time
+    QVERIFY(!look->isEnabled());
 
     view.handleEvent(QJsonObject{{"event", "forge_sync_planned"}, {"id", request},
-                                 {"root", "/tmp/workspace/issues"}, {"repo", "relay/relay-terminal"},
-                                 {"dry_run", true}, {"cards", 3}, {"creates", 2}, {"pushed", 0},
-                                 {"pulled", 5}, {"conflicts", 0}, {"needs_confirm", false},
-                                 {"cap", 50}, {"idle", 0}, {"errors", QJsonArray{}}});
+                                 {"creates", 2}, {"pulled", 3}, {"pushed", 0}, {"conflicts", 0}});
     QVERIFY(look->isEnabled());
-    bool reported = false;
+    QCOMPARE(look->text(), QStringLiteral("Look again"));
+    QString result;
     for (QLabel *line : view.findChild<QWidget *>(QStringLiteral("boardChatSurvey"))->findChildren<QLabel *>())
-        if (line->text().contains(QStringLiteral("5 issues would become cards"))
-            && line->text().contains(QStringLiteral("Nothing was written")))
-            reported = true;
-    QVERIFY(reported);
+        if (line->text().contains(QStringLiteral("would")))
+            result = line->text();
+    QVERIFY2(result.contains(QStringLiteral("3 issues would become cards")), qPrintable(result));
+    QVERIFY(result.contains(QStringLiteral("Nothing was written on either side")));
 
-    // Looking is the whole offer: the sync that would write is a different card's surface.
-    for (const QJsonObject &message : sent)
-        QVERIFY(message.value("type").toString() != QStringLiteral("forge_sync_run"));
-
-    // A forge that cannot be read says so on the same line, and the button comes back.
+    // A failure is an ordinary `error` carrying the same request id, and it says the same thing
+    // about nothing being written.
     sent.clear();
     look->click();
     const QString second = sent.last().value("id").toString();
-    view.handleEvent(QJsonObject{{"event", "error"}, {"id", second}, {"root", "/tmp/workspace/issues"},
-                                 {"code", "forge_auth"}, {"text", "No GitHub credential is stored."}});
-    QVERIFY(look->isEnabled());
-    bool explained = false;
+    view.handleEvent(QJsonObject{{"event", "error"}, {"id", second}, {"code", "forge_auth"},
+                                 {"text", "no credential"}});
+    QString failed;
     for (QLabel *line : view.findChild<QWidget *>(QStringLiteral("boardChatSurvey"))->findChildren<QLabel *>())
-        if (line->text().contains(QStringLiteral("no credential")))
-            explained = true;
-    QVERIFY(explained);
+        if (line->text().contains(QStringLiteral("credential")))
+            failed = line->text();
+    QVERIFY2(failed.contains(QStringLiteral("Nothing was written on either side")), qPrintable(failed));
 }
 
-// `context` rides along tagged `chat: true` (19.18) so the page's chip follows the conversation
-// exactly as a terminal pane's follows its own.
-void BoardModelTests::theContextChipFollowsTheConversation()
+// The agent belongs to the list page and is there whenever the board is — including a board with
+// no cards at all, which is precisely the board the survey has something to say about.
+void BoardModelTests::anEmptyBoardStillShowsTheAgentBecauseThatIsWhereTheSurveyRuns()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
-    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
-    auto *chip = view.findChild<QLabel *>(QStringLiteral("boardChatContext"));
-    QVERIFY(chip);
-    view.handleEvent(chatEvent(QStringLiteral("context"),
-                               {{"used", 48000}, {"window", 200000}, {"limit", 180000},
-                                {"percent", 24.0}}));
-    QVERIFY(!chip->isHidden());
-    QVERIFY(chip->text().contains(QStringLiteral("76")));
-    QVERIFY(chip->text().contains(QStringLiteral("left")));
-}
-
-// The same rule a cleanup's events keep (19.9), for the same reason: the page agent can write any
-// card, and a card that happens to be open must never see its chatter in its thread.
-void BoardModelTests::thePageAgentsEventsNeverReachACardThread()
-{
-    relay::BoardView view(QStringLiteral("/tmp/workspace"));
-    QList<QJsonObject> sent;
-    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
-    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
-    openCard(view, sent, card("K7Q2", "K7Q2 card", "the issue", "h1"));
-    QVERIFY(view.detailOpen());
-    auto *document = view.findChild<QTextBrowser *>(QStringLiteral("boardCardDocument"));
-    QVERIFY(document);
-    const QString before = document->toPlainText();
-
-    view.handleEvent(chatEvent(QStringLiteral("delta"), {{"text", "reorganising the board"}}));
-    view.handleEvent(chatEvent(QStringLiteral("tool_started"), {{"tool", "board_read"}}));
-    view.handleEvent(chatEvent(QStringLiteral("done")));
-
-    QCOMPARE(document->toPlainText(), before);
-    QVERIFY(!document->toPlainText().contains(QStringLiteral("reorganising the board")));
-    QTRY_VERIFY(chatLog(view)->toPlainText().contains(QStringLiteral("reorganising the board")));
-}
-
-// The survey is the page agent's opening turn on a board that was *just created* (19.18) — a
-// board with no cards at all. `rebuild()` hides the splitter for exactly that board, so a panel
-// built inside it could never be seen on the only board that gets a survey.
-void BoardModelTests::anEmptyBoardStillShowsThePageAgentBecauseThatIsWhereTheSurveyRuns()
-{
-    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    Consoles consoles(view);
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.resize(900, 700);
-    view.handleEvent(openedWithChat({}, chatState(false)));
+    view.handleEvent(opened({}));
 
-    QWidget *panel = chatPanel(view);
+    QWidget *area = view.findChild<QWidget *>(QStringLiteral("boardChatArea"));
     QWidget *splitter = view.findChild<QSplitter *>();
-    QVERIFY(panel && splitter);
+    QVERIFY(area && splitter);
     QVERIFY(splitter->isHidden());          // no cards: the list and its tools are away
-    QVERIFY(!panel->isHidden());            // the conversation is not
-    QVERIFY(!composerOf(view)->isHidden());
+    QVERIFY(!area->isHidden());             // the conversation is not
+    QVERIFY(consoles.board());
+    QCOMPARE(view.listConsole(), static_cast<QWidget *>(consoles.board()));
 
     // And the survey it is there for can be seen and acted on.
-    view.handleEvent(QJsonObject{
-        {"event", "board_survey"}, {"root", "/tmp/workspace/issues"}, {"project", "/tmp/workspace"},
-        {"hints", QJsonArray{}}, {"counts", QJsonObject{{"items", 1}}},
-        {"proposals", QJsonArray{QJsonObject{
-            {"title", "Write the README"},
-            {"source", QJsonObject{{"kind", "todo-md"}, {"path", "TODO.md"},
-                                   {"key", "todo-md:TODO.md#0"}}}}}},
-        {"git", QJsonObject{{"is_repo", false}}}});
+    view.handleEvent(surveyEvent(
+        QJsonArray{QJsonObject{{"title", "Write the README"},
+                               {"source", QJsonObject{{"kind", "todo-md"}, {"path", "TODO.md"},
+                                                      {"key", "todo-md:TODO.md#0"}}}}},
+        QJsonObject{{"is_repo", false}}, {}, 1));
     QWidget *survey = view.findChild<QWidget *>(QStringLiteral("boardChatSurvey"));
     QVERIFY(survey && !survey->isHidden());
     QVERIFY(view.findChild<QToolButton *>(QStringLiteral("boardChatImport")));
 
-    // A card open in a narrow pane keeps the page to itself, as the tools row already does.
+    // A card open keeps the page to itself: the board's conversation is the list page's.
     view.resize(500, 700);
     view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
     openCard(view, sent, card("K7Q2", "K7Q2 card", "the issue", "h1"));
     QVERIFY(view.detailOpen());
-    QVERIFY(panel->isHidden());
+    QVERIFY(area->isHidden());
     view.closeDetail();
-    QVERIFY(!panel->isHidden());
+    QVERIFY(!area->isHidden());
 }
 
-// `a` asks the page agent, as `/` filters the list. Not a chord: Ctrl+/ is `help.shortcuts` in
-// the keymap and the window's event filter accepts it before the board is ever offered it.
-void BoardModelTests::theAskKeyFocusesTheComposerAndACardGoesBackFirst()
+// `a` puts the keyboard in the console's composer from anywhere on the board, as `/` puts it in
+// the filter — and from an open card it goes back to the list first.
+void BoardModelTests::theAskKeyFocusesTheConsoleAndACardGoesBackFirst()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    Consoles consoles(view);
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.resize(900, 700);
@@ -3642,17 +3671,17 @@ void BoardModelTests::theAskKeyFocusesTheComposerAndACardGoesBackFirst()
     QVERIFY(QTest::qWaitForWindowExposed(&view));
     view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
 
-    QPlainTextEdit *box = composerOf(view);
-    QVERIFY(box);
+    QPlainTextEdit *box = consoles.board()->editor();
     QVERIFY(!box->hasFocus());
     QTest::keyClick(&view, Qt::Key_A);
+    QCOMPARE(consoles.board()->focusCalls, 1);
     QTRY_VERIFY(box->hasFocus());
 
     // Typing into the composer is typing, not a shortcut: the key reaches the box.
     QTest::keyClicks(box, QStringLiteral("and a"));
     QCOMPARE(box->toPlainText(), QStringLiteral("and a"));
 
-    // From an open card it goes back to the list first, because the panel is the list page's.
+    // From an open card it goes back to the list first, because the console is the list page's.
     openCard(view, sent, card("K7Q2", "K7Q2 card", "the issue", "h1"));
     QVERIFY(view.detailOpen());
     QTest::keyClick(&view, Qt::Key_A);
@@ -3665,886 +3694,203 @@ void BoardModelTests::theAskKeyFocusesTheComposerAndACardGoesBackFirst()
     QVERIFY(keys->text().contains(QStringLiteral("ask the agent")));
 }
 
-// Composer parity with the main panes (#8YQ9 `t:6m`): the strip under the box carries the model
-// box (#BRD3), the microphone and the context-left chip, the three things a terminal pane's
-// composer strip has, and — since the owner found the box shrunk to a stub beside them,
-// 2026-09-20 — the box itself is a row of its own that fills the panel's width. The model box is
-// built with the list tools — it must exist before this panel does — and reparented into the
-// strip, so the filter row above must no longer be reserving its width.
-void BoardModelTests::theModelBoxSitsInTheComposerRowWithTheMicAndTheContextChip()
+// The open card's own console: a different conversation from the board's, keyed by the card, with
+// the three actions that need no typing on its row.
+void BoardModelTests::theCardPageAsksForACardConsoleAndItsActionsFollowTheCard()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
-    view.resize(900, 700);
-    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
-
-    QWidget *panel = chatPanel(view);
-    QComboBox *box = listModelBox(view);
-    QPlainTextEdit *composer = composerOf(view);
-    auto *mic = view.findChild<QToolButton *>(QStringLiteral("boardChatMic"));
-    auto *context = view.findChild<QLabel *>(QStringLiteral("boardChatContext"));
-    QVERIFY(panel && box && composer && mic && context);
-
-    // All three in the panel, and the model box out of the filter row it was built in.
-    QVERIFY(panel->isAncestorOf(box));
-    QVERIFY(panel->isAncestorOf(mic));
-    QVERIFY(panel->isAncestorOf(context));
-    QWidget *tools = view.findChild<QWidget *>(QStringLiteral("boardListTools"));
-    QVERIFY(tools && !tools->isAncestorOf(box));
-
-    // Two rows of the prompt box's own column, in the pane's order: the editor, then a strip
-    // holding the context chip, the model and the microphone. Neither row is a widget of its own,
-    // so each is found by what it holds.
-    QCOMPARE(box->parentWidget(), composer->parentWidget());
-    QCOMPARE(mic->parentWidget(), composer->parentWidget());
-    auto *frame = panel->findChild<QFrame *>(QStringLiteral("boardChatBox"));
-    QVERIFY(frame);
-    QLayout *column = frame->layout();
-    QLayout *strip = nullptr;
-    for (QLayout *candidate : panel->findChildren<QLayout *>())
-        if (candidate->indexOf(box) >= 0)
-            strip = candidate;
-    QVERIFY(column && strip);
-    QVERIFY(strip->indexOf(composer) < 0);            // the box is not on the strip any more
-    QVERIFY(strip->indexOf(context) < strip->indexOf(box));
-    QVERIFY(strip->indexOf(box) < strip->indexOf(mic));
-    int composerAt = -1, stripAt = -1;
-    for (int i = 0; i < column->count(); ++i) {
-        if (column->itemAt(i)->widget() == composer)
-            composerAt = i;
-        if (column->itemAt(i)->layout() == strip)
-            stripAt = i;
-    }
-    QVERIFY(composerAt >= 0 && stripAt > composerAt);
-
-    // And it fills the panel: the whole box to type in, not the stub left over beside a model
-    // box naming "Follow Main — deepseek/deepseek-chat".
-    view.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&view));
-    QVERIFY2(composer->width() > panel->width() * 3 / 4,
-             qPrintable(QStringLiteral("composer %1 px in a %2 px panel")
-                            .arg(composer->width()).arg(panel->width())));
-
-    // A pick still goes out the way #BRD3 wired it: the view writes no settings itself.
-    QString picked;
-    // false is "a real pick is on its way": the box keeps the row the click chose, and the
-    // window's `configured` event is what redraws it (src/BoardPane.h, onModelPick) — #WRWN.
-    view.onModelPick = [&picked](const QString &data) { picked = data; return false; };
-    box->setCurrentIndex(0);
-    emit box->activated(0);
-    QVERIFY(!picked.isEmpty());
-}
-
-// The prompt box is a terminal pane's, not a text field on a page (owner, 2026-09-20: "i dont
-// like the helper agent prompt UI … there is the useless help sentence, and then a bunch of
-// wasted space, and then the tiny text box. and the buttons dont look as good." — and of the card
-// page's buttons: "put buttons like that in a row above the chat box").
-void BoardModelTests::theHelpersPromptBoxIsTheSameShapeAsAPanes()
-{
-    relay::BoardView view(QStringLiteral("/tmp/workspace"));
-    view.onSend = [](const QJsonObject &) {};
-    view.resize(900, 700);
-    view.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&view));
-    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
-
-    QWidget *panel = chatPanel(view);
-    QVERIFY(panel);
-    auto *box = panel->findChild<QFrame *>(QStringLiteral("boardChatBox"));
-    QPlainTextEdit *composer = composerOf(view);
-    QVERIFY(box && composer);
-
-    // One frame, and the editor is inside it and fills its width — not a field beside the chips,
-    // and with no border of its own inside the frame's.
-    QVERIFY(box->isAncestorOf(composer));
-    QVERIFY2(composer->width() >= box->width() - 40,
-             qPrintable(QStringLiteral("editor %1 px in a %2 px frame")
-                            .arg(composer->width()).arg(box->width())));
-    QCOMPARE(composer->frameShape(), QFrame::NoFrame);
-
-    // The busy strip is the frame's first row, above the editor, and hidden while nothing runs —
-    // the place a pane's "Relaying · …" line has.
-    auto *busy = panel->findChild<QWidget *>(QStringLiteral("boardChatBusy"));
-    QVERIFY(busy && box->isAncestorOf(busy));
-    QVERIFY(busy->isHidden());
-    QVERIFY(busy->mapTo(box, QPoint(0, 0)).y() < composer->mapTo(box, QPoint(0, 0)).y());
-
-    // Nothing on the chip strip but the chips: the Send button is gone everywhere (owner: "[remove]
-    // the send button on all, make it like the pane agent"), and the chips are one height.
-    auto *mic = panel->findChild<QToolButton *>(QStringLiteral("boardChatMic"));
-    auto *context = panel->findChild<QLabel *>(QStringLiteral("boardChatContext"));
-    QVERIFY(mic && context);
-    QVERIFY(!panel->findChild<QToolButton *>(QStringLiteral("boardChatSend")));
-    QLayout *strip = nullptr;
-    for (QLayout *candidate : box->findChildren<QLayout *>())
-        if (candidate->indexOf(mic) >= 0)
-            strip = candidate;
-    QVERIFY(strip);
-    QVERIFY(strip->itemAt(0)->spacerItem() != nullptr);     // the stretch that pushes them right
-    QCOMPARE(strip->indexOf(mic), strip->count() - 1);      // the microphone ends it, as in a pane
-    view.handleEvent(chatEvent(QStringLiteral("context"),
-                               {{"used", 48000}, {"window", 200000}, {"percent", 24.0}}));
-    QVERIFY(!context->isHidden());
-    QCoreApplication::processEvents();
-    // One row: the chips share a centre line, the way a pane's do. Their *heights* are equal
-    // because the stylesheet gives `boardChatContext` and `boardChatMic` the chip rules
-    // `stripChipLabel` and `stripChip` have (src/Theme.cpp) — a sheet this test does not load, so
-    // that half is checked in the evidence screenshots.
-    const int chipMid = context->mapTo(box, QPoint(0, 0)).y() + context->height() / 2;
-    const int micMid = mic->mapTo(box, QPoint(0, 0)).y() + mic->height() / 2;
-    QVERIFY2(qAbs(chipMid - micMid) <= 1,
-             qPrintable(QStringLiteral("context centred at %1, microphone at %2")
-                            .arg(chipMid).arg(micMid)));
-
-    // The actions that need no typing are on the head row above the box, not in it — and that
-    // row is **left-aligned buttons and nothing else** (owner, 2026-09-20: "the plan / execute
-    // buttons etc, would those work better at the left?" — "yes, lets do both left-aligned, drop
-    // the label"). So Check comes first, at the row's own left edge, and the stretch is behind
-    // whatever `addToolWidget` has put there.
-    auto *check = panel->findChild<QToolButton *>(QStringLiteral("boardChatCheck"));
-    auto *cleanup = panel->findChild<QToolButton *>(QStringLiteral("boardCleanup"));
-    QVERIFY(check && cleanup);
-    QVERIFY(!box->isAncestorOf(check));
-    QVERIFY(!box->isAncestorOf(cleanup));
-    QVERIFY(check->mapTo(panel, QPoint(0, 0)).y() < box->mapTo(panel, QPoint(0, 0)).y());
-    QVERIFY2(check->mapTo(panel, QPoint(0, 0)).x() < panel->width() / 4,
-             qPrintable(QStringLiteral("Check at x=%1 in a %2 px panel")
-                            .arg(check->mapTo(panel, QPoint(0, 0)).x()).arg(panel->width())));
-    QVERIFY(check->mapTo(panel, QPoint(0, 0)).x() < cleanup->mapTo(panel, QPoint(0, 0)).x());
-    // The layout says the same thing and keeps saying it when a session adds a button: the tool
-    // row is the first thing on the head row, and the last thing on it is the stretch.
-    QLayout *tools = nullptr;
-    for (QLayout *candidate : panel->findChildren<QLayout *>())
-        if (candidate->indexOf(check) >= 0)
-            tools = candidate;
-    QVERIFY(tools);
-    QLayout *head = nullptr;
-    for (QLayout *candidate : panel->findChildren<QLayout *>())
-        for (int i = 0; i < candidate->count(); ++i)
-            if (candidate->itemAt(i)->layout() == tools)
-                head = candidate;
-    QVERIFY(head);
-    QCOMPARE(head->itemAt(0)->layout(), tools);
-    QVERIFY(head->itemAt(head->count() - 1)->spacerItem() != nullptr);
-    // And no name label on it: the box's placeholder names the agent, and so does the strip that
-    // carries the clock while a turn runs.
-    QVERIFY(!panel->findChild<QLabel *>(QStringLiteral("boardChatHead")));
-
-    // No help sentence and no empty block: while the conversation is empty the log has no height
-    // at all, and the box's placeholder is what says whose box it is.
-    auto *log = chatLog(view);
-    QVERIFY(log);
-    QVERIFY(log->isHidden());
-    QVERIFY(!log->toPlainText().contains(QStringLiteral("Ask about the board itself")));
-    QCOMPARE(composer->placeholderText(),
-             QStringLiteral("Ask the Switchboard agent — Enter sends, a second prompt queues"));
-
-    // One turn later it is there, and no taller than the cap it has always had.
-    view.handleEvent(QJsonObject{{"event", "board_chat_state"},
-                                 {"chat", QJsonObject{{"running", false},
-                                                      {"history", QJsonArray{
-                                                          QJsonObject{{"role", "user"}, {"text", "how many?"}},
-                                                          QJsonObject{{"role", "agent"}, {"text", "Two."}}}}}}});
-    QTRY_VERIFY(!log->isHidden());
-    QVERIFY(log->toPlainText().contains(QStringLiteral("Two.")));
-    QVERIFY2(log->maximumHeight() <= 320,
-             qPrintable(QStringLiteral("log %1 px").arg(log->maximumHeight())));
-
-    // Which is where the clock and the survey word went (owner, 2026-09-20): the busy strip says
-    // who is turning, for how long, and whether this is the survey turn — and it is on screen for
-    // exactly as long as there is a turn to time.
-    auto *busyLabel = panel->findChild<QLabel *>(QStringLiteral("boardChatBusyLabel"));
-    QVERIFY(busyLabel);
-    QCOMPARE(busyLabel->text(), QStringLiteral("\u2726 Switchboard agent"));
-    view.handleEvent(QJsonObject{{"event", "board_chat_state"},
-                                 {"chat", QJsonObject{{"running", true}, {"turn_id", "chat-9"},
-                                                      {"seconds", 42}, {"survey", true}}}});
-    QVERIFY(!busy->isHidden());
-    QCOMPARE(busyLabel->text(), QStringLiteral("\u2726 Switchboard agent \u00b7 0:42 \u00b7 survey"));
-}
-
-// Every button on an action row wears the card page's face, whoever put it there (owner,
-// 2026-09-20: "make the buttons consistent, can you use the styling from the card agent" — and,
-// of the colours, "not the colors though"). The face is a dynamic property the stylesheet keys
-// on, so a session that adds a button keeps its object name (its own tests find it by that) and
-// still gets the shape; the colours stay whatever its own rule gives it, which is why Execute's
-// accent outline survives.
-void BoardModelTests::everyButtonOnAnActionRowWearsTheCardPagesFace()
-{
-    // The face *is* a stylesheet, so this test loads the real one — and puts back what it found.
-    // Nothing else in this file measures pixels, and none of it should inherit a sheet.
-    struct Sheet {
-        QString was = qApp->styleSheet();
-        ~Sheet() { qApp->setStyleSheet(was); }
-    } sheet;
-    relay::theme::applyTheme(*qApp);
-
-    QList<QJsonObject> sent;
-    relay::BoardView view(QStringLiteral("/tmp/workspace"));
-    view.onSend = [&sent](const QJsonObject &message) { sent.append(message); };
-    view.resize(1100, 760);
-    view.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&view));
-    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
-
-    QWidget *panel = chatPanel(view);
-    QVERIFY(panel);
-    auto *check = panel->findChild<QToolButton *>(QStringLiteral("boardChatCheck"));
-    auto *cleanup = panel->findChild<QToolButton *>(QStringLiteral("boardCleanup"));
-    QVERIFY(check && cleanup);
-
-    // A button another session reparents in — this is exactly what BoardView does with Tests and
-    // Profile — arrives with nothing on it and comes out wearing the row's face, under its own
-    // name. The panel is reached as the panel, not as a BoardView method, because that is how the
-    // other sessions reach it.
-    // No Q_OBJECT on the panel (nothing in these headers has one), so the cast is static: the
-    // object name `boardChatPanel` is that class's and no other's.
-    auto *panelApi = static_cast<relay::HelperChatPanel *>(panel);
-    auto *guest = new QToolButton;
-    guest->setObjectName(QStringLiteral("someOtherSessionsButton"));
-    guest->setText(QStringLiteral("Tests"));
-    QVERIFY(!guest->property("actionRow").toBool());
-    panelApi->addToolWidget(guest);
-    QCOMPARE(guest->objectName(), QStringLiteral("someOtherSessionsButton"));
-    QVERIFY2(guest->property("actionRow").toBool(),
-             "addToolWidget must stamp the row's face property on the button it adopts");
-    QCoreApplication::processEvents();
-
-    // Polished, it is the same height and the same type as Check beside it.
-    QCOMPARE(guest->sizeHint().height(), check->sizeHint().height());
-    QCOMPARE(guest->font(), check->font());
-
-    // And the card page's Plan is that height too: one row, three places (the Switchboard's head
-    // row, the card page's action row, and whatever a session adds).
-    openCard(view, sent, QJsonObject{{"event", "board_card"}, {"card_id", "K7Q2"},
-                                     {"title", "K7Q2 card"}, {"status", "inbox"},
-                                     {"tab", "features"}, {"body", "text"},
-                                     {"thread", QJsonArray{}}, {"thread_total", 0}});
-    QVERIFY(view.detailOpen());
-    QPushButton *plan = nullptr;
-    QPushButton *execute = view.findChild<QPushButton *>(QStringLiteral("boardExecute"));
-    for (QPushButton *button : view.findChildren<QPushButton *>(QStringLiteral("boardReplyButton")))
-        if (button->text().startsWith(QStringLiteral("Plan")))
-            plan = button;
-    QVERIFY(plan && execute);
-    QVERIFY(plan->property("actionRow").toBool());
-    QVERIFY(execute->property("actionRow").toBool());
-    QCoreApplication::processEvents();
-    QCOMPARE(plan->sizeHint().height(), check->sizeHint().height());
-    QCOMPARE(plan->font(), check->font());
-
-    // The colours are not imposed (owner: "not the colors though"). Execute leaves the board and
-    // says so with the agent's outline, and the shared rule must not have flattened it: the
-    // stylesheet still gives it the agent's ink where Plan gets the ordinary text colour.
-    const QString sheetText = qApp->styleSheet();
-    QVERIFY(sheetText.contains(QStringLiteral("QPushButton#boardExecute { padding: 4px 12px; color: ")));
-    QVERIFY(sheetText.contains(QStringLiteral("QPushButton[actionRow=\"true\"], QToolButton[actionRow=\"true\"]")));
-    // …and the shared rule declares no colour at all, which is what leaves Execute alone.
-    const int at = sheetText.indexOf(QStringLiteral("QPushButton[actionRow=\"true\"]"));
-    const QString rule = sheetText.mid(at, sheetText.indexOf(QLatin1Char('}'), at) - at);
-    QVERIFY2(!rule.contains(QStringLiteral("color")) && !rule.contains(QStringLiteral("background")),
-             qPrintable(rule));
-
-    delete guest;
-}
-
-// Every action on the Switchboard agent's row has a letter, the way the card page's Plan and
-// Execute do (owner, 2026-09-20: "it should have the letter hotkeys for each switchboard action
-// as well"). The letter is a property the button's maker sets; the panel writes the suffix into
-// the label, answers the key, and tells the page's key line about it.
-void BoardModelTests::everyActionOnTheSwitchboardsRowHasALetter()
-{
-    QList<QJsonObject> sent;
-    relay::BoardView view(QStringLiteral("/tmp/workspace"));
-    view.onSend = [&sent](const QJsonObject &message) { sent.append(message); };
-    view.resize(1100, 760);
-    view.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&view));
-    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
-
-    QWidget *panel = chatPanel(view);
-    QVERIFY(panel);
-    auto *check = panel->findChild<QToolButton *>(QStringLiteral("boardChatCheck"));
-    auto *cleanup = panel->findChild<QToolButton *>(QStringLiteral("boardCleanup"));
-    QVERIFY(check && cleanup);
-    QCOMPARE(check->text(), QStringLiteral("Check (k)"));
-    QCOMPARE(cleanup->text(), QStringLiteral("Clean up (u)"));
-    // `fullLabel` is what a row that runs out of room shortens from (CardDetail::fitButtons), so
-    // the keys are the first thing to go and no word is ever cut.
-    QCOMPARE(check->property("fullLabel").toString(), QStringLiteral("Check (k)"));
-    QCOMPARE(cleanup->property("fullLabel").toString(), QStringLiteral("Clean up (u)"));
-
-    // The letters are the page's, and the page did not already spend them.
-    auto *keys = view.findChild<QLabel *>(QStringLiteral("boardKeys"));
-    QVERIFY(keys);
-    QVERIFY2(keys->text().contains(QStringLiteral("<b>k</b> check")), qPrintable(keys->text()));
-    QVERIFY2(keys->text().contains(QStringLiteral("<b>u</b> clean up")), qPrintable(keys->text()));
-
-    // Pressing one on the list clicks its button: Check asks the worker for a board check.
-    QListWidget *list = listOf(view);
-    QVERIFY(list);
-    list->setFocus();
-    sent.clear();
-    QTest::keyClick(list, Qt::Key_K);
-    QVERIFY(!sent.isEmpty());
-    QCOMPARE(sent.last().value(QStringLiteral("type")).toString(), QStringLiteral("board_check"));
-    sent.clear();
-    QTest::keyClick(list, Qt::Key_U);
-    QVERIFY(!sent.isEmpty());
-    QCOMPARE(sent.last().value(QStringLiteral("type")).toString(), QStringLiteral("board_cleanup"));
-
-    // A button a session adds with a letter of its own is answered the same way, and says so in
-    // the key line — the row's rule, not two names written out in BoardView.
-    // No Q_OBJECT on the panel (nothing in these headers has one), so the cast is static: the
-    // object name `boardChatPanel` is that class's and no other's.
-    auto *panelApi = static_cast<relay::HelperChatPanel *>(panel);
-    auto *guest = new QToolButton;
-    guest->setObjectName(QStringLiteral("someOtherSessionsButton"));
-    guest->setText(QStringLiteral("Tests"));
-    guest->setProperty("actionKey", QStringLiteral("s"));
-    int clicks = 0;
-    QObject::connect(guest, &QToolButton::clicked, panel, [&clicks] { ++clicks; });
-    panelApi->addToolWidget(guest);
-    QCOMPARE(guest->text(), QStringLiteral("Tests (s)"));
-    view.resize(1100, 761);          // the key line is rewritten with the page's layout
-    QCoreApplication::processEvents();
-    QVERIFY2(keys->text().contains(QStringLiteral("<b>s</b> tests")), qPrintable(keys->text()));
-    QTest::keyClick(list, Qt::Key_S);
-    QCOMPARE(clicks, 1);
-
-    // The mouse path teaches the letter once (WARP.md's standing rule); the key path has just
-    // used it and says nothing.
-    QString hintedId, hintedKeys;
-    view.onHint = [&](const QString &id, const QString &text) { hintedId = id; hintedKeys = text; };
-    check->click();
-    QCOMPARE(hintedId, QStringLiteral("board.action.boardChatCheck"));
-    QCOMPARE(hintedKeys, QStringLiteral("k"));
-    hintedId.clear();
-    QTest::keyClick(list, Qt::Key_K);
-    QVERIFY2(hintedId.isEmpty(), "a key press must not teach the key it just used");
-
-    // A keyless button is left alone: no suffix, and it adds nothing to the key line. (Tests and
-    // Profile are keyless on main today — their makers have not set a letter on them.)
-    auto *quiet = new QToolButton;
-    quiet->setObjectName(QStringLiteral("quietButton"));
-    quiet->setText(QStringLiteral("Profile"));
-    panelApi->addToolWidget(quiet);
-    QCOMPARE(quiet->text(), QStringLiteral("Profile"));
-    view.resize(1100, 762);
-    QCoreApplication::processEvents();
-    QVERIFY(!keys->text().contains(QStringLiteral("profile")));
-
-    delete guest;
-    delete quiet;
-}
-
-namespace {
-
-// The two worker events the box is built from (protocol 13): the provider rows, and the role and
-// tier table a `configured` reports. `helpermodel::State` takes them both, so what is asserted
-// below is that the two boxes read the one state, not that either builds rows of its own.
-QJsonObject presetsEvent()
-{
-    return QJsonObject{
-        {"event", "presets"},
-        {"presets", QJsonArray{
-             QJsonObject{{"id", "glm-coding"}, {"label", "GLM Coding"},
-                         {"model", "zai/glm-5.3"}, {"has_stored_key", true}},
-             QJsonObject{{"id", "kimi"}, {"label", "Kimi"},
-                         {"model", "moonshot/kimi-k3"}, {"has_stored_key", true}},
-             // A provider with no key is offered on neither page; the guest harness is a row on
-             // both, and picking it is refused in words (#PK5Q) — one state, one set of rows.
-             QJsonObject{{"id", "guest:codex"}, {"label", "Codex"}, {"group", "guest"},
-                         {"has_stored_key", true}},
-             QJsonObject{{"id", "openai"}, {"label", "OpenAI"}, {"model", "openai/gpt-6"},
-                         {"has_stored_key", false}}}}};
-}
-
-QJsonObject configuredEvent(const QString &tier)
-{
-    QJsonObject role{{"source", "configured"}, {"preset", "glm-coding"}};
-    if (!tier.isEmpty())
-        role.insert(QStringLiteral("tier"), tier);
-    return QJsonObject{
-        {"event", "configured"},
-        {"roles", QJsonObject{{"switchboard", role}}},
-        {"tiers", QJsonObject{
-             {"main", QJsonObject{{"model", "zai/glm-5.3"}, {"using", "main"}}},
-             {"flash", QJsonObject{{"model", "moonshot/kimi-k3"}, {"using", "flash"}}},
-             {"lite", QJsonObject{{"model", "zai/glm-5.3-air"}, {"using", "lite"}}}}}};
-}
-
-}  // namespace
-
-// Owner, 2026-09-20: "did we lose the model picker in the switchboard agent … it's the one in the
-// cards, it's different and doesn't have the model picker." The list page's box went into the page
-// agent's composer, and an open card hides the whole list page — so the page whose Discuss and
-// Plan are turns of that very agent was the one page that could neither name the model nor change
-// it. It has the box now, and it is the same box: one `helpermodel::State` fills both, so they
-// cannot disagree about which model the helper is on.
-void BoardModelTests::theCardPageCarriesTheSameModelBoxAsTheListPage()
-{
-    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    Consoles consoles(view);
+    view.setTabId(QStringLiteral("tab-7"));
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
-    view.resize(900, 700);
     view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
     openCard(view, sent, card("K7Q2", "K7Q2 card", "the issue", "h1"));
 
-    QComboBox *list = listModelBox(view);
-    QComboBox *page = cardModelBox(view);
-    QVERIFY(list && page);
-    QVERIFY(list != page);
-    // The same control, not one that looks like it: the same class (the collapsed box hugs its
-    // current row), the same accessible name, and on the tab ring where its twin is.
-    QCOMPARE(QString::fromLatin1(page->metaObject()->className()),
-             QString::fromLatin1(list->metaObject()->className()));
-    QCOMPARE(page->objectName(), QStringLiteral("statusPicker"));
-    QCOMPARE(page->accessibleName(), QStringLiteral("Switchboard agent model"));
-    QCOMPARE(page->focusPolicy(), Qt::TabFocus);
-    QCOMPARE(page->sizePolicy().horizontalPolicy(), QSizePolicy::Maximum);
+    FakeConsole *console = consoles.card();
+    QVERIFY(console);
+    QCOMPARE(view.cardConsole(), static_cast<QWidget *>(console));
+    const relay::agent::ContextSpec spec = console->liveSpec();
+    QCOMPARE(spec.name, QStringLiteral("card"));
+    QCOMPARE(spec.surface, QStringLiteral("card:K7Q2"));     // what every card turn event carries
+    QCOMPARE(spec.scope, QStringLiteral("card"));
+    QCOMPARE(spec.agentRole, QStringLiteral("switchboard"));
+    QVERIFY(!spec.shell);
+    QCOMPARE(spec.routing, QStringLiteral("agent"));
+    // A card is its own conversation: the board's key is the tab's, this one's is the card's.
+    QVERIFY(spec.persistId() != consoles.board()->liveSpec().persistId());
+    QVERIFY(console->context()->placeholder().contains(QStringLiteral("Ctrl+Shift+Enter only comments")));
 
-    // Alone on the box's chip strip, right-aligned: a stretch, then the box, and nothing else —
-    // the shape of every other prompt box in Relay (owner, 2026-09-20).
-    auto *reply = view.findChild<QFrame *>(QStringLiteral("boardReply"));
-    QVERIFY(reply && reply->isAncestorOf(page));
-    QLayout *strip = nullptr;
-    for (QLayout *candidate : reply->findChildren<QLayout *>())
-        if (candidate->indexOf(page) >= 0)
-            strip = candidate;
-    QVERIFY(strip);
-    QVERIFY(strip->itemAt(0)->spacerItem() != nullptr);
-    QCOMPARE(strip->indexOf(page), 1);
-    QCOMPARE(strip->count(), 2);
+    // Discuss and Comment are what the box does, so they have no buttons; what is left on the row
+    // is Plan and the two that leave the board. Verify is not offered outside a QA lane.
+    QStringList labels;
+    for (const relay::agent::Action &action : console->actions())
+        labels << action.fullLabel();
+    QCOMPARE(labels, QStringList({QStringLiteral("Plan (p)"), QStringLiteral("Execute (x)")}));
+    // Execute and Verify hand the card to a pane, and that is what the accent outline means.
+    QVERIFY(!console->actions().at(0).leaves);
+    QVERIFY(console->actions().at(1).leaves);
 
-    // And the three buttons are **out** of the box, in a row directly above it, left-aligned and
-    // in the workflow's order (owner, 2026-09-20: "move those buttons out of there (plan /
-    // execute / etc) … can we instead put buttons like that in a row above the chat box", then
-    // "yes, lets do both left-aligned, drop the label"). They stay off the tab ring.
-    QPushButton *plan = button(view, QStringLiteral("Plan"));
-    QPushButton *execute = button(view, QStringLiteral("Execute"));
-    QPushButton *verify = button(view, QStringLiteral("Verify"));
-    QVERIFY(plan && execute && verify);
-    for (QPushButton *item : {plan, execute, verify}) {
-        QVERIFY2(!reply->isAncestorOf(item), qPrintable(item->text() + QStringLiteral(" is in the box")));
-        QCOMPARE(item->focusPolicy(), Qt::NoFocus);
-    }
-    auto *actions = view.findChild<QWidget *>(QStringLiteral("boardCardActions"));
-    QVERIFY(actions && actions->isAncestorOf(plan) && actions->isAncestorOf(execute)
-            && actions->isAncestorOf(verify));
-    QLayout *row = actions->layout();
-    QVERIFY(row);
-    QCOMPARE(row->indexOf(plan), 0);                           // left-aligned: Plan starts the row
-    QVERIFY(row->indexOf(plan) < row->indexOf(execute));
-    QVERIFY(row->indexOf(execute) < row->indexOf(verify));
-    QVERIFY(row->itemAt(row->count() - 1)->spacerItem() != nullptr);   // the stretch is behind them
-    // Where they *land* is measured at the width the owner works at, in
-    // theCardsModelBoxGivesTheRowItsWidthBackBeforeAButtonIsClipped(): a card page opened on a
-    // 900 px view and never resized has not laid this row out yet, so its x positions here would
-    // be the buttons' unlaid-out defaults rather than the rule.
-    auto *detail = view.findChild<QWidget *>(QStringLiteral("boardDetail"));
-    QVERIFY(detail);
-    QVERIFY2(actions->mapTo(detail, QPoint(0, 0)).y() < reply->mapTo(detail, QPoint(0, 0)).y(),
-             "the actions are above the box they belong to");
-
-    // The worker's two events, taken once by the one state and drawn into both boxes: the same
-    // rows, in the same order, on the same current one. The guest harness and the keyless
-    // provider are in neither.
-    view.handleEvent(presetsEvent());
-    view.handleEvent(configuredEvent(QStringLiteral("flash")));
-    QCOMPARE(page->count(), list->count());
-    QStringList listRows, pageRows;
-    for (int i = 0; i < list->count(); ++i) {
-        listRows << list->itemText(i) + QLatin1Char('=') + list->itemData(i).toString();
-        pageRows << page->itemText(i) + QLatin1Char('=') + page->itemData(i).toString();
-    }
-    QCOMPARE(pageRows, listRows);
-    // A provider with no key is offered on neither page. The guest harness *is* a row on both —
-    // "the owner asked for the same list", and picking it is refused in words rather than being
-    // quietly missing (src/HelperModelBox.cpp, #PK5Q). This assertion said the opposite until
-    // 2026-09-20: it was written for the board's own row filter (#8YQ9), the helper's box became
-    // the pane's box in 3669df02, and nothing caught it because this file had not compiled since
-    // 28b56483 (#WRWN).
-    QVERIFY2(pageRows.join(QLatin1Char('\n')).contains(QStringLiteral("guest:codex")),
-             qPrintable(pageRows.join(QStringLiteral(" | "))));
-    QVERIFY(!pageRows.join(QLatin1Char('\n')).contains(QStringLiteral("preset:openai")));
-    QCOMPARE(page->currentData().toString(), QStringLiteral("role:flash"));
-    QCOMPARE(page->currentText(), list->currentText());
-    QCOMPARE(page->toolTip(), list->toolTip());
-
-    // A pick on the card page is the pick the list page would have sent — the same row's data,
-    // through the one onModelPick. The view writes no settings itself, here either. The rows are
-    // a terminal pane's rows since #PK5Q, so a pick arrives in the pane's own words
-    // (`role:<tier>`, `entry:<preset>|<model>`, `gear:…`), and the window answers **true** for a
-    // row that is not a choice — which is what puts the box back on the live row
-    // (RelayWindow::pickHelperModel). This stands in for the window, so it answers the same way.
-    QStringList picks;
-    view.onModelPick = [&picks](const QString &data) {
-        picks << data;
-        return data.startsWith(QStringLiteral("gear:"));
+    // What is typed in the console's composer is Execute's note: the box is the reply box.
+    QString handedCard, handedTask;
+    view.onExecuteCard = [&](const QString &id, const QString &task) {
+        handedCard = id;
+        handedTask = task;
+        return QStringLiteral("tok");
     };
-    const int provider = page->findData(QStringLiteral("entry:kimi|moonshot/kimi-k3"));
-    QVERIFY(provider >= 0);
-    QCOMPARE(list->itemData(provider).toString(), QStringLiteral("entry:kimi|moonshot/kimi-k3"));
-    page->setCurrentIndex(provider);
-    emit page->activated(provider);
-    QCOMPARE(picks, QStringList{QStringLiteral("entry:kimi|moonshot/kimi-k3")});
+    console->editor()->setPlainText(QStringLiteral("start with the parser"));
+    // No plan and no acceptance, so the first press arms and says why; the second goes ahead
+    // (#XS6Q). The note stays in the box until the press that actually hands the card over.
+    rowButton(view, QStringLiteral("boardExecute"))->click();
+    QVERIFY(handedCard.isEmpty());
+    QCOMPARE(console->editor()->toPlainText(), QStringLiteral("start with the parser"));
+    rowButton(view, QStringLiteral("boardExecute"))->click();
+    QCOMPARE(handedCard, QStringLiteral("K7Q2"));
+    QVERIFY2(handedTask.contains(QStringLiteral("start with the parser")), qPrintable(handedTask));
+    QVERIFY(console->editor()->toPlainText().isEmpty());     // taken out of the box with it
 
-    // The worker answering the reconfigure redraws *both* boxes on the new role, so the list page
-    // is never left naming the model the card page moved off.
-    view.handleEvent(configuredEvent(QString()));
-    QCOMPARE(page->currentData().toString(), QStringLiteral("role:main"));
-    QCOMPARE(list->currentData().toString(), QStringLiteral("role:main"));
+    // While a turn runs on the card, the actions that would start another one wait — and the row
+    // is rebuilt because the context said something moved, not because the page poked a widget.
+    sent.clear();
+    console->editor()->setPlainText(QStringLiteral("is this still wanted?"));
+    QTest::keyClick(console->editor(), Qt::Key_Return);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_ask"));
+    QCOMPARE(sent.last().value("mode").toString(), QStringLiteral("discuss"));
+    QCOMPARE(sent.last().value("text").toString(), QStringLiteral("is this still wanted?"));
+    QTRY_VERIFY(!rowButton(view, QStringLiteral("boardReplyButton"))->isEnabled());
+    QVERIFY(!rowButton(view, QStringLiteral("boardExecute"))->isEnabled());
+    view.handleEvent(QJsonObject{{"event", "done"}, {"card_id", "K7Q2"}, {"mode", "discuss"}});
+    QTRY_VERIFY(rowButton(view, QStringLiteral("boardReplyButton"))->isEnabled());
 
-    // The gear is not a choice: it goes out like any other pick, and the box is put straight back
-    // on the live row rather than left showing "customize…".
-    picks.clear();
-    const int gear = page->findData(QStringLiteral("gear:modelOptions"));
-    QVERIFY(gear >= 0);
-    page->setCurrentIndex(gear);
-    emit page->activated(gear);
-    QCOMPARE(picks, QStringList{QStringLiteral("gear:modelOptions")});
-    QCOMPARE(page->currentData().toString(), QStringLiteral("role:main"));
-
-    // A turn reconfigures nothing mid-flight, so while the card is working the box waits and says
-    // why — on both pages, because the turn that blocks the configure is as likely to have been
-    // started from this one.
-    view.cardAction(QStringLiteral("plan"));
-    QVERIFY(!page->isEnabled());
-    QVERIFY(!list->isEnabled());
-    QVERIFY2(page->toolTip().contains(QStringLiteral("Disabled while the agent is working")),
-             qPrintable(page->toolTip()));
+    // Ctrl+Enter plans and Ctrl+Shift+Enter is a comment with no model call — the three chords
+    // the card page has always had, in the box that now answers them.
+    sent.clear();
+    console->editor()->setPlainText(QStringLiteral("the parser first"));
+    QTest::keyClick(console->editor(), Qt::Key_Return, Qt::ControlModifier);
+    QCOMPARE(sent.last().value("mode").toString(), QStringLiteral("plan"));
     view.handleEvent(QJsonObject{{"event", "done"}, {"card_id", "K7Q2"}, {"mode", "plan"}});
-    QVERIFY(page->isEnabled());
-    QVERIFY(list->isEnabled());
-    QVERIFY(!page->toolTip().contains(QStringLiteral("Disabled while the agent is working")));
+    sent.clear();
+    console->editor()->setPlainText(QStringLiteral("a note for later"));
+    QTest::keyClick(console->editor(), Qt::Key_Return, Qt::ControlModifier | Qt::ShiftModifier);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_comment"));
+    QCOMPARE(sent.last().value("kind").toString(), QStringLiteral("note"));
 }
 
-// Narrow, the two rows still hold their shape. The buttons are above the box now, so the row
-// they share is their own: it sheds the keys out of the labels before anything is clipped, the
-// way a card row drops its decorative badges before its meaning. The box is on its own strip,
-// where it is the only thing that can give width back (QSizePolicy::Maximum against a layout
-// that can only clip a QPushButton), so it is the last thing to squeeze. At the ~350 px pane
-// where the list is hidden and the card has the whole width, everything is still whole.
-void BoardModelTests::theCardsModelBoxGivesTheRowItsWidthBackBeforeAButtonIsClipped()
+// Verify is on the row only in a QA lane (#T71W): on any other card it would be a control for a
+// question nobody has asked yet.
+void BoardModelTests::theCardsRowCarriesVerifyOnlyInAQaLane()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    Consoles consoles(view);
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({row("K7Q2", "needs-qa-llm", "features")}));
+
+    openCard(view, sent, qaCard(qaBlock()));
+
+    QStringList labels;
+    for (const relay::agent::Action &action : consoles.card()->actions())
+        labels << action.fullLabel();
+    QCOMPARE(labels, QStringList({QStringLiteral("Plan (p)"), QStringLiteral("Execute (x)"),
+                                  QStringLiteral("Verify (v)")}));
+    QVERIFY(consoles.card()->actions().at(2).leaves);
+
+    // Back on an ordinary card the action is gone from the list, not merely greyed out.
+    QJsonObject plain = card("M3XJ", "M3XJ card", "the issue", "h2");
+    view.handleEvent(opened({row("M3XJ", "inbox", "features")}));
+    openCard(view, sent, plain);
+    labels.clear();
+    for (const relay::agent::Action &action : consoles.card()->actions())
+        labels << action.fullLabel();
+    QCOMPARE(labels, QStringList({QStringLiteral("Plan (p)"), QStringLiteral("Execute (x)")}));
+}
+
+// A link in an answer is offered to the context before the console opens it the ordinary way
+// (#FEJQ §30.4, and the `option:`/`session:` link kinds step 8 landed). The same resolver serves
+// both pages, because a helper's answer is about the app whichever page it was asked from.
+void BoardModelTests::anAnswersCardOptionAndSessionLinksResolveThroughTheContext()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    Consoles consoles(view);
+    view.onSend = [](const QJsonObject &) {};
+    QString section, row_, session;
+    view.onOpenOption = [&](const QString &s, const QString &r) { section = s; row_ = r; };
+    view.onOpenSession = [&](const QString &id) { session = id; };
+    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+
+    relay::agent::Context *context = consoles.board()->context();
+    relay::links::Target option;
+    option.valid = true;
+    option.kind = relay::links::Kind::Option;
+    option.target = relay::links::optionTarget(QStringLiteral("agent"), QStringLiteral("allow_writes"));
+    QVERIFY(context->resolveLink(option));
+    QCOMPARE(section, QStringLiteral("agent"));
+    QCOMPARE(row_, QStringLiteral("allow_writes"));
+
+    relay::links::Target conversation;
+    conversation.valid = true;
+    conversation.kind = relay::links::Kind::Session;
+    conversation.target = relay::links::sessionTarget(QStringLiteral("0f3a-11d2"));
+    QVERIFY(context->resolveLink(conversation));
+    QCOMPARE(session, QStringLiteral("0f3a-11d2"));
+
+    // A card zooms on this very board.
+    relay::links::Target cardLink;
+    cardLink.valid = true;
+    cardLink.kind = relay::links::Kind::Card;
+    cardLink.target = relay::links::cardTarget(QStringLiteral("K7Q2"));
+    QVERIFY(context->resolveLink(cardLink));
+    QCOMPARE(view.selectedCard(), QStringLiteral("K7Q2"));
+
+    // A path is nobody's here: the console opens it the ordinary way.
+    relay::links::Target path;
+    path.valid = true;
+    path.kind = relay::links::Kind::Path;
+    path.target = QStringLiteral("/tmp/workspace/src/Pane.h");
+    QVERIFY(!context->resolveLink(path));
+}
+
+// With no factory — a test, or `relay-board` linked on its own — the board shows no console and
+// everything else on it goes on working. That property is what lets the whole file above drive a
+// board without a window.
+void BoardModelTests::aBoardWithNoConsoleFactoryStillWorks()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.resize(900, 700);
-    view.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&view));
     view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
-    view.handleEvent(presetsEvent());
-    view.handleEvent(configuredEvent(QStringLiteral("flash")));   // "Flash — moonshot/kimi-k3"
+    QVERIFY(!view.listConsole());
+    QVERIFY(!view.cardConsole());
+
+    // The area is there and holds the board's own widgets; only the agent is missing.
+    QWidget *area = view.findChild<QWidget *>(QStringLiteral("boardChatArea"));
+    QVERIFY(area && !area->isHidden());
+    sent.clear();
+    view.requestCheck();
+    view.handleEvent(QJsonObject{{"event", "board_problems"},
+                                 {"id", sent.last().value("id").toString()},
+                                 {"items", QJsonArray{problem("issues/features/a.md", "no id")}},
+                                 {"section", QJsonValue()}});
+    QVERIFY(!view.findChild<QWidget *>(QStringLiteral("boardChatFindings"))->isHidden());
+
+    // `a`, `k` and the findings' drafts all find nothing to draft into and say nothing about it.
+    view.focusHelper();
+    QKeyEvent key(QEvent::KeyPress, Qt::Key_K, Qt::NoModifier, QStringLiteral("k"));
+    QApplication::sendEvent(&view, &key);
+
+    // A card opens, is edited and is handed over with no console either — the note is simply empty.
     openCard(view, sent, card("K7Q2", "K7Q2 card", "the issue", "h1"));
-
-    QComboBox *page = cardModelBox(view);
-    auto *reply = view.findChild<QFrame *>(QStringLiteral("boardReply"));
-    auto *actions = view.findChild<QWidget *>(QStringLiteral("boardCardActions"));
-    QVERIFY(page && reply && actions);
-    // The pane the owner actually uses when the list is hidden and the card has the whole width.
-    // Resized twice: the first narrow resize is clamped while the layout re-reads the minimums of
-    // a page that was laid out wide, and the second is what a splitter's drag would give anyway.
-    view.resize(350, 700);
-    QCoreApplication::processEvents();
-    view.resize(350, 700);
-    QTRY_VERIFY(view.width() == 350);
-    QCoreApplication::processEvents();
-
-    // Every button whole — its own size hint, and both edges inside its row.
-    const QList<QPushButton *> row{button(view, QStringLiteral("Plan")),
-                                   button(view, QStringLiteral("Execute"))};
-    for (QPushButton *item : row) {
-        QVERIFY(item);
-        QVERIFY(!item->isHidden());
-        QVERIFY2(item->width() >= item->sizeHint().width(),
-                 qPrintable(QStringLiteral("%1 is %2 px wide, hint %3")
-                                .arg(item->text()).arg(item->width()).arg(item->sizeHint().width())));
-        const QPoint left = item->mapTo(actions, QPoint(0, 0));
-        QVERIFY2(left.x() >= 0 && left.x() + item->width() <= actions->width(),
-                 qPrintable(QStringLiteral("%1 spans %2..%3 in a %4 px row")
-                                .arg(item->text()).arg(left.x())
-                                .arg(left.x() + item->width()).arg(actions->width())));
-    }
-
-    // Left-aligned, in the workflow's order, with the free space behind them (owner, 2026-09-20:
-    // "yes, lets do both left-aligned, drop the label"). Measured here because this is the one
-    // card-page test whose row has been through a resize and so has real geometry.
-    const int planAt = row.at(0)->mapTo(actions, QPoint(0, 0)).x();
-    const int executeAt = row.at(1)->mapTo(actions, QPoint(0, 0)).x();
-    QVERIFY2(planAt <= 1 && planAt < executeAt,
-             qPrintable(QStringLiteral("Plan at x=%1, Execute at x=%2, in a %3 px row")
-                            .arg(planAt).arg(executeAt).arg(actions->width())));
-    QVERIFY2(executeAt + row.at(1)->width() < actions->width(),
-             qPrintable(QStringLiteral("Execute ends at %1 in a %2 px row: nothing is left over "
-                                       "at the right, so the row is not left-aligned")
-                            .arg(executeAt + row.at(1)->width()).arg(actions->width())));
-
-    // The keys are still in the labels: with the row to themselves the buttons fit a 350 px card,
-    // which is what moving them off the box's strip bought.
-    QCOMPARE(button(view, QStringLiteral("Plan"))->text(), QStringLiteral("Plan (p)"));
-    QCOMPARE(button(view, QStringLiteral("Execute"))->text(), QStringLiteral("Execute (x)"));
-
-    // And the box, alone on its strip, is whole here too — it no longer has to give the buttons
-    // their width back at the size the owner works at.
-    QVERIFY(!page->isHidden());
-    QVERIFY2(page->width() >= page->sizeHint().width(),
-             qPrintable(QStringLiteral("box %1 px, hint %2")
-                            .arg(page->width()).arg(page->sizeHint().width())));
-    const QPoint boxAt = page->mapTo(reply, QPoint(0, 0));
-    QVERIFY(boxAt.x() >= 0 && boxAt.x() + page->width() <= reply->width());
-
-    // The shortening rule itself, on a row narrower than its own labels — a larger desktop font
-    // is what reaches this in the wild. The keys come out of the labels first, and the box, on
-    // its own strip now, is untouched by what the row does.
-    const int boxWas = page->width();
-    actions->setFixedWidth(150);
-    view.resize(351, 700);            // a resize of the page is what re-fits the row
-    QCoreApplication::processEvents();
-    QTRY_COMPARE(button(view, QStringLiteral("Plan"))->text(), QStringLiteral("Plan"));
-    QCOMPARE(button(view, QStringLiteral("Execute"))->text(), QStringLiteral("Execute"));
-    QCOMPARE(page->width(), boxWas);
-    actions->setMinimumWidth(0);
-    actions->setMaximumWidth(QWIDGETSIZE_MAX);
-
-    // Wide again, and the keys come back.
-    view.resize(1100, 700);
-    QTRY_COMPARE(button(view, QStringLiteral("Plan"))->text(), QStringLiteral("Plan (p)"));
+    QVERIFY(view.detailOpen());
+    QVERIFY(!replyBox(view));
+    QString handed;
+    view.onExecuteCard = [&handed](const QString &id, const QString &) {
+        handed = id;
+        return QStringLiteral("tok");
+    };
+    view.cardAction(QStringLiteral("execute"));
+    view.cardAction(QStringLiteral("execute"));   // the arm-then-go rule: no plan, no acceptance
+    QCOMPARE(handed, QStringLiteral("K7Q2"));
 }
-
-// ---------------------------------------------------------------------------- the helper panel
-//
-// One helper worker serves a whole tab (#FEJQ), so every panel in it sees every turn event and
-// exactly one of them may take it. The pane's name is what decides: it rides out on what the
-// panel sends — the worker picks the brief from it — and it comes back on what the worker
-// streams.
-void BoardModelTests::aHelperTagsWhatItSendsWithItsPaneAndTakesOnlyThatPanesEvents()
-{
-    relay::HelperChatPanel panel(relay::helperpane::sessions());
-    QList<QJsonObject> sent;
-    panel.onSend = [&sent](const QJsonObject &message) { sent << message; };
-
-    auto *composer = panel.findChild<QPlainTextEdit *>(QStringLiteral("boardChatComposer"));
-    QVERIFY(composer);
-    composer->setPlainText(QStringLiteral("which sessions touched Pane.h?"));
-    QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
-    QApplication::sendEvent(composer, &enter);
-    QCOMPARE(sent.size(), 1);
-    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_chat"));
-    QCOMPARE(sent.last().value("pane").toString(), QStringLiteral("sessions"));
-
-    // The board's own answer, streaming in the same tab. Not this panel's, and not in its log.
-    QVERIFY(!panel.handleEvent(QStringLiteral("delta"),
-                               QJsonObject{{"chat", true}, {"pane", "switchboard"},
-                                           {"turn_id", "chat-1"}, {"text", "84 open cards."}}));
-    // An untagged event is the board's too: that is what the worker sent before there were other
-    // panes, and the Switchboard is the panel that was there then.
-    QVERIFY(!panel.handleEvent(QStringLiteral("delta"),
-                               QJsonObject{{"chat", true}, {"turn_id", "chat-1"},
-                                           {"text", "84 open cards."}}));
-    QVERIFY(panel.handleEvent(QStringLiteral("delta"),
-                              QJsonObject{{"chat", true}, {"pane", "sessions"},
-                                          {"turn_id", "chat-2"}, {"text", "Four of them."}}));
-    auto *log = panel.findChild<QTextBrowser *>(QStringLiteral("boardChatLog"));
-    QVERIFY(log);
-    QTRY_VERIFY(log->toPlainText().contains(QStringLiteral("Four of them.")));
-    QVERIFY(!log->toPlainText().contains(QStringLiteral("84 open cards.")));
-
-    // The Switchboard's panel is the other side of the same rule, and its extras are its own.
-    relay::BoardChatPanel board;
-    QCOMPARE(board.pane(), QStringLiteral("switchboard"));
-    QVERIFY(board.handleEvent(QStringLiteral("delta"),
-                              QJsonObject{{"chat", true}, {"turn_id", "chat-1"},
-                                          {"text", "84 open cards."}}));
-    QVERIFY(!board.handleEvent(QStringLiteral("delta"),
-                               QJsonObject{{"chat", true}, {"pane", "sessions"},
-                                           {"turn_id", "chat-2"}, {"text", "Four of them."}}));
-    QVERIFY(board.findChild<QToolButton *>(QStringLiteral("boardChatCheck")));
-    QVERIFY(!panel.findChild<QToolButton *>(QStringLiteral("boardChatCheck")));
-    QVERIFY(!panel.findChild<QWidget *>(QStringLiteral("boardChatSurvey")));
-}
-
-// The queue is the worker's and serves every panel, so every panel draws it (owner, 2026-09-20:
-// "message queue isn't working in the sessions helper, i can't interrupt"). Until now only the
-// Switchboard built the rows, while the composer in Options, Actions and Sessions went on
-// promising that a second prompt queues — it did queue, in the worker, with nothing on screen to
-// say so and no way to take one out again.
-void BoardModelTests::everyHelperPanelDrawsTheQueueAndCanStopItsOwnTurn()
-{
-    relay::HelperChatPanel panel(relay::helperpane::sessions());
-    QList<QJsonObject> sent;
-    panel.onSend = [&sent](const QJsonObject &message) { sent << message; };
-    panel.expand();
-    panel.resize(460, 320);
-    panel.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&panel));
-
-    // A turn of this pane's is running…
-    QVERIFY(panel.handleEvent(QStringLiteral("board_chat_started"),
-                              QJsonObject{{"chat", true}, {"pane", "sessions"},
-                                          {"turn_id", "chat-1"}}));
-    QVERIFY(panel.running());
-    // …and the second prompt queues, which the panel now shows.
-    QVERIFY(panel.handleEvent(QStringLiteral("board_chat_queued"),
-                              QJsonObject{{"chat", true}, {"pane", "sessions"}, {"id", "c1"},
-                                          {"position", 1}, {"text", "and the one about panes?"}}));
-    auto *queue = panel.findChild<QWidget *>(QStringLiteral("boardChatQueue"));
-    QVERIFY2(queue, "the Sessions helper has no queue box");
-    QTRY_VERIFY(queue->isVisible());
-    QVERIFY(panel.findChild<QLabel *>(QStringLiteral("boardChatQueueHead")));
-    auto *row = panel.findChild<QWidget *>(QStringLiteral("boardChatQueueRow"));
-    QVERIFY(row);
-    // …and can be taken out again, from here.
-    auto *drop = row->findChild<QToolButton *>(QStringLiteral("boardChatQueueDrop"));
-    QVERIFY(drop);
-    drop->click();
-    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_chat_queue_remove"));
-    QCOMPARE(sent.last().value("item").toString(), QStringLiteral("c1"));
-    QCOMPARE(sent.last().value("pane").toString(), QStringLiteral("sessions"));
-
-    // ✕ Stop is this panel's too, and it says which pane pressed it so the answer comes back here.
-    auto *stop = panel.findChild<QToolButton *>(QStringLiteral("boardChatStop"));
-    QVERIFY(stop);
-    stop->click();
-    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_chat_cancel"));
-    QCOMPARE(sent.last().value("pane").toString(), QStringLiteral("sessions"));
-    // The worker's answer, addressed to the panel that asked (§30.3): the turn settles here.
-    QVERIFY(panel.handleEvent(QStringLiteral("board_chat_cancelled"),
-                              QJsonObject{{"pane", "sessions"}, {"stopped", true},
-                                          {"chat", QJsonObject{{"running", false},
-                                                               {"queue", QJsonArray{}},
-                                                               {"history", QJsonArray{}}}}}));
-    QVERIFY(!panel.running());
-    QTRY_VERIFY(!queue->isVisible());
-
-    // The queue is the worker's, not the turn's: a state block addressed to the *board's* panel
-    // still lists this panel's waiting prompt, so the row is read from it. Only the turn is not —
-    // a Sessions panel does not go busy because the board is.
-    QVERIFY(!panel.handleEvent(QStringLiteral("board_chat_state"),
-                               QJsonObject{{"pane", "switchboard"},
-                                           {"chat", QJsonObject{
-                                               {"running", true}, {"pane", "switchboard"},
-                                               {"turn_id", "chat-9"},
-                                               {"queue", QJsonArray{QJsonObject{
-                                                   {"id", "c2"}, {"text", "mine, still waiting"},
-                                                   {"pane", "sessions"}}}},
-                                               {"history", QJsonArray{}}}}}));
-    QVERIFY(!panel.running());
-    QTRY_VERIFY(queue->isVisible());
-    QVERIFY(panel.findChild<QWidget *>(QStringLiteral("boardChatQueueRow")));
-}
-
-// A helper worker that died mid-turn is the window's `error` with `worker_gone` on it
-// (RelayWindow::helperWorkerGone, #H6VQ): the panel that was waiting goes back to idle, says so
-// where the answer would have been, and drops a queue no worker holds any more.
-void BoardModelTests::aHelperWorkerThatDiedPutsThePanelBack()
-{
-    relay::HelperChatPanel panel(relay::helperpane::sessions());
-    panel.expand();
-    panel.resize(460, 320);
-    panel.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&panel));
-    QVERIFY(panel.handleEvent(QStringLiteral("board_chat_started"),
-                              QJsonObject{{"chat", true}, {"pane", "sessions"},
-                                          {"turn_id", "chat-1"}}));
-    QVERIFY(panel.handleEvent(QStringLiteral("board_chat_queued"),
-                              QJsonObject{{"chat", true}, {"pane", "sessions"}, {"id", "c1"},
-                                          {"position", 1}, {"text", "the other one"}}));
-    QVERIFY(panel.running());
-
-    QVERIFY(panel.handleEvent(QStringLiteral("error"),
-                              QJsonObject{{"chat", true}, {"pane", "sessions"},
-                                          {"worker_gone", true},
-                                          {"text", "The helper stopped before it answered. Your "
-                                                   "message is kept — ask again and a fresh "
-                                                   "helper starts."}}));
-    QVERIFY(!panel.running());
-    auto *queue = panel.findChild<QWidget *>(QStringLiteral("boardChatQueue"));
-    QVERIFY(queue);
-    QTRY_VERIFY(!queue->isVisible());
-    auto *log = panel.findChild<QTextBrowser *>(QStringLiteral("boardChatLog"));
-    QVERIFY(log);
-    QTRY_VERIFY(log->toPlainText().contains(QStringLiteral("The helper stopped before it answered")));
-    // And the composer takes the next prompt, which is what starts a fresh worker.
-    auto *composer = panel.findChild<QPlainTextEdit *>(QStringLiteral("boardChatComposer"));
-    QVERIFY(composer);
-    QVERIFY(composer->isEnabled());
-}
-
-// Collapsed by default outside the Switchboard (owner, 2026-09-20): the board's 320 px of log
-// plus composer is most of a small pane, so a helper is one row until it is asked for.
-void BoardModelTests::aHelperOpensAsOneRowThatExpandsIntoTheWholePanel()
-{
-    relay::HelperChatPanel panel(relay::helperpane::options());
-    panel.setAskShortcut(QStringLiteral("options.ask"), QStringLiteral("Ctrl+/"));
-    panel.resize(420, 260);
-    panel.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&panel));
-
-    QVERIFY(panel.collapsed());
-    auto *ask = panel.findChild<QToolButton *>(QStringLiteral("boardChatAsk"));
-    auto *body = panel.findChild<QWidget *>(QStringLiteral("boardChatBody"));
-    auto *row = panel.findChild<QWidget *>(QStringLiteral("boardChatAskRow"));
-    QVERIFY(ask && body && row);
-    QVERIFY(ask->isVisible());
-    QVERIFY(!body->isVisible());
-    // The row says what it opens and how, in one button (owner, 2026-09-20: "make the button say
-    // Helper Agent (Alt+Q)"), with a question mark beside the words, at the pane's bottom right.
-    QCOMPARE(ask->text(), QStringLiteral("Helper Agent (Ctrl+/)"));
-    QVERIFY(!ask->icon().isNull());
-    QVERIFY2(ask->geometry().center().x() > row->width() / 2,
-             qPrintable(QStringLiteral("ask at x=%1 in a %2 px row")
-                            .arg(ask->geometry().center().x()).arg(row->width())));
-    QCOMPARE(panel.findChild<QLabel *>(QStringLiteral("boardChatHead"))->text(),
-             QStringLiteral("Options helper"));
-
-    ask->click();
-    QVERIFY(!panel.collapsed());
-    QVERIFY(body->isVisible());
-    QVERIFY(!ask->isVisible());
-    QVERIFY(panel.composerHasFocus());                      // the row said Ask; the cursor is there
-
-    // An empty conversation takes no height at all — the help sentence that used to fill it is
-    // gone (owner, 2026-09-20), so there is nothing to show and nothing to reserve.
-    auto *log = panel.findChild<QTextBrowser *>(QStringLiteral("boardChatLog"));
-    QVERIFY(log);
-    QVERIFY(log->isHidden());
-
-    // With a conversation in it, it is sized to the pane it is in and not to the board's list
-    // page: at most ~40 % of the pane, and never more than the 320 the board keeps.
-    panel.setChatState(QJsonObject{{"running", false},
-                                   {"history", QJsonArray{
-                                       QJsonObject{{"role", "user"}, {"text", QString(400, QLatin1Char('x'))}},
-                                       QJsonObject{{"role", "agent"}, {"text", QString(2000, QLatin1Char('y'))}}}}});
-    QTRY_VERIFY(!log->isHidden());
-    QVERIFY2(log->maximumHeight() < 320,
-             qPrintable(QStringLiteral("log %1 px").arg(log->maximumHeight())));
-    QVERIFY(log->maximumHeight() >= 3 * QFontMetrics(log->font()).lineSpacing());
-
-    // Folded back, and nothing is lost: the draft is still in the box when it opens again.
-    auto *composer = panel.findChild<QPlainTextEdit *>(QStringLiteral("boardChatComposer"));
-    QVERIFY(composer);
-    composer->setPlainText(QStringLiteral("half a question"));
-    panel.findChild<QToolButton *>(QStringLiteral("boardChatFold"))->click();
-    QVERIFY(panel.collapsed());
-    QVERIFY(ask->isVisible());
-    panel.focusComposer();                                  // the pane's ask key, from anywhere
-    QVERIFY(!panel.collapsed());
-    QCOMPARE(panel.draft(), QStringLiteral("half a question"));
-
-    // The Switchboard's panel is its page and has neither the row nor the fold.
-    relay::BoardChatPanel board;
-    QVERIFY(!board.collapsed());
-    QVERIFY(!board.findChild<QToolButton *>(QStringLiteral("boardChatAsk")));
-    QVERIFY(!board.findChild<QToolButton *>(QStringLiteral("boardChatFold")));
-}
-
-// ---- the cards the agent closed itself (#93WR, owner 2026-09-20) -------------------------------
-//
-// "medium folding seems like a no brainer": a card the agent finished and closed itself is
-// ordinary work in the done lane, and the board folds it rather than giving it a type of its own.
-// The marker is the stamp — `verified_by` equal to `implemented_by` — and `board::selfClosed` is
-// the only place that rule is written.
 
 void BoardModelTests::aSelfClosedCardIsDoneAndStampedByWhoeverImplementedIt()
 {
@@ -4795,42 +4141,6 @@ void BoardModelTests::aSelfClosedCardReachedByIdUnfoldsItsGroup()
     QVERIFY(other.openSelfClosed().isEmpty());
     QVERIFY(other.rows().at(relay::board::rowOfSection(other.rows(),
                                                        QStringLiteral("done"))).collapsed);
-}
-
-// An answer that names a thing the app can show is one click from showing it (#FEJQ). `card:`
-// was already there; `option:` and `session:` are the two the helper answers with.
-void BoardModelTests::anAnswersOptionAndSessionLinksResolveIntoThePane()
-{
-    relay::HelperChatPanel panel(relay::helperpane::options());
-    QString section, row, session, card;
-    panel.onOpenOption = [&section, &row](const QString &s, const QString &r) {
-        section = s;
-        row = r;
-    };
-    panel.onOpenSession = [&session](const QString &id) { session = id; };
-    panel.onOpenCard = [&card](const QString &id) { card = id; };
-
-    auto *log = panel.findChild<QTextBrowser *>(QStringLiteral("boardChatLog"));
-    QVERIFY(log);
-    emit log->anchorClicked(QUrl(QStringLiteral("option:agent/allow_writes")));
-    QCOMPARE(section, QStringLiteral("agent"));
-    QCOMPARE(row, QStringLiteral("allow_writes"));
-    emit log->anchorClicked(QUrl(QStringLiteral("session:0f3a-11d2")));
-    QCOMPARE(session, QStringLiteral("0f3a-11d2"));
-    emit log->anchorClicked(QUrl(QStringLiteral("card:K7Q2")));
-    QCOMPARE(card, QStringLiteral("K7Q2"));
-
-    // Written with an authority instead — a model spells a link either way — and the same thing
-    // has to arrive. A section on its own reveals the section.
-    section.clear();
-    row.clear();
-    emit log->anchorClicked(QUrl(QStringLiteral("option://agent/allow_writes")));
-    QCOMPARE(section, QStringLiteral("agent"));
-    QCOMPARE(row, QStringLiteral("allow_writes"));
-    section.clear();
-    emit log->anchorClicked(QUrl(QStringLiteral("option:voice")));
-    QCOMPARE(section, QStringLiteral("voice"));
-    QVERIFY(row.isEmpty());
 }
 
 QTEST_MAIN(BoardModelTests)

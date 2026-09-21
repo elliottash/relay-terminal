@@ -22,7 +22,7 @@
 #include "BoardModel.h"
 #include "BoardSections.h"
 #include "BoardSignals.h"   // signals: the machine's own faults as rows this list draws (#AQ6X)
-#include "HelperModelBox.h"   // the model box's rows, shared with the helper panels (#BRD3, #FEJQ)
+#include "AgentContext.h"    // what the agent on this surface is about (#AGNT steps 2, 6)
 
 class QComboBox;
 class QFrame;
@@ -36,17 +36,21 @@ class QTextBrowser;
 class QToolButton;
 class QVBoxLayout;
 class RichEditor;
-class CurrentTextComboBox;   // global, as Pane.h defines it (#BRD3)
 
 namespace relay {
 
-class BoardChatPanel;
 class CardDetail;
-class HelperChatPanel;
 class ColumnHeader;
 class RowList;
 
 namespace board {
+
+// The two contexts this file supplies (card #AGNT step 6). The list page's agent is the
+// Switchboard agent and the open card's is the card's own; each is a `relay::agent::Context` and
+// nothing more — the console that draws them is a no-shell `Pane` the window makes. They are
+// defined in BoardPane.cpp because they are the view's own and nothing outside it may name one.
+class BoardContext;
+class CardContext;
 
 // Below this width the open card takes the whole Switchboard pane instead of squeezing the list
 // (BoardView::updateDetailLayout); at or above it the list and the card sit side by side. It
@@ -61,6 +65,9 @@ inline constexpr int kCardSplitWidth = 900;
 class BoardView : public QWidget {
 public:
     explicit BoardView(const QString &workspace, QWidget *parent = nullptr);
+    // The consoles hold a pointer to their context and clear its `onChanged` as they go, so the
+    // widgets come down before the contexts do. `~QWidget` would run the other way round.
+    ~BoardView() override;
 
     // ---- wiring
     std::function<void(const QJsonObject &)> onSend;         // a worker protocol message (board_*, presets, …)
@@ -124,6 +131,13 @@ public:
     std::function<void(const QString &)> onTitleChanged;
     std::function<void(const QString &)> onStatus;           // one line for the pane's status area
     std::function<void(const QString &id, const QString &text)> onHint;  // shortcut hints
+    // The agent console, made by the window and embedded here (card #AGNT steps 5 and 6). The
+    // pane libraries cannot construct a `Pane` — it lives only in the app's translation unit — so
+    // the window hands over the widget to embed and the handful of calls a host makes on it. The
+    // view calls this lazily, the first time a console is actually shown, and with no factory set
+    // (a test, or relay-board linked on its own) it simply shows no console and everything else
+    // on the board goes on working.
+    relay::agent::ConsoleFactory onCreateConsole;
 
     void handleEvent(const QJsonObject &event);
     void focusInput();
@@ -251,21 +265,30 @@ public:
     // While a run is going the same button is Stop and sends `cancel`.
     void requestCleanup();
     bool cleanupRunning() const { return !m_cleanupRun.isEmpty(); }
-    // The Switchboard page agent (#8YQ9, protocol 19.18): the conversation about the whole board,
-    // at the bottom of the list page. `a` puts the keyboard in its composer from anywhere on the
-    // board; the Check button and every section's ⚠ run the board's own `check()` and show what
-    // they find as lines that pre-fill that composer with a fix request.
-    void focusChat();
-    // The helper panel, and the model box the keyboard should reach from wherever the cursor is
-    // (#PK5Q). On the list page that is the page agent's composer and its box; with a card open
-    // the whole list page is hidden, so it is the card's reply box and the box on its strip —
-    // Discuss and Plan are turns of the very same agent.
-    HelperChatPanel *helperPanel() const;
-    QComboBox *focusedModelBox() const;
+    // The Switchboard agent (#8YQ9; card #AGNT step 6): the conversation about the whole board,
+    // in a console at the bottom of the list page. `a` puts the keyboard in its composer from
+    // anywhere on the board; Check on its action row and every section's ⚠ run the board's own
+    // `check()` and show what they find as lines that draft a fix request into that composer.
+    void focusHelper();
+    void focusChat() { focusHelper(); }   // the name the window has called it by since #8YQ9
+    // Which tab this board is in: the key its helper conversation is kept under (§30.7, and
+    // `ContextSpec::persistKey`). The window supplies it — a view has no idea what a tab is — and
+    // a board with none keeps one conversation for as long as its worker lives, which is what an
+    // empty key means on the wire.
+    void setTabId(const QString &tabId);
+    QString tabId() const { return m_tabId; }
+    // The console on whichever page is showing, or null before one has been made. For a test and
+    // for the window's "which prompt box is the keyboard in" walk.
+    QWidget *listConsole() const { return m_console; }
+    QWidget *cardConsole() const;
+    // The model box the keyboard should reach from wherever the cursor is (#PK5Q). Null since
+    // #AGNT step 6: both prompt boxes are consoles now and a console carries the *pane's* own
+    // picker, which answers Alt+M itself. Kept so the window's walk compiles until step 5 stops
+    // asking; see the report on `ConsoleHandle`.
+    QComboBox *focusedModelBox() const { return nullptr; }
     // `board_check {section}` — a section's ⚠ — or the unscoped Check button when `columnId` is
     // empty. The answer arrives as `board_problems {items, section}`.
     void requestCheck(const QString &columnId = QString());
-    bool chatRunning() const;
     void moveSelected();            // the `m` popup
     // Delete (card #CYM9): the open or selected card, after a confirm, through `board_delete`.
     // The owner's action alone — an agent closes a card by moving it to done or dropped.
@@ -308,23 +331,73 @@ protected:
 
 private:
     void buildChrome(QVBoxLayout *layout);
-    // The top of the list page: the count, the filter, "+ New card", "Clean up", and under them
-    // one checkbox per section. They belong to the list, not to the pane's header, so an open
-    // card is not looking at the list's tools (owner, 2026-09-18).
+    // The top of the list page: the count, the filter, "+ New card", and under them one checkbox
+    // per section. They belong to the list, not to the pane's header, so an open card is not
+    // looking at the list's tools (owner, 2026-09-18). Clean up left this row for the agent's
+    // action row (card #AGNT step 6, and #PBX1 before it).
     void buildListTools(QVBoxLayout *layout);
     // The cleanup's result, in the list page itself rather than over it: outcome, counts, every
     // change with its card as a link, the refusals, the agent's report and the changelog.
     void buildCleanupPanel(QVBoxLayout *layout);
-    // The page agent's panel (19.18), pinned under the list. It holds no process: it is fed the
-    // `chat: true` events through handleChatEvent and speaks through the same `onSend` the view
-    // does. Clean up moves into its button row (owner, 2026-09-19: "put the clean up button down
-    // there"), where a Check button joins it.
-    void buildChatPanel(QVBoxLayout *layout);
-    // A page-agent event (19.18: `chat: true`, or one of the `board_chat_*` answers). Returns
-    // true when the panel took it, so a card thread never sees one — the `cleanup: true`
-    // precedent below.
-    bool handleChatEvent(const QString &type, const QJsonObject &event);
+    // The Switchboard agent's area, pinned under the list and deliberately outside the splitter
+    // (see the comment where it is built). Three things live in it, top to bottom: the Check
+    // findings, the survey offer — both **board** widgets, because they are lists to act on and
+    // not turns of a conversation — and the console itself, which is the agent (card #AGNT).
+    void buildChatArea(QVBoxLayout *layout);
+    // Ask the window for the list page's console and embed it, once. Called the first time the
+    // area is shown rather than from the constructor: a tab nobody asks anything from never pays
+    // for one (§30.7, and the owner's decision 5 on this card).
+    void ensureConsole();
     void syncChatVisible();
+    // Put a request in the console's composer and focus it — a **draft**, never sent (owner,
+    // 2026-09-19: "draft you confirm"). What the problems banner and every finding row do.
+    void draftForAgent(const QString &text);
+    // Triage and Check findings, from `board_problems {items, section}`; `section` empty is the
+    // unscoped Check. A clickable list above the console, and a click drafts `board::fixRequest`.
+    // Returns the number shown.
+    int showFindings(const QJsonArray &items, const QString &section);
+    // `board_survey {root, project, hints, counts, proposals, git}` (19.18): what `project_probe`
+    // found offline and what an import would create. The agent narrates the same data in its
+    // opening turn — this is the part the owner has to *act* on, so it is checkboxes and a button
+    // above the console rather than prose inside it.
+    void showSurvey(const QJsonObject &event);
+    void hideSurvey();
+    void applyImport();                       // `board_import_apply {keys}` for the ticked rows
+    void lookForIssues();                     // `forge_sync_plan`: what a sync would do, writing nothing
+    void showForgePlan(const QJsonObject &event);
+    void showForgeError(const QJsonObject &event);
+
+    // ---- what the two contexts ask of the view (card #AGNT step 6) --------------------------
+    // What is on screen in this pane right now — the filter, the sections and their counts, the
+    // open card. It rides on each `ask` as `screen` and is cut at 2 000 characters by the spec;
+    // it is a hint about what is being read, never a dump of the catalog (§30.7).
+    QString screenHint() const;
+    // A link the owner activated in an answer, offered to the context first: a `card:` or `#ID`
+    // zooms on this board, an `option:` reveals that row and a `session:` opens that conversation
+    // (#FEJQ, §30.4, and the link kinds step 8 landed). True means handled.
+    bool resolveAgentLink(const relay::links::Target &target);
+    QString openCardId() const;
+    QList<relay::agent::Action> cardActions() const;
+    // A card turn started or ended, or a cleanup did: the row's Plan, Execute and Verify wait
+    // while one runs. One name for what used to be `syncModelBoxEnabled`, which disabled the two
+    // model boxes for the same reason.
+    void cardBusyChanged();
+    // Tell both contexts that something `spec()` or `actions()` would now answer differently has
+    // moved — on the **next turn of the event loop**, never inside the call that noticed.
+    // `Context::changed()` makes the console rebuild its action row, and a rebuild frees the very
+    // button whose click is still on the stack (src/Pane.h, `rebuildActionRow`, deletes each
+    // widget outright), so a Clean up that turns into Stop would delete itself mid-click.
+    void refreshContexts();
+    bool m_contextRefresh = false;
+    // Ask the window for the open card's console and embed it in the card page, once.
+    void ensureCardConsole();
+    // What the board's key legend adds for the console's action row: `" &nbsp; <b>k</b> check"`
+    // per keyed action, in row order. Read off the context rather than written out, so an action
+    // a later session adds gets its entry in the line for free.
+    QString agentActionKeyLine() const;
+    // A card turn ended. The worker wrote the thread entry (19.10, `_card_answer`), so this only
+    // makes sure the page showing that thread has read it back.
+    void cardTurnFinished(const relay::agent::TurnRecord &record);
     void startCleanup(bool dryRun);
     void endCleanup();                        // the run is over, whatever ended it
     void updateCleanupButton();
@@ -485,34 +558,10 @@ private:
     QWidget *m_head = nullptr;
     QHBoxLayout *m_tools = nullptr;     // the header row's layout, for the hover-button inset
     QToolButton *m_back = nullptr;
-    QHBoxLayout *m_listTools = nullptr; // the count, the filter, "+ New card" and "Clean up"
+    QHBoxLayout *m_listTools = nullptr; // the count, the filter and "+ New card"
     QWidget *m_toolsWrapRow = nullptr;  // where those two buttons go when the row is too narrow
     QHBoxLayout *m_toolsWrap = nullptr;
-    QToolButton *m_add = nullptr, *m_cleanup = nullptr;
-    // The Switchboard agent's model box (#BRD3), at the end of the same row: it names the model
-    // the board's worker is running and picks a different one. Filled from the worker's
-    // `configured` (roles/tiers) and `presets` (the provider rows) events; a pick goes out
-    // through onModelPick. Disabled while a card turn or a cleanup runs, because the worker
-    // refuses a configure mid-turn.
-    CurrentTextComboBox *m_modelBox = nullptr;
-    // The same box again, on the card page's reply strip (owner, 2026-09-20: "did we lose the
-    // model picker in the switchboard agent … it's the one in the cards"). A card's Discuss and
-    // Plan run on the same `switchboard` role the list page's box names, so the card page cannot
-    // be the one page that neither shows it nor changes it. One state, two widgets: both are
-    // filled by rebuildModelBox, both are disabled by syncModelBoxEnabled, and a pick in either
-    // goes out through pickModel and so through the one onModelPick.
-    CurrentTextComboBox *m_cardModelBox = nullptr;
-    // What the model box is built from: the `presets`, `configured` and `model_roles` events, in
-    // the holder the three helper panels use as well (src/HelperModelBox.h, #FEJQ) — four boxes
-    // over one role and one worker have to agree about which model that is.
-    relay::helpermodel::State m_modelBoxState;
-    QString m_modelTip;                 // the box's tooltip without the busy line
-    void buildCardModelBox();
-    void rebuildModelBox();
-    void syncModelBoxEnabled();
-    // What a pick in either box means: the gear snaps back to the live row, everything else goes
-    // to the window, which writes the role and reconfigures the workers.
-    void pickModel(const QString &data);
+    QToolButton *m_add = nullptr;
     // The list's own column header (board::Sort): the Card, Created and Updated cells a click
     // sorts by, over the rows and under the tools.
     ColumnHeader *m_columnHeader = nullptr;
@@ -562,8 +611,33 @@ private:
     QPointer<QLineEdit> m_quickAdd;
     QString m_quickAddColumn;
 
-    // ---- the page agent's panel (protocol 19.18), under the list on the list page.
-    BoardChatPanel *m_chat = nullptr;
+    // ---- the Switchboard agent, under the list on the list page (card #AGNT step 6).
+    //
+    // `m_chatArea` is the column: the findings list, the survey offer and then the console. The
+    // first two are the board's own widgets — an owner acts on them, they are not a conversation
+    // — and they draft into the console exactly as they drafted into the old panel's composer.
+    QWidget *m_chatArea = nullptr;
+    QWidget *m_findings = nullptr;
+    QVBoxLayout *m_findingsLayout = nullptr;
+    QWidget *m_survey = nullptr;
+    QVBoxLayout *m_surveyLayout = nullptr;
+    QToolButton *m_import = nullptr;         // "Import 7 cards", rebuilt with the survey
+    QStringList m_importKeys;
+    QToolButton *m_forgeLook = nullptr;      // "Look for issues on GitHub" (#GDQN, offer only)
+    QLabel *m_forgeResult = nullptr;
+    QString m_forgeRepo, m_forgeRequest;
+    // The list page's console and what the window handed back with it. The context outlives the
+    // console and the console outlives nothing: `~BoardView` takes the widgets down first.
+    QWidget *m_console = nullptr;
+    relay::agent::ConsoleHandle m_consoleHandle;
+    board::BoardContext *m_boardContext = nullptr;
+    board::CardContext *m_cardContext = nullptr;
+    // The tab this board is in: the key the helper conversation is kept under (§30.7).
+    QString m_tabId;
+    // The contexts read the view's own state — the filter, the cleanup, the open card — to
+    // answer `spec()` and `actions()`. They are the view's, made with it and freed with it.
+    friend class board::BoardContext;
+    friend class board::CardContext;
 
     // ---- the cleanup run (protocol 19.9). One at a time, on the whole board.
     QWidget *m_cleanupPanel = nullptr;      // the result, in the list page
