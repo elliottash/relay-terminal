@@ -1914,7 +1914,7 @@ class BoardCommands:
         # in the §12 strip instead of being refused; what the mode may touch is enforced for the
         # length of the turn by `Agent.set_card_turn`, which opens the `CardScope` on this card's
         # own tools when the turn starts and closes it when it ends.
-        self.cards.submit(card_id, mode, prompt, rid, seed_hash=card_hash)
+        self.cards.submit(card_id, mode, prompt, rid, seed_hash=card_hash, preview=said)
 
     def card_queue(self, surface):
         """The card queue a `surface` names (`card:<ID>`), or None (protocol 33, card #CTRN).

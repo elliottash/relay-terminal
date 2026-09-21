@@ -731,6 +731,8 @@ class AskTests(ProtocolTest):
         rows = [e for e in events if e["event"] == "queue_changed"][-1]
         self.assertEqual([(r["mode"], r["card_id"]) for r in rows["items"]], [("plan", card_id)])
         self.assertEqual(rows["surface"], f"card:{card_id}")
+        # The row is what the owner asked for, not the prompt the brief and the card make.
+        self.assertEqual([r["preview"] for r in rows["items"]], ["Plan this card."])
         self.cards.agent(card_id).release()
         self.assertTrue(self.cards.wait())
         # Both turns ran, in order, each on this card's own conversation and with its own brief.

@@ -213,7 +213,7 @@ class CardTurns:
 
     # ---- starting and stopping -------------------------------------------------
     def submit(self, card_id: str, mode: str, prompt: str, request_id=None,
-               seed_hash: str | None = None) -> str:
+               seed_hash: str | None = None, preview: str = "") -> str:
         """Put `prompt` on this card's own queue.  Returns the turn id (the queue item's).
 
         The caller has already validated the mode, written the owner's entry to the thread and
@@ -224,6 +224,9 @@ class CardTurns:
 
         `when` is `queue` rather than `now` for exactly that reason: `now` is the pane's "refuse
         if something is already running", which is the refusal this card removes.
+
+        `preview` is the owner's own words: the prompt is the card's seed block and the mode's
+        brief, and the queue row and the request ledger show what was typed.
         """
         evicted: list[CardSession] = []
         with self._lock:
@@ -238,7 +241,7 @@ class CardTurns:
             old.turns.shutdown(timeout=1.0)
         # Outside the lock too: `submit` emits `queued` and `queue_changed` through `_observe`.
         return turns.submit(prompt, "queue", request_id, surface=surface_of(card_id),
-                            mode=mode, card=card_id)
+                            mode=mode, card=card_id, preview=preview)
 
     def stop(self, card_id: str) -> bool:
         """Stop the turn running on one card (the card's Stop button).  True if one was.

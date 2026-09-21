@@ -42,6 +42,18 @@ def _surface_of(item: dict) -> dict:
     return {"surface": item["surface"]} if item.get("surface") else {}
 
 
+def _preview_of(item: dict) -> str:
+    """What the queue strip and the request ledger show for an item (protocol 12, 33).
+
+    The prompt, for everything a person types: it *is* what they typed. A card turn is the one
+    caller that sends something else — `board_ask` builds the model's prompt out of the card's
+    seed block and the mode's brief — and the strip on a card page would otherwise read
+    "[Switchboard card #CRD1 — …] You are Relay's Switchboard agent…" where the owner's question
+    belongs. `screen`'s rule, one field along: the record is what the person typed (#CTRN).
+    """
+    return item.get("preview") or item["prompt"]
+
+
 def _card_of(item: dict) -> dict:
     """`{"mode": …, "card_id": …}` when this item is a card turn, `{}` when it is not (#CTRN).
 
@@ -161,7 +173,7 @@ class TurnSupervisor:
     def submit(self, prompt, when: str = "now", request_id=None, context=None, attachments=None,
                origin: str = "user", requeue: bool = True, ledger_id=None,
                surface: str = "", screen: str = "", readonly: bool = False,
-               mode: str = "", card: str = "") -> str:
+               mode: str = "", card: str = "", preview: str = "") -> str:
         """origin "relay" marks prompts Relay queued itself (e.g. a background subagent finished).
 
         when="steer" delivers the prompt inside the running turn at its next step boundary. If no
@@ -188,6 +200,10 @@ class TurnSupervisor:
         constrain the *turn* the way `readonly` does — `set_card_turn` opens the card's stage scope
         around the ask and closes it after — and they leave the tool **list** alone, so a card
         conversation that goes Discuss → Plan → Discuss re-prefills nothing.
+
+        `preview` is what the queue row and the request ledger show when that is not the prompt
+        — a card turn's prompt is the card's seed block and the mode's brief, and the row on the
+        card page is the owner's question.
         """
         if when not in {"now", "queue", "interrupt", "steer"}:
             raise ValueError('"when" must be "now", "queue", "interrupt", or "steer".')
@@ -197,6 +213,7 @@ class TurnSupervisor:
             raise ValueError("readonly must be a boolean.")
         surface, screen = validate_surface(surface), validate_screen(screen)
         mode, card = validate_card_turn(mode, card)
+        preview = preview if isinstance(preview, str) else ""
         requested_steer = when == "steer"
         with self._lock:
             if when == "steer":
@@ -208,8 +225,10 @@ class TurnSupervisor:
                     item = {"id": uuid.uuid4().hex, "prompt": prompt, "request_id": request_id,
                             "context": context, "attachments": attachments, "origin": origin,
                             "requeue": requeue, "surface": surface, "screen": screen,
-                            "readonly": readonly, "mode": mode, "card": card}
-                    item["ledger_id"] = self._ledger_add(prompt, "steer", origin, attachments, ledger_id)
+                            "readonly": readonly, "mode": mode, "card": card,
+                            "preview": preview}
+                    item["ledger_id"] = self._ledger_add(_preview_of(item), "steer", origin,
+                                                        attachments, ledger_id)
                     if ledger_id is not None and item["ledger_id"] is not None:
                         self._agent.requests.queued(ledger_id, item["id"])
                     else:
@@ -235,9 +254,11 @@ class TurnSupervisor:
                 raise ValueError("An agent turn is already active.")
             item = {"id": uuid.uuid4().hex, "prompt": prompt, "force": when != "queue", "context": context,
                     "attachments": attachments, "origin": origin, "surface": surface,
-                    "screen": screen, "readonly": readonly, "mode": mode, "card": card}
-            item["ledger_id"] = self._ledger_add(prompt, "steer" if requested_steer else when, origin, attachments,
-                                                 ledger_id)
+                    "screen": screen, "readonly": readonly, "mode": mode, "card": card,
+                    "preview": preview}
+            item["ledger_id"] = self._ledger_add(_preview_of(item),
+                                                 "steer" if requested_steer else when, origin,
+                                                 attachments, ledger_id)
             if ledger_id is not None and item["ledger_id"] is not None:
                 self._agent.requests.queued(ledger_id, item["id"])
             else:
@@ -383,7 +404,8 @@ class TurnSupervisor:
                         item.get("attachments"), origin=item.get("origin", "user"),
                         ledger_id=item.get("ledger_id"), surface=item.get("surface", ""),
                         screen=item.get("screen", ""), readonly=bool(item.get("readonly")),
-                        mode=item.get("mode", ""), card=item.get("card", ""))
+                        mode=item.get("mode", ""), card=item.get("card", ""),
+                        preview=item.get("preview", ""))
         except Exception:
             # Never lose the prompt: it goes back to the head of the queue instead (the invariant
             # at the top of this file), and the caller still sees the error.
@@ -393,7 +415,8 @@ class TurnSupervisor:
                                         "origin": item.get("origin", "user"), "ledger_id": item.get("ledger_id"),
                                         "surface": item.get("surface", ""), "screen": item.get("screen", ""),
                                         "readonly": bool(item.get("readonly")),
-                                        "mode": item.get("mode", ""), "card": item.get("card", "")})
+                                        "mode": item.get("mode", ""), "card": item.get("card", ""),
+                                        "preview": item.get("preview", "")})
                 self._changed_locked()
                 self._lock.notify_all()
             raise
@@ -414,7 +437,8 @@ class TurnSupervisor:
                               "origin": item.get("origin", "user"), "ledger_id": item.get("ledger_id"),
                               "surface": item.get("surface", ""), "screen": item.get("screen", ""),
                               "readonly": bool(item.get("readonly")),
-                              "mode": item.get("mode", ""), "card": item.get("card", "")})
+                              "mode": item.get("mode", ""), "card": item.get("card", ""),
+                              "preview": item.get("preview", "")})
         for item in reversed(front):
             self._queue.appendleft(item)
 
@@ -532,10 +556,10 @@ class TurnSupervisor:
 
     def _changed_locked(self) -> None:
         self._emit({"event": "queue_changed", "running": self._running, "paused": self._paused,
-                    "items": [{"id": i["id"], "preview": i["prompt"][:PREVIEW], "forced": i["force"],
+                    "items": [{"id": i["id"], "preview": _preview_of(i)[:PREVIEW], "forced": i["force"],
                                "origin": i.get("origin", "user"), **_surface_of(i), **_card_of(i)}
                               for i in self._queue],
-                    "steering": [{"id": i["id"], "preview": i["prompt"][:PREVIEW],
+                    "steering": [{"id": i["id"], "preview": _preview_of(i)[:PREVIEW],
                                   "origin": i.get("origin", "user"), **_surface_of(i), **_card_of(i)}
                                  for i in self._steer]})
 

@@ -715,6 +715,30 @@ class ConsoleFieldTests(unittest.TestCase):
         self.assertIsNone(self.agent.card_turn)
         self.agent._prepare('write_file', {'path': 'x', 'content': 'y'})
 
+    def test_a_queue_row_shows_what_was_typed_when_the_prompt_is_not_it(self):
+        """`submit {preview}` (card #CTRN): a card turn's prompt is not the owner's question.
+
+        `board_ask` builds the model's prompt out of the card's seed block and the mode's brief,
+        so the row on the card page — and the request ledger's — would read "[Switchboard card
+        #CRD1 …] You are Relay's Switchboard agent…" where the question belongs. It is `screen`'s
+        rule one field along: the record is what the person typed.
+        """
+        p = self.use(GatedProvider())
+        self.sup.submit('running', 'now')
+        self.rec.wait(lambda e: e['event'] == 'agent_started')
+        self.sup.submit('[Switchboard card #CRD1] the brief\n\nand the queue?', 'queue',
+                        surface='card:CRD1', mode='discuss', card='CRD1',
+                        preview='and the queue?')
+        row = self.rec.of('queue_changed')[-1]['items'][-1]
+        self.assertEqual(row['preview'], 'and the queue?')
+        self.assertEqual(self.agent.requests.items[-1]['text'], 'and the queue?')
+        p.release.release()
+        # …and the model still gets the whole prompt.
+        self.rec.wait(lambda e: e['event'] == 'agent_started' and e.get('card_id') == 'CRD1')
+        p.release.release()
+        self.rec.wait(lambda e: e['event'] == 'agent_finished' and e.get('card_id') == 'CRD1')
+        self.assertIn('[Switchboard card #CRD1]', p.prompts[-1])
+
     def test_a_mode_without_a_card_is_refused_before_anything_is_queued(self):
         self.use(GatedProvider())
         for mode, card in (('plan', ''), ('', 'CTRN'), ('pl\nan', 'CTRN'), ('plan', 'C' * 65)):
