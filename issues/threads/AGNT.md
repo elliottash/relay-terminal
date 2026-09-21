@@ -723,3 +723,85 @@ Live, in `docs/qa_evidence/2026-09-20-window-makes-consoles/`: the terminal pane
 the answer streaming into a vterm with the `option:` link clickable and revealing the row in
 place, and `app_panes`, which reads the same `allPanes()` the phone's publish list reads, coming
 back `count=1 titles=project` with **two consoles on screen**.
+
+<!-- relay:entry 20260921T042835Z-vt author=claude-code kind=progress -->
+Step 11 landed: **the docs say an agent is the prompt box** (`6e0179f2`). Five files, my hunks only
+(`--confirm`); the other sessions' uncommitted lines in `ARCHITECTURE.md`, `SWITCHBOARD-DESIGN.md`
+and the protocol doc were in my snapshot, so they are neither committed nor touched.
+
+**What was written**
+
+- `docs/ARCHITECTURE.md` — "The helper system: one agent per tab, in four panes" is **replaced** by
+  **"Agents are consoles; contexts are what they are about"** (#FEJQ's panel-era passages are gone,
+  not left beside it; what was still true — `AppTools`, the catalog round trip, the change log —
+  stays and now says "console" where it said "panel"). It holds: the owner's three sentences; the two
+  interfaces (`agent::Host` — what a console is drawn on, with the bubble question named as the one
+  call an embedded host answers differently — and `agent::Context`, with `submit`, `resolveLink`,
+  `turnFinished`, `changed()` and **no `tools()`, ever**); `ContextSpec` as the only part that
+  crosses to the worker; **why `Pane` is the console** (the `--closure` numbers: 228 members, 4 031
+  lines, a floor of 284 names, and the 109 uses of the composer that stay behind whatever moves);
+  what a `shell: false` pane does not start; the table of the six contexts; how the window makes and
+  shares them (`createAgentConsole`, `TabConsoleContext`, one worker and one conversation per tab,
+  `surface` per ask, `panesIn` stopping at a `ToolPane`, and the list of what is deliberately not
+  wired, `onAppCommand` included); the action row and its two deletion hazards; the named tool scopes
+  with constraint against fence; and "adding a context" as three steps. Also: the `HelperChat` source
+  bullet and source-map row become `AgentContext`/`AgentHost`, and the board-pane, board-worker and
+  `relay_core` rows say what they are now.
+- `docs/SWITCHBOARD-DESIGN.md` §4.13 — "The page agent and the card's reply box are agent consoles":
+  both action rows, the three chords through `Context::submit`, findings and the survey as board
+  widgets above the console, and **what Discuss writes to the thread** (the worker writes both ends;
+  `CardContext::turnFinished` only makes sure the page is looking at the file that moved). §4.12 and
+  §4.13a updated where they named `boardChatBox` / `boardCardActions` / "the helper panel".
+- `docs/REMOTE-AND-MULTIPLAYER-DESIGN.md` §12.8 — consoles are **not** published to the phone (owner
+  decision 4): what keeps them out, that nothing leaks on the event streams either, and the three
+  things changing it would need.
+- `docs/AGENT-SESSIONS-PROTOCOL.md` — §19.18/§30.7/§33 (step 4's) reconciled rather than duplicated;
+  the retired messages stay marked **once**, in §19.18's table, and §30.8 and §33 point at it.
+- `CLAUDE.md` — where `AgentContext`/`AgentHost` live (their own QtCore-only library, not the one
+  translation unit), that `Pane` is now also the console, and that `HelperChat*`/`HelperModelBox*`
+  are retired.
+
+**Where the code disagreed with the card, or with itself.** Three are worth another session's time;
+the first is a behaviour bug.
+
+1. **`RelayWindow::TabConsoleContext` does not forward `Context::submit`.** It forwards `spec`,
+   `actions`, `resolveLink`, `turnFinished` and `placeholder`, and `Pane` calls `m_context->submit()`
+   on the *wrapper*, so `CardContext::submit` is never reached through a window-made console: a
+   card's Enter travels as an ordinary `ask` rather than as `board_ask`, which is the write to
+   `issues/threads/<ID>.md` and the stage advance (19.10, owner decision 2). `consolemode` tests
+   `Pane` against a context directly, which is why it is green. One line in `src/RelayWindow.h`.
+   The docs describe the contract as designed; they are wrong about the card until this lands.
+2. **`ContextSpec`'s two halves are not the same shape in two places.** The C++ `toJson` writes
+   `surface` into the `context` block; `agent_context.ContextSpec.from_json` ignores it and
+   `to_json` does not echo it, so `configured {context}` comes back without the field the GUI sent.
+   Harmless today (the worker takes the surface off each `ask`), and now written down in 33.1's
+   table. The other direction: Python accepts `brief.screen` and keeps it in the system prompt, and
+   no GUI sends one — `toJson` writes `brief {key, title}` only. Also written down.
+3. **`CardContext` asks for its own persist key (`card:<ID>`) and the window overrides it** with
+   `helper`/`<tab id>`, as owner decision 1 requires. Step 6's report says "a card is a different
+   conversation from the board"; step 5's wrapper makes it the same one. The docs follow the code
+   and say a per-surface conversation is that one override and nothing else.
+
+Smaller ones, fixed in the docs: `src/AgentHost.h`'s header comment still points at
+`src/AgentConsole.h` and `relay::AgentConsole`, which were folded into `Pane` (the file is gone);
+`docs/ARCHITECTURE.md` said the board worker "answers every `board_*` message of protocol 17" (it is
+19); §30.5 still said `session_info`/`activity` were the pane agent's alone; §12.13 still said
+deferral was off for "a tab's helper in every scope" rather than "only a terminal pane defers".
+
+**Shortcut hints — which ids still fire, for the integration pass** (I edited no code):
+
+- `board.chat` — **dead**. Its only home was `src/HelperChat.h:373` (`m_askHint`, Ctrl+/). The
+  board's fast path is now `a` (focus the console) and nothing fires a hint for it.
+- `board.action.<key>` — **dead**. Its only emitter was `HelperChatPanel::triggerActionKey`
+  (`src/HelperChat.cpp:964`); `Pane::rebuildActionRow` connects a button's `clicked` straight to
+  `Action::run` and calls no `hint()`. `src/AgentContext.h:90` still documents the id as the one the
+  mouse path teaches, and WARP.md's standing rule wants it, so this is the one worth rewiring — one
+  `hint("board.action." + action.key, action.letter)` in the button's click path, with the letter
+  taken from the `Action`. `docs/ARCHITECTURE.md`'s trigger list is written as though it is wired;
+  if you decide not to, tell me and I will take the clause out.
+- `options.ask` / `sessions.ask` — **dead ids, deliberately**. `RelayWindow::wireConsoleHost` still
+  passes them, but `SettingsPane::setHelperShortcut` and `SessionManager::setHelperShortcut` both
+  ignore the parameter (`const QString & /*hintId*/`) and only keep the keys, because the collapsed
+  row says "Helper Agent (Alt+Q)" in the live wording and teaches its own shortcut (step 7's
+  decision). Either drop the parameter or give the row a hint; leaving an unused id in the call is
+  what makes the next grep of the registry misleading.
