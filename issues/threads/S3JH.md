@@ -13,3 +13,6 @@ Created and claimed; adding navigable section search results.
 
 <!-- relay:entry 20260921T215226Z-61 author=agent kind=event model=gpt-6-astra pane=d6f3632a turn=d02d825321e54a62b25b87a3999f13c2/983a57e797a64fb0b1564b21ff7f1cd2 -->
 - ✦ agent moved this card · Executing → Needs verification · 45 settings GUI tests pass; live full-window check confirms Actions section scrolling and Options section navigation with cleared search. · evidence docs/qa_evidence/2026-09-21-search-section-headers/evidence.md · implemented_by openai/gpt-6-astra via codex
+
+<!-- relay:entry 20260921T215351Z-a9 author=agent kind=event model=gpt-6-astra pane=d6f3632a turn=d02d825321e54a62b25b87a3999f13c2/983a57e797a64fb0b1564b21ff7f1cd2 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-21-search-se… → {"plans": [], "commits": ["c13d46da5745ad368d920753b972e86f60203a03"], "evidence…; appended to `## Execution Summary`

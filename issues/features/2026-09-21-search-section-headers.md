@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: m
 created: '2026-09-21'
 source: Codex in Relay, 2026-09-21
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-search-section-headers/evidence.md], related: [], github: null}
+links: {plans: [], commits: [c13d46da5745ad368d920753b972e86f60203a03], evidence: [docs/qa_evidence/2026-09-21-search-section-headers/evidence.md], related: [], github: null}
 ---
 # Search and jump to Actions and Options sections
 
@@ -20,6 +20,7 @@ Index Options tabs and section headings plus Actions categories and submenu head
 
 ## Execution Summary
 Section search results cover Options tabs, headings and subheadings, and Actions categories, submenu headings and Recent. Clicking or pressing Enter clears the filter and navigates within the pane, switching Actions/Options when appropriate. Heading targets scroll into view, and folded Options parents expand. Navigation bypasses action execution so the pane stays open.
+Committed as c13d46da; the exact committed tree passed the C++ build gate.
 
 ## Tests
 ctest:settings
