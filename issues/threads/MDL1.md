@@ -714,3 +714,19 @@ tabs, Enter changing the *served* pane's chip, Escape leaving the pane open, and
 green (`modelspane` 15 cases, `modelpicker` 37), and
 `python3 -m unittest discover -s tests -p test_keybindings.py` 24/24 with a new guard that
 `agent.model` is gone and `agent.modelOptions` is Ctrl+Shift+M.
+
+<!-- relay:entry 20260921T222500Z-h2 author=claude-fable kind=note -->
+### Claude Fable · 2026-09-21 22:25
+The follow-up commit the entry above left as `<follow-up sha>` is **`449e3baf`** — the three faults
+the driven run found, the fourth the first-run shot found, the docs (README, ARCHITECTURE,
+MODEL-PICKING-DESIGN §5.8 marked built) and the evidence directory. The pane itself is `912dd2e2`.
+They are **not** on the card's `links.commits`: that front-matter line sits in the same hunk as an
+uncommitted `status: executing` / `assignee: codex` from another session's older copy of the card,
+and landing it would have reverted the `needs-verification` / `claude-code` already on `main`. This
+entry is the record instead, and the evidence is
+`docs/qa_evidence/2026-09-21-models-pane/` (drive.sh, NOTES.md, fourteen shots).
+
+t:a11 is the last of the eleven tasks and it is ticked, but the card's `status` is left as
+`executing`: two other sessions are live on this card (t:a8's model box and t:a9's ranking file),
+so whether #MDL1 as a whole is ready for verification is not mine to say.
+
