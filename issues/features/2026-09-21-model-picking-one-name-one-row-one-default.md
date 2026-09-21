@@ -55,7 +55,7 @@ never returns to the model the owner was using, and its own sentence is overwrit
 
 ## Tasks
 - [ ] Alt+M / Alt+E: current row highlighted, arrows, type to filter <!-- t:a1 -->
-- [ ] catalog: `models::name`, the worker's `name`, `grouped`, the pane's key resolved by name <!-- t:a2 -->
+- [x] catalog: `models::name`, the worker's `name`, `grouped`, the pane's key resolved by name <!-- t:a2 -->
 - [ ] defaults: a new pane reads the main list; a pick is per pane; restore the model; re-send tiers <!-- t:a3 -->
 - [ ] `/swap`: a toggle with memory, a sentence that survives, a test <!-- t:a4 -->
 - [ ] names at every display site, lower-case roles <!-- t:a5 -->
