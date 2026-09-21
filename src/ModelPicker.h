@@ -29,6 +29,7 @@
 //   ctrl+tab       change tab, wherever the focus is; ctrl+shift+tab goes back
 //   ↑/↓            move through the rows, from the filter too
 //   enter          use this row in the pane — the model and the level together
+//   tab            the focus along filter → rows → providers → levels (←/→ belong to the tabs)
 //   →  on a row    the providers of this row, then the levels; ← comes back
 //   alt+↑ / alt+↓  move the row up or down the list (a drag does the same)
 //   delete         take the row out of the list (backspace does it while the filter is empty)

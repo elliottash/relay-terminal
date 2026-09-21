@@ -160,6 +160,10 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QDialog(pare
     m_list->setTextElideMode(Qt::ElideRight);
     m_list->setDragDropOverwriteMode(false);
     m_list->setDefaultDropAction(Qt::MoveAction);
+    // Tab leaves the view rather than walking its cells, because Tab is how the keyboard reaches
+    // the right-hand column: ←/→ in the filter belong to the tabs, so the way to a row's
+    // providers is filter → tab → list → →.
+    m_list->setTabKeyNavigation(false);
     dragList->onDropped = [this] { commitDragOrder(); };
 
     auto *lists = new QHBoxLayout;
@@ -172,17 +176,25 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QDialog(pare
     m_vias = new QListWidget;
     m_vias->setObjectName(QStringLiteral("modelVias"));
     m_vias->setAccessibleName(QStringLiteral("provider"));
-    m_vias->setFixedWidth(150);
-    m_vias->setMaximumHeight(120);
+    m_vias->setFixedWidth(210);          // "z.ai (glm) · coding plan" fits; the rest elide
+    m_vias->setMaximumHeight(130);
     m_vias->setUniformItemSizes(true);
+    m_vias->setTextElideMode(Qt::ElideRight);
+    m_vias->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     sideColumn->addWidget(m_vias);
     sideColumn->addWidget(new QLabel(QStringLiteral("reasoning")));
     m_levels = new QListWidget;
     m_levels->setObjectName(QStringLiteral("modelLevels"));
     m_levels->setAccessibleName(QStringLiteral("reasoning level"));
-    m_levels->setFixedWidth(150);
+    m_levels->setFixedWidth(210);
+    // Tall enough for the longest level list anyone ships and no taller: stretched to the height
+    // of the models it would be an empty well beside four or five words.
+    m_levels->setMaximumHeight(240);
     m_levels->setUniformItemSizes(true);
-    sideColumn->addWidget(m_levels, 1);
+    m_levels->setTextElideMode(Qt::ElideRight);
+    m_levels->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    sideColumn->addWidget(m_levels);
+    sideColumn->addStretch(1);
     lists->addLayout(sideColumn);
     layout->addLayout(lists, 1);
 
@@ -268,8 +280,13 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QDialog(pare
     connect(m_use, &QPushButton::clicked, this, [this] { accept(); });
     connect(cancel, &QPushButton::clicked, this, &QDialog::reject);
 
-    // Typing goes to the filter; arrows move the list even while the filter has the focus.
+    // Typing goes to the filter; arrows move the list even while the filter has the focus, so Tab
+    // is what actually moves the focus along the four controls, in the order they are read.
     m_filter->installEventFilter(this);
+    setTabOrder(m_filter, m_list);
+    setTabOrder(m_list, m_vias);
+    setTabOrder(m_vias, m_levels);
+    setTabOrder(m_levels, m_favorite);
     const QStringList ids = tabIds();
     m_tier = ids.contains(m_context.tier) ? m_context.tier
            : ids.contains(QStringLiteral("main")) ? QStringLiteral("main") : ids.value(0, kAll);
@@ -529,7 +546,10 @@ void ModelPicker::rebuild() {
     m_list->setDragDropMode(all ? QAbstractItemView::NoDragDrop : QAbstractItemView::InternalMove);
     if (all) buildAll(query); else buildTier(query);
     if (!keep.isEmpty()) selectKey(keep);
-    if (!m_list->currentItem()) selectFirstRow();
+    // A tab that does not hold the row you were on opens on the pane's own model where it has it —
+    // the one row you are most likely to want — and on rank 1 otherwise.
+    if (!currentRow()) selectKey(m_context.currentKey);
+    if (!currentRow()) selectFirstRow();
     updateFooter();
     onRowChanged();
 }
@@ -586,7 +606,7 @@ void ModelPicker::onRowChanged() {
             if (!candidate) continue;
             auto *item = new QListWidgetItem(providerText(*candidate), m_vias);
             item->setData(Qt::UserRole, each);
-            item->setToolTip(candidate->model);
+            item->setToolTip(providerText(*candidate) + QStringLiteral(" · ") + candidate->model);
             if (!candidate->usable || exhausted(m_context.catalog, candidate->preset, nowSeconds()))
                 item->setForeground(palette().color(QPalette::Disabled, QPalette::Text));
             if (each == key) m_vias->setCurrentItem(item);
@@ -667,7 +687,7 @@ void ModelPicker::onLevelChanged() {
 
 void ModelPicker::updateFooter() {
     m_footer->setText(m_tier == kAll
-        ? QStringLiteral("←→ tab · ↑↓ row · → the providers of a folded row, then the levels · enter uses it")
+        ? QStringLiteral("←→ tab · ↑↓ row · enter uses it · tab, then → : the providers of a folded row, and the levels")
         : QStringLiteral("←→ tab · ↑↓ row · enter uses it · alt+↑↓ moves it · del removes it · type a name, "
                          "ctrl+enter adds it · ctrl+z undoes"));
 }
