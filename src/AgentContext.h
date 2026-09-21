@@ -70,9 +70,9 @@ class QWidget;
 
 namespace relay::agent {
 
-// The on-screen hint (`screen`) is cut at this many characters before it is sent, exactly as
-// protocol 30.7 already cuts `board_chat`'s: it is a hint about what is being read, not a context
-// dump, and the catalog is never pasted into a prompt — the agent reads the rows live.
+// The on-screen hint (`screen`) is cut at this many characters before it is sent, as protocol
+// 30.7 has always cut the helper's: it is a hint about what is being read, not a context dump,
+// and the catalog is never pasted into a prompt — the agent reads the rows live.
 constexpr int kScreenLimit = 2000;
 
 // ---------------------------------------------------------------------------------------------
@@ -121,8 +121,8 @@ struct Action {
 QList<Action> withUniqueLetters(QList<Action> actions);
 
 // The index in `actions` of the enabled action that answers `letter`, or -1. Compared
-// case-insensitively, and a disabled action answers nothing (`HelperChatPanel::triggerActionKey`'s
-// rule, which this replaces).
+// case-insensitively, and a disabled action answers nothing — the helper panel's rule for its
+// own tool row, which this replaces.
 int actionForLetter(const QList<Action> &actions, const QString &letter);
 
 // A label without its key: "Execute (x)" -> "Execute". What a narrow action row shows once the
@@ -170,9 +170,9 @@ struct ContextSpec {
     QString persistScope;
     QString persistKey;
     // Which brief goes in front of the agent, and what this surface is called. The paragraph
-    // itself is the worker's (`board_chat`'s briefs, 30.7): the GUI sends the key that picks it,
-    // and the title the panel's own header shows — "Switchboard agent", "Options helper". As a
-    // pane worker the brief belongs in the system prompt rather than in front of every prompt,
+    // itself is the worker's (the console briefs of 30.7 and 33): the GUI sends the key that
+    // picks it, and the title the host's own header shows — "Switchboard agent", "Options
+    // helper". The brief belongs in the system prompt rather than in front of every prompt,
     // which is also what makes it visible to `session_info` (card #AGNT step 4 item 4).
     QString briefKey;
     QString briefTitle;
@@ -182,7 +182,8 @@ struct ContextSpec {
     // program-context object (`queue.validate_context`).
     QString screen;
     // A turn that may look but not write. The survey's read-only turn is the case that exists
-    // today (`board_chat.py:508`); it is a property of the turn, so it goes out with `askFields()`.
+    // today (the board's import survey); it is a property of the turn, so it goes out with
+    // `askFields()`.
     bool readonly = false;
     // The terminal context is the only one that spawns a shell. Everything else keeps the same
     // vterm transcript surface and simply never starts a program — the pty is one call at the end

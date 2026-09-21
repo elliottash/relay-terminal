@@ -3263,7 +3263,7 @@ public:
 
     // A letter typed on this surface when the composer is empty: the action that answers it, run.
     // The key can do no more than the mouse can — a disabled action answers nothing — which is
-    // `HelperChatPanel::triggerActionKey`'s rule, now the context library's.
+    // the helper panel's rule for its own tool row, now the context library's.
     bool runActionLetter(const QString &letter) {
         const int at = relay::agent::actionForLetter(m_actionKeys, letter);
         if (at < 0 || !m_actionKeys.at(at).run) return false;
