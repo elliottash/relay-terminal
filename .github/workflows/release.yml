@@ -99,9 +99,12 @@ jobs:
             dist/*.deb
             out/logs/*.log
 
+  windows:
+    uses: ./.github/workflows/windows.yml
+
   release:
     name: GitHub release
-    needs: [source, deb]
+    needs: [source, deb, windows]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -114,6 +117,7 @@ jobs:
           mkdir -p assets
           find artifacts -name '*.deb' -exec cp {} assets/ \;
           cp artifacts/source/relay-*.tar.gz assets/
+          cp artifacts/windows-installer/*setup.exe assets/
           (cd assets && sha256sum -- * > SHA256SUMS)
           cat assets/SHA256SUMS
       - name: Create release

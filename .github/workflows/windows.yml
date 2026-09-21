@@ -19,7 +19,7 @@ jobs:
       - name: Install Qt
         shell: pwsh
         run: |
-          python -m pip install aqtinstall
+          python -m pip install aqtinstall cryptography
           python -m aqt install-qt windows desktop 6.8.3 win64_msvc2022_64 -O C:/Qt
           'C:/Qt/6.8.3/msvc2022_64/bin' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - name: Build native pseudoconsole test
@@ -27,13 +27,37 @@ jobs:
       - run: cmake --build build-windows --config Release --parallel
       - name: Exercise native Windows process and console lifecycle
         run: ctest --test-dir build-windows -C Release --output-on-failure
+      - name: Native storage, worker, credentials and PowerShell tests
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = 'backend'
+          $env:RELAY_POWERSHELL = (Get-Command pwsh).Source
+          python -m unittest discover -s tests -p test_platform_storage.py -v
+          python -m unittest discover -s tests -p test_powershell.py -v
       - name: Configure Windows desktop
         run: cmake -S . -B build-app -A x64 -DRELAY_QT_MAJOR=6 -DBUILD_TESTING=OFF -DCMAKE_PREFIX_PATH=C:/Qt/6.8.3/msvc2022_64
       - name: Build Windows desktop
         run: cmake --build build-app --config Release --parallel 4
       - name: Package native installer with private runtimes
         shell: pwsh
-        run: ./packaging/windows/package.ps1
+        run: |
+          $version = if ($env:GITHUB_REF_NAME -match '^v[0-9]') { $env:GITHUB_REF_NAME.Substring(1) } else { '0.1.0-beta.3' }
+          ./packaging/windows/package.ps1 -Version $version
+      - name: Install and launch as a user
+        shell: pwsh
+        run: |
+          $installer = (Get-ChildItem dist/*setup.exe).FullName
+          $destination = Join-Path $env:RUNNER_TEMP 'Relay installed'
+          $install = Start-Process $installer -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$destination`"") -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Installer failed: $($install.ExitCode)" }
+          python packaging/windows/installed-smoke.py "$destination" windows-evidence
+          $uninstall = Start-Process "$destination/unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw 'Uninstall failed' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-evidence
+          path: windows-evidence/
       - uses: actions/upload-artifact@v4
         with:
           name: windows-installer
