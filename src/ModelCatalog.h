@@ -13,6 +13,9 @@
 //                     stops reading it: a stale list from before the lists existed must not
 //                     re-order what Options › Models now shows. Kept only so an install that has
 //                     never seen the tier lists keeps the order it had (card #MDL1).
+//   models/available  step 2 of the four (owner, 2026-09-21): the models that exist for the lists,
+//                     the box and its filter at all. Absent = the default in `curation` below.
+//                     Per machine, never per profile.
 //   models/custom     keys the user typed by hand ("add model by id"); they are entries like any
 //   models/favorites  keys pinned to the top of the picker (opencode's Favorites)
 //   models/recent     keys picked most recently, newest first, at most ten (opencode's Recent)
@@ -22,8 +25,10 @@
 //
 // Retired with card #MDL1 t:a10, and ignored rather than migrated where an old settings file
 // still holds them: `models/shown` (the "models in the picker" checklist) and `models/collapsed`
-// (its per-provider fold). Both left Options › Models with the checklist — every usable model is
-// in the lists now, and OpenRouter's long tail is behind typing in the Ctrl+Alt+M dialog.
+// (its per-provider fold). They are *not* `models/available`: the checklist said what the pickers
+// listed out of everything a provider serves, and its per-provider fold is a widget's state.
+// `models/available` says what exists for the lists and the box at all, it is edited in the
+// Ctrl+Alt+M dialog rather than on Options › Models, and its default is not "everything".
 //
 // Keys are "<preset>|<model>". A preset id can hold ":" (guest:claude, local:foo) and a model id
 // can hold "/" (deepseek/deepseek-v4.1-flash); neither holds "|".
@@ -194,6 +199,47 @@ QStringList customKeys();
 Entry addCustom(const QString &preset, const QString &model, const Catalog &catalog);
 void removeCustom(const QString &key);
 
+// ----- step 2 of four: which models are *available* (owner, 2026-09-21) -------------------------
+// > "there need to be 4 steps of model availability: 1 add provider, 2 add model as available,
+// >  3 add model to priority list, 4 include model in box picker. we currently only have 1, 3, 4.
+// >  and its step 2 that determines the models available in the text filter."
+//
+// Step 2 came back with this card, after t:a10 retired `models/shown` on the reading that "a model
+// a provider serves is a model you can pick". It is not the old checklist: that one decided what
+// the *pickers* listed, this one decides what exists at all — the lists (step 3), the box (step 4)
+// and the box's typed filter all read it, and a model that is not available is in none of them.
+//
+//   models/available   the keys that are available. Absent — the ordinary case — is the DEFAULT
+//                      below, which is why nothing is written until the first uncheck.
+//
+// The default, in the owner's words: "for branded providers, all models are included by default
+// and you can uncheck them (eg i probably want to uncheck sonnet and haiku and gpt 5.5). but then
+// for openrouter, you have to select specific models -- and maybe there are some recommended ones
+// by default, deepseek 4.1 and gemini 3.8 flash for example." So:
+//
+//   * a branded (non-open-ended) provider: every model it serves;
+//   * an open-ended one (`Entry::openEnded` — OpenRouter's four hundred live rows): only the
+//     recommended ones, which are the rows the worker's own catalog names (`presets.MODEL_CATALOG`
+//     for `openrouter`: deepseek/deepseek-v4.1-flash, google/gemini-3.8-flash,
+//     google/gemini-3.5-flash-lite — they are the rows that carry a `tier`; the live listing's do
+//     not), plus anything a tier list names and anything you typed yourself (`models/custom`).
+//
+// **Per machine, not per profile.** A profile is the five lists and nothing else (see `profiles()`
+// below): which models this machine can reach is not a thing to swap between "AI work" and "admin
+// work", and a profile that hid half a provider would read as the provider being broken.
+//
+// A model a tier list names is available whatever the checkbox says — a list entry that cannot be
+// picked is a list that lies — and the dialog's tooltip says so on the greyed checkbox.
+QStringList availableKeys();
+// The list read once, for a caller walking a whole catalog (the same trap as `shown`, #PPR4).
+bool isAvailable(const Entry &entry, const QStringList &available);
+bool isAvailable(const Entry &entry);
+// Check or un-check one. The first change snapshots today's default, exactly as `setShown` did, so
+// one un-check never empties the picker; un-checking the last one is a reset to the default rather
+// than "nothing is available". `catalog` is what the snapshot is taken over.
+void setAvailable(const QString &key, bool on, const Catalog &catalog);
+void resetAvailable();
+
 QStringList favorites();
 bool isFavorite(const QString &key);
 void toggleFavorite(const QString &key);
@@ -340,16 +386,21 @@ Sort sort();
 void setSort(Sort sort);
 }  // namespace curation
 
-// The entries the picker offers, in rank order: every usable entry, minus an open-ended
-// provider's long tail — an OpenRouter row that no tier list names, that is not one of its tier
-// defaults and that you did not type yourself. Nothing else is held back: the "models in the
-// picker" checklist and its `models/shown` retired with card #MDL1 t:a10, so a model a provider
-// serves is a model the box, the dialog and `/model` all offer.
+// The entries the picker offers, in rank order: every usable entry that is **available**
+// (`curation::isAvailable`, step 2 of the four). With nothing un-checked that is every model of a
+// branded provider plus an open-ended one's recommended rows, which is the rule t:a10 wrote here
+// by hand; since 2026-09-21 it is the default of a setting rather than the only rule, because
+// "you can uncheck them (eg i probably want to uncheck sonnet and haiku and gpt 5.5)".
 QList<Entry> shown(const Catalog &catalog);
-// Every usable entry in rank order — `shown()` plus the tail it holds back. The Ctrl+Alt+M
-// dialog's filter searches this, which is how the tail is reached now that the per-provider
-// "add a model by id" box has left Options › Models; nothing else should need it.
+// Every usable entry in rank order — `shown()` plus what it holds back (an open-ended provider's
+// long tail, and anything un-checked). The Ctrl+Alt+M dialog's filter searches this for "more from
+// openrouter", and `/model <name>` falls back to it: typing a name is asking for that model.
 QList<Entry> allUsable(const Catalog &catalog);
+// The rows step 2 is *edited* on — the `all` tab of the dialog: every usable entry that is
+// available, plus every one that would be available by default and has been un-checked. An
+// un-checked row therefore stays in the tab, greyed, with its box there to tick again; an
+// open-ended provider's long tail is still behind typing, because it is neither.
+QList<Entry> curatable(const Catalog &catalog);
 // The same list under one sort. Every sort is stable over `entries`' order, so ties keep rank.
 QList<Entry> ordered(QList<Entry> entries, Sort sort, const Catalog &catalog);
 

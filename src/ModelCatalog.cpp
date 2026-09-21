@@ -16,6 +16,7 @@ namespace relay::models {
 namespace {
 
 const QString kPriority = QStringLiteral("models/priority");
+const QString kAvailable = QStringLiteral("models/available");
 const QString kCustom = QStringLiteral("models/custom");
 const QString kFavorites = QStringLiteral("models/favorites");
 const QString kRecent = QStringLiteral("models/recent");
@@ -401,12 +402,70 @@ void move(const QString &key, int delta, const Catalog &catalog) {
 
 void resetPriority() { QSettings().remove(kPriority); }
 
+// ----- step 2: available (owner, 2026-09-21) ---------------------------------------------------
+// The default, with nothing stored: every model of a branded provider, and of an open-ended one
+// (OpenRouter's live listing) only the recommended rows — the ones the worker's own catalog names,
+// which are exactly the rows that carry a `tier` (`presets.MODEL_CATALOG["openrouter"]`;
+// openrouter_catalog.py sends `tier: null` on every live row) — plus an id you typed and anything
+// a tier list names. This was `inPickerList` until today, written into `shown()` as the only rule.
+static bool availableByDefault(const Entry &entry) {
+    if (!entry.openEnded || !entry.tier.isEmpty() || entry.custom) return true;
+    return inAnyList(entry.key);
+}
+
+// Whether the stored list says anything at all about this preset. A provider added *after* the
+// list was written (step 1 happens again every time a key is added) has said nothing about its
+// models, so the default applies to it rather than "nothing of it is available" — otherwise
+// un-checking one model today would silently hide every model of tomorrow's provider.
+static bool presetNamedIn(const QStringList &available, const QString &preset) {
+    const QString prefix = preset + QLatin1Char('|');
+    for (const QString &key : available)
+        if (key.startsWith(prefix)) return true;
+    return false;
+}
+
+QStringList availableKeys() { return list(kAvailable); }
+
+bool isAvailable(const Entry &entry, const QStringList &available) {
+    if (available.isEmpty()) return availableByDefault(entry);
+    if (available.contains(entry.key)) return true;
+    // A model a tier list names is available whatever the checkbox says: a list entry that cannot
+    // be picked is a list that lies, and the failover would step over a rank the user wrote down.
+    if (inAnyList(entry.key)) return true;
+    if (!presetNamedIn(available, entry.preset)) return availableByDefault(entry);
+    return false;
+}
+
+bool isAvailable(const Entry &entry) { return isAvailable(entry, availableKeys()); }
+
+void setAvailable(const QString &key, bool on, const Catalog &catalog) {
+    QStringList keys = availableKeys();
+    if (keys.isEmpty()) {
+        // The first change writes down today's default, so that one un-check un-checks one model
+        // rather than every model the default was letting through (the same shape `setShown` had).
+        for (const Entry &entry : catalog.entries)
+            if (availableByDefault(entry)) keys << entry.key;
+    }
+    if (on && !keys.contains(key)) keys << key;
+    if (!on) keys.removeAll(key);
+    // Un-checking the last one is a reset to the default, never an empty catalog.
+    if (keys.isEmpty()) { QSettings().remove(kAvailable); return; }
+    store(kAvailable, keys);
+}
+
+void resetAvailable() { QSettings().remove(kAvailable); }
+
 QStringList customKeys() { return list(kCustom); }
 
 Entry addCustom(const QString &preset, const QString &model, const Catalog &catalog) {
     const QString key = Catalog::keyFor(preset, model.trimmed());
     QStringList keys = customKeys();
     if (!catalog.find(key) && !keys.contains(key)) { keys << key; store(kCustom, keys); }
+    // Available at once: an id you typed is a model you asked for, and hunting for its checkbox
+    // afterwards would be two steps for one. Only when a list is already stored — with nothing
+    // stored the default already says so, and writing the snapshot here would turn "I added an
+    // id" into "I curated every model on this machine".
+    if (!availableKeys().isEmpty()) setAvailable(key, true, catalog);
     Entry entry;
     entry.key = key; entry.preset = preset; entry.model = model.trimmed(); entry.label = entry.model.toLower();
     entry.custom = true;
@@ -423,6 +482,7 @@ void removeCustom(const QString &key) {
     QStringList keys = customKeys();
     keys.removeAll(key);
     store(kCustom, keys);
+    if (QStringList available = availableKeys(); available.removeAll(key) > 0) store(kAvailable, available);
     QStringList ranks = priority();
     ranks.removeAll(key);
     store(kPriority, ranks);
@@ -883,24 +943,25 @@ void setSort(Sort sort) {
 
 // ----- lists -----------------------------------------------------------------------------------
 
-// The one rule behind `shown()`, stated once (card #MDL1 t:a10, design 5.5). There is no
-// "models in the picker" checklist any more and no `models/shown`: a model a provider serves is
-// a model you can pick. The single exception is an open-ended provider's long tail — OpenRouter's
-// four hundred live rows — which would bury every other provider in every list it appears in. A
-// tail row joins the lists the moment something says it is wanted: it is a provider's tier
-// default, it is an id you typed (`models/custom`), or a tier list names it. Typing in the
-// Ctrl+Alt+M dialog reaches the rest (`allUsable`), which is where the old id box went.
-static bool inPickerList(const Entry &entry) {
-    if (!entry.usable) return false;
-    if (!entry.openEnded || !entry.tier.isEmpty() || entry.custom) return true;
-    return curation::inAnyList(entry.key);
+// The one rule behind `shown()`, stated once (card #MDL1, design 5.5 and 5.7): a usable entry
+// that is **available** — step 2 of the owner's four. With nothing un-checked that is every model
+// of a branded provider plus an open-ended one's recommended rows, which is exactly the rule t:a10
+// wrote here by hand; `curation::isAvailable` is now that rule as the *default* of a setting, so a
+// model can be taken out ("i probably want to uncheck sonnet and haiku and gpt 5.5") and an
+// OpenRouter row can be put in, which is what "for openrouter, you have to select specific models"
+// needs. The long tail is still behind typing, which is where `allUsable` is read.
+static bool inPickerList(const Entry &entry, const QStringList &available) {
+    return entry.usable && curation::isAvailable(entry, available);
 }
 
 QList<Entry> shown(const Catalog &catalog) {
     QList<Entry> out;
+    // The list is read once, not once per entry: a sort calls its comparator O(n log n) times and
+    // every read would be a QSettings lookup (the same trap as #PPR4).
+    const QStringList available = curation::availableKeys();
     for (const QString &key : curation::ranked(catalog)) {
         const Entry *entry = catalog.find(key);
-        if (entry && inPickerList(*entry)) out << *entry;
+        if (entry && inPickerList(*entry, available)) out << *entry;
     }
     return out;
 }
@@ -910,6 +971,21 @@ QList<Entry> allUsable(const Catalog &catalog) {
     for (const QString &key : curation::ranked(catalog)) {
         const Entry *entry = catalog.find(key);
         if (entry && entry->usable) out << *entry;
+    }
+    return out;
+}
+
+QList<Entry> curatable(const Catalog &catalog) {
+    QList<Entry> out;
+    const QStringList available = curation::availableKeys();
+    for (const QString &key : curation::ranked(catalog)) {
+        const Entry *entry = catalog.find(key);
+        if (!entry || !entry->usable) continue;
+        // Available, or available by default and un-checked: both are rows the `all` tab draws —
+        // the second greyed, with its box empty, so it can be ticked again. An open-ended
+        // provider's long tail is neither, and stays behind typing.
+        if (curation::isAvailable(*entry, available) || curation::isAvailable(*entry, QStringList()))
+            out << *entry;
     }
     return out;
 }

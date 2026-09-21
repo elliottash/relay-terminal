@@ -204,16 +204,128 @@ private Q_SLOTS:
         QVERIFY(!Catalog::splitKey(QStringLiteral("trailing|"), &preset, &model));
     }
 
-    void shownIsEveryUsableEntry() {
+    // Nothing un-checked: every usable model of a branded provider is available, so `shown` is
+    // every usable entry and `allUsable` is the same list in the same order (card #MDL1, step 2 —
+    // this was the *only* rule between t:a10 and 2026-09-21, and it is the default now).
+    void shownIsEveryAvailableUsableEntry() {
         const Catalog catalog = catalogFrom(presets());
+        QVERIFY(curation::availableKeys().isEmpty());   // nothing written until the first un-check
         const QList<Entry> list = shown(catalog);
         QCOMPARE(list.size(), 7);   // openai has no key
         for (const Entry &entry : list) QVERIFY(entry.usable);
-        // Nothing curates it any more (card #MDL1 t:a10): with no open-ended provider in this
-        // catalog, `allUsable` is the same list in the same order.
+        for (const Entry &entry : list) QVERIFY(curation::isAvailable(entry));
         const QList<Entry> every = allUsable(catalog);
         QCOMPARE(every.size(), list.size());
         for (int i = 0; i < every.size(); ++i) QCOMPARE(every.at(i).key, list.at(i).key);
+        // The `all` tab draws the same rows while nothing has been taken out.
+        QCOMPARE(curatable(catalog).size(), list.size());
+    }
+
+    // ----- step 2: which models are available (owner, 2026-09-21) ------------------------------
+    // "for branded providers, all models are included by default and you can uncheck them (eg i
+    // probably want to uncheck sonnet and haiku and gpt 5.5). but then for openrouter, you have to
+    // select specific models -- and maybe there are some recommended ones by default."
+
+    void unCheckingOneModelLeavesTheRestAvailable() {
+        const Catalog catalog = catalogFrom(presets());
+        const QString sonnet = QStringLiteral("guest:claude|sonnet");
+        QVERIFY(curation::isAvailable(*catalog.find(sonnet)));
+        curation::setAvailable(sonnet, false, catalog);
+        // The first change writes today's default down, so the one un-check is one model.
+        QVERIFY(!curation::availableKeys().isEmpty());
+        QVERIFY(!curation::isAvailable(*catalog.find(sonnet)));
+        QVERIFY(curation::isAvailable(*catalog.find(QStringLiteral("guest:claude|opus"))));
+        QVERIFY(curation::isAvailable(*catalog.find(QStringLiteral("glm-coding|glm-5.3"))));
+        const QList<Entry> list = shown(catalog);
+        QCOMPARE(list.size(), 6);
+        for (const Entry &entry : list) QVERIFY(entry.key != sonnet);
+        // …but it is still usable, so the dialog's filter and `/model <name>` still reach it,
+        // and the `all` tab still draws it so the box can be ticked again.
+        QVERIFY(allUsable(catalog).size() == 7);
+        bool inTab = false;
+        for (const Entry &entry : curatable(catalog)) inTab = inTab || entry.key == sonnet;
+        QVERIFY(inTab);
+        // Checking it again puts it straight back.
+        curation::setAvailable(sonnet, true, catalog);
+        QVERIFY(curation::isAvailable(*catalog.find(sonnet)));
+        QCOMPARE(shown(catalog).size(), 7);
+    }
+
+    // An open-ended provider (OpenRouter's live listing) is the other way round: only the rows the
+    // worker's own catalog recommends — the ones carrying a `tier` — are available to begin with,
+    // and the rest are checked in one at a time.
+    void anOpenEndedProvidersRecommendedRowsAreTheDefault() {
+        QJsonArray rows;
+        QJsonArray models{model(QStringLiteral("deepseek/deepseek-v4.1-flash"), QStringLiteral("deepseek-v4.1-flash"), QStringLiteral("main"), {}),
+                          model(QStringLiteral("google/gemini-3.8-flash"), QStringLiteral("gemini-3.8-flash"), QStringLiteral("lite"), {})};
+        for (int i = 0; i < 8; ++i)
+            models << model(QStringLiteral("vendor/tail-%1").arg(i), QStringLiteral("tail-%1").arg(i), QString(), {});
+        rows << preset(QStringLiteral("openrouter"), QStringLiteral("openrouter"), QStringLiteral("openrouter"),
+                       QString(), models, true);
+        Catalog catalog = catalogFrom(rows);
+        QVERIFY(catalog.find(QStringLiteral("openrouter|vendor/tail-3"))->openEnded);
+        const auto available = [&](const QString &key) { return curation::isAvailable(*catalog.find(key)); };
+        QVERIFY(available(QStringLiteral("openrouter|deepseek/deepseek-v4.1-flash")));   // recommended
+        QVERIFY(available(QStringLiteral("openrouter|google/gemini-3.8-flash")));        // recommended
+        QVERIFY(!available(QStringLiteral("openrouter|vendor/tail-3")));                 // the tail
+        // The `all` tab does not draw the tail either: it is not available and not a default.
+        QCOMPARE(curatable(catalog).size(), 2);
+        QCOMPARE(shown(catalog).size(), 2);
+        QCOMPARE(allUsable(catalog).size(), 10);
+        // Checking a tail row — the dialog's "more from openrouter" — makes it available, and
+        // leaves the recommended ones where they were.
+        curation::setAvailable(QStringLiteral("openrouter|vendor/tail-3"), true, catalog);
+        QVERIFY(available(QStringLiteral("openrouter|vendor/tail-3")));
+        QVERIFY(available(QStringLiteral("openrouter|deepseek/deepseek-v4.1-flash")));
+        QCOMPARE(shown(catalog).size(), 3);
+        // An id typed by hand is available the moment it is added, list or no list.
+        curation::addCustom(QStringLiteral("openrouter"), QStringLiteral("vendor/hand-typed"), catalog);
+        catalog = catalogFrom(rows);
+        QVERIFY(available(QStringLiteral("openrouter|vendor/hand-typed")));
+    }
+
+    // A model a tier list names is available whatever the checkbox says: a rank the user wrote
+    // down that the failover would step over is a list that lies.
+    void aModelATierListNamesStaysAvailable() {
+        const Catalog catalog = catalogFrom(presets());
+        const QString sonnet = QStringLiteral("guest:claude|sonnet");
+        curation::setAvailable(sonnet, false, catalog);
+        QVERIFY(!curation::isAvailable(*catalog.find(sonnet)));
+        curation::addToTier(QStringLiteral("flash"), sonnet);
+        QVERIFY(curation::isAvailable(*catalog.find(sonnet)));
+        bool listed = false;
+        for (const Entry &entry : shown(catalog)) listed = listed || entry.key == sonnet;
+        QVERIFY(listed);
+        curation::removeFromTier(QStringLiteral("flash"), sonnet);
+        QVERIFY(!curation::isAvailable(*catalog.find(sonnet)));
+    }
+
+    // Step 1 happens again every time a key is added, and a provider that was not on this machine
+    // when the list was written has said nothing about its models — so the default applies to it.
+    // Without this, one un-check today would hide every model of tomorrow's provider.
+    void aProviderAddedAfterTheListKeepsTheDefault() {
+        QJsonArray rows;
+        rows << presets().at(0).toObject();   // glm-coding alone
+        const Catalog before = catalogFrom(rows);
+        curation::setAvailable(QStringLiteral("glm-coding|glm-5.3-flash"), false, before);
+        QVERIFY(!curation::availableKeys().isEmpty());
+        const Catalog after = catalogFrom(presets());   // kimi, the guest and the local box arrive
+        QVERIFY(curation::isAvailable(*after.find(QStringLiteral("kimi-code|k3"))));
+        QVERIFY(curation::isAvailable(*after.find(QStringLiteral("guest:claude|sonnet"))));
+        QVERIFY(!curation::isAvailable(*after.find(QStringLiteral("glm-coding|glm-5.3-flash"))));
+    }
+
+    void unCheckingTheLastAvailableModelIsAResetNotAnEmptyCatalog() {
+        QJsonArray rows;
+        rows << presets().at(1).toObject();   // kimi-code: two models
+        const Catalog catalog = catalogFrom(rows);
+        curation::setAvailable(QStringLiteral("kimi-code|k3"), false, catalog);
+        curation::setAvailable(QStringLiteral("kimi-code|kimi-for-coding-highspeed"), false, catalog);
+        QVERIFY(curation::availableKeys().isEmpty());
+        QCOMPARE(shown(catalog).size(), 2);
+        curation::setAvailable(QStringLiteral("kimi-code|k3"), false, catalog);
+        curation::resetAvailable();
+        QCOMPARE(shown(catalog).size(), 2);
     }
 
     // The "models in the picker" checklist left Options › Models for the Ctrl+Alt+M dialog, and
