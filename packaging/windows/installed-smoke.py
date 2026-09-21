@@ -4,6 +4,7 @@ import ctypes
 from ctypes import wintypes
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -38,6 +39,18 @@ with tempfile.TemporaryDirectory(prefix='relay-installed-') as tmp:
             if state is None:
                 raise RuntimeError('Installed GUI never received PowerShell ready event')
             (evidence / 'shell-ready.json').write_text(json.dumps(state, indent=2), encoding='utf-8')
+            # Let the actual GUI worker finish startup before inspecting its first-run UI.
+            worker_log = Path(tmp) / 'relay/logs/worker.log'
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline:
+                if worker_log.exists() and 'worker_start' in worker_log.read_text(encoding='utf-8', errors='replace'):
+                    break
+                if proc.poll() is not None:
+                    raise RuntimeError('GUI exited while starting the agent worker')
+                time.sleep(.2)
+            else:
+                raise RuntimeError('Installed GUI did not start its bundled agent worker')
+            time.sleep(5)
             screenshot = str(evidence / 'desktop.png').replace("'", "''")
             subprocess.run(['pwsh', '-NoProfile', '-Command',
                 'Add-Type -AssemblyName System.Windows.Forms,System.Drawing; '
@@ -58,6 +71,9 @@ with tempfile.TemporaryDirectory(prefix='relay-installed-') as tmp:
             if proc.wait(timeout=20) != 0:
                 raise RuntimeError(f'GUI shutdown failed: {proc.returncode}')
         finally:
+            logs = Path(tmp) / 'relay/logs'
+            if logs.exists():
+                shutil.copytree(logs, evidence / 'logs', dirs_exist_ok=True)
             if proc.poll() is None:
                 proc.kill()
                 proc.wait()
