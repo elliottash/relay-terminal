@@ -129,8 +129,12 @@
 #include <QDirIterator>
 #include <QMimeDatabase>
 #include <QTextBlock>
+#ifndef Q_OS_WIN
 #include <sys/stat.h>
+#endif
+#ifndef Q_OS_WIN
 #include <sys/syscall.h>
+#endif
 #include <algorithm>
 #include <functional>
 #include <memory>
@@ -138,9 +142,15 @@
 #include <csignal>
 #include <cstring>
 #include <stdexcept>
+#ifndef Q_OS_WIN
 #include <fcntl.h>
+#endif
+#ifndef Q_OS_WIN
 #include <termios.h>
+#endif
+#ifndef Q_OS_WIN
 #include <unistd.h>
+#endif
 
 // The units main.cpp used to hold inline, one header each (see docs/ARCHITECTURE.md).
 // This is still one translation unit: the headers are included here and nowhere else,
@@ -161,7 +171,7 @@
 static void registerUrlHandler() {
     if (qEnvironmentVariableIntValue("RELAY_NO_URL_HANDLER")) return;
     const QString helper = qEnvironmentVariable("RELAY_OPEN_HELPER");
-    const QString python = QStandardPaths::findExecutable(QStringLiteral("python3"));
+    const QString python = relayPython();
     if (!QFileInfo::exists(helper) || python.isEmpty()) return;
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/applications");
     const QString name = QStringLiteral("org.relayterminal.Relay.url-handler.desktop");
@@ -236,7 +246,7 @@ static void migrateOutputTokenCeiling() {
 // workers not told to shut down, and every pane's private /tmp/relay-XXXXXX directory left behind.
 // A handler may only do async-signal-safe work, so it writes one byte to a pipe and the event loop
 // turns that into an ordinary quit(): aboutToQuit saves, and the destructors clean up.
-static int g_quitPipe[2] = {-1, -1};
+
 // Why this process is ending, for the one line aboutToQuit writes. "window" is the ordinary path
 // (the last window closed, or Ctrl+Q); a signal says so instead. What it is *for* is the case it
 // cannot cover: a run that ends with no `gui_quit` line at all was not asked to stop — it was
@@ -244,6 +254,8 @@ static int g_quitPipe[2] = {-1, -1};
 // Without this line a normal quit and a kill looked identical in the log: it simply stopped.
 static const char *g_quitReason = "window";
 
+#ifndef Q_OS_WIN
+static int g_quitPipe[2] = {-1, -1};
 static void quitSignalHandler(int) {
     const char byte = 1;
     const ssize_t written = ::write(g_quitPipe[1], &byte, 1);
@@ -272,8 +284,20 @@ static void installQuitSignals(QCoreApplication &app) {
     }
 }
 
+#else
+static void installQuitSignals(QCoreApplication &) {} // Qt handles Windows session shutdown.
+#endif
+
 int main(int argc, char **argv) {
     QApplication app(argc, argv);
+#ifdef Q_OS_WIN
+    if (qEnvironmentVariableIsEmpty("XDG_DATA_HOME"))
+        qputenv("XDG_DATA_HOME", QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation).toUtf8());
+    if (qEnvironmentVariableIsEmpty("XDG_CONFIG_HOME"))
+        qputenv("XDG_CONFIG_HOME", QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation).toUtf8());
+    qputenv("RELAY_PYTHON", relayPython().toUtf8());
+    qputenv("RELAY_POWERSHELL", relayPowerShell().toUtf8());
+#endif
     relay::theme::applyDarkTheme(app);
     QCoreApplication::setOrganizationName(QStringLiteral("RelayTerminal"));
     QCoreApplication::setApplicationName(QStringLiteral("relay"));
@@ -323,7 +347,7 @@ int main(int argc, char **argv) {
         // Make relay-open available to Relay shells and to anything they launch.
         const QString scripts = dataRoot() + QStringLiteral("/scripts");
         qputenv("RELAY_OPEN_HELPER", (scripts + QStringLiteral("/relay-open")).toUtf8());
-        qputenv("PATH", (scripts + ':' + qEnvironmentVariable("PATH")).toUtf8());
+        qputenv("PATH", (scripts + QDir::listSeparator() + qEnvironmentVariable("PATH")).toUtf8());
         WindowManager manager(path, parser.isSet(clean));
         manager.setUpLayoutSaving();
         installQuitSignals(app);   // SIGTERM, SIGINT and SIGHUP become an ordinary quit

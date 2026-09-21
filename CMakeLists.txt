@@ -3,6 +3,15 @@ project(Relay VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
+if(MSVC)
+    add_compile_options(/utf-8 /bigobj)
+    set(RELAY_WARNINGS /W3)
+else()
+    set(RELAY_WARNINGS -Wall -Wextra -Wpedantic)
+endif()
+if(WIN32)
+    add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
+endif()
 include(GNUInstallDirs)
 include(CTest)
 option(RELAY_BUILD_APP "Build the Relay application" ON)
@@ -42,12 +51,12 @@ find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
 add_library(relay-prompthistory STATIC src/PromptHistory.cpp src/PromptHistory.h)
 target_include_directories(relay-prompthistory PUBLIC src)
 target_link_libraries(relay-prompthistory PUBLIC ${RELAY_QT}::Core)
-target_compile_options(relay-prompthistory PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-prompthistory PRIVATE ${RELAY_WARNINGS})
 
 add_library(relay-editor STATIC src/RichEditor.cpp src/RichEditor.h)
 target_include_directories(relay-editor PUBLIC src)
 target_link_libraries(relay-editor PUBLIC relay-prompthistory ${RELAY_QT}::Widgets)
-target_compile_options(relay-editor PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-editor PRIVATE ${RELAY_WARNINGS})
 
 # `relay-helperchat` was here: src/HelperChat.{h,cpp} (the helper agent's chat panel, #8YQ9 and
 # #FEJQ), src/HelperModelBox.{h,cpp} (its model box, #BRD3) and src/BoardChat.h (the Switchboard's
@@ -83,7 +92,7 @@ target_include_directories(relay-board PUBLIC src)
 # relay-modelcatalog: a card comment records the model id its turn ran on; the page names the
 # model (card #MDL1, rule 1), through the same `nameOf` as everywhere else.
 target_link_libraries(relay-board PUBLIC relay-editor relay-toollabel relay-projects relay-notifications relay-agentcontext relay-modelcatalog ${RELAY_QT}::Widgets)
-target_compile_options(relay-board PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-board PRIVATE ${RELAY_WARNINGS})
 
 # Which project a pane is in, where that project's Switchboard folder is (or would be), and the
 # removable registry of known projects under `$XDG_DATA_HOME/relay/state/projects.json`. QtCore only
@@ -92,7 +101,7 @@ target_compile_options(relay-board PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-projects STATIC src/Projects.cpp src/Projects.h src/ProjectInit.cpp src/ProjectInit.h)
 target_include_directories(relay-projects PUBLIC src)
 target_link_libraries(relay-projects PUBLIC ${RELAY_QT}::Core)
-target_compile_options(relay-projects PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-projects PRIVATE ${RELAY_WARNINGS})
 
 # The project picker pane (card #916B): the known projects, fuzzy-filtered, with "Initialize new
 # project here" on top, for a tab that has no project when a Switchboard is reached for. Widgets
@@ -100,7 +109,7 @@ target_compile_options(relay-projects PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-projectpicker STATIC src/ProjectPicker.cpp src/ProjectPicker.h src/PaneView.h)
 target_include_directories(relay-projectpicker PUBLIC src)
 target_link_libraries(relay-projectpicker PUBLIC relay-projects ${RELAY_QT}::Widgets)
-target_compile_options(relay-projectpicker PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-projectpicker PRIVATE ${RELAY_WARNINGS})
 
 # Folder explorer and file preview panes: plain Qt, with optional syntax highlighting and PDF.
 # The two provider modals (API keys, model roles): a static library so the roles dialog's lists can be
@@ -108,14 +117,14 @@ target_compile_options(relay-projectpicker PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-modelcatalog STATIC src/ModelCatalog.cpp src/ModelCatalog.h)
 target_include_directories(relay-modelcatalog PUBLIC src)
 target_link_libraries(relay-modelcatalog PUBLIC ${RELAY_QT}::Core)
-target_compile_options(relay-modelcatalog PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-modelcatalog PRIVATE ${RELAY_WARNINGS})
 # The rows of the model box (#PK5Q): one list, drawn by every prompt box in Relay — which since
 # card #AGNT is one widget, `Pane`, in a terminal pane and in every console. Its own library so
 # the rows can be had without the picker dialog, which is the window's.
 add_library(relay-modelrows STATIC src/ModelRows.cpp src/ModelRows.h)
 target_include_directories(relay-modelrows PUBLIC src)
 target_link_libraries(relay-modelrows PUBLIC relay-modelcatalog ${RELAY_QT}::Widgets)
-target_compile_options(relay-modelrows PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-modelrows PRIVATE ${RELAY_WARNINGS})
 # The list a status picker drops open (2026-09-21): the current row highlighted, Up/Down over the
 # rows that can be picked, and a filter line you can see. Its own library, and free of Pane, so
 # tests/filterpopup_test.cpp can drive it without a window. relay-theme is for the tokens it
@@ -123,11 +132,11 @@ target_compile_options(relay-modelrows PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-filterpopup STATIC src/FilterPopup.cpp src/FilterPopup.h)
 target_include_directories(relay-filterpopup PUBLIC src)
 target_link_libraries(relay-filterpopup PUBLIC relay-theme ${RELAY_QT}::Widgets)
-target_compile_options(relay-filterpopup PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-filterpopup PRIVATE ${RELAY_WARNINGS})
 add_library(relay-modelpicker STATIC src/ModelPicker.cpp src/ModelPicker.h)
 target_include_directories(relay-modelpicker PUBLIC src)
 target_link_libraries(relay-modelpicker PUBLIC relay-modelcatalog ${RELAY_QT}::Widgets)
-target_compile_options(relay-modelpicker PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-modelpicker PRIVATE ${RELAY_WARNINGS})
 # The models pane (card #MDL1 t:a11, design 5.8): the three tabs Ctrl+Shift+M opens — providers,
 # available, priorities — over the picker widget above and the settings-row renderer below. Its own
 # library and free of `Pane` and `RelayWindow`, so tests/modelspane_test.cpp drives the whole
@@ -135,12 +144,12 @@ target_compile_options(relay-modelpicker PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-modelspane STATIC src/ModelsPane.cpp src/ModelsPane.h)
 target_include_directories(relay-modelspane PUBLIC src)
 target_link_libraries(relay-modelspane PUBLIC relay-modelpicker relay-settings ${RELAY_QT}::Widgets)
-target_compile_options(relay-modelspane PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-modelspane PRIVATE ${RELAY_WARNINGS})
 add_library(relay-modelsettings STATIC src/ModelSettings.cpp src/ModelSettings.h)
 target_include_directories(relay-modelsettings PUBLIC src)
 # relay-modelcatalog: the key-test line names the model that answered (card #MDL1, rule 1).
 target_link_libraries(relay-modelsettings PUBLIC relay-modelcatalog ${RELAY_QT}::Widgets)
-target_compile_options(relay-modelsettings PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-modelsettings PRIVATE ${RELAY_WARNINGS})
 
 # A setting read on a hot path — per key, per event, per poll, per paint (card #057J). Plain
 # QtCore and no dependency on anything else here, so the libraries that hold those paths
@@ -148,7 +157,7 @@ target_compile_options(relay-modelsettings PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-settingscache STATIC src/SettingsCache.cpp src/SettingsCache.h)
 target_include_directories(relay-settingscache PUBLIC src)
 target_link_libraries(relay-settingscache PUBLIC ${RELAY_QT}::Core)
-target_compile_options(relay-settingscache PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-settingscache PRIVATE ${RELAY_WARNINGS})
 
 add_library(relay-settings STATIC src/SettingsPane.cpp src/SettingsPane.h)
 target_include_directories(relay-settings PUBLIC src)
@@ -157,7 +166,7 @@ target_include_directories(relay-settings PUBLIC src)
 # only in the executable, so nothing here links a window.
 # relay-settingscache: SettingsWatch::notify() is what drops the hot-path cache (#057J).
 target_link_libraries(relay-settings PUBLIC relay-agentcontext relay-settingscache ${RELAY_QT}::Widgets)
-target_compile_options(relay-settings PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-settings PRIVATE ${RELAY_WARNINGS})
 
 # The agent drives the app (card #FEJQ, protocol §30): the catalog the window sends its workers,
 # the executor for one `app_command`, and the change log that makes a write visible and undoable.
@@ -166,19 +175,19 @@ target_compile_options(relay-settings PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-appcommands STATIC src/AppCommands.cpp src/AppCommands.h)
 target_include_directories(relay-appcommands PUBLIC src)
 target_link_libraries(relay-appcommands PUBLIC relay-settings relay-notifications ${RELAY_QT}::Widgets)
-target_compile_options(relay-appcommands PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-appcommands PRIVATE ${RELAY_WARNINGS})
 
 # Settings › Local models (card #24XJ): the section's rows and the worker traffic behind them,
 # with no widgets of its own, so the same headless test can drive it.
 add_library(relay-localmodels STATIC src/LocalModelsSettings.cpp src/LocalModelsSettings.h)
 target_include_directories(relay-localmodels PUBLIC src)
 target_link_libraries(relay-localmodels PUBLIC relay-settings ${RELAY_QT}::Widgets)
-target_compile_options(relay-localmodels PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-localmodels PRIVATE ${RELAY_WARNINGS})
 
 add_library(relay-filepanes STATIC src/FilePanes.cpp src/FilePanes.h)
 target_include_directories(relay-filepanes PUBLIC src)
 target_link_libraries(relay-filepanes PUBLIC relay-remotefiles relay-hints ${RELAY_QT}::Widgets)
-target_compile_options(relay-filepanes PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-filepanes PRIVATE ${RELAY_WARNINGS})
 find_package(${RELAY_KF}SyntaxHighlighting QUIET)
 if(TARGET ${RELAY_KF}::SyntaxHighlighting)
     target_link_libraries(relay-filepanes PRIVATE ${RELAY_KF}::SyntaxHighlighting)
@@ -204,7 +213,7 @@ target_include_directories(relay-subagents PUBLIC src)
 # relay-requests: the strip under the composer pairs the running agents with the open task list
 # (owner, 2026-09-19), so it reads the same RequestLedgerModel the task list panel does.
 target_link_libraries(relay-subagents PUBLIC relay-toollabel relay-requests ${RELAY_QT}::Widgets)
-target_compile_options(relay-subagents PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-subagents PRIVATE ${RELAY_WARNINGS})
 
 # Terminal engine settings (--engine-core / RELAY_ENGINE_CORE) and the pane's right-click menu:
 # plain Qt, no engine linked in, so the rules can be tested on their own.
@@ -215,7 +224,7 @@ target_link_libraries(relay-backends PUBLIC ${RELAY_QT}::Core)
 # The engine library is always built (see add_subdirectory(engine) below), so every build of
 # the app has a terminal.
 target_compile_definitions(relay-backends PUBLIC RELAY_HAVE_ENGINE)
-target_compile_options(relay-backends PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-backends PRIVATE ${RELAY_WARNINGS})
 
 # Saved window layout ("reopen where I left off"): reading/writing state/windows.json, screen
 # clamping and directory fallbacks. Plain QtCore so the rules can be tested without a window.
@@ -224,34 +233,34 @@ target_compile_options(relay-backends PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-windowstate STATIC src/WindowState.cpp src/WindowState.h src/ClosedStack.cpp src/ClosedStack.h)
 target_include_directories(relay-windowstate PUBLIC src)
 target_link_libraries(relay-windowstate PUBLIC ${RELAY_QT}::Core)
-target_compile_options(relay-windowstate PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-windowstate PRIVATE ${RELAY_WARNINGS})
 
 # The "Recently closed" list widget (the session manager's second tab). Fed records and callbacks,
 # so it is tested offscreen without a window.
 add_library(relay-closedlist STATIC src/ClosedList.cpp src/ClosedList.h)
 target_include_directories(relay-closedlist PUBLIC src)
 target_link_libraries(relay-closedlist PUBLIC relay-windowstate ${RELAY_QT}::Widgets)
-target_compile_options(relay-closedlist PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-closedlist PRIVATE ${RELAY_WARNINGS})
 
 # Private runtime directories (/tmp/relay-XXXXXX, /tmp/relay-open-XXXXXX): the owner mark that says
 # which Relay is using one, and the startup sweep that removes the ones a crash left behind.
 add_library(relay-runtimedirs STATIC src/RuntimeDirs.cpp src/RuntimeDirs.h)
 target_include_directories(relay-runtimedirs PUBLIC src)
 target_link_libraries(relay-runtimedirs PUBLIC ${RELAY_QT}::Core)
-target_compile_options(relay-runtimedirs PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-runtimedirs PRIVATE ${RELAY_WARNINGS})
 
 # Request ledger UI: model for requests/todos events and the expanded request list (plain Qt).
 add_library(relay-completion STATIC src/Completion.cpp src/Completion.h)
 target_include_directories(relay-completion PUBLIC src)
 target_link_libraries(relay-completion PUBLIC ${RELAY_QT}::Core)
-target_compile_options(relay-completion PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-completion PRIVATE ${RELAY_WARNINGS})
 
 # The `@` file picker's index: the git listing behind it, run asynchronously so typing `@` in a
 # large repository never blocks the window. Plain QtCore, driven from a test without a pane.
 add_library(relay-fileindex STATIC src/FileIndex.cpp src/FileIndex.h)
 target_include_directories(relay-fileindex PUBLIC src)
 target_link_libraries(relay-fileindex PUBLIC ${RELAY_QT}::Core)
-target_compile_options(relay-fileindex PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-fileindex PRIVATE ${RELAY_WARNINGS})
 
 # Rotating diagnostics log (~/.local/share/relay/logs/relay.log). Plain QtCore so the rotation,
 # level and redaction rules can be tested without a window.
@@ -259,14 +268,14 @@ add_library(relay-logging STATIC src/Logging.cpp src/Logging.h src/CrashLog.cpp 
 target_include_directories(relay-logging PUBLIC src)
 # relay-settingscache: level() is read on every log line, from every thread (#057J).
 target_link_libraries(relay-logging PUBLIC relay-settingscache ${RELAY_QT}::Core)
-target_compile_options(relay-logging PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-logging PRIVATE ${RELAY_WARNINGS})
 
 # Prompt-box-only input: where a submitted line goes, when "Take control" is offered, and how
 # a password typed into the masked prompt box is wiped. Pure rules, no terminal.
 add_library(relay-input STATIC src/InputPolicy.cpp src/InputPolicy.h)
 target_include_directories(relay-input PUBLIC src)
 target_link_libraries(relay-input PUBLIC ${RELAY_QT}::Core)
-target_compile_options(relay-input PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-input PRIVATE ${RELAY_WARNINGS})
 
 # Slash commands: whether a submitted line is an attempt at a Relay command (and not a path the
 # shell should keep), and what Relay answers when the command does not exist. Pure rules, with an
@@ -274,14 +283,14 @@ target_compile_options(relay-input PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-slash STATIC src/SlashCommands.cpp src/SlashCommands.h)
 target_include_directories(relay-slash PUBLIC src)
 target_link_libraries(relay-slash PUBLIC ${RELAY_QT}::Core)
-target_compile_options(relay-slash PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-slash PRIVATE ${RELAY_WARNINGS})
 
 # Screen-text input detection: "is the program waiting for a line?" read off the last rows of
 # the screen (issues/features/2026-09-17-screen-text-input-detection.md). Pure text rules.
 add_library(relay-screen STATIC src/ScreenPrompt.cpp src/ScreenPrompt.h)
 target_include_directories(relay-screen PUBLIC src)
 target_link_libraries(relay-screen PUBLIC relay-input ${RELAY_QT}::Core)
-target_compile_options(relay-screen PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-screen PRIVATE ${RELAY_WARNINGS})
 
 # The session manager pane (/resume, Ctrl+Shift+Y: every session and, on request, every subagent
 # thread, searchable), the Ctrl+F find bar and the ⓘ conversation info view. The worker does the
@@ -294,17 +303,17 @@ target_include_directories(relay-conversations PUBLIC src)
 # relay-modelcatalog: history records the model id the API took, and both panes print its *name*
 # (card #MDL1, rule 1) — `relay::models::nameOf`, the same derivation as everywhere else.
 target_link_libraries(relay-conversations PUBLIC relay-agentcontext relay-modelcatalog ${RELAY_QT}::Widgets)
-target_compile_options(relay-conversations PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-conversations PRIVATE ${RELAY_WARNINGS})
 
 # Shared workspace manager pages (card #P7SJ). Callback-only widgets, independently testable.
 add_library(relay-projectspane STATIC src/ProjectsPane.cpp src/ProjectsPane.h)
 target_include_directories(relay-projectspane PUBLIC src)
 target_link_libraries(relay-projectspane PUBLIC relay-projectpicker ${RELAY_QT}::Widgets)
-target_compile_options(relay-projectspane PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-projectspane PRIVATE ${RELAY_WARNINGS})
 add_library(relay-globalspane STATIC src/GlobalsPane.cpp src/GlobalsPane.h)
 target_include_directories(relay-globalspane PUBLIC src)
 target_link_libraries(relay-globalspane PUBLIC ${RELAY_QT}::Widgets)
-target_compile_options(relay-globalspane PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-globalspane PRIVATE ${RELAY_WARNINGS})
 
 
 # Notification centre: the list behind the bell in the window header. Plain QtCore so the
@@ -312,28 +321,28 @@ target_compile_options(relay-globalspane PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-notifications STATIC src/Notifications.cpp src/Notifications.h)
 target_include_directories(relay-notifications PUBLIC src)
 target_link_libraries(relay-notifications PUBLIC ${RELAY_QT}::Core)
-target_compile_options(relay-notifications PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-notifications PRIVATE ${RELAY_WARNINGS})
 
 # Queue navigation: when Up and Down move between queued items and when they belong to the text of
 # the item being edited in the prompt box. Pure rules, no widgets.
 add_library(relay-queuenav STATIC src/QueueNav.cpp src/QueueNav.h)
 target_include_directories(relay-queuenav PUBLIC src)
 target_link_libraries(relay-queuenav PUBLIC ${RELAY_QT}::Core)
-target_compile_options(relay-queuenav PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-queuenav PRIVATE ${RELAY_WARNINGS})
 
 # Queue submit policy (#N8VK): when a submitted agent prompt starts its turn at once and when it
 # queues. Pure rules, no widgets.
 add_library(relay-queuesubmit STATIC src/QueueSubmit.cpp src/QueueSubmit.h)
 target_include_directories(relay-queuesubmit PUBLIC src)
 target_link_libraries(relay-queuesubmit PUBLIC ${RELAY_QT}::Core)
-target_compile_options(relay-queuesubmit PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-queuesubmit PRIVATE ${RELAY_WARNINGS})
 
 # pane_state (relay-terminal-71): a pane as a paired phone draws it, and the publisher that
 # coalesces its changes. Plain inputs in, the v1 JSON out; QtCore only, so it is tested headless.
 add_library(relay-panestate STATIC src/PaneState.cpp src/PaneState.h)
 target_include_directories(relay-panestate PUBLIC src)
 target_link_libraries(relay-panestate PUBLIC ${RELAY_QT}::Core)
-target_compile_options(relay-panestate PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-panestate PRIVATE ${RELAY_WARNINGS})
 
 # The opt-in cap on the programs that leave their pane (card #Y4RX): tmux and Chrome move
 # themselves into their own systemd scope under app.slice, so per-pane limits never see them. The
@@ -343,14 +352,14 @@ target_compile_options(relay-panestate PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-escapees STATIC src/EscapeeCaps.cpp src/EscapeeCaps.h)
 target_include_directories(relay-escapees PUBLIC src)
 target_link_libraries(relay-escapees PUBLIC ${RELAY_QT}::Core)
-target_compile_options(relay-escapees PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-escapees PRIVATE ${RELAY_WARNINGS})
 
 # Pane movement: which pane is the neighbour in a direction, how two panes swap inside their
 # splitter, and which edge a dropped pane lands on. Plain Qt widgets, no terminal.
 add_library(relay-panes STATIC src/PaneLayout.cpp src/PaneLayout.h)
 target_include_directories(relay-panes PUBLIC src)
 target_link_libraries(relay-panes PUBLIC ${RELAY_QT}::Widgets)
-target_compile_options(relay-panes PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-panes PRIVATE ${RELAY_WARNINGS})
 
 # Image context (issue EM1E): where a pasted, dropped or captured image is written, what counts as
 # an image, the `@` token the composer gets and the cache sweep. Plain Qt Gui so every rule can be
@@ -358,7 +367,7 @@ target_compile_options(relay-panes PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-images STATIC src/Images.cpp src/Images.h)
 target_include_directories(relay-images PUBLIC src)
 target_link_libraries(relay-images PUBLIC ${RELAY_QT}::Gui)
-target_compile_options(relay-images PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-images PRIVATE ${RELAY_WARNINGS})
 
 # Pane titles and tab labels (issue JRWQ): tidying a model-written title, deciding whether two
 # panes are on the same work without a model, and joining/shortening a tab label. Plain QtCore so
@@ -366,35 +375,35 @@ target_compile_options(relay-images PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-titles STATIC src/PaneTitles.cpp src/PaneTitles.h)
 target_include_directories(relay-titles PUBLIC src)
 target_link_libraries(relay-titles PUBLIC ${RELAY_QT}::Core)
-target_compile_options(relay-titles PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-titles PRIVATE ${RELAY_WARNINGS})
 # Pane types and pane states (#SPBN, #XM0T): the header band's tints, the state a pane is in, the
 # most urgent one a tab shows, and the host of an ssh/mosh/telnet session. Rules only; the painting
 # is in src/PaneChrome.h.
 add_library(relay-panestatus STATIC src/PaneStatus.cpp src/PaneStatus.h)
 target_include_directories(relay-panestatus PUBLIC src)
 target_link_libraries(relay-panestatus PUBLIC ${RELAY_QT}::Gui)
-target_compile_options(relay-panestatus PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-panestatus PRIVATE ${RELAY_WARNINGS})
 # A pane's share of the machine (issue #D03W): /proc counters of the shell's and the worker's
 # process trees, turned into CPU / memory percentages. QtCore only, so tests need no window.
 add_library(relay-paneusage STATIC src/PaneUsage.cpp src/PaneUsage.h)
 target_include_directories(relay-paneusage PUBLIC src)
 # relay-settingscache: metersEnabled() is read by the 400 ms status poll, once per pane (#057J).
 target_link_libraries(relay-paneusage PUBLIC relay-settingscache ${RELAY_QT}::Core)
-target_compile_options(relay-paneusage PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-paneusage PRIVATE ${RELAY_WARNINGS})
 
 # SSH and mosh sessions (card #S5SH, docs/SSH-AND-MOSH.md): which host a login reached, per
 # `ssh -G`, and the line that loads shell/remote-integration.sh into the remote shell.
 add_library(relay-remotesession STATIC src/RemoteSession.cpp src/RemoteSession.h)
 target_include_directories(relay-remotesession PUBLIC src)
 target_link_libraries(relay-remotesession PUBLIC ${RELAY_QT}::Core ${RELAY_QT}::Network)
-target_compile_options(relay-remotesession PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-remotesession PRIVATE ${RELAY_WARNINGS})
 # The shortcut-hint registry (WARP.md, "Shortcut hints"): how often a hint has been shown, when it
 # may be shown again, and the "Next time: …" wording. Plain QtCore over QSettings — a library
 # rather than a file in the app, so a pane widget can teach its own shortcut too (#S5SH).
 add_library(relay-hints STATIC src/Hints.cpp src/Hints.h)
 target_include_directories(relay-hints PUBLIC src)
 target_link_libraries(relay-hints PUBLIC ${RELAY_QT}::Core)
-target_compile_options(relay-hints PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-hints PRIVATE ${RELAY_WARNINGS})
 # Files on the host a pane is logged into (#S5SH, docs/SSH-AND-MOSH.md section 9): the shell
 # quoting and the remote scripts that fetch and save one file over the user's own ssh connection,
 # and the batched `test -e` cache that says which paths in the output are the host's. The quoting,
@@ -402,14 +411,14 @@ target_compile_options(relay-hints PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-remotefiles STATIC src/RemoteFiles.cpp src/RemoteFiles.h)
 target_include_directories(relay-remotefiles PUBLIC src)
 target_link_libraries(relay-remotefiles PUBLIC ${RELAY_QT}::Core)
-target_compile_options(relay-remotefiles PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-remotefiles PRIVATE ${RELAY_WARNINGS})
 # SSH (#S5SH, docs/SSH-AND-MOSH.md section 8): the concrete hosts of ~/.ssh/config and its
 # Includes for "Connect to host…", the recently used hosts, and the ssh/mosh command line that
 # "Split on the same host" runs again. Plain QtCore, tested against a temporary ~/.ssh.
 add_library(relay-sshconfig STATIC src/SshConfig.cpp src/SshConfig.h)
 target_include_directories(relay-sshconfig PUBLIC src)
 target_link_libraries(relay-sshconfig PUBLIC ${RELAY_QT}::Core)
-target_compile_options(relay-sshconfig PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-sshconfig PRIVATE ${RELAY_WARNINGS})
 # Clickable paths in terminal output (#YZTK) and the keyboard walk over them (#GWXM):
 # which spans of a line are files, folders or URLs, what they resolve to against a pane's
 # working directory, and the cursor that steps through the ordered list. Plain QtCore with
@@ -417,7 +426,7 @@ target_compile_options(relay-sshconfig PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-outputlinks STATIC src/OutputLinks.cpp src/OutputLinks.h)
 target_include_directories(relay-outputlinks PUBLIC src)
 target_link_libraries(relay-outputlinks PUBLIC ${RELAY_QT}::Core)
-target_compile_options(relay-outputlinks PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-outputlinks PRIVATE ${RELAY_WARNINGS})
 
 # What an agent is *about* (#AGNT): `relay::agent::Context`, its `ContextSpec` — the block that
 # rides on the worker's `configure` — and the `Action` row of things that need no typing. The
@@ -430,7 +439,7 @@ target_compile_options(relay-outputlinks PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-agentcontext STATIC src/AgentContext.cpp src/AgentContext.h)
 target_include_directories(relay-agentcontext PUBLIC src)
 target_link_libraries(relay-agentcontext PUBLIC relay-outputlinks ${RELAY_QT}::Core)
-target_compile_options(relay-agentcontext PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-agentcontext PRIVATE ${RELAY_WARNINGS})
 
 # Agent replies in the terminal: streaming Markdown to ANSI (headings, emphasis, code, lists,
 # quotes, links, tables), word-wrapped to the pane's width. Plain QtCore so chunk boundaries can
@@ -439,7 +448,7 @@ add_library(relay-markdown STATIC src/MarkdownAnsi.cpp src/MarkdownAnsi.h src/Wo
                                   src/LabelLinks.h)
 target_include_directories(relay-markdown PUBLIC src)
 target_link_libraries(relay-markdown PUBLIC ${RELAY_QT}::Core)
-target_compile_options(relay-markdown PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-markdown PRIVATE ${RELAY_WARNINGS})
 
 # Aliases: saved commands and prompts (issue G8DK): turning an alias's template into composer
 # fields, walking them with Tab, and deciding whether a typed line names an alias. Plain QtCore so
@@ -448,7 +457,7 @@ target_compile_options(relay-markdown PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-aliases STATIC src/Aliases.cpp src/Aliases.h)
 target_include_directories(relay-aliases PUBLIC src)
 target_link_libraries(relay-aliases PUBLIC ${RELAY_QT}::Core)
-target_compile_options(relay-aliases PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-aliases PRIVATE ${RELAY_WARNINGS})
 
 # Voice transcription (issue NY7Z): which capture tool to run, which key event is the hold key,
 # where the transcript lands in the composer, and WAV repair. Plain QtCore so every rule can be
@@ -456,7 +465,7 @@ target_compile_options(relay-aliases PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-voice STATIC src/Voice.cpp src/Voice.h)
 target_include_directories(relay-voice PUBLIC src)
 target_link_libraries(relay-voice PUBLIC ${RELAY_QT}::Core)
-target_compile_options(relay-voice PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-voice PRIVATE ${RELAY_WARNINGS})
 
 # Colour themes (issue 0JA7): reading a theme file (TOML) into a ThemeSpec, the tokens a theme
 # must carry, and discovery across the built-in and the user folder. Plain Qt Gui so every rule
@@ -465,14 +474,14 @@ target_compile_options(relay-voice PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-theme STATIC src/ThemeFile.cpp src/ThemeFile.h)
 target_include_directories(relay-theme PUBLIC src)
 target_link_libraries(relay-theme PUBLIC ${RELAY_QT}::Gui)
-target_compile_options(relay-theme PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-theme PRIVATE ${RELAY_WARNINGS})
 
 # Prompt-box colouring: shell syntax when the line is going to the shell, plain text for an agent
 # prompt, and the caret colour that shows which (owner design, 2026-09-17).
 add_library(relay-highlight STATIC src/ShellHighlighter.cpp src/ShellHighlighter.h src/Theme.cpp src/Theme.h)
 target_include_directories(relay-highlight PUBLIC src)
 target_link_libraries(relay-highlight PUBLIC ${RELAY_QT}::Gui ${RELAY_QT}::Widgets relay-theme)
-target_compile_options(relay-highlight PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-highlight PRIVATE ${RELAY_WARNINGS})
 
 # Unified diffs from the agent's file tools: the parser the concise tool-call notification and the
 # diff pane share, and the read-only viewer. relay-highlight carries src/Theme.cpp, so the add and
@@ -480,7 +489,7 @@ target_compile_options(relay-highlight PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-diffview STATIC src/DiffView.cpp src/DiffView.h)
 target_include_directories(relay-diffview PUBLIC src)
 target_link_libraries(relay-diffview PUBLIC relay-highlight ${RELAY_QT}::Widgets)
-target_compile_options(relay-diffview PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-diffview PRIVATE ${RELAY_WARNINGS})
 
 # The tool-call `label` (docs/AGENT-SESSIONS-PROTOCOL.md section 23) turned into the one concise
 # line every surface prints: the terminal pane, the subagent transcript and the turn pane share it.
@@ -488,7 +497,7 @@ target_compile_options(relay-diffview PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-toollabel STATIC src/ToolLabel.cpp src/ToolLabel.h)
 target_include_directories(relay-toollabel PUBLIC src)
 target_link_libraries(relay-toollabel PUBLIC ${RELAY_QT}::Core)
-target_compile_options(relay-toollabel PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-toollabel PRIVATE ${RELAY_WARNINGS})
 
 # The terminal pane's tool-call lines (card #TK9C): the anchor URI, the row and how far it may be
 # cut, the rewrite-or-new-row state machine, and a fold's rows. src/Pane.h is the glue that writes
@@ -497,7 +506,7 @@ target_compile_options(relay-toollabel PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-calllines STATIC src/CallLines.cpp src/CallLines.h)
 target_include_directories(relay-calllines PUBLIC src ${CMAKE_CURRENT_SOURCE_DIR}/engine)
 target_link_libraries(relay-calllines PUBLIC relay-toollabel relay-diffview relay-markdown)
-target_compile_options(relay-calllines PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-calllines PRIVATE ${RELAY_WARNINGS})
 
 # The agent internals pane (card #QT8C): the view that holds one terminal pane's reasoning and tool
 # calls, and the ledger of the rows it took from the terminal while it was open. The ledger is pure
@@ -507,20 +516,20 @@ add_library(relay-internals STATIC src/InternalsLedger.cpp src/InternalsLedger.h
     src/AgentInternalsView.cpp src/AgentInternalsView.h src/AskRow.h)
 target_include_directories(relay-internals PUBLIC src)
 target_link_libraries(relay-internals PUBLIC relay-calllines relay-highlight ${RELAY_QT}::Widgets)
-target_compile_options(relay-internals PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-internals PRIVATE ${RELAY_WARNINGS})
 
 add_library(relay-requests STATIC src/RequestLedger.cpp src/RequestLedger.h src/RequestsPanel.cpp src/RequestsPanel.h)
 target_include_directories(relay-requests PUBLIC src)
 # relay-calllines for the one status-glyph table the fold and this panel share (card #BDXG).
 target_link_libraries(relay-requests PUBLIC ${RELAY_QT}::Widgets relay-calllines)
-target_compile_options(relay-requests PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-requests PRIVATE ${RELAY_WARNINGS})
 
 # Multiplayer, the owner's side (#W5N2): the Sharing pane and the model behind it. The model eats
 # the sidecar's line JSON and holds no widgets, so tests/sharingpane_test.cpp runs it without a hub.
 add_library(relay-sharing STATIC src/SharingPane.cpp src/SharingPane.h)
 target_include_directories(relay-sharing PUBLIC src)
 target_link_libraries(relay-sharing PUBLIC ${RELAY_QT}::Widgets)
-target_compile_options(relay-sharing PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-sharing PRIVATE ${RELAY_WARNINGS})
 
 # Remote control as a service (card #PH0N): which QSettings keys remember the switch and the
 # address, the `start` line the sidecar is sent, the `remote_state` line it sends back, and the
@@ -529,7 +538,7 @@ target_compile_options(relay-sharing PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-remotesettings STATIC src/RemoteSettings.cpp src/RemoteSettings.h)
 target_include_directories(relay-remotesettings PUBLIC src)
 target_link_libraries(relay-remotesettings PUBLIC relay-settings relay-settingscache ${RELAY_QT}::Widgets)
-target_compile_options(relay-remotesettings PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-remotesettings PRIVATE ${RELAY_WARNINGS})
 
 # Relay-to-Relay: a pane shared by another desktop, opened here as the owner's own device — the
 # screen painter, the pane_state view, and the `remote/viewer.py` sidecar that holds the session.
@@ -538,7 +547,7 @@ target_include_directories(relay-remotepane PUBLIC src)
 target_link_libraries(relay-remotepane PUBLIC relay-highlight relay-hints ${RELAY_QT}::Widgets)
 target_compile_definitions(relay-remotepane PRIVATE
     RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay" RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-target_compile_options(relay-remotepane PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(relay-remotepane PRIVATE ${RELAY_WARNINGS})
 
 # Relay's own terminal engine (engine/, docs/ENGINE.md). The library is built and linked
 # into the app (RELAY_HAVE_ENGINE, --engine=relay); the manual harness and the benchmark
@@ -548,8 +557,8 @@ option(RELAY_BUILD_ENGINE_SPIKE "Deprecated alias for RELAY_BUILD_ENGINE" OFF)
 add_subdirectory(engine)
 
 if(RELAY_BUILD_APP)
-    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        message(FATAL_ERROR "Relay v0.1 targets Linux (/proc and the Bash integration).")
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT WIN32)
+        message(FATAL_ERROR "Relay currently supports Linux and Windows.")
     endif()
     # main.cpp was split into one header per unit on 2026-09-18 (scripts/split-main.py); it is
     # still one translation unit -- main.cpp includes them -- and they are listed so AUTOMOC and
@@ -569,22 +578,27 @@ if(RELAY_BUILD_APP)
         # The Profile result pane (#7BM4 phase 5), likewise.
         src/ProfilePane.cpp src/ProfilePane.h
         src/RemoteShare.cpp src/RemoteShare.h)
-    find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
+    find_package(${RELAY_QT} REQUIRED COMPONENTS Network)
     target_link_libraries(relay PRIVATE relay-closedlist relay-localmodels relay-projects relay-escapees relay-appcommands)
     # What an agent is about (#AGNT): a Pane takes a relay::agent::Context, and supplies the
     # terminal one itself. QtCore only, so this is a link edge and not a dependency.
     target_link_libraries(relay PRIVATE relay-agentcontext)
-    target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-modelcatalog relay-modelrows relay-modelpicker relay-modelspane relay-filterpopup relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-queuesubmit relay-logging relay-voice relay-images relay-titles relay-panestatus relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::DBus ${RELAY_QT}::Network)
+    target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-modelcatalog relay-modelrows relay-modelpicker relay-modelspane relay-filterpopup relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-queuesubmit relay-logging relay-voice relay-images relay-titles relay-panestatus relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::Network)
     target_link_libraries(relay PRIVATE relay-projectspane relay-globalspane)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
         RELAY_VERSION="${PROJECT_VERSION}")
-    target_compile_options(relay PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(relay PRIVATE ${RELAY_WARNINGS})
     # -rdynamic puts the app's own symbols in the dynamic table, which is the difference between a
     # crash report (src/CrashLog.h) that names the function and one that gives a bare offset. It
     # costs a larger symbol table in an already large binary and nothing at run time.
-    target_link_options(relay PRIVATE -rdynamic)
+    if(WIN32)
+        set_target_properties(relay PROPERTIES WIN32_EXECUTABLE TRUE)
+        target_link_libraries(relay-paneusage PRIVATE psapi)
+    else()
+        target_link_options(relay PRIVATE -rdynamic)
+    endif()
     install(TARGETS relay RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
     # The build id (owner, 2026-09-19): 2026-09-19.14H.01 — the date, the hour, the count that hour.
     # POST_BUILD runs exactly when `relay` was relinked, so the number counts real builds; it is
@@ -636,7 +650,9 @@ if(RELAY_BUILD_APP)
     install(PROGRAMS scripts/relay-open scripts/relay-agent.py scripts/relay-local.py scripts/relay-update.py DESTINATION ${CMAKE_INSTALL_DATADIR}/relay/scripts)
     install(FILES packaging/org.relayterminal.Relay.metainfo.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo)
     install(FILES README.md packaging/copyright DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/relay)
-    include(packaging/cpack.cmake)
+    if(NOT WIN32)
+        include(packaging/cpack.cmake)
+    endif()
 endif()
 
 if(BUILD_TESTING)
@@ -714,7 +730,7 @@ if(BUILD_TESTING)
         src/TestSuitesModel.cpp src/TestSuitesPane.cpp)
     target_include_directories(relay-testsuites-tests PRIVATE src)
     target_link_libraries(relay-testsuites-tests PRIVATE relay-highlight ${RELAY_QT}::Widgets ${RELAY_QT}::Test)
-    target_compile_options(relay-testsuites-tests PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(relay-testsuites-tests PRIVATE ${RELAY_WARNINGS})
     add_test(NAME testsuites COMMAND relay-testsuites-tests)
     set_tests_properties(testsuites PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # The Profile result pane (#7BM4 phase 5): the `profile` events of protocol 31.9 in, the
@@ -722,7 +738,7 @@ if(BUILD_TESTING)
     add_executable(relay-profilepane-tests tests/profilepane_test.cpp src/ProfilePane.cpp)
     target_include_directories(relay-profilepane-tests PRIVATE src)
     target_link_libraries(relay-profilepane-tests PRIVATE relay-highlight ${RELAY_QT}::Widgets ${RELAY_QT}::Test)
-    target_compile_options(relay-profilepane-tests PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(relay-profilepane-tests PRIVATE ${RELAY_WARNINGS})
     add_test(NAME profilepane COMMAND relay-profilepane-tests)
     set_tests_properties(profilepane PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # The strip under the composer pairs subagents with the open tasks (owner, 2026-09-19): the
@@ -842,7 +858,7 @@ if(BUILD_TESTING)
             relay-terminal-engine relay-screen relay-slash relay-board relay-aliases
             relay-calllines relay-diffview relay-sharing relay-remotepane relay-internals
             relay-panestate relay-remotesettings
-            ${RELAY_QT}::DBus ${RELAY_QT}::Network ${RELAY_QT}::Widgets)
+            ${RELAY_QT}::Network ${RELAY_QT}::Widgets)
         target_compile_definitions(${console_target} PRIVATE
             RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
             RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"

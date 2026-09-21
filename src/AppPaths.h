@@ -7,6 +7,7 @@
 // The RELAY_* fallbacks live here because dataRoot() is what reads them.
 
 #include <QDir>
+#include <QStandardPaths>
 #include <QFileInfo>
 #include <QCoreApplication>
 #include <QString>
@@ -27,6 +28,24 @@
 #ifndef RELAY_SOURCE_DIR
 #define RELAY_SOURCE_DIR "."
 #endif
+
+// Packaged Windows runtimes are private to Relay; never rely on the Store alias.
+inline QString relayPython() {
+#ifdef Q_OS_WIN
+    const QString bundled = QCoreApplication::applicationDirPath() + QStringLiteral("/../runtime/python/python.exe");
+    if (QFileInfo::exists(bundled)) return QDir::cleanPath(bundled);
+    const QString configured = qEnvironmentVariable("RELAY_PYTHON");
+    if (!configured.isEmpty() && QFileInfo::exists(configured)) return configured;
+    return QStandardPaths::findExecutable(QStringLiteral("python.exe"));
+#else
+    return QStandardPaths::findExecutable(QStringLiteral("python3"));
+#endif
+}
+inline QString relayPowerShell() {
+    const QString bundled = QCoreApplication::applicationDirPath() + QStringLiteral("/../runtime/powershell/pwsh.exe");
+    if (QFileInfo::exists(bundled)) return QDir::cleanPath(bundled);
+    return QStandardPaths::findExecutable(QStringLiteral("pwsh.exe"));
+}
 
 inline QString dataRoot() {
     const QStringList choices{qEnvironmentVariable("RELAY_DATA_DIR"),

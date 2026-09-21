@@ -17,3 +17,7 @@ Corrected card ID R6LS (L is outside the board alphabet) to R6BS. Gate fixes lan
 <!-- relay:entry 20260921T221042Z-a5 author=codex kind=decision -->
 ### Codex · 2026-09-21 22:10
 Owner: "Native Windows installer". This requires the native port rather than a WSL wrapper. Starting the independent ConPTY backend and native smoke-test job; asked whether the installer should use PowerShell or bundled Bash before implementing shell integration. Linux CI is running at a59525c0.
+
+<!-- relay:entry 20260921T225943Z-a6 author=codex kind=decision -->
+### Codex · 2026-09-21 22:59
+Owner: "ok, sounds good, deliver it with a subagent". PowerShell 7 accepted. Delegated shell/command integration, Windows platform APIs, and Python locking/credentials to bounded subagents; parent owns application startup, installer, CI, release and site.

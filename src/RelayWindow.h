@@ -6417,7 +6417,7 @@ public:
     // close through their ordinary path so layout and scrollback are saved for it to reopen.
     void updateApp() {
         if (m_updateProcess) { notice(QStringLiteral("An update is already running.")); return; }
-        const QString python = QStandardPaths::findExecutable(QStringLiteral("python3"));
+        const QString python = relayPython();
         const QString script = dataRoot() + QStringLiteral("/scripts/relay-update.py");
         if (python.isEmpty() || !QFileInfo::exists(script)) {
             notice(QStringLiteral("The updater is missing: %1").arg(script));
@@ -6816,7 +6816,7 @@ public:
         const QString tab = tabIdOf(page);
         if (relay::BoardWorker *existing = m_boardWorkers.value(tab).data()) return existing;
         auto *worker = new relay::BoardWorker(
-            QStandardPaths::findExecutable(QStringLiteral("python3")), dataRoot(), this);
+            relayPython(), dataRoot(), this);
         m_boardWorkers.insert(tab, worker);
         QPointer<RelayWindow> guard(this);
         // Its events reach the views of its own tab and no others. A second tab on the same

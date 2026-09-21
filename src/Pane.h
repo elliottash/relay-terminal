@@ -157,17 +157,27 @@
 #include <QMimeDatabase>
 #include <QScrollBar>
 
+#ifndef Q_OS_WIN
 #include <sys/stat.h>
+#endif
+#ifndef Q_OS_WIN
 #include <sys/syscall.h>
+#endif
 #include <algorithm>
 #include <functional>
 #include <memory>
 #include <cmath>
 #include <csignal>
 #include <stdexcept>
+#ifndef Q_OS_WIN
 #include <fcntl.h>
+#endif
+#ifndef Q_OS_WIN
 #include <termios.h>
+#endif
+#ifndef Q_OS_WIN
 #include <unistd.h>
+#endif
 
 // One row of the queue list, in delivery order: a steer waiting for the running turn's next tool
 // call ("↪ next tool call ✦", in the agent's colour), then queued agent prompts (✦) and terminal
@@ -552,7 +562,7 @@ public:
         : m_workspace(workspace), m_cwd(cwd.isEmpty() ? workspace : cwd), m_cleanShell(cleanShell) {
         m_engineCore = engineCore;
         m_data = dataRoot();
-        m_python = QStandardPaths::findExecutable(QStringLiteral("python3"));
+        m_python = relayPython();
         if (m_python.isEmpty()) throw std::runtime_error("Python 3 is required.");
         if (!m_runtime.isValid()) throw std::runtime_error("Could not create a private shell runtime directory.");
         QFile::setPermissions(m_runtime.path(), QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
@@ -690,9 +700,9 @@ public:
         // `-m relay_core.…` needs the backend importable; appended, never prepended (26.4).
         const QString backend = m_data + QStringLiteral("/backend");
         const QString existing = environment.value(QStringLiteral("PYTHONPATH"));
-        if (!existing.split(QLatin1Char(':'), Qt::SkipEmptyParts).contains(backend))
+        if (!existing.split(QDir::listSeparator(), Qt::SkipEmptyParts).contains(backend))
             environment.insert(QStringLiteral("PYTHONPATH"),
-                               existing.isEmpty() ? backend : existing + QLatin1Char(':') + backend);
+                               existing.isEmpty() ? backend : existing + QDir::listSeparator() + backend);
         return environment;
     }
 
@@ -10619,8 +10629,8 @@ private:
         // restart, so the plain append grew the variable by one copy every time (review of
         // 51587e3) — a hundred shell restarts, a hundred copies, in every child process.
         const QString pythonPath = qEnvironmentVariable("PYTHONPATH");
-        if (!pythonPath.split(QLatin1Char(':'), Qt::SkipEmptyParts).contains(backendDir))
-            qputenv("PYTHONPATH", (pythonPath.isEmpty() ? backendDir : pythonPath + QLatin1Char(':') + backendDir).toUtf8());
+        if (!pythonPath.split(QDir::listSeparator(), Qt::SkipEmptyParts).contains(backendDir))
+            qputenv("PYTHONPATH", (pythonPath.isEmpty() ? backendDir : pythonPath + QDir::listSeparator() + backendDir).toUtf8());
         qputenv("RELAY_PYTHON", m_python.toUtf8());
         qputenv("RELAY_CLEAN_SHELL", cleanShell ? "1" : "0");
         // Opt-in OSC 7 / OSC 133 marks (shell/relay-integration.bash). Relay's own engine
@@ -10760,8 +10770,14 @@ private:
             return;
         }
         qputenv("RELAY_START_DIR", m_cwd.toUtf8());
+#ifdef Q_OS_WIN
+        const QStringList shell{relayPowerShell(), QStringLiteral("-NoLogo"), QStringLiteral("-NoProfile"),
+            QStringLiteral("-NoExit"), QStringLiteral("-ExecutionPolicy"), QStringLiteral("Bypass"),
+            QStringLiteral("-File"), m_data + QStringLiteral("/shell/integration.ps1")};
+#else
         const QStringList shell{QStringLiteral("/bin/bash"), QStringLiteral("--noprofile"),
             QStringLiteral("--rcfile"), m_data + QStringLiteral("/shell/integration.bash"), QStringLiteral("-i")};
+#endif
         m_shellUnit.clear();
         bool started = false;
         if (isolation::enabled() && isolation::available()) {
@@ -11914,7 +11930,7 @@ private:
         if (pid > 0) m_shellPid = pid;
         // A shell killed by a signal can leave the pane with no PID to ask about; use the last
         // PID the shell itself reported.
-        if (m_shellPid > 0 && !QFileInfo::exists(QStringLiteral("/proc/%1").arg(m_shellPid))) { shellStopped(); return; }
+        if (m_shellPid > 0 && !m_backend->isRunning()) { shellStopped(); return; }
         pid = m_shellPid;
         if (m_shellUnit.isEmpty()) return;
         const long kills = isolation::oomKills(pid);
@@ -16276,17 +16292,25 @@ private:
     // Where Relay's `ssh` and `mosh` wrappers keep their control sockets (shell/integration.bash).
     // Short on purpose: a socket path is limited to 107 bytes and %C adds 40.
     static QString sshSocketDir() {
+#ifdef Q_OS_WIN
+        return QDir::tempPath() + QStringLiteral("/relay-ssh");
+#else
         const QString runtime = qEnvironmentVariable("XDG_RUNTIME_DIR");
         if (!runtime.isEmpty()) return runtime + QStringLiteral("/relay-ssh");
         // No runtime directory: the fallback lives in a shared temporary directory, so its name
         // carries the user id and its owner and mode are checked before anything is put in it.
         return QDir::tempPath() + QStringLiteral("/relay-ssh-%1").arg(::getuid());
+#endif
     }
 
     // The directory holds the control sockets of the user's own logins: another account owning it,
     // or a mode that lets anyone in, means no sharing rather than sharing through someone's
     // directory. Returns false without creating anything when it cannot be made safe.
     static bool sshSocketDirReady(QString *why) {
+#ifdef Q_OS_WIN
+        *why = QStringLiteral("SSH connection sharing is unavailable on Windows; use a normal SSH session.");
+        return false;
+#else
         const QString path = sshSocketDir();
         const QFileInfo before(path);
         if (before.exists() && !before.isDir()) { *why = QStringLiteral("%1 is not a directory").arg(path); return false; }
@@ -16300,6 +16324,7 @@ private:
         if (info.st_uid != ::getuid()) { *why = QStringLiteral("%1 belongs to another user").arg(path); return false; }
         if (info.st_mode & (S_IRWXG | S_IRWXO)) { *why = QStringLiteral("%1 is open to other users").arg(path); return false; }
         return true;
+#endif
     }
 
     // The foreground program's arguments, unjoined (foregroundCommandLine() joins them with spaces).
@@ -16759,6 +16784,9 @@ private:
             if (!flags.canonical) return TerminalMode::Raw;
             return flags.echo ? TerminalMode::Echoing : TerminalMode::Secret;
         }
+#ifdef Q_OS_WIN
+        return TerminalMode::Unknown; // ConPTY does not expose child console input modes.
+#else
         const auto name = QStringLiteral("/proc/%1/fd/0").arg(pid).toLocal8Bit();
         const int fd = ::open(name.constData(), O_RDONLY | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
         if (fd < 0) return TerminalMode::Unknown;
@@ -16768,6 +16796,7 @@ private:
         if (!ok) return TerminalMode::Unknown;
         if (!(state.c_lflag & ICANON)) return TerminalMode::Raw;
         return (state.c_lflag & ECHO) ? TerminalMode::Echoing : TerminalMode::Secret;
+#endif
     }
 
     // Everything the input rules (src/InputPolicy.h) need about this pane. `live` also asks
@@ -16791,6 +16820,9 @@ private:
     // /proc/<pid>/syscall needs ptrace access, so programs running as another user (sudo) are
     // not visible here.
     bool programWaitingForInput() const {
+#ifdef Q_OS_WIN
+        return false; // No Windows API exposes another process's pending console read.
+#else
         if (!m_backend) return false;
         const int shell = shellPid();
         if (shell <= 0) return false;
@@ -16817,12 +16849,16 @@ private:
             if (QFileInfo(QStringLiteral("/proc/%1/fd/%2").arg(pid).arg(fd)).symLinkTarget() == tty) return true;
         }
         return false;
+#endif
     }
 
     // Programs Relay cannot inspect: sudo, doas, pkexec, su, run0, anything running as another user,
     // or a process whose /proc/<pid>/syscall is unreadable. The prompt box stays visible, but the
     // keyboard focus stays in the terminal; a hint in the composer row says how to type a prompt.
     QString opaqueForegroundProgram() const {
+#ifdef Q_OS_WIN
+        return {};
+#else
         if (!processBusy()) return {};
         const int shell = shellPid();
         long group = shell > 0 ? foregroundGroup(shell) : -1;
@@ -16848,6 +16884,7 @@ private:
         };
         if (readable(shell) && !readable(group)) return name;
         return {};
+#endif
     }
 
     void updateOpaqueProgram() {
@@ -17389,6 +17426,9 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
     // TIOCGPGRP on the pty master it already holds, instead of an open/ioctl/close of
     // /proc/<pid>/fd/0 plus a parse of /proc/<pid>/stat.
     bool readlineReady() const {
+#ifdef Q_OS_WIN
+        return m_backend && m_backend->isRunning() && m_promptReported;
+#else
         if (!m_backend) return false;
         const int pid = shellPid();
         if (pid <= 0) return false;
@@ -17405,6 +17445,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
         // (tpgid) reports the same foreground process group without that restriction. (The
         // engine's TIOCGPGRP above is on the MASTER, which carries no such rule.)
         return raw && foregroundGroup(pid) == pid;
+#endif
     }
 
     // Foreground process group of the pane's terminal, read from the shell's /proc entry: the

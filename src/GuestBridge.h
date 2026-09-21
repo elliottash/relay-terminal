@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
+#include "AppPaths.h"
 // The Claude IDE bridge, the GUI's end (issue GT7X, protocol 26.5).
 //
 // Relay plays the *editor* side of Claude Code's IDE integration, so a `claude` the user starts in
@@ -261,7 +262,7 @@ private:
 
     void start(const QString &python) {
         const QString interpreter = python.isEmpty()
-                                        ? QStandardPaths::findExecutable(QStringLiteral("python3"))
+                                        ? relayPython()
                                         : python;
         if (interpreter.isEmpty() || m_data.isEmpty()) {
             relay::log::error(QStringLiteral("guest_bridge_unavailable python=%1 data=%2")
