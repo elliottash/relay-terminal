@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: m
 created: '2026-09-21'
 source: Codex in Relay, 2026-09-21
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-recently-closed-modal/], related: [H8SS], github: null}
+links: {plans: [], commits: [abd65a7111e5fb0662871e2c1f85df2e594dedea], evidence: [docs/qa_evidence/2026-09-21-recently-closed-modal/], related: [H8SS], github: null}
 ---
 # Open Recently closed in a modal from Actions
 
