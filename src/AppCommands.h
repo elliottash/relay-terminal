@@ -27,6 +27,7 @@
 #include <QJsonValue>
 #include <QList>
 #include <QString>
+#include <QStringList>
 #include <functional>
 
 namespace relay {
@@ -90,6 +91,39 @@ bool conversationToOpen(const QJsonObject &command, QJsonObject *item, bool *new
 // action is not to widen what agents may do by accident.
 bool actionIsAgentSafe(const QString &key);
 
+// The half of that table that only opens, reveals, focuses or restores a view — and so changes
+// nothing at all. Owner, 2026-09-20 on card #AG7R: "7 pass the toggle like app_open". Options ›
+// Agent's "Agents may change options and run actions" refused *every* `run_action`, so with the
+// toggle off a helper could open a conversation into a new pane through `app_open` (never gated —
+// §30.4, opening is not a write) and could not open an empty pane through `run_action`: the same
+// act, two answers. These pass the toggle; the reversible-but-writing rest of the safe table
+// (`keybindings.reload`, `theme.reload`, `agents.reload`, `pane.equalize`, `agent.screenshotPane`
+// and every `row:` button) stays behind it, so the toggle still means "may change things".
+//
+// Every read action is agent-safe; `actionIsAgentSafe()` is this set plus the writing ones.
+bool actionIsRead(const QString &key);
+
+// Every key the safe table names outright, sorted. `catalog()` uses it to list the safe keys the
+// palette has no row for (#AG7R group 1); the prefix entries (`closed:<id>`) are not in it,
+// because there is no fixed set of them to list.
+QStringList agentSafeActionKeys();
+
+// A value row that is named like a credential — `key`, `token`, `secret`, `password`,
+// `credential` in its id or its label — but was never marked `SettingRow::secret`.
+//
+// Decision 1 is "every value row except a secret", and until 2026-09-20 no shipped row set the
+// flag at all: the guard had never fired, and nothing but §30.8 stood between the next
+// key-shaped row and an agent reading its value out of the catalog (#AG7R group 6). So the
+// catalog fails safe — a row this answers true for is listed without its value and is not
+// settable, exactly as a marked secret is — and says so on stderr, which is how the person who
+// adds the row learns to mark it (or to name it below).
+//
+// Only `Text` rows are examined. A secret is always free text; a Toggle, Choice or Number cannot
+// hold one, and the broad rule over every kind would have caught five innocent shipped rows on
+// the word "key" alone (the keymap preset, the program-keys mode, the voice hold key, the
+// first-token timeout, "Which Relay keys still act while vim runs").
+bool rowNamedLikeASecret(const SettingRow &row);
+
 // The action key a Button/Buttons row of the Options pane gets in the action catalog. Owner
 // decision 1: "Button rows are not values; they are actions" — so the Test-key button, Local
 // models' Refresh and Detect, "copy this page" and the model reorder arrows are reachable through
@@ -117,6 +151,22 @@ public:
     // the §30.3 error words in *error when it cannot. Not gated by `writes_enabled`: opening a
     // pane changes nothing.
     std::function<bool(const QJsonObject &command, QString *error)> openTarget;
+    // The keybinding registry (`Keymap`, src/Keymap.h), for the keys it knows that the action
+    // catalog has no row for. Twelve of the 33 keys the safe table named were registry-only —
+    // `pane.focusLeft`, `window.next`, `palette.open`, `help.shortcuts`, `conversations.open`,
+    // `agent.agentsMenu`, `agent.subagentPane`, `notifications.jump` — so an agent that read
+    // §30.2, believed it might move the focus and tried it was told the action did not exist
+    // (#AG7R group 1). The registry is what the keyboard itself dispatches through, so running a
+    // key here is the same act as pressing it.
+    //
+    // `registryLabel` answers the action's description, or an empty string when the key is not a
+    // registered action — that emptiness is what still makes a made-up key `unknown_action`. A
+    // registered key that the table does *not* name is found and then refused `not_agent_safe`,
+    // which is the right refusal: the policy says no, not "no such thing".
+    //
+    // Both unset is the tested, window-free case: then only the catalog's own rows resolve.
+    std::function<QString(const QString &key)> registryLabel;
+    std::function<void(const QString &key)> runRegistryAction;
     // ----- the catalog (§30.2) ------------------------------------------------------------------
     // The whole `app` block, for `configure` and for an `app_catalog` refresh. It is rebuilt from
     // the live catalogs every time: the block carries current values, so a setting the person

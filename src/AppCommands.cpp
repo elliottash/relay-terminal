@@ -2,21 +2,31 @@
 #include "AppCommands.h"
 #include "Notifications.h"
 
+#include <QDebug>
 #include <QJsonArray>
+#include <QRegularExpression>
 #include <QSet>
 
 namespace relay {
 namespace appcommands {
 
-bool actionIsAgentSafe(const QString &key) {
-    // Owner decision 2 (2026-09-20), the line being "undoable in one click". Everything not named
-    // here is off, including every action added after this list was written: opt-in has to mean
-    // that adding an action does not widen what an agent may do.
-    static const QSet<QString> safe = {
+namespace {
+
+// `closed:<id>` is the Recently-closed submenu's child: one named pane, tab or window out of the
+// last 25 (src/ClosedStack.h). It cannot be a set entry, because the id is minted when the thing
+// is closed and there is no list of them to write down — so it is matched by prefix, and by a
+// prefix that `closed.list` and `closed.restore` cannot collide with (they use a dot).
+bool isOneNamedClosedPane(const QString &key) {
+    return key.startsWith(QStringLiteral("closed:")) && key.size() > 7;
+}
+
+// The half of the safe table that changes nothing: it opens, reveals, focuses or restores a view
+// and stops there. This is the set `writes_enabled` does not gate (see actionIsRead()).
+const QSet<QString> &readActions() {
+    static const QSet<QString> keys = {
         // Open or reveal something. Nothing is changed and the pane closes in one click.
         QStringLiteral("app.settings"),        // Options
         QStringLiteral("palette.open"),        // Actions
-        QStringLiteral("palette.agent"),
         QStringLiteral("board.open"),          // the Switchboard
         QStringLiteral("conversations.open"),  // the session manager
         QStringLiteral("closed.list"),
@@ -31,6 +41,15 @@ bool actionIsAgentSafe(const QString &key) {
         QStringLiteral("find.inView"),
         QStringLiteral("links.step"),
         QStringLiteral("notifications.jump"),
+        // #AG7R group 3, owner 2026-09-20 ("groups 1-3 all yes"): reversible, in the catalog, and
+        // named here only because the first table was written from a short list. Test suites is
+        // the same pane class as the Switchboard and the explorer, which were already safe
+        // (#7BM4); About is a dialog with one OK; the two folder actions hand a path to the
+        // desktop's file manager and change nothing on either side.
+        QStringLiteral("tests.open"),
+        QStringLiteral("app.about"),
+        QStringLiteral("logs.open"),
+        QStringLiteral("theme.folder"),
         // Open a pane. Owner, 2026-09-20 — "the sessions helper can't open panes because it says
         // it's unsafe. can you change that": a new pane holds nothing of the person's until they
         // put something in it, and the × in its header (pane.close, Ctrl+W) is the one click that
@@ -40,16 +59,82 @@ bool actionIsAgentSafe(const QString &key) {
         QStringLiteral("pane.splitRight"), QStringLiteral("pane.splitDown"),
         QStringLiteral("pane.splitLeft"), QStringLiteral("pane.splitUp"),
         QStringLiteral("closed.restore"),  // puts a closed pane back; the undo of a close
+        // …and `menu:closed` is the list of the last 25 to put back one by one. The submenu itself
+        // has no `run` and cannot be run (§30.2); it is named here so that the agent reading the
+        // catalog is not told the group is off while every child of it is on.
+        QStringLiteral("menu:closed"),
         // Move the focus. Moving it back is the undo.
         QStringLiteral("pane.focusUp"), QStringLiteral("pane.focusDown"),
         QStringLiteral("pane.focusLeft"), QStringLiteral("pane.focusRight"),
         QStringLiteral("tab.next"), QStringLiteral("tab.previous"),
         QStringLiteral("window.next"), QStringLiteral("window.previous"),
-        // Re-read a file that is already on disk: a refresh, like Local models' Detect.
+    };
+    return keys;
+}
+
+// Safe — undoable in one click — but each of these writes something, so `writes_enabled` still
+// gates it. Keeping the two sets apart is what stops the toggle from meaning "agents may do
+// nothing at all" and from meaning "agents may do anything reversible" (#AG7R group 7).
+const QSet<QString> &reversibleWriteActions() {
+    static const QSet<QString> keys = {
+        // Re-read a file that is already on disk: a refresh, like Local models' Detect. It is a
+        // write because a theme or a keybinding file edited since the last read takes effect.
         QStringLiteral("keybindings.reload"), QStringLiteral("theme.reload"),
         QStringLiteral("agents.reload"),
+        // #AG7R group 3, the two that are not merely views. A screenshot writes no setting but it
+        // attaches an image to the pane's next prompt, so it changes what the person is about to
+        // send; equalize moves every splitter in the tab, which a drag takes back but which is a
+        // change to the layout all the same.
+        QStringLiteral("agent.screenshotPane"),
+        QStringLiteral("pane.equalize"),
     };
-    return safe.contains(key);
+    return keys;
+}
+
+}  // namespace
+
+bool actionIsRead(const QString &key) {
+    return readActions().contains(key) || isOneNamedClosedPane(key);
+}
+
+bool actionIsAgentSafe(const QString &key) {
+    // Owner decision 2 (2026-09-20), the line being "undoable in one click". Everything not named
+    // in the two sets above is off, including every action added after they were written: opt-in
+    // has to mean that adding an action does not widen what an agent may do.
+    //
+    // `palette.agent` used to be here and is gone: src/Keymap.h:176 migrates it to `palette.open`
+    // and it exists nowhere else in the tree, so the table was naming a key that could never
+    // arrive (#AG7R group 1).
+    return actionIsRead(key) || reversibleWriteActions().contains(key);
+}
+
+QStringList agentSafeActionKeys() {
+    QStringList keys;
+    for (const QString &key : readActions()) keys << key;
+    for (const QString &key : reversibleWriteActions()) keys << key;
+    // Sorted: a QSet iterates in whatever order it likes, and the catalog must not reshuffle
+    // between two reads of the same app (§30.2 — nothing is cached across a refresh, so a
+    // reordered array reads as a changed app).
+    keys.sort();
+    return keys;
+}
+
+bool rowNamedLikeASecret(const SettingRow &row) {
+    if (row.kind != SettingRow::Text || row.secret) return false;
+    // Named like a credential but provably not one. Each entry is an existing row whose *name*
+    // trips the rule, not a judgement that its value is harmless to send: add to this list only
+    // after reading the row, and mark the row `secret` instead whenever the answer is "it might
+    // hold one".
+    static const QSet<QString> notSecretDespiteTheName = {
+        // Options › Security, "Files the agent never reads": a list of regular expressions that
+        // says which files hold secrets. It is the guard's own configuration, not a secret.
+        QStringLiteral("option:security/secret_patterns"),
+    };
+    if (notSecretDespiteTheName.contains(row.id)) return false;
+    static const QRegularExpression named(
+        QStringLiteral("key|token|secret|password|passphrase|credential"),
+        QRegularExpression::CaseInsensitiveOption);
+    return named.match(row.id).hasMatch() || named.match(row.label).hasMatch();
 }
 
 QString rowActionKey(const QString &sectionId, const QString &rowId, int button) {
@@ -163,6 +248,24 @@ QJsonObject AppCommands::catalog(const QString &tab) const {
         for (const SettingRow &row : section.rows) {
             if (row.id.isEmpty()) continue;
             const bool value = holdsValue(row.kind);
+            // A row nobody remembered to mark. This is the one place every row passes through on
+            // its way to an agent, so it is where the guard belongs: it fails safe (the value is
+            // withheld, exactly as a marked secret's is) and says so once, naming the row, for
+            // whoever added it (#AG7R group 6).
+            const bool unmarkedSecret = rowNamedLikeASecret(row);
+            if (unmarkedSecret) {
+                static QSet<QString> told;
+                if (!told.contains(row.id)) {
+                    told.insert(row.id);
+                    qWarning().noquote()
+                        << QStringLiteral("app catalog: \"%1\" (%2) is named like a credential but does "
+                                          "not set SettingRow::secret, so its value is being withheld "
+                                          "from agents. Set row.secret, or name it in "
+                                          "appcommands::rowNamedLikeASecret() if it holds no secret "
+                                          "(protocol §30.8).").arg(row.label, row.id);
+                }
+            }
+            const bool secret = row.secret || unmarkedSecret;
             QJsonObject entry{{QStringLiteral("id"), row.id},
                               {QStringLiteral("section"), section.id},
                               {QStringLiteral("section_label"), section.title},
@@ -171,10 +274,10 @@ QJsonObject AppCommands::catalog(const QString &tab) const {
                               {QStringLiteral("kind"), kindName(row.kind)},
                               // Owner decision 1: every value row except a secret. A button is not
                               // a value; it is an action, and is listed as one below.
-                              {QStringLiteral("settable"), value && !row.secret}};
-            if (row.secret) entry.insert(QStringLiteral("secret"), true);
+                              {QStringLiteral("settable"), value && !secret}};
+            if (secret) entry.insert(QStringLiteral("secret"), true);
             // A secret row's value never leaves this process, in either direction (§30.8).
-            if (value && !row.secret) entry.insert(QStringLiteral("value"), rowValue(row));
+            if (value && !secret) entry.insert(QStringLiteral("value"), rowValue(row));
             if (row.kind == SettingRow::Choice) {
                 QJsonArray choices;
                 for (int i = 0; i < row.options.size(); ++i)
@@ -214,8 +317,10 @@ QJsonObject AppCommands::catalog(const QString &tab) const {
         }
     }
 
-    const auto appendAction = [&actionRows](const ActionItem &item) {
+    QSet<QString> listed;
+    const auto appendAction = [&actionRows, &listed](const ActionItem &item) {
         if (item.key.isEmpty()) return;
+        listed.insert(item.key);
         actionRows.append(QJsonObject{{QStringLiteral("key"), item.key},
                                       {QStringLiteral("section"), item.section},
                                       {QStringLiteral("label"), item.label},
@@ -231,6 +336,26 @@ QJsonObject AppCommands::catalog(const QString &tab) const {
         // A submenu is not runnable itself; its children are the actions. One level, exactly as
         // the Actions pane draws them.
         if (item.children) for (const ActionItem &child : item.children()) appendAction(child);
+    }
+
+    // The safe keys the palette has no row for. Until 2026-09-20 twelve of them were missing from
+    // this array while #GMCF listed them from the worker side under section `Shortcuts` with
+    // `agent_safe: false` — so one answer contradicted the policy table on the same key, and
+    // running one answered `unknown_action` (#AG7R group 1). The GUI catalog is where the policy
+    // lives, so it carries them; the worker's shortcut rows skip any key this array already holds,
+    // and `findAction()` runs them through the same registry the keyboard dispatches through.
+    if (registryLabel) {
+        for (const QString &key : agentSafeActionKeys()) {
+            if (listed.contains(key)) continue;
+            const QString label = registryLabel(key);
+            if (label.isEmpty()) continue;   // not a registered action either: nothing to offer
+            listed.insert(key);
+            actionRows.append(QJsonObject{{QStringLiteral("key"), key},
+                                          {QStringLiteral("section"), QStringLiteral("Shortcuts")},
+                                          {QStringLiteral("label"), label},
+                                          {QStringLiteral("detail"), QString()},
+                                          {QStringLiteral("agent_safe"), true}});
+        }
     }
 
     app.insert(QStringLiteral("options"), options);
@@ -281,16 +406,44 @@ bool AppCommands::findAction(const QString &key, ActionItem *item, bool *agentSa
             }
         return false;
     }
-    if (!actions) return false;
     const auto match = [&](const ActionItem &candidate) {
         if (candidate.key != key || !candidate.run) return false;
         if (item) *item = candidate;
         if (agentSafe) *agentSafe = candidate.agentSafe || appcommands::actionIsAgentSafe(candidate.key);
         return true;
     };
-    for (const ActionItem &candidate : actions()) {
-        if (match(candidate)) return true;
-        if (candidate.children) for (const ActionItem &child : candidate.children()) if (match(child)) return true;
+    if (actions) {
+        for (const ActionItem &candidate : actions()) {
+            if (match(candidate)) return true;
+            if (candidate.children) for (const ActionItem &child : candidate.children()) if (match(child)) return true;
+        }
+    }
+    // Nothing in the catalog. The keybinding registry knows a great many keys the palette has no
+    // row for, and twelve of them were in the safe table — `pane.focusLeft`, `window.next`,
+    // `palette.open`, `help.shortcuts` — so the policy named keys the executor could not find and
+    // every one of them answered `unknown_action` (#AG7R group 1). Running one here is what
+    // pressing its shortcut does, through the same `runAction()`.
+    //
+    // The lookup is deliberately not filtered by the safe table: a registered key the table does
+    // not name is found and then refused `not_agent_safe` by execute(), which tells the agent the
+    // policy said no rather than that Relay has no such action.
+    if (registryLabel && runRegistryAction) {
+        const QString label = registryLabel(key);
+        if (!label.isEmpty()) {
+            if (agentSafe) *agentSafe = appcommands::actionIsAgentSafe(key);
+            if (item) {
+                ActionItem wrapped;
+                wrapped.key = key;
+                // The same section #GMCF gives these on the worker side, so a key does not move
+                // between sections depending on which answer the agent is reading.
+                wrapped.section = QStringLiteral("Shortcuts");
+                wrapped.label = label;
+                wrapped.agentSafe = appcommands::actionIsAgentSafe(key);
+                wrapped.run = [run = runRegistryAction, key] { run(key); };
+                *item = wrapped;
+            }
+            return true;
+        }
     }
     return false;
 }
@@ -386,8 +539,10 @@ QJsonObject AppCommands::execute(const QJsonObject &command, const QString &who)
         QString sectionId;
         if (!findRow(rowId, &row, &sectionId)) return refuse(QStringLiteral("unknown_row"));
         // The catalog the worker holds is a snapshot; the row is the truth, so both markers are
-        // checked again here (§30.3).
-        if (row.secret) return refuse(QStringLiteral("secret"));
+        // checked again here (§30.3). `rowNamedLikeASecret` is the unmarked case the catalog
+        // already withheld the value of: the two halves have to agree, or a row would be listed
+        // as not settable and then be written anyway (#AG7R group 6).
+        if (row.secret || rowNamedLikeASecret(row)) return refuse(QStringLiteral("secret"));
         if (!holdsValue(row.kind)) return refuse(QStringLiteral("not_settable"));
         const QJsonValue before = rowValue(row);
         QString error;
@@ -425,8 +580,14 @@ QJsonObject AppCommands::execute(const QJsonObject &command, const QString &who)
     }
 
     if (what == QStringLiteral("run_action")) {
-        if (!writes) return refuse(QStringLiteral("writes_disabled"));
         const QString key = target(command, "key", "action");
+        // Owner, 2026-09-20 on #AG7R: "7 pass the toggle like app_open". Until then the toggle
+        // refused every action, so with it off a helper could open a conversation into a new pane
+        // through `app_open` and could not open an empty pane through `run_action` — the same act,
+        // two answers. An action that only opens, reveals, focuses or restores a view changes
+        // nothing, so it passes; everything else, including a key nothing answers to, still meets
+        // the toggle first and answers `writes_disabled` exactly as before.
+        if (!writes && !actionIsRead(key)) return refuse(QStringLiteral("writes_disabled"));
         ActionItem item;
         bool agentSafe = false;
         if (!findAction(key, &item, &agentSafe)) return refuse(QStringLiteral("unknown_action"));

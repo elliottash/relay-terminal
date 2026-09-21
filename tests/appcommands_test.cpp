@@ -15,6 +15,8 @@
 #include <QJsonDocument>
 #include <QLabel>
 #include <QJsonObject>
+#include <QMap>
+#include <QRegularExpression>
 #include <QTest>
 
 using relay::ActionItem;
@@ -156,7 +158,31 @@ QList<ActionItem> actions(State *state) {
         item.run = [state] { state->ran << QStringLiteral("windows.fresh"); };
         items << item;
     }
+    {
+        // Safe, but it writes: re-reading theme.json puts an edit made since the last read into
+        // effect, so this one stays behind the writes toggle while opening a pane no longer does
+        // (#AG7R group 7).
+        ActionItem item;
+        item.key = QStringLiteral("theme.reload");
+        item.section = QStringLiteral("Relay");
+        item.label = QStringLiteral("Reload themes");
+        item.agentSafe = relay::appcommands::actionIsAgentSafe(item.key);
+        item.run = [state] { state->ran << QStringLiteral("theme.reload"); };
+        items << item;
+    }
     return items;
+}
+
+// The keybinding registry as AppCommands sees it (src/Keymap.h in the app): a key it knows, and
+// nothing else. Two of these are in the safe table and one is not, which is how the three
+// answers — ran, `not_agent_safe`, `unknown_action` — are told apart.
+QString registryLabel(const QString &key) {
+    static const QMap<QString, QString> registered = {
+        {QStringLiteral("pane.focusLeft"), QStringLiteral("Focus pane to the left")},
+        {QStringLiteral("help.shortcuts"), QStringLiteral("Actions: every action and the keys it answers to")},
+        {QStringLiteral("agent.interrupt"), QStringLiteral("Interrupt the agent")},
+    };
+    return registered.value(key);
 }
 
 QJsonObject rowOf(const QJsonObject &app, const QString &key, const QString &id) {
@@ -190,6 +216,8 @@ private Q_SLOTS:
         app.sections = [this] { return catalog(&state); };
         app.actions = [this] { return actions(&state); };
         app.writesEnabled = [this] { return writes; };
+        app.registryLabel = [](const QString &key) { return registryLabel(key); };
+        app.runRegistryAction = [this](const QString &key) { state.ran << QStringLiteral("registry:") + key; };
         app.openTarget = [this](const QJsonObject &command, QString *error) {
             const QString target = command.value(QStringLiteral("target")).toString();
             if (target != QStringLiteral("options") && target != QStringLiteral("sessions")) {
@@ -354,7 +382,7 @@ private Q_SLOTS:
 
         const QJsonObject ran = run({{QStringLiteral("id"), QStringLiteral("r2")},
                                      {QStringLiteral("command"), QStringLiteral("run_action")},
-                                     {QStringLiteral("key"), QStringLiteral("app.settings")}});
+                                     {QStringLiteral("key"), QStringLiteral("theme.reload")}});
         QCOMPARE(ran.value(QStringLiteral("error")).toString(), QStringLiteral("writes_disabled"));
 
         // Opening a pane changes nothing, so it is offered whatever the toggle says (§30.4).
@@ -413,6 +441,273 @@ private Q_SLOTS:
                       {QStringLiteral("key"), QStringLiteral("pane.close")}}).value(QStringLiteral("error")).toString(),
                  QStringLiteral("not_agent_safe"));
         QCOMPARE(state.ran.size(), 1);
+    }
+
+    // ----- the registry fallback (#AG7R group 1) --------------------------------------------------
+    //
+    // Twelve of the 33 keys the safe table named had no palette row — they live only in the
+    // keybinding registry — so an agent that read §30.2, believed it might move the focus between
+    // panes, and tried it was told `unknown_action`: "Relay has no action 'pane.focusLeft'". The
+    // table is the policy, so the executor now falls back to the registry the keyboard itself
+    // dispatches through.
+    void aSafeKeyWithNoPaletteRowRunsThroughTheRegistry() {
+        const QJsonObject result = run({{QStringLiteral("id"), QStringLiteral("r1")},
+                                        {QStringLiteral("command"), QStringLiteral("run_action")},
+                                        {QStringLiteral("key"), QStringLiteral("pane.focusLeft")}});
+        QVERIFY2(result.value(QStringLiteral("ok")).toBool(),
+                 qPrintable(result.value(QStringLiteral("error")).toString()));
+        QCOMPARE(state.ran, QStringList{QStringLiteral("registry:pane.focusLeft")});
+        // It is a change like any other action, logged under the registry's own description.
+        QCOMPARE(app.changes().size(), 1);
+        QCOMPARE(app.changes().first().label, QStringLiteral("Focus pane to the left"));
+    }
+
+    // …and the policy still answers first. A registered key the table does not name is refused on
+    // the policy rather than denied as missing — the card's own note: "which would make them
+    // reachable and then refused on the policy, which is the right answer".
+    void aRegistryKeyOutsideTheTableIsRefusedOnThePolicyNotAsUnknown() {
+        writes = true;
+        QCOMPARE(run({{QStringLiteral("id"), QStringLiteral("r1")},
+                      {QStringLiteral("command"), QStringLiteral("run_action")},
+                      {QStringLiteral("key"), QStringLiteral("agent.interrupt")}})
+                     .value(QStringLiteral("error")).toString(),
+                 QStringLiteral("not_agent_safe"));
+        // Neither the catalog nor the registry: still nothing to run.
+        QCOMPARE(run({{QStringLiteral("id"), QStringLiteral("r2")},
+                      {QStringLiteral("command"), QStringLiteral("run_action")},
+                      {QStringLiteral("key"), QStringLiteral("pane.focusSideways")}})
+                     .value(QStringLiteral("error")).toString(),
+                 QStringLiteral("unknown_action"));
+        QVERIFY(state.ran.isEmpty());
+    }
+
+    // The same keys in the catalog, so `app_action_list` stops contradicting the policy table on
+    // the same key in the same answer (#GMCF listed them under `Shortcuts` with agent_safe false).
+    void theCatalogListsTheRegistryOnlySafeKeysAsSafe() {
+        const QJsonObject block = app.catalog(QStringLiteral("tab-7"));
+        const QJsonObject focus = rowOf(block, QStringLiteral("actions"), QStringLiteral("pane.focusLeft"));
+        QVERIFY(!focus.isEmpty());
+        QVERIFY(focus.value(QStringLiteral("agent_safe")).toBool());
+        QCOMPARE(focus.value(QStringLiteral("section")).toString(), QStringLiteral("Shortcuts"));
+        QCOMPARE(focus.value(QStringLiteral("label")).toString(), QStringLiteral("Focus pane to the left"));
+        QVERIFY(rowOf(block, QStringLiteral("actions"), QStringLiteral("help.shortcuts"))
+                    .value(QStringLiteral("agent_safe")).toBool());
+        // Not safe, so not added here: the fallback finds it, the catalog does not advertise it.
+        QVERIFY(rowOf(block, QStringLiteral("actions"), QStringLiteral("agent.interrupt")).isEmpty());
+        // A safe key with a palette row is listed once, from the palette, not twice.
+        int settings = 0;
+        for (const auto &value : block.value(QStringLiteral("actions")).toArray())
+            if (value.toObject().value(QStringLiteral("key")).toString() == QStringLiteral("app.settings")) ++settings;
+        QCOMPARE(settings, 1);
+    }
+
+    // `palette.agent` was in the table and nowhere else in the tree: src/Keymap.h migrates the key
+    // to `palette.open`, so the policy was naming a key that could never arrive.
+    void theRetiredPaletteAgentKeyIsGone() {
+        QVERIFY(!relay::appcommands::actionIsAgentSafe(QStringLiteral("palette.agent")));
+        QVERIFY(!relay::appcommands::agentSafeActionKeys().contains(QStringLiteral("palette.agent")));
+    }
+
+    // ----- group 3: reversible, in the catalog, never named --------------------------------------
+    // Owner, 2026-09-20 on #AG7R: "groups 1-3 all yes", for the window-scoped half. The
+    // pane-scoped keys (model, effort, input mode, plan toggle) wait for `run_action` to carry a
+    // target pane — group 2 — and are deliberately still off here.
+    void theWindowScopedGroupThreeKeysAreSafe() {
+        for (const QString &key : {QStringLiteral("tests.open"), QStringLiteral("app.about"),
+                                   QStringLiteral("logs.open"), QStringLiteral("theme.folder"),
+                                   QStringLiteral("agent.screenshotPane"), QStringLiteral("pane.equalize"),
+                                   QStringLiteral("menu:closed")})
+            QVERIFY2(relay::appcommands::actionIsAgentSafe(key), qPrintable(key));
+        for (const QString &key : {QStringLiteral("menu:model"), QStringLiteral("model:local/bonsai"),
+                                   QStringLiteral("menu:effort"), QStringLiteral("input.toggle"),
+                                   QStringLiteral("agent.planToggle")})
+            QVERIFY2(!relay::appcommands::actionIsAgentSafe(key), qPrintable(key));
+    }
+
+    // One named recently-closed pane. The key carries the id the close minted, so there is no set
+    // to look it up in: it is matched by prefix, and `closed.list` / `closed.restore` cannot be
+    // caught by that prefix because they use a dot.
+    void aNamedClosedPaneIsSafeByItsPrefix() {
+        QVERIFY(relay::appcommands::actionIsAgentSafe(QStringLiteral("closed:2")));
+        QVERIFY(relay::appcommands::actionIsAgentSafe(QStringLiteral("closed:c-91f3ab")));
+        QVERIFY(relay::appcommands::actionIsRead(QStringLiteral("closed:2")));
+        QVERIFY(!relay::appcommands::actionIsAgentSafe(QStringLiteral("closed:")));       // no id at all
+        QVERIFY(!relay::appcommands::actionIsAgentSafe(QStringLiteral("closed.forget")));  // not the prefix
+    }
+
+    // ----- group 7: the writes toggle is about writing ------------------------------------------
+    //
+    // Owner, 2026-09-20: "7 pass the toggle like app_open". With the toggle off a helper could
+    // open a conversation into a new pane through `app_open` — never gated, §30.4 — and could not
+    // open an empty pane through `run_action`. Same act, two answers.
+    void withWritesOffAnActionThatOnlyOpensRunsAndOneThatWritesDoesNot() {
+        writes = false;
+        QVERIFY2(run({{QStringLiteral("id"), QStringLiteral("r1")},
+                      {QStringLiteral("command"), QStringLiteral("run_action")},
+                      {QStringLiteral("key"), QStringLiteral("pane.splitRight")}})
+                     .value(QStringLiteral("ok")).toBool(),
+                 "opening a pane changes nothing, so the toggle does not gate it");
+        QVERIFY(run({{QStringLiteral("id"), QStringLiteral("r2")},
+                     {QStringLiteral("command"), QStringLiteral("run_action")},
+                     {QStringLiteral("key"), QStringLiteral("pane.focusLeft")}})
+                    .value(QStringLiteral("ok")).toBool());
+        QCOMPARE(state.ran, (QStringList{QStringLiteral("pane.splitRight"),
+                                         QStringLiteral("registry:pane.focusLeft")}));
+
+        // Reversible, but it puts a file edited since the last read into effect: still gated.
+        QCOMPARE(run({{QStringLiteral("id"), QStringLiteral("r3")},
+                      {QStringLiteral("command"), QStringLiteral("run_action")},
+                      {QStringLiteral("key"), QStringLiteral("theme.reload")}})
+                     .value(QStringLiteral("error")).toString(),
+                 QStringLiteral("writes_disabled"));
+        // A row button that tests a key is reversible too, and also stays behind the toggle.
+        QCOMPARE(run({{QStringLiteral("id"), QStringLiteral("r4")},
+                      {QStringLiteral("command"), QStringLiteral("run_action")},
+                      {QStringLiteral("key"), relay::appcommands::rowActionKey(
+                                                  QStringLiteral("models"), QStringLiteral("provider:acme"), 0)}})
+                     .value(QStringLiteral("error")).toString(),
+                 QStringLiteral("writes_disabled"));
+        QCOMPARE(state.ran.size(), 2);
+    }
+
+    // The two halves of the table are a partition, not two overlapping lists: everything that
+    // reads is safe, and nothing may be read-only without being safe.
+    void everyReadActionIsAgentSafe() {
+        for (const QString &key : relay::appcommands::agentSafeActionKeys())
+            QVERIFY2(relay::appcommands::actionIsAgentSafe(key), qPrintable(key));
+        QVERIFY(!relay::appcommands::actionIsRead(QStringLiteral("theme.reload")));
+        QVERIFY(!relay::appcommands::actionIsRead(QStringLiteral("pane.equalize")));
+        QVERIFY(!relay::appcommands::actionIsRead(QStringLiteral("agent.screenshotPane")));
+        QVERIFY(!relay::appcommands::actionIsRead(QStringLiteral("pane.close")));
+    }
+
+    // ----- group 6: the secret guard ------------------------------------------------------------
+    //
+    // `SettingRow::secret` is decision 1's "every value row except a secret", and until
+    // 2026-09-20 no shipped row set it: the guard had never fired once, and nothing but §30.8
+    // stood between the next key-shaped row and an agent reading its value out of the catalog.
+    // So a Text row named like a credential and left unmarked is treated as one.
+    //
+    // The shipped catalog is built in RelayWindow::settingsSections(), which needs a window; the
+    // rule itself is here, is what `catalog()` applies to every row it lists, and is what this
+    // test walks. A row that trips it in the app also says so on stderr, naming itself.
+    void aValueRowNamedLikeACredentialIsTreatedAsASecretEvenUnmarked() {
+        app.sections = [this] {
+            QList<SettingsSection> sections = catalog(&state);
+            SettingsSection added;
+            added.id = QStringLiteral("added");
+            added.title = QStringLiteral("Added");
+            for (const QString &id : {QStringLiteral("option:anthropic_api_key"),
+                                      QStringLiteral("option:github_token"),
+                                      QStringLiteral("option:sync_password"),
+                                      QStringLiteral("option:store/credential"),
+                                      QStringLiteral("option:ssh_passphrase")}) {
+                SettingRow row;
+                row.kind = SettingRow::Text;
+                row.id = id;
+                row.label = QStringLiteral("A row nobody marked");
+                row.text = QStringLiteral("sk-do-not-leak");
+                row.onText = [this](const QString &text) { state.ran << text; };
+                added.rows << row;
+            }
+            {
+                // …and one caught by its label rather than its id.
+                SettingRow row;
+                row.kind = SettingRow::Text;
+                row.id = QStringLiteral("option:relayfree");
+                row.label = QStringLiteral("OpenRouter key");
+                row.text = QStringLiteral("sk-do-not-leak");
+                row.onText = [this](const QString &text) { state.ran << text; };
+                added.rows << row;
+            }
+            sections << added;
+            return sections;
+        };
+
+        const QJsonObject block = app.catalog(QStringLiteral("tab-7"));
+        static const QRegularExpression named(
+            QStringLiteral("key|token|secret|password|passphrase|credential"),
+            QRegularExpression::CaseInsensitiveOption);
+        int guarded = 0;
+        for (const auto &value : block.value(QStringLiteral("options")).toArray()) {
+            const QJsonObject entry = value.toObject();
+            if (entry.value(QStringLiteral("kind")).toString() != QStringLiteral("text")) continue;
+            if (!named.match(entry.value(QStringLiteral("id")).toString()).hasMatch()
+                && !named.match(entry.value(QStringLiteral("label")).toString()).hasMatch())
+                continue;
+            if (entry.value(QStringLiteral("id")).toString()
+                == QStringLiteral("option:security/secret_patterns"))
+                continue;   // the guard's own configuration, named in rowNamedLikeASecret()
+            ++guarded;
+            QVERIFY2(entry.value(QStringLiteral("secret")).toBool(),
+                     qPrintable(entry.value(QStringLiteral("id")).toString()));
+            QVERIFY2(!entry.value(QStringLiteral("settable")).toBool(),
+                     qPrintable(entry.value(QStringLiteral("id")).toString()));
+            QVERIFY2(!entry.contains(QStringLiteral("value")),
+                     qPrintable(entry.value(QStringLiteral("id")).toString()));
+        }
+        QCOMPARE(guarded, 7);   // the six added above, plus the marked provider:acme/key
+        QVERIFY(!QJsonDocument(block).toJson().contains("sk-do-not-leak"));
+
+        // And the executor agrees with the catalog: listed as not settable, refused when set.
+        QCOMPARE(run({{QStringLiteral("id"), QStringLiteral("r1")},
+                      {QStringLiteral("command"), QStringLiteral("set_option")},
+                      {QStringLiteral("row"), QStringLiteral("option:github_token")},
+                      {QStringLiteral("value"), QStringLiteral("ghp-nope")}})
+                     .value(QStringLiteral("error")).toString(),
+                 QStringLiteral("secret"));
+        QVERIFY(state.ran.isEmpty());
+    }
+
+    // The rule is narrow on purpose: only a Text row can hold a credential, and the broad rule
+    // over every kind would have withheld the value of five innocent shipped rows on the word
+    // "key" alone. Those must keep answering with their values.
+    void aRowThatOnlyHasTheWordInItsNameKeepsItsValue() {
+        app.sections = [this] {
+            QList<SettingsSection> sections = catalog(&state);
+            SettingsSection added;
+            added.id = QStringLiteral("added");
+            added.title = QStringLiteral("Added");
+            {
+                SettingRow row;                                   // Options › Voice, a Choice
+                row.kind = SettingRow::Choice;
+                row.id = QStringLiteral("option:voice_hold_key");
+                row.label = QStringLiteral("Voice key");
+                row.options = QStringList{QStringLiteral("ctrl"), QStringLiteral("alt")};
+                row.current = QStringLiteral("ctrl");
+                row.onChoose = [](const QString &) {};
+                added.rows << row;
+            }
+            {
+                SettingRow row;                                   // Options › Agent, a Number
+                row.kind = SettingRow::Number;
+                row.id = QStringLiteral("agent/first_token_timeout_s");
+                row.label = QStringLiteral("Wait longer for the first token");
+                row.number = 90;
+                row.onNumber = [](int) {};
+                added.rows << row;
+            }
+            {
+                SettingRow row;                                   // Options › Security, a Text list
+                row.kind = SettingRow::Text;
+                row.id = QStringLiteral("option:security/secret_patterns");
+                row.label = QStringLiteral("Files the agent never reads");
+                row.text = QStringLiteral("\\.vault$ credentials");
+                row.onText = [](const QString &) {};
+                added.rows << row;
+            }
+            sections << added;
+            return sections;
+        };
+        const QJsonObject block = app.catalog(QStringLiteral("tab-7"));
+        for (const QString &id : {QStringLiteral("option:voice_hold_key"),
+                                  QStringLiteral("agent/first_token_timeout_s"),
+                                  QStringLiteral("option:security/secret_patterns")}) {
+            const QJsonObject entry = rowOf(block, QStringLiteral("options"), id);
+            QVERIFY2(!entry.value(QStringLiteral("secret")).toBool(), qPrintable(id));
+            QVERIFY2(entry.value(QStringLiteral("settable")).toBool(), qPrintable(id));
+            QVERIFY2(entry.contains(QStringLiteral("value")), qPrintable(id));
+        }
     }
 
     void aSafeButtonOnARowRunsAndAnUnsafeOneDoesNot() {
