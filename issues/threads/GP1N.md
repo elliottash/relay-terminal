@@ -17,3 +17,7 @@ Owner: “looks good, also relay isnt linux only”. Applied the approved displa
 <!-- relay:entry 20260921T183905Z-e1 author=codex kind=decision -->
 ### Codex · 2026-09-21 18:39
 Owner: “yeah thats better”. Replaced the longer delegation guidance with the approved shorter paragraph; retained the platform-neutral introduction.
+
+<!-- relay:entry 20260921T183924Z-f1 author=codex kind=evidence -->
+### Codex · 2026-09-21 18:39
+Recorded wording commit 2efd99de601910357c6c8179a4af301b619ec7db; all 5 provider startup tests pass.

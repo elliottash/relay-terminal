@@ -7,7 +7,7 @@ assignee: codex
 rank: m
 created: '2026-09-21'
 source: 'Codex in Relay, 2026-09-21'
-links: {plans: [], commits: [28e94fef3b14fc73e1196b310ce55cd64f69abd1], evidence: [docs/qa_evidence/2026-09-21-guest-instructions/README.md], related: [GT7X, 4NXH], github: null}
+links: {plans: [], commits: [28e94fef3b14fc73e1196b310ce55cd64f69abd1, 2efd99de601910357c6c8179a4af301b619ec7db], evidence: [docs/qa_evidence/2026-09-21-guest-instructions/README.md], related: [GT7X, 4NXH], github: null}
 ---
 # Attach Relay instructions to guest sessions through their native interfaces
 
