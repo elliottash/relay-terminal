@@ -50,7 +50,7 @@ private:
     QVector<FoldLine> m_lines;
     FoldLine m_line;         // the line being built
     FoldSpan m_open;         // the span being built (style set when it opened)
-    bool m_bold = false, m_italic = false, m_underline = false, m_faint = false;
+    bool m_bold = false, m_italic = false, m_underline = false, m_faint = false, m_reverse = false;
     int m_fg = -1;           // -1 = the default ink; else an ANSI index
     // The OSC 8 link the next span opens with (card #MDKN). Only a *label* URI is kept: an
     // anchor — the block's own prose run, a fold's URI — is a handle, not a destination, and a
@@ -67,6 +67,7 @@ inline QString ProseCollector::currentSgr() const
     if (m_bold) p << QStringLiteral("1");
     if (m_faint) p << QStringLiteral("2");
     if (m_italic) p << QStringLiteral("3");
+    if (m_reverse) p << QStringLiteral("7");
     if (m_underline) p << QStringLiteral("4");
     if (m_fg >= 0) {
         if (m_fg < 8) p << QString::number(30 + m_fg);
@@ -88,11 +89,13 @@ inline void ProseCollector::applySgr(const QString &params)
     const QStringList ps = params.split(QLatin1Char(';'), Qt::SkipEmptyParts);
     for (int i = 0; i < ps.size(); ++i) {
         const int p = ps.at(i).toInt();
-        if (p == 0) { m_bold = m_italic = m_underline = m_faint = false; m_fg = -1; }
+        if (p == 0) { m_bold = m_italic = m_underline = m_faint = m_reverse = false; m_fg = -1; }
         else if (p == 1) m_bold = true;
         else if (p == 2) m_faint = true;
         else if (p == 3) m_italic = true;
         else if (p == 4 || p == 21) m_underline = true;
+        else if (p == 7) m_reverse = true;
+        else if (p == 27) m_reverse = false;
         else if (p == 22) { m_bold = m_faint = false; }
         else if (p == 23) m_italic = false;
         else if (p == 24) m_underline = false;
@@ -144,6 +147,7 @@ inline void ProseCollector::feed(const QString &rendered)
                 m_open.italic = m_italic;
                 m_open.underline = m_underline;
                 m_open.dim = m_faint;
+                m_open.reverse = m_reverse;
                 m_open.link = m_link;
             }
             m_open.text += ch;

@@ -128,6 +128,7 @@ void FoldLayer::layout(Fold *f) const
                 c.italic = span.italic;
                 c.underline = span.underline;
                 c.dim = span.dim;
+                c.reverse = span.reverse;
                 c.link = span.link;
                 c.fgPacked = sgrInk;
                 if (c.width > 0)

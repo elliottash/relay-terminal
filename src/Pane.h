@@ -78,6 +78,9 @@
 #include "Images.h"
 #include "Aliases.h"
 #include "MarkdownAnsi.h"
+#include "InlineInk.h"
+#include <QTextFragment>
+#include <QTextBlock>
 #include "WordWrap.h"
 #include "view/ProseSpans.h"   // #R2WQ: prose blocks, ANSI -> FoldLine spans
 #include "TranscriptGaps.h" // a blank line between blocks of different kinds (#5AWD)
@@ -621,7 +624,7 @@ public:
         // one of the things that changes what a paired device must be told. Costs nothing while
         // nobody is listening: changed() gathers nothing until onPaneState is wired up.
         connect(relay::theme::notifier(), &relay::theme::Notifier::themeChanged, this,
-                [this] { m_paneState.changed(); });
+                [this] { refreshTranscriptTheme(); m_paneState.changed(); });
         qApp->installEventFilter(this);
         // Relay came to the front or went behind another application: the poll's rate follows
         // (card #057J), and it follows now rather than on the next tick, which while quiet is
@@ -3343,7 +3346,7 @@ public:
         if (m_backend) m_backend->setFoldExpanded(uri, expanded);
     }
     void setFoldContent(const QString &uri, const QVector<relay::FoldLine> &lines) override {
-        if (m_backend && terminalFolds()) m_backend->setFoldContent(uri, lines);
+        setFold(uri, lines);
     }
     bool toggleFold(const QString &uri) override { return m_backend && m_backend->toggleFold(uri); }
 
@@ -6373,7 +6376,7 @@ private:
     // One settled, collapsed row with its anchor, the way drawCallRow draws a finished row: the
     // reprinted rows of the Activity pane, in the ink each would have had live. (Ink is defined
     // further down the class; a parameter type needs it declared first.)
-    enum class Ink;
+    using Ink = relay::InlineInk;
     void printAnchoredRow(const QString &anchor, const QString &title, const QString &rest, Ink ink) {
         // A reprinted reasoning row is the agent's own block; a call row sits with the tool rows
         // (#5AWD). Both follow the rule above them, which is a Header, so neither opens a gap.
@@ -6647,7 +6650,27 @@ private:
     }
 
     void setFold(const QString &uri, const QVector<relay::FoldLine> &lines) {
-        if (m_backend && terminalFolds()) m_backend->setFoldContent(uri, lines);
+        if (!m_backend || !terminalFolds()) return;
+        auto themed = lines;
+        const auto palette = foldPalette();
+        for (auto &line : themed) for (auto &span : line.spans) {
+            if (span.bg.isValid() && (span.bg == palette.addBg || span.bg == palette.removeBg)) {
+                span.sgr = span.bg == palette.addBg ? QStringLiteral("32") : QStringLiteral("31");
+                span.fg = span.bg = QColor();
+                span.reverse = true;
+            } else if (span.fg.isValid()) {
+                const auto fg = span.fg;
+                if (fg == palette.muted) span.sgr = QStringLiteral("90");
+                else if (fg == palette.text) span.sgr = QStringLiteral("97");
+                else if (fg == palette.error) span.sgr = QStringLiteral("31");
+                else if (fg == palette.code) span.sgr = QStringLiteral("36");
+                else if (fg == palette.link) span.sgr = QStringLiteral("32");
+                else if (fg == palette.accent) span.sgr = QStringLiteral("33");
+                else continue;
+                span.fg = QColor();
+            }
+        }
+        m_backend->setFoldContent(uri, themed);
     }
 
     // A fold anchor with no content yet was clicked: fetch the call's detail. A merged run needs
@@ -13746,7 +13769,6 @@ private:
     }
 
     // ----- inline output in the terminal -------------------------------------------------
-    enum class Ink { Agent, User, UserAgent, Tool, ToolOutput, DiffAdd, DiffRemove, Error, Note, Recap, Ask };
 
     // Two levels (owner, 2026-09-18): the conversation carries colour — cyan for what the user
     // sent to the shell, violet for what they sent to the agent, white for the agent's prose —
@@ -13755,15 +13777,15 @@ private:
     // agent destination). Diffs keep the add/remove pair — as black-or-white ink on the green/red
     // fill, not green/red text — and failures keep red: content, not chrome.
     // Agent lines follow the active theme: the colours come from the live tokens (src/Theme.h),
-    // so a light theme gets dark text instead of the near-white a dark theme uses. Lines already
-    // printed keep the colours they were written in; the terminal cannot recolour its scrollback.
+    // so a light theme gets dark text. Terminal output uses palette references below;
+    // these RGB values are for widgets and are refreshed when the theme changes.
     static QColor inkColor(Ink ink) {
         namespace t = relay::theme;
         switch (ink) {
         case Ink::Agent: return t::Text;
         case Ink::User: return t::Shell;
         case Ink::UserAgent: return t::Agent;
-        case Ink::Tool: case Ink::ToolOutput: case Ink::Note: case Ink::Recap: return t::TextMuted;
+        case Ink::Tool: case Ink::ToolOutput: case Ink::Note: case Ink::Recap: case Ink::RecapBody: return t::TextMuted;
         // The fill colours themselves are the background the band is painted in (inkCode); as
         // text they would vanish into it.
         case Ink::DiffAdd: return t::contrastInk(t::Success);
@@ -13776,36 +13798,7 @@ private:
         return t::Text;
     }
 
-    static QByteArray inkCode(Ink ink) {
-        // The one ink that is written with the *indexed* palette rather than 24-bit RGB (#MQ9C).
-        // Everything printed into the terminal is frozen at the colour it was written in — the
-        // emulator cannot recolour its scrollback — and an ask is the one piece of inline
-        // output that is still actionable after a theme switch. Indexed bold yellow is what each
-        // theme's own palette renders (`[terminal] palette[3]`: #ecc476 on Relay Dark, the ochre
-        // #7a5400 on IBM Beige), so the ask follows the theme instead of keeping a dark theme's
-        // amber on a light ground. It is the colour MarkdownAnsi's **Need:** bold already uses
-        // for the same reason (src/MarkdownAnsi.h, card #4E13).
-        if (ink == Ink::Ask) return QByteArray("\x1b[1;33m");
-        // A diff's add/remove lines carry their fill as a 24-bit background: the green/red ground
-        // with black-or-white ink on it is what the diff pane and the folds draw, and the inline
-        // copy under the tool row should be the same picture.
-        const auto sgr = [](const QColor &c) {
-            return QByteArray::number(c.red()) + ';' + QByteArray::number(c.green()) + ';'
-                   + QByteArray::number(c.blue());
-        };
-        if (ink == Ink::DiffAdd || ink == Ink::DiffRemove)
-            return "\x1b[38;2;" + sgr(inkColor(ink)) + ";48;2;"
-                   + sgr(ink == Ink::DiffAdd ? relay::theme::Success : relay::theme::Error) + 'm';
-        const QColor c = inkColor(ink);
-        // Bold for the lines the user typed, plain otherwise. Notes are not italic: the muted ink
-        // marks them, and italic muted monospace was the hardest text to read (docs/ARCHITECTURE.md,
-        // "Legible text").
-        // Bold amber for a question, as card #4E13 asked: "questions or items needing human
-        // response could be in bold amber".
-        const QByteArray style = (ink == Ink::User || ink == Ink::UserAgent || ink == Ink::Ask)
-                                     ? QByteArray("1;") : QByteArray();
-        return "\x1b[" + style + "38;2;" + sgr(c) + 'm';
-    }
+    static QByteArray inkCode(Ink ink) { return relay::inlineInkCode(ink); }
 
     // The `/command` a line sent to the agent opens with, as [from, to) into `line`; an empty span
     // (from == to) when it opens with anything else. The pane's own `✦ ` mark may come first and
@@ -13927,6 +13920,7 @@ private:
         QTextCursor cursor(m_transcriptView->document());
         cursor.movePosition(QTextCursor::End);
         QTextCharFormat format;
+        format.setProperty(QTextFormat::UserProperty, int(ink));
         format.setForeground(inkColor(ink));
         // A diff line carries its fill here too, as the terminal's own copy does (inkCode).
         if (ink == Ink::DiffAdd || ink == Ink::DiffRemove)
@@ -13954,6 +13948,30 @@ private:
         const int cap = std::max(line * 3 + chrome, height() * 2 / 5);
         m_transcript->setMaximumHeight(std::min(wanted, cap));
         m_transcript->setMinimumHeight(0);
+    }
+
+    void refreshTranscriptTheme() {
+        if (!m_transcriptView) return;
+        auto *doc = m_transcriptView->document();
+        struct Run { int start, length; QTextCharFormat format; };
+        QVector<Run> runs;
+        for (QTextBlock block = doc->begin(); block.isValid(); block = block.next())
+            for (auto it = block.begin(); !it.atEnd(); ++it) {
+                const QTextFragment fragment = it.fragment();
+                auto format = fragment.charFormat();
+                if (!format.hasProperty(QTextFormat::UserProperty)) continue;
+                const Ink ink = Ink(format.property(QTextFormat::UserProperty).toInt());
+                format.setForeground(inkColor(ink));
+                if (ink == Ink::DiffAdd || ink == Ink::DiffRemove)
+                    format.setBackground(ink == Ink::DiffAdd ? relay::theme::Success : relay::theme::Error);
+                runs << Run{fragment.position(), fragment.length(), format};
+            }
+        for (const auto &run : runs) {
+            QTextCursor cursor(doc);
+            cursor.setPosition(run.start);
+            cursor.setPosition(run.start + run.length, QTextCursor::KeepAnchor);
+            cursor.setCharFormat(run.format);
+        }
     }
 
     void resetTranscript() {

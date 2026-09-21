@@ -18,8 +18,12 @@ namespace {
 
 const uint32_t kVtermTail = 0xFFFFFFFF;
 
-inline uint32_t rgbOf(const VTermColor &c)
+// Keep palette references in history and serialized scrollback: resolving them here
+// freezes a row at the theme that was active when it left the screen.
+inline uint32_t packedColor(const VTermColor &c)
 {
+    if (VTERM_COLOR_IS_INDEXED(&c))
+        return CellColor::indexed(c.indexed.idx);
     return CellColor::rgb(c.rgb.red, c.rgb.green, c.rgb.blue);
 }
 
@@ -242,14 +246,10 @@ struct LibVtermCore::Impl {
             c->width = uint8_t(vc.width > 0 ? vc.width : 1);
         }
         if (!VTERM_COLOR_IS_DEFAULT_FG(&vc.fg)) {
-            VTermColor col = vc.fg;
-            vterm_screen_convert_color_to_rgb(screen, &col);
-            c->fg = rgbOf(col);
+            c->fg = packedColor(vc.fg);
         }
         if (!VTERM_COLOR_IS_DEFAULT_BG(&vc.bg)) {
-            VTermColor col = vc.bg;
-            vterm_screen_convert_color_to_rgb(screen, &col);
-            c->bg = rgbOf(col);
+            c->bg = packedColor(vc.bg);
         }
         uint16_t a = 0;
         if (vc.attrs.bold) a |= AttrBold;
@@ -510,10 +510,14 @@ struct LibVtermCore::Impl {
         if (CellColor::kind(c.fg) == CellColor::Rgb) {
             const uint32_t v = CellColor::value(c.fg);
             vterm_color_rgb(&o->fg, uint8_t(v >> 16), uint8_t(v >> 8), uint8_t(v));
+        } else if (CellColor::kind(c.fg) == CellColor::Indexed) {
+            vterm_color_indexed(&o->fg, uint8_t(CellColor::value(c.fg)));
         }
         if (CellColor::kind(c.bg) == CellColor::Rgb) {
             const uint32_t v = CellColor::value(c.bg);
             vterm_color_rgb(&o->bg, uint8_t(v >> 16), uint8_t(v >> 8), uint8_t(v));
+        } else if (CellColor::kind(c.bg) == CellColor::Indexed) {
+            vterm_color_indexed(&o->bg, uint8_t(CellColor::value(c.bg)));
         }
         o->attrs.bold = (c.attrs & AttrBold) != 0;
         o->attrs.italic = (c.attrs & AttrItalic) != 0;

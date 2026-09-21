@@ -22,3 +22,11 @@ Verdict: keep the card; the acceptance criterion is unmet. Recorded the finding 
 - So `MarkdownAnsi`'s rule ("an absolute colour is burnt into the scrollback … indexed colours are resolved by the engine at paint time") is now the cheap fix, and four new role bits are the expensive one.
 
 **Card:** #K3RT — appended the check to `## Approach` and left it `ready` for Execute.
+
+<!-- relay:entry 20260921T212352Z-aa author=codex kind=progress -->
+### Codex · 2026-09-21 21:23
+Claimed #K3RT for the renewed request; recorded the indexed-ink implementation plan.
+
+<!-- relay:entry 20260921T213206Z-aa author=codex kind=evidence -->
+### Codex · 2026-09-21 21:32
+Implemented indexed inline/fold colors and found/fixed the libvterm history RGB conversion. Xvfb pixel checks pass for grid, rewrapped prose, expanded details and scrollback. Evidence and QA checklist recorded; moving to needs-verification with the implementation. Literal RGB from older saves cannot recover its original role.

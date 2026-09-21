@@ -81,7 +81,7 @@ private slots:
         const Line &l = f.lines[0];
         QVERIFY(l.cells[0].attrs & AttrBold);
         QVERIFY(l.cells[0].attrs & AttrUnderline);
-        QCOMPARE(CellColor::kind(l.cells[0].fg), CellColor::Rgb);
+        QCOMPARE(CellColor::kind(l.cells[0].fg), core == QLatin1String("libvterm") ? CellColor::Indexed : CellColor::Rgb);
         QCOMPARE(l.cells[1].fg, CellColor::rgb(1, 2, 3));
         QCOMPARE(l.cells[1].bg, CellColor::rgb(4, 5, 6));
         QCOMPARE(CellColor::kind(l.cells[2].fg), CellColor::Default);
@@ -427,6 +427,33 @@ private slots:
     // Scrollback reaches a phone styled (docs/REMOTE-PROTOCOL.md section 6.5):
     // historyLines() hands back the same Line the viewport frame carries, so
     // one serializer does the live screen and history alike.
+    void indexedHistorySurvivesPaletteChangesAndResize()
+    {
+        QFETCH_GLOBAL(QString, core);
+        if (core != QLatin1String("libvterm")) QSKIP("libvterm history storage regression");
+        Harness h(core, 3, 20);
+        h.feed("\x1b[31;44mindexed\x1b[0m\r\nsecond\r\nthird\r\n");
+        std::vector<Line> history;
+        h.vt->historyLines(0, 1, &history);
+        QCOMPARE(history.size(), size_t(1));
+        QCOMPARE(history[0].cells[0].fg, CellColor::indexed(1));
+        QCOMPARE(history[0].cells[0].bg, CellColor::indexed(4));
+        Harness restored(core, 3, 20);
+        restored.feed(lineToAnsi(history[0]).toUtf8());
+        QCOMPARE(restored.frame().lines[0].cells[0].fg, CellColor::indexed(1));
+        QCOMPARE(restored.frame().lines[0].cells[0].bg, CellColor::indexed(4));
+        h.vt->setColors(0x101010, 0xf0f0f0, nullptr);
+        h.vt->resize(5, 20, 8, 16); // pop history back into the screen
+        const auto frame = h.frame();
+        bool found = false;
+        for (const auto &line : frame.lines) if (line.text() == QLatin1String("indexed")) {
+            QCOMPARE(line.cells[0].fg, CellColor::indexed(1));
+            QCOMPARE(line.cells[0].bg, CellColor::indexed(4));
+            found = true;
+        }
+        QVERIFY(found);
+    }
+
     void styledHistoryLines()
     {
         QFETCH_GLOBAL(QString, core);

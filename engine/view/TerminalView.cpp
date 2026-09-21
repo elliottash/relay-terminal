@@ -1011,7 +1011,10 @@ void TerminalView::paintFoldRow(QPainter &p, int screenRow, int foldIndex, int f
         if (col + c.width > m_cols)
             break;
         const int x = m_padding + col * m_cw;
-        QColor fg = c.fg.isValid() ? c.fg : m_scheme.foreground;
+        QColor fg = c.fg.isValid() ? c.fg
+                  : c.fgPacked ? resolve(c.fgPacked, true) : m_scheme.foreground;
+        QColor bg = c.bg;
+        if (c.reverse) { bg = fg; fg = m_scheme.background; }
         bool hit = false, hitCurrent = false;
         for (const FoldSearch::RowMatch &h : hits) {
             if (i >= h.from && i < h.to) {
@@ -1019,8 +1022,8 @@ void TerminalView::paintFoldRow(QPainter &p, int screenRow, int foldIndex, int f
                 hitCurrent = hitCurrent || h.current;
             }
         }
-        if (c.bg.isValid())
-            p.fillRect(QRect(x, y, c.width * m_cw, m_ch), c.bg);
+        if (bg.isValid())
+            p.fillRect(QRect(x, y, c.width * m_cw, m_ch), bg);
         if (selected && col >= selFrom && col <= selTo)
             p.fillRect(QRect(x, y, c.width * m_cw, m_ch), m_scheme.selection);
         if (hit)
@@ -1030,7 +1033,7 @@ void TerminalView::paintFoldRow(QPainter &p, int screenRow, int foldIndex, int f
         if (c.dim) {
             const QColor under = hit ? (hitCurrent ? m_scheme.searchCurrent : m_scheme.searchMatch)
                 : (selected && col >= selFrom && col <= selTo) ? m_scheme.selection
-                : c.bg.isValid()                               ? c.bg
+                : bg.isValid()                                 ? bg
                                                                : foldBackground();
             fg = faintInk(fg, under);
         }
@@ -1142,6 +1145,8 @@ void TerminalView::paintProseRow(QPainter &p, int screenRow, const FoldLayer::Fo
         // `/command` (#SQ3D) — keeps its hue and is moved only as far as the band demands.
         else if (roleBand.isValid() && (c.fg.isValid() || c.fgPacked))
             fg = legibleOn(fg, roleBand);
+        QColor bg = c.bg;
+        if (c.reverse) { bg = fg; fg = m_scheme.background; }
         bool hit = false, hitCurrent = false;
         for (const FoldSearch::RowMatch &h : hits) {
             if (i >= h.from && i < h.to) {
@@ -1149,8 +1154,8 @@ void TerminalView::paintProseRow(QPainter &p, int screenRow, const FoldLayer::Fo
                 hitCurrent = hitCurrent || h.current;
             }
         }
-        if (c.bg.isValid())
-            p.fillRect(QRect(x, y, c.width * m_cw, m_ch), c.bg);
+        if (bg.isValid())
+            p.fillRect(QRect(x, y, c.width * m_cw, m_ch), bg);
         else if (roleBand.isValid())
             p.fillRect(QRect(x, y, c.width * m_cw, m_ch), roleBand);
         if (selected && col >= selFrom && col <= selTo)
@@ -1160,7 +1165,7 @@ void TerminalView::paintProseRow(QPainter &p, int screenRow, const FoldLayer::Fo
         if (c.dim) {
             const QColor under = hit ? (hitCurrent ? m_scheme.searchCurrent : m_scheme.searchMatch)
                 : (selected && col >= selFrom && col <= selTo) ? m_scheme.selection
-                : c.bg.isValid()                               ? c.bg
+                : bg.isValid()                                 ? bg
                 : roleBand.isValid()                            ? roleBand
                                                                : groundAt(y);
             fg = faintInk(fg, under);

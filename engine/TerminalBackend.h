@@ -45,6 +45,7 @@ struct FoldSpan {
     bool italic = false;
     bool underline = false;
     bool dim = false;
+    bool reverse = false;
     QString link;         // non-empty: clickable, reported through onLinkActivated
     // An SGR parameter list ("1;35"), for prose the pane printed as ANSI
     // (#R2WQ): the view resolves it against the theme *when it paints*, so a

@@ -8,6 +8,7 @@
 #include "view/TerminalView.h"
 #include "WordWrap.h"
 #include "MarkdownAnsi.h"
+#include "InlineInk.h"
 #include "view/ProseSpans.h"
 
 #include <QAccessible>
@@ -972,6 +973,73 @@ private slots:
     // prose ink) is resolved through the palette the view has *now*, not the one the text was
     // written under. Owner's QA, 2026-09-19: a pane that started on IBM Beige and switched to
     // Dark Copper painted new prose in Beige's near-black ANSI 15 on Copper's charcoal.
+    void existingInlineTextFollowsThemeAcrossGridProseAndFolds()
+    {
+        QFETCH_GLOBAL(QString, core);
+        for (int surface = 0; surface < 3; ++surface) {
+            Term t(core, QStringLiteral("/bin/cat"));
+            const QByteArray rendered = inlineInkCode(InlineInk::Note) + "existing note\x1b[0m\n"
+                + inlineInkCode(InlineInk::RecapBody) + "existing recap\x1b[0m\n"
+                + inlineInkCode(InlineInk::DiffAdd) + "+ added line\x1b[0m\n"
+                + inlineInkCode(InlineInk::DiffRemove) + "- removed line\x1b[0m\n";
+            ProseCollector collector;
+            collector.feed(QString::fromUtf8(rendered));
+            const auto lines = collector.take();
+            QVERIFY(lines.at(2).spans.first().reverse);
+            QVERIFY(!lines.at(0).spans.first().reverse);
+            QByteArray bytes = rendered;
+            bytes.replace("\n", "\r\n");
+            if (surface == 0) t.backend->writeToDisplay(bytes);
+            else if (surface == 1) {
+                const QString uri = QStringLiteral("relay://prose/theme/1");
+                t.backend->writeToDisplay("\x1b]8;;" + uri.toUtf8() + "\x1b\\" + bytes + "\x1b]8;;\x1b\\");
+                t.backend->setProseBlock(uri, lines, 80); // narrower now: paint replacement rows
+            } else {
+                const QString uri = QStringLiteral("relay://call/theme/1/a");
+                t.view->setFoldPrefix(QStringLiteral("relay://call/"));
+                t.backend->writeToDisplay("\x1b]8;;" + uri.toUtf8() + "\x1b\\details\x1b]8;;\x1b\\\r\n");
+                QVERIFY(t.waitScreen(QStringLiteral("details")));
+                t.view->setFoldContent(uri, lines);
+                t.view->setFoldExpanded(uri, true);
+                QTest::qWait(80);
+                t.view->scrollToTop();
+            }
+            if (surface != 2) QVERIFY(t.waitScreen(QStringLiteral("existing note")));
+            const int offset = surface == 2 ? 1 : 0;
+            for (bool light : {false, true, false}) {
+                ColorScheme scheme = t.view->colorScheme();
+                scheme.background = light ? QColor("#faf8f2") : QColor("#101218");
+                scheme.foreground = light ? QColor("#14120d") : QColor("#f4efe9");
+                scheme.palette[8] = light ? 0xff514c45 : 0xffa8a4a0;
+                scheme.palette[2] = light ? 0xff21652a : 0xff92dc98;
+                scheme.palette[1] = light ? 0xffa02030 : 0xffff8a96;
+                t.view->setColorScheme(scheme);
+                const QImage img = t.grab();
+                const int ch = t.view->cellHeight();
+                QVERIFY2(rowHasColor(img, offset, ch, QColor::fromRgb(scheme.palette[8])), "existing note did not recolor");
+                QVERIFY(rowHasColor(img, offset + 1, ch, QColor::fromRgb(scheme.palette[8])));
+                QVERIFY(rowHasColor(img, offset + 2, ch, QColor::fromRgb(scheme.palette[2])));
+                QVERIFY(rowHasColor(img, offset + 3, ch, QColor::fromRgb(scheme.palette[1])));
+                if (qEnvironmentVariableIsSet("RELAY_THEME_EVIDENCE"))
+                    img.save(qEnvironmentVariable("RELAY_THEME_EVIDENCE")
+                             + QStringLiteral("/surface-%1-%2.png").arg(surface).arg(light ? "light" : "dark"));
+            }
+            // Move the same output into history, then recolor it without replaying it.
+            t.backend->writeToDisplay(QByteArray(20, '\n') + "history end");
+            QVERIFY(t.waitScreen(QStringLiteral("history end")));
+            QTest::qWait(80);
+            t.view->scrollToTop();
+            ColorScheme historyScheme = t.view->colorScheme();
+            historyScheme.palette[8] = 0xffc0a0d0;
+            historyScheme.palette[2] = 0xff50d0b0;
+            t.view->setColorScheme(historyScheme);
+            const QImage history = t.grab();
+            QVERIFY2(rowHasColor(history, offset, t.view->cellHeight(), QColor::fromRgb(historyScheme.palette[8])),
+                     qPrintable(QString::number(surface) + ": " + t.view->visibleRowsText().join("|")));
+            QVERIFY(rowHasColor(history, offset + 2, t.view->cellHeight(), QColor::fromRgb(historyScheme.palette[2])));
+        }
+    }
+
     void anIndexedColourFollowsTheSchemeItIsPaintedUnder()
     {
         QFETCH_GLOBAL(QString, core);

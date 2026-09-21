@@ -61,6 +61,7 @@ public:
         bool italic = false;
         bool underline = false;
         bool dim = false;
+        bool reverse = false;
         QString link;
         uint32_t fgPacked = 0;  // an SGR ink as CellColor (prose spans); 0 = none
     };
