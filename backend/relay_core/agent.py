@@ -551,7 +551,10 @@ READONLY_REFUSAL = (
     "This turn writes nothing by design — the owner has not confirmed anything yet. Say what you "
     "would do; the write happens once the owner answers.")
 
-#: What a **card turn** may not call (`ask {mode, card}`, 19.10; card #CTRN, owner 2026-09-21).
+#: What a **card turn** may not call (`board_ask {card, mode}`, 19.10; card #CTRN, owner
+#: 2026-09-21). `board_ask` is the verb — decision 6 kept it — and `mode`/`card` are what it
+#: passes to `TurnSupervisor.submit`; a plain `ask` forwards `surface`, `screen` and `readonly`
+#: and nothing else (`backend/worker.py`), so no pane can open a card turn by asking for one.
 #: The board's own tools are refused by `board_tools.CardScope.allows`, which has not moved; this
 #: is the executor's half — the read-only turn's list, plus the two that read and stop a command a
 #: card turn may not start in the first place.

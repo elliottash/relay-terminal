@@ -340,6 +340,14 @@ struct ConsoleHandle {
     // (owner decision 2), so an empty band would sit between the thread and the reply box — and
     // the tab's other turns *do* print here (decision 1), so it is not hidden for ever.
     std::function<void(bool)> setTranscriptHiddenUntilUsed;
+    // "This console is about `surface` from now on" — card #CTRN. The card page keeps **one**
+    // console and points it at whatever card is open, so the transcript it draws has to change
+    // hands with the card: what is on screen is put away under the surface it was printed for,
+    // the emulator, its scrollback and the fold ledger are reset, and whatever was put away for
+    // this surface is drawn again. Only the host knows both ends of the move, which is why the
+    // surface is passed rather than read back off the context; called with the surface the
+    // console already holds, it does nothing.
+    std::function<void(const QString &surface)> clearTranscript;
     explicit operator bool() const { return widget != nullptr; }
 };
 

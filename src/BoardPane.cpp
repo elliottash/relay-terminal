@@ -3792,7 +3792,11 @@ class CardContext final : public relay::agent::Context {
                                       : QStringLiteral("card:") + card;
         spec.agentRole = QStringLiteral("switchboard");
         spec.workspace = m_view->m_workspace;
-        spec.scope = QStringLiteral("card");
+        // A card console is a console: step 3 of this card deleted the `card` tool scope, and
+        // `"card"` left `agent_context.SCOPES` with it. It still arrived because
+        // `RETIRED_SCOPES` maps it — a one-release courtesy for GUIs older than the worker, not
+        // a name this GUI has any business sending.
+        spec.scope = QStringLiteral("console");
         // One conversation per card, persisted per (tab, card) — the owner's decision 1 on card
         // #CTRN, which is the day the comment that stood here anticipated: a card turn is an
         // ordinary console turn now, and folding every card into the tab's one conversation would
@@ -3879,6 +3883,7 @@ BoardView::~BoardView()
     m_consoleHandle = relay::agent::ConsoleHandle();
     if (m_detail != nullptr) {
         m_detail->onActionsChanged = nullptr;
+        m_cardConsoleHandle = relay::agent::ConsoleHandle();
         delete m_detail->console();
     }
     delete m_boardContext;
@@ -4330,6 +4335,10 @@ void BoardView::buildChrome(QVBoxLayout *layout)
         const QString card = m_detail->cardId();
         if (card.isEmpty())
             return;
+        // `surface` is provenance here, not routing: `board_protocol._cancel_card` finds the
+        // supervisor by the card id it was always addressed by, and never reads the surface. It
+        // rides anyway so every message this console sends names the console it came from, and
+        // so a reader of one line on the wire can see which of a tab's queues it is about.
         send({{QStringLiteral("type"), QStringLiteral("board_cancel")},
               {QStringLiteral("card"), card},
               {QStringLiteral("surface"), QStringLiteral("card:") + card}});
@@ -4686,6 +4695,7 @@ void BoardView::ensureCardConsole()
     const relay::agent::ConsoleHandle handle = onCreateConsole(m_cardContext, m_detail);
     if (!handle)
         return;
+    m_cardConsoleHandle = handle;   // the card page's half of `clearTranscript` (card #CTRN)
     // The composer inside the console *is* the card's reply box from here on. There is no hook on
     // the console for a host-defined chord yet, so the host takes the editor's submit route —
     // The editor is still handed over: it *is* this page's reply box from here on (drafts,
@@ -6120,6 +6130,17 @@ void BoardView::handleEvent(const QJsonObject &event)
         // A card and a signal never share the page (#AQ6X): the card takes it.
         m_signalDetail->hide();
         ensureCardConsole();   // the first card opened is when the page asks for its agent
+        // One console, several cards (card #CTRN). The page keeps **one** console and points it
+        // at whatever card is open — the conversation, the routing and the persist key already
+        // follow the card (`CardContext::spec`) — but the emulator did not, so switching cards
+        // left the card before's turn in the transcript under this card's title. The console is
+        // told whose transcript it is drawing: the one it was drawing is put away under its own
+        // surface and this card's, if it has been here before, is drawn again.
+        // Only when the card actually changed: a card is re-read whenever its file changes
+        // under it (#N5JJ), and that must not wipe what is on screen.
+        if (const QString showing = event.value(QStringLiteral("card_id")).toString();
+            m_cardConsoleHandle.clearTranscript && m_detail->cardId() != showing)
+            m_cardConsoleHandle.clearTranscript(QStringLiteral("card:") + showing);
         m_detail->show(event);
         watchCardFiles();   // the open card and its thread get a watch each (#N5JJ)
         // Turns run per card (19.16), so the card you open may already be working: give it back

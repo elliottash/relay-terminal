@@ -451,6 +451,22 @@ public:
     ~RelayWindow() override {
         qApp->removeEventFilter(this);
         stopBoardWorkers();
+        // The consoles let go of this window before anything else does (card #CTRN). `m_consoles`
+        // is an ordinary member, and members are destroyed *after* this body and **before**
+        // `~QWidget` deletes the child widgets — so on a quit that deletes the window outright
+        // (a SIGTERM never runs `closeEvent`; see src/main.cpp) every `TabConsoleContext` was
+        // freed while the console panes holding a pointer to it were still alive. Two
+        // use-after-frees followed: `~Pane` writing `m_context->onChanged = nullptr` into the
+        // freed wrapper, and each pane's `destroyed` handler reading a `QList` whose destructor
+        // had already run. Both are undone here, while everything is still alive.
+        const QList<ConsoleEntry> consoles = m_consoles;
+        m_consoles.clear();
+        for (const ConsoleEntry &entry : consoles) {
+            if (Pane *pane = entry.pane.data()) {
+                disconnect(pane, &QObject::destroyed, this, nullptr);
+                pane->forgetContext();
+            }
+        }
         // The panes under this window are deleted after this body runs, and a shared pane's view
         // dying makes RemoteShare emit into everything still connected to it — including this
         // window's own slots, which then read a tab bar that is already half destroyed (SIGSEGV in
@@ -7981,6 +7997,7 @@ private:
         handle.collapsed = [guard] { return guard && guard->collapsed(); };
         handle.runActionLetter = [guard](const QString &letter) { return guard && guard->runActionLetter(letter); };
         handle.setTranscriptHiddenUntilUsed = [guard](bool on) { if (guard) guard->setTranscriptHiddenUntilUsed(on); };
+        handle.clearTranscript = [guard](const QString &surface) { if (guard) guard->clearTranscript(surface); };
         return handle;
     }
 
@@ -8174,12 +8191,13 @@ private:
     // runs them (protocol 33, `queue.TurnSupervisor.agent_emit`), which is what makes `surface`
     // provenance rather than a filter.
     //
-    // A queue op's answer is the one shape that is not tagged on the envelope: `queue_changed`
-    // carries the surface on each *row* and nothing outside them (`queue.py`, `_surface_of`), and
-    // a `Pane` takes a `queue_changed` whole. So rows that all name one card make the envelope
-    // that card's, and the §12 strip on a card operates that card's queue instead of appearing in
-    // every console of the tab. An envelope with no rows at all says nothing about whose it is and
-    // broadcasts, exactly as it did before this card.
+    // The row fallback below is for a worker that tags only the rows. Step 2 of this card put
+    // `queue_changed` in `board_turns.QUEUE_TAGGED`, so a card supervisor's envelope names the
+    // card as well — including an empty one, which is the shape the rows cannot speak for. The
+    // fallback is kept because `queue.py` itself tags an envelope only while a turn is running
+    // (`_emit` adds the running item's surface) and because rows carry the surface whatever the
+    // worker's age: rows that all name one card make the envelope that card's. An envelope with
+    // no surface and no rows says nothing about whose it is and broadcasts, as it always did.
     static QString cardSurfaceOf(const QJsonObject &event) {
         const auto ofCard = [](const QString &surface) { return surface.startsWith(QStringLiteral("card:")); };
         const QString tagged = event.value(QStringLiteral("surface")).toString();

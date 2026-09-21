@@ -1364,16 +1364,23 @@ public:
         // A program owns the screen: leave it alone and let the note queue until the prompt is back.
         printInline(QStringLiteral("New agent conversation\n"), Ink::Note); closeInline();
     }
-    int queuedPrompts() const { return m_entries.size(); }
-    bool queuePaused() const { return m_entriesPaused; }
+    // What is waiting on the agent here, both halves of it: what this pane is holding and what
+    // the worker holds for this console's surface (card #CTRN).
+    int queuedPrompts() const { return int(m_entries.size()) + int(workerQueued().size()); }
+    bool queuePaused() const { return m_entriesPaused || (m_queuePaused && !workerQueued().isEmpty()); }
     void clearAgentQueue() {
+        // Both halves of the one queue: what this pane is holding, and what the worker holds for
+        // this console's surface (card #CTRN). A terminal pane's surface is empty and `queueOp`
+        // sends exactly what it sent before.
+        if (!workerQueued().isEmpty()) send(queueOp(QStringLiteral("queue_clear")));
         m_entries.clear(); m_entriesPaused = false;
+        m_selectedWorkerRow.clear();
         keepSelectionOn(0);   // nothing left to select: the prompt box gives the item's text back
         rebuildQueueStrip(); changed();
     }
     void resumeAgentQueue() {
         m_entriesPaused = false; m_pauseReason.clear();
-        send({{"type", "resume_queue"}});
+        send(queueOp(QStringLiteral("resume_queue")));
         rebuildQueueStrip(); changed();
         pumpQueue();
     }
@@ -1398,7 +1405,9 @@ public:
         submitAgent(text, true, QString(), QStringLiteral("interrupt"));
     }
     void stopAgent() {
-        send({{"type", "cancel"}}); clearFix();
+        // The surface says which turn Esc is for: a card's runs on that card's own supervisor,
+        // so an untagged `cancel` from a card console stopped the *tab's* turn (#CTRN).
+        send(queueOp(QStringLiteral("cancel"))); clearFix();
         status(QStringLiteral("Stopping. Commands that already ran may have changed files; a network read can take up to its timeout to stop."));
     }
     void selectModel(const QString &id, const QString &model = QString()) {
@@ -3466,6 +3475,13 @@ public:
         contextChanged();
     }
     relay::agent::Context *context() const { return m_context; }
+    // Let go of the context without touching it and without rebuilding any chrome. The window
+    // calls it on the way down (see `~RelayWindow`): the list that owns a console's wrapped
+    // context is an ordinary member of the window and is destroyed *before* `~QWidget` deletes
+    // the console panes, so `~Pane`'s `m_context->onChanged = nullptr` wrote into a freed
+    // wrapper. Not `setContext(nullptr)`, which would rebuild the action row and the
+    // placeholders of a pane that is about to be deleted.
+    void forgetContext() { m_context = nullptr; }
     // Fresh every time rather than cached, so a host may answer with today's workspace, today's
     // brief and today's busy state without having to push anything. The exception is `hasShell()`
     // below, which is read on hot paths and is settled once per context.
@@ -3545,6 +3561,60 @@ public:
         if (m_hideEmptyTranscript == on) return;
         m_hideEmptyTranscript = on;
         applyTranscriptVisibility();
+    }
+
+    // ----- one console, several surfaces: the card page's transcript (card #CTRN) --------------
+    //
+    // The card page builds **one** console and points it at whatever card is open. Since #CTRN
+    // the conversation and the routing follow the card — the context's `surface` and its persist
+    // key are the open card's — but the vterm does not, so switching cards left the card before's
+    // turn in the transcript under the new card's title. One console *per* open card is the other
+    // answer and it is the cost the plan's Risk 4 named: a second emulator, a second attachment
+    // to the tab's worker and a second queue strip for every card anyone opens, none of which the
+    // owner asked for.
+    //
+    // So the host says when the surface under the console changed, and the transcript is put away
+    // and brought back: what is on screen is banked under the surface it was printed for, the
+    // vterm, its scrollback and the fold ledger are reset, and whatever was banked for the
+    // surface the context names *now* is replayed. A card reopened in the same tab draws its own
+    // transcript; a card opened for the first time draws nothing, its conversation is still the
+    // worker's (one per (tab, card), §30.7) and its record is still the thread above it.
+    //
+    // Memory, not disk: a console's conversation is the worker's file and a card's record is its
+    // thread, so the pixels are the only thing here and they are worth a few thousand lines per
+    // card, not a store of their own. `kBankedSurfaces` caps how many cards keep theirs.
+    // `surface` is what the console is about *from now on* — the host passes it because only the
+    // host knows both ends of the move, and because a `contextSpec()` read here would be one
+    // virtual call on the terminal's hottest path for an answer no terminal pane ever has.
+    // Called with the surface it already holds, it does nothing at all.
+    static constexpr int kBankedSurfaces = 8;
+    void clearTranscript(const QString &surface) {
+        if (surface == m_transcriptSurface) return;
+        const QString was = m_transcriptSurface;
+        const QString now = surface;
+        if (!was.isEmpty()) {
+            const QStringList lines = paneFormattedTextLines(relay::windowstate::kScrollbackMaxLines);
+            m_bankedText.remove(was);
+            m_bankedOrder.removeAll(was);
+            if (!lines.isEmpty()) { m_bankedText.insert(was, lines); m_bankedOrder.append(was); }
+            while (m_bankedOrder.size() > kBankedSurfaces) m_bankedText.remove(m_bankedOrder.takeFirst());
+        }
+        m_transcriptSurface = now;
+        closeInline();
+        m_inlinePending.clear();
+        // The fold ledger goes with the rows it belongs to: a `tool_output_get` answered after
+        // the clear would otherwise fill a fold that is no longer on screen (#TK9C).
+        m_calls.clear();
+        m_callOrder.clear();
+        m_thinkingAnchor.clear();
+        m_lastThinkingAnchor.clear();
+        m_proseUri.clear();
+        m_lastBlock = relay::gaps::Block::None;   // a cleared screen does not open with a blank line
+        resetTranscript();
+        if (m_backend) { m_backend->clearScrollback(); m_backend->clear(); }
+        m_restoredScrollback.clear();
+        queueTextReplay(m_bankedText.value(now));   // nothing banked: nothing is replayed
+        rebuildQueueStrip();                        // the strip is the new surface's too
     }
 
     void applyTranscriptVisibility() {
@@ -7889,7 +7959,12 @@ private:
                 if (entry.requestId != requestId) continue;
                 entry.itemId = event.value(QStringLiteral("id")).toString();
                 // × was clicked before the worker had named the item: withdraw it now.
-                if (entry.withdraw) send({{"type", "queue_remove"}, {"item", entry.itemId}, {"id", QStringLiteral("withdraw-") + requestId}});
+                if (entry.withdraw) {
+                    QJsonObject remove = queueOp(QStringLiteral("queue_remove"));
+                    remove.insert(QStringLiteral("item"), entry.itemId);
+                    remove.insert(QStringLiteral("id"), QStringLiteral("withdraw-") + requestId);
+                    send(remove);
+                }
             }
             return true;
         }
@@ -9642,6 +9717,17 @@ public:
             rows.append({QStringLiteral("steer:") + steer.requestId, QStringLiteral("steer"), steer.text.simplified(),
                          steer.withdraw ? QStringLiteral("withdrawing")
                                         : steer.requestId == m_selectedSteer ? QStringLiteral("editing") : QStringLiteral("waiting")});
+        // Then the worker's own rows for this console's surface, which are the truth about that
+        // queue and include the ones this console never submitted (card #CTRN). A pane whose
+        // context names no surface has none of these and the list is exactly what it was.
+        for (const WorkerRow &row : workerSteers())
+            rows.append({QStringLiteral("item:") + row.id, QStringLiteral("steer"), row.preview.simplified(),
+                         row.id == m_selectedWorkerRow ? QStringLiteral("editing") : QStringLiteral("waiting")});
+        for (const WorkerRow &row : workerQueued())
+            rows.append({QStringLiteral("item:") + row.id, QStringLiteral("agent"), row.preview.simplified(),
+                         row.id == m_selectedWorkerRow ? QStringLiteral("editing")
+                         : m_queuePaused                ? QStringLiteral("paused")
+                                                        : QStringLiteral("queued")});
         for (int i = 0; i < m_entries.size(); ++i) {
             const QueueEntry &entry = m_entries[i];
             rows.append({QStringLiteral("entry:%1").arg(entry.id), entry.agent ? QStringLiteral("agent") : QStringLiteral("command"),
@@ -9663,6 +9749,10 @@ public:
             if (known) withdrawSteer(requestId);
             return known;
         }
+        // A row of the worker's own queue for this surface: the op names the surface, because a
+        // card's prompts wait in that card's supervisor and not in the tab's (card #CTRN).
+        if (rowId.startsWith(QStringLiteral("item:")))
+            return removeWorkerRow(rowId.mid(5));
         if (rowId.startsWith(QStringLiteral("entry:"))) {
             bool ok = false;
             const quint64 id = rowId.mid(6).toULongLong(&ok);
@@ -9688,7 +9778,12 @@ private:
                 m_selectedSteer.clear();
                 m_editor->clear();
             }
-            if (!steer.itemId.isEmpty()) send({{"type", "queue_remove"}, {"item", steer.itemId}, {"id", QStringLiteral("withdraw-") + requestId}});
+            if (!steer.itemId.isEmpty()) {
+                QJsonObject remove = queueOp(QStringLiteral("queue_remove"));
+                remove.insert(QStringLiteral("item"), steer.itemId);
+                remove.insert(QStringLiteral("id"), QStringLiteral("withdraw-") + requestId);
+                send(remove);
+            }
             status(then == SteerEntry::Edit    ? QStringLiteral("Taking it back to edit · the agent will not get it at its next tool call…")
                    : then == SteerEntry::ToQueue ? QStringLiteral("Moving it back to the queue, to run after this turn…")
                                                  : QStringLiteral("Withdrawing it before the agent's next tool call…"));
@@ -9711,7 +9806,7 @@ private:
             m_editor->clear();
             QTimer::singleShot(0, this, [this, row] {
                 if (inQueueSelection() || !m_editor->toPlainText().isEmpty()) return;
-                const int rows = int(liveSteers().size() + m_entries.size());
+                const int rows = steerRowCount() + queuedRowCount();
                 if (rows > 0) selectQueueRow(std::min(row, rows - 1));
                 else m_selectionDroppedAt.start();
             });
@@ -9788,7 +9883,10 @@ private:
         m_pendingPrompts.insert(requestId, prompt);
         setTurnCards(pending->cards, requestId);   // it becomes a turn of its own: the chip follows (#C7PF)
         m_interruptPending = true;   // set before the stop, so agent_finished does not pause the queue
-        send({{"type", "queue_unsteer"}, {"request", pending->requestId}, {"as_request", requestId}});
+        QJsonObject unsteer = queueOp(QStringLiteral("queue_unsteer"));
+        unsteer.insert(QStringLiteral("request"), pending->requestId);
+        unsteer.insert(QStringLiteral("as_request"), requestId);
+        send(unsteer);
         status(QStringLiteral("Interrupting the current turn to send it now…"));
         return true;
     }
@@ -10829,6 +10927,10 @@ private:
             // would read "agent", because a console's mode is locked there, and Enter on a card
             // would plan instead of discuss.
             if (m_context->submit(overrideMode, typed)) {
+                // What the context took, kept until the worker names the item it became: that is
+                // what lets its row in the §12 strip be edited rather than only removed, because
+                // the row itself carries a 120-character preview (card #CTRN).
+                rememberContextSubmit(overrideMode, typed);
                 // The box is the context's from here: it clears and remembers the line when it
                 // took it, and **leaves it alone when it refused** — a card ask that arrives
                 // while a cleanup is running keeps the words the owner typed, which is the whole
@@ -11242,21 +11344,37 @@ private:
             refreshPresets();   // Options › Models: the provider's models become usable rows
         } else if (type == QStringLiteral("queued")) {
             const QString requestId = event.value(QStringLiteral("request_id")).toString();
-            if (m_pendingPrompts.contains(requestId)) m_itemPrompts.insert(event.value(QStringLiteral("id")).toString(), m_pendingPrompts.take(requestId));
-            if (requestId == m_turnCardAsk) m_turnCardItem = event.value(QStringLiteral("id")).toString();   // the chip's turn has an item now (#C7PF)
+            const QString itemId = event.value(QStringLiteral("id")).toString();
+            if (m_pendingPrompts.contains(requestId)) m_itemPrompts.insert(itemId, m_pendingPrompts.take(requestId));
+            // A line this console handed to its context has no request id of the pane's to come
+            // back on — `board_ask` is the context's message, not the pane's — so the item it
+            // became is matched in order, oldest first, and only on this console's own surface.
+            // It is kept apart from `m_itemPrompts`, which is what `agent_started` prints its
+            // "✦ …" line from: a card's question is already on the thread above the console.
+            else if (!itemId.isEmpty() && !m_contextSubmits.isEmpty() && !queueSurface().isEmpty()
+                     && event.value(QStringLiteral("surface")).toString() == queueSurface())
+                m_workerPrompts.insert(itemId, m_contextSubmits.takeFirst());
+            if (requestId == m_turnCardAsk) m_turnCardItem = itemId;   // the chip's turn has an item now (#C7PF)
         } else if (type == QStringLiteral("queue_changed")) {
             m_runningItem = event.value(QStringLiteral("running")).toString();
             m_queuePaused = event.value(QStringLiteral("paused")).toBool();
-            m_queueItems.clear();
-            for (const auto &value : event.value(QStringLiteral("items")).toArray()) {
-                const auto item = value.toObject();
-                m_queueItems.append({item.value(QStringLiteral("id")).toString(),
-                                     {item.value(QStringLiteral("preview")).toString(), item.value(QStringLiteral("forced")).toBool()}});
-            }
+            m_workerItems = workerRowsIn(event, QStringLiteral("items"));
+            m_workerSteering = workerRowsIn(event, QStringLiteral("steering"));
             // Forget prompts that are neither running nor queued any more (removed or cleared).
-            for (auto it = m_itemPrompts.begin(); it != m_itemPrompts.end();) {
-                const bool queued = std::any_of(m_queueItems.cbegin(), m_queueItems.cend(), [&](const auto &q) { return q.first == it.key(); });
-                if (!queued && it.key() != m_runningItem && it.key() != m_currentItem) it = m_itemPrompts.erase(it); else ++it;
+            const auto gone = [this](const QString &id) {
+                const auto named = [&id](const WorkerRow &row) { return row.id == id; };
+                return !std::any_of(m_workerItems.cbegin(), m_workerItems.cend(), named)
+                    && !std::any_of(m_workerSteering.cbegin(), m_workerSteering.cend(), named)
+                    && id != m_runningItem && id != m_currentItem;
+            };
+            for (auto it = m_itemPrompts.begin(); it != m_itemPrompts.end();)
+                if (gone(it.key())) it = m_itemPrompts.erase(it); else ++it;
+            for (auto it = m_workerPrompts.begin(); it != m_workerPrompts.end();)
+                if (gone(it.key())) it = m_workerPrompts.erase(it); else ++it;
+            // The selected row may have started, been withdrawn or been taken by another device.
+            if (!m_selectedWorkerRow.isEmpty() && gone(m_selectedWorkerRow)) {
+                m_selectedWorkerRow.clear();
+                m_editor->clear();   // what was in the box was the row's, not the user's
             }
             rebuildQueueStrip();
             changed();
@@ -14233,7 +14351,11 @@ private:
     // theme — between two muted rules, because the shell under them is new and nothing was re-run.
     void replayRestoredScrollback() {
         if (m_restoredScrollback.isEmpty() || m_scrollbackReplayed || !m_backend) return;
-        if (m_inlineOpen || !shellIdleAtPrompt()) return;   // busy: the next prompt tries again
+        // A console has no shell and so never reaches a prompt: `inlineReady()` says why it is
+        // always ready to be printed into, and without this a card's banked transcript (card
+        // #CTRN, `clearTranscript`) waited for a prompt that never comes. A pane with a shell
+        // asks exactly what it asked before.
+        if (m_inlineOpen || (hasShell() && !shellIdleAtPrompt())) return;   // busy: the next prompt tries again
         m_scrollbackReplayed = true;
         // Two blocks can be replayed into one pane, and they are not the same thing: the pane's
         // own text from before the restart, and a conversation's text, which followed the
@@ -14257,7 +14379,8 @@ private:
         // restored block has just scrolled the screen out from under it, so the repaint is a no-op
         // and the pane is left with no prompt at all (the same trap clearTerminal() documents).
         // An empty line is the shell's own way of printing a fresh prompt where the cursor now is.
-        sendShellInput(QStringLiteral("\n"));
+        // A console has no shell to print one.
+        if (hasShell()) sendShellInput(QStringLiteral("\n"));
         status(conversation
                    ? QStringLiteral("Restored %1 line(s) of this conversation's saved terminal text.").arg(lines.size())
                    : QStringLiteral("Restored %1 line(s) of scrollback from this pane's previous shell.").arg(lines.size()));
@@ -14701,6 +14824,7 @@ private:
     void selectQueueEntry(int index) {
         if (index < 0 || index >= m_entries.size()) return;
         m_selectedSteer.clear();   // before the text changes, so it does not read as editing the steer
+        m_selectedWorkerRow.clear();
         m_selected = index;
         m_editor->setPlainText(m_entries[index].written() ? QString() : m_entries[index].text);
         m_editor->moveCursor(QTextCursor::End);
@@ -14723,6 +14847,7 @@ private:
     void leaveQueueSelection() {
         m_selected = -1;
         m_selectedSteer.clear();   // before the box empties, so that does not read as editing the steer
+        m_selectedWorkerRow.clear();
         m_editor->clear();
         rebuildQueueStrip(); changed();
         pumpQueue();   // nothing is held any more
@@ -14736,22 +14861,46 @@ private:
     // The keyboard walks one list in delivery order: steers still waiting for the next tool call,
     // then the queue. A steer being withdrawn is shown greyed but is not a row the keys can land on.
     // m_selected indexes m_entries and m_selectedSteer names a steer; at most one is set.
-    bool inQueueSelection() const { return m_selected >= 0 || !m_selectedSteer.isEmpty(); }
+    bool inQueueSelection() const {
+        return m_selected >= 0 || !m_selectedSteer.isEmpty() || !m_selectedWorkerRow.isEmpty();
+    }
     QStringList liveSteers() const {
         QStringList ids;
         for (const auto &steer : m_steering) if (!steer.withdraw) ids << steer.requestId;
         return ids;
     }
+    // The one list the keyboard walks, in delivery order: this pane's steers, then the worker's
+    // steers for this surface, then the worker's queue for it, then the pane's own items — which
+    // are last because they are not in the worker's queue yet and run after everything that is
+    // (card #CTRN). Every count is zero for a pane whose context names no surface.
+    int steerRowCount() const { return int(liveSteers().size()) + int(workerSteers().size()); }
+    int queuedRowCount() const { return int(workerQueued().size()) + int(m_entries.size()); }
     int selectedQueueRow() const {
         const QStringList steers = liveSteers();
         if (!m_selectedSteer.isEmpty()) return int(steers.indexOf(m_selectedSteer));
-        return (m_selected >= 0 && m_selected < m_entries.size()) ? int(steers.size()) + m_selected : -1;
+        if (!m_selectedWorkerRow.isEmpty()) {
+            const QList<WorkerRow> waiting = workerSteers();
+            for (int i = 0; i < waiting.size(); ++i)
+                if (waiting[i].id == m_selectedWorkerRow) return int(steers.size()) + i;
+            const QList<WorkerRow> queued = workerQueued();
+            for (int i = 0; i < queued.size(); ++i)
+                if (queued[i].id == m_selectedWorkerRow) return steerRowCount() + i;
+            return -1;
+        }
+        return (m_selected >= 0 && m_selected < m_entries.size())
+                   ? steerRowCount() + int(workerQueued().size()) + m_selected
+                   : -1;
     }
     void selectQueueRow(int row) {
         const QStringList steers = liveSteers();
         if (row < 0) return;
-        if (row < steers.size()) selectSteer(steers[row]);
-        else selectQueueEntry(row - int(steers.size()));
+        if (row < steers.size()) { selectSteer(steers[row]); return; }
+        const QList<WorkerRow> waiting = workerSteers();
+        if (row < steers.size() + waiting.size()) { selectWorkerRow(waiting[row - int(steers.size())].id); return; }
+        const QList<WorkerRow> queued = workerQueued();
+        const int fromQueued = row - steerRowCount();
+        if (fromQueued < queued.size()) { selectWorkerRow(queued[fromQueued].id); return; }
+        selectQueueEntry(fromQueued - int(queued.size()));
     }
 
     // Show a steer in the prompt box, like a queued item. It is still a steer while the text is
@@ -14761,6 +14910,7 @@ private:
         for (const auto &steer : m_steering) {
             if (steer.requestId != requestId || steer.withdraw) continue;
             m_selected = -1;
+            m_selectedWorkerRow.clear();
             m_selectedSteer = requestId;
             m_editor->setPlainText(steer.text);
             m_editor->moveCursor(QTextCursor::End);
@@ -14985,16 +15135,25 @@ private:
         // relay::queuenav so they can be tested without a widget. The rows are one list in
         // delivery order: steers waiting for the next tool call, then the queued items.
         {
-            const QStringList steers = liveSteers();
+            const QList<WorkerRow> workerWaiting = workerSteers();
+            const QList<WorkerRow> workerLine = workerQueued();
             relay::queuenav::State nav;
             nav.selected = selectedQueueRow();
-            nav.steers = int(steers.size());
-            nav.count = nav.steers + int(m_entries.size());
-            nav.headSteerable = m_agentBusy && !m_entries.isEmpty() && m_entries.first().agent && !m_entries.first().written();
+            nav.steers = steerRowCount();
+            nav.count = nav.steers + queuedRowCount();
+            // The head of the queue is the worker's first row for this surface when it has one:
+            // those are already *in* the queue, and the pane's own items run after them (#CTRN).
+            nav.headSteerable = m_agentBusy
+                && (!workerLine.isEmpty()
+                    || (!m_entries.isEmpty() && m_entries.first().agent && !m_entries.first().written()));
             nav.promptEmpty = m_editor->toPlainText().isEmpty();
             nav.cursorLine = m_editor->textCursor().blockNumber();
             nav.lineCount = m_editor->document()->blockCount();
             const bool onSteer = !m_selectedSteer.isEmpty();
+            const bool onWorkerRow = !m_selectedWorkerRow.isEmpty();
+            const bool onWorkerSteer = onWorkerRow
+                && std::any_of(workerWaiting.cbegin(), workerWaiting.cend(),
+                               [this](const WorkerRow &row) { return row.id == m_selectedWorkerRow; });
             using Action = relay::queuenav::Action;
             switch (relay::queuenav::decide(nav, k, mods)) {
             case Action::Enter:
@@ -15020,6 +15179,19 @@ private:
                     takeBackSelectedSteer();
                     return true;
                 }
+                if (onWorkerRow) {
+                    // A row the worker holds. An edit withdraws it and asks again, which is the
+                    // two steps a person would take and puts it at the back; a row this console
+                    // never sent shows only the preview the worker kept, so it is not edited
+                    // here and Enter simply leaves the list.
+                    const bool editable = !workerRowText(m_selectedWorkerRow).isEmpty();
+                    const bool edited = saveWorkerEdit();
+                    leaveQueueSelection();
+                    toast(edited      ? QStringLiteral("Sent again · it runs at the back of the queue")
+                          : editable  ? QStringLiteral("Unchanged · the queue runs on")
+                                      : QStringLiteral("This prompt was sent from elsewhere · it can be moved or removed here"));
+                    return true;
+                }
                 const bool held = queueHeldBySelection();
                 const bool edited = saveQueueEdit();
                 leaveQueueSelection();
@@ -15032,19 +15204,21 @@ private:
                 leaveQueueSelection();          // the edit is dropped: nothing was written back
                 return true;
             case Action::Remove: {
-                const QString rowId = onSteer ? QStringLiteral("steer:") + m_selectedSteer
-                                              : QStringLiteral("entry:%1").arg(m_entries[m_selected].id);
+                const QString rowId = onSteer      ? QStringLiteral("steer:") + m_selectedSteer
+                                      : onWorkerRow ? QStringLiteral("item:") + m_selectedWorkerRow
+                                                    : QStringLiteral("entry:%1").arg(m_entries[m_selected].id);
                 const int at = nav.selected;
                 leaveQueueSelection();
                 removeRow(rowId);
                 // Stay in the list on the row that moved up into the gap, so several can go in a
                 // row. A steer being withdrawn is no longer a row, so the gap is there at once.
-                const int rows = int(liveSteers().size() + m_entries.size());
+                const int rows = steerRowCount() + queuedRowCount();
                 if (rows > 0) selectQueueRow(std::min(at, rows - 1));
                 return true;
             }
             case Action::MoveUp:
             case Action::MoveDown: {
+                if (onWorkerRow) { moveWorkerRow(k == Qt::Key_Up ? -1 : 1); return true; }
                 saveQueueEdit();
                 const int to = m_selected + (k == Qt::Key_Up ? -1 : 1);
                 m_entries.move(m_selected, to);
@@ -15053,6 +15227,7 @@ private:
             }
             case Action::Steer: {
                 // Ctrl+Up on the head of the queue: one further up is the running turn itself.
+                if (onWorkerRow) { steerWorkerRow(m_selectedWorkerRow); return true; }
                 saveQueueEdit();
                 const QString requestId = steerQueuedEntry(m_entries[m_selected].id);
                 if (!requestId.isEmpty()) selectSteer(requestId);   // the highlight follows it
@@ -15060,7 +15235,10 @@ private:
             }
             case Action::Unsteer: {
                 // Ctrl+Down on a steer: back out of the turn, to the head of the queue once the
-                // worker confirms it had not taken it yet.
+                // worker confirms it had not taken it yet. The wire has no "back to the queue"
+                // for a steer the *worker* holds — `queue_remove` is the only op that reaches one
+                // — so what this console typed goes back to the prompt box instead of being lost.
+                if (onWorkerSteer) { removeWorkerRow(m_selectedWorkerRow, true); return true; }
                 const QString requestId = m_selectedSteer;
                 leaveQueueSelection();
                 withdrawSteer(requestId, SteerEntry::ToQueue);
@@ -16742,9 +16920,201 @@ private:
 
 struct PendingPrompt { QString text, why, program; bool fix = false, handoff = false; QString shellText; };
 
+    // ----- the worker's own queue, drawn in the strip (protocol 33, card #CTRN) -----------------
+    //
+    // Until this card the §12 strip drew the pane's **own** list and nothing else: a terminal
+    // pane holds its prompts back client-side (`m_entries`) and sends one `ask` at a time, so the
+    // worker's queue never had a row in it that was not already running. A console's has. A
+    // card's Enter travels as `board_ask` (19.10) and waits in *that card's* supervisor, so the
+    // prompt queued, ran, and had nothing on screen to say so — the owner's report on this card,
+    // "the queue doesn't work like the main terminal", on the one surface it was still true of.
+    //
+    // One rule for every pane: **the worker's list for this console's surface is the truth**, and
+    // the pane's own pending items are the optimistic overlay in front of it — they are not in
+    // the worker's queue yet, so they run after everything that is. A terminal pane's surface is
+    // empty, `workerQueued()` and `workerSteers()` answer nothing, and its strip is byte-for-byte
+    // what it was.
+    //
+    // The rows of one `queue_changed` are every surface's: the consoles of a tab share one
+    // supervisor, so a row is drawn by the console whose `ask` made it and by no other.
+    struct WorkerRow {
+        QString id, preview, surface, origin, mode, cardId;
+        bool forced = false;
+    };
+    // What was typed for a prompt this console handed to its context, and which chord sent it —
+    // `auto`, `agent` or `shell`, because a card's three chords are exactly that distinction and
+    // an edited row has to go back the way it came.
+    struct ContextSubmit { QString route, text; };
+
+    // The surface whose worker rows this console draws, or empty for a pane that draws none.
+    QString queueSurface() const { return contextSpec().surface; }
+
+    static QList<WorkerRow> workerRowsIn(const QJsonObject &event, const QString &key) {
+        QList<WorkerRow> rows;
+        for (const QJsonValue &value : event.value(key).toArray()) {
+            const QJsonObject item = value.toObject();
+            WorkerRow row;
+            row.id = item.value(QStringLiteral("id")).toString();
+            // `preview` is the owner's own words, not the prompt the model is sent: `board_ask`
+            // builds that out of the card's seed block and the mode's brief, and the strip would
+            // otherwise read "[Switchboard card #CRD1 — …] You are Relay's Switchboard agent…".
+            row.preview = item.value(QStringLiteral("preview")).toString();
+            row.surface = item.value(QStringLiteral("surface")).toString();
+            row.origin = item.value(QStringLiteral("origin")).toString();
+            row.mode = item.value(QStringLiteral("mode")).toString();
+            row.cardId = item.value(QStringLiteral("card_id")).toString();
+            row.forced = item.value(QStringLiteral("forced")).toBool();
+            rows.append(row);
+        }
+        return rows;
+    }
+
+    // The other half of "the pane's own submissions are the overlay": a worker row this pane
+    // already draws itself is not drawn twice. A steer the pane made keeps the worker's item id
+    // (`queued {when: "steer"}`, handleSessionEvent) and an `ask` the pane sent is in
+    // `m_itemPrompts` from the same event — so the pane's row wins for as long as the pane has
+    // one, and the worker's echo of it is suppressed.
+    //
+    // It is also what keeps a **terminal pane byte-for-byte what it was**: a terminal context's
+    // surface is that pane's own session token (`TerminalContext::spec`), so every row of its
+    // worker's queue is one it sent, and every one of them is held here.
+    bool heldHere(const QString &itemId) const {
+        if (itemId.isEmpty() || m_itemPrompts.contains(itemId)) return true;
+        return std::any_of(m_steering.cbegin(), m_steering.cend(),
+                           [&itemId](const SteerEntry &steer) { return steer.itemId == itemId; });
+    }
+
+    QList<WorkerRow> workerRowsFor(const QList<WorkerRow> &rows) const {
+        QList<WorkerRow> mine;
+        const QString surface = queueSurface();
+        if (surface.isEmpty()) return mine;
+        for (const WorkerRow &row : rows)
+            if (row.surface == surface && !heldHere(row.id)) mine.append(row);
+        return mine;
+    }
+    QList<WorkerRow> workerQueued() const { return workerRowsFor(m_workerItems); }
+    QList<WorkerRow> workerSteers() const { return workerRowsFor(m_workerSteering); }
+
+    // A queue op addressed to the queue this console's rows are in. A card's prompts wait in that
+    // card's own supervisor, so `queue_remove`, `queue_move`, `queue_steer`, `queue_unsteer`,
+    // `queue_clear`, `resume_queue` and `cancel` name the surface they are for (worker.py,
+    // `queue_for`); a pane, a tab console and a GUI that sends no surface all reach the worker's
+    // own supervisor exactly as before.
+    QJsonObject queueOp(const QString &type) const {
+        QJsonObject op{{QStringLiteral("type"), type}};
+        if (const QString surface = queueSurface(); !surface.isEmpty())
+            op.insert(QStringLiteral("surface"), surface);
+        return op;
+    }
+
+    // What a worker row puts in the prompt box, and empty when it may not be edited here. A row
+    // carries a 120-character preview (`queue.PREVIEW`), so writing the box back into a prompt
+    // this pane never held would silently truncate it: such a row is treated exactly as a
+    // `QueueEntry::written()` one — selectable, movable, removable, and not edited.
+    QString workerRowText(const QString &itemId) const {
+        return m_workerPrompts.value(itemId).text;
+    }
+
+    // Put a worker row in the prompt box, as selectQueueEntry does for one of the pane's own.
+    void selectWorkerRow(const QString &itemId) {
+        if (itemId.isEmpty()) return;
+        m_selected = -1;
+        m_selectedSteer.clear();
+        m_selectedWorkerRow = itemId;
+        m_editor->setPlainText(workerRowText(itemId));
+        m_editor->moveCursor(QTextCursor::End);
+        rebuildQueueStrip(); changed();
+        pumpQueue();
+    }
+
+    // Enter on a selected worker row. There is no `queue_edit` on the wire and there should not
+    // be one: the prompt the worker holds was built by whoever submitted it — a card's is the
+    // card's seed block and the mode's brief around these words — so an edit is the same two
+    // steps a person would take, withdraw and ask again, and it lands at the back of the queue
+    // because that is where asking again puts it. Says so rather than pretending otherwise.
+    bool saveWorkerEdit() {
+        const QString itemId = m_selectedWorkerRow;
+        if (itemId.isEmpty()) return false;
+        const ContextSubmit sent = m_workerPrompts.value(itemId);
+        const QString text = m_editor->toPlainText();
+        if (sent.text.isEmpty() || text.trimmed().isEmpty() || text == sent.text) return false;
+        QJsonObject remove = queueOp(QStringLiteral("queue_remove"));
+        remove.insert(QStringLiteral("item"), itemId);
+        send(remove);
+        m_workerPrompts.remove(itemId);
+        m_selectedWorkerRow.clear();
+        m_editor->clear();
+        if (m_context) m_context->submit(sent.route, text);
+        rememberContextSubmit(sent.route, text);
+        return true;
+    }
+
+    // The console handed a line to its context (`board_ask`): remember it until the worker names
+    // the item it became. Bounded, because a context may refuse to queue anything at all.
+    void rememberContextSubmit(const QString &route, const QString &text) {
+        if (queueSurface().isEmpty() || text.trimmed().isEmpty()) return;
+        m_contextSubmits.append(ContextSubmit{route, text});
+        while (m_contextSubmits.size() > 32) m_contextSubmits.removeFirst();
+    }
+
+    // Ctrl+↑ / Ctrl+↓ on a worker row. `to` is a position in the worker's whole list, not in the
+    // rows this console draws: the consoles of a tab share one supervisor, so the row above mine
+    // in the strip can be several places above mine in the queue.
+    void moveWorkerRow(int delta) {
+        const QList<WorkerRow> mine = workerQueued();
+        int here = -1;
+        for (int i = 0; i < mine.size(); ++i) if (mine[i].id == m_selectedWorkerRow) { here = i; break; }
+        const int there = here + delta;
+        if (here < 0 || there < 0 || there >= mine.size()) return;
+        int to = -1;
+        for (int i = 0; i < m_workerItems.size(); ++i) if (m_workerItems[i].id == mine[there].id) { to = i; break; }
+        if (to < 0) return;
+        QJsonObject move = queueOp(QStringLiteral("queue_move"));
+        move.insert(QStringLiteral("item"), m_selectedWorkerRow);
+        move.insert(QStringLiteral("to"), to);
+        send(move);
+    }
+
+    // Ctrl+↑ on the head of the worker's queue while the turn works: the same "one further up is
+    // the running turn itself" the pane's own head has, sent as the op the worker has for it.
+    void steerWorkerRow(const QString &itemId) {
+        QJsonObject steer = queueOp(QStringLiteral("queue_steer"));
+        steer.insert(QStringLiteral("item"), itemId);
+        send(steer);
+        toast(QStringLiteral("Steering · delivered at the agent's next tool call"));
+    }
+
+    // Shift+Delete or × on a worker row, and Ctrl+↓ on a worker steer. `queue_remove` takes a
+    // steer out of the running turn as well as a prompt out of the queue, and it is the only op
+    // the wire has for either — there is no "back to the queue" for a steer nobody here made —
+    // so what this console typed is handed back to the prompt box rather than thrown away.
+    bool removeWorkerRow(const QString &itemId, bool draftItBack = false) {
+        const bool known = std::any_of(m_workerItems.cbegin(), m_workerItems.cend(),
+                                       [&](const WorkerRow &row) { return row.id == itemId; })
+                        || std::any_of(m_workerSteering.cbegin(), m_workerSteering.cend(),
+                                       [&](const WorkerRow &row) { return row.id == itemId; });
+        if (!known) return false;
+        QJsonObject remove = queueOp(QStringLiteral("queue_remove"));
+        remove.insert(QStringLiteral("item"), itemId);
+        send(remove);
+        const QString text = workerRowText(itemId);
+        m_workerPrompts.remove(itemId);
+        if (m_selectedWorkerRow == itemId) { m_selectedWorkerRow.clear(); m_editor->clear(); }
+        if (draftItBack && !text.isEmpty()) {
+            m_editor->setPlainText(text);
+            m_editor->moveCursor(QTextCursor::End);
+            status(QStringLiteral("Taken back · it is in the prompt box, unsent"));
+        }
+        return true;
+    }
+
+
     // Another turn will start without user action: something is queued and the queue is not paused.
     // Another turn will start without user action: queued items, or a turn that is interrupting this one.
-    bool moreTurnsPending() const { return (!m_entries.isEmpty() && !queueBlocked()) || m_interruptPending; }
+    bool moreTurnsPending() const {
+        return (!m_entries.isEmpty() && !queueBlocked()) || m_interruptPending
+            || (!workerQueued().isEmpty() && !m_queuePaused);
+    }
 
     QString sendPrompt(QJsonObject request, const PendingPrompt &prompt) {
         const QString requestId = QStringLiteral("ask-%1").arg(++m_askSerial);
@@ -16772,7 +17142,15 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
     void rebuildQueueStrip() {
         m_paneState.changed();   // pane_state (relay-terminal-71)
         if (!m_queueStrip) return;
-        const bool visible = !m_entries.isEmpty() || m_entriesPaused || !m_steering.isEmpty();
+        // The worker's rows for this console's surface count towards the strip being there at
+        // all: a card's prompt waits in that card's supervisor and never in `m_entries`, and
+        // until card #CTRN that meant a queued card prompt had no row on screen (the owner's
+        // report on this card). A pane whose context names no surface has none of them.
+        const QList<WorkerRow> waiting = workerSteers();
+        const QList<WorkerRow> queued = workerQueued();
+        const bool workerPaused = m_queuePaused && !queued.isEmpty() && !queueSurface().isEmpty();
+        const bool visible = !m_entries.isEmpty() || m_entriesPaused || !m_steering.isEmpty()
+                          || !waiting.isEmpty() || !queued.isEmpty();
         auto *layout = static_cast<QVBoxLayout *>(m_queueStrip->layout());
         while (QLayoutItem *item = layout->takeAt(0)) {
             if (QWidget *w = item->widget()) { if (w != m_queueList) w->deleteLater(); }
@@ -16786,7 +17164,8 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
         if (!visible) return;
         auto *header = new QHBoxLayout;
         const bool held = queueHeldBySelection();
-        auto *title = new QLabel(queueBlocked() ? QStringLiteral("QUEUE · PAUSED") : QStringLiteral("QUEUE"));
+        auto *title = new QLabel(queueBlocked() || workerPaused ? QStringLiteral("QUEUE · PAUSED")
+                                                               : QStringLiteral("QUEUE"));
         title->setObjectName(QStringLiteral("queueTitle"));
         QString why = held ? QStringLiteral("The next item is highlighted and being edited in the prompt box, so the"
                                             " queue is holding. Enter saves it, Esc drops the edit; either way the"
@@ -16795,13 +17174,15 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
         if (!m_pauseReason.isEmpty()) why = why.isEmpty() ? m_pauseReason : why + QStringLiteral("\nAlso paused: ") + m_pauseReason;
         title->setToolTip(why);
         header->addWidget(title, 1);
-        const bool headSteerable = m_selected == 0 && m_agentBusy && !m_entries.isEmpty() && m_entries.first().agent
-                                   && !m_entries.first().written();
+        const bool headSteerable = selectedQueueRow() == steerRowCount() && m_agentBusy
+                                   && (!queued.isEmpty()
+                                       || (!m_entries.isEmpty() && m_entries.first().agent
+                                           && !m_entries.first().written()));
         auto *hint = new QLabel(!m_selectedSteer.isEmpty()
                                     ? QStringLiteral("Enter or type to edit · Ctrl+↓ back to the queue · Ctrl+Enter now · Shift+Del withdraw · Esc")
                                 : headSteerable
                                     ? QStringLiteral("Ctrl+↑ next tool call · Ctrl+↓ move · Enter save · Esc cancel · Shift+Del remove")
-                                : m_selected >= 0
+                                : inQueueSelection()
                                     ? QStringLiteral("↑↓ row · Ctrl+↑↓ move · Enter save · Esc cancel · Shift+Del remove")
                                     : QStringLiteral("↑ select a row · Ctrl+↑↓ move · Shift+Del remove"));
         hint->setObjectName(QStringLiteral("queueHint"));
@@ -16814,12 +17195,12 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
             "the queue, Ctrl+Enter interrupts the turn and sends it now.\n"
             "Shift+Delete or × removes a queued row and withdraws a ↪ row the agent has not taken yet."));
         header->addWidget(hint);
-        if (m_entriesPaused && !held) {
+        if ((m_entriesPaused || workerPaused) && !held) {
             auto *resume = new QToolButton; resume->setText(QStringLiteral("Resume")); resume->setFocusPolicy(Qt::NoFocus);
             connect(resume, &QToolButton::clicked, this, [this] { resumeAgentQueue(); });
             header->addWidget(resume);
         }
-        if (m_entries.size() > 1) {
+        if (m_entries.size() + queued.size() > 1) {
             auto *clear = new QToolButton; clear->setText(QStringLiteral("Clear")); clear->setFocusPolicy(Qt::NoFocus);
             connect(clear, &QToolButton::clicked, this, [this] { clearAgentQueue(); });
             header->addWidget(clear);
@@ -16865,6 +17246,33 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
             item->setFlags(steer.withdraw ? Qt::NoItemFlags : Qt::ItemIsEnabled | Qt::ItemIsSelectable);
             if (steer.requestId == m_selectedSteer) current = item;
         }
+        // Then the worker's own rows for this surface, in its order: the steers it holds inside
+        // the running turn, then its queue. They carry no `EntryIdRole` and are not draggable —
+        // `syncEntriesFromList` reorders `m_entries`, and a row that is not in that list has no
+        // place in a drop — so Ctrl+↑↓, which sends `queue_move`, is how one is reordered.
+        for (const QList<WorkerRow> *group : {&waiting, &queued}) {
+            const bool steering = group == &waiting;
+            for (const WorkerRow &row : *group) {
+                auto *item = new QListWidgetItem(row.preview, m_queueList);
+                item->setData(Row::EntryIdRole, QVariant::fromValue<qulonglong>(0));
+                item->setData(Row::AgentRole, true);
+                item->setData(Row::KindRole, steering ? QStringLiteral("steer") : QStringLiteral("agent"));
+                item->setData(Row::RowIdRole, QStringLiteral("item:") + row.id);
+                const QString what = row.mode.isEmpty()
+                                         ? QStringLiteral("Queued on the agent")
+                                         : QStringLiteral("Queued to %1 #%2").arg(row.mode, row.cardId);
+                item->setToolTip(steering
+                    ? QStringLiteral("Delivered inside the running turn at the agent's next tool call\n%1").arg(row.preview)
+                    : workerRowText(row.id).isEmpty()
+                        ? QStringLiteral("%1\n%2\n\nSent from elsewhere, so this row shows what the "
+                                         "worker kept of it: Ctrl+↑↓ moves it, Shift+Delete or × removes it.")
+                              .arg(what, row.preview)
+                        : QStringLiteral("%1\n%2\n\nEnter or typing edits it · Ctrl+↑↓ moves it · "
+                                         "Shift+Delete or × removes it").arg(what, row.preview));
+                item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+                if (row.id == m_selectedWorkerRow) current = item;
+            }
+        }
         for (int i = 0; i < m_entries.size(); ++i) {
             const QueueEntry &entry = m_entries[i];
             auto *item = new QListWidgetItem(entry.label(), m_queueList);
@@ -16880,7 +17288,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
         if (current) m_queueList->setCurrentItem(current);
         else { m_queueList->clearSelection(); m_queueList->setCurrentRow(-1); }
         const int rowHeight = std::max(20, fontMetrics().height() + 8);
-        const int rows = int(m_steering.size() + m_entries.size());
+        const int rows = int(m_steering.size()) + int(waiting.size()) + int(queued.size()) + int(m_entries.size());
         m_queueList->setFixedHeight(std::min<int>(6, std::max<int>(1, rows)) * rowHeight + 4);
         m_queueList->setVisible(rows > 0);
         if (current) m_queueList->scrollToItem(current);
@@ -17618,6 +18026,12 @@ private:
     // True while m_restoredScrollback holds a *conversation's* text rather than this pane's own:
     // the two wear different rules, because only one of them was printed in this pane.
     bool m_restoredIsSessionText = false;
+    // One console, several surfaces (card #CTRN, `clearTranscript`): which surface the rows on
+    // screen were printed for, and what the surfaces before it left behind. Empty and empty for
+    // every pane that is not a card page's console, which is every pane but one.
+    QString m_transcriptSurface;
+    QHash<QString, QStringList> m_bankedText;
+    QStringList m_bankedOrder;   // least recently banked first, for the kBankedSurfaces cap
     // The `conversation_get` asked for to stand in for text that was never saved, and — for a
     // conversation opened in a new pane — the id to ask about once the worker is up.
     QString m_transcriptRequest, m_transcriptPending;
@@ -17802,7 +18216,17 @@ private:
     QPlainTextEdit *m_transcriptView = nullptr;
     QString m_transcriptProgram;
     QHash<QString, PendingPrompt> m_pendingPrompts, m_itemPrompts;   // request id / queue item id -> prompt
-    QList<QPair<QString, QPair<QString, bool>>> m_queueItems;        // item id -> (preview, forced)
+    // The worker's own queue, exactly as its last `queue_changed` reported it — every surface's
+    // rows, in the worker's order, because `queue_move`'s `to` is a position in *that* list.
+    // `workerQueued()` and `workerSteers()` are what the strip draws, filtered to this console's
+    // own surface.
+    QList<WorkerRow> m_workerItems, m_workerSteering;
+    // What this console handed to its context and the worker has not named yet (`board_ask`
+    // carries no request id back), oldest first, and what the `queued` events since matched up:
+    // the optimistic overlay that lets a worker row be *edited*, because a row itself carries a
+    // 120-character preview and writing that back would truncate the prompt.
+    QList<ContextSubmit> m_contextSubmits;
+    QHash<QString, ContextSubmit> m_workerPrompts;   // worker item id -> what was typed here
     QString m_runningItem, m_currentItem;
     bool m_queuePaused = false;
     QList<QueueEntry> m_entries;
@@ -17813,6 +18237,7 @@ private:
     quint64 m_entrySerial = 0;
     int m_selected = -1;
     QString m_selectedSteer;   // the steer row selected in the queue list (its request id); see selectSteer
+    QString m_selectedWorkerRow;   // a row of the *worker's* queue, by its item id (card #CTRN)
     QElapsedTimer m_selectionDroppedAt;   // a selected steer left the list and nothing took its place (forgetSteer)
     QListWidget *m_queueList = nullptr, *m_atList = nullptr;
     // Switchboard: the `#K7Q2` picker and the card rows behind it (protocol 17.2, 17.6).

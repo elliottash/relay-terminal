@@ -61,7 +61,7 @@ public:
     {
         relay::agent::ContextSpec spec;
         spec.name = QStringLiteral("switchboard");
-        spec.surface = QStringLiteral("stub");
+        spec.surface = surface;
         spec.agentRole = QStringLiteral("main");
         spec.workspace = workspace;
         spec.scope = QStringLiteral("console");
@@ -88,6 +88,7 @@ public:
     }
 
     QString workspace;
+    QString surface = QStringLiteral("stub");
     QList<relay::agent::Action> rows;
     QStringList seen, finished, submitted;
     QList<int> kinds;
@@ -504,6 +505,170 @@ void theContextGetsFirstRefusalOnEveryLinkKind()
     CHECK(opened.isEmpty());
     }
 
+
+// ----- the §12 queue strip reads the worker's queue (card #CTRN) --------------------------------
+//
+// A pane holds its own prompts back client-side and sends one `ask` at a time, so until this card
+// the strip drew `m_entries` and nothing else — and a card's prompt never goes that way: it
+// travels as `board_ask`, waits in that card's own supervisor and comes back as `queue_changed`.
+// It queued and it ran, and there was no row on screen to say so (the owner's report on #CTRN,
+// "the queue doesn't work like the main terminal"). One rule for every pane now: the worker's
+// list for this console's surface is the truth, the pane's own pending items are the overlay in
+// front of it, and a pane whose context names no surface has none of the first.
+QJsonObject workerRow(const QString &id, const QString &preview, const QString &surface)
+{
+    return QJsonObject{{QStringLiteral("id"), id},
+                       {QStringLiteral("preview"), preview},
+                       {QStringLiteral("surface"), surface},
+                       {QStringLiteral("origin"), QStringLiteral("user")},
+                       {QStringLiteral("forced"), false}};
+}
+
+QJsonObject queueChanged(const QJsonArray &items, const QJsonArray &steering = {})
+{
+    return QJsonObject{{QStringLiteral("event"), QStringLiteral("queue_changed")},
+                       {QStringLiteral("running"), QStringLiteral("run-1")},
+                       {QStringLiteral("paused"), false},
+                       {QStringLiteral("items"), items},
+                       {QStringLiteral("steering"), steering}};
+}
+
+void aQueueChangedForThisSurfaceDrawsRowsTheConsoleNeverSubmitted()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    console.onWorkerLine = [](const QJsonObject &) {};
+    // Two rows of one worker: one this console's, one another console's of the same tab. The
+    // consoles of a tab share a supervisor, so every row of one `queue_changed` is not this
+    // console's to draw.
+    console.deliverWorkerEvent(queueChanged({workerRow(QStringLiteral("q1"), QStringLiteral("trace the card please"), QStringLiteral("stub")),
+                                             workerRow(QStringLiteral("q2"), QStringLiteral("not this console's"), QStringLiteral("options"))},
+                                            {workerRow(QStringLiteral("s1"), QStringLiteral("and check the tests"), QStringLiteral("stub"))}));
+    QStringList previews, ids, kinds;
+    for (const Pane::QueueRow &row : console.queueRows()) {
+        if (row.kind == QStringLiteral("running")) continue;
+        previews << row.preview;
+        ids << row.id;
+        kinds << row.kind;
+    }
+    // Delivery order: what the turn takes at its next tool call, then what is queued behind it.
+    CHECK_EQ(previews, QStringList({QStringLiteral("and check the tests"), QStringLiteral("trace the card please")}));
+    CHECK_EQ(ids, QStringList({QStringLiteral("item:s1"), QStringLiteral("item:q1")}));
+    CHECK_EQ(kinds, QStringList({QStringLiteral("steer"), QStringLiteral("agent")}));
+    CHECK_EQ(console.queuedPrompts(), 1);
+}
+
+void aTerminalPaneIgnoresTheWorkersRowsEntirely()
+{
+    Pane pane(home->path(), home->path(), true);
+    // A terminal context's surface is that pane's own session token, so a row of another
+    // console's — or of no console at all — is never its to draw, and the one client of its
+    // worker's queue is the pane itself, whose rows `heldHere` suppresses. Together that is
+    // "a terminal pane's strip is byte-for-byte what it was".
+    CHECK(!pane.contextSpec().surface.isEmpty());
+    pane.deliverWorkerEvent(queueChanged({workerRow(QStringLiteral("q1"), QStringLiteral("someone else's"), QStringLiteral("switchboard")),
+                                          workerRow(QStringLiteral("q2"), QStringLiteral("untagged"), QString())},
+                                         {workerRow(QStringLiteral("s1"), QStringLiteral("another console's steer"), QStringLiteral("card:K7Q2"))}));
+    CHECK(pane.queueRows().isEmpty());
+    CHECK_EQ(pane.queuedPrompts(), 0);
+}
+
+// The optimistic overlay, and what it buys: a line typed into this console's own box travels as
+// the context's message (`board_ask`), which carries no request id of the pane's, so the item it
+// becomes is matched to what was typed in order. That is what lets the row be *edited* — the row
+// itself carries a 120-character preview, and writing that back would truncate the prompt.
+void aLineThisConsoleSentComesBackAsAnEditableRow()
+{
+    StubContext context;
+    context.workspace = home->path();
+    context.takeSubmit = true;
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    QList<QJsonObject> sent;
+    console.onWorkerLine = [&sent](const QJsonObject &message) { sent << message; };
+    auto *editor = console.findChild<QPlainTextEdit *>(QStringLiteral("composerEditor"));
+    CHECK(editor != nullptr);
+    if (editor == nullptr) return;
+
+    const QString typed = QStringLiteral("trace the card please, and say what the thread is missing");
+    console.draftInComposer(typed);
+    QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+    QCoreApplication::sendEvent(editor, &enter);
+    CHECK_EQ(context.submitted.size(), 1);
+    // A real context clears the box when it takes the line (`CardContext::submit` → the card
+    // page's reply handler); this stub only records, so the box is emptied here.
+    console.draftInComposer(QString());
+
+    console.deliverWorkerEvent(QJsonObject{{QStringLiteral("event"), QStringLiteral("queued")},
+                                           {QStringLiteral("id"), QStringLiteral("q1")},
+                                           {QStringLiteral("request_id"), QStringLiteral("sb-1")},
+                                           {QStringLiteral("surface"), QStringLiteral("stub")}});
+    console.deliverWorkerEvent(queueChanged({workerRow(QStringLiteral("q1"), typed.left(20), QStringLiteral("stub"))}));
+    CHECK_EQ(console.queuedPrompts(), 1);
+
+    // ↑ selects the top row and the **whole** prompt is in the box, not the preview.
+    QKeyEvent up(QEvent::KeyPress, Qt::Key_Up, Qt::NoModifier);
+    QCoreApplication::sendEvent(editor, &up);
+    CHECK_EQ(console.composerText(), typed);
+
+    // Enter on an edited row withdraws it and asks again — the two steps a person would take.
+    sent.clear();
+    context.submitted.clear();
+    console.draftInComposer(typed + QStringLiteral(" (and the tests)"));
+    QKeyEvent save(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+    QCoreApplication::sendEvent(editor, &save);
+    CHECK_EQ(sent.size(), 1);
+    CHECK_EQ(sent.at(0).value(QStringLiteral("type")).toString(), QStringLiteral("queue_remove"));
+    CHECK_EQ(sent.at(0).value(QStringLiteral("item")).toString(), QStringLiteral("q1"));
+    CHECK_EQ(sent.at(0).value(QStringLiteral("surface")).toString(), QStringLiteral("stub"));
+    CHECK_EQ(context.submitted.size(), 1);
+    CHECK(context.submitted.at(0).endsWith(QStringLiteral("(and the tests)")));
+}
+
+void aWorkerRowIsRemovedAndMovedWithItsSurface()
+{
+    StubContext context;
+    context.workspace = home->path();
+    context.surface = QStringLiteral("card:K7Q2");
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    QList<QJsonObject> sent;
+    console.onWorkerLine = [&sent](const QJsonObject &message) { sent << message; };
+    console.deliverWorkerEvent(queueChanged({workerRow(QStringLiteral("q1"), QStringLiteral("first"), QStringLiteral("card:K7Q2")),
+                                             workerRow(QStringLiteral("q2"), QStringLiteral("second"), QStringLiteral("card:K7Q2"))}));
+    CHECK_EQ(console.queuedPrompts(), 2);
+
+    // Shift+Delete, or the × on the row: the op names the queue it is for, because a card's
+    // prompts wait in that card's supervisor and not in the tab's.
+    sent.clear();
+    CHECK(console.removeRow(QStringLiteral("item:q2")));
+    CHECK_EQ(sent.size(), 1);
+    CHECK_EQ(sent.at(0).value(QStringLiteral("type")).toString(), QStringLiteral("queue_remove"));
+    CHECK_EQ(sent.at(0).value(QStringLiteral("item")).toString(), QStringLiteral("q2"));
+    CHECK_EQ(sent.at(0).value(QStringLiteral("surface")).toString(), QStringLiteral("card:K7Q2"));
+
+    // ↑ steps into the list at the top row; Ctrl+↓ moves the selected row down the worker's queue.
+    sent.clear();
+    auto *editor = console.findChild<QPlainTextEdit *>(QStringLiteral("composerEditor"));
+    CHECK(editor != nullptr);
+    if (editor == nullptr) return;
+    QKeyEvent up(QEvent::KeyPress, Qt::Key_Up, Qt::NoModifier);
+    QCoreApplication::sendEvent(editor, &up);
+    QKeyEvent ctrlDown(QEvent::KeyPress, Qt::Key_Down, Qt::ControlModifier);
+    QCoreApplication::sendEvent(editor, &ctrlDown);
+    CHECK_EQ(sent.size(), 1);
+    CHECK_EQ(sent.at(0).value(QStringLiteral("type")).toString(), QStringLiteral("queue_move"));
+    CHECK_EQ(sent.at(0).value(QStringLiteral("item")).toString(), QStringLiteral("q1"));
+    CHECK_EQ(sent.at(0).value(QStringLiteral("to")).toInt(), 1);
+    CHECK_EQ(sent.at(0).value(QStringLiteral("surface")).toString(), QStringLiteral("card:K7Q2"));
+
+    // Esc is the card's turn too, not the tab's: an untagged `cancel` stopped the wrong one.
+    sent.clear();
+    console.stopAgent();
+    CHECK_EQ(sent.size(), 1);
+    CHECK_EQ(sent.at(0).value(QStringLiteral("type")).toString(), QStringLiteral("cancel"));
+    CHECK_EQ(sent.at(0).value(QStringLiteral("surface")).toString(), QStringLiteral("card:K7Q2"));
+}
+
 }  // namespace cases
 
 int main(int argc, char **argv)
@@ -531,8 +696,12 @@ int main(int argc, char **argv)
     cases::theHostsHandlesWork();
     cases::aConsoleIsAnOrdinaryChildOfItsHost();
     cases::theContextGetsFirstRefusalOnEveryLinkKind();
+    cases::aQueueChangedForThisSurfaceDrawsRowsTheConsoleNeverSubmitted();
+    cases::aTerminalPaneIgnoresTheWorkersRowsEntirely();
+    cases::aWorkerRowIsRemovedAndMovedWithItsSurface();
+    cases::aLineThisConsoleSentComesBackAsAnEditableRow();
 
     if (failures == 0)
-    std::fprintf(stdout, "consolemode: 15 cases, all passed\n");
+    std::fprintf(stdout, "consolemode: 19 cases, all passed\n");
     return failures == 0 ? 0 : 1;
 }

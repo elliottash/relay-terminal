@@ -269,6 +269,8 @@ public:
     // is where a card turn is drawn now, so it must never be hidden until a byte arrives.
     int hideCalls = 0;
     bool hidden = false;
+    // `clearTranscript`, in order: the surface the console was told it is drawing (card #CTRN).
+    QStringList transcriptOf;
 
     relay::agent::ConsoleHandle handle()
     {
@@ -281,6 +283,7 @@ public:
         };
         out.composerText = [this] { return m_editor->toPlainText(); };
         out.setTranscriptHiddenUntilUsed = [this](bool hide) { ++hideCalls; hidden = hide; };
+        out.clearTranscript = [this](const QString &surface) { transcriptOf << surface; };
         out.setCollapsed = [this](bool collapse) { setVisible(!collapse); };
         out.collapsed = [this] { return isHidden(); };
         out.runActionLetter = [this](const QString &letter) {
@@ -425,6 +428,7 @@ private slots:
     void anEmptyBoardStillShowsTheAgentBecauseThatIsWhereTheSurveyRuns();
     void theAskKeyFocusesTheConsoleAndACardGoesBackFirst();
     void theCardPageAsksForACardConsoleAndItsActionsFollowTheCard();
+    void theOneConsoleIsToldWhichCardsTranscriptItIsDrawing();
     void theCardsRowCarriesVerifyOnlyInAQaLane();
     void anAnswersCardOptionAndSessionLinksResolveThroughTheContext();
     void aBoardWithNoConsoleFactoryStillWorks();
@@ -3794,7 +3798,9 @@ void BoardModelTests::theCardPageAsksForACardConsoleAndItsActionsFollowTheCard()
     const relay::agent::ContextSpec spec = console->liveSpec();
     QCOMPARE(spec.name, QStringLiteral("card"));
     QCOMPARE(spec.surface, QStringLiteral("card:K7Q2"));     // what every card turn event carries
-    QCOMPARE(spec.scope, QStringLiteral("card"));
+    // A card console is a console: step 3 of card #CTRN deleted the `card` tool scope, and the
+    // name only still arrived because `agent_context.RETIRED_SCOPES` maps it for older GUIs.
+    QCOMPARE(spec.scope, QStringLiteral("console"));
     QCOMPARE(spec.agentRole, QStringLiteral("switchboard"));
     QVERIFY(!spec.shell);
     QCOMPARE(spec.routing, QStringLiteral("agent"));
@@ -3877,6 +3883,40 @@ void BoardModelTests::theCardPageAsksForACardConsoleAndItsActionsFollowTheCard()
 
 // Verify is on the row only in a QA lane (#T71W): on any other card it would be a control for a
 // question nobody has asked yet.
+// One console, several cards (card #CTRN). The page keeps one console and points it at whatever
+// card is open, so the scrollback would bleed from card to card: the conversation and the routing
+// follow the card, and until this card the emulator did not. The page tells the console whose
+// transcript it is drawing on every card it shows — including the first, so the card being left
+// is always the surface the console was last told about — and says it once per card, so a card
+// re-read under the same id (a change on disk, protocol #N5JJ) does not wipe what is on screen.
+void BoardModelTests::theOneConsoleIsToldWhichCardsTranscriptItIsDrawing()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    Consoles consoles(view);
+    view.setTabId(QStringLiteral("tab-7"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({row("K7Q2", "inbox", "features"), row("M3PD", "inbox", "features")}));
+
+    openCard(view, sent, card("K7Q2", "K7Q2 card", "the issue", "h1"));
+    FakeConsole *console = consoles.card();
+    QVERIFY(console);
+    QCOMPARE(console->transcriptOf, QStringList({QStringLiteral("card:K7Q2")}));
+
+    // The same card again — the file changed under it — is not a hand-over.
+    openCard(view, sent, card("K7Q2", "K7Q2 card", "the issue, edited", "h2"));
+    QCOMPARE(console->transcriptOf, QStringList({QStringLiteral("card:K7Q2")}));
+
+    // Another card is, and it is the console's own surface that is named, so the pane can bank
+    // what is on screen under the card it was printed for and draw that card's back.
+    view.closeDetail();
+    sent.clear();
+    openCard(view, sent, card("M3PD", "M3PD card", "another issue", "h1"));
+    QCOMPARE(console->transcriptOf,
+             QStringList({QStringLiteral("card:K7Q2"), QStringLiteral("card:M3PD")}));
+    QCOMPARE(console->liveSpec().surface, QStringLiteral("card:M3PD"));
+}
+
 void BoardModelTests::theCardsRowCarriesVerifyOnlyInAQaLane()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));

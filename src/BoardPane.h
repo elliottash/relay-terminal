@@ -656,6 +656,10 @@ private:
     // console and the console outlives nothing: `~BoardView` takes the widgets down first.
     QWidget *m_console = nullptr;
     relay::agent::ConsoleHandle m_consoleHandle;
+    // The card page's console, which lives in `m_detail`. Kept here for the one call the page
+    // makes on it that `CardDetail` has no reason to know about: `clearTranscript`, which hands
+    // the transcript from the card being left to the card being opened (card #CTRN).
+    relay::agent::ConsoleHandle m_cardConsoleHandle;
     board::BoardContext *m_boardContext = nullptr;
     board::CardContext *m_cardContext = nullptr;
     // The tab this board is in: the key the helper conversation is kept under (§30.7).
