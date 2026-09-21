@@ -2117,9 +2117,26 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   gone — an OpenRouter model is a list entry like any other); custom ids, favorites, recent, sort,
   a remembered reasoning level per entry, use counts and a tokens/s estimate. `src/ModelPicker.*`
   (`relay-modelpicker`, `tests/modelpicker_test.cpp`) is the dialog behind Ctrl+Alt+M
-  (`agent.model`), `/model` alone and the box's "more models…": filter, sort menu, columns model ·
-  provider · reasoning · intelligence · tok/s · left, the reasoning buttons for the highlighted
-  row, favorites / recent sections that give way to a flat list when you type. Every pick goes
+  (`agent.model`), `/model` alone and the box's "more models…", and since card #MDL1 t:a7 it is
+  where models are *prioritized* as well as picked (design 5.2; the lists were "too hard to find"
+  under Options › Models). A tab per tier list — high · main · flash · lite · local, `local` only
+  where this machine serves one — plus `all`; `Context::tier` is the mode the pane is in, so it
+  opens on the list it would be editing, and ←/→ (empty filter, or the caret at that end) and
+  Ctrl+Tab walk the tabs. A tier tab is `curation::tierList(tier)` itself: one row per list
+  *entry*, numbered, the model named once and the provider in a "via" column, rank 1 of main
+  marked, an unusable or exhausted rank greyed in place with the reason in the "left" column. The
+  edits — Alt+↑/↓, a drag (`commitDragOrder`), Delete, Ctrl+Enter with `models::tierStartEffort`,
+  the level list writing `TierEntry::effort`, Ctrl+Z over a stack of (tier, previous list) — all
+  go through `curation::setTierList`, which is the same single writer Options › Models uses and
+  writes through to the current profile, and then call `onListsChanged`; the pane wires that to
+  `onProfileApplied`, i.e. `RelayWindow::modelsCurated()`, so the page redraws and every running
+  worker is re-sent its tiers. Typing searches `shown(catalog)`: this list's matches, then a "not
+  in this list" rule with the rest folded by `models::grouped`. The `all` tab is the old flat
+  picker — filter, sort menu, favorites / recent sections — but one row per *group*, with "via"
+  naming the preferred provider and "+N" and → opening the group's providers beside the levels
+  (which follow the chosen entry into its own words). The profile is in the header when there is
+  one, a footer line spells the tab's keys, and Options › Models carries a "prioritize models…"
+  button at the top that opens the same dialog. Every pick goes
   through `Pane::selectEntry(key, effort)`, which is `selectModel(preset, model)` plus the level;
   `/swap` toggles between rank 1 and rank 2 (#DC4J). Options › Models (`RelayWindow::modelsSection`)
   is the one page: providers and keys (through the pane's `storeKey` / `testKey` / `removeKey`),
@@ -3318,7 +3335,7 @@ of the platform and of the engine itself.
 | `src/SkillsDialog.*` | skills list, exclude, refine, import, updates |
 | `src/ModelSettings.*` | the API-keys and model-roles modals (roles: "per-job models (advanced)" on Options › Models) |
 | `src/ModelCatalog.*` | the one model catalog behind the box, the picker and Options › Models, and what the user checked and ranked |
-| `src/ModelPicker.*` | the model picker dialog (Ctrl+Alt+M, `/model`; Alt+M drops the model box open, Ctrl+Shift+M opens Options › Models) |
+| `src/ModelPicker.*` | the model dialog: picks a model *and* prioritizes the five lists (Ctrl+Alt+M, `/model`; Alt+M drops the model box open, Ctrl+Shift+M opens Options › Models) |
 | `src/SettingsPane.*` | the Actions pane and the Options pane: one widget, two modes |
 | `src/AgentUi.*` | pickers and instructions dialog |
 | `src/Conversations.*` | the session manager pane (`/resume`, `/conversations`, Ctrl+Shift+Y) and the Ctrl+F find bar |

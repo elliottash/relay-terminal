@@ -1607,8 +1607,17 @@ public:
         context.catalog = modelCatalog();
         context.currentKey = currentEntryKey();
         context.currentEffort = m_effort;
+        // The tab it opens on is the mode this pane is in (card #MDL1 t:a7): Ctrl+Alt+M from a
+        // /flash pane lands on the flash list, which is the one it would be editing.
+        context.tier = relay::modelrows::roleTier(m_agentRole);
         const relay::ModelPick pick = relay::pickModel(this, context, [this] {
             if (onOpenOptions) onOpenOptions(QStringLiteral("models"));
+        }, [this] {
+            // A list edited in the dialog is a list edited on Options › Models — one storage, one
+            // exit. The window redraws the page and tells every pane and its worker; on its own,
+            // this pane at least re-reads the lists and re-sends its tiers.
+            if (onProfileApplied) onProfileApplied();
+            else { modelsCurationChanged(); agentOptionsChanged(QStringLiteral("models/fallback")); }
         });
         if (!pick.accepted) return;
         hintSwapForPick(pick.key);

@@ -2247,6 +2247,25 @@ private:
         auto curated = [this] { modelsCurated(); };
         auto str = [](const QJsonObject &object, const char *field) { return object.value(QLatin1String(field)).toString(); };
 
+        // ----- 0. the way to the dialog -----------------------------------------------------------
+        // The five lists are section 4 of this page, under the providers and the checklist — owner,
+        // 2026-09-21: "the model priority chooser is crtical, and currently its too hard to find --
+        // model options, then scroll down." Ctrl+Alt+M is now that chooser (card #MDL1 t:a7, design
+        // 5.2) and this is the door to it from here; the rows below still edit the same storage, so
+        // whichever you use the other agrees.
+        {
+            const QString chord = Keymap::instance().shortcutText(QStringLiteral("agent.model"));
+            relay::SettingRow row = buttonRow(QStringLiteral("models.prioritize"),
+                QStringLiteral("prioritize models"),
+                QStringLiteral("The dialog these five lists live in: a tab per list, enter to use a model in this pane, "
+                               "alt+↑↓ or a drag to reorder, delete to take one out, and typing to find any model and "
+                               "add it. The same lists this page shows"),
+                chord.isEmpty() ? QStringLiteral("prioritize models…") : QStringLiteral("prioritize models… (%1)").arg(chord),
+                [this] { runAction(QStringLiteral("agent.model")); });
+            row.aliases = QStringLiteral("prioritize priority order rank models picker dialog tier lists ctrl+alt+m");
+            models.rows << row;
+        }
+
         // ----- 1. providers ---------------------------------------------------------------------
         // Owner (2026-09-20): only the providers you can use are listed — a key stored, Relay Free,
         // Claude Code and Codex on this machine — plus OpenRouter always, because it is the one key

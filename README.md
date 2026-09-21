@@ -94,7 +94,7 @@ that conflict.
 | Ctrl+Shift+A | Actions: everything you can do now, with its keys, in a list you can filter (again to close) |
 | Ctrl+Shift+O | Options: what persists, a tab per section (again to close; also Ctrl+, and the gear) |
 | Ctrl+Shift+S | Switchboard: this repository's cards, threads and plans (again to close it) |
-| Alt+M, Ctrl+Alt+M | Models: drop the pane's model box open / the full picker with filter and sort (`/model`) |
+| Alt+M, Ctrl+Alt+M | Models: drop the pane's model box open / the dialog that picks *and* prioritizes them (`/model`) |
 | Alt+E | Reasoning: drop the pane's level box open (also Alt+. / Alt+, and `/effort`) |
 | Ctrl+Shift+M | Model options: Options › Models (`/models`) |
 | Ctrl+Shift+Y | Sessions: resume a saved session (`/resume`) |
@@ -232,13 +232,21 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   updated on every autosave and rebuildable from the session files at any time (Actions › Rebuild
   the conversation index). It holds message text, so it stays on this machine and is deleted with
   the conversation; `RELAY_INDEX=off` turns indexing off entirely.
-- **The model picker.** Ctrl+Alt+M, `/model`, or **more models…** at the bottom of the pane's
-  model box opens one list of every model you can use — one row per model, not per provider, in
-  lower case — with a filter that matches words of the model, id or provider, a **sort** menu
-  (priority, a to z, intelligence, speed, most used, subscription left), the reasoning level chosen
-  beside the model and remembered per model, ★ favorites and the ten most recent picks above the
-  rest, and each provider's subscription windows ("5h 62% left, resets 14:30") under the list.
-  `/model <name>` switches without the dialog. The box itself lists the same rows in priority order.
+- **The model dialog: pick *and* prioritize.** Ctrl+Alt+M, `/model`, or **more models…** at the
+  bottom of the pane's model box. A tab per list — **high · main · flash · lite · local** — and an
+  **all** tab; it opens on the tab of the mode the pane is in, and ←/→ (or Ctrl+Tab) walk them. A
+  tier tab *is* that list: numbered, in order, one row per model in lower case with the provider in
+  a **via** column, rank 1 of main marked "new panes start here", and a rank whose provider has no
+  key or is spent greyed in place with the reason rather than dropped. **Enter** uses the row in
+  this pane, **Alt+↑/Alt+↓** or a drag moves it, **Delete** takes it out, the level list on the
+  right sets the level that model runs at *in that list*, and **Ctrl+Z** undoes any of it — the
+  same storage Options › Models writes, so the two can never disagree. **Typing** searches every
+  model: this list's matches first, then "not in this list", where **Ctrl+Enter** adds one. The
+  **all** tab is the flat picker — a **sort** menu (priority, a to z, intelligence, speed, most
+  used, subscription left), ★ favorites and the ten most recent above the rest, subscription
+  windows ("5h 62% left, resets 14:30") under the list — with one row per model whatever serves it
+  and **→** opening that row's providers to choose one. The profile is named in the header and
+  switched there. `/model <name>` switches without the dialog; the box lists the same rows.
 - **Model roles: main, high, flash, lite, local.** The tiers are five ordered lists on Options ›
   Models: **main** for agent turns and subagents, **high** for plan mode (main at max reasoning
   unless you list a model), **flash** for driving programs and quick side calls, **lite** for
