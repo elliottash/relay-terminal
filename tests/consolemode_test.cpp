@@ -76,6 +76,7 @@ public:
     bool resolveLink(const relay::links::Target &target) override
     {
         seen << target.target;
+        kinds << int(target.kind);
         return swallow;
     }
     void turnFinished(const relay::agent::TurnRecord &record) override { finished << record.id; }
@@ -89,6 +90,7 @@ public:
     QString workspace;
     QList<relay::agent::Action> rows;
     QStringList seen, finished, submitted;
+    QList<int> kinds;
     bool swallow = false, takeSubmit = false;
 };
 
@@ -185,6 +187,14 @@ void theActionRowIsBuiltFromTheContext()
     // card page's old *push* buttons, and this row is tool buttons.
     for (auto *button : buttons) CHECK(button->property("actionRow").toBool());
     CHECK(!buttons.at(0)->property("leaves").toBool());
+    // And the row never takes the keyboard from the box under it: "Tab stays between the reply
+    // box and the card" (#PBX1). `NoFocus` is the whole of it — a focusable button on the row
+    // would take Tab, and a focused button paints a ring, which is what the first action of a
+    // card's row was read as (`docs/qa_evidence/2026-09-21-agents-are-consoles/punch/
+    // b02-card.png`; the ring there was the missing `border-color` in src/Theme.cpp, and this is
+    // the other half of "it must not look focused, because it cannot be").
+    for (auto *button : buttons) CHECK_EQ(button->focusPolicy(), Qt::NoFocus);
+    CHECK(!console.focusWidget() || !buttons.contains(qobject_cast<QToolButton *>(console.focusWidget())));
     CHECK(console.runActionLetter(QStringLiteral("k")));
     CHECK_EQ(checked, 1);
     CHECK(!console.runActionLetter(QStringLiteral("z")));
@@ -439,6 +449,61 @@ void aConsoleIsAnOrdinaryChildOfItsHost()
     CHECK(console.isNull());
     }
 
+    // Every kind of link the transcript can carry is offered to the context **first**, with the
+    // kind already worked out, and only what the context refuses travels on to the window
+    // (#AGNT step 8, and the punch list's first item). The four forms are the four things an
+    // answer can name: a row of Options, a saved conversation, a card, and a path.
+    //
+    // The kind matters as much as the target. `Context::resolveLink` implementations switch on
+    // it — `BoardView::resolveAgentLink` opens a card, reveals a setting or shows a session by
+    // `target.kind` alone — so a console that handed every link over as `Kind::Path` would have
+    // every context refuse everything, silently, and the window would open the ones it could.
+void theContextGetsFirstRefusalOnEveryLinkKind()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    QStringList opened;
+    console.onOpenOption = [&opened](const QString &section, const QString &row) {
+        opened << QStringLiteral("option ") + section + QLatin1Char('/') + row;
+    };
+    console.onOpenSessions = [&opened](const QString &query) { opened << QStringLiteral("session ") + query; };
+    console.onOpenCard = [&opened](const QString &id) { opened << QStringLiteral("card ") + id; };
+    console.onOpenPath = [&opened](const QString &path, int) { opened << QStringLiteral("path ") + path; };
+
+    const QString option = relay::links::optionTarget(QStringLiteral("terminal"),
+                                                      QStringLiteral("copy_on_select"));
+    const QString session = relay::links::sessionTarget(QStringLiteral("0f3a"));
+    const QString card = relay::links::cardTarget(QStringLiteral("K7Q2"));
+    const QString path = home->path();
+
+    // Refused by the context: each one goes on to the window, at the thing it names.
+    context.swallow = false;
+    console.openOutputTarget(option, -1, false);
+    console.openOutputTarget(session, -1, false);
+    console.openOutputTarget(card, -1, false);
+    console.openOutputTarget(path, -1, false);
+    CHECK_EQ(context.seen, QStringList({option, session, card, path}));
+    CHECK_EQ(context.kinds, QList<int>({int(relay::links::Kind::Option), int(relay::links::Kind::Session),
+                                        int(relay::links::Kind::Card), int(relay::links::Kind::Path)}));
+    CHECK_EQ(opened, QStringList({QStringLiteral("option terminal/copy_on_select"),
+                                  QStringLiteral("session 0f3a"), QStringLiteral("card K7Q2"),
+                                  QStringLiteral("path ") + path}));
+
+    // Swallowed by the context — Options revealing its own row, a card page zooming to itself —
+    // and then nothing reaches the window: no second Options pane, no second card.
+    context.swallow = true;
+    context.seen.clear();
+    context.kinds.clear();
+    opened.clear();
+    console.openOutputTarget(option, -1, false);
+    console.openOutputTarget(session, -1, false);
+    console.openOutputTarget(card, -1, false);
+    console.openOutputTarget(path, -1, false);
+    CHECK_EQ(context.seen.size(), 4);
+    CHECK(opened.isEmpty());
+    }
+
 }  // namespace cases
 
 int main(int argc, char **argv)
@@ -465,8 +530,9 @@ int main(int argc, char **argv)
     cases::theContextBlockAndTheAskFieldsAreTheContextsOwn();
     cases::theHostsHandlesWork();
     cases::aConsoleIsAnOrdinaryChildOfItsHost();
+    cases::theContextGetsFirstRefusalOnEveryLinkKind();
 
     if (failures == 0)
-    std::fprintf(stdout, "consolemode: 14 cases, all passed\n");
+    std::fprintf(stdout, "consolemode: 15 cases, all passed\n");
     return failures == 0 ? 0 : 1;
 }

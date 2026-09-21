@@ -2080,6 +2080,20 @@ public:
             m_replyFrame->style()->unpolish(m_replyFrame);
             m_replyFrame->style()->polish(m_replyFrame);
         }
+        // …and so does the console's **own** outer frame, which is the one that was still drawn.
+        // `RelayWindow::wireAgentConsole` ends in `theme::polishWindow`, and `Pane` declares no
+        // `Q_OBJECT`, so its `metaObject()->className()` is "QWidget" and that function names
+        // every console `pane` — which is what gives a console a terminal pane's face wherever it
+        // is embedded. On the Switchboard's list page, in Options and in Sessions that is right:
+        // the transcript stands inside it and the prompt box inside that, exactly as in a pane.
+        // On a card the transcript is hidden until it is used (above), so the pane frame hugged
+        // the composer frame eight pixels out and the owner was looking at a border inside a
+        // border (`docs/qa_evidence/2026-09-21-agents-are-consoles/punch/b02-card.png`). The
+        // property says which case this is and src/Theme.cpp keys the frame on it; the console is
+        // repolished by hand because a dynamic property does not restyle itself.
+        console->setProperty("cardConsole", true);
+        console->style()->unpolish(console);
+        console->style()->polish(console);
         m_reply = editor;
         if (m_reply == nullptr)
             return;

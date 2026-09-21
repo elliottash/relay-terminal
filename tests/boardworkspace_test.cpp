@@ -603,10 +603,28 @@ void BoardWorkspaceTests::aConsoleIsNotALeafSoTheActivePaneIsNeverOne()
              "a console's action row has no ground of its own");
     QVERIFY2(sheet.contains(QStringLiteral("QToolButton[actionRow=\"true\"][leaves=\"true\"] { color: @agent")),
              "an action that leaves the surface has lost its accent outline");
+    // A plain button on that row is framed in the quiet `@border`. The shape rule above declares
+    // no colour on purpose (it is shared with push buttons that bring their own id rule), so
+    // without this one Qt frames a tool button in its **own ink** — which is how the card page's
+    // Plan came out ringed in `@text` beside Execute's violet and read as a focus ring on a row
+    // that takes no focus at all.
+    QVERIFY2(sheet.contains(QStringLiteral("QToolButton[actionRow=\"true\"] { background: @raised; color: @text; border-color: @border; }")),
+             "an action-row button with no rule of its own is framed in its own ink again");
     // And the card page's own frame steps back when the box inside it is a console's, so the
     // owner is not looking at a border inside a border.
     QVERIFY2(sheet.contains(QStringLiteral("QFrame#boardReply[hasConsole=\"true\"]")),
              "the card page draws two frames around one prompt box again");
+    // The second of the two frames was the **console's own**: `wireAgentConsole` ends in
+    // `theme::polishWindow`, `Pane` has no `Q_OBJECT` so its class name is "QWidget", and that
+    // function names every console `pane`. Right everywhere the transcript is drawn; on a card,
+    // where it is hidden until used, the pane frame hugged the composer's eight pixels out.
+    QVERIFY2(sheet.contains(QStringLiteral("QWidget#pane[cardConsole=\"true\"] { background: transparent; border: none; }")),
+             "a card's console draws a pane frame inside the card page again");
+    QVERIFY2(board.contains(QStringLiteral("console->setProperty(\"cardConsole\", true)")),
+             "CardDetail::setConsole no longer says which console is a card's");
+    // Only a card's. The Switchboard's list page, Options and Sessions keep the pane frame,
+    // which is what makes a console read as a pane wherever it is embedded.
+    QVERIFY2(board.count(QStringLiteral("\"cardConsole\"")) == 1, "more than one console is a card's");
 }
 
 // Card #AGNT step 9. The helper was a second implementation of the prompt box — its own panel,

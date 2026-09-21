@@ -483,6 +483,15 @@ QToolButton#interruptButton { border: 1px solid @border; border-radius: 6px; pad
 QToolButton#interruptButton:hover { border-color: @accent; }
 QWidget#pane { background: @bg; border: 1px solid @border; border-radius: 8px; }
 QWidget#pane[relayActive="true"] { border: 1px solid @muted; }
+/* An agent console is a `Pane`, and `theme::polishWindow` names it `pane` like any other, so it
+   wears the frame above wherever a host embeds it — right on the Switchboard's list page, in
+   Options and in Sessions, where the transcript stands inside the frame and the prompt box
+   inside that, exactly as in a pane. On a **card** the transcript is hidden until it is used
+   (`Pane::setTranscriptHiddenUntilUsed`, owner decision 2), so the frame came down to eight
+   pixels outside the composer's own and the card page showed a border inside a border. One
+   frame there, and it is the prompt box's: `CardDetail::setConsole` stamps the property, and no
+   other console has it. */
+QWidget#pane[cardConsole="true"] { background: transparent; border: none; }
 /* Pane button row, drop zones, tab bar controls */
 QFrame#helpPopup { background: @raised; border: 1px solid @border; border-radius: 8px; }
 QLabel#keyCap { background: @surface; border: 1px solid @border; border-radius: 4px; padding: 1px 6px; color: @text; font-size: 9pt; min-width: 14px; }
@@ -710,8 +719,16 @@ QWidget#boardCardActions QPushButton { padding: 5px 12px 6px 12px; }
    Plan and Execute — which are tool buttons on that row now, not the push buttons the id rules
    below were written for — get the same ground as Check and Clean up instead of the bare Fusion
    button. An id rule still outranks this one, so a button that brings its own colours keeps
-   them. */
-QToolButton[actionRow="true"] { background: @raised; color: @text; }
+   them.
+
+   The border colour is here and not in the shape rule above: the shape rule is shared with push
+   buttons that bring their own id rule, and a tool button on a row has none to bring. Without it
+   Qt frames the button in its own ink, so the card page's Plan — a tool button since the row
+   became the console's — came out ringed in `@text` beside Execute's violet, and read as a focus
+   ring or a default button on the first action of the row (`docs/qa_evidence/
+   2026-09-21-agents-are-consoles/punch/b02-card.png`). The quiet `@border` is what Check, Clean
+   up and the old `QPushButton#boardReplyButton` have always worn. */
+QToolButton[actionRow="true"] { background: @raised; color: @text; border-color: @border; }
 QToolButton[actionRow="true"]:hover { color: @text; border-color: @accent; }
 QToolButton[actionRow="true"]:disabled { color: @disabled; border-color: @surface; }
 /* …and the one that **leaves the surface**: Execute and Verify hand the card to a terminal pane,
