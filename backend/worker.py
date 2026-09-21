@@ -10,6 +10,7 @@ import threading
 import urllib.parse
 from pathlib import Path
 
+from relay_core import globals_protocol
 from relay_core import (__version__, board_protocol, customproviders, hosted, keystore, keytest, localmodels, logs,
                         observe_protocol, roles as model_roles, session_protocol, skills, voice)
 from relay_core.agent import Agent, validate_turn_options
@@ -88,6 +89,7 @@ def main():
     # Switchboard (protocol 17). `board` also tags board_ask turn events with their card_id and
     # appends the agent's answer to the card thread, so it is created before the supervisor.
     board = board_protocol.BoardCommands(None, emit)
+    globals_commands = globals_protocol.GlobalsCommands(emit, workspace=lambda: board.workspace)
 
     # The agent drives the app (protocol 30, card #FEJQ): the GUI's Options and actions catalog,
     # the `app_command` round trip and this worker's change log. Created before the supervisor
@@ -726,6 +728,8 @@ def main():
             elif observe.handles(kind):
                 observe.handle(kind, request)
             # --- Switchboard (protocol section 17) ---
+            elif globals_commands.handles(kind):
+                globals_commands.dispatch(request)
             elif board.handles(kind):
                 board.dispatch(request)
             elif kind == "shutdown":

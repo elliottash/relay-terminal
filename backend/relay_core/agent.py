@@ -16,6 +16,7 @@ from typing import Callable
 
 from . import context as compaction
 from . import conv_index
+from . import memories
 from . import logs
 from . import loopdetect
 from . import route_assist
@@ -1006,7 +1007,8 @@ class Agent:
             # that cannot file what it was told is not worth the tokens it saves.
             short = prompt_profiles.system_prompt(
                 workspace=str(self.executor.workspace.root), skills=self.executor.skills,
-                instructions=self.instructions.section if self.instructions is not None else "",
+                instructions=(self.instructions.section if self.instructions is not None else "")
+                             + memories.prompt_section(self.executor.workspace.root),
                 board=board_tools.prompt_section(getattr(self, "board", None)),
                 board_note=board_tools.session_note(getattr(self, "board", None)))
             # The brief survives the short profile: it is the one paragraph that says which
@@ -1033,6 +1035,7 @@ class Agent:
             "" if "own_session" in deferred else activity_tools.prompt_section(getattr(self, "activity", None)),
             self.executor.skills.prompt_section() if self.executor.skills is not None else "",
             self.instructions.section if self.instructions is not None else "",
+            memories.prompt_section(self.executor.workspace.root),
             "Chosen workspace: " + str(self.executor.workspace.root),
             # Below the workspace line because `tests` is one of the groups: which groups exist
             # changes when a project is attached, and that belongs with the Switchboard sections

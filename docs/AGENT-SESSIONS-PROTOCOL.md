@@ -7532,3 +7532,50 @@ What came down with this card, and why each was a fence:
 - **A card turn now has a turn boundary.** `agent_started` and `agent_finished` bracket it, carrying
   `card_id`, `mode` and `surface: "card:<ID>"`; a console used to infer where a card turn began and ended
   from the events it saw.
+
+## 34. Globals: Switchboard HQ (#P7SJ, #Y2MP)
+
+The Projects / Sessions / Globals manager's Globals tab edits the existing global
+Switchboard at `RELAY_GLOBAL_SWITCHBOARD`, otherwise `$XDG_CONFIG_HOME/relay/switchboard`
+(`~/.config/relay/switchboard` by default). Reads never create it. Saving the first memory
+or alias creates its `board.yaml`. This is an explicit global editor, **not** an implicit
+fallback destination for project work cards.
+
+All requests have an opaque `id`, echoed by the response. `workspace` is optional and
+selects the project used for override inspection; otherwise the worker's configured
+project applies. These messages expose local paths and instruction text and are for the
+local desktop, not remote peers.
+
+| Request `type` | Fields | Response `event` |
+| --- | --- | --- |
+| `globals_list` | optional `workspace` | `globals_state {id,root,records,problems}` |
+| `globals_get` | `kind,key` | `globals_record {id,record}` |
+| `globals_save` | `kind,key?,text,base_hash` | `globals_saved {id,record}` |
+| `globals_retire` | `kind,key,base_hash` | `globals_saved {id,record}` |
+
+`kind` is `memory`, `alias`, or `instruction`. A record contains `kind,key,title,path,scope,
+status,shadowed,exists`; reads and saves also contain `text,hash`. Card keys are their IDs;
+instruction keys are the known original source paths. `scope: global` denotes storage;
+a memory card's own `scope: user|project|team` remains in its front matter. Team memories
+are retained for inspection but inactive. `shadowed` means an active project record of
+the same name overrides this global record. Problems contain `path,message`. Errors
+are `globals_error {id,message}` and leave the editor's buffer available for correction.
+
+`text` is full Markdown, with front matter for cards. New cards omit `key` and send
+`base_hash: ""`; the server supplies ID, creation date, rank and links. Existing records
+require the hash returned by get/save. Hash comparisons and atomic replacements run
+under a directory lock; a stale edit fails with a reload message. Card type and ID cannot
+change. Instruction writes accept only known global instruction locations and the Relay
+synthesis target, never arbitrary client paths. They edit the original file in place,
+without importing or relocating it; source selection/loading remains in Options.
+Files over 128 KiB and binary content are rejected. Retirement preserves card identity
+and history and moves the file to its existing format's `archive/` folder. Every card
+write appends a thread event. An active duplicate name in the same global category is
+rejected.
+
+Before each built-in agent prompt is refreshed, Relay reads active project and global
+memory cards. Pinned cards and cards whose `paths` glob matches the workspace are
+included, with a shared 16 KiB UTF-8 budget. Project names shadow global names; active
+`supersedes` references remove old memories; retired and team-scoped memories do not
+load. Matching checks the absolute workspace, its basename, and its path relative to
+the project. Each block names its source and is explicitly lower-priority context.
