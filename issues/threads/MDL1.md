@@ -220,3 +220,7 @@ arguments, the pane back on "kimi-k3 · flash" and its box agreeing. Tests: 16 i
 <!-- relay:entry 20260921T141434Z-z1 author=claude-code kind=progress -->
 ### Claude Code · 2026-09-21 14:14
 All seven tasks landed; the targeted C++ and Python tests re-run green on the final tree and `build/relay` rebuilt. Card to needs-verification with its Execution Summary, Tests and QA checklist. Left for the owner: three provider labels still carry a model name ("z.ai · glm-5.3 · coding plan"), which are Options › Models' provider headings.
+
+<!-- relay:entry 20260921T175711Z-k1 author=claude-code kind=decision -->
+### Claude Code · 2026-09-21 17:57
+The owner confirmed the box's second design ("yes") with four rulings, recorded in the card's Decisions and design §5.3: class headers not selectable, exhausted models hidden, the chip is the model alone, and the defaults by provider count from a ranking file he can edit. Tasks t:a8–t:a10 added; a proposal for the ranking file and for Options › Models goes back to him before t:a9/t:a10 start.

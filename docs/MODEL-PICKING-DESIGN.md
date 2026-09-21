@@ -275,6 +275,43 @@ disagree.
   at the top.
 - A footer line spells the keys. Every change is live and undoable with Ctrl+Z inside the dialog.
 
+### 5.3 The box, second design (owner, 2026-09-21, confirmed)
+
+```
+high
+  gpt-6-astra        codex
+  glm-5.3            z.ai +1
+main
+▌ kimi-k3            kimi           ← this pane's model, highlighted on open
+  glm-5.3            z.ai +1
+flash
+  glm-5.3-flash      z.ai
+local                               only where this machine serves one
+  bonsai-2-27b       spark
+──────────────────────────
+more models…
+```
+
+- Classes high, main, flash and local, each a header (a label: **not selectable**, skipped by Up
+  and Down) and its top-ranked models. Lite is never a pane mode and never shown.
+- Two per class by default. In the dialog every row of a class tab has a "show in box" checkbox
+  that is a **cutoff**: checking row 4 shows the class up to rank 4; a class tab has a "show this
+  class in the box" switch. Both are stored with the lists, per profile.
+- Right on a row expands its class to the whole list, Left collapses it; expansion lasts while
+  the box is open. Typing filters across every listed model in every class.
+- **Exhausted models are not shown** (unusable ones neither). If the pane's own model is below
+  the cutoff its row is shown anyway, so the highlight has a home.
+- Enter on a model row switches the pane to that class and that model. Escape changes nothing.
+- The collapsed box is **the model alone**, on every mode.
+- "more models…" leads to the dialog; "customize…" leaves the box.
+
+This replaces 5.1's mode rows and Left/Right paging.
+
+### 5.4 Defaults from a ranking file (proposal)
+
+See the card's thread, 2026-09-21: the defaults come from a reviewable file in the repo, and the
+tier lists and the checklist leave Options › Models for the dialog.
+
 ## 6. Order of work
 
 1. `/swap` and the defaults (Rule 3): bugs the owner is hitting now; no visible redesign.

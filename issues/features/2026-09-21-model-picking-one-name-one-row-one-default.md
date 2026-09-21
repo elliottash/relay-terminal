@@ -56,6 +56,16 @@ and i realized that the model priority chooser is crtical, and currently its too
   too hard to find -- model options, then scroll down. i think we should beef up the ctrl alt m
   dialogue to be the main way to select / prioritize models".
 
+- 2026-09-21, the box redesigned (owner's alternative, confirmed "yes" with four rulings): classes
+  high / main / flash / local with the top-ranked models of each, Right expands a class, "more
+  models…" leads to the dialog, the cutoff and a class switch live in the dialog. Rulings: "the
+  class header rows are not selectable in the picker. thats redundant." — "exhausted models dont
+  show up." — "no need to show the model class in the pane header" (the collapsed box is the model
+  alone, always) — defaults: "without installing any providers -- you get the 3 relay models.
+  default with 1 provider -- you get 1 each high / main / flash models. dont pick 2 options from the
+  same provider. default with 2+ providers -- 2 each -- lets revisit how those are decided, id like
+  to have a structured ranking MD or YAML in the repo i can review and edit."
+
 ## Discussion points
 Three calls that were the owner's (`docs/MODEL-PICKING-DESIGN.md`, section 4). All three were
 answered on 2026-09-21 — see Decisions:
@@ -83,6 +93,9 @@ never returns to the model the owner was using, and its own sentence is overwrit
 - [x] names at every display site, lower-case roles; no protocol role name ("switchboard") in a box <!-- t:a5 -->
 - [x] the box: mode rows "high (model)", Left/Right changes mode in place, that mode's list below, one row per model, `/high` <!-- t:a6 -->
 - [x] the Ctrl+Alt+M dialog is where models are picked AND prioritized: tier tabs, reorder, add, remove, level, profile, "via" <!-- t:a7 -->
+- [ ] the box as classes: top-N per class, Right expands, headers not selectable, exhausted hidden, model alone in the chip <!-- t:a8 -->
+- [ ] defaults from a ranking file in the repo: 0 providers → Relay Free's three; 1 → one per class; 2+ → two per class, one per provider per class <!-- t:a9 -->
+- [ ] Options › Models: the tier lists and the checklist leave the page for the dialog (proposal pending the owner) <!-- t:a10 -->
 
 ## Execution Summary
 Seven tasks, each by an Opus subagent in a named area of the code, each landed through
