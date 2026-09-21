@@ -7834,9 +7834,19 @@ private:
         // overwrite the tab's context block and its conversation key with a pane's; a model
         // picked in its box reaches the worker the way every other helper model box does, by
         // writing the `switchboard` role and calling `reconfigureBoardWorkers()`.
-        if (message.value(QStringLiteral("type")).toString() == QStringLiteral("configure")) return;
-        m_tabConsole.insert(tabIdOf(page), QPointer<Pane>(console));
-        if (relay::BoardWorker *worker = helperWorker(page, true)) worker->send(message);
+        const QString type = message.value(QStringLiteral("type")).toString();
+        if (type == QStringLiteral("configure")) return;
+        // Only an *ask* makes this console the one the worker is briefed for. Every console of the
+        // tab gets every event of the worker, and a console answers `configured` with lines of its
+        // own (route_assist, its role); when each of those re-pointed the context block, two
+        // consoles in one tab took turns reconfiguring the worker twice a second, for hours
+        // (2026-09-21, 15,865 `configured` events in one log, card #CFG1). A line that is not an
+        // ask goes down the pipe the worker is on.
+        const QString tab = tabIdOf(page);
+        const bool ask = type == QStringLiteral("ask");
+        if (ask) m_tabConsole.insert(tab, QPointer<Pane>(console));
+        relay::BoardWorker *worker = ask || !boardWorker(page) ? helperWorker(page, true) : boardWorker(page);
+        if (worker) worker->send(message);
     }
 
     // Every event of a tab's worker, to every console embedded in that tab. Nothing is filtered by
