@@ -12,6 +12,9 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMouseEvent>
+#include <QToolButton>
+#include <QLineEdit>
+#include <QLabel>
 #include <QtTest>
 
 namespace {
@@ -64,6 +67,7 @@ class BoardPaneTests : public QObject {
     Q_OBJECT
 
 private slots:
+    void doneButtonAndKeyOfferUndo();
     void navigationSurvivesReload();
     void aCardOpenedInOnePaneDoesNotOpenInTheOther();
     void boardDataStillReachesBothPanes();
@@ -254,6 +258,74 @@ void BoardPaneTests::theCardPagesFlagClicksThroughToBoardPriority()
     QCOMPARE(prioritySent(), -1);
     press(Qt::RightButton);
     QCOMPARE(prioritySent(), -1);
+}
+
+void BoardPaneTests::doneButtonAndKeyOfferUndo()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.resize(1100, 760);
+    view.show();
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    QString hint;
+    view.onHint = [&hint](const QString &id, const QString &) { hint = id; };
+    view.handleEvent(opened({row(QStringLiteral("K7Q2"), QStringLiteral("inbox"))}));
+    view.selectCard(QStringLiteral("K7Q2"));
+    QTest::keyClick(&view, Qt::Key_D);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_move"));
+    QCOMPARE(sent.last().value("status").toString(), QStringLiteral("done"));
+    QVERIFY(sent.last().contains("section"));
+    QCOMPARE(sent.last().value("section").toString(), QString());
+
+    view.openSelected();
+    auto answer = cardArrived(QStringLiteral("K7Q2"));
+    answer.insert("id", sent.last().value("id"));
+    view.handleEvent(answer);
+    auto *button = view.findChild<QToolButton *>(QStringLiteral("boardCardDone"));
+    QVERIFY(button);
+    QCOMPARE(button->text(), QStringLiteral("Done (d)"));
+    QTest::mouseClick(button, Qt::LeftButton);
+    QCOMPARE(hint, QStringLiteral("board.done"));
+    QCOMPARE(sent.last().value("card").toString(), QStringLiteral("K7Q2"));
+    QCOMPARE(sent.last().value("status").toString(), QStringLiteral("done"));
+    view.handleEvent(QJsonObject{{"event", "board_written"}, {"id", sent.last().value("id")},
+                                {"kind", "board_move"}, {"card_id", "K7Q2"}, {"write_id", "done-write"}});
+    auto *notice = view.findChild<QWidget *>(QStringLiteral("boardNotice"));
+    QVERIFY(notice && notice->isVisible());
+    QToolButton *undo = nullptr;
+    for (auto *candidate : notice->findChildren<QToolButton *>())
+        if (candidate->text() == QStringLiteral("Undo (Ctrl+Z)"))
+            undo = candidate;
+    QVERIFY(undo && undo->isVisible());
+    QVERIFY(notice->findChild<QLabel *>(QStringLiteral("boardNoticeText"))->text().contains("Marked #K7Q2 done"));
+    QCoreApplication::processEvents();
+    const QString capture = qEnvironmentVariable("RELAY_DONE_SCREENSHOT");
+    if (!capture.isEmpty())
+        QVERIFY(view.grab().save(capture));
+    QTest::mouseClick(undo, Qt::LeftButton);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_undo"));
+    QCOMPARE(sent.last().value("write_id").toString(), QStringLiteral("done-write"));
+
+    auto *document = view.findChild<QWidget *>(QStringLiteral("boardCardDocument"));
+    QVERIFY(document);
+    QTest::keyClick(document, Qt::Key_D);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_move"));
+    auto *filter = view.findChild<QLineEdit *>(QStringLiteral("boardFilter"));
+    QVERIFY(filter);
+    const auto writes = [&sent] {
+        int count = 0;
+        for (const auto &message : sent)
+            count += message.value("type").toString() == QStringLiteral("board_move");
+        return count;
+    };
+    const int before = writes();
+    QTest::keyClick(filter, Qt::Key_D);
+    QCOMPARE(filter->text(), QStringLiteral("d"));
+    QCOMPARE(writes(), before);
+
+    view.handleEvent(opened({row(QStringLiteral("K7Q2"), QStringLiteral("done"))}));
+    QTest::keyClick(&view, Qt::Key_D);
+    QCOMPARE(writes(), before);
 }
 
 QTEST_MAIN(BoardPaneTests)

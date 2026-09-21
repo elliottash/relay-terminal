@@ -1777,6 +1777,19 @@ public:
         pickers->addWidget(m_status);
         pickers->addWidget(m_tab);
         pickers->addStretch();
+        m_done = new QToolButton(this);
+        m_done->setObjectName(QStringLiteral("boardCardDone"));
+        m_done->setText(QStringLiteral("Done (d)"));
+        m_done->setToolTip(QStringLiteral("Mark this card done (d)"));
+        m_done->setCursor(Qt::PointingHandCursor);
+        m_done->setFocusPolicy(Qt::NoFocus);
+        pickers->addWidget(m_done);
+        connect(m_done, &QToolButton::clicked, this, [this] {
+            if (onModeHint)
+                onModeHint(QStringLiteral("done"));
+            if (onDone)
+                onDone();
+        });
         layout->addLayout(pickers);
 
         // The machine's own block on a promoted card (#AQ6X): the card's `## Signal` section, as a
@@ -2173,6 +2186,7 @@ public:
     std::function<void(const QJsonObject &patch, const QString &baseHash)> onEdit;
     std::function<void()> onEditHint;        // the Edit button was clicked, not the key
     // Delete (#CYM9): the trash button or the Del key was confirmed; the view sends board_delete.
+    std::function<void()> onDone;
     std::function<void()> onDelete;
     std::function<void()> onDeleteHint;      // the Delete button was clicked, not the key
 
@@ -2451,6 +2465,7 @@ public:
         const QJsonObject front = card.value(QStringLiteral("front")).toObject();
         m_front = front;
         m_statusValue = card.value(QStringLiteral("status")).toString();
+        m_done->setEnabled(m_statusValue != QStringLiteral("done"));
         m_sections.clear();
         for (const QJsonValue &heading : card.value(QStringLiteral("sections")).toArray())
             m_sections << heading.toString();
@@ -2819,7 +2834,7 @@ protected:
                 beginEdit(false);
                 return true;
             }
-            // `p` plans, `x` executes, `d` goes to the reply box to discuss (#XS6Q).
+            // `p` plans, `x` executes, `d` marks the card done.
             if (object == m_doc && !m_editing && mods == Qt::NoModifier) {
                 if (key->text() == QStringLiteral("p")) {
                     plan();
@@ -2834,7 +2849,8 @@ protected:
                     return true;
                 }
                 if (key->text() == QStringLiteral("d")) {
-                    focusReply();
+                    if (onDone)
+                        onDone();
                     return true;
                 }
                 if (key->key() == Qt::Key_Delete) {   // #CYM9
@@ -3742,6 +3758,7 @@ private:
     QJsonArray m_checkIds, m_checkFailing;
     QComboBox *m_status = nullptr, *m_tab = nullptr;
     QToolButton *m_close = nullptr, *m_toPrompt = nullptr, *m_openFile = nullptr, *m_edit = nullptr;
+    QToolButton *m_done = nullptr;
     QToolButton *m_delete = nullptr;
     QTextBrowser *m_doc = nullptr;
     // The console's composer, not this page's widget: `setConsole` points this at the box inside
@@ -4498,6 +4515,8 @@ void BoardView::buildChrome(QVBoxLayout *layout)
             onHint(QStringLiteral("board.plan"), QStringLiteral("p"));
         else if (mode == QStringLiteral("execute"))
             onHint(QStringLiteral("board.execute"), QStringLiteral("x"));
+        else if (mode == QStringLiteral("done"))
+            onHint(QStringLiteral("board.done"), QStringLiteral("d"));
         else if (mode == QStringLiteral("verify"))
             onHint(QStringLiteral("board.verify"), QStringLiteral("v"));
     };
@@ -4526,6 +4545,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     m_detail->onEdit = [this](const QJsonObject &patch, const QString &baseHash) {
         saveCardEdit(patch, baseHash);
     };
+    m_detail->onDone = [this] { doneSelected(); };
     m_detail->onDelete = [this] { deleteCard(m_detail->cardId()); };
     m_detail->onDeleteHint = [this] {
         if (onHint)
@@ -7443,14 +7463,14 @@ void BoardView::updateDetailLayout()
     // pane to itself.
     static const QString boardKeys = QStringLiteral(
         "<b>Enter</b> open &nbsp; <b>e</b> edit &nbsp; <b>p</b> plan &nbsp; <b>x</b> execute &nbsp; "
-        "<b>v</b> verify &nbsp; "
+        "<b>v</b> verify &nbsp; <b>d</b> done &nbsp; "
         "<b>n</b> new &nbsp; <b>←/→</b> fold section &nbsp; "
         "<b>Alt+Shift+↑↓</b> reorder &nbsp; <b>Alt+Shift+←→</b> status &nbsp; <b>m</b> move "
         "&nbsp; <b>/</b> or <b>Esc</b> filter &nbsp; <b>a</b> ask the agent &nbsp; "
         "<b>t</b> #ID to prompt &nbsp; <b>y</b> copy &nbsp; "
         "<b>o</b> file &nbsp; <b>Ctrl+Z</b> undo");
     static const QString cardKeys = QStringLiteral(
-        "<b>Esc</b> back to the board &nbsp; <b>e</b> edit &nbsp; <b>d</b>/<b>Tab</b> reply &nbsp; "
+        "<b>Esc</b> back to the board &nbsp; <b>e</b> edit &nbsp; <b>d</b> done &nbsp; <b>Tab</b> reply &nbsp; "
         "<b>Enter</b> discuss &nbsp; <b>p</b> or <b>Ctrl+Enter</b> plan &nbsp; <b>x</b> execute "
         "&nbsp; <b>v</b> verify &nbsp; <b>Ctrl+Shift+Enter</b> comment only");
     const bool stacked = width() < kStackedWidth;
@@ -7570,6 +7590,23 @@ void BoardView::moveToTab(const QString &id, const QString &tabId)
     send({{QStringLiteral("type"), QStringLiteral("board_move")}, {QStringLiteral("id"), requestId},
           {QStringLiteral("card"), id}, {QStringLiteral("tab"), tabId},
           {QStringLiteral("reason"), QStringLiteral("moved in the Switchboard")}});
+}
+
+void BoardView::doneSelected()
+{
+    if (detailOpen() && m_detail->editing())
+        return;
+    const QString card = detailOpen() ? m_detail->cardId() : m_selected;
+    const board::Card *item = m_model.card(card);
+    if (!item || item->status == QStringLiteral("done"))
+        return;
+    const QString requestId = nextRequestId();
+    m_pendingNotes.insert(requestId, QStringLiteral("Marked #%1 done").arg(card));
+    send({{QStringLiteral("type"), QStringLiteral("board_move")},
+          {QStringLiteral("id"), requestId}, {QStringLiteral("card"), card},
+          {QStringLiteral("status"), QStringLiteral("done")},
+          {QStringLiteral("section"), QString()},
+          {QStringLiteral("reason"), QStringLiteral("marked done in the Switchboard")}});
 }
 
 void BoardView::undoLast()
@@ -8215,6 +8252,10 @@ bool BoardView::handleBoardKey(QKeyEvent *key)
     // document, or the pane itself when an open card left the focus nowhere in particular.
     if (text == QStringLiteral("e") && (detailOpen() || !m_selected.isEmpty())) {
         editSelected();
+        return true;
+    }
+    if (text == QStringLiteral("d") && mods == Qt::NoModifier) {
+        doneSelected();
         return true;
     }
     // `p` plans, `x` executes and `v` verifies the open card, or the selected one (opening it

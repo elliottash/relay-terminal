@@ -309,6 +309,7 @@ public:
     // Delete (card #CYM9): the open or selected card, after a confirm, through `board_delete`.
     // The owner's action alone — an agent closes a card by moving it to done or dropped.
     void deleteSelected();
+    void doneSelected();           // Done (d), through the normal undoable status move
     void undoLast();                // Ctrl+Z: board_undo of this pane's last write
     void copyReference();
     void copyCardReference(const QString &id);
