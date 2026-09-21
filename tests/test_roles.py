@@ -122,6 +122,25 @@ class ValidateTests(unittest.TestCase):
 
 
 # ----- defaults -----------------------------------------------------------------------------
+class BackgroundRoleTests(unittest.TestCase):
+    """BACKGROUND_ROLES is derived twice — here from ROLE_TIERS, and in the GUI's jobs tab from the
+    same rule over `relay::modelrows::roleTier` (`rolestore::background`, src/JobsTab.cpp, card
+    #MDL1). The tab uses it to decide which jobs may not be pointed at a guest harness, so the two
+    have to agree; writing the set out is what makes a role added to either tier fail loudly here
+    rather than silently offer a model the worker would skip."""
+
+    def test_the_set_the_jobs_tab_derives(self):
+        self.assertEqual(set(model_roles.BACKGROUND_ROLES),
+                         {"terminal_use", "summaries", "suggestions", "chores", "audit", "loop_check"})
+
+    def test_it_is_the_flash_and_lite_tiers_less_the_pane_mode(self):
+        derived = {role for role, tier in model_roles.ROLE_TIERS.items()
+                   if tier in ("flash", "lite") and role != "flash"}
+        self.assertEqual(set(model_roles.BACKGROUND_ROLES), derived)
+        # `flash` is a pane's own mode, not a side call, so it may run on a harness.
+        self.assertNotIn("flash", model_roles.BACKGROUND_ROLES)
+
+
 class DefaultTests(unittest.TestCase):
     def test_fast_agent_default_per_main_provider(self):
         for preset, model in (("glm", "glm-5.3-flash"), ("glm-coding", "glm-5.3-flash"),

@@ -1326,10 +1326,13 @@ private:
                  relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("app.settings")),
                                                 QStringLiteral("settings, including keys and model roles")));
         }
+        // "per-job models": the models pane's **jobs** tab (card #MDL1, design 5.9). It was a
+        // modal of its own until 2026-09-21; every door into model picking is the one pane now.
         else if (id == QStringLiteral("agent.modelRoles")) {
-            pane->openRolesDialog();
+            pane->openModelPicker(relay::ModelsPane::jobsTab());
             hint(QStringLiteral("model.roles.slow"),
-                 QStringLiteral("Tip: the gear at the bottom of the model box opens this too"));
+                 relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("agent.modelOptions")),
+                                                QStringLiteral("the models pane, whose fourth tab this is")));
         }
         // Settings › Local models › "Set up a model with the agent…" (card #24XJ). The agent pane
         // comes to the front and is handed one prompt; the skill it names does the rest.
@@ -1659,6 +1662,14 @@ private:
         }
         if (!served) return;
         applyModelsTarget(tool, served, served->modelsTarget(), QString(), QString());
+    }
+
+    // The models pane of the page this pane is on, re-read. What `Pane::onRolesResolved` calls:
+    // the jobs tab's "runs on" column is the worker's last `model_roles`, so a report is the one
+    // thing that has to reach an open models pane without anybody pressing a key.
+    void refreshModelsPaneFor(Pane *served) {
+        if (!served) return;
+        if (ToolPane *tool = modelsPaneIn(pageOf(served))) refreshModelsPane(tool);
     }
 
     // Point an open models pane at a pane, with the tab and filter the caller asked for. Shared by
@@ -3024,10 +3035,10 @@ private:
         models.rows << buttonRow(QStringLiteral("agent.provider"), QStringLiteral("Advanced provider settings"),
                                  QStringLiteral("Base URL, model id, extra request JSON and the agent workspace"),
                                  QStringLiteral("Open…"), [this] { runAction(QStringLiteral("agent.provider")); });
-        models.rows << buttonRow(QStringLiteral("agent.modelRoles"), QStringLiteral("per-job models (advanced)"),
-                                 QStringLiteral("The high / main / flash / lite / local tiers and what each job — plan mode, subagents, "
-                                                "summaries, chores — runs on"),
-                                 QStringLiteral("Model roles…"), [this] { runAction(QStringLiteral("agent.modelRoles")); });
+        models.rows << buttonRow(QStringLiteral("agent.modelRoles"), QStringLiteral("per-job models"),
+                                 QStringLiteral("What each job — plan mode, subagents, summaries, chores — runs on "
+                                                "right now, and a model of its own for one: the models pane's jobs tab"),
+                                 QStringLiteral("jobs…"), [this] { runAction(QStringLiteral("agent.modelRoles")); });
         return models;
     }
     // The lists changed — an edit on Options › Models, a profile switched there or by `/profile`:
@@ -4289,8 +4300,8 @@ private:
         items << actionItem(agent, QStringLiteral("API keys…"),
                             QStringLiteral("Add, replace, remove or test a provider key"),
                             QStringLiteral("agent.modelKeys"));
-        items << actionItem(agent, QStringLiteral("Model roles…"),
-                            QStringLiteral("Default provider and the Main / Flash / Lite models"),
+        items << actionItem(agent, QStringLiteral("per-job models…"),
+                            QStringLiteral("What each job — plan mode, subagents, summaries, chores — runs on"),
                             QStringLiteral("agent.modelRoles"));
         items << actionItem(agent, QStringLiteral("New chat"), QStringLiteral("Start a new conversation in this pane and clear the terminal"), QStringLiteral("agent.newChat"));
         items << actionItem(agent, QStringLiteral("Stop agent"), pane && pane->agentBusy() ? QStringLiteral("Cancel the running turn") : QStringLiteral("Agent is idle"), QStringLiteral("agent.stop"));
@@ -7748,6 +7759,11 @@ private:
         pane->onProfileApplied = [guard] {
             if (auto *w = windowOf(guard)) w->modelsCurated();
         };
+        // The worker resolved the roles again: an open models pane re-reads its target, so the
+        // jobs tab's "runs on" column follows the report (card #MDL1, design 5.9).
+        pane->onRolesResolved = [guard] {
+            if (auto *w = windowOf(guard)) w->refreshModelsPaneFor(guard);
+        };
         pane->onShareTab = [guard](int *panes) {
             auto *w = windowOf(guard);
             return w ? w->shareTabId(w->pageOf(guard), panes) : QString();
@@ -8026,6 +8042,9 @@ private:
         };
         console->onProfileApplied = [guard] {
             if (auto *w = windowOf(guard)) w->modelsCurated();
+        };
+        console->onRolesResolved = [guard] {
+            if (auto *w = windowOf(guard)) w->refreshModelsPaneFor(guard);
         };
         console->onUpdateApp = [guard]() { if (auto *w = windowOf(guard)) w->updateApp(); };
         console->onJoinShared = [guard](const QString &code) { if (auto *w = windowOf(guard)) w->joinSharedSession(code); };

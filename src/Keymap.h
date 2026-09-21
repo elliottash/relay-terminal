@@ -340,7 +340,7 @@ private:
             {QStringLiteral("Ctrl+Return"), QStringLiteral("Ctrl+Enter"), QStringLiteral("Ctrl+Alt+Return"), QStringLiteral("Ctrl+Alt+Enter")});
         add("agent.provider", "agent", "Provider and API keys (advanced endpoint settings)", {});
         add("agent.modelKeys", "agent", "API keys for model providers", {});
-        add("agent.modelRoles", "agent", "Model roles: default provider and the Main / Flash / Lite models", {});
+        add("agent.modelRoles", "agent", "per-job models: what each job runs on, and a model of its own for one", {});
         // Settings › Local models (card #24XJ): the agent reads the local-model-setup skill and
         // serves a model on this machine. No default shortcut — it is a once-per-machine errand,
         // and Options › Local models is the way in.

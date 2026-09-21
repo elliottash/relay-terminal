@@ -788,6 +788,11 @@ public:
     // door a pick takes back into it — and the window opens, re-targets or closes the one pane its
     // window has. Unset (a console with no window behind it) and the keys say so instead.
     std::function<void(const relay::ModelsPane::Target &target, const QString &tab, const QString &filter)> onOpenModelsPane;
+    // The worker resolved the roles again (`model_roles`, and the table `configured` carries): an
+    // open models pane re-reads its target, so the jobs tab's "runs on" column follows the report
+    // (card #MDL1, design 5.9). Fired only on those two events, which is a handful a minute at
+    // most — not on `changed()`, which runs on every queue and output event.
+    std::function<void()> onRolesResolved;
     // `/profile` switched the five tier lists: the window redraws Options › Models, moves the
     // new-pane default to the new rank 1 of main and tells every pane, exactly as a switch made on
     // the page does. Unset, this pane alone re-reads the lists.
@@ -1430,11 +1435,11 @@ public:
         status(QStringLiteral("Stopping. Commands that already ran may have changed files; a network read can take up to its timeout to stop."));
     }
     void selectModel(const QString &id, const QString &model = QString()) {
-        // "role:" is a Main/Flash row, "gear:" the model options modal, and "serving:" the model
+        // "role:" is a Main/Flash row, "gear:" a door to the models pane, and "serving:" the model
         // this one turn is running on (an image, plan mode's own role, or a failover): none of them
         // is a preset to switch to. The first two are acted on where the box is built
-        // (chooseAgentRole, openRolesDialog); this is the guard for the other callers — /model and
-        // the roles modal.
+        // (chooseAgentRole, openModelPicker); this is the guard for the other callers — /model and
+        // the models pane.
         if (id.startsWith(QStringLiteral("role:")) || id.startsWith(QStringLiteral("gear:"))
             || id.startsWith(QStringLiteral("serving:"))) return;
         // "guest:" is Claude Code or Codex. Two shapes (protocol 29.4): the worker's harness
@@ -1725,9 +1730,10 @@ public:
             status(QStringLiteral("The models pane is not available from this pane."));
             return;
         }
-        const QString tab = tier == QStringLiteral("all")         ? relay::ModelsPane::availableTab()
+        const QString tab = tier == QStringLiteral("all")            ? relay::ModelsPane::availableTab()
                           : tier == relay::ModelsPane::providersTab() ? relay::ModelsPane::providersTab()
-                                                                    : relay::ModelsPane::prioritiesTab();
+                          : tier == relay::ModelsPane::jobsTab()      ? relay::ModelsPane::jobsTab()
+                                                                      : relay::ModelsPane::prioritiesTab();
         onOpenModelsPane(modelsTarget(tier), tab, filter);
     }
 
@@ -1762,6 +1768,12 @@ public:
             hintSwapForPick(key);
             selectEntry(key, effort);
         };
+        // The jobs tab (design 5.9): its "runs on" column is this pane's worker's last report and
+        // nothing else, and an override there is the same live `roles`/`tiers` re-send the retired
+        // roles modal made — the worker's next `model_roles` is what repaints the column.
+        target.roleSummary = m_roleSummary;
+        target.tierSummary = m_tierSummary;
+        target.rolesChanged = [this] { rolesChanged(); };
         return target;
     }
     // A mouse pick that lands on the ranked Main (rank 1), or steps from it to rank 2, is what
@@ -1855,7 +1867,7 @@ public:
         return relay::modelrows::roleLabel(role);
     }
     static QString roleSetting(const QString &role, const QString &field) {
-        return relay::RolesDialog::roleSetting(role, field);
+        return relay::rolestore::roleSetting(role, field);
     }
     // The `roles` object of configure / set_agent_options; empty when every role follows its default.
     // A role is either tiered (`roles/<id>/tier` = main|flash|lite) or pinned to an endpoint
@@ -1866,7 +1878,7 @@ public:
         for (const QString &role : roleIds()) {
             const QString effort = settings.value(roleSetting(role, QStringLiteral("effort"))).toString();
             const QString tier = settings.value(roleSetting(role, QStringLiteral("tier"))).toString();
-            if (relay::RolesDialog::tierIds().contains(tier)) {
+            if (relay::models::curation::tierIds().contains(tier)) {
                 QJsonObject entry{{"tier", tier}};
                 // The word as the list holds it: the worker validates it against the model it
                 // resolves the tier to (card #MDL1, 2026-09-21).
@@ -1910,15 +1922,15 @@ public:
             }
             return tiers;
         }
-        for (const QString &tier : relay::RolesDialog::tierIds()) {
+        for (const QString &tier : relay::models::curation::tierIds()) {
             if (tier == QStringLiteral("main")) continue;
-            const QString preset = settings.value(relay::RolesDialog::tierSetting(tier, QStringLiteral("preset"))).toString();
-            const QString model = settings.value(relay::RolesDialog::tierSetting(tier, QStringLiteral("model"))).toString().trimmed();
+            const QString preset = settings.value(relay::rolestore::tierSetting(tier, QStringLiteral("preset"))).toString();
+            const QString model = settings.value(relay::rolestore::tierSetting(tier, QStringLiteral("model"))).toString().trimmed();
             if (preset.isEmpty() && model.isEmpty()) continue;
             QJsonObject entry;
             if (!preset.isEmpty()) entry.insert(QStringLiteral("preset"), preset);
             if (!model.isEmpty()) entry.insert(QStringLiteral("model"), model);
-            const QString effort = settings.value(relay::RolesDialog::tierSetting(tier, QStringLiteral("effort"))).toString();
+            const QString effort = settings.value(relay::rolestore::tierSetting(tier, QStringLiteral("effort"))).toString();
             if (!effort.isEmpty()) entry.insert(QStringLiteral("effort"), effort);
             if (!entry.isEmpty()) tiers.insert(tier, entry);
         }
@@ -7904,10 +7916,10 @@ private:
     }
 
 public:
-    // ----- provider and model modals -------------------------------------------------------
-    // Both are non-modal windows fed by the worker's `presets` / `model_roles` events. No key
-    // material passes through either of them in the read direction: keys only go out, to the
-    // worker's keyring commands.
+    // ----- the provider keys modal -----------------------------------------------------------
+    // A non-modal window fed by the worker's `presets` event. No key material passes through it
+    // in the read direction: keys only go out, to the worker's keyring commands. The roles modal
+    // that stood beside it is the models pane's **jobs** tab now (card #MDL1, design 5.9).
     void openKeysDialog() {
         if (!m_keysDialog) {
             m_keysDialog = new relay::KeysDialog(window());
@@ -7920,20 +7932,6 @@ public:
         if (m_workerReady) send({{"type", "presets"}});
     }
 
-    void openRolesDialog() {
-        if (!m_rolesDialog) {
-            m_rolesDialog = new relay::RolesDialog(window());
-            m_rolesDialog->setAttribute(Qt::WA_DeleteOnClose);
-            m_rolesDialog->send = [this](QJsonObject request) { send(request); };
-            m_rolesDialog->openKeys = [this] { openKeysDialog(); };
-            m_rolesDialog->onRolesChanged = [this] { rolesChanged(); };
-        }
-        m_rolesDialog->setPresets(providerPresets(), m_tierCatalog, m_roleActions);
-        m_rolesDialog->setProvider(m_currentPreset);
-        m_rolesDialog->setResolved(m_tierSummary, m_roleSummary);
-        m_rolesDialog->show(); m_rolesDialog->raise(); m_rolesDialog->activateWindow();
-        if (m_workerReady) send({{"type", "presets"}});
-    }
     QString lastTurnId() const { return m_lastTurnId; }
     void requestTurn(const QString &turnId, relay::TurnTranscriptView *view) {
         m_turnViews.insert(turnId, view);
@@ -8113,7 +8111,7 @@ private:
         if (type == QStringLiteral("model_roles")) {   // protocol 13
             m_roleSummary = event.value(QStringLiteral("roles")).toObject();
             m_tierSummary = event.value(QStringLiteral("tiers")).toObject();
-            if (m_rolesDialog) m_rolesDialog->setResolved(m_tierSummary, m_roleSummary);
+            if (onRolesResolved) onRolesResolved();
             const QString role = event.value(QStringLiteral("agent_role")).toString();
             if (!role.isEmpty()) m_agentRole = role;
             const QJsonArray warnings = event.value(QStringLiteral("warnings")).toArray();
@@ -11188,7 +11186,7 @@ private:
                                          .value(QStringLiteral("model")).toString();
             m_paneModel = ownModel.isEmpty() ? m_model : ownModel;
             m_tierSummary = event.value(QStringLiteral("tiers")).toObject();
-            if (m_rolesDialog) m_rolesDialog->setResolved(m_tierSummary, m_roleSummary);
+            if (onRolesResolved) onRolesResolved();
             m_agentRole = event.value(QStringLiteral("agent_role")).toString(QStringLiteral("main"));
             // Protocol 33: the worker echoes the context block back, which is how a console
             // confirms that the surface it is drawn on was understood — the role it settled on,
@@ -11225,7 +11223,6 @@ private:
             m_presets = event.value(QStringLiteral("presets")).toArray();
             // Tier defaults and the Advanced action list come from the worker so the GUI never has
             // to keep a second copy of backend/relay_core/presets.py in step (protocol 13.7).
-            m_tierCatalog = event.value(QStringLiteral("tier_defaults")).toObject();
             // The two defaults the worker computed for the five lists (owner, 2026-09-20). A fresh
             // install takes one at once — with the OpenRouter twins when that key is stored, which
             // is the recommended one — so no list is ever empty by accident.
@@ -11236,7 +11233,6 @@ private:
                 const QJsonObject chosen = withOpenrouter.isEmpty() ? plain : withOpenrouter;
                 if (!chosen.isEmpty()) relay::models::curation::applyTierDefaults(chosen);
             }
-            m_roleActions = event.value(QStringLiteral("role_actions")).toArray();
             m_stored.clear();
             bool hostedUnavailable = false;
             for (const auto &item : m_presets) {
@@ -11261,7 +11257,6 @@ private:
             }
             rememberFallback(modelCatalog());   // the failover's first candidate follows the catalog
             if (m_keysDialog) m_keysDialog->setPresets(providerPresets());
-            if (m_rolesDialog) m_rolesDialog->setPresets(providerPresets(), m_tierCatalog, m_roleActions);
             // A presets event that arrives after the first one can change what a settings pane
             // shows — the codex catalogue landing turns Options' Codex Model row from its text
             // field into the dropdown (#E516) — so an open Options re-renders from the fresh rows.
@@ -18307,7 +18302,6 @@ private:
     QList<SlashCommand> m_skillCommands;   // `/name` for each skill the agent can load
     QString m_skillHintPending;            // a skill asked for in prose; hinted at the turn's end
     QPointer<relay::KeysDialog> m_keysDialog;
-    QPointer<relay::RolesDialog> m_rolesDialog;
     QTimer m_assistDebounce, m_assistHold;
     QString m_assistLocalGuess, m_assistFailedText;
     QString m_assistId, m_assistText, m_assistInflightText, m_assistQueuedText, m_assistRoute, m_assistReason, m_heldMode;
@@ -18464,8 +18458,7 @@ private:
     // one state fed by all three rather than a member each: every move pushes, every `*_ended`
     // pops, and the end of the turn empties it however the turn ended.
     QList<Serving> m_serving;
-    QJsonObject m_roleSummary, m_tierSummary, m_tierCatalog, m_tierListDefaults;
-    QJsonArray m_roleActions;
+    QJsonObject m_roleSummary, m_tierSummary, m_tierListDefaults;
     bool m_cleanShell = false, m_closing = false;
     QJsonArray m_presets;
     // Usage limits as the worker last reported them, by preset id (owner, 2026-09-20): the guest's
