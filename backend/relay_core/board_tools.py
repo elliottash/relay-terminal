@@ -30,6 +30,7 @@ Guardrails, in one place so they can be reviewed:
 """
 from __future__ import annotations
 
+import contextlib
 import difflib
 import fcntl
 import json
@@ -2408,6 +2409,23 @@ class BoardTools:
         return {"id": card.id, "removed": True, "path": rel,
                 "write_id": write_id, "summary": summary}
 
+    #: True inside `without_stage_moves()`: a write that is Relay's own bookkeeping earns no stage.
+    _stage_quiet = False
+
+    @contextlib.contextmanager
+    def without_stage_moves(self):
+        """For an entry that is bookkeeping, not the start of a discussion.
+
+        #3XZV moves an inbox card to Discussing on its thread's first entry.  An import's
+        provenance note ("imported from …") is such an entry and nobody said anything: the card
+        it lands belongs in the inbox, where `board_import_apply` says it put it.
+        """
+        previous, self._stage_quiet = self._stage_quiet, True
+        try:
+            yield
+        finally:
+            self._stage_quiet = previous
+
     def stage_advance(self, card_id: str, event: str) -> dict | None:
         """Move a work card one step along its stage lifecycle (#3XZV).
 
@@ -2418,6 +2436,8 @@ class BoardTools:
         event on every path that meets it. A manual `section:` is never touched: a card parked
         by hand stays parked while its stage moves underneath it.
         """
+        if self._stage_quiet:
+            return None
         step = STAGE_MOVES.get(event)
         if step is None:
             raise BoardToolError(f"unknown stage event {event!r}; use one of {', '.join(sorted(STAGE_MOVES))}.")

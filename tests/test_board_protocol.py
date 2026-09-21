@@ -460,7 +460,12 @@ class WriteTests(ProtocolTest):
         self.assertEqual(detail["id"], "d1")
         self.assertEqual(detail["card_id"], card_id)
         self.assertIn("## Issue", detail["body"])
-        self.assertEqual([e["text"] for e in detail["thread"]][-1], "a reply")
+        # The reply is there, and being the thread's first entry it started the discussion: the
+        # stage move it earned (#3XZV) is the entry after it, and the card says so.
+        texts = [e["text"] for e in detail["thread"]]
+        self.assertIn("a reply", texts)
+        self.assertIn("Inbox → Discussing", texts[-1])
+        self.assertEqual(detail["front"]["status"], "discussing")
         update = self.send(type="board_update", card=card_id, base_hash=detail["hash"],
                            patch={"fields": {"labels": ["voice"]}})
         self.assertTrue([e for e in update if e["event"] == "board_written"])

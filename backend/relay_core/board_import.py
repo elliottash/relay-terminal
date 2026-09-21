@@ -473,8 +473,10 @@ def apply(board, proposals: Sequence[Proposal], *, tab: str | None = None,
             where = f"{where}, {proposal.source['id']}"
         note = (f"- ✦ imported from {proposal.kind} · {where}\n"
                 f"  The original file is unchanged. Import key `{proposal.source_key}`.")
-        _fail(tools.run("board_comment", {"id": card_id, "kind": "note", "text": note}),
-              f"recording the source of {proposal.source_key}")
+        # The provenance note is bookkeeping, not a discussion: the card stays in the inbox.
+        with tools.without_stage_moves():
+            _fail(tools.run("board_comment", {"id": card_id, "kind": "note", "text": note}),
+                  f"recording the source of {proposal.source_key}")
         for author, text in proposal.comments[:20]:
             real.append_thread(card_id, text, author=str(author)[:60] or "import", kind="comment")
         imported[proposal.source_key] = {"card": card_id, "at": stamp, "kind": proposal.kind,
