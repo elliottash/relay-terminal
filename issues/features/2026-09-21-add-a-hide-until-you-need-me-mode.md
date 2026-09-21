@@ -7,7 +7,7 @@ assignee: codex
 implemented_by: openai/gpt-6-astra via codex
 rank: zzzzzzzzzzzzzzzzw
 created: '2026-09-21'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-pane-dimming/], related: [], github: null}
+links: {plans: [], commits: [a4c930d05b9964c05a7b7b932c736c6137785d4c], evidence: [docs/qa_evidence/2026-09-21-pane-dimming/], related: [], github: null}
 ---
 # add a "hide until you need me" mode
 

@@ -27,3 +27,9 @@ Owner: "completion does not ovefrride manual dimming"; "otherwise i agree with y
 
 <!-- relay:entry 20260921T190330Z-qk author=agent kind=event model=gpt-6-astra pane=9255636d turn=bde50672e69443a48e42855349d1893a/f33091886e6c4af78bad54a1ddf55a5f -->
 - ✦ agent moved this card · Executing → Needs verification · Implemented agreed dimming controls; app build and four targeted tests pass, with isolated Xvfb dark/light evidence. Ready for independent GUI verification. · evidence docs/qa_evidence/2026-09-21-pane-dimming/ · implemented_by openai/gpt-6-astra via codex
+
+<!-- relay:entry 20260921T190509Z-5r author=agent kind=event model=gpt-6-astra pane=9255636d turn=bde50672e69443a48e42855349d1893a/f33091886e6c4af78bad54a1ddf55a5f -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-21-pane-dimm… → {"plans": [], "commits": ["a4c930d05b9964c05a7b7b932c736c6137785d4c"], "evidence…
+
+<!-- relay:entry 20260921T190509Z-7q author=agent kind=evidence model=gpt-6-astra pane=9255636d turn=bde50672e69443a48e42855349d1893a/f33091886e6c4af78bad54a1ddf55a5f -->
+Landed a4c930d05b9964c05a7b7b932c736c6137785d4c through scripts/land.py. The exact committed tree passed its isolated build gate. Four targeted CTest cases passed in the shared checkout; Xvfb evidence covers dark/light themes, focus dimming, Alt keys/wheel, keyboard focus retention and temporary reveal. Card remains needs-verification for independent live agent/GUI QA.
