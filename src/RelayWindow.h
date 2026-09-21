@@ -1155,6 +1155,7 @@ private:
         }
         else if (id == QStringLiteral("agent.subagentPane")) toggleSubagentPane();   // card #WD83
         else if (id == QStringLiteral("remote.openShared")) openSharedPaneDialog();   // Relay-to-Relay
+        else if (id == QStringLiteral("remote.pair")) pairPhone();   // #FR1C: one entry point
         else if (id == QStringLiteral("remote.join")) joinSharedSession();
         // Alt+M and Ctrl+Alt+M in a *helper* prompt box (#PK5Q). The two keys belong to a prompt
         // box rather than to a terminal pane: the helper's composer carries the same model box
@@ -4120,6 +4121,13 @@ private:
             const bool shared = pane && share.isSharing(pane->sessionToken());
             const int guests = pane ? share.sharingModel().guestsOn(pane->sessionToken()) : 0;
             const int waiting = share.sharingModel().waiting();
+            // Pairing your own phone first: it is the common case, and it is the one that turns
+            // remote control on by itself (#FR1C).
+            items << actionItem(terminal, QStringLiteral("Pair a phone…"),
+                                relay::RemoteShare::instance().alwaysOn()
+                                    ? QStringLiteral("The code to type on it, and the QR · remote control is on")
+                                    : QStringLiteral("Turns remote control on, then shows the code to type on the phone"),
+                                QStringLiteral("remote.pair"));
             items << actionItem(terminal, QStringLiteral("Share this pane…"),
                                 shared ? QStringLiteral("Already shared · pair another phone, or invite someone")
                                        : QStringLiteral("Pair your phone, or make a link for somebody else"),
@@ -7658,6 +7666,56 @@ private:
                                        : QStringLiteral("Join a shared session"));
     }
 
+    // One plug-menu row chosen. The ids are relay::remotesettings::plugMenu's.
+    void runPlugItem(const QString &id) {
+        if (id == QStringLiteral("remote.pair")) { pairPhone(); return; }
+        if (id == QStringLiteral("remote.control")) {
+            if (relay::RemoteShare::instance().alwaysOn()) disconnectRemoteDevices();
+            else {
+                relay::RemoteShare::instance().setAlwaysOn(true);
+                syncAlwaysOnShares();
+                refreshSettingsPanes();
+                notice(relay::remotesettings::statusLine(shownRemoteState()), 6000);
+            }
+            return;
+        }
+        if (id == QStringLiteral("remote.join")) {
+            joinSharedSession();
+            hint(QStringLiteral("remote.join.button"),
+                 QStringLiteral("Next time: type /join and the code in any prompt box"));
+            return;
+        }
+        if (id == QStringLiteral("remote.openShared")) openSharedPaneDialog();
+    }
+
+    // "Pair a phone" (#FR1C): the plug menu, the palette (remote.pair) and Options › Remote all
+    // land here. A phone paired against a desktop that publishes nothing shows an empty list and
+    // no notification, so the switch goes on first — writing what the Options switch writes, and
+    // sending the same `start` with `always` — and then the pairing window opens.
+    void pairPhone() {
+        relay::RemoteShare &share = relay::RemoteShare::instance();
+        if (!share.alwaysOn()) {
+            relay::remotesettings::turnOnForPairing();
+            share.setAlwaysOn(true);          // brings the sidecar up and sends `start`
+            syncAlwaysOnShares();
+            refreshSettingsPanes();
+        }
+        // The pairing window belongs to a pane, because the same window also invites people to
+        // one. The active leaf is the natural owner; a tool pane (Options, the Switchboard) is
+        // not one, and "Pair a phone" from there is still meant to work.
+        Pane *pane = dynamic_cast<Pane *>(m_activeLeaf.data());
+        if (!pane) {
+            const QList<Pane *> panes = allPanes();
+            pane = panes.isEmpty() ? nullptr : panes.first();
+        }
+        if (!pane) {
+            notice(QStringLiteral("Open a terminal pane first — pairing happens in a pane's "
+                                  "sharing window."), 6000);
+            return;
+        }
+        pane->toggleShare();
+    }
+
     // "Disconnect all" (#PH0N, "forgot it was on"). The phones go and the service goes with them:
     // the sidecar has no "keep running but drop the devices" line today, so this turns the switch
     // off and says so, rather than pretending the two are different things.
@@ -7685,7 +7743,9 @@ private:
             QTimer::singleShot(0, this, [this] { refreshSettingsPanes(); });
         };
         // Pairing is the share dialog's, where the QR and the five digits to compare already live.
-        hooks.pairPhone = [this] { runAction(QStringLiteral("pane.share")); };
+        // The same door as the plug menu's "Pair a phone…" (#FR1C): the switch first when it is
+        // off, then the window with the code and the QR.
+        hooks.pairPhone = [this] { pairPhone(); };
         return relay::remotesettings::section(hooks);
     }
 
@@ -8115,22 +8175,24 @@ private:
         m_connect->setToolTip(QStringLiteral("Join a shared session"));
         connect(m_connect, &QToolButton::clicked, this, [this] {
             QMenu menu(this);
-            // Remote control's own line, first and not clickable (#PH0N): where this desktop is
-            // published, and how many of your phones are on it. "Disconnect all" is under it while
-            // it is on, because "I forgot it was on" needs an answer in one click, not in Options.
-            const relay::remotesettings::State remote = shownRemoteState();
-            QAction *line = menu.addAction(relay::remotesettings::statusLine(remote));
-            line->setEnabled(false);
-            if (remote.on)
-                menu.addAction(QStringLiteral("Disconnect all"), this, [this] { disconnectRemoteDevices(); });
-            menu.addSeparator();
-            menu.addAction(QStringLiteral("Join with a code…"), this, [this] {
-                joinSharedSession();
-                hint(QStringLiteral("remote.join.button"),
-                     QStringLiteral("Next time: type /join and the code in any prompt box"));
-            });
-            menu.addAction(QStringLiteral("Open a pane your other desktop shares…"), this,
-                           [this] { openSharedPaneDialog(); });
+            // The rows and their order are relay::remotesettings::plugMenu (#FR1C), so a test
+            // reads them without a window: the status line the plug has carried since #PH0N,
+            // "Pair a phone…" first, and the switch itself under it. Turning the switch off here
+            // is what "Disconnect all" was — the phones go and the service goes with them — under
+            // the name of the thing it actually moves.
+            for (const relay::remotesettings::PlugItem &item :
+                 relay::remotesettings::plugMenu(shownRemoteState())) {
+                using Item = relay::remotesettings::PlugItem;
+                if (item.kind == Item::Separator) { menu.addSeparator(); continue; }
+                QAction *action = menu.addAction(item.label);
+                if (item.kind == Item::Status) { action->setEnabled(false); continue; }
+                if (item.kind == Item::Toggle) {
+                    action->setCheckable(true);
+                    action->setChecked(item.checked);
+                }
+                const QString id = item.id;
+                connect(action, &QAction::triggered, this, [this, id] { runPlugItem(id); });
+            }
             menu.exec(m_connect->mapToGlobal(QPoint(0, m_connect->height())));
         });
         rightRow->addWidget(m_connect);

@@ -302,6 +302,10 @@ private:
         // Sharing a pane with a phone (#W5N2). No default shortcut: it is a deliberate act,
         // and the strip button beside the microphone is the usual way in.
         add("pane.share", "terminal", "Share this pane with a phone", {});
+        // "Pair a phone" (#FR1C): the one entry point. It turns remote control on when it is off
+        // and opens the pairing window, where the code to type on the phone is. No default key —
+        // pairing is a once-per-phone act, and the plug menu at the top right is the way in.
+        add("remote.pair", "terminal", "Pair a phone: turn remote control on and show the code to type on it", {});
         // The Sharing pane (#W5N2): the ongoing "who is here, who is knocking, what is waiting
         // for me" surface. No default key either — it opens by itself when someone knocks, and
         // the share chip and the palette are the other two ways in.
