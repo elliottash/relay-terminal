@@ -387,6 +387,16 @@ TOOL_SPECS = [
                     "description": "On `claim`, take a signal another session holds. Only when "
                                    "the user says to, or that session is plainly gone."}},
          ["action"]),
+    spec("board_try",
+         "Try it (protocol 31.10, #JNYN): prepare the card's situation for a person and hand them "
+         "one task and one question. Call it as the last step of delivering a card, once it is in "
+         "needs-verification. It answers with the brief the Switchboard's Try it button runs — "
+         "what the thing to open is, whether the verifying session already staged the situation "
+         "(then you run its stage.sh instead of staging a second one), where the evidence goes, "
+         "and the rule that the expected result is sealed in expected.md and never written on the "
+         "card. Do that work in this turn and write `## Try it` with board_update_card. It is "
+         "refused during a Switchboard cleanup, which has no machine of its own to stage on.",
+         {"card": _ID_ARG}, ["card"]),
 ]
 
 #: The three tools a whole-board cleanup needs and an ordinary turn does not (protocol 19.9).
@@ -1623,6 +1633,15 @@ class BoardTools:
                     "This turn writes nothing by design — the owner has not confirmed anything "
                     "yet. Say what you would do; the write happens once the owner answers.",
                     code="board_readonly_turn")
+            if name == "board_try" and self.cleanup is not None:
+                # Gated exactly as `board_claim` is, and for the same reason: a cleanup is the
+                # Switchboard worker tidying files, with no terminal pane of its own to stage a
+                # fixture on or open an app in. Preparing a Try it is not tidying.
+                raise BoardToolError(
+                    "board_try is not available during a Switchboard cleanup: preparing Try it "
+                    "stages a fixture and opens it, and a cleanup has no pane of its own to do "
+                    "that in. Press Try it on the card, or call this from a terminal pane.",
+                    code="board_refused")
             if name == "board_claim" and self.cleanup is not None:
                 # A cleanup is the Switchboard worker tidying the whole board (19.9): it has no
                 # terminal pane of its own to claim *for*, and putting a card into Executing is
@@ -1650,6 +1669,7 @@ class BoardTools:
                        "board_merge_cards": self._merge, "board_split_card": self._split,
                        "board_sections": self._sections,
                        "tests_check": self._tests_check, "tests_run": self._tests_run,
+                       "board_try": self._board_try,
                        "board_signals": self._signals,
                        "board_import_items": self._import_items}[name]
             return handler(dict(args))
@@ -2708,6 +2728,35 @@ class BoardTools:
         except TP.TestsError as exc:
             raise BoardToolError(str(exc), code="tests_refused") from exc
         return {"text": TP.format_run(result), **result}
+
+    def _board_try(self, args: dict) -> dict:
+        """`board_try`: the Try it brief for one card, for an agent that has a machine to run it on.
+
+        It hands back the same prompt the Switchboard's Try it button runs
+        (`tryit_protocol.tryit_prompt`) rather than starting a turn somewhere else, because there
+        is nowhere else to start one: a terminal pane's worker and the Switchboard's worker are
+        different processes and the board is the only thing between them. The calling agent
+        already has a shell, a display and this turn — it *is* the machine — so the useful act is
+        to give it the brief and the card, which is what `/deliver`'s landing step needs.
+
+        The thread gains a `progress` entry, so a person watching the card sees that a Try it was
+        prepared and by whom, exactly as a claim or a check does.
+        """
+        if set(args) - {"card"}:
+            raise BoardToolError("board_try takes card.")
+        from . import tryit_protocol as TI
+        card_id = normalize_id(args.get("card"), "card")
+        card = self._card(card_id)
+        prompt = TI.tryit_prompt(self, card_id, TI.evidence_dir_for(self.board.repo, card_id))
+        staged = TI.verify_staging(self.board.repo, card_id, card.body)
+        self._append(card, f"- ✦ {self.context.actor} is preparing Try it for this card"
+                           + (f" · reusing the staging in {staged['dir']}"
+                              if staged and staged.get("stage") else ""),
+                     kind="progress")
+        return {"card": card_id, "text": prompt, "evidence_dir":
+                str(TI.evidence_dir_for(self.board.repo, card_id).relative_to(self.board.repo)),
+                "reusing": bool(staged and staged.get("stage")),
+                "staged": (staged or {}).get("stage") or ""}
 
     # ---- the faults the machine tracks (protocol 32, #AQ6X) --------------------
     def _signal_state(self):

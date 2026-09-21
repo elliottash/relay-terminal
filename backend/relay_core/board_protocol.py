@@ -54,6 +54,11 @@ TESTS_TYPES = ("tests_list", "tests_run", "tests_stop", "tests_history", "tests_
 #: `tests/test_profile_protocol.py` fails if the two drift.
 PROFILE_TYPES = ("profile_run", "profile_stop")
 
+#: Try it's three requests (section 31.10, #JNYN), spelled out here for the same reason: a worker
+#: whose owner never presses Try it should not import `tryit_protocol` at start-up. It is the same
+#: set as `tryit_protocol.TYPES`, and `tests/test_tryit_protocol.py` fails if the two drift.
+TRYIT_TYPES = ("try_run", "try_stop", "try_answer")
+
 #: The Check gate's two ends (#7BM4), spelled out here for the same reason `TESTS_TYPES` is: the
 #: move path must not import `tests_protocol` — and through it `test_probe` and `jobs` — to decide
 #: that an ordinary move is not a landing. `tests/test_tests_protocol.py` fails if they drift from
@@ -82,7 +87,11 @@ TYPES = {"board_open", "board_refresh", "board_card_get", "board_create", "board
          *TESTS_TYPES,
          # The Profile button (section 31.9, #7BM4), answered by `profile_protocol.ProfileCommands`
          # the same way: one per board, made on first use.
-         *PROFILE_TYPES}
+         *PROFILE_TYPES,
+         # Try it (section 31.10, #JNYN): one bounded agent turn that opens the card's situation
+         # for a person, answered by `tryit_protocol.TryItCommands` — one per worker, because it
+         # runs on *this* worker's turn supervisor, as a cleanup does.
+         *TRYIT_TYPES}
 
 #: What every message here says when the pane has no board at all (protocol 19.1).  Both folder
 #: names, because a project may carry either and neither is wrong.
@@ -1589,6 +1598,21 @@ class BoardCommands:
             self._profile_cache = cached
         return cached[1]
 
+    # ---- Try it (protocol section 31.10) --------------------------------------
+    def _tryit(self):
+        """The `try_*` handlers (#JNYN): one bounded agent turn that opens a card's situation.
+
+        Unlike `_profile` this is **not** cached against the project, and it holds no board of
+        its own: it is handed `self._need`, so a `set_board` moves it with the worker, and
+        `self.turns`, because Try it is an agent turn on this worker exactly as a cleanup is.
+        """
+        commands = getattr(self, "_tryit_commands", None)
+        if commands is None:
+            from . import tryit_protocol as TI
+            commands = TI.TryItCommands(self._need, self.turns, self._send)
+            self._tryit_commands = commands
+        return commands
+
     # ---- dispatch -------------------------------------------------------------
     def dispatch(self, request: dict) -> bool:
         kind = request.get("type")
@@ -1681,6 +1705,14 @@ class BoardCommands:
             self._tests().dispatch(request)
         elif kind in PROFILE_TYPES:
             self._profile().dispatch(request)
+        elif kind in TRYIT_TYPES:
+            # A Try it turn owns this worker's turn supervisor for as long as it runs, exactly as
+            # a cleanup does, so it waits for whatever is already on it. `try_stop` and
+            # `try_answer` never wait: one ends a run and the other only writes a card.
+            if kind == "try_run" and not self._tryit().running() \
+                    and self._busy_error(rid, "Try it"):
+                return True
+            self._tryit().dispatch(request)
         return True
 
     # ---- who may start a turn --------------------------------------------------
@@ -2104,6 +2136,11 @@ class BoardCommands:
             self._settle_pending_board()
         if self._cleanup_log is not None:
             return self._observe_cleanup(event)
+        # A Try it turn (31.10) runs on this worker too, and its events belong to the run rather
+        # than to the card's chat: `TryItCommands.observe` tags them and streams the progress.
+        tryit = getattr(self, "_tryit_commands", None)
+        if tryit is not None and tryit.running():
+            return tryit.observe(event)
         # A card turn is no longer one of *this* agent's turns (19.16): it runs on the card's own
         # agent, and `relay_core.board_turns` tags and collects it there. Only a cleanup still
         # comes through here.
