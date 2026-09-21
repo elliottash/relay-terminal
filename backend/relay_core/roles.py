@@ -64,7 +64,10 @@ def _preset(preset_id):
 # "planning" (2026-09-19) serves plan-mode turns. Since 2026-09-20 it follows the High tier, whose
 # default is the main model pushed to max reasoning, so a plan is investigated harder without
 # switching the pane's own model.
-ROLES = ("main", "terminal_use", "subagent", "switchboard", "flash", "local", "planning",
+# "high" (2026-09-21, card #MDL1) is the pane role /high switches to, exactly as "flash" is the
+# one /flash switches to and "local" the one /local does: the box's modes are high, main, flash and
+# local, so each of the three that is not the pane's own model needs a role a pane can be put on.
+ROLES = ("main", "terminal_use", "subagent", "switchboard", "high", "flash", "local", "planning",
          "summaries", "suggestions", "chores", "audit", "loop_check", "vision", "route_assist")
 # The role the helper worker runs (protocol 30.7): one per tab, serving the Switchboard and the
 # Options, Actions and Sessions panes. Named because it is the one role that may not run on a
@@ -77,7 +80,8 @@ LABELS = {"main": "Main agent", "terminal_use": "Terminal-use agent", "subagent"
           # card #FEJQ (owner decision 4, 2026-09-20): one helper worker per tab now serves the
           # Switchboard *and* the Options, Actions and Sessions panes, so the label names the job
           # rather than the one pane it started in (protocol 30.7).
-          "switchboard": "Helper agent", "flash": "Flash agent", "local": "Local agent",
+          "switchboard": "Helper agent", "high": "High agent", "flash": "Flash agent",
+          "local": "Local agent",
           "planning": "Plan mode", "summaries": "Summaries", "suggestions": "Suggestions",
           "chores": "Chores", "audit": "Request audit", "loop_check": "Loop check",
           "vision": "Vision", "route_assist": "Route assist"}
@@ -99,6 +103,7 @@ def canonical_role(role):
 ACTIONS: tuple[tuple[str, str, str], ...] = (
     ("main", "Agent turns", "the main conversation in this pane"),
     ("planning", "Plan mode", "investigating and writing plans; the High tier by default"),
+    ("high", "Panes on the High tier (/high)", "the hardest turns; empty, the pane's own model at its top level"),
     ("subagent", "Subagents", "agents the main agent starts"),
     ("terminal_use", "Driving programs in the terminal", "answering prompts, fixing failed commands"),
     ("flash", "New panes (Flash agent)", "panes that open on the Flash agent"),
@@ -123,7 +128,7 @@ MAX_URL = 400
 # model ("main"), the High tier above it (main at max reasoning unless `tiers.high` picks a model;
 # owner, 2026-09-20), or takes the provider's Flash or Lite model.
 ROLE_TIERS: dict[str, str | None] = {
-    "planning": "high",
+    "planning": "high", "high": "high",
     "main": "main", "subagent": "main", "switchboard": "main",
     "terminal_use": "flash", "flash": "flash", "summaries": "flash", "suggestions": "flash",
     "chores": "lite", "audit": "lite", "loop_check": "lite", "local": "local",
@@ -946,6 +951,56 @@ class RoleResolver:
         if resolved.warning and resolved.warning not in self.warnings:
             self.warnings.append(resolved.warning)
         return resolved
+
+    def resolve_entry(self, role: str, entry: dict) -> Resolved:
+        """One pane's own pick for a role (protocol 13.5), resolved exactly as the same entry of
+        ``tiers.<tier>`` would be — same model, same extras, same level.
+
+        This is what the model box's mode pages do (card #MDL1, section 5.1): picking
+        ``glm-5.3-flash`` while the box is showing the Flash list puts *that pane* on the Flash role
+        **and** on that model. Before this the role's model came from ``tiers.flash`` alone, so the
+        only way to run one pane's Flash on another model was to re-order the list — which belongs
+        to every other pane and to every side call. Nothing is stored here and ``tiers`` is not
+        touched: the resolver holds no per-pane state, and the pane's config is what the caller
+        then sets.
+
+        A preset with no key here, a guest whose harness cannot run, or an entry that will not
+        validate falls back to the main agent exactly as a list entry does — never an error, so a
+        pick made against a stale catalog cannot cost the pane its model.
+        """
+        role = validate_role(role)
+        if role == "main":
+            raise ValueError('The "main" role is the pane\'s own model; set it with set_model.')
+        if not isinstance(entry, dict):
+            raise ValueError("A role pick must be an object.")
+        preset_id = entry.get("preset")
+        if not isinstance(preset_id, str) or not preset_id.strip():
+            raise ValueError("A role pick must name a preset.")
+        preset_id = preset_id.strip()
+        clean: dict = {"preset": preset_id}
+        if entry.get("model") is not None:
+            clean["model"] = _text(entry["model"], "model", MAX_MODEL)
+        if entry.get("effort") is not None:
+            clean["effort"] = validate_effort(entry["effort"])
+        tier = ROLE_TIERS.get(role) or "main"
+        if is_guest_preset(preset_id):
+            # A guest is a process, not an endpoint: it serves the tiers a harness may serve, and
+            # only where this machine can start it (GUEST_TIERS, protocol 29.3).
+            if tier not in GUEST_TIERS or not self.guest_check(guest_id_of(preset_id)):
+                return self._main(role, "fallback",
+                                  f"{LABELS[role]}: {preset_id} cannot run here; using the main agent.")
+            guest_preset, base_url, model, _extra, guest_effort = self._guest_target(clean)
+            return self._guest(role, guest_preset, base_url, model,
+                               clean.get("effort", guest_effort), "configured", tier)
+        if _preset(preset_id) is None:
+            return self._main(role, "fallback",
+                              f"{LABELS[role]}: no provider called {preset_id}; using the main agent.")
+        try:
+            chosen, base_url, model, extra, effort = self._list_target(clean, tier)
+            return self._build(role, chosen, base_url, model, extra, effort, "configured", tier)
+        except (ValueError, KeyError):
+            return self._main(role, "fallback",
+                              f"{LABELS[role]}: {preset_id} cannot be used here; using the main agent.")
 
     def planning_target(self, guests: bool = True) -> Resolved | None:
         """Where a plan-mode turn goes when the planning role is not the main agent (owner, 2026-09-19).

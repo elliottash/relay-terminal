@@ -15,6 +15,7 @@ from unittest import mock
 from relay_core import roles as model_roles
 from relay_core import route_assist
 from relay_core.agent import Agent
+from relay_core import presets
 from relay_core.presets import PRESETS, tier_default
 from relay_core.provider import ProviderConfig
 from relay_core.roles import RoleResolver, validate_roles
@@ -147,8 +148,8 @@ class DefaultTests(unittest.TestCase):
         config = ProviderConfig("https://example.invalid/v1", "house-model", "k", {}, 8192)
         made = RoleResolver(config, None, {}, key_lookup=lambda pid: "")
         for role in model_roles.ROLES:
-            if role == "planning":
-                continue
+            if role in ("planning", "high"):
+                continue   # the two High-tier roles: the main model pushed to max, asserted below
             self.assertTrue(made.resolve(role).is_main, role)
             self.assertEqual(made.resolve(role).model, "house-model")
         # Plan mode is the one role that is never "same as the main agent" by default: it follows
@@ -161,6 +162,72 @@ class DefaultTests(unittest.TestCase):
                          ("house-model", "https://example.invalid/v1", "k"))
         self.assertEqual(planning.config.extra, {"reasoning_effort": "max"})
         self.assertEqual((planning.source, planning.tier, planning.effort), ("default", "high", "max"))
+        # /high puts the pane itself on that same tier (card #MDL1): one more role, resolved by the
+        # one rule, so the mode row and a plan turn can never name two different models.
+        high = made.resolve("high")
+        self.assertEqual((high.model, high.tier, high.effort, high.source),
+                         ("house-model", "high", "max", "default"))
+        self.assertEqual(high.config.extra, {"reasoning_effort": "max"})
+
+    # ----- /high as a pane mode (card #MDL1, the model box's modes) -------------------------
+    def test_high_is_a_settable_pane_role_on_the_high_tier(self):
+        self.assertIn("high", model_roles.ROLES)
+        self.assertIn("high", model_roles.SETTABLE)
+        self.assertEqual(model_roles.ROLE_TIERS["high"], "high")
+        self.assertIn("high", dict((row["role"], row) for row in model_roles.action_catalog()))
+
+    def test_high_resolves_off_the_high_list_exactly_as_flash_does_off_flash(self):
+        """The one rule for both: the first usable entry of the tier's list, at that entry's level."""
+        made = resolver("kimi", keys=("kimi", "glm-coding"))
+        made.set_tiers(model_roles.validate_tiers(
+            {"high": [{"preset": "openai", "model": "gpt-6"},          # no key: stepped over
+                      {"preset": "glm-coding", "model": "glm-5.3", "effort": "max"}],
+             "flash": [{"preset": "glm-coding", "model": "glm-5.3-flash", "effort": "low"}]}))
+        high = made.resolve("high")
+        self.assertEqual((high.preset_id, high.model, high.effort, high.tier),
+                         ("glm-coding", "glm-5.3", "max", "high"))
+        self.assertFalse(high.is_main)
+        flash = made.resolve("flash")
+        self.assertEqual((flash.preset_id, flash.model, flash.tier), ("glm-coding", "glm-5.3-flash", "flash"))
+        # The step-down note names the entries that could not be used, as it does for every tier.
+        self.assertIn("High", high.note or "")
+
+    # ----- a pane's own pick for a role (protocol 13.5, set_agent_role {preset, model, effort}) ---
+    def test_resolve_entry_pins_one_pane_without_touching_the_list(self):
+        made = resolver("kimi", keys=("kimi", "glm-coding"))
+        made.set_tiers(model_roles.validate_tiers(
+            {"flash": [{"preset": "glm-coding", "model": "glm-5.3-flash", "effort": "low"}]}))
+        pinned = made.resolve_entry("flash", {"preset": "kimi", "model": "kimi-k2.7-code-highspeed"})
+        self.assertEqual((pinned.preset_id, pinned.model, pinned.tier, pinned.source),
+                         ("kimi", "kimi-k2.7-code-highspeed", "flash", "configured"))
+        self.assertFalse(pinned.is_main)
+        # The list is untouched: it belongs to every other pane and to every side call.
+        self.assertEqual(made.tiers["flash"], [{"preset": "glm-coding", "model": "glm-5.3-flash",
+                                                "effort": "low"}])
+        self.assertEqual(made.resolve("flash").model, "glm-5.3-flash")
+
+    def test_resolve_entry_takes_the_level_and_the_models_own_extras(self):
+        made = resolver("kimi", keys=("kimi", "glm-coding"))
+        pinned = made.resolve_entry("high", {"preset": "glm-coding", "model": "glm-5.3", "effort": "max"})
+        self.assertEqual((pinned.preset_id, pinned.model, pinned.effort, pinned.tier),
+                         ("glm-coding", "glm-5.3", "max", "high"))
+        # The model's own request extras, exactly as the same entry in a list would run
+        self.assertEqual(pinned.config.extra, presets.model_extra("glm-coding", "glm-5.3")
+                         | {"reasoning_effort": "max"})
+
+    def test_resolve_entry_falls_back_rather_than_failing(self):
+        made = resolver("kimi", keys=("kimi",))
+        for entry in ({"preset": "openai", "model": "gpt-6"},          # no stored key
+                      {"preset": "nope-there-is-no-such-provider"},    # not a provider at all
+                      {"preset": "guest:claude"}):                     # no harness in this resolver
+            resolved = made.resolve_entry("flash", entry)
+            self.assertTrue(resolved.is_main, entry)
+            self.assertTrue(resolved.warning)
+        for bad in (None, {}, {"preset": ""}, {"preset": "kimi", "effort": "turbo"}):
+            with self.assertRaises(ValueError):
+                made.resolve_entry("flash", bad)
+        with self.assertRaises(ValueError):
+            made.resolve_entry("main", {"preset": "kimi"})
 
     def test_chores_prefers_openrouter_then_the_fast_agent(self):
         with_or = resolver("kimi", keys=("kimi", "openrouter")).resolve("chores")
@@ -530,6 +597,31 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(len(warning), 1)
         self.assertNotIn("error", [e["event"] for e in events])
 
+    # set_agent_role {role, preset, model, effort}: this pane's own pick for a mode (13.5, #MDL1).
+    # The box's Flash page lists the Flash models; Enter on one means "this pane, flash, that
+    # model", which the tier list alone cannot say.
+    def test_set_agent_role_takes_a_pane_pick_of_preset_and_model(self):
+        events, _ = run_worker([{"type": "configure", "preset": "kimi", "use_stored_key": True,
+                                 "base_url": CONFIGS["kimi"][0], "model": CONFIGS["kimi"][1],
+                                 "workspace": str(ROOT),
+                                 "tiers": {"flash": [{"preset": "kimi", "model": "kimi-k2.7-code-highspeed"}]}},
+                                {"type": "set_agent_role", "id": "r1", "role": "flash",
+                                 "preset": "kimi", "model": "kimi-k3", "effort": "high"},
+                                {"type": "shutdown"}], {"RELAY_KIMI_API_KEY": "k"})
+        changed = next(e for e in events if e["event"] == "model_changed")
+        self.assertEqual((changed["model"], changed["agent_role"]), ("kimi-k3", "flash"))
+        self.assertNotIn("error", [e["event"] for e in events])
+
+    def test_set_agent_role_without_a_pick_still_reads_the_list(self):
+        events, _ = run_worker([{"type": "configure", "preset": "kimi", "use_stored_key": True,
+                                 "base_url": CONFIGS["kimi"][0], "model": CONFIGS["kimi"][1],
+                                 "workspace": str(ROOT)},
+                                {"type": "set_agent_role", "id": "r1", "role": "flash"},
+                                {"type": "shutdown"}], {"RELAY_KIMI_API_KEY": "k"})
+        changed = next(e for e in events if e["event"] == "model_changed")
+        self.assertEqual((changed["model"], changed["agent_role"]),
+                         ("kimi-k2.7-code-highspeed", "flash"))
+
     def test_bad_role_table_is_an_error_and_changes_nothing(self):
         events, _ = run_worker([{"type": "configure", "preset": "kimi", "use_stored_key": True,
                                  "base_url": CONFIGS["kimi"][0], "model": CONFIGS["kimi"][1],
@@ -603,13 +695,14 @@ class TierTests(unittest.TestCase):
         config = ProviderConfig("https://example.invalid/v1", "house-model", "k", {}, 8192)
         made = RoleResolver(config, None, {}, key_lookup=lambda pid: "")
         for role in model_roles.ROLES:
-            if role == "planning":
+            if role in ("planning", "high"):
                 continue   # the High tier: the main model at max reasoning (see DefaultTests)
             self.assertTrue(made.resolve(role).is_main, role)
         self.assertEqual(made.warnings, [])
         # Was "main" until High became a tier (2026-09-20): the same model at max, now labelled
-        # with the tier that asked for it.
+        # with the tier that asked for it. /high (card #MDL1) is a pane on that same tier.
         self.assertEqual(made.resolve("planning").tier, "high")
+        self.assertEqual(made.resolve("high").tier, "high")
 
     def test_minimax_flash_is_its_own_highspeed_model(self):
         made = self.tiered("kimi", ("minimax",))

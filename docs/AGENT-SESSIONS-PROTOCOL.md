@@ -976,11 +976,24 @@ after a `set_model` (per-provider defaults are recomputed for the new main model
 
 ### 13.5 `set_agent_role`
 
-`set_agent_role {role, id?}` switches this pane between the main agent and another role (the Flash agent in
-the GUI) **keeping the conversation**, like `set_model`. Refused while a turn is running. Replies with
+`set_agent_role {role, id?, preset?, model?, effort?}` switches this pane between the main agent and another
+role (the Flash agent in the GUI) **keeping the conversation**, like `set_model`. Refused while a turn is
+running. Replies with
 `model_changed {model, preset, context_window, effort, agent_role, warning?}` and `context`. A role that
 falls back reports `agent_role: "main"`. `configure` with an unusable `agent_role` reports
 `agent_role: "main"` too, plus the warning in `model_roles`.
+
+**`preset` / `model` / `effort`: this pane's own pick for that role** (v4.6, 2026-09-21, card #MDL1). With
+no `preset` the role resolves off its tier list exactly as it always has. With one, the three fields are
+read as a single tier-list entry — `{"preset": <id>, "model": <id or absent>, "effort": <Relay level or
+absent>}`, the same object `tiers.<tier>` holds — and resolved by the same rule
+(`roles.RoleResolver.resolve_entry`): the model's own request extras, the entry's level, a `guest:<id>`
+started as a harness where that tier allows one. **`tiers` is not written**: the list belongs to every
+other pane and to every side call, and a pane's pick must not re-order it. A preset with no key here, a
+guest whose harness cannot run, or an entry that will not validate falls back to the main agent with a
+warning, never an error, so a pick made against a stale catalog cannot cost the pane its model. The GUI
+sends this when a model is picked out of the model box's Flash, High or Local page (section 5.1 of
+`docs/MODEL-PICKING-DESIGN.md`): "this pane, this mode, that model" is one message.
 
 ### 13.6 Notes and deviations
 
@@ -1005,11 +1018,16 @@ presets … then advanced options, which would then reveal the specific actions"
 
 | Tier | Used for | Where it comes from |
 |---|---|---|
-| `high` | plan mode (`planning`), and any role pinned to it | the first usable entry of `tiers.high` — a `guest:` entry starts that guest's harness for the plan turn (v4.4, below) — else the pane's own model at `max` reasoning |
+| `high` | plan mode (`planning`), panes on the High agent (`/high`, the `high` role, v4.6), and any role pinned to it | the first usable entry of `tiers.high` — a `guest:` entry starts that guest's harness for the plan turn (v4.4, below) — else the pane's own model at `max` reasoning |
 | `main` | agent turns, subagents, Switchboard threads | the pane's own model (`configure` / `set_model`); `tiers.main` is only the order a failing turn walks |
 | `flash` | terminal use, fast panes, summaries, suggestions | the first usable entry of `tiers.flash`, else `TIER_DEFAULTS[<main preset>]["flash"]` |
 | `lite` | chores and the request audit; a pane whose model is on this list also sends the **short prompt profile** by default (12.12) | the first usable entry of `tiers.lite`, else `TIER_DEFAULTS[<main preset>]["lite"]` |
 | `local` | panes on the Local agent (`/local`), and any role pinned to it | the first usable entry of `tiers.local`, else the first saved local endpoint |
+
+The roles a **pane** can be put on are therefore `main` (its own model), `high`, `flash` and `local` — the
+four modes of the model box (v4.6, 2026-09-21, card #MDL1; `/high` joined `/main`, `/flash` and `/local`).
+Each is named after its tier and resolves on it; `set_agent_role` may carry the pane's own
+`{preset, model, effort}` for the role (13.5) instead of taking the list's first usable entry.
 
 **Options: each tier is an ordered list** (v3.10, owner, 2026-09-20: Options › Models replaces its
 single priority list with five — "main, high, flash, lite, local models. Each is a priority list, where

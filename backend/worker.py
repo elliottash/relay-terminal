@@ -619,7 +619,15 @@ def main():
                 agent = turns.agent
                 if agent is None or agent.roles is None:
                     raise ValueError("Configure a provider and workspace first.")
-                resolved = agent.roles.resolve(role)
+                # `preset`/`model`/`effort`: this pane's own pick for that role (13.5, card #MDL1).
+                # The model box shows the mode's list and Enter on one of its rows means "this pane,
+                # this mode, that model" — which the tier list alone cannot say, because it belongs
+                # to every pane. Absent, the role resolves off the list exactly as it always has.
+                pick = request.get("preset")
+                resolved = (agent.roles.resolve_entry(role, {"preset": pick,
+                                                             "model": request.get("model"),
+                                                             "effort": request.get("effort")})
+                            if isinstance(pick, str) and pick.strip() else agent.roles.resolve(role))
                 new_role = "main" if resolved.is_main else role
                 changed = {"event": "model_changed", "id": request.get("id"), "model": resolved.config.model,
                            "preset": resolved.preset_id, "effort": agent.effort, "agent_role": new_role,
