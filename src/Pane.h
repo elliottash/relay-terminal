@@ -12570,7 +12570,9 @@ private:
         // Left and Right turn between the modes without closing the list, so the popup is handed
         // every page at once and answers a pick by the row's own data (card #MDL1, section 5.1).
         m_modelBox->pageId = rows.mode;
-        m_modelBox->onPages = [this] { return modelBoxPages(); };
+        // Read again the moment the list is about to be drawn: the box always opens on the mode
+        // this pane is in, whatever page the last Escape happened to be over.
+        m_modelBox->onPages = [this] { m_modelBox->pageId = paneMode(); return modelBoxPages(); };
         m_modelBox->onPickedData = [this](const QString &data) { modelBoxPicked(data); };
         // The chip is the model alone on main and "<model> · <mode>" on any other mode, while the
         // row it sits on is a mode row: that is what CurrentTextComboBox::setCollapsedText is for.

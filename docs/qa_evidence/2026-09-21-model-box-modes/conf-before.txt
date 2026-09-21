@@ -1,0 +1,29 @@
+[instructions]
+onboarded=true
+
+[isolation]
+enabled=false
+
+[provider]
+preset=kimi-code
+
+[agent]
+effort=high
+
+[models]
+tier\main=kimi-code|k3|high, glm-coding|glm-5.3|max, glm|glm-5.3|max
+tier\high=glm-coding|glm-5.3|max, openai|gpt-5.6-sol|max
+tier\flash=glm-coding|glm-5.3-flash|low, kimi-code|k3|high
+tier\lite=glm-coding|glm-5.3-flash|low
+tier\local=@Invalid()
+
+[suggestions]
+next_command=false
+next_prompt=false
+
+[security]
+approvals_chosen=true
+approvals_ask=@Invalid()
+
+[url_handler]
+announced=true

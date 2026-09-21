@@ -77,8 +77,10 @@ public:
 
     // A list of several pages, turned by Left and Right (the model box's modes; card #MDL1). Unset
     // — which it is for the level box and every other box — the list is the combo's own model,
-    // exactly as before. `pageId` is the page to open on; a pick is answered by the row's `data`
-    // through `onPickedData`, because an index into one page is not an index into the combo.
+    // exactly as before. `pageId` is the page the box OPENS on and belongs to the owner: turning a
+    // page does not change it, so Escape leaves the next Alt+M where the pane actually is. A pick
+    // is answered by the row's `data` through `onPickedData`, because an index into one page is not
+    // an index into the combo.
     std::function<QList<relay::FilterPage>()> onPages;
     QString pageId;
     std::function<void(const QString &data)> onPickedData;
@@ -151,7 +153,10 @@ private:
             emit activated(index);
         };
         m_popup->onPageChanged = [this](const QString &id) {
-            pageId = id;
+            // `pageId` is deliberately *not* written here. It is the page the box OPENS on, and the
+            // owner sets it from the state the box is a view of (the pane's mode). A turn that is
+            // then abandoned with Escape must leave everything as it was, and remembering it here
+            // did not: the next Alt+M opened on whatever page the last Escape happened to be over.
             if (onPageTurned) onPageTurned(id);
         };
         m_popup->onCancelled = [this] { restoreFocus(); };

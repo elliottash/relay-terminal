@@ -94,7 +94,8 @@ that conflict.
 | Ctrl+Shift+A | Actions: everything you can do now, with its keys, in a list you can filter (again to close) |
 | Ctrl+Shift+O | Options: what persists, a tab per section (again to close; also Ctrl+, and the gear) |
 | Ctrl+Shift+S | Switchboard: this repository's cards, threads and plans (again to close it) |
-| Alt+M, Ctrl+Alt+M | Models: drop the pane's model box open / the dialog that picks *and* prioritizes them (`/model`) |
+| Alt+M, Ctrl+Alt+M | Models: drop the pane's model box open (Left/Right change the mode, Up/Down the model, typing filters) / the dialog that picks *and* prioritizes them (`/model`) |
+| Alt+F, Alt+H | This pane on the Flash model / the High model, and back to main (`/flash`, `/high`, `/main`) |
 | Alt+E | Reasoning: drop the pane's level box open (also Alt+. / Alt+, and `/effort`) |
 | Ctrl+Shift+M | Model options: Options › Models (`/models`) |
 | Ctrl+Shift+Y | Sessions: resume a saved session (`/resume`) |
@@ -208,7 +209,8 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   an empty prompt), `/rewind-code` (restores the files the agent changed, after showing them and
   asking; "Code and chat" does both), `/fork` (continues in a new pane),
   `/resume` (with a recap; `/sessions` is the same), `/conversations`, `/find`, `/plan`, `/recap`, `/tasks`, `/continue`, `/agents`, `/skills`, `/instructions`, `/export`
-  (Markdown under `.relay/exports`), `/main` and `/flash` (this pane's model tier), `/glm` and `/kimi`
+  (Markdown under `.relay/exports`), `/main`, `/high`, `/flash` and `/local` (this pane's model
+  tier — the four modes of the model box), `/glm` and `/kimi`
   (switch provider), `/help` (the popup `?` shows). A `/command` Relay does not have is answered by
   Relay, not by the shell: it names the closest real commands and points at `/` and `/help`. Coming back to the window after 3 minutes, with a finished
   turn and an empty prompt, prints a short recap (Options › General turns it off).
@@ -265,9 +267,10 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   A tier whose provider has no key steps down to the next one and says so inline; nothing ever fails
   because a key is missing. Every pane starts on the Main agent unless Options › Agent › "New panes
   use the Flash agent" is on, and then every pane after a window's first one starts on the Flash agent.
-  **`/flash`**, Alt+F, the **(flash)** row in the model box, or Actions › Flash agent for this
-  pane moves a pane to the Flash model, and **`/main`** or the **(main)** row moves it back,
-  both without losing the conversation. **`/glm`** and **`/kimi`** switch
+  **`/flash`**, Alt+F, the **flash** row in the model box, or Actions › Flash agent for this
+  pane moves a pane to the Flash model, **`/high`** or Alt+H to the High model, **`/local`** to one
+  served on this machine, and **`/main`** or the **main** row moves it back — all without losing the
+  conversation. **`/glm`** and **`/kimi`** switch
   the pane to that provider's Coding Plan (its pay-as-you-go preset when no Coding Plan key is stored).
 - **Plan mode.** Shift+Tab in the prompt box (or `/plan`) shows a PLAN chip: the agent
   investigates read-only and writes a plan, which opens in an editable pane (Ctrl+S saves) with

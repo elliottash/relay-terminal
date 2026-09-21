@@ -1,0 +1,41 @@
+[agent]
+effort=high
+
+[hints]
+count\model.mouse=1
+count\pane.focus.mouse=1
+last\model.mouse=1789997807
+last\pane.focus.mouse=1789997861
+last_any=1789997861
+
+[instructions]
+onboarded=true
+
+[isolation]
+enabled=false
+
+[models]
+fallbacks=glm-coding|glm-5.3, glm|glm-5.3
+provider_order=kimi-code, glm, glm-coding, openrouter, guest:claude, guest:codex
+tier\flash=glm-coding|glm-5.3-flash|low, kimi-code|k3|high
+tier\high=glm-coding|glm-5.3|max, openai|gpt-5.6-sol|max
+tier\lite=glm-coding|glm-5.3-flash|low
+tier\local=@Invalid()
+tier\main=kimi-code|k3|high, glm-coding|glm-5.3|max, glm|glm-5.3|max
+
+[provider]
+base=https://api.kimi.ai/coding/v1
+extra={\"reasoning_effort\":\"high\"}
+model=k3
+preset=kimi-code
+
+[security]
+approvals_ask=@Invalid()
+approvals_chosen=true
+
+[suggestions]
+next_command=false
+next_prompt=false
+
+[url_handler]
+announced=true
