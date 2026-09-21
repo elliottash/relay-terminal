@@ -1004,11 +1004,11 @@ private slots:
         QFETCH_GLOBAL(QString, core);
         for (int surface = 0; surface < 3; ++surface) {
             Term t(core, QStringLiteral("/bin/cat"));
-        // Test palette identity, not platform font rasterization: small Qt6 subpixel
-        // glyphs need not contain even one pixel of their exact foreground colour.
-        QFont font = t.view->terminalFont();
-        font.setStyleStrategy(QFont::NoAntialias);
-        t.view->setTerminalFont(font);
+            // Test palette identity, not platform font rasterization: small Qt6 subpixel
+            // glyphs need not contain even one pixel of their exact foreground colour.
+            QFont font = t.view->terminalFont();
+            font.setStyleStrategy(QFont::NoAntialias);
+            t.view->setTerminalFont(font);
             const QByteArray rendered = inlineInkCode(InlineInk::Note) + "existing note\x1b[0m\n"
                 + inlineInkCode(InlineInk::RecapBody) + "existing recap\x1b[0m\n"
                 + inlineInkCode(InlineInk::DiffAdd) + "+ added line\x1b[0m\n"
