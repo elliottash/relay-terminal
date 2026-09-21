@@ -28,3 +28,9 @@ not claims about the user's current live session size. See `gui.txt` and the thr
 The initial broader provider-suite run also found an unrelated Luna model-level expectation
 mismatch in CatalogueTests, in files undergoing concurrent model-ranking work. The focused
 context, adapter, wiring and worker tests above pass; model catalogue changes are outside this fix.
+
+Final landing: `f94f669d64ba057b35f68ad99213c9511f87fbe3`. The exact commit tree passed
+land.py's build gate. The final six context regression cases and contextmeter CTest are recorded
+as passing in the Switchboard test store; tests_check returned no findings, failures or blocks.
+The transient catalogue failure above passed on recheck after the concurrent changes landed.
+Global board check reported existing format errors elsewhere; none concern C8WX.

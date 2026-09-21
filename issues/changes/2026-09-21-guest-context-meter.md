@@ -8,7 +8,7 @@ implemented_by: opus/opus via claude-code
 rank: m
 created: '2026-09-21'
 source: User request in Relay, 2026-09-21
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-guest-context-meter/], related: [GT7X], github: null}
+links: {plans: [], commits: [f94f669d64ba057b35f68ad99213c9511f87fbe3], evidence: [docs/qa_evidence/2026-09-21-guest-context-meter/], related: [GT7X], github: null}
 ---
 # Show the running guest’s context in Relay’s meter
 

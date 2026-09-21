@@ -21,3 +21,9 @@ While checking #D7AV, the default scripts/relay-build hit relay-contextmeter-tes
 
 <!-- relay:entry 20260921T204211Z-k3 author=agent kind=event model=opus pane=4fd20531 turn=ac859a81872f41129eeaa0c501ad955f/23f40449f5df4b53bc42cf868cb54a70 -->
 - ✦ agent moved this card · Executing → Needs verification · Focused context/adapter/wiring tests, contextmeter CTest and isolated Codex/Claude/unknown GUI drive pass; ready for independent verification. · evidence docs/qa_evidence/2026-09-21-guest-context-meter/ · implemented_by opus/opus via claude-code
+
+<!-- relay:entry 20260921T204344Z-ax author=agent kind=event model=opus pane=4fd20531 turn=ac859a81872f41129eeaa0c501ad955f/23f40449f5df4b53bc42cf868cb54a70 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-21-guest-con… → {"plans": [], "commits": ["f94f669d64ba057b35f68ad99213c9511f87fbe3"], "evidence…
+
+<!-- relay:entry 20260921T204344Z-n1 author=agent kind=evidence model=opus pane=4fd20531 turn=ac859a81872f41129eeaa0c501ad955f/23f40449f5df4b53bc42cf868cb54a70 -->
+Landed f94f669d64ba057b35f68ad99213c9511f87fbe3 after land.py's exact-tree build passed. Focused adapters/wiring/worker tests passed (189 before the final zero-occupancy case); all 6 final regression cases plus contextmeter pass in the test registry. tests_check has no findings/failing tests/blocks. Real GUI Xvfb drive passes Codex, Claude and unknown-state cases. Board check reports no C8WX issues; unrelated existing board-format findings remain. The transient model-catalog test failure now passes after concurrent model changes landed.
