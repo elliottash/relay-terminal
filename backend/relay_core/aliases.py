@@ -551,10 +551,28 @@ def save(alias: Alias, workspace: str | os.PathLike | None = None,
     if root is None:
         raise AliasError("A local alias needs an open project.")
     path = card_path(root, alias)
+    # HQ and imported cards may have ID-based filenames. Find the actual stored definition
+    # before updating so a second name.md cannot leave a stale command active (#P7SJ).
+    stored = []
+    for status in STATUSES:
+        found, _ = _load_dir(alias_dir(root, status), scope)
+        stored.extend(found)
+    previous = next((a for a in stored if alias.card_id and a.card_id == alias.card_id), None)
+    if previous is None:
+        previous = next((a for a in stored if a.name == alias.name and a.status == alias.status), None)
+    if previous is not None and previous.path:
+        old_path = Path(previous.path)
+        if not old_path.resolve().is_relative_to(root.resolve()):
+            raise AliasError("Alias source is outside its Switchboard.")
+        if previous.name == alias.name and previous.status == alias.status:
+            path = old_path
+        elif path.exists() and path != old_path:
+            raise AliasError("An alias already occupies the destination path.")
     card_id, rank, created = alias.card_id, None, None
-    if path.exists():  # keep the identity, the rank and the creation date of the card we replace
+    identity_path = Path(previous.path) if previous is not None and previous.path else path
+    if identity_path.exists():  # keep the identity, rank and creation date on updates and renames
         try:
-            old = board.Card.load(path)
+            old = board.Card.load(identity_path)
             card_id = card_id or old.id
             rank = old.rank or None
             created = str(old.front.get("created")) if old.front.get("created") else None
@@ -563,6 +581,8 @@ def save(alias: Alias, workspace: str | os.PathLike | None = None,
     card = to_card(alias, card_id=card_id, rank=rank, created=created)
     card.path = path
     board.atomic_write(path, card.to_text())
+    if previous is not None and previous.path and Path(previous.path) != path:
+        Path(previous.path).unlink()
     alias.card_id = card.id
     alias.path = str(path)
     return alias

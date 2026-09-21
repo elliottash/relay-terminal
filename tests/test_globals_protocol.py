@@ -80,3 +80,49 @@ class GlobalsTests(unittest.TestCase):
     def test_invalid_memory_metadata_rejected(self):
         for text in [MEMORY.replace('pinned: true', 'pinned: maybe'), MEMORY.replace('scope: user', 'scope: planet')]:
             self.assertEqual(self.ask('save', kind='memory', text=text, base_hash='')['event'], 'globals_error')
+
+    def test_casefolded_names_cannot_duplicate_runtime_identity(self):
+        for kind, text in [('memory', MEMORY), ('alias', ALIAS)]:
+            self.create(kind, text)
+            duplicate = text.replace('name: rule', 'name: RULE').replace('name: where', 'name: WHERE')
+            self.assertEqual(self.ask('save', kind=kind, text=duplicate, base_hash='')['event'], 'globals_error')
+
+    def test_alias_store_updates_hq_record_without_stale_definition(self):
+        row = self.create('alias', ALIAS)
+        self.assertEqual(Path(row['path']).name, 'where.md')
+        # Legacy HQ/imported aliases can still use ID-based names.
+        old_path = Path(row['path'])
+        legacy_path = old_path.with_name(row['key'] + '.md')
+        old_path.rename(legacy_path)
+        alias = aliases.resolve('where', scope='global')
+        alias.text = 'pwd -P'
+        aliases.save(alias, scope='global')
+        self.assertEqual(aliases.resolve('where', scope='global').text, 'pwd -P')
+        found, _ = aliases.load(scopes=('global',))
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0].card_id, row['key'])
+        alias.name = 'location'
+        aliases.save(alias, scope='global')
+        self.assertFalse(legacy_path.exists())
+        self.assertEqual(aliases.resolve('location', scope='global').card_id, row['key'])
+
+    def test_globals_alias_rename_keeps_identity_and_one_active_definition(self):
+        row = self.create('alias', ALIAS)
+        result = self.ask('save', kind='alias', key=row['key'], base_hash=row['hash'],
+                          text=row['text'].replace('name: where', 'name: location'))
+        self.assertEqual(result['event'], 'globals_saved', result)
+        self.assertEqual(Path(result['record']['path']).name, 'location.md')
+        self.assertFalse(Path(row['path']).exists())
+        self.assertEqual(aliases.resolve('location', scope='global').card_id, row['key'])
+        with self.assertRaises(aliases.AliasError):
+            aliases.resolve('where', scope='global')
+
+    def test_alias_rename_cannot_overwrite_another_alias(self):
+        self.create('alias', ALIAS)
+        aliases.save(aliases.Alias(name='location', kind='command', text='ls'), scope='global')
+        alias = aliases.resolve('where', scope='global')
+        alias.name = 'location'
+        with self.assertRaises(aliases.AliasError):
+            aliases.save(alias, scope='global')
+        self.assertEqual(aliases.resolve('where', scope='global').text, 'pwd')
+        self.assertEqual(aliases.resolve('location', scope='global').text, 'ls')

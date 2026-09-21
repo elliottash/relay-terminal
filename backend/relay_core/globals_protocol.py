@@ -126,7 +126,10 @@ class GlobalsCommands:
                         card.set(field, new.front[field])
                     path = root / ('memory' if kind == 'memory' else 'aliases') / (card.id + '.md')
                 if kind == 'alias':
-                    aliases.validate(aliases.from_card(card, 'global'))
+                    alias = aliases.validate(aliases.from_card(card, 'global'))
+                    card.set('name', alias.name)
+                    if record is None:
+                        path = root / 'aliases' / (alias.name + '.md')
                 else:
                     if card.front.get('scope', 'user') not in ('user', 'project', 'team'):
                         raise ValueError('Memory scope must be user, project or team.')
@@ -140,7 +143,7 @@ class GlobalsCommands:
                 for other in records:
                     if other['kind'] == kind and other['key'] != card.id:
                         existing = board.Card.load(Path(other['path']))
-                        if (card.front.get('name') and existing.front.get('name') == card.front['name']
+                        if (card.front.get('name') and str(existing.front.get('name') or '').casefold() == str(card.front['name']).casefold()
                                 and existing.status == 'active' and card.status == 'active'):
                             raise ValueError('An active record with this name already exists.')
                 key = card.id
@@ -158,7 +161,8 @@ class GlobalsCommands:
                 target = path
                 if kind != 'instruction':
                     folder = root / ('memory' if kind == 'memory' else 'aliases')
-                    target = folder / ('archive' if card.status == 'retired' else '') / path.name
+                    filename = (card.front['name'] + '.md') if kind == 'alias' else path.name
+                    target = folder / ('archive' if card.status == 'retired' else '') / filename
                     if target != path:
                         target.parent.mkdir(parents=True, exist_ok=True)
                         if target.exists():

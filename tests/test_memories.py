@@ -75,3 +75,13 @@ class MemoriesTests(unittest.TestCase):
         self.put('runtime', 'SECOND MEMORY', root=aliases.global_root(), pinned=True)
         self.assertIn('SECOND MEMORY', agent.system_prompt())
         self.assertNotIn('FIRST MEMORY', agent.system_prompt())
+
+    def test_scoped_replacement_only_supersedes_where_it_applies(self):
+        old = self.put('old-scoped', 'OLDER GUIDANCE', pinned=True)
+        self.put('replacement', 'NEWER GUIDANCE', paths=['docs/**'], supersedes=[old.id])
+        source = memories.prompt_section(self.workspace / 'src')
+        self.assertIn('OLDER GUIDANCE', source)
+        self.assertNotIn('NEWER GUIDANCE', source)
+        docs = memories.prompt_section(self.workspace / 'docs')
+        self.assertNotIn('OLDER GUIDANCE', docs)
+        self.assertIn('NEWER GUIDANCE', docs)

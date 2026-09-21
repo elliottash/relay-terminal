@@ -73,6 +73,7 @@ def prompt_section(workspace, cap=TOTAL_CAP):
     candidates = [(c, 'project', local) for c in local_cards]
     candidates += [(c, 'global', local) for c in cards(aliases.global_root())
                    if identity(c) not in names and c.front.get('scope') != 'team']
+    candidates = [(c, scope, root) for c, scope, root in candidates if applies(c, workspace, root)]
     superseded = {str(item).lstrip('#').casefold() for c, _, _ in candidates
                   for item in (c.front.get('supersedes') if isinstance(c.front.get('supersedes'), list) else [])}
     candidates = [(c, scope, root) for c, scope, root in candidates
