@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: m
 created: '2026-09-21'
 source: Codex in a Relay pane, 2026-09-21
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-remove-issues-dropdown/], related: [], github: null}
+links: {plans: [], commits: [7329eee2e3cbbad779cc1db6032234aaa017f294], evidence: [docs/qa_evidence/2026-09-21-remove-issues-dropdown/], related: [], github: null}
 ---
 # Remove the prompt issues dropdown
 
