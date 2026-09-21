@@ -2643,11 +2643,11 @@ private:
             const QString said = payload.value(QStringLiteral("last-assistant-message")).toString().simplified();
             notify(guestName(guest),
                    said.isEmpty() ? QStringLiteral("finished its turn.") : said.left(200));
-            if (guest == m_guest) setGuestBusy(false);
+            setGuestBusy(false);
         } else if (name == QStringLiteral("UserPromptSubmit") || name == QStringLiteral("PreToolUse")) {
-            if (guest == m_guest) setGuestBusy(true);   // a guest turn has begun; Stop ends it
+            setGuestBusy(true);   // a guest turn has begun; Stop ends it
         } else if (name == QStringLiteral("Stop")) {
-            if (guest == m_guest) setGuestBusy(false);
+            setGuestBusy(false);
         }
     }
 
