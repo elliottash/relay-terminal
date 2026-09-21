@@ -1791,6 +1791,45 @@ window.addEventListener('DOMContentLoaded', () => {
   connectStored();
 });
 
+// A pairing link pasted on the welcome screen: the same fragment the QR carries, from the
+// clipboard instead of the camera. An installed app on iOS has no other way in — the camera hands
+// a link to Safari, whose storage the Home Screen app does not share — and a link typed by hand
+// on any phone reaches the same screen. The page moves to the link's own URL first, so what
+// follows (the fragment gone after pairing, `/pair` on a paired device) is one path, not two.
+$('welcome-pair').addEventListener('click', () => {
+  const text = $('welcome-link').value.trim();
+  const at = text.indexOf('#');
+  let target;
+  try {
+    target = new URL(text);
+  } catch {
+    $('welcome-note').textContent = 'That is not a link. Paste the whole pairing link, from https:// to the end.';
+    return;
+  }
+  if (at < 0 || !/\/pair\/?$/.test(target.pathname) || target.origin !== location.origin) {
+    $('welcome-note').textContent = target.origin !== location.origin && at >= 0
+      ? `That link is for ${target.host}; this app is on ${location.host}. Open it there, or pair from the desktop's share window with this address chosen.`
+      : 'That is not a pairing link: it should end in /pair# and the code after it.';
+    return;
+  }
+  let link;
+  try {
+    link = Rrp.parsePairFragment(target.hash);
+  } catch (error) {
+    $('welcome-note').textContent = error.message;
+    return;
+  }
+  // The same path a scanned link takes at load, without a reload: the URL is put where the
+  // scan would have put it and the pairing screen takes over. The pasted text is spent.
+  $('welcome-note').textContent = '';
+  $('welcome-link').value = '';
+  history.replaceState(null, '', target.pathname + target.hash);
+  startPairing(link);
+});
+// Disabled in the markup until this script is up: the welcome screen is the one drawn before any
+// script runs, and a tap on a button with nobody listening would do nothing and say nothing.
+$('welcome-pair').disabled = false;
+
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(() => {});
   // Tapping a notification opens that pane. The worker focuses this page and posts the pane id

@@ -361,7 +361,7 @@ details.tool > summary::marker { color: var(--muted); }
    `hidden` attribute still has to win over these display rules, which [hidden] above guarantees. */
 :root { --guest: #e0a860; }
 
-#join-name, #guest-line, #guest-prompt-text {
+#join-name, #welcome-link, #guest-line, #guest-prompt-text {
   width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line);
   border-radius: 10px; padding: 10px 12px; font: inherit;
 }

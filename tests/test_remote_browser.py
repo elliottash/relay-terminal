@@ -9,6 +9,7 @@ without a certificate.
 Skipped when Chrome is not installed.
 """
 import asyncio
+import json
 import tempfile
 import time
 import unittest
@@ -227,6 +228,48 @@ class Harness:
 
 @unittest.skipUnless(find_chrome(), "no Chrome or Chromium installed")
 class BrowserClientTests(unittest.TestCase):
+    def test_a_pairing_link_pasted_on_the_welcome_screen_pairs(self):
+        """The welcome screen takes the pairing link from the clipboard (#PH0N): an installed app
+        on iOS has no other way in, since the camera hands a link to Safari and the Home Screen
+        app's storage is its own. A link for another origin is refused with a sentence naming
+        both; the right one pairs exactly as the QR does."""
+        async def main():
+            async with Harness() as harness:
+                url, _ = await harness.host.open_pairing()
+                root = url.split("/pair#", 1)[0] + "/"
+                browser = Browser()
+                await browser.start()
+                try:
+                    await browser.navigate(root)
+                    # The welcome screen is drawn before any script runs; the button is enabled
+                    # by the script, so waiting on it is waiting for the handler.
+                    await browser.wait_for("!document.getElementById('welcome-pair').disabled", timeout=40)
+                    self.assertTrue(await browser.evaluate(shown('welcome-link')))
+
+                    async def paste(text):
+                        await browser.evaluate(
+                            "(() => { document.getElementById('welcome-link').value = %s;"
+                            " document.getElementById('welcome-pair').click(); return true; })()"
+                            % json.dumps(text))
+
+                    await paste("https://join.relay-terminal.ai/pair" + url[url.index("#"):])
+                    said = await browser.wait_for(
+                        "document.getElementById('welcome-note').textContent || ''", timeout=10)
+                    self.assertIn("join.relay-terminal.ai", said)
+                    self.assertEqual(len(harness.requests), 0)
+                    await paste("not a link at all")
+                    said = await browser.evaluate("document.getElementById('welcome-note').textContent")
+                    self.assertIn("not a link", said)
+
+                    await paste(url)
+                    await browser.wait_for(shown('screen-inbox'), timeout=40)
+                    self.assertEqual(len(harness.requests), 1)
+                    self.assertEqual(await browser.evaluate("location.href"), root)
+                finally:
+                    await browser.stop()
+
+        asyncio.run(main())
+
     def test_a_paired_phone_reopening_its_pairing_tab_lands_in_the_inbox(self):
         """After pairing the page sits at the app's root, and a refresh of `/pair` with no code
         connects the stored device instead of asking for the QR code again (#PH0N).

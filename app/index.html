@@ -46,6 +46,13 @@
         microphone under the prompt box, then scan the QR code with this device's camera.</p>
       <p class="muted">Both devices have to be on the same network.</p>
       <p id="welcome-note" class="note"></p>
+      <!-- The link the QR carries, pasted. For an installed app on iOS: the camera opens a link
+           in Safari, and a web app on the Home Screen has storage of its own, so the only way a
+           pairing link reaches the installed app is through the clipboard (#PH0N). -->
+      <label class="field-label" for="welcome-link">Or paste the pairing link</label>
+      <input id="welcome-link" type="url" inputmode="url" autocomplete="off" autocapitalize="off"
+             autocorrect="off" spellcheck="false" placeholder="https://join.relay-terminal.ai/pair#…">
+      <button type="button" id="welcome-pair" disabled>Pair with this link</button>
     </div>
   </section>
 
