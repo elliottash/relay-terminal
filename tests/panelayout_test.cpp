@@ -350,7 +350,7 @@ private Q_SLOTS:
             }
     }
 
-    // The sizes Ctrl+Alt+0 writes (card #BXCN): equal shares, except a Switchboard pane takes its
+    // The sizes Alt+0 writes (card #BXCN; the key was Ctrl+Alt+0 until #GSJ7): equal shares, except a Switchboard pane takes its
     // list/card split and the other panes divide what is left.
     void equalizingGivesTheBoardPaneItsSplit() {
         // All-zero floors: the plain equal division of the total, today's behaviour.

@@ -177,7 +177,8 @@ QList<QPointer<QSplitter>> splittersIn(QWidget *root);
 // Verify passes — divides the anchor's share alone and behaves exactly as before.
 QList<int> sizesAfterDock(const QList<int> &sizes, int anchorIndex, int anchorFloor = 0);
 
-// The sizes for Ctrl+Alt+0, "every splitter in this tab back to equal shares": equal shares,
+// The sizes for Alt+0 (Ctrl+Alt+0 before 2026-09-20), "every splitter in this tab back to equal
+// shares": equal shares,
 // except that an entry whose floor exceeds its equal share is pinned at the floor and the
 // remainder is divided equally among the rest — so "equalize panes" gives a Switchboard pane the
 // width its list/card split needs (card #BXCN) and the other panes share what is left. `floors`

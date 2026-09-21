@@ -244,9 +244,16 @@ private:
         add("pane.moveToNewTab", "pane", "Move pane to a new tab (keeps the shell and agent)", {});
         // Every splitter in the tab back to equal shares, top to bottom (owner report, 2026-09-19:
         // pane sizes jiggle) -- a way back to a tidy layout after drags leave the panes uneven,
-        // digit 0 for "reset the sizes"; no other action binds a digit so this is free in all four
-        // presets, and Ctrl+Alt matches the rest of the pane-arranging family (moveLeft and friends).
-        add("pane.equalize", "pane", "Equalize pane sizes: every splitter in this tab back to equal shares", {QStringLiteral("Ctrl+Alt+0")});
+        // digit 0 for "reset the sizes". It was Ctrl+Alt+0 for a day; the owner moved it to plain
+        // Alt+0 (2026-09-20: "change ctrl+alt+0 to alt+0 if it wont cause any problems"), because
+        // the chord is the slow path this action exists to fix and one fewer modifier is one fewer
+        // reason to keep dragging. Nothing was in the way: no action and no preset table binds an
+        // Alt+digit (Ctrl+Shift+1 is notifications.jump), a QMenuBar accelerator is Alt+letter and
+        // never Alt+digit, and Alt+0 is not in actsInsidePrograms, so it steps aside for a program
+        // that owns the keyboard exactly as Ctrl+Alt+0 did -- the shell's own M-0 (readline
+        // digit-argument) is only reachable in that state, so Relay never answers for it.
+        add("pane.equalize", "pane", "Equalize pane sizes (auto-resize): every splitter in this tab back to equal shares",
+            {QStringLiteral("Alt+0")});
         add("tab.moveToNewWindow", "tab", "Move tab to a new window (keeps its panes)", {});
         add("closed.restore", "pane", "Restore the last closed pane, tab or window", {QStringLiteral("Ctrl+Shift+Z")});
         add("closed.list", "pane", "Recently closed: the last 25 panes, tabs and windows, any of them reopened", {});

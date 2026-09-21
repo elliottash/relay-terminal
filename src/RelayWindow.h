@@ -2969,6 +2969,25 @@ private:
         relay::SettingsSection appearance;
         appearance.id = QStringLiteral("appearance");
         appearance.title = QStringLiteral("Appearance");
+        {
+            auto fontSize = numberRow(QStringLiteral("appearance/font_size"), QStringLiteral("Font size"),
+                                      QStringLiteral("Default terminal text size in all panes; Ctrl+0 resets zoom to this size"),
+                                      11, 6, 48, QStringLiteral(" pt"));
+            const auto apply = [] {
+                for (QWidget *widget : QApplication::allWidgets())
+                    if (auto *pane = dynamic_cast<Pane *>(widget)) pane->applyTerminalSettings();
+            };
+            const auto change = fontSize.onNumber;
+            fontSize.onNumber = [this, change, apply](int value) {
+                change(value);
+                apply();
+                hint(QStringLiteral("terminal.fontSize.options"), relay::ShortcutHints::nextTime(
+                    Keymap::instance().shortcutText(QStringLiteral("terminal.zoomIn")), QStringLiteral("zoom this pane")));
+            };
+            const auto reset = fontSize.reset;
+            fontSize.reset = [reset, apply] { reset(); apply(); };
+            appearance.rows << fontSize;
+        }
         appearance.blurb = QStringLiteral("One file per theme. Built-in themes ship with Relay; your own go in "
                                           "~/.config/relay/themes as <name>.toml — copy a built-in one and edit it.");
         {
@@ -4320,7 +4339,14 @@ private:
         items << actionItem(panes, QStringLiteral("Hide until you need me"), QStringLiteral("Dim working agents"), QStringLiteral("pane.autoDim"), relay::settings::boolValue(QStringLiteral("appearance/auto_dim"), false));
         items << actionItem(panes, QStringLiteral("Close pane"), QStringLiteral("Then the tab, then the window"), QStringLiteral("pane.close"));
         items << actionItem(panes, QStringLiteral("Move pane to new tab"), QStringLiteral("Keeps the shell and agent running"), QStringLiteral("pane.moveToNewTab"));
-        items << actionItem(panes, QStringLiteral("Equalize pane sizes"), QStringLiteral("Every splitter in this tab back to equal shares"), QStringLiteral("pane.equalize"));
+        {
+            // "Auto-resize" is what the owner calls it (#GSJ7), so the name is searchable and the
+            // detail says it: this is the entry the "?" list shows, and the drag hint teaches it.
+            PaletteItem equalize = actionItem(panes, QStringLiteral("Equalize pane sizes (auto-resize)"),
+                                              QStringLiteral("Every splitter in this tab back to equal shares"), QStringLiteral("pane.equalize"));
+            equalize.aliases = QStringLiteral("auto resize auto-resize reset sizes even balance tidy layout rearrange");
+            items << equalize;
+        }
         items << actionItem(panes, QStringLiteral("Move tab to new window"), QStringLiteral("Keeps its panes running"), QStringLiteral("tab.moveToNewWindow"));
         items << actionItem(panes, QStringLiteral("Move pane left"), QStringLiteral("Then ↓ docks it beneath · or drag the ⠿ grip"), QStringLiteral("pane.moveLeft"));
         items << actionItem(panes, QStringLiteral("Move pane right"), QStringLiteral("Then ↓ docks it beneath"), QStringLiteral("pane.moveRight"));
@@ -7856,7 +7882,18 @@ private:
         splitter->setChildrenCollapsible(false);
         splitter->setHandleWidth(3);
         // Saved window layout: dragging a divider changes the sizes that come back on restart.
-        connect(splitter, &QSplitter::splitterMoved, this, [this](int, int) { m_manager->scheduleSave(); });
+        // A drag is also the slow path to a tidy layout, so it teaches the key that does it in one
+        // press: pane.equalize puts every splitter in the tab back to equal shares (#GSJ7). Only a
+        // real drag teaches it -- QSplitter::splitterMoved also fires for Relay's own setSizes()
+        // (a split, a dock, equalize itself), and those run with no mouse button down.
+        connect(splitter, &QSplitter::splitterMoved, this, [this](int, int) {
+            m_manager->scheduleSave();
+            if (!(QApplication::mouseButtons() & Qt::LeftButton)) return;
+            const QString keys = Keymap::instance().shortcutText(QStringLiteral("pane.equalize"));
+            if (keys.isEmpty()) return;
+            hint(QStringLiteral("pane.resize.equalize"),
+                 relay::ShortcutHints::nextTime(keys, QStringLiteral("equal panes")));
+        });
         return splitter;
     }
 
@@ -10007,9 +10044,10 @@ private:
         // moved toward, and past the page's edge there is no neighbour on that side.
     }
 
-    // Ctrl+Alt+0 (owner report, 2026-09-19: pane sizes jiggle): every splitter in the active tab
-    // back to equal shares, top to bottom, so a page a drag has left lopsided goes back to a tidy
-    // grid in one key. The same "identical
+    // Alt+0, "auto-resize" (owner report, 2026-09-19: pane sizes jiggle; the key was Ctrl+Alt+0
+    // until #GSJ7): every splitter in the active tab back to equal shares, top to bottom, so a page
+    // a drag has left lopsided goes back to a tidy grid in one key. The drag that leaves it
+    // lopsided is also where newSplitter teaches this key. The same "identical
     // entries, let Qt turn them into ratios of the real width" trick insertBeside's equal-shares
     // fallback and movePastPageEdge's outer wrapper use, just applied to every splitter in the
     // page rather than one.

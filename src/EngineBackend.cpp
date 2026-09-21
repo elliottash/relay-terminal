@@ -7,6 +7,7 @@
 
 #include <QFont>
 #include <QSettings>
+#include <algorithm>
 
 namespace relay {
 
@@ -23,6 +24,15 @@ EngineBackend::EngineBackend(const QString &coreName, QWidget *parent)
 
 void EngineBackend::applySettings()
 {
+    if (TerminalView *v = view()) {
+        const int size = std::clamp(QSettings().value(QStringLiteral("appearance/font_size"), 11).toInt(), 6, 48);
+        QFont font = v->terminalFont();
+        // Leave per-pane zoom alone when an unrelated setting is refreshed.
+        if (font.pointSizeF() != size) {
+            font.setPointSize(size);
+            v->setTerminalFont(font);
+        }
+    }
     if (TerminalView *v = view())
         v->setCopyOnSelect(QSettings().value(QStringLiteral("terminal/copy_on_select"), false).toBool());
     // Paths and URLs in program output wear the link colour at rest, not only under the pointer

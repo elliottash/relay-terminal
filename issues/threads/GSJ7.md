@@ -11,3 +11,11 @@ Add a shortcut hint on divider drag (pane.equalize), rebind pane.equalize Ctrl+A
 
 <!-- relay:entry 20260920T231315Z-zr author=owner kind=event pane=c938d100 -->
 Released (c938d100) · the pane closed
+
+<!-- relay:entry 20260921T195119Z-g1 author=codex kind=progress -->
+### Codex · 2026-09-21 19:51
+Owner authorized recovery: “can you duoble check those again, and if they arent here merge them int o the active build, delete other branches and worktrees”. Claimed this follow-up, confirmed the implementation is still outside main, and reviewed the hunks for landing and rebuilding. No extra branches/worktrees exist.
+
+<!-- relay:entry 20260921T195847Z-rv author=codex kind=evidence -->
+### Codex · 2026-09-21 19:58
+Recovered the owner-authorized inactive changes. Targeted panes/hints/settings tests and engine zoom checks passed; isolated GUI verified the drag hint, Alt+0 equalization, searchable Actions entry, and saved font size changing 18→22 pt in open terminals. Evidence: docs/qa_evidence/2026-09-21-recover-inactive/README.md. Moving to needs-verification with a QA checklist; landing uses the exact-tree build gate. No extra branches or worktrees exist to delete.
