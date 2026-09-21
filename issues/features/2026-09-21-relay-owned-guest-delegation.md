@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: m
 created: '2026-09-21'
 source: Codex in Relay, 2026-09-21
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-guest-delegation/results.txt], related: [4NXH], github: null}
+links: {plans: [], commits: [d40085fc90b07f39a6783a266a89b5c4b60c7ce5], evidence: [docs/qa_evidence/2026-09-21-guest-delegation/results.txt], related: [4NXH], github: null}
 ---
 # Codex delegates through Relay so its tasks and child sessions are visible
 

@@ -18,3 +18,6 @@ Bridge exposes Relay delegation and tasks; Codex native multi-agent flags disabl
 
 <!-- relay:entry 20260921T205548Z-w9 author=agent kind=event model=gpt-6-astra pane=6fa44d36 turn=77b09ee57dd745c79bbaeef222fc9ace/2c6387465f3b44dbbd723ac3a518fbbb -->
 - ✦ agent moved this card · Executing → Needs verification · Implemented and passed 182 targeted tests plus four tracked integration checks; live Codex/GUI verification awaits worker restart. · evidence docs/qa_evidence/2026-09-21-guest-delegation/results.txt · implemented_by openai/gpt-6-astra via codex
+
+<!-- relay:entry 20260921T205607Z-xf author=agent kind=event model=gpt-6-astra pane=6fa44d36 turn=77b09ee57dd745c79bbaeef222fc9ace/2c6387465f3b44dbbd723ac3a518fbbb -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-21-guest-del… → {"plans": [], "commits": ["d40085fc90b07f39a6783a266a89b5c4b60c7ce5"], "evidence…
