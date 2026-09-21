@@ -497,15 +497,20 @@ public:
             // guesses a scope from whether a board has a card scope, so a board-less agent
             // silently took the pane branch.
             spec.scope = QStringLiteral("pane");
-            // The conversation is the pane's own session, under the project it belongs to. The
-            // scope is part of the identity, never decoration: the same pane id in two projects
-            // is two conversations.
-            spec.persistScope = m_pane->workspace();
+            // Where the conversation is kept. `persistScope` is a *wire enum* -- "", "pane" or
+            // "helper" (backend/relay_core/agent_context.py, PERSIST_SCOPES) -- and not a path:
+            // it says which store, and the key names the conversation inside it. A pane keeps
+            // its own session under relay/sessions/ exactly as it always has, which is what
+            // scope "pane" means; only "helper" redirects (protocol 30.7).
+            spec.persistScope = QStringLiteral("pane");
             spec.persistKey = m_pane->scrollbackId();
             spec.shell = true;                 // the only context that spawns one
-            // "auto" is the terminal's routing -- a typed line may be a command or a prompt --
-            // and it is the pane's live setting rather than a constant, because Ctrl+I moves it.
-            spec.routing = m_pane->mode();
+            // The terminal's routing: a typed line may be a command or a prompt. It is the
+            // surface's own answer and not the pane's input mode -- Ctrl+I moves the mode
+            // between shell, agent and auto, and "shell" is not one of the two the wire has
+            // (ROUTINGS), because what the mode picks is where *this* line goes, not what the
+            // surface can route.
+            spec.routing = QStringLiteral("auto");
             return spec;
         }
 
