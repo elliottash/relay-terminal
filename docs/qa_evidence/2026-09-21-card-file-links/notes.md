@@ -10,3 +10,9 @@ A second defect was reproduced in ViewTest: a known plain #ID returned an empty 
 - `scripts/relay-build --target relay relay-engine-tests relay-boardworkspace-tests`: passed.
 
 GUI verification uses the existing markdown-link-labels drive with CARDROW targeting the generated card's absolute Markdown path. Isolated Xvfb, HOME/XDG directories and loopback stub provider; no user profile or external provider requests. The first attempt exposed an outdated fixture default selecting the installed Claude harness; it was stopped and the private fixture was corrected to explicitly rank the stub model first.
+
+GUI result: **3 PASS, 0 FAIL**. The CARDROW label linked to the generated card's absolute `.md` path; clicking it opened Switchboard on the matching title and ID. See `card-opened.png` and `gui-check.txt`.
+
+The ViewTest resize-and-click regression also passed under Xvfb with `QT_QPA_PLATFORM=xcb` and isolated `XDG_CONFIG_HOME`; see `resize-click-test.txt`. The final committed tree passed land.py's full Relay build gate. Implementation commit: `1f71d6050a27b8b2045448e29b3dd18997f8b5bd`.
+
+`TestsCommands('.').check_card('L9KC')` returned no findings, actions, failing tests or blocking signals. The board format check reported no findings for this card; existing warnings elsewhere were left unchanged.

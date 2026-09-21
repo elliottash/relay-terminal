@@ -1,0 +1,7 @@
+===== (c) the #ID label, clicked in a terminal pane =====
+PASS c0 the reply carries the paragraph of links ("SITEROW" in c01-links.png)
+  clicking the label "CARDROW" at 1184 222
+PASS c1 the label opened the card page ("Back to board" in c02-card.png)
+PASS c1 …on the card it named ("The console is the prompt box" in c02-card.png)
+
+3 PASS · 0 FAIL

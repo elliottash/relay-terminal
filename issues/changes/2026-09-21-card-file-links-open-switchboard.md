@@ -7,7 +7,7 @@ assignee: codex
 rank: m
 created: '2026-09-21'
 source: 'Codex in a Relay pane, 2026-09-21'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-card-file-links/notes.md], related: [GWXM, MDKN], github: null}
+links: {plans: [], commits: [1f71d6050a27b8b2045448e29b3dd18997f8b5bd], evidence: [docs/qa_evidence/2026-09-21-card-file-links/notes.md], related: [GWXM, MDKN], github: null}
 ---
 # Card file links should open the Switchboard card
 
