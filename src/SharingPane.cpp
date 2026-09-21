@@ -835,10 +835,18 @@ void SharingView::build()
     m_clocks.clear();
     m_firstRefuse = nullptr;
     // Rebuilt wholesale: the rows are few, and every one of them is a question whose buttons must
-    // match the row's current state exactly. deleteLater would leave the old buttons live for a
-    // turn of the loop, so they go now.
+    // match the row's current state exactly. The old rows leave the layout and the screen now,
+    // but are freed on the next turn of the loop: a rebuild is very often *caused* by one of
+    // them — a checkbox's `toggled` reaches the model, the model's change comes straight back
+    // here — and QCheckBox::setChecked still touches the box (accessibility) after `toggled`
+    // returns. Deleting it here was a SIGSEGV on "Guest prompts run immediately" (#SHCK). Hidden
+    // and parentless, an old row can take no click in the meantime.
     while (QLayoutItem *item = m_column->takeAt(0)) {
-        if (QWidget *widget = item->widget()) delete widget;
+        if (QWidget *widget = item->widget()) {
+            widget->hide();
+            widget->setParent(nullptr);
+            widget->deleteLater();
+        }
         delete item;
     }
 

@@ -9,6 +9,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QCheckBox>
+#include <QPointer>
 #include <QtTest>
 
 using namespace relay::sharing;
@@ -48,6 +50,7 @@ private slots:
     void aPlanArrivesAsAPrompt();
     void expiryIsReadInWhicheverUnitArrived();
     void sentences();
+    void togglingAnOptionSurvivesTheRebuildItCauses();
 };
 
 void SharingTest::sharedPanesAndTitles()
@@ -395,6 +398,41 @@ void SharingTest::sentences()
     QCOMPARE(usesText(1), QStringLiteral("1 use left"));
     QCOMPARE(usesText(3), QStringLiteral("3 uses left"));
     QCOMPARE(usesText(0), QStringLiteral("spent"));
+}
+
+void SharingTest::togglingAnOptionSurvivesTheRebuildItCauses()
+{
+    // #SHCK: clicking "Guest prompts run immediately" crashed Relay. The box's `toggled` reached
+    // the model, the model's change rebuilt the view at once, and the rebuild deleted the box
+    // while QCheckBox::setChecked was still running on it. The wiring here is the window's own:
+    // the option is written to the model and the view refreshed synchronously.
+    Model model;
+    model.setSharedPanes({{QStringLiteral("p1"), QStringLiteral("build")}});
+    model.setParticipants(items(R"([{"id":"a1","name":"alice","role":"editor","panes":["p1"]}])"), {});
+    SharingView view;
+    view.setModel(&model);
+    view.refresh();
+    view.onOptions = [&](const QString &pane, bool immediate, bool present) {
+        model.setOptions(pane, {model.options(pane).paused, immediate, present});
+        view.refresh();
+    };
+    QPointer<QCheckBox> box;
+    for (QCheckBox *candidate : view.findChildren<QCheckBox *>())
+        if (candidate->text() == QStringLiteral("Guest prompts run immediately")) box = candidate;
+    QVERIFY(box);
+    QVERIFY(!box->isChecked());
+    box->click();
+    // The click returned with the box still alive: it goes on the next turn of the loop, not
+    // under its own signal.
+    QVERIFY(box);
+    QCOMPARE(model.options(QStringLiteral("p1")).promptsImmediate, true);
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QVERIFY(!box);
+    QCheckBox *fresh = nullptr;
+    for (QCheckBox *candidate : view.findChildren<QCheckBox *>())
+        if (candidate->text() == QStringLiteral("Guest prompts run immediately")) fresh = candidate;
+    QVERIFY(fresh);
+    QVERIFY(fresh->isChecked());
 }
 
 QTEST_MAIN(SharingTest)
