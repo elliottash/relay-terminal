@@ -11,7 +11,9 @@
   <meta property="og:title" content="Relay Terminal — one prompt for your shell and your coding agent">
   <meta property="og:description" content="A Linux terminal for agentic coding: the agent answers in the terminal itself, the tracker lives in git, and any provider's key works. An included allowance to start.">
   <meta property="og:type" content="website">
-  <meta property="og:image" content="assets/agent-inline.png">
+  <meta property="og:image" content="https://relay-terminal.ai/assets/agent-inline.png">
+  <meta property="og:url" content="https://relay-terminal.ai/">
+  <link rel="canonical" href="https://relay-terminal.ai/">
   <link rel="icon" href="assets/relay.svg" type="image/svg+xml">
   <link rel="stylesheet" href="style.css">
   <script>
@@ -35,6 +37,7 @@
         <nav aria-label="Sections">
           <ul>
             <li><a href="#why">Why Relay</a></li>
+            <li><a href="#latest">What’s new</a></li>
             <li><a href="#features">Features</a></li>
             <li><a href="#install">Install</a></li>
             <li><a href="#privacy">Privacy</a></li>
@@ -59,7 +62,7 @@
             <a class="button" href="https://github.com/elliottash/relay-terminal">Source on GitHub</a>
           </div>
           <p class="cta-note">A <code>.deb</code> for Ubuntu 24.04, Ubuntu 26.04 and Debian 13, or a source build.
-            The agent runs commands as your user without asking each time —
+            Agent commands run as your user; approval settings depend on your build —
             <a href="#privacy">read this first</a>.</p>
         </div>
 
@@ -136,17 +139,46 @@
       </div>
     </section>
 
+    <section id="latest" aria-labelledby="latest-title">
+      <div class="wrap">
+        <p class="eyebrow">Development update · <time datetime="2026-09-21">21 September 2026</time></p>
+        <h2 id="latest-title">Less setup. More continuity.</h2>
+        <p class="intro">Recent changes on <code>main</code>. These may be ahead of the downloadable beta;
+          check the <a href="https://github.com/elliottash/relay-terminal/releases">release notes</a> for your package.</p>
+        <div class="updates">
+          <article><span class="num">01 / Models</span><h3>Change the model. Keep the work.</h3>
+            <p>Switch during a conversation, choose the reasoning level the model supports, or swap back with
+              Alt+S. Claude Code and Codex guests can delegate into Relay’s own subagent tabs.</p></article>
+          <article><span class="num">02 / Workspace</span><h3>Ask where you are working.</h3>
+            <p>Switchboard cards, Options, Actions and Sessions now have agent consoles. Discuss a card,
+              plan its work or execute it with the conversation attached to that card.</p></article>
+          <article><span class="num">03 / Continuity</span><h3>Come back with context.</h3>
+            <p>Idle panes can leave an away recap after work finishes. Sessions keeps saved conversations
+              searchable, and Ctrl+Enter in an empty prompt continues a stopped turn.</p></article>
+          <article><span class="num">04 / Control</span><h3>Make the workspace yours.</h3>
+            <p>Choose approval behavior, dim surrounding panes while you work, and find slash commands in
+              Actions. Folded diffs and output that rewraps make longer sessions easier to read.</p></article>
+          <article><span class="num">05 / Phone</span><h3>Take the Switchboard with you.</h3>
+            <p>Pair with a short code and PIN as well as a QR code. Your paired phone can browse cards and
+              threads, act on work, and bring questions that need you into its inbox.</p></article>
+          <article><span class="num">06 / Keyboard</span><h3>Keep your hands on the work.</h3>
+            <p>Open Actions with Ctrl+Shift+A, Sessions with Ctrl+Shift+Y and the Switchboard with
+              Ctrl+Shift+S. These are Relay’s default shortcuts; other keymap presets are available.</p></article>
+        </div>
+        <p class="small"><a href="https://github.com/elliottash/relay-terminal/compare/58aeb17f...main">Browse the changes since the previous website update →</a></p>
+      </div>
+    </section>
+
     <section id="why" aria-labelledby="why-title">
       <div class="wrap">
-        <h2 id="why-title">What only Relay does</h2>
-        <p class="intro">Warp, Wave and the command-line agents each put the agent somewhere else: a block, a
-          sidebar, a TUI of its own. Relay puts it in the terminal you already have, and keeps everything
-          else on your machine.</p>
+        <h2 id="why-title">Why work in Relay?</h2>
+        <p class="intro">Keep the shell, the conversation and the work record together. Read an answer beside the command
+          that prompted it, change models without starting over, and keep your project’s decisions in git.</p>
         <ol class="why">
           <li>
             <span class="num">01</span>
             <h3>The agent answers in the terminal grid</h3>
-            <p>There is no agent pane. Prompts, answers, tool calls, diffs and command output print into the
+            <p>In a terminal pane, prompts, answers, tool calls, diffs and command output print into the
               scrollback in their own colours, folded where they run long. The agent reads the same screen you
               do, so when you hand a pane over (Ctrl+Shift+J) it can drive vim, a REPL or an installer there.</p>
           </li>
@@ -168,23 +200,21 @@
           <li>
             <span class="num">04</span>
             <h3>The tracker lives in the repository</h3>
-            <p>The Switchboard is your <code>issues/</code> folder as a board: one Markdown card per issue, plan or
-              memory, threads append-only, all in git and readable on GitHub. The agent files what it did not
-              finish, asks its questions on the card, and lands work in a QA lane that a different provider's
-              model can verify.</p>
+            <p>The Switchboard keeps work cards, plans and memories as Markdown in your repository, with
+              append-only threads. New boards use <code>.switchboard/</code>; existing <code>issues/</code>
+              boards still work. Agents claim work, record evidence and hand it off for verification.</p>
           </li>
           <li>
             <span class="num">05</span>
             <h3>Any provider, including the ones you already pay for</h3>
-            <p>GLM Coding Plan, Kimi Code, MiniMax, OpenRouter, OpenAI, Anthropic, Gemini, any OpenAI-compatible
-              endpoint, or a model server on this machine. Pick one and Relay fills in Main, Flash and Lite; a
-              tier without a key steps down instead of failing. Claude Code and Codex run as guests in a pane, on
-              the subscription you already have.</p>
+            <p>Use your own provider key, a compatible endpoint or a local model server. Claude Code and Codex
+              can also be the pane’s agent through their installed command-line tools and existing login.
+              Relay Free supplies an included allowance when you want to try Relay without a key.</p>
           </li>
           <li>
             <span class="num">06</span>
             <h3>Your phone, and other people, without an account</h3>
-            <p>Pair a phone from a QR code: an end-to-end encrypted session over a rendezvous that only ever sees
+            <p>Pair a phone from a QR code or, in current development builds, a short code and PIN: an end-to-end encrypted session over a rendezvous that only ever sees
               ciphertext. The phone sees the pane, types into the same routed prompt box and dictates. Invite
               someone else with a role and an expiry, admit them by hand, and take the keyboard back by typing.</p>
           </li>
@@ -213,9 +243,9 @@
           </li>
           <li class="ag">
             <h3>The agent acts for real</h3>
-            <p>It runs commands as your user, unsandboxed, without asking for each one, and writes files inside
-              the workspace. Every action prints as it happens and Esc stops it, but nothing is rolled back.
-              Start with a project you can afford to break.</p>
+            <p>It runs commands as your user and edits workspace files. Actions print as they happen and Esc
+              stops the agent; stopping does not undo changes. Current development builds offer a first-run
+              choice of approval behavior, editable in Options › Security. Shell commands are not sandboxed.</p>
           </li>
           <li class="sh">
             <h3>Passwords stay in the box</h3>
@@ -248,12 +278,11 @@
               of you. The index is a local SQLite file.</p>
           </li>
           <li class="ag">
-            <h3>One provider choice, three models</h3>
-            <p>Pick a provider and Relay fills in three tiers from its own line-up — on GLM that is
-              <strong>glm-5.3</strong> for agent turns, <strong>glm-5.3-flash</strong> for quick work and a
-              cheap model for labels and checks. Every tier and every job is editable. Bring your own
-              key for GLM, Kimi, Kimi Code, MiniMax, OpenRouter, OpenAI, Anthropic or Gemini; the API keys
-              window has a Test button and keeps keys in your system keyring.</p>
+            <h3>Choose the model for the work</h3>
+            <p>Pick a model in the pane, or use <code>/model</code>. Current development builds group models
+              by class, offer each model’s own reasoning levels, and let you rank your choices. Use
+              <code>/swap</code> (Alt+S) to switch models while keeping the conversation. Provider keys,
+              subscriptions and local endpoints can all take part.</p>
           </li>
           <li class="ag">
             <h3>Subagents in their own tabs</h3>
@@ -303,12 +332,13 @@
           </li>
           <li class="plain">
             <h3>No telemetry, no account</h3>
-            <p>No analytics, no crash reporting and no sign-in. On your own key the only network traffic is to
-              the provider whose key you entered; on the included <a href="free.html">Relay Free</a> allowance
-              it is to Relay's gateway, which keeps request metadata and never content. AGPL-3.0-or-later.</p>
+            <p>No analytics, no crash reporting and no Relay account. Agent requests use the provider selected
+              for that job; <a href="free.html">Relay Free</a> uses a gateway with metadata-only logs.
+              Remote sharing and other network tools connect when you use them. AGPL-3.0-or-later.</p>
           </li>
         </ul>
 
+        <p class="small">Screenshots show earlier beta builds; controls and layout are evolving.</p>
         <div class="gallery">
           <figure class="shot">
             <img src="assets/splits.png" width="1320" height="860" loading="lazy"
@@ -328,7 +358,7 @@
           <figure class="shot">
             <img src="assets/switchboard.png" width="700" height="450" loading="lazy"
                  alt="The Switchboard pane beside a terminal: sections from Inbox to Done, one card per row with its id, labels and a task count.">
-            <figcaption>The Switchboard (Ctrl+Shift+S): the repository's <code>issues/</code> folder as a board</figcaption>
+            <figcaption>The Switchboard (Ctrl+Shift+S): work cards and their threads, stored in the repository</figcaption>
           </figure>
           <figure class="shot">
             <img src="assets/plan-mode.png" width="640" height="430" loading="lazy"
@@ -410,13 +440,15 @@ relay --engine-core=libvterm   # pick the emulator core</code></pre>
             <h3>What stays with you</h3>
             <ul class="checks">
               <li>No telemetry, no analytics, no crash reporting.</li>
-              <li>No Relay account. On your own key, Relay connects to the network only to reach the provider
-                you configure, when you use the agent. On <a href="free.html">Relay Free</a> it reaches
-                Relay's gateway instead, and nothing else.</li>
+              <li>No Relay account. Requests on your own API key go directly to that provider.
+                <a href="free.html">Relay Free</a> requests go through Relay’s gateway. Different jobs can
+                use different providers; guest-agent background tasks may use Relay Free.</li>
               <li>API keys live in your desktop keyring (GNOME Keyring or KWallet, through
                 <code>secret-tool</code>) or in an environment variable. They are passed on stdin, never on a
                 command line, in a settings file or in a log.</li>
-              <li>Shell commands you run stay on your machine, and terminal output is never sent on its own.</li>
+              <li>Relay does not upload shell history as telemetry. Commands can access the network themselves;
+                output the agent reads can become part of its provider request. Remote sharing sends the
+                shared pane over an end-to-end encrypted connection.</li>
               <li>A password typed at a masked prompt goes to that program and nowhere else — not to history,
                 the session file, the logs or any model.</li>
               <li>Conversations and their search index are files on your disk, deleted with the conversation.</li>
@@ -431,11 +463,11 @@ relay --engine-core=libvterm   # pick the emulator core</code></pre>
                 applies.</li>
               <li>On <a href="free.html">Relay Free</a>, the same things go to Relay's gateway and on to the
                 provider serving that role. The gateway logs one line of metadata per request and never the
-                text. Pick any other provider and it is out of the path.</li>
-              <li><strong>Agent tools run without asking for approval.</strong> The agent can run commands and
-                write files in your workspace as your user. Shell commands are not sandboxed; file tools stay
-                inside the workspace. Every action prints in the terminal and you can stop the agent at any
-                time, but nothing is rolled back. Start with a project you can afford to break.</li>
+                text. A request made with your own provider key bypasses that gateway.</li>
+              <li><strong>Agent tools can change your files and run commands as your user.</strong> Current
+                development builds let you choose which capabilities require approval in Options › Security;
+                older betas run tools without per-action approval. Guest agents also follow their own
+                permission settings. Shell commands are not sandboxed, and stopping does not roll back work.</li>
             </ul>
           </div>
         </div>
@@ -479,89 +511,6 @@ relay --engine-core=libvterm   # pick the emulator core</code></pre>
       </ul>
     </div>
   </footer>
-  <script>
-    // The panel switch. The page already answers the browser's own setting in CSS; this only adds
-    // the manual patch, so it is built here and stays absent when JavaScript is off.
-    (function () {
-      var host = document.querySelector(".panel-switch");
-      if (!host) return;
-      var panels = [{ id: "beige", label: "beige" }, { id: "copper", label: "copper" }];
-      var dark = window.matchMedia("(prefers-color-scheme: dark)");
-
-      function current() {
-        var pinned = document.documentElement.dataset.theme;
-        if (pinned === "beige" || pinned === "copper") return pinned;
-        return dark.matches ? "copper" : "beige";
-      }
-      function paint() {
-        var now = current();
-        host.querySelectorAll("button").forEach(function (button) {
-          button.setAttribute("aria-checked", String(button.dataset.panel === now));
-        });
-      }
-      function patch(panel) {
-        document.documentElement.dataset.theme = panel;
-        try { localStorage.setItem("relay-panel", panel); } catch (e) {}
-        paint();
-      }
-
-      panels.forEach(function (panel) {
-        var button = document.createElement("button");
-        button.type = "button";
-        button.setAttribute("role", "radio");
-        button.dataset.panel = panel.id;
-        button.textContent = panel.label;
-        button.addEventListener("click", function () { patch(panel.id); });
-        host.appendChild(button);
-      });
-      host.addEventListener("keydown", function (event) {
-        if (["ArrowLeft", "ArrowUp", "ArrowRight", "ArrowDown"].indexOf(event.key) === -1) return;
-        event.preventDefault();
-        var next = current() === "beige" ? "copper" : "beige";
-        patch(next);
-        host.querySelector('[data-panel="' + next + '"]').focus();
-      });
-      // An unpinned page follows the browser, including a change made while it is open.
-      dark.addEventListener("change", paint);
-      host.hidden = false;
-      paint();
-    })();
-  </script>
-
-  <script>
-    // One interactive moment on the page: re-patching the line. Everything works without it —
-    // the shell jack is plugged in the markup, and its session is the one shown.
-    (function () {
-      var board = document.querySelector('.board');
-      if (!board) return;
-      var screen = document.querySelector('.screen');
-      var text = screen.querySelector('.input-text');
-      var chip = screen.querySelector('.dest-chip');
-      var lines = { shell: 'git status --short', agent: 'rebase this onto main and fix the conflicts' };
-      var labels = { shell: 'terminal', agent: 'agent' };
-      function patch(target) {
-        board.dataset.line = target;
-        board.querySelectorAll('.jack').forEach(function (jack) {
-          jack.setAttribute('aria-checked', String(jack.dataset.target === target));
-        });
-        screen.querySelectorAll('[data-for]').forEach(function (body) {
-          body.hidden = body.dataset.for !== target;
-        });
-        text.textContent = lines[target];
-        chip.textContent = labels[target];
-        chip.className = 'chip dest-chip ' + (target === 'shell' ? 'sh-chip' : 'ag-chip');
-      }
-      board.querySelectorAll('.jack').forEach(function (jack) {
-        jack.addEventListener('click', function () { patch(jack.dataset.target); });
-      });
-      board.querySelector('.jacks').addEventListener('keydown', function (event) {
-        if (['ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown'].indexOf(event.key) === -1) return;
-        event.preventDefault();
-        var next = board.dataset.line === 'shell' ? 'agent' : 'shell';
-        patch(next);
-        board.querySelector('.jack-' + next).focus();
-      });
-    })();
-  </script>
+  <script src="site.js" defer></script>
 </body>
 </html>

@@ -46,20 +46,19 @@
   <main id="main">
     <section id="free" aria-labelledby="free-title">
       <div class="wrap">
-        <h2 id="free-title">Relay Free</h2>
+        <h1 id="free-title">Relay Free</h1>
         <p class="lede">Open Relay, ask the agent something, and it answers. No API key, no account. Relay Free
           is a modest daily allowance included with Relay; when you want more, or want your prompts to go
-          straight to a provider of your choice, add your own key and Relay Free steps out of the way.</p>
+          straight to a provider of your choice, add your own key and select your provider.</p>
 
         <div class="grid two">
           <div>
             <h3>What you get</h3>
             <ul class="checks">
-              <li>The three model tiers Relay uses everywhere: <strong>Main</strong> for the agent and its
+              <li>An allowance for agent work and background jobs: <strong>Main</strong> for the agent and its
                 planning, <strong>Flash</strong> for terminal work and quick turns, <strong>Lite</strong> for
-                titles, labels and routing. Today they are GLM-5.3-Flash, DeepSeek V4.1 Flash and Gemini 3.5
-                Flash-Lite, served through OpenRouter; the mapping lives on the server and can change without
-                a new Relay.</li>
+                titles, labels and routing. The model mapping is managed on the server and can change without
+                a new Relay release; the app shows the current choices.</li>
               <li>A daily token allowance that resets every day. The pane shows how much is left, and when it
                 is used up the terminal keeps working; only the agent waits for the reset or for a key of
                 your own.</li>
@@ -85,9 +84,10 @@
 
         <h3>Your key, whenever you want it</h3>
         <p>Options › Models › <strong>API keys…</strong> takes a key for GLM, Kimi, MiniMax, OpenRouter, OpenAI,
-          Anthropic, Gemini or any OpenAI-compatible endpoint. Once one is stored, new panes use it, requests
-          go directly to that provider, and nothing passes through Relay's gateway. Relay Free stays in the
-          model list as one more choice, or you can remove it.</p>
+          Anthropic, Gemini or any OpenAI-compatible endpoint. Requests made on your own key go directly to
+          that provider. Check the models selected for
+          other jobs too: background tasks in a Claude Code or Codex guest pane can use Relay Free.
+          Relay Free remains a separate provider choice.</p>
 
         <h3>Limits, plainly</h3>
         <p>The allowance is a resource quota, not a crippled product: the same models, the same streaming, the
@@ -109,5 +109,6 @@
       </ul>
     </div>
   </footer>
+  <script src="site.js" defer></script>
 </body>
 </html>
