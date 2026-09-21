@@ -98,7 +98,7 @@ Wave 3 landed (`c6c2f72e`, `4c0348a8`, `4cffa9b2`, `5cf0db2b`): the whole always
 live against join.relay-terminal.ai — a real Relay under Xvfb, headless Chrome as the phone, a
 second browser as a guest — 23 of 24 steps PASS in `docs/qa_evidence/2026-09-21-ph0n-hosted-drive/`
 (`drive.sh` reruns it). The one FAIL (a `/pair` reload on a paired device) is fixed and served
-since the `5cf0db2b` deploy. Five product bugs found and fixed on the way; two filed (#WCLS,
-#AUDL). Phases 1 and 2 are complete; the card moves to needs-verification with the iPhone
+since the `5cf0db2b` deploy. Five product bugs found and fixed on the way; two filed (#WEVT,
+#ADTR). Phases 1 and 2 are complete; the card moves to needs-verification with the iPhone
 checklist as the acceptance. Owner decision left open: a recap on a desktop with no keys goes to
 Relay Free through the summaries role (seen with `RELAY_KEYRING=off`); fine or not?

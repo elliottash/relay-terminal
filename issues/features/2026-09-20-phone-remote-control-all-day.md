@@ -240,7 +240,7 @@ waits on Phase 3.
   Stop vanishing on a socket drop; a restarted rendezvous refusing the hub forever (4401); a >64 KiB
   line killing the sidecar (`4c0348a8`); `shareStatus()` never saying `finished`; the share window
   losing its device list; a `/pair` reload on a paired device (`c6c2f72e`).
-- **Filed, not fixed here**: #WCLS (25 worker events unclassified for remote), #AUDL (the audit log
+- **Filed, not fixed here**: #WEVT (25 worker events unclassified for remote), #ADTR (the audit log
   misses invites, knocks, admits and guest prompts).
 
 ## Tests
