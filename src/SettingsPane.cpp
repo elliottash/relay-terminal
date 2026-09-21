@@ -23,6 +23,7 @@
 #include <QFileDialog>
 #include <QFrame>
 #include <QHBoxLayout>
+#include <QHash>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QCompleter>
@@ -52,6 +53,46 @@
 #include <memory>
 
 namespace relay {
+
+QString actionSlashCommands(const QString &key) {
+    // Keep this list aligned with Pane::slashCommands and runSlashCommand. Hidden aliases
+    // (such as /todos) are intentionally not taught in the menu.
+    static const QHash<QString, QString> commands{
+        {QStringLiteral("agent:skills"), QStringLiteral("/skills")},
+        {QStringLiteral("agent.swap"), QStringLiteral("/swap")},
+        {QStringLiteral("agent.newChat"), QStringLiteral("/new · /clear")},
+        {QStringLiteral("agent.flashAgent"), QStringLiteral("/flash")},
+        {QStringLiteral("agent.highAgent"), QStringLiteral("/high")},
+        {QStringLiteral("agent.localAgent"), QStringLiteral("/local")},
+        {QStringLiteral("agent.modelOptions"), QStringLiteral("/models")},
+        {QStringLiteral("agent.compact"), QStringLiteral("/compact")},
+        {QStringLiteral("agent.rewind"), QStringLiteral("/rewind")},
+        {QStringLiteral("agent.rewindCode"), QStringLiteral("/rewind-code")},
+        {QStringLiteral("agent.fork"), QStringLiteral("/fork")},
+        {QStringLiteral("agent.resume"), QStringLiteral("/resume · /sessions · /conversations")},
+        {QStringLiteral("conversations.open"), QStringLiteral("/conversations · /sessions · /resume")},
+        {QStringLiteral("agent.info"), QStringLiteral("/info · /status")},
+        {QStringLiteral("find.inView"), QStringLiteral("/find")},
+        {QStringLiteral("agent.planToggle"), QStringLiteral("/plan")},
+        {QStringLiteral("agent.recap"), QStringLiteral("/recap")},
+        {QStringLiteral("agent.requests"), QStringLiteral("/tasks · /requests")},
+        {QStringLiteral("agent.continue"), QStringLiteral("/continue")},
+        {QStringLiteral("agent.instructions"), QStringLiteral("/instructions")},
+        {QStringLiteral("agent.export"), QStringLiteral("/export")},
+        {QStringLiteral("agent.subagentPane"), QStringLiteral("/agents")},
+        {QStringLiteral("menu:agents"), QStringLiteral("/agents")},
+        {QStringLiteral("agent.agentsMenu"), QStringLiteral("/agents")},
+        {QStringLiteral("board.open"), QStringLiteral("/switchboard")},
+        {QStringLiteral("project.init"), QStringLiteral("/init")},
+        {QStringLiteral("remote.join"), QStringLiteral("/join · /connect")},
+        {QStringLiteral("app.update"), QStringLiteral("/update")},
+        {QStringLiteral("menu:effort"), QStringLiteral("/effort · /reasoning")},
+    };
+    if (key.startsWith(QStringLiteral("effort:")))
+        return QStringLiteral("/effort ") + key.mid(7);
+    return commands.value(key);
+}
+
 
 namespace {
 
@@ -717,7 +758,10 @@ void SettingsPane::addActionsList(QVBoxLayout *into) {
         for (const ActionItem &item : std::as_const(m_actionCache)) {
             if (item.section != section) continue;
             if (!item.children) { into->addWidget(actionRow(item)); continue; }
-            into->addWidget(groupHeader(item.label + (item.detail.isEmpty() ? QString() : QStringLiteral("  ·  ") + item.detail), item.key));
+            const QString commands = actionSlashCommands(item.key);
+            into->addWidget(groupHeader(item.label
+                + (commands.isEmpty() ? QString() : QStringLiteral("  ·  ") + commands)
+                + (item.detail.isEmpty() ? QString() : QStringLiteral("  ·  ") + item.detail), item.key));
             for (const ActionItem &child : item.children()) into->addWidget(actionRow(child));
         }
     }
@@ -1034,6 +1078,8 @@ QWidget *SettingsPane::actionRow(const ActionItem &item, const QString &prefix) 
     label->setWordWrap(true);
     text->addWidget(label);
     if (!item.detail.isEmpty()) text->addWidget(mutedLabel(item.detail, "settingsRowDetail"));
+    const QString commands = actionSlashCommands(item.key);
+    if (!commands.isEmpty()) text->addWidget(mutedLabel(commands, "settingsActionCommands"));
     box->addLayout(text, 1);
     if (!item.shortcut.isEmpty()) box->addWidget(keyCap(item.shortcut));
     Row entry;
@@ -1125,7 +1171,7 @@ void SettingsPane::buildResults(const QString &needle) {
         }
     }
     for (const ActionItem &item : std::as_const(flat)) {
-        const int score = scoreOf(item.label, item.detail, item.section, item.aliases);
+        const int score = scoreOf(item.label, item.detail, item.section, item.aliases + QLatin1Char(' ') + actionSlashCommands(item.key));
         if (score > 0) hits.append({actionsMode ? score : score / 2, order++, {}, item, item.section, true, {}});
     }
     std::stable_sort(hits.begin(), hits.end(), [](const Hit &a, const Hit &b) { return a.score > b.score; });

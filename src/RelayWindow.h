@@ -1872,8 +1872,8 @@ private:
     void runFromSettings(ToolPane *tool, const PaletteItem &item) {
         if (!item.run) return;
         const QString hintId = QStringLiteral("palette.") + item.key;
-        const QString hintText = item.shortcut.isEmpty()
-            ? QString() : relay::ShortcutHints::nextTime(item.shortcut, item.label.toLower());
+        const QString fastPath = item.shortcut.isEmpty() ? relay::actionSlashCommands(item.key) : item.shortcut;
+        const QString hintText = relay::ShortcutHints::nextTime(fastPath, item.label.toLower());
         QStringList recent = QSettings().value(QStringLiteral("palette/recent")).toStringList();
         recent.removeAll(item.key); recent.prepend(item.key);
         QSettings().setValue(QStringLiteral("palette/recent"), QStringList(recent.mid(0, 12)));
@@ -4079,6 +4079,7 @@ private:
                                 QStringLiteral("Investigate and write a plan before changing anything"), QStringLiteral("agent.planToggle"),
                                 pane->agentMode() == QStringLiteral("plan"));
         }
+        items << actionItem(agent, QStringLiteral("Swap models"), QStringLiteral("Switch to the main model and back"), QStringLiteral("agent.swap"));
         items << actionItem(agent, QStringLiteral("Compact conversation"), QStringLiteral("Summarize older turns to free context"), QStringLiteral("agent.compact"));
         items << actionItem(agent, QStringLiteral("Rewind chat…"), QStringLiteral("Conversation back to an earlier turn; files unchanged · Esc Esc"), QStringLiteral("agent.rewind"));
         items << actionItem(agent, QStringLiteral("Rewind code…"), QStringLiteral("Restore files the agent changed since a turn · /rewind-code"), QStringLiteral("agent.rewindCode"));

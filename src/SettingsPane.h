@@ -178,6 +178,9 @@ private:
     bool m_scheduled = false;
 };
 
+// Existing composer commands associated with a menu action; empty when none exists.
+QString actionSlashCommands(const QString &key);
+
 // A runnable action, or a submenu of them. `checked` marks the current choice; `stayOpen` says
 // running it changes state the pane should show at once rather than closing. `typed` lets a
 // submenu answer what was typed in the search box with rows of its own, listed first: "Connect to

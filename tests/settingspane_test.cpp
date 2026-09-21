@@ -393,6 +393,42 @@ private slots:
         QCOMPARE(state.thinking, true);
     }
 
+    void slashCommandsAreVisibleSearchableAndKeepTheAction() {
+        ActionItem swap;
+        swap.key = QStringLiteral("agent.swap"); swap.section = QStringLiteral("Agent");
+        swap.label = QStringLiteral("Switch models"); swap.shortcut = QStringLiteral("Alt+S");
+        swap.run = [] {};
+        ActionItem fresh;
+        fresh.key = QStringLiteral("agent.newChat"); fresh.section = swap.section;
+        fresh.label = QStringLiteral("Start conversation"); fresh.run = [] {};
+        ActionItem split;
+        split.key = QStringLiteral("pane.splitRight"); split.section = swap.section;
+        split.label = QStringLiteral("Split pane"); split.run = [] {};
+        SettingsPane pane(SettingsPane::Mode::Actions, [] { return QList<SettingsSection>(); },
+                          [=] { return QList<ActionItem>{swap, fresh, split}; });
+        pane.resize(700, 650);
+        pane.show();
+        QStringList commands;
+        for (auto *label : pane.findChildren<QLabel *>(QStringLiteral("settingsActionCommands")))
+            commands << label->text();
+        QVERIFY(commands.contains(QStringLiteral("/swap")));
+        QVERIFY(commands.contains(QStringLiteral("/new · /clear")));
+        QCOMPARE(commands.size(), 2);  // no invented slash command for Split pane
+        bool keyVisible = false;
+        for (auto *label : pane.findChildren<QLabel *>())
+            if (label->text() == QStringLiteral("Alt+S")) keyVisible = true;
+        QVERIFY(keyVisible);
+        QString ran;
+        pane.onRun = [&](const ActionItem &item) { ran = item.key; };
+        pane.setSearch(QStringLiteral("/swap"));
+        QCOMPARE(pane.visibleRowIds(), QStringList{swap.key});
+        press(pane.findChild<QLineEdit *>(QStringLiteral("settingsSearch")), Qt::Key_Return);
+        QCOMPARE(ran, swap.key);
+        pane.setSearch(QStringLiteral("/clear"));
+        QCOMPARE(pane.visibleRowIds(), QStringList{fresh.key});
+        QVERIFY(!relay::actionSlashCommands(QStringLiteral("agent.requests")).contains(QStringLiteral("/todos")));
+    }
+
     void optionsSearchFindsActionsToo() {
         State state;
         SettingsPane pane(SettingsPane::Mode::Options, [&] { return catalog(&state); }, [&] { return actions(&state); });
