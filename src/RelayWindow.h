@@ -167,7 +167,12 @@ public:
         if (m_socketDir.isValid()) {
             QFile::setPermissions(m_socketDir.path(), QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
             relay::runtimedirs::markOwned(m_socketDir.path());   // whose socket directory this is
+#ifdef Q_OS_WIN
+            const QString address = QStringLiteral("relay-open-") + QUuid::createUuid().toString(QUuid::WithoutBraces);
+            m_server.setSocketOptions(QLocalServer::UserAccessOption);
+#else
             const QString address = m_socketDir.filePath(QStringLiteral("open.sock"));
+#endif
             if (m_server.listen(address)) {
                 qputenv("RELAY_OPEN_SOCKET", address.toUtf8());
                 publishSocketAddress(address);

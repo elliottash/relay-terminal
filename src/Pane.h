@@ -3270,7 +3270,11 @@ public:
     // A quoted cd is run like any other Relay command, so the shell (and its prompt) follow.
     bool changeDirectory(const QString &path) {
         if (!QFileInfo(path).isDir()) return false;
-        return runCommand(QStringLiteral("cd '") + QString(path).replace('\'', QStringLiteral("'\\''")) + '\'');
+#ifdef Q_OS_WIN
+        return runCommand(QStringLiteral("Set-Location -LiteralPath ") + shellQuote(path));
+#else
+        return runCommand(QStringLiteral("cd ") + shellQuote(path));
+#endif
     }
 
     // "Set as agent workspace" in the explorer's right-click menu. The agent's file tools are
@@ -13885,7 +13889,11 @@ private:
 
     static QString shellQuote(const QString &value) {
         QString quoted = value;
+#ifdef Q_OS_WIN
+        quoted.replace('\'', QStringLiteral("''"));
+#else
         quoted.replace('\'', QStringLiteral("'\\''"));
+#endif
         return '\'' + quoted + '\'';
     }
 
