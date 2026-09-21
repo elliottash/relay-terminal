@@ -4522,9 +4522,9 @@ private:
                                     QStringLiteral("ssh.splitSameHost"));
         }
         {
-            PaletteItem hosts = submenu(QStringLiteral("menu:ssh"), panes, QStringLiteral("Connect to host…"),
-                                        QStringLiteral("ssh in a new tab · ~/.ssh/config and recent hosts"),
-                                        [this] { return sshMenuItems(); });
+            PaletteItem hosts = actionItem(panes, QStringLiteral("Connect to SSH…"),
+                                           QStringLiteral("Choose a saved or recent host, or enter a new one"),
+                                           QStringLiteral("ssh.connect"));
             hosts.aliases = QStringLiteral("ssh mosh remote server login");
             hosts.typed = [this](const QString &search) { return sshTypedItems(search); };
             items << hosts;
@@ -4776,9 +4776,57 @@ private:
     }
 
     void openSshMenu() {
-        openSettingsPane(relay::SettingsPane::Mode::Actions);
-        if (ToolPane *tool = settingsPaneIn(m_tabs->currentWidget(), relay::SettingsPane::Mode::Actions))
-            tool->settings()->scrollToGroup(QStringLiteral("menu:ssh"));
+        QDialog dialog(this);
+        dialog.setObjectName(QStringLiteral("sshHostPicker"));
+        dialog.setWindowTitle(QStringLiteral("Connect to SSH"));
+        dialog.resize(600, 420);
+        auto *layout = new QVBoxLayout(&dialog);
+        auto *filter = new QLineEdit(&dialog);
+        filter->setPlaceholderText(QStringLiteral("Search saved hosts or enter user@host"));
+        layout->addWidget(filter);
+        auto *list = new QListWidget(&dialog);
+        layout->addWidget(list, 1);
+        auto *empty = new QLabel(QStringLiteral("No saved hosts. Enter a host above to connect."), &dialog);
+        empty->setWordWrap(true);
+        layout->addWidget(empty);
+        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+        auto *connectButton = buttons->button(QDialogButtonBox::Ok);
+        connectButton->setText(QStringLiteral("Connect"));
+        layout->addWidget(buttons);
+        const auto hosts = sshMenuItems();
+        auto refresh = [=](const QString &query) {
+            list->clear();
+            bool exact = false;
+            for (const auto &host : hosts) {
+                if (!host.run) continue;  // the empty-list placeholder is not a host
+                const QString target = host.key.mid(4);
+                if (target.compare(query.trimmed(), Qt::CaseInsensitive) == 0) exact = true;
+                if (!query.isEmpty() && !host.label.contains(query, Qt::CaseInsensitive)
+                    && !host.detail.contains(query, Qt::CaseInsensitive)) continue;
+                auto *row = new QListWidgetItem(host.label + (host.detail.isEmpty() ? QString() : QStringLiteral("  ·  ") + host.detail), list);
+                row->setData(Qt::UserRole, target);
+                row->setToolTip(host.detail);
+            }
+            const QString target = relay::ssh::typedTarget(QStringLiteral("ssh ") + query.trimmed());
+            if (!target.isEmpty() && !exact) {
+                auto *row = new QListWidgetItem(QStringLiteral("Connect to %1").arg(target), list);
+                row->setData(Qt::UserRole, target);
+            }
+            empty->setVisible(list->count() == 0);
+            empty->setText(query.isEmpty() ? QStringLiteral("No saved hosts. Enter a host above to connect.")
+                                         : QStringLiteral("No matching hosts. Enter a hostname or user@host."));
+            connectButton->setEnabled(list->count() > 0);
+            if (list->count()) list->setCurrentRow(0);
+        };
+        connect(filter, &QLineEdit::textChanged, &dialog, refresh);
+        connect(filter, &QLineEdit::returnPressed, connectButton, &QPushButton::click);
+        connect(list, &QListWidget::itemActivated, &dialog, [&](QListWidgetItem *) { dialog.accept(); });
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        refresh(QString());
+        filter->setFocus();
+        if (dialog.exec() == QDialog::Accepted && list->currentItem())
+            connectToHost(list->currentItem()->data(Qt::UserRole).toString());
     }
 
     void connectToHost(const QString &target) {
@@ -4832,7 +4880,7 @@ private:
             if (age > kSshNewTabHintMs) return;
             const QString keys = Keymap::instance().shortcutText(QStringLiteral("ssh.connect"));
             hint(QStringLiteral("ssh.connect.typed"),
-                 keys.isEmpty() ? QStringLiteral("Next time: Actions › Connect to host… lists your saved and recent hosts")
+                 keys.isEmpty() ? QStringLiteral("Next time: Actions › Connect to SSH… lists your saved and recent hosts")
                                 : relay::ShortcutHints::nextTime(keys, QStringLiteral("connect to a host in a new tab")));
             return;
         }

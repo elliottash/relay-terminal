@@ -310,8 +310,10 @@ clicking it folds the detail open rather than opening a local file of the same n
 
 ### 8. Getting there, and elsewhere
 
-- **Connect to a host** (palette, `ssh/` hosts): every concrete `Host` in `~/.ssh/config` and its
-  `Include`s, plus recently used hosts. Opens a new tab running `ssh <alias>`.
+- **Actions › Connect to SSH…**: one action opens a searchable modal with concrete `Host` aliases
+  from `~/.ssh/config` and its `Include`s, plus recently used hosts. Choose a host or enter a new
+  hostname or `user@host`, then Connect opens a new tab running `ssh <target>`. Host rows stay out
+  of the Actions list. Typing `ssh <host>` or `user@host` in Actions still offers a direct connection.
 - **Split on the same host**: a split that runs the same ssh command line; with connection sharing
   it opens without a login.
 - **Options › Terminal › SSH sessions**: `auto` / `ask` / `off`, and the never-enhance host list.
