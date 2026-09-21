@@ -773,8 +773,9 @@ void RemoteScreen::mouseReleaseEvent(QMouseEvent *event)
     m_selEnd = cellAt(event->pos());
     if (m_selEnd == m_selStart) {
         m_selStart = m_selEnd = {-1, -1};
-    } else {
-        const QString text = selectedText();
+    } else if (const QString text = selectedText(); relay::copyOnSelectWorthCopying(text)) {
+        // The highlight is long enough to be meant (#C9VT): PRIMARY always, the clipboard when
+        // copy on highlight is on. A shorter one is a slip of the mouse, and leaves both alone.
         QClipboard *clipboard = QGuiApplication::clipboard();
         if (clipboard->supportsSelection()) clipboard->setText(text, QClipboard::Selection);
         // Copy on highlight, the terminal's own setting (Options › Terminal).

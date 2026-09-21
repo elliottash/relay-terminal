@@ -91,6 +91,21 @@ QString defaultEmojiFamily()
 #endif
 }
 
+// A highlight worth putting on PRIMARY when the button is released: at least three letters or
+// digits (#C9VT, the owner's rule), so an accidental one- or two-character drag does not take
+// the selection buffer. The same rule is `relay::copyOnSelectWorthCopying` in
+// src/CopyOnSelect.h, which every read-only pane surface uses; the engine cannot include a
+// header from src/, so it is written out here and the two must stay in step.
+bool copyOnSelectWorthCopying(const QString &text)
+{
+    int worthwhile = 0;
+    for (const QChar &ch : text) {
+        if (ch.isLetterOrNumber() && ++worthwhile >= 3)
+            return true;
+    }
+    return false;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------- accessibility
@@ -1587,7 +1602,7 @@ void TerminalView::mouseReleaseEvent(QMouseEvent *e)
     m_pressedFold.clear();
     if (m_copyOnSelect && QApplication::clipboard()->supportsSelection()) {
         const QString text = selectedText();
-        if (!text.isEmpty())
+        if (copyOnSelectWorthCopying(text))
             QApplication::clipboard()->setText(text, QClipboard::Selection);
     }
 }

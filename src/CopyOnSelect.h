@@ -66,6 +66,22 @@ inline QString copyOnSelectText(const QWidget *widget)
     return QString();
 }
 
+// Whether a highlight is worth taking the clipboard for: at least three letters or digits
+// (#C9VT, the owner's rule). A one- or two-character drag is nearly always a slip of the mouse
+// on the way to a click, and it used to clobber whatever the user had copied. Punctuation,
+// whitespace and symbols do not count, so `a-b` is two and `a b c` is three. The same rule is
+// repeated in engine/view/TerminalView.cpp (the engine cannot include this header) and must stay
+// in step with this one.
+inline bool copyOnSelectWorthCopying(const QString &text)
+{
+    int worthwhile = 0;
+    for (const QChar &ch : text) {
+        if (ch.isLetterOrNumber() && ++worthwhile >= 3)
+            return true;
+    }
+    return false;
+}
+
 // To PRIMARY where the platform has one and to the clipboard, which is what the terminal does
 // between TerminalView::mouseReleaseEvent (PRIMARY) and Pane::copySelection (clipboard).
 inline void copyOnSelectPut(const QString &text)
@@ -109,7 +125,9 @@ public:
                 if (!target)
                     return;
                 const QString text = copyOnSelectText(target);
-                if (text.isEmpty())
+                // Below three letters or digits this is an accidental drag, not a copy: leave
+                // both buffers alone, and say nothing, because nothing was copied (#C9VT).
+                if (!copyOnSelectWorthCopying(text))
                     return;
                 copyOnSelectPut(text);
                 if (notify)

@@ -4173,7 +4173,14 @@ protected:
         // in this pane's terminal, copy it to the clipboard.
         if (event->type() == QEvent::MouseButtonRelease && copyOnSelect()
             && static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton && ownsTerminalWidget(qobject_cast<QWidget *>(object))) {
-            QTimer::singleShot(0, this, [this] { copySelection(); });
+            // Highlighting copies only a selection worth copying -- three letters or digits or
+            // more (#C9VT), the same rule the shared filter applies, so a slip of the mouse does
+            // not take the clipboard. An explicit copy (Ctrl+Shift+C, the context menu) was asked
+            // for and still copies a short selection.
+            QTimer::singleShot(0, this, [this] {
+                if (m_backend && relay::copyOnSelectWorthCopying(m_backend->selectedText()))
+                    copySelection();
+            });
         }
         // The program transcript is a read-only text view, so its copy on select is the shared
         // filter (src/CopyOnSelect.h) installed where it is built. Ctrl+C in the prompt box still

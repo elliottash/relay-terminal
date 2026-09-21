@@ -186,6 +186,48 @@ private slots:
         QCOMPARE(QGuiApplication::clipboard()->text(), QStringLiteral("kept"));
     }
 
+    // The threshold itself (#C9VT): three letters or digits, and symbols do not count.
+    void onlyThreeLettersOrDigitsAreWorthCopying()
+    {
+        QVERIFY(!relay::copyOnSelectWorthCopying(QString()));
+        QVERIFY(!relay::copyOnSelectWorthCopying(QStringLiteral("ab")));
+        QVERIFY(!relay::copyOnSelectWorthCopying(QStringLiteral("12")));
+        QVERIFY(!relay::copyOnSelectWorthCopying(QStringLiteral("a-b")));      // the dash is not one
+        QVERIFY(!relay::copyOnSelectWorthCopying(QStringLiteral("...")));
+        QVERIFY(!relay::copyOnSelectWorthCopying(QStringLiteral("  a ")));
+        QVERIFY(relay::copyOnSelectWorthCopying(QStringLiteral("abc")));
+        QVERIFY(relay::copyOnSelectWorthCopying(QStringLiteral("a1b")));
+        QVERIFY(relay::copyOnSelectWorthCopying(QStringLiteral("a b c")));     // the spaces are not
+        QVERIFY(relay::copyOnSelectWorthCopying(QStringLiteral("/home/elliott")));
+        QVERIFY(relay::copyOnSelectWorthCopying(QStringLiteral("ünï")));       // letters, not ASCII
+    }
+
+    // A one- or two-character highlight is a slip of the mouse on the way to a click: it must
+    // leave the clipboard and PRIMARY as they were, and say nothing (#C9VT).
+    void aTwoCharacterHighlightLeavesTheClipboardAlone()
+    {
+        QSettings().setValue(QStringLiteral("terminal/copy_on_select"), true);
+        QGuiApplication::clipboard()->setText(QStringLiteral("kept"));
+        bool told = false;
+        QPlainTextEdit view;
+        view.setReadOnly(true);
+        view.setPlainText(QStringLiteral("ab"));
+        relay::installCopyOnSelect(&view, [&told](const QString &) { told = true; });
+        selectAll(&view);
+        release(&view);
+        QCOMPARE(QGuiApplication::clipboard()->text(), QStringLiteral("kept"));
+        QVERIFY(!told);   // nothing was copied, so there is nothing to announce
+
+        // Three of them, and it is a copy again.
+        QPlainTextEdit longEnough;
+        longEnough.setReadOnly(true);
+        longEnough.setPlainText(QStringLiteral("abc"));
+        relay::installCopyOnSelect(&longEnough);
+        selectAll(&longEnough);
+        release(&longEnough);
+        QCOMPARE(QGuiApplication::clipboard()->text(), QStringLiteral("abc"));
+    }
+
     // A surface that says so out loud -- the pane toasts the character count.
     void theSurfaceIsToldWhatWasCopied()
     {
