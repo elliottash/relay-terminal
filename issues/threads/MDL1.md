@@ -168,3 +168,51 @@ Evidence: `docs/qa_evidence/2026-09-21-model-names-everywhere`, whose NOTES.md e
 the commands, and why each remaining hit is left (Options' row headings, the Actions palette's
 action names, "the Switchboard agent" as a product noun, and `conciseModel`, which only the model
 box still calls).
+
+<!-- relay:entry 20260921T141021Z-m1 author=claude-code kind=progress -->
+### Claude Code · 2026-09-21 14:10
+t:a6's follow-ups. `1c669027` (the picks are saved with the layout; the marker gets a gutter; the
+evidence re-driven), `000ea2c4` (the high role's own test, one naming function left, a command's
+sentence survives). Evidence: `docs/qa_evidence/2026-09-21-model-box-modes`, re-driven end to end.
+
+**A pane comes back on the model it picked for its mode.** `m_modePick` lived only as long as the
+pane, so a pane on "kimi-k3 · flash" came back on rank 1 of the flash list. `serializeNode` writes
+`mode_picks` — `{"flash": {"preset", "model", "effort"}}`, the same three fields a tier-list entry
+has — and `initRestore` reads it back; "main" is never in it, because main's model is the pane's own
+and is saved as `model`. The trip out and back is two pure functions in `relay::modelrows`, so it is
+stated as a test, and the reader is total: anything that is not that shape is dropped rather than
+guessed at. `configure` carries the role and the role alone resolves off the tier list, so a
+restored pane sends its pick straight after `configured`, keeping the conversation. A pick whose
+entry has left the catalog or lost its key is dropped **silently** at the first refresh that has a
+catalog to ask; an exhausted subscription is not, because a reset brings it back. The pick carries
+the level it was ranked with, so a list re-ordered while Relay was shut does not quietly change the
+level the pane comes back on.
+
+**The marker has a gutter.** The mode rows carry their mark in the row's *text*, because the popup,
+the combo and the phone's menu all draw the same string and only one of the three can paint a
+gutter — and a bullet is wider than the two spaces that stand in for it, so the names sat about 5 px
+apart. The popup takes the mark back out and draws it in a fixed-width column; a page with no marked
+row (the Alt+E level box) gets no gutter and is drawn exactly where it was.
+`theMarkerSitsInAGutterSoTheNamesLineUp` renders the same word with and without a marker and
+compares the two images column by column.
+
+**Three more, found by re-reading.** The restored pane's *main* row named the **flash** model:
+`configure` set the pane's own model from the `configured` event's `model`, which is the model of
+whatever role the pane started on — it now reads `roles.main` (13.4), which `model_changed` has done
+since t:a3. `test_presets.test_role_tiers_cover_every_role` pinned the High tier to `["planning"]`
+and `/high` put a second role on it; the assertion is the new truth and every Python file that reads
+`ROLE_TIERS` / `ROLES` / `TIER_LABELS` runs green (161 cases). And `Pane::conciseModel` is gone —
+the second function that named a model, which returned a *preset label* for a guest or Relay Free
+and is how the picker came to say "Codex" for gpt-5.6-sol; its last caller now calls `modelNameFor`.
+
+**A command's sentence survives the switch it asked for.** The one-shot e7cab7d2 gave /swap is now
+`sayAndSwitch(sentence, switchNow)` / `m_switchSentence`, and /glm and /kimi go through it, so
+"model: glm-5.3 · z.ai (glm)." is not replaced 100–300 ms later by a generic line that does not say
+which key is being spent. `/model <name>` prints nothing of its own and `/profile` switches no
+model, so neither needs it.
+
+Shots added to the evidence: `k` (/flash comes back on the pane's own flash model, not rank 1),
+`saved-mode-picks.txt` (what the layout node holds), and `l` / `l2` — quit, relaunched with no
+arguments, the pane back on "kimi-k3 · flash" and its box agreeing. Tests: 16 in
+`tests/modelrows_test.cpp`, 19 in `tests/filterpopup_test.cpp`,
+`ctest -R "modelrows|filterpopup|modelcatalog|modelpicker|panestate"` green.
