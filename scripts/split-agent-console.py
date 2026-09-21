@@ -1,65 +1,41 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Move the agent block out of class Pane and into relay::AgentConsole, by moving text.
+"""What a proposed cut through class Pane would cost, measured rather than guessed.
 
-Card #AGNT, step 1. `Pane` is one class of 16 500 lines and the agent -- the prompt box and
-everything that belongs to it -- is a demarcated but scattered part of it. This tool moves that
-part into `relay::AgentConsole` (src/AgentConsole.h), which reaches the pane it is drawn on
-through `relay::agent::Host` (src/AgentHost.h).
+This began as the mover for card #AGNT step 1 -- lift the agent block out of `Pane` into a
+`relay::AgentConsole`, the way scripts/split-main.py lifted the classes out of main.cpp -- and it
+is kept for the half of itself that turned out to matter. **The extraction was cancelled**, on
+2026-09-20, on the strength of what this script measured; the mover and its `--check` went with
+it, and `src/AgentConsole.h` no longer exists.
 
-It is `scripts/split-main.py`'s model, for the same reason: src/Pane.h is the hot file in this
-checkout and several sessions have uncommitted edits in it at any moment, so the move is done on
-the *working tree* and a hand-move could not be proved complete. Every region is found by an
-exact content anchor, never a line number; every member is brace-matched with an awareness of
-strings, char literals, raw strings and comments; anything missing or ambiguous is a non-zero
-exit, not a guess.
+Why. The plan costed the seam as "the 4 631-line agent block touches `m_backend` exactly 30
+times". True, and not the whole cost: the block also reads `Pane`'s own fields and calls its own
+members. `--coupling` over the wave-1b regions reported 66 fields and 52 members crossing the cut.
+`--closure`, which starts from the owner's own "agent sessions UI" banner and grows the set to a
+fixed point by adding anything whose every remaining mention is already inside it -- so it can
+only make the set bigger and the seam smaller -- stopped at 228 members and 4 031 lines with a
+**minimum seam of 284 names**: 157 fields and 127 members, whatever order the waves ran in.
 
-    --check rebuilds the original src/Pane.h from the two files and diffs it.
+The number that decided it was `m_editor`: **109 uses of the composer stay in `Pane` even when the
+entire agent block moves**, and they are one thing -- the routing decision in and around
+`requestRoute`: read the typed line, try a slash command, an alias, a skill, then choose the
+shell, the foreground program, an ssh login, or the agent. The prompt box is not a part of the
+agent block that can be lifted out of it; it is what both halves are made of. Which is the owner's
+sentence read literally -- *an agent interface is the prompt box* -- so `Pane` **is** the console,
+a terminal is one routing of what is typed in it, and a helper surface is the same `Pane` with a
+context whose spec says `shell: false`.
 
-The rebuild is possible because the move records where each block came from: every block written
-into AgentConsole.h carries a `// moved-from:` line naming the *anchor of the member it
-followed* in Pane.h, and `--check` puts each block back after that anchor and compares the result
-with the pre-split file (named by the `// split-base:` line, read with `git show`).
+What is left is the measuring, and it is worth keeping: anyone proposing to move code out of this
+class should run `--coupling` on the lines first and read the two numbers before writing anything.
 
-The only text the tool changes in the code it moves is the receiver: the calls the agent block
-made on the pane's terminal backend, or on the pane itself, become calls on the host
-(`m_backend->columns()` -> `host().columns()`, `toast(x)` -> `host().toast(x, 1600)`). Every such
-rewrite is listed on stdout, and the list is closed: a receiver the table does not know about is
-an error, so a member that still needs the pane cannot be moved by accident.
-
-What the measurement said, 2026-09-20 (--coupling, and why wave 1b is not written yet)
--------------------------------------------------------------------------------------
-Card #AGNT step 1 counted the seam as "the 4 631-line agent block touches `m_backend` exactly 30
-times". That is true, and it is not the whole cost: the same block *also* reads class Pane's own
-fields and calls its own members directly, and those are what a move has to answer for.
-
-Run over the wave 1b regions (the reasoning fold, the Activity ledger, the tool-call rows, the
-transcript writer and the prose blocks -- 101 members, 1 395 lines), `--coupling` reports 33
-fields that would travel with the cut, **66 that cross it**, and **52 Pane members called from
-inside it that are not on `Host`** (14 more already are, and cost nothing). The heaviest are
-`m_editor` (181 uses left behind), `m_backend` (131), `m_agentBusy` (71), `m_login` (67),
-`m_cwd` (59), `m_token` (40), `m_workspace` (32). Narrowing the cut does not help: the 137-line
-prose / `printInline` slice alone still leaves 8 fields and 11 members on the other side.
-
-So waves 1b-1e cannot be a pure move through a 15-call, terminal-shaped `relay::agent::Host` --
-`Host` would have to grow to sixty-odd calls, and many of those (`workspace`, `cwd`, the routing,
-the agent role, the persist key) are not what the console is *drawn on* at all: they are what the
-agent is *about*, which is `relay::agent::Context` (src/AgentContext.h, #AGNT step 2, landed
-separately). Step 3 is where a console takes a Context; until it has one, a move would have to
-push context through the host interface and every embedded host -- BoardPane, SettingsPane,
-Conversations -- would have to answer `loginAtPrompt()` and `foregroundCommandLine()`.
-
-That is a change to the card's own seam, so it is the owner's and the card's, not this tool's.
-The waves below are therefore declared and empty: the anchors are the record of what each was to
-move, `--coupling` is how the next session re-measures a proposed cut before making it, and 1a --
-the seam itself -- has landed.
+Every region is still found by content, never by a line number, and every member is brace-matched
+with an awareness of strings, char literals, raw strings and comments; anything ambiguous is a
+non-zero exit rather than a guess.
 
 Usage:
-    scripts/split-agent-console.py --wave 1b                  # move wave 1b, in place
-    scripts/split-agent-console.py --wave 1b --dry-run        # say what it would move
-    scripts/split-agent-console.py --check                    # rebuild Pane.h and diff
     scripts/split-agent-console.py --index                    # every member of Pane, with its span
     scripts/split-agent-console.py --coupling 5119-6018 ...   # what a proposed cut would cost
+    scripts/split-agent-console.py --closure 3058-7696        # …and the floor under that cost
 """
 
 import argparse
@@ -71,7 +47,6 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PANE = os.path.join(ROOT, "src", "Pane.h")
-CONSOLE = os.path.join(ROOT, "src", "AgentConsole.h")
 
 # The class the members are taken from. Anchored on the `class` line, not on a line number: the
 # base list changed when the pane became a Host and will change again.
@@ -79,12 +54,6 @@ PANE_CLASS = re.compile(r"^class Pane final : public QWidget(?:, public relay::a
 
 # Where a moved block is written into AgentConsole.h. Everything between these two lines is
 # generated; everything outside is hand-written and never touched.
-MOVED_BEGIN = "// ===== moved out of class Pane by scripts/split-agent-console.py ====="
-MOVED_END = "// ===== end of the moved blocks ====="
-
-BASE_LINE = "// split-base: "      # the commit whose src/Pane.h --check rebuilds
-FROM_LINE = "// moved-from: "      # the Pane.h member this block followed, verbatim
-WAVE_LINE = "// wave: "
 
 
 # ----- the waves ---------------------------------------------------------------------------------
@@ -96,17 +65,6 @@ WAVE_LINE = "// wave: "
 # made to pass the pane's own suites is abandoned rather than patched, and its anchors stay here
 # as the record of what it was trying to move.
 
-WAVES = {
-    # 1a was the seam itself -- AgentHost.h, the empty AgentConsole, Pane implementing Host and
-    # owning `AgentConsole m_agent{*this}` -- and moved no code, so it has no anchors.
-    "1a": [],
-    "1b": [],   # transcript writer, inks, ANSI/markdown/wrap, block gaps, tool-call rows,
-                # OSC 8 folds, the reasoning fold, the Activity ledger, the turn panes
-    "1c": [],   # composer frame, chip row, busy line, voice, model/effort pickers,
-                # slash / @ / # popups, hints, prompt history
-    "1d": [],   # queue entries, steers, the queue strip and QueueRowDelegate
-    "1e": [],   # the worker process, withSessionFields, handle(), the ask, recap, session_info
-}
 
 # ----- the receivers -----------------------------------------------------------------------------
 #
@@ -115,29 +73,6 @@ WAVES = {
 # is not here is an error rather than a guess -- which is what stops a member that still needs
 # something only the pane knows from being moved quietly.
 
-RECEIVERS = [
-    # the terminal backend, through the host
-    ("m_backend->writeToDisplay(", "host().writeTerminal("),
-    ("m_backend->columns()", "host().columns()"),
-    ("m_backend->foldExpanded(", "host().foldExpanded("),
-    ("m_backend->setFoldExpanded(", "host().setFoldExpanded("),
-    ("m_backend->setFoldContent(", "host().setFoldContent("),
-    ("m_backend->toggleFold(", "host().toggleFold("),
-    ("m_backend->viewportAtBottom()", "host().viewportAtBottom()"),
-    ("m_backend->scrollToBottom()", "host().scrollToBottom()"),
-    ("m_backend->screenText()", "host().screenText()"),
-    ("m_backend->cursorPosition()", "host().cursorPosition()"),
-    ("m_backend->paste()", "host().paste()"),
-    ("m_backend->shellPid()", "host().shellPid()"),
-    ("m_backend->foregroundProcessId()", "host().foregroundProcessId()"),
-    # the pane's own, likewise
-    ("writeTerminal(", "host().writeTerminal("),
-    ("terminalFolds()", "host().terminalFolds()"),
-    ("terminalAtBottom()", "host().viewportAtBottom()"),
-    ("bubbleRoom()", "host().bubbleRoom()"),
-    ("terminalMode()", "host().terminalMode()"),
-    ("m_atLineStart", "host().atLineStart()"),
-]
 
 
 def die(message):
@@ -313,188 +248,6 @@ class Source:
 
 
 # ----- moving ------------------------------------------------------------------------------------
-
-def rewrite_receivers(block, anchor, report):
-    out = []
-    for line in block:
-        before = line
-        for old, new in RECEIVERS:
-            if old in line:
-                line = line.replace(old, new)
-        if line != before:
-            report.append((anchor, before.strip(), line.strip()))
-        out.append(line)
-    # `m_backend` reached in any other way is a receiver the table does not know about.
-    for line in out:
-        code = line.split("//")[0]
-        if "m_backend" in code:
-            die("a moved line still names m_backend, and no receiver rewrites it:\n    %s\n"
-                "            add it to RECEIVERS, or leave the member in Pane." % line.strip())
-    return out
-
-
-def preceding_anchor(source, start, floor):
-    """The first line above `start` that can name this block's place: the nearest non-blank,
-    non-comment code line still inside the class. `--check` puts the block back after it."""
-    probe = start - 1
-    while probe > floor:
-        stripped = source.lines[probe].strip()
-        if stripped and not stripped.startswith("//"):
-            return source.lines[probe]
-        probe -= 1
-    die("no line above %d can anchor the block's place" % (start + 1))
-
-
-def console_blocks(text):
-    """The generated region of AgentConsole.h, as a list of (wave, moved_from, lines)."""
-    lines = text.split("\n")
-    marks = [i for i, line in enumerate(lines) if line.strip() == MOVED_BEGIN]
-    ends = [i for i, line in enumerate(lines) if line.strip() == MOVED_END]
-    if len(marks) != 1 or len(ends) != 1 or ends[0] < marks[0]:
-        return [], lines, None
-    lo, hi = marks[0], ends[0]
-    blocks, current = [], None
-    for line in lines[lo + 1:hi]:
-        bare = line.strip()
-        if bare.startswith(WAVE_LINE.strip()):
-            if current:
-                blocks.append(current)
-            current = {"wave": bare[len(WAVE_LINE.strip()):].strip(), "from": None, "lines": []}
-        elif current is not None and bare.startswith(FROM_LINE.strip()) and current["from"] is None:
-            current["from"] = bare[len(FROM_LINE.strip()):].strip()
-        elif current is not None:
-            current["lines"].append(line)
-    if current:
-        blocks.append(current)
-    for block in blocks:
-        while block["lines"] and block["lines"][-1] == "":
-            block["lines"].pop()
-    return blocks, lines, (lo, hi)
-
-
-def base_commit(text):
-    for line in text.split("\n"):
-        if line.strip().startswith(BASE_LINE.strip()):
-            return line.strip()[len(BASE_LINE.strip()):].strip()
-    return None
-
-
-def move(wave, dry_run):
-    anchors = WAVES.get(wave)
-    if anchors is None:
-        die("unknown wave %r; the waves are %s" % (wave, ", ".join(sorted(WAVES))))
-    if not anchors:
-        print("wave %s moves no code (its work was the seam itself); nothing to do." % wave)
-        return 0
-
-    source = Source(PANE)
-    first, last = source.class_body()
-    console = open(CONSOLE, encoding="utf-8").read()
-    done, console_lines, region = console_blocks(console)
-    if any(block["wave"] == wave for block in done):
-        die("wave %s has already been moved into src/AgentConsole.h; this tool does not run twice."
-            % wave)
-    if region is None:
-        die("src/AgentConsole.h has no %r marker to write into" % MOVED_BEGIN)
-
-    spans, report = [], []
-    for anchor in anchors:
-        start, end = source.member_span(anchor)
-        if not (first < start and end < last):
-            die("%r is not inside class Pane's body" % anchor)
-        spans.append((start, end, anchor))
-    spans.sort()
-    for (a_start, a_end, a), (b_start, _, b) in zip(spans, spans[1:]):
-        if b_start <= a_end:
-            die("the members %r and %r overlap" % (a, b))
-
-    moved = []
-    for start, end, anchor in spans:
-        place = preceding_anchor(source, start, first)
-        block = rewrite_receivers(source.lines[start:end + 1], anchor, report)
-        moved.append({"wave": wave, "from": place, "lines": block})
-
-    if dry_run:
-        for start, end, anchor in spans:
-            print("  %5d..%-5d  %s" % (start + 1, end + 1, anchor.strip()))
-        print("  %d member(s), %d line(s)" % (len(spans), sum(e - s + 1 for s, e, _ in spans)))
-        for anchor, before, after in report:
-            print("  receiver: %s\n         -> %s" % (before, after))
-        return 0
-
-    kept = []
-    cut = {i for start, end, _ in spans for i in range(start, end + 1)}
-    for i, line in enumerate(source.lines):
-        if i not in cut:
-            kept.append(line)
-    open(PANE, "w", encoding="utf-8").write("\n".join(kept))
-
-    lo, hi = region
-    written = []
-    for block in done + moved:
-        written.append(WAVE_LINE + block["wave"])
-        written.append(FROM_LINE + block["from"])
-        written.extend(block["lines"])
-        written.append("")
-    out = console_lines[:lo + 1] + written + console_lines[hi:]
-    open(CONSOLE, "w", encoding="utf-8").write("\n".join(out))
-
-    print("wave %s: %d member(s), %d line(s) moved into src/AgentConsole.h"
-          % (wave, len(spans), sum(e - s + 1 for s, e, _ in spans)))
-    for anchor, before, after in report:
-        print("  receiver: %s\n         -> %s" % (before, after))
-    return 0
-
-
-# ----- --check ------------------------------------------------------------------------------------
-
-def check():
-    """Rebuild src/Pane.h from the two files and diff it against the pre-split original.
-
-    This is the property the whole move rests on: not one line dropped, not one duplicated, and
-    nothing rewritten but the receivers the move declares.
-    """
-    console = open(CONSOLE, encoding="utf-8").read()
-    base = base_commit(console)
-    if base is None:
-        die("src/AgentConsole.h carries no %r line, so there is nothing to rebuild against"
-            % BASE_LINE.strip())
-    blocks, _, region = console_blocks(console)
-    if not blocks:
-        print("--check: no wave has moved code yet; src/Pane.h is the original. OK")
-        return 0
-
-    original = subprocess.run(["git", "-C", ROOT, "show", "%s:src/Pane.h" % base],
-                              capture_output=True, text=True)
-    if original.returncode != 0:
-        die("could not read %s:src/Pane.h -- %s" % (base, original.stderr.strip()))
-
-    source = Source(PANE)
-    rebuilt = list(source.lines)
-    # Put each block back after the line it followed, deepest first so earlier insertions do not
-    # move the anchors of later ones.
-    placed = []
-    for block in blocks:
-        hits = [i for i, line in enumerate(rebuilt) if line == block["from"]]
-        if len(hits) != 1:
-            die("the line a block was moved from is %s in the rebuilt file: %r"
-                % ("missing" if not hits else "ambiguous", block["from"]))
-        placed.append((hits[0], block))
-    for index, block in sorted(placed, reverse=True):
-        body = list(block["lines"])
-        for new, old in [(b, a) for a, b in RECEIVERS]:
-            body = [line.replace(new, old) for line in body]
-        rebuilt[index + 1:index + 1] = body
-
-    want = original.stdout.split("\n")
-    if rebuilt == want:
-        print("--check: src/Pane.h + src/AgentConsole.h rebuild %s:src/Pane.h exactly. OK" % base[:12])
-        return 0
-    diff = list(difflib.unified_diff(want, rebuilt, "original", "rebuilt", lineterm="", n=2))
-    sys.stderr.write("--check FAILED: the rebuild differs from %s:src/Pane.h\n" % base)
-    sys.stderr.write("\n".join(diff[:400]) + "\n")
-    return 1
-
 
 def index():
     """Every top-level member of class Pane, with its span. The map the waves are chosen from."""
@@ -703,10 +456,6 @@ def closure(seed_ranges, rounds=40):
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--wave", help="which wave to move (%s)" % ", ".join(sorted(WAVES)))
-    parser.add_argument("--dry-run", action="store_true", help="say what it would move")
-    parser.add_argument("--check", action="store_true",
-                        help="rebuild src/Pane.h from the outputs and diff it")
     parser.add_argument("--index", action="store_true",
                         help="list every member of class Pane with its span")
     parser.add_argument("--coupling", nargs="+", metavar="FIRST-LAST",
@@ -714,17 +463,14 @@ def main():
     parser.add_argument("--closure", nargs="+", metavar="FIRST-LAST",
                         help="grow a seed cut to a fixed point and print the minimum seam")
     args = parser.parse_args()
-    if args.check:
-        return check()
     if args.index:
         return index()
     if args.coupling:
         return coupling(args.coupling)
     if args.closure:
         return closure(args.closure)
-    if not args.wave:
-        parser.error("say --wave, --check, --index or --coupling")
-    return move(args.wave, args.dry_run)
+    parser.error("say --index, --coupling or --closure")
+    return 2
 
 
 if __name__ == "__main__":

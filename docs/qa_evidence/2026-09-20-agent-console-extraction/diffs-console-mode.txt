@@ -1,0 +1,19 @@
+the terminal pane, 7a35a498 against 7a35a498^ (the no-shell console mode)
+
+shot                        whole below header
+01-fresh                    21310        21310
+02-thinking                  1052            0
+03-fold-open                 1052            0
+03b-fold-closed              1052            0
+04-toolrow                   1052            0
+05-modelbox                  1052            0
+06-modelbox-closed           1052            0
+07-queued                    1052            0
+08-esc                       1088           36
+09-after                     1052            0
+
+Eight of the ten are pixel-identical below the pane header. The other two:
+  01-fresh  21310 -> 36 once the startup quota toast's band is masked (rectangle 700,750 1400,800)
+  08-esc       36  the blinking caret, a 2x18 box at +36+817
+The 1052 whole-window figure on every shot is the pane's auto-generated title, which differs
+between two runs of the *same* binary -- the control in diffs.txt measured that at 1316-1539.

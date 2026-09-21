@@ -13639,8 +13639,8 @@ private:
         // pane sets `surface` and nothing else: what the agent may see here — the directory, the
         // foreground program, the program-control grant — is the `context` object built below,
         // and the grid is not put in front of the model on top of it.
-        for (const QJsonObject fields = contextAskFields(); const QString &key : fields.keys())
-            request.insert(key, fields.value(key));
+        const QJsonObject askFields = contextAskFields();
+        for (const QString &key : askFields.keys()) request.insert(key, askFields.value(key));
         relay::models::curation::noteUse(currentEntryKey());   // the picker's "recent" and "most used"
         if (!entry.attachments.isEmpty()) request.insert(QStringLiteral("attachments"), entry.attachments);
         if (!entry.cards.isEmpty()) request.insert(QStringLiteral("cards"), entry.cards);

@@ -151,3 +151,75 @@ therefore the wrong cut, not merely a large one — and the cut that is right in
 host relationship, because the console would own the box and the terminal would become one
 routing of what is typed in it. That is a decision about the card's shape, so it is written down
 here and in `issues/threads/AGNT.md` rather than taken.
+
+---
+
+# The no-shell console mode (`7a35a498`)
+
+The decision, taken on the measurement above: **a pane is the agent console, and the terminal is
+one routing of what is typed in it.** So a helper surface is not a second widget — it is this same
+`Pane` with a context whose spec says `shell: false`. `relay::AgentConsole` is gone, folded into
+`Pane`; `relay::agent::Context` and `relay::agent::Host` stay.
+
+## Live, in `console/`
+
+`drive-console.sh <relay-console-harness> <out>` — `tests/console_harness.cpp` is a bare
+`QMainWindow` with one no-shell `Pane` in it. No `RelayWindow`, no tabs, no window manager, which
+is also what shows that a console can be embedded by a host that knows nothing about panes
+(steps 5–7). Six checks, all passing:
+
+| shot | what it holds |
+|---|---|
+| `01-console` | the action row — **Check (k)**, **Clean up (u)**, left-aligned above the box — the context's placeholder "Ask about this board…" in the composer, and the chip row with **no mode chip**: cwd, work, quota, model, mic and nothing that offers a terminal |
+| `02-answer` | a turn: `✦ explain the fold please` echoed in the transcript, `▸ stub`, `▸ ✦ thought for 1 s` as the settled reasoning anchor, and the answer streamed into the **vterm** — the same ANSI/fold/OSC 8 transcript a terminal pane draws |
+| `04-queued` | a second prompt queued behind a running turn: `QUEUE`, `▸ running ✦ count slowly for me`, the row `✦ count slowly again` with its `×`, the hint `↑ select a row · Ctrl+↑↓ move · Shift+Del remove`, and the busy line `Relaying · thinking… · 7 s · step 1/500 · Esc stops` |
+| `05-esc`, `06-after` | Esc during that turn, and the console afterwards |
+
+Shot 04 is the Issue this card opened with — "the queue doesn't work like the main terminal" —
+answered by there being only one queue.
+
+Alt+R is deliberately not checked here: `agent.thinkingPanel` is a *window* shortcut and the
+harness has no window to hold the keymap, so the key falls through to the composer as a letter.
+The fold is proved twice over anyway — `after/03-fold-open.png` is the terminal pane unfolding the
+same block, and the anchor in `02-answer.png` reads "thought for 1 s".
+
+## What the live gate found, that the build and the suites did not
+
+Three real defects, each of them a terminal-only path that a console walked into:
+
+1. **The composer disappeared after five seconds.** The constructor's watchdog —
+   "shell integration did not initialize" — calls `setNative(true)`, and with no shell
+   `m_seenShell` never becomes true. Native mode hides the prompt box, which on a console is the
+   whole surface. Fixed at `setNative` rather than at its four callers, and the watchdog no longer
+   runs without a shell.
+2. **Every line the console printed queued for ever.** `inlineReady()` asks "is the terminal quiet
+   enough to print into" — a shell at its prompt, or a login at one — and a console has neither,
+   so nothing ever flushed and the fallback transcript panel became the console's entire output.
+   A console's surface is always ready: there is no program that could repaint over it.
+3. **`shellPid()` was not zero.** The emulator reports something for a view with no program, and
+   everything that keys off it — the guest bridge, the line discipline, "take control", the ask's
+   `foreground_program` — would have believed it.
+
+Two more were the harness's own and are recorded because they will bite the next person:
+`QSettings` is keyed by the application name, so a harness that does not set it reads a different
+`relay.conf`, finds no provider and silently falls back to Relay Free; and a `switchboard` context
+with no board is refused in one sentence by the worker, which is one of the real constraints the
+card kept, so the drive makes a fixture board.
+
+## `consolemode`, nine cases
+
+`tests/consolemode_test.cpp` builds real `Pane`s: no program started, the shell calls answer zero,
+the transcript surface is still there, the routing is locked to the agent, the action row is built
+from the context and refuses a letter two actions claim, a changed context rebuilds the row, the
+`context` block and the ask fields are the context's own, the host handles work, a console is an
+ordinary child of its host and not a top-level window — and **a terminal pane is unchanged**.
+
+Its own executable because `Pane` lives only in the `relay` translation unit and `src/Pane.h`
+compiles on its own; written without `Q_OBJECT` because moc preprocesses such a unit and trips
+over the raw string in `src/Keymap.h` (`"Ctrl+Shift+("`).
+
+## `--check` is retired
+
+`scripts/split-agent-console.py` lost its mover and its `--check` with the extraction. Nothing was
+moved, so there is nothing to rebuild and diff; `src/AgentConsole.h` no longer exists. What the
+script keeps is what earned its place: `--index`, `--coupling` and `--closure`.

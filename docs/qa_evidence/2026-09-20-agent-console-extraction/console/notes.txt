@@ -1,0 +1,6 @@
+PASS the context's placeholder is in the box ("Ask about this board" in 01-console.png)
+PASS the action row carries the context's first action ("Check" read in 01-console.png)
+PASS …and its second ("Clean" read in 01-console.png)
+PASS the answer streamed into the vterm with a settled reasoning anchor ("thought for" in 02-answer.png)
+PASS …and the answer's own words are on screen ("folds under its anchor" in 02-answer.png)
+PASS the second prompt queued, with its strip ("queue" in 04-queued.png)
