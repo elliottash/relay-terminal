@@ -20,6 +20,7 @@
 #include "PromptHistory.h"
 #include "Theme.h"
 #include "BoardPane.h"
+#include "CleanupTranscript.h"
 #include "ApprovalsPane.h"  // relay::approvals::cautious(): the ask's "Always allow" writes the same list the checklist shows
 #include "Projects.h"      // which project this pane's tab is attached to, and why (#JN7X)
 #include "ProjectInit.h"        // when "Initialize a project … here?" is asked, and what it shows
@@ -14985,6 +14986,15 @@ private:
     // Switchboard events a *terminal* pane cares about: the card index behind the `#` picker,
     // and one inline line per agent write (protocol 17.2 and 17.5).
     bool handleBoardEvent(const QString &type, const QJsonObject &event) {
+        // Cleanup is a turn on this console's shared worker. Keep its operations in the
+        // transcript as well as the board panel; ordinary tool/prose events still render below.
+        const QString cleanupNote = relay::board::cleanupTranscriptNote(event);
+        if (!cleanupNote.isEmpty()) {
+            ensureLineStart();
+            printInline(cleanupNote, Ink::Note);
+            if (type != QStringLiteral("board_activity")) return true;
+        }
+
         // ----- the init question's own round trips (protocol 19.12, 19.13) --------------------
         if (type == QStringLiteral("board_init_request")) { handleBoardInitRequest(event); return true; }
         if (type == QStringLiteral("project_probe_result")) {

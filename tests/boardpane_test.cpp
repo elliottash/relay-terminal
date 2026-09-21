@@ -6,6 +6,7 @@
 // the data broadcasts (`board`, `board_changed`) keep reaching every pane, so both lists move
 // together. The one set of files is still one board; only each pane's own navigation is its own.
 #include "BoardPane.h"
+#include "CleanupTranscript.h"
 
 #include <QCoreApplication>
 #include <QJsonArray>
@@ -67,6 +68,7 @@ class BoardPaneTests : public QObject {
     Q_OBJECT
 
 private slots:
+    void cleanupOperationsHaveTranscriptNotes();
     void doneButtonAndKeyOfferUndo();
     void navigationSurvivesReload();
     void aCardOpenedInOnePaneDoesNotOpenInTheOther();
@@ -326,6 +328,38 @@ void BoardPaneTests::doneButtonAndKeyOfferUndo()
     view.handleEvent(opened({row(QStringLiteral("K7Q2"), QStringLiteral("done"))}));
     QTest::keyClick(&view, Qt::Key_D);
     QCOMPARE(writes(), before);
+}
+
+void BoardPaneTests::cleanupOperationsHaveTranscriptNotes()
+{
+    using relay::board::cleanupTranscriptNote;
+    QVERIFY(cleanupTranscriptNote({{"event", "tool_started"}}).isEmpty());
+    QVERIFY(cleanupTranscriptNote({{"event", "delta"}, {"text", "already streamed"}}).isEmpty());
+    QVERIFY(cleanupTranscriptNote({{"event", "board_activity"}, {"summary", "ordinary write"}}).isEmpty());
+    const auto preview = cleanupTranscriptNote({{"event", "board_cleanup_started"}, {"dry_run", true}, {"cards", 3}});
+    QVERIFY(preview.contains("nothing will be written"));
+    QVERIFY(preview.contains("reading 3 cards"));
+    const auto applying = cleanupTranscriptNote({{"event", "board_cleanup_started"}, {"dry_run", false}});
+    QVERIFY(applying.contains("applying changes"));
+    QCOMPARE(cleanupTranscriptNote({{"event", "board_activity"}, {"cleanup", true},
+                                   {"id", "K7Q2"}, {"summary", "moved to ready"}}),
+             QStringLiteral("◆ #K7Q2 · moved to ready\n"));
+    QVERIFY(cleanupTranscriptNote({{"event", "board_activity"}, {"cleanup", true},
+                                   {"summary", "reordered sections"}}).contains("board · reordered sections"));
+    QJsonObject summary{{"event", "board_cleanup_summary"}, {"outcome", "done"}, {"dry_run", true},
+                        {"counts", QJsonObject{{"proposed", 2}, {"writes", 1}}},
+                        {"changelog", "docs/cleanup.md"}, {"report", "already streamed"},
+                        {"refusals", QJsonArray{QJsonObject{{"tool", "board_move"}, {"error", "requires a verdict"}}}}};
+    auto note = cleanupTranscriptNote(summary);
+    QVERIFY(note.contains("finished · 2 proposed · nothing was written"));
+    QVERIFY(note.contains("Refused board_move: requires a verdict"));
+    QVERIFY(note.contains("Changelog: docs/cleanup.md"));
+    QVERIFY(!note.contains("already streamed"));
+    summary.insert("dry_run", false);
+    summary.insert("outcome", "cancelled");
+    QVERIFY(cleanupTranscriptNote(summary).contains("stopped · 1 written"));
+    summary.insert("outcome", "error");
+    QVERIFY(cleanupTranscriptNote(summary).contains("failed · 1 written"));
 }
 
 QTEST_MAIN(BoardPaneTests)
