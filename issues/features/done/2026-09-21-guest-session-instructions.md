@@ -23,6 +23,11 @@ yes to the guest specific version that has the relevant claridication.
 
 i dont necessarily want to explicitly encourage delegation, tell me how the claude system prompt does it and see if there are other sources online with advice on how to frame it, where its used when warranted.
 
+## Decisions
+“looks good, also relay isnt linux only” — approved the displayed full supplement with delegation guidance; remove the Linux-only description.
+
+“yeah thats better” — approved the shorter delegation paragraph after reviewing its proportion of the supplement.
+
 ## Plan
 **Goal:** New Claude/Codex guest sessions receive Relay-specific instructions outside user messages, retained on subsequent resumes.
 
@@ -38,10 +43,12 @@ i dont necessarily want to explicitly encourage delegation, tell me how the clau
 **Verify:** Targeted guest harness/provider unit tests and installed CLI/schema inspection; no paid model turns.
 
 ## Execution Summary
-Added a guest-specific Relay supplement through Claude's append-system-prompt flag and Codex's developerInstructions field. Supplied on start/resume/fork, retained on Claude relaunch, never inserted as user text. Guest defaults and delegation policy remain intact. Recorded installed Claude Agent-tool prompt variants and online delegation advice in `docs/qa_evidence/2026-09-21-guest-instructions/README.md`.
+Added a guest-specific Relay supplement through Claude's append-system-prompt flag and Codex's developerInstructions field. Supplied on start/resume/fork, retained on Claude relaunch, never inserted as user text. Guest defaults remain intact. The owner subsequently approved the displayed delegation guidance for independent tasks and proportional subagent counts, and corrected the introduction to describe Relay without a Linux-only restriction. Recorded installed Claude Agent-tool prompt variants and online delegation advice in `docs/qa_evidence/2026-09-21-guest-instructions/README.md`.
 
 ## Tests
 `PYTHONPATH=backend:tests python3 -m unittest test_guest_harness_provider test_guest_harness_claude test_guest_harness_codex test_guest_board_bridge`
+
+`PYTHONPATH=backend:tests python3 -m unittest test_guest_harness_provider.StartTests`
 
 ## Resolution
 Completed with 221 targeted tests passing and installed CLI/schema inspection. No paid model turns; verification covers transport and lifecycle, not model obedience. Older guest sessions require no migration.

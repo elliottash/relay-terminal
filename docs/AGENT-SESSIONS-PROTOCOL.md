@@ -5795,7 +5795,9 @@ every start, resume and fork. Claude receives `--append-system-prompt`, also ret
 model/effort relaunches; Codex receives `developerInstructions` on `thread/start`, `thread/resume`
 and `thread/fork`, leaving `baseInstructions` untouched. The supplement explains Relay's surface,
 actual guest tool availability, project policy discovery, shared-checkout care and verified
-reporting. It does not copy the native agent's tool/ledger rules or add a delegation policy.
+reporting. The owner-approved delegation guidance favors worthwhile independent assignments,
+keeps small or tightly coupled work together, and scales the number of subagents to the work
+within the guest's limits. It does not copy the native agent's tool/ledger rules.
 It is not prepended to user turns and does not change CLAUDE.md or AGENTS.md. The existing
 per-turn board bridge discovery hint remains separate because bridge availability can change.
 

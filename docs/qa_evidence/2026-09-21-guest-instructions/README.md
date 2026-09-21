@@ -4,8 +4,9 @@
 
 `guest_instructions.GUEST_INSTRUCTIONS` is a stable supplement describing Relay's terminal,
 actual guest tool availability, project instruction discovery, Switchboard fallback, shared
-checkout care, progress and evidence-based reporting. It does not request delegation and does
-not copy the native agent prompt, which names tools and a ledger guests do not have.
+checkout care, progress and evidence-based reporting. The approved delegation guidance weighs
+independent work against coordination costs and sizes the group to worthwhile assignments.
+It does not copy the native agent prompt, which names tools and a ledger guests do not have.
 
 `start_provider` passes it through the harness `instructions` argument on start/resume/fork.
 Claude appends it using `--append-system-prompt` and keeps it through both model and effort
@@ -67,14 +68,17 @@ parallelism.
   sources/tools and an expected output. Scale effort to task complexity rather than using a
   fixed worker count. Its research-specific counts are not a recommendation for Relay coding.
 
-## Suggested wording — research recommendation only, not installed
+## Approved delegation wording (2026-09-21)
 
-Delegate when a bounded task can make useful progress independently, or when isolating a
-large investigation would keep the main conversation focused. Handle quick lookups, small
-edits and tightly dependent steps directly. Weigh setup, context transfer and verification
-costs against the benefit. If you delegate, give a clear scope and expected result, avoid
-duplicating the work, and verify the returned findings before relying on them.
+The owner approved the full proposed supplement: “looks good, also relay isnt linux only”.
+The introduction now calls Relay a terminal application without restricting it to Linux.
+The owner then approved the shorter version: “yeah thats better”.
+The attached delegation paragraph is:
 
-This expresses when delegation is warranted without a quota, a requirement to ask first, or
-an instruction to use subagents frequently. The implementation leaves guest delegation policy
-unchanged while the owner considers this wording.
+```text
+Consider subagents for independent parallel tasks or investigations that benefit from isolated context. Handle small or tightly coupled tasks directly. Match the number of agents to worthwhile independent assignments, within harness limits. Give each a clear scope and relevant constraints, avoid duplicating work, and verify results.
+```
+
+The wording expresses when delegation is warranted without a fixed quota or frequent-spawning
+requirement. The existing guest harness still determines which tools and limits are available.
+Follow-up verification: `PYTHONPATH=backend:tests python3 -m unittest test_guest_harness_provider.StartTests`.
