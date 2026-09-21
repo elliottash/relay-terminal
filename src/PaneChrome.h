@@ -16,6 +16,7 @@
 #include "SubagentTranscript.h"
 #include "OutputLinks.h"
 #include "PaneView.h"
+#include "PaneDimming.h"
 
 #include "PaneStatus.h"
 #include "RelayMark.h"   // the app's own mark, painted: the state glyph and the tab icons
@@ -624,6 +625,26 @@ private:
 class PaneChrome final : public QFrame {
 public:
     std::function<void(const QString &action)> onAction;
+    relay::dimming::State dimming;
+    relay::dimming::Overlay *dimOverlay = nullptr;
+    QToolButton *dimButton = nullptr;
+    int dimAmount = 0;
+
+    void paintDimming(int amount) {
+        dimAmount = amount;
+        if (!dimOverlay) dimOverlay = new relay::dimming::Overlay(parentWidget());
+        int header = 32;
+        if (auto *pane = dynamic_cast<Pane *>(parentWidget()))
+            header = pane->headerWidget()->isVisible() ? pane->headerWidget()->geometry().bottom() + 1 : 0;
+        else if (auto *tool = dynamic_cast<ToolPane *>(parentWidget()); tool && tool->bandShown())
+            header = tool->band()->geometry().bottom() + 1;
+        dimOverlay->refresh(amount, relay::theme::Background, header);
+        if (dimButton) {
+            dimButton->setChecked(dimming.manual > 0);
+            dimButton->setToolTip(QStringLiteral("Dim this pane · %1% dimmed\nAlt+wheel adjusts this pane; click again to restore automatic behavior").arg(amount));
+        }
+        raise();
+    }
 
     explicit PaneChrome(QWidget *leaf) : QFrame(leaf) {
         setObjectName(QStringLiteral("paneChrome"));
@@ -644,6 +665,9 @@ public:
         // placed by dragging its header. Its tooltip shows the key (pane.splitRight).
         button(m_row, QStringLiteral("⊞"), QStringLiteral("pane.newByMouse"), QStringLiteral("New pane (drag its header to place it)"))
             ->setProperty("keysFrom", QStringLiteral("pane.splitRight"));
+        dimButton = button(m_row, QStringLiteral("◐"), QStringLiteral("pane.dimToggle"), QStringLiteral("Dim this pane"));
+        dimButton->setCheckable(true);
+        dimButton->setProperty("liveTooltip", true);
         button(m_row, QStringLiteral("⇱"), QStringLiteral("pane.moveToNewTab"), QStringLiteral("Move to new tab"));
         button(m_row, QStringLiteral("×"), QStringLiteral("pane.close"), QStringLiteral("Close pane"));
         // Sharing moved here from the prompt-box strip (owner, 2026-09-19: it no longer fit
@@ -716,6 +740,7 @@ public:
         syncHeaderInset();
         placeBackdrop();
         applyShape();
+        if (dimOverlay) paintDimming(dimAmount);
     }
 
     // Repaints every pane's type band, status glyph and remote marks in every window: after

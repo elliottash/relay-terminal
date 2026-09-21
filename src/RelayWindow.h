@@ -876,6 +876,25 @@ protected:
             if (!pressed || !relay::panes::chordKeyKeepsWindow(pressed->key(), Keymap::instance().match(pressed)))
                 endBeneathDock();
         }
+        if (event->type() == QEvent::Wheel) {
+            auto *wheel = static_cast<QWheelEvent *>(event);
+            if (wheel->modifiers() == Qt::AltModifier) {
+                QWidget *leaf = leafOf(qobject_cast<QWidget *>(object));
+                if (leaf && leaf->window() == this) {
+                    if (auto *chrome = chromeOf(leaf)) {
+                        const int steps = chrome->dimming.wheelSteps(wheel->angleDelta().y());
+                        if (steps) adjustPaneDimming(leaf, -5 * steps);
+                        wheel->accept();
+                        return true;
+                    }
+                }
+            }
+        }
+        if (event->type() == QEvent::MouseButtonPress) {
+            QWidget *leaf = leafOf(qobject_cast<QWidget *>(object));
+            if (leaf && leaf->window() == this)
+                if (auto *chrome = chromeOf(leaf)) { chrome->dimming.revealed = true; refreshPaneDimming(); }
+        }
         activateOnPress(object, event);
         if (headerDrag(object, event)) return true;
         if (toolHeaderDrag(object, event)) return true;
@@ -1141,6 +1160,22 @@ private:
         else if (id == QStringLiteral("pane.focusUp")) navigate(relay::panes::Direction::Up);
         else if (id == QStringLiteral("pane.focusDown")) navigate(relay::panes::Direction::Down);
         else if (id == QStringLiteral("pane.close")) closeActive();
+        else if (id == QStringLiteral("pane.brighten") || id == QStringLiteral("pane.darken"))
+            adjustPaneDimming(m_activeLeaf, id == QStringLiteral("pane.brighten") ? -5 : 5);
+        else if (id == QStringLiteral("pane.dimToggle")) {
+            if (auto *chrome = chromeOf(m_activeLeaf)) {
+                chrome->dimming.toggle(relay::settings::intValue(QStringLiteral("appearance/dim_strength"), 90));
+                refreshPaneDimming();
+                hint(QStringLiteral("pane.dimmer"), relay::ShortcutHints::nextTime(
+                    Keymap::instance().shortcutText(QStringLiteral("pane.brighten")), QStringLiteral("brighten pane · Alt+wheel adjusts this pane")));
+            }
+        }
+        else if (id == QStringLiteral("pane.focusMode") || id == QStringLiteral("pane.autoDim")) {
+            const QString key = id == QStringLiteral("pane.focusMode") ? QStringLiteral("appearance/focus_mode") : QStringLiteral("appearance/auto_dim");
+            QSettings().setValue(key, !QSettings().value(key, false).toBool());
+            relay::SettingsWatch::instance().notify();
+            refreshPaneDimming();
+        }
         else if (id.startsWith(QStringLiteral("terminal.zoom"))) {
             if (m_active) m_active->runTerminalMenuAction(id.mid(9), {}, {}, {});
         }
@@ -3240,6 +3275,13 @@ private:
             usage.aliases = QStringLiteral("cpu memory ram usage load percent meter resource");
             appearance.rows << usage;
         }
+        appearance.rows << toggleRow(QStringLiteral("appearance/auto_dim"), QStringLiteral("Hide until you need me"),
+            QStringLiteral("Dim working agents; reveal questions, blocked work and completion. Manual dimming survives completion."), false);
+        appearance.rows << toggleRow(QStringLiteral("appearance/focus_mode"), QStringLiteral("Focus mode"),
+            QStringLiteral("Dim other panes while you work in the selected pane. Attention reveals a pane without moving focus."), false);
+        appearance.rows << numberRow(QStringLiteral("appearance/dim_strength"), QStringLiteral("Dimming strength"),
+            QStringLiteral("Default dimming amount. Alt+wheel adjusts the hovered pane; Alt++/− adjusts the active pane. Up/+ brightens."),
+            90, 0, 95, QStringLiteral("%"));
         sections << appearance;
 
         sections << modelsSection();
@@ -4483,6 +4525,11 @@ private:
         }
         items << actionItem(panes, QStringLiteral("New tab"), QString(), QStringLiteral("tab.new"));
         items << actionItem(panes, QStringLiteral("New window"), QString(), QStringLiteral("window.new"));
+        items << actionItem(panes, QStringLiteral("Dim this pane"), QStringLiteral("Toggle manual dimming; Alt+wheel adjusts strength"), QStringLiteral("pane.dimToggle"));
+        items << actionItem(panes, QStringLiteral("Brighten pane"), QStringLiteral("Reduce dimming by 5%"), QStringLiteral("pane.brighten"));
+        items << actionItem(panes, QStringLiteral("Dim pane more"), QStringLiteral("Increase dimming by 5%"), QStringLiteral("pane.darken"));
+        items << actionItem(panes, QStringLiteral("Focus mode"), QStringLiteral("Dim other panes"), QStringLiteral("pane.focusMode"), relay::settings::boolValue(QStringLiteral("appearance/focus_mode"), false));
+        items << actionItem(panes, QStringLiteral("Hide until you need me"), QStringLiteral("Dim working agents"), QStringLiteral("pane.autoDim"), relay::settings::boolValue(QStringLiteral("appearance/auto_dim"), false));
         items << actionItem(panes, QStringLiteral("Close pane"), QStringLiteral("Then the tab, then the window"), QStringLiteral("pane.close"));
         items << actionItem(panes, QStringLiteral("Move pane to new tab"), QStringLiteral("Keeps the shell and agent running"), QStringLiteral("pane.moveToNewTab"));
         items << actionItem(panes, QStringLiteral("Equalize pane sizes"), QStringLiteral("Every splitter in this tab back to equal shares"), QStringLiteral("pane.equalize"));
@@ -8197,6 +8244,7 @@ private:
             m_active = panes.isEmpty() ? nullptr : panes.first();
         }
         if (page) m_lastActive.insert(page, leaf);
+        refreshPaneDimming();
         // Clickable paths: only the active pane opens a link on a plain click, so the click
         // that moves the focus into another pane cannot open a file by accident (issue YZTK).
         for (int i = 0; i < m_tabs->count(); ++i)
@@ -9377,6 +9425,40 @@ private:
         return nullptr;
     }
 
+    void adjustPaneDimming(QWidget *leaf, int delta) {
+        if (auto *chrome = chromeOf(leaf)) {
+            chrome->dimming.adjust(delta, chrome->dimAmount);
+            refreshPaneDimming();
+        }
+    }
+
+    void refreshPaneDimming() {
+        const bool automatic = relay::settings::boolValue(QStringLiteral("appearance/auto_dim"), false);
+        const bool focus = relay::settings::boolValue(QStringLiteral("appearance/focus_mode"), false);
+        const int strength = relay::settings::intValue(QStringLiteral("appearance/dim_strength"), 90);
+        for (int i = 0; i < m_tabs->count(); ++i) {
+            for (QWidget *leaf : leavesIn(m_tabs->widget(i))) {
+                auto *chrome = chromeOf(leaf);
+                if (!chrome) continue;
+                auto *pane = dynamic_cast<Pane *>(leaf);
+                const bool busy = pane && pane->dimmingAgentBusy();
+                bool attention = false, done = false;
+                if (pane) {
+                    const auto state = relay::panestatus::resolve(pane->statusFacts(), chrome->seenSerial);
+                    attention = state == relay::panestatus::State::NeedsYou || state == relay::panestatus::State::Failed;
+                    done = state == relay::panestatus::State::Done;
+                }
+                // Guest lifecycle reports busy separately from the built-in turn finish serial.
+                if (chrome->dimming.working && !busy) chrome->dimming.completed = true;
+                if (busy) chrome->dimming.completed = false;
+                if (leaf == m_activeLeaf && chrome->dimming.revealed) chrome->dimming.completed = false;
+                done = done || chrome->dimming.completed;
+                chrome->dimming.observe(leaf == m_activeLeaf && i == m_tabs->currentIndex(), busy, attention, done);
+                chrome->paintDimming(chrome->dimming.amount(automatic, focus, strength));
+            }
+        }
+    }
+
     // ----- pane states and tab icons (#XM0T), remote sessions (#SPBN) -------------------------
     // One poll for every pane in the window. Each terminal's header shows its own state; each tab
     // shows the most urgent one among its panes, and a red mark when one of them is in an ssh,
@@ -9387,6 +9469,7 @@ private:
     static constexpr qint64 kSeenAfterMs = 1500;
 
     void refreshPaneStatus() {
+        refreshPaneDimming();
         namespace ps = relay::panestatus;
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
         const bool focused = isActiveWindow();
@@ -9430,7 +9513,11 @@ private:
                 if (!watched) chrome->watchedSince = 0;
                 else if (!chrome->watchedSince) chrome->watchedSince = now;
                 if (watched && now - chrome->watchedSince >= kSeenAfterMs) chrome->seenSerial = facts.finishSerial;
-                const ps::State state = ps::resolve(facts, chrome->seenSerial);
+                ps::State state = ps::resolve(facts, chrome->seenSerial);
+                if (!pane->guest().isEmpty() && (state == ps::State::Running || state == ps::State::Idle)) {
+                    if (pane->dimmingAgentBusy()) state = ps::State::Working;
+                    else if (chrome->dimming.completed) state = ps::State::Done;
+                }
                 const QString remoteLine = pane->remoteCommandLine();
                 const bool shared = pane->sharedWithPhone();
                 chrome->setStatus(state, remoteLine, shared);

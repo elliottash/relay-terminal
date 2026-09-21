@@ -108,7 +108,9 @@ public:
         const bool arrow = event->key() == Qt::Key_Left || event->key() == Qt::Key_Right
                            || event->key() == Qt::Key_Up || event->key() == Qt::Key_Down;
         const bool altArrow = arrow && (mods & Qt::AltModifier) && !(mods & Qt::ControlModifier);
-        return fkey || altArrow || ((mods & Qt::ControlModifier) && (mods & Qt::ShiftModifier));
+        const QString action = match(event);
+        const bool dimmer = action == QStringLiteral("pane.brighten") || action == QStringLiteral("pane.darken");
+        return dimmer || fkey || altArrow || ((mods & Qt::ControlModifier) && (mods & Qt::ShiftModifier));
     }
 
     void setProgramKeys(const QString &mode) { writeSetting(QStringLiteral("program_keys"), mode); }
@@ -226,6 +228,11 @@ private:
         add("pane.focusUp", "pane", "Focus pane above", {QStringLiteral("Alt+Up")});
         add("pane.focusDown", "pane", "Focus pane below", {QStringLiteral("Alt+Down")});
         add("pane.close", "pane", "Close pane, then tab, then window", {QStringLiteral("Ctrl+W"), QStringLiteral("Ctrl+Shift+W")});
+        add("pane.brighten", "pane", "Brighten pane", {QStringLiteral("Alt++"), QStringLiteral("Alt+="), QStringLiteral("Alt+Shift+=")});
+        add("pane.darken", "pane", "Dim pane", {QStringLiteral("Alt+-")});
+        add("pane.dimToggle", "pane", "Toggle manual pane dimming", {});
+        add("pane.focusMode", "pane", "Toggle focus mode", {});
+        add("pane.autoDim", "pane", "Toggle hide until you need me", {});
         add("terminal.zoomIn", "terminal", "Zoom terminal in", {QStringLiteral("Ctrl++"), QStringLiteral("Ctrl+="), QStringLiteral("Ctrl+Shift+=")});
         add("terminal.zoomOut", "terminal", "Zoom terminal out", {QStringLiteral("Ctrl+-"), QStringLiteral("Ctrl+Shift+-")});
         add("terminal.zoomReset", "terminal", "Reset terminal zoom", {QStringLiteral("Ctrl+0"), QStringLiteral("Ctrl+Shift+0")});

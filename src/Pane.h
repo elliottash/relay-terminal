@@ -855,6 +855,7 @@ public:
     // The guest agent (Claude Code / Codex) running in this pane's foreground, or empty.
     // Classified from the command line on every program poll (issue GT7X, protocol 26).
     QString guest() const { return m_guest; }
+    bool dimmingAgentBusy() const { return m_agentBusy || m_guestBusy || m_subagents.liveCount() > 0; }
     // One `bridge` event from this pane's guest channel (26.3, 26.5): what the IDE bridge's
     // sidecar learned from a claude connected to it, handed in by the channel's own reader
     // (handleGuestEvent) — the fold the seam was waiting for.
