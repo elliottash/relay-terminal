@@ -2117,7 +2117,18 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   `models/collapsed` folds a provider's group (the priority list, its
   "fallbacks end here" line and the per-model "openrouter fallback" switch of earlier that day are
   gone — an OpenRouter model is a list entry like any other); custom ids, favorites, recent, sort,
-  a remembered reasoning level per entry, use counts and a tokens/s estimate. `src/ModelPicker.*`
+  a remembered reasoning level per entry, use counts and a tokens/s estimate.
+  What the two **defaults** are is a file in the repo rather than a table in the code (card #MDL1):
+  `backend/relay_core/model-ranking.md` holds a **Providers** table (`provider | kind | order`) and
+  a **Models** table (`name | classes | score | notes`), one row per model name, and the owner
+  reviews and edits it — `backend/relay_core/model_ranking.py` is all of the code that reads it,
+  and `presets.INTELLIGENCE` is now a view over its `score` column, so nothing that reads a model's
+  intelligence changed. `presets.tier_list_defaults` counts the providers that can take a turn — a
+  stored key, a usable guest harness, a keyed custom provider, and neither a model server on this
+  machine nor Relay Free — and gives none of them Relay Free's three rows, one of them one model per
+  class, and two or more two per class by score with at most one per provider in each. The wire
+  shape is untouched, so the C++ side applies the same `{tier: [{preset, model, effort}]}` it always
+  did. `src/ModelPicker.*`
   (`relay-modelpicker`, `tests/modelpicker_test.cpp`) is the dialog behind Ctrl+Alt+M
   (`agent.model`), `/model` alone and the box's "more models…", and since card #MDL1 t:a7 it is
   where models are *prioritized* as well as picked (design 5.2; the lists were "too hard to find"

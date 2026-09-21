@@ -72,7 +72,10 @@ that conflict.
    on: main for new panes, high for plan mode, flash for terminal driving and quick side calls,
    lite for chores, local for `/local`. The rest are that tier's fallbacks, in order, and a model
    in no list is only used when you pick it by hand. "fill the lists" applies Relay's defaults,
-   or the recommended ones with the cheaper OpenRouter twins after your own models. A **profile**
+   or the recommended ones with the cheaper OpenRouter twins after your own models; those defaults
+   come out of `backend/relay_core/model-ranking.md`, a file you can read and edit — with no
+   provider set up you get Relay's three included models, with one you get one model per list, and
+   with two or more you get two, by score and never twice from the same provider. A **profile**
    names the five lists as a set — "AI work", "admin work" — and switching one in, there or with
    `/profile`, swaps every list at once for every pane; a profile exports to a JSON file you can
    mail, commit or carry to another machine, and imports back. Claude Code

@@ -1162,20 +1162,36 @@ buttons only apply one of them and send it back as `tiers`:
                        "openrouter": {"main": [entry…], "high": […], "flash": […], "lite": […], "local": […]}}
 ```
 
-- **`plain`** — `main`: each usable provider's Main-tier model; subscriptions first (group
-  `subscription`, and the guest harnesses that run here and have not said they are signed out — they are
-  subscriptions too — each on the first model of its own list), then pay-as-you-go (the aggregator and
-  keyed custom providers with it), Relay Free last; within a group by `INTELLIGENCE` descending, unknown
-  last; each at the provider's own default level (absent where it has none). `high`: the same models at
-  the top level each offers (`max`; `high` on Gemini; `medium` on Relay Free), the usable guests among
-  them in the same place as in `main` (v4.4: a plan turn runs through the guest's harness) at their
-  own top word — Claude Code's the last its `efforts` list names (`max`); Codex's `xhigh` when its
-  model offers it, else the last (`presets._guest_top_level`). `flash`: each provider's Flash-tier
-  model. `lite`: each provider's Lite-tier model **when it is on that provider** (GLM, Kimi and MiniMax
-  borrow OpenRouter's, so they add none). Every `flash` and `lite` entry says its **lowest level
-  outright** (`low`; owner, 2026-09-20: Lite is "with no reasoning"), so the GUI never shows a blank
-  level; only a model with no knob at all (Kimi's high-speed ones, MiniMax's) carries none
-  (`presets._low_level`). `local`: the saved endpoints.
+- **`plain`** (v4.5, card #MDL1) — computed from `backend/relay_core/model-ranking.md`, a file in
+  the repo the owner reviews and edits: a **Providers** table (`provider | kind | order`, kind one of
+  `plan`, `harness`, `api`, `router`, `free`, `order` the tie-break, lower first) and a **Models**
+  table (`name | classes | score | notes`), keyed by the one name a model has (rule 1) and
+  classed by `high`, `main`, `flash`, `lite`. Its `score` column *is* `presets.INTELLIGENCE`, which
+  is now a view over it, and its `order` column replaces the old group order.
+
+  The worker counts the providers that can take a turn right now — a built-in preset with a stored
+  key, a guest harness that runs here and has not said it is signed out, a keyed custom provider;
+  **not** a model server on this machine, and **not** Relay Free — and fills each list from the
+  file (owner, 2026-09-21): **none** → Relay Free's three rows (`relay-main` in `main` and `high`,
+  `relay-flash`, `relay-lite`), and empty lists where Relay Free itself cannot run; **one** → one
+  model per class from that provider, the highest score whose `classes` names the class; **two or
+  more** → two per class, by score descending, **at most one per provider per class** and never the
+  same model twice, a blank score last and ties broken by the provider's `order` then the name.
+  Two presets of one company (`glm` and `glm-coding`) are **one provider**, and the plan wins the
+  tie, so the credit already paid for is spent first. A guest's models are scored by **name** like
+  anyone else's (`opus` is `claude-opus-5`, `gpt-6-astra` through codex scores what the OpenAI API's
+  does) and a guest is offered for `high` and `main` only — the tiers a guest entry may serve
+  (`roles.GUEST_TIERS`), because a Flash or Lite call is a side call to a running conversation.
+  Relay Free appears nowhere once anything else can take a turn.
+
+  The **levels** are unchanged: `main` the provider's own default level for that model (absent
+  where it has none), `high` the top level it offers (`max`; `high` on Gemini; `medium` on Relay
+  Free), a guest's in its own word — Claude Code's the last its `efforts` list names (`max`),
+  Codex's `xhigh` when its model offers it (`presets._guest_top_level`). Every `flash` and `lite`
+  entry says its **lowest level outright** (`low`; owner, 2026-09-20: Lite is "with no reasoning"),
+  so the GUI never shows a blank level; only a model with no knob at all (Kimi's high-speed ones,
+  MiniMax's) carries none (`presets._low_level`). `local`: the saved endpoints, in their own order
+  — the local class belongs to no provider and is not ranked.
 - **`openrouter`** (owner: "openrouter twins are after the subscription models, and are cost sensitive;
   the openrouter one is most important for chores and transcription") — the plain lists, and then,
   **only when the `openrouter` preset has a key**, the OpenRouter twins (`OPENROUTER_TWINS`) of each
@@ -1190,7 +1206,9 @@ buttons only apply one of them and send it back as `tiers`:
   `presets.LITE_LIST_FIRST`; owner, 2026-09-20: "I thought it's 3.5 flash lite with no reasoning"),
   ahead of the providers' own. That is the *list's* first entry only: the built-in Lite row a pane
   resolves to with no list at all (`presets._LITE_VIA_OPENROUTER`, `google/gemini-3.8-flash`) is
-  unchanged. Without the key the two are identical.
+  unchanged, and so is `plain`, which ranks `lite` out of the ranking file like every other class:
+  putting OpenRouter first for chores is what pressing *this* button means (v4.5). Without the key
+  the two are identical.
 
 The prices arrive with OpenRouter's listing, so the worker's unasked `presets` push when that lands
 (13.8) carries a `tier_list_defaults` that may have gained twins the first answer could not price.
