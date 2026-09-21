@@ -25,3 +25,10 @@ widget. It maps Relay-generated fold colors to palette references when handing t
 to the view. Fold/prose reverse video keeps diff backgrounds adaptive.
 
 Board validation has pre-existing findings elsewhere; none names K3RT.
+
+Verification result: commit `82680f0910eac2c84f1e2f64512013bb57621d23` built from
+its exact tree, with both `relay` and `relay-engine-tests` targets. The complete
+`relay-engine-tests` CTest target passed in 19.44 seconds. Xvfb rendering checks
+passed separately (5 passes including setup/cleanup). The shared build was blocked
+by another session's CMake reference to the not-yet-created `tests/modelspane_test.cpp`;
+the landing build excludes uncommitted changes and has no such dependency.

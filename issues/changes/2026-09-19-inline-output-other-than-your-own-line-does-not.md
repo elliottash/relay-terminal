@@ -10,7 +10,7 @@ rank: zzzzzzs
 created: '2026-09-19'
 acceptance: after a theme switch, the tool lines, notes, recaps, question cards and diff lines already in a pane's scrollback are drawn in the new theme's colours, as the user's own lines already are
 source: 'found while landing #bef461d (the band that follows the theme), 2026-09-19'
-links: {plans: [], commits: [bef461d], evidence: [docs/qa_evidence/2026-09-19-echo-band/, docs/qa_evidence/2026-09-21-existing-text-theme/README.md], related: [], github: null}
+links: {plans: [], commits: [bef461d, 82680f0910eac2c84f1e2f64512013bb57621d23], evidence: [docs/qa_evidence/2026-09-19-echo-band/, docs/qa_evidence/2026-09-21-existing-text-theme/README.md], related: [], github: null}
 ---
 # Inline output other than your own line still keeps the colours it was printed in
 
@@ -86,6 +86,7 @@ The scrollback regression exposed an additional root cause: LibVtermCore resolve
 Evidence: docs/qa_evidence/2026-09-21-existing-text-theme/README.md and surface PNGs.
 
 ## Tests
+Exact landing tree: application build and complete engine test target passed (19.44 seconds). Xvfb targeted rendering checks passed separately.
 `ctest --test-dir build -R '^relay-engine-tests$' --output-on-failure`
 `RELAY_ENGINE_TEST=CoreTest build/engine/relay-engine-tests`
 `RELAY_ENGINE_TEST=FoldLayerTest build/engine/relay-engine-tests`

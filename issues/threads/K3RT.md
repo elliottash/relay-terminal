@@ -30,3 +30,7 @@ Claimed #K3RT for the renewed request; recorded the indexed-ink implementation p
 <!-- relay:entry 20260921T213206Z-aa author=codex kind=evidence -->
 ### Codex · 2026-09-21 21:32
 Implemented indexed inline/fold colors and found/fixed the libvterm history RGB conversion. Xvfb pixel checks pass for grid, rewrapped prose, expanded details and scrollback. Evidence and QA checklist recorded; moving to needs-verification with the implementation. Literal RGB from older saves cannot recover its original role.
+
+<!-- relay:entry 20260921T213427Z-aa author=codex kind=evidence -->
+### Codex · 2026-09-21 21:34
+Landed 82680f0910eac2c84f1e2f64512013bb57621d23. Exact-tree application build and complete engine CTest target passed (19.44s); Xvfb rendering checks passed. Other sessions' hunks were excluded. Recorded the commit and results; K3RT remains needs-verification for interactive QA.
