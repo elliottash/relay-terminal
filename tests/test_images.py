@@ -208,12 +208,13 @@ class VisionCapabilityTests(unittest.TestCase):
 
     def test_openrouter_style_slugs_match_on_their_last_segment(self):
         self.assertTrue(presets.model_supports_vision("google/gemini-3.8-flash"))
-        self.assertFalse(presets.model_supports_vision("deepseek/deepseek-v4.1-flash"))
+        self.assertTrue(presets.model_supports_vision("deepseek/deepseek-v4.1-flash"))
+        self.assertFalse(presets.model_supports_vision("deepseek/deepseek-v4.1-pro"))
 
     def test_presets_report_their_image_support(self):
-        for preset_id in ("openai", "anthropic", "gemini", "kimi"):
+        for preset_id in ("openai", "anthropic", "gemini", "kimi", "openrouter"):
             self.assertTrue(presets.PRESETS[preset_id].to_dict()["vision"], preset_id)
-        for preset_id in ("kimi-code", "minimax", "openrouter"):
+        for preset_id in ("kimi-code", "minimax"):
             self.assertFalse(presets.PRESETS[preset_id].to_dict()["vision"], preset_id)
 
     def test_the_vision_role_defaults_to_glm_flash_on_glm_and_to_nothing_elsewhere(self):

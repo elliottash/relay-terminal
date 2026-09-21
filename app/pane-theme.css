@@ -616,6 +616,12 @@
   --qss-statusPicker-font-size: calc(var(--rt-pt) * 9);
   --qss-statusPicker-min-height: 20px;
   --qss-statusPicker-padding: 2px 18px 2px 8px;
+  --qss-statusPicker-disabled-background: transparent;
+  --qss-statusPicker-disabled-border-color: var(--rt-border);
+  --qss-statusPicker-disabled-color: var(--rt-disabled);
+  --qss-statusPicker-disabled-hover-background: transparent;
+  --qss-statusPicker-disabled-hover-border-color: var(--rt-border);
+  --qss-statusPicker-disabled-hover-color: var(--rt-disabled);
   --qss-statusPicker-hover-border-color: var(--rt-accent);
   --qss-statusPicker-hover-color: var(--rt-text);
   --qss-contextLabel-background: transparent;

@@ -396,7 +396,9 @@ class GuestPlanTurnTests(PlanTurnTests):
         # (the user's words, the tools Relay's agent called, their results) and the request.
         self.assertEqual(len(harness.sent), 1)
         sent = harness.sent[0]["prompt"]
-        self.assertTrue(sent.startswith("PLAN MODE."))
+        # Project instructions may precede the planning directive (#GPF7).
+        self.assertIn("PLAN MODE.", sent)
+        self.assertLess(sent.index("PLAN MODE."), sent.index("The request to plan:"))
         self.assertIn("do not modify the workspace", sent)
         self.assertIn("reply with the complete implementation plan as Markdown", sent)
         self.assertIn("User:\nearlier: look at widget.py", sent)
