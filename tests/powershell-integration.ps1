@@ -8,6 +8,7 @@ $root = Join-Path ([IO.Path]::GetTempPath()) ('relay-shell-' + [guid]::NewGuid()
 Push-Location -LiteralPath $root
 $expectedCwd = $PWD.Path
 Pop-Location
+$primaryFailure = $null
 try {
     $env:RELAY_RUNTIME_DIR = $root
     $env:RELAY_SESSION_TOKEN = 'test-token'
@@ -53,15 +54,27 @@ try {
         # Reproduce a GUI reader that briefly holds state.json without delete sharing.
         Add-Type -TypeDefinition @'
 public static class RelayReleaseFile {
-    public static void Later(System.IDisposable file) {
-        System.Threading.Tasks.Task.Run(() => { System.Threading.Thread.Sleep(100); file.Dispose(); });
+    public static System.Threading.Thread Later(System.IDisposable file) {
+        var thread = new System.Threading.Thread(() => {
+            System.Threading.Thread.Sleep(100);
+            file.Dispose();
+        });
+        thread.Start();
+        return thread;
     }
 }
 '@
         $locked = [IO.File]::Open((Join-Path $root 'state.json'), [IO.FileMode]::Open,
                                   [IO.FileAccess]::Read, [IO.FileShare]::Read)
-        [RelayReleaseFile]::Later($locked)
-        __relay_event 'running' 9
+        $releaseThread = $null
+        try {
+            $releaseThread = [RelayReleaseFile]::Later($locked)
+            __relay_event 'running' 9
+        } finally {
+            # Release even if the event/assertion fails; otherwise cleanup masks that failure.
+            if ($releaseThread) { $releaseThread.Join() }
+            $locked.Dispose()
+        }
         $state = Get-Content -Raw -LiteralPath (Join-Path $root 'state.json') | ConvertFrom-Json
         if ($state.event -ne 'running' -or $state.status -ne 9) { throw 'Reader lock lost shell event' }
     }
@@ -71,7 +84,14 @@ public static class RelayReleaseFile {
     $handlers = Get-PSReadLineKeyHandler -Chord 'Ctrl+x,Ctrl+r', 'Ctrl+x,Ctrl+p'
     if ($handlers.Count -ne 2) { throw 'Composer handshake key bindings missing' }
     Write-Output 'PowerShell shell events passed'
+} catch {
+    $primaryFailure = $_
 } finally {
     Set-Location $PSScriptRoot
-    [IO.Directory]::Delete($root, $true)
+    try { [IO.Directory]::Delete($root, $true) } catch {
+        if (!$primaryFailure) { $primaryFailure = $_ }
+        else { Write-Warning "Fixture cleanup also failed: $_" }
+    }
 }
+if ($primaryFailure) { throw $primaryFailure }
+
