@@ -3,6 +3,7 @@
 #include "Notifications.h"
 
 #include <QDebug>
+#include <QHash>
 #include <QJsonArray>
 #include <QRegularExpression>
 #include <QSet>
@@ -86,10 +87,17 @@ const QSet<QString> &readActions() {
     return keys;
 }
 
-// Safe — undoable in one click — but each of these writes something, so `writes_enabled` still
-// gates it. Keeping the two sets apart is what stops the toggle from meaning "agents may do
-// nothing at all" and from meaning "agents may do anything reversible" (#AG7R group 7).
-const QSet<QString> &reversibleWriteActions() {
+// The half of the safe table that *changes* something, so `writes_enabled` still gates it. Keeping
+// the two sets apart is what stops the toggle from meaning "agents may do nothing at all" and from
+// meaning "agents may do anything reversible" (#AG7R group 7).
+//
+// It was called `reversibleWriteActions()` until 2026-09-20, and the rename is the honest record of
+// a decision: the owner's answer to #AG7R group 5 ("dont let the agent do 1, 4, 6, 7. others are
+// ok") put things in here that are not reversible at all — a compaction cannot be un-compacted, a
+// cleared queue was the person's own typing. Decision 2's founding line, "undoable in one click",
+// no longer describes the contents, so the name no longer claims it does; what carries the weight
+// instead is the notification, which says what happened and what it cost (see `note()`).
+const QSet<QString> &writingActions() {
     static const QSet<QString> keys = {
         // Re-read a file that is already on disk: a refresh, like Local models' Detect. It is a
         // write because a theme or a keybinding file edited since the last read takes effect.
@@ -112,6 +120,90 @@ const QSet<QString> &reversibleWriteActions() {
         QStringLiteral("input.modeAuto"), QStringLiteral("input.modeTerminal"),
         QStringLiteral("input.modeAgent"), QStringLiteral("input.toggle"),
         QStringLiteral("agent.planToggle"),
+        // ----- #AG7R group 5, owner 2026-09-20 -------------------------------------------------
+        // "group 5: dont let the agent do 1, 4, 6, 7. others are ok" — answering a list of seven
+        // this table had held back. Four stay off and are named in `refusedByTheOwner()` below.
+        // Everything else the review found is here, and most of it is *not* undoable: the line
+        // this table was built on has moved, deliberately, by the person whose app it is.
+        //
+        // The layout. Moving it back is the undo, and a new tab or window closes with Ctrl+W
+        // exactly as a new pane does — which is the argument that put the splits here first.
+        QStringLiteral("tab.new"), QStringLiteral("window.new"),
+        QStringLiteral("tab.moveToNewWindow"), QStringLiteral("pane.moveToNewTab"),
+        QStringLiteral("pane.moveLeft"), QStringLiteral("pane.moveRight"),
+        QStringLiteral("pane.moveUp"), QStringLiteral("pane.moveDown"),
+        // The pane's own turn and its shell. These end work in flight, and three of them destroy
+        // something outright — a compaction cannot be undone, a cleared queue was the person's own
+        // typing, a cleared terminal was what they were reading. They are aimed (paneScopedActions)
+        // so that "stop that pane" means that pane and not whichever one has the focus, and each
+        // says in its notification what it cost (`lossNote`).
+        QStringLiteral("agent.stop"), QStringLiteral("agent.interrupt"),
+        QStringLiteral("agent.continue"), QStringLiteral("agent.recap"),
+        QStringLiteral("agent.newChat"), QStringLiteral("agent.compact"),
+        QStringLiteral("agent.clearQueue"), QStringLiteral("agent.resumeQueue"),
+        QStringLiteral("agent.stopAllSubagents"),
+        QStringLiteral("terminal.interrupt"), QStringLiteral("terminal.clear"),
+        QStringLiteral("terminal.native"), QStringLiteral("pane.restartShell"),
+        QStringLiteral("control.prompt"),
+        // Sharing. The owner overruled the argument that publishing a pane to other people is not
+        // an agent's to start ("others are ok"): `pane.share` opens the share window with
+        // `dialog->show()` and `pane.sharing` opens a pane, so neither blocks — what either leads
+        // to still needs a person to admit a device (#W5N2: no auto-admit), which is the floor the
+        // refusal was protecting and which stands without this table.
+        QStringLiteral("pane.share"), QStringLiteral("pane.sharing"),
+        // The rest of the window and the app.
+        QStringLiteral("app.update"), QStringLiteral("project.detach"),
+        QStringLiteral("hints.reset"), QStringLiteral("conversations.rebuild"),
+        QStringLiteral("helper.ask"), QStringLiteral("ssh.splitSameHost"),
+    };
+    return keys;
+}
+
+// Named, rather than merely absent, so that the four the owner said no to on 2026-09-20 cannot be
+// added back by someone reading the table as a list of oversights. #AG7R group 5: "dont let the
+// agent do 1, 4, 6, 7."
+//
+//  1. `voice.toggle` switches a microphone on. The cost of a wrong "on" is recording a room that
+//     did not consent; the benefit is saving one click.
+//  4. The human/agent control handoff. An agent granting itself control is circular: the thing
+//     being decided is whether the agent is in charge.
+//  6. `keybindings.clearOverrides` wipes every custom shortcut at once and the overrides file is
+//     the only copy. This is not "agents may not change hotkeys" — `set_keybinding` has let them
+//     change one deliberately since #GMCF. A bulk wipe is a different act.
+//  7. `history.clear` deletes the prompt history every pane recalls with Up. Irreversible, and it
+//     is the person's record rather than the app's state.
+const QSet<QString> &refusedByTheOwner() {
+    static const QSet<QString> keys = {
+        QStringLiteral("voice.toggle"),
+        QStringLiteral("control.human"), QStringLiteral("control.program.agent"),
+        QStringLiteral("control.program.human"), QStringLiteral("program.delegate"),
+        QStringLiteral("keybindings.clearOverrides"),
+        QStringLiteral("history.clear"),
+    };
+    return keys;
+}
+
+// Allowed by the owner on 2026-09-20 and still off, for a reason that is not his: the handler
+// enters a **nested event loop** and does not come back until the person answers a dialog. That is
+// #AG7R group 4's finding and it is mechanical — `AppCommands::execute()` calls `item.run()` inline
+// and the window returns its answer synchronously, so `run()` blocking means the
+// `app_command_result` is never sent, §30.3's 20-second deadline expires, the agent is told
+// `no_reply`, and the window sits frozen behind a dialog nobody asked for. Marking these would
+// hand the person a hang instead of the feature.
+//
+// They go on as soon as group 4's non-blocking pass lands (`open()` with a finished-callback rather
+// than `exec()`), and not before. Tracked on #AG7R; this set is the list that pass has to clear.
+const QSet<QString> &waitingOnTheModalPass() {
+    static const QSet<QString> keys = {
+        // startFreshWindowSet() asks "Start a fresh window set?" with QMessageBox::question and
+        // waits for the answer (src/RelayWindow.h).
+        QStringLiteral("windows.fresh"),
+        // closePane() asks before closing a Preview pane with unsaved edits (#SEJ2) — only in that
+        // one case, but the executor cannot tell in advance which pane is dirty, and "usually
+        // returns" is not a property a deadline can be built on. It also still closes the *focused*
+        // leaf rather than a named pane, which `pane.close` needs before it means anything an agent
+        // can aim.
+        QStringLiteral("pane.close"),
     };
     return keys;
 }
@@ -133,6 +225,19 @@ const QSet<QString> &paneScopedActions() {
         QStringLiteral("agent.requests"), QStringLiteral("agent.thinkingPanel"),
         QStringLiteral("conversations.open"), QStringLiteral("find.inView"),
         QStringLiteral("links.step"), QStringLiteral("agent.screenshotPane"),
+        // #AG7R group 5: the turn and shell controls the owner allowed. These are the keys for
+        // which aiming matters most — "stop that pane" landing on whichever pane had the focus is
+        // how an agent stops the wrong turn — so every one of them is named here, not only the
+        // reversible ones.
+        QStringLiteral("agent.stop"), QStringLiteral("agent.interrupt"),
+        QStringLiteral("agent.continue"), QStringLiteral("agent.recap"),
+        QStringLiteral("agent.newChat"), QStringLiteral("agent.compact"),
+        QStringLiteral("agent.clearQueue"), QStringLiteral("agent.resumeQueue"),
+        QStringLiteral("agent.stopAllSubagents"),
+        QStringLiteral("terminal.interrupt"), QStringLiteral("terminal.clear"),
+        QStringLiteral("terminal.native"), QStringLiteral("pane.restartShell"),
+        QStringLiteral("control.prompt"),
+        QStringLiteral("pane.share"), QStringLiteral("pane.sharing"),
     };
     return keys;
 }
@@ -144,15 +249,53 @@ bool actionIsRead(const QString &key) {
 }
 
 bool actionIsAgentSafe(const QString &key) {
-    // Owner decision 2 (2026-09-20), the line being "undoable in one click". Everything not named
-    // in the two sets above is off, including every action added after they were written: opt-in
-    // has to mean that adding an action does not widen what an agent may do.
+    // Owner decision 2 (2026-09-20). Everything not named in the two sets above is off, including
+    // every action added after they were written: opt-in has to mean that adding an action does not
+    // widen what an agent may do.
     //
     // `palette.agent` used to be here and is gone: src/Keymap.h:176 migrates it to `palette.open`
     // and it exists nowhere else in the tree, so the table was naming a key that could never
     // arrive (#AG7R group 1).
-    return actionIsRead(key) || reversibleWriteActions().contains(key)
+    //
+    // The two refusals are tested *first* and not merely left out of the sets. Left out, a key is
+    // off because nobody put it in; named, it is off because somebody decided, and a later reader
+    // adding it to the set above gets a contradiction they have to resolve rather than a silent
+    // widening. That is the whole point of an opt-in table, and both lists cost one lookup.
+    if (refusedByTheOwner().contains(key) || waitingOnTheModalPass().contains(key)) return false;
+    return actionIsRead(key) || writingActions().contains(key)
         || isOnePickedModel(key) || isOnePickedEffort(key);
+}
+
+QString lossNote(const QString &key) {
+    // What a destructive action cost, in the person's terms, for the notification that announces
+    // it (§30.6). Decision 2 used to guarantee that every agent action was undoable in one click,
+    // so "Agent ran X" was enough; #AG7R group 5 ended that guarantee, and this is what replaced
+    // it. A key with no entry here is one whose label already says what happened.
+    static const QHash<QString, QString> lost = {
+        {QStringLiteral("agent.compact"),
+         QStringLiteral("The detail the compaction dropped is gone; the conversation carries on from the summary.")},
+        {QStringLiteral("agent.clearQueue"),
+         QStringLiteral("The prompts waiting in that pane were removed. They were yours, and they are not recoverable.")},
+        {QStringLiteral("terminal.clear"),
+         QStringLiteral("That pane's scrollback was cleared. The session log still holds the text.")},
+        {QStringLiteral("agent.newChat"),
+         QStringLiteral("The conversation that pane was holding is saved and can be reopened from Sessions.")},
+        {QStringLiteral("agent.stop"),
+         QStringLiteral("The turn that pane was running was stopped part-way.")},
+        {QStringLiteral("agent.stopAllSubagents"),
+         QStringLiteral("Every subagent of that pane was stopped; work in flight is lost.")},
+        {QStringLiteral("pane.restartShell"),
+         QStringLiteral("That pane's shell was restarted, so anything it was running is gone.")},
+        {QStringLiteral("terminal.interrupt"),
+         QStringLiteral("An interrupt was sent to whatever that pane was running.")},
+        {QStringLiteral("project.detach"),
+         QStringLiteral("The tab is no longer attached to a project. Attach it again from the Actions palette.")},
+        {QStringLiteral("app.update"),
+         QStringLiteral("Relay is updating and will restart, which ends every shell and agent in every window.")},
+        {QStringLiteral("pane.share"),
+         QStringLiteral("The share window is open. Nobody joins until you admit them.")},
+    };
+    return lost.value(key);
 }
 
 bool actionIsPaneScoped(const QString &key) {
@@ -162,7 +305,7 @@ bool actionIsPaneScoped(const QString &key) {
 QStringList agentSafeActionKeys() {
     QStringList keys;
     for (const QString &key : readActions()) keys << key;
-    for (const QString &key : reversibleWriteActions()) keys << key;
+    for (const QString &key : writingActions()) keys << key;
     // Sorted: a QSet iterates in whatever order it likes, and the catalog must not reshuffle
     // between two reads of the same app (§30.2 — nothing is cached across a refresh, so a
     // reordered array reads as a changed app).
@@ -737,9 +880,13 @@ QJsonObject AppCommands::execute(const QJsonObject &command, const QString &who)
         change.who = who;
         change.turnId = command.value(QStringLiteral("turn_id")).toString();
         // No Undo on an action: what it did is its own to take back, and offering a button that
-        // cannot keep its promise is worse than offering none (§30.6).
+        // cannot keep its promise is worse than offering none (§30.6). What the note *must* do,
+        // since #AG7R group 5 put actions here that destroy things, is say what it cost — so a
+        // destructive key's own sentence replaces the action's blurb, which describes the button
+        // rather than what just happened to you (`lossNote`).
+        const QString cost = appcommands::lossNote(key);
         change.noteId = NotificationCenter::instance().post(
-            QStringLiteral("Agent ran %1").arg(change.label), item.detail);
+            QStringLiteral("Agent ran %1").arg(change.label), cost.isEmpty() ? item.detail : cost);
         m_changes.append(change);
         while (m_changes.size() > kMaxChanges) m_changes.removeFirst();
 

@@ -6059,9 +6059,15 @@ a pane (`pane.splitRight`, `…Down`, `…Left`, `…Up`), putting a closed one 
 `menu:closed` and the `closed:<id>` entry for one named pane, tab or window of the last 25), and
 moving the focus between panes, tabs and windows.
 
-**Actions that are undoable in one click but still write something.** These stay behind the
-toggle: re-reading a file already on disk (`keybindings.reload`, `theme.reload`, `agents.reload` —
-an edit made since the last read takes effect), `pane.equalize` (every splitter in the tab moves;
+**Actions that write something.** These stay behind the toggle. Until 2026-09-20 this set was
+called "undoable in one click" after decision 2's founding line, and it is not that any more: the
+owner's answer to card #AG7R group 5 — "dont let the agent do 1, 4, 6, 7. others are ok" — put
+things in it that cannot be undone at all. The set is `appcommands::writingActions()` (named
+`reversibleWriteActions()` before that answer), and what replaced the promise is the notification:
+a destructive action's note says what it cost rather than what the button does
+(`appcommands::lossNote()`, 30.6). It holds: re-reading a file already on disk
+(`keybindings.reload`, `theme.reload`, `agents.reload` — an edit made since the last read takes
+effect), `pane.equalize` (every splitter in the tab moves;
 a drag takes it back), `agent.screenshotPane` (it attaches an image to the pane's next prompt, so
 it changes what the person is about to send), every row button — the ones that test a key,
 refresh, detect or find local servers, and reorder models — and the pane's own pickers: its model
@@ -6075,12 +6081,46 @@ matched by prefix, like `closed:<id>`: the id is a stored preset and the level i
 provider offers, so there is no set of them to write down. Being named by the policy is not being
 in the catalog — an id the pane does not have is in no submenu and is still `unknown_action`.
 
+And, since the group 5 answer: the layout (`tab.new`, `window.new`, `tab.moveToNewWindow`,
+`pane.moveToNewTab`, `pane.moveLeft/Right/Up/Down` — moving it back is the undo, and a new tab or
+window closes with Ctrl+W exactly as a new pane does); the pane's turn and its shell (`agent.stop`,
+`agent.interrupt`, `agent.continue`, `agent.recap`, `agent.newChat`, `agent.compact`,
+`agent.clearQueue`, `agent.resumeQueue`, `agent.stopAllSubagents`, `terminal.interrupt`,
+`terminal.clear`, `terminal.native`, `pane.restartShell`, `control.prompt` — all aimed, so "stop
+that pane" means that pane and not whichever has the focus); sharing (`pane.share`, `pane.sharing`
+— the share window opens with `show()`, and nobody joins until a person admits them, which is the
+floor this refusal was protecting and which stands without it); and the rest of the app
+(`app.update`, `project.detach`, `hints.reset`, `conversations.rebuild`, `helper.ask`,
+`ssh.splitSameHost`).
+
 `agent_safe` is `false` on everything else — including every action added after the table was
 written, which is what opt-in has to mean: resetting to defaults, removing a key or a server,
-deleting a session, closing a pane (which takes away whatever that pane was holding), pairing and
-sharing, quit and restart. The table lives in `appcommands::actionIsAgentSafe()`, which is the
-read set (`appcommands::actionIsRead()`) plus the writing one; an `ActionItem` may also carry its
-own `agentSafe`, and either is enough.
+deleting a session. The table lives in `appcommands::actionIsAgentSafe()`, which is the read set
+(`appcommands::actionIsRead()`) plus the writing one; an `ActionItem` may also carry its own
+`agentSafe`, and either is enough.
+
+Two groups inside that `false` are **named** rather than merely left out, because a key that is off
+because somebody decided reads the same as a key that is off because nobody got to it, and the
+difference matters when the next person edits the table.
+
+`appcommands::refusedByTheOwner()` is the owner's four, 2026-09-20: `voice.toggle` (it switches a
+microphone on, and the cost of a wrong "on" is recording a room that did not consent);
+`control.human`, `control.program.agent`, `control.program.human` and `program.delegate` (the
+human/agent control handoff — an agent granting itself control is circular);
+`keybindings.clearOverrides` (it wipes every custom shortcut at once and the overrides file is the
+only copy — note this is not "agents may not change hotkeys", which `set_keybinding` has allowed
+one at a time since #GMCF); and `history.clear` (the prompt history every pane recalls with Up,
+which is the person's record rather than the app's state).
+
+`appcommands::waitingOnTheModalPass()` is the two the owner *allowed* and that are off for a
+reason that is not his: `windows.fresh` and `pane.close` enter a **nested event loop** —
+`startFreshWindowSet()` asks before discarding the window set, `closePane()` asks before closing a
+Preview pane with unsaved edits (#SEJ2). `AppCommands::execute()` calls `item.run()` inline and the
+window answers synchronously, so a `run()` that blocks means the `app_command_result` is never
+sent: 30.3's deadline expires, the agent is told `no_reply`, and the window sits frozen behind a
+dialog nobody asked for. They go on when those handlers open their dialogs without waiting
+(`open()` with a finished-callback rather than `exec()`), and not before. `pane.close` needs one
+more thing first — it still closes the *focused* leaf rather than a named pane.
 
 **A safe key the Actions palette has no row for is still runnable.** Twelve of the table's keys —
 `pane.focusUp/Down/Left/Right`, `window.next`, `window.previous`, `conversations.open`,

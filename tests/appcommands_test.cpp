@@ -213,6 +213,18 @@ QList<ActionItem> actions(State *state) {
         item.run = [state] { state->ran << QStringLiteral("theme.reload"); };
         items << item;
     }
+    {
+        // #AG7R group 5: allowed by the owner and *not* undoable, which is the case the
+        // notification had to grow a sentence for.
+        ActionItem item;
+        item.key = QStringLiteral("agent.compact");
+        item.section = QStringLiteral("Agent");
+        item.label = QStringLiteral("Compact conversation");
+        item.detail = QStringLiteral("Summarize the conversation so far");
+        item.agentSafe = relay::appcommands::actionIsAgentSafe(item.key);
+        item.run = [state] { state->ran << QStringLiteral("agent.compact"); };
+        items << item;
+    }
     return items;
 }
 
@@ -223,6 +235,12 @@ QString registryLabel(const QString &key) {
     static const QMap<QString, QString> registered = {
         {QStringLiteral("pane.focusLeft"), QStringLiteral("Focus pane to the left")},
         {QStringLiteral("help.shortcuts"), QStringLiteral("Actions: every action and the keys it answers to")},
+        // Registered and *not* in the safe table, which is the third answer. It was
+        // `agent.interrupt` until 2026-09-20, when the owner's #AG7R group 5 answer made that one
+        // safe — so the example moved to a key that is still off rather than the assertion being
+        // relaxed. `agent.provider` opens the advanced endpoint settings and nobody has asked for
+        // it to be an agent's.
+        {QStringLiteral("agent.provider"), QStringLiteral("Provider and API keys")},
         {QStringLiteral("agent.interrupt"), QStringLiteral("Interrupt the agent")},
     };
     return registered.value(key);
@@ -510,6 +528,63 @@ private Q_SLOTS:
         QCOMPARE(state.ran.size(), 1);
     }
 
+    // #AG7R group 5, owner 2026-09-20: "dont let the agent do 1, 4, 6, 7. others are ok".
+    // The four he named stay off; the rest of the list goes on, most of it not undoable at all.
+    void theOwnersGroupFiveWideningIsOnAndHisFourRefusalsAreNot() {
+        for (const QString &key : {QStringLiteral("tab.new"), QStringLiteral("window.new"),
+                                   QStringLiteral("tab.moveToNewWindow"), QStringLiteral("pane.moveToNewTab"),
+                                   QStringLiteral("pane.moveLeft"), QStringLiteral("pane.moveRight"),
+                                   QStringLiteral("pane.moveUp"), QStringLiteral("pane.moveDown"),
+                                   QStringLiteral("agent.stop"), QStringLiteral("agent.interrupt"),
+                                   QStringLiteral("agent.continue"), QStringLiteral("agent.recap"),
+                                   QStringLiteral("agent.newChat"), QStringLiteral("agent.compact"),
+                                   QStringLiteral("agent.clearQueue"), QStringLiteral("agent.resumeQueue"),
+                                   QStringLiteral("agent.stopAllSubagents"), QStringLiteral("terminal.interrupt"),
+                                   QStringLiteral("terminal.clear"), QStringLiteral("terminal.native"),
+                                   QStringLiteral("pane.restartShell"), QStringLiteral("control.prompt"),
+                                   QStringLiteral("pane.share"), QStringLiteral("pane.sharing"),
+                                   QStringLiteral("app.update"), QStringLiteral("project.detach"),
+                                   QStringLiteral("hints.reset"), QStringLiteral("conversations.rebuild"),
+                                   QStringLiteral("helper.ask"), QStringLiteral("ssh.splitSameHost")}) {
+            QVERIFY2(relay::appcommands::actionIsAgentSafe(key), qPrintable(key));
+            // None of it may leak into the read set: each one changes something, so the writes
+            // toggle has to keep gating it (group 7).
+            QVERIFY2(!relay::appcommands::actionIsRead(key), qPrintable(key));
+        }
+        // 1, 4, 6 and 7. Named in the table rather than merely absent, so that adding one back is
+        // a contradiction a reader has to resolve.
+        for (const QString &key : {QStringLiteral("voice.toggle"),
+                                   QStringLiteral("control.human"), QStringLiteral("control.program.agent"),
+                                   QStringLiteral("control.program.human"), QStringLiteral("program.delegate"),
+                                   QStringLiteral("keybindings.clearOverrides"),
+                                   QStringLiteral("history.clear")})
+            QVERIFY2(!relay::appcommands::actionIsAgentSafe(key), qPrintable(key));
+    }
+
+    // Allowed by the owner and still off, for a reason that is not his: the handler enters a nested
+    // event loop and `execute()` runs it inline, so the result would never be sent and §30.3's
+    // deadline would expire with the window frozen behind a dialog (#AG7R group 4). These go on
+    // when that pass lands, and this test is what fails to remind whoever lands it.
+    void theTwoActionsThatWouldHangAreStillOff() {
+        QVERIFY(!relay::appcommands::actionIsAgentSafe(QStringLiteral("windows.fresh")));
+        QVERIFY(!relay::appcommands::actionIsAgentSafe(QStringLiteral("pane.close")));
+    }
+
+    // Decision 2 promised every agent action was undoable in one click, so "Agent ran X" was
+    // enough. Group 5 ended that, so the note has to say what it cost instead of describing the
+    // button (#AG7R group 5).
+    void aDestructiveActionSaysInTheNotificationWhatItCost() {
+        QVERIFY(run({{QStringLiteral("id"), QStringLiteral("r1")},
+                     {QStringLiteral("command"), QStringLiteral("run_action")},
+                     {QStringLiteral("key"), QStringLiteral("agent.compact")}})
+                    .value(QStringLiteral("ok")).toBool());
+        const auto note = relay::NotificationCenter::instance().entries().first();
+        QCOMPARE(note.title, QStringLiteral("Agent ran Compact conversation"));
+        QVERIFY2(note.body.contains(QStringLiteral("is gone")), qPrintable(note.body));
+        // and not the palette blurb, which describes the button rather than the loss
+        QVERIFY(!note.body.contains(QStringLiteral("Summarize the conversation")));
+    }
+
     // The owner's report, 2026-09-20: "the sessions helper can't open panes because it says it's
     // unsafe". A split opens an empty pane and the × in its header takes it back in one click, so
     // it is on the reversible side of decision 2's line; closing a pane, which takes away what the
@@ -559,7 +634,7 @@ private Q_SLOTS:
         writes = true;
         QCOMPARE(run({{QStringLiteral("id"), QStringLiteral("r1")},
                       {QStringLiteral("command"), QStringLiteral("run_action")},
-                      {QStringLiteral("key"), QStringLiteral("agent.interrupt")}})
+                      {QStringLiteral("key"), QStringLiteral("agent.provider")}})
                      .value(QStringLiteral("error")).toString(),
                  QStringLiteral("not_agent_safe"));
         // Neither the catalog nor the registry: still nothing to run.
@@ -583,7 +658,11 @@ private Q_SLOTS:
         QVERIFY(rowOf(block, QStringLiteral("actions"), QStringLiteral("help.shortcuts"))
                     .value(QStringLiteral("agent_safe")).toBool());
         // Not safe, so not added here: the fallback finds it, the catalog does not advertise it.
-        QVERIFY(rowOf(block, QStringLiteral("actions"), QStringLiteral("agent.interrupt")).isEmpty());
+        QVERIFY(rowOf(block, QStringLiteral("actions"), QStringLiteral("agent.provider")).isEmpty());
+        // …and one the owner *did* allow in group 5 is advertised, from the registry, like the
+        // focus keys above it — the same fallback, the other side of the policy.
+        QVERIFY(rowOf(block, QStringLiteral("actions"), QStringLiteral("agent.interrupt"))
+                    .value(QStringLiteral("agent_safe")).toBool());
         // A safe key with a palette row is listed once, from the palette, not twice.
         int settings = 0;
         for (const auto &value : block.value(QStringLiteral("actions")).toArray())
