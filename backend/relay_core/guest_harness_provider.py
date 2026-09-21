@@ -569,9 +569,12 @@ def make_harness(guest_id: str, probe: bool = False):
     return factory()
 
 
+_SKILLS_UNSET = object()
+
+
 def start_provider(preset_id: str, request: dict, workspace: str,
                    stall_timeout: float = DEFAULT_STALL_TIMEOUT,
-                   config: ProviderConfig | None = None) -> "HarnessProvider":
+                   config: ProviderConfig | None = None, *, skill_index=_SKILLS_UNSET) -> "HarnessProvider":
     """Build and start the harness a `configure`/`set_model` asked for, and wrap it as a provider.
 
     Every failure is a `ValueError`, which is what the worker's protocol loop already turns into an
@@ -584,14 +587,17 @@ def start_provider(preset_id: str, request: dict, workspace: str,
     options = guest_options(request.get("guest"))
     harness = make_harness(guest_id)
     from .guest_board_bridge import Bridge
-    from .guest_instructions import GUEST_INSTRUCTIONS
+    from .guest_instructions import build_instructions
     from .board_tools import find_board_root
     bridge = Bridge(available=find_board_root(workspace) is not None)
     try:
+        instructions = (build_instructions(request.get("skills"), workspace)
+                        if skill_index is _SKILLS_UNSET else
+                        build_instructions(None, workspace, skill_index=skill_index))
         started = harness.start(cwd=workspace, model=options["model"] or None,
                                 resume=options["resume"], fork=options["fork"],
                                 permissions=options["permissions"], effort=options["effort"],
-                                board_bridge=bridge.descriptor, instructions=GUEST_INSTRUCTIONS)
+                                board_bridge=bridge.descriptor, instructions=instructions)
     except HarnessError as exc:
         bridge.close()
         _close_quietly(harness)

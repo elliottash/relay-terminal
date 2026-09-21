@@ -315,7 +315,8 @@ class SessionCommands:
         restart_guest = guest_id is not None and guest_provider is None
         if restart_guest:
             guest_provider = guest_harness_provider.start_provider(
-                preset_id, request, str(agent.executor.workspace.root), agent.stall_timeout_s)
+                preset_id, request, str(agent.executor.workspace.root), agent.stall_timeout_s,
+                skill_index=agent.executor.skills)
         if guest_provider is not None:
             config = guest_provider.config
         preset = resolve_preset(preset_id, config.base_url, config.model)

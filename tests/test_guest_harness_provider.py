@@ -201,7 +201,8 @@ class StartTests(unittest.TestCase):
                     with tempfile.TemporaryDirectory() as cwd, \
                          mock.patch.object(ghp, "make_harness", return_value=harness):
                         provider = ghp.start_provider("guest:" + guest,
-                            {"guest": {"resume": session, "fork": fork}}, cwd)
+                            {"guest": {"resume": session, "fork": fork},
+                             "skills": {"enabled": False}}, cwd)
                         try:
                             self.assertEqual(harness.instructions, GUEST_INSTRUCTIONS)
                             for prompt in ("hello", "next turn"):
@@ -216,6 +217,63 @@ class StartTests(unittest.TestCase):
                             session = provider.session_id
                         finally:
                             provider.close()
+
+    def test_relay_global_skills_reach_both_guests_on_start_resume_and_fork(self):
+        with tempfile.TemporaryDirectory() as home:
+            root = Path(home)
+            paths = []
+            for folder in (".warp/skills/warp-global", ".claude/skills/synced/library/claude-global"):
+                path = root / folder / "SKILL.md"
+                path.parent.mkdir(parents=True)
+                path.write_text("---\nname: example\ndescription: Use this for global work\n---\nFull instructions")
+                paths.append(path)
+            with mock.patch.dict(os.environ, {"HOME": home, "XDG_CONFIG_HOME": home + "/config",
+                                              "XDG_DATA_HOME": home + "/data"}):
+                for guest in ("claude", "codex"):
+                    for resume, fork in ((None, False), ("existing", False), ("existing", True)):
+                        with self.subTest(guest=guest, resume=resume, fork=fork):
+                            harness = FakeHarness([], guest=guest)
+                            with mock.patch.object(ghp, "make_harness", return_value=harness):
+                                provider = ghp.start_provider("guest:" + guest,
+                                    {"guest": {"resume": resume, "fork": fork}}, home)
+                            try:
+                                for path in paths:
+                                    self.assertIn(str(path), harness.instructions)
+                                self.assertIn("Use this for global work", harness.instructions)
+                                self.assertNotIn("Full instructions", harness.instructions)
+                                self.assertNotIn("load_skill", harness.instructions)
+                            finally:
+                                provider.close()
+
+    def test_guest_skill_catalog_respects_configured_dirs_exclusions_and_disable(self):
+        from relay_core.guest_instructions import GUEST_INSTRUCTIONS, build_instructions
+        with tempfile.TemporaryDirectory() as home:
+            for name in ("included", "excluded"):
+                path = Path(home) / name / "SKILL.md"
+                path.parent.mkdir()
+                path.write_text("---\nname: " + name + "\ndescription: A trigger\n---\nBody")
+            instructions = build_instructions({"dirs": [home], "exclude": ["excluded"]}, home)
+            self.assertIn(str(Path(home) / "included" / "SKILL.md"), instructions)
+            self.assertNotIn('"name": "excluded"', instructions)
+            self.assertEqual(build_instructions({"enabled": False}, home), GUEST_INSTRUCTIONS)
+            self.assertEqual(build_instructions({"dirs": []}, home), GUEST_INSTRUCTIONS)
+
+    def test_existing_pane_skill_index_is_used_instead_of_rediscovery(self):
+        from relay_core.skills import SkillIndex, Skill
+        from relay_core.guest_instructions import GUEST_INSTRUCTIONS
+        skill = Skill("pane-only", "Pane skill", "Use the pane skill", Path("/custom/pane-only"))
+        for index in (None, SkillIndex(skills={skill.id: skill})):
+            harness = FakeHarness([], guest="codex")
+            with mock.patch.object(ghp, "make_harness", return_value=harness), \
+                 mock.patch("relay_core.skills.from_request", side_effect=AssertionError("rediscovery")):
+                provider = ghp.start_provider("guest:codex", {}, "/tmp", skill_index=index)
+            try:
+                if index is None:
+                    self.assertEqual(harness.instructions, GUEST_INSTRUCTIONS)
+                else:
+                    self.assertIn("/custom/pane-only/SKILL.md", harness.instructions)
+            finally:
+                provider.close()
 
     def test_start_provider_passes_the_effort_and_keeps_what_the_guest_says(self):
         harness = FakeHarness([], session_id="s", model="m")

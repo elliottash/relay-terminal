@@ -2432,7 +2432,8 @@ class Agent:
                              "permissions": PLAN_GUEST_PERMISSIONS}}
         try:
             provider = ghp.start_provider(preset_id, request, str(self.executor.workspace.root),
-                                          self.stall_timeout_s, config=target.config)
+                                          self.stall_timeout_s, config=target.config,
+                                          skill_index=self.executor.skills)
         except ValueError as exc:
             logs.event(_log, "plan_guest_unavailable", level_name="error", session=self.session_id,
                        turn=turn_id, guest=guest_id_of(preset_id), error=str(exc)[:200])
