@@ -1656,7 +1656,9 @@ do not. The conversation is one across all four.
 **`AppTools`, on every agent.** `backend/relay_core/app_tools.py` is to the app what `board_tools.py`
 is to the board: attached as `agent.app` beside `agent.board`, on the helper worker and on every
 pane agent alike. `app_option_list` / `_get` / `_set`, `app_action_list` / `_run`,
-`app_sessions_search`, `app_open`, `app_changes` and `app_undo`. What differs between a pane agent
+`app_panes`, `app_sessions_search`, `app_open`, `app_changes` and `app_undo`. A pane-scoped action
+is aimed: `app_action_run` takes an optional `pane`, which defaults to the asking agent's own pane
+(§30.3, #AG7R), and `app_panes` is where the ids are read. What differs between a pane agent
 and the helper is the brief and the catalog's markers, never the tool list. The reads are answered
 by the worker on its own — from the catalog the GUI sent, or, for sessions, the protocol-14 index,
 which the Sessions pane itself never queries — so a question about the app costs no round trip.
