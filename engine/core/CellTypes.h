@@ -97,6 +97,11 @@ struct Line {
     void appendCluster(Cell *c, const char32_t *cps, int n);
     // Text of columns [from, to) with trailing spaces trimmed.
     QString text(int from = 0, int to = -1) const;
+    // Text of columns [from, to) exactly as it was printed: the trailing-space trim of text()
+    // is not applied, so a row that soft-wrapped at a space still ends in one. Columns the
+    // terminal never wrote to are still dropped from the end. This is what a selection copies
+    // for a row the next row wraps out of (#8SBD); everything else wants text().
+    QString untrimmedText(int from = 0, int to = -1) const;
 };
 
 enum class CursorShape : uint8_t { Block, Underline, Bar };

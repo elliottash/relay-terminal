@@ -633,6 +633,53 @@ private slots:
         QVERIFY(!h.vt->hasSelection());
     }
 
+    // #8SBD: copying across a soft wrap dropped the space the line wrapped at, so "the quick "
+    // and "brown" arrived in the clipboard as "quickbrown". The join is character-exact: the row
+    // the next row wraps out of is copied without the trailing-space trim, the last row of the
+    // selection still gets it, and a hard break is still a newline.
+    void selectionKeepsThePrintedSpaceAtASoftWrap()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core, 4, 10);
+        h.feed("the quick brown");   // wraps after the space in the last column
+        h.feed("\r\nnext");          // and then a real line break
+        ViewportFrame f = h.frame();
+        QVERIFY(!f.lines[0].continuation);
+        QVERIFY2(f.lines[1].continuation, "premise: row 1 is the soft wrap of row 0");
+        QVERIFY(!f.lines[2].continuation);
+
+        h.vt->selectionBegin(0, 0, SelectionUnit::Cell, false);
+        h.vt->selectionExtend(1, 4);
+        QCOMPARE(h.vt->selectedText(), QStringLiteral("the quick brown"));
+        // Past the end of the wrapped row: the last row of a selection is still trimmed, so the
+        // copy does not carry the grid's padding.
+        h.vt->selectionExtend(1, 9);
+        QCOMPARE(h.vt->selectedText(), QStringLiteral("the quick brown"));
+        // A hard break stays a newline, and the row before it is trimmed as before.
+        h.vt->selectionExtend(2, 3);
+        QCOMPARE(h.vt->selectedText(), QStringLiteral("the quick brown\nnext"));
+        // Starting inside the first row keeps the space just the same.
+        h.vt->selectionBegin(0, 4, SelectionUnit::Cell, false);
+        h.vt->selectionExtend(1, 4);
+        QCOMPARE(h.vt->selectedText(), QStringLiteral("quick brown"));
+    }
+
+    // #8SBD, the other half of the rule: when the wrap falls mid-token nothing is inserted, so a
+    // URL or path too long for the row still copies whole.
+    void selectionAcrossAMidTokenWrapJoinsWithNothing()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core, 4, 10);
+        h.feed("https://example.com/a"); // "https://ex" / "ample.com/" / "a"
+        ViewportFrame f = h.frame();
+        QVERIFY2(f.lines[1].continuation && f.lines[2].continuation,
+                 "premise: the URL wraps twice, mid-token both times");
+
+        h.vt->selectionBegin(0, 0, SelectionUnit::Cell, false);
+        h.vt->selectionExtend(2, 0);
+        QCOMPARE(h.vt->selectedText(), QStringLiteral("https://example.com/a"));
+    }
+
     void searchScrollback()
     {
         QFETCH_GLOBAL(QString, core);

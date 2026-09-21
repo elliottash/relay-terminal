@@ -1447,13 +1447,20 @@ QString LibVtermCore::selectedText() const
             from = std::min(d->selStart.col, d->selEnd.col);
             to = std::max(d->selStart.col, d->selEnd.col) + 1;
         }
-        out += l->text(from, to);
-        if (id < d->selEnd.line) {
+        // #8SBD: a row the next row soft-wrapped out of is joined with nothing, so the copied
+        // text keeps exactly what was printed at the wrap — the space prose wrapped at, and
+        // nothing at all when the wrap fell mid-token, which is what keeps a wrapped URL or path
+        // whole. That means reading such a row *without* text()'s trailing-space trim; the last
+        // row of the selection still gets it, so a selection never ends in padding.
+        bool wrapped = false;
+        if (id < d->selEnd.line && !d->selRect) {
             Line tmp2;
             const Line *next = d->peekLine(id + 1, &tmp2);
-            if (d->selRect || !next || !next->continuation)
-                out += QLatin1Char('\n');
+            wrapped = next && next->continuation;
         }
+        out += wrapped ? l->untrimmedText(from, to) : l->text(from, to);
+        if (id < d->selEnd.line && !wrapped)
+            out += QLatin1Char('\n');
     }
     return out;
 }
