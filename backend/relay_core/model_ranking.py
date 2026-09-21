@@ -249,6 +249,28 @@ class Ranking:
                 if name not in self.models:
                     problems.append(f"{provider}'s {cls} pick is {name!r}, which is not a name in "
                                     f"the Models table")
+                elif provider in P.PRESETS and P.provider_model_id(provider, name) is None:
+                    problems.append(f"{provider}'s {cls} pick is {name!r}, which is not a model "
+                                    f"{provider} serves; that class falls back to the Models table")
+
+        # A Levels cell is keyed by name, and a name can be served by two providers with two
+        # vocabularies — `gpt-5.6-luna` takes `max` through codex and stops at `xhigh` through the
+        # OpenAI API — so a cell is wrong only when *no* provider that serves the model has that
+        # level. Where one does, `presets.nearest_effort` maps the cell onto whichever provider is
+        # about to run it, which is the whole reason the table can be keyed by name at all.
+        for name in sorted(self.levels):
+            if name not in self.models:
+                continue                    # already reported above
+            offered = set(P.levels_for_name(name))
+            for guest_id, models in _GUEST_MODEL_IDS.items():
+                if any(P.model_name(f"guest:{guest_id}", model) == name for model in models):
+                    offered |= set(_GUEST_LEVELS.get(guest_id, ()))
+            if not offered:
+                continue                    # a model with no knob anywhere ignores its row
+            for cls, level in sorted(self.levels[name].items()):
+                if level not in offered:
+                    problems.append(f"{name}'s {cls} level is {level!r}, which no provider that "
+                                    f"serves it offers ({', '.join(sorted(offered))})")
 
         guest_ids = {f"guest:{guest}" for guest in ("claude", "codex")}
         for preset_id in sorted(self.providers):
@@ -283,6 +305,13 @@ class Ranking:
 # a list of eight strings, and the test that runs `check()` is what keeps the two in step.
 _GUEST_MODEL_IDS = {"claude": ("fable", "opus", "sonnet", "haiku"),
                     "codex": ("gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")}
+# And the level words each CLI names (`guest_harness_claude.EFFORTS`,
+# `guest_harness_codex.EFFORTS`), for the same reason and the same check: a Levels cell saying
+# `xhigh` for `claude-opus-5` is right because Claude Code has an xhigh, even though Anthropic's
+# own compat layer has no knob at all. Codex narrows its list per model; the union is what a cell
+# is checked against, so a level one codex model does not have is the CLI's to refuse.
+_GUEST_LEVELS = {"claude": ("low", "medium", "high", "xhigh", "max"),
+                 "codex": ("low", "medium", "high", "xhigh", "max", "ultra")}
 
 
 # ----- parsing ---------------------------------------------------------------------------------

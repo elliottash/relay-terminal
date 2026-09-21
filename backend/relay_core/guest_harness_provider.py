@@ -33,7 +33,7 @@ import time
 import uuid
 
 from . import guest, logs, questions as questions_mod, tool_labels
-from .presets import model_name, provider_rank, tier_start_efforts
+from .presets import effort_fixed, model_name, provider_rank, tier_start_efforts
 from .guest_harness import (HARNESS_GUESTS, HarnessError, HarnessNotAvailable, HarnessEvent,
                             limit_windows,
                             TOOL_NAMES, chunk_tool_output, map_tool_name, validate_effort,
@@ -457,11 +457,15 @@ def guest_models(guest_id: str) -> list[dict]:
     for row in rows:
         efforts = row.get("efforts") if isinstance(row.get("efforts"), list) else []
         default = row.get("default_effort") if isinstance(row.get("default_effort"), str) else None
-        row["tier_effort"] = tier_start_efforts(efforts, default, guest_id)
         # One model, one name (card #MDL1). The adapters fill this in; an older one, or a row that
         # came from somewhere else, gets it here, so no guest row ever reaches the GUI without it.
         name = row.get("name") or model_name(PRESET_PREFIX + guest_id, row.get("id"))
         row["name"] = row["label"] = name
+        row["tier_effort"] = tier_start_efforts(efforts, default, guest_id, name)
+        # The same key every built-in catalog row carries (presets.effort_fixed): grey the effort
+        # box for a model the CLI says has no levels. A guest is never Relay Free, so the list is
+        # the whole of the question here.
+        row["effort_fixed"] = effort_fixed(efforts)
     return rows
 
 
@@ -513,6 +517,8 @@ def preset_rows() -> list[dict]:
                      # line a provider uses to explain the levels it has *not* got; a guest's
                      # list is its own and leaves nothing out, so there is nothing to say.
                      "efforts": guest_efforts(guest_id, models) if state["installed"] else [],
+                     "effort_fixed": effort_fixed(guest_efforts(guest_id, models)
+                                                  if state["installed"] else []),
                      "effort_note": "", "models": models})
         # The subscription's rolling windows as the guest last reported them to any pane in this
         # worker (`usage_limits`), so a picker opened later still has a figure to show. Absent

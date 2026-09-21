@@ -34,22 +34,24 @@ class PresetTests(unittest.TestCase):
                           {'thinking': {'type': 'enabled'}, 'reasoning_effort': 'low'}))
         self.assertEqual(presets.apply_effort({'reasoning': {'max_tokens': 5, 'exclude': True}}, 'openrouter', 'medium')[0],
                          {'reasoning': {'exclude': True, 'effort': 'medium'}})
-        # A level two others collapse onto keeps the name the provider itself sends, so "high" —
-        # Relay's own default, and what every other picker shows — is never the one dropped
-        # (owner report, 2026-09-18: the roles modal offered three levels and not that one).
+        # A provider offers its own words, and the word offered is the word sent (card #MDL1,
+        # 2026-09-21): there is no second table saying what each one becomes, so "xhigh" is a
+        # level on OpenAI and OpenRouter rather than a label for a stored "max".
         self.assertEqual(presets.effort_levels('kimi'), ['low', 'high', 'max'])
         self.assertEqual(presets.effort_levels('glm'), ['low', 'high', 'max'])
-        self.assertEqual(presets.effort_levels('openrouter'), ['low', 'medium', 'high', 'max'])
+        self.assertEqual(presets.effort_levels('openrouter'), ['low', 'medium', 'high', 'xhigh'])
         self.assertEqual(presets.effort_levels('gemini'), ['low', 'medium', 'high'])
-        for style in presets.EFFORT_MAP:
+        for style in presets.EFFORT_LEVELS:
             offered = presets.effort_levels(style)
-            self.assertEqual(offered, [level for level in presets.EFFORTS if level in offered], style)
+            self.assertEqual(offered, [w for w in presets.EFFORT_LADDER if w in offered], style)
             if style != 'none':
                 self.assertIn('high' if style not in ('gemini', 'relay') else offered[-1], offered, style)
-        self.assertEqual(presets.effort_note('kimi'), 'medium is sent as high.')
-        self.assertEqual(presets.effort_note('gemini'), 'max is sent as high.')
-        self.assertEqual(presets.effort_note('relay'), 'high and max are sent as medium.')
+        # Nothing is silently sent as anything else any more, so the only note left is the one
+        # that is not about vocabulary: Relay Free's ceiling is the gateway's.
+        self.assertEqual(presets.effort_note('kimi'), '')
+        self.assertEqual(presets.effort_note('gemini'), '')
         self.assertEqual(presets.effort_note('openrouter'), '')
+        self.assertIn('gateway', presets.effort_note('relay'))
         self.assertEqual(presets.infer_effort('glm', presets.GLM_EXTRA), 'high')
         self.assertIsNone(presets.apply_effort({'a': 1}, 'kimi', None)[1] or None)
 

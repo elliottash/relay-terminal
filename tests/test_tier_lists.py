@@ -14,6 +14,7 @@ import tempfile
 import unittest
 from unittest import mock
 
+from relay_core import model_ranking as MR
 from relay_core import presets as P
 from relay_core.agent import Agent
 from relay_core.presets import PRESETS
@@ -55,11 +56,18 @@ class ValidationTests(unittest.TestCase):
     def test_every_tier_takes_an_ordered_list_of_model_and_level(self):
         sent = {'main': [{'preset': 'glm-coding', 'model': 'glm-5.3', 'effort': 'high'},
                          {'preset': 'kimi', 'model': 'kimi-k3'}],
-                'high': [{'preset': 'openai', 'model': 'gpt-6-astra', 'effort': 'max'}],
+                'high': [{'preset': 'openai', 'model': 'gpt-6-astra', 'effort': 'xhigh'}],
                 'flash': [{'preset': 'glm-coding', 'model': 'glm-5.3-flash', 'effort': 'low'}],
                 'lite': [{'preset': 'openrouter', 'model': 'google/gemini-3.8-flash'}]}
         self.assertEqual(validate_tiers(sent), sent)
         self.assertEqual(list(validate_tiers(sent)['main'][0]), ['preset', 'model', 'effort'])
+        # A level is its provider's own word now (card #MDL1, 2026-09-21), and `xhigh` above is
+        # the OpenAI API's top. An older client still sends Relay's four; the entry keeps the
+        # level that model has for it rather than a word the endpoint would refuse.
+        older = {'high': [{'preset': 'openai', 'model': 'gpt-6-astra', 'effort': 'max'}]}
+        self.assertEqual(validate_tiers(older)['high'][0]['effort'], 'xhigh')
+        self.assertEqual(validate_tiers({'flash': [{'preset': 'gemini', 'model': 'gemini-3.8-flash',
+                                                    'effort': 'max'}]})['flash'][0]['effort'], 'high')
 
     def test_a_list_drops_what_it_cannot_read_and_never_raises(self):
         table = validate_tiers({'flash': ['junk', None, 7, {'model': 'no preset'},
@@ -70,7 +78,7 @@ class ValidationTests(unittest.TestCase):
                                           {'preset': 'glm', 'model': '  glm-5.3-flash ', 'zzz': 1}],
                                 'turbo': [{'preset': 'glm'}],              # not a tier: ignored
                                 'lite': [], 'high': None})
-        self.assertEqual(table, {'flash': [{'preset': 'kimi', 'model': 'kimi-k3'},   # the bad level is dropped, not the entry
+        self.assertEqual(table, {'flash': [{'preset': 'kimi', 'model': 'kimi-k3'},   # 'ludicrous' is no level of any model: dropped, but not the entry
                                            {'preset': 'glm', 'model': 'glm-5.3-flash'}]})
 
     def test_the_one_object_form_is_a_one_element_list(self):
@@ -417,31 +425,37 @@ class SubagentTests(TurnCase):
         self.assertEqual((self.events[-1]['event'], self.moves()), ('done', [('glm-5.3', 'gpt-6-astra')]))
 
 
-# ----- the provider's own words for a level ------------------------------------------------------
-class EffortLabelTests(unittest.TestCase):
-    def test_labels_per_style(self):
-        self.assertEqual(P.effort_labels('openai'), {'low': 'low', 'medium': 'medium', 'high': 'high', 'max': 'xhigh'})
-        self.assertEqual(P.effort_labels('openrouter')['max'], 'xhigh')
-        self.assertEqual(P.effort_labels('gemini'), {'low': 'low', 'medium': 'medium', 'high': 'high'})
-        self.assertEqual(P.effort_labels('kimi'), {'low': 'low', 'high': 'high', 'max': 'max'})
-        self.assertEqual(P.effort_labels('glm'), {'low': 'low', 'high': 'high', 'max': 'max'})
-        self.assertEqual(P.effort_labels('relay'), {'low': 'low', 'medium': 'medium'})
-        self.assertEqual(P.effort_labels('none'), {})
-        self.assertEqual(P.effort_labels('kimi', ['medium']), {'medium': 'high'})   # what medium is sent as
+# ----- a level is the provider's own word --------------------------------------------------------
+class EffortLevelTests(unittest.TestCase):
+    """`effort_labels` is retired (card #MDL1, 2026-09-21). There is nothing to label: the word
+    the picker offers is the word that is sent, so a row's `efforts` is the whole answer and
+    `effort_fixed` says whether the box may be moved at all."""
 
-    def test_every_row_names_exactly_its_own_levels(self):
+    def test_no_row_carries_a_second_table_of_words(self):
         with mock.patch('relay_core.openrouter_catalog.rows', return_value=[]):
             for preset in PRESETS.values():
                 row = preset.to_dict()
-                self.assertEqual(list(row['effort_labels']), row['efforts'], preset.id)
+                self.assertNotIn('effort_labels', row, preset.id)
+                self.assertEqual(row['efforts'], P.effort_levels(preset.effort_style), preset.id)
                 for model in row['models']:
                     with self.subTest(preset=preset.id, model=model['id']):
-                        self.assertEqual(list(model['effort_labels']), model['efforts'])
-                        for level, label in model['effort_labels'].items():
-                            self.assertEqual(label, P.EFFORT_MAP[preset.effort_style][level])
+                        self.assertNotIn('effort_labels', model)
+                        self.assertIn('effort_fixed', model)
+        self.assertFalse(hasattr(P, 'effort_labels'))
+        self.assertFalse(hasattr(P, 'EFFORT_MAP'))
+
+    def test_a_row_offers_exactly_what_its_endpoint_takes(self):
+        models = {m['id']: m for m in P.catalog_rows('openai')}
+        self.assertEqual(models['gpt-6-astra']['efforts'], ['low', 'medium', 'high', 'xhigh'])
+        self.assertFalse(models['gpt-6-astra']['effort_fixed'])
         models = {m['id']: m for m in P.catalog_rows('kimi')}
-        self.assertEqual(models['kimi-k2.7-code-highspeed']['effort_labels'], {})
-        self.assertEqual({m['id']: m for m in P.catalog_rows('openai')}['gpt-6-astra']['effort_labels']['max'], 'xhigh')
+        self.assertEqual(models['kimi-k3']['efforts'], ['low', 'high', 'max'])
+        self.assertEqual(models['kimi-k2.7-code-highspeed']['efforts'], [])
+        self.assertTrue(models['kimi-k2.7-code-highspeed']['effort_fixed'])
+        # Relay Free offers two and greys the box anyway: the gateway clamps each role.
+        for model in P.catalog_rows('relay-free'):
+            self.assertEqual(model['efforts'], ['low', 'medium'])
+            self.assertTrue(model['effort_fixed'])
 
 
 # ----- the two defaults -------------------------------------------------------------------------
@@ -483,28 +497,45 @@ class DefaultsTests(unittest.TestCase):
                               custom=[('custom:acme', 'acme-1')])['plain']
         # By score (model-ranking.md), one per provider: gpt-6-astra 53, then claude-opus-5 51 —
         # which is what the guest's `opus` is, so it is ranked by name like anyone else's model.
-        # Each at the provider's own default level.
+        # Each at the level the file's Levels table gives it for that class: the owner wrote
+        # `gpt-6-astra | main = medium` ("the API's default is high; codex's own is medium") and
+        # `claude-opus-5 | main = high`, so those are the levels, not the providers' defaults.
         self.assertEqual(pairs(plain['main']),
-                         [('openai', 'gpt-6-astra', 'high'), ('guest:claude', 'opus', None)])
-        # The same models at their top level, the usable guest at its own top word (a plan turn
-        # runs through its harness, 13.7): Claude Code's is the last it lists.
+                         [('openai', 'gpt-6-astra', 'medium'), ('guest:claude', 'opus', 'high')])
+        # And the file's `high` cells, each in the vocabulary of the provider that will run it.
+        # High is Claude Code's `fable` (claude-fable-5.1, 53, which the owner classed for high on
+        # 2026-09-21) ahead of gpt-6-astra on the same score, because the harnesses sort first in
+        # his Providers table — and at `high`, not `xhigh`, because that is the cell he wrote.
         self.assertEqual(pairs(plain['high']),
-                         [('openai', 'gpt-6-astra', 'max'), ('guest:claude', 'opus', 'max')])
-        # Flash and Lite say their lowest level outright (owner, 2026-09-20: Lite is "with no
-        # reasoning"), and leave it out only for a model with no knob at all. Nobody's flash model
-        # is scored, so the tie goes to the provider order: the coding plan, then minimax.
+                         [('guest:claude', 'fable', 'high'), ('openai', 'gpt-6-astra', 'xhigh')])
+        # Flash takes its level from the file too — the owner wrote `glm-5.3-flash | flash =
+        # high`, which is not the "lowest level" rule that applies where a cell is blank — and
+        # leaves it out for a model with no knob at all. Nobody's flash model is scored, so the
+        # tie goes to the provider order: the coding plan, then minimax.
         self.assertEqual(pairs(plain['flash']),
-                         [('glm-coding', 'glm-5.3-flash', 'low'),
+                         [('glm-coding', 'glm-5.3-flash', 'high'),
                           ('minimax', 'MiniMax-M2.7-highspeed', None)])
-        # Lite only where the provider has one of its own: GLM, Kimi and MiniMax borrow OpenRouter's,
-        # and OpenRouter has no key here. A guest is never offered for flash or lite.
-        self.assertEqual(pairs(plain['lite']), [('openai', 'gpt-5.6-luna', 'low')])
+        # Lite is Relay Free and nothing else, however many keys are stored (owner, 2026-09-21:
+        # "for lite ... everybody is on relay free by default, or openrouter if they want
+        # privacy"). It is the one place Relay Free appears beside other providers.
+        self.assertEqual(pairs(plain['lite']), [('relay-free', 'relay-lite', 'low')])
         self.assertEqual(pairs(plain['local']), [('local:bonsai', 'bonsai-2-27b', None)])
         # Every entry is one `tiers` takes back unchanged.
         with mock.patch('relay_core.roles._preset', side_effect=lambda p: PRESETS.get(p) or mock.Mock()), \
                 mock.patch('relay_core.roles._is_local_endpoint', return_value=True):
             self.assertEqual(validate_tiers(plain), {t: e for t, e in plain.items() if e})
         json.dumps(plain)
+
+    def test_a_harness_may_be_a_flash_default_but_never_a_lite_one(self):
+        """Owner, 2026-09-21: "the worker should allow the harness for flash, and defaults should
+        be the same across plans / apis / harnesses". Lite is nothing but background jobs, which a
+        harness cannot serve, so no guest is ranked into it."""
+        self.assertEqual(P.GUEST_CLASSES, ('high', 'main', 'flash'))
+        with_sonnet = [dict(GUESTS[0], models=[{'id': 'sonnet'}])]
+        plain = self.defaults(['relay-free'], guests=with_sonnet)['plain']
+        # claude-sonnet-5 is the file's flash model for anthropic, and the guest serves it here.
+        self.assertEqual(pairs(plain['flash']), [('guest:claude', 'sonnet', 'low')])
+        self.assertEqual(pairs(plain['lite']), [('relay-free', 'relay-lite', 'low')])
 
     def test_codex_plans_at_xhigh_when_its_model_offers_it_else_at_its_last_level(self):
         # Owner, 2026-09-20: "for codex planning you pick xhigh, not max". Two providers here (the
@@ -546,7 +577,7 @@ class DefaultsTests(unittest.TestCase):
             self.assertEqual(routed[tier][:len(plain[tier])], plain[tier], tier)     # after ALL of them
         # $2.86 is in; GPT-6 ($50) is not, so main's two models yield one twin.
         self.assertEqual(pairs(plain['main']),
-                         [('openai', 'gpt-6-astra', 'high'), ('glm-coding', 'glm-5.3', 'high')])
+                         [('openai', 'gpt-6-astra', 'medium'), ('glm-coding', 'glm-5.3', 'high')])
         self.assertEqual(pairs(routed['main'][len(plain['main']):]),
                          [('openrouter', 'z-ai/glm-5.3', None)])
         # High runs a twin at max too, unless the listing says the model takes no level.
@@ -558,15 +589,15 @@ class DefaultsTests(unittest.TestCase):
         self.assertEqual(pairs(routed['flash'][len(plain['flash']):]),
                          [('openrouter', 'z-ai/glm-5.3-flash', 'low'),
                           ('openrouter', 'minimax/minimax-m2.7', 'low')])
-        # Lite starts with Gemini 3.5 Flash-Lite at low (owner, 2026-09-20: "I thought it's 3.5
-        # flash lite with no reasoning"), ahead of the providers' own, and names it once.
+        # Lite starts with OpenRouter's **own** lite pick, which is `model-ranking.md`'s Provider
+        # picks row rather than a constant in the code (`LITE_LIST_FIRST` is retired), at low.
         self.assertEqual(pairs(routed['lite'])[0], ('openrouter', 'google/gemini-3.5-flash-lite', 'low'))
-        self.assertEqual(pairs(routed['lite'])[0][:2], P.LITE_LIST_FIRST)
+        self.assertEqual(P.provider_model_id('openrouter', MR.load().pick('openrouter', 'lite')),
+                         'google/gemini-3.5-flash-lite')
+        self.assertFalse(hasattr(P, 'LITE_LIST_FIRST'))
         self.assertEqual([e for e in pairs(routed['lite']) if e[1] == 'google/gemini-3.5-flash-lite'],
                          [('openrouter', 'google/gemini-3.5-flash-lite', 'low')])
         self.assertNotIn('google/gemini-3.8-flash', [e[1] for e in pairs(routed['lite'])])
-        self.assertTrue(all(e[2] == 'low' for e in pairs(routed['lite'])[:-1]))
-        self.assertEqual(pairs(routed['lite'])[-1], ('openrouter', 'openai/gpt-5.6-luna', None))  # no knob
 
     def test_an_unknown_price_keeps_a_twin_out_of_main_and_high(self):
         routed = self.defaults(['glm-coding', 'openrouter'], listing=[])['openrouter']
@@ -617,7 +648,8 @@ class StartEffortTests(unittest.TestCase):
                     with self.subTest(preset=preset_id, model=row['id']):
                         self.assertEqual(set(row['tier_effort']), {'main', 'high', 'flash', 'lite'})
                         self.assertEqual(row['tier_effort'],
-                                         P.tier_start_efforts(row['efforts'], row['default_effort']))
+                                         P.tier_start_efforts(row['efforts'], row['default_effort'],
+                                                              '', row['name']))
                         # A level named is a level the model offers; None is None.
                         for level in row['tier_effort'].values():
                             self.assertIn(level, [None, *row['efforts']])

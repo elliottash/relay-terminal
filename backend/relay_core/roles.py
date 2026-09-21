@@ -16,9 +16,10 @@ import copy
 import urllib.parse
 from dataclasses import dataclass, replace
 
-from .presets import (EFFORTS, PRESETS, TIER_LABELS, TIERS, apply_effort, effort_style, match_preset,
-                      model_efforts, model_extra, model_name, openrouter_twin, provider_tier_model,
-                      tier_default,
+from .presets import (EFFORT_LADDER, PRESETS, TIER_LABELS, TIERS, apply_effort, effort_levels,
+                      effort_style,
+                      match_preset, model_efforts, model_extra, model_name, nearest_effort,
+                      openrouter_twin, provider_tier_model, tier_default,
                       tier_fallbacks, validate_effort, validate_tier)
 from .provider import MIN_OUTPUT_TOKENS, ProviderConfig
 from . import customproviders, hosted, localmodels
@@ -382,13 +383,31 @@ def _list_entry(tier: str, value) -> dict | None:
     if isinstance(value.get("extra"), dict) and not guest:
         entry["extra"] = copy.deepcopy(value["extra"])
     effort = value.get("effort")
-    if guest:
-        # A guest's levels are its CLI's own words (claude: "max", codex: "xhigh"; 29.3), not
-        # Relay's four, so they are kept as written rather than checked against EFFORTS.
-        if isinstance(effort, str) and 0 < len(effort.strip()) <= 32:
-            entry["effort"] = effort.strip()
-    elif isinstance(effort, str) and effort in EFFORTS:
-        entry["effort"] = effort
+    # Every level is its provider's own word now (card #MDL1, 2026-09-21), not one of Relay's
+    # four, so a list entry keeps what it was written with — "xhigh" on the OpenAI API and codex,
+    # "max" on Kimi, "ultra" from a codex model that offers it. This used to drop anything outside
+    # EFFORTS, which would now silently throw away half the levels the defaults themselves fill
+    # the lists with. Which levels *this* model has is decided where it is resolved, against that
+    # model's own list (`presets.validate_effort`).
+    if isinstance(effort, str) and 0 < len(effort.strip()) <= 32:
+        word = effort.strip().lower()
+        if guest:
+            entry["effort"] = word          # the CLI's own vocabulary; the harness judges it
+        elif not preset:
+            # A bare base_url: Relay cannot name the endpoint, so it cannot name its levels
+            # either. A word off the ladder is still a typo, and those are dropped as they were.
+            if word in EFFORT_LADDER:
+                entry["effort"] = word
+        else:
+            levels = _levels_for(preset, entry.get("model") or "")
+            if word in levels:
+                entry["effort"] = word
+            elif levels and word in EFFORT_LADDER:
+                # An older client's word, or one carried over from another provider: the level
+                # this model actually has for it (`nearest_effort`), never the word itself.
+                entry["effort"] = nearest_effort(word, levels)
+            # Anything else — a typo, or a level for a model with no knob — is dropped, not the
+            # entry: the model still belongs in the list, it just runs at its own default.
     if tier == "local" and not _is_local_endpoint(entry):
         return None
     return entry
@@ -425,6 +444,30 @@ def _strict_entry(name: str, value: dict) -> dict:
                          "endpoint id, or a plain http:// base_url on localhost, 127.0.0.1 or "
                          "::1 with its model.")
     return entry
+
+
+def _levels_for(preset_id, model: str) -> list[str]:
+    """The reasoning levels this (provider, model) pair offers, in the provider's own words: the
+    catalog row's list where Relay names the model, else the endpoint's, else none at all."""
+    levels = model_efforts(preset_id, model)
+    if levels is not None:
+        return levels
+    found = _preset(preset_id)
+    return effort_levels(found.effort_style) if found is not None else []
+
+
+def _file_level(preset_id: str, model: str, tier: str) -> str | None:
+    """``model-ranking.md``'s Levels cell for this model in this class, in the words the provider
+    about to run it uses, or None when the file says nothing (or there is no knob).
+
+    Keyed by the model's **name**, like every other row of that file, and mapped onto this
+    provider's own list because one name can be served two ways (`presets.nearest_effort`).
+    """
+    from . import model_ranking
+    if not preset_id or tier not in model_ranking.CLASSES:
+        return None
+    listed = model_ranking.load().level(model_name(preset_id, model), tier)
+    return nearest_effort(listed, _levels_for(preset_id, model)) if listed else None
 
 
 def _is_local_endpoint(entry: dict) -> bool:
@@ -664,9 +707,20 @@ class RoleResolver:
             # harness's own word, staged for one turn by `Agent._begin_guest_plan_boost` (#HR5E) —
             # never a bogus `reasoning_effort` written into the harness's config.
             return self._main(role, tier="high")
-        effort = "max" if effort is None else effort
         style = effort_style(_preset(self.main_preset_id), self.main_config.extra,
                              self.main_config.base_url)
+        if effort is None:
+            # "Max reasoning" is the model's **top level**, in its provider's own word — `max` on
+            # Kimi and GLM, `xhigh` on the OpenAI API, `high` on Gemini, `medium` on Relay Free.
+            # It was the literal "max" until 2026-09-21, which only worked because every level
+            # was mapped onto Relay's four on the way out; with the level words the provider's
+            # own, "max" is a word half the endpoints do not have.
+            levels = model_efforts(self.main_preset_id, self.main_config.model)
+            if levels is None:
+                levels = effort_levels(style)
+            effort = levels[-1] if levels else None
+        if effort is None:
+            return self._main(role, tier="high")        # no knob to turn: the main agent as it is
         raised, _ = apply_effort(self.main_config.extra, style, effort)
         if raised != self.main_config.extra:
             return Resolved(role, replace(self.main_config, extra=raised), self.main_preset_id,
@@ -824,7 +878,9 @@ class RoleResolver:
             # the provider's own for this tier, and the extras are that model's.
             _, base_url, model, extra, effort = self._list_target(
                 {"preset": preset_id, "model": fallback.get("model") if isinstance(fallback.get("model"), str) else "",
-                 "effort": fallback.get("effort") if fallback.get("effort") in EFFORTS else None,
+                 "effort": (fallback["effort"].strip().lower()
+                            if isinstance(fallback.get("effort"), str) and fallback["effort"].strip()
+                            else None),
                  **({"extra": fallback["extra"]} if isinstance(fallback.get("extra"), dict) else {})},
                 tier)
             resolved = self._build(role, preset_id, base_url, model, extra, effort, "failover", tier)
@@ -1017,8 +1073,22 @@ class RoleResolver:
         if entry.get("model") is not None:
             clean["model"] = _text(entry["model"], "model", MAX_MODEL)
         if entry.get("effort") is not None:
-            clean["effort"] = validate_effort(entry["effort"])
+            # Against this model's own levels: a pick carrying `max` for a model whose top is
+            # `xhigh` runs at `xhigh`, and one carrying a word no provider has is the error it
+            # always was (card #MDL1, 2026-09-21).
+            clean["effort"] = validate_effort(
+                entry["effort"],
+                None if is_guest_preset(preset_id) else _levels_for(preset_id, entry.get("model") or ""))
         tier = ROLE_TIERS.get(role) or "main"
+        if clean.get("effort") is None:
+            # A pick made in the model box carries no level of its own, and it is not in any tier
+            # list to take one from — so it starts where `model-ranking.md`'s Levels table says
+            # this model starts in this class, which is where the same model would start if the
+            # `defaults` button had put it in the list (card #MDL1, 2026-09-21). A model the file
+            # says nothing about keeps what it always did: the model's own default.
+            listed = _file_level(preset_id, clean.get("model") or "", tier)
+            if listed:
+                clean["effort"] = listed
         if is_guest_preset(preset_id):
             # A guest is a process, not an endpoint: it serves the tiers a harness may serve, and
             # only where this machine can start it (GUEST_TIERS, protocol 29.3).

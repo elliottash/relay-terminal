@@ -25,7 +25,7 @@ class PresetTableTests(unittest.TestCase):
                 self.assertFalse(preset.base_url.endswith("/"), "the transport appends /chat/completions")
                 self.assertTrue(preset.model.strip())
                 self.assertIn(preset.group, P.GROUPS)
-                self.assertIn(preset.effort_style, P.EFFORT_MAP)
+                self.assertIn(preset.effort_style, P.EFFORT_LEVELS)
                 self.assertGreaterEqual(preset.context_window, 128_000)
                 self.assertTrue(preset.key_url.startswith("https://"), preset.id)
                 self.assertTrue(preset.note)
@@ -174,10 +174,61 @@ class PresetTableTests(unittest.TestCase):
             self.assertEqual(extra, {"temperature": 0.2})
         self.assertIsNone(P.infer_effort("none", {"reasoning_effort": "high"}))
 
-    def test_openai_and_gemini_effort_maps_stay_inside_the_documented_values(self):
-        self.assertEqual(set(P.EFFORT_MAP["openai"].values()), {"low", "medium", "high", "xhigh"})
+    def test_every_style_offers_exactly_the_words_its_endpoint_takes(self):
+        """Since 2026-09-21 the level offered *is* the level sent (card #MDL1), so this is the
+        whole of what a picker may show for each provider."""
+        self.assertEqual(P.effort_levels("openai"), ["low", "medium", "high", "xhigh"])
+        self.assertEqual(P.effort_levels("openrouter"), ["low", "medium", "high", "xhigh"])
         # "minimal" is rejected by gemini-3.8-flash and "none" only works on 2.5 models.
-        self.assertEqual(set(P.EFFORT_MAP["gemini"].values()), {"low", "medium", "high"})
+        self.assertEqual(P.effort_levels("gemini"), ["low", "medium", "high"])
+        self.assertEqual(P.effort_levels("kimi"), ["low", "high", "max"])
+        self.assertEqual(P.effort_levels("glm"), ["low", "high", "max"])
+        # Relay Free stops at medium: the gateway clamps each role, so anything above it is a
+        # control that would only pretend (`effort_fixed` greys the box).
+        self.assertEqual(P.effort_levels("relay"), ["low", "medium"])
+        self.assertEqual(P.effort_levels("none"), [])
+
+    def test_an_older_clients_level_lands_on_the_one_the_model_has(self):
+        """Relay's own four are no longer the universe; they are a compatibility read.
+
+        `nearest_effort` is the whole of it: the weakest listed level that is at least as much
+        work, and the top of the list when there is none. That reproduces, exactly, every answer
+        the {Relay level: provider value} table used to give — which is why the table could go.
+        """
+        self.assertEqual(P.nearest_effort("max", P.effort_levels("openai")), "xhigh")
+        self.assertEqual(P.nearest_effort("max", P.effort_levels("gemini")), "high")
+        self.assertEqual(P.nearest_effort("medium", P.effort_levels("kimi")), "high")
+        self.assertEqual(P.nearest_effort("high", P.effort_levels("relay")), "medium")
+        self.assertEqual(P.nearest_effort("max", P.effort_levels("kimi")), "max")
+        self.assertIsNone(P.nearest_effort("high", P.effort_levels("none")))
+        # A guest word off Relay's ladder is the provider's to judge, not this function's.
+        self.assertEqual(P.nearest_effort("ultra", ["low", "medium", "high", "xhigh", "max", "ultra"]),
+                         "ultra")
+        self.assertEqual(P.nearest_effort("turbo", ["low", "high"]), "turbo")
+
+    def test_validate_effort_checks_the_level_against_the_model_that_will_run_it(self):
+        self.assertEqual(P.validate_effort("xhigh"), "xhigh")     # shape only, with no model
+        self.assertEqual(P.validate_effort("max", P.effort_levels("openai")), "xhigh")
+        self.assertEqual(P.validate_effort("high", ["low", "medium", "high"]), "high")
+        self.assertEqual(P.validate_effort("ULTRA ", []), "ultra")   # no knob: nothing to check
+        for bad in (None, 17, "", "  ", "Very High", "a" * 40):
+            with self.assertRaises(ValueError):
+                P.validate_effort(bad)
+
+    def test_effort_fixed_is_no_knob_or_relay_free(self):
+        """Owner, 2026-09-21: "for no knob models, the effort box should be grayed out. same for
+        relay free"."""
+        self.assertTrue(P.effort_fixed([]))
+        self.assertTrue(P.effort_fixed(["low", "medium"], hosted=True))
+        self.assertFalse(P.effort_fixed(["low", "medium"]))
+        rows = {row["id"]: row for row in P.catalog_rows("relay-free")}
+        self.assertTrue(all(row["effort_fixed"] for row in rows.values()), rows)
+        self.assertTrue(P.PRESETS["relay-free"].to_dict()["effort_fixed"])
+        # MiniMax and Anthropic have no knob at all; Kimi's high-speed model has none either.
+        self.assertTrue(all(row["effort_fixed"] for row in P.catalog_rows("anthropic")))
+        self.assertTrue({row["id"]: row for row in P.catalog_rows("kimi")}
+                        ["kimi-k2.7-code-highspeed"]["effort_fixed"])
+        self.assertFalse({row["id"]: row for row in P.catalog_rows("kimi")}["kimi-k3"]["effort_fixed"])
 
     def test_glm_flash_never_asks_to_disable_thinking(self):
         # Z.AI errors when thinking.type is "disabled" on GLM-5.3 and GLM-5.3-Flash. The rule is
@@ -220,12 +271,13 @@ class DeepSeekTests(unittest.TestCase):
 
     def test_it_is_a_first_party_pay_as_you_go_api_like_glm_and_kimi(self):
         preset = P.PRESETS["deepseek"]
-        self.assertEqual(preset.label, "deepseek \u00b7 v4 pro")
+        self.assertEqual(preset.label, "deepseek \u00b7 v4.1 flash")
         self.assertEqual(preset.label, preset.label.lower())      # lower-case, Warp style
         self.assertEqual(preset.base_url, "https://api.deepseek.com")
         self.assertEqual(preset.group, "payg")
         self.assertEqual((preset.provider, preset.plan), ("deepseek", "pay-as-you-go"))
-        self.assertEqual(preset.model, "deepseek-v4-pro")
+        # "deepseek pro is never used ... use deepseek-flash for all" (owner, 2026-09-21).
+        self.assertEqual(preset.model, "deepseek-flash")
         self.assertEqual(preset.context_window, 1_048_576)        # "1M" on the pricing page
         self.assertEqual(preset.max_output, 131_072)              # its own thinking-mode ceiling
         self.assertFalse(preset.hosted or preset.local or preset.custom)
@@ -248,18 +300,17 @@ class DeepSeekTests(unittest.TestCase):
         self.assertEqual(rows["deepseek-v4-pro"]["name"], "deepseek-v4-pro")
         self.assertEqual(rows["deepseek-flash"]["openrouter"], "deepseek/deepseek-v4.1-flash")
         self.assertEqual(rows["deepseek-v4-pro"]["openrouter"], "deepseek/deepseek-v4-pro")
-        self.assertEqual(rows["deepseek-v4-pro"]["tier"], "main")
-        # Flash is the default for Flash *and* Lite; a row carries the first in PROVIDER_TIERS order.
-        self.assertEqual(rows["deepseek-flash"]["tier"], "flash")
+        # Flash is the default for Main, Flash *and* Lite since 2026-09-21; a row carries the
+        # first in PROVIDER_TIERS order, and Pro is the default for nothing.
+        self.assertEqual(rows["deepseek-flash"]["tier"], "main")
+        self.assertIsNone(rows["deepseek-v4-pro"]["tier"])
+        self.assertEqual(P.tier_default("deepseek", "main")[1], "deepseek-flash")
 
-    def test_the_four_relay_levels_map_onto_deepseeks_three(self):
-        # reasoning_effort is none | low | high | max, with "medium" (and "xhigh") accepted and
-        # mapped to "high" by the API itself; Relay maps it here so the picker offers what is sent.
-        self.assertEqual(P.EFFORT_MAP["deepseek"],
-                         {"low": "low", "medium": "high", "high": "high", "max": "max"})
+    def test_deepseek_offers_its_own_three_words(self):
+        # reasoning_effort is none | low | high | max; the picker offers exactly those three, and
+        # a "medium" from an older client is read as high, which is what the API does with it too.
         self.assertEqual(P.effort_levels("deepseek"), ["low", "high", "max"])
-        self.assertEqual(P.effort_labels("deepseek"), {"low": "low", "high": "high", "max": "max"})
-        self.assertEqual(P.effort_note("deepseek"), "medium is sent as high.")
+        self.assertEqual(P.effort_note("deepseek"), "")
         self.assertEqual(P.apply_effort({}, "deepseek", "medium")[1],
                          {"thinking": {"type": "enabled"}, "reasoning_effort": "high"})
 
@@ -267,7 +318,7 @@ class DeepSeekTests(unittest.TestCase):
         self.assertTrue(P.model_supports_vision("deepseek-flash"))
         self.assertTrue(P.model_supports_vision("deepseek/deepseek-v4.1-flash"))
         self.assertFalse(P.model_supports_vision("deepseek-v4-pro"))
-        self.assertFalse(P.PRESETS["deepseek"].vision)            # the preset's own model is Pro
+        self.assertTrue(P.PRESETS["deepseek"].vision)             # the preset's own model is Flash
         # So an image turn steps to Flash and back, exactly as it does on Z.AI.
         from relay_core.roles import VISION_DEFAULTS
         self.assertEqual(VISION_DEFAULTS["deepseek"], ("deepseek", "deepseek-flash", {}))
@@ -422,7 +473,7 @@ class TierTableTests(unittest.TestCase):
 class ModelCatalogTests(unittest.TestCase):
     """One list of models per provider row (owner, 2026-09-20): MODEL_CATALOG and catalog_rows()."""
 
-    ROW_KEYS = {"id", "name", "label", "tier", "efforts", "effort_labels", "intelligence",
+    ROW_KEYS = {"id", "name", "label", "tier", "efforts", "effort_fixed", "intelligence",
                 "openrouter", "default_effort", "tier_effort"}
 
     def setUp(self):

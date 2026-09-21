@@ -71,16 +71,16 @@ class OpenRouterCatalogTests(unittest.TestCase):
         self.assertEqual(rows[0], {"id": "deepseek/deepseek-v4.1-flash", "name": "deepseek-v4.1-flash",
                                    "label": "deepseek-v4.1-flash",
                                    "tier": None, "efforts": levels,
-                                   # OpenRouter's own word for each level: max is sent as "xhigh".
-                                   "effort_labels": {"low": "low", "medium": "medium", "high": "high",
-                                                     "max": "xhigh"},
+                                   # OpenRouter's own words, and they are what is sent: its top
+                                   # level is "xhigh", so that is the word the row offers.
+                                   "effort_fixed": False,
                                    "intelligence": None, "openrouter": None,
                                    "context_window": 1048576,
                                    # Dollars per million tokens, from the API's per-token strings.
                                    "price_prompt_per_mtok": 0.15, "price_completion_per_mtok": 0.6})
         self.assertEqual(rows[1]["price_completion_per_mtok"], 2.86)
         self.assertEqual(rows[2]["efforts"], [])                           # says it takes no reasoning
-        self.assertEqual(rows[2]["effort_labels"], {})
+        self.assertTrue(rows[2]["effort_fixed"])                           # so the box is greyed
         # No pricing at all, and OpenRouter's "-1" for a router row: neither is a price.
         self.assertIsNone(rows[2]["price_completion_per_mtok"])
         self.assertIsNone(rows[3]["price_completion_per_mtok"])

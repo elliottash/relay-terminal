@@ -420,20 +420,35 @@ class DefaultRulesTests(unittest.TestCase):
         lists = self.defaults([], local=[('local:bonsai', 'bonsai-2-27b')])
         self.assertEqual([tier for tier, entries in lists.items() if entries], ['local'])
 
-    def test_relay_free_disappears_the_moment_anything_else_can_take_a_turn(self):
+    def test_relay_free_disappears_the_moment_anything_else_can_take_a_turn_except_in_lite(self):
+        """Relay Free is what "no providers" means — with one exception since 2026-09-21.
+
+        The owner: "for lite, i am thinking to simplify that and just everybody is on relay free
+        by default, or openrouter if they want privacy". A Lite call is a title, a label or a
+        duplicate check, and spending a subscription or a metered key on one is what the
+        allowance exists to avoid. High, Main and Flash are unchanged.
+        """
         for usable, guests in ((['relay-free', 'glm-coding'], ()),
                                (['relay-free'], [CLAUDE])):
             lists = self.defaults(usable, guests=guests)
-            listed = [e['preset'] for entries in lists.values() for e in entries]
-            self.assertNotIn('relay-free', listed, usable)
-            self.assertTrue(listed, usable)
+            for tier in ('main', 'high', 'flash'):
+                self.assertNotIn('relay-free', [e['preset'] for e in lists[tier]], (usable, tier))
+            self.assertEqual(pairs(lists['lite']), [('relay-free', 'relay-lite', 'low')], usable)
+        # Without Relay Free, lite is ranked out of the file like every other class.
+        lists = self.defaults(['gemini'])
+        self.assertEqual(pairs(lists['lite']), [('gemini', 'gemini-3.5-flash-lite', 'low')])
 
     def test_one_provider_gives_one_model_per_class_the_highest_scoring_one(self):
         lists = self.defaults(['openai'])
-        self.assertEqual(pairs(lists['main']), [('openai', 'gpt-6-astra', 'high')])
-        self.assertEqual(pairs(lists['high']), [('openai', 'gpt-6-astra', 'max')])
-        self.assertEqual(pairs(lists['flash']), [('openai', 'gpt-5.6-terra', 'low')])
-        self.assertEqual(pairs(lists['lite']), [('openai', 'gpt-5.6-luna', 'low')])
+        # The levels are the file's Levels cells, in the endpoint's own words: the owner wrote
+        # `gpt-6-astra | high = xhigh, main = medium` ("the API's default is high; codex's own is
+        # medium"), and `gpt-5.6-luna | flash = low`. He also moved openai's flash model from
+        # terra to luna and left terra a default for nothing.
+        self.assertEqual(pairs(lists['main']), [('openai', 'gpt-6-astra', 'medium')])
+        self.assertEqual(pairs(lists['high']), [('openai', 'gpt-6-astra', 'xhigh')])
+        self.assertEqual(pairs(lists['flash']), [('openai', 'gpt-5.6-luna', 'low')])
+        # Lite is Relay Free's, and Relay Free cannot run here, so there is nothing in it.
+        self.assertEqual(pairs(lists['lite']), [])
         # gpt-5.6-sol scores 47 — above terra and luna — and is in no class, so it is a default for
         # nothing. That is the file's decision to make, and it is written down in it.
         self.assertEqual(MR.load().score('gpt-5.6-sol'), 47)
@@ -445,14 +460,14 @@ class DefaultRulesTests(unittest.TestCase):
         # tie, so the credit already paid for is spent first.
         lists = self.defaults(['glm', 'glm-coding'])
         self.assertEqual(pairs(lists['main']), [('glm-coding', 'glm-5.3', 'high')])
-        self.assertEqual(pairs(lists['flash']), [('glm-coding', 'glm-5.3-flash', 'low')])
+        self.assertEqual(pairs(lists['flash']), [('glm-coding', 'glm-5.3-flash', 'high')])
 
     def test_two_providers_give_two_per_class_by_score(self):
         lists = self.defaults(['openai', 'glm-coding'])
         self.assertEqual(pairs(lists['main']),
-                         [('openai', 'gpt-6-astra', 'high'), ('glm-coding', 'glm-5.3', 'high')])
+                         [('openai', 'gpt-6-astra', 'medium'), ('glm-coding', 'glm-5.3', 'high')])
         self.assertEqual(pairs(lists['high']),
-                         [('openai', 'gpt-6-astra', 'max'), ('glm-coding', 'glm-5.3', 'max')])
+                         [('openai', 'gpt-6-astra', 'xhigh'), ('glm-coding', 'glm-5.3', 'max')])
         self.assertEqual([MR.load().score(n) for n in ('gpt-6-astra', 'glm-5.3')], [53, 45])
 
     def test_three_providers_still_give_two_per_class_and_never_two_from_one(self):
@@ -469,7 +484,7 @@ class DefaultRulesTests(unittest.TestCase):
         # decides: the coding plan (11), then minimax (12), ahead of openai (32) and kimi (30).
         lists = self.defaults(['openai', 'glm-coding', 'kimi', 'minimax'])
         self.assertEqual(pairs(lists['flash']),
-                         [('glm-coding', 'glm-5.3-flash', 'low'),
+                         [('glm-coding', 'glm-5.3-flash', 'high'),
                           ('minimax', 'MiniMax-M2.7-highspeed', None)])
         rank = MR.load()
         self.assertEqual([rank.score(n) for n in ('glm-5.3-flash', 'minimax-m2.7-highspeed')],
@@ -483,18 +498,27 @@ class DefaultRulesTests(unittest.TestCase):
         # claude-opus-5, which the file scores 51, above `sonnet` and `haiku` and above `fable`,
         # which no class names.
         alone = self.defaults([], guests=[CLAUDE])
-        self.assertEqual(pairs(alone['main']), [('guest:claude', 'opus', None)])
-        self.assertEqual(pairs(alone['high']), [('guest:claude', 'opus', 'max')])
-        # A harness is offered for high and main only: a flash or lite call is a side call to a
-        # running conversation, which roles.py will not hand to an agent of its own.
-        self.assertEqual(P.GUEST_CLASSES, ('high', 'main'))
-        self.assertEqual((alone['flash'], alone['lite']), ([], []))
+        # `opus` is claude-opus-5, which the file classes for main and scores 51; `fable` is
+        # claude-fable-5.1, which the owner classed for high on 2026-09-21 and scores 53. The
+        # levels are his Levels cells, in Claude Code's own words — the vocabulary the guest
+        # reports, not Relay's four.
+        self.assertEqual(pairs(alone['main']), [('guest:claude', 'opus', 'high')])
+        self.assertEqual(pairs(alone['high']), [('guest:claude', 'fable', 'high')])
+        # A harness is offered for high, main and flash (owner, 2026-09-21: "the worker should
+        # allow the harness for flash"), never for lite: lite is nothing but background jobs, and
+        # roles.py will not hand one to an agent of its own. `sonnet` is claude-sonnet-5, the
+        # file's flash model.
+        self.assertEqual(P.GUEST_CLASSES, ('high', 'main', 'flash'))
+        self.assertEqual(pairs(alone['flash']), [('guest:claude', 'sonnet', 'low')])
+        self.assertEqual(alone['lite'], [])
         # Beside one API provider it is two providers, so two each, and claude-opus-5 (51) beats
         # glm-5.3 (45).
         with_glm = self.defaults(['glm-coding'], guests=[CLAUDE])
         self.assertEqual(pairs(with_glm['main']),
-                         [('guest:claude', 'opus', None), ('glm-coding', 'glm-5.3', 'high')])
-        self.assertEqual(pairs(with_glm['flash']), [('glm-coding', 'glm-5.3-flash', 'low')])
+                         [('guest:claude', 'opus', 'high'), ('glm-coding', 'glm-5.3', 'high')])
+        # Two providers, two per class — and the harness takes a flash slot now, beside z.ai's.
+        self.assertEqual(pairs(with_glm['flash']),
+                         [('guest:claude', 'sonnet', 'low'), ('glm-coding', 'glm-5.3-flash', 'high')])
 
     def test_a_signed_out_or_unavailable_guest_is_not_a_provider(self):
         lists = self.defaults(['glm-coding'], guests=[SIGNED_OUT])
@@ -528,10 +552,35 @@ class DefaultRulesTests(unittest.TestCase):
                          [('local:bonsai', 'bonsai-2-27b', None), ('local:two', 'other', None)])
         self.assertEqual(pairs(lists['main']), [('relay-free', 'relay-main', 'medium')])
 
-    def test_the_lite_list_only_starts_with_openrouter_in_the_openrouter_variant(self):
-        both = P.tier_list_defaults(['openai', 'openrouter'], listing=[])
-        self.assertEqual(pairs(both['plain']['lite'])[0], ('openai', 'gpt-5.6-luna', 'low'))
-        self.assertEqual(pairs(both['openrouter']['lite'])[0][:2], P.LITE_LIST_FIRST)
+    def test_lite_is_relay_free_by_default_and_openrouter_in_the_other_variant(self):
+        """Owner, 2026-09-21: "for lite ... everybody is on relay free by default, or openrouter
+        if they want privacy". The two buttons are where that choice is made."""
+        both = P.tier_list_defaults(['relay-free', 'openai', 'openrouter'], listing=[])
+        self.assertEqual(pairs(both['plain']['lite']), [('relay-free', 'relay-lite', 'low')])
+        # The openrouter variant leads with OpenRouter's own lite pick — the Provider picks row
+        # in the file, not a constant in the code — and keeps relay-lite behind it.
+        self.assertEqual(pairs(both['openrouter']['lite'])[0],
+                         ('openrouter', 'google/gemini-3.5-flash-lite', 'low'))
+        self.assertIn(('relay-free', 'relay-lite', 'low'), pairs(both['openrouter']['lite']))
+        self.assertEqual(MR.load().pick('openrouter', 'lite'), 'gemini-3.5-flash-lite')
+
+    def test_a_provider_picks_row_replaces_that_providers_candidate_for_a_class(self):
+        """`## Provider picks` is "a provider whose defaults differ from the shared rows", and the
+        cell wins outright: OpenRouter's Main is glm-5.3-flash however the Models table classes
+        it. Only `openrouter` has a row today; the owner asked for the table so that "we could
+        add that for cerebras for example later on"."""
+        rank = MR.load()
+        self.assertEqual(rank.pick('openrouter', 'main'), 'glm-5.3-flash')
+        self.assertEqual(P.provider_model_id('openrouter', 'glm-5.3-flash'), 'z-ai/glm-5.3-flash')
+        lists = P.tier_list_defaults(['openrouter'], listing=[])['plain']
+        self.assertEqual(names(lists['main']), ['z-ai/glm-5.3-flash'])
+        self.assertEqual(names(lists['high']), ['z-ai/glm-5.3'])
+        self.assertEqual(names(lists['flash']), ['deepseek/deepseek-v4.1-flash'])
+        # Neither glm slug is in OpenRouter's own three catalog rows: the pick names a model and
+        # `provider_model_id` finds the slug that serves it through the twin map.
+        self.assertNotIn('z-ai/glm-5.3', [row['id'] for row in P.MODEL_CATALOG['openrouter']])
+        # A provider with no row follows the Models table, as everyone but OpenRouter does.
+        self.assertIsNone(rank.pick('openai', 'main'))
 
 
 if __name__ == '__main__':

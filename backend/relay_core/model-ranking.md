@@ -83,9 +83,11 @@ a harness is a whole agent of its own that cannot be handed one (`roles.GUEST_TI
 | claude-sonnet-5 | flash | | `anthropic`'s flash |
 | deepseek-v4-pro | - |  | `deepseek`'s pro model; the owner, 2026-09-21: "deepseek pro is never used" — DeepSeek runs high, main and flash on V4.1 Flash |
 | deepseek-v4.1-flash | high, main, flash | | openrouter's built-in main *and* flash: there is no non-flash DeepSeek V4.1 |
-| gemini-3.1-pro-preview | high | | `gemini`'s main |
+| gemini-3.1-pro-preview | - | | the concrete version behind `gemini-pro-latest`; a default for nothing, so the defaults follow Google forward |
 | gemini-3.5-flash-lite | lite | | the lite model both `gemini` and `openrouter` name; what the openrouter defaults put first in lite |
-| gemini-3.8-flash | main, flash | | `gemini`'s flash, and the lite that every provider without one of its own borrows through openrouter |
+| gemini-3.8-flash | - | | the concrete version behind `gemini-flash-latest`; a default for nothing, for the same reason |
+| gemini-flash-latest | main, flash | | google's moving alias for its current Flash. It **moves**: the model behind it changes without this file changing |
+| gemini-pro-latest | high | | google's moving alias for its current Pro. It **moves** too; `gemini`'s high |
 | glm-5.3-flash | flash | | z.ai's flash, on both the standard API and the coding plan |
 | gpt-5.6-luna | flash | | `openai`'s lite |
 | gpt-5.6-terra | - | | `openai`'s flash |
@@ -135,6 +137,8 @@ provider shows the level in its own vocabulary (codex says `xhigh` for max). Pre
 | glm-5.3-flash | max | high | high |  |  |
 | gemini-3.1-pro-preview | high | medium | low  |  | gemini has no max |
 | gemini-3.8-flash | high | high| medium |  |  |
+| gemini-pro-latest | high | medium | low |  | the alias's levels are the concrete row's |
+| gemini-flash-latest | high | high | medium |  |  |
 | minimax-m3 |  |  |  |  | no knob |
 | minimax-m2.7-highspeed |  |  |  |  | no knob |
 | deepseek-v4.1-flash | max | high | low |  | first-party levels are low/high/max; through openrouter also medium |

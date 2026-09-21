@@ -8,49 +8,75 @@ provider's own documentation on 2026-09-17; the doc URL sits next to the entry i
 from __future__ import annotations
 
 import copy
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from . import model_ranking
 
+# Relay's own four words. Until 2026-09-21 they were the universe: every provider's levels were
+# mapped onto them and the GUI showed the provider's word through a second table (`effort_labels`).
+# The owner ended that — "i want the effort options in relay to be determined by the model … so
+# xhigh shows up for codex for example" — so a model's levels are now **exactly what its provider
+# offers**, in the provider's own words, and the level word travels the wire as it is.
+#
+# These four survive for one job: reading what an older client sends. A GUI that still holds
+# Relay's four asks codex for `max`, and `nearest_effort` turns that into the level the model
+# actually has. Nothing writes them any more.
 EFFORTS = ("low", "medium", "high", "max")
 
-# Relay effort -> provider value, per request style. Verified 2026-09-17 against:
+# Every level word any provider Relay knows uses, weakest first. It is the ladder `nearest_effort`
+# walks, and nothing else: a word off it is still a perfectly good level, it just cannot be
+# compared to another one. "ultra" is codex's delegation mode and sits at the top because it is
+# the most work, not because anyone defaults to it.
+EFFORT_LADDER = ("low", "medium", "high", "xhigh", "max", "ultra")
+
+# What each request style's endpoint takes for a reasoning level, **in its own words**, weakest
+# first. This replaced EFFORT_MAP, the {Relay level: provider value} table, on 2026-09-21: a
+# mapping table has to answer "what is medium on Kimi" for every provider whether or not the
+# provider has a medium, and the answer was always a fiction the picker then had to hide. The list
+# of words the endpoint takes has no such hole. Verified 2026-09-17 against:
+#
 # - Kimi K3: https://platform.kimi.ai/docs/api/chat (top-level reasoning_effort: low|high|max, default max,
 #   and only on kimi-k3; thinking cannot be disabled).
 # - GLM-5.3: https://docs.z.ai/guides/capabilities/thinking (thinking.type accepts only "enabled";
 #   reasoning_effort low|high|max, default max).
 # - DeepSeek: https://api-docs.deepseek.com/api/create-chat-completion/ and .../guides/thinking_mode/
-#   (reasoning_effort none|low|high|max, "minimal" mapped to low and "medium"/"xhigh" mapped to high;
-#   thinking is on by default and `thinking: {"type": "disabled"}` turns it off).
+#   (reasoning_effort none|low|high|max; thinking is on by default and `thinking: {"type":
+#   "disabled"}` turns it off).
 # - OpenRouter: https://openrouter.ai/docs/use-cases/reasoning-tokens.md (reasoning.effort: none|minimal|low|
-#   medium|high|xhigh|max; xhigh and max get the same ~95% budget).
+#   medium|high|xhigh|max; xhigh and max get the same ~95% budget, so only xhigh is offered).
 # - OpenAI: https://developers.openai.com/api/docs/api-reference/chat/create (reasoning_effort none|minimal|
 #   low|medium|high|xhigh|max, per-model subsets; gpt-6-astra rejects "none", so Relay never sends it).
 # - Gemini: https://ai.google.dev/gemini-api/docs/openai (reasoning_effort minimal|low|medium|high; "minimal"
-#   is rejected by gemini-3.8-flash and "none" only works on 2.5 models, so max maps to high).
+#   is rejected by gemini-3.8-flash and "none" only works on 2.5 models, so Gemini's top is high).
 # - "none": providers with no usable effort knob on their OpenAI-compatible endpoint. Anthropic's compat
 #   layer ignores reasoning_effort and rejects `thinking` on Claude 5
 #   (https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk); MiniMax has no
 #   reasoning_effort at all and only M3 can disable thinking
-#   (https://platform.minimax.io/docs/api-reference/text-chat-openai.md).
-EFFORT_MAP: dict[str, dict[str, str]] = {
-    "kimi": {"low": "low", "medium": "high", "high": "high", "max": "max"},
-    "glm": {"low": "low", "medium": "high", "high": "high", "max": "max"},
-    # DeepSeek takes the same three words as Kimi and GLM, so medium is sent as high. It is its own
-    # style rather than "glm" because `apply_effort` has to send `thinking` with the level and the
-    # two providers disagree about "off": GLM-5.3 cannot be turned off, DeepSeek can (the Lite row
-    # below is exactly that), so a level picked here must switch thinking back on.
-    "deepseek": {"low": "low", "medium": "high", "high": "high", "max": "max"},
-    "openrouter": {"low": "low", "medium": "medium", "high": "high", "max": "xhigh"},
-    "openai": {"low": "low", "medium": "medium", "high": "high", "max": "xhigh"},
-    "gemini": {"low": "low", "medium": "medium", "high": "high", "max": "high"},
-    "none": {level: "" for level in EFFORTS},
-    # Relay Free (owner, 2026-09-18): medium reasoning and below. The gateway clamps whatever it is
-    # sent to each role's ceiling, and this table is the same rule on the client, so the effort
-    # picker offers Low and Medium and nothing that would be silently lowered.
-    "relay": {"low": "low", "medium": "medium", "high": "medium", "max": "medium"},
+#   (https://platform.minimax.io/docs/api-reference/text-chat-openai.md). An empty list is what
+#   greys the effort box (`effort_fixed`).
+# - "relay": Relay Free (owner, 2026-09-18) offers low and medium, because the gateway clamps each
+#   role to its ceiling and a picker that offered more would only pretend.
+#
+# The two guest harnesses are not here: a guest reports its own levels over its own protocol
+# (codex low|medium|high|xhigh|max|ultra, claude code low|medium|high|xhigh|max, and a subset per
+# model), which is exactly the shape this table now has for everyone else.
+EFFORT_LEVELS: dict[str, tuple[str, ...]] = {
+    "kimi": ("low", "high", "max"),
+    "glm": ("low", "high", "max"),
+    # DeepSeek takes the same three words as Kimi and GLM. It is its own style rather than "glm"
+    # because `apply_effort` has to send `thinking` with the level and the two providers disagree
+    # about "off": GLM-5.3 cannot be turned off, DeepSeek can (the Lite row below is exactly
+    # that), so a level picked here must switch thinking back on.
+    "deepseek": ("low", "high", "max"),
+    "openrouter": ("low", "medium", "high", "xhigh"),
+    "openai": ("low", "medium", "high", "xhigh"),
+    "gemini": ("low", "medium", "high"),
+    "none": (),
+    "relay": ("low", "medium"),
 }
+
 
 # Context windows in tokens (verified 2026-09-17; see docs/INTAKE-CLARIFICATION-RESEARCH.md section 4).
 # GLM-5.3 uses Z.AI's documented 1,000,000 (OpenRouter lists 1,310,720, but some OpenRouter GLM endpoints
@@ -192,10 +218,11 @@ class Preset:
         return {"id": self.id, "label": self.label, "base_url": self.base_url,
                 "model": self.model, "extra": dict(self.extra), "context_window": self.context_window,
                 "max_output": self.max_output,
+                # The levels this endpoint takes, in its own words (effort_levels): the word the
+                # picker offers is the word that is sent. `effort_fixed` is "grey the box": no
+                # knob at all, or Relay Free, whose gateway clamps each role whatever is asked.
                 "efforts": effort_levels(self.effort_style),
-                # What each of those levels is called by the provider (effort_labels below): the
-                # GUI shows the label and stores the Relay level.
-                "effort_labels": effort_labels(self.effort_style),
+                "effort_fixed": effort_fixed(effort_levels(self.effort_style), self.hosted),
                 "effort_note": effort_note(self.effort_style), "group": self.group,
                 "key_url": self.key_url, "note": self.note, "vision": self.vision,
                 "provider": self.provider or self.label.split(" · ")[0], "plan": self.plan,
@@ -315,8 +342,9 @@ PRESETS: dict[str, Preset] = {p.id: p for p in [
            provider="google (gemini)", plan="pay-as-you-go", max_output=65_536),
     # DeepSeek's own API (https://api-docs.deepseek.com/quick_start/pricing and
     # .../api/create-chat-completion/, checked 2026-09-21): OpenAI-compatible at
-    # https://api.deepseek.com, two models. `deepseek-v4-pro` is DeepSeek-V4-Pro-0813 and the
-    # headline one, so it is the preset's model; `deepseek-flash` is DeepSeek-V4.1-Flash.
+    # https://api.deepseek.com, two models. `deepseek-v4-pro` is DeepSeek-V4-Pro-0813, the
+    # headline one; `deepseek-flash` is DeepSeek-V4.1-Flash, and it is the preset's model on all
+    # three tiers since 2026-09-21.
     # Both document a 1M window, which is 1,048,576 on every endpoint that serves them (the same
     # number the `openrouter` preset above carries for the Flash line).
     #
@@ -329,7 +357,10 @@ PRESETS: dict[str, Preset] = {p.id: p for p in [
     # (tests/test_presets.py::test_every_preset_documents_an_output_cap_that_fits_its_window).
     # Asking for 384K of a 1M window would leave the reply fighting that reserve for a length no
     # DeepSeek turn actually reaches.
-    Preset("deepseek", "deepseek · v4 pro", "https://api.deepseek.com", "deepseek-v4-pro",
+    # The preset's own model is the Flash line, not Pro (owner, 2026-09-21: "deepseek pro is
+    # never used ... use deepseek-flash for all"). Pro keeps its catalog row and its row in the
+    # ranking file, classed for nothing: it can still be picked, it is just nobody's default.
+    Preset("deepseek", "deepseek · v4.1 flash", "https://api.deepseek.com", "deepseek-flash",
            DEEPSEEK_EXTRA, 1_048_576, "deepseek", "payg",
            "https://platform.deepseek.com/api_keys", "DeepSeek platform, pay-as-you-go.",
            provider="deepseek", plan="pay-as-you-go", max_output=131_072),
@@ -399,7 +430,7 @@ TIER_DEFAULTS: dict[str, dict[str, tuple[str, str, dict]]] = {
                "lite": ("gemini", "gemini-3.5-flash-lite", {})},
     # DeepSeek serves its own Lite, so this is the one first-party API that needs no OpenRouter key
     # to fill all three: Flash at its lowest level, and Lite the same model with thinking off.
-    "deepseek": {"main": ("deepseek", "deepseek-v4-pro", DEEPSEEK_EXTRA),
+    "deepseek": {"main": ("deepseek", "deepseek-flash", DEEPSEEK_EXTRA),
                  "flash": ("deepseek", "deepseek-flash", DEEPSEEK_FAST_EXTRA),
                  "lite": ("deepseek", "deepseek-flash", DEEPSEEK_NO_THINKING_EXTRA)},
 }
@@ -427,13 +458,15 @@ RECOMMENDED = (("glm-coding", "openrouter"), ("kimi-code", "openrouter"))
 #                *target* preset, so "google/gemini-3.8-flash" is a lite row of `openrouter`. A
 #                model two tiers name (DeepSeek on OpenRouter) carries the first in PROVIDER_TIERS
 #                order; a model no tier names carries None.
-#   efforts      the Relay levels this model accepts, or None for "whatever the preset's effort
-#                style offers" (effort_levels). The value the GUI sees is always a list.
-#   effort_labels {<relay level>: <the word the provider's API takes for it>} for exactly the levels
-#                in `efforts`, from EFFORT_MAP (owner, 2026-09-20: "for codex planning you pick
-#                xhigh, not max; for glm 5.3 you pick max"). The GUI *displays* the label and
-#                *stores* the Relay level: openai and openrouter show "xhigh" for max, everything
-#                else shows the level's own name, and a model with no levels carries {}.
+#   efforts      the levels this model accepts, in its provider's own words, or None for
+#                "whatever the preset's endpoint offers" (effort_levels). The value the GUI sees
+#                is always a list. Since 2026-09-21 the word here is the word sent — openai and
+#                openrouter say "xhigh" rather than being shown "xhigh" for a stored "max" —
+#                which is the owner's "i want the effort options in relay to be determined by the
+#                model … so xhigh shows up for codex".
+#   effort_fixed true when the effort box must be greyed (`effort_fixed`): a model with no knob at
+#                all, and every Relay Free model, whose gateway clamps each role whatever is
+#                asked. The GUI still shows the level; it just cannot be moved.
 #   intelligence INTELLIGENCE[id], or None.
 #
 # `efforts` is only ever narrowed below what the preset offers: Kimi documents reasoning_effort
@@ -494,7 +527,15 @@ MODEL_CATALOG: dict[str, list[dict]] = {
         {"id": "claude-haiku-4-5", "name": "claude-haiku-4.5", "tier": "lite", "efforts": None},
         {"id": "claude-fable-5-1", "name": "claude-fable-5.1", "tier": None, "efforts": None},
     ],
+    # Google publishes a moving alias beside each concrete version, and the owner asked for both
+    # ("i want gemini latest aliases", 2026-09-21). An alias keeps its own name (design 3.4): it
+    # is a different thing to pick — you are choosing "whatever Gemini Pro is this week" — so it
+    # is its own row rather than a second spelling of today's model. Same levels as the rest of
+    # the family; the ranking file classes the two aliases and leaves the concrete rows classed
+    # for nothing, so the defaults follow Google forward.
     "gemini": [
+        {"id": "gemini-pro-latest", "tier": None, "efforts": None},
+        {"id": "gemini-flash-latest", "tier": None, "efforts": None},
         {"id": "gemini-3.1-pro-preview", "tier": "main", "efforts": None},
         {"id": "gemini-3.8-flash", "tier": "flash", "efforts": None},
         {"id": "gemini-3.5-flash-lite", "tier": "lite", "efforts": None},
@@ -507,8 +548,8 @@ MODEL_CATALOG: dict[str, list[dict]] = {
     # `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp` are still accepted and served by the
     # same Flash model; they are left out, because a retired name is not a model a person picks.
     "deepseek": [
-        {"id": "deepseek-v4-pro", "tier": "main", "efforts": None},
-        {"id": "deepseek-flash", "name": "deepseek-v4.1-flash", "tier": "flash", "efforts": None},
+        {"id": "deepseek-flash", "name": "deepseek-v4.1-flash", "tier": "main", "efforts": None},
+        {"id": "deepseek-v4-pro", "tier": None, "efforts": None},
     ],
 }
 
@@ -686,11 +727,11 @@ def catalog_rows(preset_id) -> list[dict]:
         name = model_name(preset_id, row["id"])
         out.append({"id": row["id"], "name": name, "label": name, "tier": row["tier"],
                     "efforts": efforts,
-                    "effort_labels": effort_labels(preset.effort_style, efforts),
+                    "effort_fixed": effort_fixed(efforts, preset.hosted),
                     "intelligence": INTELLIGENCE.get(name),
                     "openrouter": openrouter_twin(row["id"]),
                     "default_effort": provider_default,
-                    "tier_effort": tier_start_efforts(efforts, provider_default)})
+                    "tier_effort": tier_start_efforts(efforts, provider_default, "", name)})
     if preset_id == "openrouter":
         from . import openrouter_catalog          # here, not at the top: it imports this module
         known = {row["id"] for row in out}
@@ -823,21 +864,17 @@ def _order_of(rank, preset_id: str, group: str = "") -> int:
         return row.order
     return _MAIN_GROUP_ORDER.get(group, model_ranking.UNKNOWN_PROVIDER_ORDER)
 
-# What the openrouter default puts first in the Lite list (owner, 2026-09-20: "I thought it's 3.5
-# flash lite with no reasoning"): the cheapest Gemini, at its lowest level. Not `_LITE_VIA_OPENROUTER`,
-# which is the built-in Lite row a pane resolves to with no list at all and is left as it was.
-#
-# It survives card #MDL1's ranking file, and it stays in the **openrouter variant only** — the one
-# the user presses when they have chosen to spend an OpenRouter key on chores. The plain lists rank
-# lite the same way they rank every other class, out of `model-ranking.md`, with no provider put
-# first by name; the owner's "openrouter first for chores" is exactly what pressing the other
-# button means.
-LITE_LIST_FIRST = ("openrouter", "google/gemini-3.5-flash-lite")
+# `LITE_LIST_FIRST` — what the openrouter default used to put first in the Lite list — is gone
+# (2026-09-21). It said the same thing twice: the model is now `model-ranking.md`'s **Provider
+# picks** row for `openrouter`, and a cell in the file the owner edits is the whole point of the
+# file. `_LITE_VIA_OPENROUTER` above is untouched: that is the built-in Lite row a pane resolves
+# to with no list at all, which is a different question from what a `defaults` button fills.
 
 
 def _top_level(levels: list[str]) -> str | None:
-    """The highest level of a model's own list, which is what High runs a model at: max where the
-    provider has one, "high" on Gemini, "medium" on Relay Free, None with no knob at all."""
+    """The highest level of a model's own list, which is what High runs a model at, in the
+    provider's own word: "max" on Kimi and GLM, "xhigh" on the OpenAI API and OpenRouter, "high"
+    on Gemini, "medium" on Relay Free, None with no knob at all."""
     return levels[-1] if levels else None
 
 
@@ -869,12 +906,20 @@ def _list_entry(preset_id: str, model: str, effort: str | None) -> dict:
     return entry
 
 
-def tier_start_efforts(efforts, default_effort: str | None = None, guest_id: str = "") -> dict:
+def tier_start_efforts(efforts, default_effort: str | None = None, guest_id: str = "",
+                       name: str = "") -> dict:
     """``{tier: level}`` for main, high, flash and lite: where a model starts when the user adds it
     to that list by hand (Options › Models' ``+ add a model…``, card #TKN7).
 
-    The same three rules the ``defaults`` buttons fill the lists by, so a hand-added row and a
-    filled list agree:
+    ``model-ranking.md``'s **Levels** table first, by the model's ``name`` — the owner asked for
+    "a similar defaults file for the reasoning levels across model X class" and then filled it in,
+    so a cell there is the answer, mapped into this model's own vocabulary (`nearest_effort`,
+    because one name can be served by two providers and `claude-opus-5` is `xhigh` through Claude
+    Code and has no level at all through Anthropic's compat layer).
+
+    A blank cell, or no ``name`` to look up, is the rule that was there before it, which is also
+    the rule the ``defaults`` buttons fill the lists by, so a hand-added row and a filled list
+    agree:
 
     * **main** — the provider's own default level for this model (``default_effort``: a guest's
       ``default_effort``, a cloud model's ``infer_effort`` of its tier extra), and ``None`` when
@@ -891,15 +936,28 @@ def tier_start_efforts(efforts, default_effort: str | None = None, guest_id: str
     main = default_effort if default_effort in levels else None
     high = _guest_top_level(guest_id, levels) if guest_id else _top_level(levels)
     low = levels[0] if levels else None
-    return {"main": main, "high": high, "flash": low, "lite": low}
+    rule = {"main": main, "high": high, "flash": low, "lite": low}
+    if not name:
+        return rule
+    rank = model_ranking.load()
+    return {cls: (nearest_effort(rank.level(name, cls), levels) or rule[cls]) for cls in rule}
 
 
 # The classes a guest harness may be a default for (`roles.GUEST_TIERS`, spelled here rather than
 # imported: roles imports this module). Main is the pane's own agent and High is a plan turn, both
-# of which start the harness deliberately; Flash and Lite are side calls and per-turn swaps of a
-# running conversation, which a whole agent of its own cannot be handed — `roles._tier_entries`
-# drops a guest from those lists, so ranking one into them would only leave a row that never runs.
-GUEST_CLASSES = ("high", "main")
+# of which start the harness deliberately. Flash joined them on 2026-09-21, at the owner's ask —
+# "the worker should allow the harness for flash, and defaults should be the same across plans /
+# apis / harnesses" — so Claude Code's sonnet can sit in the Flash list and a /flash pane can run
+# on it. It serves the /flash *pane* only: every background job on that tier (terminal use,
+# summaries, suggestions) skips a guest entry and steps down, because a side call of a running
+# conversation cannot be handed a whole agent of its own (`roles.BACKGROUND_ROLES`). Lite is
+# nothing but background jobs, so no guest is ever ranked into it.
+GUEST_CLASSES = ("high", "main", "flash")
+
+# What a provider the file classes for nothing stands in with, so it can still run a pane: High
+# and Main, never the two chore classes. Spelled apart from GUEST_CLASSES since 2026-09-21, when
+# a harness was let into Flash and the two stopped being the same tuple.
+_STAND_IN_CLASSES = ("high", "main")
 
 
 @dataclass(frozen=True)
@@ -935,21 +993,88 @@ def _ranked_classes(rank, name: str, allowed=model_ranking.CLASSES) -> tuple[str
     return tuple(cls for cls in rank.classes(name) if cls in allowed)
 
 
+def provider_model_id(preset_id: str, name: str) -> str | None:
+    """The model **id** this provider serves a model name with, or None when it does not serve it.
+
+    A Provider picks cell names a model the way a person reads it, and which id carries it is the
+    provider's business: `glm-5.3` is `glm-5.3` on Z.AI and `z-ai/glm-5.3` on OpenRouter. So the
+    provider's own catalog rows are searched by name first, and then — for OpenRouter alone, whose
+    catalog here is three built-in rows against a live listing of hundreds — the twin map, which
+    is the one table that already says which slug serves which model (OPENROUTER_TWINS).
+    """
+    if not isinstance(preset_id, str) or not isinstance(name, str) or not name:
+        return None
+    for row in MODEL_CATALOG.get(preset_id) or []:
+        if model_name(preset_id, row["id"]) == name:
+            return row["id"]
+    if preset_id == "openrouter":
+        for model_id, slug in OPENROUTER_TWINS.items():
+            if model_name("openrouter", slug) == name:
+                return slug
+    return None
+
+
+def levels_for_name(name: str) -> tuple[str, ...]:
+    """Every reasoning level any built-in provider offers for this model name, weakest first.
+
+    One name, several providers, several vocabularies (design rule 1): `gpt-5.6-luna` takes `max`
+    through codex and stops at `xhigh` through the OpenAI API. Only `model-ranking.md`'s `check()`
+    asks this — "is `max` a level this model has anywhere?" — because a Levels cell is keyed by
+    name and has no provider to be checked against. Guests are added by the caller, which is the
+    module that already lists their level words.
+    """
+    out: list[str] = []
+    for preset_id in PRESETS:
+        for row in MODEL_CATALOG.get(preset_id) or []:
+            if model_name(preset_id, row["id"]) != name:
+                continue
+            for level in model_efforts(preset_id, row["id"]) or ():
+                if level not in out:
+                    out.append(level)
+    return tuple(sorted(out, key=lambda word: EFFORT_LADDER.index(word)
+                        if word in EFFORT_LADDER else len(EFFORT_LADDER)))
+
+
 def _builtin_candidates(preset_id: str, rank) -> list[_Candidate]:
-    """Every model of a built-in preset's catalog, scored and classed by `model-ranking.md`."""
+    """Every model of a built-in preset's catalog, scored and classed by `model-ranking.md`, with
+    that provider's **Provider picks** row applied on top of the shared Models classes.
+
+    A picks cell — today only `openrouter` has a row — replaces this provider's candidate for that
+    class outright: OpenRouter's Main is `glm-5.3-flash` whatever the Models table classes it as,
+    because the picks table is exactly "a provider whose defaults differ from the shared rows". A
+    cell naming a model this provider does not serve is ignored here and reported by `check()`,
+    so a typo costs the class its pick rather than the provider its place in the list.
+    """
     preset = PRESETS[preset_id]
     identity, order = _provider_identity(preset_id), rank.provider_order(preset_id)
+    picked = {cls: provider_model_id(preset_id, rank.pick(preset_id, cls) or "")
+              for cls in model_ranking.CLASSES}
+    picked = {cls: model for cls, model in picked.items() if model}
+
+    def classes_of(model_id: str) -> tuple[str, ...]:
+        name = model_name(preset_id, model_id)
+        shared = tuple(cls for cls in _ranked_classes(rank, name) if cls not in picked)
+        return tuple(cls for cls in model_ranking.CLASSES
+                     if cls in shared or picked.get(cls) == model_id)
+
     out = [_Candidate(preset_id, row["id"], model_name(preset_id, row["id"]), identity, order,
-                      rank.score(model_name(preset_id, row["id"])),
-                      _ranked_classes(rank, model_name(preset_id, row["id"])))
+                      rank.score(model_name(preset_id, row["id"])), classes_of(row["id"]))
            for row in MODEL_CATALOG.get(preset_id) or []]
+    known = {candidate.model for candidate in out}
+    for model_id in dict.fromkeys(picked.values()):
+        # A pick the provider serves but its built-in catalog does not name — every OpenRouter one
+        # but two, whose ids come out of the twin map.
+        if model_id not in known:
+            name = model_name(preset_id, model_id)
+            out.append(_Candidate(preset_id, model_id, name, identity, order, rank.score(name),
+                                  classes_of(model_id)))
     if not any("main" in c.classes for c in out):
         # A provider the file puts in no Main class still has to be able to run a pane, so its
         # built-in Main entry stands in — what this function answered before the file existed.
         entry = tier_default(preset_id, "main") or (preset_id, preset.model, preset.extra)
         name = model_name(preset_id, entry[1])
         out.append(_Candidate(preset_id, entry[1], name, identity, order, rank.score(name),
-                              GUEST_CLASSES))
+                              _STAND_IN_CLASSES))
     return out
 
 
@@ -1000,7 +1125,7 @@ def _custom_candidates(preset_id: str, model: str, rank) -> list[_Candidate]:
     otherwise, because a provider the user configured deliberately is a provider."""
     name = model_name(preset_id, model)
     return [_Candidate(preset_id, model or "", name, preset_id, _order_of(rank, preset_id, "custom"),
-                       rank.score(name), _ranked_classes(rank, name) or GUEST_CLASSES)]
+                       rank.score(name), _ranked_classes(rank, name) or _STAND_IN_CLASSES)]
 
 
 def _pick(candidates: list[_Candidate], cls: str, limit: int) -> list[_Candidate]:
@@ -1022,10 +1147,30 @@ def _pick(candidates: list[_Candidate], cls: str, limit: int) -> list[_Candidate
     return out
 
 
+def _candidate_levels(candidate: _Candidate) -> list[str]:
+    """The levels this (provider, model) pair offers, in the provider's own words."""
+    if candidate.guest:
+        return list(candidate.levels)
+    levels = model_efforts(candidate.preset, candidate.model)
+    if levels is not None:
+        return levels
+    preset = PRESETS.get(candidate.preset)
+    return effort_levels(preset.effort_style) if preset is not None else []
+
+
 def _class_effort(candidate: _Candidate, cls: str) -> str | None:
-    """The level a default entry carries, by the same three rules `tier_start_efforts` applies to a
-    hand-added row: Main the provider's own default, High the model's top level (in a guest's own
-    word), Flash and Lite the lowest."""
+    """The level a default entry carries: `model-ranking.md`'s **Levels** row for this model's
+    name, and otherwise the same three rules `tier_start_efforts` applies to a hand-added row —
+    Main the provider's own default, High the model's top level (in a guest's own word), Flash and
+    Lite the lowest.
+
+    The file's word is mapped onto this provider's own list (`nearest_effort`): the table is keyed
+    by name and one name can be served two ways, so `gpt-5.6-luna | high = max` is `max` through
+    codex and `xhigh` through the OpenAI API, which is the level that model actually has there.
+    """
+    listed = nearest_effort(model_ranking.load().level(candidate.name, cls), _candidate_levels(candidate))
+    if listed:
+        return listed
     if cls == "main":
         if candidate.guest:
             return candidate.default_effort
@@ -1067,22 +1212,35 @@ def tier_list_defaults(usable, *, local=(), custom=(), guests=(), listing=None) 
       never the same model twice; a blank score sorts last and ties break by the provider's
       `order`, then by name.
 
+    **Lite is the exception** (owner, 2026-09-21): while Relay Free can run, the plain `lite` list
+    is `relay-lite` and nothing else, however many keys are stored — "for lite, i am thinking to
+    simplify that and just everybody is on relay free by default, or openrouter if they want
+    privacy". Without Relay Free it is ranked like any other class.
+
+    **A provider whose defaults differ** from the shared rows says so in `model-ranking.md`'s
+    Provider picks table, and that cell replaces its candidate for the class
+    (`_builtin_candidates`). Only `openrouter` has a row today.
+
     Two presets of one company (`glm` and `glm-coding`) are one provider, so a class never holds
     the same model twice over; the plan wins the tie on `order`, so the credit is spent first.
     A guest's models are scored by name through the same table, and a guest is offered for High and
     Main only (GUEST_CLASSES). Relay Free never appears once anything else can take a turn.
 
-    **The levels** are unchanged: `main` the provider's own default for that model, `high` its top
-    level (a guest's in the CLI's own word, `_guest_top_level`: codex plans at `xhigh`), `flash`
-    and `lite` its lowest (owner, 2026-09-20: Lite is "with no reasoning"). `local` is the saved
-    endpoints in their own order — it belongs to no provider and is not ranked.
+    **The levels** are `model-ranking.md`'s Levels table, by the model's name, in the provider's
+    own words and mapped onto the levels that provider actually has (`_class_effort`). A blank
+    cell is the rule that was there before the table: `main` the provider's own default for that
+    model, `high` its top level (a guest's in the CLI's own word, `_guest_top_level`: codex plans
+    at `xhigh`), `flash` and `lite` its lowest (owner, 2026-09-20: Lite is "with no reasoning").
+    `local` is the saved endpoints in their own order — it belongs to no provider and is not
+    ranked.
 
     openrouter — the plain lists, then, only with an `openrouter` key, the OpenRouter twins of each
     list's models *after all of them*, cost-sensitive ones only
     (OPENROUTER_TWIN_MAX_COMPLETION_USD_PER_MTOK), a Flash or Lite twin at "low" where the listing
-    says it takes a level. `lite` starts with LITE_LIST_FIRST (Gemini 3.5 Flash-Lite through
-    OpenRouter, at low), ahead of the providers' own: chores and transcription are where the owner
-    wants OpenRouter first, and this button is where he said so. Without the key the two are equal.
+    says it takes a level. `lite` starts with OpenRouter's own Lite pick — the Provider picks row
+    in `model-ranking.md` — with `relay-lite` behind it: chores are where the owner wants the
+    choice between Relay's allowance and his own router key, and the two buttons are where he
+    makes it. Without the key the two are equal.
     """
     rank = model_ranking.load()
     usable = [p for p in PRESETS if p in set(usable)]             # PRESETS order, built-ins only
@@ -1099,14 +1257,28 @@ def tier_list_defaults(usable, *, local=(), custom=(), guests=(), listing=None) 
 
     providers = {candidate.provider for candidate in candidates}
     limit = 2 if len(providers) > 1 else 1
+    hosted_id = next((p for p in usable if PRESETS[p].hosted), "")
     if not providers:
-        hosted = next((p for p in usable if PRESETS[p].hosted), "")
-        candidates = _builtin_candidates(hosted, rank) if hosted else []
+        candidates = _builtin_candidates(hosted_id, rank) if hosted_id else []
 
     plain = {cls: [_list_entry(c.preset, c.model, _class_effort(c, cls))
                    for c in _pick(candidates, cls, limit)]
              for cls in ("main", "high", "flash", "lite")}
     plain["local"] = [_list_entry(endpoint_id, model or "", None) for endpoint_id, model in local]
+
+    # Lite is Relay Free, whatever else is stored (owner, 2026-09-21: "for lite, i am thinking to
+    # simplify that and just everybody is on relay free by default, or openrouter if they want
+    # privacy"). The one exception to "Relay Free only with no providers", and deliberate: a Lite
+    # call is a title, a label or a duplicate check, and spending a subscription or a metered key
+    # on one is what the allowance is there to avoid. The providers' own Lite models are no
+    # longer defaults at all — the owner emptied their `lite` cells in the file — so with no
+    # Relay Free the list falls back to whatever the Models table still classes for lite, which
+    # is the ranking every other class gets.
+    hosted_lite = next((c for c in (_builtin_candidates(hosted_id, rank) if hosted_id else [])
+                        if "lite" in c.classes), None)
+    if hosted_lite is not None:
+        plain["lite"] = [_list_entry(hosted_lite.preset, hosted_lite.model,
+                                     _class_effort(hosted_lite, "lite"))]
 
     routed = {tier: [dict(entry) for entry in entries] for tier, entries in plain.items()}
     if "openrouter" in usable:
@@ -1122,9 +1294,17 @@ def tier_list_defaults(usable, *, local=(), custom=(), guests=(), listing=None) 
                 efforts = model_efforts("openrouter", slug)
             return None if efforts == [] else "low"
 
-        first = _list_entry(LITE_LIST_FIRST[0], LITE_LIST_FIRST[1], twin_low(LITE_LIST_FIRST[1]))
-        routed["lite"] = [first] + [entry for entry in routed["lite"]
-                                    if (entry["preset"], entry["model"]) != LITE_LIST_FIRST]
+        # "…with openrouter" is the button for a user who would rather their chores went through
+        # the router than through Relay's own allowance (owner, 2026-09-21: "everybody is on
+        # relay free by default, or openrouter if they want privacy"). So this list starts with
+        # OpenRouter's **own** Lite pick — `model-ranking.md`'s Provider picks row, which is
+        # where that choice is written now rather than in a constant here — and Relay Free's
+        # `relay-lite` follows it, so a router that is refusing calls does not leave Lite empty.
+        lite_pick = provider_model_id("openrouter", rank.pick("openrouter", "lite") or "")
+        if lite_pick:
+            first = _list_entry("openrouter", lite_pick, twin_low(lite_pick))
+            routed["lite"] = [first] + [entry for entry in routed["lite"]
+                                        if (entry["preset"], entry["model"]) != ("openrouter", lite_pick)]
         for tier in ("main", "high", "flash", "lite"):
             have = {(entry["preset"], entry["model"]) for entry in routed[tier]}
             for entry in plain[tier]:
@@ -1186,69 +1366,79 @@ def resolve_preset(preset_id, base_url: str = "", model: str = "") -> Preset | N
 
 
 def effort_levels(style: str) -> list[str]:
-    """The levels a picker offers for this style: one per request this provider can actually make.
+    """The levels this provider's endpoint takes, in its own words, weakest first.
 
-    Empty for the "none" style, whose OpenAI-compatible endpoint has no effort knob at all.
+    Empty for the "none" style, whose OpenAI-compatible endpoint has no effort knob at all — and
+    an empty list is what greys the effort box (`effort_fixed`).
 
-    Levels that send the same request are one entry, and the entry is the level the provider itself
-    names — ``EFFORT_MAP`` values are Relay level names, so the group keeps the level whose own name
-    is the value sent, and only falls back to the first of the group when none is (OpenRouter's max,
-    sent as "xhigh"). That name matters: Kimi and GLM send the same request for medium and high, and
-    keeping the *first* of the group offered "medium" and dropped "high" — the level Relay defaults
-    to and the one every other picker shows, so the roles modal could not display the pane's own
-    effort and fell back to "Model default" (owner report, 2026-09-18). Relay Free's cap is the same
-    rule read the other way: everything above medium is sent as medium, so the picker stops there.
+    Before 2026-09-21 this answered in Relay's four words and a second table said what each one
+    was *sent* as. Now the word offered is the word sent: "xhigh" on OpenAI and OpenRouter, "high"
+    as Gemini's top, "max" on Kimi and GLM, and nothing above "medium" on Relay Free. A style the
+    table has never heard of gets Kimi's three, which is what `effort_style` falls back to for an
+    endpoint Relay cannot name.
     """
-    if style == "none":
-        return []
-    out = []
-    for value, levels in _effort_groups(style).items():
-        out.append(next((level for level in levels if level == value), levels[0]))
-    return out
+    return list(EFFORT_LEVELS.get(style, EFFORT_LEVELS["kimi"]))
 
 
-def _effort_groups(style: str) -> dict[str, list[str]]:
-    """provider value -> the Relay levels that send it, in EFFORTS order."""
-    groups: dict[str, list[str]] = {}
-    for level in EFFORTS:
-        groups.setdefault(EFFORT_MAP[style][level], []).append(level)
-    return groups
+def nearest_effort(level, levels) -> str | None:
+    """``level`` expressed in the vocabulary of ``levels``, or None when there is no knob at all.
 
+    This is the whole of the compatibility read. One model name can be served by two providers
+    with two vocabularies — `gpt-5.6-luna` is `max` through codex and has no `max` through the
+    OpenAI API — and an older GUI still holds Relay's four words and will ask codex for `max`. So
+    a level that the list does not have becomes **the weakest listed level that is at least as
+    much work**, and the top of the list when there is none: `max` on the OpenAI API is `xhigh`,
+    `max` on Gemini is `high`, `medium` on Kimi is `high`, `high` on Relay Free is `medium`. Those
+    are exactly the answers the old {Relay level: provider value} table gave, which is why it
+    could be deleted rather than kept beside this.
 
-def effort_labels(style: str, levels=None) -> dict[str, str]:
-    """``{<relay level>: <what is sent for it>}`` for the levels a picker offers (owner,
-    2026-09-20: reasoning levels are shown in the provider's own words everywhere).
-
-    Relay stores four level names; a provider's API has its own. OpenAI and OpenRouter take
-    "xhigh" where Relay says max, Gemini's top is "high", and Kimi, GLM and the rest use Relay's
-    words as they are. ``effort_levels`` already keeps, for each request a provider can make, the
-    level whose own name *is* the value sent, so a label differs from its level only where the
-    provider has no such name (max on OpenAI and OpenRouter). ``levels`` narrows the answer to a
-    model's own list (a catalog row's ``efforts``); the "none" style, and a model with no levels,
-    get {}. The GUI displays the label and stores the Relay level — the level is what
-    ``configure`` / ``set_effort`` / a ``tiers`` entry take.
+    A word neither the list nor the ladder knows is out of Relay's hands — a guest CLI may name a
+    level nothing here has heard of — so it is handed back as written and the provider decides.
     """
-    if style not in EFFORT_MAP or style == "none":
-        return {}
-    offered = effort_levels(style) if levels is None else [l for l in levels if l in EFFORTS]
-    return {level: EFFORT_MAP[style][level] for level in offered}
+    if not isinstance(level, str) or not level:
+        return None
+    level = level.strip().lower()
+    listed = [word for word in (levels or []) if isinstance(word, str)]
+    if not listed:
+        return None
+    if level in listed:
+        return level
+    if level not in EFFORT_LADDER:
+        return level
+    rank = EFFORT_LADDER.index(level)
+    above = [word for word in listed if word in EFFORT_LADDER and EFFORT_LADDER.index(word) >= rank]
+    if above:
+        return min(above, key=EFFORT_LADDER.index)
+    ranked = [word for word in listed if word in EFFORT_LADDER]
+    return max(ranked, key=EFFORT_LADDER.index) if ranked else listed[-1]
 
 
 def effort_note(style: str) -> str:
-    """One line naming the levels this provider does not have, or "" when it has all four.
+    """One line about this provider's levels, shown under the effort box, or "" when there is
+    nothing to say.
 
-    The picker shows what the endpoint can do; this says what happens to the levels it left out, so
-    a pane set to one of them from another provider is not a mystery.
+    There used to be one per provider, naming the Relay levels it did not have and what each was
+    silently sent as. Nothing is silently sent as anything any more — the picker offers the
+    provider's own words — so the only note left is the one that is not about vocabulary: Relay
+    Free's ceiling is the *gateway's*, applied per role, so even the two levels it offers are a
+    request rather than a setting.
     """
-    if style == "none":
-        return ""
-    phrases = []
-    for value, levels in _effort_groups(style).items():
-        kept = next((level for level in levels if level == value), levels[0])
-        dropped = [level for level in levels if level != kept]
-        if dropped:
-            phrases.append(f"{' and '.join(dropped)} {'are' if len(dropped) > 1 else 'is'} sent as {kept}")
-    return "; ".join(phrases) + "." if phrases else ""
+    return ("Relay Free caps reasoning per role at the gateway, so a level above the cap is "
+            "lowered there." if style == "relay" else "")
+
+
+def effort_fixed(levels, hosted: bool = False) -> bool:
+    """Whether the effort box must be greyed out for this model (owner, 2026-09-21: "for no knob
+    models, the effort box should be grayed out. same for relay free").
+
+    Two cases, and they are different kinds of "no". A model with no levels at all has no knob to
+    turn — Kimi's high-speed models, Anthropic's compat layer, MiniMax. Relay Free *has* two
+    levels and sends them, but the gateway clamps each role to its own ceiling
+    (gateway/validate.py), so a box the user can move would only pretend: the number that decides
+    is on the server. Either way the GUI shows the level and refuses to change it, rather than
+    offering a control with no effect.
+    """
+    return bool(hosted or not [word for word in (levels or []) if isinstance(word, str)])
 
 
 def effort_style(preset: Preset | None, extra: dict | None = None, base_url: str = "") -> str:
@@ -1262,23 +1452,62 @@ def effort_style(preset: Preset | None, extra: dict | None = None, base_url: str
     return "kimi"
 
 
-def validate_effort(effort) -> str:
-    if effort not in EFFORTS:
-        raise ValueError("effort must be one of low, medium, high, max.")
-    return effort
+_EFFORT_WORD = re.compile(r"[a-z][a-z0-9-]{0,31}")
+
+
+def validate_effort(effort, levels=None) -> str:
+    """A reasoning level on its way in, checked against **the model it is for** (owner,
+    2026-09-21: "i want the effort options in relay to be determined by the model").
+
+    ``levels`` is that model's own list — a catalog row's ``efforts``, a guest row's, or the
+    provider's (`effort_levels`). A level in it is returned as written. One of Relay's own four,
+    or any other word on the ladder, is read through `nearest_effort`, which is what makes an
+    older GUI's `max` land on codex's `max` and on the OpenAI API's `xhigh` rather than being
+    refused. Anything else is a typo, and it raises, naming the levels the model does have.
+
+    With ``levels`` left out — the callers that hold a level before they know which model will run
+    it — or empty (a model with no knob at all), only the shape is checked: one short lower-case
+    word, which is what every level either guest or any provider here names.
+
+    Relay's own four are no longer the universe, so "effort must be one of low, medium, high, max"
+    is gone as an error; what a model does not take, it says with its own list in the message.
+    """
+    if not isinstance(effort, str) or not _EFFORT_WORD.fullmatch(effort.strip().lower()):
+        raise ValueError("effort must be one short lower-case word, such as low or high.")
+    word = effort.strip().lower()
+    listed = [level for level in (levels or []) if isinstance(level, str)]
+    if levels is None or not listed:
+        return word
+    if word in listed:
+        return word
+    if word in EFFORT_LADDER:
+        return nearest_effort(word, listed)
+    raise ValueError(f"effort must be one of {', '.join(listed)}.")
 
 
 def apply_effort(extra: dict | None, style: str, effort: str | None) -> tuple[dict, dict]:
-    """Return (new extra, applied provider params). effort=None leaves extra unchanged."""
+    """Return (new extra, applied provider params). effort=None leaves extra unchanged.
+
+    The level is sent in the provider's own words, because that is what it now is: the word the
+    picker offered came out of `effort_levels`, which is the endpoint's own list. A word this
+    endpoint does not take — an older client's, or a level carried over from another provider —
+    is mapped onto the nearest one it does (`nearest_effort`) rather than sent and refused.
+    """
     result = copy.deepcopy(extra or {})
     if effort is None:
         return result, {}
-    validate_effort(effort)
+    effort = validate_effort(effort)
     if style == "none":
         # Anthropic's compat layer ignores reasoning_effort and MiniMax has no such field; sending one
         # would be noise at best and a 400 at worst, so the model's own default stands.
         return result, {}
-    value = EFFORT_MAP[style][effort]
+    levels = effort_levels(style)
+    value = nearest_effort(effort, levels)
+    if value not in levels:
+        # A word this endpoint has no level for and the ladder cannot place — a typo, or a guest
+        # CLI's own level on a request-body provider. Relay sends nothing rather than a word it
+        # knows the endpoint will refuse; the model's own default stands.
+        return result, {}
     if style == "openrouter":
         reasoning = dict(result.get("reasoning") or {})
         reasoning.pop("max_tokens", None)  # OpenRouter accepts effort or max_tokens, not both
@@ -1295,20 +1524,22 @@ def apply_effort(extra: dict | None, style: str, effort: str | None) -> tuple[di
 
 
 def infer_effort(style: str, extra: dict | None) -> str | None:
-    """Best Relay level describing the provider params already in extra, if any."""
+    """The level the provider params already in ``extra`` describe, if any.
+
+    This used to have to work backwards through the {Relay level: provider value} table and pick,
+    of the two levels that could have sent this value, the one the pane could be put back on.
+    There is nothing to work backwards through now: the value in the request *is* the level, so
+    this reads it out and checks it is one the picker offers (`nearest_effort`), which keeps a
+    level left behind by another provider — a `max` in a body now pointed at Gemini — from being
+    reported as a level this endpoint has.
+    """
     extra = extra or {}
     if style == "none":
         return None
     value = (extra.get("reasoning") or {}).get("effort") if style == "openrouter" else extra.get("reasoning_effort")
-    if not isinstance(value, str):
+    if not isinstance(value, str) or not value.strip():
         return None
-    # Only a level the picker offers: two levels can send this value, and the answer is the one the
-    # pane can be put back on (effort_levels).
-    offered = effort_levels(style)
-    for level in ("low", "high", "max", "medium"):
-        if level in offered and EFFORT_MAP[style][level] == value:
-            return level
-    return "max" if value in ("max", "xhigh") else None
+    return nearest_effort(value.strip().lower(), effort_levels(style))
 
 
 def context_window_for(preset: Preset | None) -> int:

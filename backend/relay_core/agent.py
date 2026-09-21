@@ -39,8 +39,9 @@ from .planning import (EXIT_PLAN_MODE_SPEC, validate_exit_args,
                        PLAN_BLOCKED_TOOLS, PLAN_MODE_NOTE, WRITE_PLAN_SPEC, guest_plan_prompt, plan_from_reply,
                        validate_mode, validate_plan_args, write_plan)
 from .roles import GUEST_BASE_SCHEME, guest_id_of, is_guest_preset
-from .presets import (apply_effort, context_window_for, effort_style, infer_effort, model_name,
-                      model_supports_vision, resolve_preset, tier_default, validate_effort)
+from .presets import (apply_effort, context_window_for, effort_levels, effort_style, infer_effort,
+                      model_efforts, model_name, model_supports_vision, resolve_preset,
+                      tier_default, validate_effort)
 from .program_input import DEFAULT_MAX_WRITES, clip_screen, validate_grant
 from .terminal_handoff import validate_ceiling
 from .provider import (DEFAULT_STALL_TIMEOUT, Cancelled, ChatProvider, ProviderConfig, ProviderError,
@@ -1191,8 +1192,18 @@ class Agent:
     def _effort_style(self) -> str:
         return effort_style(self.preset, self.config.extra, self.config.base_url)
 
+    def _effort_levels(self) -> list[str]:
+        """The levels this pane's own model takes, in its provider's own words: the catalog row's
+        list where Relay names the model, else the endpoint's (card #MDL1, 2026-09-21)."""
+        levels = model_efforts(self.preset.id if self.preset is not None else None, self.config.model)
+        return list(levels) if levels is not None else effort_levels(self._effort_style())
+
     def set_effort(self, effort: str) -> dict:
-        extra, applied = apply_effort(self.config.extra, self._effort_style(), validate_effort(effort))
+        # Checked against **this model's** levels, not Relay's old four: a client that still sends
+        # `max` to a model whose top is `xhigh` gets `xhigh`, and that is what the pane then
+        # reports as its level rather than a word the endpoint never saw.
+        effort = validate_effort(effort, self._effort_levels())
+        extra, applied = apply_effort(self.config.extra, self._effort_style(), effort)
         self.config.extra = extra
         if getattr(self.provider, "config", None) is not None and self.provider.config is not self.config:
             self.provider.config.extra = copy.deepcopy(extra)
