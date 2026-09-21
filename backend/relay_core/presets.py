@@ -20,6 +20,9 @@ EFFORTS = ("low", "medium", "high", "max")
 #   and only on kimi-k3; thinking cannot be disabled).
 # - GLM-5.3: https://docs.z.ai/guides/capabilities/thinking (thinking.type accepts only "enabled";
 #   reasoning_effort low|high|max, default max).
+# - DeepSeek: https://api-docs.deepseek.com/api/create-chat-completion/ and .../guides/thinking_mode/
+#   (reasoning_effort none|low|high|max, "minimal" mapped to low and "medium"/"xhigh" mapped to high;
+#   thinking is on by default and `thinking: {"type": "disabled"}` turns it off).
 # - OpenRouter: https://openrouter.ai/docs/use-cases/reasoning-tokens.md (reasoning.effort: none|minimal|low|
 #   medium|high|xhigh|max; xhigh and max get the same ~95% budget).
 # - OpenAI: https://developers.openai.com/api/docs/api-reference/chat/create (reasoning_effort none|minimal|
@@ -34,6 +37,11 @@ EFFORTS = ("low", "medium", "high", "max")
 EFFORT_MAP: dict[str, dict[str, str]] = {
     "kimi": {"low": "low", "medium": "high", "high": "high", "max": "max"},
     "glm": {"low": "low", "medium": "high", "high": "high", "max": "max"},
+    # DeepSeek takes the same three words as Kimi and GLM, so medium is sent as high. It is its own
+    # style rather than "glm" because `apply_effort` has to send `thinking` with the level and the
+    # two providers disagree about "off": GLM-5.3 cannot be turned off, DeepSeek can (the Lite row
+    # below is exactly that), so a level picked here must switch thinking back on.
+    "deepseek": {"low": "low", "medium": "high", "high": "high", "max": "max"},
     "openrouter": {"low": "low", "medium": "medium", "high": "high", "max": "xhigh"},
     "openai": {"low": "low", "medium": "medium", "high": "high", "max": "xhigh"},
     "gemini": {"low": "low", "medium": "medium", "high": "high", "max": "high"},
@@ -71,7 +79,10 @@ DEFAULT_MAX_OUTPUT = 32_768
 # an image on GLM swaps to Flash for that turn and back afterwards (roles.VISION_DEFAULTS). Kimi K3
 # and the K2.5+ models read images (OpenRouter lists text+image input for kimi-k3, kimi-k2.7-code,
 # kimi-k2.6 and kimi-k2.5; kimi-k2, kimi-k2-0905 and kimi-k2-thinking are text-only, which the
-# "kimi-k2." prefix keeps out). MiniMax M3 and DeepSeek are text-only, so an image turn there needs
+# "kimi-k2." prefix keeps out). DeepSeek's Flash reads images and its Pro does not
+# (https://api-docs.deepseek.com/quick_start/pricing, checked 2026-09-21: Vision is a tick for
+# `deepseek-flash` and "Not supported" for `deepseek-v4-pro`), which is why a turn carrying an image
+# on DeepSeek swaps to Flash the way GLM does. MiniMax M3 is text-only, so an image turn there needs
 # a configured vision model and is otherwise refused with a message instead of being sent and
 # rejected.
 VISION_MODELS: tuple[str, ...] = (
@@ -80,6 +91,9 @@ VISION_MODELS: tuple[str, ...] = (
     "gemini-",                                                   # Google: the Gemini family
     "glm-5.3-flash", "glm-4.5v", "glm-4.6v", "glm-5v",           # Z.AI: the Flash and V models
     "kimi-k3", "kimi-k2.",                                       # Moonshot: K3 and K2.5+ read images
+    # DeepSeek: the Flash line only. "deepseek-flash" is the first-party id and its moving
+    # -latest alias; "deepseek-v4.1-flash" is the same model's name and OpenRouter's slug.
+    "deepseek-flash", "deepseek-v4.1-flash", "deepseek-v4-flash",
     "qwen-vl", "qwen2-vl", "qwen3-vl", "pixtral", "llava", "minimax-vl",
     "kimi-latest", "moonshot-v1-8k-vision", "moonshot-v1-32k-vision", "moonshot-v1-128k-vision",
 )
@@ -98,6 +112,40 @@ def model_supports_vision(model) -> bool:
 GROUPS = ("included", "subscription", "aggregator", "payg", "local", "custom")
 GROUP_LABELS = {"included": "Included", "subscription": "Subscriptions", "aggregator": "Aggregator",
                 "payg": "Pay-as-you-go", "local": "On this machine", "custom": "Custom"}
+
+
+# --- how a provider is reached, per row of the `presets` event (protocol 13.2) -------------------
+# `kind` and `order` are that provider's row of `model-ranking.md`, sent with the provider rather
+# than kept a second time in the GUI. Until card #MDL1 the client held its own copy of rule 2.2 as a
+# hard-coded list (src/ModelCatalog.cpp `accessRank`: plan, then guest, then api, then OpenRouter,
+# then Relay Free); the owner edits the file, so the file has to be what the picker sorts by, and
+# `grouped()` now reads these two off the row and falls back to that list only for a row with
+# neither.
+#
+# The fallback is deliberately safe, because the ranking file is a file a person edits and may be
+# half-way through: a provider it does not name is `api` at `UNKNOWN_PROVIDER_ORDER`, which is after
+# every provider it does name. Nothing here raises and nothing is refused — a row simply stops
+# carrying an opinion and sorts last among its peers. That covers a custom provider the user added,
+# a model server on this machine, and a preset the file has not caught up with yet.
+DEFAULT_PROVIDER_KIND = "api"
+
+
+def provider_rank(preset_id, hosted: bool = False) -> tuple[str, int]:
+    """``(kind, order)`` for a provider, from the ranking file, with the safe pair above.
+
+    ``hosted`` and a ``guest:`` id are the two cases the row itself settles, so they keep their
+    kind even with no row at all: Relay's own allowance is `free` and a guest CLI is a `harness`.
+    """
+    rank = model_ranking.load()
+    kind = rank.provider_kind(preset_id)
+    if not kind:
+        if hosted:
+            kind = "free"
+        elif isinstance(preset_id, str) and preset_id.startswith("guest:"):
+            kind = "harness"
+        else:
+            kind = DEFAULT_PROVIDER_KIND
+    return kind, rank.provider_order(preset_id)
 
 
 @dataclass(frozen=True)
@@ -140,6 +188,7 @@ class Preset:
         return model_supports_vision(self.model)
 
     def to_dict(self) -> dict:
+        kind, order = provider_rank(self.id, self.hosted)
         return {"id": self.id, "label": self.label, "base_url": self.base_url,
                 "model": self.model, "extra": dict(self.extra), "context_window": self.context_window,
                 "max_output": self.max_output,
@@ -152,6 +201,9 @@ class Preset:
                 "provider": self.provider or self.label.split(" · ")[0], "plan": self.plan,
                 "local": self.local, "server": self.server, "hosted": self.hosted,
                 "custom": self.custom,
+                # How this provider is reached and where it sorts against the others serving the
+                # same model (`provider_rank` above, `model-ranking.md`'s Providers table).
+                "kind": kind, "order": order,
                 # The per-model catalog (MODEL_CATALOG below): [] for a local endpoint, whose one
                 # served model is `model` and whose own list comes from the probe (protocol 28).
                 "models": catalog_rows(self.id)}
@@ -162,6 +214,17 @@ GLM_EXTRA = {"thinking": {"type": "enabled"}, "reasoning_effort": "high"}
 # (an error will occur if the thinking.type parameter ... is set to disabled)"
 # — https://docs.z.ai/guides/capabilities/thinking. The cheapest legal setting is reasoning_effort low.
 GLM_FAST_EXTRA = {"thinking": {"type": "enabled"}, "reasoning_effort": "low"}
+
+# DeepSeek's switch is the same shape and it *can* be turned off: "thinking" takes enabled | disabled
+# and is enabled by default (https://api-docs.deepseek.com/api/create-chat-completion/). Relay has no
+# "off" among its four levels — a level is how *hard* a model thinks, not whether it does — so "off"
+# is a property of the request the tier makes, exactly as GLM's Flash row pins its level: Main asks
+# for high, Flash for low, and Lite (titles, labels, duplicate checks) turns thinking off outright
+# rather than paying for reasoning tokens on a chore. Picking any level on a Lite row switches
+# thinking back on, because `apply_effort` sends the pair (see the "deepseek" style in EFFORT_MAP).
+DEEPSEEK_EXTRA = {"thinking": {"type": "enabled"}, "reasoning_effort": "high"}
+DEEPSEEK_FAST_EXTRA = {"thinking": {"type": "enabled"}, "reasoning_effort": "low"}
+DEEPSEEK_NO_THINKING_EXTRA = {"thinking": {"type": "disabled"}}
 
 PRESETS: dict[str, Preset] = {p.id: p for p in [
     # Relay Free (owner decision 2026-09-18): a modest included allowance so a fresh install's first
@@ -250,6 +313,26 @@ PRESETS: dict[str, Preset] = {p.id: p for p in [
            # reads this per model instead of as a share of the window
            # (https://ai.google.dev/gemini-api/docs/gemini-3).
            provider="google (gemini)", plan="pay-as-you-go", max_output=65_536),
+    # DeepSeek's own API (https://api-docs.deepseek.com/quick_start/pricing and
+    # .../api/create-chat-completion/, checked 2026-09-21): OpenAI-compatible at
+    # https://api.deepseek.com, two models. `deepseek-v4-pro` is DeepSeek-V4-Pro-0813 and the
+    # headline one, so it is the preset's model; `deepseek-flash` is DeepSeek-V4.1-Flash.
+    # Both document a 1M window, which is 1,048,576 on every endpoint that serves them (the same
+    # number the `openrouter` preset above carries for the Flash line).
+    #
+    # The output cap is the one number here that is not the largest the provider will accept.
+    # DeepSeek takes max_tokens "between 1 and 384K (393216)", but that is a ceiling on the ask,
+    # not what it produces: unset, it answers with "8K in non-thinking mode, 64K in thinking mode
+    # (128K with reasoning_effort set to max)". 128K is therefore the real budget of a thinking
+    # turn, it is what every sibling preset above documents, and it stays inside the quarter of the
+    # window Relay keeps for the reply against the compaction reserve
+    # (tests/test_presets.py::test_every_preset_documents_an_output_cap_that_fits_its_window).
+    # Asking for 384K of a 1M window would leave the reply fighting that reserve for a length no
+    # DeepSeek turn actually reaches.
+    Preset("deepseek", "deepseek · v4 pro", "https://api.deepseek.com", "deepseek-v4-pro",
+           DEEPSEEK_EXTRA, 1_048_576, "deepseek", "payg",
+           "https://platform.deepseek.com/api_keys", "DeepSeek platform, pay-as-you-go.",
+           provider="deepseek", plan="pay-as-you-go", max_output=131_072),
 ]}
 
 # --- Main / Flash / Lite tiers (docs/AGENT-SESSIONS-PROTOCOL.md section 13.7) ----------------------
@@ -314,6 +397,11 @@ TIER_DEFAULTS: dict[str, dict[str, tuple[str, str, dict]]] = {
     "gemini": {"main": ("gemini", "gemini-3.1-pro-preview", {"reasoning_effort": "high"}),
                "flash": ("gemini", "gemini-3.8-flash", {}),
                "lite": ("gemini", "gemini-3.5-flash-lite", {})},
+    # DeepSeek serves its own Lite, so this is the one first-party API that needs no OpenRouter key
+    # to fill all three: Flash at its lowest level, and Lite the same model with thinking off.
+    "deepseek": {"main": ("deepseek", "deepseek-v4-pro", DEEPSEEK_EXTRA),
+                 "flash": ("deepseek", "deepseek-flash", DEEPSEEK_FAST_EXTRA),
+                 "lite": ("deepseek", "deepseek-flash", DEEPSEEK_NO_THINKING_EXTRA)},
 }
 
 # Recommended default-provider pairings shown in the roles modal.
@@ -410,6 +498,17 @@ MODEL_CATALOG: dict[str, list[dict]] = {
         {"id": "gemini-3.1-pro-preview", "tier": "main", "efforts": None},
         {"id": "gemini-3.8-flash", "tier": "flash", "efforts": None},
         {"id": "gemini-3.5-flash-lite", "tier": "lite", "efforts": None},
+    ],
+    # https://api-docs.deepseek.com/api/list-models/ lists exactly these two ids.
+    # `deepseek-flash` is a moving alias for whatever DeepSeek's Flash line currently is — today
+    # DeepSeek-V4.1-Flash, which is what OpenRouter serves as `deepseek/deepseek-v4.1-flash` — so it
+    # carries that model's name and folds into the row the `openrouter` preset already has (rule 1:
+    # one model, one name, whoever serves it). `deepseek-v4-pro` names itself. The legacy ids
+    # `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp` are still accepted and served by the
+    # same Flash model; they are left out, because a retired name is not a model a person picks.
+    "deepseek": [
+        {"id": "deepseek-v4-pro", "tier": "main", "efforts": None},
+        {"id": "deepseek-flash", "name": "deepseek-v4.1-flash", "tier": "flash", "efforts": None},
     ],
 }
 
@@ -530,6 +629,10 @@ OPENROUTER_TWINS: dict[str, str] = {
     "claude-sonnet-5": "anthropic/claude-sonnet-5",
     "claude-haiku-4-5": "anthropic/claude-haiku-4.5",
     "claude-fable-5-1": "anthropic/claude-fable-5.1",
+    # deepseek (its own API). Both lines are on OpenRouter: the Flash alias is today's
+    # DeepSeek-V4.1-Flash, and `deepseek/deepseek-v4-pro` is the Pro line's moving slug.
+    "deepseek-v4-pro": "deepseek/deepseek-v4-pro",
+    "deepseek-flash": "deepseek/deepseek-v4.1-flash",
     # google
     "gemini-3.1-pro-preview": "google/gemini-3.1-pro-preview",
     "gemini-3.8-flash": "google/gemini-3.8-flash",
@@ -1181,7 +1284,9 @@ def apply_effort(extra: dict | None, style: str, effort: str | None) -> tuple[di
         reasoning.pop("max_tokens", None)  # OpenRouter accepts effort or max_tokens, not both
         reasoning["effort"] = value
         applied = {"reasoning": reasoning}
-    elif style == "glm":
+    elif style in ("glm", "deepseek"):
+        # Both take the switch and the level together, and sending "enabled" is what makes picking a
+        # level on a row whose extra says `disabled` (DeepSeek's Lite) mean what it says.
         applied = {"thinking": {"type": "enabled"}, "reasoning_effort": value}
     else:
         applied = {"reasoning_effort": value}

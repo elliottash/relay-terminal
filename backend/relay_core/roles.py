@@ -143,6 +143,9 @@ ROLE_TIERS: dict[str, str | None] = {
 VISION_DEFAULTS: dict[str, tuple[str, str, dict]] = {
     "glm": ("glm", "glm-5.3-flash", {}),
     "glm-coding": ("glm-coding", "glm-5.3-flash", {}),
+    # DeepSeek is the same shape: Pro is text-only and the Flash line reads images
+    # (https://api-docs.deepseek.com/quick_start/pricing), so an image turn goes to Flash and back.
+    "deepseek": ("deepseek", "deepseek-flash", {}),
 }
 # Route assist keeps its fixed fast model whatever the tiers say: the routing budget is under a second
 # and Gemini 3.5 Flash-Lite measured 0.5-0.6 s against 2.3-4.9 s for 3.8 Flash. See route_assist.py.

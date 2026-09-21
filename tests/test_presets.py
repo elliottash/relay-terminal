@@ -97,7 +97,8 @@ class PresetTableTests(unittest.TestCase):
             by_group.setdefault(preset.group, []).append(preset.id)
         self.assertEqual(sorted(by_group["subscription"]), ["glm-coding", "kimi-code", "minimax"])
         self.assertEqual(by_group["aggregator"], ["openrouter"])
-        self.assertEqual(sorted(by_group["payg"]), ["anthropic", "gemini", "glm", "kimi", "openai"])
+        self.assertEqual(sorted(by_group["payg"]),
+                         ["anthropic", "deepseek", "gemini", "glm", "kimi", "openai"])
         self.assertEqual(by_group["included"], ["relay-free"])
 
     # ----- Relay Free (owner decision 2026-09-18) --------------------------------------------
@@ -141,7 +142,8 @@ class PresetTableTests(unittest.TestCase):
         # The roles modal picks a provider, so it shows the company, never the preset's model name.
         expected = {"relay-free": "relay", "kimi": "kimi", "kimi-code": "kimi", "glm": "z.ai (glm)",
                     "glm-coding": "z.ai (glm)", "minimax": "minimax", "openrouter": "openrouter",
-                    "openai": "openai (chatgpt)", "anthropic": "anthropic (claude)", "gemini": "google (gemini)"}
+                    "openai": "openai (chatgpt)", "anthropic": "anthropic (claude)",
+                    "gemini": "google (gemini)", "deepseek": "deepseek"}
         self.assertEqual({p.id: p.to_dict()["provider"] for p in P.PRESETS.values()}, expected)
         # Two presets of one company are told apart by their plan, so neither can be nameless.
         shared = {name for name in expected.values() if list(expected.values()).count(name) > 1}
@@ -178,11 +180,146 @@ class PresetTableTests(unittest.TestCase):
         self.assertEqual(set(P.EFFORT_MAP["gemini"].values()), {"low", "medium", "high"})
 
     def test_glm_flash_never_asks_to_disable_thinking(self):
-        # Z.AI errors when thinking.type is "disabled" on GLM-5.3 and GLM-5.3-Flash.
+        # Z.AI errors when thinking.type is "disabled" on GLM-5.3 and GLM-5.3-Flash. The rule is
+        # Z.AI's, not everyone's — DeepSeek documents the same switch and *does* take "disabled"
+        # (the test below) — so it is checked on the presets it belongs to.
         self.assertEqual(P.GLM_FAST_EXTRA["thinking"], {"type": "enabled"})
-        for table in P.TIER_DEFAULTS.values():
-            for _, _, extra in table.values():
-                self.assertNotEqual((extra.get("thinking") or {}).get("type"), "disabled")
+        for preset_id in ("glm", "glm-coding"):
+            for _, _, extra in P.TIER_DEFAULTS[preset_id].values():
+                self.assertNotEqual((extra.get("thinking") or {}).get("type"), "disabled", preset_id)
+
+    def test_only_deepseeks_lite_turns_thinking_off(self):
+        """Relay has no "off" among its four levels, so "off" is the tier's request (card #MDL1).
+
+        https://api-docs.deepseek.com/api/create-chat-completion/: `thinking` takes enabled |
+        disabled and is enabled by default. Lite is titles, labels and duplicate checks, so it asks
+        for no reasoning tokens at all; Main and Flash keep the switch on and differ by level.
+        """
+        table = P.TIER_DEFAULTS["deepseek"]
+        self.assertEqual(table["main"][2], {"thinking": {"type": "enabled"}, "reasoning_effort": "high"})
+        self.assertEqual(table["flash"][2], {"thinking": {"type": "enabled"}, "reasoning_effort": "low"})
+        self.assertEqual(table["lite"][2], {"thinking": {"type": "disabled"}})
+        # Nobody else disables it, so a stray "disabled" elsewhere is still caught.
+        off = {preset_id for preset_id, tiers in P.TIER_DEFAULTS.items()
+               for _, _, extra in tiers.values()
+               if (extra.get("thinking") or {}).get("type") == "disabled"}
+        self.assertEqual(off, {"deepseek"})
+        # And picking a level on that row switches thinking back on rather than sending both.
+        extra, applied = P.apply_effort(table["lite"][2], "deepseek", "max")
+        self.assertEqual(extra, {"thinking": {"type": "enabled"}, "reasoning_effort": "max"})
+        self.assertEqual(applied, extra)
+
+
+class DeepSeekTests(unittest.TestCase):
+    """DeepSeek's own API (card #MDL1; owner, 2026-09-21: "i added deepseek as an api option").
+
+    Everything here was read off https://api-docs.deepseek.com on 2026-09-21: the pricing page
+    (models, windows, vision), /api/list-models (the two ids), /api/create-chat-completion
+    (reasoning_effort, thinking, max_tokens) and /guides/thinking_mode.
+    """
+
+    def test_it_is_a_first_party_pay_as_you_go_api_like_glm_and_kimi(self):
+        preset = P.PRESETS["deepseek"]
+        self.assertEqual(preset.label, "deepseek \u00b7 v4 pro")
+        self.assertEqual(preset.label, preset.label.lower())      # lower-case, Warp style
+        self.assertEqual(preset.base_url, "https://api.deepseek.com")
+        self.assertEqual(preset.group, "payg")
+        self.assertEqual((preset.provider, preset.plan), ("deepseek", "pay-as-you-go"))
+        self.assertEqual(preset.model, "deepseek-v4-pro")
+        self.assertEqual(preset.context_window, 1_048_576)        # "1M" on the pricing page
+        self.assertEqual(preset.max_output, 131_072)              # its own thinking-mode ceiling
+        self.assertFalse(preset.hosted or preset.local or preset.custom)
+
+    def test_the_key_is_looked_up_like_every_other_providers(self):
+        # Nothing was added for it: the env name and the keyring entry are derived from the id, so
+        # the keys dialog and `has_stored_key` work the moment the preset exists.
+        from relay_core import keystore
+        self.assertEqual(keystore.env_name("deepseek"), "RELAY_DEEPSEEK_API_KEY")
+
+    def test_the_two_models_are_the_two_ids_the_api_lists(self):
+        rows = {row["id"]: row for row in P.catalog_rows("deepseek")}
+        self.assertEqual(sorted(rows), ["deepseek-flash", "deepseek-v4-pro"])
+        # `deepseek-flash` is a moving alias serving DeepSeek-V4.1-Flash, which OpenRouter serves
+        # as `deepseek/deepseek-v4.1-flash` — one model, one name (rule 1), so the two fold into
+        # one row of the picker instead of appearing twice.
+        self.assertEqual(rows["deepseek-flash"]["name"], "deepseek-v4.1-flash")
+        self.assertEqual(rows["deepseek-flash"]["name"],
+                         P.model_name("openrouter", "deepseek/deepseek-v4.1-flash"))
+        self.assertEqual(rows["deepseek-v4-pro"]["name"], "deepseek-v4-pro")
+        self.assertEqual(rows["deepseek-flash"]["openrouter"], "deepseek/deepseek-v4.1-flash")
+        self.assertEqual(rows["deepseek-v4-pro"]["openrouter"], "deepseek/deepseek-v4-pro")
+        self.assertEqual(rows["deepseek-v4-pro"]["tier"], "main")
+        # Flash is the default for Flash *and* Lite; a row carries the first in PROVIDER_TIERS order.
+        self.assertEqual(rows["deepseek-flash"]["tier"], "flash")
+
+    def test_the_four_relay_levels_map_onto_deepseeks_three(self):
+        # reasoning_effort is none | low | high | max, with "medium" (and "xhigh") accepted and
+        # mapped to "high" by the API itself; Relay maps it here so the picker offers what is sent.
+        self.assertEqual(P.EFFORT_MAP["deepseek"],
+                         {"low": "low", "medium": "high", "high": "high", "max": "max"})
+        self.assertEqual(P.effort_levels("deepseek"), ["low", "high", "max"])
+        self.assertEqual(P.effort_labels("deepseek"), {"low": "low", "high": "high", "max": "max"})
+        self.assertEqual(P.effort_note("deepseek"), "medium is sent as high.")
+        self.assertEqual(P.apply_effort({}, "deepseek", "medium")[1],
+                         {"thinking": {"type": "enabled"}, "reasoning_effort": "high"})
+
+    def test_flash_reads_images_and_pro_does_not(self):
+        self.assertTrue(P.model_supports_vision("deepseek-flash"))
+        self.assertTrue(P.model_supports_vision("deepseek/deepseek-v4.1-flash"))
+        self.assertFalse(P.model_supports_vision("deepseek-v4-pro"))
+        self.assertFalse(P.PRESETS["deepseek"].vision)            # the preset's own model is Pro
+        # So an image turn steps to Flash and back, exactly as it does on Z.AI.
+        from relay_core.roles import VISION_DEFAULTS
+        self.assertEqual(VISION_DEFAULTS["deepseek"], ("deepseek", "deepseek-flash", {}))
+
+    def test_its_lite_tier_needs_no_second_providers_key(self):
+        # Every other first-party API borrows Gemini through OpenRouter for Lite. DeepSeek serves
+        # its own cheap model, so all three tiers stay on the one key.
+        for _, (preset_id, _, _) in P.TIER_DEFAULTS["deepseek"].items():
+            self.assertEqual(preset_id, "deepseek")
+
+
+class ProviderKindAndOrderTests(unittest.TestCase):
+    """`kind` and `order` on a `presets` row (card #MDL1, protocol 13.2)."""
+
+    def test_every_row_carries_the_ranking_files_kind_and_order(self):
+        from relay_core import model_ranking
+        rank = model_ranking.load()
+        for preset_id, preset in P.PRESETS.items():
+            row = preset.to_dict()
+            with self.subTest(preset_id):
+                self.assertIn(row["kind"], model_ranking.KINDS)
+                self.assertIsInstance(row["order"], int)
+                if preset_id in rank.providers:
+                    self.assertEqual(row["kind"], rank.providers[preset_id].kind)
+                    self.assertEqual(row["order"], rank.providers[preset_id].order)
+
+    def test_a_provider_the_file_does_not_name_gets_the_safe_pair(self):
+        # The owner edits `model-ranking.md` by hand and may be half-way through it. A provider it
+        # does not name must not break the worker or empty the picker: it is an `api` sorting after
+        # every provider the file does name, and nothing raises.
+        self.assertEqual(P.provider_rank("no-such-provider"),
+                         ("api", model_ranking_unknown_order()))
+        # The two cases the row itself settles keep their kind with no row at all.
+        self.assertEqual(P.provider_rank("no-such-provider", hosted=True)[0], "free")
+        self.assertEqual(P.provider_rank("guest:nobody")[0], "harness")
+
+    def test_the_rows_order_is_what_the_picker_sorts_providers_by(self):
+        # src/ModelCatalog.cpp `grouped()` reads these two off the row instead of keeping a second
+        # copy of rule 2.2, so a provider Relay prefers sorts first among those serving one model.
+        rows = {p.id: p.to_dict() for p in P.PRESETS.values()}
+        self.assertLess(rows["relay-free"]["order"], 1000)
+        self.assertEqual(rows["relay-free"]["kind"], "free")
+        # Relay Free is spent last: every other built-in sorts before it.
+        for preset_id, row in rows.items():
+            if preset_id != "relay-free":
+                self.assertLess(row["order"], rows["relay-free"]["order"], preset_id)
+
+
+def model_ranking_unknown_order():
+    from relay_core import model_ranking
+    return model_ranking.UNKNOWN_PROVIDER_ORDER
+
 
 
 class TierTableTests(unittest.TestCase):
@@ -474,19 +611,27 @@ class ModelCatalogTests(unittest.TestCase):
         self.assertEqual(dict(P.INTELLIGENCE),
                          {name: row.score for name, row in rank.models.items()})
         self.assertEqual(P.INTELLIGENCE.get("glm-5.3"), rank.score("glm-5.3"))
-        # A group is the first order of the built-ins that carry it, and `guest` the first harness:
-        # plans before harnesses before pay-as-you-go before the router, Relay Free last.
-        self.assertEqual(P._MAIN_GROUP_ORDER["subscription"], rank.provider_order("kimi-code"))
-        self.assertEqual(P._MAIN_GROUP_ORDER["payg"], rank.provider_order("kimi"))
-        self.assertEqual(P._MAIN_GROUP_ORDER["guest"], rank.provider_order("guest:claude"))
+        # A group is the *first* order of the built-ins that carry it, and `guest` the first
+        # harness. Which provider that is belongs to the file and to nobody here: the owner
+        # re-ordered the table on 2026-09-21 and a group named by hand went stale the same day, so
+        # each expectation is computed from the file rather than spelled out.
+        first = {}
+        for preset_id, preset in P.PRESETS.items():
+            order = rank.provider_order(preset_id)
+            first[preset.group] = min(order, first.get(preset.group, order))
+        for group, order in first.items():
+            self.assertEqual(P._MAIN_GROUP_ORDER[group], order, group)
+        self.assertEqual(P._MAIN_GROUP_ORDER["guest"],
+                         min(row.order for row in rank.providers.values() if row.kind == "harness"))
         self.assertEqual(P._MAIN_GROUP_ORDER["included"], rank.provider_order("relay-free"))
         # No preset carries `guest` or `custom`, so those two are read off the file another way:
         # the first harness, and — for a custom OpenAI-compatible endpoint the user added — the
         # same band as pay-as-you-go, which is where the hand-written table put it.
         self.assertEqual(P._MAIN_GROUP_ORDER["custom"], P._MAIN_GROUP_ORDER["payg"])
-        order = [P._MAIN_GROUP_ORDER[g] for g in ("subscription", "guest", "payg", "aggregator",
-                                                  "included")]
-        self.assertEqual(order, sorted(order))
+        # Relay Free is last whatever else moves, and every group the file names sorts before it.
+        included = P._MAIN_GROUP_ORDER["included"]
+        for group in ("subscription", "guest", "payg", "aggregator"):
+            self.assertLess(P._MAIN_GROUP_ORDER[group], included, group)
 
     def test_every_openrouter_twin_names_a_catalog_model_and_a_real_slug(self):
         # OPENROUTER_TWINS (owner, 2026-09-20): keyed by a cloud catalog model id, valued by the
