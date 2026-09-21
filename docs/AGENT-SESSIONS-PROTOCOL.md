@@ -24,7 +24,7 @@ Owner decisions this implements are recorded in
 | `agents` | `{"dirs": [abs paths] or omitted}` | agent definition directories; omitted = all known locations (section 7) |
 | `context` | object | **what this agent is about** (section 33, card #AGNT): the surface's name, the role, the brief, where the conversation is kept, the named tool scope. Absent means a terminal pane, which is what every `configure` before section 33 meant. |
 
-`configured` event gains: `context_window`, `effort`, `mode`, `instructions` (list of loaded paths), `agents` (count), `session_id`.
+`configured` event gains: `context_window`, `effort`, `mode`, `instructions` (list of loaded paths), `agents` (count), `session_id`, and — when the request carried one — `context`, the block back with the scope the worker settled on (section 33.1).
 
 **A named preset is an endpoint.** In `configure` and `set_model`, `base_url`, `model` and `extra` are
 optional when `preset` names a built-in preset: the preset supplies each one that is missing, the same
@@ -853,10 +853,11 @@ only their schemas were held back. This is Claude Code's own deferred-tool shape
 
 Deferral is **off** on the Local tier and under the short profile (12.12), where a load would cost
 the whole prefix, and off for a group nothing is wired up for (no `app` block, no board): there is
-then no `load_tools` tool and no rule line. It is off for a **tab's helper** (30.7) in every scope,
-board or no board — it is the agent asked from Options, Actions and Sessions, so its first action is
-an app call and holding the schemas back only buys it a round trip. A new conversation starts from
-the names again. The
+then no `load_tools` tool and no rule line. **Only a terminal pane defers** (33.3): the named tool
+scope decides it, in one line (`Agent._deferred_groups`). A console — the agent asked from Options,
+Actions and Sessions — has an app call for its first action, so holding the schemas back would only
+buy it a round trip, and a card turn holds its stage's tools and has nothing to fetch. A new
+conversation starts from the names again. The
 group's prompt rules travel with its schemas: a deferred `app` group takes `app_tools.prompt_section`
 out of the prompt and leaves the one line. Backend: `backend/relay_core/tool_groups.py`; tests:
 `tests/test_tool_groups.py`.
@@ -879,7 +880,7 @@ The newest role is `planning`, which serves plan-mode turns: by default the pane
 | `main` | the pane's own agent | the configured preset (read-only here: set with `configure` / `set_model`) |
 | `terminal_use` | driving programs, fixing commands | Flash tier |
 | `subagent` | subagents that do not name a model | Main tier (the pane's own model) |
-| `switchboard` | the helper agent: the Switchboard's card threads and page agent, and the helper in Options, Actions and Sessions (19.18, section 30) | Main tier |
+| `switchboard` | the helper agent: the Switchboard's card threads and its page console, and the consoles in Options, Actions and Sessions (19.18, sections 30 and 33) | Main tier |
 | `flash` | panes that default to the Flash agent | Flash tier |
 | `local` | panes switched to a model served on this machine (`/local`) | Local tier |
 | `summaries` | compaction summaries and recaps | Flash tier |
@@ -5943,20 +5944,24 @@ how many turns it cost, and what did not work.
 Card `#FEJQ`, owner 2026-09-20: one helper system, not three features that happen to look alike.
 An agent can change an option, run a safe action, search the session manager, and open or zoom
 Options, Actions, Sessions and the Switchboard down to a row, a query or a card; and each of those
-panes carries a helper agent, which is the Switchboard's page agent (19.18) answering for another
-pane of the same worker.
+panes carries a helper agent, which since card #AGNT is an **agent console** — the same prompt box a
+terminal pane has, with a `context` saying what it is about (33) — on the tab's one worker and its
+one conversation (19.18, 30.7).
 
 Backend: `backend/relay_core/app_tools.py` — `AppTools`, attached to the agent as `agent.app`
 exactly as `BoardTools` is attached as `agent.board`, plus `AppCatalog`, `AppBridge` and
 `AppCommands` (the worker's half) — with `backend/worker.py` holding one `AppCommands` per worker;
-`backend/relay_core/activity_tools.py` (30.5); `backend/relay_core/board_chat.py` and
-`board_protocol.py` (the helper's panes and briefs, 30.7). GUI: `src/AppCommands.{h,cpp}`
+`backend/relay_core/activity_tools.py` (30.5); `backend/relay_core/agent_context.py` (the surfaces,
+their briefs and the named tool scopes, 33) and `board_protocol.py` (30.7). GUI:
+`src/AppCommands.{h,cpp}`
 (`relay::AppCommands` — the catalog, the executor, the change log; a small library tested headless),
 `src/RelayWindow.h` (supplies `settingsSections()` and `searchableActions()`, mints the tab id,
-sends the catalogs, opens the panes), `src/Pane.h` (`app_command` in, `app_command_result` out),
-`src/HelperChat.{h,cpp}` and `src/BoardChat.h` (the panel), `src/BoardWorker.{h,cpp}` (the per-tab
-helper worker). Tests: `tests/test_app_tools.py`, `tests/test_activity_tools.py`,
-`tests/test_board_chat.py`, `tests/appcommands_test.cpp`.
+sends the catalogs, opens the panes, and makes every agent console — `createAgentConsole`),
+`src/Pane.h` (`app_command` in, `app_command_result` out; a pane with a non-terminal context is the
+console itself), `src/AgentContext.{h,cpp}` (what an agent is about, 33),
+`src/BoardWorker.{h,cpp}` (the per-tab worker). Tests: `tests/test_app_tools.py`,
+`tests/test_activity_tools.py`, `tests/test_agent_context.py`, `tests/test_board_chat.py`,
+`tests/appcommands_test.cpp`, `tests/boardworkspace_test.cpp`, `tests/consolemode_test.cpp`.
 
 All additive. A worker that gets no `app` block has no app tools at all, which is what every worker
 did before this section.
@@ -6322,14 +6327,15 @@ its own rather than leaving it to the tool schema. The person's words decide whe
 and anything else opens in a new pane and says so rather than quietly taking a pane over.
 
 **Never answer with nothing after an app call** (owner, 2026-09-20: "it also needs to reply in
-text that it is doing it"). A helper panel draws the agent's *text*; its tool calls are not on
-screen, so a turn that opened three panes and answered with an empty message is indistinguishable
-from a turn that did nothing — which is how this was first reported. Every pane's brief and the
-`agent.app` prompt section carry the rule: one line, before or alongside the call, naming the
-things ("Opening 3 sessions in new panes: A, B, C.", "Turned Copy on select on — Undo is in the
-notification."). The worker enforces the floor: when a page-agent turn ends with no text of its
-own and its `app_*` calls reported something, `board_chat` appends their own sentences as the
-answer, so the panel always shows what was done.
+text that it is doing it"). A console draws the agent's *text*, and a tool call it folded away is
+not what the person reads, so a turn that opened three panes and answered with an empty message is
+indistinguishable from a turn that did nothing — which is how this was first reported. Every
+context's brief and the `agent.app` prompt section carry the rule: one line, before or alongside the
+call, naming the things ("Opening 3 sessions in new panes: A, B, C.", "Turned Copy on select on —
+Undo is in the notification."). The worker enforces the floor for **every** agent since card #AGNT
+(it was the helper's own emit wrapper before, 33.4): when a turn ends with no text of its own and
+its `app_*` calls reported something, `Agent` appends their own sentences as the answer, so the
+surface always shows what was done.
 
 A refusal is a tool *result*, not an exception: `{error: "<sentence>", code: "<word>"}` with the
 codes of 30.3, plus `catalog` for an `app` block that broke its shape. A worker with no catalog at
@@ -6372,8 +6378,11 @@ row that prefills that pane's composer.
   calls in the window. Every answer carries a `note` saying what was left out. The whole ledger is
   never returned: answering "why is my context low" must not be what lowers it.
 
-Both are read-only, neither needs the GUI, and both are on the pane agent only — the helper worker
-has no pane of its own to report.
+Both are read-only and neither needs the GUI. They were the pane agent's alone until card #AGNT, on
+the reasoning that a helper worker has no pane of its own to report; they are now on **every** agent
+(33.3), because every agent should be able to answer "why was that turn slow" about a turn of its
+own, and the few figures that are a pane's — its id, its tab, its share state — are simply absent
+for a console, which the tool already handles by never guessing one.
 
 ### 30.6 Every change is visible, and undoable in one step
 
@@ -6434,8 +6443,14 @@ decision 1).
   keybinding reload — brings the same one back. A `configure` with **no** persistence at all (a GUI
   from before this) gets no store: its console behaves as it did, one conversation per worker, gone
   when the worker goes.
-- **Started on the first ask**, not when the tab opens (owner decision 5), and it lives as long as
-  the tab: closing the tab stops its worker, and a Switchboard put away no longer ends it. A tab
+- **Started on the first console**, not when the tab opens (owner decision 5), and it lives as long
+  as the tab: closing the tab stops its worker, and a Switchboard put away no longer ends it. The
+  rule moved one step out when the panels became consoles: a pane refuses to submit while it is
+  unconfigured, so the window starts the worker as a console attaches itself to the tab rather than
+  at that console's first ask — and Options, Actions and Sessions build their console on first
+  *expand* of the collapsed row, so a tab whose helper nobody opens still pays for nothing. A
+  console that attaches after the worker is up is replayed the `ready` and `configured` it missed,
+  in that order. A tab
   with no project attached gets a **board-less** console: the `app` block and the app tools, no
   `board` block and no `board_*` tools (`configure` with an empty `workspace`).
 - **The helper's `configure` carries the `keybindings` block too**, the same one a pane's does and
@@ -6504,8 +6519,11 @@ decision 1).
 
 The `switchboard` role keeps its protocol name — settings, the model box (#BRD3), its Options ›
 Models row and its Main default are untouched — and is **labelled "Helper agent"** in the UI (owner
-decision 4, 13.1). Each console's header says where it is: "Switchboard agent", "Options helper",
-"Actions helper", "Sessions helper", which is `context.brief.title`.
+decision 4, 13.1). What each surface calls itself — "Switchboard agent", "Options helper",
+"Actions helper", "Sessions helper", `#<ID>` for a card — is `context.brief.title`, the heading the
+brief is written under in the system prompt. On screen the console says it in its placeholder ("Ask
+the Options helper…") and in its busy strip, and Options, Actions and Sessions say it again on the
+collapsed row they fold back to; there is no panel header any more.
 
 ### 30.8 Notes and deviations
 
@@ -7142,6 +7160,7 @@ So there is no second protocol for a helper. A helper worker is `backend/worker.
 {"type": "configure", "workspace": "/home/e/relay-terminal", "…": "…",
  "context": {
    "name": "switchboard",            // terminal | switchboard | card | options | actions | sessions
+   "surface": "switchboard",         // this console's own id; defaults to `name`
    "agent_role": "switchboard",      // 13.1; the top-level `agent_role` wins when both are sent
    "workspace": "/home/e/relay-terminal",
    "persist": {"scope": "helper", "key": "t0123456789ab"},
@@ -7154,13 +7173,14 @@ So there is no second protocol for a helper. A helper worker is `backend/worker.
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `name` | enum, **required** | — | which surface this is. An unknown name is refused rather than ignored: a typo would otherwise silently take the terminal's defaults. |
+| `surface` | string ≤64 | `name` | this console's own id, the one that rides on its asks (33.2). The GUI sends it in the block so the whole of a `configure` reads as one surface; the worker takes the surface it *echoes* off each `ask` instead, and its `configured` echo does not carry this field. `src/AgentContext.cpp` fills it from `name` when a host leaves it empty, which is right for one console per context per tab. |
 | `agent_role` | string | `""` | the model role (13.1). The top-level `agent_role` wins when both are sent, so a GUI that sends both cannot contradict itself. |
 | `workspace` | string | `""` | the surface's workspace; the `configure`'s own `workspace` is what the agent and the board use. |
 | `persist.scope` | `""` \| `pane` \| `helper` | `""` | where the conversation is kept. `helper` is the per-(project, key) file of 30.7; `""` is the agent's own session store. |
 | `persist.key` | string ≤128 | `""` | the key inside that scope — the tab id, for `helper`. A scope with no key is refused: keying by `""` would give every tab of every project one shared conversation. |
 | `brief.key` | string ≤64 | `""` | which brief goes in the **system prompt**: `switchboard` (`board_chat_brief.md`), `options`, `actions`, `sessions`. An unknown key is no brief rather than an error — the GUI may name a surface this worker is older than. |
 | `brief.title` | string ≤200 | `""` | the heading the brief is written under, and what the console's header says. |
-| `brief.screen` | string ≤2000 | `""` | the surface's standing "On screen" line. The live one is `ask {screen}`. |
+| `brief.screen` | string ≤2000 | `""` | a standing "On screen now:" line for the surface, kept in the system prompt beside the brief. No GUI sends one: `ContextSpec::toJson` writes `brief {key, title}` only, because what is on screen changes every turn and belongs on the `ask` (33.2). The field stays because the worker's brief is built once, and a surface whose screen never changes could say so here. |
 | `scope` | `pane` \| `console` \| `card` | from `name` | the **named tool scope** (33.3). `terminal` → `pane`, `card` → `card`, everything else → `console`. |
 | `shell` | bool | `name == "terminal"` | whether the surface spawns a shell. The GUI's; the worker records and echoes it. |
 | `routing` | `auto` \| `agent` | `auto` for `terminal`, else `agent` | what the composer does with a line that is not obviously a prompt. The terminal is the only context that can run it as a command. |

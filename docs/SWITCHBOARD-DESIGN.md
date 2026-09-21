@@ -751,14 +751,16 @@ enter in teh top row thing makes the title, not the issue content."* Evidence:
   **Ctrl+Shift+Enter** leaves a comment with no model call, and the placeholder says both. What is
   left is what is *not* typing into the box — **Plan (p)**, **Execute (x)** and, in a QA lane,
   **Verify (v)** — and since 2026-09-20 those three are a row of their own **above** the reply
-  frame (`boardCardActions`), not inside it: "move those buttons out of there (plan / execute /
-  etc), because they actually dont do anything in the chat box. can we instead put buttons like
+  frame — the console's action row, built from `CardContext::actions()` since #AGNT (4.13) — and
+  not inside it: "move those buttons out of there (plan / execute / etc), because they actually
+  dont do anything in the chat box. can we instead put buttons like
   that in a row above the chat box. they are actions the agent can take that dont require typing.
   we put the 'clean up' button there for the main switchboard agent, for example" (owner). Their
   keys, tooltips and behaviour are unchanged, and both still take whatever is typed in the box as
   their note. The empty-thread line teaches the same three keys instead of naming buttons.
-- **The reply box is the pane's prompt box** (4.13a): one frame, the busy strip, a borderless
-  editor in the prompt font, and one chip strip under it carrying the model box alone.
+- **The reply box is the pane's prompt box** (4.13a), and since card #AGNT it literally is one: the
+  composer of the card's embedded agent console (4.13) — one frame, the busy strip, a borderless
+  editor in the prompt font, and the pane's own chip strip under it.
 - **Stopping a turn is a strip, not a mode-swapped button.** While a turn runs, a line over the
   reply box reads `✦ Switchboarding · planning…` or `✦ Switchboarding · discussing…` with `✕ Stop planning` /
   `✕ Stop discussing` at its right (`boardBusyStrip`, `boardBusyLabel`, `boardStop`); the buttons
@@ -773,27 +775,65 @@ enter in teh top row thing makes the title, not the issue content."* Evidence:
   empty save leaves the card exactly as the field made it. The field no longer stays open for a
   burst of cards; `n` reopens it.
 
-### 4.13 The page agent's panel is the helper surface (#FEJQ, owner 2026-09-20)
+### 4.13 The page agent and the card's reply box are agent consoles (#FEJQ, #AGNT, owner 2026-09-20)
 
-The panel at the bottom of the list page — the page agent's log, its worker-side queue and the
-composer that queues rather than refusing (`relay::BoardChatPanel`, `src/BoardChat.{h,cpp}`, card
-#8YQ9, protocol 19.18) — is now **one instance of a surface the app has four of**. The others are
-in Options, Actions and Sessions, where the same widget sits collapsed behind one "Ask about this
-pane" row and expands on it: the board's 320 px of log plus composer is most of a small pane, and
-those panes are read first and asked about second. The Switchboard keeps a subclass for what only
-it has — the survey (19.18), the queue drawn in delivery order, and the Clean up and Check buttons
-in the panel's row (4.8).
+The panel at the bottom of the list page was the page agent's own log, queue and composer
+(`relay::BoardChatPanel`, card #8YQ9). Since card #AGNT it is an **agent console**: the same class a
+terminal pane is, with no shell started and a `relay::agent::Context` saying what it is about
+(`board::BoardContext`; protocol 33, `ARCHITECTURE.md`, "Agents are consoles"). The owner's words are
+the reason — *"an agent interface is the prompt box"* — and the Issue that started the card was the
+gap the second implementation had left: no thinking bubbles that fold, no tool rows, and a queue with
+neither steering, interruption nor a request ledger. A console has all of them, because they are the
+pane's.
 
-All four talk to **one worker per tab** (protocol 30.7), so a question about the board and the next
-one about a setting are consecutive turns of the same agent: each ask carries a `pane` name that
-picks the brief, and every event of the answer carries it back, so the panel that asked draws the
-reply. The agent's tools are the board's (section 6.1) plus the `app_*` tools — read or change an
-option, run a safe action, search the session manager, open any of the four panes at a section, a
-row, a query or a card — with every change announced as `Agent changed <label>: <before> → <after>
-· Undo` and undoable without an agent (protocol 30.6). The `switchboard` model role keeps its name
-and its model box, and is labelled **"Helper agent"**; a panel that folds says where it is on its
-head row ("Options helper", "Sessions helper"), and the Switchboard's — which is the page it is on
-— is named by its placeholder and by its busy strip instead (4.13a).
+- **The page agent.** At the bottom of the list page, outside the columns' splitter, exactly where the
+  panel sat. Its action row is **Check (k)**, **Clean up (u)**, **Tests** and **Profile** (4.14) —
+  supplied by the context, drawn by the console, left-aligned inside the composer frame. `a` from
+  anywhere on the board puts the keyboard in it, as `/` puts it in the filter; Clean up becomes
+  **Stop** while it runs, which is one `Context::changed()` and not a second widget.
+- **The card's reply box.** A card page embeds its own console (`board::CardContext`) and the reply
+  box *is* that console's composer, so the per-card draft, the prompt history, `restoreReply` and Esc
+  all go on reading one box. Its action row is **Plan (p)**, **Execute (x)** and, in a QA lane,
+  **Verify (v)**, above the box and never in it (4.12); Execute and Verify wear the accent outline,
+  which is the `leaves` flag of a `relay::agent::Action` — they hand the card to a terminal pane. The
+  console shortens its own row when the page is narrow, so `CardDetail::fitButtons` is gone.
+- **The three chords are still the card's.** Enter discusses, Ctrl+Enter plans and Ctrl+Shift+Enter
+  leaves a comment with no model call. The console offers a submitted line to its context first
+  (`Context::submit(route, text)`, where `route` is which *key* was pressed), so a card's Enter
+  travels as `board_ask` — the owner's words are written to `issues/threads/<ID>.md` and the stage
+  advances before the model sees them (protocol 19.10) — rather than as an ordinary `ask`. A context
+  that takes the line clears and remembers it; one that refuses (a card asked while a cleanup runs)
+  leaves the words exactly where they were typed.
+- **Findings and the survey are board widgets, not turns.** The Check findings list, the problems
+  banner and the survey's import offer sit **above** the console and keep their object names
+  (`boardChatFindings`, `boardChatSurvey`, `boardChatImport`); a click still *drafts*
+  `board::fixRequest` into the composer and focuses it, and sends nothing, because the owner confirms
+  it (owner, 2026-09-19: "draft you confirm"). The survey itself is an ordinary read-only turn of the
+  console's conversation (protocol 19.18), so it queues, it can be stopped, and its events are the
+  pane's.
+- **What Discuss writes to the thread.** The worker writes both ends, as it always has: the owner's
+  words are appended to `issues/threads/<ID>.md` before the model sees them, and the answer after,
+  with tool fragments stripped and `model=` and `turn=<session>/<turn>` provenance
+  (`board_protocol._card_answer`, protocol 19.10). That is owner decision 2 on card #AGNT — the thread
+  is the record a verifier reads (POLICY rules 2, 4 and 7) — and what the card *gains* is a real
+  conversation behind it: a queue, bubbles, tool rows and a history that survives instead of
+  re-seeding whenever the card file's hash moves. The page hears the write back as
+  `board_thread_appended` and makes sure the thread it is showing is the one that moved;
+  `CardContext::turnFinished` does nothing else, because nothing else should write that file twice.
+
+All the tab's consoles — the board, an open card, Options, Actions and Sessions — talk to **one
+worker and one conversation per tab** (protocol 30.7, owner decision 1), so a question about the board
+and the next one about a setting are consecutive turns of the same agent and both are drawn in both.
+Each `ask` carries a `surface` (`switchboard`, `options`, `card:AGNT`) that rides back on every event
+of that turn; it is provenance and addressing, never a filter. The agent's tools are the board's
+(section 6.1) plus the `app_*` tools — read or change an option, run a safe action, search the session
+manager, open any pane at a section, a row, a query or a card — with every change announced as `Agent
+changed <label>: <before> → <after> · Undo` and undoable without an agent (protocol 30.6), and since
+#AGNT the shell and the file tools as well (owner decision 3; a card's Plan turn still writes only its
+`## Plan`). A context carries no tool list of its own. The `switchboard` model role keeps its name and
+its model box and is labelled **"Helper agent"**; Options, Actions and Sessions say where they are on
+the collapsed row they fold back to ("Helper Agent (Alt+Q)"), and the Switchboard's console — which is
+the page it is on — is named by its placeholder and its busy strip instead (4.13a).
 
 ### 4.13a Every prompt box is the main pane's prompt box (#PBX1, owner 2026-09-20)
 
@@ -804,8 +844,8 @@ it like the pane agent". So a pane's prompt box (`QFrame#composer`, `src/Pane.h`
 and every other box in the app is that control:
 
 - **One rounded frame** on `@surface` with a 1 px border, a 10 px radius and the accent border
-  while the cursor is in it — `QFrame#boardChatBox` on the helper panel, `QFrame#boardReply` on
-  the card page, both written from `QFrame#composer`'s own values.
+  while the cursor is in it. Since card #AGNT this is not a resemblance: every one of those boxes
+  **is** `QFrame#composer`, because every agent surface is a `Pane` (4.13).
 - Inside it, top to bottom: **the busy strip** (what the turn is doing and the `✕ Stop` that ends
   it), shown only while a turn runs, where a pane's "Relaying · …" line is; **the editor**,
   borderless and in the prompt font, growing with what is typed; then **the chip strip**,
@@ -839,8 +879,8 @@ Evidence: `docs/qa_evidence/2026-09-20-prompt-boxes-like-the-pane/`, and
 The owner's direction, agreed 2026-09-20 (card #7BM4, research in
 [`SWITCHBOARD-TOOLING-RESEARCH.md`](SWITCHBOARD-TOOLING-RESEARCH.md)): the Switchboard is not only
 the tracker but the project's control panel. Every recurring engineering activity is a button in
-the helper panel's row (4.13) or a sibling pane beside the board, never a pane-header control and
-never an overlay, and **what it produces is written into cards**, so the agents that claim cards
+the page agent's action row (4.13) or a sibling pane beside the board, never a pane-header control
+and never an overlay, and **what it produces is written into cards**, so the agents that claim cards
 and the QA sessions that verify them read the same numbers the owner sees. Three surfaces ship
 first; the row is capped at four buttons (Check · Clean up · Tests · Profile), past which it
 becomes a menu.

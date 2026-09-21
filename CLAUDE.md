@@ -239,7 +239,10 @@ lines — and one header per unit beside it:
 - `src/AppPaths.h` — `dataRoot()`, `relayFuzzyScore()`, and the `RELAY_*` fallbacks.
 - `src/Keymap.h` — `ActionDef`, `Keymap`.
 - `src/Isolation.h` — `namespace isolation`.
-- `src/Pane.h` — `QueueRowDelegate` and `Pane`. This is still 8,000 of the lines.
+- `src/Pane.h` — `QueueRowDelegate` and `Pane`. This is still 8,000 of the lines. Since card #AGNT
+  (2026-09-21) `Pane` is also **the agent console**: a pane built with a `relay::agent::Context`
+  whose spec says `shell: false` starts no pty and is what the Switchboard's list page and card
+  page, Options, Actions and Sessions embed. Only `RelayWindow::createAgentConsole` constructs one.
 - `src/PaneChrome.h` — `ToolPane`, `PaneChrome`.
 - `src/WindowChrome.h` — `ChromeButton`, `NotificationsPopup`.
 - `src/RelayWindow.h` — `ClosedItem`, the `WindowManager` declaration, then `RelayWindow`. Those
@@ -254,6 +257,20 @@ being able to find and edit a class without scrolling past four others — not a
 not a step towards a library. A one-line change to `Pane` still recompiles the lot. De-inlining
 `Pane` into a `Pane.cpp` is a separate, riskier job; do not start it as a side effect of something
 else.
+
+Two units joined them on 2026-09-21, and they are **not** part of the one translation unit: they are
+their own library (`relay-agentcontext`, QtCore only), so `relay-board`, `relay-settings` and
+`relay-conversations` can link them without pulling in a window.
+
+- `src/AgentContext.{h,cpp}` — `relay::agent::Context` (what an agent is *about*: the spec, the
+  action row, `submit`, link resolution, `turnFinished`, the placeholder — and **no tool list,
+  ever**), with `ContextSpec`, `Action`, `TurnRecord`, `ConsoleHandle` and `ConsoleFactory`.
+- `src/AgentHost.h` — `relay::agent::Host`, what a console is drawn on. `Pane` implements it.
+
+`src/HelperChat.{h,cpp}`, `src/BoardChat.h`, `src/HelperModelBox.{h,cpp}` and the
+`relay-helperchat` library are **retired** with the same card: there is no second chat surface, and
+no `board_chat*` message on the wire. Read `docs/ARCHITECTURE.md`, "Agents are consoles; contexts
+are what they are about", before adding a surface that asks an agent anything.
 
 Two practical consequences:
 

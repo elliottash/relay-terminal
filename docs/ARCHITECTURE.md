@@ -735,9 +735,9 @@ no timer at all. `nextTime(shortcut, what)` builds the
 text from the live Keymap, so rebinding changes the hint and unbound actions get none. Current
 triggers: toolbar and palette activations of actions with shortcuts, pane buttons, the tab "+",
 tab close buttons, the plug's "Join with a code…" (→ `/join CODE`, `remote.join.button`), a click on a button of the
-Switchboard agent's action row (→ its own letter, `board.action.<objectName>`; the letter comes from
-the button's `actionKey` property, so a session that adds a button to that row brings its hint with
-it — card #PBX1), clicking into another pane, mouse model/effort/mode pickers, clicking
+agent console's action row (→ its own letter, `board.action.<key>`; the id and the letter come from
+the `relay::agent::Action` the context supplied, whose `key` is the button's `objectName`, so a
+context that adds a button to that row brings its hint with it — cards #PBX1, #AGNT), clicking into another pane, mouse model/effort/mode pickers, clicking
 the directory line (`@`), the palette's Update action (→ `/update`, `update.palette`), the queue × (on a steer row → ↑ then Shift+Delete), dragging a queued row
 (→ ↑ then Ctrl+↑↓; dropped above the steers → Ctrl+↑ sends it at the next tool call), `/shell ` and `/agent ` (`!`, `*`), `/help` (→ `?` in an
 empty prompt box), palette rewinds, pane
@@ -1569,32 +1569,30 @@ record and nothing else) and the declined ones (Undo).
 - **`src/BoardPane.{h,cpp}`**: `relay::BoardView`, a `ToolPane` leaf (`ToolPane::Kind::Board`).
   A tab bar with counts, a filter field, horizontally scrolling columns of cards with drag and
   drop between them, quick add, and a card detail view on the right: the rendered body, the
-  `## Tasks` checklist, the links, the thread and a reply box (`RichEditor`) that either asks the
-  Switchboard agent or appends a plain comment. A `QFileSystemWatcher` on the board folder (the
+  `## Tasks` checklist, the links, the thread and a reply box — which since card #AGNT is the
+  composer of the card's own **agent console** (below), whose Enter discusses, Ctrl+Enter plans and
+  Ctrl+Shift+Enter appends a plain comment. A `QFileSystemWatcher` on the board folder (the
   one the `board` event named, else `projects::boardDirOf()`) turns any write — this window, a pane
   agent, an editor, a `git pull` — into one debounced `board_refresh`.
-- **`src/HelperChat.{h,cpp}`** (library `relay-helperchat`) and **`src/BoardChat.h`**:
-  `relay::HelperChatPanel` is the **helper's** panel — one chat surface every pane embeds — and
-  `relay::BoardChatPanel` is the board's name for it, a subclass with no body of its own
-  (the survey, the queue box and Check are a `pane == "switchboard"` flag inside the panel, not a
-  subclass's members). At the bottom of the list page here, and the same widget behind the "Ask
-  about this pane" row in Options, Actions and Sessions (card #FEJQ, "The helper system" below;
-  card #8YQ9, protocol 19.18 and 30.7) — the conversation about the whole board, for the
-  questions that are about the board rather than one card. A log of the conversation, the
-  worker-side FIFO queue drawn in delivery order, and a composer whose Enter sends and whose
-  second prompt *queues* rather than being refused (#N8VK's rule, the same as a terminal pane's).
-  The board's two whole-board buttons live in its row — **Clean up**, moved down out of the filter
-  row (owner, 2026-09-19), and **Check**, the board's own format check over every card; each
-  section header carries a hover ⚠ that checks that section alone (`board_check {section}`).
-  A finding, and the problems banner over the list, **draft** a fix request into the composer and
-  focus it — never sent, because the owner confirms it (owner, 2026-09-19: "draft you confirm").
-  Ctrl+/ puts the keyboard there from anywhere on the board, the pair of `/` for the filter.
-  It holds no process: `BoardView` feeds it the `chat` block of the `board` event and every
-  `chat: true` turn event, exactly as it feeds a card thread `card_id` events.
+- **`src/AgentContext.{h,cpp}`** (library `relay-agentcontext`) and **`src/AgentHost.h`**: the two
+  interfaces an agent surface is made of — `relay::agent::Context` (what the agent is about: the
+  brief, the defaults, the action row, the links it resolves, where the conversation is kept, what a
+  finished turn's output does) and `relay::agent::Host` (what the console is drawn on). Both are
+  QtCore-only, so `relay-board`, `relay-settings` and `relay-conversations` link them without pulling
+  in a window. `board::BoardContext` and `board::CardContext` (in `src/BoardPane.cpp`) are the list
+  page's and an open card's; `RelayWindow` turns either into an embedded console — a no-shell `Pane`
+  — through `relay::agent::ConsoleFactory`. "Agents are consoles; contexts are what they are about"
+  below, card #AGNT, protocol 33. The Switchboard's console sits at the bottom of the list page,
+  outside the splitter, with **Check**, **Clean up**, **Tests** and **Profile** as its action row and
+  `a` from anywhere on the board to put the keyboard in it; the Check findings and the survey offer
+  are board widgets *above* it, and a finding still **drafts** a fix request into the composer rather
+  than sending one (owner, 2026-09-19: "draft you confirm"). There is no `relay::HelperChatPanel`
+  and no `board_chat` message any more.
 - **`src/BoardWorker.{h,cpp}`**: one `backend/worker.py` per **tab**, configured with
-  `agent_role: "switchboard"`, so card threads never enter a pane's conversation. It is started
-  lazily on the first ask and answers every `board_*` message of protocol 17. It is the tab's
-  helper, not the board's alone: "The helper system" below.
+  `agent_role: "switchboard"` and the asking console's `context` block, so card threads never enter a
+  pane's conversation. It is started lazily on the first console and answers every `board_*` message
+  of protocol 19. It serves every agent console of the tab, not the board's alone: "Agents are
+  consoles; contexts are what they are about" below.
 - **`src/BoardRemote.{h,cpp}`** (card #SWPH): the Switchboard on the owner's paired devices. The
   sidecar hands `RemoteShare` a `board_request {rid, device, name, request}` line; the bridge
   re-checks `request.type` against the device allow-list (`board_open`, `board_refresh`,
@@ -1645,77 +1643,256 @@ Memory is a card type, not a work card: the Memory tab is one list per topic. Th
 plan card type — card #X7NB dropped it on 2026-09-20 — so `planning/` is an ordinary tab of
 work cards and a plan is the `## Plan` section of the card it plans.
 
-### The helper system: one agent per tab, in four panes
+### Agents are consoles; contexts are what they are about
 
-Card #FEJQ (owner, 2026-09-20), protocol section 30. The Switchboard's page agent, the helper in
-Options, Actions and Sessions, and an agent's power to change a setting or run an action are one
-system: one worker per tab, one panel, one tool set.
+Card #AGNT (owner, 2026-09-20), protocol sections 30 and 33. It began with the helper's panels beside
+a terminal pane:
 
-**The worker is the tab's.** `RelayWindow` keeps a `BoardWorker` per **tab**, keyed by the tab's
-persistent id — the one that restores its panes — and configured with that tab's workspace, not one
-per window and not one per attached project. The id is minted lazily by `RelayWindow::tabIdOf()`
-(`t` plus twelve hex digits) and saved with the tab as `tab_id`, so it survives a restart and a tab
-being moved. Switchboards are per tab, so the same project open in two tabs gets two helpers with
-two conversations over **one** set of board files; only the conversation and its queue are the
-tab's own. It starts on the first ask rather than when the tab opens, and a tab with no project
-gets a board-less instance: the app tools, no board tools, and a `switchboard` ask answered with
-one sentence saying to attach a project or ask from another pane. Closing the tab stops it, and
-with it the conversation: the tab id rides on the helper's `configure` so the conversation can one
-day be keyed by (project, tab), but nothing persists it across a restart yet (protocol 30.8).
+> "the queue doesn't work like the main terminal, and the thinking bubbles don't work the same way.
+> why not just make it feature equal with the terminal agent?"
 
-**One panel, four places.** `relay::HelperChatPanel` (`src/HelperChat.{h,cpp}`, library
-`relay-helperchat`; `src/BoardChat.h` is the board's name for it) is the surface: a log,
-the worker-side queue in delivery order, and a composer whose second prompt queues rather than being
-refused. The Switchboard keeps a subclass of it for the survey, the queue and Check/Clean up;
-Options, Actions and Sessions embed it **collapsed** behind one "Ask about this pane" row, because
-the board's 320 px of log plus composer is most of a small pane. Each ask carries a `pane` name
-(`switchboard`, `options`, `actions`, `sessions`) that picks the brief in front of the turn, and
-every event of the answer carries it back, so the panel that asked draws the reply and the others
-do not. The conversation is one across all four.
+and widened, the same evening, into the seam the whole app now hangs on:
+
+> "an agent interface is the prompt box. it has a set of options and tools that vary according to the
+> setting/task, but in general they are shared systems."
+
+> "agents are specialized for the given pane context, but the general rule/approach is that agents
+> have access to all systems and can work across panes and contexts."
+
+Read together those sentences split an agent in two. **How you talk to one is shared**: one composer,
+one queue, one transcript with its thinking bubbles and tool rows, one model box, one history, one
+Esc, one worker connection. A behaviour added to the prompt box appears in every setting at once.
+**What the agent is about varies**: the brief in front of the turn, the defaults, the row of actions
+that need no typing, how a link in the answer resolves, where the conversation is kept, what a
+finished turn's output does. **What must not vary is the tool set.**
+
+So there is no second chat implementation anywhere in Relay. `relay::HelperChatPanel`, `BoardChat`,
+`HelperModelBox` and the `board_chat*` messages are gone; a helper agent is an **agent console** — a
+`Pane` with a non-terminal context — and the terminal is one context of the same class.
+
+**The two interfaces**, both QtCore-only headers so a pane library can name them without a window:
+
+- **`relay::agent::Host` (`src/AgentHost.h`) — what a console is drawn on.** The thirty `m_backend`
+  touches the agent code of `src/Pane.h` had, grouped and named: `writeTerminal` / `columns` /
+  `atLineStart`, the fold calls (`foldExpanded`, `setFoldExpanded`, `setFoldContent`, `toggleFold`),
+  `viewportAtBottom` / `scrollToBottom`, `screenText` / `cursorPosition`, the shell's
+  `sendText` / `paste` / `shellPid` / `foregroundProcessId` / `terminalMode`, `status` / `toast` /
+  `hint`, the bubble question (`bubbleRoom`, `bubbleRow`, `bubbleSpan`, `roomForBubble`, `showBubble`,
+  `hideBubble`, `setBubbleHeight`) and `overlayArea()`. The bubbles are the one place an embedded host
+  answers differently from a full pane: a 320 px panel measured like a terminal would hide the queue
+  strip outright, which was half of the Issue. The interface is terminal-shaped on purpose — every
+  context keeps a vterm as its transcript surface, which costs one emulator per console and buys the
+  ANSI transcript, the OSC 8 folds, the theme repaint and the scrollback for nothing (a console's
+  emulator is streamed to nobody: it is not one of the window's panes, below). A surface that one day wants something else (a document, a canvas) implements `Host`
+  and touches nothing else.
+- **`relay::agent::Context` (`src/AgentContext.{h,cpp}`, library `relay-agentcontext`) — what the
+  agent is about.** `spec()` (the data half, below), `actions()` (the row above the box),
+  `submit(route, text)` (offered the owner's line **before** the pane routes it, so a card's Enter can
+  travel as `board_ask`), `resolveLink(target)` (offered an activated `option:` / `session:` / `card:`
+  link before the console's own handling), `turnFinished(record)` (what a finished turn's output does)
+  and `placeholder()`. `changed()` is the push half: the context calls it and the console rebuilds the
+  action row and re-reads the spec — there is no signal, because the library is QtCore-only and a
+  context is not a `QObject`.
+
+**There is no `tools()` method, and there must never be one.** A per-surface allowlist would rebuild
+the fence the owner's second sentence took down: the Sessions helper could not open a pane until
+#H6VQ, because "open a pane" had been marked unsafe somewhere else. The backend gives every agent the
+tool set its workspace allows, named by a scope rather than inferred (below), and the only gates are
+the two that are already the owner's — the `settable` / `agent_safe` markers on the catalog rows and
+the Options › Agent toggle "Agents may change options and run actions" (#FEJQ decisions 1–3).
+
+**`ContextSpec` is the only part of a context that crosses to the worker.** `toJson()` is
+`configure`'s `context` block — `name`, `surface`, `agent_role`, `workspace`, `scope`, `shell`,
+`routing`, and `persist {scope, key}` / `brief {key, title}` when they say something — and
+`askFields()` is what rides on each `ask`: `surface`, `screen` (cut at 2 000 characters) and
+`readonly`. `persistId()` joins the scope and the key with a unit separator, which is the "did the
+context move?" test of protocol 30.7: a model swap leaves the conversation where it is, a different
+workspace or key adopts another. The bytes are pinned by `tests/agentcontext_test.cpp` and by
+`backend/relay_core/agent_context.py`, so the two halves are tested against one written-down shape
+rather than against each other.
+
+**Why `Pane` *is* the console, and not something a pane owns.** The card's first plan was to lift a
+`relay::AgentConsole` out of `src/Pane.h` and let the terminal host it. `scripts/split-agent-console.py
+--closure` measured that cut instead of guessing at it: starting from the owner's own "agent sessions
+UI" banner and growing the set until nothing else belonged in it, the agent is **228 members and
+4 031 lines with a minimum seam of 284 names — 157 fields and 127 members**, and cutting the whole
+block at once is no better (165 fields and 167 members on the other side, only 18 of the calls already
+carried by `Host`). The number that settled it is **`m_editor`: 109 uses of the composer stay behind
+whatever moves**, and they are not scattered — they are the routing decision in and around
+`requestRoute`, which reads the typed text and chooses a slash command, an alias, a skill, the shell,
+the foreground program, an ssh login or the agent. The prompt box is not a part of the agent that can
+be lifted out of the terminal; it is what both halves are made of. So the cut inverted, which is the
+owner's sentence read literally: **`Pane` is the agent console**, and a terminal is one routing of
+what is typed in it (#AGNT thread, 2026-09-21; the coupling and closure reports are committed under
+`docs/qa_evidence/2026-09-20-agent-console-extraction/`).
+
+**A console is a `Pane` with `shell: false`**, and none of it is a second rendering path
+(`Pane(workspace, cwd, cleanShell, engineCore, context)`, the context last and defaulted to null —
+passing none is a terminal pane, which is every pane written before this card):
+
+- `startTerminal` returns before the pty. Everything above that line — the engine, the theme, the fold
+  layer, the link probe, the card lookup — the console keeps.
+- The shell poll timers never start, `shellPid()` and `foregroundPid()` answer 0 (so the guest bridge,
+  the line discipline, "take control" and the ask's `foreground_program` are inert through that one
+  answer), `setNative(true)` is refused and the "shell integration did not initialize" watchdog does
+  not run.
+- `inlineReady()` is true from the start, so the transcript goes to the vterm and not to the fallback
+  panel; the routing is locked to `agent` and the mode chip is hidden. `applyContextRouting` only ever
+  *restricts*, so a terminal context leaves it having changed nothing.
+
+**The contexts that exist, and what each supplies.** A seventh — the project-management page the owner
+named — is one more class implementing `Context`, and nothing else.
+
+| Context | Where | Role | Shell | Persist | Action row | Links it resolves | A finished turn |
+|---|---|---|---|---|---|---|---|
+| **Terminal** (`Pane::TerminalContext`) | `src/Pane.h` | the pane's own (`main`/`flash`/`local`) | yes | `pane` / the pane's scrollback id | — | path, url, `#ID` | the transcript |
+| **Switchboard** (`board::BoardContext`) | `src/BoardPane.cpp` | `switchboard` | no | `helper` / the tab id | Check (k), Clean up (u), Tests, Profile | `option:`, `session:`, `card:` | the transcript |
+| **Card** (`board::CardContext`) | `src/BoardPane.cpp` | `switchboard` | no | `helper` / the tab id | Plan (p), Execute (x), Verify (v) in a QA lane | as the board | the answer is appended to `issues/threads/<ID>.md` by the worker |
+| **Options / Actions** (`OptionsContext`) | `src/SettingsPane.cpp` | `switchboard` | no | `helper` / the tab id | — | `option:` reveals the row here | the transcript |
+| **Sessions** (`SessionsContext`) | `src/Conversations.cpp` | `switchboard` | no | `helper` / the tab id | — | `session:` selects the row here | the transcript |
+
+Each context answers `spec()` fresh, so `screen` is what that surface is showing right now — the open
+Options section and the visible row ids, the Sessions query and the filters actually narrowing, the
+board's filter and its section counts — and the busy state of a card is a `changed()` rather than a
+pushed label. `OptionsContext` is one class for both modes: `setMode` calls `changed()` and the name,
+the brief and the placeholder all read `mode()`, so Options and Actions swap without swapping consoles.
+
+**The window makes consoles; the pane libraries never construct one.** `Pane` lives only in the
+`relay` executable's translation unit, so a host sets a `relay::agent::ConsoleFactory onCreateConsole`
+and is handed a `relay::agent::ConsoleHandle` — the widget to embed plus `focusComposer`,
+`draftInComposer`, `composerText`, `setCollapsed`, `collapsed` and `runActionLetter`. That is the
+`relay::PaneView` pattern. `RelayWindow::createAgentConsole(Context *, QWidget *parent)` builds it and
+`wireConsoleHost(view, leaf, hintId)` is the one template that sets the factory, the tab id, the tab's
+workspace and the live `helper.ask` key on Options, Actions and Sessions; `createBoardPane` does the
+same for the Switchboard. Options, Actions and Sessions build their console **on first expand** of the
+collapsed "Helper Agent (Alt+Q)" row, which is the host's — so a tab nobody asks anything pays for
+nothing.
+
+- **One worker and one conversation per tab** (owner decision 1). `RelayWindow::TabConsoleContext`
+  wraps the host's context with what only the window knows: the tab's project, and
+  `persist {scope: "helper", key: <tab id>}`. Every console of a tab therefore resolves to one
+  conversation and two tabs on one project keep two — the wrapper sets those two fields on **every**
+  console, so a context that asks for a key of its own (`CardContext` offers `card:<ID>`) still keeps
+  the tab's one conversation, which is what owner decision 1 asked for. A conversation per surface is
+  that one override and nothing else. A console's lines go down the tab's one
+  `BoardWorker` (`helperWorker(page, true)`, `sendFromConsole`), `startBoardWorker` carries the asking
+  console's `context` block, and **every** event of that worker reaches **every** console of the tab
+  (`deliverToConsoles`): the conversation is one and each console draws all of it, so a question in
+  Options and the next one on the board are consecutive turns visible in both. `surface` is provenance
+  and addressing, never a filter — which is what killed the class of bug #H6VQ was, a panel dropping an
+  event addressed to somebody else and then waiting for ever. A console created after its tab's worker
+  was already up is replayed the `ready` and `configured` it missed, in that order, because a pane
+  refuses to submit while it is unconfigured.
+- **A console is not a pane of the window.** `panesIn` stops at a `ToolPane` the way `leavesIn`
+  already does, so an embedded console is in no leaf list: it is not published to the phone by
+  `syncTabShares` / `syncAlwaysOnShares`, not counted in the close dialog, not what makes the first
+  real terminal default to Flash, not written to the scrollback store and not found by
+  `paneWithToken`. It is not serialised either — `serializeNode` returns at the `ToolPane` branch
+  without descending — so a restore rebuilds the host and the host recreates the console.
+- **What is wired, and what is deliberately not.** A console gets the callbacks a terminal pane gets
+  for the things it can do: status, the worker line, `onOpenPath`, `onOpenCard`, `onOpenOption`,
+  `onOpenSessions`, `onOpenDocument`, `onOpenTurn`, `onOpenInternals`, `onOpenDiff`, `onOpenInfo`,
+  `onToggleExplorer`, `onShowAgents`, `onOpenSubagent`, `onAppCatalog`, `onLocalModelEvent`,
+  `onChooseTheme`, `onProfileApplied`, `onUpdateApp`, `onJoinShared`, `onBoardSettings`. Not wired:
+  a terminal pane's own (`onShellExited`, `onOpenGuestPane`, `onForkState`, `onOpenSessionInNewPane`,
+  `onSessionOpenElsewhere`, `onPlanWritten`, the project-init question), a *leaf's*
+  (`onTitleChanged`, `onRenameTab`, `hasPaneSiblings`, `onWindowAction`, `onShareTab`,
+  `onOpenSharing`), and **`onAppCommand`**: the window answers that pipe once for the tab, tagged
+  `helper`, so `deliverToConsoles` drops `app_command` rather than let four consoles run the same
+  write four times. The openers that insist on a `Pane *owner` are handed the tab's own terminal pane
+  (`paneForConsoleOpen`), or nothing.
+
+**The action row.** It is inside the composer frame, above the busy line, left-aligned, buttons and
+nothing else (#PBX1). `Pane::rebuildActionRow` builds it from `Context::actions()` put through
+`relay::agent::withUniqueLetters`, which clears a letter two actions claim rather than answering it
+twice — the *letter* is refused, never the action, so one context's button can never make another's
+disappear. A button's `objectName` is the action's `key` and it carries `fullLabel` and `leaves` as
+properties, which is what `src/Theme.cpp` and the tests read; `runActionLetter(letter)` is the
+keyboard half and a disabled action answers nothing, so the key can do no more than the mouse.
+Rebuilding unparents and `deleteLater`s, and `runActionLetter` copies the `std::function` out of the
+list before calling it, because an action that raises `changed()` — Clean up becoming Stop — would
+otherwise free the button whose `clicked` is still on the stack.
+
+**The named tool scope, and what still withholds a tool.** `configure {context: {scope}}` names it and
+`Agent.tools()` resolves it in one place. Before this card it was *inferred* from whether the board
+had a card scope, so a console in a tab with no project fell through to the pane branch and silently
+got the whole executor while a board-attached one got read-only tools.
+
+| Scope | Who | Tools |
+|---|---|---|
+| `pane` | a terminal pane's agent | the whole executor, the app tools, its own session's read tools, the ordinary board tools. The only scope that defers its on-demand tool groups (protocol 12.13) |
+| `console` | the Switchboard page, Options, Actions, Sessions | the same list, plus `board_merge_cards`, `board_split_card`, `board_import_items` and `search_files` |
+| `card` | one Discuss, Plan or Verify turn on one card | the mode's board tools and the read-only file tools (protocol 19.10) |
+
+Three things still withhold a tool, and each is a **constraint** — a fact about the setting — rather
+than a fence around a surface: no board means no `board_*` tools (there is nothing to act on, and a
+`switchboard` ask in a board-less tab is answered in a sentence); a guest harness cannot run Relay's
+own tools, so a helper never runs on one and never starts one (#GH5T, #4NXH); and a card's Plan turn
+may write only its own `## Plan`, which is the stage machine of protocol 19.20. What came **down** with
+this card was the fences: `ChatScope`'s "no shell, no file writes" (owner decision 3 — yes, with the
+workspace it has, and never for a card's Plan turn), `session_info` and `activity` being the pane
+agent's alone, `track_requests` / `todo_tool` / `completion_check` forced off, and `_deferred_groups`
+special-casing a `helper` flag. Protocol 33.3 is the table of record.
+
+**Adding a context is one class, one factory call and a brief.**
+
+1. Write a `relay::agent::Context` in the pane that owns the surface — `spec()` (name, role,
+   `scope: "console"`, `shell: false`, `routing: "agent"`, `briefKey`, `briefTitle`, and a `screen`
+   hint of what is being read), `placeholder()`, and `actions()` / `resolveLink()` / `submit()` /
+   `turnFinished()` only if the surface has something to say. Never a tool list. The host owns the
+   context and it must outlive the console; do not set its `onChanged` yourself, because the pane owns
+   that callback while it holds the context.
+2. Let the window build the console: an `onCreateConsole` factory on the host, set by
+   `wireConsoleHost` (or by the pane's own creator), and embed the handle's widget. Do not put it in a
+   leaf list and do not construct a `Pane` from a pane library.
+3. Add the name to `NAMES` in `backend/relay_core/agent_context.py` and a paragraph to `BRIEFS` beside
+   it. Nothing else in the worker is per surface — an unknown brief key is simply no brief, and an
+   unknown *name* is refused, because a typo would otherwise silently take the terminal's defaults.
 
 **`AppTools`, on every agent.** `backend/relay_core/app_tools.py` is to the app what `board_tools.py`
-is to the board: attached as `agent.app` beside `agent.board`, on the helper worker and on every
-pane agent alike. `app_option_list` / `_get` / `_set`, `app_action_list` / `_run`,
-`app_panes`, `app_sessions_search`, `app_open`, `app_changes` and `app_undo`. A pane-scoped action
-is aimed: `app_action_run` takes an optional `pane`, which defaults to the asking agent's own pane
-(§30.3, #AG7R), and `app_panes` is where the ids are read. What differs between a pane agent
-and the helper is the brief and the catalog's markers, never the tool list. The reads are answered
-by the worker on its own — from the catalog the GUI sent, or, for sessions, the protocol-14 index,
-which the Sessions pane itself never queries — so a question about the app costs no round trip.
+is to the board: attached as `agent.app` beside `agent.board`, on a tab's console worker and on every
+pane agent alike. `app_option_list` / `_get` / `_set`, `app_action_list` / `_run`, `app_panes`,
+`app_sessions_search`, `app_open`, `app_changes` and `app_undo`. A pane-scoped action is aimed:
+`app_action_run` takes an optional `pane`, which defaults to the asking agent's own pane (protocol
+30.3, #AG7R), and `app_panes` is where the ids are read. What differs between a pane agent and a
+console is the brief, never the tool list. The reads are answered by the worker on its own — from the
+catalog the GUI sent, or, for sessions, the protocol-14 index, which the Sessions pane itself never
+queries — so a question about the app costs no round trip. Every agent also carries the rule the owner
+asked for: say what you are doing, in text, whenever you act on the app, because a console draws the
+agent's words and not its tool calls.
 
 **The catalog and the round trip.** `RelayWindow` already builds both catalogs for the Options and
-Actions panes (`settingsSections()` → `SettingRow`, `searchableActions()` → `ActionItem`); it now
-ships them in `configure`'s `app` block and resends them with `app_catalog` on every change, as the
+Actions panes (`settingsSections()` → `SettingRow`, `searchableActions()` → `ActionItem`); it ships
+them in `configure`'s `app` block and resends them with `app_catalog` on every change, as the
 keybindings catalog has always done. The rules over those two catalogs — what the block looks like,
-what is settable, which actions are agent-safe, how a command is carried out and the change log
-behind Undo — are `relay::AppCommands` (`src/AppCommands.{h,cpp}`, library `relay-appcommands`),
-which names no window and is tested headless (`tests/appcommands_test.cpp`); `RelayWindow` holds one
-and supplies it the two catalogs, the Options › Agent toggle and the callback that opens a pane.
-Rows carry `settable` (every value row except a secret) and
-actions carry `agent_safe` (opt-in, "undoable in one click") — and a Button or Buttons row of
-Options is listed in the *action* catalog too, under a `row:<section>/<id>` key, because owner
-decision 1 makes a button an action. One toggle in Options › Agent —
-"Agents may change options and run actions" — gates the whole write side for the helper and the pane
-agents together. A write or a navigation is an `app_command` event the pane forwards to
-`RelayWindow` the way `onOpenCard` is forwarded; it executes through the same entry points a key
-would (`openSettingsPane`, `SettingsPane::revealOption`, `openSessions`, `openBoardCard`, the row's
-own writer, the `ActionItem`'s `run()`) and answers `app_command_result` with what actually
-happened, so the tool result in the transcript is the outcome rather than the request.
+what is settable, which actions are agent-safe, how a command is carried out and the change log behind
+Undo — are `relay::AppCommands` (`src/AppCommands.{h,cpp}`, library `relay-appcommands`), which names
+no window and is tested headless (`tests/appcommands_test.cpp`); `RelayWindow` holds one and supplies
+it the two catalogs, the Options › Agent toggle and the callback that opens a pane. Rows carry
+`settable` (every value row except a secret) and actions carry `agent_safe` (opt-in, "undoable in one
+click") — and a Button or Buttons row of Options is listed in the *action* catalog too, under a
+`row:<section>/<id>` key, because #FEJQ decision 1 makes a button an action. One toggle in Options ›
+Agent — "Agents may change options and run actions" — gates the whole write side for consoles and pane
+agents together. A write or a navigation is an `app_command` event the pane forwards to `RelayWindow`
+the way `onOpenCard` is forwarded; it executes through the same entry points a key would
+(`openSettingsPane`, `SettingsPane::revealOption`, `openSessions`, `openBoardCard`, the row's own
+writer, the `ActionItem`'s `run()`) and answers `app_command_result` with what actually happened, so
+the tool result in the transcript is the outcome rather than the request.
 
-**The change log is the GUI's.** Every successful write becomes an entry with a `change_id`, which
-the result carries back to the agent; the notification reads `Agent changed <label>: <before> →
-<after> · Undo` and the Undo is `RelayWindow`'s own operation over that entry — it works with no
-agent in the loop, after the worker has stopped and after the conversation is gone. An option row an
-agent changed is marked in the Options pane until the person touches it. `app_changes` and
-`app_undo` are the agent's view of the same log, a convenience rather than the mechanism.
+**The change log is the GUI's.** Every successful write becomes an entry with a `change_id`, which the
+result carries back to the agent; the notification reads `Agent changed <label>: <before> → <after> ·
+Undo` and the Undo is `RelayWindow`'s own operation over that entry — it works with no agent in the
+loop, after the worker has stopped and after the conversation is gone. An option row an agent changed
+is marked in the Options pane until the person touches it. `app_changes` and `app_undo` are the
+agent's view of the same log, a convenience rather than the mechanism.
 
-**Info and Activity have no helper.** Those panes are about the pane's own agent, so that agent gets
-two read tools instead (`backend/relay_core/activity_tools.py`, attached to a pane agent and never
-to the helper) — `session_info` over its live session, with the last 20 turns of history and the
-true count beside it, and `activity {turns?, turn?, slowest?}`, a windowed digest of its own turns,
-tool calls and timings, never the whole ledger — and
-each pane gets an Ask row that prefills the owning pane's composer and focuses it, the Check-finding
-draft pattern.
+**Info and Activity are still about a pane's own agent**, and they are read tools rather than a
+surface: `backend/relay_core/activity_tools.py` gives `session_info` over the live session, with the
+last 20 turns of history and the true count beside it, and `activity {turns?, turn?, slowest?}`, a
+windowed digest of that agent's own turns, tool calls and timings, never the whole ledger. Since
+#AGNT they are attached to **every** agent rather than to a pane's alone — a console should be able to
+answer "why was that turn slow" about a turn of its own — and each pane keeps its Ask row, which
+prefills the owning pane's composer and focuses it, the Check-finding draft pattern.
 
 ## 11. Agent backend
 
@@ -3078,8 +3255,8 @@ of the platform and of the engine itself.
 | `src/WindowManagerImpl.h` | the `WindowManager` members that need the complete `RelayWindow`: opening and restoring windows, and reading and writing the saved layout. Included after `RelayWindow.h` |
 | `src/RichEditor.*` | composer editor |
 | `src/FilePanes.*` | explorer and preview widgets |
-| `src/BoardModel.*`, `src/BoardPane.*`, `src/BoardWorker.*` | the Switchboard: card rows, tabs, columns, filters; the pane and card detail; the per-tab helper worker that serves the board and the Options, Actions and Sessions helpers |
-| `src/HelperChat.*`, `src/BoardChat.h` | the helper agent's panel (`relay::HelperChatPanel`, library `relay-helperchat`): the log, the worker-side queue, the composer that queues rather than refuses, and the collapsed "Ask about this pane" row outside the Switchboard. `BoardChat.h` is the board's name for the same class — `relay::BoardChatPanel`, the `switchboard` pane, where the survey, the queue box and Check live |
+| `src/BoardModel.*`, `src/BoardPane.*`, `src/BoardWorker.*` | the Switchboard: card rows, tabs, columns, filters; the pane and card detail; the per-tab worker that serves every agent console of the tab (the board, a card, Options, Actions and Sessions). `BoardContext` and `CardContext` live in `src/BoardPane.cpp` |
+| `src/AgentContext.*`, `src/AgentHost.h` | an agent is the prompt box (card #AGNT, protocol 33): `relay::agent::Context` — what an agent is about (spec, action row, `submit`, link resolution, `turnFinished`, placeholder; **no tool list, ever**) — with `ContextSpec`, `Action`, `TurnRecord`, `ConsoleHandle` and `ConsoleFactory`; and `relay::agent::Host`, what a console is drawn on. Library `relay-agentcontext`, QtCore only, so a pane library can supply a context without naming a window |
 | `src/AppCommands.*` | the agent drives the app (protocol 30): the `app` catalog the window sends its workers, what is settable and which actions are agent-safe, the executor that carries out an `app_command`, and the change log behind Undo. No window is named here, so it is a library tested headless |
 | `src/BoardRemote.*` | the Switchboard on the owner's paired devices (#SWPH): `board_request` lines allow-listed and rebuilt into the tab worker's messages, the worker's events tapped and sent back as `board_event`, Execute/Verify through the board pane's hooks |
 | `src/BoardWorkspace.*` | which project's Switchboard a pane is looking at: the walk up to `/`, trying every folder of `projects::boardFolders()` (`.switchboard/board.yaml`, `switchboard/board.yaml`, `issues/board.yaml`) at each level |
@@ -3113,7 +3290,7 @@ of the platform and of the engine itself.
 | `remote/`, `rendezvous/`, `app/` | the remote protocol and its Noise handshake, the ciphertext-only relay, and the phone's web client (`docs/REMOTE-PROTOCOL.md`) |
 | `shell/integration.bash`, `shell/event.py` | Bash bridge |
 | `backend/worker.py` | worker protocol loop |
-| `backend/relay_core/` | `router`, `provider`, `presets` (providers and the Main/Flash/Lite tiers), `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keytest` (the keys modal's Test button), `keybindings`, `skills`, `roles` (model roles), `titles` (pane titles and session summaries), `voice` (transcription), `program_input` (the agent typing into the visible pane), `conv_index` (conversation index and search), `logs` (rotating `worker.log`), `board` (card format), `board_tools` (the `board_*` agent tools and their guardrails), `board_protocol` (the Switchboard messages), `app_tools` (the `app_*` tools: the options and actions catalogs, the command round trip, the session search), `activity_tools` (a pane agent's `session_info` and `activity` over its own session), `board_chat` (the helper agent: its panes, briefs and queue), `aliases` and `alias_import` (saved commands and prompts, and importing Warp workflows and shell aliases) |
+| `backend/relay_core/` | `router`, `provider`, `presets` (providers and the Main/Flash/Lite tiers), `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keytest` (the keys modal's Test button), `keybindings`, `skills`, `roles` (model roles), `titles` (pane titles and session summaries), `voice` (transcription), `program_input` (the agent typing into the visible pane), `conv_index` (conversation index and search), `logs` (rotating `worker.log`), `board` (card format), `board_tools` (the `board_*` agent tools and their guardrails), `board_protocol` (the Switchboard messages), `app_tools` (the `app_*` tools: the options and actions catalogs, the command round trip, the session search), `activity_tools` (`session_info` and `activity` over an agent's own session), `agent_context` (the `context` block of `configure`: the named tool scopes, the briefs and where a console's conversation is kept), `board_chat` (what is left of the page agent: the board seed, the survey state and its prompt), `aliases` and `alias_import` (saved commands and prompts, and importing Warp workflows and shell aliases) |
 | `scripts/` | `build.sh`, `test.sh`, `relay-open`, `relay-agent.py` |
 | `src/EngineBackend.*` | the `TerminalBackend` implementation over `engine/` |
 | `src/TerminalBackends.*`, `src/BackendFactory.cpp` | per-pane engine selection and the factory |
