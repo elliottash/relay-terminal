@@ -29,6 +29,7 @@ python -m pip install --only-binary=:all: --platform win_amd64 --python-version 
 $qtRoot = Split-Path (Split-Path (Get-Command windeployqt).Source)
 if (Test-Path "$qtRoot/licenses") { Copy-Item "$qtRoot/licenses" "$Stage/Qt-licenses" -Recurse }
 Copy-Item LICENSE "$Stage/LICENSE.txt"
+Copy-Item engine/third_party/libvterm/LICENSE "$Stage/libvterm-LICENSE.txt"
 "Source: https://github.com/elliottash/relay-terminal/releases/tag/v$Version`nRelay: AGPL-3.0-or-later. Qt: see Qt-licenses. Python/PowerShell/dependencies: bundled license files." | Set-Content "$Stage/NOTICE.txt"
 & "$Stage/runtime/python/python.exe" -X utf8 -S tests/test_worker_encoding.py --worker "$Stage/share/relay/backend/worker.py"
 $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
