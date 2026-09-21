@@ -70,12 +70,62 @@ prose, not a path.
 - `src/Pane.h` — the open block's URI is handed to the renderer before the chunk is rendered.
 
 ## Tasks
-- [ ] The fragment convention and the renderer <!-- t:a1 -->
-- [ ] The collector and the fold path <!-- t:a2 -->
-- [ ] The view: merged anchors and the hit test <!-- t:a3 -->
-- [ ] The pane: the anchor per block <!-- t:a4 -->
-- [ ] Live drive and evidence <!-- t:a5 -->
+- [x] The fragment convention and the renderer <!-- t:a1 -->
+- [x] The collector and the fold path <!-- t:a2 -->
+- [x] The view: merged anchors and the hit test <!-- t:a3 -->
+- [x] The pane: the anchor per block <!-- t:a4 -->
+- [x] Live drive and evidence <!-- t:a5 -->
+
+## Execution Summary
+
+The label is the link, and it opens exactly what the printed target opens, by the same road.
+
+**What was weighed.** Three shapes were on the table and two of them end in the emulator cores,
+only one of which compiles on this machine (`docs/ENGINE.md`; GhosttyCore is built elsewhere).
+*Replacing the prose anchor* with a private mark or an OSC 133-style one means both cores have to
+store it per cell and keep it through reflow, trimming and the scrollback walk — untestable here.
+*A second, inner link layer* is a new field on `Cell`, with the same problem. *A side table of
+row/col spans* dies on the two things this feature has to survive: a re-wrap moves every span, and
+a trim moves every row. The fragment needs none of them: it is an ordinary OSC 8 string to both
+cores, and every piece of machinery it touches — `hyperlinkRuns`, `FoldSpan::link`, `linkAt` —
+already exists and is already tested.
+
+**What is on screen is unchanged.** The `(target)` is still printed after every label. An OSC 8
+run takes no cells, so a transcript renders to the same pixels it did before; what changed is that
+the label now underlines on hover, shows the target in the tooltip, takes the pointing hand and
+opens on a click.
 
 ## Tests
 
+- `ctest --test-dir build -R markdown` — 6 new cases: with no anchor the bytes are exactly what
+  they were; the label's run and the re-opened anchor, with the printed target left outside it;
+  every link kind round-tripping through the fragment; two links in one paragraph, whole and one
+  character at a time; a label with spaces, punctuation and a `#ID`, in a list item and a quote;
+  a link in a table cell not widening the column (`visibleWidth` used to read an OSC as text).
+- `ctest --test-dir build -R calllines` — a label in a fold carries its target on the span, still
+  underlined, with none of the sequence in the row's text; with no anchor the fold is unchanged.
+- `ctest --test-dir build -R relay-engine-tests` — `FoldLayerTest`: the collector puts a label URI
+  on the span and never an anchor, at every chunk boundary. `ViewTest`:
+  `markdownLinkLabelsAreClickable` builds a block the way the pane builds one and hovers all five
+  labels at the print width, re-wrapped at 62 columns and back, clicks one and checks the signal,
+  checks the printed target still opens the same thing, and copies the label (the selection is the
+  label's text, with no escape and no URI in it); `aBlockThatOpensWithALabelStillKnowsItsFirstRow`
+  is the anchor merge — without it the block's first row is painted twice.
+- `ctest --test-dir build -R "markdown|wordwrap|outputlinks|calllines|transcriptreplay|turntranscript|consolemode"` — green.
+- `manual: docs/qa_evidence/2026-09-21-markdown-link-labels/` — the live drive.
+
 ## QA checklist
+- [ ] In a terminal pane, click the **label** of each kind an agent can write — `option:`,
+      `session:`, `#ID`, a file path, an `https://` URL — and check each opens what the printed
+      target beside it opens.
+- [ ] The same in an embedded console (the Options helper, the Switchboard's): the context still
+      gets first refusal, so an `option:` label reveals the row *in that pane*.
+- [ ] Make the pane narrower so the paragraph re-wraps, and click the label again.
+- [ ] Open a thinking bubble (Alt+R) with a link in it and click the label there.
+- [ ] Hover a label: the tooltip is the target (a card shows `#ID · title`), and the run underlines
+      only the label, not the sentence.
+- [ ] Select a label and copy it: the clipboard holds the label's words, no escape and no URI.
+- [ ] Restart on the same profile and click in the restored transcript. The label is plain text
+      again there (saved terminal bytes carry no OSC 8) and the printed target is what opens —
+      that is the intended degradation; what must not happen is a label that opens the wrong thing.
+- [ ] A transcript with no links looks exactly as it did before.

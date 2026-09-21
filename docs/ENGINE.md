@@ -193,6 +193,19 @@ no cursor, no click; `TerminalView::linkAt()` steps over it so the text behaves 
 output. A block whose anchor was trimmed out of the scrollback has no run and stays frozen at the
 width it was printed, exactly as before.
 
+**One exception, and it is how a markdown link's label is clickable** (card #MDKN). A
+`relay://prose/…` URI that carries a `#l=` fragment is a label inside that block, and the
+fragment is the target the agent wrote: `relay://prose/p4/7#l=option%3Ageneral%2Ftheme`
+(`src/LabelLinks.h`). OSC 8 runs do not nest, so the pane switches the anchor to the label's URI
+for the label's characters and switches back — the same mid-line switch a tool-call row makes for
+its `#K7Q2` segment. Because the fragment keeps the label inside the block's own URI namespace,
+`hyperlinkRuns(kProsePrefix)` still returns the label's cells: `resolveFoldAnchors` merges the
+pieces of one block by `labellink::anchorOf()`, so the replacement fold's rows are the block's
+whole range even when a label is the only thing on its first or last row. `linkAt()` resolves the
+fragment through `relay::links` and returns the same `Link` the printed target would, and
+`ProseCollector` puts the label URI on the `FoldSpan` so the re-wrapped rows carry it too. Neither
+core knows any of this: the URI is an ordinary OSC 8 string to them.
+
 ### One break rule
 
 Where a row may end is decided once, in `relay::wrap` (`src/WordWrap.h`): break before a word that

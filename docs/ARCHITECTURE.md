@@ -1144,6 +1144,25 @@ engine writes them into its parser.
   resized instead of leaving the printed break points frozen into the scrollback. At the print
   width nothing changes: the layer stands aside and the printed rows show. The run is never a
   link. See `docs/ENGINE.md`, "Prose blocks".
+- **A markdown link's label is a link** (card #MDKN). `[LABEL](target)` prints as
+  `LABEL (target)`, the label in the link ink; until 2026-09-21 only the `(target)` beside it was
+  clickable, because that is text and `relay::links` scans text. OSC 8 runs do not nest, but they
+  do not have to — the pane already switches the anchor mid-line and switches back, for the
+  `#K7Q2` segment of a tool-call row — so the label's cells carry **the block's own anchor with
+  the target as a fragment**, `relay://prose/<pane>/<block>#l=<percent-encoded target>`
+  (`src/LabelLinks.h`, `relay::labellink`). Three things follow from the fragment. The label's
+  cells are still inside the block's URI namespace, so `hyperlinkRuns(kProsePrefix)` returns them
+  with the rest of the block and `TerminalView::resolveFoldAnchors` merges the pieces by
+  `anchorOf()` — the block's rows are whole even when a label is the only thing on its first or
+  last row. The hit test resolves the fragment through `relay::links` exactly as it resolves a
+  span of text (`TerminalView::resolveLabelLink`), so a label fills the same `Link` the printed
+  target does and opens by the same road, `Pane::openOutputTarget`. And a re-wrapped block —
+  and a markdown fold, a thinking bubble — carries the target in `FoldSpan::link` instead, which
+  `ProseCollector` and `relay::calllines::appendMarkdown` read off the same OSC 8 and the view
+  hit-tests in `foldLinkAt`. The `(target)` is still printed, for every kind: it is what a person
+  reads before clicking, and saved terminal text keeps SGR and drops OSC 8
+  (`Pane::sanitizeSgrOnly`), so after a restart the label is plain text again and the printed
+  target is what opens — degraded, never broken. Nothing in either emulator core changed.
 - `closeInline` sends Ctrl+X Ctrl+P, so Readline redraws the prompt. While more queued turns
   are pending, the prompt is not redrawn between turns.
 - Tool calls print one line each; see "Tool-call lines" below.
@@ -1513,6 +1532,11 @@ resolved against a `CardLookup` the host hands in rather than against the filesy
 missing path, **an id the pane's board does not know is not a link**, and a `#` comment in shell
 output never becomes one. The target is `relay://card/<id>`, which `Pane::openOutputTarget`
 already routes like the other `relay://` links.
+
+A markdown link's **label** reaches the same rules from the other direction: it carries its
+target in an OSC 8 fragment and `TerminalView::resolveLabelLink` asks `scan()` what that target
+is, so `option:`, `session:`, `#K7Q2`, a path with `:line` and an http(s) URL all fill the same
+`Target` a scanned span would. See section 9, "A markdown link's label is a link" (card #MDKN).
 
 The Relay engine uses it in `engine/view/TerminalView.cpp` for the hover underline and tooltip,
 plain click (only in the active pane, so the click that moves the focus cannot open a file),

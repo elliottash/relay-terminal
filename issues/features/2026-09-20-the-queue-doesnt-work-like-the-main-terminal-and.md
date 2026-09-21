@@ -761,10 +761,13 @@ answer changes only the step named.
       is hidden until used. And Plan's ring was a missing `border-color` on
       `QToolButton[actionRow="true"]`, not focus. Measured: 4 rules across the reply box → 2,
       Plan's edges `#e5e8eb` → `#2a2e37`, Execute's `#b48ef7` unchanged.
-- [ ] **A markdown link's label is not clickable** — only the target printed beside it is.
-      Making the label the link needs an OSC 8 run around it, and a prose block is already one
-      (`relay://prose/<pane>/<n>`, the anchor the fold layer re-wraps from). OSC 8 runs do not
-      nest, so this is a change to the prose anchor rather than to `MarkdownAnsi`, and it is the
-      owner's call whether it is worth one.
+- [x] **A markdown link's label is not clickable** — done 2026-09-21 as card #MDKN, on the
+      owner's "yes, add the linking". OSC 8 runs do not nest, but they did not have to: the
+      label's cells carry the block's own anchor with the target as a fragment
+      (`relay://prose/<pane>/<n>#l=<target>`), which is the same mid-line switch of the anchor a
+      tool-call row already makes for its `#K7Q2` segment, and the fragment keeps the label
+      inside the block's URI namespace so the re-wrap layer still finds the block's rows. No
+      change in either emulator core. Evidence:
+      `docs/qa_evidence/2026-09-21-markdown-link-labels/`.
 - [ ] A restart with two tabs on one project: each tab's helper conversation comes back to the
       file it had. The drive read a new file instead; the store is keyed (workspace, tab).

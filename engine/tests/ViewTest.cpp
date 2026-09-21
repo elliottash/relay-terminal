@@ -1452,6 +1452,32 @@ private slots:
         t.backend->resizeTerminal(14, 100);
         QTest::qWait(120);
         checkAll("back at the print width");
+
+        // Copying a label copies the label. The run is an escape sequence, not cells, so the
+        // selection is the text on the screen — never the URI behind it, and never a `\x1b]8`.
+        {
+            const QStringList rows = t.view->visibleRowsText();
+            int row = -1, col = -1;
+            for (int r = 0; r < rows.size() && row < 0; ++r) {
+                col = rows.at(r).indexOf(QStringLiteral("the theme row"));
+                if (col >= 0)
+                    row = r;
+            }
+            QVERIFY(row >= 0);
+            const int cw = t.view->cellWidth(), ch = t.view->cellHeight();
+            const QPoint from(2 + col * cw + cw / 2, 2 + row * ch + ch / 2);
+            const QPoint to(2 + (col + 13) * cw + cw / 2, 2 + row * ch + ch / 2);
+            QTest::mousePress(t.view, Qt::LeftButton, Qt::NoModifier, from);
+            QMouseEvent move(QEvent::MouseMove, to, Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(t.view, &move);
+            QTest::mouseRelease(t.view, Qt::LeftButton, Qt::NoModifier, to);
+            QCOMPARE(t.backend->selectedText(), QStringLiteral("the theme row"));
+            t.backend->selectAll();
+            const QString all = t.backend->selectedText();
+            QVERIFY2(!all.contains(QStringLiteral("#l=")), "the label's URI is in the copied text");
+            QVERIFY2(!all.contains(QChar(0x1b)), "an escape is in the copied text");
+            QVERIFY(all.contains(QStringLiteral("the theme row (option:general/theme)")));
+        }
     }
 
     // A label can be the only thing on the block's first grid row, which cuts the block's OSC 8
