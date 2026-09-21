@@ -7438,7 +7438,6 @@ public:
         relay::RemoteShare &share = relay::RemoteShare::instance();
         const bool sharing = share.isSharing(m_token);
         const int guests = share.sharingModel().guestsOn(m_token);
-        m_shareChip->setProperty("dest", sharing ? QStringLiteral("agent") : QVariant());
         m_shareChip->setToolTip(!sharing
             ? QStringLiteral("Share this pane with your phone, or invite someone to it")
             : guests == 0
