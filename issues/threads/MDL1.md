@@ -664,3 +664,13 @@ bands before, `low` off the top with 27px of empty ground under `max`; three aft
 Alt+M and Alt+M with `glm` typed at it: the same clearance under the last row as above the first.
 Every popup is the same height before and after and 8px wider — the width the rows used to lose to
 that padding.
+
+<!-- relay:entry 20260921T220542Z-g1 author=claude-code kind=note -->
+### Claude Code · 2026-09-21 22:05
+Landed as `a354ef8a`. One correction to that commit's own message: its last paragraph says
+`measure.py` finds the popup as "the block of changed pixels between the closed and open shots".
+That was an earlier cut of the tool and it does not work — where the list hangs over the composer
+strip the popup's ground *is* the strip's ground, so the diff loses the bottom of the box and the
+measurement silently reads the wrong rectangle. The tool that landed asks X instead: the popup is
+the one visible `relay` window that is not the main one, and `drive.sh` writes its geometry beside
+each shot (`*-popup.txt`). NOTES.md and the tool's own docstring say so correctly.
