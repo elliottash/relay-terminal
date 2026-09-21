@@ -248,7 +248,10 @@ class TierTableTests(unittest.TestCase):
 
     def test_role_tiers_cover_every_role(self):
         self.assertEqual(sorted(model_roles.ROLE_TIERS), sorted(model_roles.ROLES))
-        self.assertEqual([role for role, tier in model_roles.ROLE_TIERS.items() if tier == "high"], ["planning"])
+        # Plan mode, and the pane role /high switches to (card #MDL1): the two are deliberately the
+        # same tier, so a mode row and a plan turn can never name two different models.
+        self.assertEqual(sorted(r for r, t in model_roles.ROLE_TIERS.items() if t == "high"),
+                         ["high", "planning"])
         self.assertEqual([role for role, tier in model_roles.ROLE_TIERS.items() if tier == "main"],
                          ["main", "subagent", "switchboard"])
         self.assertEqual(sorted(r for r, t in model_roles.ROLE_TIERS.items() if t == "flash"),

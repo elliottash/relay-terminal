@@ -1708,6 +1708,17 @@ public:
         }
         if (!level.isEmpty() && level != m_effort && efforts().contains(level)) setPaneEffort(level);
     }
+    // A command that switches the model **and** has something of its own to say. Every such switch
+    // is answered 100–300 ms later by `model_changed`, whose generic "model: … · conversation kept"
+    // used to land on top of the command's line — so /swap read like a /model that had picked the
+    // wrong thing (design 1.4.2). The sentence is held for exactly one report: the handler prints
+    // it in place of its own, and anything that happens after that speaks for itself.
+    void sayAndSwitch(const QString &sentence, const std::function<void()> &switchNow) {
+        m_switchSentence = sentence;
+        if (switchNow) switchNow();
+        status(sentence);
+    }
+
     // The pane's provider settings follow a model switch as a whole (card WFJM): the provider dialog
     // reads `provider/base|model|extra` as its defaults, and they used to keep the first preset's
     // endpoint after every chip or /model switch.
@@ -7750,12 +7761,13 @@ private:
                 : role.isEmpty() || role == QStringLiteral("main")
                 ? QStringLiteral("model: %1 · conversation kept").arg(modelName)
                 : QStringLiteral("%1: %2 · conversation kept").arg(roleLabel(role), modelName);
-            // This report *is* the /swap arriving, so it says what the swap did instead of
-            // overwriting that line 100–300 ms later with its own (card #MDL1, design 1.4.2).
-            // One shot: whatever happens next, the next report speaks for itself.
-            if (!m_swapSentence.isEmpty() && !later && (role.isEmpty() || role == QStringLiteral("main")))
-                what = m_swapSentence;
-            m_swapSentence.clear();
+            // This report *is* the switch a command asked for arriving, so it says what that
+            // command did instead of overwriting its line 100–300 ms later with a generic one
+            // (`sayAndSwitch`; card #MDL1, design 1.4.2). One shot: whatever happens next, the
+            // next report speaks for itself.
+            if (!m_switchSentence.isEmpty() && !later && (role.isEmpty() || role == QStringLiteral("main")))
+                what = m_switchSentence;
+            m_switchSentence.clear();
             status(what); toast(what);
             if (later) {
                 // The clock owns the status line while a turn runs, so the "not now, next step" part
@@ -9032,12 +9044,7 @@ private:
                 relay::models::swapTarget(modelCatalog(), currentEntryKey(), m_swapFrom);
             if (step.kind == relay::models::SwapKind::None) { status(step.message); return; }
             m_swapFrom = step.remember;
-            // `model_changed` lands 100–300 ms later and used to replace this line with the
-            // generic "Model: … · conversation kept", so /swap read like a /model that had picked
-            // the wrong thing (design 1.4.2). The handler prints this once instead of its own.
-            m_swapSentence = step.message;
-            selectEntry(step.target.key);
-            status(step.message);
+            sayAndSwitch(step.message, [this, key = step.target.key] { selectEntry(key); });
         } else if (name == QStringLiteral("main") || name == QStringLiteral("high")
                    || name == QStringLiteral("flash") || name == QStringLiteral("local")) {
             // The pane's own agent, not the tier table: /flash runs this conversation on the Flash
@@ -9081,8 +9088,10 @@ private:
                     status(QStringLiteral("Already on %1.").arg(line));
                     return;
                 }
-                selectModel(id);   // also puts the pane back on the Main agent
-                status(QStringLiteral("model: %1.").arg(line));
+                // Through the same one-shot as /swap: this command's own sentence, not the
+                // generic one `model_changed` prints a moment later (card #MDL1).
+                sayAndSwitch(QStringLiteral("model: %1.").arg(line),
+                             [this, id] { selectModel(id); });   // also puts the pane back on main
                 return;
             }
             status(QStringLiteral("No stored %1 key. Add one in Options › Models › API keys….")
@@ -12489,8 +12498,11 @@ private:
         const relay::models::Catalog catalog = modelCatalog();
         if (const relay::models::Entry *entry = catalog.find(currentEntryKey()))
             return entry->label;   // a guest too: "gpt-5.6-sol", not "Codex" (owner, 2026-09-21)
-        const QString model = conciseModel(m_currentPreset, presetLabelOf(m_currentPreset));
-        return model.isEmpty() ? m_model : model;
+        // Not in the catalog at all — a hand-typed id, a model heard before the catalog arrived:
+        // the same naming rule off the id alone (card #MDL1, rule 1). `conciseModel` used to
+        // answer here and fell back to the *preset's* label, which is a preset and not a model.
+        const QString model = modelNameFor(m_currentPreset, paneModel());
+        return model.isEmpty() ? relay::models::nameOf(m_model) : model;
     }
     // The wording is relay::modelrows' (#PK5Q), so a helper agent's box says it the same way.
     QString roleRowText(const QString &role) const {
@@ -12996,27 +13008,10 @@ private:
         });
     }
 
-    // "glm-5.3", not "z.ai · glm-5.3 · coding plan": the model id from the worker's preset list,
-    // which is what a person recognises. Falls back to the preset label.
-    QString conciseModel(const QString &presetId, const QString &label) const {
-        for (const auto &item : m_presets) {
-            const QJsonObject preset = item.toObject();
-            if (preset.value(QStringLiteral("id")).toString() != presetId) continue;
-            // A model server on this machine reads as local rather than as one more provider
-            // (card #24XJ): no key stands behind it and it answers from this machine.
-            const QString mark = preset.value(QStringLiteral("local")).toBool()
-                                     ? QStringLiteral(" · local") : QString();
-            // A guest (29.4) reads as the tool — "Claude Code", not the model id it happens to be
-            // running: the model is the guest's own and shows on the chip once it reports one.
-            if (preset.value(QStringLiteral("group")).toString() == QStringLiteral("guest")) return label;
-            // Relay Free's model ids are the gateway's roles (relay-main…), which name nothing a
-            // person recognises: the row reads as the service.
-            if (preset.value(QStringLiteral("hosted")).toBool()) return label;
-            const QString model = preset.value(QStringLiteral("model")).toString();
-            if (!model.isEmpty()) return model.section('/', -1).toLower() + mark;
-        }
-        return label;
-    }
+    // `conciseModel` was here, and is gone with card #MDL1 (rule 1: "one function names a model").
+    // It was the second naming function — the id after its last "/", except for a guest or Relay
+    // Free, where it returned the *preset label* instead, which is how the picker came to say
+    // "Codex" for gpt-5.6-sol. `modelNameFor` is the one that stayed.
 
     // Chip tooltip: the pane's model plus every role's effective model (protocol 13).
     QString modelTooltip(const QString &extra = QString()) const {
@@ -17611,8 +17606,9 @@ private:
     // What this pane's own agent runs on, and /swap's memory (card #MDL1). `m_paneModel` is the
     // pane's model as against `m_model`, the last model the worker named for anything at all;
     // `m_swapFrom` is where the last /swap (or a pick that landed on rank 1) came from, and
-    // `m_swapSentence` the line the next `model_changed` prints in place of its own.
-    QString m_paneModel, m_swapFrom, m_swapSentence;
+    // `m_switchSentence` the line the next `model_changed` prints in place of its own — see
+    // `sayAndSwitch`.
+    QString m_paneModel, m_swapFrom, m_switchSentence;
     // What this pane picked for each mode of the model box, by tier id — "flash" → the entry a
     // model row of the flash page named, and the level it runs at (card #MDL1, section 5.1). It is
     // what the mode row's parentheses say, what `set_agent_role` carries as this pane's own pick,
