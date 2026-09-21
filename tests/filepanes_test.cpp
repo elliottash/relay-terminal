@@ -126,6 +126,59 @@ private slots:
         QCOMPARE(QFileInfo(opened).fileName(), QStringLiteral("note.txt"));
     }
 
+    // Card #SEJ2: Ctrl+Enter is the in-app variant of Enter — the file opens ready to edit,
+    // and the plain-open callback stays out of it.
+    void ctrlEnterOnFileAsksForAnEditor() {
+        QTemporaryDir temp;
+        writeFile(temp.filePath(QStringLiteral("note.txt")), "hello");
+        FileExplorer explorer(temp.path());
+        QString opened, edited;
+        explorer.onOpenFile = [&opened](const QString &path) { opened = path; };
+        explorer.onEditFile = [&edited](const QString &path) { edited = path; };
+        explorer.show();
+        QTRY_COMPARE(explorer.visiblePaths().size(), 1);
+        QTRY_VERIFY(explorer.view()->currentIndex().isValid());
+        explorer.view()->setFocus();
+        QTest::keyClick(explorer.view(), Qt::Key_Return, Qt::ControlModifier);
+        QCOMPARE(QFileInfo(edited).fileName(), QStringLiteral("note.txt"));
+        QVERIFY(opened.isEmpty());
+    }
+
+    // Card #SEJ2: Shift+Enter is the chord that leaves the app. The host callback stands in for
+    // the desktop here, so the test never opens a real application.
+    void shiftEnterOnFileGoesToTheDesktop() {
+        QTemporaryDir temp;
+        writeFile(temp.filePath(QStringLiteral("note.txt")), "hello");
+        FileExplorer explorer(temp.path());
+        QString opened, external;
+        explorer.onOpenFile = [&opened](const QString &path) { opened = path; };
+        explorer.onOpenExternal = [&external](const QString &path) { external = path; };
+        explorer.show();
+        QTRY_COMPARE(explorer.visiblePaths().size(), 1);
+        QTRY_VERIFY(explorer.view()->currentIndex().isValid());
+        explorer.view()->setFocus();
+        QTest::keyClick(explorer.view(), Qt::Key_Return, Qt::ShiftModifier);
+        QCOMPARE(QFileInfo(external).fileName(), QStringLiteral("note.txt"));
+        QVERIFY(opened.isEmpty());
+    }
+
+    // A folder only ever navigates, whichever modifier is held (#SEJ2).
+    void ctrlEnterOnAFolderStillNavigates() {
+        QTemporaryDir temp;
+        QVERIFY(QDir(temp.path()).mkdir(QStringLiteral("sub")));
+        writeFile(temp.filePath(QStringLiteral("sub/inner.txt")), "x");
+        FileExplorer explorer(temp.path());
+        QString edited;
+        explorer.onEditFile = [&edited](const QString &path) { edited = path; };
+        explorer.show();
+        QTRY_COMPARE(explorer.visiblePaths().size(), 1);
+        QTRY_VERIFY(explorer.view()->currentIndex().isValid());
+        explorer.view()->setFocus();
+        QTest::keyClick(explorer.view(), Qt::Key_Return, Qt::ControlModifier);
+        QCOMPARE(QFileInfo(explorer.root()).fileName(), QStringLiteral("sub"));
+        QVERIFY(edited.isEmpty());
+    }
+
     void typingInListStartsFilter() {
         QTemporaryDir temp;
         writeFile(temp.filePath(QStringLiteral("zeta.txt")), "");
@@ -225,6 +278,94 @@ private slots:
         QCOMPARE(mode->text(), QStringLiteral("Rendered (MD)"));
         QVERIFY(preview.open(temp.filePath(QStringLiteral("shot.png"))));
         QCOMPARE(mode->text(), QStringLiteral("100%"));
+    }
+
+    // Card #SEJ2: the ✎ button turns a read-only local preview into an editor, and Ctrl+S
+    // writes the file back to its own path. Clicking ✎ is the slow path, so it teaches the
+    // chord (WARP.md, "Shortcut hints").
+    void aLocalTextFileEditsAndSaves() {
+        QSettings settings;
+        settings.remove(QStringLiteral("hints"));
+        QTemporaryDir temp;
+        const QString path = temp.filePath(QStringLiteral("note.txt"));
+        writeFile(path, "before\n");
+        FilePreview preview;
+        QVERIFY(preview.open(path));
+        QCOMPARE(preview.kind(), FilePreview::Kind::Text);
+        auto *edit = preview.findChild<QToolButton *>(QStringLiteral("filePreviewEdit"));
+        auto *editor = preview.findChild<QPlainTextEdit *>(QStringLiteral("filePreviewText"));
+        QVERIFY(edit && editor);
+        QVERIFY(edit->isVisibleTo(&preview));
+        QVERIFY(editor->isReadOnly());
+        QVERIFY(!preview.isEditable());
+
+        edit->click();
+        QVERIFY(preview.isEditable());
+        QVERIFY(!editor->isReadOnly());
+        QVERIFY(!edit->isVisibleTo(&preview));
+        QVERIFY(preview.notice().contains(QStringLiteral("Next time")));
+        QVERIFY(preview.notice().contains(QStringLiteral("Ctrl+Enter")));
+        QVERIFY(!preview.isDirty());
+
+        // Typed, not set, so the document's modified flag — the ● and Save's signal — is real.
+        editor->selectAll();
+        editor->textCursor().insertText(QStringLiteral("after\n"));
+        QVERIFY(preview.isDirty());
+        QVERIFY(preview.title().startsWith(QStringLiteral("● ")));
+        QVERIFY(preview.save());
+        QVERIFY(!preview.isDirty());
+        QCOMPARE(QString::fromUtf8(readFile(path)), QStringLiteral("after\n"));
+        QVERIFY(preview.notice().contains(QStringLiteral("Saved")));
+        settings.remove(QStringLiteral("hints"));
+    }
+
+    // A save that the disk refuses says why and keeps the buffer dirty (#SEJ2).
+    void aLocalSaveThatFailsSaysWhy() {
+        QTemporaryDir temp;
+        const QString path = temp.filePath(QStringLiteral("locked.txt"));
+        writeFile(path, "before\n");
+        FilePreview preview;
+        QVERIFY(preview.open(path));
+        preview.startEditing();
+        auto *editor = preview.findChild<QPlainTextEdit *>(QStringLiteral("filePreviewText"));
+        QVERIFY(editor);
+        editor->textCursor().insertText(QStringLiteral("x"));
+        QVERIFY(preview.isDirty());
+        QVERIFY(QFile::setPermissions(path, QFile::ReadOwner));
+        QVERIFY(!preview.save());
+        QVERIFY(preview.isDirty());
+        QVERIFY(!preview.notice().isEmpty());
+        QVERIFY(QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner));   // let the temp dir clean up
+    }
+
+    // Card #SEJ2: a Markdown file is edited as source, so startEditing() leaves the render.
+    void markdownEditingStartsInTheSourceView() {
+        QTemporaryDir temp;
+        const QString path = temp.filePath(QStringLiteral("doc.md"));
+        writeFile(path, "# Title\n\nBody\n");
+        FilePreview preview;
+        QVERIFY(preview.open(path));
+        QCOMPARE(preview.kind(), FilePreview::Kind::Markdown);
+        QVERIFY(!preview.showingSource());
+        preview.startEditing();
+        QVERIFY(preview.isEditable());
+        QVERIFY(preview.showingSource());
+    }
+
+    // The ✎ button is for text: an image has nothing to edit here (#SEJ2).
+    void theEditButtonStaysAwayFromAnImage() {
+        QTemporaryDir temp;
+        QImage image(4, 3, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        QVERIFY(image.save(temp.filePath(QStringLiteral("shot.png"))));
+        FilePreview preview;
+        auto *edit = preview.findChild<QToolButton *>(QStringLiteral("filePreviewEdit"));
+        QVERIFY(edit);
+        QVERIFY(preview.open(temp.filePath(QStringLiteral("shot.png"))));
+        QCOMPARE(preview.kind(), FilePreview::Kind::Image);
+        QVERIFY(!edit->isVisibleTo(&preview));
+        preview.startEditing();   // a no-op for an image
+        QVERIFY(!preview.isEditable());
     }
 
     // Issue S1JP: a link inside a rendered Markdown preview is handed to the host for a pane of

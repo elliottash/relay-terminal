@@ -391,6 +391,28 @@ void FileExplorer::activate(const QString &path) {
     else if (onOpenFile) onOpenFile(path);
 }
 
+void FileExplorer::openFromKeyboard(const QModelIndex &index, Qt::KeyboardModifiers mods) {
+    if (!index.isValid()) return;
+    const QString path = pathAt(index);
+    const bool remote = relay::remote::parseFileUrl(path).ok;
+    // A folder only ever navigates, and a remote file opens editable already, so Ctrl+Enter on
+    // one is plain Enter. Shift+Enter is the chord that leaves the app (card #SEJ2), and the
+    // desktop cannot open a file that is not on this machine, so a remote row ignores it.
+    if (mods == Qt::NoModifier || isDirAt(index) || (remote && mods == Qt::ControlModifier)) {
+        activate(path);
+        return;
+    }
+    if (mods == Qt::ControlModifier) {
+        if (onEditFile) onEditFile(path);
+        else if (onOpenFile) onOpenFile(path);
+        return;
+    }
+    if (mods == Qt::ShiftModifier && !remote) {
+        if (onOpenExternal) onOpenExternal(path);
+        else QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+    }
+}
+
 void FileExplorer::resizeEvent(QResizeEvent *event) {
     QWidget::resizeEvent(event);
     // Narrow explorers keep the name column readable by hiding size and date.
@@ -704,10 +726,11 @@ bool FileExplorer::eventFilter(QObject *object, QEvent *event) {
     auto *key = static_cast<QKeyEvent *>(event);
     const auto mods = key->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::MetaModifier);
     if (object == m_view) {
-        if ((key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) && mods == Qt::NoModifier) {
-            const QModelIndex index = m_view->currentIndex();
-            if (index.isValid()) activate(pathAt(index));
-            return true;
+        if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) {
+            if (mods == Qt::NoModifier || mods == Qt::ControlModifier || mods == Qt::ShiftModifier) {
+                openFromKeyboard(m_view->currentIndex(), mods);
+                return true;
+            }
         }
         if ((key->key() == Qt::Key_Backspace && mods == Qt::NoModifier) || (key->key() == Qt::Key_Up && mods == Qt::AltModifier)) {
             goUp();
@@ -738,9 +761,10 @@ bool FileExplorer::eventFilter(QObject *object, QEvent *event) {
             return true;
         }
         if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) {
-            const QModelIndex index = m_view->currentIndex();
-            if (index.isValid()) activate(pathAt(index));
-            return true;
+            if (mods == Qt::NoModifier || mods == Qt::ControlModifier || mods == Qt::ShiftModifier) {
+                openFromKeyboard(m_view->currentIndex(), mods);
+                return true;
+            }
         }
         if (key->key() == Qt::Key_Escape && !m_filter->text().isEmpty()) {
             m_filter->clear();
@@ -910,8 +934,15 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
     m_save = headerButton(QStringLiteral("Save"), QStringLiteral("Save to the host (Ctrl+S)"));
     m_save->setObjectName(QStringLiteral("filePreviewSave"));
     m_save->hide();
+    // The read-only preview's way into editing (card #SEJ2); updateEditButton() decides when it
+    // shows. Its tooltip is set for a local file in updateEditButton() — "to the host" is a
+    // remote save's wording.
+    m_edit = headerButton(QStringLiteral("✎ Edit"), QStringLiteral("Edit this file here"));
+    m_edit->setObjectName(QStringLiteral("filePreviewEdit"));
+    m_edit->hide();
     header->addWidget(m_title, 1);
     header->addWidget(m_hostChip);
+    header->addWidget(m_edit);
     header->addWidget(m_save);
     header->addWidget(m_mode);
     header->addWidget(m_reload);
@@ -1012,6 +1043,13 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
         m_teachSaveShortcut = relay::ShortcutHints::instance().shouldShow(QStringLiteral("files.remoteSave"));
         save();
     });
+    // The slow path (clicking ✎) teaches the fast one (Ctrl+Enter in the explorer, card #SEJ2).
+    connect(m_edit, &QToolButton::clicked, this, [this] {
+        if (relay::ShortcutHints::instance().shouldShow(QStringLiteral("files.editFromExplorer")))
+            setNotice(relay::ShortcutHints::nextTime(QStringLiteral("Ctrl+Enter"),
+                                                     QStringLiteral("edit a file straight from the explorer")));
+        startEditing();
+    });
     auto *saveShortcut = new QShortcut(QKeySequence::Save, this);
     saveShortcut->setContext(Qt::WidgetWithChildrenShortcut);
     connect(saveShortcut, &QShortcut::activated, this, [this] { save(); });
@@ -1096,6 +1134,13 @@ bool FilePreview::highlighting() const {
 
 bool FilePreview::open(const QString &path) {
     if (relay::remote::isFileUrl(path)) return openRemote(path);
+    // Opening (or reloading) another file over this one is the local path that can lose an edit,
+    // so it asks first — the same guard openRemote() has (#SEJ2).
+    if (isDirty()
+        && QMessageBox::warning(this, QStringLiteral("Reload"),
+                                QStringLiteral("Throw away your unsaved edits to %1?").arg(QFileInfo(m_path).fileName()),
+                                QMessageBox::Cancel | QMessageBox::Discard, QMessageBox::Cancel) != QMessageBox::Discard)
+        return false;
     const QFileInfo info(path);
     if (path.isEmpty() || !info.exists() || !info.isFile() || !info.isReadable()) return false;
     setEditable(false);
@@ -1143,6 +1188,7 @@ bool FilePreview::open(const QString &path) {
     m_reload->setEnabled(true);
     m_external->setEnabled(true);
     updateModeButton();
+    updateEditButton();
     if (onTitleChanged) onTitleChanged(title());
     return true;
 }
@@ -1388,10 +1434,33 @@ void FilePreview::setEditable(bool on) {
     m_editable = on;
     m_textView->setReadOnly(!on);
     m_save->setVisible(on);
+    // "to the host" is a remote save's wording; a local save writes the file's own path.
+    m_save->setToolTip(isRemote() ? QStringLiteral("Save to the host (Ctrl+S)")
+                                  : QStringLiteral("Save (Ctrl+S)"));
     // The pane opens ready to type in, and Ctrl+S (a WidgetWithChildren shortcut) has a focused
     // widget to fire from: the host's focusInput() sets the focus on this widget, and the proxy
     // passes it to the editor. A read-only preview keeps the focus itself, as it always did.
     setFocusProxy(on ? m_textView : nullptr);
+    updateEditButton();
+}
+
+void FilePreview::updateEditButton() {
+    // The ✎ button is the read-only local preview's way into editing (card #SEJ2). A remote file
+    // is editable the moment its bytes land, and an image, PDF or info page has nothing to edit.
+    m_edit->setVisible(!isRemote() && !m_editable && (m_kind == Kind::Text || m_kind == Kind::Markdown));
+}
+
+void FilePreview::startEditing() {
+    if (m_editable || isRemote()) return;
+    if (m_kind != Kind::Text && m_kind != Kind::Markdown) return;
+    // Markdown is edited as source, the same view the "Source (MD)" button shows.
+    if (m_kind == Kind::Markdown && !m_markdownSource) {
+        m_markdownSource = true;
+        m_stack->setCurrentWidget(m_textView);
+        updateModeButton();
+    }
+    setEditable(true);
+    m_textView->setFocus(Qt::OtherFocusReason);
 }
 
 void FilePreview::watchForReconnect() {
@@ -1416,8 +1485,37 @@ void FilePreview::watchForReconnect() {
 }
 
 bool FilePreview::save() {
-    if (!m_editable || !isRemote() || !m_remote) return false;
+    if (!m_editable) return false;
     if (!m_textView->document()->isModified()) return true;
+    if (!isRemote()) {
+        // A local save (card #SEJ2): atomically, so a crash or a full disk leaves the old file
+        // whole. The buffer is UTF-8 because the read path decoded it as UTF-8.
+        QSaveFile file(m_path);
+        if (!file.open(QIODevice::WriteOnly)) {
+            setNotice(QStringLiteral("Could not save: %1").arg(file.errorString()));
+            return false;
+        }
+        file.write(m_textView->toPlainText().toUtf8());
+        if (!file.commit()) {
+            setNotice(QStringLiteral("Could not save: %1").arg(file.errorString()));
+            return false;
+        }
+        m_textView->document()->setModified(false);
+        QString said = QStringLiteral("Saved · %1").arg(QLocale().toString(QTime::currentTime(), QLocale::ShortFormat));
+        if (m_teachSaveShortcut) {
+            m_teachSaveShortcut = false;
+            said += QStringLiteral(" · ") + relay::ShortcutHints::nextTime(
+                        QKeySequence(QKeySequence::Save).toString(QKeySequence::NativeText),
+                        QStringLiteral("save this file"));
+        }
+        setNotice(said);
+        updateTitleText();
+        if (onTitleChanged) onTitleChanged(title());
+        const QString shown = m_notice;
+        QTimer::singleShot(6000, this, [this, shown] { if (m_notice == shown) setNotice(QString()); });
+        return true;
+    }
+    if (!m_remote) return false;
     if (m_remote->busy()) { setNotice(QStringLiteral("Still saving to %1…").arg(m_remoteHost)); return false; }
     if (!m_remote->live()) {
         setNotice(QStringLiteral("The connection to %1 has ended · your edits are safe in this pane. Log in to %1 again "

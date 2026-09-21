@@ -69,7 +69,10 @@ QList<FileMenuItem> previewMenu(const FileMenuHost &host);
 
 // A directory browser rooted at one folder. Enter, or a click (double by default, single when
 // "Open items with a single click" is on), opens: a folder navigates into it, a file calls
-// onOpenFile. Backspace or Alt+Up goes to the parent folder. Right-click offers explorerMenu().
+// onOpenFile. Ctrl+Enter on a file calls onEditFile instead (open it in Relay ready to edit),
+// and Shift+Enter hands it to the desktop (onOpenExternal, card #SEJ2): Ctrl is the in-app
+// variant, Shift the one that leaves the app, the same split the conversation list teaches.
+// Backspace or Alt+Up goes to the parent folder. Right-click offers explorerMenu().
 //
 // The folder may be on the host a terminal pane is logged into (card #S5SH): `setRoot()` takes an
 // `ssh://<host>/<path>/` the same way `FilePreview::open()` takes a file's URL, and then the rows
@@ -114,6 +117,11 @@ public:
     QList<FileMenuItem> menuFor(const QString &path) const;
 
     std::function<void(const QString &)> onOpenFile;          // a file was opened
+    // Ctrl+Enter on a file: open it ready to edit (card #SEJ2). Folders ignore the modifier.
+    std::function<void(const QString &)> onEditFile;
+    // Shift+Enter on a row: the desktop opens it. Unset means this pane does it itself with
+    // QDesktopServices; a test sets it to watch instead. Remote (ssh://) rows never fire it.
+    std::function<void(const QString &)> onOpenExternal;
     std::function<void(const QString &)> onDirectoryChanged;  // the root folder changed
     std::function<void(const QString &)> onNavigateHere;      // move the terminal to this folder
     std::function<void(const QString &)> onOpenInPreview;     // open this file in a preview pane
@@ -126,6 +134,9 @@ protected:
 
 private:
     void activate(const QString &path);
+    // One Enter-family chord on a row: plain opens inside Relay, Ctrl+Enter opens ready to edit,
+    // Shift+Enter hands to the desktop; a folder only navigates (card #SEJ2).
+    void openFromKeyboard(const QModelIndex &index, Qt::KeyboardModifiers mods);
     void updateHeader();
     void hideUnmatchedFolders();
     // ----- one folder on another machine (#S5SH) -------------------------------------------
@@ -163,8 +174,11 @@ private:
 
 // A preview of one file. The viewer is chosen by MIME type: text and code (with syntax
 // highlighting when KSyntaxHighlighting is built in), Markdown (rendered or source), images
-// (fit or 100%), PDF (when Qt PDF is built in), otherwise a file-info panel. A local file is
-// read only here (the editable panes are PlanEditor and the composer).
+// (fit or 100%), PDF (when Qt PDF is built in), otherwise a file-info panel. A local text or
+// Markdown file opens read only and turns into an editor on the header's ✎ button or on
+// Ctrl+Enter from the explorer (card #SEJ2): Ctrl+S saves back to the same path (atomically,
+// through QSaveFile), a ● in the title marks unsaved edits, and opening or reloading a dirty
+// file asks first.
 //
 // A file on the host a terminal pane is logged into (card #S5SH) opens in this same pane, fetched
 // over that pane's own ssh connection, and — owner, 2026-09-18, "editing allowed so it's equal to
@@ -189,10 +203,18 @@ public:
     bool isRemote() const { return !m_remoteHost.isEmpty(); }
     QString remoteHost() const { return m_remoteHost; }
     QString remotePath() const { return m_remotePath; }
-    // Unsaved edits. Only a remote file is editable, so this is false for every local one.
+    // Unsaved edits. False while the pane is read only, which a local file is until
+    // startEditing().
     bool isDirty() const;
-    // Write the buffer back to the host (Ctrl+S and the Save button). Returns false when there is
-    // nothing to save or no connection to save over; the save itself lands later.
+    // True while the pane is an editor rather than a read-only preview.
+    bool isEditable() const { return m_editable; }
+    // Turn the preview into an editor (the ✎ button, or Ctrl+Enter from the explorer, card
+    // #SEJ2). A Markdown file is edited as source, so the source view comes up first. A no-op
+    // for a file that cannot be edited here (image, PDF, info) or already is.
+    void startEditing();
+    // Write the buffer back — to the host over ssh for a remote file, atomically to its own
+    // path for a local one (Ctrl+S and the Save button). Returns false when there is nothing
+    // to save or no connection to save over; a remote save itself lands later.
     bool save();
     // Scroll a text preview to a 1-based line and highlight it (no-op for other kinds).
     void goToLine(int line);
@@ -257,6 +279,8 @@ private:
     void showRemoteInfo(const QString &mime, const QString &message = QString());
     void remoteFailed(const QString &message, int conflict);
     void setEditable(bool on);
+    // The ✎ button shows only while a local text or Markdown file sits read only (#SEJ2).
+    void updateEditButton();
     void watchForReconnect();
     void followLink(const QUrl &url);
     bool showMenu(const QPoint &globalPos, QWidget *source);
@@ -285,7 +309,7 @@ private:
     QTimer *m_reconnect = nullptr;
     QHBoxLayout *m_header = nullptr;
     QLabel *m_title = nullptr, *m_noticeLabel = nullptr, *m_info = nullptr, *m_image = nullptr, *m_hostChip = nullptr;
-    QToolButton *m_mode = nullptr, *m_reload = nullptr, *m_external = nullptr, *m_save = nullptr;
+    QToolButton *m_mode = nullptr, *m_reload = nullptr, *m_external = nullptr, *m_save = nullptr, *m_edit = nullptr;
     QStackedWidget *m_stack = nullptr;
     QPlainTextEdit *m_textView = nullptr;
     QTextBrowser *m_markdownView = nullptr;

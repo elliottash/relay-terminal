@@ -609,7 +609,9 @@ public:
     // has no QFileInfo here, it is never a folder, and the preview pane fetches it over that
     // pane's own ssh connection. Everything else about the pane — which one is reused, where it
     // opens, the line it goes to — is the same, so it goes through the same function.
-    void openPath(const QString &path, int line, QWidget *anchor, bool newPane = false) {
+    // `edit` (card #SEJ2, the explorer's Ctrl+Enter) turns the preview into an editor once it is
+    // open; it means nothing for a folder.
+    void openPath(const QString &path, int line, QWidget *anchor, bool newPane = false, bool edit = false) {
         const bool remote = relay::remote::isFileUrl(path);
         const QFileInfo info(path);
         if (!remote && !info.exists()) { notice(QStringLiteral("No such file or folder: ") + path, 6000); return; }
@@ -646,6 +648,7 @@ public:
             insertBeside(anchor, target, Qt::Horizontal, false);
         }
         if (kind == ToolPane::Kind::Preview && line > 0) target->preview()->goToLine(line);
+        if (edit && kind == ToolPane::Kind::Preview) target->preview()->startEditing();
         setActiveLeaf(target);
         focusLeaf(target);
         updateTitles();
@@ -7215,6 +7218,8 @@ private:
         if (tool->explorer()) {
             relay::FileExplorer *explorer = tool->explorer();
             explorer->onOpenFile = [guard](const QString &file) { if (auto *w = windowOf(guard)) w->openPath(file, 0, guard); };
+            // Ctrl+Enter: open the file ready to edit (card #SEJ2).
+            explorer->onEditFile = [guard](const QString &file) { if (auto *w = windowOf(guard)) w->openPath(file, 0, guard, false, true); };
             explorer->onDirectoryChanged = [guard](const QString &) { if (auto *w = windowOf(guard)) w->updateTitles(); };
             // Right-click menu entries the window owns (issue #D60R).
             explorer->onOpenInPreview = [guard](const QString &file) { if (auto *w = windowOf(guard)) w->openPath(file, 0, guard); };
@@ -10097,6 +10102,17 @@ public:
     void closePane(QWidget *pane, bool record) {
         QWidget *page = pageOf(pane);
         if (!page) return;
+        // Closing the one pane kind that can hold unsaved edits asks first (card #SEJ2):
+        // Save writes them, Discard closes, Cancel keeps the pane.
+        if (auto *tool = dynamic_cast<ToolPane *>(pane);
+            tool && tool->kind() == ToolPane::Kind::Preview && tool->preview()->isDirty()) {
+            const auto choice = QMessageBox::warning(this, QStringLiteral("Unsaved changes"),
+                QStringLiteral("Save your changes to %1 before closing?").arg(tool->preview()->title()),
+                QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
+            if (choice == QMessageBox::Cancel) return;
+            // A save that failed (or could not start) keeps the pane, so the edits stay put.
+            if (choice == QMessageBox::Save && !tool->preview()->save()) return;
+        }
         // The Switchboard's own key (Ctrl+Shift+S) closes it too; a board pane closed any other
         // way — the pane's ×, Ctrl+W — is the slow path that hint names, once.
         if (!m_boardClosedByToggle)
