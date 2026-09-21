@@ -685,7 +685,10 @@ class BoardViewTests(unittest.TestCase):
                 stop = await newest()
                 self.assertEqual(stop, {"t": "board_request", "rid": stop["rid"],
                                         "request": {"type": "board_cancel", "id": CARD_ID}})
-                cancelled = {"event": "board_cancelled", "card_id": CARD_ID, "stopped": True, "cards": []}
+                # `cards` still names the stopped card: what a worker sent while that turn's
+                # thread unwound (the hosted drive's first Stop). The lamp goes out regardless.
+                cancelled = {"event": "board_cancelled", "card_id": CARD_ID, "stopped": True,
+                             "cards": [CARD_ID]}
                 await browser.evaluate(f"window.fakeRrp.board({stop['rid']}, {js(cancelled)})")
                 await browser.wait_for("document.querySelector('.rb-stop').hidden")
 

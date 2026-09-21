@@ -769,6 +769,9 @@ class AskTests(ProtocolTest):
         events = self.send(type="board_cancel", id="c1", card=first)
         answered = [e for e in events if e["event"] == "board_cancelled"][0]
         self.assertEqual((answered["card_id"], answered["stopped"]), (first, True))
+        # What is *still* running: never the card that was just stopped, although its thread has
+        # not unwound yet when this goes out. A phone has nothing else to put the lamp out with.
+        self.assertEqual(answered["cards"], [second])
         for _ in range(200):
             if self.commands.cards.running_cards() == [second]:
                 break

@@ -1872,8 +1872,16 @@ class BoardCommands:
         """
         card_id = normalize_id(request.get("card")) if request.get("card") else ""
         stopped = self.cards.stop(card_id) if card_id else bool(self.cards.stop_all())
+        # `cards` is what is *still* running (19.16), and a turn that was just told to stop is
+        # not: it stays `active` for the moment its thread takes to unwind, and this answer goes
+        # out inside that moment. A phone is sent none of a card turn's own events (remote
+        # protocol 17.4), so this list is the only thing that puts its lamp out — it stayed lit
+        # for good on the first Stop of #SWPH's hosted drive.
+        running = self.cards.running_cards()
+        if stopped:
+            running = [card for card in running if card != card_id] if card_id else []
         self._send({"event": "board_cancelled", "id": rid, "card_id": card_id or None,
-                    "stopped": stopped, "cards": self.cards.running_cards()})
+                    "stopped": stopped, "cards": running})
 
     def _problem_section(self, problem: dict) -> str | None:
         """Which section a problem belongs to, for `board_check {section}` (a triage button).

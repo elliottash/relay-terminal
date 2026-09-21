@@ -1434,6 +1434,10 @@ export function mountBoard(options) {
       case 'board_cancelled': {
         settle(rid);
         const still = new Set((Array.isArray(event.cards) ? event.cards : []).map(str));
+        // The card that was stopped is not running, whatever the list says: a worker answers
+        // while that turn's thread is still unwinding and used to name it here, and none of a
+        // card turn's own events reach a device to put the lamp out later (protocol 17.4).
+        if (cardId && event.stopped !== false) still.delete(cardId);
         for (const id of [...busy.keys()]) if (!still.has(id)) busy.delete(id);
         say(lineFor(cardId), event.stopped === false ? 'Nothing was running on this card.' : 'Stopped.');
         paintCard();
