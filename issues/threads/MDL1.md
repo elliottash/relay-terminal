@@ -469,3 +469,86 @@ Targeted tests green: `test_model_ranking` 40, `test_presets` 51 (bar the mirror
 `test_guest_harness_provider` 63, `test_openrouter_catalog` 13, plus `test_agent`, `test_subagents`,
 `test_local_tier` and every other Python test that mentions `effort`. `test_images` (2) and
 `test_plan_turns` (1) fail on a clean export of `main` as well and are not this work.
+
+<!-- relay:entry 20260921T211000Z-x1 author=claude-fable kind=progress -->
+### Claude Fable (fable-avail) · 2026-09-21 21:10
+
+**Step 2 of four is back, and the box's text filter reaches it.** The owner's correction:
+
+> "the text filter isnt working -- its supposed to show all available models, not just the ones
+> selected for the box picker. on this point -- i notice now that we lost functionality. there need
+> to be 4 steps of model availability: 1 add provider, 2 add model as available, 3 add model to
+> priority list, 4 include model in box picker. we currently only have 1, 3, 4. and its step 2 that
+> determines the models available in the text filter. for branded providers, all models are
+> included by default and you can uncheck them (eg i probably want to uncheck sonnet and haiku and
+> gpt 5.5). but then for openrouter, you have to select specific models -- and maybe there are some
+> recommended ones by default, deepseek 4.1 and gemini 3.8 flash for example."
+
+Five commits, all of them on `main`:
+
+`44e5f91a` — **the storage.** `models/available`, a list of keys, **per machine and never per
+profile** (a profile is the five lists; one that hid half a provider would read as the provider
+being broken). Absent — every install until the first un-tick — is the default, which is exactly
+what t:a10 had written into `shown()` by hand: every model of a branded provider, and of an
+open-ended one only its recommended rows, which are the ones the worker's own catalog names and so
+carry a `tier`, plus anything a tier list names or `models/custom` holds. So `shown()` is unchanged
+on every install today. `curation::availableKeys / isAvailable / setAvailable / resetAvailable`;
+`setAvailable` snapshots today's default on the first change, as `setShown` did, and un-ticking the
+last one is a reset rather than an empty catalog. Two rules that are not in the owner's sentence but
+follow from it: a provider added **after** the list was written keeps the default (otherwise one
+un-tick today hides every model of tomorrow's provider), and a model a tier list names is available
+whatever the tick says (a rank the user wrote down that the box would not offer is a list that
+lies). `shown` is every usable *available* entry; `allUsable` is unchanged; `curatable` is new — what
+the `all` tab draws, so an un-ticked row stays there greyed with a box to tick again.
+
+`08936206` — **where step 2 is edited:** the Ctrl+Alt+M dialog's `all` tab. An `available` checkbox
+column covering every provider of the row (a row is one model, rule 2: un-ticking sonnet un-ticks
+sonnet). The tail rows under "more from openrouter" carry the same box, un-ticked; ticking one is
+"you have to select specific models". The rest of the tab is grouped **by provider**, one rule per
+provider name. Nothing moves under the click: the ticks and the ink are refreshed in place, because
+rebuilding from inside the `itemChanged` that delivered it would delete the item being clicked.
+
+`b6921b4e` — **the filter.** `FilterPopup::onQueryRows` is handed the query and answers with the
+rows the *filter* should search, which the popup then draws in place of its own and filters by
+exactly the same rule; an empty answer, or no hook, means "the rows I already have", so the Alt+E
+level box and every other list are untouched. `modelrows::filtered` is the model box's answer: every
+class **whole** (the cutoff is step 4 — what the box shows at rest), plus one section `other models`
+holding every available model no class lists. Enter there is `pick:main|<key>`.
+
+`fd8df23c` — the pane and Options › Models: `onQueryRows` wired, `/model <name>` falling back from
+available to every usable entry (typing a name is asking for that model), and a **models… (N of M
+available)** link under every provider row that opens the `all` tab on that provider — step 1 to
+step 2 in one click.
+
+`9fcd5c62` — docs: design §5.7 with the four-step table, ARCHITECTURE and README.
+
+**Evidence:** `docs/qa_evidence/2026-09-21-model-availability/` — `drive.sh`, `NOTES.md` and nine
+shots, driven against a **clean export of the landed tree** (the shared `build/` does not compile:
+another session's uncommitted `relay::boardCardIdForFile` in `Pane.h`). The Options page reads
+"models… (4 of 4 available)" for kimi and **"3 of 446"** for openrouter; un-ticking
+`kimi-for-coding-highspeed` in the dialog changes that line to "3 of 4" while you watch, and the
+model then disappears from the Alt+M filter — which is the owner's sentence tested end to end.
+`conf-after.txt` is the stored list read back: the default minus the one un-tick, with three of
+OpenRouter's 446 rows in it.
+
+**Tests:** `ctest -R "modelcatalog|modelpicker|modelrows|filterpopup|settings"` 8/8.
+modelcatalog `shownIsEveryAvailableUsableEntry`, `unCheckingOneModelLeavesTheRestAvailable`,
+`anOpenEndedProvidersRecommendedRowsAreTheDefault`, `aModelATierListNamesStaysAvailable`,
+`aProviderAddedAfterTheListKeepsTheDefault`,
+`unCheckingTheLastAvailableModelIsAResetNotAnEmptyCatalog`; modelpicker
+`theAllTabHasAnAvailabilityColumnAndATierTabDoesNot`,
+`unTickingAModelGreysItAndTakesItOutOfTheListsAndTheBox`,
+`tickingATailRowUnderMoreFromOpenrouterSelectsIt`, `aModelATierListNamesStaysTicked`,
+`theDialogCanOpenFilteredToOneProvider`; filterpopup
+`aTypedFilterSearchesTheWiderListTheCallerHandsBack`,
+`withNoHookTheFilterNarrowsTheRowsItWasGiven`; modelrows
+`theFilteredBoxOpensEveryClassAndAddsOtherModels`,
+`anAvailableModelInNoListComesUnderOtherModels`, `theBoxAtRestIsUnchanged`; settings
+`everyProviderRowHasAModelsLinkIntoTheAllTab`.
+
+**One thing for the owner, and it is a product call.** Availability is stored per *entry*
+(`<preset>|<model>`) but the `all` tab's tick covers every provider of a row, because a row is one
+model. So un-ticking `gpt-5.6-sol` un-ticks it on Codex, the OpenAI API and OpenRouter together.
+That is what "i probably want to uncheck sonnet and haiku" reads as — the model, not the route —
+and the storage can already say otherwise if the answer is "no, per provider": it would want a
+second control (the `via` list), not a different setting.
