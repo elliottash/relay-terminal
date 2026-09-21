@@ -139,8 +139,13 @@ between providers is *expressed*.
 Preference order inside a group:
 
 1. the entry's position in the tier lists (main first), i.e. what the user already ranked;
-2. then the kind of access: a subscription or plan, then a guest harness, then the first-party
-   pay-as-you-go API, then OpenRouter, then Relay Free;
+2. then the kind of access, in the order the Providers table of `backend/relay_core/model-ranking.md`
+   gives — its `order` column, lower first, which the worker sends on every `presets` row as
+   `kind` and `order` (protocol 13.2). That file is the owner's to edit, so the order is not
+   written out again here: read the table. A row from a worker too old to send the pair falls back
+   to the shape this rule used to name — a subscription or plan, then a guest harness, then the
+   first-party pay-as-you-go API, then OpenRouter, then Relay Free — which is what
+   `accessRank` in src/ModelCatalog.cpp still holds for exactly that case;
 3. skipping an entry that is unusable (no key) or exhausted.
 
 Picking the row picks the first live entry. The row says which provider that is

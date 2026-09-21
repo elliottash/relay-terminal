@@ -425,7 +425,7 @@ regenerates `issues/BOARD.md`. A repository without `issues/board.yaml` never se
 ## Privacy and your keys
 
 - **BYOK.** Subscriptions (GLM Coding Plan, Kimi Code, MiniMax Coding/Token Plan), the OpenRouter
-  aggregator, and pay-as-you-go OpenAI, Anthropic and Google Gemini — all through their
+  aggregator, and pay-as-you-go OpenAI, Anthropic, Google Gemini and DeepSeek — all through their
   OpenAI-compatible endpoints — plus Kimi's and Z.AI's standard APIs and any other
   OpenAI-compatible endpoint.
 - **Where keys live.** The desktop keyring (GNOME Keyring or KWallet) through `secret-tool`,
