@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: m7h
 created: '2026-09-21'
 source: Codex in a Relay pane, 2026-09-21
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-wrapped-link-hover/], related: [], github: null}
+links: {plans: [], commits: [76091e05e8e2bdf9e0f3652b63dabeefb3e43c87], evidence: [docs/qa_evidence/2026-09-21-wrapped-link-hover/], related: [], github: null}
 ---
 # Underline the whole wrapped link on hover
 
