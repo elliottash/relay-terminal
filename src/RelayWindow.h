@@ -3120,6 +3120,12 @@ private:
         }
         appearance.rows << toggleRow(QStringLiteral("appearance/auto_dim"), QStringLiteral("Dim while working"),
             QStringLiteral("Dim working agents; reveal questions, blocked work and completion. Manual dimming survives completion."), false);
+        {
+            auto activeDim = toggleRow(QStringLiteral("appearance/auto_dim_active"), QStringLiteral("Include active pane"),
+                QStringLiteral("Also dim the selected pane while its agent works. Applies when Dim while working is on."), false);
+            activeDim.indent = 1;
+            appearance.rows << activeDim;
+        }
         appearance.rows << toggleRow(QStringLiteral("appearance/focus_mode"), QStringLiteral("Focus mode"),
             QStringLiteral("Dim other panes while you work in the selected pane. Attention reveals a pane without moving focus."), false);
         appearance.rows << numberRow(QStringLiteral("appearance/dim_strength"), QStringLiteral("Dimming strength"),
@@ -9346,6 +9352,7 @@ private:
 
     void refreshPaneDimming() {
         const bool automatic = relay::settings::boolValue(QStringLiteral("appearance/auto_dim"), false);
+        const bool includeActive = relay::settings::boolValue(QStringLiteral("appearance/auto_dim_active"), false);
         const bool focus = relay::settings::boolValue(QStringLiteral("appearance/focus_mode"), false);
         const int strength = relay::settings::intValue(QStringLiteral("appearance/dim_strength"), 90);
         for (int i = 0; i < m_tabs->count(); ++i) {
@@ -9366,7 +9373,7 @@ private:
                 if (leaf == m_activeLeaf && chrome->dimming.revealed) chrome->dimming.completed = false;
                 done = done || chrome->dimming.completed;
                 chrome->dimming.observe(leaf == m_activeLeaf && i == m_tabs->currentIndex(), busy, attention, done);
-                chrome->paintDimming(chrome->dimming.amount(automatic, focus, strength));
+                chrome->paintDimming(chrome->dimming.amount(automatic, focus, strength, includeActive));
             }
         }
     }

@@ -24,11 +24,14 @@ struct State {
         attention = needsYou;
         completed = done;
     }
-    int amount(bool automatic, bool focus, int strength) const {
-        if (attention || revealed) return 0;
+    int amount(bool automatic, bool focus, int strength, bool includeActive = false) const {
+        if (attention) return 0;
+        const bool autoDim = automatic && working && (!active || includeActive);
+        // Opted-in working panes stay dim even when entered. Manual reveal still wins.
+        if (revealed && !(manual < 0 && autoDim)) return 0;
         if (manual >= 0) return std::clamp(manual, 0, 95);
         if (completed) return 0;
-        return ((automatic && working) || (focus && !active))
+        return (autoDim || (focus && !active))
                    ? std::clamp(strength, 0, 95) : 0;
     }
     void toggle(int strength) {

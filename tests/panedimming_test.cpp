@@ -13,13 +13,34 @@ private slots:
         s.observe(true, false, false, false);
         QCOMPARE(s.amount(true, false, 90), 0);
         s.observe(true, true, false, false);
-        QCOMPARE(s.amount(true, false, 90), 90);
+        QCOMPARE(s.amount(true, false, 90), 0); // default: active pane stays bright
+        QCOMPARE(s.amount(true, false, 90, true), 90);
+        QCOMPARE(s.amount(false, false, 90, true), 0); // parent is required
         s.observe(true, true, true, false);
-        QCOMPARE(s.amount(true, false, 90), 0);
+        QCOMPARE(s.amount(true, false, 90, true), 0);
         s.observe(true, true, false, false);
-        QCOMPARE(s.amount(true, false, 90), 90);
+        QCOMPARE(s.amount(true, false, 90, true), 90);
         s.observe(true, false, false, true);
+        QCOMPARE(s.amount(true, false, 90, true), 0);
+    }
+    void activeOptionAndReentry() {
+        State s;
+        s.observe(false, true, false, false);
+        QCOMPARE(s.amount(true, false, 90), 90);
+        s.observe(true, true, false, false);
         QCOMPARE(s.amount(true, false, 90), 0);
+        QCOMPARE(s.amount(true, false, 90, true), 90);
+        QCOMPARE(s.amount(true, false, 90, false), 0); // live toggle
+        s.observe(false, true, false, false);
+        QCOMPARE(s.amount(true, false, 90), 90);
+        s.adjust(-90, 90); // explicit bright override
+        s.observe(true, true, false, false);
+        QCOMPARE(s.amount(true, false, 90, true), 0);
+        s.adjust(45, 0);
+        QCOMPARE(s.amount(true, false, 90, true), 45);
+        s.observe(false, true, false, false);
+        s.observe(true, true, false, false);
+        QCOMPARE(s.amount(true, false, 90, true), 0); // manual reveal survives
     }
     void manualSurvivesCompletionAndAttention() {
         State s;
