@@ -127,7 +127,7 @@ QString nearestEffort(const QStringList &levels, const QString &level) {
         // A word this ladder has never heard of sits at the provider's own position in its list,
         // which keeps a provider-specific level orderable against the ones that are known.
         int rank = effortRank(candidate);
-        if (rank < 0) rank = std::clamp(levels.indexOf(candidate), 0, effortLadder().size() - 1);
+        if (rank < 0) rank = std::clamp(int(levels.indexOf(candidate)), 0, int(effortLadder().size()) - 1);
         const int distance = qAbs(rank - want);
         if (bestDistance < 0 || distance < bestDistance
             || (distance == bestDistance && rank > effortRank(best))) {
