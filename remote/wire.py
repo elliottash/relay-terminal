@@ -251,6 +251,34 @@ GUEST_NEVER.update({
 })
 SERVER_TYPES = SERVER_TYPES | frozenset({"pane_state", "queue_edit_text"})
 
+# The Switchboard on a device (card #SWPH, section 17) -----------------------------------------------
+# One client type and one server type. `board_request {rid, request}` wraps the ten board requests a
+# device may make — which ones, their fields and their caps are remote/board_state.py's allow-list,
+# and everything else about a board (deleting, folders, cleanup, claiming, attaching, initializing,
+# imports, GitHub sync, anything carrying a path) is refused there. It is `full` and nothing less:
+# the Switchboard is every card of every project the desktop has open, not the one conversation a
+# viewer or a partner was paired for. `board_event {rid, event}` carries the desktop's answer,
+# scrubbed by the same module, to `full` devices only; it is absent from GUEST_SERVER_TYPES, so
+# `Channel.send` drops it for a participant whatever a sender does.
+CLIENT_TYPES.update({
+    "board_request": FULL,         # {rid, request: {type, …}}; see board_state.REQUESTS
+})
+GUEST_NEVER.update({
+    "board_request": "the Switchboard is the owner's cards and threads, not the shared pane",
+})
+SERVER_TYPES = SERVER_TYPES | frozenset({"board_event"})
+# A device never *sends* a board event: it would be a forged answer from the desktop's own worker.
+NEVER_FROM_CLIENT = NEVER_FROM_CLIENT | frozenset({"board_event"})
+
+# The same two names on the GUI↔sidecar stdio line (remote/gui_host.py), written down here so the
+# vocabulary is in one place. They are different messages from the wire's: the sidecar's
+# `board_request` carries the hub's own `rid`, the asking device's id and its name, and the GUI's
+# `board_event` answers with that `rid` — or null for a change nobody asked for.
+#   sidecar → GUI   {"t":"board_request","rid":n,"device":"<id>","name":"<device name>","request":{…}}
+#   GUI → sidecar   {"t":"board_event","rid":n|null,"event":{…}}
+SIDECAR_TO_GUI_BOARD = frozenset({"board_request"})
+GUI_TO_SIDECAR_BOARD = frozenset({"board_event"})
+
 # ---- worker events --------------------------------------------------------------------------
 # Forwarded to a phone, wrapped in an `agent` message.
 

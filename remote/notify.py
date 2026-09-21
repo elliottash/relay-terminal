@@ -35,7 +35,7 @@ import logging
 import time
 from urllib.parse import urlsplit
 
-from . import identity as identity_mod, push, wire
+from . import board_state, identity as identity_mod, push, wire
 
 log = logging.getLogger("relay.notify")
 
@@ -51,8 +51,18 @@ SEAL_KEY_BYTES = 32
 # your pocket and what you are doing today — so the choice is per device and is made **on** the
 # device: `push_subscribe` carries `kinds`, and sending it again changes them without the browser
 # asking for permission a second time.
-KINDS = ("agent_finished", "waiting_input", "password", "failed", "plan")
-DEFAULT_KINDS = KINDS            # all five on: a notification you did not want is one tap to turn off
+#
+# `card_waiting` (card #SWPH, section 17.5) is the sixth: a Switchboard card that starts waiting on
+# the owner. It is the same decision as `waiting_input` — something has stopped until you answer —
+# and sits under the same switch on the phone, which is how `kinds_of` reads a list written by a
+# client that had never heard of it.
+KINDS = ("agent_finished", "waiting_input", "password", "failed", "plan", "card_waiting")
+DEFAULT_KINDS = KINDS            # all on: a notification you did not want is one tap to turn off
+
+CARD_COOLDOWN = 60.0               # one card may ring the phone once a minute, like one pane
+CARD_GAP = 10.0                    # and a cleanup that moves twenty cards rings once, not twenty times
+BOARDS_MAX = 8                     # boards whose cards are remembered (one per project open)
+BOARD_CARDS_MAX = 5000             # cards remembered per board
 
 
 def clean_endpoint(value) -> str:
@@ -134,10 +144,18 @@ def clean_kinds(value) -> list[str]:
 
 
 def kinds_of(subscription: dict) -> list[str]:
-    """What a stored subscription asked for. A record written before `kinds` existed gets all."""
+    """What a stored subscription asked for. A record written before `kinds` existed gets all.
+
+    `card_waiting` rides with `waiting_input` in a list that does not name it: the two are one
+    switch on the phone ("When something needs me"), and a list stored by a client from before
+    #SWPH says what it wants of that switch in the only word it had. Without this the owner's
+    already-subscribed phone would never hear about a card until he toggled the switch off and on.
+    """
     kinds = subscription.get("kinds")
-    return [kind for kind in KINDS if kind in kinds] if isinstance(kinds, list) \
-        else list(DEFAULT_KINDS)
+    if not isinstance(kinds, list):
+        return list(DEFAULT_KINDS)
+    return [kind for kind in KINDS
+            if kind in kinds or (kind == "card_waiting" and "waiting_input" in kinds)]
 
 
 def elapsed_text(seconds: float) -> str:
@@ -168,6 +186,11 @@ class Notifier:
         self._status: dict[str, str] = {}
         self._turn_started: dict[str, float] = {}
         self._last_push: dict[str, float] = {}
+        # Who each Switchboard card was last known to wait on, per board (`board_key`), and whether
+        # that board has been seen whole yet. Section 17.5.
+        self._boards: dict[str, dict] = {}
+        self._last_card_push: dict[str, float] = {}
+        self._last_any_card_push = -CARD_GAP
 
     # ---- presence and labels -------------------------------------------------------------------
 
@@ -231,6 +254,42 @@ class Notifier:
         elif name == "plan_written":
             self.fire("plan", pane)
 
+    def on_board(self, event: dict) -> None:
+        """A **cleaned** board event (remote/board_state.py): a card that now waits on the owner.
+
+        The last known `waiting_on` is kept per card. A push is for a *change* to `owner`: nothing
+        on the first sight of a board — opening the Switchboard on the phone must not ring it once
+        per card already waiting — and nothing for a card first seen before its board has been
+        seen whole, because then there is no telling a new card from one not read yet. Once the
+        board is known, a card that *arrives in a change* already waiting on the owner is a change
+        like any other; one that turns up in a snapshot is not, because a snapshot is the answer
+        to somebody opening a board — perhaps another window's, which the desktop does not name.
+        """
+        seen, removed, complete = board_state.waiting_changes(event)
+        if not seen and not removed and complete is None:
+            return
+        key = event.get("board_key") if isinstance(event.get("board_key"), str) else ""
+        board = self._boards.get(key)
+        if board is None:
+            while len(self._boards) >= BOARDS_MAX:
+                self._boards.pop(next(iter(self._boards)))
+            board = self._boards[key] = {"whole": False, "cards": {}}
+        cards = board["cards"]
+        for card, waiting in seen:
+            before = cards.get(card)
+            if card not in cards and len(cards) >= BOARD_CARDS_MAX:
+                continue
+            cards[card] = waiting
+            if waiting != "owner" or before == "owner":
+                continue
+            if before is None and (not board["whole"] or complete is not None):
+                continue                            # first sight, not a change
+            self.fire_card(card)
+        for card in removed:
+            cards.pop(card, None)
+        if complete:
+            board["whole"] = True
+
     # ---- the decision ---------------------------------------------------------------------------
 
     def fire(self, kind: str, pane: str, **detail) -> None:
@@ -247,6 +306,32 @@ class Notifier:
             return
         self._last_push[pane] = now
         self.spawn(self.deliver(self.body(kind, pane, **detail)))
+
+    def fire_card(self, card: str) -> None:
+        """`card_waiting`, under the same three rules: presence, a cooldown, and only if wanted."""
+        if self.active:
+            return                                  # you are looking at the desktop
+        now = time.monotonic()
+        if now - self._last_any_card_push < CARD_GAP:
+            return
+        if now - self._last_card_push.get(card, -CARD_COOLDOWN) < CARD_COOLDOWN:
+            return
+        if not any(isinstance(device.push, dict) and "card_waiting" in kinds_of(device.push)
+                   for device in self.devices.live()):
+            return
+        if len(self._last_card_push) >= BOARD_CARDS_MAX:
+            self._last_card_push.clear()
+        self._last_card_push[card] = now
+        self._last_any_card_push = now
+        self.spawn(self.deliver(self.card_body(card)))
+
+    @staticmethod
+    def card_body(card: str) -> dict:
+        """The whole body of a `card_waiting`. The card's id and nothing else of it: not its
+        title, not the question — a title is the owner's words about his work, and this lands on
+        a lock screen. `pane` is empty because no pane is meant; `card` is what a tap opens."""
+        return {"v": 1, "kind": "card_waiting", "pane": "", "card": card,
+                "title": "A card is waiting on you", "body": f"#{card}"}
 
     def body(self, kind: str, pane: str, *, spent: float = 0.0, program: str = "") -> dict:
         """The whole body, constructed here. Read the strings: this is the security boundary."""

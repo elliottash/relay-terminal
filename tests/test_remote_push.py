@@ -293,7 +293,8 @@ class NotificationTapTests(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
 class NotifySwitchTests(unittest.TestCase):
-    """Two switches on the phone over the five kinds the protocol keeps (section 9.1).
+    """Two switches on the phone over the kinds the protocol keeps (section 9.1): five, and since
+    #SWPH a sixth, `card_waiting` (section 17.5), under "When something needs me".
 
     The desktop's side is deliberately unchanged — ``remote/notify.py`` still stores and decides
     per kind — so what is worth pinning is that the phone's two switches cover those five exactly,
@@ -312,7 +313,7 @@ class NotifySwitchTests(unittest.TestCase):
         self.assertEqual([group["label"] for group in self.mapping["switches"]],
                          ["When an agent finishes or fails", "When something needs me"])
 
-    def test_the_two_switches_cover_the_protocols_five_kinds_exactly(self):
+    def test_the_two_switches_cover_the_protocols_kinds_exactly(self):
         self.assertEqual(sorted(self.mapping["all"]), sorted(notify.KINDS))
         self.assertEqual(len(self.mapping["all"]), len(set(self.mapping["all"])),
                          "a kind in both switches could not be turned off")
@@ -323,13 +324,19 @@ class NotifySwitchTests(unittest.TestCase):
         self.assertEqual(notify.clean_kinds(self.mapping["sends"]["finished_only"]),
                          ["agent_finished", "failed", "plan"])
         self.assertEqual(notify.clean_kinds(self.mapping["sends"]["needs_only"]),
-                         ["waiting_input", "password"])
+                         ["waiting_input", "password", "card_waiting"])
         self.assertEqual(notify.clean_kinds(self.mapping["sends"]["both"]), list(notify.KINDS))
 
-    def test_the_finishing_switch_is_the_three_ends_and_needs_me_is_the_two_answers(self):
+    def test_the_finishing_switch_is_the_three_ends_and_needs_me_is_the_three_answers(self):
         groups = {group["name"]: group["kinds"] for group in self.mapping["switches"]}
         self.assertEqual(groups["finished"], ["agent_finished", "failed", "plan"])
-        self.assertEqual(groups["needs"], ["waiting_input", "password"])
+        # A card waiting on its owner (#SWPH) is the same decision as a pane waiting for input.
+        self.assertEqual(groups["needs"], ["waiting_input", "password", "card_waiting"])
+
+    def test_the_kinds_are_the_five_and_the_card(self):
+        self.assertEqual(notify.KINDS, ("agent_finished", "waiting_input", "password", "failed",
+                                        "plan", "card_waiting"))
+        self.assertEqual(notify.DEFAULT_KINDS, notify.KINDS)
 
     def test_both_switches_off_sends_nothing_which_is_unsubscribing(self):
         # An empty list would mean *all of them* to the desktop (section 9.1), which is the
@@ -629,6 +636,31 @@ class ChosenKindsTests(unittest.TestCase):
                 harness.notifier.on_panes([pane("failed")])          # must still arrive
                 await harness.settle()
                 self.assertEqual([body["kind"] for body in harness.bodies()], ["failed"])
+            finally:
+                harness.devices.close()
+        run(main())
+
+    def test_a_card_waiting_on_the_owner_is_a_sealed_push_with_its_id_and_nothing_else(self):
+        """Section 17.5 (#SWPH), through the real seal and RFC 8291: what the phone opens."""
+        def changed(waiting_on):
+            return {"event": "board_changed", "rev": 2, "removed": [], "upserts": [
+                {"id": "K7Q2", "title": "Fire the contractor before Friday",
+                 "waiting_on": waiting_on}]}
+
+        async def main():
+            harness = NotifierHarness()
+            try:
+                harness.notifier.on_board({"event": "board", "more": False, "cards": [
+                    {"id": "K7Q2", "title": "Fire the contractor before Friday",
+                     "waiting_on": "agent"}]})
+                await harness.settle()
+                self.assertEqual(harness.bodies(), [], "first sight of a board rings nothing")
+                harness.notifier.on_board(changed("owner"))
+                harness.notifier.on_board(changed("owner"))
+                await harness.settle()
+                self.assertEqual(harness.bodies(), [
+                    {"v": 1, "kind": "card_waiting", "pane": "", "card": "K7Q2",
+                     "title": "A card is waiting on you", "body": "#K7Q2"}])
             finally:
                 harness.devices.close()
         run(main())
@@ -1185,7 +1217,8 @@ class NotifyRowTests(unittest.TestCase):
                                      ["notify-switch-finished", "notify-switch-needs"])
                     self.assertTrue(all(row[1] for row in switches))
                     self.assertEqual([row[2] for row in switches],
-                                     ["agent_finished failed plan", "waiting_input password"])
+                                     ["agent_finished failed plan",
+                                      "waiting_input password card_waiting"])
                     self.assertEqual([row[3] for row in switches], ["switch", "switch"])
                     self.assertEqual([row[4] for row in switches],
                                      ["When an agent finishes or fails", "When something needs me"])
@@ -1197,7 +1230,8 @@ class NotifyRowTests(unittest.TestCase):
                         await asyncio.sleep(0.2)
                         if "agent_finished" not in device.push["kinds"]:
                             break
-                    self.assertEqual(device.push["kinds"], ["waiting_input", "password"])
+                    self.assertEqual(device.push["kinds"],
+                                     ["waiting_input", "password", "card_waiting"])
 
                     # Reload: the switches are drawn from what was stored, not from the defaults.
                     await browser.navigate(harness.base)

@@ -123,6 +123,28 @@ class DecodeTests(unittest.TestCase):
         self.assertNotIn("owner_asks", wire.GUEST_SERVER_TYPES)
         self.assertFalse(wire.may_send_to_guest("owner_asks"))
 
+    def test_the_switchboard_is_one_full_request_and_one_event_never_a_guests(self):
+        """Card #SWPH, section 17. The ten board requests travel inside `board_request`, which is
+        the owner's level and nothing less; the answer is `board_event`, which no guest is sent
+        and no client may forge. The GUI-side lines have the same two names."""
+        self.assertEqual(wire.CLIENT_TYPES.get("board_request"), wire.FULL)
+        self.assertFalse(wire.allows(wire.AGENT, wire.CLIENT_TYPES["board_request"]))
+        self.assertIn("board_request", wire.GUEST_NEVER)
+        self.assertNotIn("board_request", wire.GUEST_TYPES)
+        self.assertNotIn("board_request", wire.NEVER_FROM_CLIENT)
+        self.assertIn("board_event", wire.SERVER_TYPES)
+        self.assertNotIn("board_event", wire.GUEST_SERVER_TYPES)
+        self.assertFalse(wire.may_send_to_guest("board_event"))
+        self.assertNotIn("board_event", wire.CLIENT_TYPES)
+        self.assertIn("board_event", wire.NEVER_FROM_CLIENT)
+        self.assertEqual(wire.SIDECAR_TO_GUI_BOARD, {"board_request"})
+        self.assertEqual(wire.GUI_TO_SIDECAR_BOARD, {"board_event"})
+        # Nothing else about a board is a client type: not the requests themselves, and above all
+        # not the ones a device never gets.
+        for kind in ("board_open", "board_move", "board_comment", "board_ask", "board_delete",
+                     "board_claim", "board_cleanup", "set_board", "board_init", "board_folder"):
+            self.assertNotIn(kind, wire.CLIENT_TYPES, kind)
+
     def test_a_message_must_be_an_object_with_a_type(self):
         for bad in (b"[]", b'"hello"', b"{}", b'{"t": 3}', b"not json"):
             with self.assertRaises(wire.WireError, msg=bad):

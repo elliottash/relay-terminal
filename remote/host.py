@@ -1644,7 +1644,11 @@ class Host:
             "features": (["panes", "agent", "compose", "voice"]
                          + (["screen", "takeover"] if self.screens else [])
                          + (["history"] if self.scrollback else [])
-                         + (["pane_state"] if self.pane_state else [])),
+                         + (["pane_state"] if self.pane_state else [])
+                         # The Switchboard (section 17): the owner's level only, and only where a
+                         # GUI is there to answer, so the client shows the row or does not.
+                         + (["board"] if self.pane_state and device.capability == wire.FULL
+                            else [])),
             "server_time": time.time(),
         })
         await channel.send(self.stream("panes", limit=64).add(
@@ -2945,6 +2949,104 @@ class Host:
         self._pane_state_line({"t": "conversation_open", "pane": pane, "session": session,
                                **self._pane_state_origin(channel)})
 
+    # ---- the Switchboard on a device (card #SWPH) -------------------------------------------------
+    # docs/REMOTE-PROTOCOL.md section 17. The desktop's Switchboard runs on a per-window
+    # BoardWorker the hub never sees, so the GUI bridges it: a `full` device's
+    # `board_request {rid, request}` is cleaned against remote/board_state.py's allow-list,
+    # rate-limited, audited — the type, the card and the device, never the text — and handed to
+    # the GUI under a rid the hub minted; the GUI's `board_event {rid | null, event}` is scrubbed
+    # by the same module and sent to the device that asked, or to every connected `full` device.
+    #
+    # Never to a participant and never below `full`: `_send_board_event` reads the channel's
+    # capability as it sends, `board_request` is in wire.GUEST_NEVER, and `board_event` is absent
+    # from wire.GUEST_SERVER_TYPES, so `Channel.send` would drop it for a guest even if this did
+    # not. Nothing is kept in `self.streams`: a `resume` replays a ring as stored, past both rules.
+
+    def _board_book(self) -> board_state_mod.Book:
+        book = self.__dict__.get("_board_requests")
+        if book is None:
+            book = self.__dict__["_board_requests"] = board_state_mod.Book()
+        return book
+
+    async def _on_board_request(self, channel: Channel, message: dict) -> None:
+        if channel.participant_id is not None or channel.device_id is None:
+            # GUEST_NEVER already refused a guest; this is the second lock.
+            raise wire.WireError("not_permitted", "a guest never gets that.")
+        if channel.capability() != wire.FULL:
+            raise wire.WireError("not_permitted", "the Switchboard needs a full device.")
+        rid = board_state_mod.rid_of(message)
+        book = self._board_book()
+        device = channel.device
+
+        async def refuse(code: str, text: str) -> None:
+            await self._send_board_event(channel, rid, board_state_mod.refusal(code, text))
+
+        try:
+            request = board_state_mod.clean_request(message.get("request"))
+        except board_state_mod.Refused as refused:
+            self.audit.record("board_refused", device=channel.device_id, code=refused.code,
+                              type=board_state_mod.request_type(message.get("request")))
+            await refuse(refused.code, refused.message)
+            return
+        if not book.allow(channel.device_id, request["type"]):
+            await refuse("rate_limited", "too many Switchboard requests; slow down.")
+            return
+        send = getattr(self.source, "send", None)
+        if not callable(send):
+            await refuse("not_permitted", "this desktop does not publish a Switchboard.")
+            return
+        self.audit.record("board_request", device=channel.device_id, type=request["type"],
+                          card=request.get("id"))
+        hub_rid = book.new(channel, rid, request["type"])
+        send({"t": "board_request", "rid": hub_rid, "device": channel.device_id,
+              "name": device.name if device is not None else "", "request": request})
+
+        async def lapse() -> None:
+            await asyncio.sleep(BOARD_ANSWER_TIMEOUT)
+            pending = book.pending.get(hub_rid)
+            if pending is not None and not pending.answered:
+                book.forget(hub_rid)
+                await refuse("busy", "the desktop did not answer.")
+        self._spawn(lapse())
+
+    def board_event_from_gui(self, message: dict) -> None:
+        """A `board_event {rid | null, event}` line from the GUI (remote/gui_host.py)."""
+        book = self._board_book()
+        event = board_state_mod.clean_event(message.get("event"))
+        if event is None:
+            book.count_dropped(message.get("event"))
+            return
+        # Notifications read the cleaned event, whoever is connected: a card that starts waiting
+        # on the owner rings the phone in his pocket, which is not connected at all.
+        try:
+            self.notifier.on_board(event)
+        except Exception:
+            log.exception("the notifier failed on a board event")
+        pending = book.find(message.get("rid"))
+        asker = None
+        if pending is not None:
+            pending.answered = True
+            if not getattr(pending.channel, "closed", True):
+                asker = pending.channel
+                self._spawn(self._send_board_event(asker, pending.rid, event))
+        if message.get("rid") is not None and event["event"] not in board_state_mod.BROADCAST_EVENTS:
+            return                               # an answer is the asker's alone, present or not
+        # A change, or something nobody asked for: every other connected `full` device learns of
+        # it, so two of the owner's devices never show two boards.
+        for channel in list(self.channels.values()):
+            if channel is not asker:
+                self._spawn(self._send_board_event(channel, None, event))
+
+    async def _send_board_event(self, channel: Channel, rid, event: dict) -> None:
+        """One device's copy. The capability is read here, as it is sent."""
+        if not isinstance(channel, Channel):
+            return                               # a meeting-code attempt sits in `channels` too
+        if channel.participant_id is not None or channel.closed:
+            return                               # never to a guest, whatever asked for it
+        if channel.device_id is None or channel.capability() != wire.FULL:
+            return
+        await channel.send({"t": "board_event", "rid": rid, "event": event})
+
 
 # pane_state (relay-terminal-71): imported here, below the class, so this module's shared import
 # block stays untouched while other sessions edit it; nothing above runs before the module is done.
@@ -2956,4 +3058,14 @@ LIMITS.update({
     "conversation_new": (10, 60),
     "conversation_open": (20, 60),   # reading past conversations, not writing anything
     "queue_edit": (60, 60),
+})
+
+# The Switchboard on a device (card #SWPH): the same late import, for the same reason.
+from . import board_state as board_state_mod  # noqa: E402
+
+BOARD_ANSWER_TIMEOUT = board_state_mod.ANSWER_TIMEOUT
+LIMITS.update({
+    # The coarse ceiling only: board_state.Book's buckets are the limit that matters (ten reads
+    # and two writes a second per device), and this one must not bite before they do.
+    "board_request": (720, 60),
 })

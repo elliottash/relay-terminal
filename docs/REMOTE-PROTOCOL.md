@@ -843,7 +843,8 @@ The body:
 ```
 
 `kind` is one of `agent_finished`, `waiting_input`, `password`, `failed`, `plan` — the same five a
-device may ask for in §9.1. The service worker uses it as the notification `tag`, so a second one
+device may ask for in §9.1 — or, since #SWPH, `card_waiting`, whose trigger, body and rules are
+§17.5. The service worker uses it as the notification `tag`, so a second one
 of a kind replaces the first.
 
 **(security)** A service worker **must** discard any push it cannot open with the seal key
@@ -1431,6 +1432,7 @@ against **real shells** — including Relay's own panes, from the share button i
 | Always on (§8.1) | `remote/gui_host.py`, `remote/host.py` | `start` with `"always"` and an `"address"` brings the service up with no share asked for, and keeps it there: the hub's socket reconnects for ever with a jittered back-off and **registers again before each retry**, so a rendezvous restart is survived rather than ending the day's reachability, and it never moves to another address on its own. `remote_state` reports `on`, `address`, `base`, `online`, `devices` and one sentence of `reason` whenever any of them changes. `tests/test_remote_gui_host.py` (`AlwaysOnTests`, `AutoPublishTests`), `tests/test_remote_host.py` (`AlwaysOnLinkTests`). The desktop's half — the Options › Remote switch, the chrome indicator and "Disconnect all" — is card #PH0N's Phase 1.1 |
 | How the phone gets a secure context | `remote/tailnet.py`, `remote/devtls.py`, `remote/httpd.py` | `tailscale serve` with a real certificate, or a self-signed one. Both reach the same `httpd.Server`: it takes several listeners with one set of routes, so the CSP, `/pair` and `/join` behave the same at every origin |
 | Voice (§6.4) | `app/app.js`, `remote/gui_host.py`, `src/Pane.h` (`transcribeForRemote`) | A `MediaRecorder` clip from the phone, carried to the pane and transcribed by its own worker on the desktop's key; the text returns to the phone's prompt box, matched to the clip by id. Tested through a headless browser with Chrome's fake capture device; not yet tried with a real microphone on a real phone |
+| The Switchboard on a device (§17) | `remote/board_state.py`, `remote/wire.py`, `remote/host.py`, `remote/gui_host.py`, `remote/notify.py` | The hub half, built 2026-09-20 (#SWPH): `board_request` from a `full` device against an allow-list of ten request types with per-field shapes and caps, the never-list, per-device read and write buckets, audit lines without text, the GUI's `board_event` scrubbed of every path and routed by `rid` or fanned out to `full` devices, never to a guest, and the `card_waiting` push. `tests/test_remote_board.py`. The desktop bridge (`src/BoardRemote.*`) and the phone's view (`app/board.js`) are the card's other two halves |
 
 Every Relay pane is an engine pane, so every pane can be shared.
 
@@ -1654,3 +1656,199 @@ which a guest editor may send: a guest's prompt is not passed on but held for th
 
 Keys, provider and endpoint settings, the keyring and conversation deletion are desktop-only and
 have no type here at all (section 6.6, `NEVER_FROM_CLIENT`).
+
+## 17. The Switchboard on a device
+
+Card #SWPH, 2026-09-20. The Switchboard — the cards, their threads and the card actions — is the
+best surface Relay has for driving work from a phone, and until this section it could not be
+reached from one: remote control publishes panes that have a terminal screen, the Switchboard is a
+tool pane with none, and it runs on a per-window `BoardWorker` (sessions protocol 19) that the hub
+never sees. The shape follows section 16's rule: **the desktop's board is the model**. The GUI
+bridges its own `BoardWorker` to the hub, the hub allow-lists what goes in and scrubs what comes
+out (`remote/board_state.py`), and the device draws what the desktop's board draws. The device
+never reads `issues/`, never names a file, and there is no second writer: every write goes through
+the one worker, which already serialises them and answers `board_conflict`.
+
+`welcome.features` carries `"board"` for a `full` device on a desktop whose GUI is there to answer;
+a client shows its Switchboard row when it sees it and not otherwise.
+
+### 17.1 Client → desktop: `board_request`
+
+```
+→ board_request {rid, request: {type, …}}        `full` only; in GUEST_NEVER
+← board_event   {rid, event: {event, …}}         zero or more, each with the request's rid
+```
+
+`rid` is the device's own: a whole number 0…2^53 or a token of 1–64 characters of
+`[A-Za-z0-9_.:-]`. It is echoed and never read. A `board_request` without a usable `rid` is answered
+with an ordinary `error unknown_type`, because there is nothing to answer it under.
+
+`request.type` is one of these ten and nothing else. `id` is always a **card id** — four characters
+of `[0-9A-HJKMNP-TV-Z]`, the board's own alphabet — so it can be neither a path nor a file name.
+Each request is **rebuilt** from the fields below: a field not listed is not copied.
+
+| `type` | Fields | Reads or writes | What the desktop does |
+|---|---|---|---|
+| `board_open` | — | read | answers `board`, then a `board_cards` per further batch |
+| `board_refresh` | — | read | answers `board_changed` |
+| `board_card_get` | `id` | read | answers `board_card`: the body, the tasks and the thread's tail |
+| `board_search` | `query` ≤ 200 | read | answers `board_search {ids}`; the plain words of the filter |
+| `board_comment` | `id`, `text` 1–8,000, `kind` | write | a thread entry. `kind` is `note` (the default), `question` or `decision` — a person's kinds; `evidence` and `progress` are what an agent and the desktop's own hand-off write |
+| `board_move` | `id`, `status`, `reason` ≤ 500 | write | moves the card. `status` is one of the board's statuses (`inbox` … `retired`, `backend/relay_core/board.py` `ALL_STATUSES`); the worker's own gates — evidence before a QA lane, say — still apply and answer `error` |
+| `board_create` | `tab`?, `title` ≤ 200, `request` ≤ 8,000, `labels` ≤ 16 | write | files a card. `request` is stored verbatim as its `## Issue`; one of `title` and `request` must have words. `tab` is a tab id `[a-z0-9][a-z0-9_-]{0,39}`, a label 1–40 characters of letters, digits, space and `_.:+-` |
+| `board_ask` | `id`, `text` ≤ 8,000, `mode` | write | a Discuss (`discuss`, the default; needs `text`) or a Plan (`plan`; `text` is the note to the planner and may be empty) turn on the card |
+| `board_cancel` | `id` | write | stops that card's turn; answers `board_cancelled` |
+| `board_action` | `id`, `action` | write | GUI-level: `execute` or `verify`, run through the same hooks as the desktop's buttons; answers `board_action_result` |
+
+Text that is too long is **refused**, not cut: a comment that silently lost its last paragraph is
+worse than one the phone is told to shorten. Control characters other than newline and tab are
+stripped.
+
+**(security) Never from a device.** `board_delete`, `board_update`, `board_priority`, `board_undo`,
+`board_check`, `board_claim`, `board_cleanup*`, `board_folder*`, `board_init*`, `board_import*`,
+`board_survey`, `set_board`, `project_*`, `forge_*` (GitHub sync) and `configure` are named in
+`board_state.NEVER` and refused with `not_permitted`. So is **any request carrying a path**: a key
+named `path`, `paths`, `root`, `folder`, `file`, `files`, `dir`, `directory`, `cwd`, `workspace`,
+`project` or `repo` — or ending `_path`, `_root`, `_dir`, `_file`, `_folder`, `_cwd` — at any
+depth, and a field not on the list whose value looks like an absolute path (`/a/b`, `~/a`, `C:\a`,
+`file:/…`). The owner's own words may mention a path: `text`, `title`, `request`, `reason` and
+`query` are text, and text is on the list. None of the ten request types is a wire type of its own,
+so `{"t":"board_delete"}` is an `unknown_type` like any other.
+
+**A refusal is a `board_event`**, so a client has one path for the hub's refusals and the worker's:
+
+```json
+{"t":"board_event","rid":7,"event":{"event":"error","code":"not_permitted",
+ "message":"never from a device: deleting a card is the desktop's, behind its own confirmation.","source":"hub"}}
+```
+
+`code` is `not_permitted` (the never-list, a path, a desktop with no GUI), `unknown_type` (an unknown
+type, a bad id, status, enumeration or over-long text), `rate_limited`, or `busy` (the GUI did not
+answer within 20 s — a wedged desktop is an error on the phone, not a spinner). `source: "hub"`
+tells it from the worker's own `error` and from the desktop bridge's
+(`{"event":"error","code":"board_refused"|"remote_off"|"board_not_found"|"board_not_initialized","request":"<type>","text":…}`),
+which have none. A `view` or `agent` device is refused
+before any of this with the ordinary `error not_permitted`, and a guest with GUEST_NEVER's.
+
+**Rate limits**, per device, as two token buckets so that reading a board cannot starve a write:
+**reads 10 a second with a burst of 20, writes 2 a second with a burst of 4.** The wire's own
+per-type ceiling (`LIMITS["board_request"]`, 720 a minute) sits above both.
+
+**Audit.** An accepted request records `board_request {device, type, card}`; a refused one records
+`board_refused {device, type, code}`, where `type` is a name this module knows or `"unknown"`.
+Never the text, the title, the reason or the query.
+
+### 17.2 Hub ↔ GUI
+
+Two sidecar lines (`remote/gui_host.py`), which share names with the wire's messages and are not
+them:
+
+```json
+{"t":"board_request","rid":41,"device":"<device id>","name":"Elliott's iPhone",
+ "request":{"type":"board_move","id":"K7Q2","status":"planned","reason":"agreed on the phone"}}
+{"t":"board_event","rid":41,"event":{"event":"board_written","kind":"move","card_id":"K7Q2"}}
+{"t":"board_event","rid":null,"event":{"event":"board_changed","rev":8,"upserts":[…]}}
+```
+
+`rid` here is **the hub's own**, a rising integer; the hub keeps which device's which `rid` it
+stands for (at most 512, for 30 minutes — a Plan turn answers long after it was asked) and maps it
+back. The GUI echoes it on every event that answers the request and sends `null` for anything
+nobody asked for. `name` is the device's name, for the desktop's status line ("Card moved from
+Elliott's iPhone"). The `request` is exactly the rebuilt form of §17.1: `id` is the card (the
+worker's own requests call it `card`), and `board_create`'s `request` is the worker's `text`.
+
+### 17.3 Desktop → client: `board_event`
+
+`{"t":"board_event","rid":<the device's rid>|null,"event":{…}}`, to `full` devices only, the
+capability read as each one is sent. **Never to a guest**: `board_event` is absent from
+`GUEST_SERVER_TYPES`. It is not kept in a stream, so a `resume` replays none; a client that
+reconnects sends `board_open`.
+
+**Routing.** An event with a `rid` goes to the device that asked, under its own `rid`. If it is a
+*change* — `board_changed`, `board_thread_appended`, `board_activity`, `board_cancelled` — every
+other connected `full` device is sent it too with `rid: null`, so two of the owner's devices never
+show two boards; the GUI therefore sends a change **once**, and a client treats a repeated upsert
+as the no-op it is. An answer whose asker has gone reaches nobody. An event with `rid: null` goes
+to every connected `full` device.
+
+**Which events pass.** `board`, `board_cards`, `board_card`, `board_changed`, `board_search`,
+`board_thread_appended`, `board_written`, `board_activity`, `board_cancelled`, `board_busy`,
+`board_conflict`, `error`, `board_action_result`, and anything named `board_chat_*`. Every other
+event is **dropped and counted** (`Book.dropped`), `board_state`, `board_created`,
+`board_init_request`, `board_folder_changed`, the import and GitHub-sync events among them — the
+same ones `wire.WITHHELD_EVENTS` withholds from a pane's stream, for the same reason.
+
+**What is done to one that passes** (`board_state.clean_event`):
+
+- every key named like a path (the list in §17.1) is dropped **at every depth**: a row's `path`, the
+  board's `root`, `workspace` and `project`, a tab's `folder`, a problem's `path`;
+- a string that **is** an absolute path is dropped with its key, unless it is the owner's text;
+  inside an event with none of the owner's text in it (`error`, `board_busy`, `board_conflict`,
+  `board_action_result`) and inside every other desktop-written string, an absolute path within
+  the prose is replaced with `[path]`;
+- the **card's text passes as text** — `body`, `issue`, `title`, `acceptance` and a thread entry's
+  or a task's `text`. They are the owner's notes, already in git, and the device is the owner's. A
+  path he wrote in a card stays where he wrote it;
+- a pane session token (`session` on a row or a `board_written`, `pane_token` on a thread entry,
+  `pane` on a `board_action_result`) is cut to the eight characters the desktop's chip draws;
+- key material is redacted as in section 16 (`[redacted]`), the card's text included;
+- **caps**: `body` and `issue` 200,000 characters, a thread entry's `text` 20,000, `title` 400, any
+  other string 2,000; 500 cards (`cards`, `upserts`) and 500 thread entries per event — a thread
+  keeps its **newest** — 500 objects or 5,000 scalars in any other list, 400 keys an object, ten
+  levels deep. Anything cut sets `truncated: true` on the event;
+- the event is then **fitted under one wire message** (1 MiB less 64 KiB): first `issue` goes (it is
+  a copy of part of the body), then the oldest thread entries, then the last rows, then the tail of
+  the body, and `truncated` is set.
+
+**Two fields the hub adds.** `board_key` is an opaque name for the board an event is about — twelve
+hex characters of a hash of its `root` under a salt that lives as long as the hub, so it identifies
+a board across events and cannot confirm a guess at a path. `board_name` (on `board` only) is the
+last component of the project's path, `relay-terminal`, as a heading for the view.
+
+The payloads are otherwise the sessions protocol's (19.2–19.4, 19.10, 19.16) minus those fields: on
+every event `id` is the desktop's own request id (`remote-7`) and `card_id` the card — except
+inside a row, on `board_activity` and on the GUI's own
+`board_action_result {id, action, ok, pane, message}`, where `id` is the card's. Two
+`board_changed` shapes arrive for one write: the board tools' `{upserts: ["K7Q2"], write_id}`,
+naming the card, and then the worker's `{rev, upserts: [row], removed}`, carrying it. The desktop
+bridge (`src/BoardRemote.cpp`) strips the path keys itself before the hub does and sends `project`
+as a name; when it strips `root` there is no `board_key`.
+
+### 17.4 What a device is not given
+
+The turn events of a `board_ask` (`delta`, `thinking_delta`, `tool_started`, `done`, …) are not in
+§17.3's list: the phone sees the question land and the answer land, both as
+`board_thread_appended`, and a failed turn as `error` with its `card_id`. Editing a card's text
+(`board_update`) waits for a view that can hold a `base_hash` and show a conflict. Both are
+additions to the two lists in `remote/board_state.py`, and nothing else.
+
+### 17.5 The `card_waiting` push
+
+A sixth notification kind (§9.1–9.3): **a card whose `waiting_on` becomes `owner`.** The hub reads
+it off the *cleaned* `board`, `board_cards`, `board_changed` and `board_card` events as they pass —
+whether or not any device is connected, which is the point — keeping the last known value per card
+per `board_key`.
+
+- **A change, never first sight.** Nothing fires for a board seen for the first time, so opening
+  the Switchboard does not ring the phone once per card already waiting; nothing fires for a card
+  first seen before its board has been seen whole (`more` false), because a card not read yet cannot
+  be told from a new one. Once the board is known, a card that *arrives in a change*
+  (`board_changed`, `board_card`) already waiting on the owner is a change like any other; one
+  that turns up in a snapshot (`board`, `board_cards`) is not, because a snapshot answers somebody
+  opening a board — possibly another window's. A known card whose value differs between two
+  snapshots is a change. Another project's board (another `board_key`) is first sight again.
+  The card is read from the row's own `id` or a `board_card`'s `card_id`, never the event's `id`.
+- **The body is the hub's**, as every push body is: `{"v":1,"kind":"card_waiting","pane":"",
+  "card":"K7Q2","title":"A card is waiting on you","body":"#K7Q2"}`. The card's id and nothing else
+  of it — **never the title, the question or any text**: a title is the owner's words about his
+  work, and this lands on a lock screen. `pane` is empty because no pane is meant; `card` is what a
+  tap opens.
+- The **presence rule** applies unchanged; the cooldown is **per card, 60 s**, with **10 s between
+  any two** so a cleanup that moves twenty cards rings once; a kind nobody wants spends neither.
+- **On the phone it is part of "When something needs me"**, with `waiting_input` and `password`.
+  A stored `kinds` list that names `waiting_input` and not `card_waiting` — every list written
+  before this section — is read as wanting both (`notify.kinds_of`), so the owner's
+  already-subscribed phone hears about a card without toggling the switch; the stored list and the
+  `push_state` reply are left as the device sent them. The consequence is that the two cannot be
+  separated from the client: a device hears `card_waiting` when it asked for it **or** for
+  `waiting_input`.
