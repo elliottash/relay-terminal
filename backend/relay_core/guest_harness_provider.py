@@ -33,7 +33,7 @@ import time
 import uuid
 
 from . import guest, logs, questions as questions_mod, tool_labels
-from .presets import model_name, tier_start_efforts
+from .presets import model_name, provider_rank, tier_start_efforts
 from .guest_harness import (HARNESS_GUESTS, HarnessError, HarnessNotAvailable, HarnessEvent,
                             limit_windows,
                             TOOL_NAMES, chunk_tool_output, map_tool_name, validate_effort,
@@ -492,8 +492,14 @@ def preset_rows() -> list[dict]:
     for guest_id in HARNESS_GUESTS:
         state = found.get(guest_id) or {"installed": False, "binary": "", "version": ""}
         models = guest_models(guest_id) if state["installed"] else []
+        # How this provider is reached and where it sorts against the others serving the same
+        # model (13.2): `model-ranking.md`'s Providers table names both harnesses, and a guest
+        # keeps `harness` even if the file has not caught up (`presets.provider_rank`). The
+        # picker needs it on *both* sides of a fold — gpt-6-astra through codex and through the
+        # OpenAI API are one row — so a guest row carries the pair like every other row.
+        kind, order = provider_rank(PRESET_PREFIX + guest_id)
         rows.append({"id": PRESET_PREFIX + guest_id, "label": guest.spec(guest_id).name,
-                     "guest": guest_id,
+                     "guest": guest_id, "kind": kind, "order": order,
                      "harness": bool(state["installed"] and adapter_available(guest_id)),
                      "installed": state["installed"], "binary": state["binary"],
                      "version": state["version"], "group": "guest",

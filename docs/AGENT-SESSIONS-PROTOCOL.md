@@ -1274,6 +1274,22 @@ keeps a second copy of the backend's tables. The keys modal lists a preset per p
 presets of the same company are both offered. Since 2026-09-20 `label`, `provider` and `plan` are
 lower-case (Warp style) and the GUI shows them as they are.
 
+Since 2026-09-21 (card #MDL1) every row also carries `kind` and `order`: that provider's row of
+`backend/relay_core/model-ranking.md`'s Providers table, which the owner edits. `kind` is
+`plan` | `harness` | `api` | `router` | `free` — how the provider is reached — and `order` is the
+tie-break, **lower first**, that decides which provider a model folds onto when more than one
+serves it (`grouped()` in src/ModelCatalog.cpp sorts by it). They are sent with the provider so
+the GUI keeps no second copy of design rule 2.2, and they are on **every** row — built-in, local,
+custom and guest — because both sides of a fold need one: `gpt-6-astra` through codex and through
+the OpenAI API are one model, and which of the two leads is the file's ruling.
+
+The ranking file is one a person edits and may be half-way through, so a row it does not name is
+never an error: `presets.provider_rank` answers `api` and an order after every provider the file
+*does* name (`model_ranking.UNKNOWN_PROVIDER_ORDER`), which is what a custom provider and a model
+server on this machine get. A guest keeps `harness` and Relay Free keeps `free` whatever the file
+says, because the row itself settles those two. A client that sees neither field — an older worker
+— falls back to its own ordering, which is what it did before this pair existed.
+
 Since 2026-09-20 every cloud preset row also carries `models`: the models that row can be set to, as
 `[{id, name, label, tier, efforts, effort_labels, intelligence, openrouter}]` from `presets.MODEL_CATALOG` — `id` is what
 the API takes, `name` is what a person reads (below) and `label` is the same string, `tier` is `main` / `flash` / `lite` for a model the tier table

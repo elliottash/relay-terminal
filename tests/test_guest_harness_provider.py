@@ -153,6 +153,17 @@ class PresetTests(unittest.TestCase):
         self.assertEqual((claude["group"], claude["key_source"], claude["model"]),
                          ("guest", "guest", ""))
         self.assertFalse(claude["has_stored_key"] or claude["local"] or claude["hosted"])
+        # How this provider is reached and where it sorts (13.2, card #MDL1): a guest row carries
+        # `kind` and `order` like every other row, because both sides of a fold need one —
+        # gpt-6-astra through codex and through the OpenAI API are one model of the picker, and
+        # which of the two leads is `model-ranking.md`'s ruling, not the client's.
+        from relay_core import model_ranking
+        rank = model_ranking.load()
+        for guest_id, row in rows.items():
+            with self.subTest(guest_id):
+                self.assertEqual(row["kind"], "harness")
+                self.assertEqual(row["order"], rank.provider_order(guest_id))
+                self.assertLess(row["order"], model_ranking.UNKNOWN_PROVIDER_ORDER)
         # Whether the CLI is signed in is null until the background scan has asked it, and stays
         # null for a guest that is not installed (there is no CLI to ask).
         self.assertIn("logged_in", claude)
