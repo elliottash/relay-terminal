@@ -1,9 +1,9 @@
 ---
 id: CTRN
 type: work
-status: planned
+status: executing
 labels: [feature, agent, switchboard, architecture]
-assignee: claude-code
+assignee: agent
 rank: zzzzzzzzzzzzzzzk
 created: '2026-09-21'
 source: Owner, terminal, 2026-09-21, asking whether the two agents are one system yet

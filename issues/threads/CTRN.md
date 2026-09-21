@@ -94,3 +94,9 @@ The sixth is the plan's own and is flagged as such: `board_ask` stays the verb (
 
 Nothing here is blocked on an answer — the steps can start against the recommendations, and each
 says which of them it would have to revisit.
+
+<!-- relay:entry 20260921T190518Z-ds author=agent kind=event pane=switchboard -->
+- ✦ agent moved this card · Planned → Executing · assignee agent
+
+<!-- relay:entry 20260921T190518Z-dt author=agent kind=decision pane=switchboard -->
+Owner, 2026-09-21: "all good with 1-6, go ahead" — every recommendation taken as written: (1) one conversation per card, persisted per (tab, card); (2) the worker keeps writing the thread, `turnFinished` only refreshes the view; (3) a Plan turn is offered the full tool list and refused at call time with the refusal naming Execute; (4) the card page keeps its busy strip (#VZ69 wording and ✕) minus the progress line; (5) a withdrawn queued prompt's question stays on the thread; (6) `board_ask` stays the wire verb. Execution starts with Opus subagents, one per step: 1–3 backend and 4–5 GUI in parallel, then 6 docs and 7 the live drive.
