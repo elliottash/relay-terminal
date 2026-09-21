@@ -7605,6 +7605,21 @@ private:
         if (parent) console->setParent(parent);
         console->setObjectName(QStringLiteral("agentConsole"));
         m_consoles.append(ConsoleEntry{QPointer<Pane>(console), wrapper});
+        // The wrapper goes *with* its console, not at the next worker event. Its destructor writes
+        // to the host's context (`onChanged = nullptr`), and the API's promise is only that the
+        // host outlives the console — `~BoardView` deletes its consoles first for exactly that —
+        // not that it outlives this list. Pruned lazily, a Switchboard pane that was closed left
+        // its entry here until the tab's worker next spoke, and the wrapper then wrote into a
+        // freed BoardView: a bus error the first time a phone touched the board after the pane
+        // was closed (#SWPH's hosted drive), and the same for any other event of that worker.
+        // By address as well as by a null QPointer: a widget emits `destroyed` from `~QWidget`,
+        // before `~QObject` has cleared the pointers that guard it.
+        connect(console, &QObject::destroyed, this, [this](QObject *gone) {
+            for (int i = int(m_consoles.size()) - 1; i >= 0; --i) {
+                const Pane *pane = m_consoles.at(i).pane.data();
+                if (!pane || static_cast<const QObject *>(pane) == gone) m_consoles.removeAt(i);
+            }
+        });
         wireAgentConsole(console);
         QPointer<Pane> guard(console);
         // The tab's worker, and the handshake it has already had. Deferred one turn of the event
