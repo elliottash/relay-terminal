@@ -403,3 +403,86 @@ seconds, and the live drive catches a wire-contract break that the build and the
 
 <!-- relay:entry 20260921T014050Z-rv author=agent kind=decision pane=switchboard -->
 Decision (orchestrator, on the owner's sentence "an agent interface is the prompt box", 2026-09-20): the `--closure` measurement (228 members / 4 031 lines, a floor of 284 names on the seam, 109 uses of the composer left behind by any cut) says the agent block cannot be lifted out of `Pane` around the composer — the box is what both halves are made of. So the cut inverts: **`Pane` is the agent console**, the terminal is one routing of what is typed in it (`TerminalContext` adds the shell, `requestRoute`, login/native), and a helper is the same `Pane` with a non-terminal context — no shell started, routing locked to agent, the vterm kept as the transcript surface. Step 1's remaining waves and Step 10 are dropped; `AgentConsole.h` stays only as the thin context-facing surface (or folds back). Steps 5–7 embed a no-shell `Pane` rather than a separate console class. Risk 2 is answered by measurement rather than by moving 4 000 lines. Both seams (Host, Context) are landed and tested (cbf06cc0, 24042b5b, 81e889c1); the terminal pane is pixel-identical.
+
+<!-- relay:entry 20260921T024032Z-5p author=claude-code kind=progress -->
+The inversion is built: a pane with no shell is the whole console. Here is the API Steps 5-7 embed.
+
+**Landed** — `7a35a498` (the console mode), `769cc4a4` (the live evidence, the tool's retirement,
+a C++20 warning of mine).
+
+`relay::AgentConsole` is gone, folded into `Pane`: a console holding a member called a console was
+the confusing half of the old shape. `relay::agent::Context` and `relay::agent::Host` stay.
+
+## The API, for Step 5's briefing
+
+**Construction.** `Pane(workspace, cwd, cleanShell, engineCore, context)` — one constructor, the
+context last and defaulted to `nullptr`. The context is the **host's**: it must outlive the pane,
+and `~Pane` clears its `onChanged`. Passing none is a terminal pane, which is every pane written
+before this card. There is no second start form: `hasShell()` is `spec().shell`, settled once per
+context, and it is the single answer everything keys off.
+
+What a `shell: false` context gets, and none of it is a second rendering path:
+
+- `startTerminal` returns before the pty. Everything above that line — the engine, the theme, the
+  fold layer, the link probe, the card lookup — the console keeps.
+- The poll timers never start (four wakeups a second per console, the cost of four per tab).
+- `shellPid()` and `foregroundPid()` answer 0, so the guest bridge, the line discipline, "take
+  control" and the ask's `foreground_program` are inert through that one answer.
+- `setNative(true)` is refused, and the five-second "shell integration did not initialize"
+  watchdog does not run.
+- `inlineReady()` is true, so the transcript goes to the vterm and not to the fallback panel.
+- The routing is locked to `agent` and the mode chip is hidden. `applyContextRouting` only ever
+  *restricts*: a terminal context leaves it having changed nothing.
+
+**The composer and the context.** The action row is inside the composer frame, above the busy
+line, left-aligned, buttons only, each wearing its letter via `Action::fullLabel()`;
+`withUniqueLetters` refuses a letter two actions claim rather than answering it twice, and
+`runActionLetter(letter)` is the keyboard half. The button's `objectName` is the action's `key`
+and it carries `fullLabel` and `leaves` as properties, so `src/Theme.cpp` and the tests can key
+off them. `rebuildActionRow()` runs on every `Context::changed()` — build the list fresh in
+`actions()`; do not cache widgets. The placeholder is `Context::placeholder()` with "…" under it;
+a terminal pane keeps RichEditor's own ladder untouched.
+
+**What a host calls:** `setContext(Context *)`, `context()`, `contextSpec()`, `hasShell()`,
+`widget()` (it is the pane), `focusComposer()`, `draftInComposer(text)` (replaces the draft;
+`insertInComposer(text)` still appends at the cursor), `composerText()`, `collapsed()` /
+`setCollapsed(bool)` for the "? Helper Agent (Alt+Q)" fold — the row stays the host's, the pane
+only needs show/hide and focus, and it re-focuses the composer on expand — and `workerContext()`,
+what the worker echoed back on `configured {context}`, read rather than guessed.
+
+**What a host must not do**
+
+1. **Do not put a console in a window's leaf lists.** `Pane` registers itself nowhere on
+   construction — `consolemode` asserts it is an ordinary child and not a top-level window — so
+   the only way one can be walked into is a parent that is walked into. **`RelayWindow::panesIn`
+   must stop at a `ToolPane`, the way `leavesIn` already does.** That single line is Step 5's, and
+   without it a console is published to the phone, counted in the close dialog, makes the first
+   real terminal default to Flash, and churns the scrollback prune.
+2. **Do not construct one from a pane library.** `Pane` exists only inside the `relay` executable's
+   translation unit. `RelayWindow` makes it and hands it over as a `QWidget *` plus the handles
+   above — the `relay::PaneView` pattern.
+3. **Do not free the context before the pane**, and do not set `Context::onChanged` yourself: the
+   pane owns that callback while it holds the context.
+4. **Give a `switchboard`-named context a board.** A board console with no board is refused in one
+   sentence by the worker; that is one of the real constraints the card kept, not a bug. Options,
+   Actions and Sessions are the board-less surfaces.
+5. **`persist.scope` is a wire enum** — `""`, `pane` or `helper` — not a path, and `routing` is
+   `auto` or `agent`, not the pane's input mode. Both are validated and both raised on every
+   `configure` when I got them wrong in 24042b5b.
+
+## Gates
+
+18 suites green, including the new `consolemode` — nine cases against real `Pane`s, among them
+"a terminal pane is unchanged". The terminal pixel diff of `7a35a498^` against `7a35a498`: eight
+of ten shots identical below the pane header, the other two the blinking caret and the startup
+quota toast. The live console drive: six checks, all passing, including the queue strip with a
+second prompt behind a running turn.
+
+The live gate earned its place again: it found three terminal-only paths a console walked into
+that neither the build nor the suites saw — the native-mode watchdog hiding the whole prompt box
+after five seconds, `inlineReady()` never becoming true so every printed line queued for ever, and
+a non-zero `shellPid()` from an emulator with no program.
+
+`--check` is retired with the mover: nothing was moved, and `src/AgentConsole.h` is gone.
+`scripts/split-agent-console.py` keeps `--index`, `--coupling` and `--closure`, and says in its
+first paragraph why the waves were abandoned.
