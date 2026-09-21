@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // Faint ink: what SGR 2 and a fold's dim rows are drawn in (#TK9C, #LG7T), and — built on the
-// same contrast machinery — legibleOn(), what an ink written into a banded row is drawn in (#SLQ3).
+// same contrast machinery — legibleOn(), what an ink written into a banded row is drawn in (#SQ3D).
 //
 // Both used to be `fg.setAlphaF(0.6)`, which is a fade of 40% toward whatever is behind the cell.
 // On the greys Relay's own themes use for secondary text that lands at about 2.9:1 on Relay Dark
@@ -85,7 +85,7 @@ inline QColor faintInk(const QColor &fg, const QColor &bg, double maxFade = kFai
 // The mirror of faintInk(), and for the opposite problem. A row the host marked as typed by the
 // user wears a *band* the scheme picks when it paints (ColorScheme.h), and that band is light in
 // one theme and dark in the next. An ink written into such a row — the colour Relay gives the
-// `/command` of a prompt it echoes (#SLQ3) — was chosen against the terminal's own ground and
+// `/command` of a prompt it echoes (#SQ3D) — was chosen against the terminal's own ground and
 // knows nothing about the band it will land on, so the view puts it through this first. The
 // alternative, writing a colour that suits the band at the time, freezes into the scrollback and
 // is wrong the moment the theme changes, which is the whole reason a row carries a role and not

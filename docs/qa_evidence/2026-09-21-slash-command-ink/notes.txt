@@ -1,0 +1,23 @@
+--- dark.png (relay-dark)
+  band          #b48ef7
+  written       #78ddea   (palette[14], SGR 96)  1.63:1 on the band
+  legibleOn()   #213d41   4.51:1 on the band
+  painted       21 px of it in the command, 0 in the rest of the row
+  role ink      #110527   7.59:1 on the band, 108 px
+  PASS  the command is painted in legibleOn(written, band)
+  PASS  it clears the 4.5:1 floor on the band
+  PASS  the written colour itself is not painted
+  PASS  the command's ink is not the role's
+  PASS  the rest of the row is still the role's ink
+--- light.png (ibm-beige)
+  band          #7500c3
+  written       #0a4a46   (palette[14], SGR 96)  1.22:1 on the band
+  legibleOn()   #aec4c2   4.51:1 on the band
+  painted       35 px of it in the command, 0 in the rest of the row
+  role ink      #f4e8fc   6.99:1 on the band, 126 px
+  PASS  the command is painted in legibleOn(written, band)
+  PASS  it clears the 4.5:1 floor on the band
+  PASS  the written colour itself is not painted
+  PASS  the command's ink is not the role's
+  PASS  the rest of the row is still the role's ink
+PASS

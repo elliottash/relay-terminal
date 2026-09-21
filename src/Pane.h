@@ -14109,7 +14109,7 @@ private:
         if (ink == Ink::User || ink == Ink::UserAgent) {
             const QByteArray mark = ink == Ink::User ? QByteArray("\x1b]7772;shell\x1b\\") : QByteArray("\x1b]7772;agent\x1b\\");
             // The one thing in such a line that is *not* plain: the `/command` it opens with, in
-            // the colour the composer already tints it while it is being typed (#SLQ3, and
+            // the colour the composer already tints it while it is being typed (#SQ3D, and
             // InputHighlighter::highlightAgent). It is written as a palette index, never as an
             // RGB colour — an index is resolved against the theme's own palette when the view
             // paints, so the command follows a theme switch like the rest of the row, and the

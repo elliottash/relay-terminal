@@ -116,7 +116,7 @@ private slots:
         QCOMPARE(faintInk(kDarkMuted, kDarkGround, 0.0), kDarkMuted);
     }
 
-    // legibleOn(): the same machinery for the opposite problem (#SLQ3). The bands here are the
+    // legibleOn(): the same machinery for the opposite problem (#SQ3D). The bands here are the
     // agent colour each shipped theme paints a row the user typed in, and the inks are that
     // theme's own bright cyan — the palette entry the echoed `/command` is written with, which
     // was chosen against the terminal's ground and lands on the band by accident.

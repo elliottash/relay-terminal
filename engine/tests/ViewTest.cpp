@@ -1074,7 +1074,7 @@ private slots:
     }
 
     // The one run inside such a row that is not the role's ink: the `/command` a prompt opens
-    // with, which the pane writes as a palette index so the theme decides its hue (#SLQ3). The
+    // with, which the pane writes as a palette index so the theme decides its hue (#SQ3D). The
     // hue is kept and the distance to the band is corrected — the band is light in one theme and
     // dark in the next, and a colour already in the scrollback cannot know which it landed on.
     // Both paths that paint such a row are here: the grid's own row, and the prose block the
