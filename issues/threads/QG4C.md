@@ -52,3 +52,25 @@ says the worker is not the one holding anything.
    next tool call")? *Recommendation:* worth naming, because a steer into a harness turn cannot be
    delivered mid-turn — the harness runs the whole CLI turn in one `complete()` call, so a steer
    can only land after it, and that alone would read as "the queue does not work".
+
+<!-- relay:entry 20260921T230504Z-rx author=agent kind=decision model=gpt-6-astra pane=a76d5a83 turn=5a38cef7388c459a84bd6c3f61b7bb2d/c906ca1d59a94d29bf77803e835dc720 -->
+Owner clarified: "i meant harness, fix #1 first" and "then let me test it". Scope is the guest harness queue; leave live acceptance testing to the owner. The numbered defect #1 in the prior investigation concerns the TUI path, so confirming the harness symptom before applying that diagnosis.
+
+<!-- relay:entry 20260921T230609Z-6n author=agent kind=decision model=gpt-6-astra pane=a76d5a83 turn=5a38cef7388c459a84bd6c3f61b7bb2d/86ee019f3e234b679d8453140f59362f -->
+Owner clarified: "the issue is \"queue at next tool call\", it doesnt fire at next tool call." Owner then requested: "fix the TUI and the harness issues in separate relay subagents". Harness scope is mid-turn steering; TUI scope is the two independently diagnosed queue defects. Owner will perform live acceptance testing ("then let me test it").
+
+<!-- relay:entry 20260921T230748Z-h1 author=codex kind=progress -->
+### Codex · harness subagent
+Claimed authorized continuation; implementing backend steering and fake-process regression tests. This guest exposes no relay_board tools; using documented file fallback. TUI files belong to sibling. Plan added to card.
+
+<!-- relay:entry 20260921T231445Z-h2 author=codex kind=evidence -->
+### Codex · harness subagent
+Implemented native steering with transactional queue acknowledgement, UUID replay handling across Claude result boundaries, rejection/timeout preservation and duplicate protection. Targeted fake-transport tests; no paid turn. Evidence and owner live checklist: docs/qa_evidence/2026-09-21-harness-steering/README.md.
+
+<!-- relay:entry 20260921T231710Z-h3 author=codex kind=evidence -->
+### Codex · harness subagent
+Landed backend implementation, tests, protocol docs and card in 16fd7eddbec2dd261be180fb22714cdb61bdf789. 260 targeted Python tests pass. Card left needs-verification for owner live test. This thread remains uncommitted because its snapshot includes the parent's uncommitted decision comments and land.py reports an append/deletion conflict against main; parent should land the complete thread with its own snapshot. Added implementation commit link to card.
+
+<!-- relay:entry 20260921T231917Z-h4 author=codex kind=evidence -->
+### Codex · harness subagent
+Parent review addressed in c90b6135: preserve earlier Claude continuation text and cover pending-ack visibility, clear/cancel refusal semantics, idle reset and turn-end lease recovery. 128 focused tests passed. Added follow-up commit link. Source/fake-stream evidence supports native next-priority ingestion; owner live guest timing verification remains pending.
