@@ -82,6 +82,11 @@ public:
         // agent role), so Ctrl+Alt+M from a /flash pane lands on the flash list. "all" is the
         // flat tab. An id no tab has falls back to main.
         QString tier = QStringLiteral("main");
+        // What the filter line starts with. Options › Models' per-provider "models… (N of M
+        // available)" link opens the `all` tab with the provider's name typed, so step 2 is one
+        // click from step 1 (card #MDL1, design 5.7). Empty — every other caller — and the filter
+        // opens blank, exactly as before.
+        QString filter;
         qint64 now = 0;          // unix seconds, for the limits line
         // "fill from defaults" (card #MDL1 t:a8, design 5.5): the two buttons Options › Models'
         // `models.tier.defaults` row presses, handed in rather than copied — the lists a worker
@@ -120,6 +125,11 @@ public:
     // everything under it. Unchecking rank 1 switches the class off altogether, which is the same
     // statement. Public because a test presses it without a window manager.
     void setBoxCutoffFromRow(int rank, bool on);
+    // The `all` tab's availability column — step 2 of the owner's four (card #MDL1, design 5.7):
+    // whether this model exists for the lists, the box and the box's typed filter at all. It
+    // covers every provider of the row, because a row is one model (rule 2): un-ticking sonnet
+    // un-ticks sonnet, not "sonnet through Claude Code". Public because a test presses it.
+    void setRowAvailable(const QString &groupKey, bool on);
     QString tier() const { return m_tier; }
     void setTier(const QString &tier);
     QStringList tabIds() const;
@@ -160,8 +170,14 @@ private:
     void buildAll(const QString &query);
     void addAddByIdRow();
     void promptAddModelById();
-    void onBoxCheckChanged(QTreeWidgetItem *item, int column);
+    void onCheckChanged(QTreeWidgetItem *item, int column);
     void refreshBoxChecks();   // the ticks again from the stored cutoff, without rebuilding the rows
+    // The availability ticks and the greying again, in place: an un-tick changes no row's place in
+    // the `all` tab (the row stays, to be ticked back), so rebuilding under the signal that
+    // delivered the click would only delete the item mid-click.
+    void refreshAvailability();
+    void applyAvailability(QTreeWidgetItem *row, bool available, const QString &reason);
+    bool availabilityTab() const;    // the `all` tab, the one place step 2 is edited
     bool boxClassTab() const;        // this tab is one of the four classes the box can draw
     void syncClassSwitch();
     void onRowChanged();

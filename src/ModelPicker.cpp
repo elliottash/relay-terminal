@@ -36,7 +36,12 @@ namespace {
 // rows, which draw in column 0, with it.
 // ColBox is the "show in box" cutoff of a tier tab (card #MDL1, design 5.3); it is hidden on the
 // `all` and `lite` tabs, which the Alt+M box never draws.
-enum Column { ColRank, ColBox, ColModel, ColVia, ColReasoning, ColIntelligence, ColSpeed, ColLeft, ColCount };
+// ColAvail is step 2 of the four, and belongs to the `all` tab alone (design 5.7). It sits second
+// rather than first for one mechanical reason: a section rule is a `setFirstColumnSpanned` row,
+// which draws out of column 0, so column 0 has to be one that is never hidden — and ColAvail is
+// hidden on every tab but `all`. ColRank is empty on the `all` tab and resizes to a few pixels, so
+// the tick is still the first thing on the row.
+enum Column { ColRank, ColAvail, ColBox, ColModel, ColVia, ColReasoning, ColIntelligence, ColSpeed, ColLeft, ColCount };
 constexpr int KeyRole = Qt::UserRole;          // the entry this row would use
 constexpr int SectionRole = Qt::UserRole + 1;  // a rule, not a model
 constexpr int ViaRole = Qt::UserRole + 2;      // the keys of every provider folded into this row
@@ -44,6 +49,7 @@ constexpr int ListedRole = Qt::UserRole + 3;   // this row is an entry of the ta
 constexpr int AddRole = Qt::UserRole + 4;      // "not in this list": ctrl+enter puts it in
 constexpr int GroupRole = Qt::UserRole + 5;    // the folded row's group id, for the via choice
 constexpr int AddByIdRole = Qt::UserRole + 6;  // the `all` tab's "+ add a model by id…" row
+constexpr int AvailRole = Qt::UserRole + 7;    // a model row of the `all` tab: its tick is step 2
 
 const QString kAll = QStringLiteral("all");
 
@@ -58,6 +64,17 @@ QString providerText(const Entry &entry) {
 QString groupId(const Group &group) {
     if (group.entries.isEmpty()) return group.name;
     return group.entries.first().local ? QStringLiteral("local\x1f") + group.name : group.name;
+}
+
+// Whether any of the five lists names this entry. `curation::inAnyList` is ModelCatalog.cpp's
+// own; from out here the lists themselves are the way to ask. It decides one thing in this file:
+// a listed model's availability tick is always on and says why (card #MDL1, design 5.7) — a rank
+// the user wrote down that the box would not offer is a list that lies.
+bool inAnyTierList(const QString &key) {
+    for (const QString &tier : curation::tierIds())
+        for (const curation::TierEntry &entry : curation::tierList(tier))
+            if (entry.key == key) return true;
+    return false;
 }
 
 // Which models a tier list may hold — the same rule Options › Models' "+ add a model…" applies, so
@@ -173,7 +190,8 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QDialog(pare
     auto *dragList = new DragList;
     m_list = dragList;
     m_list->setObjectName(QStringLiteral("modelList"));
-    m_list->setHeaderLabels({QString(), QStringLiteral("in box"), QStringLiteral("model"), QStringLiteral("via"),
+    m_list->setHeaderLabels({QString(), QStringLiteral("available"), QStringLiteral("in box"),
+                             QStringLiteral("model"), QStringLiteral("via"),
                              QStringLiteral("reasoning"), QStringLiteral("intelligence"), QStringLiteral("tok/s"),
                              QStringLiteral("left")});
     m_list->setRootIsDecorated(false);
@@ -297,7 +315,7 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QDialog(pare
         rebuild();
     });
     connect(m_list, &QTreeWidget::currentItemChanged, this, [this] { onRowChanged(); });
-    connect(m_list, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem *item, int column) { onBoxCheckChanged(item, column); });
+    connect(m_list, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem *item, int column) { onCheckChanged(item, column); });
     connect(m_boxSwitch, &QCheckBox::toggled, this, [this](bool on) {
         if (m_building || !boxClassTab() || on == curation::boxShown(m_tier)) return;
         curation::setBoxShown(m_tier, on);
@@ -350,6 +368,10 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QDialog(pare
     m_tier = ids.contains(m_context.tier) ? m_context.tier
            : ids.contains(QStringLiteral("main")) ? QStringLiteral("main") : ids.value(0, kAll);
     syncTabBar();
+    // What the caller asked to be typed (Options › Models' per-provider "models…" link opens the
+    // `all` tab filtered to that provider). Set before the first rebuild so the dialog never draws
+    // the unfiltered list first and then replaces it.
+    if (!m_context.filter.isEmpty()) { const QSignalBlocker block(m_filter); m_filter->setText(m_context.filter); }
     rebuild();
     if (!m_context.currentKey.isEmpty()) selectKey(m_context.currentKey);
     if (!m_list->currentItem()) selectFirstRow();
@@ -452,7 +474,7 @@ QTreeWidgetItem *ModelPicker::addListRow(int rank, const curation::TierEntry &it
         level = item.effort.isEmpty() ? QStringLiteral("default") : nearestEffort(entry->efforts, item.effort);
     const double speed = curation::speed(item.key);
     auto *row = new QTreeWidgetItem(m_list, QStringList{
-        QString::number(rank), QString(), name, entry ? providerText(*entry) : QString(), level,
+        QString::number(rank), QString(), QString(), name, entry ? providerText(*entry) : QString(), level,
         entry && entry->intelligence >= 0 ? QString::number(entry->intelligence) : QString(),
         speed > 0 ? QString::number(qRound(speed)) : QString(), left});
     row->setData(0, KeyRole, item.key);
@@ -507,7 +529,7 @@ QTreeWidgetItem *ModelPicker::addGroupRow(const Group &group, bool addable) {
     QString leftText = percent(percentLeft(m_context.catalog, entry.preset));
     if (until >= 0) leftText = QStringLiteral("0%") + (until > 0 ? QStringLiteral(" · resets ") + resetText(until, now) : QString());
     auto *row = new QTreeWidgetItem(m_list, QStringList{
-        addable ? QStringLiteral("+ add") : QString(), QString(), name, via,
+        addable ? QStringLiteral("+ add") : QString(), QString(), QString(), name, via,
         level,
         entry.intelligence >= 0 ? QString::number(entry.intelligence) : QString(),
         speed > 0 ? QString::number(qRound(speed)) : QString(), leftText});
@@ -529,6 +551,19 @@ QTreeWidgetItem *ModelPicker::addGroupRow(const Group &group, bool addable) {
     // moves the row to the next provider, it does not take the model away.
     if (group.spent(m_context.catalog, now))
         for (int c = 0; c < ColCount; ++c) row->setForeground(c, palette().color(QPalette::Disabled, QPalette::Text));
+    // Step 2 (design 5.7): the `all` tab's tick, and the row greyed while it is empty. It covers
+    // every provider of the row, because a row is one model — un-ticking sonnet un-ticks sonnet.
+    if (availabilityTab()) {
+        row->setData(0, AvailRole, true);
+        row->setFlags(row->flags() | Qt::ItemIsUserCheckable);
+        bool available = false;
+        QString listed;
+        for (const Entry &each : group.entries) {
+            available = available || curation::isAvailable(each);
+            if (inAnyTierList(each.key)) listed = each.key;
+        }
+        applyAvailability(row, available, listed);
+    }
     if (vias.contains(m_context.currentKey)) {
         QFont font = row->font(ColModel);
         font.setBold(true);
@@ -584,7 +619,10 @@ void ModelPicker::buildTier(const QString &query) {
 
 void ModelPicker::buildAll(const QString &query) {
     const Sort sort = sortFromId(m_sort->currentData().toString());
-    const QList<Entry> listed = shown(m_context.catalog);
+    // `curatable`, not `shown`: this tab is where step 2 is *edited*, so a model you un-ticked is
+    // still drawn — greyed, with an empty box to tick again (design 5.7). What is not here is an
+    // open-ended provider's long tail, which is behind typing as it has always been.
+    const QList<Entry> listed = curatable(m_context.catalog);
     const QList<Entry> rows = ordered(listed, sort, m_context.catalog);
     const QList<Group> groups = grouped(m_context.catalog, rows, nowSeconds());
     if (!query.isEmpty() || sort != Sort::Priority) {
@@ -593,9 +631,10 @@ void ModelPicker::buildAll(const QString &query) {
             for (const Entry &entry : group.entries) hit = hit || query.isEmpty() || matches(entry, query);
             if (hit) addGroupRow(group, false);
         }
-        // This tab shows every usable model (design 5.5), and typing reaches the one part of it
-        // `shown()` holds back: an open-ended provider's long tail, which would otherwise be the
-        // whole list. Untyped it stays out of the way; typed it is right here, under its own rule.
+        // Typing reaches the one part of the catalog this tab holds back: an open-ended provider's
+        // long tail, which would otherwise be the whole list. Untyped it stays out of the way;
+        // typed it is right here, under its own rule, with the same availability tick — ticking
+        // one is "select specific models" for OpenRouter (owner, 2026-09-21).
         if (!query.isEmpty()) {
             QStringList have;
             for (const Entry &entry : listed) have << entry.key;
@@ -627,8 +666,26 @@ void ModelPicker::buildAll(const QString &query) {
         if (const Group *group = groupOf(key); group && !placed.contains(group)) { recent << group; placed << group; }
     if (!favorites.isEmpty()) { addSection(QStringLiteral("favorites")); for (const Group *group : favorites) addGroupRow(*group, false); }
     if (!recent.isEmpty()) { addSection(QStringLiteral("recent")); for (const Group *group : recent) addGroupRow(*group, false); }
-    if (!favorites.isEmpty() || !recent.isEmpty()) addSection(QStringLiteral("all, by priority"));
-    for (const Group &group : groups) if (!placed.contains(&group)) addGroupRow(group, false);
+    // The rest **by provider**, one rule per provider name (owner, 2026-09-21: the availability
+    // column is "grouped by provider … with the provider's name as a rule"). Step 2 is a statement
+    // about one provider's models at a time — "i probably want to uncheck sonnet and haiku and gpt
+    // 5.5" — and reading it needs the provider's models together, which a flat rank order never
+    // puts them in. The providers come in the order their first model does, so the rank order the
+    // page was showing is still the order you read down. Under any other sort, and while something
+    // is typed, the list stays flat above: the sort *is* the order then.
+    QStringList providers;
+    QHash<QString, QList<const Group *>> byProvider;
+    for (const Group &group : groups) {
+        if (placed.contains(&group)) continue;
+        const Entry entry = group.preferred(m_context.catalog, nowSeconds());
+        const QString provider = entry.provider.isEmpty() ? entry.preset : entry.provider;
+        if (!providers.contains(provider)) providers << provider;
+        byProvider[provider] << &group;
+    }
+    for (const QString &provider : providers) {
+        addSection(provider);
+        for (const Group *group : byProvider.value(provider)) addGroupRow(*group, false);
+    }
     addAddByIdRow();
 }
 
@@ -754,10 +811,76 @@ void ModelPicker::refreshBoxChecks() {
     syncClassSwitch();
 }
 
-void ModelPicker::onBoxCheckChanged(QTreeWidgetItem *item, int column) {
-    if (m_building || column != ColBox || item == nullptr || !boxClassTab()) return;
+void ModelPicker::onCheckChanged(QTreeWidgetItem *item, int column) {
+    if (m_building || item == nullptr) return;
+    if (column == ColAvail && availabilityTab() && item->data(0, AvailRole).toBool()) {
+        setRowAvailable(item->data(0, KeyRole).toString(), item->checkState(ColAvail) == Qt::Checked);
+        return;
+    }
+    if (column != ColBox || !boxClassTab()) return;
     if (!item->data(0, ListedRole).toBool()) return;
     setBoxCutoffFromRow(item->text(ColRank).toInt(), item->checkState(ColBox) == Qt::Checked);
+}
+
+// ----- step 2: available (owner, 2026-09-21; design 5.7) --------------------------------------
+
+bool ModelPicker::availabilityTab() const { return m_tier == kAll; }
+
+void ModelPicker::setRowAvailable(const QString &groupKey, bool on) {
+    if (groupKey.isEmpty()) return;
+    // Every provider of the row, because a row is one model (rule 2). Which row is which is read
+    // off the drawn rows rather than re-folded: `ViaRole` already holds exactly those keys.
+    QStringList keys{groupKey};
+    for (int i = 0; i < m_list->topLevelItemCount(); ++i)
+        if (m_list->topLevelItem(i)->data(0, KeyRole).toString() == groupKey) {
+            const QStringList vias = m_list->topLevelItem(i)->data(0, ViaRole).toStringList();
+            if (!vias.isEmpty()) keys = vias;
+            break;
+        }
+    for (const QString &key : std::as_const(keys)) curation::setAvailable(key, on, m_context.catalog);
+    refreshAvailability();
+    changed();
+}
+
+// The tick and the greying again, in place. Nothing moves: an un-ticked row stays in this tab so
+// it can be ticked back (`curatable`), and rebuilding from inside the itemChanged that delivered
+// the click would delete the very item that is being clicked.
+void ModelPicker::refreshAvailability() {
+    if (m_list == nullptr || !availabilityTab()) return;
+    const bool wasBuilding = m_building;
+    m_building = true;
+    for (int i = 0; i < m_list->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *row = m_list->topLevelItem(i);
+        if (!row->data(0, AvailRole).toBool()) continue;
+        QStringList keys = row->data(0, ViaRole).toStringList();
+        if (keys.isEmpty()) keys << row->data(0, KeyRole).toString();
+        bool available = false;
+        QString listed;
+        for (const QString &key : std::as_const(keys)) {
+            const Entry *entry = m_context.catalog.find(key);
+            available = available || (entry != nullptr && curation::isAvailable(*entry));
+            if (inAnyTierList(key)) listed = key;
+        }
+        applyAvailability(row, available, listed);
+    }
+    m_building = wasBuilding;
+}
+
+// One row's tick, its ink and its tooltip. `reason` is the key of a tier list entry, when one of
+// this row's providers is named by a list: the tick is then on whatever the setting says, because
+// a rank the user wrote down that the box would not offer is a list that lies — and the tooltip
+// is where that is said, since a checkbox cannot say it.
+void ModelPicker::applyAvailability(QTreeWidgetItem *row, bool available, const QString &reason) {
+    row->setCheckState(ColAvail, available ? Qt::Checked : Qt::Unchecked);
+    const QString tip = !reason.isEmpty()
+        ? QStringLiteral("Available: one of your lists names it, which keeps it available whatever this box says")
+        : available
+            ? QStringLiteral("Available: this model is in the lists, the alt+m box and its filter")
+            : QStringLiteral("Not available: it is in no list, not in the box, and not in the box's filter. "
+                             "Typing its name in this dialog still reaches it");
+    row->setToolTip(ColAvail, tip);
+    if (!available)
+        for (int c = 0; c < ColCount; ++c) row->setForeground(c, palette().color(QPalette::Disabled, QPalette::Text));
 }
 
 void ModelPicker::rebuild() {
@@ -770,6 +893,9 @@ void ModelPicker::rebuild() {
     m_sort->setVisible(all);
     syncClassSwitch();
     m_list->setColumnHidden(ColBox, !boxClassTab());
+    // Step 2 is edited in one place: the `all` tab. A tier tab is step 3 and the box column is
+    // step 4, and three checkbox columns on one row would say nothing.
+    m_list->setColumnHidden(ColAvail, !availabilityTab());
     // Dragging is how a list is reordered; on the flat tab there is no order to write down.
     m_list->setDragDropMode(all ? QAbstractItemView::NoDragDrop : QAbstractItemView::InternalMove);
     if (all) buildAll(query); else buildTier(query);
@@ -932,7 +1058,9 @@ void ModelPicker::onLevelChanged() {
 void ModelPicker::updateFooter() {
     m_footer->setText(m_tier == kAll
         ? QStringLiteral("←→ tab · ↑↓ row · enter uses it · type to search every model, openrouter's long tail "
-                         "included · tab, then → : the providers of a folded row, and the levels")
+                         "included · tab, then → : the providers of a folded row, and the levels · "
+                         "“available” is what the lists, the alt+m box and its filter may offer — un-tick one to "
+                         "take it out everywhere, tick a row under “more from…” to bring one in")
         : QStringLiteral("←→ tab · ↑↓ row · enter uses it · alt+↑↓ moves it · del removes it · type a name, "
                          "ctrl+enter adds it · ctrl+z undoes")
               + (boxClassTab() ? QStringLiteral(" · “in box” is a cutoff: alt+m shows this class down to the last one ticked")

@@ -26,8 +26,9 @@ using namespace relay::models;
 namespace {
 
 // The dialog's columns, as ModelPicker.cpp orders them.
-// ColBox is the "show in box" cutoff a tier tab gained with card #MDL1, design 5.3.
-enum Column { ColRank, ColBox, ColModel, ColVia, ColReasoning, ColIntelligence, ColSpeed, ColLeft };
+// ColBox is the "show in box" cutoff a tier tab gained with card #MDL1, design 5.3; ColAvail is
+// the `all` tab's availability tick, step 2 of the four (design 5.7).
+enum Column { ColRank, ColAvail, ColBox, ColModel, ColVia, ColReasoning, ColIntelligence, ColSpeed, ColLeft };
 
 QJsonObject model(const QString &id, const QString &label, const QString &tier, const QStringList &efforts, int intelligence = -1) {
     QJsonObject row{{QStringLiteral("id"), id}, {QStringLiteral("label"), label}, {QStringLiteral("tier"), tier},
@@ -496,9 +497,12 @@ private Q_SLOTS:
         ModelPicker::Context ctx = context();
         ctx.tier = QStringLiteral("all");
         ModelPicker picker(ctx);
+        // The rest is grouped by provider, one rule per provider name (card #MDL1, design 5.7):
+        // step 2 is a statement about one provider's models at a time, and the providers come in
+        // the order their first model does, so the rank order is still the order you read down.
         QCOMPARE(keys(picker.list()), (QStringList{QStringLiteral("[favorites]"), QStringLiteral("guest:claude|opus"),
                                                    QStringLiteral("[recent]"), QStringLiteral("anthropic|claude-opus-5"),
-                                                   QStringLiteral("[all, by priority]"), QStringLiteral("glm-coding|glm-5.3"),
+                                                   QStringLiteral("[z.ai (glm)]"), QStringLiteral("glm-coding|glm-5.3"),
                                                    QStringLiteral("glm-coding|glm-5.3-flash"),
                                                    QStringLiteral("[+ add a model by id…]")}));
         QVERIFY(picker.list()->topLevelItem(1)->text(ColModel).startsWith(QStringLiteral("★ ")));
@@ -562,7 +566,10 @@ private Q_SLOTS:
         ModelPicker picker(ctx);
         picker.show();
         QVERIFY(QTest::qWaitForWindowExposed(&picker));
-        QTreeWidgetItem *flash = picker.list()->topLevelItem(1);
+        // Row 0 of this tab is a provider rule now (design 5.7), so the row is found by its key
+        // rather than by an index that says which section happens to be drawn first.
+        picker.selectKey(QStringLiteral("glm-coding|glm-5.3-flash"));
+        QTreeWidgetItem *flash = picker.list()->currentItem();
         QCOMPARE(flash->data(0, Qt::UserRole).toString(), QStringLiteral("glm-coding|glm-5.3-flash"));
         const QRect rect = picker.list()->visualItemRect(flash);
         QTest::mouseClick(picker.list()->viewport(), Qt::LeftButton, Qt::NoModifier, rect.center());
@@ -864,6 +871,105 @@ private Q_SLOTS:
         QCOMPARE(picker.selectedKey(), had);
         // Nothing typed is nothing added.
         QVERIFY(picker.addModelById(QStringLiteral("openrouter"), QStringLiteral("   ")).isEmpty());
+    }
+
+    // ----- step 2: the availability column (owner, 2026-09-21; design 5.7) -------------------
+    // "there need to be 4 steps of model availability: 1 add provider, 2 add model as available,
+    // 3 add model to priority list, 4 include model in box picker." Step 2 is edited here, and
+    // only here: a tier tab is step 3 and its "in box" column is step 4.
+
+    void theAllTabHasAnAvailabilityColumnAndATierTabDoesNot() {
+        ModelPicker::Context ctx = context();
+        ctx.tier = QStringLiteral("all");
+        ModelPicker picker(ctx);
+        QVERIFY(!picker.list()->isColumnHidden(ColAvail));
+        QVERIFY(picker.list()->isColumnHidden(ColBox));
+        // Every model of a branded provider is available to begin with, so every row is ticked.
+        picker.selectKey(QStringLiteral("glm-coding|glm-5.3-flash"));
+        QCOMPARE(picker.list()->currentItem()->checkState(ColAvail), Qt::Checked);
+        QVERIFY(picker.list()->currentItem()->toolTip(ColAvail).contains(QStringLiteral("Available")));
+        QVERIFY(picker.footer()->text().contains(QStringLiteral("available")));
+        // …and the column belongs to this tab alone.
+        picker.setTier(QStringLiteral("main"));
+        QVERIFY(picker.list()->isColumnHidden(ColAvail));
+    }
+
+    void unTickingAModelGreysItAndTakesItOutOfTheListsAndTheBox() {
+        ModelPicker::Context ctx = context();
+        ctx.tier = QStringLiteral("all");
+        ModelPicker picker(ctx);
+        int told = 0;
+        picker.onListsChanged = [&told] { ++told; };
+        const QString flash = QStringLiteral("glm-coding|glm-5.3-flash");
+        picker.selectKey(flash);
+        picker.list()->currentItem()->setCheckState(ColAvail, Qt::Unchecked);
+        QCOMPARE(told, 1);
+        QVERIFY(!curation::isAvailable(*ctx.catalog.find(flash)));
+        bool inShown = false;
+        for (const Entry &entry : shown(ctx.catalog)) inShown = inShown || entry.key == flash;
+        QVERIFY(!inShown);
+        // The row stays where it was, greyed, with an empty box to tick again.
+        QTreeWidgetItem *row = picker.list()->currentItem();
+        QCOMPARE(row->data(0, Qt::UserRole).toString(), flash);
+        QCOMPARE(row->checkState(ColAvail), Qt::Unchecked);
+        QCOMPARE(row->foreground(ColModel).color(), picker.palette().color(QPalette::Disabled, QPalette::Text));
+        QVERIFY(row->toolTip(ColAvail).contains(QStringLiteral("Not available")));
+        // A fresh dialog still draws it, still un-ticked: this is where it is ticked back.
+        ModelPicker again(ctx);
+        QVERIFY(rowKeys(again.list()).contains(flash));
+        again.selectKey(flash);
+        QCOMPARE(again.list()->currentItem()->checkState(ColAvail), Qt::Unchecked);
+        again.list()->currentItem()->setCheckState(ColAvail, Qt::Checked);
+        QVERIFY(curation::isAvailable(*ctx.catalog.find(flash)));
+    }
+
+    // The other half of the owner's rule: "for openrouter, you have to select specific models".
+    // A tail row appears under "more from openrouter" when typed, un-ticked; ticking it is what
+    // selects it, and it is a listed model from then on with no typing at all.
+    void tickingATailRowUnderMoreFromOpenrouterSelectsIt() {
+        ModelPicker picker(tailContext());
+        const QString tail = QStringLiteral("openrouter|meta/muse-spark-1.3");
+        QVERIFY(!rowKeys(picker.list()).contains(tail));
+        picker.filter()->setText(QStringLiteral("muse-spark"));
+        picker.selectKey(tail);
+        QTreeWidgetItem *row = picker.list()->currentItem();
+        QCOMPARE(row->checkState(ColAvail), Qt::Unchecked);
+        row->setCheckState(ColAvail, Qt::Checked);
+        const Catalog catalog = tailContext().catalog;
+        QVERIFY(curation::isAvailable(*catalog.find(tail)));
+        ModelPicker again(tailContext());
+        QVERIFY(rowKeys(again.list()).contains(tail));
+        // Its neighbours in the listing are not dragged in with it.
+        QVERIFY(!rowKeys(again.list()).contains(QStringLiteral("openrouter|vendor/tail-3")));
+    }
+
+    // A model one of the lists names is available whatever the box says: a rank the user wrote
+    // down that the box would not offer is a list that lies, and the tooltip says so.
+    void aModelATierListNamesStaysTicked() {
+        const QString flash = QStringLiteral("glm-coding|glm-5.3-flash");
+        setList(QStringLiteral("flash"), {{flash, QString()}});
+        ModelPicker::Context ctx = context();
+        ctx.tier = QStringLiteral("all");
+        ModelPicker picker(ctx);
+        picker.selectKey(flash);
+        QTreeWidgetItem *row = picker.list()->currentItem();
+        QVERIFY(row->toolTip(ColAvail).contains(QStringLiteral("one of your lists names it")));
+        row->setCheckState(ColAvail, Qt::Unchecked);
+        // The setting took the un-tick; the list overrules it, and the box goes straight back on.
+        QVERIFY(curation::isAvailable(*ctx.catalog.find(flash)));
+        QCOMPARE(row->checkState(ColAvail), Qt::Checked);
+    }
+
+    // Options › Models' per-provider "models… (N of M available)" link: the `all` tab, opened
+    // with that provider's name already typed, so step 2 is one click from step 1.
+    void theDialogCanOpenFilteredToOneProvider() {
+        ModelPicker::Context ctx = context();
+        ctx.tier = QStringLiteral("all");
+        ctx.filter = QStringLiteral("z.ai (glm)");
+        ModelPicker picker(ctx);
+        QCOMPARE(picker.filter()->text(), QStringLiteral("z.ai (glm)"));
+        QCOMPARE(rowKeys(picker.list()), (QStringList{QStringLiteral("glm-coding|glm-5.3"),
+                                                      QStringLiteral("glm-coding|glm-5.3-flash")}));
     }
 
     void customizeClosesAndOpensThePage() {
