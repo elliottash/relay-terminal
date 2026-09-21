@@ -117,25 +117,25 @@ but shipping one set first is the smaller step and matches how Relay's other set
 
 ## Tasks
 
-- [x] The `security` section itself, between `agent` and `privacy` (`src/RelayWindow.h:1930`), with <!-- t:a3 -->
+- [x] The `security` section itself, between `agent` and `privacy` (`src/RelayWindow.h:1930`), with the posture sentence at its head <!-- t:a3 -->
       the posture sentence at its head
-- [ ] `security/unattended_full_tools` (default on) and the predicate it drives, with #R5TC <!-- t:b5 -->
-- [x] Move, do not copy: `agent/terminal_handoff`, `isolation/*`, `agent/max_auto_turns`, <!-- t:c7 -->
+- [ ] `security/unattended_full_tools` (default on) and the predicate it drives, with #R5TC — still blocked: no unattended turn exists in Relay yet <!-- t:b5 s=blocked blocked_by=#R5TC -->
+- [x] Move, do not copy: `agent/terminal_handoff`, `isolation/*`, `agent/max_auto_turns`, `agent/max_steps`, `agent/max_tool_calls`, `agent/audit_requests`. Check every reader of each key still finds it, and that the Agent and Terminal sections do not end up with a hole <!-- t:c7 -->
       `agent/max_steps`, `agent/max_tool_calls`, `agent/audit_requests`. Check every reader of each
       key still finds it, and that the Agent and Terminal sections do not end up with a hole
-- [x] The command denylist: a setting, the match (before execution, on the resolved command), the <!-- t:d9 -->
+- [x] The command denylist: a setting, the match (before execution, on the resolved command), the refusal the model sees, and a line in the pane saying which rule refused it <!-- t:d9 -->
       refusal the model sees, and a line in the pane saying which rule refused it
-- [x] Readable folders outside the workspace: the setting, and the widened check in <!-- t:e2 -->
+- [x] Readable folders outside the workspace: the setting, and the widened check in `backend/relay_core/tools.py` — including the ssh-host path, where the workspace guard does not apply (#S5SH) <!-- t:e2 -->
       `backend/relay_core/tools.py` — including the ssh-host path, where the workspace guard does
       not apply (#S5SH)
-- [x] User patterns added to `looks_secret()` (`tools.py:50-55`), extend-only, with the built-ins <!-- t:f4 -->
+- [x] User patterns added to `looks_secret()` (`tools.py:50-55`), extend-only, with the built-ins shown and not removable <!-- t:f4 -->
       shown and not removable
-- [x] An OSC 52 row driving `setClipboardWriteAllowed()` (`engine/view/TerminalView.h:111`), <!-- t:g6 -->
+- [x] An OSC 52 row driving `setClipboardWriteAllowed()` (`engine/view/TerminalView.h:111`), default off <!-- t:g6 -->
       default off
-- [ ] "Where your prompts go", beside the hosted-inference switch <!-- t:h8 -->
-- [ ] `docs/VALIDATION.md`'s "Security boundaries" section becomes the written statement this <!-- t:j1 -->
+- [x] "Where your prompts go", beside the hosted-inference switch — landed as the Privacy section's statement (`src/RelayWindow.h:3507-3518`) <!-- t:h8 -->
+- [ ] Rewrite `docs/VALIDATION.md` "Security boundaries" as the written statement of this section — it still says tools run without per-action approval, but the Ask-before group has landed <!-- t:j1 -->
       section renders, so the two cannot drift
-- [x] Tests: the denylist refuses and says why; a folder outside the workspace is readable only <!-- t:k3 -->
+- [x] Tests: denylist refusal, readable folders on this machine and ssh, secret patterns extend-only, unattended tools withheld, moved keys still read from their new home <!-- t:k3 -->
       when listed, on this machine and on an ssh host; a user pattern is honoured and a built-in
       cannot be removed; `security/unattended_full_tools` off actually withholds the two tools;
       and every moved key is still read from its new home

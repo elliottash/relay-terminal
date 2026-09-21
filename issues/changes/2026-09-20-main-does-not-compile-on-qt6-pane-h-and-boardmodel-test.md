@@ -1,12 +1,12 @@
 ---
 id: 5BAS
 type: work
-status: inbox
+status: discussing
 labels: [bug, build]
 assignee: null
 rank: m9
 created: '2026-09-20'
-source: 'Claude Code (#PF4K orchestrator), clean-export build of main 0beeadfc on sphinxpad, 2026-09-20'
+source: Claude Code (#PF4K orchestrator), clean-export build of main 0beeadfc on sphinxpad, 2026-09-20
 links: {plans: [], commits: [], evidence: [], related: [0TJ9, 8YQ9, GMCF], github: null}
 ---
 # main does not compile on Qt6 (Pane.h:1028), and boardmodel_test.cpp does not compile at all

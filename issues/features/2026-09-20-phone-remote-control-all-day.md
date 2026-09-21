@@ -9,8 +9,8 @@ workstream: remote
 assignee: claude-code
 rank: 6c
 created: '2026-09-20'
-source: 'owner, 2026-09-20, Claude Code session'
 acceptance: from the iPhone, over any network, all day and without touching the desktop, the owner opens the app and sees every pane on the desktop with who needs him, reads what an agent did, steers or stops it, answers its question, switches model, starts a new conversation, and gets a lock-screen notification when a turn finishes or an agent waits; the desktop keeps working through drops and sleep of the phone; content stays end-to-end encrypted
+source: owner, 2026-09-20, Claude Code session
 links: {plans: [], commits: [d56c80aa, 80706293, 38cf319b, 2c59a720, f39cb626, 8fc8d60b, baebd13a, 8e1e740f, e97c5fc8, 0d021852, ee12ac1a, 954c9f9f, 8e9b2e05, c6c2f72e, 4c0348a8, 4cffa9b2, 5cf0db2b], evidence: [docs/qa_evidence/2026-09-21-ph0n-hosted-drive/, docs/qa_evidence/2026-09-20-ph0n-remote-always-on/, docs/qa_evidence/2026-09-20-phone-remote-research/], related: [W5N2, 0VT4, 97EG, T4BS, JQ7R, KBFT, WMXN, GT7X, PF4K], github: null}
 ---
 # Phone remote control, all day: always on, reachable from anywhere, and the last mile on the iPhone
@@ -39,6 +39,9 @@ i want to be able to access my computer and run stuff all day from work / the bu
   devices; PWA first, Capacitor shell only if Phase 3 says so; connect tokens in Phase 1; WebAuthn
   dropped; `full` devices admit, decide and grant; diff view later; one origin) until the owner
   says otherwise.
+
+- Owner, 2026-09-21: "oh yeah, thats fine." — Recap on a desktop with no API keys may fall back
+  to Relay Free's summaries role (the #RCPF question, answered: fine).
 
 ## Planning notes
 

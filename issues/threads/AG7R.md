@@ -204,3 +204,61 @@ table" — the owner's answer made that one safe, so the example moved to `agent
 than the assertion being relaxed, and `agent.interrupt` now tests the other side of the same
 fallback. 57 cases passing, was 54. `land.py`'s build gate built the exact landing tree, and the
 landed diff was audited for the five other sessions' work in the protocol doc (none).
+
+<!-- relay:entry 20260921T020931Z-8z author=owner kind=comment mode=plan -->
+Plan this card.
+
+<!-- relay:entry 20260921T020931Z-90 author=owner kind=event pane=switchboard -->
+- ✦ owner moved this card · Discussing → Planning · a Plan turn started
+
+<!-- relay:entry 20260921T021023Z-fh author=owner kind=comment mode=discuss -->
+check edb61e9038c1417f8a5c75f77c8a676a , this might be done
+
+<!-- relay:entry 20260921T021243Z-3d author=agent kind=note model=kimi-k3 pane=switchboard turn=75cfeff71d8e4899a1218a15308cb939/588b4ac03e7d4158b9c4f2f83109160f -->
+Owner: "check edb61e9038c1417f8a5c75f77c8a676a , this might be done". That id matches nothing in the
+tree and I could not resolve it to a commit from the Switchboard, so I re-measured against the
+current sources instead.
+
+**Done, verified in the code:** groups 1, 2, 3, 5, 6, 7 and all of group 8.
+- Group 1: `AppCommands::findAction()` falls back to the keybinding registry; the catalog lists the
+  registry-only safe keys under `Shortcuts` with `agent_safe: true`; `palette.agent` is gone
+  (src/AppCommands.cpp).
+- Group 2: `pane` targeting, `list_panes`, `unknown_pane`, `runActionAt` — all in execute().
+- Group 3: both halves in `readActions()`/`writingActions()`, `model:`/`effort:`/`closed:` by prefix.
+- Group 5: `writingActions()` (~30 keys), `lossNote()`, `refusedByTheOwner()` (the owner's four),
+  `paneScopedActions()`.
+- Group 6: `rowNamedLikeASecret()` applied in both `catalog()` and `execute()`.
+- Group 7: read actions pass the writes toggle.
+- Group 8: `send_prompt`/`prefill_prompt` with the loop guards (`would_loop`, chain and per-pane
+  caps, `notePersonPrompt`), `rename`, `app_panes`, `app_open` now reaches files/tests/activity/
+  info/requests/subagents (app_tools.py OPEN_TARGETS), and the `prompt_section()` fix landed —
+  `app_panes` is named in the read branch (app_tools.py:1449).
+
+**NOT done, two things:**
+1. **Group 4, the non-blocking modal pass.** `waitingOnTheModalPass()` still exists in
+   src/AppCommands.cpp:196 and still holds `windows.fresh` and `pane.close`; the 18 modal actions
+   (files.open, project.pick, remote.join, agent.modelKeys, agent.rewind, ssh.connect,
+   alias:save, project.init, …) are still off. The `exec()` → `open()`+callback conversion has not
+   happened. If edb61e9… is a commit claiming this, it is not in this checkout.
+2. **The Local-models Save buttons.** `found:<n>` Save and `local:address/save` Save still have no
+   `agentSafeButtons` (src/LocalModelsSettings.cpp) — still waiting on the owner's one-line answer
+   (question below).
+
+<!-- relay:entry 20260921T021257Z-ve author=agent kind=question model=kimi-k3 pane=switchboard turn=75cfeff71d8e4899a1218a15308cb939/588b4ac03e7d4158b9c4f2f83109160f -->
+May an agent press **Save** on a local endpoint it just found — `found:<n>` › Save and
+`local:address/save` › Save in Options › Local models? Detect (already safe) finds the server and
+this is the other half of the same act; taking it back is one Remove. Recommendation: yes, mark
+both `agentSafeButtons`.
+
+<!-- relay:entry 20260921T021314Z-bn author=agent kind=comment mode=discuss model=kimi-k3 turn=75cfeff71d8e4899a1218a15308cb939/588b4ac03e7d4158b9c4f2f83109160f -->
+I checked the code directly. Two notes on the hash first: `edb61e9038c1417f8a5c75f77c8a676a` doesn't appear anywhere in the tree and isn't a format I can resolve to a commit from here (no git in this turn), so I measured against the current sources instead. Recording what I found:
+
+
+
+**Mostly done, but not all of it.** I couldn't resolve `edb61e9038c1417f8a5c75f77c8a676a` — it's nowhere in the tree and I can't run git from here — so I measured the sources directly:
+
+- **Landed and verified:** groups 1, 2, 3, 5, 6, 7, and all four group-8 items (`app_send_prompt`/`app_prefill_prompt` with loop guards, `app_rename`, the full `app_open` target list, named-pane reads, plus the `prompt_section()` fix).
+- **Still open: group 4.** `waitingOnTheModalPass()` is still in `src/AppCommands.cpp` holding `windows.fresh` and `pane.close`, and the 18 modal actions (`files.open`, `agent.modelKeys`, `ssh.connect`, …) are still off — the `exec()` → `open()`+callback pass never landed. If that hash was a commit for this work, it isn't in this checkout; can you say where you saw it?
+- **One question still yours,** now posted on #AG7R: may an agent press **Save** on a local endpoint it just detected? Recommend yes.
+
+Findings recorded on the card. Once you answer, the remaining work is one Execute: the group-4 modal pass plus (if yes) the two Save buttons.

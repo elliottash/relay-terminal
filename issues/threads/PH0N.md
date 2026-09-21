@@ -112,3 +112,76 @@ against it: thirty checks, no failures, including a paired phone reloading `/pai
 Two cards filed during the work carried ids outside the board's alphabet and are now #WEVT and
 #ADTR (`894385bf`); #RCPF asks the owner whether a keyless desktop should spend Relay Free on an
 automatic recap. Nothing is left on this card but Phase 3, on the owner's iPhone.
+
+<!-- relay:entry 20260921T034500Z-j2 author=owner kind=comment mode=discuss -->
+is this done
+
+<!-- relay:entry 20260921T034500Z-j3 author=agent kind=comment mode=discuss model=kimi-k3 turn=b01394da11cb49fea974b728ea889ed4/f3cc2efd34644a0184f92d7bdafc89b9 -->
+**Not quite** — Phases 1 and 2 are built, tested and deployed, but the card's acceptance is Phase 3, which only you can do.
+
+**Done:** all 8 build tasks. Always-on sidecar, connect tokens, join.relay-terminal.ai serving main, inbox chips, Stop/Recap/question rows, offline queue, notification switches — plus a 23/24 headless drive against the hosted address (the one failure since fixed and redeployed).
+
+**Left:** task t:c9 — install the PWA from join.relay-terminal.ai on your iPhone's Home Screen, pair, and use it over LTE for a working day (push on the lock screen, prompt from the bus, a Stop, the #KBFT keyboard checks). Evidence goes to `docs/qa_evidence/2026-09-2x-iphone-all-day/`.
+
+Also open, from the last evidence entry: **a recap on a keyless desktop now goes through Relay Free's summaries role — is that fine with you?** Say the word and I'll record either answer in `## Decisions`.
+
+<!-- relay:entry 20260921T034500Z-j4 author=owner kind=comment mode=discuss -->
+could you explain that
+
+<!-- relay:entry 20260921T034500Z-j5 author=agent kind=comment mode=discuss model=kimi-k3 turn=b01394da11cb49fea974b728ea889ed4/160db352066a448ea9275edc1ac70c63 -->
+Sure — it's about the **Recap** button, and what powers it when your desktop has no API keys.
+
+**The situation:** Recap ("what did this agent do?") needs a model to summarize the pane. Normally that uses whatever key the pane already has. But on a desktop run with no keys configured (the QA runs used `RELAY_KEYRING=off`), there is nothing to summarize with.
+
+**What was built:** in that case, Recap falls back to **Relay Free** — the included, quota-limited hosted provider — through its *summaries* role. So a keyless desktop can still produce a recap, but it spends from the Relay Free quota to do it.
+
+**Why it's a decision and not just a default:** it's the first place a free, automatic, user-triggered feature silently consumes hosted quota, and it means pane content leaves the machine to Relay's hosted summarizer — which matters on a feature whose whole point is end-to-end encryption. The rendezvous and push relay never see content; this path would.
+
+**The question on the table (card #RCPF):** is that trade fine — Recap on a keyless desktop quietly uses Relay Free — or should Recap just say "no model configured" instead? On your own machine, which has keys, you'd never hit this path either way.
+
+Say "fine" or "not fine" and I'll record it in `## Decisions`.
+
+<!-- relay:entry 20260921T034500Z-j6 author=owner kind=comment mode=discuss -->
+oh yeah, thats fine.
+
+<!-- relay:entry 20260921T034500Z-j7 author=agent kind=event model=kimi-k3 pane=switchboard turn=b01394da11cb49fea974b728ea889ed4/c4f4c58d805647b4887292ca2172c1b8 -->
+- ✦ agent updated this card · appended to `## Decisions`
+
+<!-- relay:entry 20260921T034500Z-j8 author=agent kind=decision model=kimi-k3 pane=switchboard turn=b01394da11cb49fea974b728ea889ed4/c4f4c58d805647b4887292ca2172c1b8 -->
+Owner: "oh yeah, thats fine." — a Recap on a keyless desktop falling back to Relay Free's summaries role is approved (answers the open question carried from wave 3; #RCPF). Recorded in `## Decisions`.
+
+<!-- relay:entry 20260921T034500Z-j9 author=agent kind=comment mode=discuss model=kimi-k3 turn=b01394da11cb49fea974b728ea889ed4/c4f4c58d805647b4887292ca2172c1b8 -->
+**Recorded.** Your "oh yeah, thats fine." is now a decision on #PH0N's `## Decisions`, and I noted it on #RCPF too, so that card's open question is answered.
+
+That leaves the card with exactly one thing: **your iPhone day** (task t:c9). Whenever you're ready — install from join.relay-terminal.ai to the Home Screen, pair, and take it out on LTE.
+
+<!-- relay:entry 20260921T034500Z-ja author=owner kind=comment mode=discuss -->
+ok im connected, but i coudlnt do anything
+
+<!-- relay:entry 20260921T034500Z-jb author=agent kind=note model=kimi-k3 pane=switchboard turn=56a4a9ed565b4b3cac5307c3949f2568/42d7c2f3225a4579b98a927d6e3c99ec -->
+Phase 3 began 2026-09-21: the owner paired the iPhone and connected, but "couldn't do anything". Most likely cause from the code: the desktop pairing dialog (`RemoteShareDialog::showAsk`, src/RemoteShare.cpp) has three buttons — Refuse (default, focused), "Allow viewing" (grants `view`), "Allow typing" (grants `full`) — and a `view` device gets no prompt box, no Stop, no Recap in the app (`app/app.js:805`: compose needs `agent` or `full`). Advised: revoke the phone in the share dialog and re-pair, choosing "Allow typing". Side finding, filed as a bug: there is no way to raise a paired device's grant short of revoke-and-re-pair (`set_capability` exists in remote/identity.py:306 but nothing in the GUI sends it).
+
+<!-- relay:entry 20260921T034500Z-jc author=agent kind=comment mode=discuss model=kimi-k3 turn=56a4a9ed565b4b3cac5307c3949f2568/42d7c2f3225a4579b98a927d6e3c99ec -->
+The pairing dialog explains this. Let me check whether a card already covers it, then record it.
+
+
+
+
+
+
+
+
+
+**Most likely: you paired it as view-only.** When the phone knocked, the desktop dialog had three buttons — **Refuse** (default), **Allow viewing**, **Allow typing**. "Allow viewing" grants `view`, and a view-only phone gets exactly what you saw: panes and screens, but no prompt box, no Stop, no Recap — read-only.
+
+**Fix (one minute, at the desktop):**
+
+1. Open the share dialog (the plug menu) — the devices list at the bottom should show your iPhone as `view`.
+2. Select it, **Revoke selected**.
+3. Pair again (scan the QR), and this time click **Allow typing**.
+
+Then the phone gets the composer, Stop, Recap, question rows — the whole Phase 2 build.
+
+If the devices list already says `full`, tell me what you *do* see on the phone (pane list? screens? a "read only until you take over" line?) — that would make it a different bug.
+
+Card writes: noted the Phase-3 start and diagnosis on **#PH0N**, and filed **#RSJY** — there's no way to raise a device's grant short of revoke-and-re-pair, and the phone never says *why* it's read-only. Worth fixing before your next trip.

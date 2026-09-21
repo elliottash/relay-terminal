@@ -1,7 +1,7 @@
 ---
 id: AG7R
 type: work
-status: discussing
+status: planning
 labels: [feature, agent-app-control]
 assignee: claude-code
 waiting_on: owner

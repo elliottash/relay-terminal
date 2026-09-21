@@ -126,3 +126,13 @@ clicking the card
 
 <!-- relay:entry 20260920T063040Z-5m author=agent kind=note model=glm-5.3 pane=7dcb4e9a turn=fdb3e925694241459fe5be66cc0026aa -->
 Landed as d8de5b77 (the linkify pass over body/thread Markdown and plain lines, `tag:` copies + `card:` zooms in the detail and the meta labels, and the row badge as one copy-only gesture — press, release and double-click all guarded) and 6127a540 (evidence). One finding for the verifier and for #CYM9: the shared checkout's board suite hangs in the uncommitted delete-confirm test; I reproduced it in a baseline worktree *without* this change, so it is that session's, not this one's — on tip+this-change the suite is 77/77 (logs/exact-tree-ctest.txt). Qt note discovered on the way: a swallowed press still leaves QAbstractItemView's pressedIndex stale, so a control-in-a-row that must not select has to swallow the release too; the priority flag never noticed because selecting the row it sits on is harmless there.
+
+<!-- relay:entry 20260921T004227Z-xy author=agent kind=note model=deepseek/deepseek-v4.1-flash pane=e273439f turn=28867cb1c4f8449f9a03dffa0ffd27ee/0e9607a632f44b409c0ceb9b04397106 -->
+A finding for this card's verifier, from re-running your drive while building the toast beside it (#Y2F4, `docs/qa_evidence/2026-09-21-switchboard-hash-toast/`).
+
+`docs/qa_evidence/2026-09-20-switchboard-hashtag-copy/drive.sh` has two checks that pass without proving anything:
+
+1. Steps 4–7 each run after the previous step's copy, and the "Copied #…" notice line lives 10 s while the clipboard keeps its text — so a click that copies *nothing* still passes both the notice and the clipboard check. The new drive empties the clipboard before every copy click (`clip_clear`) so each step's copy is its own.
+2. Step 5 ("the body hashtag") clicked the wrong word. The body line reads "A bug #bug and a ref #KAN3": `bug_on_line` returns the first `bug` token on that line, which is the plain word, not the hashtag. With the clipboard cleared that step fails outright — the click had never landed on the `#bug` anchor. The new drive picks the token the OCR saw *with* its `#` (`hashtag_on_line`); with that, the body hashtag copies and shows the notice as intended.
+
+So the body-tag line of this card's QA checklist ("a body `#tag` … each copy with the 'Copied #…' toast") was never actually exercised by that drive; it is exercised now, green. Nothing in `src/BoardPane.cpp` is wrong — the click target in the drive was. This is a comment on your card, not a change to it.
