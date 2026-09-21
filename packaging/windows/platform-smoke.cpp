@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "RuntimeDirs.h"
+#include "SshConfig.h"
 #include "PaneUsage.h"
 #include "CrashLog.h"
 #include "Logging.h"
@@ -29,6 +30,23 @@ int main(int argc, char **argv) {
         return 99;
     }
     QTemporaryDir dir;
+    QDir(dir.path()).mkpath(QStringLiteral("conf.d/nested"));
+    const auto write = [](const QString &path, const QByteArray &text) {
+        QFile file(path);
+        return file.open(QIODevice::WriteOnly) && file.write(text) == text.size();
+    };
+    const QString config = dir.filePath(QStringLiteral("config"));
+    const QString included = dir.filePath(QStringLiteral("conf.d/nested/host.conf"));
+    if (!check(write(included, "Host native-glob\n")
+               && write(config, "Include conf.d/*/*.conf\n"), "SSH fixture write failed")) return 8;
+    auto hosts = relay::ssh::parseConfig(config, dir.path(), dir.path());
+    if (!check(hosts.size() == 1 && hosts.first().alias == QStringLiteral("native-glob"),
+               "nested Windows SSH glob failed")) return 9;
+    if (!check(write(config, (QStringLiteral("Include \"") + included + QStringLiteral("\"\n")).toUtf8()),
+               "SSH absolute fixture write failed")) return 10;
+    hosts = relay::ssh::parseConfig(config, dir.path(), dir.path());
+    if (!check(hosts.size() == 1 && hosts.first().alias == QStringLiteral("native-glob"),
+               "absolute Windows SSH include failed")) return 11;
     const auto owner = relay::runtimedirs::self();
     if (!check(dir.isValid() && owner.pid == GetCurrentProcessId() && owner.startTime > 0,
                "native process identity unavailable")) return 1;

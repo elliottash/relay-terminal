@@ -3,6 +3,7 @@ set(RELAY_PLATFORM_SOURCE "${CMAKE_CURRENT_LIST_DIR}/../../src")
 add_executable(relay-platform-smoke
   "${CMAKE_CURRENT_LIST_DIR}/platform-smoke.cpp"
   "${RELAY_PLATFORM_SOURCE}/RuntimeDirs.cpp"
+  "${RELAY_PLATFORM_SOURCE}/SshConfig.cpp"
   "${RELAY_PLATFORM_SOURCE}/PaneUsage.cpp"
   "${RELAY_PLATFORM_SOURCE}/CrashLog.cpp"
   "${RELAY_PLATFORM_SOURCE}/Logging.cpp"
