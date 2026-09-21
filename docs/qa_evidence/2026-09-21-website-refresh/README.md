@@ -28,4 +28,10 @@ Passed: both pages at 360, 720 and 1280 pixels in light and dark; no horizontal 
 
 ## Deployment
 
-`./deploy.sh -n` listed only `index.html`, `free.html`, `style.css`, and new `site.js`, with no deletions. Deployment and live results are recorded below after publishing.
+`./deploy.sh -n` listed only `index.html`, `free.html`, `style.css`, and new `site.js`, with no deletions. `./deploy.sh` completed successfully: apex and www returned HTTP 200. Subsequent curl fetches of all four files on both hosts matched local committed bytes exactly.
+
+Implementation commit: `e24a7d066c3da9a8b7c2f8439e5ef427134c0d65`.
+
+Live SHA-256 prefixes (identical on both hosts): index.html `bb8952dba0bc`, free.html `129026fabcd5`, site.js `8cf0e5c4c7dc`, style.css `08b8947e018e`.
+
+The card’s `tests_check` returned no findings, actions or blocks before landing.
