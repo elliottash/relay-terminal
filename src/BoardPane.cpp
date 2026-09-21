@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "BoardPane.h"
+#include "ModelCatalog.h"   // nameOf: a comment's `model=` is an id; the page prints the name
 #include "Projects.h"   // which folder of a project is its board: `switchboard/`, else `issues/`
 #include "ToolLabel.h"
 
@@ -3658,7 +3659,9 @@ private:
             insertLine(cursor, author == QStringLiteral("agent") ? QStringLiteral("✦ agent") : author,
                        who, 14);
             QStringList extra;
-            const QString model = attrs.value(QStringLiteral("model")).toString();
+            // The model the turn ran on, by name (card #MDL1, rule 1): the attribute records the
+            // id the API took, and app/board.js names it the same way on the phone.
+            const QString model = relay::models::nameOf(attrs.value(QStringLiteral("model")).toString());
             // The mode first, so the history reads "Plan · …", "Discuss · …" (#XS6Q).
             const QString mode = board::modeTitle(attrs.value(QStringLiteral("mode")).toString(
                 entry.value(QStringLiteral("mode")).toString()));

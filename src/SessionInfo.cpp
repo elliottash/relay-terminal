@@ -45,6 +45,17 @@ QString modelNameOf(const QJsonObject &object, const QString &field = QStringLit
     return sent.isEmpty() ? modelName(object.value(field).toString()) : sent;
 }
 
+// The provider beside the model, with the model taken out of it. The worker names a provider by
+// its preset's label, and three of those labels carry the model — "z.ai · glm-5.3 · standard api
+// (glm)" — so the row read "glm-5.3 · z.ai · glm-5.3 · standard api (glm)", naming one model twice
+// (card #MDL1, rule 1: a model has one name, and the provider says which key is spending).
+QString providerBeside(const QString &provider, const QString &name) {
+    QStringList parts;
+    for (const QString &part : provider.split(QStringLiteral(" · "), Qt::SkipEmptyParts))
+        if (name.isEmpty() || modelName(part.section(QLatin1Char(' '), 0, 0)) != name) parts << part;
+    return parts.isEmpty() ? provider : parts.join(QStringLiteral(" · "));
+}
+
 // "Models used": the names, each once and in the order they were first used, so one model that
 // two providers served does not read as two. The worker's `models_named` is already exactly that;
 // `models` is the older field, and its ids are named here.
@@ -183,8 +194,9 @@ QString sessionHtml(const QJsonObject &info, const QDateTime &now) {
     if (!info.value(QStringLiteral("live")).toBool())
         html += QStringLiteral("<p class=m><span class=m>A saved session, not the one in this pane.</span></p>");
     html += QStringLiteral("<table>");
-    QString model = esc(modelNameOf(info));
-    const QString provider = info.value(QStringLiteral("provider")).toString();
+    const QString named = modelNameOf(info);
+    QString model = esc(named);
+    const QString provider = providerBeside(info.value(QStringLiteral("provider")).toString(), named);
     if (!provider.isEmpty()) model += QStringLiteral(" <span class=m>· %1</span>").arg(esc(provider));
     const QString effort = info.value(QStringLiteral("effort")).toString();
     const QString mode = info.value(QStringLiteral("mode")).toString();

@@ -80,7 +80,9 @@ target_include_directories(relay-board PUBLIC src)
 # relay-editor: the card page's reply box is the console's own `RichEditor`, handed down by the
 # window (`CardDetail::setConsole`); relay-toollabel: a turn's progress line is the call's concise
 # line (protocol 23). Both came in through relay-helperchat until card #AGNT step 9 retired it.
-target_link_libraries(relay-board PUBLIC relay-editor relay-toollabel relay-projects relay-notifications relay-agentcontext ${RELAY_QT}::Widgets)
+# relay-modelcatalog: a card comment records the model id its turn ran on; the page names the
+# model (card #MDL1, rule 1), through the same `nameOf` as everywhere else.
+target_link_libraries(relay-board PUBLIC relay-editor relay-toollabel relay-projects relay-notifications relay-agentcontext relay-modelcatalog ${RELAY_QT}::Widgets)
 target_compile_options(relay-board PRIVATE -Wall -Wextra -Wpedantic)
 
 # Which project a pane is in, where that project's Switchboard folder is (or would be), and the
@@ -128,7 +130,8 @@ target_link_libraries(relay-modelpicker PUBLIC relay-modelcatalog ${RELAY_QT}::W
 target_compile_options(relay-modelpicker PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-modelsettings STATIC src/ModelSettings.cpp src/ModelSettings.h)
 target_include_directories(relay-modelsettings PUBLIC src)
-target_link_libraries(relay-modelsettings PUBLIC ${RELAY_QT}::Widgets)
+# relay-modelcatalog: the key-test line names the model that answered (card #MDL1, rule 1).
+target_link_libraries(relay-modelsettings PUBLIC relay-modelcatalog ${RELAY_QT}::Widgets)
 target_compile_options(relay-modelsettings PRIVATE -Wall -Wextra -Wpedantic)
 
 # A setting read on a hot path — per key, per event, per poll, per paint (card #057J). Plain

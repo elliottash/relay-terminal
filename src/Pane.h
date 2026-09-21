@@ -7791,7 +7791,8 @@ private:
         if (type == QStringLiteral("model_switch_refused")) {
             // A switch the new window cannot hold, even compacted (issue 3ES1): the pane stays on the
             // model in force, so the chip, the role and the provider settings go back to it.
-            const QString refused = event.value(QStringLiteral("model")).toString();
+            const QString refusedId = event.value(QStringLiteral("model")).toString();
+            const QString refused = modelNameFor(event.value(QStringLiteral("preset")).toString(), refusedId);
             const QString current = event.value(QStringLiteral("current_model")).toString();
             if (!current.isEmpty()) m_model = current;
             const QString role = event.value(QStringLiteral("agent_role")).toString();
@@ -7808,7 +7809,8 @@ private:
             printInline(QStringLiteral("✗ %1\n").arg(reason.isEmpty() ? refused + QStringLiteral(" did not take over.") : reason),
                         Ink::Error);
             if (!m_agentBusy && !moreTurnsPending()) closeInline();
-            const QString what = QStringLiteral("Still on %1 · %2's window is too small for this conversation").arg(m_model, refused);
+            const QString what = QStringLiteral("Still on %1 · %2's window is too small for this conversation")
+                                     .arg(modelNameFor(m_currentPreset, m_model), refused);
             status(what); toast(what);
             updateContextLabel();
             changed();
@@ -7864,8 +7866,10 @@ private:
                 m_ctxNextWindow = next.value(QStringLiteral("window")).toVariant().toLongLong();
                 m_ctxNextLimit = next.value(QStringLiteral("limit_tokens")).toVariant().toLongLong();
                 m_ctxNextPercent = next.value(QStringLiteral("percent")).toDouble();
-                m_ctxNextModel = next.value(QStringLiteral("model")).toString();
-                m_ctxInFlightModel = next.value(QStringLiteral("in_flight_model")).toString();
+                // By name (card #MDL1, rule 1): the bar's tooltip is a sentence about two models.
+                m_ctxNextModel = modelNameFor(m_currentPreset, next.value(QStringLiteral("model")).toString());
+                m_ctxInFlightModel = modelNameFor(m_currentPreset,
+                                                  next.value(QStringLiteral("in_flight_model")).toString());
             }
             if (m_contextNotePending) {
                 m_contextNotePending = false;

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ModelSettings.h"
+#include "ModelCatalog.h"
 
 #include <QAbstractItemView>
 #include <QCheckBox>
@@ -307,7 +308,8 @@ void KeysDialog::handleEvent(const QJsonObject &event) {
             if (str(value.toObject(), "id") == id) included = hosted(value.toObject());
         m_status->setText(ok ? (included ? QStringLiteral("%1 works — %2 answered in %3 ms%4")
                                          : QStringLiteral("%1: key works — %2 answered in %3 ms%4"))
-                                   .arg(presetLabelFor(id), event.value(QStringLiteral("model")).toString())
+                                   .arg(presetLabelFor(id),
+                                        relay::models::nameOf(event.value(QStringLiteral("model")).toString()))
                                    .arg(ms)
                                    .arg(truncated ? QStringLiteral(" (it spent the test budget thinking, "
                                                                    "which still proves the key)")
