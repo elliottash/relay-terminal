@@ -141,3 +141,27 @@ says the brief was too heavy.
 
 Build through 3, use it for some weeks, and let the places where a person was asked something
 they did not need to be asked decide the rest.
+
+## 5. Second opinion, and what it changed (2026-09-21)
+
+The owner asked for a skeptical read from Codex, then for product simulations from it
+([`research/qa-across-fields/f-codex-skeptical-review.md`](research/qa-across-fields/f-codex-skeptical-review.md),
+[`g-codex-product-simulations.md`](research/qa-across-fields/g-codex-product-simulations.md)). Its
+verdict: the per-card taxonomy in §3 is forced. A card can need several shapes at once (#7BM4
+spans checks, a scenario and profiling), the words mix evidence, activity and setup, and a chip is
+one more thing to correct before working. Keep the *actions* — Run checks, Compare results, Try
+it, Review — proposed by an agent per card, and drop the classification. Other corrections taken:
+the Check gate must distinguish passed / failed / missing evidence / not applicable, accept an
+attached CI or collaborator result, treat a retired test as retirement, scope an override to a
+check and revision, and never let "no `## Tests` section" mean "ungated"; "proven in use" is
+"observed use", shown as numbers and never closing a card; "never ask twice" is "do not ask again
+while the evidence still applies"; acceptance expectations are written before implementation; and
+the human brief must not carry the answer to the question it asks (the #7BM4 scenario 2 did).
+Its simulations of an economist, a policy analyst and a computational scientist agree on what
+to build once — a short route from a request to the current deliverable, its supporting work
+and the remaining decision; an output record (file, producing command, code and inputs, checks,
+review); an acceptance record with the four statuses, per identified version — and on what stays
+out of the core (field conventions, viewers, editors). **Results is a separate list from the Test
+suites pane**, shown beside the board when outputs exist, not a fifth button. The plan on #YZ8G
+was rewritten to this smaller slice.
+

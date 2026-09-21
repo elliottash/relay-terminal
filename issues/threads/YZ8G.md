@@ -132,3 +132,6 @@ Owner answered the four questions ("1 OK", "2 i think cards need to be moveable 
 <!-- relay:entry 20260921T222812Z-dh author=claude-code kind=decision -->
 ### Claude Code · 2026-09-21 22:28
 Owner: "i was not looking at knowledge work as a metaphor for verification. i was asking, how will knowlege workers use relay terminal". Recorded; the product question (a researcher's cards, their "done", what the tooling row becomes) is now the open one, with a product pass on three people proposed, economist first.
+<!-- relay:entry 20260921T230206Z-cx author=claude-code kind=plan -->
+### Claude Code · 2026-09-21 23:02
+Owner: "can you query codex cli to give you a skeptical take and to see if this is forced … then have codex give you the product simulations as well". Codex (gpt-6-astra, high) said the shape-per-card taxonomy is forced and gave a five-line design and a smaller slice; its three simulations (an economist, a policy analyst, a computational scientist) agree on one output record, one acceptance record, and Results as a separate list. Both are under `docs/research/qa-across-fields/` (f, g). `## Plan` rewritten to that slice; the previous plan is superseded and summarised in `docs/QA-ACROSS-FIELDS-RESEARCH.md` §5. Three questions for the owner replace the earlier four.
