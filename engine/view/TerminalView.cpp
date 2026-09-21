@@ -2769,6 +2769,14 @@ void TerminalView::contextMenuEvent(QContextMenuEvent *e)
         menu->addAction(tr("Copy %1").arg(reference), this,
                         [reference] { QApplication::clipboard()->setText(reference); });
         menu->addSeparator();
+    } else if (QString section, row; link.valid()
+               && (links::optionOf(link.target, &section, &row) || !links::sessionIdOf(link.target).isEmpty())) {
+        // `option:sec/row` and `session:<id>` (#AGNT step 8) are neither files nor URLs: reading
+        // one as a path offered "Open <last segment>", "Open in the system editor" and "Copy
+        // path" for a setting. The click itself is the only thing that works here, so it is the
+        // only thing offered; the host resolves it (Pane::openOutputTarget).
+        menu->addAction(tr("Open"), this, [this, link] { emit linkActivated(link.target, -1, -1); });
+        menu->addSeparator();
     } else if (link.valid()) {
         const QString name = link.url ? link.target : QFileInfo(link.target).fileName();
         menu->addAction(tr("Open %1").arg(name), this,

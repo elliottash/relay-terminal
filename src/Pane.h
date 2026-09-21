@@ -561,7 +561,13 @@ public:
         setContext(context ? context : &m_terminalContext);
         buildUi();
         contextChanged();   // again, now that the chips and the composer exist to be told
-        startWorker();
+        // A terminal pane starts its own worker here, as it always has. A console does not: the
+        // window attaches it to its tab's worker right after construction (createAgentConsole),
+        // and starting a process here would give every console one of its own — four per tab,
+        // four conversations, which is exactly what the card's one-conversation decision refuses.
+        // It is also the owner's own rule that a tab's agent starts at the first ask rather than
+        // when a surface opens (#FEJQ decision 5, protocol 30.7).
+        if (hasShell()) startWorker();
         startTerminal(cleanShell);
         connect(&m_poll, &QTimer::timeout, this, [this] { pollShell(); });
         connect(&m_secretPoll, &QTimer::timeout, this, [this] { checkPasswordPrompt(); checkOomKills(); });
@@ -2805,6 +2811,20 @@ public:
                 onOpenCard(parts.at(0).toUpper());
                 return;
             }
+            // `option:sec/row` and `session:<id>` (#AGNT step 8): an answer that names a setting
+            // or a saved conversation is one click from it, in any pane's transcript. The context
+            // had first refusal above — Options reveals its own row without opening a second pane
+            // — so this is the window's path, which is what a terminal pane uses.
+            if (url.host() == QStringLiteral("option")) {
+                QString section, row;
+                if (relay::links::optionOf(target, &section, &row) && onOpenOption) onOpenOption(section, row);
+                return;
+            }
+            if (url.host() == QStringLiteral("session")) {
+                const QString id = relay::links::sessionIdOf(target);
+                if (!id.isEmpty() && onOpenSessions) onOpenSessions(id);
+                return;
+            }
             return;
         }
         if (target.contains(QStringLiteral("://")) || target.startsWith(QStringLiteral("mailto:"))) {
@@ -3226,6 +3246,20 @@ public:
     // construction, so the only way it can be walked into is a parent that is walked into — which
     // is why `RelayWindow::panesIn` must stop at a `ToolPane` (step 5).
     QWidget *widget() { return this; }
+    // The consoles of one tab share the tab's worker and its one conversation (#AGNT step 5,
+    // owner decision 1). Set by the window on a console it makes, and by nothing else: while it
+    // is set this pane starts **no process of its own** — every line it would have written goes
+    // here, and the window calls `deliverWorkerEvent` with what comes back. A terminal pane
+    // leaves it null and keeps its own `QProcess`, which is every pane written before this card.
+    std::function<void(const QJsonObject &message)> onWorkerLine;
+    bool sharesWorker() const { return bool(onWorkerLine); }
+    // One event of the shared worker, handed to this console. It is the same funnel a pane's own
+    // worker output goes through, so nothing about how an event is read depends on which pipe it
+    // arrived on.
+    void deliverWorkerEvent(const QJsonObject &event) {
+        if (m_closing) return;   // the same rule `readyReadStandardOutput` keeps, for the same crash
+        handle(event);
+    }
     // What the worker said this surface is (`configured {context}`), or `{}` before the first
     // one. A host reads the role and the tool scope off it rather than guessing them.
     QJsonObject workerContext() const { return m_workerContext; }
@@ -7897,6 +7931,11 @@ public:
     // The window opens (or brings forward) its session manager pane and binds it to this pane:
     // queries go to this pane's worker, Enter resumes here (cards #CCKY, #R6J0).
     std::function<void(const QString &query)> onOpenSessions;
+    // An `option:sec/row` link in this pane's output (#AGNT step 8): the window puts Options on
+    // that section and zooms to the row, which is exactly what `app_open {target: "options"}`
+    // already does. `onOpenOptions` above opens a section and cannot name a row, so this is its
+    // own hook rather than one more argument on a call a dozen places make.
+    std::function<void(const QString &section, const QString &row)> onOpenOption;
     // The window opens the ⓘ pane beside this one (the header button, /status) ...
     std::function<void()> onOpenInfo;
     // ... or on one thread (a thread row in the session manager).
@@ -9781,6 +9820,7 @@ private:
     // ----- end request ledger UI ------------------------------------------------------------------
 
     void startWorker() {
+        if (sharesWorker()) return;   // the tab's worker is the window's; this pane has none
         if (!m_workerConnected) connectWorker();
         m_workerBuffer.clear(); m_workerPending.clear();
         const QStringList command{m_python, QStringLiteral("-S"), QStringLiteral("-u"), m_data + QStringLiteral("/backend/worker.py")};
@@ -10076,6 +10116,9 @@ private:
     }
 
     void send(const QJsonObject &object) {
+        // A console writes to its tab's worker through the window (#AGNT step 5): one process,
+        // one conversation, and each ask tagged with this console's `surface`.
+        if (onWorkerLine) { onWorkerLine(object); return; }
         const QByteArray line = QJsonDocument(object).toJson(QJsonDocument::Compact) + '\n';
         if (m_worker.state() == QProcess::Running) m_worker.write(line);
         // The worker's first output can be handled before QProcess reports Running.
@@ -11126,6 +11169,13 @@ public:
     void restartStopped() {
         if (m_bannerCallback && m_banner && m_banner->isVisible()) { auto run = m_bannerCallback; run(); return; }
         if (!m_backend || m_shellStopped) { restartShell(); return; }
+        // A console has no worker of its own to restart: the tab's is the window's, and the next
+        // ask starts a fresh one (#AGNT step 5, protocol 30.7).
+        if (sharesWorker()) {
+            hideBanner();
+            status(QStringLiteral("This console's agent is its tab's. Ask again and a fresh one starts."));
+            return;
+        }
         if (m_worker.state() == QProcess::NotRunning) { hideBanner(); startWorker(); return; }
         status(QStringLiteral("The shell and agent in this pane are running."));
     }
