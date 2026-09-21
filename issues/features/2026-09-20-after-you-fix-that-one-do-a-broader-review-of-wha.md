@@ -8,7 +8,7 @@ waiting_on: owner
 rank: m
 created: '2026-09-20'
 source: 'owner report, 2026-09-20, in the terminal pane after #FEJQ decision 2 was amended'
-links: {plans: [], commits: [ab9e2ab7, 1a2459ed, c375a86e], evidence: [], related: [FEJQ, H6VQ, GMCF], github: null}
+links: {plans: [], commits: [ab9e2ab7, 1a2459ed, c375a86e, 2e51e3b6, cb33a900], evidence: [], related: [FEJQ, H6VQ, GMCF], github: null}
 ---
 # What an agent still cannot do in Relay, read off the catalog rather than remembered
 
@@ -337,8 +337,8 @@ since they only destroy the person's own state and the person is the one asking.
 
 1. **Landed** — groups 1, 3 (window-scoped), 6 and 7, in `1a2459ed` and `c375a86e`. See the
    thread entry for what each became.
-2. **Next** — group 2: `app_command` carries the asking pane, `runAction` takes a target. Then
-   group 3's pane-scoped keys, and every "aim it at a pane" entry above becomes answerable.
+2. **Landed** — group 2 and group 3's pane-scoped half, in `2e51e3b6`. A pane is named by its
+   session token; `app_panes` is where an agent reads the ids; `unknown_pane` is a §30.3 word.
 3. **Then** — group 8, which needs a pane to have a name a tool can use, so it follows group 2:
    send a prompt to a named pane, pre-fill a composer without sending, `app_open` for the remaining
    panes (explorer, Test suites, Activity, info, requests, subagents), naming tabs and renaming

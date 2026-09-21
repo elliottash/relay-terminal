@@ -92,3 +92,45 @@ Still open and NOT done: `local:address/save` and `found:<n>` **Save** in
 src/LocalModelsSettings.cpp. The implementing session declined to widen them on its own because the
 owner answered group 6 with "not sure what i am supposed to do there" rather than a yes, and I
 agree — it is a one-line question for him, not a gap to close silently.
+
+<!-- relay:entry 20260920T213500Z-g2 author=agent kind=progress pane=terminal -->
+**Group 2 landed, and group 3 is now complete on both halves** — `2e51e3b6`, with `cb33a900`
+adding the tool to docs/ARCHITECTURE.md's list.
+
+A pane is named by **its session token** — the string `who` already carried — so the three rules
+cost the model nothing in the common case: a pane agent with no `pane` means its own pane (the
+command came out of that pane's worker, so `who` *is* the token); the helper with no `pane` lands
+on the focused pane exactly as before, which §30.3 now says outright instead of implying; an
+explicit `pane` names any pane of the window, and one that has gone answers the new §30.3 word
+`unknown_pane`, refused before the policy is consulted so a dead pane never reads as a policy
+problem.
+
+Nothing exposed a pane id an agent could read — the catalog carries the *tab*, `session_info` is
+about this conversation, `app_sessions_search` about saved ones — so `app_panes` /
+`app_command {command: "list_panes"}` was added: `{id, title, cwd, tab, model, mode, busy, focused,
+you}`. Deliberately a round trip and not a field of the `app` block, because panes open and close
+between two catalogs and a stale list would have an agent name a pane that has gone.
+
+`runActionNow()` takes an optional target defaulting to `m_active`, so every existing caller —
+keyboard, palette, chrome, right-click — is unchanged, and only `actionIsPaneScoped()` keys follow
+the aim. The splits, the explorer, Equalize, the moves and the focus keys go on anchoring on
+`m_activeLeaf`, with the reason written down: a pane appearing in a tab nobody is watching, or a
+focus that jumps out of the tab someone is typing in, is a worse surprise than the one being fixed.
+
+Group 3's pane-scoped keys then went on: `menu:model`/`model:<id>`, `menu:effort`/`effort:<level>`,
+`menu:mode`/`input.mode*`/`input.toggle`, `agent.planToggle` — in `reversibleWriteActions()`, so
+they stay behind the writes toggle.
+
+Checked by the orchestrating session before accepting: `ctest -R appcommands` green (45 cases, was
+35), `tests.test_app_tools` + `tests.test_tool_groups` 78 OK, and — because the implementing
+session reported that land.py had listed four of another session's hunks in `src/RelayWindow.h` as
+its own — the landed diff was read for foreign code (none: no `pairPhone`, no `runPlugItem`, no
+`#FR1C`) and that session's work confirmed still present both on `main` and in the working tree.
+The one edit outside the named area, a two-line tuple in `backend/relay_core/tool_groups.py`, was
+necessary (without it `app_panes`'s schema ships in every request instead of being deferred) and is
+covered by `tests.test_tool_groups`.
+
+Group 8 is now running in two parallel sessions: `panetalk` (cross-pane send and pre-fill, the rest
+of the `app_open` targets, naming panes and tabs) and `helperread` (the helper reading the pane it
+is helping). Group 4 is NOT started: the owner asked to be told the risk before it goes ahead and
+has not yet answered.
