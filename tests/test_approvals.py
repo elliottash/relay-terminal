@@ -482,7 +482,7 @@ class SubagentApprovalTests(unittest.TestCase):
         questions._pending["q-1"] = [threading.Event(), None]
         sub = Subagent(id="s1", type="general", description="Fix the docs", background=True,
                        model="mock", effort=None,
-                       agent=SimpleNamespace(executor=SimpleNamespace(questions=questions)))
+                       agent=SimpleNamespace(provider=None, executor=SimpleNamespace(questions=questions)))
         manager._agents["s1"] = sub
         self.assertTrue(manager.resolve_question({"id": "q-1", "decision": "deny"}))
         self.assertEqual(questions._pending["q-1"][1], {"decision": "deny"})
