@@ -3902,6 +3902,14 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     m_noticeText = new QLabel(m_notice);
     m_noticeText->setObjectName(QStringLiteral("boardNoticeText"));
     m_noticeText->setWordWrap(true);
+    m_noticeText->setTextInteractionFlags(Qt::LinksAccessibleByMouse);
+    // A `#ID` a notice names ("Created #K7Q2") is a link that zooms to the card — the same
+    // `card:` anchor a card page and the cleanup panel open with (#3ZAP).
+    connect(m_noticeText, &QLabel::linkActivated, this, [this](const QString &link) {
+        const QUrl url(link);
+        if (url.scheme() == QStringLiteral("card"))
+            openCard((url.path().isEmpty() ? url.host() : url.path()).toUpper());
+    });
     noticeLayout->addWidget(m_noticeText, 1);
     m_noticeUndo = new QToolButton(m_notice);
     m_noticeUndo->setObjectName(QStringLiteral("boardTextButton"));
@@ -5653,7 +5661,10 @@ void BoardView::handleEvent(const QJsonObject &event)
         // card's removal events, until the card itself comes back or the pane reloads.
         m_pendingDeletes.remove(requestId);
         if (kind == QStringLiteral("board_create")) {
-            note = QStringLiteral("Created #%1").arg(card);
+            // The id is a `card:` link, so the notice itself zooms to the new card.
+            note = QStringLiteral("Created <a href=\"card:%1\" style=\"color:%2;"
+                                  "text-decoration:none\">#%1</a>")
+                       .arg(card.toHtmlEscaped(), theme::Link.name());
             // The quick-add field took the title; the card itself takes the issue (owner, #VZ69:
             // "when you first press enter to add a new card, it should open the edit box, the
             // editable issue part … the first thing you enter in the top row thing makes the

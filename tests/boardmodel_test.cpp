@@ -2268,6 +2268,13 @@ void BoardModelTests::quickAddNamesTheSectionItAddsTo()
     QCOMPARE(view.selectedCard(), QStringLiteral("N3W1"));
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_card_get"));
     QCOMPARE(sent.last().value("card").toString(), QStringLiteral("N3W1"));
+    // The notice's `#ID` is a `card:` link: clicking it zooms to the card it names.
+    auto *noticeText = view.findChild<QLabel *>(QStringLiteral("boardNoticeText"));
+    QVERIFY(noticeText);
+    QVERIFY(noticeText->text().contains(QStringLiteral("href=\"card:N3W1\"")));
+    view.selectCard(QStringLiteral("K7Q2"));
+    emit noticeText->linkActivated(QStringLiteral("card:N3W1"));
+    QCOMPARE(view.selectedCard(), QStringLiteral("N3W1"));
     // The worker seeds the new card's `## Issue` with the line that was typed, because that line
     // is the owner's own words and the card format keeps them verbatim.
     openCard(view, sent, card("N3W1", "clickable paths in the output",
