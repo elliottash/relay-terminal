@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: m
 created: '2026-09-21'
 source: Owner via Codex in Relay, 2026-09-21
-links: {plans: [], commits: [], evidence: [tests/test_guest_harness_provider.py], related: [B2XF], github: null}
+links: {plans: [], commits: [778b6d68d26a884fbc2e830f099463c17fa46fc2], evidence: [tests/test_guest_harness_provider.py], related: [B2XF], github: null}
 ---
 # Global skills reach guest harnesses
 
