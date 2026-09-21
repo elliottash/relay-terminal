@@ -1,0 +1,101 @@
+{
+ "card": "7BM4",
+ "version": 1,
+ "definition": "Human QA puts a person into a staged situation that simulates the problem the card was written to solve; an AI plays the same scenario first and reports (owner, 2026-09-20).",
+ "stage": "python3 docs/qa_evidence/2026-09-20-switchboard-tooling-hub/scenario/stage.py [--dir DIR] [--fresh]",
+ "ai_pass": "RELAY_BIN=<relay> docs/qa_evidence/2026-09-20-switchboard-tooling-hub/scenario/ai-pass.sh <staged dir> <out dir> a|b|c",
+ "scenarios": [
+  {
+   "id": "done",
+   "title": "The agent says it is done",
+   "problem": "An agent fixed a bug, wrote 'all tests pass' on the card and moved it to Needs verification. One listed test fails, one was deleted last week, and the Python tests have never run. Nothing on the card says so.",
+   "before": "You would have believed the thread, or opened a terminal, worked out which tests belong to the card, and run them one by one.",
+   "steps": [
+    {
+     "actor": "both",
+     "do": "Open the Switchboard, open the card 'Order totals are wrong above 100 items'.",
+     "expect": "A strip above the body: Tests 4 listed, never checked, and a Check button. The thread says: Fixed... All tests pass."
+    },
+    {
+     "actor": "both",
+     "do": "Press Check.",
+     "expect": "Findings within seconds, nothing is run: rounding is not in the project any more; totals_large_order failed the last time it ran; tests/test_invoice.py never ran here. A dated Check block appears under ## Tests in the card body."
+    },
+    {
+     "actor": "both",
+     "do": "Try to move the card to Done with the status picker.",
+     "expect": "Refused. A notice names the tests (rounding, test_invoice, totals_large_order) and offers Override…; the picker goes back to Needs verification."
+    },
+    {
+     "actor": "human",
+     "do": "Press Run these, then Check again.",
+     "expect": "totals_large_order fails for real (expected 1500000 cents, got a negative number); the invoice tests now pass and drop out of the findings; rounding is still gone."
+    },
+    {
+     "actor": "human",
+     "do": "Decide: move the card back to Executing, or press Override… and give a reason.",
+     "expect": "Either the card returns to Executing, or it moves on and the thread gains a decision entry quoting your reason."
+    }
+   ],
+   "question": "Did the card stop you from accepting work that was not done, and did it tell you why quickly enough that you would use it?"
+  },
+  {
+   "id": "flaky",
+   "title": "CI goes red about once a week",
+   "problem": "For ten days the run has gone red every few days; someone reruns it and it is green. Nobody knows which test, since when, or on which machine.",
+   "before": "You would have scrolled CI logs for the red runs and compared them by hand.",
+   "steps": [
+    {
+     "actor": "both",
+     "do": "Press Tests on the Switchboard's tool row.",
+     "expect": "Test suites pane; the summary line says 7 tests, 3 passed (1 slow, 1 flaky), 1 failed, 3 never run. The first row is inventory_sync, marked flaky, 70% reliable, with red and green cells mixed in its grid."
+    },
+    {
+     "actor": "both",
+     "do": "Click inventory_sync.",
+     "expect": "Detail: 70% reliable over 20 runs, flake score about 5, last failure with its message (warehouse did not answer within 200 ms), and a history in which it passes and fails at the same commit on both desktop and laptop."
+    },
+    {
+     "actor": "human",
+     "do": "Press Rerun until fail.",
+     "expect": "It fails within a few runs; the grid gains cells; the message is the same."
+    },
+    {
+     "actor": "human",
+     "do": "Type is:slow in the filter.",
+     "expect": "report_export alone: p50 about 0.3 s, p95 about 4 s. It got slow eight runs ago, which the grid and the history show."
+    },
+    {
+     "actor": "human",
+     "do": "Select inventory_sync and press Make a card, or Attach to card and pick 'CI goes red about once a week'.",
+     "expect": "A card in Bugs names the test in ## Tests, or the existing card gains the line."
+    }
+   ],
+   "question": "Could you name the flaky test, since when, and on which machines, in under a minute, without reading a log?"
+  },
+  {
+   "id": "slow",
+   "title": "The build got slow",
+   "problem": "A clean build used to be quick. Before anyone guesses, someone has to measure where the time goes.",
+   "before": "You would have timed make by hand, or guessed.",
+   "steps": [
+    {
+     "actor": "both",
+     "do": "Press Profile, choose Build (this machine).",
+     "expect": "Progress lines in the board's notice; after under a minute a pane 'Profile: Build (this machine)' with a table Output / Compile / Share. src/report.cpp.o is first with most of the compile time."
+    },
+    {
+     "actor": "human",
+     "do": "Press Open flame graph.",
+     "expect": "The browser opens a local speedscope page (file://, nothing uploaded) showing the build as lanes."
+    },
+    {
+     "actor": "human",
+     "do": "Press Attach to card… and pick 'The build got slow last month'.",
+     "expect": "The card gains a ## Profile table and links.evidence names the snapshot directory under docs/qa_evidence/."
+    }
+   ],
+   "question": "Do you now know which file to look at, and is that answer on the card for the next person?"
+  }
+ ]
+}
