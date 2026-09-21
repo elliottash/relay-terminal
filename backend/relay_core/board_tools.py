@@ -856,19 +856,21 @@ CARD_MODE_BOARD_TOOLS = {
     "plan": ("board_list", "board_read", "board_update_card", "board_comment"),
 }
 
-#: The page agent's board tools (protocol 19.18): the ordinary set plus merge and split —
-#: merging duplicates is that conversation's headline job — plus the import. `board_sections`
-#: stays with a cleanup: restructuring the whole board is a run with a preview of its own.
+#: An agent console's board tools (protocol 33; 19.18 before it): the ordinary set plus merge
+#: and split — merging duplicates is that conversation's headline job — plus the import.
+#: `board_sections` stays with a cleanup: restructuring the whole board is a run with a preview
+#: of its own, and `board_claim` with a terminal pane, which is the thing a console has not got.
 CHAT_BOARD_TOOLS = ("board_list", "board_read", "board_create_card", "board_update_card",
                     "board_move_card", "board_comment", "board_merge_cards",
                     "board_split_card", "board_import_items",
                     # The page is where "which cards have no tests" is asked (protocol 31).
                     "tests_check", "tests_run")
 
-#: The executor tools the helper keeps beyond the read-only ones (#GMCF, owner 2026-09-20).
-#: `set_keybinding` writes Relay's `keybindings.json`, never the workspace, so it sits with the
-#: app tools the helper is given (30.4) rather than with the repository tools a card turn is
-#: fenced off from. `Agent.tools` offers it only while a keybinding catalogue has been sent.
+#: The executor tools the console keeps beyond the read-only ones (#GMCF, owner 2026-09-20).
+#: Since #AGNT a console keeps *every* executor tool, so this names nothing the scope has to
+#: allow separately; it is kept because `set_keybinding` is still the one app-side tool that
+#: writes Relay's own `keybindings.json` rather than the workspace, and `Agent.tools` offers it
+#: only while a keybinding catalogue has been sent.
 CHAT_APP_TOOLS = ("set_keybinding",)
 
 #: Where a Plan turn writes. SWITCHBOARD-DESIGN 12.4: plan mode writes the plan onto the card.
@@ -916,38 +918,58 @@ def card_brief(mode: str) -> str:
 
 
 @dataclass
-class ChatScope:
-    """The Switchboard page agent's turn (protocol 19.18): read the repository, write the board.
+class ConsoleScope:
+    """An agent console's board tools (protocol 33, card #AGNT; 19.18 before it).
 
-    It rides in the `card_scope` slot — that is where the agent looks for a turn's scope — so it
-    answers the same three questions `CardScope` does. `chat` marks it apart for the cleanup-only
-    fence in `run`.
+    It rides in the `card_scope` slot — that is where the board looks for a turn's scope — so it
+    answers the same three questions `CardScope` does, and `chat` marks it apart for the
+    cleanup-only fence in `run`: merging duplicates is this conversation's headline job.
 
-    Since #GMCF (owner, 2026-09-20) it also keeps `set_keybinding`: the helper's Actions pane is
-    the palette "with its keyboard shortcut beside it", and the one thing asked of it there is to
-    move a shortcut. It belongs with the app tools rather than with the repository ones — it
-    writes Relay's own `keybindings.json` and nothing in the workspace — and it is offered only
-    while the GUI has sent a keybinding catalogue, which `Agent.tools` reads from the executor.
+    **It fences nothing off.** Until 2026-09-20 this scope withheld the shell and the file
+    writes (§19.18: "No shell, no file writes: code is a card's Execute"), which predates the
+    owner's rule that a context specialises an agent without fencing it — *"agents are
+    specialized for the given pane context, but the general rule/approach is that agents have
+    access to all systems and can work across panes and contexts"* — and which a board-less
+    helper got round by accident anyway, because the scope lived on the board. So `allows` is
+    now true of everything: what is offered is the whole executor plus the board set below, and
+    the gates that remain are the owner's own (the `settable` / `agent_safe` markers and the
+    Options › Agent toggle, #FEJQ decisions 1–3). A card's **Plan** turn is the one turn that
+    still writes nothing but its own `## Plan`, and that is `CardScope`, a rule about the stage.
+
+    Since #GMCF (owner, 2026-09-20) it also keeps `set_keybinding`: the console in the Actions
+    pane is the palette "with its keyboard shortcut beside it", and the one thing asked of it
+    there is to move a shortcut. `Agent.tools` offers it only while the GUI has sent a
+    keybinding catalogue.
     """
     chat: bool = True
-    mode: str = "chat"
+    mode: str = "console"
 
     def allows(self, name: str) -> bool:
-        return (name in CARD_READ_TOOLS or name == "search_files" or name in CHAT_BOARD_TOOLS
-                or name in CHAT_APP_TOOLS)
+        return True
 
     def tool_specs(self, executor_specs: list[dict]) -> list[dict]:
-        """The turn's tool list: the executor's read-only tools, search_files, the board tools."""
-        keep = [t for t in executor_specs if t["function"]["name"] in CARD_READ_TOOLS]
-        board = [dict(s) for s in TOOL_SPECS if s["function"]["name"] in CHAT_BOARD_TOOLS]
-        cleanup = [dict(s) for s in CLEANUP_TOOL_SPECS
-                   if s["function"]["name"] in CHAT_BOARD_TOOLS]
-        return keep + [dict(SEARCH_SPEC)] + board + cleanup
+        """The turn's tool list: everything the executor offers, search_files, the board tools."""
+        return list(executor_specs) + console_board_specs()
 
-    def refusal(self, name: str) -> str:
-        return (f"{name} is not available to the Switchboard page agent: it reads the repository "
-                "(read_file, list_directory, search_files) and changes the board through the board "
-                "tools. Writing code is a card's Execute, not this conversation.")
+    def refusal(self, name: str) -> str:            # pragma: no cover - `allows` refuses nothing
+        return f"{name} is not available in this console."
+
+
+#: The name this scope had while it was the Switchboard page agent's alone (19.18).  Kept so a
+#: caller written against that name still compiles; there is one class.
+ChatScope = ConsoleScope
+
+
+def console_board_specs() -> list[dict]:
+    """The board half of a console's tool list: `search_files` and `CHAT_BOARD_TOOLS`.
+
+    Separate from `ConsoleScope.tool_specs` because since #AGNT a console takes the *pane's*
+    branch of `Agent.tools` — the whole executor, in the order a pane has them — and the board
+    appends this, which is what makes "one tool set everywhere" true rather than asserted.
+    """
+    specs = [s for s in list(TOOL_SPECS) + list(CLEANUP_TOOL_SPECS)
+             if s["function"]["name"] in CHAT_BOARD_TOOLS]
+    return [dict(SEARCH_SPEC)] + [dict(s) for s in specs]
 
 
 @dataclass
@@ -1355,8 +1377,9 @@ class BoardTools:
         self.cleanup: CleanupLog | None = None
         #: Set while a card's Discuss or Plan turn runs (protocol 19.10, #XS6Q): the tools that
         #: mode offers, and the card a Plan turn may write to. None for a pane's own turns. The
-        #: page agent's turns set it to a `ChatScope` (19.18), which is why the type is loose.
-        self.card_scope: CardScope | ChatScope | None = None
+        #: An agent console sets it to a `ConsoleScope` once and for good (#AGNT), which is why
+        #: the type is loose and why `begin_console` has no closing half.
+        self.card_scope: CardScope | ConsoleScope | None = None
         #: Set while a turn that writes nothing runs (the survey of a fresh board, 19.18): every
         #: write tool refuses, so what the agent offers stays an offer until the owner says yes.
         self.readonly = False
@@ -1474,6 +1497,10 @@ class BoardTools:
             # bring one into being is offered, and calling it asks the user (protocol 19.12).
             return [dict(s) for s in TOOL_SPECS
                     if s["function"]["name"] in UNINITIALIZED_TOOLS]
+        if getattr(self.card_scope, "chat", False):
+            # An agent console (#AGNT): the ordinary set plus merge, split and the import, and
+            # `search_files`, which a console reaches through the board rather than the executor.
+            return console_board_specs()
         specs = list(TOOL_SPECS) + (list(CLEANUP_TOOL_SPECS) if self.cleanup is not None else [])
         return [dict(s) for s in specs]
 
@@ -1490,15 +1517,23 @@ class BoardTools:
     def end_card_turn(self) -> None:
         self.card_scope = None
 
-    def begin_chat_turn(self, *, readonly: bool = False) -> ChatScope:
-        """The page agent's turn starts (protocol 19.18): board tools, merge and split included.
+    def begin_console(self) -> ConsoleScope:
+        """These tools belong to an agent console (#AGNT): board tools, merge and split included.
 
-        `readonly` is the survey's opening turn: nothing is written until the owner confirms, and
-        that is enforced here rather than asked for in the brief.
+        Unlike a card turn's scope this is set once, when the console's agent is configured, and
+        never taken down: a console *is* that scope, it does not enter and leave one. The
+        read-only survey turn is `Agent.set_readonly`, which sets `readonly` below for the length
+        of one turn — nothing is written until the owner confirms, and that is enforced here
+        rather than asked for in the brief.
         """
-        self.card_scope = ChatScope()
-        self.readonly = bool(readonly)
+        self.card_scope = ConsoleScope()
         return self.card_scope
+
+    def begin_chat_turn(self, *, readonly: bool = False) -> ConsoleScope:
+        """`begin_console` with a one-turn `readonly`, for callers written before #AGNT."""
+        scope = self.begin_console()
+        self.readonly = bool(readonly)
+        return scope
 
     def end_chat_turn(self) -> None:
         self.card_scope = None

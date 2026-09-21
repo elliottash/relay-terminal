@@ -666,18 +666,26 @@ class ImportToolTest(ProtocolChatTest):
         result = tools.run("board_import_items", {"keys": []})
         self.assertIn("error", result)
 
-    def test_the_page_scope_allows_merge_and_refuses_the_shell(self):
+    def test_a_console_gets_merge_and_the_shell_and_not_board_sections(self):
+        """#AGNT, owner 2026-09-20: a context specialises an agent, it does not fence it.
+
+        §19.18's "No shell, no file writes: code is a card's Execute" is gone — a board-less
+        console got both by accident anyway, because the scope hung off the board. What is left
+        is not a fence: `board_sections` restructures the whole board and stays with a cleanup,
+        and `board_claim` records a terminal pane a console has not got.
+        """
         tools = self.commands.agent_tools(str(self.repo), {})
-        tools.begin_chat_turn()
+        tools.begin_console()
         scope = tools.card_scope
         self.assertTrue(scope.allows("board_merge_cards"))
         self.assertTrue(scope.allows("read_file"))
-        self.assertFalse(scope.allows("run_command"))
-        self.assertFalse(scope.allows("write_file"))
-        names = {t["function"]["name"] for t in scope.tool_specs([])}
+        self.assertTrue(scope.allows("run_command"))
+        self.assertTrue(scope.allows("write_file"))
+        names = {t["function"]["name"] for t in tools.tool_specs()}
         self.assertIn("board_merge_cards", names)
-        self.assertNotIn("run_command", names)
+        self.assertIn("search_files", names)
         self.assertNotIn("board_sections", names)
+        self.assertNotIn("board_claim", names)
         tools.end_chat_turn()
 
     def test_a_readonly_turn_refuses_every_write(self):
@@ -733,21 +741,25 @@ class HelperKeybindingTest(ProtocolChatTest):
         self.main_agent(catalog)
         agent, tools = self.commands._build_page_agent(lambda event: None)
 
-        tools.begin_chat_turn()
+        tools.begin_console()
         names = [t["function"]["name"] for t in agent.tools()]
         self.assertIn("set_keybinding", names)
         # Last, for TAIL_TOOLS' reason: it is the one tool of this list that comes and goes.
         self.assertEqual(names[-1], "set_keybinding")
-        self.assertNotIn("run_command", names)          # the scope is otherwise unchanged
-        self.assertNotIn("write_file", names)
+        # And the shell and the file writes are there too since #AGNT: one tool set everywhere.
+        self.assertIn("run_command", names)
+        self.assertIn("write_file", names)
         tools.end_chat_turn()
 
         # A card's Discuss or Plan turn reads the repository and writes the board: rebinding a
-        # key is not part of either, and the refusal says what the turn is for.
-        tools.begin_card_turn("discuss", "ABCD")
-        self.assertNotIn("set_keybinding", [t["function"]["name"] for t in agent.tools()])
-        self.assertFalse(tools.card_scope.allows("set_keybinding"))
-        tools.end_card_turn()
+        # key is not part of either, and the refusal says what the turn is for. It is a *card*
+        # agent that says so since #AGNT — the scope is named on the agent, not read off
+        # whatever the board's tools happen to be holding.
+        card_agent, card_tools = self.commands._build_card_agent("ABCD", lambda event: None)
+        card_tools.begin_card_turn("discuss", "ABCD")
+        self.assertNotIn("set_keybinding", [t["function"]["name"] for t in card_agent.tools()])
+        self.assertFalse(card_tools.card_scope.allows("set_keybinding"))
+        card_tools.end_card_turn()
 
     def test_a_helper_with_no_catalogue_is_offered_nothing_to_rebind(self):
         """A GUI that sends no `keybindings` block: the tool simply is not there (#GMCF)."""

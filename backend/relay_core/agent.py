@@ -22,6 +22,7 @@ from . import route_assist
 from . import titles as session_titles
 from . import approvals
 from . import activity_tools
+from . import agent_context
 from . import app_tools
 from . import board_tools
 from . import prompt_profiles
@@ -522,6 +523,25 @@ def format_context(context) -> str:
 TAIL_TOOLS = ("set_keybinding", "type_into_program", "run_in_terminal")
 
 
+def validate_tool_scope(value) -> str:
+    """The named tool scope of `configure {context: {scope}}` (protocol 33, card #AGNT)."""
+    if not isinstance(value, str) or value not in agent_context.SCOPES:
+        raise ValueError("tool scope must be one of " + ", ".join(agent_context.SCOPES) + ".")
+    return value
+
+
+#: What a **read-only turn** may not call, beyond the board's own write tools (which
+#: `BoardTools.readonly` refuses with `board_readonly_turn`).  The survey of a fresh board is the
+#: turn this exists for: it presents what a probe found and offers to import it, and nothing is
+#: written until the owner answers, so the rule is enforced rather than asked for in the brief.
+READONLY_BLOCKED = frozenset(PLAN_BLOCKED_TOOLS) | {
+    "run_command", "run_in_terminal", "type_into_program", "write_plan"}
+
+READONLY_REFUSAL = (
+    "This turn writes nothing by design — the owner has not confirmed anything yet. Say what you "
+    "would do; the write happens once the owner answers.")
+
+
 class Agent:
     def __init__(self, config: ProviderConfig, workspace: str, emit: Callable[[dict], None],
                  *, provider=None, max_steps: int = DEFAULT_MAX_STEPS, keybindings=None, skills=None,
@@ -537,6 +557,7 @@ class Agent:
                  failover_hosted: bool = False, fallback: dict | None = None,
                  fallbacks=None, failover_openrouter=None,
                  roles=None, board=None, app=None, helper: bool = False,
+                 tool_scope: str | None = None, context_spec=None,
                  security_options: dict | None = None,
                  approval_options: dict | None = None):
         self.emit = emit
@@ -584,10 +605,22 @@ class Agent:
         # options, actions, the sessions index and navigation, attached exactly as `board` is
         # (protocol 30.4, card #FEJQ). The helper worker's agents get the same instance.
         self.app = app
-        # Whether this agent is a tab's helper (protocol 30.7) rather than a pane's own agent.
-        # `board_protocol._build_page_agent` is the only caller that sets it, and `_deferred_groups`
-        # is the only reader: a helper never holds the app or own_session schemas back (#GMCF).
-        self.helper = helper
+        # Which **named** tool scope this agent holds (protocol 33, card #AGNT): "pane",
+        # "console" or "card". It is named on `configure` and resolved here, in one place —
+        # `tools()` below and `_deferred_groups` are its only readers. Before this card it was
+        # *inferred* from `getattr(self.board, "card_scope", None)`, so a console in a tab with
+        # no project attached fell through to the pane branch and silently got the whole executor
+        # while a board-attached one got read-only tools: the same agent, two tool sets, decided
+        # by whether a board happened to be there. `helper=True` is the spelling from before the
+        # scope had a name and still means "console".
+        self.tool_scope = validate_tool_scope(tool_scope or ("console" if helper else "pane"))
+        # What this agent is *about* (`relay_core.agent_context.ContextSpec`), or None for a GUI
+        # that sends no `context` block. It supplies the brief in the system prompt and nothing
+        # else here: a context specialises an agent, it does not fence it (owner, 2026-09-20).
+        self.agent_context = context_spec
+        # A turn that writes nothing by design (the Switchboard survey, 19.18), set for the
+        # length of one turn by `set_readonly`.
+        self.readonly_turn = False
         # The pane agent's read tools over its own session (relay_core.activity_tools), set by
         # `ActivityTools.attach` after construction because they need the finished agent. Only a
         # pane agent has them: the helper worker has no pane of its own to report on (30.5).
@@ -841,6 +874,16 @@ class Agent:
     def _todos_enabled(self) -> bool:
         return self.track_requests and self.todo_tool
 
+    @property
+    def helper(self) -> bool:
+        """Whether this agent is a console rather than a terminal pane's own (protocol 33).
+
+        A property since #AGNT, so there is one answer and it is the named scope's: the flag and
+        the scope could disagree, and when they did the tool set went one way and the prompt the
+        other (`_deferred_groups`' note below).
+        """
+        return self.tool_scope == "console"
+
     def _deferred_groups(self) -> tuple[str, ...]:
         """The tool groups this pane holds back until `load_tools` asks for them (#GMCF 9).
 
@@ -849,19 +892,21 @@ class Agent:
         not offer these tools at all. A group nothing is wired up for — no `app` block, no activity
         tools, no board — is not deferred either: there is nothing to load.
 
-        A **helper** defers nothing, in every scope (#GMCF, 2026-09-20). Deferral is a pane's
-        bargain — the app tools are on every request and a minority of turns use them — and the
-        helper is the other side of it: it is the agent Options, Actions and Sessions ask, so its
-        first action is an app call and the hold-back only buys it a round trip. Keying that on
-        `card_scope` was not enough, because a tab with no project attached has no board to carry
-        one (30.7): its helper took the pane branch and lost the tools it exists for, and the helper
-        *with* a board got the one-line rule in the prompt it was built with while `ChatScope`
-        handed it the schemas anyway — a `load_tools` it had no tool to call.
+        **Only a terminal pane defers** (#AGNT; #GMCF decision 9 for the reason). Deferral is a
+        pane's bargain — the app tools are on every request and a minority of turns use them — and
+        a console is the other side of it: it is the agent Options, Actions and Sessions ask, so
+        its first action is an app call and the hold-back only buys it a round trip. A card turn
+        holds its stage's tools and has nothing to fetch. One line says both, because both are the
+        same question — which scope is this — and answering it twice is what let a console take
+        the pane branch in one place and the scope branch in another (a `load_tools` named in the
+        prompt that the tool list never offered).
         """
-        if getattr(self, "helper", False):
+        if self.tool_scope != "pane":
             return ()
         if getattr(self, "preset", None) is not None and getattr(self.preset, "local", False):
             return ()
+        # A per-turn stage scope is open on the board tools: a card turn, whatever the agent was
+        # configured as. Its list is the mode's, and there is nothing to fetch.
         if self.profile() != "full" or getattr(getattr(self, "board", None), "card_scope", None) is not None:
             return ()
         have = {"app": getattr(self, "app", None) is not None,
@@ -932,11 +977,16 @@ class Agent:
             # exception since the owner's decision of 2026-09-20 — a pane with a board attached
             # carries decision 8's policy block and the five board tools, because a capture pane
             # that cannot file what it was told is not worth the tokens it saves.
-            return prompt_profiles.system_prompt(
+            short = prompt_profiles.system_prompt(
                 workspace=str(self.executor.workspace.root), skills=self.executor.skills,
                 instructions=self.instructions.section if self.instructions is not None else "",
                 board=board_tools.prompt_section(getattr(self, "board", None)),
                 board_note=board_tools.session_note(getattr(self, "board", None)))
+            # The brief survives the short profile: it is the one paragraph that says which
+            # surface this agent is on, and a console with the rules of a terminal pane is the
+            # thing #AGNT exists to stop. It is a few hundred tokens, and it is what the person
+            # in Options is actually talking to.
+            return "\n\n".join(t for t in (short, self.context_brief()) if t)
         todo_rules = todo_tool.RULES if getattr(self, "track_requests", False) and getattr(self, "todo_tool", False) else ""
         # #GMCF decision 9: a group whose schemas are loaded on demand takes its rules with it, and
         # leaves the one line that says the names exist. The line is the same whether or not the
@@ -946,6 +996,11 @@ class Agent:
         # agent that has neither, so a worker the GUI sent no `app` block to is unchanged.
         sections = [
             SYSTEM,
+            # What this agent is about (protocol 33): the context's brief, sent **once**, in the
+            # prompt, rather than prefixed to every turn the way `board_chat` did it. It is the
+            # second most stable thing here — it changes only when the console's context does —
+            # and putting it high is also what makes it visible to `session_info`.
+            self.context_brief(),
             todo_rules,
             "" if "app" in deferred else app_tools.prompt_section(getattr(self, "app", None)),
             "" if "own_session" in deferred else activity_tools.prompt_section(getattr(self, "activity", None)),
@@ -965,6 +1020,32 @@ class Agent:
     def refresh_system_prompt(self) -> None:
         self.messages[0] = {"role": "system", "content": self.system_prompt()}
 
+    def context_brief(self) -> str:
+        """The context's brief, or "" — a terminal pane's brief is Relay's own `SYSTEM` prompt."""
+        spec = getattr(self, "agent_context", None)
+        return spec.brief_text() if spec is not None else ""
+
+    def set_agent_context(self, spec) -> None:
+        """Point this agent at another context (protocol 33): the brief follows, nothing else.
+
+        A `configure` that moves the context re-sends the brief; one that moves the model or the
+        keybindings does not touch it, so the conversation is undisturbed — which is the whole
+        difference between a brief that lives in the prompt and one prefixed to every turn.
+        """
+        self.agent_context = spec
+        self.refresh_system_prompt()
+
+    def set_readonly(self, on: bool) -> None:
+        """A turn that writes nothing by design (`ask {readonly: true}`, 19.18's survey).
+
+        Both halves at once: the board refuses its own write tools with `board_readonly_turn`,
+        and `_prepare` refuses the executor's (`READONLY_BLOCKED`). Before #AGNT only the first
+        existed, because the console had no shell and no file writes to refuse.
+        """
+        self.readonly_turn = bool(on)
+        if self.board is not None:
+            self.board.readonly = bool(on)
+
     def set_mode(self, mode: str) -> None:
         # Neither the prompt nor the tool list depends on the mode since #GMCF, so a switch
         # mid-conversation keeps every cached prefix; the refresh stays because it is also where
@@ -978,19 +1059,28 @@ class Agent:
 
     def tools(self) -> list[dict]:
         scope = getattr(self.board, "card_scope", None)
-        if scope is not None:
-            # A Switchboard card's Discuss or Plan turn (protocol 19.10), or the helper agent's
-            # own turn (19.18): read-only files + the board. The app tools ride alongside the
-            # scope rather than inside it — the helper answering in Options is the agent that
-            # needs them most, and protocol 30.4 is that the tool set is the same everywhere.
+        if scope is not None and self.tool_scope != "console":
+            # A Switchboard card's Discuss or Plan turn (protocol 19.10): the mode's tools and
+            # nothing else. That is the stage machine of 19.20 — a Plan writes its own `## Plan`
+            # — and it is the one thing this card leaves fenced, because it is a rule about the
+            # *stage* rather than about the surface. The agent is configured `scope: "card"`;
+            # the per-turn scope on its board tools is what says *which* mode, and a **console**
+            # is the one agent that never takes this branch — that is the fence #AGNT took down.
+            # The app tools ride alongside the scope rather than inside it: protocol 30.4 is that
+            # the tool set is the same everywhere.
             offered = self.executor.tools()
             specs = scope.tool_specs(offered) + (
                 self.app.tool_specs() if self.app is not None else [])
-            # #GMCF (owner, 2026-09-20): the helper may rebind keys, so a scope that allows
-            # `set_keybinding` gets it — last, for TAIL_TOOLS' reason. It exists only while the
-            # GUI has sent a keybinding catalogue, so from here it can only ever append.
+            # #GMCF (owner, 2026-09-20): a scope that allows `set_keybinding` gets it — last, for
+            # TAIL_TOOLS' reason. It exists only while the GUI has sent a keybinding catalogue,
+            # so from here it can only ever append.
             return specs + [t for t in offered if t["function"]["name"] in TAIL_TOOLS
                             and scope.allows(t["function"]["name"])]
+        # Every other agent — a terminal pane and an agent **console** alike — takes the list
+        # below (#AGNT). A console is not a narrower pane: it holds the whole executor, and the
+        # board's own `tool_specs` answers a console's set (merge, split, import, `search_files`)
+        # because its `card_scope` is a `ConsoleScope`. One order, one tool set, one place.
+        #
         # One order for the life of the pane (#GMCF, distillation 4.2). The mode changes nothing
         # here: a tool that appears or disappears re-prefills the whole request, and on the Local
         # tier the chat template renders the tools *before* the system prompt, so a mode switch
@@ -3133,6 +3223,13 @@ class Agent:
         group = tool_groups.group_of(name)
         if group is not None and group in self._deferred_groups() and group not in self.loaded_tool_groups:
             raise ValueError(tool_groups.refusal(name, group))
+        # A read-only turn (`ask {readonly: true}`): the board refuses its own writes in
+        # `BoardTools.run`, and these are the executor's half. The tool *list* is unchanged —
+        # narrowing it for one turn would re-prefill every cached request below it (#GMCF 4.2) —
+        # so the refusal is here, where plan mode's is.
+        if self.readonly_turn and (name in READONLY_BLOCKED
+                                   or name in app_tools.WRITE_TOOLS):
+            raise ValueError(READONLY_REFUSAL)
         scope = getattr(self.board, "card_scope", None)
         app_tool = self.app is not None and self.app.handles(name)
         if scope is not None and not scope.allows(name) and not app_tool:
