@@ -276,6 +276,11 @@ protected:
 // that posted it. Opening it marks everything as seen (that is what the badge counts).
 class NotificationsPopup final : public QFrame {
 public:
+    // As much of the list as is shown without scrolling — about five entries with a one-line
+    // body, four with an offer on them. Beyond it the list scrolls rather than growing off the
+    // bottom of the screen.
+    static constexpr int kMaxListHeight = 460;
+
     explicit NotificationsPopup(QWidget *parent) : QFrame(parent, Qt::Popup) {
         setObjectName(QStringLiteral("notificationsPopup"));
         setAttribute(Qt::WA_StyledBackground);
@@ -339,15 +344,47 @@ public:
 
 private:
     void rebuild() {
-        for (QWidget *row : std::as_const(m_widgets)) row->deleteLater();
+        // Out of the layout *now*, not when the event loop gets round to the delete: a row that
+        // is still in it is still measured, and the height below is measured from the rows this
+        // pass built. `deleteLater` stays because rebuild() runs inside a row's own ✕ handler.
+        for (QWidget *row : std::as_const(m_widgets)) {
+            m_rowsLayout->removeWidget(row);
+            row->hide();
+            row->deleteLater();
+        }
         m_widgets.clear();
         const auto entries = relay::NotificationCenter::instance().entries();
         m_empty->setVisible(entries.isEmpty());
         m_scroll->setVisible(!entries.isEmpty());
         m_clear->setEnabled(!entries.isEmpty());
         for (const relay::Notification &note : entries) m_widgets.append(addRow(note));
-        const int rows = std::min(6, int(entries.size()));
-        m_scroll->setFixedHeight(entries.isEmpty() ? 0 : std::max(64, rows * 56));
+        // How tall the list is: what the rows actually measure, never a row count times a guess.
+        // It was `min(6, count) * 56` until 2026-09-21, and 56 px is what an entry with a
+        // one-line body measures — an entry whose body wraps is nearer ninety, and one that
+        // carries an offer ("Agent changed Copy on select · off → on · [Undo]") is over a
+        // hundred. So the *second* entry of a pair was already half outside the viewport and the
+        // third was outside it altogether, drawn and clipped, with its Undo button unreachable.
+        // That is how card #AGNT's drive came to report that an agent's write is never announced
+        // (#FEJQ decision 6, §30.6): it was announced, and the announcement was below the fold.
+        // Past kMaxListHeight it scrolls, which is what a scroll area is for.
+        //
+        // The rows are shown before they are measured: rebuild() runs while the popup is still
+        // hidden (popUpUnder rebuilds, then shows), a child of a hidden widget is `isHidden()`
+        // until something shows it, and a hidden item counts as empty in its layout — so
+        // measuring first would answer nothing at all. They appear with the popup, as before.
+        for (QWidget *row : std::as_const(m_widgets)) row->show();
+        if (QLayout *own = layout()) own->activate();   // so the viewport below has its real width
+        m_rowsLayout->activate();
+        // Less a scrollbar's width: the viewport is measured before the bar that a long list puts
+        // in it, and a narrower measurement is a taller one, which is the safe direction.
+        const int listWidth = std::max(m_scroll->viewport()->width() - 18, 120);
+        // A body that wraps is as tall as its width lets it be, and QLabel's own sizeHint guesses
+        // a width. Both answers are taken and the taller wins: too tall is white space at the
+        // bottom of the list, too short is an entry nobody can reach.
+        const int wanted = std::max(m_rowsLayout->sizeHint().height(),
+                                    m_rowsLayout->hasHeightForWidth()
+                                        ? m_rowsLayout->heightForWidth(listWidth) : 0);
+        m_scroll->setFixedHeight(entries.isEmpty() ? 0 : std::clamp(wanted, 64, kMaxListHeight));
         adjustSize();
     }
 

@@ -1123,18 +1123,29 @@ bool AppCommands::undo(const QString &changeId, const QString &who, QString *err
     entry.value = rowValue(after);
     entry.when = QDateTime::currentDateTime();
     entry.who = who;
-    m_changes.append(entry);
-    while (m_changes.size() > kMaxChanges) m_changes.removeFirst();
 
     // The row's marker. An agent undoing its own change is still the agent changing the row, so
     // the mark stays and says what the undo made it. A **person** pressing Undo has answered the
     // mark — that is what "until the person touches it" means (owner decision 6) — so it goes.
     // Leaving it there had the pane say "changed by the agent just now: on → off" about a revert
     // the person had just performed by hand, which is the one thing the marker must never do.
-    if (who == kYou)
+    if (who == kYou) {
         SettingsPane::clearAgentChanged(original.key);
-    else
+    } else {
         SettingsPane::markAgentChanged(original.key, valueText(before), valueText(entry.value));
+        // …and an agent putting a setting back is an agent changing a setting, so it is announced
+        // like one and offers the way back from *it* (owner decision 6 on #FEJQ: "it should be
+        // clear what's changed / done and reversion / undo should be easy"). Amending the first
+        // entry alone left an `app_undo` the agent chose to make with no offer anywhere — the
+        // person who wanted the value the agent had just taken away had nothing to press.
+        entry.noteId = NotificationCenter::instance().postWithAction(
+            QStringLiteral("Agent changed %1").arg(entry.label),
+            QStringLiteral("%1 → %2").arg(valueText(before), valueText(entry.value)),
+            NotificationCenter::kindInfo, QString(), QStringLiteral("Undo"), undoActionId(entry.id));
+    }
+    m_changes.append(entry);
+    while (m_changes.size() > kMaxChanges) m_changes.removeFirst();
+
     // The notification that offered the Undo says it was taken rather than offering it again.
     if (!original.noteId.isEmpty())
         NotificationCenter::instance().amend(original.noteId,

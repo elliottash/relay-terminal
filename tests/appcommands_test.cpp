@@ -1124,10 +1124,13 @@ private Q_SLOTS:
         QCOMPARE(undone.value(QStringLiteral("previous")).toString(), QStringLiteral("light"));
         QCOMPARE(undone.value(QStringLiteral("value")).toString(), QStringLiteral("dark"));
 
-        // The notification says it was taken rather than offering it again.
+        // The notification that made the offer says it was taken rather than offering it again,
+        // and the agent's own revert is announced beside it with a way back of its own.
         const auto notes = relay::NotificationCenter::instance().entries();
-        QCOMPARE(notes.first().title, QStringLiteral("Undone: Theme"));
-        QVERIFY(notes.first().actionLabel.isEmpty());
+        QCOMPARE(notes.first().title, QStringLiteral("Agent changed Theme"));
+        QCOMPARE(notes.first().actionLabel, QStringLiteral("Undo"));
+        QCOMPARE(notes.at(1).title, QStringLiteral("Undone: Theme"));
+        QVERIFY(notes.at(1).actionLabel.isEmpty());
 
         // And it cannot be taken twice.
         QCOMPARE(run({{QStringLiteral("id"), QStringLiteral("r3")},
@@ -1229,6 +1232,66 @@ private Q_SLOTS:
         QVERIFY(!orphan.value(QStringLiteral("message")).toString().isEmpty());
     }
 
+    // A console's write is a helper-pipe write (card #AGNT). Options, Actions, Sessions, the
+    // Switchboard and a card are all `Pane`s on the **tab's** worker now, so an `app_option_set`
+    // typed into one of them arrives in that worker's own wire shape — `event: "app_command"`
+    // with the command's fields beside it — and is executed with `who` = "helper". The drive of
+    // #AGNT reported that such a write reached the setting and was never announced; it was
+    // announced, and the notification list drew it outside its own viewport
+    // (NotificationsPopup::rebuild). This is the half that is testable without a window, so that
+    // "the console's route produces the notice and the mark" can never again rest on a
+    // screenshot: the change log, the notice with its Undo, the row's marker, and the offer
+    // working from where the person finds it.
+    void aConsolesWriteIsAnnouncedAndMarkedLikeAPanesOwn() {
+        const QJsonObject event{{QStringLiteral("event"), QStringLiteral("app_command")},
+                                {QStringLiteral("id"), QStringLiteral("ac-1")},
+                                {QStringLiteral("command"), QStringLiteral("set_option")},
+                                {QStringLiteral("row"), QStringLiteral("option:thinking")},
+                                {QStringLiteral("value"), false}};
+        const QJsonObject answer = relay::appcommands::answerFor(
+            event, [this](const QJsonObject &sent) { return run(sent, QStringLiteral("helper")); });
+        QVERIFY(answer.value(QStringLiteral("ok")).toBool());
+        QCOMPARE(answer.value(QStringLiteral("id")).toString(), QStringLiteral("ac-1"));
+        QCOMPARE(state.thinking, false);
+
+        QCOMPARE(app.changes().size(), 1);
+        QCOMPARE(app.changes().first().who, QStringLiteral("helper"));
+        const auto notes = relay::NotificationCenter::instance().entries();
+        QCOMPARE(notes.size(), 1);
+        QCOMPARE(notes.first().title, QStringLiteral("Agent changed Show thinking"));
+        QCOMPARE(notes.first().body, QStringLiteral("on → off"));
+        QCOMPARE(notes.first().actionLabel, QStringLiteral("Undo"));
+        QCOMPARE(relay::SettingsPane::agentChangeNote(QStringLiteral("option:thinking")),
+                 QStringLiteral("changed by the agent just now: on → off"));
+
+        // The popup hands the window the action id, the window hands it back here: the value
+        // goes back, the mark goes with it, and the entry stops offering what has been taken.
+        QVERIFY(app.undoFromNotification(notes.first().actionId));
+        QCOMPARE(state.thinking, true);
+        QVERIFY(relay::SettingsPane::agentChangeNote(QStringLiteral("option:thinking")).isEmpty());
+        const auto after = relay::NotificationCenter::instance().entries();
+        QCOMPARE(after.size(), 1);
+        QCOMPARE(after.first().title, QStringLiteral("Undone: Show thinking"));
+        QVERIFY(after.first().actionLabel.isEmpty());
+    }
+
+    // The same for an action: "Agent ran <label>", on the pipe a console's `app_action_run`
+    // comes out of. No Undo on an action — what it did is its own to take back (§30.6).
+    void aConsolesActionIsAnnouncedToo() {
+        const QJsonObject event{{QStringLiteral("event"), QStringLiteral("app_command")},
+                                {QStringLiteral("id"), QStringLiteral("ac-2")},
+                                {QStringLiteral("command"), QStringLiteral("run_action")},
+                                {QStringLiteral("key"), QStringLiteral("theme.reload")}};
+        const QJsonObject answer = relay::appcommands::answerFor(
+            event, [this](const QJsonObject &sent) { return run(sent, QStringLiteral("helper")); });
+        QVERIFY(answer.value(QStringLiteral("ok")).toBool());
+        QCOMPARE(state.ran, QStringList{QStringLiteral("theme.reload")});
+        const auto notes = relay::NotificationCenter::instance().entries();
+        QCOMPARE(notes.size(), 1);
+        QCOMPARE(notes.first().title, QStringLiteral("Agent ran Reload themes"));
+        QVERIFY(notes.first().actionLabel.isEmpty());
+    }
+
     // Owner decision 6: a row an agent changed "carries a marker until the person touches it".
     // Pressing Undo *is* touching it, so the mark goes; an agent undoing its own change is still
     // the agent changing the row, so there the mark stays and says what the undo made it.
@@ -1256,6 +1319,24 @@ private Q_SLOTS:
         QCOMPARE(state.thinking, true);
         QVERIFY(relay::SettingsPane::agentChangeNote(QStringLiteral("option:thinking"))
                     .contains(QStringLiteral("off \u2192 on")));
+
+        // \u2026and it is announced like any other agent write, with the way back from *it*: the
+        // amended entry says the first offer was taken and offers nothing, so without this the
+        // person whose setting the agent has just put back has nothing to press \u2014 and an
+        // `app_undo` whose original entry had been dismissed would announce nothing at all.
+        const auto notes = relay::NotificationCenter::instance().entries();
+        QCOMPARE(notes.first().title, QStringLiteral("Agent changed Show thinking"));
+        QCOMPARE(notes.first().body, QStringLiteral("off \u2192 on"));
+        QCOMPARE(notes.first().actionLabel, QStringLiteral("Undo"));
+        QCOMPARE(notes.first().actionId, AppCommands::undoActionId(app.changes().last().id));
+        QCOMPARE(notes.at(1).title, QStringLiteral("Undone: Show thinking"));
+        QVERIFY(notes.at(1).actionLabel.isEmpty());
+
+        // And that offer works: the person takes the agent's revert back, and the mark goes
+        // because the person has now touched the row.
+        QVERIFY(app.undoFromNotification(notes.first().actionId));
+        QCOMPARE(state.thinking, false);
+        QVERIFY(relay::SettingsPane::agentChangeNote(QStringLiteral("option:thinking")).isEmpty());
     }
 
     // ----- open a conversation (§30.4) ----------------------------------------------------------
