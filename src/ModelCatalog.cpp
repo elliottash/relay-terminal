@@ -357,8 +357,6 @@ QList<Sort> allSorts() {
 // ----- curation --------------------------------------------------------------------------------
 
 namespace curation {
-// Whether any tier list names this entry (an open-ended provider's tail shows only then).
-bool inAnyList(const QString &key);
 
 QStringList priority() { return list(kPriority); }
 
@@ -407,10 +405,11 @@ void resetPriority() { QSettings().remove(kPriority); }
 // (OpenRouter's live listing) only the recommended rows — the ones the worker's own catalog names,
 // which are exactly the rows that carry a `tier` (`presets.MODEL_CATALOG["openrouter"]`;
 // openrouter_catalog.py sends `tier: null` on every live row) — plus an id you typed and anything
-// a tier list names. This was `inPickerList` until today, written into `shown()` as the only rule.
+// a **terminal** list names. This was `inPickerList` until today, written into `shown()` as the
+// only rule.
 static bool availableByDefault(const Entry &entry) {
     if (!entry.openEnded || !entry.tier.isEmpty() || entry.custom) return true;
-    return inAnyList(entry.key);
+    return inTerminalList(entry.key);
 }
 
 // Whether the stored list says anything at all about this preset. A provider added *after* the
@@ -429,9 +428,10 @@ QStringList availableKeys() { return list(kAvailable); }
 bool isAvailable(const Entry &entry, const QStringList &available) {
     if (available.isEmpty()) return availableByDefault(entry);
     if (available.contains(entry.key)) return true;
-    // A model a tier list names is available whatever the checkbox says: a list entry that cannot
-    // be picked is a list that lies, and the failover would step over a rank the user wrote down.
-    if (inAnyList(entry.key)) return true;
+    // A model one of the **terminal** lists names is available whatever the checkbox says: a list
+    // entry that cannot be picked is a list that lies, and the failover would step over a rank the
+    // user wrote down. The lite list does not pin — see `inTerminalList`.
+    if (inTerminalList(entry.key)) return true;
     if (!presetNamedIn(available, entry.preset)) return availableByDefault(entry);
     return false;
 }
@@ -440,16 +440,27 @@ bool isAvailable(const Entry &entry) { return isAvailable(entry, availableKeys()
 
 void setAvailable(const QString &key, bool on, const Catalog &catalog) {
     QStringList keys = availableKeys();
+    QString preset, model;
+    const QString marker = Catalog::splitKey(key, &preset, &model) ? preset + QLatin1Char('|') : QString();
     if (keys.isEmpty()) {
         // The first change writes down today's default, so that one un-check un-checks one model
         // rather than every model the default was letting through (the same shape `setShown` had).
         for (const Entry &entry : catalog.entries)
             if (availableByDefault(entry)) keys << entry.key;
     }
-    if (on && !keys.contains(key)) keys << key;
-    if (!on) keys.removeAll(key);
-    // Un-checking the last one is a reset to the default, never an empty catalog.
-    if (keys.isEmpty()) { QSettings().remove(kAvailable); return; }
+    if (on) { keys.removeAll(marker); if (!keys.contains(key)) keys << key; }
+    else keys.removeAll(key);
+    // Un-checking the last one is a reset to the default, never an empty catalog. A marker (below)
+    // is not a model, so a list of nothing but markers is that same reset.
+    bool anyModel = false;
+    for (const QString &each : std::as_const(keys)) anyModel = anyModel || !each.endsWith(QLatin1Char('|'));
+    if (!anyModel) { QSettings().remove(kAvailable); return; }
+    // A provider whose every model has been un-ticked leaves `"<preset>|"` behind, which is not a
+    // key and matches no entry — it is only there so `presetNamedIn` goes on finding the preset.
+    // Without it the provider would read as one nobody has said anything about and the default —
+    // every model available — would quietly come back, so a provider serving one model (a custom
+    // endpoint, a local server) could never have that model un-ticked at all (card #MDL1).
+    if (!on && !marker.isEmpty() && !presetNamedIn(keys, preset)) keys << marker;
     store(kAvailable, keys);
 }
 
@@ -623,6 +634,22 @@ void setTierEffort(const QString &tier, const QString &key, const QString &effor
 }
 bool inAnyList(const QString &key) {
     for (const QString &tier : tierIds())
+        for (const TierEntry &entry : tierList(tier))
+            if (entry.key == key) return true;
+    return false;
+}
+// The same question asked of the four classes a *pane* can run in — `boxClasses()`: high, main,
+// flash, local. It is `inAnyList` less `lite`, and the difference is the whole of the owner's
+// 2026-09-21 report: "it seems like i cant disable gemini flash lite. just to say -- this tab is
+// only for terminal agents, so gemini flash lite should be optional." Membership of the lite list
+// used to pin a model available (`isAvailable`), so the one model the built-in lite list names
+// could never be un-ticked. Lite is not a pane mode — the box has no lite row (design 5.3) and
+// nothing a person types goes to it — so what the lite list holds is a statement about the chores,
+// not about what this machine offers a terminal agent. The chores read `models/tier/lite` straight
+// (`Pane::tiersObject`), never `shown()`, so un-ticking a lite model takes it out of the pane's
+// filter and leaves the chores exactly where they were.
+bool inTerminalList(const QString &key) {
+    for (const QString &tier : boxClasses())
         for (const TierEntry &entry : tierList(tier))
             if (entry.key == key) return true;
     return false;
@@ -943,6 +970,21 @@ void setSort(Sort sort) {
 
 // ----- lists -----------------------------------------------------------------------------------
 
+// Relay Free's own lite role, and anything shaped like it (card #MDL1, owner 2026-09-21: "and
+// relay lite shouldnt show up"). The gateway exposes one pseudo-model per role — `relay-main`,
+// `relay-flash`, `relay-lite` — and clamps each to that role's own ceiling, so `relay-lite` is not
+// a model at all: it is the lite chore lane, named so the lite list has something to hold. Nothing
+// a terminal agent does runs on it, so no surface a terminal agent picks from draws it.
+//
+// The rule is read off the row rather than off the name, so a second hosted lane needs no edit
+// here: a **hosted** entry whose ranking class is `lite` and nothing else (`Entry::tier`, the one
+// class the worker's catalog names it a default for). Everybody else's lite-classed models —
+// gemini-3.5-flash-lite, gpt-5.6-luna, claude-haiku-4.5 — are real models a pane can be put on,
+// so they stay, available by default and the user's to un-tick (`inTerminalList`).
+bool liteOnlyRole(const Entry &entry) {
+    return entry.hosted && entry.tier == QStringLiteral("lite");
+}
+
 // The one rule behind `shown()`, stated once (card #MDL1, design 5.5 and 5.7): a usable entry
 // that is **available** — step 2 of the owner's four. With nothing un-checked that is every model
 // of a branded provider plus an open-ended one's recommended rows, which is exactly the rule t:a10
@@ -951,7 +993,7 @@ void setSort(Sort sort) {
 // OpenRouter row can be put in, which is what "for openrouter, you have to select specific models"
 // needs. The long tail is still behind typing, which is where `allUsable` is read.
 static bool inPickerList(const Entry &entry, const QStringList &available) {
-    return entry.usable && curation::isAvailable(entry, available);
+    return entry.usable && !liteOnlyRole(entry) && curation::isAvailable(entry, available);
 }
 
 QList<Entry> shown(const Catalog &catalog) {
@@ -970,7 +1012,7 @@ QList<Entry> allUsable(const Catalog &catalog) {
     QList<Entry> out;
     for (const QString &key : curation::ranked(catalog)) {
         const Entry *entry = catalog.find(key);
-        if (entry && entry->usable) out << *entry;
+        if (entry && entry->usable && !liteOnlyRole(*entry)) out << *entry;
     }
     return out;
 }
@@ -980,7 +1022,7 @@ QList<Entry> curatable(const Catalog &catalog) {
     const QStringList available = curation::availableKeys();
     for (const QString &key : curation::ranked(catalog)) {
         const Entry *entry = catalog.find(key);
-        if (!entry || !entry->usable) continue;
+        if (!entry || !entry->usable || liteOnlyRole(*entry)) continue;
         // Available, or available by default and un-checked: both are rows the `all` tab draws —
         // the second greyed, with its box empty, so it can be ticked again. An open-ended
         // provider's long tail is neither, and stays behind typing.

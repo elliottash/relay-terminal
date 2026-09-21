@@ -300,6 +300,81 @@ private Q_SLOTS:
         QVERIFY(!curation::isAvailable(*catalog.find(sonnet)));
     }
 
+    // …but the **lite** list does not pin, because lite is not a pane mode (card #MDL1,
+    // owner 2026-09-21: "it seems like i cant disable gemini flash lite. just to say -- this tab
+    // is only for terminal agents, so gemini flash lite should be optional"). The lite list was
+    // the reason the one model the built-in list names could never be un-ticked.
+    void theLiteListDoesNotPinButTheTerminalClassesDo() {
+        const Catalog catalog = catalogFrom(presets());
+        const QString flashLite = QStringLiteral("glm-coding|glm-5.3-flash");
+        curation::addToTier(QStringLiteral("lite"), flashLite);
+        QVERIFY(curation::inAnyList(flashLite));
+        QVERIFY(!curation::inTerminalList(flashLite));
+        // The tick is the user's: un-ticking it takes it out of `shown` and leaves it on the
+        // available tab to be ticked back.
+        curation::setAvailable(flashLite, false, catalog);
+        QVERIFY(!curation::isAvailable(*catalog.find(flashLite)));
+        for (const Entry &entry : shown(catalog)) QVERIFY(entry.key != flashLite);
+        bool inTab = false;
+        for (const Entry &entry : curatable(catalog)) inTab = inTab || entry.key == flashLite;
+        QVERIFY(inTab);
+        // The lite list still names it — the chores read `models/tier/lite` straight and are
+        // untouched by the tick.
+        QCOMPARE(curation::tierList(QStringLiteral("lite")).size(), 1);
+        QCOMPARE(curation::tierList(QStringLiteral("lite")).first().key, flashLite);
+        // Each of the four terminal classes does pin, one at a time.
+        for (const QString &tier : curation::boxClasses()) {
+            curation::addToTier(tier, flashLite);
+            QVERIFY2(curation::inTerminalList(flashLite), qPrintable(tier));
+            QVERIFY2(curation::isAvailable(*catalog.find(flashLite)), qPrintable(tier));
+            curation::removeFromTier(tier, flashLite);
+            QVERIFY2(!curation::isAvailable(*catalog.find(flashLite)), qPrintable(tier));
+        }
+    }
+
+    // Relay Free's lite role is the gateway's chore lane, not a model: no surface a terminal agent
+    // picks from draws it (owner, 2026-09-21: "and relay lite shouldnt show up"). Its two siblings
+    // are ordinary rows, and so is anybody else's lite-classed model.
+    void relayFreesLiteRoleIsDrawnNowhereButTheListStillHoldsIt() {
+        QJsonArray rows;
+        QJsonArray free{model(QStringLiteral("relay-main"), QStringLiteral("relay-main"), QStringLiteral("main"), {QStringLiteral("low")}),
+                        model(QStringLiteral("relay-flash"), QStringLiteral("relay-flash"), QStringLiteral("flash"), {QStringLiteral("low")}),
+                        model(QStringLiteral("relay-lite"), QStringLiteral("relay-lite"), QStringLiteral("lite"), {QStringLiteral("low")})};
+        rows << QJsonObject{{QStringLiteral("id"), QStringLiteral("relay-free")}, {QStringLiteral("label"), QStringLiteral("relay free")},
+                            {QStringLiteral("provider"), QStringLiteral("relay free")}, {QStringLiteral("hosted"), true},
+                            {QStringLiteral("available"), true}, {QStringLiteral("model"), QStringLiteral("relay-main")},
+                            {QStringLiteral("models"), free}};
+        // …and a lite-classed model of somebody else's, which is a real model and stays.
+        rows << preset(QStringLiteral("gemini"), QStringLiteral("google · gemini"), QStringLiteral("google"),
+                       QStringLiteral("gemini-3.5-flash-lite"),
+                       {model(QStringLiteral("gemini-3.5-flash-lite"), QStringLiteral("gemini-3.5-flash-lite"), QStringLiteral("lite"), {})},
+                       true);
+        const Catalog catalog = catalogFrom(rows);
+        const QString lite = QStringLiteral("relay-free|relay-lite");
+        QVERIFY(catalog.find(lite));                       // the catalog knows it: the worker sent it
+        QVERIFY(liteOnlyRole(*catalog.find(lite)));
+        QVERIFY(!liteOnlyRole(*catalog.find(QStringLiteral("relay-free|relay-main"))));
+        QVERIFY(!liteOnlyRole(*catalog.find(QStringLiteral("gemini|gemini-3.5-flash-lite"))));
+        for (const Entry &entry : shown(catalog)) QVERIFY(entry.key != lite);
+        for (const Entry &entry : allUsable(catalog)) QVERIFY(entry.key != lite);
+        for (const Entry &entry : curatable(catalog)) QVERIFY(entry.key != lite);
+        const auto drawn = [&](const QString &key) {
+            for (const Entry &entry : curatable(catalog)) if (entry.key == key) return true;
+            return false;
+        };
+        QVERIFY(drawn(QStringLiteral("relay-free|relay-main")));
+        QVERIFY(drawn(QStringLiteral("relay-free|relay-flash")));
+        QVERIFY(drawn(QStringLiteral("gemini|gemini-3.5-flash-lite")));   // optional, and tickable
+        curation::setAvailable(QStringLiteral("gemini|gemini-3.5-flash-lite"), false, catalog);
+        QVERIFY(!curation::isAvailable(*catalog.find(QStringLiteral("gemini|gemini-3.5-flash-lite"))));
+        // …and ranking it in lite does not bring it back, nor does it bring relay-lite into view.
+        curation::addToTier(QStringLiteral("lite"), lite);
+        curation::addToTier(QStringLiteral("lite"), QStringLiteral("gemini|gemini-3.5-flash-lite"));
+        QVERIFY(!curation::isAvailable(*catalog.find(QStringLiteral("gemini|gemini-3.5-flash-lite"))));
+        for (const Entry &entry : shown(catalog)) QVERIFY(entry.key != lite);
+        QCOMPARE(curation::tierList(QStringLiteral("lite")).size(), 2);
+    }
+
     // Step 1 happens again every time a key is added, and a provider that was not on this machine
     // when the list was written has said nothing about its models — so the default applies to it.
     // Without this, one un-check today would hide every model of tomorrow's provider.

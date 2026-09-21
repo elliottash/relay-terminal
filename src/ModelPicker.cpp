@@ -67,17 +67,6 @@ QString groupId(const Group &group) {
     return group.entries.first().local ? QStringLiteral("local\x1f") + group.name : group.name;
 }
 
-// Whether any of the five lists names this entry. `curation::inAnyList` is ModelCatalog.cpp's
-// own; from out here the lists themselves are the way to ask. It decides one thing in this file:
-// a listed model's availability tick is always on and says why (card #MDL1, design 5.7) — a rank
-// the user wrote down that the box would not offer is a list that lies.
-bool inAnyTierList(const QString &key) {
-    for (const QString &tier : curation::tierIds())
-        for (const curation::TierEntry &entry : curation::tierList(tier))
-            if (entry.key == key) return true;
-    return false;
-}
-
 // Which models a tier list may hold — the same rule Options › Models' "+ add a model…" applies, so
 // the two doors offer the same models: local models in the local list and nowhere else, and a
 // guest harness only where it can be a whole agent (its own pane, or a plan turn).
@@ -611,7 +600,7 @@ QTreeWidgetItem *ModelPicker::addGroupRow(const Group &group, bool addable) {
         QString listed;
         for (const Entry &each : group.entries) {
             available = available || curation::isAvailable(each);
-            if (inAnyTierList(each.key)) listed = each.key;
+            if (curation::inTerminalList(each.key)) listed = each.key;
         }
         applyAvailability(row, available, listed);
     }
@@ -910,21 +899,24 @@ void ModelPicker::refreshAvailability() {
         for (const QString &key : std::as_const(keys)) {
             const Entry *entry = m_context.catalog.find(key);
             available = available || (entry != nullptr && curation::isAvailable(*entry));
-            if (inAnyTierList(key)) listed = key;
+            if (curation::inTerminalList(key)) listed = key;
         }
         applyAvailability(row, available, listed);
     }
     m_building = wasBuilding;
 }
 
-// One row's tick, its ink and its tooltip. `reason` is the key of a tier list entry, when one of
-// this row's providers is named by a list: the tick is then on whatever the setting says, because
-// a rank the user wrote down that the box would not offer is a list that lies — and the tooltip
-// is where that is said, since a checkbox cannot say it.
+// One row's tick, its ink and its tooltip. `reason` is the key of a **terminal** list entry, when
+// one of this row's providers is named by high, main, flash or local: the tick is then on whatever
+// the setting says, because a rank the user wrote down that the box would not offer is a list that
+// lies — and the tooltip is where that is said, since a checkbox cannot say it. The **lite** list
+// does not pin (card #MDL1, `curation::inTerminalList`): lite is not a pane mode, so what it holds
+// says nothing about what this tab offers a terminal agent.
 void ModelPicker::applyAvailability(QTreeWidgetItem *row, bool available, const QString &reason) {
     row->setCheckState(ColAvail, available ? Qt::Checked : Qt::Unchecked);
     const QString tip = !reason.isEmpty()
-        ? QStringLiteral("Available: one of your lists names it, which keeps it available whatever this box says")
+        ? QStringLiteral("Available: your high, main, flash or local list names it, which keeps it available "
+                         "whatever this box says. The lite list does not: those are chores, not panes")
         : available
             ? QStringLiteral("Available: this model is in the lists, the alt+m box and its filter")
             : QStringLiteral("Not available: it is in no list, not in the box, and not in the box's filter. "

@@ -946,9 +946,9 @@ private Q_SLOTS:
         QVERIFY(!rowKeys(again.list()).contains(QStringLiteral("openrouter|vendor/tail-3")));
     }
 
-    // A model one of the lists names is available whatever the box says: a rank the user wrote
-    // down that the box would not offer is a list that lies, and the tooltip says so.
-    void aModelATierListNamesStaysTicked() {
+    // A model one of the **terminal** lists names is available whatever the box says: a rank the
+    // user wrote down that the box would not offer is a list that lies, and the tooltip says so.
+    void aModelATerminalListNamesStaysTicked() {
         const QString flash = QStringLiteral("glm-coding|glm-5.3-flash");
         setList(QStringLiteral("flash"), {{flash, QString()}});
         ModelPicker::Context ctx = context();
@@ -956,11 +956,31 @@ private Q_SLOTS:
         ModelPicker picker(ctx);
         picker.selectKey(flash);
         QTreeWidgetItem *row = picker.list()->currentItem();
-        QVERIFY(row->toolTip(ColAvail).contains(QStringLiteral("one of your lists names it")));
+        QVERIFY(row->toolTip(ColAvail).contains(QStringLiteral("high, main, flash or local list names it")));
         row->setCheckState(ColAvail, Qt::Unchecked);
         // The setting took the un-tick; the list overrules it, and the box goes straight back on.
         QVERIFY(curation::isAvailable(*ctx.catalog.find(flash)));
         QCOMPARE(row->checkState(ColAvail), Qt::Checked);
+    }
+
+    // …and the **lite** list does not pin (card #MDL1, owner 2026-09-21: "it seems like i cant
+    // disable gemini flash lite … this tab is only for terminal agents"). Lite is not a pane mode,
+    // so the tick stays the user's and the un-tick sticks.
+    void theLiteListDoesNotPinTheTick() {
+        const QString flash = QStringLiteral("glm-coding|glm-5.3-flash");
+        setList(QStringLiteral("lite"), {{flash, QString()}});
+        ModelPicker::Context ctx = context();
+        ctx.tier = QStringLiteral("all");
+        ModelPicker picker(ctx);
+        picker.selectKey(flash);
+        QTreeWidgetItem *row = picker.list()->currentItem();
+        QCOMPARE(row->checkState(ColAvail), Qt::Checked);
+        QVERIFY(!row->toolTip(ColAvail).contains(QStringLiteral("high, main, flash or local list names it")));
+        row->setCheckState(ColAvail, Qt::Unchecked);
+        QVERIFY(!curation::isAvailable(*ctx.catalog.find(flash)));
+        QCOMPARE(row->checkState(ColAvail), Qt::Unchecked);
+        // The lite list is untouched: the chores go on running it.
+        QCOMPARE(curation::tierList(QStringLiteral("lite")).size(), 1);
     }
 
     // Options › Models' per-provider "models… (N of M available)" link: the `all` tab, opened

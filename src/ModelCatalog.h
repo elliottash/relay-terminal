@@ -228,8 +228,9 @@ void removeCustom(const QString &key);
 // below): which models this machine can reach is not a thing to swap between "AI work" and "admin
 // work", and a profile that hid half a provider would read as the provider being broken.
 //
-// A model a tier list names is available whatever the checkbox says — a list entry that cannot be
-// picked is a list that lies — and the dialog's tooltip says so on the greyed checkbox.
+// A model one of the **terminal** lists names is available whatever the checkbox says — a list
+// entry that cannot be picked is a list that lies — and the tooltip says so on the pinned
+// checkbox. `lite` is not one of them: see `inTerminalList` below.
 QStringList availableKeys();
 // The list read once, for a caller walking a whole catalog (the same trap as `shown`, #PPR4).
 bool isAvailable(const Entry &entry, const QStringList &available);
@@ -287,6 +288,15 @@ void setTierEffort(const QString &tier, const QString &key, const QString &effor
 // The level a model runs at when picked: the main list's entry for it, else the first other list
 // that names it, else empty (the pane keeps its own level, moved to one the model offers).
 QString listEffortFor(const QString &key);
+// Whether any of the five lists names this key, and whether one of the four **terminal** classes
+// does — `boxClasses()`: high, main, flash, local. The pair exists because `lite` is not a pane
+// mode: the box has no lite row (design 5.3), the models pane is about what a terminal agent can
+// run, and so a model the lite list names is still the user's to un-tick on the available tab
+// (owner, 2026-09-21: "this tab is only for terminal agents, so gemini flash lite should be
+// optional"). Only `inTerminalList` pins availability; the chores read `models/tier/lite` straight
+// and are untouched by the tick either way.
+bool inAnyList(const QString &key);
+bool inTerminalList(const QString &key);
 
 // ----- what the box shows of each list (card #MDL1, design 5.3) --------------------------------
 // The Alt+M box draws a **class** per header — high, main, flash, and local where this machine
@@ -401,6 +411,12 @@ QList<Entry> allUsable(const Catalog &catalog);
 // un-checked row therefore stays in the tab, greyed, with its box there to tick again; an
 // open-ended provider's long tail is still behind typing, because it is neither.
 QList<Entry> curatable(const Catalog &catalog);
+// Relay Free's own chore lane: a **hosted** row whose one ranking class is `lite` — `relay-lite`
+// today. The gateway clamps each of its three pseudo-models to that role's ceiling, so this one is
+// the lite chore lane and not a model a pane can be put on; `shown`, `allUsable` and `curatable`
+// all leave it out, which is every surface a terminal agent picks from (owner, 2026-09-21: "and
+// relay lite shouldnt show up"). The lite *list* still holds it and the chores still run on it.
+bool liteOnlyRole(const Entry &entry);
 // The same list under one sort. Every sort is stable over `entries`' order, so ties keep rank.
 QList<Entry> ordered(QList<Entry> entries, Sort sort, const Catalog &catalog);
 
