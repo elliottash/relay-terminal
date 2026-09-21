@@ -37,7 +37,7 @@ from .checkpoints import CheckpointStore
 from .context import DEFAULT_THRESHOLD, ContextTracker
 from .planning import (PLAN_BLOCKED_TOOLS, PLAN_MODE_NOTE, WRITE_PLAN_SPEC, guest_plan_prompt, plan_from_reply,
                        validate_mode, validate_plan_args, write_plan)
-from .roles import guest_id_of, is_guest_preset
+from .roles import GUEST_BASE_SCHEME, guest_id_of, is_guest_preset
 from .presets import (apply_effort, context_window_for, effort_style, infer_effort,
                       model_supports_vision, resolve_preset, tier_default, validate_effort)
 from .program_input import DEFAULT_MAX_WRITES, clip_screen, validate_grant
@@ -2273,7 +2273,8 @@ class Agent:
     def _begin_vision_turn(self, pictures: list[dict], turn_id: str) -> dict | None:
         """Route one turn that carries images, for that turn only (owner decisions, 2026-09-17).
 
-        Three outcomes:
+        Four outcomes:
+        * the pane is on a guest harness — the guest takes the pictures itself, always (below);
         * the pane's own model reads images — nothing changes and no event is sent;
         * it does not, and a vision model is configured or the provider has one (GLM-5.3 → GLM-5.3
           Flash) — this turn runs on that model, which `vision_route` says in the UI;
@@ -2283,6 +2284,16 @@ class Agent:
         A vision model the user picked by hand wins even over a main model that can read images:
         they chose it for pictures, so pictures go there.
         """
+        if self._on_a_guest_harness():
+            # A guest harness (protocol 29.3) is an agent of its own, with its own session and its
+            # own transcript, and both adapters put images on the wire as image blocks
+            # (`guest_harness_claude._user_message`, `guest_harness_codex._build_input`). So it
+            # reads the pictures itself, and it is never routed off: a vision swap would hand them
+            # to a model the guest never sees, for a turn the guest is still holding. Its
+            # `config.model` is the family name its CLI reports ("opus", "sonnet"), which matches
+            # no prefix in VISION_MODELS — asking `model_supports_vision` refused an image Claude
+            # Code would have read (card #P1CS).
+            return None
         main_reads_images = model_supports_vision(self.config.model)
         pinned = bool(self.roles is not None and self.roles.stored().get("vision"))
         target = self.roles.vision_target() if self.roles is not None else None
@@ -2314,6 +2325,13 @@ class Agent:
                            f"then back to {back_name}."})
         self.emit({"event": "status", "text": f"Image turn · {to_name}"})
         return swap
+
+    def _on_a_guest_harness(self) -> bool:
+        """Whether this pane's turns are served by a guest CLI rather than by a model endpoint.
+        The base URL is the test `guest_harness_provider.config_guest_id` makes; the scheme is
+        taken from `roles`, which names it without pulling in the guest stack."""
+        base_url = getattr(self.config, "base_url", "")
+        return isinstance(base_url, str) and base_url.startswith(GUEST_BASE_SCHEME)
 
     def _end_vision_turn(self) -> None:
         """Put the pane's own model back after an image turn. Always runs, however the turn ended,

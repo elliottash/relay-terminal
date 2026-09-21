@@ -30,6 +30,9 @@ KIMI = ProviderConfig("https://api.moonshot.ai/v1", "kimi-k3", "key", {"reasonin
 # MiniMax M3 is text-only, so it stands in wherever a test needs a model that cannot read images.
 MINIMAX = ProviderConfig("https://api.minimax.io/v1", "MiniMax-M3", "key", {}, 8192)
 OPENAI = ProviderConfig("https://api.openai.com/v1", "gpt-6-astra", "key", {"reasoning_effort": "high"}, 8192)
+# A pane on a guest harness (protocol 29.3): no key, a `harness://` base URL, and the model is the
+# family name Claude Code reports rather than an API id.
+GUEST = ProviderConfig("harness://claude", "sonnet", "", {}, 8192)
 
 
 class RecordingProvider:
@@ -333,6 +336,27 @@ class ImageTurnTests(unittest.TestCase):
         prompt = [m for m in agent.messages if m.get("relay_kind") == "prompt"][-1]
         self.assertIn("what is this?", prompt["content"])
         self.assertIsInstance(prompt["content"], str)
+
+    # ----- a guest harness reads its own pictures (card #P1CS) ------------------------
+    def test_a_guest_harness_pane_takes_the_image_turn_itself(self):
+        # Claude Code takes images; "sonnet" is not an id any VISION_MODELS prefix matches, and the
+        # turn used to be refused with "sonnet cannot read images" before it reached the guest.
+        agent = self.build(GUEST, "guest:claude")
+        agent.ask("what is this?", attachments=self.attachment())
+        self.assertIsNone(self.event("vision_unavailable"))
+        model, messages = RecordingProvider.served[-1]
+        self.assertEqual(model, "sonnet")
+        self.assertEqual(messages[-1]["content"][1]["type"], "image_url")
+        self.assertEqual(self.events[-1]["event"], "done")
+
+    def test_a_guest_pane_is_not_routed_off_its_harness_for_an_image(self):
+        # A swap would hand the picture to a model the guest never sees, on a turn the guest's own
+        # session is holding, so a pinned vision model does not take a guest pane's image turn.
+        agent = self.build(GUEST, "guest:claude", {"vision": {"preset": "openai", "model": "gpt-6-astra"}})
+        agent.ask("what is this?", attachments=self.attachment())
+        self.assertEqual(RecordingProvider.served[-1][0], "sonnet")
+        self.assertIsNone(self.event("vision_route"))
+        self.assertEqual(self.events[-1]["event"], "done")
 
     # ----- the configured vision model -----------------------------------------------
     def test_a_configured_vision_model_takes_the_image_turn(self):
