@@ -26,9 +26,11 @@
 namespace relay::links {
 
 enum class Kind {
-    Path, // a file or folder, possibly with :line:column
-    Url,  // scheme://rest — left alone, never treated as a path
-    Card, // #K7Q2 — a Switchboard card the pane has seen (design section 5)
+    Path,    // a file or folder, possibly with :line:column
+    Url,     // scheme://rest — left alone, never treated as a path
+    Card,    // #K7Q2 — a Switchboard card the pane has seen (design section 5)
+    Option,  // option:agent/allow_writes — a row of Options (#FEJQ)
+    Session, // session:0f3a… — a saved conversation (#FEJQ)
 };
 
 // One span of a logical line that could be a link. `start`/`length` are UTF-16 indices
@@ -39,6 +41,7 @@ struct Candidate {
     Kind kind = Kind::Path;
     QString text;      // the source text of the span (quotes already removed)
     QString path;      // Path: the span without the :line:column suffix. Card: the id, upper-cased.
+                       // Option: `<section>[/<row>]`. Session: the id. (The `//` is already gone.)
     int line = -1;     // 1-based, -1 when the span carries none
     int column = -1;
     bool bare = false; // Path: a bare-token stage find with no `/` in it — see Mode::Prose
@@ -82,10 +85,24 @@ QString cardTarget(const QString &id);
 // The id inside a `relay://card/<id>` target, or empty when it is not one.
 QString cardIdOf(const QString &target);
 
+// The other two things an agent's answer can name, and the app can show (#FEJQ, card #AGNT step
+// 8): a row of Options and a saved conversation. They travel as `relay://option/<section>[/<row>]`
+// and `relay://session/<id>` for the same reason a card does — the engine carries one string per
+// link, so the kind has to survive in it, and the host routes it in openOutputTarget() beside
+// `relay://card/`. `<row>` may itself hold slashes (`option:models/provider/glm-coding`), so the
+// split is at the *first* one, exactly as the helper's own click handler split it.
+QString optionTarget(const QString &section, const QString &row);
+// The section and row inside a `relay://option/…` target. False when it is not one; `row` is
+// emptied when the target names a section alone.
+bool optionOf(const QString &target, QString *section, QString *row);
+QString sessionTarget(const QString &id);
+// The id inside a `relay://session/<id>` target, or empty when it is not one.
+QString sessionIdOf(const QString &target);
+
 struct Target {
     bool valid = false;
     Kind kind = Kind::Path;
-    QString target;         // the URL as written, the cleaned absolute path, or relay://card/<id>
+    QString target;         // the URL as written, the cleaned absolute path, or relay://card|option|session/…
     QString label;          // Card only: the card's title, when the board knows one
     bool directory = false; // Path only
     int line = -1;
@@ -99,12 +116,16 @@ bool splitLocation(const QString &token, QString *path, int *line, int *column);
 // Every candidate in one logical line (soft wrap already joined), left to right and
 // non-overlapping. Recognises quoted paths with spaces, `file:line[:column]`,
 // `file(line,column)` (tsc/MSVC), Python tracebacks (`File "x.py", line 12`), pytest node
-// ids, URLs and `#K7Q2` card references; skips `--flags`, bare numbers and version strings.
+// ids, URLs, `#K7Q2` card references and the `option:`/`session:` forms; skips `--flags`, bare
+// numbers and version strings.
 QVector<Candidate> candidates(const QString &text);
 
 // `candidate` against a pane's directory and board. `cwd` resolves relative paths, `home`
 // expands `~`. A path the probe does not find is not a link, and neither is a card id `cards`
-// does not know (`Target::valid` stays false in both cases). `mode` follows the surface the
+// does not know (`Target::valid` stays false in both cases). An `option:`/`session:` span needs
+// no such probe — it is spelled out, not guessed at, so it always resolves and the *host* decides
+// whether it can show the thing (`Context::resolveLink`), the way an unroutable URL is left to the
+// browser. `mode` follows the surface the
 // line was printed on (see `Mode`): in `Mode::Prose` a bare candidate links only to a file.
 Target resolve(const Candidate &candidate, const QString &cwd, const QString &home, const Probe &probe,
                const CardLookup &cards = {}, Mode mode = Mode::Program);

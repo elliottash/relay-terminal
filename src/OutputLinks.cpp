@@ -11,6 +11,51 @@ namespace relay::links {
 namespace {
 
 const QLatin1String kCardScheme("relay://card/");
+const QLatin1String kOptionScheme("relay://option/");
+const QLatin1String kSessionScheme("relay://session/");
+
+// `option:<section>/<row>` and `session:<id>` — the two schemes an agent's answer writes when it
+// names something the app can show (#FEJQ; the backend tells it to, `board_chat.py:140`). Both
+// spellings arrive, with and without an authority (`option:agent/allow_writes`,
+// `option://agent/allow_writes`), because they are typed into prose by a model and Qt puts the
+// first in the path and the second in the host; `HelperChat.cpp:585-617` accepted both and this
+// keeps that, so every answer already in a transcript still links.
+//
+// Like the card rule, the scheme must *open* a word: the character before it is the start of the
+// line or one of the openers below. That is what keeps `https://relay.test/option:a/b` whole —
+// a `/` is not an opener, so nothing is claimed inside a URL — and what makes `options:a/b`, with
+// its extra letter, no match at all. `<row>` keeps its slashes (`models/provider/glm-coding` is
+// one row id), the id does not.
+//
+// `Mode` does not change them. The #SFZC rule exists because a bare English word looks like a
+// path; a scheme word, a colon and a name is Relay's own vocabulary and nothing in program output
+// means it by accident, so an answer keeps its links whether the surface printed it as a prose
+// block, a recap line or an Activity row.
+QString openers() { return QStringLiteral("(?:^|(?<=[\\s\"'`([{<,;]))"); }
+
+const QRegularExpression &optionExpression()
+{
+    static const QRegularExpression re(
+        openers() + QStringLiteral("option:(?://)?([A-Za-z0-9_][A-Za-z0-9_./-]*)"));
+    return re;
+}
+
+const QRegularExpression &sessionExpression()
+{
+    static const QRegularExpression re(
+        openers() + QStringLiteral("session:(?://)?([A-Za-z0-9_][A-Za-z0-9_.-]*)"));
+    return re;
+}
+
+// The character classes above are deliberately loose at the end — a row id may hold `.` and `-`
+// — so a sentence stop, a trailing slash or a dash left hanging comes off here, the way the URL
+// stage chops its own. Returns false when nothing is left to name.
+bool trimSchemeTail(QString &target)
+{
+    while (!target.isEmpty() && QStringLiteral("./-").contains(target.back()))
+        target.chop(1);
+    return !target.isEmpty();
+}
 
 // A Switchboard card reference: `#K7Q2` (design section 5).
 //
@@ -135,6 +180,33 @@ QString cardIdOf(const QString &target)
     return target.startsWith(kCardScheme) ? target.mid(kCardScheme.size()) : QString();
 }
 
+QString optionTarget(const QString &section, const QString &row)
+{
+    return row.isEmpty() ? kOptionScheme + section : kOptionScheme + section + QLatin1Char('/') + row;
+}
+
+bool optionOf(const QString &target, QString *section, QString *row)
+{
+    *section = QString();
+    *row = QString();
+    if (!target.startsWith(kOptionScheme))
+        return false;
+    const QString rest = target.mid(kOptionScheme.size());
+    if (rest.isEmpty())
+        return false;
+    const int slash = rest.indexOf(QLatin1Char('/')); // the *first*: a row id keeps its own slashes
+    *section = slash < 0 ? rest : rest.left(slash);
+    *row = slash < 0 ? QString() : rest.mid(slash + 1);
+    return !section->isEmpty();
+}
+
+QString sessionTarget(const QString &id) { return kSessionScheme + id; }
+
+QString sessionIdOf(const QString &target)
+{
+    return target.startsWith(kSessionScheme) ? target.mid(kSessionScheme.size()) : QString();
+}
+
 bool splitLocation(const QString &token, QString *path, int *line, int *column)
 {
     *line = -1;
@@ -169,7 +241,37 @@ QVector<Candidate> candidates(const QString &text)
     QVector<Candidate> out;
     Claim claim{std::vector<bool>(size_t(text.size()), false)};
 
-    // 1. URLs stay URLs. Any scheme, so `foo://bar` is never mistaken for a relative path.
+    // 1. `option:` and `session:` (#FEJQ, card #AGNT step 8). First, before the URL stage, because
+    //    the `option://sec/row` spelling *is* a URL to that regex and would be claimed whole; here
+    //    the opener rule has already decided the span is not inside one.
+    struct Scheme {
+        const QRegularExpression &re;
+        Kind kind;
+    };
+    for (const Scheme &scheme : {Scheme{optionExpression(), Kind::Option},
+                                 Scheme{sessionExpression(), Kind::Session}}) {
+        for (auto it = scheme.re.globalMatch(text); it.hasNext();) {
+            const QRegularExpressionMatch m = it.next();
+            QString name = m.captured(1);
+            if (!trimSchemeTail(name))
+                continue;
+            // The span is the scheme word plus what is left of the name: `//` included when it was
+            // written, so the underline sits under the same text the answer printed.
+            const int length = m.capturedStart(1) - m.capturedStart() + name.size();
+            if (!claim.free(m.capturedStart(), length))
+                continue;
+            Candidate c;
+            c.start = m.capturedStart();
+            c.length = length;
+            c.kind = scheme.kind;
+            c.text = text.mid(c.start, c.length);
+            c.path = name;
+            out.append(c);
+            claim.take(c.start, c.length);
+        }
+    }
+
+    // 2. URLs stay URLs. Any scheme, so `foo://bar` is never mistaken for a relative path.
     static const QRegularExpression urlRe(QStringLiteral("[A-Za-z][A-Za-z0-9+.-]*://[^\\s\"'`<>|\\\\^{}]+"));
     for (auto it = urlRe.globalMatch(text); it.hasNext();) {
         const QRegularExpressionMatch m = it.next();
@@ -187,7 +289,7 @@ QVector<Candidate> candidates(const QString &text)
         claim.take(c.start, c.length);
     }
 
-    // 2. Card references: `#K7Q2` in a recap, in the agent's prose, or in a board-activity
+    // 3. Card references: `#K7Q2` in a recap, in the agent's prose, or in a board-activity
     //    line (design section 5). Claimed before the path stages so the bare-token pass cannot
     //    read the span as a relative path, which also means an unknown id is left as plain text
     //    rather than probed as a file called `#ABCD`.
@@ -211,7 +313,7 @@ QVector<Candidate> candidates(const QString &text)
         claim.take(at, length);
     }
 
-    // 3. Python tracebacks and unittest output: File "/path/x.py", line 12, in <module>
+    // 4. Python tracebacks and unittest output: File "/path/x.py", line 12, in <module>
     static const QRegularExpression pyRe(
         QStringLiteral("\\bFile \"([^\"\\n]+)\", line (\\d+)|\\bFile '([^'\\n]+)', line (\\d+)"));
     for (auto it = pyRe.globalMatch(text); it.hasNext();) {
@@ -223,7 +325,7 @@ QVector<Candidate> candidates(const QString &text)
         addPath(out, claim, at, path.size(), path, path, line, -1, true);
     }
 
-    // 4. tsc, MSVC and Qt Creator style: src/app.ts(12,5): error TS2304
+    // 5. tsc, MSVC and Qt Creator style: src/app.ts(12,5): error TS2304
     static const QRegularExpression parenRe(QStringLiteral("([^\\s\"'`()\\[\\]{}<>|,]+)\\((\\d+)(?:,(\\d+))?\\)"));
     for (auto it = parenRe.globalMatch(text); it.hasNext();) {
         const QRegularExpressionMatch m = it.next();
@@ -231,7 +333,7 @@ QVector<Candidate> candidates(const QString &text)
                 m.captured(2).toInt(), m.captured(3).isEmpty() ? -1 : m.captured(3).toInt(), false);
     }
 
-    // 5. Quoted paths, including names with spaces (`ls` quotes those, so does pytest).
+    // 6. Quoted paths, including names with spaces (`ls` quotes those, so does pytest).
     static const QRegularExpression quotedRe(QStringLiteral("\"([^\"\\n]+)\"|'([^'\\n]+)'"));
     for (auto it = quotedRe.globalMatch(text); it.hasNext();) {
         const QRegularExpressionMatch m = it.next();
@@ -259,7 +361,7 @@ QVector<Candidate> candidates(const QString &text)
         addPath(out, claim, at, length, inner, path, line, column, true, !path.contains(QLatin1Char('/')));
     }
 
-    // 6. Bare tokens: ls output, gcc/clang/cargo `file:line:column`, pytest node ids,
+    // 7. Bare tokens: ls output, gcc/clang/cargo `file:line:column`, pytest node ids,
     //    stack frames inside parentheses (the brackets are boundaries). A token with no `/`
     //    is marked `bare`: in prose (#SFZC) it may link only to a file, never to the
     //    directory an English word happens to name — resolve() holds that rule.
@@ -310,6 +412,22 @@ Target resolve(const Candidate &candidate, const QString &cwd, const QString &ho
         target.valid = true;
         target.target = cardTarget(candidate.path);
         target.label = title;
+        return target;
+    }
+    if (candidate.kind == Kind::Option) {
+        // No board, no probe: the answer spelled the row out, so the span is a link wherever it is
+        // printed and the host decides whether it can show it. A section on its own is a link too —
+        // `option:agent` reveals the page, which is what the helper's own handler did with an
+        // empty row.
+        const int slash = candidate.path.indexOf(QLatin1Char('/'));
+        target.valid = true;
+        target.target = slash < 0 ? optionTarget(candidate.path, QString())
+                                  : optionTarget(candidate.path.left(slash), candidate.path.mid(slash + 1));
+        return target;
+    }
+    if (candidate.kind == Kind::Session) {
+        target.valid = true;
+        target.target = sessionTarget(candidate.path);
         return target;
     }
     struct Attempt {

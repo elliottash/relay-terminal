@@ -84,6 +84,16 @@ QVector<Candidate> cardSpans(const QString &text)
     return out;
 }
 
+// The `option:`/`session:` spans of a line, read off candidates() for the same reason cardSpans()
+// is: every word is offered as a possible path too, and the probe is what rejects those.
+QVector<Candidate> schemeSpans(const QString &text)
+{
+    QVector<Candidate> out;
+    for (const Candidate &c : candidates(text))
+        if (c.kind == Kind::Option || c.kind == Kind::Session) out << c;
+    return out;
+}
+
 QStringList targets(const QString &text)
 {
     QStringList out;
@@ -327,6 +337,122 @@ private slots:
         QCOMPARE(cardIdOf(QStringLiteral("relay://card/K7Q2")), QStringLiteral("K7Q2"));
         QVERIFY(cardIdOf(QStringLiteral("relay://turn/p1/t-41")).isEmpty());
         QVERIFY(cardIdOf(QStringLiteral("/home/dev/project/src/main.cpp")).isEmpty());
+    }
+
+    // ---- option: and session: (#FEJQ, card #AGNT step 8) --------------------------------
+    //
+    // The two schemes an agent's answer writes when it names something the app can show. They
+    // need no board and no filesystem — the answer spelled the thing out — so unlike a card they
+    // resolve in a pane that has seen nothing, and the host decides whether it can show it.
+
+    void anOptionRowIsALinkWithOrWithoutAnAuthority()
+    {
+        const QString line = QStringLiteral("Turn it on in option:agent/allow_writes.");
+        const auto links = found(line);
+        QCOMPARE(links.size(), 1);
+        QCOMPARE(links[0].target.kind, Kind::Option);
+        QCOMPARE(links[0].target.target, QStringLiteral("relay://option/agent/allow_writes"));
+        // The underline covers the scheme word too, and stops before the sentence stop.
+        QCOMPARE(line.mid(links[0].candidate.start, links[0].candidate.length),
+                 QStringLiteral("option:agent/allow_writes"));
+        // `option://agent/allow_writes` is the other spelling a model writes, and it reaches the
+        // same row rather than the browser.
+        const auto authority = found(QStringLiteral("see option://agent/allow_writes"));
+        QCOMPARE(authority.size(), 1);
+        QCOMPARE(authority[0].target.kind, Kind::Option);
+        QCOMPARE(authority[0].target.target, QStringLiteral("relay://option/agent/allow_writes"));
+        QCOMPARE(authority[0].candidate.text, QStringLiteral("option://agent/allow_writes"));
+        // No board and no probe: a pane that has seen neither still links it.
+        QCOMPARE(scan(QStringLiteral("option:agent/allow_writes"), kCwd, kHome, probe()).size(), 1);
+    }
+
+    void anOptionRowKeepsItsOwnSlashesAndASectionAloneIsALink()
+    {
+        // `option:models/provider/glm-coding` is one row: the split is at the *first* slash,
+        // which is what RelayWindow's row ids need (`option:models/provider/<preset>`).
+        QString section, row;
+        QCOMPARE(targets(QStringLiteral("see option:models/provider/glm-coding")),
+                 {QStringLiteral("relay://option/models/provider/glm-coding")});
+        QVERIFY(optionOf(QStringLiteral("relay://option/models/provider/glm-coding"), &section, &row));
+        QCOMPARE(section, QStringLiteral("models"));
+        QCOMPARE(row, QStringLiteral("provider/glm-coding"));
+        // A section on its own reveals the page — the empty row the helper's handler allowed.
+        QCOMPARE(targets(QStringLiteral("it is under option:agent")), {QStringLiteral("relay://option/agent")});
+        QVERIFY(optionOf(QStringLiteral("relay://option/agent"), &section, &row));
+        QCOMPARE(section, QStringLiteral("agent"));
+        QVERIFY(row.isEmpty());
+    }
+
+    void aSessionIdIsALinkWithOrWithoutAnAuthority()
+    {
+        // What `[title](session:<id>)` leaves in the transcript once MarkdownAnsi has drawn it:
+        // the label, then the target in dim parentheses.
+        const QString line = QStringLiteral("Porting the worker (session:008c2701cc448d7b)");
+        const auto links = found(line);
+        QCOMPARE(links.size(), 1);
+        QCOMPARE(links[0].target.kind, Kind::Session);
+        QCOMPARE(links[0].target.target, QStringLiteral("relay://session/008c2701cc448d7b"));
+        // The closing bracket is not part of the id.
+        QCOMPARE(line.mid(links[0].candidate.start, links[0].candidate.length),
+                 QStringLiteral("session:008c2701cc448d7b"));
+        QCOMPARE(targets(QStringLiteral("resume session://008c2701cc448d7b, it has the log")),
+                 {QStringLiteral("relay://session/008c2701cc448d7b")});
+    }
+
+    void schemesThatAreNotLinks()
+    {
+        // The typo: one letter more is not the scheme.
+        QVERIFY(schemeSpans(QStringLiteral("options:agent/allow_writes")).isEmpty());
+        QVERIFY(schemeSpans(QStringLiteral("sessions:008c2701cc448d7b")).isEmpty());
+        // A bare word, and the word followed by a colon and nothing to name.
+        QVERIFY(schemeSpans(QStringLiteral("that option is off")).isEmpty());
+        QVERIFY(schemeSpans(QStringLiteral("no session: none running")).isEmpty());
+        QVERIFY(schemeSpans(QStringLiteral("option: the agent one")).isEmpty());
+        // The scheme has to open a word, so nothing is claimed mid-token or inside a URL — and
+        // the URL stays one whole link, which is what the opener rule is for.
+        QVERIFY(schemeSpans(QStringLiteral("myoption:agent/allow_writes")).isEmpty());
+        const auto links = found(QStringLiteral("https://relay.test/docs/option:agent/allow_writes"));
+        QCOMPARE(links.size(), 1);
+        QCOMPARE(links[0].target.kind, Kind::Url);
+        QCOMPARE(links[0].target.target, QStringLiteral("https://relay.test/docs/option:agent/allow_writes"));
+    }
+
+    void optionAndSessionShareALineWithTheOtherKinds()
+    {
+        const auto links = found(QStringLiteral("#K7Q2 · option:agent/allow_writes · src/main.cpp:42"));
+        QCOMPARE(links.size(), 3);
+        QCOMPARE(links[0].target.kind, Kind::Card);
+        QCOMPARE(links[1].target.kind, Kind::Option);
+        QCOMPARE(links[2].target.target, QStringLiteral("/home/dev/project/src/main.cpp"));
+        // An agent's own message scans in Prose mode; the scheme rule does not change there.
+        QCOMPARE(proseTargets(QStringLiteral("it is option:agent/allow_writes")),
+                 {QStringLiteral("relay://option/agent/allow_writes")});
+    }
+
+    void optionAndSessionTargetsRoundTrip()
+    {
+        QString section, row;
+        QCOMPARE(optionTarget(QStringLiteral("agent"), QStringLiteral("allow_writes")),
+                 QStringLiteral("relay://option/agent/allow_writes"));
+        QCOMPARE(optionTarget(QStringLiteral("agent"), QString()), QStringLiteral("relay://option/agent"));
+        QVERIFY(optionOf(QStringLiteral("relay://option/agent/allow_writes"), &section, &row));
+        QCOMPARE(section, QStringLiteral("agent"));
+        QCOMPARE(row, QStringLiteral("allow_writes"));
+        // Every other target is not one, and the out-parameters are cleared before the refusal.
+        QVERIFY(!optionOf(QStringLiteral("relay://card/K7Q2"), &section, &row));
+        QVERIFY(section.isEmpty());
+        QVERIFY(row.isEmpty());
+        QVERIFY(!optionOf(QStringLiteral("relay://option/"), &section, &row));
+        QVERIFY(!optionOf(QStringLiteral("/home/dev/project/src/main.cpp"), &section, &row));
+
+        QCOMPARE(sessionTarget(QStringLiteral("008c2701cc448d7b")),
+                 QStringLiteral("relay://session/008c2701cc448d7b"));
+        QCOMPARE(sessionIdOf(QStringLiteral("relay://session/008c2701cc448d7b")),
+                 QStringLiteral("008c2701cc448d7b"));
+        QVERIFY(sessionIdOf(QStringLiteral("relay://card/K7Q2")).isEmpty());
+        QVERIFY(sessionIdOf(QStringLiteral("relay://option/agent/allow_writes")).isEmpty());
+        // A card target is still only a card target, whatever else is now in the enum.
+        QVERIFY(cardIdOf(QStringLiteral("relay://option/agent")).isEmpty());
     }
 
     // ---- what must NOT become a link ----------------------------------------------------
