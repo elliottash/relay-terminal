@@ -28,6 +28,12 @@ we can use opus subagents for research and implementation
 
 something else i want to fix in this workstream, is that when you use alt+m or alt+e, youu current selection should be highlighted. then you should be able to select with up/down arrows, and also filter with text typing (like warp's model picker). deploy a subagent to fix that
 
+## Decisions
+- 2026-09-21, on the three questions below: "i agree with your rec on all 3". So: a guest harness
+  at rank 1 of main is what a new pane starts on (the process starts on the first turn); Claude
+  Code's `opus` is named `claude-opus-5`; Relay Free's models are `relay-main`, `relay-flash`,
+  `relay-lite`.
+
 ## Discussion points
 Three calls that are the owner's; work proceeds on the recommendation for each until he says
 otherwise (`docs/MODEL-PICKING-DESIGN.md`, section 4):
