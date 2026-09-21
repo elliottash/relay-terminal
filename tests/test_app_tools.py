@@ -392,6 +392,123 @@ class PanesTest(unittest.TestCase):
         self.assertEqual(tool_groups.group_of("app_panes"), "app")
 
 
+class CrossPanePromptTest(unittest.TestCase):
+    """`app_send_prompt` / `app_prefill_prompt` (§30.3, #AG7R group 8).
+
+    Owner, 2026-09-20: "allow sending messages and pre-filling messages across panes". The worker
+    checks the shape and hands the rest to the GUI: whether the pane exists, whether it is the
+    asking agent's own and how deep the chain of agent-to-agent prompts already is are questions
+    only the window can answer.
+    """
+
+    def setUp(self):
+        self.gui = FakeGui(lambda command: {"ok": True, "pane_title": "\u201cbuild\u201d"})
+        self.tools = self.gui.build()
+
+    def test_a_send_names_the_pane_and_the_text(self):
+        result = self.tools.run("app_send_prompt", {"pane": " p-2 ", "text": "run the tests"})
+        self.assertEqual(self.gui.last["command"], "send_prompt")
+        self.assertEqual(self.gui.last["pane"], "p-2")
+        self.assertEqual(self.gui.last["text"], "run the tests")
+        self.assertTrue(result["sent"])
+        self.assertIn("build", result["text"])
+
+    def test_a_send_says_whether_it_is_queued_behind_a_running_turn(self):
+        self.gui.reply = lambda command: {"ok": True, "queued": True, "pane_title": "build"}
+        result = self.tools.run("app_send_prompt", {"pane": "p-2", "text": "next"})
+        self.assertTrue(result["queued"])
+        self.assertIn("queued", result["text"])
+
+    def test_a_prefill_is_a_different_command_and_is_not_sent(self):
+        result = self.tools.run("app_prefill_prompt", {"pane": "p-2", "text": "git push --force?"})
+        self.assertEqual(self.gui.last["command"], "prefill_prompt")
+        self.assertFalse(result["sent"])
+        self.assertIn("unsent", result["text"])
+
+    def test_the_pane_and_the_text_are_both_required(self):
+        for args in ({"text": "hello"}, {"pane": "p-2"}, {"pane": "  ", "text": "x"},
+                     {"pane": "p-2", "text": "   "}, {"pane": 7, "text": "x"}):
+            self.assertEqual(self.tools.run("app_send_prompt", args)["code"], "invalid_value")
+        self.assertEqual(self.gui.commands, [])
+
+    def test_a_prompt_longer_than_the_cap_is_refused_before_a_round_trip(self):
+        result = self.tools.run("app_send_prompt", {"pane": "p-2", "text": "x" * (A.MAX_PROMPT + 1)})
+        self.assertEqual(result["code"], "invalid_value")
+        self.assertEqual(self.gui.commands, [])
+
+    def test_a_pane_that_has_gone_and_a_ring_are_the_guis_refusals(self):
+        self.gui.reply = lambda command: {"ok": False, "error": "unknown_pane",
+                                          "message": "Relay has no pane p-9 in this window any more."}
+        self.assertEqual(self.tools.run("app_send_prompt", {"pane": "p-9", "text": "x"})["code"],
+                         "unknown_pane")
+        self.gui.reply = lambda command: {"ok": False, "error": "would_loop",
+                                          "message": "That is your own pane."}
+        refused = self.tools.run("app_send_prompt", {"pane": "p-1", "text": "x"})
+        self.assertEqual(refused["code"], "would_loop")
+        self.assertIn("ring", refused["error"])           # the vocabulary's own sentence
+        self.assertIn("would_loop", A.ERRORS)
+
+    def test_a_composer_the_person_is_typing_in_is_busy(self):
+        self.gui.reply = lambda command: {"ok": False, "error": "busy",
+                                          "message": "That pane's composer already has something in it."}
+        self.assertEqual(self.tools.run("app_prefill_prompt", {"pane": "p-2", "text": "x"})["code"],
+                         "busy")
+
+    def test_both_are_writes_so_the_toggle_refuses_them_without_a_round_trip(self):
+        gui = FakeGui()
+        tools = gui.build({**APP, "writes_enabled": False})
+        for name in ("app_send_prompt", "app_prefill_prompt"):
+            self.assertEqual(tools.run(name, {"pane": "p-2", "text": "x"})["code"], "writes_disabled")
+            self.assertIn(name, A.WRITE_TOOLS)
+        self.assertEqual(gui.commands, [])
+
+    def test_they_are_in_the_app_group_with_the_rest(self):
+        from relay_core import tool_groups
+        for name in ("app_send_prompt", "app_prefill_prompt", "app_rename"):
+            self.assertEqual(tool_groups.group_of(name), "app")
+
+
+class RenameTest(unittest.TestCase):
+    """`app_rename` (§30.3, #AG7R group 8): `/rename` and `/rename-tab` for an agent.
+
+    Those are slash commands typed into a composer and no agent can type into one, so "call this
+    pane «deploy»" could not be asked of one at all. It is a command and not a palette action
+    because it takes an argument and an `ActionItem` takes none.
+    """
+
+    def setUp(self):
+        self.gui = FakeGui(lambda command: {"ok": True, "previous": "~/relay"})
+        self.tools = self.gui.build()
+
+    def test_naming_a_pane_says_what_it_was_called(self):
+        result = self.tools.run("app_rename", {"what": "pane", "name": " deploy "})
+        self.assertEqual(self.gui.last["command"], "rename")
+        self.assertEqual(self.gui.last["what"], "pane")
+        self.assertEqual(self.gui.last["name"], "deploy")
+        self.assertNotIn("pane", self.gui.last)          # the agent's own pane, as run_action does
+        self.assertEqual(result["previous"], "~/relay")
+        self.assertIn("Renaming it back is the undo", result["text"])
+
+    def test_an_empty_name_puts_it_back_to_automatic(self):
+        result = self.tools.run("app_rename", {"what": "tab", "name": "", "pane": "p-2"})
+        self.assertEqual(self.gui.last["name"], "")
+        self.assertEqual(self.gui.last["pane"], "p-2")
+        self.assertIn("automatic", result["text"])
+
+    def test_only_a_pane_or_a_tab_and_only_one_line_of_text(self):
+        for args in ({"what": "window", "name": "x"}, {"what": "pane", "name": "a\nb"},
+                     {"what": "pane", "name": "x" * (A.MAX_LABEL + 1)},
+                     {"what": "pane", "name": 7}):
+            self.assertEqual(self.tools.run("app_rename", args)["code"], "invalid_value")
+        self.assertEqual(self.gui.commands, [])
+
+    def test_it_is_a_write(self):
+        tools = FakeGui().build({**APP, "writes_enabled": False})
+        self.assertEqual(tools.run("app_rename", {"what": "pane", "name": "x"})["code"],
+                         "writes_disabled")
+        self.assertIn("app_rename", A.WRITE_TOOLS)
+
+
 class OpenTest(unittest.TestCase):
     def setUp(self):
         self.gui = FakeGui(lambda command: {"ok": True})
@@ -415,6 +532,24 @@ class OpenTest(unittest.TestCase):
         result = self.tools.run("app_open", {"target": "inbox"})
         self.assertEqual(result["code"], "unknown_target")
         self.assertEqual(self.gui.commands, [])
+
+    def test_every_pane_relay_has_can_be_opened_by_name(self):
+        """#AG7R group 8: `app_open` reached four panes and a conversation.
+
+        The explorer, Test suites, Activity, \u24d8, requests and subagents had an *action* and
+        nothing else — two of them among group 1's unreachable twelve — so an agent could name
+        Options and had to reach for a key for the rest.
+        """
+        for target in ("files", "tests", "activity", "info", "requests", "subagents"):
+            self.assertIn(target, A.OPEN_TARGETS)
+            result = self.tools.run("app_open", {"target": target})
+            self.assertEqual(self.gui.last["command"], "open")
+            self.assertEqual(self.gui.last["target"], target)
+            self.assertIn(f"Opened {target}", result["text"])
+        # The pane-scoped ones follow the aim of \u00a730.3 rather than landing on whichever pane
+        # has the focus; the GUI resolves an unnamed one to the asking agent's own pane.
+        self.tools.run("app_open", {"target": "activity", "pane": "p-2"})
+        self.assertEqual(self.gui.last["pane"], "p-2")
 
 
 class OpenConversationTest(unittest.TestCase):
@@ -740,6 +875,43 @@ class AgentWiringTest(unittest.TestCase):
         names = [t["function"]["name"] for t in bare.tools()]
         self.assertNotIn("app_option_list", names)
         self.assertNotIn("app_option_list", bare.system_prompt())
+
+
+class PromptSectionTest(unittest.TestCase):
+    """What `Agent.system_prompt` appends when the pane can drive the app (§30.4)."""
+
+    @staticmethod
+    def section(**catalog):
+        gui = FakeGui()
+        return A.prompt_section(gui.build({**APP, **catalog}))
+
+    def test_app_panes_is_named_whether_or_not_writes_are_on(self):
+        """`list_panes` is a read, answered whatever the toggle says (§30.4) — and it is
+        the only place a pane id can be found.
+
+        It used to be named only in the writes-enabled branch, so with Options › Agent's
+        toggle off an agent had the tool in its list and not one sentence saying it existed or
+        what the ids were for (#AG7R). `activity_tools.prompt_section` names its own read tools
+        unconditionally for the same reason (c33df71b).
+        """
+        for writes in (True, False):
+            text = self.section(writes_enabled=writes)
+            self.assertIn("app_panes", text)
+            self.assertIn("`pane`", text)
+
+    def test_the_write_tools_are_named_only_when_they_are_allowed(self):
+        on, off = self.section(writes_enabled=True), self.section(writes_enabled=False)
+        for name in ("app_send_prompt", "app_prefill_prompt", "app_rename"):
+            self.assertIn(name, on)
+            self.assertNotIn(name, off)
+        # `app_option_set` is named either way: with the toggle off the prompt says so in a
+        # sentence rather than leaving the model to discover it by being refused.
+        self.assertIn("switched off for agents", off)
+
+    def test_sending_a_prompt_comes_with_the_rule_that_bounds_it(self):
+        text = self.section(writes_enabled=True)
+        self.assertIn("may not send to your own pane", text)
+        self.assertIn("cuts off a chain", text)
 
 
 if __name__ == "__main__":

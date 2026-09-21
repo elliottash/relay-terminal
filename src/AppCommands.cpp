@@ -750,7 +750,179 @@ QJsonObject AppCommands::execute(const QJsonObject &command, const QString &who)
         return result;
     }
 
+    // `send_prompt` / `prefill_prompt`: one pane's agent putting a prompt into another pane
+    // (§30.3, #AG7R group 8; owner, 2026-09-20: "allow sending messages and pre-filling messages
+    // across panes"). A send submits it there as if the person had pressed Enter; a pre-fill
+    // leaves it in that pane's composer for them to read and send. Both are writes — the first
+    // makes another agent act — so both meet the toggle, and neither is in `readActions()`.
+    if (what == QStringLiteral("send_prompt") || what == QStringLiteral("prefill_prompt")) {
+        const bool send = what == QStringLiteral("send_prompt");
+        if (!writes) return refuse(QStringLiteral("writes_disabled"));
+        bool named = false;
+        const QString aim = aimedPane(&named);
+        // Unlike `run_action`, there is no sensible default: "put this prompt somewhere" is not a
+        // request. The pane is named or the command is refused, and `list_panes` is where the ids
+        // are.
+        if (!named)
+            return refuse(QStringLiteral("invalid_value"),
+                          QStringLiteral("Name the pane to reach with `pane`; list_panes gives the ids."));
+        if (aim.isEmpty()) return refuse(paneError, unknownPaneMessage(command));
+        const QString text = command.value(QStringLiteral("text")).toString();
+        if (text.trimmed().isEmpty())
+            return refuse(QStringLiteral("invalid_value"), QStringLiteral("There is no prompt to send."));
+        // The one-hop ring, and the first thing the loop guard has to refuse: an agent talking to
+        // its own pane is talking to itself, which it can do by writing the words.
+        if (aim == who)
+            return refuse(QStringLiteral("would_loop"),
+                          QStringLiteral("That is your own pane. Say it in your reply instead."));
+        // The chain, for a send only: a pre-fill makes nobody act, and the person's Enter that
+        // sends it is itself a person's prompt, which clears the count.
+        int depth = 0;
+        if (send) {
+            depth = m_promptChain.value(who) + 1;
+            if (depth > kMaxPromptChain)
+                return refuse(QStringLiteral("would_loop"),
+                              QStringLiteral("This prompt is %1 agents deep in a chain of agents "
+                                             "prompting each other; Relay stops at %2. Answer in "
+                                             "words instead.").arg(depth).arg(kMaxPromptChain));
+            if (m_promptsSent.value(who) >= kMaxPromptsPerPane)
+                return refuse(QStringLiteral("would_loop"),
+                              QStringLiteral("This pane's agent has already sent %1 prompts to "
+                                             "other panes since anyone typed one here. Tell the "
+                                             "user what still needs doing.").arg(kMaxPromptsPerPane));
+        }
+        QJsonObject aimed = command;
+        aimed.insert(QStringLiteral("pane"), aim);
+        aimed.insert(QStringLiteral("send"), send);
+        aimed.insert(QStringLiteral("from"), who);
+        aimed.insert(QStringLiteral("from_label"), paneLabel(who));
+        bool queued = false;
+        QString error = QStringLiteral("failed");
+        if (!deliverPrompt || !deliverPrompt(aimed, &queued, &error))
+            return refuse(error, error == QStringLiteral("busy")
+                                     ? QStringLiteral("That pane's composer already has something "
+                                                      "in it; the person is typing. Send it, or try "
+                                                      "again later.")
+                                     : error == QStringLiteral("failed") && !deliverPrompt
+                                           ? QStringLiteral("There is no window left to act in.")
+                                           : QString());
+        if (send) {
+            // Counted only once it landed: a refused prompt has driven nobody.
+            m_promptChain.insert(aim, depth);
+            m_promptsSent.insert(who, m_promptsSent.value(who) + 1);
+        }
+        // The person sees it. A pre-fill sitting in a composer announces itself, but a *send*
+        // does not: the other pane simply starts working, and without this the only trace that
+        // it was an agent's doing would be the note in that pane's transcript (§30.6).
+        const QString label = paneLabel(aim);
+        AppChange change;
+        change.id = QStringLiteral("c%1").arg(m_nextChange++);
+        change.action = true;
+        change.key = what;
+        change.label = send ? QStringLiteral("Sent a prompt to %1").arg(label)
+                            : QStringLiteral("Filled the composer in %1").arg(label);
+        change.when = QDateTime::currentDateTime();
+        change.who = who;
+        change.turnId = command.value(QStringLiteral("turn_id")).toString();
+        // No Undo: the prompt is already on its way to another agent, and a button that cannot
+        // keep its promise is worse than no button (§30.6). A pre-fill is undone by clearing the
+        // box, which is the box the person is looking at.
+        change.noteId = NotificationCenter::instance().post(
+            send ? QStringLiteral("Agent sent a prompt to %1").arg(label)
+                 : QStringLiteral("Agent filled the composer in %1").arg(label),
+            QStringLiteral("From %1 · %2").arg(paneLabel(who), text.simplified().left(120)));
+        m_changes.append(change);
+        while (m_changes.size() > kMaxChanges) m_changes.removeFirst();
+
+        result.insert(QStringLiteral("ok"), true);
+        result.insert(QStringLiteral("pane"), aim);
+        result.insert(QStringLiteral("pane_title"), label);
+        if (send) result.insert(QStringLiteral("queued"), queued);
+        return result;
+    }
+
+    // `rename`: `/rename` and `/rename-tab` for an agent (§30.3, #AG7R group 8). Those are slash
+    // commands typed into a composer and no agent can type into one, so "call this pane «deploy»"
+    // could not be asked of one at all. It is a command and not a palette action because it takes
+    // an argument and an `ActionItem` takes none — the safe table could only have offered "open
+    // the rename editor", which parks a field in front of the person (group 4's own problem).
+    // Renaming back is the undo, which is what puts it on the allowed side of decision 2.
+    if (what == QStringLiteral("rename")) {
+        if (!writes) return refuse(QStringLiteral("writes_disabled"));
+        const QString thing = target(command, "what");
+        if (thing != QStringLiteral("pane") && thing != QStringLiteral("tab"))
+            return refuse(QStringLiteral("invalid_value"),
+                          QStringLiteral("what must be \"pane\" or \"tab\"."));
+        bool named = false;
+        const QString aim = aimedPane(&named);
+        if (named && aim.isEmpty()) return refuse(paneError, unknownPaneMessage(command));
+        // A pane agent renames its own pane (or its own tab) with nothing named, exactly as
+        // `run_action` aims at it; a helper has no pane of its own, so it has to say which.
+        if (aim.isEmpty())
+            return refuse(QStringLiteral("unknown_pane"),
+                          QStringLiteral("Name the pane with `pane`; list_panes gives the ids."));
+        QJsonObject aimed = command;
+        aimed.insert(QStringLiteral("pane"), aim);
+        QString previous;
+        QString error = QStringLiteral("failed");
+        if (!renameTarget || !renameTarget(aimed, &previous, &error))
+            return refuse(error, error == QStringLiteral("failed") && !renameTarget
+                                     ? QStringLiteral("There is no window left to act in.") : QString());
+        const QString name = command.value(QStringLiteral("name")).toString();
+        AppChange change;
+        change.id = QStringLiteral("c%1").arg(m_nextChange++);
+        change.action = true;
+        change.key = QStringLiteral("rename.") + thing;
+        change.label = name.isEmpty()
+            ? QStringLiteral("Put the %1 name back to automatic").arg(thing)
+            : QStringLiteral("Renamed the %1 to \u201c%2\u201d").arg(thing, name);
+        change.when = QDateTime::currentDateTime();
+        change.who = who;
+        change.turnId = command.value(QStringLiteral("turn_id")).toString();
+        change.noteId = NotificationCenter::instance().post(
+            QStringLiteral("Agent renamed a %1").arg(thing),
+            previous.isEmpty() ? name : QStringLiteral("%1 \u2192 %2").arg(previous, name.isEmpty()
+                                            ? QStringLiteral("automatic") : name));
+        m_changes.append(change);
+        while (m_changes.size() > kMaxChanges) m_changes.removeFirst();
+
+        result.insert(QStringLiteral("ok"), true);
+        result.insert(QStringLiteral("previous"), previous);
+        result.insert(QStringLiteral("pane"), aim);
+        return result;
+    }
+
     return refuse(QStringLiteral("unknown_target"), QStringLiteral("No such command: %1.").arg(what));
+}
+
+// The loop guard's reset (§30.3, #AG7R group 8). A person typing a prompt into a pane is the
+// evidence the counters exist to look for: the chain of agents that reached this pane ends with a
+// human in it, and its agent may send again. "helper" is cleared too — the tab's helper has no
+// pane of its own to be typed into, and a person prompting anywhere in this window is the same
+// evidence about it.
+void AppCommands::notePersonPrompt(const QString &paneId) {
+    if (paneId.isEmpty()) return;
+    m_promptChain.remove(paneId);
+    m_promptsSent.remove(paneId);
+    m_promptsSent.remove(QStringLiteral("helper"));
+    m_promptChain.remove(QStringLiteral("helper"));
+}
+
+// What the person calls a pane, for the notification and for the tool result. `list_panes` is
+// already the one place a pane's name lives, so this reads it there rather than growing a second
+// callback that could disagree with it.
+QString AppCommands::paneLabel(const QString &paneId) const {
+    if (paneId.isEmpty()) return QStringLiteral("a pane");
+    if (paneId == QStringLiteral("helper")) return QStringLiteral("the tab helper");
+    if (panes) {
+        for (const QJsonValue &value : panes()) {
+            const QJsonObject row = value.toObject();
+            if (row.value(QStringLiteral("id")).toString() != paneId) continue;
+            const QString title = row.value(QStringLiteral("title")).toString();
+            return title.isEmpty() ? paneId : QStringLiteral("\u201c%1\u201d").arg(title);
+        }
+    }
+    return paneId;
 }
 
 // ----- the change log (§30.6) ---------------------------------------------------------------------

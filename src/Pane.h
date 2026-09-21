@@ -11213,6 +11213,86 @@ public:
         submitAgent(text, false, why);
     }
 
+    // A prompt put into this pane by **another pane's agent** (#AG7R group 8, protocol §30.3;
+    // owner, 2026-09-20: "allow sending messages and pre-filling messages across panes"). Two
+    // acts, and the difference between them is the whole point: `send` submits it here as if the
+    // person had pressed Enter, and a pre-fill only leaves it in the composer for them to read,
+    // edit and send themselves.
+    //
+    // It never goes past the router: a prompt one agent sends another is a prompt, never a shell
+    // command in this pane, whatever this pane's input mode says. It joins the queue like
+    // anything else, so a pane mid-turn takes it when its turn comes — the way the person's own
+    // second prompt queues (#N8VK) — rather than being refused for being busy.
+    //
+    // **Attribution.** `from` names the pane it came out of and rides on the queue entry's `why`,
+    // which the transcript prints under the prompt as a note: the person reading this pane sees
+    // `✦ <the prompt>` and beneath it "sent by the agent in “deploy”", so a line they never typed
+    // is never mistaken for one they did. `*queued` says whether it is waiting behind a turn
+    // already running here, for the sending agent's tool result; *error is a §30.3 word.
+    bool takeAgentPrompt(const QString &text, const QString &from, bool send, bool *queued,
+                         QString *error) {
+        const auto refuse = [error](const QString &word) { if (error) *error = word; return false; };
+        const QString body = text.trimmed();
+        if (body.isEmpty()) return refuse(QStringLiteral("invalid_value"));
+        const QString why = from.isEmpty()
+            ? QStringLiteral("sent by another pane's agent")
+            : QStringLiteral("sent by the agent in %1").arg(from);
+        if (!send) {
+            // Never throw away what the person has typed. Their draft exists nowhere else — it is
+            // not in the prompt history and not on any disk until they press Enter — so a
+            // composer with anything in it refuses rather than being overwritten, and the sending
+            // agent is told the person is typing there.
+            if (!m_editor->toPlainText().trimmed().isEmpty()) return refuse(QStringLiteral("busy"));
+            if (m_native) setNative(false, false);   // the composer has to be on screen to be read
+            m_editor->setPlainText(body);
+            m_editor->moveCursor(QTextCursor::End);
+            // Deliberately no focusInput(): the person may be typing in another pane, and a
+            // prompt sitting in a composer is visible where it is. Taking their keyboard to show
+            // it to them would be the surprise this whole card is about.
+            if (queued) *queued = false;
+            status(why + QStringLiteral(" · read it and press Enter to send"));
+            return true;
+        }
+        // A guest pane (26.8): claude's or codex's own TUI is the input here, so the prompt is
+        // typed into it exactly as one submitted from the composer would be. The note below has
+        // nowhere to go in that case — the transcript is the guest's — so the status line and the
+        // notification the executor posts are what say where it came from.
+        if (guestInFront()) {
+            if (queued) *queued = m_guestBusy;
+            submitGuest(body, false);
+            status(why);
+            return true;
+        }
+        if (!m_configured) return refuse(QStringLiteral("failed"));
+        if (queued)
+            *queued = relay::queuesubmit::decide(queueSubmitState()) != relay::queuesubmit::Decision::StartNow;
+        // Not typed at this desk: the same flag a phone's prompt travels under, so the
+        // "initialize a Switchboard here?" question is not raised on somebody else's line and the
+        // queue row carries the author it came from.
+        m_remoteSubmit = true;
+        m_remoteAuthor = from;
+        submitAgent(body, false, why);
+        m_remoteAuthor.clear();
+        m_remoteSubmit = false;
+        status(why);
+        return true;
+    }
+
+    // `/rename` for an agent (#AG7R group 8): the same act, checked first, because `renameTo()`
+    // can only say so in the status line and a tool result has to be true. An empty name puts the
+    // pane back to the automatic one, which is also how the rename is undone.
+    bool takeAgentRename(const QString &name, QString *previous, QString *error) {
+        if (!m_workerReady) { if (error) *error = QStringLiteral("failed"); return false; }
+        if (previous) *previous = m_titleUser ? m_title : QString();
+        renameTo(name);
+        return true;
+    }
+
+    // A person typed a prompt into this pane, so the chain of agent-to-agent prompts that reached
+    // it ends here and its agent may send again (#AG7R group 8's loop guard — AppCommands
+    // ::notePersonPrompt, §30.3).
+    std::function<void()> onPersonPrompt;
+
     // Settings › Local models talks to this pane's worker, the same connection the keys dialog
     // uses and never a second one: the four `local_*` messages of protocol 28 and `test_key` for a
     // `local:` preset go out here, and every answer comes back through onLocalModelEvent. False
@@ -13096,7 +13176,13 @@ private:
             status(QStringLiteral("No agent provider is configured."));
             return;
         }
-        if (fromEditor) { m_editor->remember(text); m_editor->clear(); skillSlashHint(text); }
+        if (fromEditor) {
+            m_editor->remember(text); m_editor->clear(); skillSlashHint(text);
+            // The loop guard's reset (#AG7R group 8): a prompt the person typed here is the
+            // evidence that somebody is still asking, so this pane's agent may send prompts to
+            // other panes again and the chain that reached it is over.
+            if (onPersonPrompt) onPersonPrompt();
+        }
         // Trigger (1) of "Initialize a project and create a Switchboard here?": the first prompt
         // sent to the agent in a pane standing in a git repository that has no board (19.12). The
         // prompt is **not** held for it — it goes on below and the turn starts now; the question is

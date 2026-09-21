@@ -23,6 +23,7 @@
 #include "SettingsPane.h"
 
 #include <QDateTime>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QJsonValue>
@@ -198,6 +199,26 @@ public:
     std::function<bool(const QString &paneId)> paneExists;
     std::function<bool(const QString &key, const QString &paneId)> runActionAt;
     std::function<QJsonArray()> panes;
+    // ----- one pane talking to another (§30.3, #AG7R group 8) -----------------------------------
+    // "8 allow sending messages and pre-filling messages across panes" (owner, 2026-09-20). No
+    // agent could put a prompt anywhere but its own pane: the Sessions helper could open three
+    // conversations and then say nothing to any of them.
+    //
+    // `deliverPrompt` takes the command with its `pane` already resolved, `send` saying which of
+    // the two acts it is (true submits the prompt in that pane, false leaves it in the composer)
+    // and `from_label` naming the pane it came out of, which the receiving pane writes into its
+    // transcript. `*queued` says whether the prompt is waiting behind a turn already running
+    // there; *error is a §30.3 word — `busy` for a composer the person has typed in, which a
+    // pre-fill must never overwrite.
+    //
+    // `renameTarget` is `/rename` and `/rename-tab` for an agent: `what` is `pane` or `tab`,
+    // `name` is the new one (empty puts it back to automatic) and `*previous` comes back so the
+    // notification and the tool result can say what it was called before.
+    //
+    // Both unset is the tested, window-free case: the command then answers `failed` rather than
+    // claiming to have done something.
+    std::function<bool(const QJsonObject &command, bool *queued, QString *error)> deliverPrompt;
+    std::function<bool(const QJsonObject &command, QString *previous, QString *error)> renameTarget;
     // ----- the catalog (§30.2) ------------------------------------------------------------------
     // The whole `app` block, for `configure` and for an `app_catalog` refresh. It is rebuilt from
     // the live catalogs every time: the block carries current values, so a setting the person
@@ -216,6 +237,28 @@ public:
     // pane that asked (§30.3). It still never refuses by *who*: the policy is `writes_enabled`,
     // `settable` and `agent_safe`, set once in Options (§30.8).
     QJsonObject execute(const QJsonObject &command, const QString &who);
+
+    // ----- the loop guard (§30.3, #AG7R group 8) ------------------------------------------------
+    // `send_prompt` is the first thing in Relay that lets one agent make another act, so it is
+    // also the first that could run for ever with nobody asking: A prompts B, B prompts C, C
+    // prompts A. Two counters stop that, and both are cleared by the person speaking in the pane
+    // — which is the honest definition of "somebody is still asking for this".
+    //
+    //  * **The chain.** A prompt sent into a pane makes that pane's own sends one link deeper. A
+    //    chain longer than `kMaxPromptChain` is refused `would_loop`, so a ring of any size dies
+    //    after three hops. A pane may not send to itself at all: that is the one-hop ring, and
+    //    an agent that wants to say something to itself can simply say it.
+    //  * **The budget.** One pane's agent may send at most `kMaxPromptsPerPane` prompts before a
+    //    person types a prompt into that pane again, so a fan-out of a hundred prompts into one
+    //    pane's queue is refused too — the chain cap alone would allow it.
+    //
+    // `notePersonPrompt` is the reset, called from `Pane::submitAgent` when the prompt came from
+    // the composer. It clears the helper's budget as well as the pane's: the helper has no pane
+    // of its own to be typed into, and a person prompting anywhere in the window is the same
+    // evidence that they are still there.
+    void notePersonPrompt(const QString &paneId);
+    static constexpr int kMaxPromptChain = 3;
+    static constexpr int kMaxPromptsPerPane = 5;
 
     // ----- the change log (§30.6) ---------------------------------------------------------------
     QList<AppChange> changes() const { return m_changes; }
@@ -245,9 +288,15 @@ private:
     // Validates against the row's kind and invokes its writer; *error is a §30.3 word.
     bool writeRow(const SettingRow &row, const QJsonValue &value, QString *error) const;
     QString note(const AppChange &change) const;
+    // What the person calls a pane: its `list_panes` title, or the token when there is no window
+    // to ask. The helper names itself, since "helper" is not a pane id anyone would recognise.
+    QString paneLabel(const QString &paneId) const;
 
     QList<AppChange> m_changes;
     int m_nextChange = 1;
+    // The loop guard's two counters, keyed by pane session token (see notePersonPrompt above).
+    QHash<QString, int> m_promptChain;    // pane -> how many links reached the prompt it is running
+    QHash<QString, int> m_promptsSent;    // pane -> prompts its agent has sent since a person spoke
 };
 
 }  // namespace relay

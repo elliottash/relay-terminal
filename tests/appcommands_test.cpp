@@ -40,6 +40,14 @@ struct State {
     // pane, so which list an action lands in is the whole question these tests ask.
     QStringList panes{QStringLiteral("pane-a"), QStringLiteral("pane-b")};
     QStringList aimed;
+    // One pane talking to another (#AG7R group 8): `sent` and `prefilled` record
+    // "<pane>←<from>:<text>", which is the whole contract — which pane it reached, who it says it
+    // came from, and whether it was submitted or only put in the box. `composerBusy` is the
+    // person typing in the target pane and `paneBusy` its agent mid-turn, the two things only the
+    // pane itself can know.
+    QStringList sent, prefilled, renamed;
+    QMap<QString, QString> names;
+    bool composerBusy = false, paneBusy = false;
 };
 
 QList<SettingsSection> catalog(State *state) {
@@ -243,6 +251,18 @@ private:
         return app.execute(command, who);
     }
 
+    // One `send_prompt` or `prefill_prompt` (#AG7R group 8). Here and not among the slots below:
+    // everything in a `private Q_SLOTS:` section is a test case.
+    QJsonObject prompt(const QString &command, const QString &pane, const QString &text,
+                       const QString &who = QStringLiteral("pane-a")) {
+        static int serial = 0;
+        return run({{QStringLiteral("id"), QStringLiteral("p%1").arg(++serial)},
+                    {QStringLiteral("command"), command},
+                    {QStringLiteral("pane"), pane},
+                    {QStringLiteral("text"), text}}, who);
+    }
+
+
 private Q_SLOTS:
     void init() {
         state = State();
@@ -266,6 +286,27 @@ private Q_SLOTS:
                                         {QStringLiteral("title"), QStringLiteral("~/src ") + id},
                                         {QStringLiteral("focused"), id == state.panes.first()}});
             return rows;
+        };
+        app.deliverPrompt = [this](const QJsonObject &command, bool *queued, QString *error) {
+            const QString pane = command.value(QStringLiteral("pane")).toString();
+            if (!state.panes.contains(pane)) { if (error) *error = QStringLiteral("unknown_pane"); return false; }
+            const bool send = command.value(QStringLiteral("send")).toBool();
+            // A pre-fill never overwrites what the person has typed there (Pane::takeAgentPrompt).
+            if (!send && state.composerBusy) { if (error) *error = QStringLiteral("busy"); return false; }
+            if (queued) *queued = send && state.paneBusy;
+            (send ? state.sent : state.prefilled)
+                << pane + QStringLiteral("<") + command.value(QStringLiteral("from")).toString()
+                   + QLatin1Char(':') + command.value(QStringLiteral("text")).toString();
+            return true;
+        };
+        app.renameTarget = [this](const QJsonObject &command, QString *previous, QString *error) {
+            const QString pane = command.value(QStringLiteral("pane")).toString();
+            if (!state.panes.contains(pane)) { if (error) *error = QStringLiteral("unknown_pane"); return false; }
+            const QString key = command.value(QStringLiteral("what")).toString() + QLatin1Char(':') + pane;
+            if (previous) *previous = state.names.value(key);
+            state.names.insert(key, command.value(QStringLiteral("name")).toString());
+            state.renamed << key + QLatin1Char('=') + command.value(QStringLiteral("name")).toString();
+            return true;
         };
         app.openTarget = [this](const QJsonObject &command, QString *error) {
             const QString target = command.value(QStringLiteral("target")).toString();
@@ -1219,6 +1260,197 @@ private Q_SLOTS:
                                          {QStringLiteral("target"), QStringLiteral("conversation")}});
         QCOMPARE(refused.value(QStringLiteral("error")).toString(),
                  QStringLiteral("unknown_conversation"));
+    }
+
+    // ----- group 8: one pane talking to another --------------------------------------------------
+    //
+    // Owner, 2026-09-20: "allow sending messages and pre-filling messages across panes". Until
+    // this, no agent could put a prompt anywhere but its own pane, so the Sessions helper could
+    // open three conversations and say nothing to any of them.
+
+    void aSendReachesTheNamedPaneCarriesWhoAskedAndIsAnnounced() {
+        const QJsonObject result = prompt(QStringLiteral("send_prompt"), QStringLiteral("pane-b"),
+                                          QStringLiteral("run the failing test"));
+        QVERIFY(result.value(QStringLiteral("ok")).toBool());
+        QCOMPARE(result.value(QStringLiteral("pane")).toString(), QStringLiteral("pane-b"));
+        QCOMPARE(state.sent, (QStringList{QStringLiteral("pane-b<pane-a:run the failing test")}));
+        QVERIFY(state.prefilled.isEmpty());
+        // The person sees it: a pre-fill sitting in a composer announces itself, a send does not.
+        const auto notes = relay::NotificationCenter::instance().entries();
+        QCOMPARE(notes.size(), 1);
+        QVERIFY(notes.first().title.contains(QStringLiteral("sent a prompt")));
+        QVERIFY(notes.first().title.contains(QStringLiteral("~/src pane-b")));   // the pane's own title
+        QVERIFY(notes.first().body.contains(QStringLiteral("run the failing test")));
+        // Whether it starts now or waits behind a turn already running there is part of what
+        // happened, so it comes back with the result.
+        QVERIFY(!result.value(QStringLiteral("queued")).toBool());
+        state.paneBusy = true;
+        QVERIFY(prompt(QStringLiteral("send_prompt"), QStringLiteral("pane-b"), QStringLiteral("and again"))
+                    .value(QStringLiteral("queued")).toBool());
+    }
+
+    void aPrefillLeavesItUnsentAndNeverOverwritesADraft() {
+        QVERIFY(prompt(QStringLiteral("prefill_prompt"), QStringLiteral("pane-b"),
+                       QStringLiteral("git push --force?"))
+                    .value(QStringLiteral("ok")).toBool());
+        QCOMPARE(state.prefilled, (QStringList{QStringLiteral("pane-b<pane-a:git push --force?")}));
+        QVERIFY(state.sent.isEmpty());          // nobody acted: the person still has to press Enter
+        // The person is typing there. Their draft is in no file and no history until they send
+        // it, so it is the one thing an agent may not write over.
+        state.composerBusy = true;
+        QCOMPARE(prompt(QStringLiteral("prefill_prompt"), QStringLiteral("pane-b"),
+                        QStringLiteral("something else"))
+                     .value(QStringLiteral("error")).toString(), QStringLiteral("busy"));
+        QCOMPARE(state.prefilled.size(), 1);
+    }
+
+    void aPromptToAPaneThatHasGoneIsUnknownPaneAndAnUnnamedOneIsRefused() {
+        QCOMPARE(prompt(QStringLiteral("send_prompt"), QStringLiteral("pane-gone"),
+                        QStringLiteral("hello"))
+                     .value(QStringLiteral("error")).toString(), QStringLiteral("unknown_pane"));
+        QVERIFY(state.sent.isEmpty());
+        // "Put this prompt somewhere" is not a request: unlike run_action there is no sensible
+        // default pane, so an unnamed one is refused rather than guessed at.
+        QCOMPARE(run({{QStringLiteral("id"), QStringLiteral("r1")},
+                      {QStringLiteral("command"), QStringLiteral("send_prompt")},
+                      {QStringLiteral("text"), QStringLiteral("hello")}})
+                     .value(QStringLiteral("error")).toString(), QStringLiteral("invalid_value"));
+        // And an empty prompt reaches nobody.
+        QCOMPARE(prompt(QStringLiteral("send_prompt"), QStringLiteral("pane-b"), QStringLiteral("   "))
+                     .value(QStringLiteral("error")).toString(), QStringLiteral("invalid_value"));
+    }
+
+    void sendingToYourOwnPaneIsRefused() {
+        QCOMPARE(prompt(QStringLiteral("send_prompt"), QStringLiteral("pane-a"),
+                        QStringLiteral("think harder"), QStringLiteral("pane-a"))
+                     .value(QStringLiteral("error")).toString(), QStringLiteral("would_loop"));
+        QCOMPARE(prompt(QStringLiteral("prefill_prompt"), QStringLiteral("pane-a"),
+                        QStringLiteral("think harder"), QStringLiteral("pane-a"))
+                     .value(QStringLiteral("error")).toString(), QStringLiteral("would_loop"));
+        QVERIFY(state.sent.isEmpty() && state.prefilled.isEmpty());
+    }
+
+    // The ring: A prompts B, B prompts A, A prompts B… Each send is one link deeper than the
+    // prompt the sending pane is running, and the chain stops at kMaxPromptChain — so a ring of
+    // any size dies rather than running for ever with nobody asking.
+    void theChainOfAgentPromptsIsCutOff() {
+        state.panes << QStringLiteral("pane-c");
+        QVERIFY(prompt(QStringLiteral("send_prompt"), QStringLiteral("pane-b"), QStringLiteral("1"),
+                       QStringLiteral("pane-a")).value(QStringLiteral("ok")).toBool());
+        QVERIFY(prompt(QStringLiteral("send_prompt"), QStringLiteral("pane-c"), QStringLiteral("2"),
+                       QStringLiteral("pane-b")).value(QStringLiteral("ok")).toBool());
+        QVERIFY(prompt(QStringLiteral("send_prompt"), QStringLiteral("pane-a"), QStringLiteral("3"),
+                       QStringLiteral("pane-c")).value(QStringLiteral("ok")).toBool());
+        const QJsonObject fourth = prompt(QStringLiteral("send_prompt"), QStringLiteral("pane-b"),
+                                          QStringLiteral("4"), QStringLiteral("pane-a"));
+        QCOMPARE(fourth.value(QStringLiteral("error")).toString(), QStringLiteral("would_loop"));
+        QCOMPARE(state.sent.size(), 3);
+        // A pre-fill is not a link: nobody acts on it until the person presses Enter, and that
+        // Enter is a person's prompt, which clears the count anyway.
+        QVERIFY(prompt(QStringLiteral("prefill_prompt"), QStringLiteral("pane-b"), QStringLiteral("4"),
+                       QStringLiteral("pane-a")).value(QStringLiteral("ok")).toBool());
+        // The person typing in pane-a ends the chain that reached it.
+        app.notePersonPrompt(QStringLiteral("pane-a"));
+        QVERIFY(prompt(QStringLiteral("send_prompt"), QStringLiteral("pane-b"), QStringLiteral("5"),
+                       QStringLiteral("pane-a")).value(QStringLiteral("ok")).toBool());
+    }
+
+    // The other half of the guard: the chain cap alone would let one pane fan a hundred prompts
+    // into another pane's queue, each of them link one.
+    void onePanesAgentCannotSendForEverWithoutAPersonAsking() {
+        for (int i = 0; i < AppCommands::kMaxPromptsPerPane; ++i)
+            QVERIFY(prompt(QStringLiteral("send_prompt"), QStringLiteral("pane-b"),
+                           QStringLiteral("do %1").arg(i)).value(QStringLiteral("ok")).toBool());
+        const QJsonObject over = prompt(QStringLiteral("send_prompt"), QStringLiteral("pane-b"),
+                                        QStringLiteral("and one more"));
+        QCOMPARE(over.value(QStringLiteral("error")).toString(), QStringLiteral("would_loop"));
+        QVERIFY(over.value(QStringLiteral("message")).toString().contains(QStringLiteral("typed one here")));
+        QCOMPARE(state.sent.size(), AppCommands::kMaxPromptsPerPane);
+        // A pre-fill still goes: it makes nobody act.
+        QVERIFY(prompt(QStringLiteral("prefill_prompt"), QStringLiteral("pane-b"),
+                       QStringLiteral("have a look")).value(QStringLiteral("ok")).toBool());
+        // The person typing in pane-a is the evidence the budget exists to look for.
+        app.notePersonPrompt(QStringLiteral("pane-a"));
+        QVERIFY(prompt(QStringLiteral("send_prompt"), QStringLiteral("pane-b"),
+                       QStringLiteral("one more, asked for")).value(QStringLiteral("ok")).toBool());
+    }
+
+    void bothAreRefusedWithTheWritesToggleOff() {
+        writes = false;
+        QCOMPARE(prompt(QStringLiteral("send_prompt"), QStringLiteral("pane-b"), QStringLiteral("go"))
+                     .value(QStringLiteral("error")).toString(), QStringLiteral("writes_disabled"));
+        QCOMPARE(prompt(QStringLiteral("prefill_prompt"), QStringLiteral("pane-b"), QStringLiteral("go"))
+                     .value(QStringLiteral("error")).toString(), QStringLiteral("writes_disabled"));
+        QCOMPARE(run({{QStringLiteral("id"), QStringLiteral("r1")},
+                      {QStringLiteral("command"), QStringLiteral("rename")},
+                      {QStringLiteral("what"), QStringLiteral("pane")},
+                      {QStringLiteral("name"), QStringLiteral("deploy")}})
+                     .value(QStringLiteral("error")).toString(), QStringLiteral("writes_disabled"));
+        QVERIFY(state.sent.isEmpty() && state.prefilled.isEmpty() && state.renamed.isEmpty());
+    }
+
+    // `/rename` and `/rename-tab` are typed into a composer, and no agent can type into one — so
+    // "call this pane «deploy»" could not be asked of an agent at all. Renaming back is the undo,
+    // which is what allows it in the first place.
+    void aPaneAndItsTabCanBeNamedAndNamedBack() {
+        const QJsonObject named = run({{QStringLiteral("id"), QStringLiteral("r1")},
+                                       {QStringLiteral("command"), QStringLiteral("rename")},
+                                       {QStringLiteral("what"), QStringLiteral("pane")},
+                                       {QStringLiteral("name"), QStringLiteral("deploy")}},
+                                      QStringLiteral("pane-b"));
+        QVERIFY(named.value(QStringLiteral("ok")).toBool());
+        QCOMPARE(state.renamed, (QStringList{QStringLiteral("pane:pane-b=deploy")}));
+        QCOMPARE(relay::NotificationCenter::instance().entries().first().title,
+                 QStringLiteral("Agent renamed a pane"));
+        // Renaming back: the previous name comes back with the result, so the agent can say what
+        // it was and put it there again.
+        const QJsonObject back = run({{QStringLiteral("id"), QStringLiteral("r2")},
+                                      {QStringLiteral("command"), QStringLiteral("rename")},
+                                      {QStringLiteral("what"), QStringLiteral("pane")},
+                                      {QStringLiteral("name"), QString()},
+                                      {QStringLiteral("pane"), QStringLiteral("pane-b")}},
+                                     QStringLiteral("pane-a"));
+        QCOMPARE(back.value(QStringLiteral("previous")).toString(), QStringLiteral("deploy"));
+        QCOMPARE(state.names.value(QStringLiteral("pane:pane-b")), QString());
+        // The tab the pane sits in, the other half of the pair.
+        run({{QStringLiteral("id"), QStringLiteral("r3")},
+             {QStringLiteral("command"), QStringLiteral("rename")},
+             {QStringLiteral("what"), QStringLiteral("tab")},
+             {QStringLiteral("name"), QStringLiteral("release")}}, QStringLiteral("pane-a"));
+        QCOMPARE(state.names.value(QStringLiteral("tab:pane-a")), QStringLiteral("release"));
+        // Neither a made-up thing nor a pane that has gone.
+        QCOMPARE(run({{QStringLiteral("id"), QStringLiteral("r4")},
+                      {QStringLiteral("command"), QStringLiteral("rename")},
+                      {QStringLiteral("what"), QStringLiteral("window")},
+                      {QStringLiteral("name"), QStringLiteral("x")}}, QStringLiteral("pane-a"))
+                     .value(QStringLiteral("error")).toString(), QStringLiteral("invalid_value"));
+        QCOMPARE(run({{QStringLiteral("id"), QStringLiteral("r5")},
+                      {QStringLiteral("command"), QStringLiteral("rename")},
+                      {QStringLiteral("what"), QStringLiteral("pane")},
+                      {QStringLiteral("name"), QStringLiteral("x")},
+                      {QStringLiteral("pane"), QStringLiteral("pane-gone")}}, QStringLiteral("pane-a"))
+                     .value(QStringLiteral("error")).toString(), QStringLiteral("unknown_pane"));
+        // The helper has no pane of its own, so it has to say which one it means.
+        QCOMPARE(run({{QStringLiteral("id"), QStringLiteral("r6")},
+                      {QStringLiteral("command"), QStringLiteral("rename")},
+                      {QStringLiteral("what"), QStringLiteral("pane")},
+                      {QStringLiteral("name"), QStringLiteral("x")}}, QStringLiteral("helper"))
+                     .value(QStringLiteral("error")).toString(), QStringLiteral("unknown_pane"));
+        QCOMPARE(state.renamed.size(), 3);
+    }
+
+    // A window with none of these callbacks — the case every test above the group-2 block runs in
+    // — says so rather than claiming to have done something.
+    void withNoWindowToActInTheCommandsFail() {
+        app.deliverPrompt = nullptr;
+        app.renameTarget = nullptr;
+        QCOMPARE(prompt(QStringLiteral("send_prompt"), QStringLiteral("pane-b"), QStringLiteral("go"))
+                     .value(QStringLiteral("error")).toString(), QStringLiteral("failed"));
+        QCOMPARE(run({{QStringLiteral("id"), QStringLiteral("r1")},
+                      {QStringLiteral("command"), QStringLiteral("rename")},
+                      {QStringLiteral("what"), QStringLiteral("pane")},
+                      {QStringLiteral("name"), QStringLiteral("x")}}, QStringLiteral("pane-a"))
+                     .value(QStringLiteral("error")).toString(), QStringLiteral("failed"));
     }
 
     void anUnknownCommandIsRefusedRatherThanIgnored() {

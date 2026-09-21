@@ -6110,10 +6110,13 @@ worker) and nothing a command carries may take that name from it.
 
 | `command` | fields | what the GUI does |
 |---|---|---|
-| `open` | `target`: `options` \| `actions` \| `sessions` \| `switchboard` \| `conversation`; `section?`, `row?`, `query?`, `card?`, `conversation?`, `item?`, `new_pane?`, `pane?` | `openSettingsPane(mode, section, query)` then `SettingsPane::revealOption(section, row)`; `openSessions(query)`; `openBoardCard(card)`, or `board.open` when no card is named; for `conversation`, `Pane::openSavedSession(item, new_pane)` on the pane it was aimed at — the Sessions row's own Enter |
+| `open` | `target`: `options` \| `actions` \| `sessions` \| `switchboard` \| `conversation` \| `files` \| `tests` \| `activity` \| `info` \| `requests` \| `subagents`; `section?`, `row?`, `query?`, `card?`, `conversation?`, `item?`, `new_pane?`, `pane?` | `openSettingsPane(mode, section, query)` then `SettingsPane::revealOption(section, row)`; `openSessions(query)`; `openBoardCard(card)`, or `board.open` when no card is named; for `conversation`, `Pane::openSavedSession(item, new_pane)` on the pane it was aimed at — the Sessions row's own Enter; the last six run the same window code their actions do (`files.explorer`, `tests.open`, `agent.internalsPane`, `agent.info`, `agent.requests`, `Pane::openSubagentPane`), on the pane they were aimed at |
 | `set_option` | **`row`**, `value` | finds the row and invokes its writer |
 | `run_action` | `key`, `pane?` | finds the `ActionItem` — or the Options row button behind a `row:` key — and runs it, on the pane it was aimed at when the action is one that acts on a pane |
 | `list_panes` | — | answers `panes`: every pane of this window, with the id `pane` takes |
+| `send_prompt` | **`pane`**, `text` | submits that prompt in the named pane, as if the person had typed it there and pressed Enter (`Pane::takeAgentPrompt`) |
+| `prefill_prompt` | **`pane`**, `text` | puts the prompt in that pane's composer and leaves it unsent |
+| `rename` | `what`: `pane` \| `tab`; `name`, `pane?` | names the pane (`Pane::renameTo`) or the tab it sits in (`RelayWindow::renameTab`); an empty `name` puts it back to the automatic one |
 | `undo` | `change_id` | reverts that entry of the change log (30.6) |
 
 **Which pane a command lands on.** Until 2026-09-20 the answer was always "whichever one the
@@ -6146,6 +6149,52 @@ pane. A successful `run_action` that *was* aimed answers with `pane`, so the tra
 the change went. `open` carries the resolved token on to the window's opener, so
 `open {target: "conversation", new_pane: false}` from a pane agent means "into my pane" rather
 than "into whichever one has the focus".
+
+**One pane talking to another** (owner, 2026-09-20: "allow sending messages and pre-filling
+messages across panes", #AG7R group 8). `send_prompt` submits a prompt in the named pane exactly
+as the person pressing Enter there would — its agent starts on it, or it joins that pane's queue
+behind whatever is running, the way the person's own second prompt does (#N8VK) — and
+`prefill_prompt` only puts the text in that pane's composer and leaves it. Both take `pane` and
+`text`, both are **writes** and meet `writes_enabled`, and `pane` is required: unlike `run_action`
+there is no sensible default for "put this prompt somewhere", so an unnamed one is
+`invalid_value`. Four things hold them up, and each is a promise to the person:
+
+- **The person sees every one.** Each posts a notification naming the sending pane, the receiving
+  pane and the first line of the text (30.6). A pre-fill sitting in a composer announces itself; a
+  send does not, which is why it must.
+- **A sent prompt is attributed where it lands.** The receiving pane prints it as any prompt —
+  `✦ <text>` — with *"sent by the agent in “<pane>”"* beneath it, the line the queue entry's `why`
+  carries. A line the person never typed is never shown as one they did.
+- **A pre-fill never overwrites a draft.** A composer with anything in it answers `busy`: what the
+  person has typed and not yet sent is in no file and no history, so it is the one thing in a pane
+  an agent may not write over. It does not take the keyboard either — no focus change — because
+  the person may be typing elsewhere.
+- **The loop guard.** This is the first thing in Relay that lets one agent make another act, so it
+  is the first that could run with nobody asking. A pane **may not send to itself** (`would_loop`:
+  that is the one-hop ring, and an agent with something to say to itself can write it). Every send
+  is a **link in a chain**: a prompt sent into a pane makes that pane's own sends one link deeper,
+  and a chain longer than **three** links is refused `would_loop`, so a ring of any size dies. One
+  pane's agent may also send at most **five** prompts before a person types a prompt into that
+  pane again, which stops a fan-out the chain cap would allow. A person's prompt in a pane clears
+  both counters — the chain ends where a person joins it
+  (`AppCommands::notePersonPrompt`, called from `Pane::submitAgent` when the prompt came from the
+  composer; the tab helper's budget is cleared with it, since it has no pane of its own to be
+  typed into). A pre-fill is not a link: nobody acts on it until the person presses Enter, and
+  that Enter is a person's prompt.
+
+A sent prompt goes to the pane's **agent**, never through its router: whatever that pane's input
+mode says, a prompt one agent sends another is a prompt and not a shell command. In a guest pane
+it is typed into claude's or codex's own input (26.8), which is where a prompt goes there. The
+result carries `pane`, `pane_title` and — for a send — `queued`, so the agent says whether the
+other pane started on it or has it waiting.
+
+**`rename`** is `/rename` and `/rename-tab` for an agent. Those are slash commands typed into a
+composer and no agent can type into one, so "call this pane «deploy»" could not be asked of one at
+all. It is a command rather than a palette action because it takes an argument and an `ActionItem`
+takes none — the safe table could only ever have offered "open the rename editor", which parks a
+field in front of the person. It is a write, and it is allowed because renaming back is the undo;
+the result carries `previous`, so the agent can say what the thing was called before. `what: "tab"`
+renames the tab the aimed pane sits in.
 
 `list_panes` answers `panes: [{id, title, cwd, tab, model, mode, busy, focused, you?}]` — `id`
 being the token `pane` takes, `you` marking the asking agent's own pane. It is a round trip and
@@ -6183,7 +6232,7 @@ future GUI answers with them.
 
 `error` is one of `unknown_row`, `unknown_action`, `unknown_target`, `unknown_change`,
 `unknown_conversation`, `unknown_pane`, `not_settable`, `secret`, `writes_disabled`,
-`invalid_value`, `not_agent_safe`, `busy`, `failed` or `no_reply`, and the sentence for the transcript rides beside it in **`message`** (the worker also
+`invalid_value`, `not_agent_safe`, `busy`, `would_loop`, `failed` or `no_reply`, and the sentence for the transcript rides beside it in **`message`** (the worker also
 reads `text` or `detail`, and treats an unrecognised `error` string as the sentence itself). An
 unknown `command` is answered `unknown_target`, with the command name in `message`.
 
@@ -6208,10 +6257,21 @@ never the tool list.
 | `app_action_list` | `search?` | the action catalog, at most 60 entries, `agent_safe` on each row and `runnable` counting them, so the agent can name an action it may not run and tell the person where the button is. Since #GMCF it answers from the keybinding catalog too: a row that is a bindable action carries its current `keys`, and the registry entries with no palette row (the focus moves, the window cycle, the shortcuts overlay — 31 of 92) are listed after it under section `Shortcuts`, `agent_safe: false`, with a third of the cap kept for them. `set_keybinding`'s schema no longer lists any of it, so this is where an action id is found; a truncated listing says so in `note`. |
 | `app_action_run` | `key`, `pane?` | `agent_safe` actions only, and only with `writes_enabled`. An action that acts on one pane runs on the asking agent's own pane, or on the pane `pane` names; the helper, which has none of its own, runs it on the focused pane (30.3). The result carries `pane` when the choice was real. |
 | `app_panes` | — | the panes of this window — `{id, title, cwd, tab, model, mode, busy, focused, you?}` — over `app_command {command: "list_panes"}`. The ids are what `pane` takes, and this is the only place they can be read: the catalog carries the *tab*, `session_info` is about this conversation and `app_sessions_search` about saved ones. Not a write, so it is offered whatever `writes_enabled` says. |
+| `app_send_prompt` | `pane`, `text` | `app_command {command: "send_prompt"}`: the prompt is submitted in that pane as though the person had typed it there. A write, and the first tool that makes another agent act — so it is announced to the person, attributed in the receiving pane's transcript, refused on the agent's own pane and bounded by the loop guard (30.3). The result says whether it started or is `queued`. |
+| `app_prefill_prompt` | `pane`, `text` | the same, unsent: the text is left in that pane's composer for the person to read, edit and send. `busy` when they have already typed something there, which is never overwritten. |
+| `app_rename` | `what`: `pane` \| `tab`; `name`, `pane?` | `/rename` and `/rename-tab`, which an agent cannot type. An empty `name` restores the automatic one; `previous` comes back so the rename can be described and put back. A write; renaming back is its undo. |
 | `app_sessions_search` | `query`, `limit?` (default 10, at most 25) | worker-side, through the conversation index of section 14 (`conv_index.ConversationIndex.search`, the same query language as 14.2, `scope="all"` so it is the person's sessions and not this workspace's, up to 3 matching lines per row) — the Sessions pane never talks to the worker itself, so this needs no round trip and no open pane. Each row carries the `id` `app_open {target: "conversation"}` takes. |
-| `app_open` | `target`, `section?`, `row?`, `query?`, `card?`, `id?`, `ids?`, `new_pane?`, `pane?` | `app_command {command: "open"}`; a `row` is checked against the catalog first, so a misremembered id is a tool error rather than a pane opened at nothing, and a `card` is normalised (`#k7q2` → `K7Q2`). With `target: "conversation"` it opens past conversations: `id` for one, `ids` for up to 8, each in a pane of its own, in the order given and one round trip each, so the result answers **per id** (`results: [{id, ok, title?, error?}]`) and one unknown id does not lose the rest. `new_pane` defaults to true, and `pane` says which pane it opens from — the asking agent's own unless it names another, so `new_pane: false` means "into my pane" (30.3). Returns when the pane has opened, so the agent says what it did, not what it asked for. Not a write: it is offered whatever `writes_enabled` says. |
+| `app_open` | `target`, `section?`, `row?`, `query?`, `card?`, `id?`, `ids?`, `new_pane?`, `pane?` | one of eleven targets — Options, the actions palette, Sessions, the Switchboard, a past conversation, and since #AG7R group 8 the file explorer, Test suites, Activity, ⓘ, the request ledger and a pane's subagents, each of which had an *action* and no way to be named (two of them among group 1's unreachable twelve). `app_command {command: "open"}`; a `row` is checked against the catalog first, so a misremembered id is a tool error rather than a pane opened at nothing, and a `card` is normalised (`#k7q2` → `K7Q2`). With `target: "conversation"` it opens past conversations: `id` for one, `ids` for up to 8, each in a pane of its own, in the order given and one round trip each, so the result answers **per id** (`results: [{id, ok, title?, error?}]`) and one unknown id does not lose the rest. `new_pane` defaults to true, and `pane` says which pane it opens from — the asking agent's own unless it names another, so `new_pane: false` means "into my pane" (30.3). Returns when the pane has opened, so the agent says what it did, not what it asked for. Not a write: it is offered whatever `writes_enabled` says. |
 | `app_changes` | — | the writes this worker has made so far, newest first (at most 100 kept): `{change_id, kind: "option", id, label, previous, value, when, undone}` for an option and `{change_id, kind: "action", key, label, when, undone}` for an action, `when` being seconds ago, built from the results it received and not from the GUI's log |
 | `app_undo` | `change_id` | `app_command {command: "undo"}` for one of its own changes, and only one it has not already undone |
+
+**An agent may make another agent act, and the rules for that are the person's to see.** The
+three tools above are in `WRITE_TOOLS` with `app_option_set` and `app_action_run`, so Options ›
+Agent's toggle refuses all of them together; the prompt section says, whenever they are on, that
+sending is visible to the user, that an agent may not send to its own pane and that Relay cuts off
+a chain of agents prompting each other. `app_panes` is named in the prompt **whether the toggle is
+on or off** — it is a read, answered either way (30.3), and it is the only place a pane id can be
+found, so an agent with the tool and no sentence about it could aim nothing.
 
 **Opening a conversation is a first-class ability, and the agent says so in words.** The Sessions
 helper can search the index *and* open what it finds — one conversation in the pane the person is
@@ -6289,7 +6349,10 @@ Owner, 2026-09-20: "it should be clear what's changed / done and reversion / und
 - **A change announces itself**: a notification reading `Agent changed <label>` / `<before> →
   <after>`, with Undo as its action, and the tool result in the transcript says the same words, so
   the pane and the notification never disagree about what happened. Taking the Undo amends that
-  same notification to `Undone: <label>`. An action's notification reads `Agent ran <label>`.
+  same notification to `Undone: <label>`. An action's notification reads `Agent ran <label>`, a
+  prompt put into another pane `Agent sent a prompt to “<pane>”` / `Agent filled the composer in
+  “<pane>”` with the sending pane and the first line of the text beneath it (30.3), and a rename
+  `Agent renamed a pane` / `… a tab` with `<before> → <after>`.
 - **The row is marked.** An option row an agent changed carries a marker in the Options pane until
   the person touches it (`SettingsPane::markAgentChanged`), so "what did it do to my settings" is
   answerable by looking, and every open Options pane redraws at once (`SettingsWatch`).

@@ -45,6 +45,13 @@ Guardrails, in one place so they can be reviewed:
   worker asked — it knows which, because the command arrives with that pane's session token — and
   a helper, which has no pane of its own, goes on landing where the person is focused, as it
   always did.  `app_panes` is where the ids come from.
+* **One agent making another act is announced, attributed and bounded.**  `app_send_prompt`
+  submits a prompt in another pane as if the person had pressed Enter there and
+  `app_prefill_prompt` only fills that pane's composer (#AG7R group 8, §30.3).  The GUI posts a
+  notification for each — a pre-fill is visible where it lands, a send is not — writes the
+  sending pane's name into the receiving pane's transcript, and refuses a pane sending to itself
+  or a chain of agent-to-agent prompts that runs on past `would_loop`.  The fence is the GUI's,
+  because only it can see the other panes.
 * **Sessions search never leaves the worker.**  `app_sessions_search` asks the conversation
   index directly (`conv_index.ConversationIndex.search`, the protocol-14 `conversations`
   answer's own source), so asking "which session was that in" costs no GUI round trip.
@@ -75,7 +82,14 @@ VALUE_KINDS = ("toggle", "choice", "text", "number")
 #: (`SessionManager::onResume`), which until 2026-09-20 no tool could reach: the helper could
 #: search the index and then only open the *list* at the search, so "open a group of previous
 #: sessions in new panes" came back as a list the person had to click through (owner's report).
-OPEN_TARGETS = ("options", "actions", "sessions", "switchboard", "conversation")
+#:
+#: The six after them are #AG7R group 8: every other pane Relay has had only an *action*, and two
+#: of those actions were among group 1's unreachable twelve.  Each routes to the same window code
+#: the action runs (`RelayWindow::openAppTarget`), so there is one way to open a pane and not two,
+#: and the pane-scoped ones (`info`, `requests`, `activity`, `subagents`, `files`) follow the
+#: `pane` aim of §30.3 rather than landing wherever the focus happens to be.
+OPEN_TARGETS = ("options", "actions", "sessions", "switchboard", "conversation",
+                "files", "tests", "activity", "info", "requests", "subagents")
 
 #: How many conversations one `app_open {ids}` may open.  A group is a handful of panes, not a
 #: window full: each one is a worker of its own.
@@ -84,14 +98,15 @@ MAX_OPEN_CONVERSATIONS = 8
 #: The commands that go out as `app_command` (§30.3).  `list_panes` is a round trip and not a
 #: field of the catalog: panes open and close between two catalogs, and an agent aiming at a pane
 #: that has gone is the fault `pane` exists to fix (#AG7R group 2).
-COMMANDS = ("open", "set_option", "run_action", "undo", "list_panes")
+COMMANDS = ("open", "set_option", "run_action", "undo", "list_panes",
+            "send_prompt", "prefill_prompt", "rename")
 
 #: The `error` vocabulary of `app_command_result` (§30.3).  The worker's own refusals use the
 #: same words, so a refusal reads the same whether the catalog caught it or the pane did.
 ERRORS = ("unknown_row", "unknown_action", "unknown_target", "unknown_change",
           "unknown_conversation", "unknown_pane", "not_settable",
-          "secret", "writes_disabled", "invalid_value", "not_agent_safe", "busy", "failed",
-          "no_reply")
+          "secret", "writes_disabled", "invalid_value", "not_agent_safe", "busy", "would_loop",
+          "failed", "no_reply")
 
 #: What each of those means in a sentence, for the tool result when the GUI sends the code alone.
 ERROR_TEXT = {
@@ -107,6 +122,7 @@ ERROR_TEXT = {
     "invalid_value": "Relay rejected that value.",
     "not_agent_safe": "That action is not one an agent may run.",
     "busy": "Relay was busy and did not do it.",
+    "would_loop": "Relay stopped that prompt: agents may not drive each other in a ring.",
     "failed": "Relay could not do it.",
     "no_reply": "Relay did not answer.",
 }
@@ -121,6 +137,9 @@ MAX_LIST_ROWS = 60
 MAX_SEARCH = 200
 MAX_SESSION_ROWS = 25
 MAX_PANES = 60
+#: How long a prompt one agent sends another may be.  A prompt, not a document: anything longer
+#: is a file to point at, and the receiving pane's transcript has to stay readable by the person.
+MAX_PROMPT = 4000
 MAX_CHANGES = 100
 
 
@@ -597,6 +616,38 @@ TOOL_SPECS = [
          "Your own pane is marked `you`. Read it before aiming an action at a pane that is not "
          "yours — the list is the only place the ids are.",
          {}, []),
+    spec("app_send_prompt",
+         "Send a prompt to another pane's agent, exactly as if the person had typed it there and "
+         "pressed Enter. The pane's transcript shows it came from you, and the person is told. "
+         "Use it to hand work to a pane that is already in the right directory or on the right "
+         "model; say in your reply which pane you sent it to and why. If that pane's agent is "
+         "mid-turn the prompt waits in its queue, as a second prompt of the person's own does. "
+         "You cannot send to your own pane, and a chain of agents prompting each other is cut "
+         "off, so do not use this to loop.",
+         {"pane": {"type": "string", "description": "The pane to send to, as app_panes gives it."},
+          "text": {"type": "string",
+                   "description": "The prompt, as you would type it into that pane."}},
+         ["pane", "text"]),
+    spec("app_prefill_prompt",
+         "Put a prompt into another pane's composer and leave it there, unsent, for the person to "
+         "read, edit and send themselves. The gentler half of app_send_prompt: use it whenever "
+         "the person should see the words before the other agent acts on them. It is refused if "
+         "that composer already has something in it — the person's draft is never overwritten.",
+         {"pane": {"type": "string", "description": "The pane whose composer to fill, as app_panes gives it."},
+          "text": {"type": "string", "description": "The text to leave in the composer."}},
+         ["pane", "text"]),
+    spec("app_rename",
+         "Name a pane or the tab it is in, the way /rename and /rename-tab do for the person — "
+         "who can type those and you cannot. A name helps them find the pane again: \"deploy\", "
+         "\"the failing test\". An empty name puts it back to the automatic one, which is also "
+         "how a rename is undone.",
+         {"what": {"type": "string", "enum": ["pane", "tab"],
+                   "description": "pane renames the pane; tab renames the tab it sits in."},
+          "name": {"type": "string",
+                   "description": "The new name, or empty to go back to the automatic one."},
+          "pane": {"type": "string",
+                   "description": "Which pane, as app_panes gives it. Your own by default."}},
+         ["what", "name"]),
     spec("app_sessions_search",
          "Search the person's past Relay conversations — the same index the Sessions pane uses. "
          "One row per conversation: id, title, when, model, workspace and the turns that matched. "
@@ -610,7 +661,9 @@ TOOL_SPECS = [
     spec("app_open",
          "Open one of Relay's panes for the person and zoom it to what you are talking about: "
          "Options or the actions palette at a section or a row, Sessions at a search, the "
-         "Switchboard at a card — or, with target `conversation`, open a past conversation "
+         "Switchboard at a card, the file explorer, Test suites, Activity, \u24d8 (conversation "
+         "info), the request ledger or the subagents of a pane — or, with target "
+         "`conversation`, open a past conversation "
          "itself, which is what pressing Enter on a Sessions row does. `id` is a conversation's "
          "id from app_sessions_search; `ids` opens a group, each in its own pane, in the order "
          "given, and the result says what happened to each one. `new_pane` is true by default "
@@ -618,7 +671,8 @@ TOOL_SPECS = [
          "conversation into the pane they are in, which replaces what that pane is holding. Use "
          "it instead of describing where a setting lives. It returns once the pane is open.",
          {"target": {"type": "string", "enum": list(OPEN_TARGETS),
-                     "description": "options, actions, sessions, switchboard or conversation."},
+                     "description": "options, actions, sessions, switchboard, conversation, "
+                                    "files, tests, activity, info, requests or subagents."},
           "section": {"type": "string", "description": "Options/actions: the section to open at."},
           "row": {"type": "string", "description": "Options: the row id to reveal and highlight."},
           "query": {"type": "string", "description": "Sessions or actions: the search to open with."},
@@ -633,8 +687,10 @@ TOOL_SPECS = [
                        "description": "conversation: open in a new pane (the default) rather "
                                       "than loading it into the pane the person is in."},
           "pane": {"type": "string",
-                   "description": "conversation: the pane to open from, as app_panes gives it. "
-                                  "Your own pane by default, so new_pane false means \"here\"."}},
+                   "description": "The pane to open in or beside, as app_panes gives it. Your own "
+                                  "by default \u2014 so for a conversation new_pane false means "
+                                  "\"here\", and \u24d8, Activity, requests, subagents and the "
+                                  "explorer open on the pane you name."}},
          ["target"]),
     spec("app_changes",
          "List the changes you have made to Relay in this session — each with the row, what it "
@@ -651,7 +707,11 @@ TOOL_NAMES = tuple(s["function"]["name"] for s in TOOL_SPECS)
 
 #: The two tools `writes_enabled` gates.  `app_open` is not one of them (§30.4: it is not a
 #: write), and neither is `app_undo` (§30.4: putting a setting back is not a new write).
-WRITE_TOOLS = ("app_option_set", "app_action_run")
+#: `app_send_prompt`, `app_prefill_prompt` and `app_rename` are writes too (#AG7R group 8): the
+#: first two make another agent act or put words in front of the person, and a rename changes what
+#: they see in the header — reversible by renaming back, which is why it is allowed at all.
+WRITE_TOOLS = ("app_option_set", "app_action_run", "app_send_prompt", "app_prefill_prompt",
+               "app_rename")
 
 
 class AppTools:
@@ -727,7 +787,7 @@ class AppTools:
             return f"RELAY {head}"
         bits = [f"{key}: {_short(args[key], 120)}"
                 for key in ("id", "value", "key", "pane", "target", "section", "row", "query",
-                            "card", "search", "change_id")
+                            "card", "search", "change_id", "what", "name", "text")
                 if args.get(key) is not None]
         return f"RELAY {head}\n\n" + ("\n".join(bits) or "(no arguments)")
 
@@ -740,6 +800,8 @@ class AppTools:
                    "app_option_set": self._option_set, "app_action_list": self._action_list,
                    "app_action_run": self._action_run, "app_sessions_search": self._sessions_search,
                    "app_panes": self._panes,
+                   "app_send_prompt": self._send_prompt,
+                   "app_prefill_prompt": self._prefill_prompt, "app_rename": self._rename,
                    "app_open": self._open, "app_changes": self._changes, "app_undo": self._undo}[name]
         try:
             return handler(dict(args))
@@ -894,6 +956,98 @@ class AppTools:
             text += f"; yours is \"{mine.get('title') or mine.get('id')}\""
         return {"ok": True, "panes": panes, "count": len(panes), "text": text + "."}
 
+    # ---- one pane talking to another (#AG7R group 8, §30.3) ---------------------
+    #
+    # "8 allow sending messages and pre-filling messages across panes" (owner, 2026-09-20).  Until
+    # this, no agent could put a prompt anywhere but its own pane: the Sessions helper could open
+    # three conversations and then not say a word to any of them, and `run_in_terminal` /
+    # `type_into_program` reach only the worker's own pane.
+    #
+    # Two acts, two tools, on purpose.  A **send** submits the prompt in that pane as if the
+    # person had pressed Enter — the other agent starts working — and a **pre-fill** leaves it in
+    # the composer for them to read and send.  A boolean on one tool would be one wrong default
+    # away from making an agent act when the person was meant to.
+    #
+    # The worker checks the shape and nothing else: whether a pane exists, whether it is the
+    # asking agent's own, and how long the chain of agent-to-agent prompts already is are all
+    # questions only the GUI can answer, so they are refused there (`unknown_pane`, `would_loop`).
+    def _send_prompt(self, args: dict) -> dict:
+        return self._into_pane(args, send=True)
+
+    def _prefill_prompt(self, args: dict) -> dict:
+        return self._into_pane(args, send=False)
+
+    def _into_pane(self, args: dict, *, send: bool) -> dict:
+        what = "sending a prompt to another pane" if send else "pre-filling another pane's composer"
+        self._need_writes(what)
+        pane = args.get("pane")
+        if not isinstance(pane, str) or not pane.strip():
+            raise AppToolError("Name the pane with `pane`; app_panes lists the ids.",
+                               code="invalid_value")
+        text = args.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise AppToolError("Give the prompt as `text`.", code="invalid_value")
+        if len(text) > MAX_PROMPT:
+            raise AppToolError(f"A prompt sent to another pane is at most {MAX_PROMPT} characters; "
+                               "point at a file instead of pasting one.", code="invalid_value")
+        result = self.bridge.send("send_prompt" if send else "prefill_prompt",
+                                  {"pane": pane.strip(), "text": text})
+        if not result.get("ok"):
+            raise _refused(result, what)
+        where = result.get("pane_title") or pane.strip()
+        if not send:
+            return {"ok": True, "pane": pane.strip(), "sent": False,
+                    "text": f"Left the prompt in {where}'s composer, unsent. The user reads it and "
+                            "presses Enter."}
+        # Queued or started: a tool result says what happened, and "it is waiting behind the turn
+        # running there" is part of what happened (§30.3).
+        queued = bool(result.get("queued"))
+        return {"ok": True, "pane": pane.strip(), "sent": True, "queued": queued,
+                "text": f"Sent the prompt to {where}; "
+                        + ("it is queued behind what that pane is doing."
+                           if queued else "its agent has started on it.")}
+
+    # `/rename` and `/rename-tab` are slash commands typed into a composer, and no agent can type
+    # into one — so "call this pane «deploy»" could not be asked of an agent at all (#AG7R group
+    # 8).  It is a command rather than a palette action because it takes an argument and an
+    # `ActionItem` takes none; the safe table could only ever have offered "open the rename
+    # editor", which is a modal in front of the person (group 4's own problem).
+    def _rename(self, args: dict) -> dict:
+        self._need_writes("renaming a pane or a tab")
+        what = args.get("what")
+        if what not in ("pane", "tab"):
+            raise AppToolError("what must be \"pane\" or \"tab\".", code="invalid_value")
+        name = args.get("name")
+        if name is None:
+            name = ""
+        if not isinstance(name, str):
+            raise AppToolError("name must be text.", code="invalid_value")
+        name = name.strip()
+        if len(name) > MAX_LABEL:
+            raise AppToolError(f"A name is at most {MAX_LABEL} characters.", code="invalid_value")
+        for character in name:
+            if ord(character) < 32:
+                raise AppToolError("A name is one line of text.", code="invalid_value")
+        fields = {"what": what, "name": name}
+        pane = args.get("pane")
+        if pane is not None:
+            if not isinstance(pane, str) or not pane.strip():
+                raise AppToolError("pane must be a pane id from app_panes.", code="invalid_value")
+            fields["pane"] = pane.strip()
+        result = self.bridge.send("rename", fields)
+        if not result.get("ok"):
+            raise _refused(result, f"renaming the {what}")
+        previous = result.get("previous") if isinstance(result.get("previous"), str) else ""
+        out = {"ok": True, "what": what, "name": name}
+        if previous:
+            out["previous"] = previous
+        if name:
+            out["text"] = (f"Renamed the {what}" + (f" \"{previous}\"" if previous else "")
+                           + f" to \"{name}\". Renaming it back is the undo.")
+        else:
+            out["text"] = f"The {what} is back to its automatic name."
+        return out
+
     # ---- sessions --------------------------------------------------------------
     def _sessions_search(self, args: dict) -> dict:
         """The Sessions pane's own search, worker-side (§30.4, protocol 14): no round trip."""
@@ -958,6 +1112,16 @@ class AppTools:
             fields["row"] = self.catalog.find(fields["row"]).id
         if "card" in fields:
             fields["card"] = fields["card"].strip().lstrip("#").upper()
+        # The pane it opens in or beside (§30.3).  It matters for the six targets #AG7R group
+        # 8 added — ⓘ, Activity, requests, subagents and the explorer are *that pane's*
+        # views, and until they could be named the only way to open one was a key that landed
+        # wherever the person was focused.  Unsent unless the model named one: the GUI resolves a
+        # pane agent's own pane from the token the command arrives with.
+        pane = args.get("pane")
+        if pane is not None:
+            if not isinstance(pane, str) or not pane.strip():
+                raise AppToolError("pane must be a pane id from app_panes.", code="invalid_value")
+            fields["pane"] = pane.strip()
         result = self.bridge.send("open", fields)
         if not result.get("ok"):
             raise _refused(result, f"opening {target}")
@@ -1269,9 +1433,10 @@ def prompt_section(tools: "AppTools | None") -> str:
         "app_option_get read its Options "
         f"({len(catalog.options)} rows), app_action_list the actions ({safe} of "
         f"{len(catalog.actions)} are ones you may run), app_sessions_search their past "
-        "conversations, and app_open puts any of Options, the actions palette, Sessions or the "
-        "Switchboard on screen zoomed to the row, search or card you are talking about — do "
-        "that instead of describing where a setting lives.",
+        "conversations, and app_open puts any of Options, the actions palette, Sessions, the "
+        "Switchboard, the file explorer, Test suites, Activity, \u24d8, requests or subagents on "
+        "screen zoomed to the row, search or card you are talking about — do that instead of "
+        "describing where a setting lives.",
         # The owner, 2026-09-20: "it also needs to reply in text that it is doing it." A turn that
         # only calls tools draws nothing in a helper panel — the panel shows the agent's text, not
         # its calls — so the app tools are the one place where narrating is not optional.
@@ -1281,6 +1446,14 @@ def prompt_section(tools: "AppTools | None") -> str:
         "panes\" means true, and only \"here\" or \"in this pane\" means false, which replaces "
         "what that pane is holding. When neither is said and the conversation is not yours to "
         "disturb, open it in a new pane.",
+        # `app_panes` is named here and not in the writes branch below (#AG7R, 2026-09-20): it is
+        # a *read*, answered whatever the toggle says (§30.4), and it is the only place a pane id
+        # can be found — so an agent that has the tool and no sentence about it cannot aim
+        # anything, least of all a prompt at another pane. `activity_tools.prompt_section` names
+        # its own read tools unconditionally for the same reason (c33df71b).
+        "app_panes lists the panes of this window — their ids, titles, directories, models and "
+        "whether each one's agent is busy — and `pane` on the tools that take it aims at one of "
+        "them; your own pane is marked `you`.",
         "Say what you are doing, in words, whenever you use one of these tools: name the panes, "
         "rows or conversations before or as you act (\"Opening 3 sessions in new panes: A, B, "
         "C.\", \"Turned Copy on select on — Undo is in the notification.\") and never end a turn "
@@ -1293,8 +1466,15 @@ def prompt_section(tools: "AppTools | None") -> str:
             "only what was asked for, say in your reply what you changed, and use app_changes "
             "and app_undo to reverse your own. Ask first when a change reaches beyond the "
             "request. An action that acts on one pane — its model, reasoning effort, input mode "
-            "or plan mode — runs on your own pane; app_panes lists the window's panes and `pane` "
-            "aims at one of them.")
+            "or plan mode — runs on your own pane; `pane` aims it at another.")
+        lines.append(
+            "You can also talk to another pane: app_send_prompt submits a prompt in it as if the "
+            "user had typed it there, app_prefill_prompt leaves it in that pane's composer for "
+            "them to send, and app_rename names a pane or its tab. Sending makes another agent "
+            "act, so name the pane and say why in your reply; the user is shown every send. You "
+            "may not send to your own pane, and Relay cuts off a chain of agents prompting each "
+            "other — if you find yourself answering a prompt by sending another one, stop and "
+            "write the answer instead.")
     else:
         lines.append(
             "Changing options and running actions is switched off for agents in Options › Agent, "

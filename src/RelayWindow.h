@@ -1693,6 +1693,15 @@ private:
                 runAction(key, pane);
                 return true;
             };
+            // One pane's agent putting a prompt into another pane, and naming a pane or a tab
+            // (#AG7R group 8, §30.3). Both take the command with its `pane` already resolved, so
+            // the rules about *which* pane live in one place and these only do the act.
+            m_appCommands.deliverPrompt = [this](const QJsonObject &command, bool *queued, QString *error) {
+                return deliverAppPrompt(command, queued, error);
+            };
+            m_appCommands.renameTarget = [this](const QJsonObject &command, QString *previous, QString *error) {
+                return renameAppTarget(command, previous, error);
+            };
             // The panes of this window, for `list_panes`: an agent cannot aim at a pane but its
             // own until it can read the others' ids. Answered on demand rather than carried in the
             // `app` block, because panes open and close between two catalogs and a stale list
@@ -1839,7 +1848,67 @@ private:
             runAction(QStringLiteral("board.open"));
             return true;
         }
+        // The rest of Relay's panes (#AG7R group 8). Each had an *action* and no `app_open`
+        // target, so an agent could open Options and the Switchboard by naming them and had to
+        // reach for a key — two of them among group 1's unreachable twelve — for the explorer,
+        // Test suites, Activity, ⓘ, requests and subagents. They route to the same window code
+        // the action runs rather than repeating it, and the pane-scoped ones follow the aim
+        // (§30.3) instead of landing on whichever pane has the focus.
+        Pane *aim = findPaneByToken(command.value(QStringLiteral("pane")).toString());
+        if (target == QStringLiteral("files")) {
+            // toggleExplorer() takes the anchor the action's own branch passes as `m_activeLeaf`:
+            // aimed, the explorer opens on that pane's directory and beside it.
+            if (aim) toggleExplorer(aim->cwd(), aim); else runAction(QStringLiteral("files.explorer"));
+            return true;
+        }
+        if (target == QStringLiteral("subagents")) {
+            // `agent.subagentPane` is one of the keys that is not in `actionIsPaneScoped()` — its
+            // branch reads the focused pane — so an aimed open calls what that branch calls
+            // rather than silently landing somewhere else.
+            if (aim) aim->openSubagentPane(); else runAction(QStringLiteral("agent.subagentPane"));
+            return true;
+        }
+        static const QMap<QString, QString> paneTargets = {
+            {QStringLiteral("tests"), QStringLiteral("tests.open")},            // #7BM4
+            {QStringLiteral("activity"), QStringLiteral("agent.internalsPane")},
+            {QStringLiteral("info"), QStringLiteral("agent.info")},
+            {QStringLiteral("requests"), QStringLiteral("agent.requests")}};
+        if (const QString key = paneTargets.value(target); !key.isEmpty()) {
+            runAction(key, aim);   // aimed where the action is pane-scoped; ignored where it is not
+            return true;
+        }
         return fail(QStringLiteral("unknown_target"));
+    }
+
+    // `send_prompt` / `prefill_prompt` (§30.3, #AG7R group 8): the prompt goes to the pane the
+    // executor resolved, which has already refused a pane that is not this window's, the asking
+    // agent's own pane and a chain of agents prompting each other. All that is left here is the
+    // pane itself, which knows whether its composer is free and whether its agent is busy.
+    bool deliverAppPrompt(const QJsonObject &command, bool *queued, QString *error) {
+        Pane *pane = findPaneByToken(command.value(QStringLiteral("pane")).toString());
+        if (!pane) { if (error) *error = QStringLiteral("unknown_pane"); return false; }   // closed in flight
+        return pane->takeAgentPrompt(command.value(QStringLiteral("text")).toString(),
+                                     command.value(QStringLiteral("from_label")).toString(),
+                                     command.value(QStringLiteral("send")).toBool(), queued, error);
+    }
+
+    // `rename` (§30.3, #AG7R group 8): `/rename` and `/rename-tab` for an agent, since those are
+    // slash commands typed into a composer and no agent can type into one. The pane's own rename
+    // goes through the pane (it owns the title and the worker that stores it); a tab's goes
+    // through `renameTab()`, the same call the double click and `/rename-tab` make.
+    bool renameAppTarget(const QJsonObject &command, QString *previous, QString *error) {
+        const auto fail = [error](const QString &word) { if (error) *error = word; return false; };
+        Pane *pane = findPaneByToken(command.value(QStringLiteral("pane")).toString());
+        if (!pane) return fail(QStringLiteral("unknown_pane"));
+        const QString name = command.value(QStringLiteral("name")).toString();
+        if (command.value(QStringLiteral("what")).toString() == QStringLiteral("tab")) {
+            QWidget *page = pageOf(pane);
+            if (!page) return fail(QStringLiteral("failed"));
+            if (previous) *previous = m_tabNames.value(page);
+            renameTab(name, false, page);
+            return true;
+        }
+        return pane->takeAgentRename(name, previous, error);
     }
 
     // Two keys, a pane each: Ctrl+Shift+A is Actions (things to do now), Ctrl+Shift+O and the gear
@@ -7148,6 +7217,11 @@ private:
             // `who` is the pane's session token: the change log says which agent did it, and the
             // notification reads the same either way.
             return w ? w->executeAppCommand(command, guard->sessionToken()) : QJsonObject{};
+        };
+        // The loop guard's reset (#AG7R group 8, §30.3): a prompt the person typed in this pane
+        // ends the chain of agent-to-agent prompts that reached it, and lets its agent send again.
+        pane->onPersonPrompt = [guard] {
+            if (auto *w = windowOf(guard)) w->appCommands().notePersonPrompt(guard->sessionToken());
         };
         // Right-click menu entries the window owns (issue #X2F1).
         pane->onWindowAction = [guard](const QString &action) {
