@@ -9,10 +9,10 @@ shot 05-share-the-share-window-pairing-through-the-hosted-address.png
 PASS the pairing link points at the hosted app: https://join.relay-terminal.ai/pair#… (135 chars)
 shot 06-phone-the-code-on-the-phone.png
 shot 07-share-the-same-code-on-the-desktop.png
-NOTE the phone shows 87026; shot 07 is the desktop's — compare them
+NOTE the phone shows 47207; shot 07 is the desktop's — compare them
 shot 08-phone-paired-full-inbox.png
 PASS the phone paired with Allow typing and reads 'full', link 'connected' (shot 08)
-PASS the phone holds a connect token (35 chars) for desktop e3ae7615… (the record's id matches the link's key: True)
+PASS the phone holds a connect token (35 chars) for desktop 08f54669… (the record's id matches the link's key: True)
 PASS a connect with no token at all to the paired desktop is refused: closed 4404 'no such desktop or the pairing code expired.'
 PASS a connect with a made-up token to the paired desktop is refused: closed 4404 'no such desktop or the pairing code expired.'
 shot 09-phone-inbox-two-panes-with-chips.png
@@ -25,7 +25,7 @@ shot 13-phone-inbox-running-with-the-clock.png
 shot 14-phone-inbox-finished.png
 shot 15-phone-the-answer-on-the-phone.png
 shot 16-desktop-the-answer-in-the-pane.png
-PASS a prompt sent through the pane view’s box (one screen drawn: True) ran on the desktop: the chip read 'running · 1s' then 'finished', and the fake model's answer reached the terminal (True) (shots 12-16)
+PASS a prompt sent through the pane view’s box (one screen drawn: True) ran on the desktop: the chip read 'running · 0s' then 'finished', and the fake model's answer reached the terminal (True) (shots 12-16)
 shot 17-phone-stop-while-the-turn-runs.png
 shot 18-phone-after-stop.png
 shot 19-desktop-the-stopped-turn-on-the-desktop.png
@@ -56,7 +56,7 @@ PASS an editor invite was made on the desktop, through the hosted address: https
 shot 35-guest-alice-knocks.png
 shot 36-phone-the-knock-on-the-phone.png
 shot 37-desktop-the-knock-on-the-desktop.png
-PASS the knock reaches the owner's phone with the same code the guest sees (29437): 'alice wants to join as editor · code 29437AdmitRefuse' (shots 35-37)
+PASS the knock reaches the owner's phone with the same code the guest sees (75339): 'alice wants to join as editor · code 75339AdmitRefuse' (shots 35-37)
 shot 38-guest-alice-admitted-from-the-phone.png
 shot 39-desktop-alice-on-the-people-list.png
 PASS Admit on the phone lets the guest in (shots 38, 39)
@@ -67,17 +67,17 @@ shot 43-phone-the-guest-prompt-ran.png
 shot 44-desktop-the-guest-prompt-on-the-desktop.png
 PASS a guest prompt waits on the desktop, shows on the phone ('alice: GUESTQ what is in this folder?RunRefuse'), Run sends it to the agent (True) and the model answered it (True) (shots 40-44)
 shot 45-phone-the-desktop-quit.png
-PASS Relay quit cleanly on SIGTERM (exited normally, gui_crash lines: 0); the rendezvous shows it gone (desktops 0); the phone says 'offline' (shot 45)
+PASS Relay quit cleanly on SIGTERM (exit 0, gui_crash lines: 0); the rendezvous shows it gone (desktops 0); the phone says 'offline' (shot 45)
 shot 46-desktop-relay-started-again-nothing-pressed.png
 shot 47-phone-the-phone-reloaded-and-reconnected.png
 PASS after a restart on the same profile the sidecar comes back by itself (True), the desktop is registered again (desktops 1), and the reloaded phone is straight in the inbox with 1 pane(s), no pairing (['screen-inbox']; link 'connected'; welcome note '') (shots 46, 47)
 shot 47a-phone-the-pairing-tab-refreshed.png
-FAIL a paired phone refreshing the tab it paired in (/pair, no code) lands in 'This pairing link arrived without its code — usually because the browser reloaded the page after the certificate warning. Scan the QR code on your desktop again; it stays valid for five minutes.' (shot 47a)
+PASS a paired phone refreshing the tab it paired in (/pair, no code) lands in 'the inbox' (shot 47a)
 shot 48-desktop-options-remote-switched-off.png
 shot 49-phone-the-phone-after-the-switch.png
 PASS the switch off withdraws the desktop from the rendezvous (desktops 0), the phone says 'offline', and alwaysOn=false is remembered (True); the sidecar is still a child of Relay (shots 48, 49)
-NOTE phone console: ['error: Loading the script \'https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495\' violates the following Content Security Policy directive: "script-src \'self\'". Note that \'script-src-elem\' was not explicitly set, so \'script-src\' is used as a fallback. The action has been blocked.', 'error: Loading the script \'https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495\' violates the following Content Security Policy directive: "script-src \'self\'". Note that \'script-src-elem\' was not explicitly set, so \'script-src\' is used as a fallback. The action has been blocked.', 'error: Loading the script \'https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495\' violates the following Content Security Policy directive: "script-src \'self\'". Note that \'script-src-elem\' was not explicitly set, so \'script-src\' is used as a fallback. The action has been blocked.', 'error: Loading the script \'https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495\' violates the following Content Security Policy directive: "script-src \'self\'". Note that \'script-src-elem\' was not explicitly set, so \'script-src\' is used as a fallback. The action has been blocked.']
+NOTE phone console: ['error: Loading the script \'https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495\' violates the following Content Security Policy directive: "script-src \'self\'". Note that \'script-src-elem\' was not explicitly set, so \'script-src\' is used as a fallback. The action has been blocked.', 'error: Loading the script \'https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495\' violates the following Content Security Policy directive: "script-src \'self\'". Note that \'script-src-elem\' was not explicitly set, so \'script-src\' is used as a fallback. The action has been blocked.', 'error: Loading the script \'https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495\' violates the following Content Security Policy directive: "script-src \'self\'". Note that \'script-src-elem\' was not explicitly set, so \'script-src\' is used as a fallback. The action has been blocked.']
 NOTE guest console: ['error: Loading the script \'https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495\' violates the following Content Security Policy directive: "script-src \'self\'". Note that \'script-src-elem\' was not explicitly set, so \'script-src\' is used as a fallback. The action has been blocked.']
-NOTE Relay ended: exited normally
+NOTE Relay ended: exit 0
 
-30 notes, 1 failures
+30 notes, 0 failures

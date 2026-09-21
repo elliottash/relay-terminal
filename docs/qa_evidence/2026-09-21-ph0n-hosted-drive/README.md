@@ -5,7 +5,8 @@
 rendezvous at `https://join.relay-terminal.ai` (nothing stubbed there), a headless "phone"
 (Chrome at 390×844) and a headless guest, driven end to end through the thirteen steps the card's
 wave 3 asked for. Everything that failed and could be fixed here was fixed and landed; the run
-recorded in this folder is of the final harness against the final code.
+recorded in this folder is the re-run after the fixes were deployed, and every one of its thirty
+checks passes.
 
 ```sh
 scripts/relay-build
@@ -33,7 +34,10 @@ and `audit.txt`.
 checkout is shared by several sessions, so the tree had other sessions' uncommitted edits in
 `src/` (listed in `provenance.txt`); none of them is in `remote/`, `app/` or `rendezvous/`. The
 phone ran the app **as served by join.relay-terminal.ai**, which at the time was the deploy of
-`8e9b2e05` (`served app.js 7c195862cf60`), not the repo's `app.js` — see step 12a.
+`5d8ce281`, which is the repo's own `app.js` (`provenance.txt`'s two hashes match). The first
+recorded run, on 2026-09-21 before that deploy, ran against the deploy of `8e9b2e05` and is the
+reason step 12a was red then: the fix existed in the repo and not on the server. The run recorded
+here is the re-run after the deploy.
 
 ## The thirteen steps
 
@@ -51,7 +55,7 @@ phone ran the app **as served by join.relay-terminal.ai**, which at the time was
 | 10 | Notifications | "Notify me on this phone" → the desktop answers with the two switches ("When an agent finishes or fails" = agent_finished/failed/plan, "When something needs me" = waiting_input/password), both on; turning one off is kept | `30`, `31`, `32` | PASS — subscription only; delivery is Phase 3 on the real phone (`pushManager.subscribe` is stubbed in the browser, nothing else is) |
 | 11 | Admit from the phone; a guest prompt | The share window opened now lists the paired phone ("Linux Chrome (Chrome) · full", finding 3). An editor invite made on the desktop (`https://join.relay-terminal.ai/join#…`); alice knocks from a second browser; the owner's phone shows "alice wants to join as editor · code NNNNN" with the guest's code; Admit lets her in; her prompt shows on the phone as "alice: GUESTQ …" with Run/Refuse; Run sends it to the agent and the model answers it | `33`–`44` | PASS |
 | 12 | Restart Relay on the same profile | SIGTERM: Relay exits normally (0 `gui_crash` lines, the share window open), the rendezvous shows 0 desktops, the phone says `offline`. Started again with nothing pressed: the sidecar comes back, `/v1/health` is 1 again, and the phone opened at `/` is straight in the inbox, connected, no pairing | `45`, `46`, `47` | PASS |
-| 12a | The tab the phone paired in, refreshed at `/pair` | The **served** app says "This pairing link arrived without its code … scan the QR code again" to a device that is paired. Fixed in `app/app.js` (`c6c2f72e`): after pairing the page sits at `/`, and `/pair` with no code on a paired device goes to the inbox; `tests/test_remote_browser.py` covers it. **The fix is not deployed** (`rendezvous/deploy.sh` is the orchestrator's), so the served app still shows the note | `47a` | FAIL until deployed |
+| 12a | The tab the phone paired in, refreshed at `/pair` | A paired phone reloading `/pair` with no code lands in the inbox instead of being told to scan again. Fixed in `app/app.js` (`c6c2f72e`): after pairing the page sits at `/`, and `/pair` with no code on a paired device connects the stored device; `tests/test_remote_browser.py` covers it. Red in the first run because the fix was in the repo and not yet served; green here, against the deploy of `5d8ce281` | `47a` | PASS |
 | 13 | The switch off | `/v1/health` back to the count before the run, the phone says `offline`, `relay.conf` remembers `alwaysOn=false`. The sidecar process stays a child of Relay after `stop` (it answers `stopped` and idles; by design, `RemoteShare::setAlwaysOn`) | `48`, `49` | PASS |
 
 `timings.txt` has the seconds per step; the whole run is about six minutes, of which the restart
@@ -65,8 +69,7 @@ Eight things, none of which the unit tests said. Each was fixed here except the 
    left the page at `/pair` with the fragment cut; a refresh of that URL — Safari reopens a tab
    where it was — hit the "arrived without its code" branch. Now the page is put at the app's
    root after pairing, and `/pair` with no code on a device that already has a record connects
-   the stored device. `c6c2f72e`, with a browser test. Needs a deploy to take effect on the
-   phone.
+   the stored device. `c6c2f72e`, with a browser test. Deployed, and green in the re-run.
 2. **Every finished turn reached the inbox as `idle`.** `Pane::shareStatus()` answered only
    `password`, `waiting_input`, `running`, `failed` and `idle`, so the "finished" chip of Phase
    2.5 could never show from a GUI pane. It now answers `finished` after a turn that ended well,
@@ -91,7 +94,7 @@ Eight things, none of which the unit tests said. Each was fixed here except the 
    Relay first (which it must, for Web Push) could not pair inside the installed app: the
    welcome screen had no place for a link. It now has "Or paste the pairing link", which takes
    the same path a scanned link takes; a link for another origin or a non-link is refused with a
-   sentence. Browser test in `tests/test_remote_browser.py`. Needs the deploy too.
+   sentence. Browser test in `tests/test_remote_browser.py`. Deployed with the same commit.
 7. **The audit log records almost nothing of the run.** `audit.txt` holds `pair` and two
    `push_subscribe` rows; `invite_create`, `knock`, `admitted`, `guest_prompt`, `prompt_decided`
    are all in `remote/host.py` as `audit.record(...)` calls and none reached the file. Not
@@ -127,8 +130,9 @@ note finding 7: without the tier lists in the profile, a recap would have gone t
 
 What a real phone does differently from this run is in bold.
 
-1. Deploy first: `rendezvous/deploy.sh` from `c6c2f72e` or later, so the served `app.js` has
-   the `/pair` fix (12a). Check `provenance.txt`'s "served app.js" line equals the repo's.
+1. Deploy first: `rendezvous/deploy.sh` (done for `5d8ce281`; do it again after any change under
+   `app/`, `remote/` or `rendezvous/`, or the phone runs old code). Check `provenance.txt`'s two
+   `app.js` hashes match.
 2. On the desktop: Options › Remote → Remote control **on**, address `relay-terminal.ai`. The
    plug's menu should read "Remote control on · relay-terminal.ai · no phone connected".
 3. **Install the app before pairing.** In Safari open `https://join.relay-terminal.ai/`, Share

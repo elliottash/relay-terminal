@@ -139,3 +139,6 @@ QProcess: Destroyed while process ("python3") is still running.
 [Inferior 1 (process 3031753) exited normally]
 No stack.
 No frame selected.
+Failed to execute child process “dbus-launch” (No such file or directory)
+Failed to execute child process “dbus-launch” (No such file or directory)
+QProcess: Destroyed while process ("python3") is still running.
