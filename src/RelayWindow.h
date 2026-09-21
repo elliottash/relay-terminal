@@ -6572,9 +6572,11 @@ public:
             } else if (type == QStringLiteral("key_tested") && !guard->m_active) {
                 // No pane to carry the status line: the answer is said where the button was.
                 const QString preset = event.value(QStringLiteral("preset")).toString();
+                // The model that answered, by name (card #MDL1, rule 1).
+                const QString answered = relay::models::nameOf(event.value(QStringLiteral("model")).toString());
                 QMessageBox::information(guard, QStringLiteral("Models"), event.value(QStringLiteral("ok")).toBool()
-                    ? QStringLiteral("%1 answered%2.").arg(preset, event.value(QStringLiteral("model")).toString().isEmpty()
-                          ? QString() : QStringLiteral(" on ") + event.value(QStringLiteral("model")).toString())
+                    ? QStringLiteral("%1 answered%2.").arg(preset, answered.isEmpty()
+                          ? QString() : QStringLiteral(" on ") + answered)
                     : QStringLiteral("%1: %2").arg(preset, event.value(QStringLiteral("error")).toString()));
             }
             QWidget *page = guard->pageOfTabId(tab);
