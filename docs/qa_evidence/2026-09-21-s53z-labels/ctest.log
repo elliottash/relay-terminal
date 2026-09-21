@@ -1,0 +1,3 @@
+run 20260921T111816Z-99da: 1 passed, 0 failed, 0 skipped (1 of 1 asked for)
+  pass     2.58s  ctest:board
+{'run_id': '20260921T111816Z-99da', 'state': 'finished', 'requested': 1, 'ran': 1, 'counts': {'pass': 1, 'fail': 0, 'skip': 0}, 'tests': [{'id': 'ctest:board', 'result': 'pass', 'duration': 2.582}], 'skipped': [], 'opened': [], 'rerun': [], 'message': 'the run produced no results'}

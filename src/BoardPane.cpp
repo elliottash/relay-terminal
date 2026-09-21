@@ -1182,7 +1182,7 @@ public:
     // A click on a row's flag: the card and the step, +1 for a left click and −1 for a right
     // one (#VKFV). The pane clamps at −1…+3 and writes it through `board_priority`.
     std::function<void(const QString &cardId, int step)> onPriority;
-    // A click on a row's label badge copies its hashtag (#3ZAP) instead of selecting the row.
+    // A click on a row's label badge copies its label: filter term (#S53Z) instead of selecting the row.
     std::function<void(const QString &label)> onCopyLabel;
     // A click on the ⧉ beside a row's `#ID` copies the reference (#FT77), under the badge's
     // one-gesture rule: a copy, never a selection.
@@ -1278,7 +1278,7 @@ protected:
             event->accept();
             return;
         }
-        // A label badge copies its hashtag (#3ZAP) rather than selecting the row; the row's
+        // A label badge copies its label: filter term (#S53Z) rather than selecting the row; the row's
         // other badges still decorate, and a click between them selects as before.
         if (const QString label = labelBadgeUnder(event); !label.isEmpty()) {
             if (onCopyLabel)
@@ -1994,8 +1994,8 @@ public:
         connect(m_close, &QToolButton::clicked, this, [this] { if (onClose) onClose(); });
         connect(m_refCopy, &QToolButton::clicked, this, [this] {
             // The ⧉ (#FT77): the same copy the row's ⧉ makes.
-            if (onCopyTag)
-                onCopyTag(m_id);
+            if (onCopyId)
+                onCopyId(m_id);
             if (onCopyIdHint)
                 onCopyIdHint();
         });
@@ -2027,7 +2027,7 @@ public:
                     onFocusPane(url.path());
                 return;
             }
-            // A label hashtag copies; a `#ID` that names a card zooms to it (#3ZAP).
+            // A label copies its filter term; a `#ID` that names a card zooms to it (#3ZAP).
             if (url.scheme() == QStringLiteral("tag")) {
                 if (onCopyTag)
                     onCopyTag(url.path().isEmpty() ? url.host() : url.path());
@@ -2147,8 +2147,9 @@ public:
     // Whether the pane a card was claimed by is still open (#R9G7): read as the card is shown,
     // so the page picks up a closed pane at its next re-read. Unset means live.
     std::function<bool(const QString &token)> paneExists;
-    // A label hashtag was clicked — a badge in the list, the meta's labels, or a `#tag` in the
-    // card's own words or the thread (#3ZAP): copy `#tag` and say so.
+    // The header copy button preserves the card reference (#S53Z).
+    std::function<void(const QString &id)> onCopyId;
+    // A meta label copies its label: filter term (#S53Z).
     std::function<void(const QString &tag)> onCopyTag;
     // A click on the ⧉ beside the ref is the slow path: `y` is its key (#FT77, the WARP.md hint
     // rule).
@@ -2157,7 +2158,7 @@ public:
     // it, the way the cleanup panel's `card:` anchors do (#3ZAP).
     std::function<void(const QString &id)> onOpenCard;
     // Whether a word after a `#` names a card on this board (#3ZAP): the board decides whether
-    // `#K7Q2` is a card reference or a four-character label — shape alone cannot.
+    // `#K7Q2` is a card reference — unknown words remain plain text.
     std::function<bool(const QString &id)> hasCard;
     std::function<void(const QString &mode)> onModeHint;   // a mode button was clicked, not keyed
     std::function<void()> onClose, onCancel, onToPrompt, onEscape;
@@ -3307,7 +3308,7 @@ private:
                 parts << item(label, items.join(QStringLiteral(", ")));
             }
         };
-        // Labels read as the hashtags they are and copy on a click (#3ZAP): the muted key
+        // Labels render as bare words and copy a filter term (#S53Z): the muted key
         // stays the meta's, the words take the pane's link colour.
         QStringList labelWords;
         const QJsonValue labelsValue = front.value(QLatin1String("labels"));
@@ -3320,7 +3321,7 @@ private:
         if (!labelWords.isEmpty()) {
             QStringList shown;
             for (const QString &label : std::as_const(labelWords))
-                shown << QStringLiteral("<a href=\"tag:%1\" style=\"color:%2\">#%3</a>")
+                shown << QStringLiteral("<a href=\"tag:%1\" style=\"color:%2\">%3</a>")
                                  .arg(QString::fromUtf8(QUrl::toPercentEncoding(label)),
                                       theme::Link.name(), label.toHtmlEscaped());
             parts << QStringLiteral("<span style=\"color:%1\">labels</span>&nbsp;%2")
@@ -3412,10 +3413,7 @@ private:
         linkifyTags(cursor.document(), from, cursor.position());
     }
 
-    // A `#tag` (#3ZAP): a label hashtag copies when clicked; a `#ID` that names a card on this
-    // board zooms to it instead. Card ids are the four base32 characters the board coins, so
-    // shape alone cannot tell a reference from a four-letter label — `hasCard` decides, and a
-    // word that names no card is a label. A `#` inside a word (`well#known`) is not a tag.
+    // Only known card references become links (#S53Z); #label stays plain text.
     static const QRegularExpression &tagPattern()
     {
         static const QRegularExpression pattern(
@@ -3426,17 +3424,17 @@ private:
     // The anchor a tag wears, over whatever format the words around it carry.
     QTextCharFormat tagFormat(const QTextCharFormat &base, const QString &word) const
     {
-        const bool ref = hasCard && hasCard(word);
+        if (!hasCard || !hasCard(word))
+            return base;
         QTextCharFormat link = base;
         link.setAnchor(true);
-        link.setAnchorHref(ref ? QStringLiteral("card:") + word.toUpper()
-                               : QStringLiteral("tag:") + word);
+        link.setAnchorHref(QStringLiteral("card:") + word.toUpper());
         link.setFontUnderline(true);
         link.setForeground(theme::Link);
         return link;
     }
 
-    // `text` inserted with every `#tag` in it an anchor (#3ZAP), so a plain thread line — an
+    // `text` inserted with known card references as anchors, so a plain thread line — an
     // event, a note, a hand-off — carries the same affordance the Markdown bodies get.
     void insertTagged(QTextCursor &cursor, const QString &text, const QTextCharFormat &format)
     {
@@ -3454,7 +3452,7 @@ private:
             cursor.insertText(text.mid(at), format);
     }
 
-    // Overlay `#tag` anchors on a stretch of already-rendered Markdown (#3ZAP): the body after
+    // Overlay card-reference anchors on a stretch of already-rendered Markdown: the body after
     // setMarkdown(), or the range a thread comment's fragment landed in. What is already an
     // anchor — a Markdown link's label, a pane link — and what is code, fenced or inline, keeps
     // its meaning: `[#bug](http://x)` stays an http link and `#include` stays source.
@@ -4203,7 +4201,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
         return delegate->idCopyRectOf(rowIndex, itemRect);
     };
     m_list->onCopyId = [this](const QString &id) {
-        copyTag(id);
+        copyCardReference(id);
         // A click is the slow path: `y` copies the selected card's reference (#FT77).
         if (onHint)
             onHint(QStringLiteral("copyId"), QStringLiteral("y"));
@@ -4423,6 +4421,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     m_detail->onFocusPane = [this](const QString &token) { revealClaim(token); };
     m_detail->paneExists = [this](const QString &token) { return tokenLive(token); };
     m_detail->hasCard = [this](const QString &id) { return m_model.card(id) != nullptr; };
+    m_detail->onCopyId = [this](const QString &id) { copyCardReference(id); };
     m_detail->onCopyTag = [this](const QString &tag) { copyTag(tag); };
     m_detail->onCopyIdHint = [this] {
         if (onHint)
@@ -7873,20 +7872,28 @@ void BoardView::selectCard(const QString &id)
 
 void BoardView::copyReference()
 {
-    copyTag(m_selected);
+    copyCardReference(m_selected);
 }
 
-// A label hashtag was clicked (#3ZAP) — a row badge, the meta's labels, or a `#tag` in the
-// card's own words or the thread: the copy-and-notice `copyReference` gives a card id.
+// Card references retain their # prefix, independently of label copying (#S53Z).
+void BoardView::copyCardReference(const QString &id)
+{
+    if (id.isEmpty())
+        return;
+    QApplication::clipboard()->setText(QStringLiteral("#") + id);
+    showNotice(QStringLiteral("Copied #%1").arg(id), false);
+    toast(QStringLiteral("#%1 copied").arg(id));
+}
+
+// A label badge or meta label copies a term the filter understands (#S53Z).
 void BoardView::copyTag(const QString &tag)
 {
     if (tag.isEmpty())
         return;
-    QApplication::clipboard()->setText(QStringLiteral("#") + tag);
-    showNotice(QStringLiteral("Copied #%1").arg(tag), false);
-    // The same thing said where the eye is (#Y2F4): on a card's page the notice bar can be a long
-    // way from the hashtag that was clicked.
-    toast(QStringLiteral("#%1 copied").arg(tag));
+    const QString term = QStringLiteral("label:") + tag;
+    QApplication::clipboard()->setText(term);
+    showNotice(QStringLiteral("Copied %1").arg(term), false);
+    toast(QStringLiteral("%1 copied").arg(term));
 }
 
 // Zoom to a card by id (#3ZAP): a `#ID` reference in a card's text takes the same path the

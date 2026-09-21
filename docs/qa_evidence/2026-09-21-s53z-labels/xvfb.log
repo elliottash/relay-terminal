@@ -1,0 +1,8 @@
+********* Start testing of BoardModelTests *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : BoardModelTests::initTestCase()
+PASS   : BoardModelTests::labelClicksCopyFiltersAndCardRefsZoom()
+PASS   : BoardModelTests::theRefCopyButtonCopiesTheIdInTheRowsAndTheHeader()
+PASS   : BoardModelTests::cleanupTestCase()
+Totals: 4 passed, 0 failed, 0 skipped, 0 blacklisted, 211ms
+********* Finished testing of BoardModelTests *********

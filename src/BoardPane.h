@@ -311,8 +311,8 @@ public:
     void deleteSelected();
     void undoLast();                // Ctrl+Z: board_undo of this pane's last write
     void copyReference();
-    // A label hashtag was clicked (#3ZAP) — a row badge, the meta's labels, or a `#tag` in the
-    // card's own words or the thread: the copy-and-notice `copyReference` gives a card id.
+    void copyCardReference(const QString &id);
+    // A label badge or meta label copies a label: filter term (#S53Z).
     void copyTag(const QString &tag);
     // Zoom to a card by id (#3ZAP): a `#ID` reference in a card's text, and the cleanup panel's
     // `card:` anchors, land here.
@@ -327,8 +327,8 @@ public:
     // progress (#7BM4 phase 5), which goes exactly where Clean up's does. The view owns the
     // notice, so nothing outside it touches the widget.
     void showToolNotice(const QString &text, bool error = false) { showNotice(text, error); }
-    // A hash copy says so the way the copy-on-highlight does in a terminal pane (#Y2F4): the
-    // same small fading popup, bottom-right and over the board, so a click on a hashtag announces
+    // A clipboard copy says so the way the copy-on-highlight does in a terminal pane (#Y2F4): the
+    // same small fading popup, bottom-right and over the board, so a click on a label or reference announces
     // itself where the eye already is. The notice line still carries "Copied #K7Q2" — the toast is
     // the one a reader skimming a card page actually catches.
     void toast(const QString &text, int milliseconds = 1600);

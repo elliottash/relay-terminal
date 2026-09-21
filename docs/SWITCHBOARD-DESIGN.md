@@ -239,7 +239,8 @@ has no tabs at all. So:
   row; the counts live in the pane's title (`Switchboard · 84 open`) and beside the filter box.
   *(4.7: that filter box moved out of the pane's header and became the top of the list page.)*
 - **`bug` and `feature` are labels**, like `voice` or `design`: a badge on the row and
-  `label:bug` in the filter box. Not tabs, not folders-as-tabs, not a card type. The front
+  `label:bug` in the filter box. Labels display as bare words and copy `label:<name>`
+  when clicked; `#` is reserved for card references. Not tabs, not folders-as-tabs, not a card type. The front
   matter's `type` (work/plan/memory) and the folder layout on disk are unchanged; the UI is simply
   not driven by them, and `folder:changes` (or `folder:bugs`, the board.yaml id that names it)
   reaches those cards.
