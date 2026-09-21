@@ -159,3 +159,64 @@ and an else branch that reads the target as a file path, so a right-click on an 
 link offers "Open <last path segment>", "Open with default application" and "Copy path". Left click,
 Ctrl+click, hover and the keyboard walk (#GWXM) are all correct — they go through
 `linkActivated(link.target, …)`. Worth a two-line branch there when step 5 lands the routing.
+
+<!-- relay:entry 20260921T005702Z-q9 author=claude-code kind=progress -->
+Step 2 landed: `relay::agent::Context`, `ContextSpec`, `Action` and `TurnRecord`
+(de54a76144a2, `src/AgentContext.{h,cpp}`, `tests/agentcontext_test.cpp`, `relay-agentcontext` +
+its test target in `CMakeLists.txt`). Steps 3, 6 and 7 can code against it without changing it.
+
+**The header is where the rule lives.** It quotes the owner's two sentences and then says what a
+context is *not*: not a tool whitelist — **no `tools()` method, ever**, with the #H6VQ fence and the
+two gates that stay (the `settable` / `agent_safe` markers, the Options › Agent toggle) named in the
+paragraph that refuses it — and not a widget and not a worker.
+
+**The interface, as written.** `Context` is the card's, unchanged: `spec()`, `actions()`,
+`resolveLink(const relay::links::Target &)`, `turnFinished(const TurnRecord &)`, `placeholder()`.
+One addition the card did not name and steps 6 and 7 would otherwise have had to add: a
+`std::function<void()> onChanged` the console sets and the context calls through `changed()` when
+anything `spec()` or `actions()` would now answer differently has moved — a card going busy and its
+Execute becoming "Executing (a1b2c3d4)", Options swapping mode. There is no signal because the
+library is QtCore-only and a context is not a QObject.
+
+**`Action`** is `{key, letter, label, tooltip, leaves, enabled, run}` with `fullLabel()` →
+`"Check (k)"`, plus free functions `withUniqueLetters()` (a duplicate letter, a multi-character
+letter or a letter another action claimed first is cleared — the *letter* is refused, never the
+action, so one context's button can never make another's disappear), `actionForLetter()` (case
+insensitive, and a disabled action answers nothing — the key can do no more than the mouse) and
+`labelWithoutKey()` (the same rule `CardDetail::fitButtons` uses today, so step 6 can drop its
+static copy). `leaves` is the accent-outline flag for the two that hand the card to a pane.
+
+**`ContextSpec` is the only part that crosses to the worker**, and both halves are golden-tested so
+step 4's Python is checked against one written-down shape rather than against the GUI:
+
+- `toJson()` — `configure`'s `context` block: `name`, `surface`, `agent_role`, `workspace`,
+  `scope`, `shell`, `routing` always; `persist {scope, key}` only when there is a key (no key means
+  no store, which is what 30.7 says a `configure` with no tab means); `brief {key, title}` only
+  when there is one. `surface` falls back to `name`, so a host with one console per context sets
+  nothing.
+- `askFields()` — what rides on each `ask`: `surface` always, `screen` when there is one (trimmed,
+  cut at 2000 characters as 30.7 already cuts `board_chat`'s), `readonly` only when true. Neither
+  `screen` nor `readonly` is in the `context` block: they are the turn's, not the context's.
+- `persistId()` — `scope` and `key` joined with a unit separator, so a board-less tab keyed
+  ("", tab) cannot resolve to the conversation the same tab inside a project keeps, and no pair of
+  (scope, key) can spell another pair's string. `operator==` is the rest of 30.7's move test: a
+  model swap leaves the conversation where it is, a new tab does not.
+
+`TurnRecord` carries what `board_protocol._card_answer` writes today — id, surface, prompt, answer,
+`model`, `sessionId`/`turnId` (`turnRef()` → `"<session>/<turn>"`), `mode`, `outcome`, `readonly` —
+so `CardContext::turnFinished` can append a Discuss turn to `issues/threads/<ID>.md` with its
+provenance (owner decision 2).
+
+**The library edge goes the way the card asked.** `relay-agentcontext` is QtCore-only and links
+`relay-outputlinks` (for `links::Target`); `relay-board`, `relay-settings` and `relay-conversations`
+link *it*, never the other way, so a pane library can supply a context without pulling in a window.
+
+Tests: `ctest --test-dir build -R '^agentcontext$'` — 20 cases, all passing, and the same run inside
+land.py's verify build of the exact tree that went on main. Only my two `CMakeLists.txt` hunks were
+landed (`--only-hunk`); step 1's source-list hunk was left in the working tree untouched.
+
+One note for step 4: the `context` block carries `surface` beside `name` (`name` is the kind —
+"terminal", "card", "options" — and `surface` is *this console's* id, unique within a worker, so a
+tab with two cards open on one worker can be told apart on events). If the worker would rather take
+the surface only off the `ask`, it can ignore the field; `fromJson` ignores unknown keys the same
+way, so neither side breaks when the other adds one.
