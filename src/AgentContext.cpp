@@ -44,6 +44,26 @@ QString labelWithoutKey(const QString &label)
     return at > 0 && label.endsWith(QLatin1Char(')')) ? label.left(at) : label;
 }
 
+QStringList placeholderRungs(const QString &line)
+{
+    const QString top = line.trimmed();
+    if (top.isEmpty())
+        return {};
+    QStringList rungs{top};
+    for (QString rung = top;;) {
+        const int comma = rung.lastIndexOf(QStringLiteral(", "));
+        if (comma <= 0)
+            break;
+        rung = rung.left(comma);
+        rungs << rung;
+    }
+    if (const int dash = top.indexOf(QStringLiteral(" \u2014 ")); dash > 0)
+        rungs << top.left(dash);
+    rungs << QStringLiteral("\u2026");
+    rungs.removeDuplicates();
+    return rungs;
+}
+
 QList<Action> withUniqueLetters(QList<Action> actions)
 {
     QSet<QString> taken;

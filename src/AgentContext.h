@@ -61,6 +61,7 @@
 #include <QJsonObject>
 #include <QList>
 #include <QString>
+#include <QStringList>
 
 #include <functional>
 
@@ -129,6 +130,19 @@ int actionForLetter(const QList<Action> &actions, const QString &letter);
 // keys no longer fit (`CardDetail::fitButtons`); the key itself does not vanish, it is in the
 // tooltip and the pane's key legend either way.
 QString labelWithoutKey(const QString &label);
+
+// The rungs of the composer's grey text, widest first, built from a context's `placeholder()`.
+//
+// `RichEditor` takes the first candidate that fits the box, so a two-rung ladder — the line and
+// "…" — is all-or-nothing: a line one pixel too wide leaves the box saying nothing at all. That
+// is what a card page's box did, and the three chords the owner asked to be said *there* (#VZ69)
+// were then said nowhere near it.
+//
+// Every rung is a **prefix** of the line the context wrote, so no rung can claim something the
+// context did not: drop the last comma-separated clause, then the next, then everything from the
+// em dash on, and finally "…". A short one-clause line gives one rung and "…", which is what a
+// context that wants no ladder gets for free.
+QStringList placeholderRungs(const QString &line);
 
 // ---------------------------------------------------------------------------------------------
 // The data half: what the worker is told about this context.

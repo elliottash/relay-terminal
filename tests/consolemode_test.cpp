@@ -24,6 +24,8 @@
 #include <QPointer>
 #include <QTemporaryDir>
 #include <QLabel>
+#include <QLayout>
+#include <QPlainTextEdit>
 #include <QToolButton>
 
 #include <cstdio>
@@ -51,7 +53,7 @@ int failures = 0;
 namespace {
 
 // A context with no shell, the shape the Switchboard, Options and Sessions will supply.
-class StubContext final : public relay::agent::Context {
+class StubContext : public relay::agent::Context {
 public:
     relay::agent::ContextSpec spec() const override
     {
@@ -238,6 +240,38 @@ void anActionThatRebuildsItsOwnRowIsSafe()
     CHECK(!first);   // and it is freed once the event loop reaches it
     }
 
+    // The composer's grey text is a **ladder** built from the context's own line, not that line
+    // and "…" (`relay::agent::placeholderRungs`, which `agentcontext` tests rung by rung). What
+    // this case holds down is the wiring: the pane asks the context, builds the ladder and hands
+    // the whole of it to the editor, so a wide box says the context's whole sentence.
+void theComposerSaysWhatTheContextSays()
+{
+    class Wordy final : public StubContext {
+      public:
+        QString placeholder() const override
+        {
+            return QStringLiteral("Reply \u2014 Enter discusses, Ctrl+Enter plans, Ctrl+Shift+Enter only comments");
+        }
+    } context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    console.resize(1400, 700);
+    if (QLayout *layout = console.layout()) layout->activate();
+    auto *editor = console.findChild<QPlainTextEdit *>(QStringLiteral("composerEditor"));
+    CHECK(editor != nullptr);
+    if (editor == nullptr) return;
+    CHECK_EQ(editor->placeholderText(),
+             QStringLiteral("Reply \u2014 Enter discusses, Ctrl+Enter plans, Ctrl+Shift+Enter only comments"));
+    // A terminal pane keeps RichEditor's own ladder: its context says the same words, and one
+    // rung would stop it shortening as the pane narrows.
+    Pane terminal(context.workspace, context.workspace, false, relay::defaultEngineCore());
+    terminal.resize(1400, 700);
+    if (QLayout *layout = terminal.layout()) layout->activate();
+    auto *plain = terminal.findChild<QPlainTextEdit *>(QStringLiteral("composerEditor"));
+    CHECK(plain != nullptr);
+    if (plain) CHECK(plain->placeholderText().startsWith(QStringLiteral("Shell commands")));
+    }
+
     // A click on an action button teaches its letter once, and pressing the letter teaches
     // nothing — WARP.md's standing rule, on the id `relay::agent::Action::key` names
     // ("board.action." + key). Before this the row was the one fast path in the console with no
@@ -370,11 +404,12 @@ int main(int argc, char **argv)
     cases::anActionThatRebuildsItsOwnRowIsSafe();
     cases::aContextMaySwallowASubmit();
     cases::aClickedActionTeachesItsLetter();
+    cases::theComposerSaysWhatTheContextSays();
     cases::theContextBlockAndTheAskFieldsAreTheContextsOwn();
     cases::theHostsHandlesWork();
     cases::aConsoleIsAnOrdinaryChildOfItsHost();
 
     if (failures == 0)
-    std::fprintf(stdout, "consolemode: 12 cases, all passed\n");
+    std::fprintf(stdout, "consolemode: 13 cases, all passed\n");
     return failures == 0 ? 0 : 1;
 }

@@ -196,6 +196,42 @@ private slots:
 
     // ---- the letters a row may answer -----------------------------------------------------------
 
+    // The composer's grey text sheds clauses instead of collapsing. `RichEditor` takes the
+    // first candidate that fits, so a line and "…" is all-or-nothing: the card page's box, one
+    // pixel too narrow for its line, said nothing at all where the owner asked for the three
+    // chords (#VZ69). Every rung is a prefix of what the context wrote, so a narrow box can say
+    // less but never something else.
+    void thePlaceholderSheddsItsClausesRatherThanVanishing()
+    {
+        const QStringList card = placeholderRungs(
+            QStringLiteral("Reply \u2014 Enter discusses, Ctrl+Enter plans, Ctrl+Shift+Enter only comments"));
+        QCOMPARE(card, (QStringList{
+                           QStringLiteral("Reply \u2014 Enter discusses, Ctrl+Enter plans, Ctrl+Shift+Enter only comments"),
+                           QStringLiteral("Reply \u2014 Enter discusses, Ctrl+Enter plans"),
+                           QStringLiteral("Reply \u2014 Enter discusses"),
+                           QStringLiteral("Reply"),
+                           QStringLiteral("\u2026")}));
+        // Every rung is a prefix of the line, so none of them can promise anything else.
+        for (const QString &rung : card)
+            if (rung != QStringLiteral("\u2026")) QVERIFY2(card.first().startsWith(rung), qPrintable(rung));
+
+        // The Switchboard's, which has one comma and one dash.
+        QCOMPARE(placeholderRungs(QStringLiteral("Ask the Switchboard agent \u2014 Enter sends, a second prompt queues")),
+                 (QStringList{QStringLiteral("Ask the Switchboard agent \u2014 Enter sends, a second prompt queues"),
+                              QStringLiteral("Ask the Switchboard agent \u2014 Enter sends"),
+                              QStringLiteral("Ask the Switchboard agent"),
+                              QStringLiteral("\u2026")}));
+        // One short clause: one rung and "…", which is the two-rung ladder this replaces.
+        QCOMPARE(placeholderRungs(QStringLiteral("Ask the Options helper\u2026")),
+                 (QStringList{QStringLiteral("Ask the Options helper\u2026"), QStringLiteral("\u2026")}));
+        // Nothing to say: nothing, so the pane leaves RichEditor's own ladder alone.
+        QVERIFY(placeholderRungs(QString()).isEmpty());
+        QVERIFY(placeholderRungs(QStringLiteral("   ")).isEmpty());
+        // A dash that opens the line is not a clause boundary: "— go" would be a rung of nothing.
+        QCOMPARE(placeholderRungs(QStringLiteral("\u2014 go")),
+                 (QStringList{QStringLiteral("\u2014 go"), QStringLiteral("\u2026")}));
+    }
+
     void aDuplicateLetterIsRefusedAndItsActionStays()
     {
         Action check;

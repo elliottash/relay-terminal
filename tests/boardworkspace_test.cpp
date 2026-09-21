@@ -64,6 +64,7 @@ private slots:
     void theConsolesOfATabShareOneWorkerAndOneConversation();
     void theWindowsWrapperForwardsEveryContextVirtual();
     void theHelperPanelAndItsModelBoxAreGoneFromTheTree();
+    void aConsoleIsNotALeafSoTheActivePaneIsNeverOne();
     void anOptionOrSessionLinkOpensWhereItNames();
     void theBoardPanePaintsFromTheBoardMaterials();
     void tabMetersGiveWayOnlyWhenFullLabelsDoNotFit();
@@ -386,8 +387,12 @@ void BoardWorkspaceTests::anEmbeddedConsoleIsNotOneOfTheWindowsPanes()
     // It must stop *before* the child walk, or the early-out is decoration.
     QVERIFY(walk.indexOf(QStringLiteral("if (dynamic_cast<ToolPane *>(root)) return panes;"))
             < walk.indexOf(QStringLiteral("findChildren<QWidget *>")));
-    // `leavesIn` already stopped there, and `isLeaf` is what says a ToolPane is a leaf at all.
-    QVERIFY(text.contains(QStringLiteral("static bool isLeaf(QWidget *widget) { return dynamic_cast<Pane *>(widget) || dynamic_cast<ToolPane *>(widget); }")));
+    // `leavesIn` already stopped there, and `isLeaf` is what says a ToolPane is a leaf at all —
+    // and what says an embedded console is **not** one, which is the walk *up*
+    // (aConsoleIsNotALeafSoTheActivePaneIsNeverOne, below).
+    QVERIFY(text.contains(QStringLiteral("static bool isLeaf(QWidget *widget) {")));
+    QVERIFY(bodyOf(text, QStringLiteral("    static bool isLeaf(QWidget *widget) {"))
+                .contains(QStringLiteral("dynamic_cast<ToolPane *>(widget) != nullptr")));
     // The six readers go on reading `panesIn`/`allPanes()` — they are not to be taught about
     // consoles one by one, which is the whole point of fixing the walk instead.
     QVERIFY(text.contains(QStringLiteral("!allPanes().isEmpty()")));   // the first-pane Flash default
@@ -537,6 +542,37 @@ void BoardWorkspaceTests::theWindowsWrapperForwardsEveryContextVirtual()
     }
     // And the other direction: a card going busy or Options swapping mode still reaches the row.
     QVERIFY2(body.contains(QStringLiteral("m_host->onChanged = [this] { changed(); }")), qPrintable(body));
+}
+
+// The walk **up**. `panesIn` stopping at a `ToolPane` (above) keeps a console out of everything
+// that walks the splitter tree downwards; `leafOf()` walks the other way — from a clicked widget
+// up to the first leaf — and `isLeaf` said a console was one, because a console is a `Pane`.
+//
+// So a click in the Switchboard's or the Sessions helper's prompt box made that console
+// `m_activeLeaf` and `m_active`, and every window path that aims at "the active pane" landed on
+// a surface whose leaf-shaped hooks are deliberately unset. The integration drive caught it as
+// `app_open {target: conversation, ids}` from the Sessions helper: the tool answered ok and not
+// one pane opened, because `m_active->openSavedSession()` reached a console with no
+// `onOpenSessionInNewPane`.
+void BoardWorkspaceTests::aConsoleIsNotALeafSoTheActivePaneIsNeverOne()
+{
+    const QString text = windowSource();
+    QVERIFY2(!text.isEmpty(), "src/RelayWindow.h could not be read");
+    const QString leaf = bodyOf(text, QStringLiteral("    static bool isLeaf(QWidget *widget) {"));
+    QVERIFY2(!leaf.isEmpty(), "RelayWindow::isLeaf() is gone or is a one-liner again");
+    // `sharesWorker()` is the test: the window sets `onWorkerLine` on a console it made and on
+    // nothing else, so it is "I am embedded" rather than a name or a parent to guess from.
+    QVERIFY2(leaf.contains(QStringLiteral("sharesWorker()")), qPrintable(leaf));
+    QVERIFY2(leaf.contains(QStringLiteral("ToolPane")), qPrintable(leaf));
+    // And the one walker that needs it still asks: leafOf() is what a press goes through.
+    const QString of = bodyOf(text, QStringLiteral("    static QWidget *leafOf(QWidget *widget) {"));
+    QVERIFY2(of.contains(QStringLiteral("isLeaf(w)")), qPrintable(of));
+    QVERIFY2(bodyOf(text, QStringLiteral("    bool activateOnPress(QObject *object, QEvent *event) {"))
+                 .contains(QStringLiteral("leafOf(widget)")),
+             "a press no longer resolves the pane it landed in");
+    // The one place that turns a leaf into `m_active` reads the same answer.
+    const QString active = bodyOf(text, QStringLiteral("    void setActiveLeaf(QWidget *leaf) {"));
+    QVERIFY2(active.contains(QStringLiteral("dynamic_cast<Pane *>(leaf)")), qPrintable(active));
 }
 
 // Card #AGNT step 9. The helper was a second implementation of the prompt box — its own panel,

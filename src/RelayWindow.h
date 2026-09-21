@@ -7145,7 +7145,24 @@ private:
         return nullptr;
     }
 
-    static bool isLeaf(QWidget *widget) { return dynamic_cast<Pane *>(widget) || dynamic_cast<ToolPane *>(widget); }
+    // A leaf of the splitter tree: a terminal pane, or a tool pane with whatever it is chroming.
+    //
+    // **An embedded agent console is a `Pane` and is not a leaf.** It lives inside a `ToolPane`'s
+    // subtree, not in the splitter, and `sharesWorker()` is exactly "the window made me one"
+    // (`createAgentConsole` sets `onWorkerLine` and nothing else does). Without the test,
+    // `leafOf()` -- which walks *up* from a clicked widget and takes the first leaf it meets --
+    // answered the console rather than the tool pane around it, so a click in the Switchboard's
+    // or the Sessions helper's prompt box made that console `m_activeLeaf` **and** `m_active`.
+    // Everything the window then aimed at "the active pane" landed on a surface with half its
+    // hooks deliberately unwired: the integration drive of card #AGNT caught `app_open {target:
+    // conversation, ids}` from the Sessions helper answering ok and opening nothing, because
+    // `m_active->openSavedSession(...)` reached a console whose `onOpenSessionInNewPane` is not
+    // set. This is `panesIn` stopping at a `ToolPane` (step 5), one level up: the walk down was
+    // fixed and the walk up was not.
+    static bool isLeaf(QWidget *widget) {
+        if (auto *pane = dynamic_cast<Pane *>(widget)) return !pane->sharesWorker();
+        return dynamic_cast<ToolPane *>(widget) != nullptr;
+    }
 
     static QWidget *leafOf(QWidget *widget) {
         for (QWidget *w = widget; w; w = w->parentWidget())

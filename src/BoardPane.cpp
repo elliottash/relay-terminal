@@ -2067,6 +2067,22 @@ public:
         if (console == nullptr || m_consoleBox == nullptr)
             return;
         m_consoleBox->addWidget(console);
+        // **The console's own pane header comes off here.** A `Pane` wears one — the title the
+        // model writes for the conversation, the mode chip, the directory — and on a card page
+        // that is a second heading under the card's own title, saying "project" over the reply
+        // box. The card page has said what this surface is about at the top of the page since
+        // #8YQ9. `Pane::bubbleRoom()` already reads `isVisible()`, so the room it frees goes to
+        // the transcript and the §12 queue strip rather than nowhere.
+        if (QWidget *header = console->findChild<QWidget *>(QStringLiteral("paneHeader")))
+            header->hide();
+        // And a floor, so what is below the header is a conversation rather than a slot. The
+        // integration drive of card #AGNT looked at this: the transcript is empty *today*,
+        // because a card turn's deltas stream into the thread view above (owner decision 2) --
+        // but it is not dead space, because the tab's conversation is one and drawn in every
+        // console of it (decision 1), and because the thinking bubble and the queue strip are
+        // drawn in that room. A console with three rows draws neither, which is the half of this
+        // card's Issue that is about the queue. Ten lines, and the page keeps the rest.
+        console->setMinimumHeight(10 * QFontMetrics(font()).lineSpacing());
         m_reply = editor;
         if (m_reply == nullptr)
             return;

@@ -3198,12 +3198,18 @@ public:
     // The grey text in the empty composer. A terminal pane keeps RichEditor's own ladder — the
     // one that sheds "? for help" and then words as the pane narrows — because its context says
     // the same words and replacing the ladder with one rung would stop it shortening. Every other
-    // context puts its own line on top, with "…" under it as the last rung.
+    // context puts its own line on top, and gets a ladder built from it.
+    //
+    // A ladder, not one rung and "…": `RichEditor` takes the first candidate that fits, so a
+    // two-rung ladder is all-or-nothing — and the card's line does not fit a card page's box, so
+    // the box said nothing at all where the owner asked for the three chords (#VZ69). The rungs
+    // are built by `relay::agent::placeholderRungs`, which says there why each one is a prefix
+    // of what the context wrote.
     void applyComposerPlaceholders() {
         if (!m_editor || !m_context || hasShell()) return;
-        const QString top = m_context->placeholder();
-        if (top.isEmpty()) return;
-        m_editor->setPlaceholders({top, QStringLiteral("…")});
+        const QStringList rungs = relay::agent::placeholderRungs(m_context->placeholder());
+        if (rungs.isEmpty()) return;
+        m_editor->setPlaceholders(rungs);
     }
 
     // The action row: what the agent can do here that needs no typing, left-aligned above the
