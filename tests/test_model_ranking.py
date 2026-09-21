@@ -59,6 +59,24 @@ MINIMAL = """\
     | k3-256k | - | - | a default for nothing |
 """
 
+# The two per-class tables added on 2026-09-21, appended to MINIMAL where a test needs them.
+PER_CLASS = """\
+
+    ## Provider picks
+
+    | provider | high | main | flash | lite |
+    |---|---|---|---|---|
+    | openrouter | glm-5.3 |  | glm-5.3-flash | glm-5.3-flash |
+
+    ## Levels
+
+    | name | high | main | flash | lite | notes |
+    |---|---|---|---|---|---|
+    | gpt-6-astra | xhigh | medium | low |  | codex's own words |
+    | glm-5.3 | max | high | low | - |  |
+    | glm-5.3-flash |  |  |  |  | the levels are the provider's |
+"""
+
 
 # ----- the parser -------------------------------------------------------------------------------
 class ParseTests(unittest.TestCase):
@@ -132,6 +150,87 @@ class ParseTests(unittest.TestCase):
         # ... and the two structural checks, on a file that only names two providers.
         self.assertTrue(any("'kimi' has no row in the Providers table" in line for line in problems), problems)
         self.assertTrue(any("'kimi-k3'" in line and 'Models table' in line for line in problems), problems)
+
+    def test_the_two_per_class_tables_are_optional(self):
+        """A file with neither still parses, and every rule they carry stays where it was.
+
+        That is what lets the owner add one table at a time — and what keeps a worker shipped
+        with an older copy of the file running instead of refusing to start.
+        """
+        rank = MR.parse(textwrap.dedent(MINIMAL))
+        self.assertEqual(rank.picks, {})
+        self.assertEqual(rank.levels, {})
+        self.assertIsNone(rank.level('glm-5.3', 'high'))
+        self.assertIsNone(rank.pick('openrouter', 'lite'))
+        self.assertEqual(rank.level_columns, ())
+        self.assertEqual([line for line in rank.check() if 'Levels' in line or 'picks' in line], [])
+
+    def test_it_reads_the_provider_picks_and_levels_tables(self):
+        rank = MR.parse(textwrap.dedent(MINIMAL + PER_CLASS))
+        self.assertEqual(rank.pick('openrouter', 'high'), 'glm-5.3')
+        self.assertEqual(rank.pick('openrouter', 'lite'), 'glm-5.3-flash')
+        self.assertIsNone(rank.pick('openrouter', 'main'))          # a blank cell says nothing
+        self.assertIsNone(rank.pick('openai', 'high'))              # no row at all says nothing
+        self.assertEqual(rank.level('gpt-6-astra', 'high'), 'xhigh')
+        self.assertEqual(rank.level('gpt-6-astra', 'main'), 'medium')
+        self.assertIsNone(rank.level('gpt-6-astra', 'lite'))
+        self.assertIsNone(rank.level('glm-5.3-flash', 'high'))      # a row of nothing but notes
+        self.assertIsNone(rank.level('k3-256k', 'high'))
+        # A cell is a word, not a sentence: "-" and "none" mean the same as leaving it blank.
+        self.assertIsNone(rank.level('glm-5.3', 'lite'))
+
+    def test_a_class_column_may_be_left_out_or_re_ordered(self):
+        """The header says which class a cell is in, so the file can write the four in any order
+        and leave out a class no model starts at a level in."""
+        text = MINIMAL + """\
+            ## Levels
+
+            | name | flash | high |
+            |---|---|---|
+            | glm-5.3 | low | max |
+        """
+        rank = MR.parse(textwrap.dedent(text))
+        self.assertEqual(rank.level_columns, ('flash', 'high'))
+        self.assertEqual(rank.level('glm-5.3', 'high'), 'max')
+        self.assertEqual(rank.level('glm-5.3', 'flash'), 'low')
+        self.assertIsNone(rank.level('glm-5.3', 'main'))
+        self.assertEqual([line for line in rank.check() if 'Levels' in line], [])
+
+    def test_a_per_class_table_that_is_not_the_table_it_says_it_is_raises(self):
+        text = MINIMAL + """\
+            ## Levels
+
+            | model | high |
+            |---|---|
+            | glm-5.3 | max |
+        """
+        with self.assertRaises(ValueError) as caught:
+            MR.parse(textwrap.dedent(text), 'ranking.md')
+        self.assertIn("the Levels table's first column is 'model'", str(caught.exception))
+        self.assertIn("expected 'name'", str(caught.exception))
+
+    def test_check_reports_an_unknown_column_and_a_key_neither_old_table_names(self):
+        text = MINIMAL + """\
+            ## Provider picks
+
+            | provider | high |
+            |---|---|
+            | openrouter | glm-5.3 |
+            | glm-coding | kimi-k3 |
+
+            ## Levels
+
+            | name | high | fast | notes |
+            |---|---|---|---|
+            | glm-5.3 | max | low | |
+            | gpt-6-astra-mini | high | | renamed |
+        """
+        problems = MR.parse(textwrap.dedent(text)).check()
+        self.assertTrue(any("column 'fast'" in line and 'Levels' in line for line in problems), problems)
+        self.assertTrue(any("row for 'gpt-6-astra-mini'" in line for line in problems), problems)
+        # `openrouter` is not one of this file's two providers, and kimi-k3 is not one of its models.
+        self.assertTrue(any("row for 'openrouter'" in line for line in problems), problems)
+        self.assertTrue(any("glm-coding's high pick is 'kimi-k3'" in line for line in problems), problems)
 
     def test_check_reports_two_providers_sharing_an_order(self):
         """`order` is the tie-break, so it decides nothing when two rows share a number.

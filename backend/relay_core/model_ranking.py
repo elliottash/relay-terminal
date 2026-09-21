@@ -3,22 +3,37 @@
 
 The owner asked for "a structured ranking MD or YAML in the repo i can review and edit", and chose
 Markdown. So the numbers that decide the defaults live in `model-ranking.md` beside this module —
-two pipe tables, **Providers** (`provider | kind | order`) and **Models**
-(`name | classes | score | notes`) — and this is the whole of the code that reads them. It depends
-on nothing: no YAML, no Markdown library, and (at import time) nothing else in `relay_core`, so
-`presets` can import it while `check()` imports `presets` back.
+four pipe tables — and this is the whole of the code that reads them. It depends on nothing: no
+YAML, no Markdown library, and (at import time) nothing else in `relay_core`, so `presets` can
+import it while `check()` imports `presets` back.
+
+* **Providers** (`provider | kind | order`) — who is offered, and in which order ties break.
+* **Models** (`name | classes | score | notes`) — which class each model is a default for, and how
+  good the owner says it is.
+* **Provider picks** (`provider | high | main | flash | lite`) — a provider whose defaults differ
+  from the shared Models rows, by model *name*. A blank cell follows the Models table. Added
+  2026-09-21; only `openrouter` has a row so far.
+* **Levels** (`name | high | main | flash | lite | notes`) — the reasoning level a model starts at
+  in each class, in that model's provider's own words ("i want the effort options in relay to be
+  determined by the model … so xhigh shows up for codex"). A blank cell is the rule in code: high
+  is the model's top level, main the provider's own default, flash and lite its lowest.
 
 `presets.INTELLIGENCE` is a view over `score(name)` and `presets.tier_list_defaults` does its
-ranking through `classes()` and `provider_order()`; `model-ranking.md`'s own header says what the
-rules are and how to edit the tables.
+ranking through `classes()`, `provider_order()`, `pick()` and `level()`;
+`model-ranking.md`'s own header says what the rules are and how to edit the tables.
+
+The last two tables are **optional**: a file without them parses, and every rule they carry stays
+where it was before they existed. That is what lets the file be edited a table at a time.
 
 What raises and what only reports. A row that cannot be read at all — the wrong number of cells, a
-score that is not a number, a `kind` outside the five — is a `ValueError` naming the line, because
-a half-parsed table would silently drop a model. Everything else is `check()`'s: an unknown class
-word, a provider the worker has never heard of, a preset with no row, a catalog model with no row,
-a duplicate name and two providers sharing an `order`. So a typo in a class word gives a readable
-report from the test rather than a worker that will not start — and the file stays editable by
-hand, half-finished, without taking the worker or the model picker down with it.
+score that is not a number, a `kind` outside the five, a table whose first column is not the one
+named above — is a `ValueError` naming the line, because a half-parsed table would silently drop a
+model. Everything else is `check()`'s: an unknown class word (in a Models row or as a column of
+either new table), a provider the worker has never heard of, a preset with no row, a catalog model
+with no row, a duplicate name, two providers sharing an `order`, a pick naming a model its provider
+does not serve, and a level cell naming a level the model does not take. So a typo in a class word
+gives a readable report from the test rather than a worker that will not start — and the file stays
+editable by hand, half-finished, without taking the worker or the model picker down with it.
 """
 from __future__ import annotations
 
@@ -46,6 +61,13 @@ DEFAULT_PATH = Path(__file__).resolve().parent / "model-ranking.md"
 
 _PROVIDER_COLUMNS = ("provider", "kind", "order")
 _MODEL_COLUMNS = ("name", "classes", "score", "notes")
+# The two tables added on 2026-09-21 share one shape: a key column, then one column per class in
+# whatever order the file writes them, then an optional `notes` column nobody reads. Only the key
+# column's name is fixed, so a class may be left out of a table entirely and the columns may be
+# re-ordered — the header is what says which class a cell belongs to.
+_PICK_KEY = "provider"
+_LEVEL_KEY = "name"
+_NOTES_COLUMN = "notes"
 _SEPARATOR = re.compile(r":?-{2,}:?")
 # "a default for nothing" and "nobody has scored it", in the spellings a person might reach for.
 _BLANK = ("", "-", "--", "—", "–", "none", "n/a")
@@ -78,6 +100,16 @@ class Ranking:
     # second wins and `check()` says so rather than the file quietly meaning something else.
     duplicate_providers: tuple[str, ...] = ()
     duplicate_models: tuple[str, ...] = ()
+    # The Provider picks table: {provider: {class: model name}}, blank cells left out.
+    picks: dict[str, dict[str, str]] = field(default_factory=dict)
+    # The Levels table: {model name: {class: level}}, blank cells left out.
+    levels: dict[str, dict[str, str]] = field(default_factory=dict)
+    # The class columns each of those two tables was written with, and their repeated keys — both
+    # for `check()`, which is the only thing that cares that a column said "fast".
+    pick_columns: tuple[str, ...] = ()
+    level_columns: tuple[str, ...] = ()
+    duplicate_picks: tuple[str, ...] = ()
+    duplicate_levels: tuple[str, ...] = ()
 
     # ----- what the rest of the worker asks ------------------------------------------------
     def score(self, name) -> int | None:
@@ -93,6 +125,30 @@ class Ranking:
         if row is None:
             return ()
         return tuple(c for c in CLASSES if c in row.classes)
+
+    def level(self, name, klass) -> str | None:
+        """The reasoning level this model starts at in a class, in its provider's own words, or
+        None for a blank cell, a model with no Levels row and a name that is not a string.
+
+        None means "the rule in code": the model's top level for `high`, the provider's own
+        default for `main`, its lowest for `flash` and `lite`. The word here is whatever the
+        provider says — `xhigh` through codex, `max` through Kimi — and the caller maps it onto
+        the levels the model it is about to run actually lists (`presets.nearest_effort`), because
+        one name can be served by two providers with two vocabularies.
+        """
+        row = self.levels.get(name) if isinstance(name, str) else None
+        return row.get(klass) if row is not None else None
+
+    def pick(self, provider, klass) -> str | None:
+        """The model *name* this provider puts in a class when its defaults differ from the shared
+        Models rows, or None for a blank cell and for a provider with no Provider picks row.
+
+        None means "follow the Models table", which is what every provider but `openrouter` does
+        today. The answer is a name, not an id: which id serves it is the provider's business
+        (`presets.provider_model_id`).
+        """
+        row = self.picks.get(provider) if isinstance(provider, str) else None
+        return row.get(klass) if row is not None else None
 
     def provider_order(self, preset_id) -> int:
         """The tie-break for a provider, lower first; UNKNOWN_PROVIDER_ORDER for one with no row
@@ -135,6 +191,20 @@ class Ranking:
             problems.append(f"provider {name!r} has more than one row; only the last one counts")
         for name in self.duplicate_models:
             problems.append(f"model {name!r} has more than one row; only the last one counts")
+        for name in self.duplicate_picks:
+            problems.append(f"provider {name!r} has more than one Provider picks row; only the "
+                            f"last one counts")
+        for name in self.duplicate_levels:
+            problems.append(f"model {name!r} has more than one Levels row; only the last one counts")
+
+        # A column of either per-class table that is not one of the four classes. The cells under
+        # it are parsed and then read by nobody, which looks exactly like a rule that is not being
+        # applied — so it is said out loud rather than dropped in silence.
+        for heading, columns in (("Provider picks", self.pick_columns), ("Levels", self.level_columns)):
+            for word in columns:
+                if word not in CLASSES:
+                    problems.append(f"the {heading} table has a column {word!r}, which is not one "
+                                    f"of {', '.join(CLASSES)}; nothing reads it")
 
         # `order` is the tie-break between two providers serving the same model at the same score,
         # so two providers at the same number decide nothing: the sort falls through to the name
@@ -163,6 +233,22 @@ class Ranking:
                 if word not in CLASSES:
                     problems.append(f"model {name!r} has an unknown class {word!r} "
                                     f"(one of {', '.join(CLASSES)}, or '-' for none)")
+
+        # Both new tables are keyed by something the two old ones already name, and a key neither
+        # of them holds is a row that decides nothing — a renamed model, or a provider spelled the
+        # way its label reads rather than the way its id does.
+        for name in sorted(self.levels):
+            if name not in self.models:
+                problems.append(f"the Levels table has a row for {name!r}, which is not a name in "
+                                f"the Models table; nothing reads it")
+        for provider in sorted(self.picks):
+            if provider not in self.providers:
+                problems.append(f"the Provider picks table has a row for {provider!r}, which is "
+                                f"not a provider in the Providers table; nothing reads it")
+            for cls, name in sorted(self.picks[provider].items()):
+                if name not in self.models:
+                    problems.append(f"{provider}'s {cls} pick is {name!r}, which is not a name in "
+                                    f"the Models table")
 
         guest_ids = {f"guest:{guest}" for guest in ("claude", "codex")}
         for preset_id in sorted(self.providers):
@@ -208,10 +294,10 @@ def _is_separator(cells: list[str]) -> bool:
     return bool(cells) and all(cell and _SEPARATOR.fullmatch(cell) for cell in cells)
 
 
-def _table(text: str, heading: str, columns: tuple[str, ...], where: str) -> list[tuple[int, list[str]]]:
-    """The rows of the one pipe table under `## <heading>`, as (line number, cells), header and
-    separator dropped. Extra whitespace anywhere is fine; a missing table, or a header naming
-    something else, is a ValueError."""
+def _scan(text: str, heading: str) -> list[tuple[int, list[str]]] | None:
+    """The rows of the one pipe table under `## <heading>`, as (line number, cells), separator
+    lines dropped and the header still first. None when the file has no such heading at all, and
+    [] when the heading is there with no table under it."""
     rows: list[tuple[int, list[str]]] = []
     found = False
     inside = False
@@ -227,7 +313,14 @@ def _table(text: str, heading: str, columns: tuple[str, ...], where: str) -> lis
         if _is_separator(cells):
             continue
         rows.append((lineno, cells))
-    if not found:
+    return rows if found else None
+
+
+def _table(text: str, heading: str, columns: tuple[str, ...], where: str) -> list[tuple[int, list[str]]]:
+    """The rows of one of the two required tables, header and separator dropped. Extra whitespace
+    anywhere is fine; a missing table, or a header naming something else, is a ValueError."""
+    rows = _scan(text, heading)
+    if rows is None:
         raise ValueError(f"{where}: no '## {heading}' heading")
     if not rows:
         raise ValueError(f"{where}: the '## {heading}' section has no table")
@@ -236,6 +329,46 @@ def _table(text: str, heading: str, columns: tuple[str, ...], where: str) -> lis
         raise ValueError(f"{where}:{lineno}: the {heading} table's header is "
                          f"{' | '.join(header)}; expected {' | '.join(columns)}")
     return rows[1:]
+
+
+def _class_table(text: str, heading: str, key: str, where: str) \
+        -> tuple[dict[str, dict[str, str]], tuple[str, ...], tuple[str, ...]]:
+    """One of the two per-class tables added on 2026-09-21, as
+    ``({key: {class: cell}}, the class columns, the keys that appeared twice)``.
+
+    Both are optional: with no such heading this is ``({}, (), ())`` and every rule the table
+    carries stays where it was in code, which is what lets the owner add one table at a time. The
+    columns are read off the header rather than fixed, so a class may be left out and the order
+    may be anything; a trailing ``notes`` column is dropped, and a blank cell (or "-", or "none")
+    is left out of the row rather than stored as "". A first column that is not ``key`` is a
+    ValueError: it means this table is not the table it says it is.
+    """
+    rows = _scan(text, heading)
+    if not rows:
+        return {}, (), ()
+    lineno, header = rows[0]
+    if not header or header[0].strip().lower() != key:
+        first = header[0] if header else ""
+        raise ValueError(f"{where}:{lineno}: the {heading} table's first column is {first!r}; "
+                         f"expected {key!r}")
+    columns = tuple(cell.strip().lower() for cell in header[1:])
+    if columns and columns[-1] == _NOTES_COLUMN:
+        columns = columns[:-1]
+    out: dict[str, dict[str, str]] = {}
+    duplicates: list[str] = []
+    for lineno, cells in rows[1:]:
+        name = cells[0].strip()
+        if not name:
+            raise ValueError(f"{where}:{lineno}: a {heading} row needs a {key}")
+        row = {}
+        for index, column in enumerate(columns, start=1):
+            value = cells[index].strip() if index < len(cells) else ""
+            if value and value.lower() not in _BLANK:
+                row[column] = value.lower()
+        if name in out:
+            duplicates.append(name)
+        out[name] = row
+    return out, columns, tuple(duplicates)
 
 
 def _int(value: str, what: str, where: str, lineno: int) -> int:
@@ -283,7 +416,13 @@ def parse(text: str, where: str = "model-ranking.md") -> Ranking:
             duplicate_models.append(name)
         models[name] = Model(name, words, number, notes)
 
-    return Ranking(providers, models, where, tuple(duplicate_providers), tuple(duplicate_models))
+    picks, pick_columns, duplicate_picks = _class_table(text, "Provider picks", _PICK_KEY, where)
+    levels, level_columns, duplicate_levels = _class_table(text, "Levels", _LEVEL_KEY, where)
+
+    return Ranking(providers, models, where, tuple(duplicate_providers), tuple(duplicate_models),
+                   picks=picks, levels=levels, pick_columns=pick_columns,
+                   level_columns=level_columns, duplicate_picks=duplicate_picks,
+                   duplicate_levels=duplicate_levels)
 
 
 # One parse per process per path: the file is read at worker start and never changes under a
