@@ -562,7 +562,8 @@ class TurnTests(unittest.TestCase):
                    "result": ("ok", "end", {})}]
         events, agent, provider = run_turn(self, script)
         context = [e for e in events if e["event"] == "context"][-1]
-        self.assertNotIn("guest_context", context)
+        self.assertEqual(context["guest"], "claude")
+        self.assertEqual(context["guest_context"], {})  # unknown, never Relay's fallback
         ghp.detach(agent)
         self.assertNotIn("guest_context", agent.context_event())
 

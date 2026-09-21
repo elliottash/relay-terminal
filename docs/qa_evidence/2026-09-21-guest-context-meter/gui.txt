@@ -1,0 +1,76 @@
+codex: PASS
+© work - cpu00%-mem00% x +
+
+OQ se S 29 - 0
+
+© work
+
+elliott@spark-dcc9: /tmp/relay- context -5en8zzxe/work$
+> gpt-6-astra
+
+Context meter fixture.
+
+25,840 of 258,400 tokens
+
+Codex manages compaction.
+
+@8 on
+
+l Queued - the agent prompt runs when its turn comes
+
+Shell commands or agent prompts. 2? for help
+
+Mtmp/relay-context-Sen8zzxe/work —
+
+‘90% left gpt-G-astra v high vO
+
+
+claude: PASS
+© work - cpu00%-mem00% = + OQ 42s Se 0 -O
+
+© work
+
+elliott@spark-dcc9: /tmp/relay-context-wfi9_6wj/work$
+> gpt-6-astra
+
+Context meter fixture.
+
+20,000 of 200,000 tokens
+
+Claude Code manages compaction.
+
+@8 on
+
+l Queued - the agent prompt runs when its turn comes
+
+Shell commands or agent prompts. 2? for help
+
+itmp/relay-context-wfi9_6wj/work ‘90% left gpt-G-astra v high vO
+
+
+unknown: PASS
+© work - cpu00%-mem00% x +
+
+OQ se S 29 - 0
+
+© work
+
+elliott@spark-dcc9: /tmp/relay-context-zr0z_mnz/work$
+> gpt-6-astra
+
+Context meter fixture.
+
+Context usage has not been reported yet
+
+Claude Code manages compaction.
+
+@8 on
+
+l Queued - the agent prompt runs when its turn comes
+
+Shell commands or agent prompts. 2? for help
+
+‘Amp/relay-context-2r0z_mnz/work ©
+
+contextunknown  gpt-6-astra. » high vo
+

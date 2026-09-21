@@ -803,9 +803,9 @@ class CodexHarness:
         # "13k of 258k" and not only a percentage (GT7X task t:a3).
         if window:
             data["context_window"] = int(window)
-        if last:
+        if isinstance(last, (int, float)) and last >= 0:
             data["context_tokens"] = int(last)
-        if window and last:
+        if window and isinstance(last, (int, float)) and last >= 0:
             data["context_pct"] = round(100.0 * int(last) / int(window), 1)
         return data
 

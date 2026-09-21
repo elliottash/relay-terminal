@@ -5955,9 +5955,9 @@ restarts the harness with `resume` when it has a session id. Nothing is retried 
 - A harness's `error` event is not forwarded as its own Relay `error`: both adapters emit it and
   then end the turn, so the text is held and becomes the turn's single `error`, as for every
   other provider.
-- The provider emits one `usage` event and the Agent computes `context` from it as for any
-  provider; the guest's own `context_pct` travels as `usage.guest_context_pct` and does not drive
-  the context bar, which measures Relay's transcript against Relay's window.
+- The provider emits `usage`, and the Agent retains its own transcript accounting in `context`.
+  For a guest the context meter uses `context.guest_context`, never the top-level Relay budget
+  (2026-09-21, #C8WX). The guest manages its own compaction.
 - **Side calls never reach the guest.** `HarnessProvider.serves_side_calls = False`;
   `Agent.side_provider` then uses a role of its own (summaries, chores, route_assist…) when one is
   configured and otherwise gets an empty answer, so a guest pane has no model-written title or
@@ -5998,6 +5998,15 @@ beside `context_pct` — codex reports both in `thread/tokenUsage/updated`, clau
 `result`'s `modelUsage` and the turn's prompt — and they ride the `context` event under
 `guest_context`, beside Relay's own measurement of Relay's own window. Two windows, two numbers,
 one event: the chip can say "13k of 258k" instead of "5%".
+
+The meter, `/context` and remote pane state use the guest measurement when `guest` is present.
+That identity and `guest_context: {}` are sent even before the first usage report: unknown usage
+must not look like an empty context or Relay's 128K fallback. The tooltip names the guest as
+managing compaction rather than advertising Relay's transcript threshold. Changing the guest's
+model clears its old measurement until another usage report; leaving the guest restores native
+accounting. Claude occupancy comes from the final parent assistant request (or the result's last
+message iteration), matched to that model's window; result usage totals remain cumulative for
+usage accounting. A result containing only aggregate usage cannot establish context occupancy.
 
 **Usage limits: the subscription's rolling windows, per guest.** Both guests run on the
 person's own plan, and both say how much of it is spent. The adapter emits a `limits` harness

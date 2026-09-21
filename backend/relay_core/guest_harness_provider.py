@@ -683,6 +683,7 @@ class HarnessProvider:
         # on every `context` event as `guest_context`, so the pane's chip can say how full the
         # *guest's* window is — which is the only window a guest turn actually runs against.
         self.guest_context: dict = {}
+        self.context_generation = 0
         # The subscription's rolling windows after the guest's last `limits` event, in the
         # `usage_limits` event's words (`windows`, `status`?, `updated_at`); {} until it says.
         self.usage_limits: dict = {}
@@ -825,6 +826,7 @@ class _Turn:
 
     def __init__(self, provider: HarnessProvider, agent, record, emit, cancel: threading.Event):
         self.provider = provider
+        self.context_generation = provider.context_generation
         self.agent = agent
         self.record = record
         self.emit = emit
@@ -907,8 +909,15 @@ class _Turn:
         if not usage:
             return
         self.usage_seen = True
-        self.provider.guest_context = guest_context(usage) or self.provider.guest_context
+        self._record_context(usage)
         self.emit({"event": "usage", "usage": usage})
+        if self.agent is not None:
+            self.emit(self.agent.context_event())
+
+    def _record_context(self, usage: dict) -> None:
+        # A late report from the old model must not repopulate the new model's meter.
+        if self.context_generation == self.provider.context_generation:
+            self.provider.guest_context = guest_context(usage) or self.provider.guest_context
 
     def _on_limits(self, data: dict) -> None:
         event = usage_limits_event(self.provider.guest_id, data)
@@ -924,7 +933,7 @@ class _Turn:
             return
         mapped = relay_usage(usage)
         if mapped:
-            self.provider.guest_context = guest_context(mapped) or self.provider.guest_context
+            self._record_context(mapped)
             self.emit({"event": "usage", "usage": mapped})
 
     # ----- tool calls -----------------------------------------------------------------------
@@ -1424,7 +1433,7 @@ def attach(agent, provider: HarnessProvider) -> None:
     def context_event():
         event = original_context()
         held = getattr(agent, "_guest_session_data", None)
-        if held is not None and held.guest_context:
+        if held is not None:
             event["guest"] = held.guest_id
             event["guest_context"] = dict(held.guest_context)
         return event
@@ -1471,6 +1480,8 @@ def switch_model(agent, guest_id: str | None, request: dict) -> HarnessProvider 
         except HarnessError as exc:
             raise ValueError(str(exc) or f"{guest.spec(guest_id).name} would not switch to {model}.") from None
         provider.config.model = named or model
+        provider.guest_context = {}
+        provider.context_generation += 1
     # A `guest` block may carry both (the model box's row and its effort are one choice); the
     # effort is applied after the model, because which levels a model has is the model's business.
     effort = options["effort"]

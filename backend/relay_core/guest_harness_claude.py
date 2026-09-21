@@ -687,6 +687,11 @@ class ClaudeHarness:
         body = message.get("message")
         if not isinstance(body, dict):
             return
+        # Result usage is cumulative across requests. Keep the final parent request for
+        # context occupancy, separately from the turn's billing counters (#C8WX).
+        if not message.get("parent_tool_use_id") and isinstance(body.get("usage"), dict):
+            state["last_usage"] = body["usage"]
+            state["last_model"] = body.get("model", "")
         model = body.get("model")
         if isinstance(model, str) and model and not model.startswith("<"):
             with self._state_lock:
@@ -769,7 +774,7 @@ class ClaudeHarness:
             "detail": _approval_detail(name, request, tool_input)}))
 
     def _finish(self, message: dict, state: dict, emit) -> TurnResult:
-        usage = _usage_event(message)
+        usage = _usage_event(message, state.get("last_usage"), state.get("last_model", ""))
         if usage:
             emit(HarnessEvent("usage", usage))
         text = message.get("result")
@@ -1112,7 +1117,7 @@ def _answers_text(answers) -> str:
     return "The user answered."
 
 
-def _usage_event(message: dict) -> dict:
+def _usage_event(message: dict, last_usage: dict | None = None, last_model: str = "") -> dict:
     """The `usage` event a `result` becomes. `context_pct` is derived — the CLI does not send
     the statusline's `context_window.used_percentage` on this stream — from the last request's
     prompt (fresh input + both cache counters) against the model's own context window."""
@@ -1128,19 +1133,28 @@ def _usage_event(message: dict) -> dict:
     if isinstance(cost, (int, float)):
         data["cost_usd"] = float(cost)
     model, window = "", 0
-    for name, entry in model_usage.items():
+    # Never take an auxiliary model's window just because it was listed first.
+    candidates = {last_model: model_usage[last_model]} if last_model in model_usage else (
+        model_usage if not last_model and len(model_usage) == 1 else {})
+    for name, entry in candidates.items():
         if isinstance(entry, dict) and isinstance(entry.get("contextWindow"), (int, float)):
             model, window = str(name), int(entry["contextWindow"])
             break
+    if last_usage is None:
+        # Recent CLIs also report individual iterations; older results with only summed
+        # usage cannot establish occupancy, so report the window with usage unknown.
+        iterations = usage.get("iterations") or []
+        last_usage = next((item for item in reversed(iterations)
+                           if isinstance(item, dict) and item.get("type") == "message"), {})
     if model:
         data["model"] = model
     if window > 0:
         # The guest's own context, as claude reports it: the window the model has and what the
         # last request put in it, so the pane can say "13k of 258k" and not only a percentage.
         data["context_window"] = window
-        prompt = (data.get("input_tokens", 0) + data.get("cache_read_input_tokens", 0)
-                  + data.get("cache_creation_input_tokens", 0))
-        if prompt > 0:
+        keys = ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+        prompt = sum(last_usage.get(key, 0) for key in keys)
+        if any(key in last_usage for key in keys) and prompt >= 0:
             data["context_tokens"] = prompt
             data["context_pct"] = round(min(100.0, 100.0 * prompt / window), 1)
     return data

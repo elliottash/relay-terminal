@@ -27,6 +27,7 @@
 #include "ProjectInitBlock.h"   // …and the inline block that asks it, under the terminal
 #include "AgentUi.h"
 #include "AgentHost.h"      // relay::agent::Host: the surface calls the console makes (#AGNT)
+#include "ContextMeter.h"
 #include "AgentContext.h"   // relay::agent::Context: what the agent on this surface is about
 #include "Completion.h"
 #include "FileIndex.h"
@@ -5378,27 +5379,24 @@ private:
     void updateContextLabel() {
         m_paneState.changed();   // pane_state (relay-terminal-71)
         if (!m_ctxLabel) return;
-        if (m_ctxWindow <= 0) { m_ctxLabel->hide(); return; }
+        if (m_ctxWindow <= 0 && m_ctxGuest.isEmpty()) { m_ctxLabel->hide(); return; }
         // While a switch waits (issue 3ES1) the chip already names the new model, so the bar agrees
         // with it: the conversation against the window that serves the next request. The ↻ and the
         // tooltip say the request in flight is still on the old model.
-        const bool next = m_ctxNextWindow > 0;
+        const bool next = m_ctxGuest.isEmpty() && m_ctxNextWindow > 0;
         const qint64 used = next ? m_ctxNextUsed : m_ctxUsed, window = next ? m_ctxNextWindow : m_ctxWindow;
         const qint64 limit = next ? m_ctxNextLimit : m_ctxLimit;
         const double percent = next ? m_ctxNextPercent : m_ctxPercent;
+        relay::context::Reading reading{used, window, limit, percent, m_ctxEstimated || next, m_ctxGuest};
         if (m_compacting) {
             m_ctxLabel->setText(QStringLiteral("compacting…"));
         } else {
-            const double left = std::max(0.0, 100.0 - percent);
-            m_ctxLabel->setText(QStringLiteral("%1% left%2").arg(QString::number(left, 'f', left < 10 ? 1 : 0),
-                                                                 next ? QStringLiteral(" ↻") : QString()));
+            m_ctxLabel->setText(reading.label() + (next ? QStringLiteral(" ↻") : QString()));
         }
         const bool near = limit > 0 && used >= limit * 9 / 10;
         m_ctxLabel->setProperty("warn", near);
         m_ctxLabel->style()->unpolish(m_ctxLabel); m_ctxLabel->style()->polish(m_ctxLabel);
-        QString tip = QStringLiteral("%1 of %2 tokens%3\nAuto-compacts at %4 tokens")
-            .arg(QLocale().toString(used), QLocale().toString(window), m_ctxEstimated || next ? QStringLiteral(" (estimated)") : QString(),
-                 QLocale().toString(limit));
+        QString tip = reading.tooltip();
         if (next)
             tip = QStringLiteral("Measured against %1's window, which serves the next request.\n%2\n%3\n"
                                  "The request in flight is still on %4 (%5-token window) until the switch lands.")
@@ -8008,14 +8006,16 @@ private:
             return true;
         }
         if (type == QStringLiteral("context")) {
-            m_ctxUsed = event.value(QStringLiteral("used_tokens")).toVariant().toLongLong();
-            m_ctxWindow = event.value(QStringLiteral("window")).toVariant().toLongLong();
-            m_ctxLimit = event.value(QStringLiteral("limit_tokens")).toVariant().toLongLong();
-            m_ctxPercent = event.value(QStringLiteral("percent")).toDouble();
-            m_ctxEstimated = event.value(QStringLiteral("estimated")).toBool();
+            const auto reading = relay::context::Reading::fromEvent(event);
+            m_ctxUsed = reading.used;
+            m_ctxWindow = reading.window;
+            m_ctxLimit = reading.limit;
+            m_ctxPercent = reading.percent;
+            m_ctxEstimated = reading.estimated;
+            m_ctxGuest = reading.guest;
             // A switch waiting to land (issue 3ES1): the bar measures against its window instead.
             const QJsonObject next = event.value(QStringLiteral("next")).toObject();
-            if (next.isEmpty()) clearNextContext();
+            if (next.isEmpty() || !m_ctxGuest.isEmpty()) clearNextContext();
             else {
                 m_ctxNextUsed = next.value(QStringLiteral("used_tokens")).toVariant().toLongLong();
                 m_ctxNextWindow = next.value(QStringLiteral("window")).toVariant().toLongLong();
@@ -8029,7 +8029,9 @@ private:
             if (m_contextNotePending) {
                 m_contextNotePending = false;
                 ensureLineStart();
-                printInline(QStringLiteral("Context: %1 of %2 tokens (%3%) · compacts at %4%5\n")
+                if (!m_ctxGuest.isEmpty())
+                    printInline(reading.tooltip() + '\n', Ink::Note);
+                else printInline(QStringLiteral("Context: %1 of %2 tokens (%3%) · compacts at %4%5\n")
                     .arg(compactTokens(m_ctxUsed), compactTokens(m_ctxWindow), QString::number(m_ctxPercent, 'f', 1), compactTokens(m_ctxLimit),
                          m_ctxEstimated ? QStringLiteral(" · estimated") : QString()), Ink::Note);
                 if (!m_agentBusy && !moreTurnsPending()) closeInline();
@@ -13347,10 +13349,10 @@ public:
         in.mode = m_modeValue;
         if (m_editor) in.placeholder = m_editor->placeholderText().isEmpty() ? m_savedPlaceholder : m_editor->placeholderText();
 
-        if (m_ctxLabel && m_ctxWindow > 0) {
+        if (m_ctxLabel && (m_ctxWindow > 0 || !m_ctxGuest.isEmpty())) {
             in.contextLabel = m_ctxLabel->text();
             const double percent = m_ctxNextWindow > 0 ? m_ctxNextPercent : m_ctxPercent;
-            in.percentLeft = int(std::lround(std::clamp(100.0 - percent, 0.0, 100.0)));
+            if (percent >= 0) in.percentLeft = int(std::lround(std::clamp(100.0 - percent, 0.0, 100.0)));
         }
 
         // The session manager's rows (/resume, /conversations): agent sessions of this project, as
@@ -17861,6 +17863,7 @@ private:
     // The harness this pane is on but has not started: rank 1 of the main list, waiting for the
     // first prompt (card #MDL1, owner 2026-09-21).
     QString m_deferredPreset, m_deferredModel;
+    QString m_ctxGuest;
     qint64 m_ctxUsed = 0, m_ctxWindow = 0, m_ctxLimit = 0;
     double m_ctxPercent = 0;
     // A model switch waiting to land (issue 3ES1): the bar measures against its window, not the one

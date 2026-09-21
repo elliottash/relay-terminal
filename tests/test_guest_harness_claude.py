@@ -1124,7 +1124,9 @@ class UsageTest(unittest.TestCase):
                                           "cache_read_input_tokens": 90,
                                           "cache_creation_input_tokens": 100},
                                 "total_cost_usd": 1.5,
-                                "modelUsage": {"claude-x": {"contextWindow": 1000}}})
+                                "modelUsage": {"claude-x": {"contextWindow": 1000}}},
+                               {"input_tokens": 10, "cache_read_input_tokens": 90,
+                                "cache_creation_input_tokens": 100})
         self.assertEqual(data["context_pct"], 20.0)
         self.assertEqual(data["model"], "claude-x")
         self.assertEqual(data["cost_usd"], 1.5)
@@ -1141,7 +1143,9 @@ class UsageTest(unittest.TestCase):
         data = gh._usage_event({"usage": {"input_tokens": 10, "output_tokens": 5,
                                           "cache_read_input_tokens": 90,
                                           "cache_creation_input_tokens": 100},
-                                "modelUsage": {"claude-x": {"contextWindow": 1000}}})
+                                "modelUsage": {"claude-x": {"contextWindow": 1000}}},
+                               {"input_tokens": 10, "cache_read_input_tokens": 90,
+                                "cache_creation_input_tokens": 100})
         self.assertEqual(data["context_window"], 1000)
         self.assertEqual(data["context_tokens"], 200)      # 10 + 90 + 100, the last request
         self.assertEqual(data["context_pct"], 20.0)
