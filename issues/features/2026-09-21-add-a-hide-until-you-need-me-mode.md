@@ -7,7 +7,7 @@ assignee: codex
 implemented_by: openai/gpt-6-astra via codex
 rank: zzzzzzzzzzzzzzzzw
 created: '2026-09-21'
-links: {plans: [], commits: [a4c930d05b9964c05a7b7b932c736c6137785d4c], evidence: [docs/qa_evidence/2026-09-21-pane-dimming/], related: [], github: null}
+links: {plans: [], commits: [a4c930d05b9964c05a7b7b932c736c6137785d4c, 5bac2a5de27eeb539ec3ebd44d275d4348e1bf1e], evidence: [docs/qa_evidence/2026-09-21-pane-dimming/], related: [], github: null}
 ---
 # add a "hide until you need me" mode
 
@@ -54,6 +54,8 @@ Verify: manual completion exemption, attention overrides and restoration, focus 
 Research: iTerm2 adjustable inactive dimming (https://iterm2.com/documentation-preferences-appearance.html); Ghostty overlay fill (https://ghostty.org/docs/config/reference#unfocused-split-opacity); Warp inactive dimming and agent notifications (https://docs.warp.dev/terminal/appearance/pane-dimming); cmux attention rings (https://cmux.com/docs/changelog/0.60.0).
 
 ## Tests
+Alt+wheel regression: `ctest --test-dir build -R '^panedimming$' --output-on-failure` passed; exact committed app builds and native full-app Xvfb wheel check passes (wheel-fix.md).
+
 `ctest --test-dir build -R '^(panedimming|panestatus|settings|panes)$' --output-on-failure`
 
 `manual: docs/qa_evidence/2026-09-21-pane-dimming/`

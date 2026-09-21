@@ -9,3 +9,5 @@ Validation:
 - Shared app build initially blocked by concurrent model-picker changes: src/Pane.h references relay::pickModel, absent from the working ModelPicker.h. No model-picker files were changed by this fix.
 
 Desktop verification: in the rebuilt app, hover a pane and Alt+scroll down/up; expect 5% dimmer/brighter steps without moving keyboard focus.
+
+The exact committed tree passed the full app build gate; landed as `5bac2a5de27eeb539ec3ebd44d275d4348e1bf1e`. Native full-app Xvfb check with isolated config/data/runtime: four Alt+wheel-down events showed `paneDimOverlay`; four Alt+wheel-up events hid it. Verified via RELAY_QA_RECTS. The shared build remains blocked by concurrent model-picker edits; the tested executable is `/tmp/claude-1000/land/dim-wheel/verify/build/relay`. Board format check reports existing findings elsewhere, none for RG0Z.
