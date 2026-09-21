@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
-// Faint ink: what SGR 2 and a fold's dim rows are drawn in (#TK9C, #LG7T).
+// Faint ink: what SGR 2 and a fold's dim rows are drawn in (#TK9C, #LG7T), and — built on the
+// same contrast machinery — legibleOn(), what an ink written into a banded row is drawn in (#SLQ3).
 //
 // Both used to be `fg.setAlphaF(0.6)`, which is a fade of 40% toward whatever is behind the cell.
 // On the greys Relay's own themes use for secondary text that lands at about 2.9:1 on Relay Dark
@@ -74,6 +75,43 @@ inline QColor faintInk(const QColor &fg, const QColor &bg, double maxFade = kFai
     }
     const QColor faded = mixToward(solid, ground, keep);
     return contrastRatio(faded, ground) >= kTextContrast ? faded : solid;
+}
+
+// The legible form of `fg` on `bg`: the ink moved toward black or white — whichever pole the
+// ground leaves room for — only as far as it must to reach `kTextContrast` there, so it keeps its
+// hue. Ink that already clears the floor comes back untouched, and the pole itself is the answer
+// when even that is the best on offer (a mid-grey ground, where nothing reaches 4.5:1 by much).
+//
+// The mirror of faintInk(), and for the opposite problem. A row the host marked as typed by the
+// user wears a *band* the scheme picks when it paints (ColorScheme.h), and that band is light in
+// one theme and dark in the next. An ink written into such a row — the colour Relay gives the
+// `/command` of a prompt it echoes (#SLQ3) — was chosen against the terminal's own ground and
+// knows nothing about the band it will land on, so the view puts it through this first. The
+// alternative, writing a colour that suits the band at the time, freezes into the scrollback and
+// is wrong the moment the theme changes, which is the whole reason a row carries a role and not
+// a colour.
+inline QColor legibleOn(const QColor &fg, const QColor &bg)
+{
+    const QColor ink(fg.red(), fg.green(), fg.blue());
+    const QColor ground(bg.red(), bg.green(), bg.blue());
+    if (contrastRatio(ink, ground) >= kTextContrast)
+        return ink;
+    // Toward whichever pole the ground leaves room for. One of the two always clears the floor:
+    // they score alike (4.58:1) at the one luminance where they cross, 0.179 — the crossover
+    // contrastInk() is built on — and better than that everywhere else.
+    const QColor pole = relativeLuminance(ground) > 0.179 ? QColor(Qt::black) : QColor(Qt::white);
+    // Contrast rises all the way to the pole, so the least move that clears the floor is found by
+    // bisection: `keep` is short of it, `push` clears it.
+    double keep = 0.0, push = 1.0;
+    for (int i = 0; i < 12; ++i) { // 12 halvings: finer than one 8-bit step
+        const double mid = (keep + push) / 2;
+        if (contrastRatio(mixToward(ink, pole, mid), ground) >= kTextContrast)
+            push = mid;
+        else
+            keep = mid;
+    }
+    const QColor moved = mixToward(ink, pole, push);
+    return contrastRatio(moved, ground) >= kTextContrast ? moved : pole;
 }
 
 } // namespace relay

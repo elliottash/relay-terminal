@@ -13750,6 +13750,24 @@ private:
         return "\x1b[" + style + "38;2;" + sgr(c) + 'm';
     }
 
+    // The `/command` a line sent to the agent opens with, as [from, to) into `line`; an empty span
+    // (from == to) when it opens with anything else. The pane's own `✦ ` mark may come first and
+    // nothing else may, which is the composer's rule for the same token (`^/[A-Za-z][\w-]*`,
+    // InputHighlighter::highlightAgent), so the line that is printed back reads like the line that
+    // was typed. A second slash means a path — `/usr/bin/env` is not a command — and is left plain.
+    static QPair<int, int> agentSlashSpan(const QString &line) {
+        int from = 0;
+        if (line.startsWith(QStringLiteral("✦ "))) from = 2;
+        if (from + 1 >= line.size() || line.at(from) != QLatin1Char('/') || !line.at(from + 1).isLetter())
+            return {0, 0};
+        int to = from + 1;
+        while (to < line.size()
+               && (line.at(to).isLetterOrNumber() || line.at(to) == QLatin1Char('_') || line.at(to) == QLatin1Char('-')))
+            ++to;
+        if (to < line.size() && line.at(to) == QLatin1Char('/')) return {0, 0};
+        return {from, to};
+    }
+
     bool shellIdleAtPrompt() const {
         return m_backend && m_promptReported && !m_loading && !m_native
             && (foregroundPid() <= 0 || foregroundPid() == shellPid());
@@ -14038,8 +14056,25 @@ private:
         // theme changes"). The text itself is bold in the default foreground.
         if (ink == Ink::User || ink == Ink::UserAgent) {
             const QByteArray mark = ink == Ink::User ? QByteArray("\x1b]7772;shell\x1b\\") : QByteArray("\x1b]7772;agent\x1b\\");
+            // The one thing in such a line that is *not* plain: the `/command` it opens with, in
+            // the colour the composer already tints it while it is being typed (#SLQ3, and
+            // InputHighlighter::highlightAgent). It is written as a palette index, never as an
+            // RGB colour — an index is resolved against the theme's own palette when the view
+            // paints, so the command follows a theme switch like the rest of the row, and the
+            // view moves it as far as the band under it demands (engine/view/FaintInk.h,
+            // legibleOn). Bright cyan is where every shipped theme puts this family, and it is
+            // the palette entry its `[syntax] token` is drawn from.
+            const QPair<int, int> cmd = ink == Ink::UserAgent ? agentSlashSpan(clean) : QPair<int, int>{0, 0};
             QString body = QStringLiteral("\x1b[1m");
-            for (const QChar ch : clean) { if (ch == '\n') body += QStringLiteral("\x1b[0m\n\x1b[1m"); else body += ch; }
+            for (int i = 0; i < clean.size(); ++i) {
+                if (cmd.second > cmd.first) {
+                    if (i == cmd.first) body += QStringLiteral("\x1b[96m");
+                    else if (i == cmd.second) body += QStringLiteral("\x1b[39m");
+                }
+                const QChar ch = clean.at(i);
+                if (ch == '\n') body += QStringLiteral("\x1b[0m\n\x1b[1m"); else body += ch;
+            }
+            if (cmd.second > cmd.first && cmd.second == clean.size()) body += QStringLiteral("\x1b[39m");
             body += QStringLiteral("\x1b[0m");
             // The word wrapper breaks a long line into rows of its own, so the mark goes at the
             // head of each row — never after the last newline, which would hand the role to

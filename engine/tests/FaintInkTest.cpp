@@ -115,6 +115,64 @@ private slots:
     {
         QCOMPARE(faintInk(kDarkMuted, kDarkGround, 0.0), kDarkMuted);
     }
+
+    // legibleOn(): the same machinery for the opposite problem (#SLQ3). The bands here are the
+    // agent colour each shipped theme paints a row the user typed in, and the inks are that
+    // theme's own bright cyan — the palette entry the echoed `/command` is written with, which
+    // was chosen against the terminal's ground and lands on the band by accident.
+    void aWrittenInkIsMovedOntoTheFloorOfItsBand_data()
+    {
+        QTest::addColumn<QColor>("fg");
+        QTest::addColumn<QColor>("bg");
+        QTest::addColumn<bool>("mustMove");
+        QTest::newRow("relay dark: bright cyan on the violet band")
+            << QColor(QStringLiteral("#78ddea")) << QColor(QStringLiteral("#b48ef7")) << true;
+        QTest::newRow("relay light: teal on the violet band")
+            << QColor(QStringLiteral("#0f5d61")) << QColor(QStringLiteral("#7c3aed")) << true;
+        QTest::newRow("ibm beige: teal on the purple band")
+            << QColor(QStringLiteral("#0a4a46")) << QColor(QStringLiteral("#7500c3")) << true;
+        QTest::newRow("gruvbox: bright aqua on the pink band")
+            << QColor(QStringLiteral("#8ec07c")) << QColor(QStringLiteral("#c88fc2")) << true;
+        // Already legible: handed back untouched, so nothing that reads well is repainted.
+        QTest::newRow("cyan on the terminal's own ground")
+            << QColor(QStringLiteral("#78ddea")) << QColor(QStringLiteral("#0f1115")) << false;
+        QTest::newRow("black on white") << QColor(Qt::black) << QColor(Qt::white) << false;
+    }
+
+    void aWrittenInkIsMovedOntoTheFloorOfItsBand()
+    {
+        QFETCH(QColor, fg);
+        QFETCH(QColor, bg);
+        QFETCH(bool, mustMove);
+        const QColor ink = legibleOn(fg, bg);
+        QVERIFY2(contrastRatio(ink, bg) >= kTextContrast,
+                 qPrintable(QStringLiteral("%1 on %2 is %3:1")
+                                .arg(ink.name(), bg.name())
+                                .arg(contrastRatio(ink, bg), 0, 'f', 2)));
+        if (!mustMove) {
+            QCOMPARE(ink, QColor(fg.red(), fg.green(), fg.blue()));
+            return;
+        }
+        QVERIFY(ink != QColor(fg.red(), fg.green(), fg.blue()));
+        // It moved as little as it could: it sits on the floor, not well past it.
+        QVERIFY2(contrastRatio(ink, bg) < kTextContrast + 0.25,
+                 qPrintable(QStringLiteral("%1 was pushed to %2:1").arg(ink.name()).arg(contrastRatio(ink, bg), 0, 'f', 2)));
+        // And it kept its hue rather than becoming black or white.
+        QVERIFY(ink != QColor(Qt::black) && ink != QColor(Qt::white));
+        QVERIFY(std::abs(ink.toHsv().hue() - fg.toHsv().hue()) <= 2);
+    }
+
+    // The worst ground there is — the luminance where black and white score alike — still gets
+    // ink that clears the floor, which is why legibleOn() needs no answer for "neither pole works".
+    void theCrossoverGroundStillGetsLegibleInk()
+    {
+        for (const QString &grey : {QStringLiteral("#767676"), QStringLiteral("#797979"), QStringLiteral("#808080")}) {
+            const QColor bg(grey);
+            const QColor ink = legibleOn(QColor(QStringLiteral("#3ec5f0")), bg);
+            QVERIFY2(contrastRatio(ink, bg) >= kTextContrast,
+                     qPrintable(QStringLiteral("%1 on %2 is %3:1").arg(ink.name(), grey).arg(contrastRatio(ink, bg), 0, 'f', 2)));
+        }
+    }
 };
 
 QObject *makeFaintInkTest()

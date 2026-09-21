@@ -3,6 +3,7 @@
 // keyboard, mouse selection, links, IME, scrolling, accessibility, key mapping.
 #include "backend/VTermBackend.h"
 #include "session/TerminalSession.h"
+#include "view/FaintInk.h"
 #include "view/KeyMapper.h"
 #include "view/TerminalView.h"
 #include "WordWrap.h"
@@ -1070,6 +1071,85 @@ private slots:
         QVERIFY(rowHasColor(img, 0, ch, scheme.userAgentInk));
         QVERIFY(at(img, 2, 40) != QColor(0x45, 0xc8, 0xee));
         QVERIFY(rowHasColor(img, 2, ch, scheme.userShellInk));
+    }
+
+    // The one run inside such a row that is not the role's ink: the `/command` a prompt opens
+    // with, which the pane writes as a palette index so the theme decides its hue (#SLQ3). The
+    // hue is kept and the distance to the band is corrected — the band is light in one theme and
+    // dark in the next, and a colour already in the scrollback cannot know which it landed on.
+    // Both paths that paint such a row are here: the grid's own row, and the prose block the
+    // layer re-wraps and paints itself once the pane is narrowed (#R2WQ).
+    void aCommandInAUserRowKeepsItsHueAndClearsItsBand()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.backend->resizeTerminal(12, 80);
+        t.view->setFoldPrefix(QStringLiteral("relay://call/"));   // the layer the prose block rides on
+        const QColor lightBand(0xb4, 0x8e, 0xf7), lightCyan(0x78, 0xdd, 0xea);   // Relay Dark
+        const QColor darkBand(0x7c, 0x3a, 0xed), darkCyan(0x0f, 0x5d, 0x61);     // Relay Light
+        ColorScheme scheme = t.view->colorScheme();
+        scheme.userAgentBand = lightBand;
+        scheme.userAgentInk = QColor(0x1a, 0x0e, 0x2e);
+        scheme.palette[14] = lightCyan.rgb();   // the theme's bright cyan: SGR 96
+        t.view->setColorScheme(scheme);
+
+        // A row of the grid, then the block the pane hands over beside its bytes: its anchor in
+        // the grid, its logical line with the role on it and the command's SGR on its own span.
+        const QString blockTail = QStringLiteral(" the row the fold layer re-wraps once this pane is narrowed");
+        QByteArray bytes = QByteArrayLiteral("\x1b]7772;agent\x1b\\\x1b[1m\x1b[96m/deliver\x1b[39m trace the bug\x1b[0m\r\n");
+        bytes += QByteArrayLiteral("\x1b]8;;relay://prose/t/1\x1b\\\x1b]7772;agent\x1b\\\x1b[1m\x1b[96m/inspect\x1b[39m")
+            + blockTail.toUtf8() + QByteArrayLiteral("\x1b[0m\r\n\x1b]8;;\x1b\\");
+        t.backend->writeToDisplay(bytes);
+        QVERIFY(t.waitScreen(QStringLiteral("/inspect")));
+        FoldLine prose;
+        FoldSpan command, rest;
+        command.text = QStringLiteral("/inspect");
+        command.bold = true;
+        command.sgr = QStringLiteral("1;96");
+        rest.text = blockTail;
+        rest.bold = true;
+        rest.sgr = QStringLiteral("1");
+        prose.spans << command << rest;
+        prose.role = kFoldRoleAgent;
+        t.backend->setProseBlock(QStringLiteral("relay://prose/t/1"), {prose}, 80);
+        QTest::qWait(200);
+
+        const int ch = t.view->cellHeight();
+        // The rows to look at: the grid's own, and the block's first row — which the layer paints
+        // itself only once the width it was printed at is gone, so the pane is narrowed first.
+        const auto rowOf = [&t](const QString &word) {
+            const QStringList rows = t.view->visibleRowsText();
+            for (int i = 0; i < rows.size(); ++i)
+                if (rows.at(i).startsWith(word))
+                    return i;
+            return -1;
+        };
+        const auto check = [&](const QString &word, const QColor &band, const QColor &written, const QColor &roleInk) {
+            const int row = rowOf(word);
+            QVERIFY2(row >= 0, qPrintable(QStringLiteral("%1 is not on the screen").arg(word)));
+            const QColor inked = legibleOn(written, band);
+            QVERIFY2(contrastRatio(inked, band) >= kTextContrast, "the command is under the text floor on its band");
+            QVERIFY2(inked != written, "this case is meant to be a colour the band forces to move");
+            const QImage img = t.grab();
+            QVERIFY2(rowHasColor(img, row, ch, inked), qPrintable(word + QStringLiteral(" lost the ink of its own")));
+            QVERIFY2(!rowHasColor(img, row, ch, written),
+                     qPrintable(word + QStringLiteral(": the written colour was painted on the band unchanged")));
+            QVERIFY2(rowHasColor(img, row, ch, roleInk), "the rest of the row left the role's ink");
+        };
+        check(QStringLiteral("/deliver"), lightBand, lightCyan, scheme.userAgentInk);
+        t.backend->resizeTerminal(12, 40);   // now the layer owns the block's rows
+        QTest::qWait(300);
+        check(QStringLiteral("/inspect"), lightBand, lightCyan, scheme.userAgentInk);
+
+        // The theme changes: the same cells, the other direction, nothing rewritten.
+        scheme.userAgentBand = darkBand;
+        scheme.userAgentInk = QColor(0xf6, 0xee, 0xff);
+        scheme.palette[14] = darkCyan.rgb();
+        t.view->setColorScheme(scheme);
+        QTest::qWait(120);
+        check(QStringLiteral("/deliver"), darkBand, darkCyan, scheme.userAgentInk);
+        check(QStringLiteral("/inspect"), darkBand, darkCyan, scheme.userAgentInk);
+        QVERIFY(legibleOn(darkCyan, darkBand) != legibleOn(lightCyan, lightBand));
     }
 
     // ---- find, with the open folds in the sequence (#TK9C)

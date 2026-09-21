@@ -743,6 +743,12 @@ void TerminalView::paintRow(QPainter &p, int row, const Line &line, int realRow)
         bool bgDefault = CellColor::kind(c.bg) == CellColor::Default;
         if (roleInk.isValid() && CellColor::kind(c.fg) == CellColor::Default)
             fg = roleInk;
+        // A cell on such a row that *did* bring a colour is Relay's own token — the ink it gives
+        // the `/command` of a prompt it echoes (#SLQ3) — written as a palette index so the theme
+        // decides the hue here, not the scrollback. The hue is kept; only the distance to the
+        // band is corrected, because the band is light in one theme and dark in the next.
+        else if (roleRow && roleBand.isValid())
+            fg = legibleOn(fg, roleBand);
         if (c.attrs & AttrReverse) {
             std::swap(fg, bg);
             bgDefault = false;
@@ -1132,6 +1138,10 @@ void TerminalView::paintProseRow(QPainter &p, int screenRow, const FoldLayer::Fo
                                : m_scheme.foreground;
         if (roleInk.isValid() && !c.fg.isValid() && !c.fgPacked)
             fg = roleInk;
+        // As in the grid path: an ink the block carried of its own — the echoed prompt's
+        // `/command` (#SLQ3) — keeps its hue and is moved only as far as the band demands.
+        else if (roleBand.isValid() && (c.fg.isValid() || c.fgPacked))
+            fg = legibleOn(fg, roleBand);
         bool hit = false, hitCurrent = false;
         for (const FoldSearch::RowMatch &h : hits) {
             if (i >= h.from && i < h.to) {
