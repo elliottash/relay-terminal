@@ -632,7 +632,7 @@ private Q_SLOTS:
         ModelPicker picker(ctx);
         picker.selectKey(QStringLiteral("relay-free|relay-main"));
         QCOMPARE(picker.levelList()->count(), 1);
-        QCOMPARE(picker.levelList()->item(0)->text(), QStringLiteral("relay free sets the level for you"));
+        QCOMPARE(picker.levelList()->item(0)->text(), QStringLiteral("Relay Free sets the level for you"));
         QVERIFY(!(picker.levelList()->item(0)->flags() & Qt::ItemIsSelectable));
         QVERIFY(picker.selectedEffort().isEmpty());
         // A model with no knob at all says the other half of the same rule, naming the model.

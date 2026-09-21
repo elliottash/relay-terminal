@@ -3730,12 +3730,38 @@ public:
     QString snapEffort(const QString &value, bool say, const QStringList &levels) {
         if (levels.isEmpty() || levels.contains(value)) return levels.isEmpty() ? QString() : value;
         const QString snapped = relay::models::nearestEffort(levels, value);
-        if (say && !snapped.isEmpty() && snapped != value) {
-            const QString name = modelNameFor(m_currentPreset, paneModel());
-            status(QStringLiteral("%1 is not a level of %2 here · using %3")
-                       .arg(value, name.isEmpty() ? QStringLiteral("this model") : name, snapped));
-        }
+        if (say && !snapped.isEmpty() && snapped != value) noteEffortSnap(value, snapped);
         return snapped;
+    }
+    // A snap is nearly always a *consequence of a model switch*, and the switch's own line —
+    // "model: kimi-k3 · conversation kept" — lands 100–300 ms later and used to wipe it off the
+    // status bar (design 1.4.2, the same problem `m_switchSentence` was written for). So the
+    // sentence waits: `model_changed` joins it to its own line, and when no report comes — a
+    // `/effort` typed on the model the pane is already on — this timer says it alone.
+    //
+    // The two levels are kept rather than the finished sentence, because the model the sentence
+    // names is the one the pane is moving *to* and its own id only arrives with that report: a
+    // sentence built at snap time said "xhigh is not a level of gpt-6-astra here" while the pane
+    // was already on kimi-k3.
+    void noteEffortSnap(const QString &from, const QString &to) {
+        m_effortSnapFrom = from;
+        m_effortSnapTo = to;
+        QTimer::singleShot(600, this, [this] {
+            const QString note = takeEffortSnapNote();
+            if (note.isEmpty()) return;
+            status(note);
+            toast(note);
+        });
+    }
+    QString takeEffortSnapNote() {
+        if (m_effortSnapFrom.isEmpty() || m_effortSnapTo.isEmpty()) return QString();
+        const QString name = modelNameFor(m_currentPreset, paneModel());
+        const QString note = QStringLiteral("%1 is not a level of %2 here · using %3")
+                                 .arg(m_effortSnapFrom, name.isEmpty() ? QStringLiteral("this model") : name,
+                                      m_effortSnapTo);
+        m_effortSnapFrom.clear();
+        m_effortSnapTo.clear();
+        return note;
     }
     // The pane's own level moved onto the model it is now on, once, when that model does not take
     // it. A fixed model is left alone on purpose: the pane keeps whatever level it had, ready for
@@ -5244,6 +5270,11 @@ private:
                                     ? QStringLiteral("Reasoning level for this pane (Alt+E opens it; Alt+. / Alt+, step)")
                                     : sentenceCase(why));
         m_effortBox->setVisible(true);
+        // The box hugs the word it is showing (CurrentTextComboBox::sizeHint), and the word can
+        // now be six characters — `medium`, `xhigh`, `ultra` — where Relay's four were four. The
+        // layout is only told when the widget asks, and setCurrentIndex does not ask, so a longer
+        // word was drawn clipped inside the old width.
+        m_effortBox->updateGeometry();
         m_planChip->setVisible(m_agentMode == QStringLiteral("plan"));
         updateContextLabel();
     }
@@ -7901,6 +7932,11 @@ private:
             if (!m_switchSentence.isEmpty() && !later && (role.isEmpty() || role == QStringLiteral("main")))
                 what = m_switchSentence;
             m_switchSentence.clear();
+            // The level this switch moved, when it moved one (card #MDL1, rule 3): one line, not
+            // two that overwrite each other. Built here, where the model it names is known.
+            if (!later)
+                if (const QString note = takeEffortSnapNote(); !note.isEmpty())
+                    what += QStringLiteral(" · ") + note;
             status(what); toast(what);
             if (later) {
                 // The clock owns the status line while a turn runs, so the "not now, next step" part
@@ -17889,6 +17925,9 @@ private:
     bool m_voiceHold = false, m_voiceTranscribing = false;
     QFrame *m_helpPopup = nullptr;
     QComboBox *m_effortBox = nullptr;
+    // The two levels a snap moved between, waiting for the model report they belong to
+    // (noteEffortSnap); the sentence is built when the model that took the level is known.
+    QString m_effortSnapFrom, m_effortSnapTo;
     QListWidget *m_slashList = nullptr;
     QListWidget *m_tabList = nullptr;   // Tab completion candidates
     relay::Completion m_tabCompletion;

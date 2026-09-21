@@ -795,7 +795,7 @@ private Q_SLOTS:
         const Entry *hosted = catalog.find(QStringLiteral("relay-free|relay-main"));
         QVERIFY(hosted && hosted->efforts.size() == 2);
         QVERIFY(hosted->effortFixed);
-        QCOMPARE(hosted->effortFixedReason(), QStringLiteral("relay free sets the level for you"));
+        QCOMPARE(hosted->effortFixedReason(), QStringLiteral("Relay Free sets the level for you"));
     }
 
     void theWorkersEffortFixedWinsOverTheDerivation() {

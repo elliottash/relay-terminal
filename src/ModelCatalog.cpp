@@ -142,7 +142,7 @@ QString Entry::effortFixedReason() const {
     if (!effortFixed) return QString();
     // Relay Free first: it does have levels, and saying "no reasoning level" about a model that
     // plainly has two would read as a bug rather than as the gateway's rule.
-    if (hosted) return QStringLiteral("relay free sets the level for you");
+    if (hosted) return QStringLiteral("Relay Free sets the level for you");
     return QStringLiteral("%1 has no reasoning level").arg(name.isEmpty() ? model : name);
 }
 
