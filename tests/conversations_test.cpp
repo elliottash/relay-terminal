@@ -2,6 +2,11 @@
 // Pure helpers of the session manager and the find bar (src/Conversations.h), the session manager
 // pane itself, and the ⓘ view's rendering (src/SessionInfo.h).
 #include "Conversations.h"
+#include "AgentContext.h"
+#include "OutputLinks.h"
+
+#include <QFontMetrics>
+#include <algorithm>
 #include "SessionInfo.h"
 
 #include <QAction>
@@ -56,6 +61,38 @@ static QTreeWidgetItem *rowTitled(QTreeWidget *tree, const QString &title) {
         if ((*it)->text(0) == title) return *it;
     return nullptr;
 }
+
+// ----- a fake console, for the helper agent (card #AGNT step 7) --------------------------------
+//
+// The window is the only place a `Pane` can be built, so a pane library's own test stands in for
+// it: a plain QWidget and the handful of lambdas `relay::agent::ConsoleHandle` carries, each
+// recording what the host asked of it. That is the whole seam — if a host needs anything else
+// from a console, this struct is what has to grow.
+struct FakeConsole {
+    QWidget *widget = nullptr;
+    relay::agent::Context *context = nullptr;
+    int builds = 0, focused = 0;
+    QList<bool> collapsed;
+    QString draft;
+
+    relay::agent::ConsoleFactory factory() {
+        return [this](relay::agent::Context *context, QWidget *parent) {
+            ++builds;
+            this->context = context;
+            widget = new QWidget(parent);
+            widget->setObjectName(QStringLiteral("fakeConsole"));
+            relay::agent::ConsoleHandle handle;
+            handle.widget = widget;
+            handle.focusComposer = [this] { ++focused; };
+            handle.draftInComposer = [this](const QString &text) { draft = text; };
+            handle.composerText = [this] { return draft; };
+            handle.setCollapsed = [this](bool on) { collapsed << on; };
+            handle.collapsed = [this] { return collapsed.isEmpty() ? true : collapsed.last(); };
+            handle.runActionLetter = [](const QString &) { return false; };
+            return handle;
+        };
+    }
+};
 
 static QJsonObject sessionItem(const QString &id, const QString &title, const QString &project = QStringLiteral("relay")) {
     return QJsonObject{{QStringLiteral("session_id"), id}, {QStringLiteral("source"), QStringLiteral("agent")},
@@ -1446,86 +1483,117 @@ private slots:
         QCOMPARE(calls, before);   // the label alone does not re-search
     }
 
-    // ----- the helper agent's panel (#FEJQ) -----------------------------------------------------
+    // ----- the helper agent (card #FEJQ; a console since card #AGNT step 7) -------------------
     //
     // "When you are in options, actions, or sessions, you have a helper agent, same as the
-    // switchboard agent" (owner). In this pane it is the Switchboard's own panel, embedded at the
-    // bottom and collapsed to one row, asking the tab's helper worker with `pane: "sessions"`.
-    void theHelperPanelSitsAtTheBottomCollapsedAndAsksAsTheSessionsPane() {
-        SessionManager manager;
-        manager.onQuery = [](const QJsonObject &) {};
-        QList<QJsonObject> sent;
-        manager.onHelperSend = [&sent](const QJsonObject &message) { sent << message; };
-        manager.nextHelperRequestId = [] { return QStringLiteral("sessions-1"); };
-        manager.show();
-        QVERIFY(QTest::qWaitForWindowExposed(&manager));
-
-        // One row, and the pane's own list is still the pane.
-        auto *panel = manager.findChild<QWidget *>(QStringLiteral("boardChatPanel"));
-        QVERIFY(panel && panel->isVisible());
-        auto *ask = manager.findChild<QToolButton *>(QStringLiteral("boardChatAsk"));
-        auto *body = manager.findChild<QWidget *>(QStringLiteral("boardChatBody"));
-        QVERIFY(panel && ask && body);
-        QVERIFY(ask->isVisible());
-        QVERIFY(!body->isVisible());
-        QCOMPARE(manager.findChild<QLabel *>(QStringLiteral("boardChatHead"))->text(),
-                 QStringLiteral("Sessions helper"));
-
-        // Asking: the row opens, the cursor lands in the box, and the message goes out tagged.
-        ask->click();
-        QVERIFY(body->isVisible());
-        auto *composer = manager.findChild<QPlainTextEdit *>(QStringLiteral("boardChatComposer"));
-        QVERIFY(composer);
-        QVERIFY(composer->hasFocus());
-        // The box is a terminal pane's prompt box (owner, 2026-09-20): one frame around the
-        // editor and its chips, no Send button, and a placeholder that names the helper now that
-        // the help sentence over it is gone.
-        auto *box = manager.findChild<QFrame *>(QStringLiteral("boardChatBox"));
-        QVERIFY(box && box->isAncestorOf(composer));
-        QVERIFY(!manager.findChild<QToolButton *>(QStringLiteral("boardChatSend")));
-        QVERIFY(composer->placeholderText().startsWith(QStringLiteral("Ask the Sessions helper")));
-        composer->setPlainText(QStringLiteral("which sessions touched Pane.h?"));
-        QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
-        QApplication::sendEvent(composer, &enter);
-        QCOMPARE(sent.size(), 1);
-        QCOMPARE(sent.last().value(QStringLiteral("type")).toString(), QStringLiteral("board_chat"));
-        QCOMPARE(sent.last().value(QStringLiteral("pane")).toString(), QStringLiteral("sessions"));
-        QCOMPARE(sent.last().value(QStringLiteral("text")).toString(),
-                 QStringLiteral("which sessions touched Pane.h?"));
-        QCOMPARE(sent.last().value(QStringLiteral("id")).toString(), QStringLiteral("sessions-1"));
-
-        // The answer streams back through the pane, and the board's own does not.
-        manager.helperEvent(QStringLiteral("delta"),
-                            QJsonObject{{QStringLiteral("chat"), true},
-                                        {QStringLiteral("pane"), QStringLiteral("switchboard")},
-                                        {QStringLiteral("turn_id"), QStringLiteral("t1")},
-                                        {QStringLiteral("text"), QStringLiteral("84 open cards.")}});
-        manager.helperEvent(QStringLiteral("delta"),
-                            QJsonObject{{QStringLiteral("chat"), true},
-                                        {QStringLiteral("pane"), QStringLiteral("sessions")},
-                                        {QStringLiteral("turn_id"), QStringLiteral("t2")},
-                                        {QStringLiteral("text"), QStringLiteral("Four of them.")}});
-        auto *log = manager.findChild<QTextBrowser *>(QStringLiteral("boardChatLog"));
-        QVERIFY(log);
-        QTRY_VERIFY(log->toPlainText().contains(QStringLiteral("Four of them.")));
-        QVERIFY(!log->toPlainText().contains(QStringLiteral("84 open cards.")));
-
-        // A `session:` link in an answer selects that row rather than asking the window for it.
-        manager.setResults({{QStringLiteral("items"),
-                             QJsonArray{sessionItem(QStringLiteral("a"), QStringLiteral("Index work")),
-                                        sessionItem(QStringLiteral("b"), QStringLiteral("Voice work"))}}});
-        emit log->anchorClicked(QUrl(QStringLiteral("session:b")));
-        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
-        QVERIFY(tree && tree->currentItem());
-        QCOMPARE(tree->currentItem()->text(0), QStringLiteral("Voice work"));
-
-        // A pane whose window never wired the helper shows no ask row at all: a row that sends
-        // nowhere is worse than no row.
+    // switchboard agent" (owner). Since card #AGNT step 7 that helper is an embedded **console** —
+    // a no-shell `Pane` the window builds — over the context this pane owns.
+    void theHelperConsoleSitsAtTheBottomCollapsedAndAsksAsTheSessionsPane() {
+        // A pane whose window never wired a factory has no helper at all.
         SessionManager unwired;
         unwired.onQuery = [](const QJsonObject &) {};
         unwired.show();
         QVERIFY(QTest::qWaitForWindowExposed(&unwired));
         QVERIFY(!unwired.findChild<QWidget *>(QStringLiteral("boardChatPanel"))->isVisible());
+        QVERIFY(!unwired.agentConsole());
+
+        FakeConsole fake;
+        SessionManager manager;
+        manager.onQuery = [](const QJsonObject &) {};
+        manager.onCreateConsole = fake.factory();
+        manager.setHelperTabId(QStringLiteral("tab-3"));
+        manager.setHelperWorkspace(QStringLiteral("/home/e/relay"));
+        manager.setHelperShortcut(QStringLiteral("sessions.ask"), QStringLiteral("Ctrl+/"));
+        manager.resize(900, 700);
+        manager.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&manager));
+
+        // One row, at the bottom right, with the question-mark icon and the live key in its text.
+        auto *panel = manager.findChild<QWidget *>(QStringLiteral("boardChatPanel"));
+        auto *askRow = manager.findChild<QWidget *>(QStringLiteral("boardChatAskRow"));
+        auto *ask = manager.findChild<QToolButton *>(QStringLiteral("boardChatAsk"));
+        auto *body = manager.findChild<QWidget *>(QStringLiteral("boardChatBody"));
+        QVERIFY(panel && askRow && ask && body);
+        QVERIFY(panel->isVisible());
+        QVERIFY(askRow->isVisible());
+        QVERIFY(!body->isVisible());
+        QCOMPARE(ask->text(), QStringLiteral("Helper Agent (Ctrl+/)"));
+        QVERIFY(!ask->icon().isNull());
+        QVERIFY(ask->geometry().center().x() > askRow->width() / 2);
+        QCOMPARE(manager.findChild<QLabel *>(QStringLiteral("boardChatHead"))->text(),
+                 QStringLiteral("Sessions helper"));
+        QCOMPARE(fake.builds, 0);
+
+        // Expanding builds it once, unfolds it and hands it the cursor.
+        ask->click();
+        QCOMPARE(fake.builds, 1);
+        QVERIFY(body->isVisible());
+        QCOMPARE(fake.collapsed.size(), 1);
+        QCOMPARE(fake.collapsed.last(), false);
+        QCOMPARE(fake.focused, 1);
+        QVERIFY(body->isAncestorOf(fake.widget));
+        const int line = QFontMetrics(manager.font()).lineSpacing();
+        QVERIFY(body->maximumHeight() >= 3 * line);
+        QVERIFY(body->maximumHeight() <= std::max(10 * line, manager.height() * 2 / 5));
+
+        // What the worker is told.
+        relay::agent::Context *context = manager.agentContext();
+        QVERIFY(context);
+        relay::agent::ContextSpec spec = context->spec();
+        QCOMPARE(spec.name, QStringLiteral("sessions"));
+        QCOMPARE(spec.surface, QStringLiteral("sessions"));
+        QCOMPARE(spec.agentRole, QStringLiteral("switchboard"));
+        QCOMPARE(spec.workspace, QStringLiteral("/home/e/relay"));
+        QCOMPARE(spec.scope, QStringLiteral("console"));
+        QCOMPARE(spec.persistScope, QStringLiteral("helper"));
+        QCOMPARE(spec.persistKey, QStringLiteral("tab-3"));
+        QCOMPARE(spec.briefTitle, QStringLiteral("Sessions helper"));
+        QCOMPARE(spec.routing, QStringLiteral("agent"));
+        QVERIFY(!spec.shell);
+        QCOMPARE(context->placeholder(), QStringLiteral("Ask the Sessions helper…"));
+        QVERIFY(context->actions().isEmpty());
+
+        // The `screen` hint names the query and the filters in force.
+        manager.setQuery(QStringLiteral("Pane.h"));
+        QVERIFY(context->spec().screen.contains(QStringLiteral("Search: Pane.h")));
+        QVERIFY(context->spec().screen.contains(QStringLiteral("Filters:")));
+        QVERIFY(context->spec().screen.size() <= relay::agent::kScreenLimit);
+
+        // A `session:` link in an answer selects that row rather than asking the window for it.
+        manager.setResults({{QStringLiteral("items"),
+                             QJsonArray{sessionItem(QStringLiteral("a"), QStringLiteral("Index work")),
+                                        sessionItem(QStringLiteral("b"), QStringLiteral("Voice work"))}}});
+        relay::links::Target session;
+        session.valid = true;
+        session.kind = relay::links::Kind::Session;
+        session.target = relay::links::sessionTarget(QStringLiteral("b"));
+        QVERIFY(context->resolveLink(session));
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        QVERIFY(tree && tree->currentItem());
+        QCOMPARE(tree->currentItem()->text(0), QStringLiteral("Voice work"));
+        QVERIFY(context->spec().screen.contains(QStringLiteral("Selected: Voice work (b)")));
+        // An `option:` row belongs to the window, and false is how the context says so.
+        relay::links::Target option;
+        option.valid = true;
+        option.kind = relay::links::Kind::Option;
+        option.target = relay::links::optionTarget(QStringLiteral("agent"), QStringLiteral("option:writes"));
+        QVERIFY(!context->resolveLink(option));
+
+        // The fold goes back to one row — folded, not destroyed — and opening it again is where
+        // you left it.
+        auto *fold = manager.findChild<QToolButton *>(QStringLiteral("boardChatFold"));
+        QVERIFY(fold);
+        fold->click();
+        QVERIFY(!body->isVisible());
+        QVERIFY(askRow->isVisible());
+        QCOMPARE(fake.collapsed.last(), true);
+        manager.focusHelper();
+        QCOMPARE(fake.builds, 1);
+        QCOMPARE(fake.focused, 2);
+
+        // A draft is a draft, never a send.
+        manager.helperDraft(QStringLiteral("which sessions touched Pane.h?"));
+        QCOMPARE(fake.draft, QStringLiteral("which sessions touched Pane.h?"));
     }
 
     // The delegate's laid-out documents are kept between rebuilds, keyed by html, width and font

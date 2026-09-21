@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SettingsPane.h"
 
-#include "HelperChat.h"
+#include "OutputLinks.h"     // `option:` in an answer is this pane's own link (#AGNT step 8)
 #include "SettingsCache.h"   // a write here drops the hot-path settings cache (#057J)
+#include "Theme.h"           // the collapsed row's ink
 
 #include <QAbstractItemView>
 #include <QApplication>
@@ -27,7 +28,11 @@
 #include <QCompleter>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QFontMetrics>
+#include <QIcon>
 #include <QMouseEvent>
+#include <QPainter>
+#include <QPixmap>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QScrollArea>
@@ -307,6 +312,127 @@ SettingRow resetRow(const SettingsSection &section, std::function<void(int count
     return row;
 }
 
+
+// ----- the helper agent's context (card #AGNT step 7) -----------------------------------------
+//
+// What the agent in this pane is *about*, and nothing else: which of Options and Actions it is
+// (one class, because they are one widget and `setMode` swaps the answer), what is on screen, and
+// where an `option:` link in an answer goes. The console — the prompt box, the queue, the
+// transcript — is a no-shell `Pane` the window builds; it is the same surface a terminal has, and
+// nothing about it is written here (src/AgentContext.h).
+class OptionsContext final : public agent::Context {
+  public:
+    explicit OptionsContext(SettingsPane *pane) : m_pane(pane) {}
+
+    agent::ContextSpec spec() const override {
+        const bool actions = m_pane->mode() == SettingsPane::Mode::Actions;
+        agent::ContextSpec spec;
+        // The mode decides both: a turn asked in Actions is answered by the Actions helper, with
+        // the Actions brief, on the same conversation. That is what "the helper follows the mode"
+        // has always meant here (#FEJQ) — only now it is one field rather than a `pane` tag.
+        spec.name = actions ? QStringLiteral("actions") : QStringLiteral("options");
+        spec.surface = spec.name;
+        spec.agentRole = QStringLiteral("switchboard");
+        spec.workspace = m_workspace;
+        // Named, never inferred: a board-less helper that falls through the worker's inference
+        // gets the *pane* branch and the full executor (§33.3, card #AGNT finding).
+        spec.scope = QStringLiteral("console");
+        // `persist.scope` is a wire enum — "", "pane" or "helper" — not a path. No tab id means no
+        // store, which is a supported state and how a pane with no window says so.
+        if (!m_tabId.isEmpty()) {
+            spec.persistScope = QStringLiteral("helper");
+            spec.persistKey = m_tabId;
+        }
+        spec.briefKey = spec.name;
+        spec.briefTitle = title();
+        spec.screen = screen();
+        spec.shell = false;          // every context but the terminal's
+        spec.routing = QStringLiteral("agent");   // everything typed here is a prompt
+        return spec;
+    }
+
+    QString placeholder() const override {
+        return QStringLiteral("Ask the %1 helper…").arg(
+            m_pane->mode() == SettingsPane::Mode::Actions ? QStringLiteral("Actions")
+                                                          : QStringLiteral("Options"));
+    }
+
+    // `option:<section>/<row>` is this pane's own business: the helper was asked about a setting
+    // and answered with the way to it, so the row is revealed *here* rather than the window being
+    // asked for a second Options pane. Everything else — a card, a path, a URL, a `session:` —
+    // is the window's, and false is how this says so.
+    bool resolveLink(const relay::links::Target &target) override {
+        QString section, row;
+        if (!relay::links::optionOf(target.target, &section, &row)) return false;
+        m_pane->revealOption(section, row);
+        return true;
+    }
+
+    QString title() const {
+        return m_pane->mode() == SettingsPane::Mode::Actions ? QStringLiteral("Actions helper")
+                                                             : QStringLiteral("Options helper");
+    }
+
+    void setTabId(const QString &tabId) { if (tabId != m_tabId) { m_tabId = tabId; changed(); } }
+    void setWorkspace(const QString &workspace) {
+        if (workspace != m_workspace) { m_workspace = workspace; changed(); }
+    }
+
+  private:
+    // What is being read right now, for the "On screen now:" line above the prompt (§33). It is a
+    // hint, not a context dump: the page and the search first, because those are what a question
+    // is nearly always about, then as many of the visible row ids as fit. The catalog itself is
+    // never pasted in — the agent reads the rows live.
+    QString screen() const {
+        QStringList lines;
+        if (m_pane->mode() == SettingsPane::Mode::Actions) {
+            lines << QStringLiteral("Actions, the whole list");
+        } else {
+            lines << QStringLiteral("Options › %1").arg(m_pane->currentTab());
+        }
+        const QString search = m_pane->search().trimmed();
+        if (!search.isEmpty()) lines << QStringLiteral("Search: %1").arg(search);
+        QStringList ids;
+        int room = agent::kScreenLimit - lines.join(QLatin1Char('\n')).size() - 16;
+        for (const QString &id : m_pane->visibleRowIds()) {
+            room -= id.size() + 2;
+            if (room <= 0) { ids << QStringLiteral("…"); break; }
+            ids << id;
+        }
+        if (!ids.isEmpty()) lines << QStringLiteral("Rows: %1").arg(ids.join(QStringLiteral(", ")));
+        return lines.join(QLatin1Char('\n'));
+    }
+
+    SettingsPane *m_pane = nullptr;
+    QString m_tabId, m_workspace;
+};
+
+// The collapsed row's mark (owner, 2026-09-20: "it should have a question mark icon next to it").
+// Painted rather than typed for the reason the helper panel's copy gave: a glyph from the button's
+// font is whatever the desktop's font has at 14 px, which on this row is a "?" a third of the
+// height of the word beside it. A ringed question mark reads as "ask" at that size.
+static QIcon askIcon(const QColor &ink) {
+    constexpr int kSize = 14;
+    QPixmap pixmap(kSize * 2, kSize * 2);        // 2x, so it stays crisp on a scaled desktop
+    pixmap.setDevicePixelRatio(2.0);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    QPen pen(ink, 1.2);
+    pen.setCapStyle(Qt::RoundCap);
+    painter.setPen(pen);
+    painter.setBrush(Qt::NoBrush);
+    painter.drawEllipse(QRectF(1.2, 1.2, 11.6, 11.6));
+    painter.drawArc(QRectF(4.3, 3.4, 5.4, 4.6), 200 * 16, -250 * 16);
+    painter.drawLine(QPointF(7.0, 7.4), QPointF(7.0, 9.0));
+    QPen dot(ink, 1.6);
+    dot.setCapStyle(Qt::RoundCap);
+    painter.setPen(dot);
+    painter.drawPoint(QPointF(7.0, 10.8));
+    painter.end();
+    return QIcon(pixmap);
+}
+
 // ----- construction ------------------------------------------------------------------------------
 
 SettingsPane::SettingsPane(Mode mode, std::function<QList<SettingsSection>()> sections,
@@ -350,38 +476,11 @@ SettingsPane::SettingsPane(Mode mode, std::function<QList<SettingsSection>()> se
     m_footer->setTextFormat(Qt::PlainText);
     layout->addWidget(m_footer);
 
-    // The helper agent's panel (#FEJQ), under the footer and collapsed to one "Ask about this
-    // pane" row: the same panel the Switchboard carries, asking the same per-tab worker. Its pane
-    // name follows the mode — Options and Actions are one widget — so the worker's brief is about
-    // whichever of the two is on screen, while the conversation stays one.
-    m_helper = new HelperChatPanel(m_mode == Mode::Actions ? helperpane::actions()
-                                                           : helperpane::options());
-    m_helper->onSend = [this](const QJsonObject &message) {
-        if (onHelperSend) onHelperSend(message);
-    };
-    m_helper->nextRequestId = [this] {
-        return nextHelperRequestId ? nextHelperRequestId() : QString();
-    };
-    m_helper->onHint = [this](const QString &id, const QString &keys) {
-        if (onHelperHint) onHelperHint(id, keys);
-    };
-    // `option:<section>/<row>` in an answer is this pane's own: the helper was asked about a
-    // setting and answers with the way to it, so the link reveals the row here rather than asking
-    // the window to open a second Options pane.
-    m_helper->onOpenOption = [this](const QString &section, const QString &row) {
-        revealOption(section, row);
-    };
-    m_helper->onOpenCard = [this](const QString &id) {
-        if (onHelperOpenCard) onHelperOpenCard(id);
-    };
-    m_helper->onOpenFile = [this](const QString &path) {
-        if (onHelperOpenFile) onHelperOpenFile(path);
-    };
-    m_helper->onOpenSession = [this](const QString &id) {
-        if (onHelperOpenSession) onHelperOpenSession(id);
-    };
-    m_helper->setAskShortcut(QStringLiteral("options.ask"), QString());
-    layout->addWidget(m_helper, 0);
+    // The helper agent, under the footer and collapsed to one row at the bottom right (#FEJQ,
+    // card #AGNT step 7): a context this pane owns, and a console the window builds for it on the
+    // first expand. The context outlives the console, which is what §33 requires of a host.
+    m_context = new OptionsContext(this);
+    buildHelperRow(layout);
     applyMode();
 
     connect(m_tabs, &QTabBar::currentChanged, this, [this](int index) {
@@ -428,10 +527,11 @@ void SettingsPane::setMode(Mode mode) {
     if (mode == m_mode) return;
     m_mode = mode;
     // The helper is about the pane in front of you, and the pane has just become the other one:
-    // from here the worker is asked with `pane: "actions"` rather than `"options"` and picks the
-    // other brief (§30.7). The log stays — it is one conversation with one agent.
-    if (m_helper)
-        m_helper->setPane(mode == Mode::Actions ? helperpane::actions() : helperpane::options());
+    // from here `spec()` answers "actions" rather than "options" and the worker picks the other
+    // brief (§33). The console is left alone — it is one conversation with one worker, and the
+    // turns already in it were answers to this person.
+    if (m_context) m_context->changed();
+    updateHelperRow();
     m_wantedTab.clear();
     {
         const QSignalBlocker blocker(m_search);
@@ -562,6 +662,8 @@ void SettingsPane::announceTab() {
     const QString id = currentTab();
     if (id.isEmpty() || id == m_shownTab) return;
     m_shownTab = id;
+    // The page under the helper moved, so what `spec()` answers for `screen` moved with it.
+    if (m_context) m_context->changed();
     if (onSectionShown) onSectionShown(id);
 }
 
@@ -1181,39 +1283,202 @@ void SettingsPane::keyPressEvent(QKeyEvent *event) {
 void SettingsPane::showEvent(QShowEvent *event) {
     QWidget::showEvent(event);
     // An ask row that does nothing is worse than no ask row (the Sessions pane's rule, and the ⓘ
-    // view's `onAskOwner`), so the panel is there only once the window has given it somewhere to
-    // send. By the time the pane is on screen the wiring has happened or it never will.
-    if (m_helper) m_helper->setVisible(bool(onHelperSend));
+    // view's `onAskOwner`), so the row is there only once the window has given this pane a way
+    // to build a console. By the time the pane is on screen the wiring has happened or never
+    // will — and a library with no window (the tests) simply has no helper.
+    if (m_helper) m_helper->setVisible(bool(onCreateConsole));
 }
 
-// ----- the helper agent's panel (#FEJQ) --------------------------------------------------------
+void SettingsPane::resizeEvent(QResizeEvent *event) {
+    QWidget::resizeEvent(event);
+    updateConsoleHeight();
+}
+
+// ----- the helper agent (#FEJQ; a console since card #AGNT step 7) -----------------------------
 //
-// The pane holds no worker of its own: what the panel sends goes out through `onHelperSend` and
-// what the worker answers comes back through `helperEvent`, the same seam the Sessions pane keeps
-// (src/Conversations.cpp) so the window wires both panes with the same lines.
+// The pane holds no worker and builds no console: it owns the *context* — what the agent here is
+// about — and the window, which is the only place a `Pane` can be made, turns that into a console
+// through `onCreateConsole`. The same seam is the Sessions pane's, name for name
+// (src/Conversations.cpp), so the window wires both panes with the same lines.
 
-void SettingsPane::helperEvent(const QString &type, const QJsonObject &event) {
-    if (m_helper) m_helper->handleEvent(type, event);
+SettingsPane::~SettingsPane() {
+    // The console holds a pointer to the context and clears its own callback in ~Pane, so the
+    // widget goes first (Qt destroys the children above) and the context last.
+    delete m_context;
 }
 
-void SettingsPane::setHelperPresets(const QJsonArray &presets) {
-    if (m_helper) m_helper->setPresets(presets);
+relay::agent::Context *SettingsPane::agentContext() const { return m_context; }
+
+void SettingsPane::setHelperTabId(const QString &tabId) {
+    if (m_context) m_context->setTabId(tabId);
 }
 
+void SettingsPane::setHelperWorkspace(const QString &workspace) {
+    if (m_context) m_context->setWorkspace(workspace);
+}
+
+// The row teaches its own shortcut: the key is in the button's own text ("Helper Agent (Alt+Q)"),
+// so there is no notice to show and no hint id to keep. The argument stays because the window
+// wires this pane and the Sessions pane with one line, and because the console's own slow paths —
+// the composer, the model box — are the `Pane`'s to teach.
+void SettingsPane::setHelperShortcut(const QString & /*hintId*/, const QString &keys) {
+    m_askKeys = keys;
+    updateHelperRow();
+}
+
+// Asking for the cursor is asking for the console: the pane's ask key, a click on the row and a
+// drafted request all mean the box has to be there to type in (#FEJQ). The console is built here,
+// on the first expand, so a tab nobody asks anything never pays for one (§33, owner decision 5).
+// The step-5 bridge (see the header): the window's old wiring still hands this pane a model box
+// built for a panel that is gone. Taking it and hiding it is what keeps it from leaking while the
+// two commits cross; the console brings its own model box.
 void SettingsPane::addHelperComposerWidget(QWidget *widget) {
-    if (m_helper) m_helper->addComposerWidget(widget);
-}
-
-void SettingsPane::setHelperShortcut(const QString &hintId, const QString &keys) {
-    if (m_helper) m_helper->setAskShortcut(hintId, keys);
+    if (widget == nullptr) return;
+    widget->setParent(this);
+    widget->hide();
 }
 
 void SettingsPane::focusHelper() {
-    if (m_helper) m_helper->expand();
+    if (!onCreateConsole) return;
+    ensureConsole();
+    if (m_helperCollapsed) {
+        m_helperCollapsed = false;
+        applyHelperCollapsed();
+    }
+    if (m_console.focusComposer) m_console.focusComposer();
 }
 
+// A draft, never a send (owner, 2026-09-19: "draft you confirm").
 void SettingsPane::helperDraft(const QString &text) {
-    if (m_helper) m_helper->prefill(text);
+    focusHelper();
+    if (m_console.draftInComposer) m_console.draftInComposer(text);
+}
+
+// The row the pane is until the helper is asked for, and the fold back to it. Both are the
+// **host's**, not the console's: the console is a `Pane`, and a pane has no business knowing it
+// is embedded at the foot of something (card #AGNT step 7).
+void SettingsPane::buildHelperRow(QVBoxLayout *into) {
+    m_helper = new QWidget(this);
+    m_helper->setObjectName(QStringLiteral("boardChatPanel"));
+    m_helper->setAttribute(Qt::WA_StyledBackground);
+    auto *outer = new QVBoxLayout(m_helper);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+
+    // ---- collapsed: the one row the helper is until it is asked for -------------------------
+    // It is a button and not a label so the keyboard can reach it, and reaching it is enough: a
+    // Tab that lands here meant to ask something, so the focus goes on into the composer.
+    m_askRow = new QWidget(m_helper);
+    m_askRow->setObjectName(QStringLiteral("boardChatAskRow"));
+    auto *askLine = new QHBoxLayout(m_askRow);
+    askLine->setContentsMargins(10, 6, 10, 6);
+    askLine->setSpacing(6);
+    // At the **bottom right** of the pane, not the left (owner, 2026-09-20: "it should be at the
+    // bottom right rather than bottom left"), so the stretch goes in front of the button.
+    askLine->addStretch(1);
+    m_ask = new QToolButton(m_askRow);
+    m_ask->setObjectName(QStringLiteral("boardChatAsk"));
+    // One button that says what it opens and how (owner, 2026-09-20: "make the button say Helper
+    // Agent (Alt+Q)"). The key rides in the button's own text rather than on a muted label beside
+    // it: two widgets for one offer read as a label with a stray key after it, and the key is part
+    // of what the button is. It is also the shortcut hint — the slow path teaches itself here,
+    // with no notice to show (WARP.md's standing rule).
+    m_ask->setIcon(askIcon(theme::TextMuted));
+    m_ask->setIconSize(QSize(14, 14));
+    m_ask->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    m_ask->setCursor(Qt::PointingHandCursor);
+    m_ask->setFocusPolicy(Qt::StrongFocus);
+    m_ask->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    askLine->addWidget(m_ask, 0);
+    outer->addWidget(m_askRow);
+    connect(m_ask, &QToolButton::clicked, this, [this] { focusHelper(); });
+
+    // ---- expanded: the console, under a row that folds it away ------------------------------
+    m_helperBody = new QWidget(m_helper);
+    m_helperBody->setObjectName(QStringLiteral("boardChatBody"));
+    auto *body = new QVBoxLayout(m_helperBody);
+    body->setContentsMargins(10, 8, 10, 8);
+    body->setSpacing(6);
+    auto *headRow = new QHBoxLayout;
+    headRow->setSpacing(6);
+    // Which helper this is. The console's placeholder says it too, but the head is the row you
+    // fold from and the pane it is in has nothing else that names the agent (#FEJQ decision 4).
+    m_helperHead = new QLabel(m_helperBody);
+    m_helperHead->setObjectName(QStringLiteral("boardChatHead"));
+    headRow->addWidget(m_helperHead, 0);
+    headRow->addStretch(1);
+    // The way back to one row. At the end of the head, where a pane's own chrome buttons are, and
+    // out of the tab order: the composer is what Shift+Tab should reach from here, not the control
+    // that would throw the answer off screen.
+    auto *fold = new QToolButton(m_helperBody);
+    fold->setObjectName(QStringLiteral("boardChatFold"));
+    fold->setText(QStringLiteral("⌄"));
+    fold->setToolTip(QStringLiteral("Fold the helper back to one row. The conversation is kept — "
+                                    "it opens where you left it."));
+    fold->setCursor(Qt::PointingHandCursor);
+    fold->setFocusPolicy(Qt::NoFocus);
+    fold->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    headRow->addWidget(fold, 0);
+    connect(fold, &QToolButton::clicked, this, [this] {
+        if (m_helperCollapsed) return;
+        m_helperCollapsed = true;
+        applyHelperCollapsed();
+    });
+    body->addLayout(headRow);
+    m_helperBody->setVisible(false);
+    outer->addWidget(m_helperBody);
+
+    into->addWidget(m_helper, 0);
+    updateHelperRow();
+}
+
+// The window is the only place a `Pane` can be made, so this is the one call that produces one —
+// and only when somebody asks, which is what keeps an untouched tab free (§33).
+void SettingsPane::ensureConsole() {
+    if (m_console || !onCreateConsole || m_helperBody == nullptr) return;
+    m_console = onCreateConsole(m_context, m_helperBody);
+    if (!m_console) return;
+    if (auto *body = qobject_cast<QVBoxLayout *>(m_helperBody->layout())) body->addWidget(m_console.widget, 1);
+    m_console.widget->show();
+    updateConsoleHeight();
+}
+
+// One row, or the row and the console. Nothing is destroyed either way: a helper folded back keeps
+// its conversation, its draft and its queue, so opening it again is where you left it.
+void SettingsPane::applyHelperCollapsed() {
+    if (m_askRow) m_askRow->setVisible(m_helperCollapsed);
+    // Folding with the cursor still in the composer: hand the focus to the row that replaces it
+    // first. Qt hands it on itself when the widget holding it hides, and it does that as a Tab —
+    // and a Tab onto the ask row means "open the helper", which would unfold what was just folded.
+    if (m_helperCollapsed && m_ask && m_helperBody
+        && m_helperBody->isAncestorOf(QApplication::focusWidget()))
+        m_ask->setFocus(Qt::OtherFocusReason);
+    if (m_helperBody) m_helperBody->setVisible(!m_helperCollapsed);
+    if (m_console.setCollapsed) m_console.setCollapsed(m_helperCollapsed);
+    if (!m_helperCollapsed) updateConsoleHeight();
+}
+
+// "Helper Agent (Alt+Q)" — the name of what the row opens, with the live key in parentheses. One
+// widget: the key rides in the button's own text, so an unbound key simply leaves the name alone
+// rather than leaving an empty label behind.
+void SettingsPane::updateHelperRow() {
+    if (m_ask) {
+        m_ask->setText(m_askKeys.isEmpty() ? QStringLiteral("Helper Agent")
+                                           : QStringLiteral("Helper Agent (%1)").arg(m_askKeys));
+        m_ask->setToolTip(m_askKeys.isEmpty()
+            ? QStringLiteral("Ask the helper agent about this pane.")
+            : QStringLiteral("Ask the helper agent about this pane (%1).").arg(m_askKeys));
+    }
+    if (m_helperHead && m_context) m_helperHead->setText(m_context->title());
+}
+
+// The console is sized to the pane it is in: at most ~40 % of its height, and never so little that
+// the transcript is a slot rather than a conversation. It is the rule the helper panel's log
+// already followed, applied a level up now that the console brings its own box with it.
+void SettingsPane::updateConsoleHeight() {
+    if (m_helperBody == nullptr) return;
+    const int line = QFontMetrics(font()).lineSpacing();
+    m_helperBody->setMaximumHeight(std::max(10 * line, height() * 2 / 5));
 }
 
 // ----- public surface ------------------------------------------------------------------------------

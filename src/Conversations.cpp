@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Conversations.h"
 #include "CopyOnSelect.h"
-#include "HelperChat.h"
+#include "OutputLinks.h"     // `session:` in an answer is this pane's own link (#AGNT step 8)
+#include "Theme.h"           // the collapsed row's ink
 
 #include <QAbstractTextDocumentLayout>
 #include <QAction>
@@ -20,7 +21,10 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
+#include <QFontMetrics>
+#include <QIcon>
 #include <QPainter>
+#include <QPixmap>
 #include <QPushButton>
 #include <QScrollBar>
 #include <QSignalBlocker>
@@ -604,6 +608,89 @@ private:
 };
 }  // namespace
 
+// ----- the helper agent's context (card #AGNT step 7) -----------------------------------------
+//
+// What the agent in this pane is *about*: the list in front of it and where a `session:` link in
+// an answer goes. The console — the prompt box, the queue, the transcript — is a no-shell `Pane`
+// the window builds, the same surface a terminal has, and nothing about it is written here
+// (src/AgentContext.h).
+class SessionsContext final : public relay::agent::Context {
+  public:
+    explicit SessionsContext(SessionManager *pane) : m_pane(pane) {}
+
+    relay::agent::ContextSpec spec() const override {
+        relay::agent::ContextSpec spec;
+        spec.name = QStringLiteral("sessions");
+        spec.surface = spec.name;
+        spec.agentRole = QStringLiteral("switchboard");
+        spec.workspace = m_workspace;
+        // Named, never inferred: a board-less helper that falls through the worker's inference
+        // gets the *pane* branch and the full executor (§33.3, card #AGNT finding).
+        spec.scope = QStringLiteral("console");
+        // `persist.scope` is a wire enum — "", "pane" or "helper" — not a path. No tab id means no
+        // store, which is a supported state and how a pane with no window says so.
+        if (!m_tabId.isEmpty()) {
+            spec.persistScope = QStringLiteral("helper");
+            spec.persistKey = m_tabId;
+        }
+        spec.briefKey = spec.name;
+        spec.briefTitle = title();
+        spec.screen = m_pane->agentScreen();
+        spec.shell = false;          // every context but the terminal's
+        spec.routing = QStringLiteral("agent");   // everything typed here is a prompt
+        return spec;
+    }
+
+    QString placeholder() const override { return QStringLiteral("Ask the Sessions helper…"); }
+
+    // `session:<id>` is this pane's own business: the helper was asked about what is in the list
+    // and answered with a row of it, so the row is selected *here* rather than the window being
+    // asked for a second Sessions pane. Everything else — an `option:` row, a card, a path, a URL
+    // — is the window's, and false is how this says so.
+    bool resolveLink(const relay::links::Target &target) override {
+        const QString id = relay::links::sessionIdOf(target.target);
+        if (id.isEmpty()) return false;
+        m_pane->revealSession(id);
+        return true;
+    }
+
+    QString title() const { return QStringLiteral("Sessions helper"); }
+
+    void setTabId(const QString &tabId) { if (tabId != m_tabId) { m_tabId = tabId; changed(); } }
+    void setWorkspace(const QString &workspace) {
+        if (workspace != m_workspace) { m_workspace = workspace; changed(); }
+    }
+
+  private:
+    SessionManager *m_pane = nullptr;
+    QString m_tabId, m_workspace;
+};
+
+// The collapsed row's mark (owner, 2026-09-20: "it should have a question mark icon next to it").
+// Painted rather than typed: a glyph from the button's font is whatever the desktop's font has at
+// 14 px, which on this row is a "?" a third of the height of the word beside it.
+static QIcon askIcon(const QColor &ink) {
+    constexpr int kSize = 14;
+    QPixmap pixmap(kSize * 2, kSize * 2);        // 2x, so it stays crisp on a scaled desktop
+    pixmap.setDevicePixelRatio(2.0);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    QPen pen(ink, 1.2);
+    pen.setCapStyle(Qt::RoundCap);
+    painter.setPen(pen);
+    painter.setBrush(Qt::NoBrush);
+    painter.drawEllipse(QRectF(1.2, 1.2, 11.6, 11.6));
+    painter.drawArc(QRectF(4.3, 3.4, 5.4, 4.6), 200 * 16, -250 * 16);
+    painter.drawLine(QPointF(7.0, 7.4), QPointF(7.0, 9.0));
+    QPen dot(ink, 1.6);
+    dot.setCapStyle(Qt::RoundCap);
+    painter.setPen(dot);
+    painter.drawPoint(QPointF(7.0, 10.8));
+    painter.end();
+    return QIcon(pixmap);
+}
+
 SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     setObjectName(QStringLiteral("sessionManager"));
 
@@ -907,41 +994,18 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_inset->setFixedSize(0, 1);
     m_tabs->setCornerWidget(m_inset, Qt::TopRightCorner);
 
-    // The helper agent's panel, at the bottom of the pane and collapsed to one row (#FEJQ): the
-    // same panel the Switchboard carries, asking the same per-tab worker with `pane: "sessions"`.
-    // Below the tabs rather than inside the list, because the helper is about the pane and every
-    // tab of it — "when you are in options, actions, or sessions, you have a helper agent, same
-    // as the switchboard agent" (owner).
-    m_helper = new HelperChatPanel(helperpane::sessions());
-    m_helper->onSend = [this](const QJsonObject &message) {
-        if (onHelperSend) onHelperSend(message);
-    };
-    m_helper->nextRequestId = [this] {
-        return nextHelperRequestId ? nextHelperRequestId() : QString();
-    };
-    m_helper->onHint = [this](const QString &id, const QString &keys) {
-        if (onHelperHint) onHelperHint(id, keys);
-    };
-    m_helper->onStatus = [this](const QString &text) {
-        m_note = text;          // the one-off line, cleared by the next row or query
-        updateStatus();
-    };
-    m_helper->onOpenSession = [this](const QString &id) { revealSession(id); };
-    m_helper->onOpenOption = [this](const QString &section, const QString &row) {
-        if (onHelperOpenOption) onHelperOpenOption(section, row);
-    };
-    m_helper->onOpenCard = [this](const QString &id) {
-        if (onHelperOpenCard) onHelperOpenCard(id);
-    };
-    m_helper->onOpenFile = [this](const QString &path) {
-        if (onHelperOpenFile) onHelperOpenFile(path);
-    };
-    m_helper->setAskShortcut(QStringLiteral("sessions.ask"), QStringLiteral("Ctrl+/"));
+    // The helper agent, at the bottom of the pane and collapsed to one row (#FEJQ, card #AGNT
+    // step 7): a context this pane owns, and a console the window builds for it on the first
+    // expand. Below the tabs rather than inside the list, because the helper is about the pane and
+    // every tab of it — "when you are in options, actions, or sessions, you have a helper agent,
+    // same as the switchboard agent" (owner).
+    m_context = new SessionsContext(this);
+    m_askKeys = QStringLiteral("Ctrl+/");
 
     auto *outer = new QVBoxLayout(this);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->addWidget(m_tabs, 1);
-    outer->addWidget(m_helper, 0);
+    buildHelperRow(outer);
 
     m_debounce = new QTimer(this);
     m_debounce->setSingleShot(true);
@@ -1053,35 +1117,227 @@ void SessionManager::focusView() {
     else if (m_tabs->currentWidget()) m_tabs->currentWidget()->setFocus(Qt::OtherFocusReason);
 }
 
-// ----- the helper agent's panel (#FEJQ) ---------------------------------------------------
+// ----- the helper agent (#FEJQ; a console since card #AGNT step 7) -----------------------------
 //
-// The manager holds no worker of its own: what the panel sends goes out through `onHelperSend`
-// and what the worker answers comes back through `helperEvent`, the same shape the session search
-// already has. Every message the panel sends already carries `pane: "sessions"`, and it takes only
-// the events tagged with it, so handing it the whole stream is safe.
+// The pane holds no worker and builds no console: it owns the *context* — what the agent here is
+// about — and the window, which is the only place a `Pane` can be made, turns that into a console
+// through `onCreateConsole`. The same seam is the Options pane's, name for name
+// (src/SettingsPane.cpp), so the window wires both panes with the same lines.
 
-void SessionManager::helperEvent(const QString &type, const QJsonObject &event) {
-    if (m_helper) m_helper->handleEvent(type, event);
+SessionManager::~SessionManager() {
+    // The console holds a pointer to the context and clears its own callback in ~Pane, so the
+    // widget goes first (Qt destroys the children above) and the context last.
+    delete m_context;
 }
 
-void SessionManager::setHelperPresets(const QJsonArray &presets) {
-    if (m_helper) m_helper->setPresets(presets);
+relay::agent::Context *SessionManager::agentContext() const { return m_context; }
+
+void SessionManager::setHelperTabId(const QString &tabId) {
+    if (m_context) m_context->setTabId(tabId);
 }
 
+void SessionManager::setHelperWorkspace(const QString &workspace) {
+    if (m_context) m_context->setWorkspace(workspace);
+}
+
+// The row teaches its own shortcut: the key is in the button's own text ("Helper Agent (Ctrl+/)"),
+// so there is no notice to show and no hint id to keep. The argument stays because the window
+// wires this pane and the Options pane with one line, and because the console's own slow paths are
+// the `Pane`'s to teach.
+void SessionManager::setHelperShortcut(const QString & /*hintId*/, const QString &keys) {
+    m_askKeys = keys;
+    updateHelperRow();
+}
+
+// Asking for the cursor is asking for the console: the pane's ask key, a click on the row and a
+// drafted request all mean the box has to be there to type in (#FEJQ). The console is built here,
+// on the first expand, so a tab nobody asks anything never pays for one (§33, owner decision 5).
+// The step-5 bridge (see the header): the window's old wiring still hands this pane a model box
+// built for a panel that is gone. Taking it and hiding it is what keeps it from leaking while the
+// two commits cross; the console brings its own model box.
 void SessionManager::addHelperComposerWidget(QWidget *widget) {
-    if (m_helper) m_helper->addComposerWidget(widget);
-}
-
-void SessionManager::setHelperShortcut(const QString &hintId, const QString &keys) {
-    if (m_helper) m_helper->setAskShortcut(hintId, keys);
+    if (widget == nullptr) return;
+    widget->setParent(this);
+    widget->hide();
 }
 
 void SessionManager::focusHelper() {
-    if (m_helper) m_helper->expand();
+    if (!onCreateConsole) return;
+    ensureConsole();
+    if (m_helperCollapsed) {
+        m_helperCollapsed = false;
+        applyHelperCollapsed();
+    }
+    if (m_console.focusComposer) m_console.focusComposer();
 }
 
+// A draft, never a send (owner, 2026-09-19: "draft you confirm").
 void SessionManager::helperDraft(const QString &text) {
-    if (m_helper) m_helper->prefill(text);
+    focusHelper();
+    if (m_console.draftInComposer) m_console.draftInComposer(text);
+}
+
+// What the agent is looking at, for the `screen` hint on each ask (§33): the query, the filters in
+// force and the row that is selected. A hint about what is being read, not a dump of the list —
+// the rows themselves are the worker's to fetch.
+QString SessionManager::agentScreen() const {
+    QStringList lines{QStringLiteral("The Sessions list")};
+    if (const QString query = m_search ? m_search->text().trimmed() : QString(); !query.isEmpty())
+        lines << QStringLiteral("Search: %1").arg(query);
+    QStringList filters;
+    if (m_scope) filters << m_scope->currentText();
+    // Only a filter that is doing something: the first row of each box is its "any", and listing
+    // "Any model, Any time, Any branch" on every ask would say nothing in three lines.
+    const auto narrowing = [&filters](const QComboBox *box) {
+        if (box && box->currentIndex() > 0) filters << box->currentText();
+    };
+    narrowing(m_projectFilter);
+    narrowing(m_kind);
+    narrowing(m_model);
+    narrowing(m_date);
+    narrowing(m_branch);
+    const auto checked = [&filters](const QAction *action, const QString &said) {
+        if (action && action->isChecked()) filters << said;
+    };
+    checked(m_hasEdits, QStringLiteral("with edits"));
+    checked(m_unfinished, QStringLiteral("unfinished"));
+    checked(m_pinnedOnly, QStringLiteral("pinned only"));
+    checked(m_hasSummary, QStringLiteral("with a summary"));
+    checked(m_openTasks, QStringLiteral("with open tasks"));
+    if (!filters.isEmpty()) lines << QStringLiteral("Filters: %1").arg(filters.join(QStringLiteral(", ")));
+    if (const QString id = selectedId(); !id.isEmpty()) {
+        const QString title = selectedItem().value(QStringLiteral("title")).toString();
+        lines << (title.isEmpty() ? QStringLiteral("Selected: %1").arg(id)
+                                  : QStringLiteral("Selected: %1 (%2)").arg(title, id));
+    }
+    return lines.join(QLatin1Char('\n'));
+}
+
+// The row the pane is until the helper is asked for, and the fold back to it. Both are the
+// **host's**, not the console's: the console is a `Pane`, and a pane has no business knowing it is
+// embedded at the foot of something (card #AGNT step 7).
+void SessionManager::buildHelperRow(QVBoxLayout *into) {
+    m_helper = new QWidget(this);
+    m_helper->setObjectName(QStringLiteral("boardChatPanel"));
+    m_helper->setAttribute(Qt::WA_StyledBackground);
+    auto *outer = new QVBoxLayout(m_helper);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+
+    // ---- collapsed: the one row the helper is until it is asked for -------------------------
+    // It is a button and not a label so the keyboard can reach it, and reaching it is enough: a
+    // Tab that lands here meant to ask something, so the focus goes on into the composer.
+    m_askRow = new QWidget(m_helper);
+    m_askRow->setObjectName(QStringLiteral("boardChatAskRow"));
+    auto *askLine = new QHBoxLayout(m_askRow);
+    askLine->setContentsMargins(10, 6, 10, 6);
+    askLine->setSpacing(6);
+    // At the **bottom right** of the pane, not the left (owner, 2026-09-20: "it should be at the
+    // bottom right rather than bottom left"), so the stretch goes in front of the button.
+    askLine->addStretch(1);
+    auto *ask = new QToolButton(m_askRow);
+    ask->setObjectName(QStringLiteral("boardChatAsk"));
+    // One button that says what it opens and how (owner, 2026-09-20: "make the button say Helper
+    // Agent (Alt+Q)"). The key rides in the button's own text rather than on a muted label beside
+    // it: the key is part of what the button is, and the row teaches its own shortcut that way.
+    ask->setIcon(askIcon(relay::theme::TextMuted));
+    ask->setIconSize(QSize(14, 14));
+    ask->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    ask->setCursor(Qt::PointingHandCursor);
+    ask->setFocusPolicy(Qt::StrongFocus);
+    ask->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    askLine->addWidget(ask, 0);
+    outer->addWidget(m_askRow);
+    connect(ask, &QToolButton::clicked, this, [this] { focusHelper(); });
+
+    // ---- expanded: the console, under a row that folds it away ------------------------------
+    m_helperBody = new QWidget(m_helper);
+    m_helperBody->setObjectName(QStringLiteral("boardChatBody"));
+    auto *body = new QVBoxLayout(m_helperBody);
+    body->setContentsMargins(10, 8, 10, 8);
+    body->setSpacing(6);
+    auto *headRow = new QHBoxLayout;
+    headRow->setSpacing(6);
+    // Which helper this is. The console's placeholder says it too, but the head is the row you
+    // fold from and the pane it is in has nothing else that names the agent (#FEJQ decision 4).
+    m_helperHead = new QLabel(m_helperBody);
+    m_helperHead->setObjectName(QStringLiteral("boardChatHead"));
+    headRow->addWidget(m_helperHead, 0);
+    headRow->addStretch(1);
+    // The way back to one row. At the end of the head, where a pane's own chrome buttons are, and
+    // out of the tab order: the composer is what Shift+Tab should reach from here, not the control
+    // that would throw the answer off screen.
+    auto *fold = new QToolButton(m_helperBody);
+    fold->setObjectName(QStringLiteral("boardChatFold"));
+    fold->setText(QStringLiteral("⌄"));
+    fold->setToolTip(QStringLiteral("Fold the helper back to one row. The conversation is kept — "
+                                    "it opens where you left it."));
+    fold->setCursor(Qt::PointingHandCursor);
+    fold->setFocusPolicy(Qt::NoFocus);
+    fold->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    headRow->addWidget(fold, 0);
+    connect(fold, &QToolButton::clicked, this, [this] {
+        if (m_helperCollapsed) return;
+        m_helperCollapsed = true;
+        applyHelperCollapsed();
+    });
+    body->addLayout(headRow);
+    m_helperBody->setVisible(false);
+    outer->addWidget(m_helperBody);
+
+    into->addWidget(m_helper, 0);
+    updateHelperRow();
+}
+
+// The window is the only place a `Pane` can be made, so this is the one call that produces one —
+// and only when somebody asks, which is what keeps an untouched tab free (§33).
+void SessionManager::ensureConsole() {
+    if (m_console || !onCreateConsole || m_helperBody == nullptr) return;
+    m_console = onCreateConsole(m_context, m_helperBody);
+    if (!m_console) return;
+    if (auto *body = qobject_cast<QVBoxLayout *>(m_helperBody->layout())) body->addWidget(m_console.widget, 1);
+    m_console.widget->show();
+    updateConsoleHeight();
+}
+
+// One row, or the row and the console. Nothing is destroyed either way: a helper folded back keeps
+// its conversation, its draft and its queue, so opening it again is where you left it.
+void SessionManager::applyHelperCollapsed() {
+    if (m_askRow) m_askRow->setVisible(m_helperCollapsed);
+    // Folding with the cursor still in the composer: hand the focus to the row that replaces it
+    // first. Qt hands it on itself when the widget holding it hides, and it does that as a Tab —
+    // and a Tab onto the ask row means "open the helper", which would unfold what was just folded.
+    if (m_helperCollapsed && m_askRow && m_helperBody
+        && m_helperBody->isAncestorOf(QApplication::focusWidget()))
+        if (auto *ask = m_askRow->findChild<QToolButton *>(QStringLiteral("boardChatAsk")))
+            ask->setFocus(Qt::OtherFocusReason);
+    if (m_helperBody) m_helperBody->setVisible(!m_helperCollapsed);
+    if (m_console.setCollapsed) m_console.setCollapsed(m_helperCollapsed);
+    if (!m_helperCollapsed) updateConsoleHeight();
+}
+
+// "Helper Agent (Ctrl+/)" — the name of what the row opens, with the live key in parentheses. One
+// widget: the key rides in the button's own text, so an unbound key simply leaves the name alone
+// rather than leaving an empty label behind.
+void SessionManager::updateHelperRow() {
+    if (m_askRow) {
+        if (auto *ask = m_askRow->findChild<QToolButton *>(QStringLiteral("boardChatAsk"))) {
+            ask->setText(m_askKeys.isEmpty() ? QStringLiteral("Helper Agent")
+                                             : QStringLiteral("Helper Agent (%1)").arg(m_askKeys));
+            ask->setToolTip(m_askKeys.isEmpty()
+                ? QStringLiteral("Ask the helper agent about this pane.")
+                : QStringLiteral("Ask the helper agent about this pane (%1).").arg(m_askKeys));
+        }
+    }
+    if (m_helperHead && m_context) m_helperHead->setText(m_context->title());
+}
+
+// The console is sized to the pane it is in: at most ~40 % of its height, and never so little that
+// the transcript is a slot rather than a conversation.
+void SessionManager::updateConsoleHeight() {
+    if (m_helperBody == nullptr) return;
+    const int line = QFontMetrics(font()).lineSpacing();
+    m_helperBody->setMaximumHeight(std::max(10 * line, height() * 2 / 5));
 }
 
 // `session:<id>` in an answer. The row is usually on screen already — the helper was asked about
@@ -1110,12 +1366,18 @@ void SessionManager::scheduleQuery() { m_debounce->start(); }
 
 void SessionManager::refresh() { requery(); }
 
+void SessionManager::resizeEvent(QResizeEvent *event) {
+    QWidget::resizeEvent(event);
+    updateConsoleHeight();
+}
+
 void SessionManager::showEvent(QShowEvent *event) {
     QWidget::showEvent(event);
-    // An ask row that does nothing is worse than no ask row, so the helper's panel is there only
-    // once the window has given it somewhere to send (the Ask row on the ⓘ view does the same with
-    // `onAskOwner`). By the time the pane is on screen the wiring has happened or it never will.
-    if (m_helper) m_helper->setVisible(bool(onHelperSend));
+    // An ask row that does nothing is worse than no ask row, so the row is there only once the
+    // window has given this pane a way to build a console (the Ask row on the ⓘ view does the
+    // same with `onAskOwner`). By the time the pane is on screen the wiring has happened or it
+    // never will — and a library with no window (the tests) simply has no helper.
+    if (m_helper) m_helper->setVisible(bool(onCreateConsole));
     // Opening the list must show the sessions without the user typing anything.
     requery();
 }

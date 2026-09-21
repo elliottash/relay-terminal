@@ -136,9 +136,11 @@ target_compile_options(relay-settingscache PRIVATE -Wall -Wextra -Wpedantic)
 
 add_library(relay-settings STATIC src/SettingsPane.cpp src/SettingsPane.h)
 target_include_directories(relay-settings PUBLIC src)
-# relay-helperchat: Options and Actions carry the helper agent's panel, collapsed (#FEJQ).
+# relay-agentcontext: Options and Actions each supply a context for the console the window embeds
+# at the foot of the pane (#FEJQ, card #AGNT step 7). The console itself is a `Pane`, which lives
+# only in the executable, so nothing here links a window.
 # relay-settingscache: SettingsWatch::notify() is what drops the hot-path cache (#057J).
-target_link_libraries(relay-settings PUBLIC relay-helperchat relay-settingscache ${RELAY_QT}::Widgets)
+target_link_libraries(relay-settings PUBLIC relay-agentcontext relay-settingscache ${RELAY_QT}::Widgets)
 target_compile_options(relay-settings PRIVATE -Wall -Wextra -Wpedantic)
 
 # The agent drives the app (card #FEJQ, protocol §30): the catalog the window sends its workers,
@@ -271,8 +273,9 @@ target_compile_options(relay-screen PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-conversations STATIC src/Conversations.cpp src/Conversations.h
     src/SessionInfo.cpp src/SessionInfo.h src/PaneView.h src/AskRow.h)
 target_include_directories(relay-conversations PUBLIC src)
-# relay-helperchat: the Sessions pane carries the helper agent's panel, collapsed (#FEJQ).
-target_link_libraries(relay-conversations PUBLIC relay-helperchat ${RELAY_QT}::Widgets)
+# relay-agentcontext: the Sessions pane supplies a context for the console the window embeds at
+# the foot of it (#FEJQ, card #AGNT step 7).
+target_link_libraries(relay-conversations PUBLIC relay-agentcontext ${RELAY_QT}::Widgets)
 target_compile_options(relay-conversations PRIVATE -Wall -Wextra -Wpedantic)
 
 # Notification centre: the list behind the bell in the window header. Plain QtCore so the

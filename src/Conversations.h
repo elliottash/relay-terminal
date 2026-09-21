@@ -16,6 +16,10 @@
 #include <QWidget>
 #include <QJsonArray>
 #include <QJsonObject>
+
+// The helper agent this pane embeds is a `relay::agent::Context` and a console the window
+// builds for it (card #AGNT step 7). The header is QtCore-only by design.
+#include "AgentContext.h"
 #include <QString>
 #include <functional>
 
@@ -28,6 +32,7 @@ class QLabel;
 class QLineEdit;
 class QMenu;
 class QPushButton;
+class QResizeEvent;
 class QTabWidget;
 class QTextBrowser;
 class QTextDocument;
@@ -35,12 +40,17 @@ class QTimer;
 class QToolButton;
 class QTreeWidget;
 class QTreeWidgetItem;
+class QVBoxLayout;
 
 namespace relay {
-class HelperChatPanel;   // the helper agent's panel, embedded at the bottom of the pane (#FEJQ)
+class HelperChatPanel;   // only named by the step-5 bridge below; never built here
 }
 
 namespace relay::conversations {
+
+// What this pane's helper agent is about: the query, the filters in force and the row that is
+// selected. Defined in Conversations.cpp (card #AGNT step 7).
+class SessionsContext;
 
 // ----- pure helpers (unit tested in tests/conversations_test.cpp) -------------------------
 
@@ -176,15 +186,16 @@ QString compactTokens(double tokens);
 // one pane, opened by /resume, Ctrl+Shift+M, /conversations and the palette. Other features can add
 // tabs beside the list (addTab), e.g. recently closed windows, tabs and panes.
 //
-// At the bottom of it sits the **helper agent's panel** (#FEJQ), collapsed to one "Ask about this
-// pane" row: the same panel the Switchboard carries, asking the same per-tab worker with
-// `pane: "sessions"`. The manager still never talks to a worker itself — the panel's messages
-// leave through `onHelperSend` and its answers arrive through `helperEvent`, exactly as the list's
-// own search goes out through `onQuery` — so the pane is testable without one.
+// At the bottom of it sits the **helper agent** (#FEJQ), collapsed to one "Helper Agent" row at
+// the bottom right: since card #AGNT step 7 that is an embedded agent console — a `Pane` with no
+// shell — over the `SessionsContext` this pane owns. The manager still never talks to a worker
+// itself: it says what the agent is about and the window builds the console, exactly as the
+// list's own search goes out through `onQuery` — so the pane is testable without one.
 class SessionManager : public QWidget, public relay::PaneView {
     Q_OBJECT
 public:
     explicit SessionManager(QWidget *parent = nullptr);
+    ~SessionManager() override;
 
     // Asked whenever the query or a filter changes. The object is the `conversations` request
     // body without "type"/"id": {query, scope, model, has_open_tasks, since, sources, limit,
@@ -241,39 +252,57 @@ public:
     // being rebuilt or the worker asked again. Public so a test can tick it by hand.
     void refreshClosedAges();
 
-    // ----- the helper agent's panel (#FEJQ) ---------------------------------------------------
-    // Where the panel's messages go: `board_chat` and the rest, each already carrying
-    // `pane: "sessions"`. The window hands them to the tab's helper worker.
+    // ----- the helper agent (#FEJQ; a console since card #AGNT step 7) ------------------------
+    //
+    // "When you are in options, actions, or sessions, you have a helper agent, same as the
+    // switchboard agent" (owner). It is no longer a panel of its own: it is an embedded **agent
+    // console** — a `Pane` with no shell, the same prompt box, queue and transcript a terminal
+    // pane has — over a `relay::agent::Context` this pane owns. The context is what the agent is
+    // *about*: the query, the filters, the selected row, and where a `session:` link in an answer
+    // goes (§33, src/AgentContext.h).
+    //
+    // The pane cannot build the console itself — `Pane` exists only inside the `relay`
+    // executable's translation unit — so the **window** sets `onCreateConsole` and gets back a
+    // `relay::agent::ConsoleHandle`. With no factory there is no helper row at all and the rest of
+    // the pane works unchanged, which is what keeps this library and its tests free of a window.
+    //
+    // The seam is the Options pane's, name for name (src/SettingsPane.h), so the window wires both
+    // with the same lines.
+    relay::agent::ConsoleFactory onCreateConsole;
+
+    // Where this console's conversation is kept: the tab's id, sent as `persist {scope: "helper",
+    // key}` (§33). Unset means no store.
+    void setHelperTabId(const QString &tabId);
+    // The project this pane's agent works in. Empty is a supported state, not an error.
+    void setHelperWorkspace(const QString &workspace);
+    // The key that opens the console, in the window's live Keymap wording, for the collapsed row's
+    // text (WARP.md's standing rule: the live Keymap text, never a written-down key).
+    void setHelperShortcut(const QString &hintId, const QString &keys);
+    // Open the helper and put the cursor in it — the pane's ask key, and what a click on the row
+    // does. `helperDraft` prefills the composer without sending.
+    void focusHelper();
+    void helperDraft(const QString &text);
+    // What the window needs to reach the console it made, and what a test reads.
+    const relay::agent::ConsoleHandle &agentConsole() const { return m_console; }
+    relay::agent::Context *agentContext() const;
+
+    // ----- a bridge for card #AGNT step 5, and nothing else -----------------------------------
+    //
+    // `RelayWindow::wireHelperPanel` still wires the panel this pane no longer has. Step 5 replaces
+    // it with `onCreateConsole` above and is landing beside this commit, but a name it still
+    // mentions has to exist or `main` does not compile — and the tree that goes on `main` is what
+    // land.py builds. **These do nothing.** They are the whole list, and step 5 deletes them with
+    // the template that names them (step 9 then retires `HelperChatPanel` itself).
     std::function<void(const QJsonObject &message)> onHelperSend;
-    // The request-id prefix of whatever is carrying the traffic, so the worker's answers are told
-    // from another pane's. Unset simply means the messages carry no id.
     std::function<QString()> nextHelperRequestId;
-    // An answer's links into the app. A session is this pane's own business and is resolved here;
-    // an option row and a card belong to the window, which wires these.
     std::function<void(const QString &sectionId, const QString &rowId)> onHelperOpenOption;
     std::function<void(const QString &cardId)> onHelperOpenCard;
     std::function<void(const QString &path)> onHelperOpenFile;
-    std::function<void(const QString &id, const QString &keys)> onHelperHint;   // shortcut hints
-
-    // A worker event for the panel: the `chat: true` turn events and the `board_chat_*` answers.
-    // The panel takes only the ones tagged with its own pane, so handing it everything is safe.
-    void helperEvent(const QString &type, const QJsonObject &event);
-    // The provider rows the `presets` event carries, for the composer's microphone offer.
-    void setHelperPresets(const QJsonArray &presets);
-    // The model box, built by the window (it reads the catalog and the settings) and reparented
-    // into the panel's composer strip, exactly as the Switchboard's is.
-    void addHelperComposerWidget(QWidget *widget);
-    // The key that opens the panel, in the window's live Keymap wording, for the collapsed row's
-    // key line and the hint a mouse click teaches (WARP.md's standing rule).
-    void setHelperShortcut(const QString &hintId, const QString &keys);
-    // Open the helper and put the cursor in it — the pane's ask key, and what a click on the row
-    // does. `helperDraft` prefills it without sending, the Check-finding pattern.
-    void focusHelper();
-    void helperDraft(const QString &text);
-    // The panel itself, for the two keys that belong to a prompt box rather than to a pane
-    // (#PK5Q): Alt+M drops its model box open, Ctrl+Alt+M and `/model` open the picker over it.
-    // Null before the panel is built; the window checks `composerHasFocus()` through it.
-    HelperChatPanel *helperPanel() const { return m_helper; }
+    std::function<void(const QString &id, const QString &keys)> onHelperHint;
+    void helperEvent(const QString &, const QJsonObject &) {}
+    void setHelperPresets(const QJsonArray &) {}
+    void addHelperComposerWidget(QWidget *widget);   // adopts it and hides it, so nothing leaks
+    relay::HelperChatPanel *helperPanel() const { return nullptr; }
 
     void focusSearch();
     QString query() const;
@@ -295,6 +324,7 @@ public:
 
 protected:
     void showEvent(QShowEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
 
 private:
     void requery();
@@ -334,6 +364,16 @@ private:
     // The `session:<id>` link in a helper's answer: select that row, or search for it when the
     // query in force does not draw it.
     void revealSession(const QString &sessionId);
+    // What the agent is looking at, for the `screen` hint on each ask (§33): the query, the
+    // filters in force and the row that is selected. Written here rather than in the context
+    // because it is the pane's own widgets that answer it.
+    QString agentScreen() const;
+    // The helper's own half: the collapsed row, the console under it, and the fold between.
+    void buildHelperRow(QVBoxLayout *into);
+    void ensureConsole();               // builds it, once, on the first expand
+    void applyHelperCollapsed();
+    void updateHelperRow();             // the live key in the button's own text
+    void updateConsoleHeight();         // ~40 % of the pane, never less than a few lines
     void rename();
     void togglePin();
     void remove();
@@ -341,7 +381,15 @@ private:
     bool eventFilter(QObject *object, QEvent *event) override;
 
     QTabWidget *m_tabs = nullptr;
-    relay::HelperChatPanel *m_helper = nullptr;
+    // ----- the helper agent (#FEJQ, card #AGNT step 7) ----------------------------------
+    SessionsContext *m_context = nullptr;   // owned; outlives the console, as §33 requires
+    relay::agent::ConsoleHandle m_console;
+    QWidget *m_helper = nullptr;            // the foot of the pane: the row and the console
+    QWidget *m_askRow = nullptr;            // collapsed: one button, bottom right
+    QWidget *m_helperBody = nullptr;        // expanded: the fold row and the console
+    QLabel *m_helperHead = nullptr;
+    QString m_askKeys;
+    bool m_helperCollapsed = true;
     QWidget *m_inset = nullptr;
     QLineEdit *m_search = nullptr;
     QComboBox *m_scope = nullptr, *m_model = nullptr, *m_date = nullptr, *m_kind = nullptr,
@@ -379,6 +427,10 @@ private:
     double m_elapsed = 0;
     QTimer *m_debounce = nullptr, *m_ages = nullptr;
     bool m_filling = false, m_sortChosen = false, m_batchRunning = false;
+
+    // The context reads the query, the filters and the selection through agentScreen(), and
+    // reveals a `session:` link through revealSession(); both are the pane's own.
+    friend class SessionsContext;
 };
 
 // ----- Ctrl+F find in view ----------------------------------------------------------------
