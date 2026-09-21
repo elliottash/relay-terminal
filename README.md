@@ -102,7 +102,7 @@ that conflict.
 | Ctrl+Shift+A | Actions: everything you can do now, with its keys, in a list you can filter (again to close) |
 | Ctrl+Shift+O | Options: what persists, a tab per section (again to close; also Ctrl+, and the gear) |
 | Ctrl+Shift+S | Switchboard: this repository's cards, threads and plans (again to close it) |
-| Alt+M, Ctrl+Alt+M | Models: drop the pane's model box open (a header per class and its top models; Up/Down the rows, Right opens a class to its whole list, typing filters) / the dialog that picks *and* prioritizes them (`/model`) |
+| Alt+M, Ctrl+Alt+M | Models: drop the pane's model box open (a header per class and its top models; Up/Down the rows, Right opens a class to its whole list, typing searches every model you have made available) / the dialog that picks *and* prioritizes them, and says which models are available at all (`/model`) |
 | Alt+F, Alt+H | This pane on the Flash model / the High model, and back to main (`/flash`, `/high`, `/main`) |
 | Alt+E | Reasoning: drop the pane's level box open (also Alt+. / Alt+, and `/effort`) |
 | Ctrl+Shift+M | Model options: Options › Models (`/models`) |
@@ -254,11 +254,17 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   model your providers serve: this list's matches first, then "not in this list", where
   **Ctrl+Enter** adds one, and last **more from openrouter** — a provider with a listing of
   hundreds is kept out of the lists until you type, so it cannot bury the rest. The
-  **all** tab is every model you can run — a **sort** menu (priority, a to z, intelligence, speed,
-  most used, subscription left), ★ favorites and the ten most recent above the rest, subscription
-  windows ("5h 62% left, resets 14:30") under the list — with one row per model whatever serves it
-  and **→** opening that row's providers to choose one, and **+ add a model by id…** at the end for
-  an id your provider serves but does not list. A class tab also says what **Alt+M** shows
+  **all** tab is every model you can run, grouped by provider — a **sort** menu (priority, a to z,
+  intelligence, speed, most used, subscription left), ★ favorites and the ten most recent above the
+  rest, subscription windows ("5h 62% left, resets 14:30") under the list — with one row per model
+  whatever serves it and **→** opening that row's providers to choose one, and
+  **+ add a model by id…** at the end for an id your provider serves but does not list. Its first
+  column is **available**: which models your lists, the box and the box's filter may offer at all.
+  A provider you have a key for starts with all of its models ticked — un-tick the ones you never
+  want — and a provider that lists hundreds, like OpenRouter, starts with a few recommended ones
+  instead: type a name, and tick the row that comes up under **more from openrouter** to add it.
+  (Options › Models has a **models… (N of M available)** link under every provider that opens
+  this tab on it.) A class tab also says what **Alt+M** shows
   of it: the **in box** column is a cutoff (tick rank 3 and the box draws three of that class), and
   **show this class in the box** takes the class out of it altogether. Both travel with the profile,
   and **fill from defaults** replaces every list with what your providers can serve. The profile is
@@ -266,8 +272,10 @@ closes and puts focus back where it was, so nothing there needs the mouse.
 - **The model box (Alt+M)** is the short answer: a header per class — **high**, **main**, **flash**,
   and **local** where this machine serves a model — with that class's top two models under it and
   your own highlighted. The headers are labels, so ↑↓ step over them; **→** opens a class to its
-  whole list and **←** closes it again; typing filters across every class; **Enter** puts the pane on
-  that class *and* that model. A model that cannot take a turn right now — spent, or no key — is not
+  whole list and **←** closes it again; **Enter** puts the pane on that class *and* that model.
+  **Typing searches every model you have made available**, not only the two rows a class is
+  showing: matches in a class come under its own header, and anything in no list at all comes under
+  **other models** — Enter there puts the pane on it. A model that cannot take a turn right now — spent, or no key — is not
   in the box at all, which is what makes it short. The collapsed chip is the model, and only the
   model, whichever class the pane is in.
 - **Model roles: main, high, flash, lite, local.** The tiers are five ordered lists on Options ›

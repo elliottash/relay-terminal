@@ -2120,11 +2120,23 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   "models in the picker" checklist) and `models/collapsed` (its per-provider fold) are **retired**
   with card #MDL1 t:a10 and are ignored where an old settings file still holds them — as are the
   priority list, its "fallbacks end here" line and the per-model "openrouter fallback" switch of
-  2026-09-20, which went earlier. `models::shown(catalog)` is now one rule with no setting behind
-  it: every usable entry in rank order, minus an open-ended provider's long tail (an OpenRouter row
-  that is not one of its tier defaults, that no tier list names and that the user did not type).
-  `models::allUsable(catalog)` is the same walk without that exception, and only the dialog's
-  filter reads it.
+  2026-09-20, which went earlier.
+- **Four steps of availability** (owner, 2026-09-21; design 5.7): **1** add a provider, **2** make
+  a model *available*, **3** put it in a tier list, **4** say how much of that list the box draws.
+  Step 2 came back with `models/available` — a list of keys, **per machine and never per profile**,
+  edited in the Ctrl+Alt+M dialog's `all` tab (an `available` column, first on a model row) and
+  reached from Options › Models by the **models… (N of M available)** link under each provider.
+  Absent — every install until the first un-tick — is the default t:a10 had hard-coded: every model
+  of a **branded** provider, and of an **open-ended** one (`Entry::openEnded`, OpenRouter's live
+  listing) only its recommended rows, which are the ones the worker's catalog names and so carry a
+  `tier`, plus anything a tier list names or `models/custom` holds. A provider added after the list
+  was written keeps the default, and a model a tier list names is available whatever the tick says.
+  `curation::availableKeys / isAvailable / setAvailable`; `models::shown(catalog)` is every usable
+  **available** entry in rank order — the lists, the box, its filter and `/model` all read it —
+  `models::allUsable(catalog)` is every usable entry (the dialog's "more from openrouter", and the
+  fallback `/model <name>` takes: typing a name is asking for that model), and
+  `models::curatable(catalog)` is what the `all` tab draws, so an un-ticked row stays there greyed
+  with a box to tick again.
   What the two **defaults** are is a file in the repo rather than a table in the code (card #MDL1):
   `backend/relay_core/model-ranking.md` holds a **Providers** table (`provider | kind | order`) and
   a **Models** table (`name | classes | score | notes`), one row per model name, and the owner
@@ -2230,9 +2242,19 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   **Right** opens the highlighted row's class to its whole list and **Left** closes it
   (`FilterPopup::onExpandKey` → `Pane::expandModelClass`, `modelrows::Context::expanded`); the
   expansion is the pane's, lasts only while the box is open, and never reaches the settings.
-  Typing filters across every listed model of every class and a header stays exactly as long as its
-  own class still has a match (`FilterRow::group`, `FilterPopup::groupHasMatch`) — a header is
-  never matched on its own words. Enter on a model row is `pick:<class>|<key>`: on main the
+  **Typing searches every available model, not the rows the box happens to be drawing** (owner,
+  2026-09-21: "the text filter isnt working -- its supposed to show all available models, not just
+  the ones selected for the box picker"). The cutoff is step 4 — what the box shows *at rest* — so
+  the popup asks the caller for the wider list instead: `FilterPopup::onQueryRows` is handed the
+  query and answers with rows, which it then filters exactly as it filters its own (an empty answer,
+  or no hook, means "the rows I already have", which is every other list). `modelrows::filtered`
+  is the model box's answer: every class **whole**, plus one section `other models` holding every
+  available model (step 2) that no class lists, folded one row per model and spent rows dropped as
+  inside a class. Its rows are `pick:main|<key>` — a model in no list becomes this pane's own model
+  on main — and Right does not expand it, because it is not a class and is already whole. A header
+  stays exactly as long as its own group still has a match (`FilterRow::group`,
+  `FilterPopup::groupHasMatch`) and is never matched on its own words. With the filter empty the
+  box is untouched. Enter on a model row is `pick:<class>|<key>`: on main the
   ordinary pick, on any other class the pane's role **and** its own model for that class
   (`set_agent_role {preset, model, effort}`, protocol 13.5) — the tier list is never rewritten,
   because it belongs to every other pane. Escape leaves everything as it was.

@@ -383,6 +383,58 @@ has a harness, the flash chores run on relay flash?"* — *"i agree"*). And **De
 everything** while **gemini gains its two moving `-latest` aliases**, with the concrete versions
 left a default for nothing so the defaults follow Google forward.
 
+### 5.7 The four steps of availability (owner, 2026-09-21, verbatim)
+
+> "the text filter isnt working -- its supposed to show all available models, not just the ones
+> selected for the box picker. on this point -- i notice now that we lost functionality. there need
+> to be 4 steps of model availability: 1 add provider, 2 add model as available, 3 add model to
+> priority list, 4 include model in box picker. we currently only have 1, 3, 4. and its step 2 that
+> determines the models available in the text filter. for branded providers, all models are
+> included by default and you can uncheck them (eg i probably want to uncheck sonnet and haiku and
+> gpt 5.5). but then for openrouter, you have to select specific models -- and maybe there are some
+> recommended ones by default, deepseek 4.1 and gemini 3.8 flash for example."
+
+Step 2 was lost at t:a10, which retired `models/shown` on the reading that "a model a provider
+serves is a model you can pick" and wrote the one exception it still needed — an open-ended
+provider's long tail — into `shown()` by hand. That exception *was* step 2, minus the ability to
+say anything about it. It is a setting again, and its default is exactly what t:a10 hard-coded.
+
+| step | what it says | where it is edited | what stores it |
+| --- | --- | --- | --- |
+| 1 · provider | this machine can reach this provider at all | Options › Models, **providers**: add key…, a guest login, a custom endpoint | the keyring, `models/custom_providers` |
+| 2 · available | this model exists for the lists, the box and the box's filter | the Ctrl+Alt+M dialog, **all** tab, the `available` column — and the **models… (N of M available)** link under each provider row on Options › Models opens it there | `models/available` (per machine, never per profile) |
+| 3 · in a list | this model is one of the five tier lists, at a rank and a level | the dialog's **high · main · flash · lite · local** tabs | `models/tier/<tier>`, and a profile's copy |
+| 4 · in the box | how much of a class the Alt+M box draws at rest | the same tabs' **in box** cutoff column and **show this class in the box** | `models/box/<tier>`, `models/box_off/<tier>` |
+
+**The default for step 2** (nothing stored, which is every install until the first un-tick):
+
+- a **branded** provider — one whose catalog is a handful of rows it names — is available whole;
+- an **open-ended** one (`Entry::openEnded`; OpenRouter's live listing of four hundred) is
+  available only in its **recommended** rows: the ones the worker's own catalog names, which are
+  exactly the rows carrying a `tier` (`presets.MODEL_CATALOG["openrouter"]` —
+  `deepseek/deepseek-v4.1-flash`, `google/gemini-3.8-flash`, `google/gemini-3.5-flash-lite`;
+  `openrouter_catalog.py` sends `tier: null` on every live row), plus anything a tier list names
+  and anything typed by hand into `models/custom`.
+
+A provider added *after* the list was written keeps the default, so step 1 still gives you step 2
+for free; and a model one of the lists names is available whatever the tick says, because a rank
+the user wrote down that the box would not offer is a list that lies. The dialog's tooltip says so.
+
+**What each step feeds.** `models::shown(catalog)` is every *usable and available* entry in rank
+order — the lists, the box, `/model` and the box's filter all read it. `models::allUsable` is every
+usable entry: the dialog's "more from openrouter", and the fallback `/model <name>` takes, because
+typing a name is asking for that model. `models::curatable` is what the `all` tab draws: available,
+plus available-by-default-and-un-ticked, so an un-ticked row stays there greyed with a box to tick
+again.
+
+**The filter (the owner's first sentence).** Alt+M draws each class down to its cutoff — step 4,
+what it shows *at rest*. The moment something is typed, `FilterPopup::onQueryRows` asks the pane
+for the rows the *filter* should search and draws those instead, put through the same match:
+`modelrows::filtered` gives every class **whole** plus one section, `other models`, holding every
+available model no class lists, folded one row per model. Enter on one of those is
+`pick:main|<key>` — a model in no list becomes this pane's own model, on main, at the level the
+Levels rule gives it. With the filter empty the box is exactly what it was.
+
 ## 6. Order of work
 
 1. `/swap` and the defaults (Rule 3): bugs the owner is hitting now; no visible redesign.
