@@ -111,6 +111,16 @@ private slots:
         QCOMPARE(rows.at(1).text, QStringLiteral("glm-5.3-flash (flash)"));
     }
 
+    // Owner, 2026-09-21: the Switchboard agent's box said "kimi-k3 (switchboard)". The parentheses
+    // name the tier the role runs on; a protocol role name never reaches a person.
+    void aRoleRowNamesItsTierNotItsProtocolName()
+    {
+        using relay::modelrows::roleRowText;
+        QCOMPARE(roleRowText(QStringLiteral("switchboard"), QStringLiteral("kimi-k3")), QStringLiteral("kimi-k3 (main)"));
+        QCOMPARE(roleRowText(QStringLiteral("planning"), QStringLiteral("glm-5.3")), QStringLiteral("glm-5.3 (high)"));
+        QCOMPARE(roleRowText(QStringLiteral("flash"), QStringLiteral("glm-5.3-flash")), QStringLiteral("glm-5.3-flash (flash)"));
+    }
+
     // The point of the card: the pane's box and a helper's box are the same list.
     void paneAndHelperBoxesAreTheSameList()
     {

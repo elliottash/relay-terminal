@@ -75,7 +75,10 @@ int fill(QComboBox *box, const Context &context);
 
 // A role row's text (owner, 2026-09-19): the model the row runs, then the role in parentheses —
 // "glm-5.3 (main)". With no model known yet it is the role's name alone.
+// The parentheses name the TIER the role runs on, never a protocol role name: the Switchboard's
+// agent is "kimi-k3 (main)", not "kimi-k3 (switchboard)" (owner, 2026-09-21).
 QString roleRowText(const QString &role, const QString &model);
+QString roleTier(const QString &role);
 QString roleLabel(const QString &role);
 
 // What `/model <words>` picks, in both boxes' composers: an exact key, model id or label among the

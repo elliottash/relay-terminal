@@ -15,9 +15,24 @@ QString roleLabel(const QString &role)
     return labels.value(role, role);
 }
 
+// The tier a role runs on (the worker's roles.ROLE_TIERS): what the row's parentheses say. A role's
+// protocol name is not a word for a person — the Switchboard's agent read "kimi-k3 (switchboard)"
+// (owner, 2026-09-21: "i also dont like how it says switchboard in the picker").
+QString roleTier(const QString &role)
+{
+    static const QHash<QString, QString> tiers{
+        {QStringLiteral("switchboard"), QStringLiteral("main")}, {QStringLiteral("subagent"), QStringLiteral("main")},
+        {QStringLiteral("planning"), QStringLiteral("high")},
+        {QStringLiteral("terminal_use"), QStringLiteral("flash")}, {QStringLiteral("summaries"), QStringLiteral("flash")},
+        {QStringLiteral("suggestions"), QStringLiteral("flash")},
+        {QStringLiteral("chores"), QStringLiteral("lite")}, {QStringLiteral("audit"), QStringLiteral("lite")},
+        {QStringLiteral("loop_check"), QStringLiteral("lite")}};
+    return tiers.value(role, role);
+}
+
 QString roleRowText(const QString &role, const QString &model)
 {
-    return model.isEmpty() ? roleLabel(role) : QStringLiteral("%1 (%2)").arg(model, role);
+    return model.isEmpty() ? roleLabel(role) : QStringLiteral("%1 (%2)").arg(model, roleTier(role));
 }
 
 QList<Row> build(const Context &context)
