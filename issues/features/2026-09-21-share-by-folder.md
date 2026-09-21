@@ -7,7 +7,7 @@ assignee: codex
 rank: m
 created: '2026-09-21'
 source: 'Codex in Relay, 2026-09-21'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-share-by-folder/], related: [], github: null}
+links: {plans: [], commits: [42b1f54ff2345ae6a9f0bf01caf1d067c733367b], evidence: [docs/qa_evidence/2026-09-21-share-by-folder/], related: [], github: null}
 ---
 # Move pane sharing beside the folder
 
