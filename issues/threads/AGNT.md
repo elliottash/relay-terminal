@@ -945,3 +945,47 @@ id under two workspace digests, which is #FEJQ's keying rather than this card's 
 - [ ] Ctrl+Shift+Enter on a card, on its own and after a Discuss turn (see above).
 - [ ] A restart with two tabs on one project: each tab's helper conversation comes back to the
       file it had (see above).
+
+<!-- relay:entry 20260921T080802Z-cr author=claude-code kind=progress -->
+### Claude Code · 2026-09-21 08:08
+The owner's punch list on the integration drive, done (`b62b9f34`, evidence `37eae815`,
+`docs/qa_evidence/2026-09-21-agents-are-consoles/punch/`).
+
+**A — the console's header row.** A console draws none: the row is a *pane's* chrome — the title
+the model writes, the "auto" badge, the card chip, the directory, and the row itself as the drag
+handle — and an embedded console has none of those to say. Counted rather than looked at: one
+`paneHeader` in a window with a console up. And the title it was showing is gone at the source —
+protocol 33's `screen` hint was composed into the prompt string before `Agent.ask` saw it, so
+everything `ask` makes *out of* the prompt carried it: the title, the session summary, the
+checkpoint a rewind goes back to, the ledger row. It rides in `note` now, where every other
+per-turn note rides.
+
+**B — the card page.** Three, all in `punch/b02-card.png`: no empty band (the transcript is
+hidden until the first byte and shown for good after, because the tab's conversation is one and
+does print there), one frame (`boardReply` steps back when the box inside it is a console's), and
+the row's face back — `rebuildActionRow` stamps `actionRow` and `leaves`, and `src/Theme.cpp`
+keys the shape and the agent's accent outline on them, so Execute is 33 px and outlined again.
+
+**C — the restart.** The backend owns it and says so in `agent_context.helper_file`: the helper
+file's name is already unique per tab, so the workspace digest in the path is filing, and a
+conversation that exists under any digest for this key is the one that is opened. The window's
+half is `refreshConsoleHosts` reconfiguring the tab's worker when its project moves. Driven:
+`HISTORY turns=2` — the restored console's agent still has the earlier turn.
+
+**D — Ctrl+Shift+Enter.** Settled by test, and it is neither the route mapping nor a busy guard:
+`consolemode` drives all three chords through a shell-less console (`auto`, `agent`, `shell`),
+including after a finished turn, and `board` drives them through the card page's console, where
+the comment chord sends `board_comment` with the card and the words, clears the box and does not
+send them twice. The chord does not reach Qt under Xvfb — three spellings tried — so it is the
+driver, and the drive says so where the check lives.
+
+**E — the marker and the notification's Undo.** Half done, and the half that is left is a real
+gap rather than an aim. The list is readable and clickable now: `RELAY_QA_RECTS` (a gated,
+debounced dump of every visible named widget's screen rectangle — unset, one `qgetenv` at
+startup) lets a drive click an icon, and `shotroot` captures a `Qt::Popup`, which is its own
+top-level window and comes out as a black hole in an `import -window <app>` capture. What the
+list does not contain is the entry: after an `app_option_set` that **reaches the setting**
+(`relay.conf: copy_on_select=true`), the only rows are the two turns' own "Agent finished" —
+no "Agent changed Copy on select · Undo", and no "changed by the agent" on the row.
+`src/AppCommands.cpp:829-833` posts both unconditionally once the write lands, so something
+between the two is swallowing them. Added to the QA checklist with what has been ruled out.
