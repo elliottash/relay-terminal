@@ -241,6 +241,22 @@ function pairProblem(error) {
 const INVITE_CODE_SENTENCE = 'That is an invite code, not a pairing code. Ask for a pairing code, '
   + 'or open the join page.';
 
+// The fields of a fragment, undoing the percent-encoding some link handlers add (rrp.js does the
+// same before parsing). Which door it opens is then read exactly as `pairing.fragment_kind` reads
+// it on the desktop: `s=` pairs, `i=` invites, and a fragment with both — or with neither —
+// belongs to no page at all and is not guessed at.
+function fragmentFields(fragment) {
+  let raw = String(fragment).replace(/^#/, '');
+  if (!raw.includes('&') && /%26/i.test(raw)) {
+    try {
+      raw = decodeURIComponent(raw);
+    } catch {
+      /* keep the original: the checks below will report it */
+    }
+  }
+  return new URLSearchParams(raw);
+}
+
 async function pairWithCode() {
   if (codeBusy) return;
   const codeInput = $('welcome-code');
@@ -272,10 +288,18 @@ async function pairWithCode() {
     return;
   }
   pinInput.value = '';
-  const fields = new URLSearchParams(String(fragment).replace(/^#/, ''));
-  if (!fields.get('s') && fields.get('i')) {
+  const fields = fragmentFields(fragment);
+  const pairs = fields.has('s');
+  const invites = fields.has('i');
+  if (invites && !pairs) {
     setCodeBusy(false);
     codeNote(INVITE_CODE_SENTENCE, true);
+    return;
+  }
+  if (!pairs || invites) {
+    setCodeBusy(false);
+    codeNote('That code did not deliver a pairing link. Choose “New code” on your desktop and '
+      + 'try again.', true);
     return;
   }
   let link;

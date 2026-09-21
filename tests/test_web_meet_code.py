@@ -676,14 +676,56 @@ class PairWithCodeTests(unittest.TestCase):
                     await browser.stop()
         asyncio.run(asyncio.wait_for(main(), 240))
 
-    def test_an_invite_code_is_refused_by_its_shape(self):
-        """The sidecar mints both kinds over the same wire, so the fragment decides: an `i=` one
-        admits a guest to one pane and must never pair a device."""
+    def test_the_desktops_own_pairing_code_pairs_this_phone(self):
+        """End to end, with nothing standing in: `Host.pair_code()` mints the code (task 2), the
+        real rendezvous hands out the room, the real desktop runs the CPace phase and seals its
+        own pairing fragment, and the welcome screen's two fields do the rest."""
         async def main():
             async with _pair_harness()() as harness:
-                invite = ("v=1&d=" + b64(b"\x33" * 32) + "&i=" + b64(b"\x44" * 16) + "&r=room-9")
-                desktop = Desktop(invite)
+                record = await harness.host.pair_code()
+                self.assertEqual(len(record.code), 4)
+                self.assertRegex(record.pin, r"^\d{4}$")
+                browser = Browser()
+                await browser.start()
+                try:
+                    await browser.navigate(harness.base + "/")
+                    await browser.wait_for(
+                        "(e => !!e && !e.disabled)"
+                        "(document.getElementById('welcome-code-pair'))", timeout=40)
+                    await _type(browser, "welcome-code", record.code)
+                    await _type(browser, "welcome-pin", record.pin)
+                    await browser.evaluate("document.getElementById('welcome-code-pair').click()")
+                    await browser.wait_for(shown("screen-inbox"), timeout=60)
+                    self.assertEqual(len(harness.requests), 1)
+                    self.assertEqual(record.state, "used")
+                    # The PIN the desktop minted is nowhere this page could leak it.
+                    leaked = await browser.evaluate(
+                        "JSON.stringify([location.href, {...localStorage}, {...sessionStorage}])")
+                    self.assertNotIn(record.pin, leaked)
+                    self.assertFalse(any(record.pin in line for line in browser.console),
+                                     browser.console)
+                finally:
+                    await browser.stop()
+        asyncio.run(asyncio.wait_for(main(), 240))
+
+    def test_an_invite_code_is_refused_by_its_shape(self):
+        """The sidecar mints both kinds over the same wire, so the fragment decides: an `i=` one
+        admits a guest to one pane and must never pair a device.
+
+        The rule is `remote/pairing.py`'s `fragment_kind`, on this side too: `s=` pairs, `i=`
+        invites, and a fragment carrying both belongs to no page at all rather than to whichever
+        one reads it first.
+        """
+        async def main():
+            async with _pair_harness()() as harness:
+                desktop = Desktop("v=1&d=" + b64(b"\x33" * 32) + "&i=" + b64(b"\x44" * 16)
+                                  + "&r=room-9")
                 _serve_code(harness, desktop)
+                # A second code, delivering a fragment that claims to be both.
+                both = Desktop("v=1&d=" + b64(b"\x33" * 32) + "&s=" + b64(b"\x55" * 16)
+                               + "&i=" + b64(b"\x44" * 16) + "&r=room-9",
+                               code="CQRT", room="code-room-2")
+                _serve_code(harness, both, code="CQRT", room="code-room-2")
                 root = harness.base + "/"
 
                 browser = Browser()
@@ -703,6 +745,18 @@ class PairWithCodeTests(unittest.TestCase):
                     # Nothing was paired, and the screen is still the welcome screen.
                     self.assertTrue(await browser.evaluate(shown("screen-welcome")))
                     self.assertEqual(await browser.evaluate(SCREENS_SHOWN), 1)
+                    self.assertEqual(len(harness.requests), 0)
+
+                    # Both secrets at once: neither door, and nothing paired.
+                    await _clear(browser, "welcome-code")
+                    await _type(browser, "welcome-code", "CQRT")
+                    await _type(browser, "welcome-pin", PIN)
+                    await browser.evaluate("document.getElementById('welcome-code-pair').click()")
+                    said = await browser.wait_for(
+                        f"/did not deliver/.test({WELCOME_NOTE}) ? {WELCOME_NOTE} : ''",
+                        timeout=40)
+                    self.assertIn("New code", said)
+                    self.assertTrue(await browser.evaluate(shown("screen-welcome")))
                     self.assertEqual(len(harness.requests), 0)
                 finally:
                     await browser.stop()
