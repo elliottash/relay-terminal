@@ -573,6 +573,20 @@ void BoardWorkspaceTests::aConsoleIsNotALeafSoTheActivePaneIsNeverOne()
     // The one place that turns a leaf into `m_active` reads the same answer.
     const QString active = bodyOf(text, QStringLiteral("    void setActiveLeaf(QWidget *leaf) {"));
     QVERIFY2(active.contains(QStringLiteral("dynamic_cast<Pane *>(leaf)")), qPrintable(active));
+
+    // And the other thing a console's insides are found by. `RichEditor` declares no `Q_OBJECT`,
+    // so `findChild<RichEditor *>()` matches on `QPlainTextEdit`'s metaobject and answers the
+    // first plain text edit in the console — which is the transcript's fallback view whenever
+    // that has been built, not the prompt box. The card page pointed `m_reply` at it, read it
+    // empty and returned, and **Enter on a card did nothing**: no `board_ask`, no thread entry,
+    // no stage advance (19.10, owner decision 2). The name is the answer.
+    QFile pane(QStringLiteral(RELAY_SOURCE_DIR "/src/BoardPane.cpp"));
+    QVERIFY2(pane.open(QIODevice::ReadOnly | QIODevice::Text), "src/BoardPane.cpp could not be read");
+    const QString board = QString::fromUtf8(pane.readAll());
+    QVERIFY2(!board.contains(QStringLiteral("findChild<RichEditor *>()")),
+             "the card's reply box is being found by a type that has no metaobject of its own");
+    QVERIFY2(board.contains(QStringLiteral("findChild<RichEditor *>(QStringLiteral(\"composerEditor\"))")),
+             "the card's reply box is no longer found by name");
 }
 
 // Card #AGNT step 9. The helper was a second implementation of the prompt box — its own panel,

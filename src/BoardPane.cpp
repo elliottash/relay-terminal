@@ -4819,7 +4819,16 @@ void BoardView::ensureCardConsole()
     // The editor is still handed over: it *is* this page's reply box from here on (drafts,
     // history, the Esc walk). What no longer travels with it is the submit — `CardContext::submit`
     // takes that, so the box goes on answering everything else that speaks through it.
-    m_detail->setConsole(handle.widget, handle.widget->findChild<RichEditor *>());
+    // **By name, not by type.** `RichEditor` declares no `Q_OBJECT`, so finding one by type alone
+    // matches on `QPlainTextEdit`'s metaobject and answers the first *plain text edit* in the
+    // console -- which is the transcript's fallback view whenever that has been built. `m_reply`
+    // then pointed at a widget the owner never types in, `CardDetail::submit` read it empty and
+    // returned, and **Enter on a card did nothing at all**: the words stayed in the box, no
+    // `board_ask` went out, and the thread was never written (19.10, owner decision 2). The
+    // integration drive of card #AGNT read exactly that. `composerEditor` is the name
+    // `RichEditor`'s constructor puts on every prompt box in Relay.
+    m_detail->setConsole(handle.widget,
+                         handle.widget->findChild<RichEditor *>(QStringLiteral("composerEditor")));
 }
 
 // What the board's key legend adds for the console's action row, read off the context rather
