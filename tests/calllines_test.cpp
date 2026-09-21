@@ -705,6 +705,31 @@ private slots:
         QCOMPARE(rows.at(1).spans.first().fg, palette().code);
     }
 
+    // A link inside a thinking bubble (card #MDKN). A fold's rows are spans, not cells, so the
+    // label's target rides in FoldSpan::link — the field the view hit-tests on a fold row. With no
+    // anchor set nothing changes, which is what every fold that is not rendered markdown wants.
+    void aLinkLabelInAFoldCarriesItsTarget() {
+        const QString md = QStringLiteral("see [the theme row](option:general/theme) now\n");
+        const QVector<FoldLine> bare = foldForMarkdown(md, palette(), {});
+        QCOMPARE(textsOf(bare), (QStringList{QStringLiteral("see the theme row (option:general/theme) now")}));
+        for (const relay::FoldSpan &span : bare.first().spans)
+            QVERIFY2(span.link.isEmpty(), "a fold with no anchor gained a link");
+
+        FoldOptions options;
+        options.linkAnchor = QStringLiteral("relay://call/p/t/9");
+        const QVector<FoldLine> rows = foldForMarkdown(md, palette(), options);
+        // The text is what it was: the OSC is zero width, and its body does not leak into the row.
+        QCOMPARE(textsOf(rows), (QStringList{QStringLiteral("see the theme row (option:general/theme) now")}));
+        QString linked;
+        for (const relay::FoldSpan &span : rows.first().spans)
+            if (!span.link.isEmpty()) {
+                linked += span.text;
+                QCOMPARE(span.link, QStringLiteral("relay://call/p/t/9#l=option%3Ageneral%2Ftheme"));
+                QVERIFY(span.underline);   // and it still wears the link ink
+            }
+        QCOMPARE(linked, QStringLiteral("the theme row"));
+    }
+
     void emptyReasoningFoldsToNothing() {
         QVERIFY(foldForMarkdown(QString(), palette(), {}).isEmpty());
         QVERIFY(foldForMarkdown(QStringLiteral("   \n"), palette(), {}).isEmpty());

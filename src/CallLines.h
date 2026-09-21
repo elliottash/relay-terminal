@@ -213,6 +213,11 @@ struct FoldOptions {
     QString openPath;        // the link "open <name>" carries (an absolute path)
     QString openName;        // what to show after "open "; defaults to openPath's last component
     bool diffToPane = false; // the diff went to a diff pane: say so instead of repeating it
+    // The OSC 8 anchor a markdown link's label is hung from inside this fold (card #MDKN,
+    // src/LabelLinks.h). A fold's rows are FoldSpans, not cells, so the label's target travels in
+    // `FoldSpan::link` and the view hit-tests it there; empty (the default) and the renderer
+    // leaves a label plain, which is what every fold that is not rendered markdown wants.
+    QString linkAnchor;
 };
 
 // The glyph a task's status is drawn with: ○ pending, ◐ in progress, ✓ completed, ✕ cancelled,

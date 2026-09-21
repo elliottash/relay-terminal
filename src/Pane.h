@@ -5677,6 +5677,10 @@ private:
     QVector<relay::FoldLine> thinkingFoldLines(const QString &uri, bool tail) const {
         relay::calllines::FoldOptions options;
         options.maxLines = tail ? relay::calllines::kThinkingStreamRows : relay::calllines::kThinkingDoneRows;
+        // A link in the reasoning is a link too (#MDKN). A fold's rows are spans, not cells, so
+        // the label's target rides in FoldSpan::link; the anchor is this fold's own URI, which is
+        // what makes the label's URI say which block it came from.
+        options.linkAnchor = uri;
         const relay::calllines::Ref ref = relay::calllines::parseUri(uri);
         // "open in pane" is the Activity pane (#QT8C), which shows this turn's whole reasoning
         // and follows the stream; the turn pane stays what the ✦ N tool calls line opens.
@@ -13235,6 +13239,16 @@ private:
         return false;
     }
 
+    // The URI of the block a chunk of this ink will land in: the open one when it is this ink's,
+    // else the one openProse() is about to mint. A markdown link's label is hung from it (#MDKN),
+    // and the renderer has to know it *before* it renders — proseStart() only sees the bytes
+    // afterwards, which is one step too late to put the anchor inside them.
+    QString proseUriFor(Ink ink) const {
+        if (!m_proseUri.isEmpty() && ink == m_proseInk) return m_proseUri;
+        return QString::fromLatin1(relay::kProsePrefix) + m_token + QLatin1Char('/')
+               + QString::number(m_proseSeq + 1);
+    }
+
     QByteArray openProse(Ink ink) {
         m_proseUri = QString::fromLatin1(relay::kProsePrefix) + m_token + QLatin1Char('/')
                      + QString::number(++m_proseSeq);
@@ -13324,6 +13338,10 @@ private:
         // Everything then goes through the word wrapper, so a line breaks between words at the
         // pane's width rather than wherever the terminal runs out of columns (src/WordWrap.h).
         if (ink == Ink::Agent) {
+            // A link's label is clickable because its cells carry this block's anchor with the
+            // target as a fragment (#MDKN); the renderer writes that run, so it is told the
+            // anchor before it renders the chunk.
+            m_markdown.setLinkAnchor(proseUriFor(ink));
             const QString rendered = m_markdown.feed(clean);
             out += proseStart(ink, rendered);
             out += wrapped(rendered);
@@ -13331,6 +13349,7 @@ private:
             writeTerminal(out);
             return;
         }
+        m_markdown.setLinkAnchor(proseUriFor(Ink::Agent));   // the tail lands in an Agent block (#MDKN)
         const QString mdTail = m_markdown.finish();   // always runs: it resets the renderer
         if (!mdTail.isEmpty()) out += proseStart(Ink::Agent, mdTail) + wrapped(mdTail);
         // A line the user typed carries a *role*, not a colour: every row of it is marked with the
@@ -13426,6 +13445,7 @@ private:
         if (!m_inlineOpen) return;
         endCallRun();
         if (m_markdown.holding()) {
+            m_markdown.setLinkAnchor(proseUriFor(Ink::Agent));   // #MDKN, as in printInline
             const QString tail = m_markdown.finish();
             if (!tail.isEmpty()) writeTerminal(proseStart(Ink::Agent, tail) + wrapped(tail));
         }

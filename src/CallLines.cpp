@@ -2,6 +2,7 @@
 #include "CallLines.h"
 
 #include "DiffView.h"
+#include "LabelLinks.h"
 #include "MarkdownAnsi.h"
 
 #include <limits>
@@ -466,6 +467,9 @@ void appendMarkdown(QVector<FoldLine> &out, const QString &ansi, const Palette &
     if (out.isEmpty()) out << FoldLine{};
     FoldSpan own;
     FoldSpan &span = carry ? *carry : own;
+    // The open link is its own state, not part of `span`: MarkdownAnsi writes the label's OSC 8
+    // *before* the SGR that colours it, and an SGR reset clears the whole span (card #MDKN).
+    QString openLink = span.link;
     QString text;
     const auto flush = [&] {
         if (text.isEmpty()) return;
@@ -483,6 +487,25 @@ void appendMarkdown(QVector<FoldLine> &out, const QString &ansi, const Palette &
         if (u == 0x1b) {
             flush();
             if (at + 1 >= ansi.size()) break;
+            // An OSC: `ESC ]` then a body, then BEL or ST. It used to be stepped over as a
+            // two-character escape, which left the body — `8;;relay://…` — in the row's text.
+            // OSC 8 is how a markdown link's label carries its target (card #MDKN): a label URI
+            // becomes the span's link, an anchor or a close clears it, and anything else (the
+            // role mark the pane writes) is still zero width.
+            if (ansi.at(at + 1) == QLatin1Char(']')) {
+                int end = at + 2;
+                while (end < ansi.size() && ansi.at(end).unicode() != 0x07 && ansi.at(end).unicode() != 0x1b) ++end;
+                const QString body = ansi.mid(at + 2, end - at - 2);
+                if (body.startsWith(QLatin1String("8;"))) {
+                    const int semi = body.indexOf(QLatin1Char(';'), 2);
+                    const QString uri = semi < 0 ? QString() : body.mid(semi + 1);
+                    openLink = labellink::isLabelUri(uri) ? uri : QString();
+                    span.link = openLink;
+                }
+                if (end < ansi.size() && ansi.at(end).unicode() == 0x1b) ++end;   // ST is two bytes
+                at = end;   // the loop's ++at steps over the terminator's last byte
+                continue;
+            }
             if (ansi.at(at + 1) != QLatin1Char('[')) { ++at; continue; }   // two-character escape
             int end = at + 2;
             while (end < ansi.size() && ansi.at(end).unicode() >= 0x30 && ansi.at(end).unicode() <= 0x3f) ++end;
@@ -506,6 +529,7 @@ void appendMarkdown(QVector<FoldLine> &out, const QString &ansi, const Palette &
                         span.fg = markdownFg(n, palette);
                     // 9 (crossed out) and the rest: a fold row cannot say them
                 }
+                span.link = openLink;   // a reset clears the span, never the run it sits in
             } else {
                 while (end < ansi.size() && !(ansi.at(end).unicode() >= 0x40 && ansi.at(end).unicode() <= 0x7e)) ++end;
             }
@@ -616,6 +640,7 @@ QVector<FoldLine> foldForMarkdown(const QString &markdown, const Palette &palett
     QVector<FoldLine> out;
     if (markdown.isEmpty()) return out;
     MarkdownAnsi renderer;
+    renderer.setLinkAnchor(options.linkAnchor);   // #MDKN: a link's label in a fold is a link too
     appendMarkdown(out, renderer.feed(markdown) + renderer.finish(), palette);
     while (!out.isEmpty() && out.first().spans.isEmpty()) out.removeFirst();
     while (!out.isEmpty() && out.last().spans.isEmpty()) out.removeLast();
