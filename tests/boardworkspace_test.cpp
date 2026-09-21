@@ -684,7 +684,7 @@ void BoardWorkspaceTests::aConsoleIsNotALeafSoTheActivePaneIsNeverOne()
     const QString board = QString::fromUtf8(pane.readAll());
     QVERIFY2(!board.contains(QStringLiteral("findChild<RichEditor *>()")),
              "the card's reply box is being found by a type that has no metaobject of its own");
-    QVERIFY2(board.contains(QStringLiteral("findChild<RichEditor *>(QStringLiteral(\"composerEditor\"))")),
+    QVERIFY2(board.contains(QStringLiteral("findChild<QPlainTextEdit *>(QStringLiteral(\"composerEditor\"))")),
              "the card's reply box is no longer found by name");
 
     // The row's face. `src/Theme.cpp` is one sheet with `@token`s that every theme substitutes

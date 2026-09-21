@@ -332,7 +332,7 @@ struct Consoles {
 QPlainTextEdit *replyBox(relay::BoardView &view)
 {
     QWidget *console = view.cardConsole();
-    return console ? console->findChild<RichEditor *>() : nullptr;
+    return console ? console->findChild<QPlainTextEdit *>(QStringLiteral("composerEditor")) : nullptr;
 }
 
 }  // namespace
