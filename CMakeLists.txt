@@ -114,6 +114,14 @@ add_library(relay-modelrows STATIC src/ModelRows.cpp src/ModelRows.h)
 target_include_directories(relay-modelrows PUBLIC src)
 target_link_libraries(relay-modelrows PUBLIC relay-modelcatalog ${RELAY_QT}::Widgets)
 target_compile_options(relay-modelrows PRIVATE -Wall -Wextra -Wpedantic)
+# The list a status picker drops open (2026-09-21): the current row highlighted, Up/Down over the
+# rows that can be picked, and a filter line you can see. Its own library, and free of Pane, so
+# tests/filterpopup_test.cpp can drive it without a window. relay-theme is for the tokens it
+# paints with (src/Theme.h's inline colours); it pulls in no stylesheet.
+add_library(relay-filterpopup STATIC src/FilterPopup.cpp src/FilterPopup.h)
+target_include_directories(relay-filterpopup PUBLIC src)
+target_link_libraries(relay-filterpopup PUBLIC relay-theme ${RELAY_QT}::Widgets)
+target_compile_options(relay-filterpopup PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-modelpicker STATIC src/ModelPicker.cpp src/ModelPicker.h)
 target_include_directories(relay-modelpicker PUBLIC src)
 target_link_libraries(relay-modelpicker PUBLIC relay-modelcatalog ${RELAY_QT}::Widgets)
@@ -542,7 +550,7 @@ if(RELAY_BUILD_APP)
     # What an agent is about (#AGNT): a Pane takes a relay::agent::Context, and supplies the
     # terminal one itself. QtCore only, so this is a link edge and not a dependency.
     target_link_libraries(relay PRIVATE relay-agentcontext)
-    target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-modelcatalog relay-modelrows relay-modelpicker relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-queuesubmit relay-logging relay-voice relay-images relay-titles relay-panestatus relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::DBus ${RELAY_QT}::Network)
+    target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-modelcatalog relay-modelrows relay-modelpicker relay-filterpopup relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-queuesubmit relay-logging relay-voice relay-images relay-titles relay-panestatus relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::DBus ${RELAY_QT}::Network)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -619,6 +627,12 @@ if(BUILD_TESTING)
     target_link_libraries(relay-modelpicker-tests PRIVATE relay-modelpicker ${RELAY_QT}::Test)
     add_test(NAME modelpicker COMMAND relay-modelpicker-tests)
     set_tests_properties(modelpicker PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # The list Alt+M and Alt+E drop open (2026-09-21): the current row highlighted on open, Up/Down
+    # over separators and switched-off rows, the filter, and what Enter gives back.
+    add_executable(relay-filterpopup-tests tests/filterpopup_test.cpp)
+    target_link_libraries(relay-filterpopup-tests PRIVATE relay-filterpopup ${RELAY_QT}::Test)
+    add_test(NAME filterpopup COMMAND relay-filterpopup-tests)
+    set_tests_properties(filterpopup PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # The one list both model boxes draw (#PK5Q): the rows, their order and what a pick means.
     add_executable(relay-modelrows-tests tests/modelrows_test.cpp)
     target_link_libraries(relay-modelrows-tests PRIVATE relay-modelrows ${RELAY_QT}::Test)
@@ -776,7 +790,7 @@ if(BUILD_TESTING)
         target_link_libraries(${console_target} PRIVATE
             relay-closedlist relay-localmodels relay-projects relay-escapees relay-appcommands
             relay-agentcontext
-            relay-hints relay-modelsettings relay-modelcatalog relay-modelrows relay-modelpicker
+            relay-hints relay-modelsettings relay-modelcatalog relay-modelrows relay-modelpicker relay-filterpopup
             relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor
             relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations
             relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate
