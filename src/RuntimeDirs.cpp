@@ -32,10 +32,11 @@ constexpr int kMaxRemoveDepth = 8;
 bool startTimeOf(qint64 pid, qulonglong *out) {
 #ifdef Q_OS_WIN
     if (pid <= 0 || quint64(pid) > MAXDWORD) return false;
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, DWORD(pid));
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, DWORD(pid));
     if (!process) return false;
     FILETIME created{}, exited{}, kernel{}, user{};
-    const bool ok = GetProcessTimes(process, &created, &exited, &kernel, &user);
+    const bool ok = WaitForSingleObject(process, 0) == WAIT_TIMEOUT
+                    && GetProcessTimes(process, &created, &exited, &kernel, &user);
     CloseHandle(process);
     if (ok) *out = (qulonglong(created.dwHighDateTime) << 32) | created.dwLowDateTime;
     return ok;
