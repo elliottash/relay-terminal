@@ -109,7 +109,8 @@ public:
                            || event->key() == Qt::Key_Up || event->key() == Qt::Key_Down;
         const bool altArrow = arrow && (mods & Qt::AltModifier) && !(mods & Qt::ControlModifier);
         const QString action = match(event);
-        const bool dimmer = action == QStringLiteral("pane.brighten") || action == QStringLiteral("pane.darken");
+        const bool dimmer = action == QStringLiteral("pane.brighten") || action == QStringLiteral("pane.darken")
+                            || action == QStringLiteral("pane.dimToggle") || action == QStringLiteral("pane.autoDim");
         return dimmer || fkey || altArrow || ((mods & Qt::ControlModifier) && (mods & Qt::ShiftModifier));
     }
 
@@ -230,9 +231,9 @@ private:
         add("pane.close", "pane", "Close pane, then tab, then window", {QStringLiteral("Ctrl+W"), QStringLiteral("Ctrl+Shift+W")});
         add("pane.brighten", "pane", "Brighten pane", {QStringLiteral("Alt++"), QStringLiteral("Alt+="), QStringLiteral("Alt+Shift+=")});
         add("pane.darken", "pane", "Dim pane", {QStringLiteral("Alt+-")});
-        add("pane.dimToggle", "pane", "Toggle manual pane dimming", {});
+        add("pane.dimToggle", "pane", "Toggle manual pane dimming", {QStringLiteral("Alt+D")});
         add("pane.focusMode", "pane", "Toggle focus mode", {});
-        add("pane.autoDim", "pane", "Toggle hide until you need me", {});
+        add("pane.autoDim", "pane", "Toggle hide until you need me", {QStringLiteral("Ctrl+Alt+D")});
         add("terminal.zoomIn", "terminal", "Zoom terminal in", {QStringLiteral("Ctrl++"), QStringLiteral("Ctrl+="), QStringLiteral("Ctrl+Shift+=")});
         add("terminal.zoomOut", "terminal", "Zoom terminal out", {QStringLiteral("Ctrl+-"), QStringLiteral("Ctrl+Shift+-")});
         add("terminal.zoomReset", "terminal", "Reset terminal zoom", {QStringLiteral("Ctrl+0"), QStringLiteral("Ctrl+Shift+0")});
