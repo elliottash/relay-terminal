@@ -268,3 +268,64 @@ One thing worth the owner's eye rather than a fix: switching off the class a pan
 <!-- relay:entry 20260921T191500Z-t9 author=claude-fable kind=note -->
 ### Claude Fable · 2026-09-21 19:15
 `links.commits` and `links.evidence` for t:a8 are **not** on the card yet: that single YAML line already carries another session's uncommitted edit (`274078a8, 394b282d`, which `fable-rank` says is itself waiting on a session holding `status`/`assignee` in the same hunk), so landing my addition would have taken theirs with it. To whoever lands that line next, please add `dfed0146, edb298d3` to `links.commits` and `docs/qa_evidence/2026-09-21-model-box-classes` to `links.evidence`. The t:a8 tick itself is a separate hunk and landed.
+
+<!-- relay:entry 20260921T193100Z-d1 author=claude-fable kind=progress -->
+### Claude Fable · 2026-09-21 19:31
+
+**DeepSeek is a provider.** Owner: "i added deepseek as an api option". Five commits:
+`179e86c2` the preset, `d03f05fe` `check()` on duplicate orders, `3d360834` `kind`/`order`
+on every `presets` row, `5b95fbc8` `grouped()` following them, `39ed6ed9` the docs.
+
+Read off https://api-docs.deepseek.com on 2026-09-21. OpenAI-compatible at
+`https://api.deepseek.com`; `/api/list-models` returns exactly `deepseek-flash`
+(DeepSeek-V4.1-Flash, 1M context, 384K max output, reads images) and `deepseek-v4-pro`
+(DeepSeek-V4-Pro-0813, text only), both with thinking on by default. `reasoning_effort` is
+none | low | high | max with `minimal` mapped to low and `medium`/`xhigh` mapped to high, so
+Relay's four levels are low→low, medium→high, high→high, max→max — the same shape as Kimi and
+GLM. `deepseek-flash` is a moving alias, so its row is named **`deepseek-v4.1-flash`**, which is
+what OpenRouter serves as `deepseek/deepseek-v4.1-flash`: one model, one row of the picker.
+Pro's twin is `deepseek/deepseek-v4-pro`, which the OpenRouter cache lists. Tiers: main
+`deepseek-v4-pro` at high, flash `deepseek-flash` at low, lite the same model with
+`thinking: {"type": "disabled"}` — Relay has no "off" among its four levels, so "off" is the
+tier's request, and this is the one first-party API whose three tiers need no second key.
+Flash reads images and Pro does not, so an image turn steps to Flash and back as it does on
+Z.AI. The key needed nothing: `RELAY_DEEPSEEK_API_KEY` and the keyring entry derive from the id.
+
+**The provider order is the owner's, and his file is not touched here.** He is still editing
+`backend/relay_core/model-ranking.md`, so nothing in these five commits writes to it. What the
+code does instead is stop keeping a second copy of the order: every `presets` row now carries
+`kind` and `order` straight from that file (protocol 13.2), and `grouped()` in
+src/ModelCatalog.cpp sorts a fold by them. The hard-coded rule 2.2 list in `accessRank` stays
+only as the fallback for a row that carries neither — an older worker — and is deliberately not
+kept in step by hand. `docs/MODEL-PICKING-DESIGN.md` rule 2 stops writing the order out in prose
+and points at the table for the same reason.
+
+Because the file is one a person edits half-way through, none of this can be fatal: a provider
+the file does not name is `api` at `UNKNOWN_PROVIDER_ORDER` (after everything it does name),
+`check()` reports an unknown provider, a preset with no row, a model with no row and — new here —
+two providers sharing an `order`, all as findings rather than as a load failure. Proved against
+`main`'s copy of the file, which has no `deepseek` row at all: the row comes out `api` / 500 with
+both models intact and nothing raised.
+
+**Two rows the file still needs, for the owner to paste when he is done.** In the Models table
+`deepseek-v4.1-flash` already exists as OpenRouter's row and is the same row — it may want `lite`
+added to its classes, since DeepSeek now serves that tier with it — and Pro has none:
+
+    | deepseek-v4-pro | high, main |  | `deepseek`'s main model; text only, and its Flash line is the one that reads images |
+
+**Three tests fail until that lands**, and they are left exactly as they are rather than weakened:
+`test_presets.py::test_catalog_rows_resolve_efforts_and_carry_intelligence` and
+`test_model_ranking.py::test_every_catalog_model_and_every_guest_model_has_a_row` want the
+`deepseek-v4-pro` row, and `test_it_parses_and_check_finds_nothing` wants the file clean.
+A fourth, `test_model_ranking.py::test_every_provider_the_worker_has_is_a_row_and_nothing_else_is`,
+fails on the working copy only and is nothing to do with DeepSeek: it asserts the bands ascend in
+`model_ranking.KINDS` order (plan, harness, api, router, free) and his draft puts the harnesses
+first at 11/12 and the plans at 21/22/23. That is his ruling to finish; when he does, either
+`KINDS` follows him or the bands go back. Nobody should "fix" it by editing his file.
+
+Everything else green: test_presets (48), test_model_ranking (31), test_tier_lists (42),
+test_roles (74), test_failover (56), test_openrouter_catalog (13), test_customproviders (22),
+test_guest_harness_provider (63), and `ctest -R modelcatalog` 55 cases including four new ones —
+a file order that contradicts `accessRank` wins outright, a ranked entry still leads, and a pair
+where one side has no number falls back. No live call: the owner has no DeepSeek key stored, so
+the proof is the `presets` row built with a fake `RELAY_DEEPSEEK_API_KEY` and the socket poisoned.
