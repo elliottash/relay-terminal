@@ -7,7 +7,7 @@ assignee: codex
 rank: m
 created: '2026-09-21'
 source: 'Codex in a Relay pane, 2026-09-21'
-links: {plans: [], commits: [cda3defebd72a74edee5526b732d3712166a47e1], evidence: [docs/qa_evidence/2026-09-21-recover-inactive/README.md, docs/qa_evidence/2026-09-21-terminal-font-size/README.md, docs/qa_evidence/2026-09-21-terminal-zoom/README.md], related: [], github: null}
+links: {plans: [], commits: [eeced0c917c529e3e7c8749aa99df3ab67302b22, cda3defebd72a74edee5526b732d3712166a47e1], evidence: [docs/qa_evidence/2026-09-21-recover-inactive/README.md, docs/qa_evidence/2026-09-21-terminal-font-size/README.md, docs/qa_evidence/2026-09-21-terminal-zoom/README.md], related: [], github: null}
 ---
 # Terminal zoom with Ctrl and wheel or plus/minus
 

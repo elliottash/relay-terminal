@@ -19,3 +19,7 @@ Owner authorized recovery: “can you duoble check those again, and if they aren
 <!-- relay:entry 20260921T195847Z-rv author=codex kind=evidence -->
 ### Codex · 2026-09-21 19:58
 Recovered the owner-authorized inactive changes. Targeted panes/hints/settings tests and engine zoom checks passed; isolated GUI verified the drag hint, Alt+0 equalization, searchable Actions entry, and saved font size changing 18→22 pt in open terminals. Evidence: docs/qa_evidence/2026-09-21-recover-inactive/README.md. Moving to needs-verification with a QA checklist; landing uses the exact-tree build gate. No extra branches or worktrees exist to delete.
+
+<!-- relay:entry 20260921T200009Z-rc author=codex kind=evidence -->
+### Codex · 2026-09-21 20:00
+Landed in eeced0c917c529e3e7c8749aa99df3ab67302b22. The exact proposed tree compiled successfully, the active build wrapper passed again, and tests_check reports no findings or open blocks for this card. Added the implementation commit link.

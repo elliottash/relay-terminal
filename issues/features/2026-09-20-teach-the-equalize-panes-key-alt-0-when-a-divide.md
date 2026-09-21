@@ -8,7 +8,7 @@ implemented_by: deepseek/deepseek-v4.1-flash
 rank: zzzzzzzzzzzzzzzzi
 created: '2026-09-20'
 source: pane, 2026-09-20
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-recover-inactive/README.md], related: [], github: null}
+links: {plans: [], commits: [eeced0c917c529e3e7c8749aa99df3ab67302b22], evidence: [docs/qa_evidence/2026-09-21-recover-inactive/README.md], related: [], github: null}
 ---
 # Teach the equalize-panes key (Alt+0) when a divider is dragged, and move it off Ctrl+Alt+0
 

@@ -7,7 +7,9 @@ The owner authorized landing these inactive changes on 2026-09-21. Both were pre
 - `RELAY_SESSION=recover-inactive scripts/relay-build --target relay relay-panes-tests relay-hints-tests relay-settings-tests` — passed.
 - `ctest --test-dir build -R '^(panes|hints|settings)$' --output-on-failure` — 3/3 passed.
 - `RELAY_ENGINE_TEST=ViewTest QT_QPA_PLATFORM=offscreen build/engine/relay-engine-tests ctrlZoomKeysAndWheel` — passed (3 Qt test results).
-- Landing uses land.py's exact proposed-tree build gate, preventing dependence on unrelated uncommitted changes.
+- Commit `eeced0c917c529e3e7c8749aa99df3ab67302b22` passed land.py's exact proposed-tree build gate. The active build wrapper passed again after landing.
+
+Both cards passed `tests_check` after landing with no findings or open blocks. The board-wide validator still reports three pre-existing errors on #MDL1, outside this recovery.
 
 ## Live GUI
 
