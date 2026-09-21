@@ -81,6 +81,10 @@ int fill(QComboBox *box, const Context &context);
 // systems"). With no model known yet it is the role's name alone.
 QString roleRowText(const QString &role, const QString &model);
 QString roleTier(const QString &role);
+// The one word for a tier or a worker role, everywhere one is printed to a person (card #MDL1,
+// rule 1). Lower-case, the project's own vocabulary: "main", "flash", "high", "lite", "local", and
+// a plain phrase for a worker-only role — "terminal use", "subagents", "helpers". This is the only
+// table: Pane::roleLabel was a second, Title-Case one that disagreed with it, and now calls this.
 QString roleLabel(const QString &role);
 
 // What `/model <words>` picks, in both boxes' composers: an exact key, model id or label among the

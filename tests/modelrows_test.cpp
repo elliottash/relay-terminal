@@ -177,6 +177,29 @@ private slots:
         QCOMPARE(helperBox.findData(QStringLiteral("guest:claude")), -1);
     }
 
+    // One lower-case table for every tier and worker role (card #MDL1, rule 1). Pane::roleLabel
+    // was a second, Title-Case one; a model row never reads "Main agent" or "Switchboard agent".
+    void roleLabelsAreLowerCaseAndOneTable()
+    {
+        using relay::modelrows::roleLabel;
+        QCOMPARE(roleLabel(QStringLiteral("main")), QStringLiteral("main"));
+        QCOMPARE(roleLabel(QStringLiteral("flash")), QStringLiteral("flash"));
+        QCOMPARE(roleLabel(QStringLiteral("high")), QStringLiteral("high"));
+        QCOMPARE(roleLabel(QStringLiteral("lite")), QStringLiteral("lite"));
+        QCOMPARE(roleLabel(QStringLiteral("local")), QStringLiteral("local"));
+        QCOMPARE(roleLabel(QStringLiteral("terminal_use")), QStringLiteral("terminal use"));
+        QCOMPARE(roleLabel(QStringLiteral("subagent")), QStringLiteral("subagents"));
+        QCOMPARE(roleLabel(QStringLiteral("switchboard")), QStringLiteral("helpers"));
+        QCOMPARE(roleLabel(QStringLiteral("planning")), QStringLiteral("plan mode"));
+        QCOMPARE(roleLabel(QStringLiteral("loop_check")), QStringLiteral("loop check"));
+        // A role the table has never heard of still comes out as words, lower-case.
+        QCOMPARE(roleLabel(QStringLiteral("brand_new_role")), QStringLiteral("brand new role"));
+        for (const QString &role : {QStringLiteral("main"), QStringLiteral("flash"), QStringLiteral("lite"),
+                                    QStringLiteral("local"), QStringLiteral("high"), QStringLiteral("subagent"),
+                                    QStringLiteral("switchboard"), QStringLiteral("audit")})
+            QCOMPARE(roleLabel(role), roleLabel(role).toLower());
+    }
+
     // `/model <words>` resolves the same way in both composers.
     void resolveMatchesKeyModelLabelThenFilter()
     {

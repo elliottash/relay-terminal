@@ -8,11 +8,29 @@ namespace relay::modelrows {
 QString roleLabel(const QString &role)
 {
     static const QHash<QString, QString> labels{
-        {QStringLiteral("main"), QStringLiteral("Main agent")},
-        {QStringLiteral("flash"), QStringLiteral("Flash agent")},
-        {QStringLiteral("lite"), QStringLiteral("Lite agent")},
-        {QStringLiteral("local"), QStringLiteral("Local agent")}};
-    return labels.value(role, role);
+        // The tiers, in the project's own words (card #MDL1, rule 1: "tier and role words are
+        // lower-case too: main, flash, not Main agent").
+        {QStringLiteral("main"), QStringLiteral("main")},
+        {QStringLiteral("high"), QStringLiteral("high")},
+        {QStringLiteral("flash"), QStringLiteral("flash")},
+        {QStringLiteral("lite"), QStringLiteral("lite")},
+        {QStringLiteral("local"), QStringLiteral("local")},
+        // The worker-only roles: a plain lower-case phrase for the job, never a protocol name and
+        // never "Switchboard agent" / "Helper agent" in a line that names a model.
+        {QStringLiteral("terminal_use"), QStringLiteral("terminal use")},
+        {QStringLiteral("subagent"), QStringLiteral("subagents")},
+        {QStringLiteral("switchboard"), QStringLiteral("helpers")},
+        {QStringLiteral("planning"), QStringLiteral("plan mode")},
+        {QStringLiteral("summaries"), QStringLiteral("summaries")},
+        {QStringLiteral("suggestions"), QStringLiteral("suggestions")},
+        {QStringLiteral("chores"), QStringLiteral("chores")},
+        {QStringLiteral("audit"), QStringLiteral("request audit")},
+        {QStringLiteral("loop_check"), QStringLiteral("loop check")},
+        {QStringLiteral("vision"), QStringLiteral("vision")},
+        {QStringLiteral("route_assist"), QStringLiteral("route assist")}};
+    // An unknown role reads as its own id with the underscores opened out, still lower-case, so a
+    // role added to the worker before this table is not printed as "loop_check".
+    return labels.value(role, QString(role).replace(QLatin1Char('_'), QLatin1Char(' ')).toLower());
 }
 
 // The tier a role runs on (the worker's roles.ROLE_TIERS): what the row's parentheses say. A role's
