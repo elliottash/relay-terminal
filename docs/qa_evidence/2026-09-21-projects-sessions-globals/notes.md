@@ -72,3 +72,23 @@ Downloads folder. No board/git files were created, and the worker log has no pro
 An earlier live check caught the missing uninitialized-state block; it was fixed before this final run.
 11 targeted `test_board_protocol.InitTests` passed, recorded in runs
 `20260921T233453Z-1582` and `20260921T233455Z-6953`. The exact-tree application build passed.
+
+## Sessions loading and Recently closed followup
+
+Commit `56d671cf5a914099f0a3d28c424e396e46ba681c` refreshes the existing query on Sessions tab
+activation and moves Recently closed behind a button inside Sessions, with a Back to sessions button.
+The regression was reproduced before the fix: open Projects, click Sessions with the mouse, and
+the pane had no rows or result count even though a saved session fixture existed.
+The earlier key-driven empty-profile check did not exercise this mouse path.
+
+Targeted Conversations tests pass, including mouse activation with preserved query/filters and
+nested Recently closed navigation. Tracker run `20260921T234801Z-943e` passed with no opened signals.
+A clean export including the commit built successfully with scripts/relay-build. The first shared
+checkout build was interrupted by another session's in-progress ModelPicker header/source changes;
+those files were not modified by this task.
+
+Live verification with `sessions-loading.py` against the clean application build passed.
+`08-sessions-loaded.png` shows one saved session and its populated preview immediately after a mouse
+click from Projects to Sessions, without an intervening query change or keyboard refresh.
+`09-closed-button.png` shows the nested Recently closed page with Back to sessions and exactly
+three top-level tabs. The fixture remains in the index after navigation.

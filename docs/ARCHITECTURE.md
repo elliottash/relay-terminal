@@ -2025,7 +2025,9 @@ and live panes including No project; its Sessions action applies the matching pr
 Options links to this page rather than repeating the project registry. Globals (`GlobalsPane`)
 is Switchboard HQ: it edits global memory/alias cards and existing instruction sources through
 `globals_*` worker messages. The same pane helper gets the selected tab's context. Page state
-and unsaved Globals drafts survive tab switches. Screenshot capture remains an unbound action.
+and unsaved Globals drafts survive tab switches. Entering Sessions refreshes its existing query
+and filters; Recently closed is a button within Sessions, with a Back to sessions action, rather
+than a fourth manager tab. Screenshot capture remains an unbound action.
 
 Global memories are loaded by `relay_core.memories` on prompt refresh: pinned or workspace-matched
 active cards, with bounded text, project overrides and supersession; team scope is excluded.

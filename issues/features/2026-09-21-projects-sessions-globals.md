@@ -7,7 +7,7 @@ assignee: codex
 rank: m
 created: '2026-09-21'
 source: 'Codex conversation, 2026-09-21'
-links: {plans: [], commits: [237c37f0267e2a3328cf57b61fbbb33511a39494, 60ffc6b2250b, ece82b268bc9, 32721d28, a6319d5e, 7273f7b5, 6e5b2a33, be42269896bc3e0beecff69b28da487e40cfee63, f24b12a728eed750c8bf7031fb7655f162bf29da, 188b5931c9f7f60d3f96487c7cebfcd9a279ae28], evidence: [docs/qa_evidence/2026-09-21-projects-sessions-globals/], related: [916B, TVE1, Y2MP], github: null}
+links: {plans: [], commits: [237c37f0267e2a3328cf57b61fbbb33511a39494, 60ffc6b2250b, ece82b268bc9, 32721d28, a6319d5e, 7273f7b5, 6e5b2a33, be42269896bc3e0beecff69b28da487e40cfee63, f24b12a728eed750c8bf7031fb7655f162bf29da, 188b5931c9f7f60d3f96487c7cebfcd9a279ae28, 56d671cf5a914099f0a3d28c424e396e46ba681c], evidence: [docs/qa_evidence/2026-09-21-projects-sessions-globals/], related: [916B, TVE1, Y2MP], github: null}
 ---
 # One pane for Projects, Sessions, and Globals
 
@@ -33,6 +33,12 @@ Owner, after comparing separate panes, one pane with views, and a persistent sid
 > and ctrl shift g can open globals
 
 > i dont need the pane screenshot key, not sure why i have that
+
+Owner followups:
+
+> sessions doesnt work, there's nothing in there
+
+> and the "recently closed" move to be a button in the sessions tab
 
 ## Decisions
 - Owner: "fix it, remove that old project page and move ctrl shift s back to switchboard" — remove the legacy picker; Ctrl+Shift+S always opens the Switchboard for the tab/project or current directory, including its empty state.
@@ -85,6 +91,8 @@ Research behind the proposal (official documentation reviewed 2026-09-21):
 
 
 ## Plan
+Session-loading followup: refresh the list when the Sessions tab is activated by mouse, preserving its query and filters. Move Recently closed under a button within Sessions. Verify with a saved session fixture and mouse tab navigation, plus targeted widget tests.
+
 Followup: remove the legacy picker host, route project selection and held `/card` text through the new Projects tab, and make Ctrl+Shift+S open the existing Switchboard or a side-effect-free empty board for the current directory. Verify under isolated Xvfb from a loose folder.
 
 **Goal:** one Projects / Sessions / Globals pane with direct shortcuts, usable project management,
@@ -122,6 +130,8 @@ application build, and isolated GUI screenshots showing tab selection and CRUD p
 - [x] Targeted tests, GUI evidence and landing <!-- t:qa -->
 
 ## Execution Summary
+Session followup `56d671cf`: selecting Sessions now refreshes its saved query and filters, fixing the blank list after mouse entry from Projects. Recently closed is a button inside Sessions with Back to sessions; the top-level manager has Projects, Sessions and Globals. A saved fixture visibly loads with its preview in isolated GUI verification.
+
 Followup `188b5931`: removed the legacy project picker. Ctrl+Shift+S opens Switchboard directly, including an empty board for a loose directory; the helper receives explicit uninitialized state. Project selection and pending `/card` text use the new Projects tab. Opening the board writes no board/git files.
 
 One shared Projects / Sessions / Globals pane is implemented. Projects owns registry management,
@@ -148,7 +158,24 @@ Evidence: [GUI screenshots, driver and notes](../../docs/qa_evidence/2026-09-21-
 - `tests/test_remote_wire.py`
 - manual: docs/qa_evidence/2026-09-21-projects-sessions-globals/
 
+### Check 2026-09-21 19:48
+- missing-evidence · unittest:tests.test_board_protocol.InitTests — no run of tests/test_board_protocol.py::InitTests for this revision, from any host, and no attached result
+- not-applicable · manual:docs/qa_evidence/2026-09-21-projects-sessions-globals/07-switchboard-direct.png — manual evidence, recorded by hand: docs/qa_evidence/2026-09-21-projects-sessions-globals/07-switchboard-direct.png
+- passed · ctest:conversations — ctest -R conversations passed for this revision on spark-dcc9, 2026-09-21T23:48:04Z
+- missing-evidence · ctest:projectspane — no run of ctest -R projectspane for this revision, from any host, and no attached result
+- missing-evidence · ctest:globalspane — no run of ctest -R globalspane for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_keybindings — no run of tests/test_keybindings.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_globals_protocol — no run of tests/test_globals_protocol.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_memories — no run of tests/test_memories.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_agent_context — no run of tests/test_agent_context.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_remote_wire — no run of tests/test_remote_wire.py for this revision, from any host, and no attached result
+- not-applicable · manual:docs/qa_evidence/2026-09-21-projects-sessions-globals/ — manual evidence, recorded by hand: docs/qa_evidence/2026-09-21-projects-sessions-globals/
+- notice · ctest:conversations — ctest -R conversations is slow: p95 3.18 s, p50 2.91 s
+- notice · unittest:tests.test_remote_wire — tests/test_remote_wire.py: 9 of 48 are skipped for good (test_the_client_resumes_under_the_hubs_own_stream_names, test_a_plain_link_parses, test_percent_encoded_separators_still_parse…)
+history: thread
 ## QA checklist
+- [ ] Open Projects, click Sessions: existing sessions load without typing or using a shortcut.
+- [ ] Recently closed opens from the Sessions button; Back returns to the same list and filters.
 - [ ] Ctrl+Shift+S opens Switchboard directly from a loose folder; Ctrl+Shift+P opens the new Projects tab.
 - [ ] P/Y/G shortcuts select Projects/Sessions/Globals without duplicating the pane.
 - [ ] Project browsing preserves the current attachment; explicit open/attach/Switchboard actions work.
