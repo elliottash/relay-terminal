@@ -28,22 +28,31 @@ jobs:
       - name: Exercise native Windows process and console lifecycle
         run: ctest --test-dir build-windows -C Release --output-on-failure
       - name: Native storage, worker, credentials and PowerShell tests
+        if: ${{ !cancelled() }}
         shell: pwsh
         run: |
           $env:PYTHONPATH = 'backend'
           $env:RELAY_POWERSHELL = (Get-Command pwsh).Source
           python -m unittest discover -s tests -p test_platform_storage.py -v
           python -m unittest discover -s tests -p test_powershell.py -v
+          python -m unittest discover -s tests -p test_windows_open.py -v
       - name: Configure Windows desktop
+        id: configure
+        if: ${{ !cancelled() }}
         run: cmake -S . -B build-app -A x64 -DRELAY_QT_MAJOR=6 -DBUILD_TESTING=OFF -DCMAKE_PREFIX_PATH=C:/Qt/6.8.3/msvc2022_64
       - name: Build Windows desktop
+        id: desktop
+        if: ${{ !cancelled() && steps.configure.outcome == 'success' }}
         run: cmake --build build-app --config Release --parallel 4
       - name: Package native installer with private runtimes
+        id: package
+        if: ${{ !cancelled() && steps.desktop.outcome == 'success' }}
         shell: pwsh
         run: |
           $version = if ($env:GITHUB_REF_NAME -match '^v[0-9]') { $env:GITHUB_REF_NAME.Substring(1) } else { '0.1.0-beta.3' }
           ./packaging/windows/package.ps1 -Version $version
       - name: Install and launch as a user
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         shell: pwsh
         run: |
           $installer = (Get-ChildItem dist/*setup.exe).FullName

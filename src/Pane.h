@@ -17557,14 +17557,19 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
         // stat() says whether there is anything to read, in place of an open, a read and a JSON
         // parse. A small saving; tunePoll() above is the larger one.
         const QString statePath = m_runtime.filePath(QStringLiteral("state.json"));
+#ifndef Q_OS_WIN
         struct stat info;
         if (::stat(QFile::encodeName(statePath).constData(), &info) != 0) return;
         if (m_stateSeen && info.st_ino == m_stateInode && info.st_size == m_stateSize
             && info.st_mtim.tv_sec == m_stateMtime.tv_sec && info.st_mtim.tv_nsec == m_stateMtime.tv_nsec) return;
+#endif
         QFile file(statePath);
         if (!file.open(QIODevice::ReadOnly) || file.size() > 1024 * 1024) return;
+#ifndef Q_OS_WIN
         m_stateSeen = true; m_stateInode = info.st_ino; m_stateSize = info.st_size; m_stateMtime = info.st_mtim;
+#endif
         const auto event = QJsonDocument::fromJson(file.readAll()).object();
+        file.close(); // Allow Windows shell events to atomically replace state.json.
         if (event.value(QStringLiteral("token")).toString() != m_token) return;
         const auto sequence = event.value(QStringLiteral("sequence")).toString();
         if (sequence.isEmpty() || sequence == m_shellSequence) return;
@@ -18102,7 +18107,10 @@ private:
     // conversation opened in a new pane — the id to ask about once the worker is up.
     QString m_transcriptRequest, m_transcriptPending;
     // state.json as pollShell() last read it, so an unchanged file is not read again.
-    bool m_stateSeen = false; ino_t m_stateInode = 0; off_t m_stateSize = 0; timespec m_stateMtime{};
+    bool m_stateSeen = false;
+#ifndef Q_OS_WIN
+    ino_t m_stateInode = 0; off_t m_stateSize = 0; timespec m_stateMtime{};
+#endif
     // The guest-events spool directory as pollGuestEvents() last listed it, for the same reason
     // (#057J): a directory whose mtime has not moved holds what it held, which is nothing.
     relay::runtimedirs::DirStamp m_guestSpool;
