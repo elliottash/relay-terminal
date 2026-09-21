@@ -26,6 +26,55 @@ State turnStarting() {
 class QueueSubmitTest : public QObject {
     Q_OBJECT
 private slots:
+    void tui_delivery_waits_through_polling_and_stale_idle_until_progress() {
+        GuestDelivery delivery;
+        QVERIFY(delivery.available(false));
+        delivery.sent();
+        for (int poll = 0; poll < 25; ++poll) {
+            delivery.observe(false); // delayed idle snapshot, not an acknowledgement
+            QVERIFY(!delivery.available(false));
+        }
+        delivery.observe(true);
+        QVERIFY(!delivery.available(true));
+        delivery.observe(false);
+        QVERIFY(delivery.available(false));
+        delivery.sent();
+        QVERIFY(!delivery.available(false)); // the next item gets its own reservation
+    }
+
+    void duplicate_completion_cannot_release_the_next_prompt() {
+        GuestDelivery delivery;
+        delivery.sent();
+        delivery.observe(true);
+        delivery.observe(false);
+        QVERIFY(delivery.available(false));
+        delivery.sent();
+        delivery.observe(false); // codex notify after rollout completion of previous turn
+        QVERIFY(!delivery.available(false));
+    }
+
+    void tui_departure_and_failed_send_do_not_leave_a_reservation() {
+        GuestDelivery delivery;
+        // A rejected write must not call sent(); the same entry can be retried.
+        QVERIFY(delivery.available(false));
+        delivery.sent();
+        delivery.reset(); // foreground guest changed or exited
+        QVERIFY(delivery.available(false));
+        delivery.sent();
+        QVERIFY(!delivery.available(false));
+    }
+
+    void queued_guest_launch_does_not_own_the_guest_prompt_slot() {
+        GuestDelivery delivery;
+        QVERIFY(queueResourceAvailable(true, true)); // launch still active
+        QVERIFY(delivery.available(false));
+        delivery.sent();
+        QVERIFY(queueResourceAvailable(true, true));
+        QVERIFY(!delivery.available(false)); // still serialize guest prompts
+        QVERIFY(!queueResourceAvailable(false, true)); // shell/agent FIFO unchanged
+        QVERIFY(queueResourceAvailable(false, false));
+    }
+
     void an_idle_agent_starts_at_once() {
         QCOMPARE(decide(idle()), Decision::StartNow);
     }

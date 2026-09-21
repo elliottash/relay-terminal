@@ -27,4 +27,23 @@ struct State {
 
 Decision decide(const State &state);
 
+// TUI delivery has a gap between writing Return and receiving a busy hook. Do not
+// release that reservation on an idle snapshot: it may predate the submitted text.
+class GuestDelivery {
+public:
+    bool available(bool busy) const { return !busy && !m_pending; }
+    void sent() { m_pending = true; }
+    void observe(bool busy) {
+        if (busy) m_pending = false;
+    }
+    void reset() { m_pending = false; }
+private:
+    bool m_pending = false;
+};
+
+// A queued launch owns the shell until the TUI exits, not the guest's prompt slot.
+inline bool queueResourceAvailable(bool guestHead, bool activeEntry) {
+    return guestHead || !activeEntry;
+}
+
 }

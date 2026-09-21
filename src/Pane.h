@@ -2583,7 +2583,7 @@ private:
                 m_guestSession = thread;
                 sendProgramState();
             }
-            setGuestBusy(data.value(QStringLiteral("busy")).toBool());
+            if (m_guest.isEmpty() || guest == m_guest) setGuestBusy(data.value(QStringLiteral("busy")).toBool());
         } else if (name == QStringLiteral("hook")) {
             handleGuestHook(sequence, guest, data.value(QStringLiteral("name")).toString(),
                             data.value(QStringLiteral("payload")).toObject());
@@ -2603,6 +2603,7 @@ private:
     }
 
     void setGuestBusy(bool busy) {
+        m_guestDelivery.observe(busy);
         if (busy == m_guestBusy) return;
         m_guestBusy = busy;
         updateGuestChip();
@@ -2643,11 +2644,11 @@ private:
             const QString said = payload.value(QStringLiteral("last-assistant-message")).toString().simplified();
             notify(guestName(guest),
                    said.isEmpty() ? QStringLiteral("finished its turn.") : said.left(200));
-            setGuestBusy(false);
+            if (m_guest.isEmpty() || guest == m_guest) setGuestBusy(false);
         } else if (name == QStringLiteral("UserPromptSubmit") || name == QStringLiteral("PreToolUse")) {
-            setGuestBusy(true);   // a guest turn has begun; Stop ends it
+            if (m_guest.isEmpty() || guest == m_guest) setGuestBusy(true);   // a guest turn has begun; Stop ends it
         } else if (name == QStringLiteral("Stop")) {
-            setGuestBusy(false);
+            if (m_guest.isEmpty() || guest == m_guest) setGuestBusy(false);
         }
     }
 
@@ -2828,6 +2829,7 @@ private:
         m_guestModel.clear();
         m_guestContextPct = -1;
         m_guestBusy = false;
+        m_guestDelivery.reset();
         clearGuestQuestions();
         updateGuestChip();
     }
@@ -14709,11 +14711,12 @@ private:
     // Enter (otherwise Claude/Codex consumes Enter as menu navigation).
     bool typeIntoGuest(const QString &guest, const QString &text) {
         if (text.trimmed().isEmpty()) return false;    // nothing to type; submitGuest sends the Return
-        if (!m_backend || guest != m_guest) {
+        if (!m_backend || !m_backend->isRunning() || guest != m_guest) {
             status(QStringLiteral("Guest input was not sent: %1 is no longer in this pane.")
                        .arg(guestName(guest)));
             return false;
         }
+        m_guestDelivery.sent();   // reserve before writing; hooks arrive asynchronously
         m_backend->sendInput(QByteArrayLiteral("\x15"));   // Ctrl+U: clear the guest's current input line
         QString body = text;
         // `!` enters the TUI's shell mode only as a keystroke on an empty line (26.8): pasted, it
@@ -14747,9 +14750,8 @@ private:
             if (m_backend) m_backend->sendInput(QByteArrayLiteral("\r"));
             return;
         }
-        if (m_entries.isEmpty() && !m_activeValid && !m_guestBusy) {
-            typeIntoGuest(m_guest, text);
-            return;
+        if (m_entries.isEmpty() && guestInFront() && m_guestDelivery.available(m_guestBusy)) {
+            if (typeIntoGuest(m_guest, text)) return;
         }
         QueueEntry entry;
         entry.guest = m_guest;
@@ -14822,13 +14824,14 @@ private:
         if (fromQueue) { m_active = entry; m_activeValid = true; m_activeRequest = requestId; }
     }
 
-    // Start the head of the queue when its resource is free and nothing from the queue is running.
+    // Start the head when its resource is free. Guest prompts do not need the launch command to exit.
     void pumpQueue() {
-        if (queueBlocked() || m_activeValid || m_entries.isEmpty()) return;
+        if (queueBlocked() || m_entries.isEmpty()) return;
         const QueueEntry head = m_entries.first();
+        if (!relay::queuesubmit::queueResourceAvailable(!head.guest.isEmpty(), m_activeValid)) return;
         const quint64 selected = selectedEntryId();
         if (!head.guest.isEmpty()) {
-            if (m_guestBusy || head.guest != m_guest) return;
+            if (!guestInFront() || !m_guestDelivery.available(m_guestBusy) || head.guest != m_guest) return;
             m_entries.removeFirst();
             if (!typeIntoGuest(head.guest, head.text)) m_entries.prepend(head);
         } else if (head.agent) {
@@ -18148,6 +18151,7 @@ private:
     QString m_guestModel;
     QList<GuestQuestion> m_guestQuestions;   // pending, oldest first; the front one is on screen
     int m_guestContextPct = -1;   // the guest's context window share in use; -1 when unknown
+    relay::queuesubmit::GuestDelivery m_guestDelivery;
     bool m_guestBusy = false;
     QStringList m_guestSlashCommands;  // slash event catalog; empty until its static scan returns
     QProcess *m_guestTail = nullptr;    // relay_core.guest_codex tail, while a codex is in front
