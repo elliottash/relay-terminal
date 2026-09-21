@@ -134,3 +134,38 @@ Group 8 is now running in two parallel sessions: `panetalk` (cross-pane send and
 of the `app_open` targets, naming panes and tabs) and `helperread` (the helper reading the pane it
 is helping). Group 4 is NOT started: the owner asked to be told the risk before it goes ahead and
 has not yet answered.
+
+<!-- relay:entry 20260920T215500Z-hr author=agent kind=progress pane=terminal -->
+**Group 8's last bullet landed** — `c33df71b` — and the bullet itself was partly wrong when I wrote
+it, which is worth recording because it is the second time on this card that a "the agent cannot do
+X" claim turned out to be stale (see [[board-cards-go-stale]] in spirit: the review was measured
+against the catalog, but two of its statements were measured against the card trail instead).
+
+What was already true before the change: since #AGNT, `ActivityTools.attach` runs for every agent
+(`backend/worker.py:384`), so a tab's helper already had `session_info` and `activity` — about
+itself. And `app_panes` from `2e51e3b6` already answered "which panes exist, what each is doing,
+whether it is busy", and a console gets the `app` group undeferred
+(`Agent._deferred_groups()` returns `()` for `tool_scope == "console"`), so no round trip.
+
+What was genuinely missing: the conversation-level read for a **named** pane. Asked about a pane, a
+helper called `session_info`/`activity` and got *its own console session* back — a wrong answer
+that reads like a right one. Both tools now take a `pane`, resolved through `app_panes` so there is
+one list of ids and not two that can disagree. A pane that has gone answers `unknown_pane` naming
+the live ids. With no `pane` both answer byte for byte as before and make no round trip.
+
+The narrow answer on privacy, which I agree with: it returns the window's row plus `busy`, and
+**not** that pane's turns, context or token count. Those live in that pane's own worker and nothing
+relays them between workers, so the alternative is guessing — and a pane's conversation is the
+person's, not something a helper on the next pane should read. #FEJQ's decision is untouched: it
+was about *whose helper sits on the Info and Activity panes*, not about whether an agent may look
+at a pane that is not its own.
+
+Two things found on the way:
+
+- `app_tools.prompt_section()` names `app_panes` only in the writes-enabled branch, so with the
+  Options › Agent toggle off the prompt never mentions a tool that is answered regardless (§30.4).
+  That file is held by the `panetalk` session; it has been told, with the reason it matters more
+  after its own change (`app_panes` is where the id its send/pre-fill commands take comes from).
+- `tests/test_system_prompt.py::test_the_board_policy_block_stays_tiered` fails on `main` — 3,893
+  bytes against a 3,072 budget. Verified pre-existing on a clean `git archive` export of
+  `c33df71b^`, and **already tracked on #Z4HR** with the same measurement, so no card was filed.

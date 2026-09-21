@@ -8,7 +8,7 @@ waiting_on: owner
 rank: m
 created: '2026-09-20'
 source: 'owner report, 2026-09-20, in the terminal pane after #FEJQ decision 2 was amended'
-links: {plans: [], commits: [ab9e2ab7, 1a2459ed, c375a86e, 2e51e3b6, cb33a900], evidence: [], related: [FEJQ, H6VQ, GMCF], github: null}
+links: {plans: [], commits: [ab9e2ab7, 1a2459ed, c375a86e, 2e51e3b6, cb33a900, c33df71b], evidence: [], related: [FEJQ, H6VQ, GMCF], github: null}
 ---
 # What an agent still cannot do in Relay, read off the catalog rather than remembered
 
@@ -222,9 +222,15 @@ mean "may change things", which is what it says.
   no expression. Renaming is not an action either: `/rename` and `/rename-tab` are slash commands
   typed into a composer, and no agent can type into a composer, so "call this pane «deploy»" cannot
   be asked of one.
-- **The helper cannot read the pane it is helping.** It gets the options and actions catalogs and
-  the session index; `session_info` and `activity` are the *pane* agent's tools (#FEJQ: "Info and
-  Activity get no helper of their own").
+- ~~**The helper cannot read the pane it is helping.**~~ **Partly wrong when written, and now
+  done** (`c33df71b`). Two corrections: since #AGNT, `ActivityTools.attach` runs for *every* agent,
+  so the helper already had `session_info`/`activity` — about itself; and `app_panes` (`2e51e3b6`)
+  already answered "which panes exist, what each is doing, whether it is busy", undeferred for a
+  console. What was genuinely missing was the read for a *named* pane: a helper asked about a pane
+  got its own console session back, which is a wrong answer that reads like a right one. Both tools
+  now take a `pane`, resolved through `app_panes`, answering the window's row and explicitly **not**
+  that pane's turns, context or tokens — those live in the pane's own worker, nothing relays them,
+  and a pane's conversation is the person's.
 
 ## Planning notes
 
