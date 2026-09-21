@@ -278,7 +278,7 @@ private:
         // a live one's and remove it if we are killed rather than quit (#9JYK).
         relay::runtimedirs::markOwned(m_stateDir);
         const QStringList arguments{
-            QStringLiteral("-u"), QStringLiteral("-m"), QStringLiteral("relay_core.guest_bridge"),
+            QStringLiteral("-X"), QStringLiteral("utf8"), QStringLiteral("-u"), QStringLiteral("-m"), QStringLiteral("relay_core.guest_bridge"),
             QStringLiteral("serve"), QStringLiteral("--state-dir"), m_stateDir,
             QStringLiteral("--relay-version"), QString::fromLatin1(RELAY_VERSION)};
         QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
@@ -288,8 +288,8 @@ private:
         // (26.5) and `remote/` sits beside `backend/` in the tree and in the install.
         const QString existing = environment.value(QStringLiteral("PYTHONPATH"));
         environment.insert(QStringLiteral("PYTHONPATH"),
-                           m_data + QStringLiteral("/backend") + QLatin1Char(':') + m_data
-                               + (existing.isEmpty() ? QString() : QLatin1Char(':') + existing));
+                           m_data + QStringLiteral("/backend") + QDir::listSeparator() + m_data
+                               + (existing.isEmpty() ? QString() : QDir::listSeparator() + existing));
         environment.insert(QStringLiteral("PYTHONUNBUFFERED"), QStringLiteral("1"));
         m_process.setProcessEnvironment(environment);
         m_process.setProgram(interpreter);

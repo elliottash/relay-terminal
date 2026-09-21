@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "RemotePane.h"
+#include "AppPaths.h"
 
 #include "CopyOnSelect.h"
 #include "Hints.h"
@@ -2043,9 +2044,10 @@ bool RemoteViewer::ensure(QString *error)
             });
     QStringList arguments = script.isEmpty() ? QStringList{QStringLiteral("-m"), QStringLiteral("remote.viewer")} : QStringList{script};
     if (m_guest) arguments << QStringLiteral("--guest");
-    m_process->start(QStringLiteral("python3"), arguments);
+    arguments = QStringList{QStringLiteral("-X"), QStringLiteral("utf8"), QStringLiteral("-u")} + arguments;
+    m_process->start(relayPython(), arguments);
     if (!m_process->waitForStarted(5000)) {
-        if (error) *error = QStringLiteral("python3 could not start the remote viewer.");
+        if (error) *error = QStringLiteral("Python could not start the remote viewer.");
         m_process->deleteLater();
         m_process = nullptr;
         return false;

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "RemoteShare.h"
+#include "AppPaths.h"
 #include "CopyOnSelect.h"
 
 #include "Theme.h"
@@ -176,10 +177,11 @@ bool RemoteShare::ensureSidecar(QString *error)
                 emit startedChanged();
                 emit sharingChanged();
             });
-    m_process->start(QStringLiteral("python3"),
-                     {QStringLiteral("-m"), QStringLiteral("remote.gui_host")});
+    m_process->start(relayPython(),
+                     {QStringLiteral("-X"), QStringLiteral("utf8"), QStringLiteral("-u"),
+                      QStringLiteral("-m"), QStringLiteral("remote.gui_host")});
     if (!m_process->waitForStarted(5000)) {
-        if (error) *error = QStringLiteral("python3 could not start the remote sidecar.");
+        if (error) *error = QStringLiteral("Python could not start the remote sidecar.");
         m_process->deleteLater();
         m_process = nullptr;
         return false;

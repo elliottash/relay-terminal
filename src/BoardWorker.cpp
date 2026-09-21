@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "BoardWorker.h"
+#include "AppPaths.h"
 
 #include <QJsonDocument>
 #include <QProcessEnvironment>
@@ -114,8 +115,8 @@ void BoardWorker::start(const QJsonObject &configure)
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("RELAY_PANE_ID"), QStringLiteral("switchboard"));
     m_process.setProcessEnvironment(environment);
-    m_process.setProgram(m_python);
-    m_process.setArguments({QStringLiteral("-S"), QStringLiteral("-u"),
+    m_process.setProgram(m_python.isEmpty() ? relayPython() : m_python);
+    m_process.setArguments({QStringLiteral("-X"), QStringLiteral("utf8"), QStringLiteral("-S"), QStringLiteral("-u"),
                             m_data + QStringLiteral("/backend/worker.py")});
     m_process.start();
     // `configure` goes out when the worker answers `ready`, so it never races the handshake.
