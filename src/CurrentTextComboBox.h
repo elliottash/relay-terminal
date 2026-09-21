@@ -87,6 +87,10 @@ public:
     // Left / Right on a row: see relay::FilterPopup::onExpandKey. The owner answers by calling
     // `replaceRows` and returning true.
     std::function<bool(const QString &group, int delta)> onExpandKey;
+    // The rows a typed filter searches, when they are wider than the ones the list dropped open
+    // with: see relay::FilterPopup::onQueryRows (the model box searches every available model,
+    // card #MDL1, design 5.7). Unset — every other box — and the filter narrows what is there.
+    std::function<QList<relay::FilterRow>(const QString &query)> onQueryRows;
     // The open list's rows again, from inside `onExpandKey`. The popup keeps the filter line and
     // puts the highlight back on the row it was on.
     void replaceRows(const QList<relay::FilterRow> &rows, int current) {
@@ -166,6 +170,9 @@ private:
         };
         m_popup->onExpandKey = [this](const QString &group, int delta) {
             return onExpandKey ? onExpandKey(group, delta) : false;
+        };
+        m_popup->onQueryRows = [this](const QString &query) {
+            return onQueryRows ? onQueryRows(query) : QList<relay::FilterRow>();
         };
         m_popup->onCancelled = [this] { restoreFocus(); };
         m_popup->onChordKey = [this](QKeyEvent *key) {

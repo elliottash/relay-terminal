@@ -501,6 +501,75 @@ private slots:
         QCOMPARE(modelrows::resolve(catalog, QStringLiteral("kimi-k3")), QStringLiteral("kimi-code|kimi-k3"));
         QVERIFY(modelrows::resolve(catalog, QStringLiteral("nothing-like-this")).isEmpty());
         QVERIFY(modelrows::resolve(catalog, QString()).isEmpty());
+        // A model taken out of step 2 is out of the lists and the box, not forbidden: typing its
+        // name is asking for that model (card #MDL1, design 5.7).
+        curation::setAvailable(QStringLiteral("glm-coding|glm-5.3-flash"), false, catalog);
+        QCOMPARE(modelrows::resolve(catalog, QStringLiteral("glm-5.3-flash")),
+                 QStringLiteral("glm-coding|glm-5.3-flash"));
+        curation::resetAvailable();
+    }
+
+    // ----- the typed filter reaches every available model (owner, 2026-09-21; design 5.7) ------
+    // "the text filter isnt working -- its supposed to show all available models, not just the
+    // ones selected for the box picker."
+
+    void theFilteredBoxOpensEveryClassAndAddsOtherModels()
+    {
+        // At rest main shows two of its three rows: the cutoff is step 4.
+        const modelrows::Box rest = modelrows::box(paneContext());
+        QVERIFY(!dataOf(rest.rows).contains(QStringLiteral("pick:main|openai|gpt-6-astra")));
+        const modelrows::Box wide = modelrows::filtered(paneContext());
+        // Every class whole: main's third row is there to be typed at.
+        QVERIFY(dataOf(wide.rows).contains(QStringLiteral("pick:main|openai|gpt-6-astra")));
+        // Every available model of this catalog is in one of the lists, so there is nothing left
+        // for `other models` and the section is not drawn: an empty header is a promise of
+        // nothing, here as in `box()`.
+        QVERIFY2(modelrows::indexOf(wide.rows, QStringLiteral("class:") + modelrows::otherGroup()) < 0,
+                 qPrintable(shapeOf(wide.rows).join(QLatin1Char('|'))));
+        // The highlight still lands on this pane's own model, wherever the new rows pushed it.
+        QCOMPARE(wide.rows.at(wide.current).data, QStringLiteral("pick:main|kimi-code|kimi-k3"));
+    }
+
+    // A model that is available (step 2) but in no list is what `other models` is for, and Enter
+    // on it is a pick of this pane's own model: `pick:main|<key>`, main mode.
+    void anAvailableModelInNoListComesUnderOtherModels()
+    {
+        // claude-opus-5 has no key: not usable, so not available, so never in the box.
+        modelrows::Context context = paneContext();
+        curation::addCustom(QStringLiteral("kimi-code"), QStringLiteral("kimi-k2-turbo"), context.catalog);
+        context.catalog = catalogFrom(presets());
+        const modelrows::Box wide = modelrows::filtered(context);
+        const int head = modelrows::indexOf(wide.rows, QStringLiteral("class:") + modelrows::otherGroup());
+        QVERIFY2(head > 0, qPrintable(shapeOf(wide.rows).join(QLatin1Char('|'))));
+        QCOMPARE(wide.rows.at(head).text, QStringLiteral("other models"));
+        QVERIFY(wide.rows.at(head).header);
+        QVERIFY(!wide.rows.at(head).enabled);
+        // The section sits with the models, above the action rows, never below them.
+        QVERIFY(head < modelrows::indexOf(wide.rows, QStringLiteral("gear:picker")));
+        const int at = modelrows::indexOf(wide.rows, QStringLiteral("pick:main|kimi-code|kimi-k2-turbo"));
+        QVERIFY2(at > head, qPrintable(shapeOf(wide.rows).join(QLatin1Char('|'))));
+        QCOMPARE(wide.rows.at(at).group, modelrows::otherGroup());
+        QVERIFY(wide.rows.at(at).enabled);
+        QCOMPARE(wide.rows.at(at).trailing, QStringLiteral("kimi"));
+        // Right does not expand it: it is not a class, and it is already whole.
+        QVERIFY(!modelrows::expandable(context, modelrows::otherGroup()));
+        // Un-tick it and it leaves the filter too — step 2 is what the filter searches.
+        curation::setAvailable(QStringLiteral("kimi-code|kimi-k2-turbo"), false, context.catalog);
+        QVERIFY(modelrows::indexOf(modelrows::filtered(context).rows,
+                                   QStringLiteral("pick:main|kimi-code|kimi-k2-turbo")) < 0);
+        curation::resetAvailable();
+        curation::removeCustom(QStringLiteral("kimi-code|kimi-k2-turbo"));
+    }
+
+    // With nothing typed the box is untouched: the filtered list is only ever asked for while
+    // there is a query (relay::FilterPopup::onQueryRows).
+    void theBoxAtRestIsUnchanged()
+    {
+        QCOMPARE(shapeOf(modelrows::box(paneContext()).rows),
+                 QStringList({QStringLiteral("high"), QStringLiteral("  gpt-6-astra"),
+                              QStringLiteral("main"), QStringLiteral("  kimi-k3"), QStringLiteral("  glm-5.3"),
+                              QStringLiteral("flash"), QStringLiteral("  glm-5.3-flash"),
+                              QStringLiteral("  more models…")}));
     }
 };
 

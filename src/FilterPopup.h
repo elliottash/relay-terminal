@@ -76,6 +76,8 @@ public:
     // while the list is open (a class expanded, see `onExpandKey`) it keeps the filter line and
     // re-applies it — nothing is asked of the caller mid-keystroke and nothing is sent until Enter.
     void setRows(const QList<FilterRow> &rows, int current);
+    // What is drawn now: the rows `setRows` was given, or — while something is typed and
+    // `onQueryRows` answered — that wider list. `onPicked`'s index is into this.
     const QList<FilterRow> &rows() const { return m_rows; }
 
     // ----- Left / Right: the sections expand in place (card #MDL1, design 5.3) --------------
@@ -86,6 +88,16 @@ public:
     // the row it was on, found by its `data`. Unset, or answering false, and Left and Right stay
     // the filter line's own caret keys, which is what the Alt+E level box wants.
     std::function<bool(const QString &group, int delta)> onExpandKey;
+
+    // ----- the rows a typed filter searches (card #MDL1, design 5.7) ------------------------
+    // The owner, 2026-09-21: "the text filter isnt working -- its supposed to show all available
+    // models, not just the ones selected for the box picker." The model box is given its classes
+    // down to their cutoff, which is what it *shows at rest*; what the filter searches is a wider
+    // list, and only the caller knows it. So the popup asks, on every keystroke, with the query as
+    // it stands, and draws what comes back in place of the rows it was given — filtered by exactly
+    // the same rule, so the caller hands over rows and not matches. An empty answer, or no hook at
+    // all (the Alt+E level box, and every other list), means "the rows I already have".
+    std::function<QList<FilterRow>(const QString &query)> onQueryRows;
 
     // Drop open under `anchor` (above it when there is no room below), as wide as the widest row
     // and no wider than the screen, with `anchor`'s font. Clears whatever was typed last time.
@@ -137,7 +149,8 @@ private:
 
     QPointer<QWidget> m_anchor;
     bool m_above = false;              // the list opened upwards, so it shrinks from the top
-    QList<FilterRow> m_rows;
+    QList<FilterRow> m_base;           // what `setRows` was given: the list with nothing typed
+    QList<FilterRow> m_rows;           // what is drawn: `m_base`, or `onQueryRows`'s answer
     int m_current = -1;                // index into m_rows
     QLineEdit *m_edit = nullptr;
     QListWidget *m_list = nullptr;

@@ -225,6 +225,7 @@ bool FilterPopup::groupHasMatch(const QString &group, const QString &query) cons
 
 void FilterPopup::setRows(const QList<FilterRow> &rows, int current)
 {
+    m_base = rows;
     m_rows = rows;
     m_current = current >= 0 && current < rows.size() && !rows.at(current).separator && rows.at(current).enabled
         ? current
@@ -272,6 +273,27 @@ void FilterPopup::rebuild(int preferRow)
 {
     const QString query = m_edit->text();
     const bool filtering = !query.trimmed().isEmpty();
+    // What the filter searches, when the caller says it is wider than what the list shows at rest
+    // (the model box: every available model, not only the classes' top few — card #MDL1, design
+    // 5.7). The row the highlight is on is remembered by its `data` rather than its index, because
+    // the two lists are different lengths and the wider one moves everything below its first
+    // insertion.
+    {
+        const QString wasPrefer = preferRow >= 0 && preferRow < m_rows.size() ? m_rows.at(preferRow).data : QString();
+        const QString wasCurrent = m_current >= 0 && m_current < m_rows.size() ? m_rows.at(m_current).data : QString();
+        QList<FilterRow> wanted = m_base;
+        if (filtering && onQueryRows)
+            if (QList<FilterRow> wider = onQueryRows(query.trimmed()); !wider.isEmpty()) wanted = wider;
+        m_rows = wanted;
+        const auto rowWith = [this](const QString &data) -> int {
+            if (data.isEmpty()) return -1;
+            for (int i = 0; i < m_rows.size(); ++i)
+                if (m_rows.at(i).data == data && m_rows.at(i).enabled && !m_rows.at(i).separator) return i;
+            return -1;
+        };
+        preferRow = preferRow >= 0 ? rowWith(wasPrefer) : -1;
+        m_current = m_current >= 0 ? rowWith(wasCurrent) : -1;
+    }
     // Whether this list has sections at all, decided over *every* row rather than the ones the
     // filter left: the models must not shift sideways as you type. A list with no headers — the
     // Alt+E level box, and every other box — gets no indent and is drawn exactly as before.

@@ -166,6 +166,23 @@ struct Box {
 
 // The box for this pane, as design 5.3 draws it.
 Box box(const Context &context);
+// The box for this pane **while something is typed** (owner, 2026-09-21: "the text filter isnt
+// working -- its supposed to show all available models, not just the ones selected for the box
+// picker"; card #MDL1, design 5.7). Two things are wider than `box()`:
+//
+//   * every class whole, not down to its cutoff. The cutoff is what the box shows at rest — step
+//     4 of the four — and a model you have ranked fifth in main is still a model you may type.
+//   * one more section at the end of the classes, `other models`, holding every **available**
+//     model (step 2, `models::shown`) that no class lists at all, folded one row per model as the
+//     classes are. Its rows are `pick:main|<key>`: a model in no list is the pane's own model, on
+//     its main mode, and the level comes from the Levels rule as it stands in the lists.
+//
+// Nothing is filtered here — the caller's popup does that, with the same rule it applies to every
+// other row, so this hands over rows and not matches.
+Box filtered(const Context &context);
+// The group id `other models`' header and rows carry. It is not a class: it has no list, no
+// cutoff and no switch, Right does not expand it, and it exists only while the filter has text.
+QString otherGroup();
 // Its rows alone — what the phone's menu and the tests read.
 QList<Row> build(const Context &context);
 

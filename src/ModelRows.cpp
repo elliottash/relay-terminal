@@ -279,6 +279,9 @@ QList<models::Group> paneRowOnly(const QList<models::Group> &live, const QString
 
 bool expandable(const Context &context, const QString &klass)
 {
+    // `other models` is not a class: it has no list, no cutoff and no switch, and it is already
+    // whole (`filtered`). Right on one of its rows does nothing rather than redrawing the box.
+    if (klass == otherGroup()) return false;
     if (!models::curation::boxShown(klass)) return false;
     const qint64 now = context.now > 0 ? context.now : QDateTime::currentSecsSinceEpoch();
     const QList<models::Group> live = liveGroupsOf(context, klass, now);
@@ -367,6 +370,61 @@ Box box(const Context &context)
     return out;
 }
 
+QString otherGroup() { return QStringLiteral("other"); }
+
+Box filtered(const Context &context)
+{
+    // Every class whole. The cutoff says what the box draws at rest (step 4); it was never meant
+    // to say what you may *type* — the owner's report is exactly that ("its supposed to show all
+    // available models, not just the ones selected for the box picker").
+    Context wide = context;
+    for (const QString &klass : wide.classes) wide.expanded.insert(klass);
+    Box out = box(wide);
+    // Where the classes end: the guest rows and "more models…" carry no group, and `other models`
+    // belongs with the models, above them.
+    int at = out.rows.size();
+    for (int i = 0; i < out.rows.size(); ++i)
+        if (out.rows.at(i).group.isEmpty()) { at = i; break; }
+    // Every name the classes already offer. By name, not by key: a model served by three providers
+    // is one row (rule 2), and offering it again under `other models` because the class row picked
+    // a different provider would be the same model twice.
+    QSet<QString> listed;
+    for (int i = 0; i < at; ++i)
+        if (!out.rows.at(i).header) listed.insert(out.rows.at(i).text);
+    const qint64 now = context.now > 0 ? context.now : QDateTime::currentSecsSinceEpoch();
+    QList<Row> others;
+    // `models::shown` is step 2: every **available** usable entry, in rank order. A row whose every
+    // provider is spent is dropped, exactly as it is inside a class — the box is the answer to
+    // "what can I run right now", filter or no filter.
+    for (const models::Group &group : models::grouped(context.catalog, models::shown(context.catalog), now)) {
+        const models::Entry preferred = group.preferred(context.catalog, now);
+        const QString name = group.name.isEmpty() ? preferred.model : group.name;
+        if (listed.contains(name) || group.spent(context.catalog, now)) continue;
+        Row row;
+        row.text = name;
+        // Main, because a model in no list is not in a class: it becomes this pane's own model.
+        row.data = QStringLiteral("pick:main|%1").arg(preferred.key);
+        row.trailing = viaText(group, context.catalog, now);
+        row.tooltip = viaTooltip(group, context.catalog, now);
+        row.group = otherGroup();
+        row.enabled = true;
+        others << row;
+    }
+    if (others.isEmpty()) return out;
+    Row head;
+    head.text = QStringLiteral("other models");
+    head.data = QStringLiteral("class:") + otherGroup();
+    head.group = otherGroup();
+    head.header = true;
+    head.enabled = false;
+    head.tooltip = QStringLiteral("every model you have made available that none of your lists names");
+    out.rows.insert(at, head);
+    for (int i = 0; i < others.size(); ++i) out.rows.insert(at + 1 + i, others.at(i));
+    // The highlighted row moved down by however many rows went in above it.
+    if (out.current >= at) out.current += others.size() + 1;
+    return out;
+}
+
 QList<Row> build(const Context &context)
 {
     return box(context).rows;
@@ -414,6 +472,9 @@ QString resolve(const models::Catalog &catalog, const QString &words)
     for (const auto &entry : rows) if (exact(entry)) return entry.key;
     for (const auto &entry : catalog.entries) if (entry.usable && exact(entry)) return entry.key;
     for (const auto &entry : rows) if (models::matches(entry, query)) return entry.key;
+    // Available first (step 2), then everything usable: a model you un-ticked is un-ticked in the
+    // lists and the box, not forbidden — typing its name is asking for that model (card #MDL1).
+    for (const auto &entry : models::allUsable(catalog)) if (models::matches(entry, query)) return entry.key;
     return QString();
 }
 

@@ -67,6 +67,12 @@ QList<FilterRow> classRows(bool expandMain = false)
 // Where kimi-k3 sits in that list, collapsed: the row the box opens highlighted.
 constexpr int kMainModelRow = 3;
 
+bool hasData(const QList<FilterRow> &rows, const QString &data)
+{
+    for (const FilterRow &row : rows) if (row.data == data) return true;
+    return false;
+}
+
 }  // namespace
 
 class FilterPopupTest : public QObject {
@@ -554,6 +560,71 @@ private slots:
     //     one of them under a header, so a glyph's own shape (an "f" leans right at the top)
     //     stays out of the measurement. The header itself is drawn in the muted ink and so is not
     //     counted: what is asserted is where the *models* land.
+    // ----- onQueryRows: the filter searches a wider list than the box shows ------------------
+    // Owner, 2026-09-21: "the text filter isnt working -- its supposed to show all available
+    // models, not just the ones selected for the box picker" (card #MDL1, design 5.7). The list
+    // drops open with the classes down to their cutoff; the moment something is typed the caller
+    // hands over the wider list, and the popup filters it exactly as it filters its own rows.
+    void aTypedFilterSearchesTheWiderListTheCallerHandsBack()
+    {
+        FilterPopup popup;
+        popup.setRows(classRows(), kMainModelRow);
+        int asked = 0;
+        QString sawQuery;
+        popup.onQueryRows = [&](const QString &query) {
+            ++asked;
+            sawQuery = query;
+            QList<FilterRow> wider = classRows(true);   // main opened to its whole list
+            wider.insert(wider.size() - 2, FilterRow{QStringLiteral("other models"), QStringLiteral("class:other"),
+                                                     {}, false, false, {}, QStringLiteral("other"), true});
+            wider.insert(wider.size() - 2, FilterRow{QStringLiteral("deepseek-v4.1-flash"),
+                                                     QStringLiteral("pick:main|openrouter|deepseek/deepseek-v4.1-flash"),
+                                                     {}, false, true, QStringLiteral("openrouter"),
+                                                     QStringLiteral("other"), false});
+            return wider;
+        };
+        // Nothing typed: nothing is asked and the list is the one it was given.
+        QCOMPARE(asked, 0);
+        QCOMPARE(popup.rows().size(), classRows().size());
+        QCOMPARE(popup.rows().at(popup.currentRow()).data, QStringLiteral("pick:main|kimi-k3"));
+
+        popup.setFilterText(QStringLiteral("deepseek"));
+        QVERIFY(asked > 0);
+        QCOMPARE(sawQuery, QStringLiteral("deepseek"));
+        // A model that was in none of the box's own rows is reachable — it is the one selectable
+        // row the filter left — and its header survives with it (a header is never selectable, so
+        // `visibleCount` does not count it).
+        QCOMPARE(popup.visibleCount(), 1);
+        for (int i = 0; i < popup.rows().size(); ++i)
+            if (popup.rows().at(i).data == QStringLiteral("class:other")) QVERIFY(popup.rowShown(i));
+        const int at = popup.currentRow();
+        QVERIFY(at >= 0);
+        QCOMPARE(popup.rows().at(at).data, QStringLiteral("pick:main|openrouter|deepseek/deepseek-v4.1-flash"));
+        QCOMPARE(popup.activate(), at);   // Enter answers with an index into rows(), which is the wider list
+
+        // A model of a class that the cutoff had left out is reachable too.
+        FilterPopup second;
+        second.setRows(classRows(), kMainModelRow);
+        second.onQueryRows = popup.onQueryRows;
+        QVERIFY(!hasData(second.rows(), QStringLiteral("pick:main|claude-opus-5")));
+        second.setFilterText(QStringLiteral("opus"));
+        QVERIFY(hasData(second.rows(), QStringLiteral("pick:main|claude-opus-5")));
+        // …and clearing the filter puts the box back exactly as it was.
+        second.setFilterText(QString());
+        QCOMPARE(second.rows().size(), classRows().size());
+        QVERIFY(!hasData(second.rows(), QStringLiteral("pick:main|claude-opus-5")));
+    }
+
+    // No hook — the Alt+E level box, and every other list — and typing narrows what is there.
+    void withNoHookTheFilterNarrowsTheRowsItWasGiven()
+    {
+        FilterPopup popup;
+        popup.setRows(classRows(), kMainModelRow);
+        popup.setFilterText(QStringLiteral("opus"));
+        QCOMPARE(popup.rows().size(), classRows().size());
+        QCOMPARE(popup.visibleCount(), 0);
+    }
+
     void theModelsAreIndentedUnderTheirClassHeader()
     {
         theme::SurfaceRaised = QColor(0x24, 0x1c, 0x18);
