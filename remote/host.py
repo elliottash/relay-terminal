@@ -415,6 +415,7 @@ class Channel:
 
         if self.participant_id is not None:
             if not await self._guest_may(kind, message, request_id):
+                self._note_board_refusal(kind, message)
                 return
             try:
                 await self.host.handle(self, kind, message)
@@ -432,11 +433,34 @@ class Channel:
             if not wire.allows(capability, needed):
                 await self.send(wire.error("not_permitted",
                                            f"this device is paired for {capability}.", request_id))
+                self._note_board_refusal(kind, message)
                 return
         try:
             await self.host.handle(self, kind, message)
         except wire.WireError as error:
             await self.send(wire.error(error.code, error.message, request_id))
+
+    def _note_board_refusal(self, kind: str, message: dict) -> None:
+        """A `board_request` refused at the gate — a guest's, or a `view` / `agent` device's — is
+        in the audit log like the ones the Switchboard's own handler refuses (section 17.1).
+
+        Those two never reach `Host._on_board_request`, which is where `board_refused` was
+        written, so the one asker the owner most wants to hear about — somebody he let into a
+        pane trying the board — left no line at all (#SWPH's hosted drive, step 11). The type is a
+        name `board_state` knows or "unknown", and nothing else of the request is read. At most
+        one line a minute per channel: the wire's own limit lets 720 of these through, and an
+        audit log is not something a guest gets to fill.
+        """
+        if kind != "board_request":
+            return
+        now = time.monotonic()
+        if now - getattr(self, "_board_refusal_noted", -60.0) < 60.0:
+            return
+        self._board_refusal_noted = now
+        who = ({"participant": self.participant_id} if self.participant_id is not None
+               else {"device": self.device_id})
+        self.host.audit.record("board_refused", **who, code="not_permitted",
+                               type=board_state_mod.request_type(message.get("request")))
 
     async def _guest_may(self, kind: str, message: dict, request_id) -> bool:
         """The inbound gate for a participant (section 10.1). False means it was answered already.

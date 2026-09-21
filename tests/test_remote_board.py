@@ -611,6 +611,39 @@ class RequestPathTests(unittest.TestCase):
                 await owner.close()
         run(main())
 
+    def test_a_request_refused_at_the_gate_is_in_the_audit_log_without_its_text(self):
+        """A guest's, and a `view` device's: neither reaches the Switchboard's own handler, which
+        is where `board_refused` used to be written, so the hosted drive found no line for the
+        one asker the owner most wants to hear about. Once a minute per channel, not per try."""
+        async def main():
+            async with Harness() as harness:
+                lesser, record = await harness.device(wire.VIEW, name="view")
+                guest = await harness.guest(wire.EDITOR)
+                await guest.send({"t": "pane_focus", "pane": "p1"})
+                for _ in range(3):
+                    await lesser.send({"t": "board_request", "rid": 1, "request": {
+                        "type": "board_comment", "id": "K7Q2", "text": "the merger closes on Friday"}})
+                    await guest.send({"t": "board_request", "rid": 1, "request": {
+                        "type": "board_delete", "id": "K7Q2", "reason": "covering my tracks"}})
+                for client in (lesser, guest):
+                    with self.assertRaises(wire.WireError) as caught:
+                        await client.expect("board_event", timeout=5)
+                    self.assertEqual(caught.exception.code, "not_permitted")
+                await drain(lesser, 0.3)
+                await drain(guest, 0.3)
+                lines = [line for line in harness.audit_lines() if line["kind"] == "board_refused"]
+                self.assertEqual(sorted((l.get("type"), l.get("code"), l.get("device"),
+                                         bool(l.get("participant"))) for l in lines),
+                                 sorted([("board_comment", "not_permitted", record.device_id, False),
+                                         ("board_delete", "not_permitted", None, True)]))
+                written = json.dumps(lines)
+                for leak in ("merger", "covering", "K7Q2"):
+                    self.assertNotIn(leak, written, leak)
+                self.assertEqual(harness.requests(), [])
+                await lesser.close()
+                await guest.close()
+        run(main())
+
     def test_a_guest_is_refused_and_is_never_sent_an_event(self):
         async def main():
             async with Harness() as harness:

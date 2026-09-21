@@ -1736,7 +1736,11 @@ per-type ceiling (`LIMITS["board_request"]`, 720 a minute) sits above both.
 
 **Audit.** An accepted request records `board_request {device, type, card}`; a refused one records
 `board_refused {device, type, code}`, where `type` is a name this module knows or `"unknown"`.
-Never the text, the title, the reason or the query.
+Never the text, the title, the reason or the query. A request refused **at the gate** — a `view` or
+`agent` device's, or a guest's, neither of which reaches the Switchboard's handler — records the
+same line (`participant` in place of `device` for a guest, `code: "not_permitted"`), at most once a
+minute per channel: somebody let into a pane who tries the board is what the owner most wants the
+log to show, and the log is not a guest's to fill.
 
 ### 17.2 Hub ↔ GUI
 
