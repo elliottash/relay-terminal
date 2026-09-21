@@ -279,3 +279,57 @@ that unblocks them is step 3** (`AgentConsole` takes a `Context`; `Pane` supplie
 `TerminalContext`), which this session holds and which waits on step 2. The order in the plan —
 1b–1e before 3 — should be read the other way round: the context has to exist before the block
 can be cut, or the cut has to carry the context through the host.
+
+<!-- relay:entry 20260921T012110Z-8w author=agent kind=progress model=claude-opus-5 turn=agnt-worker/step-4 -->
+Step 4 landed: **the worker speaks one protocol.** A helper worker is `backend/worker.py`
+with a `context` block; `board_chat.PageAgent` and the four `board_chat*` messages are retired.
+
+Commits (oldest first):
+
+- `f0f9c6b7` — `relay_core/agent_context.py` + `tests/test_agent_context.py`: the `context` block
+  of `configure`, field for field with step 2's `relay::agent::ContextSpec`; the console briefs
+  and the helper-session file layout (#FEJQ's `3ddd2193`, untouched) move in with it.
+- `34ff0830` — the **named tool scope** (`Agent(tool_scope=…)` — `pane`/`console`/`card`) resolved
+  in one place, `ChatScope` → `ConsoleScope` with every fence down, the brief in the system prompt
+  (`set_agent_context`), and `Agent.set_readonly` for the survey's turn.
+- `bb1221a2` — `ask {surface, screen, readonly}`, `configure {context}` read by `worker.py`,
+  `queue_move {item, to}` and `queue_ack`; every event of a turn carries its `surface`.
+- `ece42d07` — `PageAgent` and `board_chat*` retire; the survey becomes a `readonly` turn of the
+  console's own conversation; card turns gain `agent_started`/`agent_finished` and
+  `surface: "card:<ID>"`; "say what you are doing" moves to `Agent`, for every agent; protocol
+  §19.18 and §30.7 rewritten and a new §33 written.
+- `ca4e5162` — the dead `turn_started` tag removed from its last two homes.
+
+What Steps 3, 5, 6 and 7 code against, verbatim:
+
+`configure {"context": {"name", "agent_role", "workspace", "persist": {"scope", "key"},
+"brief": {"key", "title", "screen"}, "scope", "shell", "routing"}}` — `name` is one of
+terminal|switchboard|card|options|actions|sessions and is required; `scope` is pane|console|card
+and defaults from the name; `routing` is auto|agent; `shell` is a bool; `persist.scope` is
+""|pane|helper and a scope without a key is refused. `configured` echoes the block back with the
+scope the worker settled on.
+
+`ask {"surface": string ≤64 one line, "screen": string cut at 2000, "readonly": bool}`. `surface`
+rides on `queued`, on every `queue_changed` row, on `agent_started`/`agent_finished` and on every
+event of the turn. `screen` reaches the model as an "On screen now:" line above the prompt and
+stays out of the queue preview and the request ledger. A pane sends none of the three and no
+event grows a field.
+
+Tool scope table — constraint vs fence, in §33.3. Kept: no board → no `board_*`; a guest harness
+cannot run Relay's tools (#GH5T stands untouched); a card's Plan turn writes only its own
+`## Plan` (19.20). Removed: the console's missing shell and file tools (owner decision 3),
+`session_info`/`activity` being pane-only, `track_requests`/`todo_tool`/`completion_check` forced
+off, and `_deferred_groups`' `helper` special case — which is now one line: only a pane defers.
+`board_sections` and `board_claim` stay off a console's list, but as constraints (a cleanup's
+preview; a terminal pane to claim for), not fences.
+
+Tests: `tests/test_agent_context.py` (new, 21), `tests/test_queue.py` (+8), `tests/test_board_chat.py`
+rewritten to 32 including an end-to-end NDJSON drive of `worker.py` as a console on a loopback
+stub, `tests/test_board_turns.py` (+2). 1,664 backend cases run green but for three failures that
+are already on main and not this work's: the two #8EJ4 ones in `test_board_protocol`, and
+`test_the_board_policy_block_stays_tiered`, which was failing at `fdb662d6` (#Z4HR) on a clean
+export before any of these commits.
+
+Left for the GUI steps: the current helper panels stop working until steps 5–7 land, by design —
+an old GUI sending `board_chat` now gets one sentence naming `ask`/`surface`/`context` rather
+than a traceback.
