@@ -2192,36 +2192,52 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   redraws the box, notifies `SettingsWatch` (the providers' status line), re-sends the chain when
   the exhausted set changed, and arms a single-shot timer for the nearest reset so the row comes
   back by itself. `applyMainDefault` still writes rank 1 itself as the new-pane default.
-- **The pane's model box is modes, then the models of the mode it is in** (`src/ModelRows.*`,
-  `Pane::refreshPickers`; card #MDL1 section 5.1, owner 2026-09-21: "first it just says high, main,
-  flash, with the first model in parens … then it lists the models for the mode you are in …
-  great, left/right changes mode"). It is a small stack of **pages**, one per mode — `high`,
-  `main`, `flash`, and `local` only where this machine serves a model; `lite` is not a pane mode —
-  and every page carries the same mode rows at the top with the marker (`•`) on a different one, so
-  Left and Right (`relay::FilterPopup::setPages` / `turnPage`) move only the marker and the list
-  below. A mode row's parentheses name what **this pane** would run in that mode: its own pick
-  (`Pane::m_modePick`) where it has one, else rank 1 of that tier's list, else what the worker's
-  role summary resolved — never a model guessed out of the whole catalog, so `local` with nothing
-  ranked says the endpoint the worker found. Below a separator are that mode's models in **list
-  order**, one row per model (`models::grouped`), with a right-hand "via" column naming the provider
-  the turn would go to and `+N` for the rest; a row whose every provider is spent or keyless is
-  greyed **in place** with the reason in its tooltip, never dropped. Then the Tier B guest rows
-  (26.9, on the main page only), "more models…" (`gear:picker`) and "⚙ customize…"
-  (`gear:modelOptions`).
-  Enter on a model row is `pick:<mode>|<key>`: on main the ordinary pick, on any other mode the
-  pane's role **and** its own model for that mode (`set_agent_role {preset, model, effort}`,
-  protocol 13.5) — the tier list is never rewritten, because it belongs to every other pane. Enter
-  on a mode row (`role:<role>`) switches the mode and keeps that mode's model, which `/high`,
-  `/flash`, `/local` and Alt+F/Alt+H do too. Escape leaves everything as it was, including which
-  page the box opens on next time: `CurrentTextComboBox::pageId` is the owner's, re-read from
-  `Pane::paneMode()` each time the list is drawn.
-  The collapsed chip is the model alone on main and `<model> · <mode>` on any other mode
-  (`modelrows::collapsedText` through `CurrentTextComboBox::setCollapsedText`, which is what that
-  class exists for); it hugs that text instead of `AdjustToContents`' widest-row box. A console's
-  main mode is its own main-tier worker role ("switchboard"), which is the one line that makes its
-  box the same list as a terminal pane's (`Pane::modeRoleOf`; owner: "those should be the same
-  systems"). The pane_state menu publishes the same rows and the same chip text
-  (`Pane::remoteState`), and a `pick:` token comes back through the same `modelBoxPicked`.
+- **The pane's model box is a header per class and its top-ranked models** (`src/ModelRows.*`,
+  `Pane::refreshPickers`; card #MDL1 design 5.3, the owner's own alternative to the mode rows and
+  the Left/Right paging that landed a few hours earlier the same day, confirmed with four rulings).
+  One section per class — `high`, `main`, `flash`, and `local` only where this machine serves a
+  model; `lite` is never a pane mode and is never in the box — each a **header row** that is a
+  label and nothing else: not selectable, never highlighted, stepped over by Up and Down ("the
+  class header rows are not selectable in the picker. thats redundant."). Under it, that class's
+  list in **list order**, one row per model (`models::grouped`), with a right-hand "via" column
+  naming the provider the turn would go to and `+N` for the rest, down to that class's **cutoff**
+  — two by default (`models::curation::boxCutoff`). A class switched off
+  (`curation::boxShown`), and one with nothing left to draw, is not drawn at all. Then the Tier B
+  guest rows (26.9) and "more models…" (`gear:picker`); "⚙ customize…" left the box, because the
+  dialog has the Options button (design 5.5).
+  **What is left out is the part to know.** "exhausted models dont show up" — a row whose every
+  provider is spent or keyless is **dropped** here, which is the opposite of what the dialog and
+  the tier lists do. A list is an order the user wrote down and the dialog shows it whole; the box
+  answers "what can I run right now". The one row that survives the cutoff whatever its rank is
+  **this pane's own model** for its class, because the box opens with it highlighted and the
+  highlight needs a home.
+  **Right** opens the highlighted row's class to its whole list and **Left** closes it
+  (`FilterPopup::onExpandKey` → `Pane::expandModelClass`, `modelrows::Context::expanded`); the
+  expansion is the pane's, lasts only while the box is open, and never reaches the settings.
+  Typing filters across every listed model of every class and a header stays exactly as long as its
+  own class still has a match (`FilterRow::group`, `FilterPopup::groupHasMatch`) — a header is
+  never matched on its own words. Enter on a model row is `pick:<class>|<key>`: on main the
+  ordinary pick, on any other class the pane's role **and** its own model for that class
+  (`set_agent_role {preset, model, effort}`, protocol 13.5) — the tier list is never rewritten,
+  because it belongs to every other pane. Escape leaves everything as it was.
+  The collapsed chip is **the model alone**, on every mode (owner: "no need to show the model class
+  in the pane header") — `modelrows::collapsedText` through `CurrentTextComboBox::setCollapsedText`,
+  which is what that class exists for; the mode is in the box's tooltip
+  (`modelrows::collapsedTooltip`). A console's main class is its own main-tier worker role
+  ("switchboard"), which is the one line that makes its box the same list as a terminal pane's
+  (`Pane::modeRoleOf`; owner: "those should be the same systems"). The pane_state menu publishes
+  the same rows and the same chip text (`Pane::remoteState`, headers left out and a row of another
+  class saying which), and a `pick:` token comes back through the same `modelBoxPicked`.
+- **The cutoff and the class switch are the dialog's, and they live with the lists.**
+  `models/box/<tier>` is the cutoff rank and `models/box_off/<tier>` the switch; an absent key
+  means "two, on". They are written through to the current profile exactly as `setTierList` is,
+  travel in an exported profile's `box` object, and are edited in Ctrl+Alt+M: every row of a class
+  tab has a "show in box" tick that behaves as a **cutoff** (ticking rank n ticks 1..n, unticking
+  n unticks n and everything below, unticking rank 1 switches the class off) and the tab has a
+  "show this class in the box" switch. Both call `onListsChanged`, so an open box redraws. The two
+  "fill the lists" buttons of Options › Models are offered in the dialog as **"fill from defaults"**
+  through `ModelPicker::Context::fillFromDefaults`, which `Pane::openModelPicker` points at
+  `Pane::fillTierListsFromDefaults` — one copy of that action for the page and the dialog both.
 - Difficulty-based routing between the Main and Flash agent is deliberately not implemented yet.
 
 ### Provider transport

@@ -97,7 +97,7 @@ that conflict.
 | Ctrl+Shift+A | Actions: everything you can do now, with its keys, in a list you can filter (again to close) |
 | Ctrl+Shift+O | Options: what persists, a tab per section (again to close; also Ctrl+, and the gear) |
 | Ctrl+Shift+S | Switchboard: this repository's cards, threads and plans (again to close it) |
-| Alt+M, Ctrl+Alt+M | Models: drop the pane's model box open (Left/Right change the mode, Up/Down the model, typing filters) / the dialog that picks *and* prioritizes them (`/model`) |
+| Alt+M, Ctrl+Alt+M | Models: drop the pane's model box open (a header per class and its top models; Up/Down the rows, Right opens a class to its whole list, typing filters) / the dialog that picks *and* prioritizes them (`/model`) |
 | Alt+F, Alt+H | This pane on the Flash model / the High model, and back to main (`/flash`, `/high`, `/main`) |
 | Alt+E | Reasoning: drop the pane's level box open (also Alt+. / Alt+, and `/effort`) |
 | Ctrl+Shift+M | Model options: Options › Models (`/models`) |
@@ -250,8 +250,18 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   **all** tab is the flat picker — a **sort** menu (priority, a to z, intelligence, speed, most
   used, subscription left), ★ favorites and the ten most recent above the rest, subscription
   windows ("5h 62% left, resets 14:30") under the list — with one row per model whatever serves it
-  and **→** opening that row's providers to choose one. The profile is named in the header and
-  switched there. `/model <name>` switches without the dialog; the box lists the same rows.
+  and **→** opening that row's providers to choose one. A class tab also says what **Alt+M** shows
+  of it: the **in box** column is a cutoff (tick rank 3 and the box draws three of that class), and
+  **show this class in the box** takes the class out of it altogether. Both travel with the profile,
+  and **fill from defaults** replaces every list with what your providers can serve. The profile is
+  named in the header and switched there. `/model <name>` switches without the dialog.
+- **The model box (Alt+M)** is the short answer: a header per class — **high**, **main**, **flash**,
+  and **local** where this machine serves a model — with that class's top two models under it and
+  your own highlighted. The headers are labels, so ↑↓ step over them; **→** opens a class to its
+  whole list and **←** closes it again; typing filters across every class; **Enter** puts the pane on
+  that class *and* that model. A model that cannot take a turn right now — spent, or no key — is not
+  in the box at all, which is what makes it short. The collapsed chip is the model, and only the
+  model, whichever class the pane is in.
 - **Model roles: main, high, flash, lite, local.** The tiers are five ordered lists on Options ›
   Models: **main** for agent turns and subagents, **high** for plan mode (main at max reasoning
   unless you list a model), **flash** for driving programs and quick side calls, **lite** for
