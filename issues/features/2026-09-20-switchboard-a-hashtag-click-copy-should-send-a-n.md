@@ -1,7 +1,7 @@
 ---
 id: Y2F4
 type: work
-status: executing
+status: needs-verification
 labels: [feature, switchboard]
 assignee: agent
 implemented_by: deepseek/deepseek-v4.1-flash
@@ -9,7 +9,7 @@ session: e273439f-004b-4369-b20d-b81d11a21ec0
 rank: zzzzzzzzzzzzzzzzi
 created: '2026-09-20'
 source: pane, 2026-09-20
-links: {plans: [], commits: [], evidence: [], related: [3ZAP], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-switchboard-hash-toast/], related: [3ZAP], github: null}
 ---
 # Switchboard: a hashtag click-copy should send a notification
 
@@ -22,14 +22,14 @@ Owner, 2026-09-20, choosing from three options (add a toast to every hashtag cop
 So the copy keeps the board's own "Copied #bug" notice line and *also* raises the copy-on-highlight-style toast, reading "#bug copied". A `#ID` reference in text still zooms (no copy), and the list rows' `#ID` column is still not a click target — both unchanged from #3ZAP's owner decision.
 
 ## Tasks
+- [x] BoardView::toast + placeToast: the pane's popup, on the board (#Y2F4) <!-- t:0x -->
+- [x] copyTag raises the toast beside the notice <!-- t:qg -->
+- [x] placeToast on resize, so the popup keeps its corner <!-- t:ew -->
+- [x] Unit test: the toast's text and its bottom-right place <!-- t:sf -->
+- [x] Live Xvfb drive: four copy surfaces, the fade, the reference zoom <!-- t:zn -->
+- [x] docs/ARCHITECTURE.md: the board's own toast <!-- t:ts -->
+- [x] Land through scripts/land.py, my hunks only — 123ecb67598d <!-- t:0h -->
 
-- [x] BoardView::toast + placeToast: the pane's popup, on the board (#Y2F4) <!-- t:dd -->
-- [x] copyTag raises the toast beside the notice <!-- t:7n -->
-- [x] placeToast on resize, so the popup keeps its corner <!-- t:0j -->
-- [x] Unit test: the toast's text and its bottom-right place <!-- t:nn -->
-- [x] Live Xvfb drive: four copy surfaces, the fade, the reference zoom <!-- t:a2 -->
-- [x] docs/ARCHITECTURE.md: the board's own toast <!-- t:zg -->
-- [ ] Land through scripts/land.py, my hunks only <!-- t:ew s=in-progress -->
 
 ## Execution Summary
 A hashtag copy in the Switchboard now says so twice: the board's notice line keeps "Copied #bug", and the copy-on-highlight-style toast appears at the pane's bottom-right reading "#bug copied".
