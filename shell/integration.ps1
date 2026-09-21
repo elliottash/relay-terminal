@@ -33,7 +33,17 @@ function global:__relay_event([string] $Stage, [int] $Status = 0, [byte[]] $Inpu
         }
         [IO.File]::WriteAllText($temporary, ($eventData | ConvertTo-Json -Compress -Depth 3),
                                [Text.UTF8Encoding]::new($false))
-        [IO.File]::Move($temporary, (Join-Path $env:RELAY_RUNTIME_DIR 'state.json'), $true)
+        # Windows readers can briefly deny FILE_SHARE_DELETE. Keep the atomic file and
+        # retry the rename; losing a loaded event would leave the composer waiting forever.
+        for ($attempt = 0; ; $attempt++) {
+            try {
+                [IO.File]::Move($temporary, (Join-Path $env:RELAY_RUNTIME_DIR 'state.json'), $true)
+                break
+            } catch [IO.IOException] {
+                if ($attempt -ge 39 -or ![IO.Directory]::Exists($env:RELAY_RUNTIME_DIR)) { throw }
+                [Threading.Thread]::Sleep(10)
+            }
+        }
     } catch [IO.IOException] {
         # Closing a pane removes its private runtime directory.
     } catch [UnauthorizedAccessException] {

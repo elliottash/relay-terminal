@@ -80,10 +80,13 @@ int main(int argc, char **argv)
     if (!pty->start(options)) { std::cerr << pty->errorString().toStdString(); return 8; }
     auto waitState = [&](const QString &stage, const QString &hash = QString()) {
         QElapsedTimer timer; timer.start();
+        QByteArray lastState;
         while (timer.elapsed() < 20000) {
             QFile stateFile(directory.filePath("state.json"));
             if (stateFile.open(QIODevice::ReadOnly)) {
-                auto state = QJsonDocument::fromJson(stateFile.readAll()).object();
+                lastState = stateFile.readAll();
+                stateFile.close(); // Do not deny a Windows atomic replacement during the sleep.
+                auto state = QJsonDocument::fromJson(lastState).object();
                 if (state.value("token").toString() == "smoke-token"
                     && state.value("event").toString() == stage
                     && (hash.isEmpty() || state.value("input_sha256").toString() == hash)) return state;
@@ -91,7 +94,8 @@ int main(int argc, char **argv)
             QThread::msleep(25);
         }
         std::lock_guard<std::mutex> lock(mutex);
-        std::cerr << "State timeout " << stage.toStdString() << " output=" << output.toStdString();
+        std::cerr << "State timeout " << stage.toStdString() << " expected_hash=" << hash.toStdString()
+                  << " state=" << lastState.toStdString() << " output=" << output.toStdString();
         return QJsonObject();
     };
     if (waitState("ready").isEmpty()) return 9;

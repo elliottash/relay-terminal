@@ -19,6 +19,22 @@ try {
     $state = Get-Content -Raw -LiteralPath (Join-Path $root 'state.json') | ConvertFrom-Json
     $expected = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
     if ($state.input_sha256 -ne $expected) { throw 'Loaded hash is not exact UTF8 bytes' }
+    if ($IsWindows) {
+        # Reproduce a GUI reader that briefly holds state.json without delete sharing.
+        Add-Type -TypeDefinition @'
+public static class RelayReleaseFile {
+    public static void Later(System.IDisposable file) {
+        System.Threading.Tasks.Task.Run(() => { System.Threading.Thread.Sleep(100); file.Dispose(); });
+    }
+}
+'@
+        $locked = [IO.File]::Open((Join-Path $root 'state.json'), [IO.FileMode]::Open,
+                                  [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        [RelayReleaseFile]::Later($locked)
+        __relay_event 'running' 9
+        $state = Get-Content -Raw -LiteralPath (Join-Path $root 'state.json') | ConvertFrom-Json
+        if ($state.event -ne 'running' -or $state.status -ne 9) { throw 'Reader lock lost shell event' }
+    }
     $global:LASTEXITCODE = 13
     __relay_event 'running'
     if ($global:LASTEXITCODE -ne 13) { throw 'Events overwrite native exit status' }
