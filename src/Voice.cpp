@@ -231,7 +231,7 @@ Insertion insertTranscript(const QString &existing, int cursor, const QString &t
                              + (trailing ? QStringLiteral(" ") : QString());
     QString result = existing;
     result.insert(at, inserted);
-    return {result, at + inserted.size() - (trailing ? 1 : 0)};
+    return {result, at + int(inserted.size()) - (trailing ? 1 : 0)};
 }
 
 // ----- clips -------------------------------------------------------------------------------------

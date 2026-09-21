@@ -10,7 +10,9 @@
 #include <QSettings>
 #include <QTextStream>
 
+#ifndef Q_OS_WIN
 #include <glob.h>
+#endif
 
 namespace relay::ssh {
 
@@ -70,12 +72,43 @@ bool concrete(const QString &pattern) {
 
 QStringList expandGlob(const QString &pattern) {
     QStringList out;
+#ifdef Q_OS_WIN
+    // Expand one path component at a time, so Include conf.d/*/*.conf works as
+    // well as a wildcard filename. Do not treat directory separators as wildcards.
+    const QString path = QDir::fromNativeSeparators(pattern);
+    int wildcard = -1;
+    for (int i = 0; i < path.size(); ++i) {
+        if (path.at(i) == QLatin1Char('*') || path.at(i) == QLatin1Char('?')
+            || path.at(i) == QLatin1Char('[')) { wildcard = i; break; }
+    }
+    if (wildcard < 0) {
+        if (QFileInfo::exists(path)) out << path;
+        return out;
+    }
+    const int slash = int(path.lastIndexOf(QLatin1Char('/'), wildcard));
+    const int nextSlash = int(path.indexOf(QLatin1Char('/'), wildcard));
+    const QString base = slash < 0 ? QStringLiteral(".") : path.left(slash + 1);
+    const QString component = nextSlash < 0 ? path.mid(slash + 1)
+                                            : path.mid(slash + 1, nextSlash - slash - 1);
+    const QString tail = nextSlash < 0 ? QString() : path.mid(nextSlash);
+    const QDir directory(base);
+    const auto entries = directory.entryList({component},
+        QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot, QDir::Name);
+    for (const QString &entry : entries) {
+        // POSIX glob's default excludes dot names unless explicitly requested.
+        if (entry.startsWith(QLatin1Char('.')) && !component.startsWith(QLatin1Char('.'))) continue;
+        const QString matched = directory.filePath(entry);
+        if (tail.isEmpty()) out << matched;
+        else if (QFileInfo(matched).isDir()) out += expandGlob(matched + tail);
+    }
+#else
     glob_t found{};
     const QByteArray local = QFile::encodeName(pattern);
     if (::glob(local.constData(), 0, nullptr, &found) == 0) {
         for (size_t k = 0; k < found.gl_pathc; ++k) out << QFile::decodeName(found.gl_pathv[k]);
     }
     ::globfree(&found);
+#endif
     return out;
 }
 
@@ -113,7 +146,7 @@ struct Reader {
                 for (const QString &arg : std::as_const(line.args)) {
                     QString pattern = arg;
                     if (pattern.startsWith(QLatin1String("~/"))) pattern = home + pattern.mid(1);
-                    else if (!pattern.startsWith(QLatin1Char('/'))) pattern = sshDir + QLatin1Char('/') + pattern;
+                    else if (!QDir::isAbsolutePath(pattern)) pattern = sshDir + QLatin1Char('/') + pattern;
                     for (const QString &included : expandGlob(pattern)) read(included, depth + 1);
                 }
             } else if (!block.isEmpty() && !line.args.isEmpty()) {

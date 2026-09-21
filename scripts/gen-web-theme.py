@@ -350,10 +350,11 @@ def read_adopt(theme_cpp: str) -> tuple[list[tuple[str, str, str]], list[tuple[s
 
 def read_stylesheet(theme_cpp: str) -> str:
     body = function_body(theme_cpp, "QString stylesheetFor(")
-    match = re.search(r'R"\((.*?)\)"', body, re.S)
-    if not match:
+    # The stylesheet is split into appended literals to fit MSVC's literal size limit.
+    chunks = re.findall(r'(?:QString css =|css \+=)\s*QStringLiteral\(R"\((.*?)\)"\);', body, re.S)
+    if not chunks:
         raise ThemeError("src/Theme.cpp: stylesheetFor() has no raw string")
-    return match.group(1)
+    return "".join(chunks)
 
 
 def read_token_table(theme_cpp: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:

@@ -417,7 +417,8 @@ QLabel#opaqueHint { color: @muted; }
 QLabel#opaqueHint[state="needs-you"] { color: @warning; }
 QLabel#opaqueHint[state="agent"] { color: @agent; }
 QLabel#opaqueHint[state="running"] { color: @shell; }
-/* Agent sessions: plan chip, context indicator, plan editor */
+/* Agent sessions: plan chip, context indicator, plan editor */)");
+    css += QStringLiteral(R"(
 QLabel#planChip { color: @onAgent; background: @agent; border-radius: 4px; padding: 1px 6px; font-weight: 700; letter-spacing: 1px; font-size: 9pt; }
 QLabel#contextLabel { color: @muted; font-family: "@mono"; font-size: 9pt; padding: 0 4px; }
 QLabel#contextLabel[warn="true"] { color: @warning; }
@@ -488,7 +489,8 @@ QWidget#pane[relayActive="true"] { border: 1px solid @muted; }
    Options and in Sessions, where the transcript stands inside the frame and the prompt box
    inside that, exactly as in a pane. On a **card** the transcript is hidden until it is used
    (`Pane::setTranscriptHiddenUntilUsed`, owner decision 2), so the frame came down to eight
-   pixels outside the composer's own and the card page showed a border inside a border. One
+   pixels outside the composer's own and the card page showed a border inside a border. One)");
+    css += QStringLiteral(R"(
    frame there, and it is the prompt box's: `CardDetail::setConsole` stamps the property, and no
    other console has it. */
 QWidget#pane[cardConsole="true"] { background: transparent; border: none; }
@@ -561,7 +563,8 @@ QLabel#notificationTime { color: @muted; font-size: 9pt; padding-left: 8px; }
 QLabel#notificationDot { color: @muted; font-size: 9pt; }
 QLabel#notificationDot[kind="success"] { color: @success; }
 QLabel#notificationDot[kind="warning"] { color: @warning; }
-QLabel#notificationDot[kind="error"] { color: @error; }
+QLabel#notificationDot[kind="error"] { color: @error; })");
+    css += QStringLiteral(R"(
 QToolButton#notificationDismiss { color: @muted; border: none; background: transparent; padding: 0 4px; font-size: 9pt; }
 QToolButton#notificationDismiss:hover { color: @text; }
 QToolButton#popupTextButton { color: @muted; border: 1px solid transparent; border-radius: 4px; padding: 2px 8px; font-size: 9pt; }
@@ -642,7 +645,8 @@ QTabWidget > QTabBar::tab, QTabBar#settingsTabs::tab { color: @muted; }
 QTabWidget > QTabBar::tab:hover, QTabBar#settingsTabs::tab:hover,
 QTabWidget > QTabBar::tab:selected, QTabBar#settingsTabs::tab:selected { color: @text; }
 
-/* File panes */
+/* File panes */)");
+    css += QStringLiteral(R"(
 QWidget#fileExplorer, QWidget#filePreview { background: @bg; }
 QLabel#fileExplorerPath, QLabel#filePreviewTitle { color: @text; font-weight: 600; padding: 2px 4px; }
 QLabel#filePreviewNotice { color: @muted; background: @surface; border: 1px solid @border; border-radius: 6px; padding: 4px 8px; }
@@ -708,7 +712,8 @@ QPushButton[actionRow="true"], QToolButton[actionRow="true"] {
    *QToolButton* that has a box rule and nothing to a QPushButton — the comment in
    qstylesheetstyle.cpp reads "### broken QToolButton" — so identical padding paints a tool
    button three pixels taller. The Switchboard's row is tool buttons and the card page's is push
-   buttons, so the push buttons carry those three pixels and the two rows come out one height.
+   buttons, so the push buttons carry those three pixels and the two rows come out one height.)");
+    css += QStringLiteral(R"(
    It is a constant, not a ratio, so this holds at any desktop font size. The second selector is
    what beats `QPushButton#boardReplyButton` and `#boardExecute`, which are id rules and would
    otherwise put their own padding back; the first catches a push button on any other row. */
@@ -778,7 +783,8 @@ QLabel#boardChatHead { color: @muted; font-family: "@mono"; font-size: 9pt; }
    every action row in the app reads the same.
 
    The panel's own log, busy strip, Stop and queue rows had rules here and have none now: a
-   console is a `Pane`, so its transcript, its busy line, its Esc and its §12 queue strip are the
+   console is a `Pane`, so its transcript, its busy line, its Esc and its §12 queue strip are the)");
+    css += QStringLiteral(R"(
    terminal pane's widgets and the terminal pane's rules paint them. That is the point of the
    card — "the queue doesn't work like the main terminal" — held down in this file as well. */
 /* Check and triage findings, and the survey's import offer: lists in the page that a click turns
@@ -845,7 +851,8 @@ QLabel#boardCardTitle { color: @text; font-size: 12pt; font-weight: 600; }
 /* The pencil that edits the card sits on the title it edits, outlined in the accent (#VZ69). On a
    card whose other tools are muted text buttons, exactly one control is obviously pressable, and
    it is the one the owner reaches for most. The delete beside it (#CYM9) wears the same outline:
-   destructive, but a first-class action of the card, and undoable for 30 s like every write. */
+   destructive, but a first-class action of the card, and undoable for 30 s like every write. */)");
+    css += QStringLiteral(R"(
 QToolButton#boardEditPencil, QToolButton#boardCardDelete { color: @accent; background: transparent; border: 1px solid @accentBorder; border-radius: 6px; padding: 3px 10px; }
 QToolButton#boardEditPencil:hover, QToolButton#boardCardDelete:hover { color: @accentText; background: @accent; border-color: @accent; }
 QToolButton#boardEditPencil:disabled, QToolButton#boardCardDelete:disabled { color: @disabled; background: transparent; border-color: @surface; }
