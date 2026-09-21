@@ -1,7 +1,7 @@
 ---
 id: P7SJ
 type: work
-status: discussing
+status: executing
 labels: [feature, projects, sessions, switchboard]
 assignee: codex
 rank: m
@@ -35,12 +35,13 @@ Owner, after comparing separate panes, one pane with views, and a persistent sid
 > i dont need the pane screenshot key, not sure why i have that
 
 ## Decisions
+- Owner: "lets go with subagents for efficiency" — proceed with implementation, dividing independent areas between subagents.
 - Owner: "i am liking the middle option. can you include a \"globals\" tab that has our proposed \"swithcboard hq\" functionality" — develop the shared-pane option with three tabs: Projects, Sessions, Globals.
 - Owner: "and ctrl shift g can open globals" — Ctrl+Shift+G selects Globals.
 - Owner: "i dont need the pane screenshot key, not sure why i have that" — remove the default Ctrl+Shift+G binding from pane screenshot capture; no replacement screenshot shortcut needed.
 
 ## Discussion points
-The conversation is still design work; no UI implementation has been requested in this stage.
+Owner authorized implementation with subagents: "lets go with subagents for efficiency".
 The Globals tab is the home for the proposed HQ functionality in card #Y2MP. That card's
 remaining memory/runtime and scope decisions stay open; choosing the tab does not settle them.
 
@@ -81,3 +82,38 @@ Research behind the proposal (official documentation reviewed 2026-09-21):
 - [Warp Tab Configs](https://docs.warp.dev/terminal/windows/tab-configs/): launching a saved working setup is distinct from resuming a conversation.
 - [Claude Code sessions](https://code.claude.com/docs/en/sessions): searchable history can widen from the current repository to all projects.
 
+
+## Plan
+**Goal:** one Projects / Sessions / Globals pane with direct shortcuts, usable project management,
+and working global memories, aliases, and instruction-file access.
+
+**Findings:** `src/Conversations.{h,cpp}` already hosts tabs; `src/RelayWindow.h` owns the registry,
+worker routing, and Options rows. `backend/worker.py` dispatches protocol modules.
+`backend/relay_core/aliases.py` has global storage; memory runtime consumption is missing.
+
+**Steps:**
+1. Add a tested HQ backend for global record list/read/save/retire and instruction-file access,
+   and bounded memory loading for local/global context. Use pinned memories plus matching path
+   globs, project precedence, and existing instruction locations. Leave team scope inactive.
+2. Build Projects and Globals widgets behind callback interfaces, reuse SessionManager tab
+   hosting and filters, and preserve state across tab switches.
+3. Wire the three entry points, project actions and HQ requests in the window. Move registry
+   management out of Options; preserve explicit project attachment and loose-card routing.
+4. Give Projects Ctrl+Shift+P, Sessions Ctrl+Shift+Y, Globals Ctrl+Shift+G. Remove the screenshot
+   default and resolve preset collisions, keeping Actions accessible. Add live shortcut hints.
+5. Run targeted backend/widget tests and an isolated Xvfb integration check, then land through
+   land.py with evidence and a manual QA checklist.
+
+**Risks:** shared checkout has unrelated edits; each agent owns named paths and snapshots them
+before editing. Global data must not become a fallback work-card inbox. The Globals page must
+show real runtime-backed records. Settings/preset custom bindings must retain user intent.
+
+**Verify:** targeted HQ/memory protocol tests, conversations/projects widget tests, keymap checks,
+application build, and isolated GUI screenshots showing tab selection and CRUD persistence.
+
+## Tasks
+- [ ] HQ storage/protocol and global/project memory consumption <!-- t:bk -->
+- [ ] Projects management and shared SessionManager tabs <!-- t:pj -->
+- [ ] Globals editor and record management <!-- t:gl -->
+- [ ] Window integration, shortcuts and hints <!-- t:wi -->
+- [ ] Targeted tests, GUI evidence and landing <!-- t:qa -->

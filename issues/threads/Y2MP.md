@@ -42,3 +42,7 @@ UI home for this card's HQ functionality, with Ctrl+Shift+G as its direct entry.
 "i dont need the pane screenshot key, not sure why i have that", releasing its current binding.
 This settles the requested UI placement; this card's existing memory/runtime and scope questions
 remain open. Its original body and implementation status are unchanged.
+
+<!-- relay:entry 20260921T220927Z-p1 author=codex kind=progress -->
+### Codex · 2026-09-21 22:09
+Claimed the HQ dependency for implementation within card #P7SJ. Owner: "lets go with subagents for efficiency". Proceed with recommended deterministic bounded memory matching, source files kept in place and no team store. Global knowledge resolution will not replace project work-card routing.

@@ -16,3 +16,7 @@ Recorded the shared Projects / Sessions / Globals pane direction, Globals on Ctr
 and removal of the conflicting screenshot default binding. Added the proposed tab responsibilities,
 source-backed research, current reuse points, and the remaining HQ dependency and preset conflict.
 
+
+<!-- relay:entry 20260921T220927Z-p1 author=codex kind=progress -->
+### Codex · 2026-09-21 22:09
+Claimed for implementation with three subagents, a written plan and bounded file ownership. Owner: "lets go with subagents for efficiency". Using the proposed memory defaults (pinned/path-matched, bounded, project precedence), existing instruction sources, no team store and no global loose-card fallback.

@@ -1,10 +1,9 @@
 ---
 id: Y2MP
 type: work
-status: discussing
-waiting_on: owner
+status: executing
 labels: [feature, switchboard, agent]
-assignee: ''
+assignee: codex
 rank: m
 created: '2026-09-20'
 source: 'conversation, 2026-09-20'
@@ -20,6 +19,9 @@ Owner, 2026-09-20:
 > memories, aliases, system prompts, etc
 
 and, after the audit: **"file the initial plan for memories and switchboard HQ in discussing."**
+
+## Decisions
+- Owner: "lets go with subagents for efficiency" — implement HQ within the Globals tab in card #P7SJ.
 
 ## What the audit found
 
