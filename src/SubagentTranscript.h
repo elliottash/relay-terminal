@@ -16,6 +16,7 @@
 #include <QHash>
 #include <QJsonObject>
 #include <QPointer>
+#include <QSet>
 #include <QTextCursor>
 #include <QVector>
 #include <QWidget>
@@ -191,6 +192,7 @@ protected:
     void keyPressEvent(QKeyEvent *event) override;
 
 private:
+    SubagentTranscriptView *ensureTab(const QString &id, bool live, bool select);
     int indexOf(const QString &id) const;
     int addTabFor(const QString &id, int at = -1);
     void relabel(int index);
@@ -200,6 +202,7 @@ private:
     QStackedWidget *m_stack = nullptr;
     QHash<QString, QPointer<SubagentTranscriptView>> m_views;
     QHash<QString, bool> m_seen;   // the owner's model has had this row
+    QSet<QString> m_closed;       // explicitly closed running tabs stay closed until reopened
     QString m_ownerKey, m_cwd;
 };
 

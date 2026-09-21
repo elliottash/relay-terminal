@@ -706,6 +706,11 @@ void SubagentTabsView::relabel(int index) {
 }
 
 SubagentTranscriptView *SubagentTabsView::showTab(const QString &id, bool live) {
+    m_closed.remove(id);
+    return ensureTab(id, live, true);
+}
+
+SubagentTranscriptView *SubagentTabsView::ensureTab(const QString &id, bool live, bool select) {
     if (id.isEmpty()) return nullptr;
     // Subagent ids start again at a1 in a new worker: a restored tab with the same id is a
     // different, finished agent, so the live one replaces it.
@@ -716,8 +721,10 @@ SubagentTranscriptView *SubagentTabsView::showTab(const QString &id, bool live) 
         m_stack->removeWidget(old); m_views.remove(id); old->deleteLater();
     }
     if (auto *existing = tab(id)) {
-        m_bar->setCurrentIndex(indexOf(id));
-        m_stack->setCurrentWidget(existing);
+        if (select) {
+            m_bar->setCurrentIndex(indexOf(id));
+            m_stack->setCurrentWidget(existing);
+        }
         return existing;
     }
     auto *view = new SubagentTranscriptView(id);
@@ -728,8 +735,10 @@ SubagentTranscriptView *SubagentTabsView::showTab(const QString &id, bool live) 
     const int index = addTabFor(id, at);
     if (onViewCreated) onViewCreated(view);
     relabel(index);
-    m_bar->setCurrentIndex(index);
-    m_stack->setCurrentWidget(view);
+    if (select || m_bar->count() == 1) {
+        m_bar->setCurrentIndex(index);
+        m_stack->setCurrentWidget(view);
+    }
     if (onTitleChanged) onTitleChanged();
     return view;
 }
@@ -749,11 +758,20 @@ void SubagentTabsView::closeTab(const QString &id) {
 // The tab's × (not the list's rules): the owner dismisses a finished agent's row, which agrees
 // with dismissing a row closing its tab. A running agent's row stays.
 void SubagentTabsView::closeTabByUser(const QString &id) {
+    m_closed.insert(id);
     if (onUserClosed) onUserClosed(id);
     closeTab(id);   // already gone if dismissing the row closed it
 }
 
 void SubagentTabsView::syncRows(const SubagentModel &model) {
+    // The strip folds away while this pane is open, so every listed agent needs a tab here.
+    // Background arrivals subscribe once without stealing the selected tab or its draft/focus.
+    for (auto it = m_closed.begin(); it != m_closed.end();) {
+        if (!model.row(*it)) it = m_closed.erase(it);
+        else ++it;
+    }
+    for (const auto &row : model.rows())
+        if (!tab(row.id) && !m_closed.contains(row.id)) ensureTab(row.id, true, false);
     QStringList gone;
     for (const QString &id : ids()) {
         SubagentTranscriptView *view = tab(id);

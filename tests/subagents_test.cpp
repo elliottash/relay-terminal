@@ -581,6 +581,58 @@ private slots:
         QCOMPARE(empties, 1);
     }
 
+    void tabsAutomaticallyIncludeEveryAgentWithoutStealingFocus() {
+        if (!qEnvironmentVariableIsEmpty("RELAY_SUBAGENTS_ALL_TABS_SHOT")) relay::theme::applyTheme(*qApp);
+        Harness h;
+        SubagentTabsView tabs;
+        QStringList subscribed;
+        tabs.onViewCreated = [&](SubagentTranscriptView *view) {
+            subscribed << view->agentId();
+            view->appendNote(QStringLiteral("Transcript for ") + view->agentId());
+        };
+        h.start("a1"); h.start("a2");
+        tabs.syncRows(h.model); // the owner's adoptSubagentTabs call, before selecting a row
+        QCOMPARE(tabs.ids(), (QStringList{QStringLiteral("a1"), QStringLiteral("a2")}));
+        tabs.showTab(QStringLiteral("a2"));
+        tabs.resize(800, 480); tabs.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&tabs));
+        tabs.activateWindow(); tabs.focusInput();
+        auto *input = tabs.current()->findChild<QLineEdit *>(QStringLiteral("subagentInput"));
+        input->setText(QStringLiteral("keep my draft"));
+        QTRY_VERIFY(input->hasFocus());
+        auto *bar = tabs.findChild<QTabBar *>(QStringLiteral("subagentTabBar"));
+        QVERIFY(bar->isVisible());
+        QCOMPARE(bar->count(), 2);
+        if (!qEnvironmentVariableIsEmpty("RELAY_SUBAGENTS_ALL_TABS_SHOT"))
+            QVERIFY(tabs.grab().save(qEnvironmentVariable("RELAY_SUBAGENTS_ALL_TABS_SHOT")));
+        h.start("a3");
+        tabs.syncRows(h.model); tabs.syncRows(h.model);
+        QCOMPARE(tabs.count(), 3);
+        QCOMPARE(tabs.currentId(), QStringLiteral("a2"));
+        QVERIFY(input->hasFocus());
+        QCOMPARE(input->text(), QStringLiteral("keep my draft"));
+        QCOMPARE(subscribed, (QStringList{QStringLiteral("a1"), QStringLiteral("a2"), QStringLiteral("a3")}));
+        // Selecting each tab shows its own view, not the previously selected transcript.
+        bar->setCurrentIndex(0);
+        QVERIFY(tabs.tab(QStringLiteral("a1"))->isVisible());
+        QVERIFY(!tabs.tab(QStringLiteral("a2"))->isVisible());
+        bar->setCurrentIndex(1);
+        QVERIFY(tabs.tab(QStringLiteral("a2"))->isVisible());
+        // A deliberate close stays closed through progress updates; an explicit open revives it.
+        tabs.closeTabByUser(QStringLiteral("a1"));
+        tabs.syncRows(h.model);
+        QCOMPARE(tabs.count(), 2);
+        QVERIFY(!tabs.tab(QStringLiteral("a1")));
+        tabs.showTab(QStringLiteral("a1"));
+        QCOMPARE(tabs.count(), 3);
+        QCOMPARE(subscribed.count(QStringLiteral("a1")), 2);
+        tabs.closeTabByUser(QStringLiteral("a3"));
+        h.model.handle(json("{'event':'ready'}"));
+        tabs.syncRows(h.model);
+        h.start("a3"); tabs.syncRows(h.model);
+        QVERIFY(tabs.tab(QStringLiteral("a3"))); // a new worker may reuse an id
+    }
+
     // Closing a finished agent's tab dismisses its row; a running agent's tab closes alone.
     void closingAFinishedTabDismissesItsRow() {
         Harness h;
