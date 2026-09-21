@@ -259,6 +259,39 @@ private slots:
         QVERIFY(!shape.contains(QStringLiteral("  gpt-6-astra")));
     }
 
+    // … unless the pane is *running* that class, when the class comes back with the pane's own
+    // row and nothing else — the same rule that spares a pane's model below the cutoff. A box that
+    // opens with nothing highlighted is a box that says the pane is running nothing.
+    void aSwitchedOffClassKeepsThePanesOwnRow()
+    {
+        modelrows::Context context = paneContext();
+        context.mode = QStringLiteral("high");
+        context.modePick.insert(QStringLiteral("high"), QStringLiteral("openai|gpt-6-astra"));
+        curation::setBoxShown(QStringLiteral("high"), false);
+        const modelrows::Box shown = modelrows::box(context);
+        const QStringList shape = shapeOf(shown.rows);
+        // The class is drawn, with one row: the model this pane is on.
+        QCOMPARE(shape.mid(0, 2), QStringList({QStringLiteral("high"), QStringLiteral("  gpt-6-astra")}));
+        QCOMPARE(shown.rows.at(shown.current).data, QStringLiteral("pick:high|openai|gpt-6-astra"));
+        // Rank 2 of high stays out, and the header offers no expansion: the class is still off.
+        QVERIFY2(!shape.contains(QStringLiteral("  claude-opus-5")), qPrintable(shape.join(QLatin1Char('/'))));
+        const modelrows::Row &head = shown.rows.at(modelrows::indexOf(shown.rows, QStringLiteral("class:high")));
+        QCOMPARE(head.trailing, QString());
+        QVERIFY(head.tooltip.contains(QStringLiteral("hidden from this box")));
+        QVERIFY(!modelrows::expandable(context, QStringLiteral("high")));
+        // Expanding it anyway (Right on the header) changes nothing while it is off.
+        context.expanded.insert(QStringLiteral("high"));
+        QCOMPARE(shapeOf(modelrows::build(context)).mid(0, 2),
+                 QStringList({QStringLiteral("high"), QStringLiteral("  gpt-6-astra")}));
+        context.expanded.clear();
+        // A pane in another class does not bring it back: the switch means what it says.
+        context.mode = QStringLiteral("main");
+        QVERIFY(!shapeOf(modelrows::build(context)).contains(QStringLiteral("high")));
+        // And a class whose only live row is not the pane's own is still not drawn: the pane is on
+        // main, so nothing in high can be its home.
+        curation::setBoxShown(QStringLiteral("high"), true);
+    }
+
     // Owner, 2026-09-21: "exhausted models dont show up." Neither do the unusable ones — this is
     // the one place that differs from the dialog and the tier lists, which grey them in rank.
     void spentAndKeylessModelsAreNotInTheBox()

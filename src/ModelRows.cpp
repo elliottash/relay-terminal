@@ -263,6 +263,18 @@ QList<models::Group> shownGroupsOf(const QList<models::Group> &live, int cutoff,
     return out;
 }
 
+// The same rule one step further out: a class switched off in the dialog is not drawn at all —
+// unless it is the class this pane is running, when its own row is drawn and nothing else. The
+// highlight has to have a home wherever the pane is (design 5.3), and a box that opens with
+// nothing selected is a box that says the pane is running nothing.
+QList<models::Group> paneRowOnly(const QList<models::Group> &live, const QString &paneKey)
+{
+    QList<models::Group> out;
+    for (const models::Group &group : live)
+        if (holdsKey(group, paneKey)) out << group;
+    return out;
+}
+
 }  // namespace
 
 bool expandable(const Context &context, const QString &klass)
@@ -284,12 +296,17 @@ Box box(const Context &context)
     //    once the spent and keyless rows are gone — an empty header is a promise of nothing.
     for (const QString &klass : context.classes) {
         if (klass == QStringLiteral("lite")) continue;          // never a pane mode, never in the box
-        if (!models::curation::boxShown(klass)) continue;
+        // A class switched off in the dialog is not drawn — unless this pane is running it, when
+        // its own row is drawn alone, the same way a pane's model below the cutoff is spared: the
+        // box opens on that row highlighted, so the highlight needs a home.
+        const bool classOn = models::curation::boxShown(klass);
+        if (!classOn && klass != context.mode) continue;
         const QList<models::Group> live = liveGroupsOf(context, klass, now);
         const QString paneKey = modeKey(context, klass);
-        const bool expanded = context.expanded.contains(klass);
+        const bool expanded = classOn && context.expanded.contains(klass);
         const QList<models::Group> shown =
-            shownGroupsOf(live, models::curation::boxCutoff(klass), expanded, paneKey);
+            classOn ? shownGroupsOf(live, models::curation::boxCutoff(klass), expanded, paneKey)
+                    : paneRowOnly(live, paneKey);
         if (shown.isEmpty()) continue;
         Row head;
         head.text = klass;
@@ -299,12 +316,14 @@ Box box(const Context &context)
         head.enabled = false;   // a label: Up and Down step over it and it is never highlighted
         // The design's "› / ⌄ at the right to say it expands". `trailing` is the column the
         // popup already draws at the far end in the muted ink, so it needs no third mechanism.
-        if (live.size() > shown.size()) head.trailing = QStringLiteral("\u203a");
-        else if (expanded && live.size() > models::curation::boxCutoff(klass)) head.trailing = QStringLiteral("\u2304");
-        head.tooltip = head.trailing.isEmpty()
-            ? QStringLiteral("the %1 list").arg(klass)
-            : QStringLiteral("the %1 list · → shows all %2, ← goes back to %3")
-                  .arg(klass).arg(live.size()).arg(models::curation::boxCutoff(klass));
+        if (classOn && live.size() > shown.size()) head.trailing = QStringLiteral("\u203a");
+        else if (classOn && expanded && live.size() > models::curation::boxCutoff(klass)) head.trailing = QStringLiteral("\u2304");
+        head.tooltip = !classOn
+            ? QStringLiteral("the %1 list is hidden from this box; this pane is running it").arg(klass)
+            : head.trailing.isEmpty()
+                ? QStringLiteral("the %1 list").arg(klass)
+                : QStringLiteral("the %1 list · → shows all %2, ← goes back to %3")
+                      .arg(klass).arg(live.size()).arg(models::curation::boxCutoff(klass));
         out.rows << head;
         for (const models::Group &group : shown) {
             const bool holdsPane = holdsKey(group, paneKey);
