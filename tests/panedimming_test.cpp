@@ -54,9 +54,32 @@ private slots:
         QCOMPARE(s.amount(false, true, 90), 95);
         s.adjust(-500, 95);
         QCOMPARE(s.amount(false, true, 90), 0);
-        QCOMPARE(s.wheelSteps(60), 0);
-        QCOMPARE(s.wheelSteps(60), 1);
-        QCOMPARE(s.wheelSteps(-240), -2);
+        QCOMPARE(s.wheelSteps(QPoint(0, 60)), 0);
+        QCOMPARE(s.wheelSteps(QPoint(0, 60)), 1);
+        QCOMPARE(s.wheelSteps(QPoint(0, -240)), -2);
+    }
+    void altWheelAxes() {
+        for (bool horizontal : {false, true}) {
+            State s;
+            s.manual = 50;
+            auto scroll = [&](int delta) {
+                const QPoint angle = horizontal ? QPoint(delta, 0) : QPoint(0, delta);
+                s.adjust(-5 * s.wheelSteps(angle), s.amount(false, false, 90));
+            };
+            scroll(-120);
+            QCOMPARE(s.manual, 55);
+            scroll(120);
+            QCOMPARE(s.manual, 50);
+            scroll(-60);
+            QCOMPARE(s.manual, 50);
+            scroll(-60);
+            QCOMPARE(s.manual, 55);
+            scroll(240);
+            QCOMPARE(s.manual, 45);
+        }
+        State s;
+        QCOMPARE(s.wheelSteps(QPoint(120, 120)), 1);
+        QCOMPARE(s.wheelSteps(QPoint()), 0);
     }
     void overlayLightDarkAndInput() {
         QWidget pane;

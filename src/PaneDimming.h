@@ -39,8 +39,10 @@ struct State {
         manual = std::clamp(current + delta, 0, 95);
         revealed = false;
     }
-    int wheelSteps(int delta) {
-        wheelRemainder += delta;
+    int wheelSteps(const QPoint &delta) {
+        // Qt/X11 translates Alt+vertical-wheel into horizontal angle deltas.
+        // Prefer vertical when both are present so a diagonal gesture counts once.
+        wheelRemainder += delta.y() ? delta.y() : delta.x();
         const int steps = wheelRemainder / 120;
         wheelRemainder %= 120;
         return steps;

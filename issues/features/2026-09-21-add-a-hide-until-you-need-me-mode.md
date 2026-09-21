@@ -61,6 +61,8 @@ Research: iTerm2 adjustable inactive dimming (https://iterm2.com/documentation-p
 All four targeted tests pass. panedimming covers automatic lifecycle, manual completion exemption, attention/reveal restoration, bounds and wheel accumulation, overlay input transparency and light/dark pixels.
 
 ## Execution Summary
+Alt+wheel follow-up: fixed Qt/X11 horizontal angle translation; both axes now adjust dimming. Regression tests and native Qt/Xvfb input probe pass. Evidence: docs/qa_evidence/2026-09-21-pane-dimming/wheel-fix.md.
+
 Implemented pane-header ◐ toggle; automatic hide-while-working and focus modes; Options > Appearance strength (90% default); Alt+wheel over hovered pane and Alt++/− for active pane in 5% steps. Bright status/header controls remain accessible. Dark themes fade to black, light themes to white. Manual dimming persists through completion and temporary focus/attention reveal. Added Actions entries and configurable keyboard bindings, plus the dimmer shortcut hint. Guest busy state is included.
 
 Evidence: docs/qa_evidence/2026-09-21-pane-dimming/README.md and screenshots 01–08. GUI build passed; all four targeted tests passed. No paid live model run: lifecycle precedence is covered by deterministic tests; live agent integrations remain QA.

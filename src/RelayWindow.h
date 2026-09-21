@@ -882,7 +882,7 @@ protected:
                 QWidget *leaf = leafOf(qobject_cast<QWidget *>(object));
                 if (leaf && leaf->window() == this) {
                     if (auto *chrome = chromeOf(leaf)) {
-                        const int steps = chrome->dimming.wheelSteps(wheel->angleDelta().y());
+                        const int steps = chrome->dimming.wheelSteps(wheel->angleDelta());
                         if (steps) adjustPaneDimming(leaf, -5 * steps);
                         wheel->accept();
                         return true;
