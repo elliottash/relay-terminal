@@ -25,6 +25,9 @@
 // the words stay in the box.
 
 import { renderMarkdown, renderLines, bodySections, numberedOptions, OPENABLE } from './boardmd.js';
+// A comment's `model=` attribute is the id the turn ran on; a card page names the model
+// (card #MDL1, rule 1).
+import { nameOf } from './modelname.js';
 
 // ---- the desktop's own words and order (src/BoardModel.cpp) -------------------------------------
 
@@ -726,7 +729,7 @@ export function mountBoard(options) {
     const words = [];
     if (mode) words.push(mode === 'plan' ? 'Plan' : 'Discuss');
     else if (kind !== 'comment' && kind !== 'note') words.push(kind);
-    if (author === 'agent' && str(attrs.model)) words.push(str(attrs.model));
+    if (author === 'agent' && str(attrs.model)) words.push(nameOf(str(attrs.model)));
     const when = pendingRid ? QUEUED_WORDS : timeText(entryTime(entry.entry_id), clock());
     if (when) words.push(when);
     head.append(el('span', 'rb-entry-meta', words.join(' · ')));

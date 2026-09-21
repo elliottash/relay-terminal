@@ -35,6 +35,8 @@ import { joinWithCode, cleanCode, cleanPin, validCode, validPin, meetProblem } f
 // The Switchboard (#SWPH): the inbox's first row, the board screen and a card's page, drawn from
 // the desktop's own board events. This file only carries its messages in and out.
 import { mountBoard } from './board.js';
+// One name for a model, the worker's own where it sent one (card #MDL1, rule 1).
+import { modelName } from './modelname.js';
 
 trackViewport();
 
@@ -1304,9 +1306,11 @@ function onAgent(message) {
 // and the new one takes over at the next step (or after a compaction a smaller window needs). The
 // lines are the desktop's own, so a phone reads the same story as the pane.
 function modelLine(event) {
-  const model = event.model || '';
+  // The model's *name*, never the id the API takes (card #MDL1, rule 1): "model: kimi-k3 ·
+  // conversation kept", the same sentence the desktop's status line prints.
+  const model = modelName(event);
   if (event.event === 'model_changed') {
-    const was = event.in_flight_model || '';
+    const was = modelName(event, 'in_flight_model');
     if (event.applies === 'after_compaction') {
       return `↻ ${model} takes over once the conversation is compacted to fit its window · ${was} summarises it`;
     }
@@ -1314,12 +1318,12 @@ function modelLine(event) {
       const when = event.applies === 'turn_end' ? 'after this turn' : 'at the next step';
       return `↻ ${model} takes over ${when} · ${was} is not interrupted${event.will_compact ? ' · will compact to fit' : ''}`;
     }
-    return `Model: ${model} · conversation kept`;
+    return `model: ${model} · conversation kept`;
   }
   if (event.event === 'model_applied') {
     let line = `→ now on ${model}`;
     if (event.at === 'turn_end') line += ' · from the next turn';
-    if (event.history_converted) line += ` · conversation converted from ${event.from_model || ''}`;
+    if (event.history_converted) line += ` · conversation converted from ${modelName(event, 'from_model')}`;
     if (event.compacted) line += ' · compacted to fit its window';
     return line;
   }
@@ -1341,14 +1345,15 @@ function trackQuestion(message) {
 function trackModel(pane, event) {
   switch (event.event) {
     case 'model_changed':
-      models.set(pane, { model: event.model || '',
-                         waiting: event.applies && event.applies !== 'now' ? event.in_flight_model || '' : '' });
+      // By name (card #MDL1, rule 1), like every other place a model is printed.
+      models.set(pane, { model: modelName(event),
+                         waiting: event.applies && event.applies !== 'now' ? modelName(event, 'in_flight_model') : '' });
       break;
     case 'model_applied':
-      models.set(pane, { model: event.model || '', waiting: '' });
+      models.set(pane, { model: modelName(event), waiting: '' });
       break;
     case 'model_switch_refused':
-      models.set(pane, { model: event.current_model || '', waiting: '' });
+      models.set(pane, { model: modelName(event, 'current_model'), waiting: '' });
       break;
     default:
       break;
