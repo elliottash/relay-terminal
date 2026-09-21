@@ -28,6 +28,8 @@ we can use opus subagents for research and implementation
 
 something else i want to fix in this workstream, is that when you use alt+m or alt+e, youu current selection should be highlighted. then you should be able to select with up/down arrows, and also filter with text typing (like warp's model picker). deploy a subagent to fix that
 
+in case you didnt notice yet, i also dont like how it says "switchboard" in the picker in the switchboard agent: [a screenshot of the box reading "kimi-k3 (switchboard)"]
+
 ## Decisions
 - 2026-09-21, on the three questions below: "i agree with your rec on all 3". So: a guest harness
   at rank 1 of main is what a new pane starts on (the process starts on the first turn); Claude
@@ -58,5 +60,5 @@ never returns to the model the owner was using, and its own sentence is overwrit
 - [x] catalog: `models::name`, the worker's `name`, `grouped`, the pane's key resolved by name <!-- t:a2 -->
 - [ ] defaults: a new pane reads the main list; a pick is per pane; restore the model; re-send tiers <!-- t:a3 -->
 - [ ] `/swap`: a toggle with memory, a sentence that survives, a test <!-- t:a4 -->
-- [ ] names at every display site, lower-case roles <!-- t:a5 -->
+- [ ] names at every display site, lower-case roles; no protocol role name ("switchboard") in a box <!-- t:a5 -->
 - [ ] one row per model in the box and the picker, "via", `/model name@provider` <!-- t:a6 -->
