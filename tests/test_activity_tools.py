@@ -244,5 +244,142 @@ class RealAgentTest(unittest.TestCase):
             self.assertIn("printf hi", detail["calls"][0]["what"])
 
 
+
+class StubBridge:
+    """`AppBridge`'s one method: the GUI's answer to an `app_command`, recorded."""
+
+    def __init__(self, answer):
+        self.answer = answer
+        self.sent = []
+
+    def send(self, command, fields):
+        self.sent.append((command, dict(fields)))
+        return self.answer
+
+
+def app_tools_with(panes, *, writes_enabled=False):
+    """A real `AppTools` over a stub GUI, so these tests exercise the tool an agent would call.
+
+    `writes_enabled` is **off** by default on purpose: listing the panes is a read, and the
+    point of #AG7R group 8 is that it is answered whatever "Agents may change options and run
+    actions" says (§30.4).
+    """
+    from relay_core import app_tools as A
+    catalog = A.AppCatalog({"tab": "t0123456789ab", "writes_enabled": writes_enabled,
+                            "options": [], "actions": []})
+    return A.AppTools(catalog, StubBridge({"ok": True, "panes": panes}))
+
+
+PANES = [{"id": "pane-one", "title": "deploy", "cwd": "/srv/app", "tab": "t1",
+          "model": "glm-5.3", "mode": "agent", "busy": True, "focused": False},
+         {"id": "pane-two", "title": "notes", "cwd": "/srv/notes", "tab": "t1",
+          "model": "kimi-k3", "mode": "terminal", "busy": False, "focused": True}]
+
+
+class OtherPaneTest(unittest.TestCase):
+    """The tab's helper reading the panes it is helping (#AG7R group 8).
+
+    The helper has no pane of its own, so nothing `app_panes` returns is ever marked `you`: every
+    pane it can name is somebody else's, which is the case this whole path exists for.
+    """
+
+    def setUp(self):
+        self.agent = FakeAgent(turns=4)
+        self.agent.app = app_tools_with(PANES)
+        self.tools = T.ActivityTools(self.agent, live_info=lambda: {"event": "session_info",
+                                                                    "turns": 4, "model": "glm-5.3"})
+
+    def test_both_tools_take_a_pane(self):
+        specs = {s["function"]["name"]: s["function"]["parameters"]["properties"]
+                 for s in self.tools.tool_specs()}
+        self.assertIn("pane", specs["session_info"])
+        self.assertIn("pane", specs["activity"])
+
+    def test_session_info_for_a_named_pane_says_what_the_window_knows(self):
+        info = self.tools.run("session_info", {"pane": "pane-one"})
+        self.assertEqual(info["pane"]["id"], "pane-one")
+        self.assertTrue(info["busy"])
+        self.assertFalse(info["you"])
+        self.assertFalse(info["turns_readable"])
+        self.assertIn("deploy", info["text"])
+        self.assertIn("busy", info["text"])
+        self.assertIn("glm-5.3", info["text"])
+        # Not this agent's own record, which is what it would have answered with before.
+        self.assertNotIn("history", info)
+        self.assertNotIn("turns", info)
+        self.assertIn("its own agent", info["note"])
+
+    def test_activity_for_a_named_pane_is_the_same_read_and_not_its_turns(self):
+        result = self.tools.run("activity", {"pane": "pane-two"})
+        self.assertEqual(result["pane"]["id"], "pane-two")
+        self.assertFalse(result["busy"])
+        self.assertNotIn("turn-3", repr(result))          # never this agent's own turn log
+        self.assertIn("its turns", result["note"])
+        self.assertIn("idle", result["text"])
+
+    def test_a_pane_that_has_gone_answers_cleanly_and_names_the_live_ones(self):
+        result = self.tools.run("session_info", {"pane": "pane-gone"})
+        self.assertEqual(result["code"], "unknown_pane")
+        self.assertIn("pane-one", result["error"])
+        self.assertIn("pane-two", result["error"])
+        self.assertIn("app_panes", result["error"])
+        # And the same on activity, by the same path.
+        self.assertEqual(self.tools.run("activity", {"pane": "nope"})["code"], "unknown_pane")
+
+    def test_a_window_with_no_panes_left_still_answers(self):
+        self.agent.app = app_tools_with([])
+        result = self.tools.run("activity", {"pane": "pane-one"})
+        self.assertEqual(result["code"], "unknown_pane")
+        self.assertIn("none", result["error"])
+
+    def test_the_writes_toggle_does_not_gate_the_read(self):
+        # Off (the default above) and on: the same answer, and no round trip but `list_panes`.
+        off = self.tools.run("session_info", {"pane": "pane-one"})
+        self.agent.app = app_tools_with(PANES, writes_enabled=True)
+        on = self.tools.run("session_info", {"pane": "pane-one"})
+        self.assertEqual(off, on)
+        self.assertEqual([command for command, _ in self.agent.app.bridge.sent], ["list_panes"])
+
+    def test_your_own_pane_is_your_own_session(self):
+        mine = [{**PANES[0], "you": True}, PANES[1]]
+        self.agent.app = app_tools_with(mine)
+        info = self.tools.run("session_info", {"pane": "pane-one"})
+        self.assertEqual(info["turns"], 4)                # the §25.3 payload, not the pane row
+        self.assertNotIn("turns_readable", info)
+        # And `activity` likewise digests this agent's own log.
+        self.assertEqual(self.tools.run("activity", {"pane": "pane-one"})["session_turns"], 4)
+
+    def test_no_pane_named_is_untouched(self):
+        self.assertEqual(self.tools.run("activity", {"turns": 1})["count"], 1)
+        self.assertEqual(self.tools.run("session_info", {})["turns"], 4)
+        self.assertEqual(self.agent.app.bridge.sent, [])   # no round trip for one's own session
+
+    def test_a_bad_pane_argument(self):
+        self.assertEqual(self.tools.run("session_info", {"pane": 7})["code"], "invalid_value")
+        self.assertEqual(self.tools.run("activity", {"pane": "  "})["code"], "invalid_value")
+
+    def test_a_worker_with_no_app_tools_says_so_rather_than_answering_for_itself(self):
+        self.agent.app = None
+        result = self.tools.run("session_info", {"pane": "pane-one"})
+        self.assertEqual(result["code"], "failed")
+        self.assertIn("cannot see Relay's panes", result["error"])
+
+    def test_a_refused_listing_comes_back_as_the_refusal_it_was(self):
+        from relay_core import app_tools as A
+        catalog = A.AppCatalog({"tab": "t1", "options": [], "actions": []})
+        self.agent.app = A.AppTools(catalog, StubBridge({"ok": False, "error": "failed",
+                                                         "text": "The window has gone."}))
+        result = self.tools.run("activity", {"pane": "pane-one"})
+        self.assertIn("window has gone", result["error"])
+
+    def test_the_preview_names_the_pane_it_is_about(self):
+        self.assertIn("pane-one", self.tools.preview("session_info", {"pane": "pane-one"}))
+        self.assertIn("pane-two", self.tools.preview("activity", {"pane": "pane-two"}))
+        self.assertEqual(self.tools.preview("session_info", {}), "SESSION INFO")
+
+    def test_the_prompt_note_points_at_the_panes_only_where_they_can_be_read(self):
+        self.assertIn("app_panes", T.prompt_section(self.tools))
+        self.assertNotIn("app_panes", T.prompt_section(T.ActivityTools(FakeAgent())))
+
 if __name__ == "__main__":
     unittest.main()

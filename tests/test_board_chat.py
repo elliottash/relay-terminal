@@ -478,14 +478,22 @@ class WorkerConsoleTest(unittest.TestCase):
         self.assertIn("[Switchboard agent]", system)
         self.assertNotIn("[Switchboard agent]", prompt)
 
-    def test_the_tools_a_console_is_offered_include_the_shell_and_the_board_set(self):
+    def test_the_tools_a_console_is_offered_include_the_shell_the_board_set_and_the_panes(self):
         self.run_worker([self.configure(context=self.context()),
                          {"type": "ask", "id": "a1", "text": "tidy the board", "surface": "sb"},
                          {"type": "shutdown"}])
-        names = {t["function"]["name"] for t in self.server.seen[0]["tools"]}
+        specs = {t["function"]["name"]: t["function"] for t in self.server.seen[0]["tools"]}
         self.assertLessEqual({"run_command", "write_file", "board_merge_cards", "search_files",
-                              "app_option_list", "session_info"}, names)
-        self.assertNotIn("load_tools", names)      # a console defers nothing (#GMCF decision 9)
+                              "app_option_list", "session_info"}, set(specs))
+        self.assertNotIn("load_tools", specs)      # a console defers nothing (#GMCF decision 9)
+        # #AG7R group 8, "the helper cannot read the pane it is helping": it can. `app_panes`
+        # says which panes there are and whether each is busy, and `pane` on the two session
+        # reads says the same about one of them rather than about the console's own turns.
+        self.assertIn("app_panes", specs)
+        for name in ("session_info", "activity"):
+            self.assertIn("pane", specs[name]["parameters"]["properties"], name)
+        system = self.server.seen[0]["messages"][0]["content"]
+        self.assertIn("app_panes", system)
 
     def test_the_same_tab_gets_its_conversation_back_and_another_tab_does_not(self):
         script = [self.configure(context=self.context()),
