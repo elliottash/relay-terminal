@@ -1,13 +1,13 @@
 ---
 id: Y2MP
 type: work
-status: executing
+status: needs-verification
 labels: [feature, switchboard, agent]
 assignee: codex
 rank: m
 created: '2026-09-20'
 source: 'conversation, 2026-09-20'
-links: {plans: [], commits: [], evidence: [], related: [VQ8T, X7NB], github: null}
+links: {plans: [], commits: [237c37f0267e2a3328cf57b61fbbb33511a39494, 60ffc6b2250b, ece82b268bc9, 32721d28, a6319d5e, 7273f7b5, 6e5b2a33, be42269896bc3e0beecff69b28da487e40cfee63, f24b12a728eed750c8bf7031fb7655f162bf29da], evidence: [docs/qa_evidence/2026-09-21-projects-sessions-globals/], related: [VQ8T, X7NB], github: null}
 ---
 # Memory cards that are actually read, and a Switchboard HQ for what is global
 
@@ -107,3 +107,32 @@ unreachable backend paths (`alias_delete`, `suggest {kind: "alias"}`), which are
 
 ## Questions
 On the card, numbered, with a recommendation each — see the thread.
+
+## Execution Summary
+HQ is the Globals tab of the shared manager (card #P7SJ), opened with Ctrl+Shift+G. Global memory
+and alias cards can be searched, created, edited and retired; existing instruction sources are
+visible and editable in place. The store gains board.yaml on its first card write.
+
+Memory cards now enter full and short agent prompts when pinned or matching the workspace,
+with a byte budget, project precedence, applicable supersession and inactive team scope.
+Board policy explains memory creation. Scoped project memories remain on project Switchboards,
+authored using existing board tools; global memory creation has the new Globals editor.
+The initial exploratory global work-card fallback was superseded by card #P7SJ's routing boundary:
+loose work retains the explicit project picker/default-project behavior.
+Evidence: [GUI screenshots, driver and notes](../../docs/qa_evidence/2026-09-21-projects-sessions-globals/).
+
+## Tests
+- `tests/test_globals_protocol.py`
+- `tests/test_memories.py`
+- `tests/test_aliases.py`
+- `tests/test_system_prompt.py`
+- `tests/test_prompt_profiles.py`
+- `ctest -R globalspane` — tests/globalspane_test.cpp
+- manual: docs/qa_evidence/2026-09-21-projects-sessions-globals/
+
+## QA checklist
+- [ ] Create/edit/retire a global memory and confirm later prompts reflect the saved state.
+- [ ] Pinned/path matching, project shadowing and scoped supersession choose expected memories.
+- [ ] Aliases created in Globals can be edited through the existing alias UI without duplicate files.
+- [ ] Instruction edits stay in the displayed source file and use existing loading settings.
+- [ ] Global content never silently becomes the inbox for loose project work.

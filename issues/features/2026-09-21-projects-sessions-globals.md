@@ -1,13 +1,13 @@
 ---
 id: P7SJ
 type: work
-status: executing
+status: needs-verification
 labels: [feature, projects, sessions, switchboard]
 assignee: codex
 rank: m
 created: '2026-09-21'
 source: 'Codex conversation, 2026-09-21'
-links: {plans: [], commits: [], evidence: [], related: [916B, TVE1, Y2MP], github: null}
+links: {plans: [], commits: [237c37f0267e2a3328cf57b61fbbb33511a39494, 60ffc6b2250b, ece82b268bc9, 32721d28, a6319d5e, 7273f7b5, 6e5b2a33, be42269896bc3e0beecff69b28da487e40cfee63, f24b12a728eed750c8bf7031fb7655f162bf29da], evidence: [docs/qa_evidence/2026-09-21-projects-sessions-globals/], related: [916B, TVE1, Y2MP], github: null}
 ---
 # One pane for Projects, Sessions, and Globals
 
@@ -42,8 +42,8 @@ Owner, after comparing separate panes, one pane with views, and a persistent sid
 
 ## Discussion points
 Owner authorized implementation with subagents: "lets go with subagents for efficiency".
-The Globals tab is the home for the proposed HQ functionality in card #Y2MP. That card's
-remaining memory/runtime and scope decisions stay open; choosing the tab does not settle them.
+The Globals tab is the home for the proposed HQ functionality in card #Y2MP. Implementation uses the bounded pinned/path-matched memory behavior in the plan below;
+team distribution and a global loose-work inbox are outside this delivery.
 
 ## Planning notes
 Proposed interaction:
@@ -112,8 +112,40 @@ show real runtime-backed records. Settings/preset custom bindings must retain us
 application build, and isolated GUI screenshots showing tab selection and CRUD persistence.
 
 ## Tasks
-- [ ] HQ storage/protocol and global/project memory consumption <!-- t:bk -->
-- [ ] Projects management and shared SessionManager tabs <!-- t:pj -->
-- [ ] Globals editor and record management <!-- t:gl -->
-- [ ] Window integration, shortcuts and hints <!-- t:wi -->
-- [ ] Targeted tests, GUI evidence and landing <!-- t:qa -->
+- [x] HQ storage/protocol and global/project memory consumption <!-- t:bk -->
+- [x] Projects management and shared SessionManager tabs <!-- t:pj -->
+- [x] Globals editor and record management <!-- t:g1 -->
+- [x] Window integration, shortcuts and hints <!-- t:w1 -->
+- [x] Targeted tests, GUI evidence and landing <!-- t:qa -->
+
+## Execution Summary
+One shared Projects / Sessions / Globals pane is implemented. Projects owns registry management,
+active sessions, pin/forget, declined entries, explicit open/attach/Switchboard actions and session
+filter links. Options now links to Projects. Ctrl+Shift+P/Y/G select the corresponding tab;
+screenshot capture is unbound, and Warp/VS Code Actions use Ctrl+Shift+A to avoid collisions.
+Existing custom overrides remain honored. The pane helper receives the selected tab's context.
+
+Globals provides search, Markdown editing, creation and retirement of memories/aliases, and
+in-place editing of known instruction sources. Runtime memories are consumed, capped, matched
+and overridden; global writes preserve existing alias identities and reject stale edits.
+Evidence: [GUI screenshots, driver and notes](../../docs/qa_evidence/2026-09-21-projects-sessions-globals/).
+
+## Tests
+- `ctest -R conversations` — tests/conversations_test.cpp
+- `ctest -R projectspane` — tests/projectspane_test.cpp
+- `ctest -R globalspane` — tests/globalspane_test.cpp
+- `tests/test_keybindings.py`
+- `tests/test_globals_protocol.py`
+- `tests/test_memories.py`
+- `tests/test_agent_context.py`
+- `tests/test_remote_wire.py`
+- manual: docs/qa_evidence/2026-09-21-projects-sessions-globals/
+
+## QA checklist
+- [ ] P/Y/G shortcuts select Projects/Sessions/Globals without duplicating the pane.
+- [ ] Project browsing preserves the current attachment; explicit open/attach/Switchboard actions work.
+- [ ] Pin, Forget and declined-project restoration preserve project files.
+- [ ] Sessions retains its search/filter behavior; project links and No project filter correctly.
+- [ ] A saved global memory loads into a later agent prompt; project overrides take precedence.
+- [ ] Globals preserves an unsaved draft across tab switches and refuses stale external edits.
+- [ ] Screenshot has no default key; slow paths show live shortcut hints.

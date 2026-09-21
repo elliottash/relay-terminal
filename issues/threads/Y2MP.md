@@ -46,3 +46,7 @@ remain open. Its original body and implementation status are unchanged.
 <!-- relay:entry 20260921T220927Z-p1 author=codex kind=progress -->
 ### Codex · 2026-09-21 22:09
 Claimed the HQ dependency for implementation within card #P7SJ. Owner: "lets go with subagents for efficiency". Proceed with recommended deterministic bounded memory matching, source files kept in place and no team store. Global knowledge resolution will not replace project work-card routing.
+
+<!-- relay:entry 20260921T222440Z-q1 author=codex kind=evidence -->
+### Codex · 2026-09-21 22:24
+Implemented with three subagents and landed integration be42269896bc. Targeted backend/widget/keymap tests and exact-tree application build pass. Isolated Xvfb verifies all three shortcut tabs, a saved global memory consumed by runtime and draft preservation. Evidence: docs/qa_evidence/2026-09-21-projects-sessions-globals/. Added execution summary, tests and manual QA checklist; moved to needs-verification.
