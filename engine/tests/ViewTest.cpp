@@ -477,6 +477,11 @@ private slots:
         { QFile f(dir.filePath(QStringLiteral("notes.txt"))); QVERIFY(f.open(QIODevice::WriteOnly)); }
         QVERIFY(QDir(dir.path()).mkdir(QStringLiteral("tests")));
         Term t(core, QStringLiteral("/bin/cat"), {}, dir.path());
+        // Test palette identity, not platform font rasterization: small Qt6 subpixel
+        // glyphs need not contain even one pixel of their exact foreground colour.
+        QFont font = t.view->terminalFont();
+        font.setStyleStrategy(QFont::NoAntialias);
+        t.view->setTerminalFont(font);
         t.backend->resizeTerminal(12, 100);
         ColorScheme scheme = t.view->colorScheme();
         scheme.link = QColor(0x12, 0x34, 0xab); // a colour nothing else on the screen has
@@ -999,6 +1004,11 @@ private slots:
         QFETCH_GLOBAL(QString, core);
         for (int surface = 0; surface < 3; ++surface) {
             Term t(core, QStringLiteral("/bin/cat"));
+        // Test palette identity, not platform font rasterization: small Qt6 subpixel
+        // glyphs need not contain even one pixel of their exact foreground colour.
+        QFont font = t.view->terminalFont();
+        font.setStyleStrategy(QFont::NoAntialias);
+        t.view->setTerminalFont(font);
             const QByteArray rendered = inlineInkCode(InlineInk::Note) + "existing note\x1b[0m\n"
                 + inlineInkCode(InlineInk::RecapBody) + "existing recap\x1b[0m\n"
                 + inlineInkCode(InlineInk::DiffAdd) + "+ added line\x1b[0m\n"
@@ -1065,6 +1075,11 @@ private slots:
     {
         QFETCH_GLOBAL(QString, core);
         Term t(core, QStringLiteral("/bin/cat"));
+        // Test palette identity, not platform font rasterization: small Qt6 subpixel
+        // glyphs need not contain even one pixel of their exact foreground colour.
+        QFont font = t.view->terminalFont();
+        font.setStyleStrategy(QFont::NoAntialias);
+        t.view->setTerminalFont(font);
         ColorScheme scheme = t.view->colorScheme();
         scheme.palette[15] = 0xff14120d;   // IBM Beige's "bright white"
         scheme.palette[6] = 0xff0f5f5a;    // and its cyan
