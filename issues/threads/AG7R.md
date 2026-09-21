@@ -19,3 +19,40 @@ so no pane-scoped action can be made safe until the command names its pane. That
 effort, input-mode and plan-toggle answers whatever the owner says to them.
 
 Card is in discussing with five questions; groups 1, 2, 6 and the secret-row test need no answer.
+
+<!-- relay:entry 20260920T210500Z-ow author=agent kind=decision pane=terminal -->
+Owner answered all eight, 2026-09-20 (quoted in full in the card's `## Decisions`): groups 1–3
+yes, group 7 "pass the toggle like app_open", group 8 yes and wider ("allow sending messages and
+pre-filling messages across panes -- and address the other limitations here"). Group 6 was not a
+question and the card said so badly — nothing for him to do. Group 4 "i want those too (i think,
+tell me if there is a risk)" and group 5 "i would want to lean on the side of allowing, argue to me
+for each why not" both came back to me; the answers are in `## Planning notes`.
+
+Three things I checked before arguing, because two of them changed my answer:
+
+1. **Group 4's risk is mechanical, not editorial.** `executeAppCommand` returns
+   `appCommands().execute()` synchronously and `execute()` calls `item.run()` inline, while every
+   group-4 action ends in `dialog.exec()` — a nested event loop. So the `app_command_result` cannot
+   be sent until the person dismisses a dialog they did not ask for, §30.3's 20-second deadline
+   expires, and the agent is told `no_reply`: the #H6VQ failure by another route, with the window
+   frozen behind the modal meanwhile. Answer to the owner: yes, but make those `run()`s
+   non-blocking first (`open()` + callback, not `exec()`), and where the agent wants the outcome
+   rather than the picker, give it an `app_open`-shaped path instead.
+2. **Agents can already change hotkeys.** `set_keybinding` has existed since #GMCF and both the
+   tab's helper and the pane agent get it whenever the GUI sent the keybinding catalog
+   (`Pane::sendKeybindings()`). The owner's group-5 ask is already satisfied; only
+   `keybindings.edit` (external editor) and `keybindings.clearOverrides` (bulk wipe) are off.
+3. **`pane.close` is not as reversible as the closed list suggests.** `WindowManager::reopen()`
+   rebuilds the pane from its saved layout — directory, text and conversation come back, the
+   running process does not. Closing a pane mid-build loses the build.
+
+Of group 5's ~34 keys I could only make an argument I believe against seven: `voice.toggle`
+(switches a microphone on), `pane.share`/`pane.sharing` (outward-facing, and revoking does not
+un-see), `app.update` (restarts the app, killing every shell in every window), the four
+`control.*`/`program.delegate` keys (an agent granting itself control is circular),
+`windows.fresh`, `keybindings.clearOverrides` and `history.clear`. Everything else I recommend
+turning on, with eight more in a bounded middle where the owner should choose.
+
+Work started: subagent `safetable` holds src/AppCommands.{h,cpp}, tests/appcommands_test.cpp, the
+§30.2 paragraph and two spots in src/RelayWindow.h for groups 1, 3 (window-scoped), 6 and 7.
+Group 2 follows it (same file), then group 8, then group 4's non-blocking pass.

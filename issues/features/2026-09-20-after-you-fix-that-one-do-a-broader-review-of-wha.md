@@ -19,6 +19,47 @@ together
 (The one being fixed: "im having an issue where the sessions helper cant open panes because it says
 its unsafe. can you cahnge that" — landed `ab9e2ab7`, the four splits and `closed.restore`.)
 
+## Decisions
+
+Owner, 2026-09-20, answering the five questions:
+
+> groups 1-3 all yes
+>
+> group 4, i want those too (i think, tell me if there is a risk)
+>
+> group 5, i want agents to be able to change hotkeys and maybe some of these other ones, new
+> window / tab yes, i would want to lean on the side of allowing, argue to me for each why not.
+>
+> 6 not sure what i am supposed to do there
+>
+> 7 pass the toggle like app_open
+>
+> 8 allow sending messages and pre-filling messages across panes -- and address the other
+> limitations here.
+
+Settled, and being built:
+
+- **Groups 1, 2, 3 — yes.** The twelve unreachable keys are made reachable, `run_action` gets a
+  target pane, and both halves of group 3 go on: the window-scoped keys now, the pane-scoped ones
+  (model, effort, input mode, plan toggle) once the pane argument exists.
+- **Group 6 — nothing for the owner to do.** It was never a question; the card said so badly. The
+  secret guard has never fired because no shipped row sets `secret`, and the fix is a test. Being
+  written with group 1.
+- **Group 7 — the open/reveal/focus subset passes the writes toggle**, the way `app_open` does.
+  The reversible-but-writing entries (`*.reload`, the row buttons that test a key, detect servers
+  or reorder models) stay behind it, so the toggle still means "may change things".
+- **Group 8 — yes, and wider**: an agent may send a prompt to another pane and pre-fill a composer
+  without sending, plus the rest of group 8's list. Queued behind group 2, which is where a pane
+  gets a name a tool can use.
+
+**Group 4 — the answer is yes, but not by marking them `agent_safe` as they stand.** See
+"The risk in group 4" below: it is mechanical, not a matter of taste.
+
+**Group 5 — the argument against each, as asked.** See "Group 5, key by key" below. Hotkeys are
+already an agent's to change and have been since #GMCF; only the bulk wipe and the open-the-file
+action are off.
+
+
 ## Discussion points
 
 Measured against the code on `main` at `ab9e2ab7`, not against the protocol's prose. Method: every
@@ -187,12 +228,119 @@ mean "may change things", which is what it says.
 
 ## Planning notes
 
-Questions for the owner, shortest first. Groups 1, 2, 6 and the `secret` test need no answer — I
-will do them when you have looked at the rest.
+The five questions above were asked and answered on 2026-09-20; the answers are in `## Decisions`.
+What follows is the two things the owner asked me to come back with.
 
-1. Group 3's eight window-scoped keys: all yes?
-2. Group 3's pane-scoped keys (model, effort, input mode, plan toggle) — yes in principle, so that
-   group 2's pane argument is worth building?
-3. `tab.new` and `window.new` (group 5): as safe as the splits, or deliberately not?
-4. `agent.recap` / `agent.continue`: may an agent spend tokens on the person's behalf?
-5. Group 7: should the open/reveal/focus actions pass the writes toggle, as `app_open` does?
+### The risk in group 4, and it is not the one you would expect
+
+Not "the dialog does something bad". The risk is that **the tool call hangs and the window freezes
+behind a dialog nobody asked for**, and it is mechanical rather than a matter of taste:
+
+`RelayWindow::executeAppCommand()` returns `appCommands().execute(command, who)` synchronously
+(`src/RelayWindow.h:1713`), and `AppCommands::execute()` calls `item.run()` inline
+(`src/AppCommands.cpp:427`) and builds the `app_command_result` from what comes back. Every one of
+group 4's actions opens a **modal** — `pickFileForPreview()` ends in `dialog.exec()`
+(`src/RelayWindow.h:739` and `:752`; two more at `:2307` and `:5337`), which spins a nested event
+loop. So `run()` does not return until the person dismisses the dialog. Three consequences:
+
+1. **The result never goes back down the pipe** until the dialog closes, so §30.3's 20-second
+   deadline expires and the agent is told `no_reply`. That is exactly the failure the owner
+   reported in #H6VQ — "sessions helper didn't do anything" — arrived at by a different route.
+2. **The modal blocks the window.** Until it is dealt with, the person cannot type in any pane of
+   that window. An agent asked something in tab 3 can stop someone working in tab 1.
+3. **The agent cannot dismiss what it opened**, so decision 2's promise inverts: instead of the
+   person taking a change back in one click, the person is *forced* to click to get their app back.
+
+So the shape is a two-step, and both steps are worth doing:
+
+1. **Make those `run()`s non-blocking** — `dialog->open()` with a finished-callback, or
+   `QTimer::singleShot(0, ...)`, instead of `exec()`. `run()` returns at once, the result goes
+   back, the dialog appears. Mechanical, and testable at the AppCommands layer without a window.
+   After this, marking them `agent_safe` does what the owner asked and carries none of the risk.
+2. **Where the agent wants the outcome rather than the picker, give it the outcome.** `app_open`
+   already has this shape: the agent names the destination and the GUI does it with no dialog at
+   all. `files.open` -> `app_open {target: "file", path}` is strictly more useful than making a
+   file chooser appear in front of someone; the same goes for `project.pick`, `agent.export` (a
+   path) and `agent.instructions` (a named file). The picker stays, for the person.
+
+### Group 5, key by key: the argument against
+
+Asked for by the owner ("argue to me for each why not"), with the honest strength of each. The
+owner's lean is toward allowing, so these are grouped by whether I can make an argument I believe.
+
+**Already allowed — the question does not arise.** *Changing hotkeys is an agent's to do today.*
+`set_keybinding` has existed since #GMCF, and both the tab's helper and the pane agent get it
+whenever the GUI sent the keybinding catalog (`Pane::sendKeybindings()`, `src/Pane.h:2774`, and
+`keybindings=` in `board_protocol._build_page_agent`). Ask any pane agent to move a shortcut and it
+moves. What is off is only `keybindings.edit` (opens the JSON in an external editor — group 4's
+modal problem) and `keybindings.clearOverrides` (below).
+
+**No argument I believe — turn them on.** `tab.new`, `window.new` (the owner said yes; they are as
+reversible as the splits that landed in `ab9e2ab7` — Ctrl+W), `pane.moveLeft/Right/Up/Down`,
+`pane.moveToNewTab`, `tab.moveToNewWindow` (moving back is the undo; the only cost is a layout that
+shifts under you mid-task, which is startling and not harmful), `hints.reset` (brings the "next
+time:" hints back — an agent teaching someone a shortcut is a good use of it), `terminal.native`
+(a toggle, one click back), `helper.ask` (focuses a composer), `ssh.splitSameHost` (a pane on the
+host you are already connected to; with splits allowed this is the same act),
+`conversations.rebuild` (idempotent re-index; the only cost is time, and it can be slow),
+`agent.newChat` (milder than it sounds — the conversation is saved and resumable from Sessions),
+`agent.recap`, `agent.continue`, `agent.resumeQueue` (they spend tokens, which #RCPF has already
+decided is acceptable on the owner's behalf).
+
+**A real argument, bounded — the owner's call.**
+
+- `pane.close`. The closed list does bring the pane back, with its directory, its layout and its
+  conversation — but **not its running process**: `WindowManager::reopen()`
+  (`src/WindowManagerImpl.h:395`) rebuilds from the saved layout. Close a pane running a build, an
+  ssh session or a long command and that work is gone with no undo. The honest version is "safe for
+  an idle pane, unsafe for a busy one", which the executor cannot tell apart today.
+- `terminal.clear`. Wipes the scrollback the person may be reading. The session log keeps the text,
+  so it is recoverable — just not where they were looking.
+- `agent.clearQueue`. Deletes prompts **the person typed** and queued. Someone else's words are the
+  one thing I would not have an agent throw away unasked.
+- `agent.compact`. Irreversible: the detail the compaction dropped is gone. Cheap to ask for,
+  expensive to be wrong about.
+- `terminal.interrupt`, `agent.interrupt`, `agent.stop`, `agent.stopAllSubagents`. Each kills work
+  in flight. Stop is also the person's emergency brake, and an agent that can press it can press
+  its own. None of them can be aimed today — they hit the focused pane — so they are blocked on
+  group 2 whatever the answer.
+- `pane.restartShell`. Kills the shell and its children in order to restart it.
+- `project.detach`. Reversible only through `project.pick`, which is a modal — so its undo sits
+  behind group 4.
+
+**I would hold the line on these seven, and here is why for each.**
+
+1. `voice.toggle` — **it switches a microphone on.** The cost of a wrong "on" is recording a room
+   that did not consent; the benefit is saving one click. No undo makes that trade worse, not
+   better.
+2. `pane.share` / `pane.sharing` — publishes a pane to other people over the network. Not
+   reversible in the way that matters: revoking a link does not un-see what was on screen, and
+   #W5N2's whole shape (multi-use links, email on join, no auto-admit) is about the person choosing
+   this deliberately.
+3. `app.update` — downloads a binary over the network and **restarts the app the person is working
+   in**, killing every shell and agent in every window. There is no undo at all.
+4. `control.human`, `control.program.agent`, `control.program.human`, `program.delegate` — these
+   hand the terminal between the person and the agent. An agent granting itself control is
+   circular: the thing being decided is whether the agent is in charge. This is the only refusal in
+   the list I would defend on principle rather than on consequences.
+5. `windows.fresh` — discards the saved window set: the person's entire arrangement, no undo.
+6. `keybindings.clearOverrides` — wipes **every** custom shortcut in one call, and the overrides
+   file is the only copy. This is not "agents may not change hotkeys" — they may, one at a time,
+   deliberately, through `set_keybinding`. A bulk wipe is a different act.
+7. `history.clear` — deletes terminal history. Irreversible, and it is the person's record.
+
+If the owner wants any of the seven anyway: 1-4 are the ones I would ask him to say out loud on the
+card, so the decision has a date on it. 5-7 I will turn on without further argument if he says so,
+since they only destroy the person's own state and the person is the one asking.
+
+### Order of work
+
+1. **Landing now** — groups 1, 3 (window-scoped), 6, 7, in `src/AppCommands.*`.
+2. **Next** — group 2: `app_command` carries the asking pane, `runAction` takes a target. Then
+   group 3's pane-scoped keys, and every "aim it at a pane" entry above becomes answerable.
+3. **Then** — group 8, which needs a pane to have a name a tool can use, so it follows group 2:
+   send a prompt to a named pane, pre-fill a composer without sending, `app_open` for the remaining
+   panes (explorer, Test suites, Activity, info, requests, subagents), naming tabs and renaming
+   panes, and the helper reading the pane it is helping.
+4. **Group 4** — the non-blocking `run()` pass, then the marks, then the direct-path tools.
+5. **Group 5** — on the owner's answers to the two lists above.
