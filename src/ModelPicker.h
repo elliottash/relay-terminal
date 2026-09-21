@@ -17,8 +17,12 @@
 // models." So the dialog is now tabbed:
 //
 //   high · main · flash · lite · local        each tab *is* that tier list, numbered, in order
-//   all                                        every usable model: favorites, recents, the sort,
-//                                              and "+ add a model by id…" at the end
+//   all                                        every available model: favorites, then a section per
+//                                              provider **alphabetically**, the sort menu, and
+//                                              "+ add a model by id…" at the end. No "recent"
+//                                              section (owner, 2026-09-21): this tab is a
+//                                              checklist read one provider at a time, and a block
+//                                              of lately-picked rows moves under you between looks
 //
 // A tier tab is the list itself, so editing it here is editing it on Options › Models: both write
 // `models/tier/<tier>` through `curation::setTierList`, which writes through to the current

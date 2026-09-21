@@ -494,17 +494,18 @@ private Q_SLOTS:
         QVERIFY(plain.viaList()->count() <= 1);
     }
 
-    void theFlatTabKeepsFavoritesRecentsAndTheSortMenu() {
+    // Favorites, then one section per provider **alphabetically**, and no "recent" section at all
+    // (owner, 2026-09-21: "for available, remove the recent section. i would order the sections
+    // alphabetically"). `noteUse` still runs — it is what counts a model's uses for the sort menu
+    // — and no longer puts a block of rows above the providers.
+    void theAvailableTabIsFavoritesThenProvidersAlphabetically() {
         curation::toggleFavorite(QStringLiteral("guest:claude|opus"));
         curation::noteUse(QStringLiteral("anthropic|claude-opus-5"));
         ModelPicker::Context ctx = context();
         ctx.tier = QStringLiteral("all");
         ModelPicker picker(ctx);
-        // The rest is grouped by provider, one rule per provider name (card #MDL1, design 5.7):
-        // step 2 is a statement about one provider's models at a time, and the providers come in
-        // the order their first model does, so the rank order is still the order you read down.
         QCOMPARE(keys(picker.list()), (QStringList{QStringLiteral("[favorites]"), QStringLiteral("guest:claude|opus"),
-                                                   QStringLiteral("[recent]"), QStringLiteral("anthropic|claude-opus-5"),
+                                                   QStringLiteral("[anthropic (claude)]"), QStringLiteral("anthropic|claude-opus-5"),
                                                    QStringLiteral("[z.ai (glm)]"), QStringLiteral("glm-coding|glm-5.3"),
                                                    QStringLiteral("glm-coding|glm-5.3-flash"),
                                                    QStringLiteral("[+ add a model by id…]")}));

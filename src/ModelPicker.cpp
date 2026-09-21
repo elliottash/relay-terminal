@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ModelPicker.h"
 
+#include <algorithm>
+
 #include <QAbstractItemView>
 #include <QCheckBox>
 #include <QComboBox>
@@ -400,7 +402,7 @@ void ModelPicker::populateTabs() {
         const int index = m_tabs->addTab(id);
         m_tabs->setTabData(index, id);
         m_tabs->setTabToolTip(index, id == kAll
-            ? QStringLiteral("every model, one row each — favorites, the ten most recent, and the sort menu")
+            ? QStringLiteral("every model, one row each — favorites, then a section per provider, alphabetically")
             : curation::tierLabel(id) + QStringLiteral(" · rank 1 is what this tier runs on, the rest are its fallbacks"));
     }
 }
@@ -690,29 +692,33 @@ void ModelPicker::buildAll(const QString &query) {
         addAddByIdRow();
         return;
     }
-    // Sections, opencode's way: favorites, then the ten most recent, then everything by rank. A
-    // group is a favorite when any of its entries is, and recent when any of them is (edge case
-    // 10) — a model is one row wherever it sits.
+    // Favorites first — a section the user made, pinned where they put it — then one section per
+    // provider, **alphabetically** (owner, 2026-09-21: "for available, remove the recent section.
+    // i would order the sections alphabetically"). A group is a favorite when any of its entries
+    // is (edge case 10): a model is one row wherever it sits.
+    //
+    // **There is no "recent" section.** This tab is a checklist — step 2, which of a provider's
+    // models exist for the lists, the box and the filter — and the question it answers is asked of
+    // one provider at a time ("i probably want to uncheck sonnet and haiku and gpt 5.5"). A ten-row
+    // block of whatever was picked lately pulls those rows out of their provider and puts them
+    // somewhere that moves under you between two looks, which is the opposite of what a checklist
+    // is for. `models/recent` and `noteUse` stay: `noteUse` is also what counts a model's uses,
+    // which is what the sort menu's "usage" reads, and the box's own recency is not this tab's.
+    //
+    // Alphabetical rather than the rank order the providers happened to come in: a list you are
+    // ticking down is read by looking for a name, and the previous order — first model's rank —
+    // moved every time a list was edited. Under any other sort, and while something is typed, the
+    // list stays flat above: the sort *is* the order then.
     auto groupOf = [&groups](const QString &key) -> const Group * {
         for (const Group &group : groups)
             for (const Entry &entry : group.entries)
                 if (entry.key == key) return &group;
         return nullptr;
     };
-    QList<const Group *> placed, favorites, recent;
+    QList<const Group *> placed, favorites;
     for (const QString &key : curation::favorites())
         if (const Group *group = groupOf(key); group && !placed.contains(group)) { favorites << group; placed << group; }
-    for (const QString &key : curation::recent())
-        if (const Group *group = groupOf(key); group && !placed.contains(group)) { recent << group; placed << group; }
     if (!favorites.isEmpty()) { addSection(QStringLiteral("favorites")); for (const Group *group : favorites) addGroupRow(*group, false); }
-    if (!recent.isEmpty()) { addSection(QStringLiteral("recent")); for (const Group *group : recent) addGroupRow(*group, false); }
-    // The rest **by provider**, one rule per provider name (owner, 2026-09-21: the availability
-    // column is "grouped by provider … with the provider's name as a rule"). Step 2 is a statement
-    // about one provider's models at a time — "i probably want to uncheck sonnet and haiku and gpt
-    // 5.5" — and reading it needs the provider's models together, which a flat rank order never
-    // puts them in. The providers come in the order their first model does, so the rank order the
-    // page was showing is still the order you read down. Under any other sort, and while something
-    // is typed, the list stays flat above: the sort *is* the order then.
     QStringList providers;
     QHash<QString, QList<const Group *>> byProvider;
     for (const Group &group : groups) {
@@ -722,6 +728,11 @@ void ModelPicker::buildAll(const QString &query) {
         if (!providers.contains(provider)) providers << provider;
         byProvider[provider] << &group;
     }
+    // The provider's *shown* name — "z.ai (glm)" sorts under z — case-insensitively, because a row
+    // from a worker that predates the lower-casing would otherwise sort above every other section.
+    std::sort(providers.begin(), providers.end(), [](const QString &a, const QString &b) {
+        return QString::compare(a, b, Qt::CaseInsensitive) < 0;
+    });
     for (const QString &provider : providers) {
         addSection(provider);
         for (const Group *group : byProvider.value(provider)) addGroupRow(*group, false);
