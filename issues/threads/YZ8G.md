@@ -138,3 +138,6 @@ Owner: "can you query codex cli to give you a skeptical take and to see if this 
 <!-- relay:entry 20260921T233702Z-ex author=claude-code kind=decision -->
 ### Claude Code · 2026-09-21 23:37
 Owner: "i agree with all, go ahead with it". Plan adopted; card claimed; steps 1–3 filed as #PR4Q, #WC3E, #JNYN with their expectations written first. One Opus subagent per card; a separate verifier session writes each checklist.
+<!-- relay:entry 20260921T234633Z-df author=claude-code kind=decision -->
+### Claude Code · 2026-09-21 23:46
+Owner: "for apps, the agents should: 1) run tests 2) verify with an AI simulator 3) open the app for the human in a simulated environment that tests that issue. does this map onto our approach? does verify do #2? what button should be added to the board for #3?" Answer recorded in `## Decisions`: Verify did not do (2) — it ran commands and read code; now it does; Try it is the button for (3). The #WC3E and #JNYN agents were told mid-flight; both cards' `## Done means` updated.
