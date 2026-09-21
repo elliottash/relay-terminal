@@ -1236,6 +1236,7 @@ private:
         else if (id == QStringLiteral("control.prompt")) pane->showPrompt();
         else if (id == QStringLiteral("program.delegate")) pane->delegateProgram();
         else if (id == QStringLiteral("input.toggle")) pane->toggleInputMode();
+        else if (id == QStringLiteral("agent.swap")) pane->swapModel();
         else if (id == QStringLiteral("agent.flashAgent")) pane->toggleFlashAgent();   // model roles
         else if (id == QStringLiteral("agent.highAgent")) pane->toggleHighAgent();     // /high, card #MDL1
         else if (id == QStringLiteral("agent.model")) pane->openModelPicker();          // Ctrl+Alt+M, /model

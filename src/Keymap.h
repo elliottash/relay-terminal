@@ -350,6 +350,7 @@ private:
         // No default key: /update in the prompt box is the fast path, and a key nobody presses on
         // the average session is not worth claiming (the same reasoning as agent.localAgent).
         add("app.update", "window", "Update: download and install the latest Relay, then restart", {});
+        add("agent.swap", "agent", "Swap models (/swap)", {QStringLiteral("Alt+S")});
         add("agent.flashAgent", "agent", "Switch this pane between the Main agent and the Flash agent", {QStringLiteral("Alt+F")});   // model roles
         // /high's key, in Alt+F's shape (card #MDL1; owner, 2026-09-21: "add /high"). Alt+H is free:
         // Relay's only Alt+letters are Alt+A, Alt+E, Alt+F, Alt+I, Alt+M, Alt+Q and Alt+R, and none

@@ -1969,6 +1969,22 @@ public:
     }
     // Before the first configure: the role a new or restored pane starts with.
     void initAgentRole(const QString &role) { if (!m_configured) m_agentRole = role; }
+    void swapModel() {
+        // Owner (card #DC4J): "/swap … immediately swaps to your default fallback (or back to
+        // your first choice provider if you are on the fallback)" — and, after #MDL1, from
+        // wherever the pane actually is. It knew two keys and had no memory, so a pane on any
+        // third model (the normal case) was sent to rank 2 and then ping-ponged 1↔2 for ever,
+        // never returning to the model the owner was working on. `swapTarget` is the rule:
+        // off rank 1 it remembers where this pane is and goes to rank 1; on rank 1 it goes
+        // back to what it remembered, or to rank 2 when there is nothing to come back to. A
+        // switch still lands at once, even mid-retry (7824689d), and a spent subscription is
+        // still stepped over on both sides.
+        const relay::models::SwapStep step =
+            relay::models::swapTarget(modelCatalog(), currentEntryKey(), m_swapFrom);
+        if (step.kind == relay::models::SwapKind::None) { status(step.message); return; }
+        m_swapFrom = step.remember;
+        sayAndSwitch(step.message, [this, key = step.target.key] { selectEntry(key); });
+    }
     void toggleFlashAgent() {
         setAgentRole(m_agentRole == QStringLiteral("flash") ? QStringLiteral("main") : QStringLiteral("flash"));
     }
@@ -9242,20 +9258,9 @@ private:
                 return;
             }
         } else if (name == QStringLiteral("swap")) {
-            // Owner (card #DC4J): "/swap … immediately swaps to your default fallback (or back to
-            // your first choice provider if you are on the fallback)" — and, after #MDL1, from
-            // wherever the pane actually is. It knew two keys and had no memory, so a pane on any
-            // third model (the normal case) was sent to rank 2 and then ping-ponged 1↔2 for ever,
-            // never returning to the model the owner was working on. `swapTarget` is the rule:
-            // off rank 1 it remembers where this pane is and goes to rank 1; on rank 1 it goes
-            // back to what it remembered, or to rank 2 when there is nothing to come back to. A
-            // switch still lands at once, even mid-retry (7824689d), and a spent subscription is
-            // still stepped over on both sides.
-            const relay::models::SwapStep step =
-                relay::models::swapTarget(modelCatalog(), currentEntryKey(), m_swapFrom);
-            if (step.kind == relay::models::SwapKind::None) { status(step.message); return; }
-            m_swapFrom = step.remember;
-            sayAndSwitch(step.message, [this, key = step.target.key] { selectEntry(key); });
+            swapModel();
+            hint(QStringLiteral("model.swap.key"), relay::ShortcutHints::nextTime(
+                     Keymap::instance().shortcutText(QStringLiteral("agent.swap")), QStringLiteral("swapping models")));
         } else if (name == QStringLiteral("main") || name == QStringLiteral("high")
                    || name == QStringLiteral("flash") || name == QStringLiteral("local")) {
             // The pane's own agent, not the tier table: /flash runs this conversation on the Flash
