@@ -7,7 +7,7 @@ labels: [bug, keyboard, panes]
 rank: mazp7
 created: '2026-09-22'
 source: 'User report in Relay; observed on sphinxpad, 2026-09-22'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-AZP7/README.md], related: [Z00M], github: null}
+links: {plans: [], commits: [7c0774c8fa8cbcf3121ac5b0feb738c24c7e804c], evidence: [docs/qa_evidence/2026-09-22-AZP7/README.md], related: [Z00M], github: null}
 ---
 # Ctrl plus/minus does not zoom auxiliary panes
 
@@ -39,8 +39,7 @@ manual: docs/qa_evidence/2026-09-22-AZP7/tests.txt
 manual: docs/qa_evidence/2026-09-22-AZP7/README.md
 
 ### Check 2026-09-22 19:37
-- passed · ctest:auxiliaryzoom — ctest -R auxiliaryzoom passed for this revision on spark-dcc9, 2026-09-22T23:37:05Z
+- passed · ctest:auxiliaryzoom — ctest -R auxiliaryzoom passed for this revision on spark-dcc9, 2026-09-22T23:37:43Z
 - not-applicable · manual:docs/qa_evidence/2026-09-22-AZP7/tests.txt — manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-AZP7/tests.txt
 - not-applicable · manual:docs/qa_evidence/2026-09-22-AZP7/README.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-AZP7/README.md
-- warning · card — none of the listed tests is named after anything this card changed (issues/changes/2026-09-22-auxiliary-pane-keyboard-zoom.md, issues/changes/2026-09-22-codex-missing-from-priorities.md, issues/changes/2026-09-22-openrouter-priorities-refresh.md…)
 history: thread

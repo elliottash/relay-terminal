@@ -12,3 +12,10 @@ Implemented auxiliary transcript keyboard zoom; application build and six Qt tes
 
 <!-- relay:entry 20260922T233706Z-p8 author=agent kind=evidence -->
 Check · 2 not-applicable, 1 passed; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T233744Z-3r author=agent kind=evidence -->
+Check · 2 not-applicable, 1 passed. The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T233805Z-a2 author=codex kind=evidence -->
+### Codex · 2026-09-22 23:38
+Linked implementation 7c0774c8fa8cbcf3121ac5b0feb738c24c7e804c; exact-tree application build passed. Post-commit targeted auxiliaryzoom run passed, and tests_check reports no findings or signals. Isolated-XDG Xvfb Activity staging passed. Card remains needs-verification.

@@ -13,3 +13,5 @@ Validation:
 - Board check: 505 cards, 12 pre-existing errors and 754 warnings; no AZP7 findings. No full suites run.
 
 Files: src/AuxiliaryZoom.h, src/RelayWindow.h (three narrow hunks), tests/auxiliaryzoom_test.cpp, CMakeLists.txt, the AZP7 card/thread, and this evidence directory. Other sessions' changes excluded at landing.
+
+Landed implementation: `7c0774c8fa8cbcf3121ac5b0feb738c24c7e804c`. The land.py exact-tree application build passed. A fresh `tests_check` through TestsCommands after landing reports auxiliaryzoom passed for revision 7c0774c8, no findings/signals. Activity staging was also rerun under Xvfb with an isolated temporary XDG_CONFIG_HOME: 3 passed, 0 failed (activityView plus init/cleanup).
