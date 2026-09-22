@@ -19,3 +19,6 @@ Real localhost GUI drive reproduced missing spacing and persistent cyan busy lin
 
 <!-- relay:entry 20260922T133708Z-wr author=agent kind=event model=gpt-6-astra pane=994d8863 turn=fc8ca9abaf2147cb82e1e6068bae5444/d1bf228b2ea04e52b96078c50da5f5b5 -->
 - ✦ agent moved this card · Executing → Needs verification · SSH audit and real localhost GUI reproduction complete; production fixes are documented follow-up work. · evidence docs/qa_evidence/2026-09-22-ssh-parity/ · implemented_by openai/gpt-6-astra via codex
+
+<!-- relay:entry 20260922T133747Z-3g author=agent kind=event model=gpt-6-astra pane=994d8863 turn=fc8ca9abaf2147cb82e1e6068bae5444/d1bf228b2ea04e52b96078c50da5f5b5 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-22-ssh-parit… → {"plans": [], "commits": ["3d9e5538ef60f7641dc17fd0b8265bdf9d619119"], "evidence…

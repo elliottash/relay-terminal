@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: m
 created: '2026-09-22'
 source: Owner in Relay, 2026-09-22
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-ssh-parity/], related: [S5SH], github: null}
+links: {plans: [], commits: [3d9e5538ef60f7641dc17fd0b8265bdf9d619119], evidence: [docs/qa_evidence/2026-09-22-ssh-parity/], related: [S5SH], github: null}
 ---
 # Audit SSH terminal parity and live UX
 
