@@ -1,14 +1,15 @@
 ---
 id: 7BM4
 type: work
-status: needs-verification
+status: executing
 labels: [feature, switchboard, tests, profiling]
 component: [gui, worker]
-assignee: claude-code
+assignee: codex
+implemented_by: anthropic/claude-fable-5.1
 rank: zzzzzzzzzzzzzzzy
 created: '2026-09-20'
 source: 'owner, Claude Code session, 2026-09-20'
-links: {plans: [], commits: [c8b0a8d2, 912ab11a, eb0a9b76, 4ac7b57d, 71355e7a, db035cfd, 5e306871, 8ad92248, 6348ebef, 6bb87f04, cf7d1a5f, 97a019fc, 0152697f, f56a6ea0, 432a17f0, a10bb2a4, fd45d116, f86266da, b81c861a, fd7a9a71, 936bc28a, 4818709e, 2bd23344, e34b1df6, 21f5b001, 20c4e29e], evidence: [docs/qa_evidence/2026-09-20-test-suites-pane/, docs/qa_evidence/2026-09-20-card-tests-check/, docs/qa_evidence/2026-09-20-profile-button/, docs/qa_evidence/2026-09-20-switchboard-tooling-hub/HUMAN-QA.md], related: [R9G7, SDXE, PF4K, YZ8G, 561P], github: null}
+links: {plans: [], commits: [c8b0a8d2, 912ab11a, eb0a9b76, 4ac7b57d, 71355e7a, db035cfd, 5e306871, 8ad92248, 6348ebef, 6bb87f04, cf7d1a5f, 97a019fc, 0152697f, f56a6ea0, 432a17f0, a10bb2a4, fd45d116, f86266da, b81c861a, fd7a9a71, 936bc28a, 4818709e, 2bd23344, e34b1df6, 21f5b001, 20c4e29e], evidence: [docs/qa_evidence/2026-09-21-verify-7BM4/report.md, docs/qa_evidence/2026-09-20-test-suites-pane/, docs/qa_evidence/2026-09-20-card-tests-check/, docs/qa_evidence/2026-09-20-profile-button/, docs/qa_evidence/2026-09-20-switchboard-tooling-hub/HUMAN-QA.md], related: [R9G7, SDXE, PF4K, YZ8G, 561P], github: null}
 ---
 # Switchboard as the project's tooling hub: a Tests section with Check, a Test suites pane, a Profile button, and what else fits
 
@@ -236,22 +237,56 @@ three phases touch no file that #R9G7 (deliver workflow) currently holds.
 - `tests/test_relay_profile.py`
 - manual: docs/qa_evidence/2026-09-20-switchboard-tooling-hub/HUMAN-QA.md
 
+### Check 2026-09-21 21:37
+- missing-evidence · ctest:testsuites — no run of ctest -R testsuites for this revision, from any host, and no attached result
+- missing-evidence · ctest:cardtests — no run of ctest -R cardtests for this revision, from any host, and no attached result
+- passed · ctest:profilepane — ctest -R profilepane passed for this revision on spark-dcc9, 2026-09-22T01:37:20Z
+- passed · ctest:windowstate — ctest -R windowstate passed for this revision on spark-dcc9, 2026-09-22T01:12:46Z
+- missing-evidence · unittest:tests.test_test_probe — no run of tests/test_test_probe.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_test_history — no run of tests/test_test_history.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_junit_runner — no run of tests/test_junit_runner.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_tests_protocol — no run of tests/test_tests_protocol.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_profile_protocol — no run of tests/test_profile_protocol.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_relay_profile — no run of tests/test_relay_profile.py for this revision, from any host, and no attached result
+- not-applicable · manual:docs/qa_evidence/2026-09-20-switchboard-tooling-hub/HUMAN-QA.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-20-switchboard-tooling-hub/HUMAN-QA.md
+- notice · ctest:testsuites — ctest -R testsuites has never run here
+- notice · ctest:cardtests — ctest -R cardtests has never run here
+- notice · unittest:tests.test_test_probe — tests/test_test_probe.py: 20 of 20 never ran here (test_names_ids_labels_and_disabled, test_source_from_the_command_path_convention, test_source_from_add_executable_when_the_name_does_not_match…)
+- notice · unittest:tests.test_test_history — tests/test_test_history.py: 68 of 69 never ran here (test_append_and_read_round_trip, test_a_batch_is_one_write_and_appends_never_rewrite, test_every_line_is_one_json_object_in_the_wire_shape…)
+- notice · unittest:tests.test_junit_runner — tests/test_junit_runner.py: 17 of 17 never ran here (test_writes_one_testcase_per_test_with_outcomes, test_classname_file_and_line_point_at_the_source, test_classname_matches_the_probes_unittest_id…)
+- notice · unittest:tests.test_junit_runner — tests/test_junit_runner.py: 2 of 17 are skipped for good (test_expected, test_unexpected)
+- notice · unittest:tests.test_tests_protocol — tests/test_tests_protocol.py: 101 of 101 never ran here (test_list_carries_the_contract_keys_and_nothing_surprising, test_cards_without_tests_lists_work_in_flight_only, test_a_cards_tests_section_names_the_test_on_its_row…)
+- notice · unittest:tests.test_profile_protocol — tests/test_profile_protocol.py: 14 of 14 never ran here (test_started_progress_finished, test_second_run_is_refused_while_one_is_in_flight, test_stop_ends_the_run…)
+- notice · unittest:tests.test_relay_profile — tests/test_relay_profile.py: 21 of 21 never ran here (test_ninja_log_becomes_a_per_output_table, test_an_output_built_twice_counts_once_at_its_last_time, test_an_empty_log_is_a_sentence_not_a_traceback…)
+- notice · unittest:tests.test_relay_profile — tests/test_relay_profile.py: 11 of 21 are skipped for good (test_it_succeeded_and_printed_where_it_wrote, test_the_five_files_are_there, test_the_summary_table_names_every_object…)
+history: thread
 ## QA checklist
-Implementer's checks (Claude Fable 5.1 orchestrating Opus subagents, 2026-09-20). Each line names
-the command or the screenshot that proves it; the verifier re-runs them on a clean export.
+Independent verifier: gpt-6-astra via Codex (Relay a2), 2026-09-21 America/New_York.
+Checked revision: `0241d05ef19393e84c0ef98655c9687466a92efc`, clean archive export;
+Qt 5 / Linux aarch64. Evidence: `docs/qa_evidence/2026-09-21-verify-7BM4/`.
+The prior implementer's checklist was not used as verification evidence.
 
-- [ ] Both runners pass the setup: `scripts/relay-tooling-setup` on spark and `ssh sphinxpad.local 'bash -s' < scripts/relay-tooling-setup` end in `0 needed tool(s) missing, 0 smoke test(s) failed`.
-- [ ] `scripts/relay-remote-tests --qt 6 -R '^(jobs|board)$'` builds on sphinxpad and leaves `ctest.xml`, `meta.json` and `ninja_log` under `issues/.private/tests/incoming/sphinxpad-*/`.
-- [ ] Backend suites: `PYTHONPATH=backend:tests RELAY_KEYRING=off python3 -m unittest tests.test_test_probe tests.test_test_history tests.test_junit_runner tests.test_tests_protocol tests.test_profile_protocol tests.test_relay_profile` — all pass (87 + 90 + 34 cases); the same three store modules pass under Python 3.14 on sphinxpad.
-- [ ] GUI suites: `QT_QPA_PLATFORM=offscreen ctest --test-dir build -R '^(testsuites|cardtests|profilepane|windowstate|panestatus|appcommands)$'` — all pass.
-- [ ] Test suites pane, live (`docs/qa_evidence/2026-09-20-test-suites-pane/implementer-live-0{1,2,3}-*.png`): the row's Tests button opens it beside the Switchboard; Run all through the real board worker marks the failing row red; the detail shows the card, commit and host; the palette row `Test suites` opens it and an unattached tab shows "No worker attached".
-- [ ] Pane width: at 560 px the names read in full and p50, Runs and Cards have yielded (`RELAY_TESTSUITES_SHOT=<png> RELAY_TESTSUITES_SHOT_WIDTH=560 ./build/relay-testsuites-tests`).
-- [ ] Card page (`docs/qa_evidence/2026-09-20-card-tests-check/implementer-0{1,2,3,4}-*.png`): the `## Tests` strip and Check; two findings (gone, failing) and the `### Check <date>` block written into the body; the move to Done refused with the tests named and the picker put back; Override… asks a reason and the `decision` entry quotes it.
-- [ ] Profile (`docs/qa_evidence/2026-09-20-profile-button/`): the four-entry menu; a build profile's result pane with the table, share column and evidence path; Attach to card… adds a `## Profile` section and the evidence path to `links.evidence`; `scripts/relay-profile tests tests.test_test_history` writes `tests.speedscope.json` and `summary.md`.
-- [ ] `scripts/relay-speedscope --print-url <any profile>` prints a `file://…/index.html#localProfilePath=` URL and the bundle opens it offline.
-- [ ] Docs: `docs/PROFILING.md`, `docs/SWITCHBOARD-TOOLING-RESEARCH.md`, `docs/SWITCHBOARD-DESIGN.md` §4.14, `docs/SWITCHBOARD-FORMAT.md` §2.6, `docs/AGENT-SESSIONS-PROTOCOL.md` §31 (31.9 Profile still to land — see the thread), `docs/VALIDATION.md` inventory pointer.
-- [ ] The staged scenario plays in the real app (AI pass): `docs/qa_evidence/2026-09-20-switchboard-tooling-hub/scenario/ai-pass.md`, eight screenshots; re-run with `scenario/ai-pass.sh`.
-- [ ] Not done, by decision: the app profile target has no screenshot (it profiles a second Relay someone must drive); the agent-facing `tests_check` tool writes no block (§31.6's contract — the owner's call); coverage and test-impact analysis are out of scope.
+- `Done means`: **missing evidence** — this section is absent; no predeclared outcome lines exist to check.
+- `ctest -R testsuites`: **passed** — fresh targeted binary, `gui-tests.log` (1/4).
+- `ctest -R cardtests`: **passed** — fresh targeted binary, `gui-tests.log` (4/4).
+- `ctest -R profilepane`: **passed** — fresh targeted binary, `gui-tests.log` (2/4).
+- `ctest -R windowstate`: **passed** — fresh targeted binary, `gui-tests.log` (3/4).
+- `tests/test_test_probe.py`: **passed** — included in the 237-test clean-source run, `backend-tests.log`.
+- `tests/test_test_history.py`: **passed** — same run, `backend-tests.log`.
+- `tests/test_junit_runner.py`: **passed** — same run, `backend-tests.log`.
+- `tests/test_tests_protocol.py`: **passed** — same run, `backend-tests.log`.
+- `tests/test_profile_protocol.py`: **passed** — same run, `backend-tests.log`.
+- `tests/test_relay_profile.py`: **passed** — same run, `backend-tests.log`.
+- `manual: docs/qa_evidence/2026-09-20-switchboard-tooling-hub/HUMAN-QA.md`: **failed** overall — fresh short-card simulation proves Check/Done gate, flaky history, build profile and attachment (`scenario/01-card.png` through `10-attached.png`), but the actual long #7BM4 card reports 0 tests because its body is truncated and its Check findings are clipped (`05-wait.png`, `08-max.png`, `10-card.png`). Human-only questions remain unanswered. The old walkthrough's retired-test blocking expectation is stale.
+
+- tests: passed (revision 0241d05ef19393e84c0ef98655c9687466a92efc)
+- simulation: played (evidence docs/qa_evidence/2026-09-21-verify-7BM4/)
+- staged: docs/qa_evidence/2026-09-21-verify-7BM4/
+
+Unresolved: long-card body truncation; clipped Check findings on that card; missing Done means;
+real-model Verify → Try it → answer completion still being exercised (GLM failed HTTP 429,
+Kimi has started and made tools calls, completion not claimed); all three owner judgments below.
+Reviewed by gpt-6-astra on 2026-09-21: 3 findings.
 
 ## Human QA
 The owner is put into a staged project in which this card's three problems are happening; an AI
@@ -263,3 +298,11 @@ in the owner's words.
 2. **CI goes red about once a week.** Could you name the flaky test, since when, and on which machines, in under a minute, without reading a log?
 3. **The build got slow.** Do you now know which file to look at, and is that answer on the card for the next person?
 
+
+## Verdict
+Not ready to close. Clean revision `0241d05ef193` passes all 237 named backend tests and
+all four named CTest suites. The fresh orders simulation proves the short-card gate,
+flaky-test history and actual build-profile attachment. The real long card still hides its
+Tests section through truncation and clips its Check findings. Missing Done means and
+unanswered Human QA judgments remain. The requested real-model end-to-end flow is pending;
+a started model turn is not a completed verification. Details: fresh evidence `report.md`.
