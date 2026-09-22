@@ -38,3 +38,14 @@ request. To needs-verification; the checklist is his iPhone and iPad.
    `waiting_on: owner`, so the row keeps saying "1 waiting on you". Should an owner's decision
    clear `waiting_on` by itself? Recommendation: yes, on any owner `decision` entry, and the agent
    sets it again if it still needs you; that is what makes the count trustworthy from a phone.
+
+<!-- relay:entry 20260922T012002Z-d1 author=claude-code kind=note -->
+### Claude Code · 2026-09-22 01:20
+**Handoff.** All three build tasks plus the hosted drive are landed and deployed; the owner opened
+Relay himself on 2026-09-21 rather than this session doing it, so task 4 is marked done on that
+basis. What is open is the QA checklist above, on the owner's paired iPhone/iPad — no more code is
+needed for it to pass. Known follow-ups that are NOT blocking, filed as separate cards or noted in
+Execution Summary: no busy strip on the desktop's card page for a phone-started Discuss/Plan
+(`src/BoardPane.cpp`, needs whoever holds it), a Verify pane headed "Execute" (`src/Pane.h`), one
+possible spurious `card_waiting` with two boards open at once (needs a `board_key` from the
+bridge), #PRM2 and #SDR1 (filed, unclaimed).

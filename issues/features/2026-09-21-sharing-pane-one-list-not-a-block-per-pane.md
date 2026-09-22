@@ -10,7 +10,7 @@ assignee: claude-code
 rank: 6b
 created: '2026-09-21'
 source: 'owner, 2026-09-21, Claude Code session, with a screenshot of the Sharing pane listing three panes with identical blocks'
-links: {plans: [], commits: [2b102129, 964f2f5f], evidence: [docs/qa_evidence/2026-09-21-sharing-pane-redesign/], related: [PH0N, SWPH, W5N2, SHCK], github: null}
+links: {plans: [], commits: [2b102129, 964f2f5f], evidence: [docs/qa_evidence/2026-09-21-sharing-pane-redesign/], related: [PH0N, SWPH, FR1C, W5N2, SHCK], github: null}
 ---
 # The Sharing pane says what varies: your phones once at the top, guests where there are any, one row per quiet pane
 

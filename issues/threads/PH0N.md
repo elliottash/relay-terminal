@@ -185,3 +185,15 @@ Then the phone gets the composer, Stop, Recap, question rows — the whole Phase
 If the devices list already says `full`, tell me what you *do* see on the phone (pane list? screens? a "read only until you take over" line?) — that would make it a different bug.
 
 Card writes: noted the Phase-3 start and diagnosis on **#PH0N**, and filed **#RSJY** — there's no way to raise a device's grant short of revoke-and-re-pair, and the phone never says *why* it's read-only. Worth fixing before your next trip.
+
+<!-- relay:entry 20260922T012000Z-k1 author=claude-code kind=note -->
+### Claude Code · 2026-09-22 01:20
+**Handoff, for whoever picks this up next.** All of Phases 1 and 2 are landed, deployed and driven
+live against the real join.relay-terminal.ai (evidence linked above). What is left is entirely
+Phase 3: the owner's own iPhone and iPad, over LTE, for a working day. Nothing here needs more
+code before that — the QA checklist just above is the whole of it, and it now points at the
+current pairing flow (#FR1C's "Pair a phone…" in the plug menu, not the old Options path). While
+you are at it, #SWPH (the Switchboard on the phone) and #SHRP (the redesigned Sharing pane) use
+the same pairing and the same devices, so their checklists can run in the same sitting. Four small
+bugs the drives found are filed but unclaimed: #WCLS, #AUDL, #PRM2, #SDR1 — none blocks pairing or
+day-to-day use. Phase 4 (a Capacitor shell) is a decision for after the week, not before it.

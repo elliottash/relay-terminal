@@ -11,7 +11,7 @@ rank: 6a
 created: '2026-09-20'
 source: 'owner, 2026-09-20, Claude Code session (after #PH0N and #FR1C)'
 acceptance: from a paired phone or iPad, by touch, the owner opens the Switchboard from the inbox, sees the cards by stage with the ones waiting on him first, opens a card to read its body and thread, answers a question or comments, moves a card, files a new card by typing or dictating, and starts Discuss, Plan, Execute or Verify on a card; a card that starts waiting on him produces a notification; a guest never sees any of it
-links: {plans: [], commits: [38659350, 2c466481, 5eb5699e, 0abb4df0, fd9d2caf, 39c94b91, 271849fe, 0fda2acb, 7b5e00c8, 7fce9ef8, 2c19e11c], evidence: [docs/qa_evidence/2026-09-21-swph-hosted-drive/, docs/qa_evidence/2026-09-21-swph-board-bridge/, docs/qa_evidence/2026-09-21-swph-board-view/], related: [PH0N, FR1C, 0VT4, W5N2, PRM2, SDR1], github: null}
+links: {plans: [], commits: [38659350, 2c466481, 5eb5699e, 0abb4df0, fd9d2caf, 39c94b91, 271849fe, 0fda2acb, 7b5e00c8, 7fce9ef8, 2c19e11c], evidence: [docs/qa_evidence/2026-09-21-swph-hosted-drive/, docs/qa_evidence/2026-09-21-swph-board-bridge/, docs/qa_evidence/2026-09-21-swph-board-view/], related: [PH0N, FR1C, 0VT4, W5N2, PRM2, SDR1, SHRP], github: null}
 ---
 # The Switchboard on the phone: cards, threads and the card actions, by touch
 

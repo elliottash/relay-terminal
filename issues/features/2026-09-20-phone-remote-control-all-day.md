@@ -11,7 +11,7 @@ rank: 6c
 created: '2026-09-20'
 acceptance: from the iPhone, over any network, all day and without touching the desktop, the owner opens the app and sees every pane on the desktop with who needs him, reads what an agent did, steers or stops it, answers its question, switches model, starts a new conversation, and gets a lock-screen notification when a turn finishes or an agent waits; the desktop keeps working through drops and sleep of the phone; content stays end-to-end encrypted
 source: owner, 2026-09-20, Claude Code session
-links: {plans: [], commits: [d56c80aa, 80706293, 38cf319b, 2c59a720, f39cb626, 8fc8d60b, baebd13a, 8e1e740f, e97c5fc8, 0d021852, ee12ac1a, 954c9f9f, 8e9b2e05, c6c2f72e, 4c0348a8, 4cffa9b2, 5cf0db2b], evidence: [docs/qa_evidence/2026-09-21-ph0n-hosted-drive/, docs/qa_evidence/2026-09-20-ph0n-remote-always-on/, docs/qa_evidence/2026-09-20-phone-remote-research/], related: [W5N2, 0VT4, 97EG, T4BS, JQ7R, KBFT, WMXN, GT7X, PF4K], github: null}
+links: {plans: [], commits: [d56c80aa, 80706293, 38cf319b, 2c59a720, f39cb626, 8fc8d60b, baebd13a, 8e1e740f, e97c5fc8, 0d021852, ee12ac1a, 954c9f9f, 8e9b2e05, c6c2f72e, 4c0348a8, 4cffa9b2, 5cf0db2b], evidence: [docs/qa_evidence/2026-09-21-ph0n-hosted-drive/, docs/qa_evidence/2026-09-20-ph0n-remote-always-on/, docs/qa_evidence/2026-09-20-phone-remote-research/], related: [W5N2, 0VT4, 97EG, T4BS, JQ7R, KBFT, WMXN, GT7X, PF4K, FR1C, SWPH, SHRP, SHCK], github: null}
 ---
 # Phone remote control, all day: always on, reachable from anywhere, and the last mile on the iPhone
 
@@ -259,9 +259,11 @@ waits on Phase 3.
 
 Phase 3, on the owner's iPhone over LTE, the acceptance line (full text in the drive's README):
 
-- [ ] Rebuild and restart Relay; Options › Remote on, address relay-terminal.ai; the plug menu says on · relay-terminal.ai · no phone connected.
-- [ ] On the iPhone, Safari → https://join.relay-terminal.ai/ → Share → Add to Home Screen; open it from there (push reaches only the installed app).
-- [ ] Options › Remote → Pair; copy the link under the QR and paste it into "Or paste the pairing link" (a camera scan opens Safari, not the installed app); the five digits match; Allow typing.
+- [ ] **Pairing is #FR1C's now**: on the desktop, the plug menu at the top right → "Pair a phone…"
+      turns remote control on by itself; type the eight-character code shown beside the QR on the
+      phone (installed to the Home Screen first — Safari → join.relay-terminal.ai → Share → Add to
+      Home Screen — push reaches only the installed app); compare the five digits; Allow typing;
+      Turn on notifications. This replaces the old "Options › Remote → Pair, paste the link" path.
 - [ ] Off Wi-Fi, on LTE: the inbox lists every pane with a chip; a new pane on the desktop appears unasked.
 - [ ] A prompt from the phone answers into the pane; Stop ends a turn; a question shows as a row and a tap answers it; Recap prints.
 - [ ] Both notification switches on; a turn longer than 30 s with the desktop window not active produces a lock-screen notification; tapping it opens that pane.
@@ -270,5 +272,6 @@ Phase 3, on the owner's iPhone over LTE, the acceptance line (full text in the d
 - [ ] Quit and restart Relay: the switch is remembered, the phone reconnects with no new pairing.
 - [ ] Switch off at the end of the day: the phone says offline; the plug menu says off.
 - [ ] #KBFT's nine keyboard checks, on this iPhone.
+- [ ] Also try #SWPH (the Switchboard row in the inbox) and #SHRP (the redesigned Sharing pane) while you are in there — same devices, same pairing, no separate setup.
 - [ ] Decision after the week: is the PWA enough, or does Phase 4 (Capacitor shell: APNs, Live Activities, Face ID) start?
 

@@ -35,3 +35,11 @@ and the rerun of 1–13 all PASS against join.relay-terminal.ai in
 `docs/qa_evidence/2026-09-21-fr1c-hosted-drive/`. The drive found the dialog's first code being
 swapped 1.5 s after it appeared (fixed) and the third wrong PIN saying "try again" on a burned code
 (fixed). To needs-verification; the checklist is the owner's iPhone and iPad.
+
+<!-- relay:entry 20260922T012001Z-d1 author=claude-code kind=note -->
+### Claude Code · 2026-09-22 01:20
+**Handoff.** Done: the plug menu's "Pair a phone…", the typed code over #97EG's CPace, the iOS
+install-first welcome screen, one-tap notifications. All four tasks landed, driven live, deployed.
+Only the QA checklist above is open — five checks on the owner's own iPhone and iPad. #PRM2 (the
+pairing dialog spends 2–4 of the hour's 20 pairing rooms per look) is the one known rough edge;
+it does not block pairing, just repeated dialog-opening in one hour.
