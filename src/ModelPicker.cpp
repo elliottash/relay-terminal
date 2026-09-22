@@ -1,8 +1,10 @@
 #include "PaneTabNavigation.h"
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ModelPicker.h"
+#include "Hints.h"
 
 #include <algorithm>
+#include <tuple>
 
 #include <QAbstractItemView>
 #include <QCheckBox>
@@ -26,6 +28,8 @@
 #include <QSignalBlocker>
 #include <QStringListModel>
 #include <QTabBar>
+#include <QTimer>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
@@ -41,12 +45,15 @@ namespace {
 // rows, which draw in column 0, with it.
 // ColBox is the "show in box" cutoff of a tier tab (card #MDL1, design 5.3); it is hidden on the
 // `all` and `lite` tabs, which the Alt+M box never draws.
-// ColAvail is step 2 of the four, and belongs to the `all` tab alone (design 5.7). It sits second
+// ColMove is the ▲▼ of a listed row (card #RKP3): the mouse's version of alt+↑↓, because a drag
+// nobody discovers and a key nobody guesses both read as "the rank can't be changed". Hidden on
+// the `all` tab, which has no order to write down.
+// ColAvail is step 2 of the four, and belongs to the `all` tab alone (design 5.7). It sits third
 // rather than first for one mechanical reason: a section rule is a `setFirstColumnSpanned` row,
 // which draws out of column 0, so column 0 has to be one that is never hidden — and ColAvail is
 // hidden on every tab but `all`. ColRank is empty on the `all` tab and resizes to a few pixels, so
 // the tick is still the first thing on the row.
-enum Column { ColRank, ColAvail, ColBox, ColModel, ColVia, ColReasoning, ColIntelligence, ColSpeed, ColLeft, ColCount };
+enum Column { ColRank, ColMove, ColAvail, ColBox, ColModel, ColVia, ColReasoning, ColIntelligence, ColSpeed, ColLeft, ColCount };
 constexpr int KeyRole = Qt::UserRole;          // the entry this row would use
 constexpr int SectionRole = Qt::UserRole + 1;  // a rule, not a model
 constexpr int ViaRole = Qt::UserRole + 2;      // the keys of every provider folded into this row
@@ -196,7 +203,7 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QWidget(pare
     auto *dragList = new DragList;
     m_list = dragList;
     m_list->setObjectName(QStringLiteral("modelList"));
-    m_list->setHeaderLabels({QString(), QStringLiteral("available"), QStringLiteral("in box"),
+    m_list->setHeaderLabels({QString(), QString(), QStringLiteral("available"), QStringLiteral("in box"),
                              QStringLiteral("model"), QStringLiteral("via"),
                              QStringLiteral("reasoning"), QStringLiteral("intelligence"), QStringLiteral("tok/s"),
                              QStringLiteral("left")});
@@ -578,7 +585,7 @@ QTreeWidgetItem *ModelPicker::addClassHeader(const QString &tier) {
     // column is the narrow one, so a note written there was drawn as "main · new pane…" while the
     // wide column beside it sat empty.
     const QString note = classNote(tier);
-    auto *item = new QTreeWidgetItem(m_list, QStringList{QString(), QString(), QString(), tier, note});
+    auto *item = new QTreeWidgetItem(m_list, QStringList{QString(), QString(), QString(), QString(), tier, note});
     item->setData(0, SectionRole, true);        // not a model: never selected, never used, never moved
     item->setData(0, ClassHeadRole, true);
     item->setData(0, TierRole, tier);
@@ -639,7 +646,7 @@ QTreeWidgetItem *ModelPicker::addListRow(const QString &tier, int rank, const cu
         level = item.effort.isEmpty() ? QStringLiteral("default") : nearestEffort(entry->efforts, item.effort);
     const double speed = curation::speed(item.key);
     auto *row = new QTreeWidgetItem(m_list, QStringList{
-        QString::number(rank), QString(), QString(), name, entry ? providerText(*entry) : QString(), level,
+        QString::number(rank), QString(), QString(), QString(), name, entry ? providerText(*entry) : QString(), level,
         entry && entry->intelligence >= 0 ? QString::number(entry->intelligence) : QString(),
         speed > 0 ? QString::number(qRound(speed)) : QString(), left});
     row->setData(0, KeyRole, item.key);
@@ -648,6 +655,38 @@ QTreeWidgetItem *ModelPicker::addListRow(const QString &tier, int rank, const cu
     row->setData(0, ViaRole, QStringList{item.key});
     row->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled
                   | (boxClassTier(tier) ? Qt::ItemIsUserCheckable : Qt::NoItemFlags));
+    // The ▲▼ (card #RKP3): the same edit alt+↑↓ makes, one click at a time, for the mouse hand
+    // that never found the drag. The button that would leave the list is disabled, so a click
+    // always does something. Deferred a turn: the click rebuilds the rows, which deletes the
+    // very button whose signal is running.
+    auto *moveBox = new QWidget;
+    auto *moveLayout = new QHBoxLayout(moveBox);
+    moveLayout->setContentsMargins(0, 0, 0, 0);
+    moveLayout->setSpacing(0);
+    const int listSize = curation::tierList(tier).size();
+    const QString key = item.key;
+    for (const auto &[delta, arrow, tip] : {std::tuple{-1, Qt::UpArrow, QStringLiteral("move up (alt+↑)")},
+                                            std::tuple{1, Qt::DownArrow, QStringLiteral("move down (alt+↓)")}}) {
+        auto *button = new QToolButton(moveBox);
+        button->setArrowType(arrow);
+        button->setAutoRaise(true);
+        button->setFixedSize(18, 18);
+        button->setToolTip(tip);
+        button->setEnabled(delta < 0 ? rank > 1 : rank < listSize);
+        QObject::connect(button, &QToolButton::clicked, this, [this, tier, key, delta] {
+            QTimer::singleShot(0, this, [this, tier, key, delta] {
+                moveKey(tier, key, delta);
+                // The standing hint rule (WARP.md): the buttons are the slow path, alt+↑↓ the
+                // fast one. The limits line carries it — the picker has no toast queue — and
+                // alt+↑↓ is a picker key, not a Keymap action, so the text is a literal.
+                if (ShortcutHints::instance().shouldShow(QStringLiteral("models.move.buttons")))
+                    m_limits->setText(ShortcutHints::nextTime(QStringLiteral("Alt+↑ / Alt+↓"),
+                                                              QStringLiteral("move a row")));
+            });
+        });
+        moveLayout->addWidget(button);
+    }
+    m_list->setItemWidget(row, ColMove, moveBox);
     // The cutoff, as a column of checkboxes: rank 1..cutoff checked, the rest not, and clicking
     // one moves the cutoff to it (design 5.3, `setBoxCutoffFromRow`).
     if (boxClassTier(tier))
@@ -696,7 +735,7 @@ QTreeWidgetItem *ModelPicker::addGroupRow(const Group &group, bool addable, cons
     QString leftText = percent(percentLeft(m_context.catalog, entry.preset));
     if (until >= 0) leftText = QStringLiteral("0%") + (until > 0 ? QStringLiteral(" · resets ") + resetText(until, now) : QString());
     auto *row = new QTreeWidgetItem(m_list, QStringList{
-        addable ? QStringLiteral("+ add") : QString(), QString(), QString(), name, via,
+        addable ? QStringLiteral("+ add") : QString(), QString(), QString(), QString(), name, via,
         level,
         entry.intelligence >= 0 ? QString::number(entry.intelligence) : QString(),
         speed > 0 ? QString::number(qRound(speed)) : QString(), leftText});
@@ -1117,6 +1156,9 @@ void ModelPicker::rebuild() {
     m_sort->setVisible(all);
     syncClassSwitch();
     m_list->setColumnHidden(ColBox, !(sectionsPage() || boxClassTier(m_tier)));
+    // The ▲▼ belong where an order is written down; the flat tab has none (same rule as the drag
+    // below, card #RKP3).
+    m_list->setColumnHidden(ColMove, all);
     // Step 2 is edited in one place: the `all` tab. A tier tab is step 3 and the box column is
     // step 4, and three checkbox columns on one row would say nothing.
     m_list->setColumnHidden(ColAvail, !availabilityTab());
@@ -1128,9 +1170,8 @@ void ModelPicker::rebuild() {
     // run that showed it). "left" stays: it is where an exhausted row says why it is greyed.
     m_list->setColumnHidden(ColIntelligence, m_hosted);
     m_list->setColumnHidden(ColSpeed, m_hosted);
-    // Dragging is how a list is reordered; on the flat tab there is no order to write down. On the
-    // sectioned page a drag that crosses a header changes no list — `commitDragOrder` reads each
-    // section's rows back and a section whose count has changed is not an order to store.
+    // Dragging is how a list is reordered — and, across a header, how a model moves to another
+    // section (card #RKP3); on the flat tab there is no order to write down.
     m_list->setDragDropMode(all ? QAbstractItemView::NoDragDrop : QAbstractItemView::InternalMove);
     if (all) buildAll(query);
     else if (sectionsPage()) buildSections(query);
@@ -1317,20 +1358,22 @@ void ModelPicker::onLevelChanged() {
 }
 
 void ModelPicker::updateFooter() {
-    // Hosted, this widget draws no tab row of its own: the host's tabs are ←→ and alt+1…, and the
-    // priorities page has sections rather than class tabs, so ←→ belong to the host everywhere.
-    const QString tabs = m_hosted ? QStringLiteral("←→ alt+1… tab · ") : QStringLiteral("←→ tab · ");
+    // Hosted, this widget draws no tab row of its own: the host's tabs are Tab / Shift+Tab (#PNAV)
+    // and the priorities page has sections rather than class tabs, so ←→ belong to the host
+    // everywhere. (It used to say alt+1… — those digits are the window's, and the lie sent the
+    // owner hunting for a key that did nothing, card #RKP3.)
+    const QString tabs = m_hosted ? QStringLiteral("tab / shift+tab: the pane's tabs · ") : QStringLiteral("←→ tab · ");
     QString text = m_tier == kAll
         ? tabs + QStringLiteral("↑↓ row · enter uses it in the pane · type to search every model, openrouter's "
                                 "long tail included · tab, then → : the providers of a folded row, and the levels · "
                                 "“available” is what the lists, the alt+m box and its filter may offer — un-tick one "
                                 "to take it out everywhere, tick a row under “more from…” to bring one in")
-        : tabs + QStringLiteral("↑↓ row, across the sections · enter uses it in the pane · alt+↑↓ moves it inside its "
-                                "section · del removes it · type a name, ctrl+enter adds it to the section the "
-                                "highlight is in · ctrl+z undoes")
+        : tabs + QStringLiteral("▲▼ or alt+↑↓ moves a row · drag to reorder — or into another section to move it "
+                                "there · del removes · type a name, ctrl+enter adds it to the highlighted section · "
+                                "ctrl+z undoes")
               + (sectionsPage() || boxClassTier(m_tier)
-                     ? QStringLiteral(" · “in box” is a cutoff: alt+m shows a class down to the last one ticked, and "
-                                      "the tick on a section's own line is whether it shows that class at all")
+                     ? QStringLiteral(" · “in box”: how far down a class alt+m shows, and the tick on a section's "
+                                      "own line is whether it shows at all")
                      : QString());
     if (onEscape) text += QStringLiteral(" · esc back to the pane");
     m_footer->setText(text);
@@ -1351,17 +1394,15 @@ void ModelPicker::changed() {
 // lists are on screen at once, so which list a key acts on is a property of the row under the
 // highlight (`editTier`). On a single-class page that is the page's own class, unchanged.
 
-void ModelPicker::moveSelected(int delta) {
-    QTreeWidgetItem *row = currentRow();
-    const QString tier = rowTier(row);
-    if (!row || tier.isEmpty() || !row->data(0, ListedRole).toBool() || delta == 0) return;
-    const QString key = row->data(0, KeyRole).toString();
+void ModelPicker::moveKey(const QString &tier, const QString &key, int delta) {
+    if (tier.isEmpty() || delta == 0) return;
     QList<curation::TierEntry> list = curation::tierList(tier);
     int at = -1;
     for (int i = 0; i < list.size(); ++i) if (list.at(i).key == key) at = i;
     const int to = at + delta;
     // Clamped inside its own section: alt+↓ on the last rank of flash does not push the model into
-    // the next class, which would be a second edit nobody asked for.
+    // the next class, which would be a second edit nobody asked for. (Across the sections is the
+    // drag's job — there the target and the rank are both pointed at.)
     if (at < 0 || to < 0 || to >= list.size()) return;
     pushUndo(tier);
     list.move(at, to);
@@ -1369,6 +1410,12 @@ void ModelPicker::moveSelected(int delta) {
     rebuild();
     selectKey(key);
     changed();
+}
+
+void ModelPicker::moveSelected(int delta) {
+    QTreeWidgetItem *row = currentRow();
+    if (!row || !row->data(0, ListedRole).toBool()) return;
+    moveKey(rowTier(row), row->data(0, KeyRole).toString(), delta);
 }
 
 void ModelPicker::removeSelected() {
@@ -1420,40 +1467,57 @@ void ModelPicker::undo() {
 
 void ModelPicker::commitDragOrder() {
     if (m_tier == kAll) return;
-    // The rows as they now read, split by the section each one is in. A drag that crossed a header
-    // changes two sections' counts, and a section whose count is not its list's length is not an
-    // order to store — the same rule a filtered view has always had.
-    QStringList order;
-    QHash<QString, QList<QString>> rows;
+    // The rows as they now read, grouped by the section each one is **physically** in: walking top
+    // to bottom, a class header opens its section (card #RKP3). The TierRole cannot be trusted
+    // here — a dragged row keeps the role of the list it came from, so grouping by the role read
+    // a cross-section drag as "nothing moved" and the row snapped back where it started (#YX8Q).
+    QString section;
+    QHash<QString, QStringList> rows;
+    bool stray = false;
     for (int i = 0; i < m_list->topLevelItemCount(); ++i) {
         QTreeWidgetItem *item = m_list->topLevelItem(i);
+        if (item->data(0, ClassHeadRole).toBool()) { section = rowTier(item); continue; }
         if (item->data(0, SectionRole).toBool() || !item->data(0, ListedRole).toBool()) continue;
-        const QString tier = rowTier(item);
-        if (tier.isEmpty()) continue;
-        if (!order.contains(tier)) order << tier;
+        const QString tier = sectionsPage() ? section : rowTier(item);
+        if (tier.isEmpty()) { stray = true; continue; }   // dropped above the first header
         rows[tier] << item->data(0, KeyRole).toString();
     }
-    bool redraw = false, anyMoved = false;
-    for (const QString &tier : std::as_const(order)) {
-        const QList<curation::TierEntry> before = curation::tierList(tier);
-        const QStringList keys = rows.value(tier);
-        if (keys.size() != before.size()) { redraw = true; continue; }
-        QHash<QString, QString> efforts;
-        for (const curation::TierEntry &item : before) efforts.insert(item.key, item.effort);
-        QList<curation::TierEntry> after;
-        for (const QString &key : keys) {
-            if (!efforts.contains(key)) { after.clear(); break; }
-            after << curation::TierEntry{key, efforts.value(key)};
+    // Every list on the page is read back, not only the ones rows were seen in: a section whose
+    // last row was dragged away is now empty, and that is an order too.
+    const QStringList tiers = sectionsPage() ? sectionTiers() : QStringList{m_tier};
+    QHash<QString, QStringList> before;
+    QHash<QString, QString> efforts;   // a key keeps the level it carried, whichever list it moves to
+    for (const QString &tier : tiers)
+        for (const curation::TierEntry &item : curation::tierList(tier)) {
+            before[tier] << item.key;
+            efforts.insert(item.key, item.effort);
         }
-        if (after.size() != before.size()) { redraw = true; continue; }
-        bool moved = false;
-        for (int i = 0; i < after.size(); ++i) moved = moved || after.at(i).key != before.at(i).key;
-        if (!moved) continue;
+    // The drop is an order only when the drawn rows are exactly the listed rows: only listed rows
+    // can drag, so a difference is a view, not an order — a filter hiding part of a list, or a row
+    // left above the first header. Store nothing, redraw what the lists really say, and *say* why:
+    // a silent snap-back is how "the rank can't be changed" happened (#YX8Q).
+    QStringList drawnAll, listedAll;
+    for (const QString &tier : tiers) { drawnAll << rows.value(tier); listedAll << before.value(tier); }
+    drawnAll.sort(); listedAll.sort();
+    if (stray || drawnAll != listedAll) {
+        rebuild();
+        if (!m_filter->text().trimmed().isEmpty())
+            m_limits->setText(QStringLiteral("not stored — the filter is hiding rows, so the drop is not an order; clear it to reorder"));
+        return;
+    }
+    // A drag across a header is a move: out of the source list, into the target list at the rank
+    // it was dropped at — which is also how a section a model was never in gets it (#RKP3).
+    bool anyMoved = false;
+    for (const QString &tier : tiers) {
+        const QStringList drawn = rows.value(tier);
+        if (drawn == before.value(tier)) continue;
+        QList<curation::TierEntry> after;
+        for (const QString &key : drawn) after << curation::TierEntry{key, efforts.value(key)};
         pushUndo(tier);
         curation::setTierList(tier, after);
         anyMoved = true;
     }
-    if (!anyMoved) { if (redraw) rebuild(); return; }
+    if (!anyMoved) return;   // the rows read as the lists already do
     const QString key = selectedKey();
     rebuild();
     selectKey(key);

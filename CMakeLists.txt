@@ -135,7 +135,7 @@ target_link_libraries(relay-filterpopup PUBLIC relay-theme ${RELAY_QT}::Widgets)
 target_compile_options(relay-filterpopup PRIVATE ${RELAY_WARNINGS})
 add_library(relay-modelpicker STATIC src/ModelPicker.cpp src/ModelPicker.h)
 target_include_directories(relay-modelpicker PUBLIC src)
-target_link_libraries(relay-modelpicker PUBLIC relay-modelcatalog ${RELAY_QT}::Widgets)
+target_link_libraries(relay-modelpicker PUBLIC relay-modelcatalog relay-hints ${RELAY_QT}::Widgets)
 target_compile_options(relay-modelpicker PRIVATE ${RELAY_WARNINGS})
 # The models pane (card #MDL1 t:a11, design 5.8): the three tabs Ctrl+Shift+M opens — providers,
 # available, priorities — over the picker widget above and the settings-row renderer below. Its own

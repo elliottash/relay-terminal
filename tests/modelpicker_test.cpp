@@ -21,6 +21,7 @@
 #include <QTabBar>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QToolButton>
 #include <QTreeWidget>
 
 using namespace relay;
@@ -29,9 +30,10 @@ using namespace relay::models;
 namespace {
 
 // The dialog's columns, as ModelPicker.cpp orders them.
-// ColBox is the "show in box" cutoff a tier tab gained with card #MDL1, design 5.3; ColAvail is
-// the `all` tab's availability tick, step 2 of the four (design 5.7).
-enum Column { ColRank, ColAvail, ColBox, ColModel, ColVia, ColReasoning, ColIntelligence, ColSpeed, ColLeft };
+// ColMove is a listed row's ▲▼ buttons (card #RKP3). ColBox is the "show in box" cutoff a tier
+// tab gained with card #MDL1, design 5.3; ColAvail is the `all` tab's availability tick, step 2
+// of the four (design 5.7).
+enum Column { ColRank, ColMove, ColAvail, ColBox, ColModel, ColVia, ColReasoning, ColIntelligence, ColSpeed, ColLeft };
 
 QJsonObject model(const QString &id, const QString &label, const QString &tier, const QStringList &efforts, int intelligence = -1) {
     QJsonObject row{{QStringLiteral("id"), id}, {QStringLiteral("label"), label}, {QStringLiteral("tier"), tier},
@@ -489,6 +491,121 @@ private Q_SLOTS:
         QCOMPARE(told, 1);
     }
 
+    // Card #RKP3: the ▲▼ of a listed row are the mouse's alt+↑↓ — the same edit, one click at a
+    // time — and the button that would leave the list is disabled, so a click always does
+    // something.
+    void theMoveButtonsMoveARowAndAreDisabledAtTheEnds() {
+        setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max")},
+                                         {QStringLiteral("anthropic|claude-opus-5"), QString()},
+                                         {QStringLiteral("guest:claude|opus"), QString()}});
+        ModelPicker picker(context());
+        int told = 0;
+        picker.onListsChanged = [&told] { ++told; };
+        const auto buttons = [&picker](const QString &key) {
+            QWidget *box = picker.list()->itemWidget(rowFor(picker.list(), key), ColMove);
+            return box ? box->findChildren<QToolButton *>() : QList<QToolButton *>{};
+        };
+        const QList<QToolButton *> first = buttons(QStringLiteral("glm-coding|glm-5.3"));
+        QCOMPARE(first.size(), 2);
+        QVERIFY(!first.at(0)->isEnabled());    // rank 1 has no up
+        QVERIFY(first.at(1)->isEnabled());
+        const QList<QToolButton *> last = buttons(QStringLiteral("guest:claude|opus"));
+        QVERIFY(last.at(0)->isEnabled());
+        QVERIFY(!last.at(1)->isEnabled());     // the last rank has no down
+        QTest::mouseClick(first.at(1), Qt::LeftButton);
+        QTest::qWait(20);                      // the click defers a turn: it rebuilds the row its button sits on
+        QCOMPARE(listKeys(QStringLiteral("main")).at(1), QStringLiteral("glm-coding|glm-5.3"));
+        QCOMPARE(curation::tierList(QStringLiteral("main")).at(1).effort, QStringLiteral("max"));   // the level travels
+        QCOMPARE(picker.selectedKey(), QStringLiteral("glm-coding|glm-5.3"));
+        QCOMPARE(told, 1);
+        // …and after the rebuild the moved row's buttons say what they can do now.
+        const QList<QToolButton *> moved = buttons(QStringLiteral("glm-coding|glm-5.3"));
+        QVERIFY(moved.at(0)->isEnabled() && moved.at(1)->isEnabled());
+    }
+
+    // Card #RKP3: a drag across a section header is a move — out of the source list, into the
+    // target list at the dropped rank. (It used to snap back in silence, which is what "the rank
+    // can't be changed" was, #YX8Q.)
+    void aDragAcrossASectionHeaderMovesTheModelBetweenLists() {
+        setList(QStringLiteral("high"), {{QStringLiteral("anthropic|claude-opus-5"), QString()}});
+        setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max")},
+                                         {QStringLiteral("guest:claude|opus"), QString()}});
+        ModelPicker::Context ctx = context();
+        ctx.tier = ModelPicker::classesTier();
+        ModelPicker picker(ctx);
+        int told = 0;
+        picker.onListsChanged = [&told] { ++told; };
+        // Page: #high, opus, #main, glm, guest, #flash, hint. glm goes up under high's opus.
+        QCOMPARE(pageRows(picker.list()).size(), 7);
+        QTreeWidgetItem *moved = picker.list()->takeTopLevelItem(3);
+        picker.list()->insertTopLevelItem(2, moved);
+        picker.commitDragOrder();
+        QCOMPARE(listKeys(QStringLiteral("high")), (QStringList{QStringLiteral("anthropic|claude-opus-5"),
+                                                                QStringLiteral("glm-coding|glm-5.3")}));
+        QCOMPARE(listKeys(QStringLiteral("main")), QStringList{QStringLiteral("guest:claude|opus")});
+        QCOMPARE(curation::tierList(QStringLiteral("high")).at(1).effort, QStringLiteral("max"));   // the level travels across
+        QCOMPARE(told, 1);
+        // Both lists redraw from storage: the moved row sits in the high section now.
+        QCOMPARE(pageRows(picker.list()), (QStringList{
+            QStringLiteral("#high"), QStringLiteral("anthropic|claude-opus-5"), QStringLiteral("glm-coding|glm-5.3"),
+            QStringLiteral("#main"), QStringLiteral("guest:claude|opus"),
+            QStringLiteral("#flash"), QStringLiteral("[nothing in flash — type a model's name, then ctrl+enter adds it here]")}));
+    }
+
+    // Card #RKP3: an empty section takes a drop too — that is how a class a model was never in
+    // gets it — and the emptied one is stored empty, not forgotten.
+    void aDropIntoAnEmptySectionAddsItThere() {
+        setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()}});
+        ModelPicker::Context ctx = context();
+        ctx.tier = ModelPicker::classesTier();
+        ModelPicker picker(ctx);
+        // Page: #high, hint, #main, glm, #flash, hint. glm goes up into the empty high section.
+        QCOMPARE(pageRows(picker.list()).size(), 6);
+        QTreeWidgetItem *moved = picker.list()->takeTopLevelItem(3);
+        picker.list()->insertTopLevelItem(1, moved);
+        picker.commitDragOrder();
+        QCOMPARE(listKeys(QStringLiteral("high")), QStringList{QStringLiteral("glm-coding|glm-5.3")});
+        QVERIFY(curation::tierList(QStringLiteral("main")).isEmpty());
+        QVERIFY(QSettings().contains(QStringLiteral("models/tier/main")));   // "nothing here" is a choice
+    }
+
+    // A drop while the filter hides listed rows is a view, not an order: nothing is stored, the
+    // rows redraw as the list really reads, and the limits line says why instead of snapping back
+    // in silence (#YX8Q).
+    void aDropWithRowsFilteredAwayIsRefusedAndSaysWhy() {
+        setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()},
+                                         {QStringLiteral("anthropic|claude-opus-5"), QString()},
+                                         {QStringLiteral("guest:claude|opus"), QString()}});
+        ModelPicker picker(context());
+        int told = 0;
+        picker.onListsChanged = [&told] { ++told; };
+        picker.filter()->setText(QStringLiteral("glm"));
+        QTreeWidgetItem *moved = picker.list()->takeTopLevelItem(0);
+        picker.list()->insertTopLevelItem(1, moved);   // among the "not in this list" rows now
+        picker.commitDragOrder();
+        QCOMPARE(listKeys(QStringLiteral("main")), (QStringList{QStringLiteral("glm-coding|glm-5.3"),
+                                                                QStringLiteral("anthropic|claude-opus-5"),
+                                                                QStringLiteral("guest:claude|opus")}));
+        QCOMPARE(told, 0);
+        QCOMPARE(picker.findChild<QLabel *>(QStringLiteral("modelLimits"))->text(),
+                 QStringLiteral("not stored — the filter is hiding rows, so the drop is not an order; clear it to reorder"));
+    }
+
+    // Card #RKP3: hosted, the footer's keys are the pane's — Tab / Shift+Tab, not the alt+digits
+    // the window took back (#PNAV) — and the priorities line names what a rank change is now.
+    void theFooterNamesTheRealKeys() {
+        setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()}});
+        ModelPicker::Context ctx = context();
+        ctx.tier = ModelPicker::classesTier();
+        ModelPicker picker(ctx);
+        picker.setHosted(true);
+        const QString text = picker.footer()->text();
+        QVERIFY(!text.contains(QStringLiteral("alt+1")));
+        QVERIFY(text.contains(QStringLiteral("tab / shift+tab")));
+        QVERIFY(text.contains(QStringLiteral("▲▼")));
+        QVERIFY(text.contains(QStringLiteral("into another section")));
+    }
+
 
     // ----- the priorities page: one page, four sections (owner, 2026-09-21) --------------------
     // "tab 3: in a pane, i dont want separate tabs for the modes. they should just be in divided
@@ -656,10 +773,10 @@ private Q_SLOTS:
         QCOMPARE(rowFor(picker.list(), QStringLiteral("glm-coding|glm-5.3"))->checkState(ColBox), Qt::Checked);
     }
 
-    // A drag inside one section rewrites that section; a drag that crosses a header changes no
-    // list at all — its two sections no longer have their lists' lengths, so there is no order to
-    // store and the page is simply drawn again.
-    void aDragInsideASectionRewritesItAndACrossingDragDoesNothing() {
+    // A drag inside one section rewrites that section; a drag past a header lands in the section
+    // it was dropped into, at that rank — a move, not a refusal (card #RKP3; the silent snap-back
+    // this test used to assert is what read as "the rank can't be changed", #YX8Q).
+    void aDragInsideASectionRewritesItAndACrossingDragMovesItThere() {
         setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()},
                                          {QStringLiteral("anthropic|claude-opus-5"), QStringLiteral("high")}});
         setList(QStringLiteral("flash"), {{QStringLiteral("glm-coding|glm-5.3-flash"), QString()}});
@@ -673,14 +790,15 @@ private Q_SLOTS:
         QCOMPARE(listKeys(QStringLiteral("main")), (QStringList{QStringLiteral("anthropic|claude-opus-5"),
                                                                 QStringLiteral("glm-coding|glm-5.3")}));
         QCOMPARE(curation::tierList(QStringLiteral("main")).first().effort, QStringLiteral("high"));
-        // Now drag main's last row past the flash header. Neither list moves.
+        // Now drag main's last row past the flash header: it leaves main and lands at the end of
+        // flash, in both directions stored.
         const int last = picker.list()->indexOfTopLevelItem(rowFor(picker.list(), QStringLiteral("glm-coding|glm-5.3")));
         QTreeWidgetItem *crossed = picker.list()->takeTopLevelItem(last);
         picker.list()->addTopLevelItem(crossed);
         picker.commitDragOrder();
-        QCOMPARE(listKeys(QStringLiteral("main")), (QStringList{QStringLiteral("anthropic|claude-opus-5"),
-                                                                QStringLiteral("glm-coding|glm-5.3")}));
-        QCOMPARE(listKeys(QStringLiteral("flash")), QStringList{QStringLiteral("glm-coding|glm-5.3-flash")});
+        QCOMPARE(listKeys(QStringLiteral("main")), QStringList{QStringLiteral("anthropic|claude-opus-5")});
+        QCOMPARE(listKeys(QStringLiteral("flash")), (QStringList{QStringLiteral("glm-coding|glm-5.3-flash"),
+                                                                 QStringLiteral("glm-coding|glm-5.3")}));
     }
 
     // An empty class still has a header, still says how to fill it, and still says which class the
@@ -817,11 +935,11 @@ private Q_SLOTS:
         picker.selectKey(QStringLiteral("glm-coding|glm-5.3-flash"));
         QTreeWidgetItem *flash = picker.list()->currentItem();
         QVERIFY(flash);
-        Q_EMIT picker.list()->itemDoubleClicked(flash, 1);   // ColAvail: the "available" tick
+        Q_EMIT picker.list()->itemDoubleClicked(flash, ColAvail);   // the "available" tick
         QVERIFY(!picker.pick().accepted);
-        Q_EMIT picker.list()->itemDoubleClicked(flash, 2);   // ColBox: the "in box" tick
+        Q_EMIT picker.list()->itemDoubleClicked(flash, ColBox);     // the "in box" tick
         QVERIFY(!picker.pick().accepted);
-        Q_EMIT picker.list()->itemDoubleClicked(flash, 3);   // ColModel: the name — this one uses it
+        Q_EMIT picker.list()->itemDoubleClicked(flash, ColModel);   // the name — this one uses it
         QVERIFY(picker.pick().accepted);
         QCOMPARE(picker.pick().key, QStringLiteral("glm-coding|glm-5.3-flash"));
     }
@@ -951,7 +1069,7 @@ private Q_SLOTS:
 
     void theFooterSpellsTheKeysOfTheTabYouAreOn() {
         ModelPicker picker(context());
-        QVERIFY(picker.footer()->text().contains(QStringLiteral("alt+↑↓ moves it")));
+        QVERIFY(picker.footer()->text().contains(QStringLiteral("alt+↑↓ moves a row")));
         QVERIFY(picker.footer()->text().contains(QStringLiteral("ctrl+z undoes")));
         picker.setTier(QStringLiteral("all"));
         QVERIFY(!picker.footer()->text().contains(QStringLiteral("alt+↑↓")));

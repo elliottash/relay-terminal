@@ -47,7 +47,10 @@
 //   enter          use this row in the pane — the model and the level together
 //   tab            the focus along filter → rows → providers → levels
 //   →  on a row    the providers of this row, then the levels; ← comes back
-//   alt+↑ / alt+↓  move the row up or down **its own** section (a drag does the same)
+//   ▲▼ / alt+↑↓    move the row up or down inside its section
+//   drag           reorder within a section — or, across a header, move the model into that
+//                  section's list at the rank it is dropped at (card #RKP3); a drop while the
+//                  filter hides rows is not an order, and the limits line says so
 //   delete         take the row out of its section (backspace does it while the filter is empty)
 //   ctrl+enter     add the highlighted model to the section it is in, at the end
 //   typing         searches every usable model; each section shows its own matches, then the
@@ -200,7 +203,9 @@ public:
     // The list edits, as the keys above do them. Public because they are the dialog's second job
     // and a test presses them without a window manager; each one writes through
     // `curation::setTierList` and calls `onListsChanged`.
-    void moveSelected(int delta);   // alt+↑ / alt+↓, and the end of a drag
+    void moveSelected(int delta);   // alt+↑ / alt+↓, and what the ▲▼ buttons call through to
+    // The one-rank move the ▲▼ buttons and `moveSelected` share (card #RKP3): key moves delta
+    // ranks inside tier's list, clamped at the ends; persisted, undoable, selection follows.
     // "+ add a model by id…", the last row of the `all` tab: the input that sat under every
     // open-ended provider on Options › Models until the checklist left the page (card #MDL1
     // t:a10, design 5.5). Returns the key it added, or an empty string. Public because a test
@@ -209,7 +214,10 @@ public:
     void removeSelected();          // delete
     void addSelected();             // ctrl+enter, and the "+ add" cell
     void undo();                    // ctrl+z
-    void commitDragOrder();         // a drag finished: the list becomes what the rows now read
+    // A drag finished: the lists become what the rows now read — a reorder inside a section, a
+    // move across one, or, while a filter hides rows, nothing (and the limits line says why).
+    void commitDragOrder();
+    void moveKey(const QString &tier, const QString &key, int delta);
     int undoDepth() const { return m_undo.size(); }
 
 protected:

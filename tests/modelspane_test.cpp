@@ -40,8 +40,8 @@ using namespace relay::models;
 
 namespace {
 
-// The picker's columns, as ModelPicker.cpp orders them.
-enum Column { ColRank, ColAvail, ColBox, ColModel, ColVia, ColReasoning, ColIntelligence, ColSpeed, ColLeft };
+// The picker's columns, as ModelPicker.cpp orders them (ColMove is a listed row's ▲▼, #RKP3).
+enum Column { ColRank, ColMove, ColAvail, ColBox, ColModel, ColVia, ColReasoning, ColIntelligence, ColSpeed, ColLeft };
 
 QJsonObject model(const QString &id, const QString &label, const QString &tier, const QStringList &efforts, int intelligence = -1) {
     QJsonObject row{{QStringLiteral("id"), id}, {QStringLiteral("label"), label}, {QStringLiteral("tier"), tier},
