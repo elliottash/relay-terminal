@@ -1101,6 +1101,14 @@ if(BUILD_TESTING)
     target_link_libraries(relay-boardwatch-tests PRIVATE relay-board ${RELAY_QT}::Test)
     add_test(NAME boardwatch COMMAND relay-boardwatch-tests)
     set_tests_properties(boardwatch PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    # The Execute button while a pane already holds the card (#48S3): it names the pane and
+    # reveals it instead of handing the card to a second one. Its own executable rather than
+    # more of boardpane_test.cpp, which several sessions hold at once.
+    add_executable(relay-boardexecute-tests tests/boardexecute_test.cpp)
+    target_link_libraries(relay-boardexecute-tests PRIVATE relay-board ${RELAY_QT}::Test)
+    add_test(NAME boardexecute COMMAND relay-boardexecute-tests)
+    set_tests_properties(boardexecute PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # The project model: candidate projects, the board folder, the key the backend's workspace
     # digest has to agree with, and the registry file. No widgets, so no offscreen platform.
     add_executable(relay-projects-tests tests/projects_test.cpp)
