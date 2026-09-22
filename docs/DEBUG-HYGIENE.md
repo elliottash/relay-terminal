@@ -28,6 +28,26 @@ Use `--origin interactive` for interactive sessions, `--origin test` or `--origi
 - Retry wait is the sum of requested backoff seconds in retry events, not measured wall time actually spent sleeping. Cancellation can shorten a wait.
 - Dated malformed lines are counted within the selected time window before origin filtering; undated lines are counted over all scanned files because they cannot be assigned to a window. Neither count is a failure count.
 
+## Instrumented runs
+
+New worker records append `origin`, `run_id` and `build_id` after the event fields. `RELAY_LOG_ORIGIN` accepts `interactive`, `test` or `qa`; invalid values become unknown. `RELAY_LOG_RUN_ID` supplies a run label, and `RELAY_BUILD_ID` supplies a package/QA build label. Identity values are bounded tokens, not arbitrary paths or messages. Without overrides the worker uses interactive origin, a process-run ID and a cached backend-source fingerprint. GUI worker exits record their running GUI build identity and lifecycle reason.
+
+For a bounded QA run, set a run label and disposable XDG directories before launching Relay:
+
+```bash
+RELAY_LOG_ORIGIN=qa RELAY_LOG_RUN_ID=hg26-example ./build/relay --workspace /path/to/disposable/project
+```
+
+The example assumes the disposable HOME/XDG environment has already been set up by the QA driver. Origin alone does not isolate storage.
+
+Use the supported targeted test runner to isolate logs and label test origin:
+
+```bash
+scripts/test.sh --junit /tmp/relay-configure.xml tests.test_configure_recovery
+```
+
+`relay_core.junit_runner` also scopes its environment during execution. Importing production logging modules does not redirect storage. Hand-written test drivers must provide their own isolated child environment; do not infer that an arbitrary `python -m unittest` invocation isolates every fixture.
+
 ## Weekly review
 
 ```bash
