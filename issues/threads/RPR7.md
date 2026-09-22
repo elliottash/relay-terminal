@@ -47,3 +47,7 @@ Check · 1 not-applicable, 12 passed; 3 advisory finding(s). The status is under
 <!-- relay:entry 20260922T021612Z-dv author=codex kind=progress -->
 ### Codex · 2026-09-22 02:16
 Implemented Pro personal codes, gateway checks and revocation, desktop activation/removal, GLM high/main/flash defaults and Free lite. Final live isolated Relay passed activation, generation, denial after revocation with no upstream request, and keyring removal. 281 targeted backend tests, 63 effort follow-up tests and all 3 C++ test groups pass. tests_check has no failures or signals (only existing timing notices). Evidence docs/qa_evidence/2026-09-22-RPR7/README.md. Landed to needs-verification; separate Relay verifier a5 is checking final implementation. No production deployment or production code issuance.
+
+<!-- relay:entry 20260922T021833Z-qa author=codex kind=evidence -->
+### Codex · 2026-09-22 02:18
+Independent verifier a5 reports PASS, evidence commit 50c23e65. Root reviewed the checklist, tests and live screenshots: valid activation/Pro turn succeed; revocation denies next turn with no upstream increase; Free/BYOK and credential guards pass. Copied verifier checklist/verdict to the card and closed implementation as done. Production rollout remains separate and is documented in gateway/README.md. XJSN also independently verified and closed.

@@ -2,13 +2,13 @@
 id: RPR7
 aliases: [RLP7]
 type: work
-status: needs-verification
+status: done
 labels: [feature, models, gateway]
 assignee: codex
 rank: n
 created: '2026-09-21'
 source: 'Claude Code in a Relay pane, 2026-09-21'
-links: {plans: [], commits: [06d0936a902c14f860471233e3af2ce8973a7e22, 1cf0f5f68778d42fa0ddb4114acc44ccf42dffe4, 380d8c66c8f9ada774186901891393ab96566898, 6668999edd9c917790c473e08c72671087a82936, cdaf887e4611c14ab618c8a2d6cf6bba01f80e76, f8937979f543745d5764c54a35eaec1244f23a6a, eb2a2671b315e6711c0c6b36052e890ea172c6da, 0263794b483e0a7f593d93785f2e5f91510a9f44], evidence: [docs/qa_evidence/2026-09-22-RPR7/README.md], related: [MDP1], github: null}
+links: {plans: [], commits: [06d0936a902c14f860471233e3af2ce8973a7e22, 1cf0f5f68778d42fa0ddb4114acc44ccf42dffe4, 380d8c66c8f9ada774186901891393ab96566898, 6668999edd9c917790c473e08c72671087a82936, cdaf887e4611c14ab618c8a2d6cf6bba01f80e76, f8937979f543745d5764c54a35eaec1244f23a6a, eb2a2671b315e6711c0c6b36052e890ea172c6da, 0263794b483e0a7f593d93785f2e5f91510a9f44, 82e164cc17d41de7ef153cf30964a7da89ac3eef, 50c23e65ba48f3b37d9eab33e64d56bada680278], evidence: [docs/qa_evidence/2026-09-22-RPR7/README.md, docs/qa_evidence/2026-09-22-verify-RPR7/README.md], related: [MDP1], github: null}
 ---
 # Relay Pro: GLM models with personal access codes
 
@@ -79,11 +79,11 @@ from preparing and verifying code; no production configuration has been changed.
 forged Pro request without entitlement and revocation of an already-issued session token.
 
 ## Tasks
-- [x] Record owner decisions; defer Ultra and retain Free lite.
-- [x] Add digest-only per-person code issuance, revocation and request authorization.
-- [x] Add background access validation, keyring code controls and current-code availability.
-- [x] Add GLM 5.3 high/main, GLM 5.3 Flash and adjustable low/medium/high effort.
-- [x] Exercise live activation, model use, revocation and removal; run targeted regressions.
+- [x] Record owner decisions; defer Ultra and retain Free lite. <!-- t:p1 -->
+- [x] Add digest-only per-person code issuance, revocation and request authorization. <!-- t:p2 -->
+- [x] Add background access validation, keyring code controls and current-code availability. <!-- t:p3 -->
+- [x] Add GLM 5.3 high/main, GLM 5.3 Flash and adjustable low/medium/high effort. <!-- t:p4 -->
+- [x] Exercise live activation, model use, revocation and removal; run targeted regressions. <!-- t:p5 -->
 
 ## Execution Summary
 Gateway authorization and operator CLI landed in `1cf0f5f6`; Pro is checked on every request,
@@ -132,3 +132,19 @@ manual: docs/qa_evidence/2026-09-22-RPR7/README.md
 - notice · ctest:modelcatalog — ctest -R modelcatalog is slow: p95 3.72 s, p50 3.72 s
 - notice · ctest:modelpicker — ctest -R modelpicker is slow: p95 1.78 s, p50 1.78 s
 history: thread
+
+## QA checklist
+Independent Relay verifier a5 checked these against Done means; full record in
+`docs/qa_evidence/2026-09-22-verify-RPR7/README.md`.
+- [x] Personal activation enables GLM 5.3 high/main and GLM 5.3 Flash; a live Pro turn succeeds. <!-- t:v1 -->
+- [x] Missing, invalid, forged and revoked access are denied; revocation blocks an existing live session before upstream traffic. <!-- t:v2 -->
+- [x] Free and BYOK still work; lite defaults and chores remain Free. <!-- t:v3 -->
+- [x] Provider availability follows access; stale/changed codes cannot reactivate it. <!-- t:v4 -->
+- [x] Codes remain out of public configuration, logs and upstream requests; foreign endpoint overrides are rejected. <!-- t:v5 -->
+
+## Verdict
+PASS — independent verifier a5 reran 22 focused tests, an additional BYOK probe, and a separate
+actual Relay activation → Pro turn → revocation drive. Upstream count remained 3 before and
+after the refused turn. Evidence committed in `50c23e65`. Root reviewed the evidence and closes
+the implementation as done. Production rollout and live GLM inference are outside this verdict;
+operator configuration and code issuance are documented in `gateway/README.md`.

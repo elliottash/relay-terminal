@@ -64,6 +64,6 @@ successfully through land.py; only the custom-form/include and §28.6 hunks were
 shared files. Post-land run 20260922T020115Z-d112: 27 passes, no opened signals. Refreshed
 Tests Check: passed, no findings and no failing tests. Independent verification remains pending.
 
-<!-- relay:entry 20260922T021000Z-vr author=codex kind=verification -->
+<!-- relay:entry 20260922T021000Z-vr author=codex kind=evidence -->
 ### Codex · 2026-09-22 02:10
 Independent root verification passed all 27 custom-provider tests and a separate live form-to-HTTP add/edit/reject/clear drive. Evidence: docs/qa_evidence/2026-09-22-verify-XJSN/README.md. Verdict recorded; moving to done.
