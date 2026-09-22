@@ -11,6 +11,7 @@
 // WindowManagerImpl.h.
 
 #include "PaneChrome.h"
+#include "AuxiliaryZoom.h"
 #include "PromptHistory.h"
 #include "RichEditor.h"
 #include "WindowChrome.h"
@@ -908,6 +909,18 @@ protected:
         }
         if (event->type() == QEvent::Wheel) {
             auto *wheel = static_cast<QWheelEvent *>(event);
+            if (wheel->modifiers() == Qt::ControlModifier) {
+                auto *widget = qobject_cast<QWidget *>(object);
+                QWidget *leaf = leafOf(widget);
+                if (leaf && leaf->window() == this && !dynamic_cast<Pane *>(leaf)) {
+                    auto *view = relay::auxiliaryZoom::target(leaf, widget);
+                    if (view && (widget == view || view->isAncestorOf(widget))) {
+                        relay::auxiliaryZoom::rememberFont(view);
+                        hint(QStringLiteral("auxiliary.zoom.wheel"), relay::ShortcutHints::nextTime(
+                            Keymap::instance().shortcutText(QStringLiteral("terminal.zoomIn")), QStringLiteral("zoom this pane")));
+                    }
+                }
+            }
             if (wheel->modifiers() == Qt::AltModifier) {
                 QWidget *leaf = leafOf(qobject_cast<QWidget *>(object));
                 if (leaf && leaf->window() == this) {
@@ -1228,7 +1241,11 @@ private:
             refreshPaneDimming();
         }
         else if (id.startsWith(QStringLiteral("terminal.zoom"))) {
-            if (m_active) m_active->runTerminalMenuAction(id.mid(9), {}, {}, {});
+            if (!target && m_activeLeaf && !dynamic_cast<Pane *>(m_activeLeaf.data())) {
+                const int step = id == QStringLiteral("terminal.zoomIn") ? 1
+                               : id == QStringLiteral("terminal.zoomOut") ? -1 : 0;
+                relay::auxiliaryZoom::zoom(m_activeLeaf, QApplication::focusWidget(), step);
+            } else if (pane) pane->runTerminalMenuAction(id.mid(9), {}, {}, {});
         }
         else if (id == QStringLiteral("pane.moveLeft")) moveActive(relay::panes::Direction::Left);
         else if (id == QStringLiteral("pane.moveRight")) moveActive(relay::panes::Direction::Right);

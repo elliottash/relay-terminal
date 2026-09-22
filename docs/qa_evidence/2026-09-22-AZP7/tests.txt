@@ -1,0 +1,10 @@
+********* Start testing of AuxiliaryZoomTest *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : AuxiliaryZoomTest::initTestCase()
+PASS   : AuxiliaryZoomTest::activityView()
+PASS   : AuxiliaryZoomTest::transcriptAndAskFocus()
+PASS   : AuxiliaryZoomTest::wheelThenReset()
+PASS   : AuxiliaryZoomTest::editableAndHiddenIgnored()
+PASS   : AuxiliaryZoomTest::cleanupTestCase()
+Totals: 6 passed, 0 failed, 0 skipped, 0 blacklisted, 161ms
+********* Finished testing of AuxiliaryZoomTest *********
