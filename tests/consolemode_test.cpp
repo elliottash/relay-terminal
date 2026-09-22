@@ -838,6 +838,46 @@ void aTerminalPanesOwnQueueResumesOnEnterToo()
     CHECK(sent.isEmpty());
 }
 
+void repeatedEnterKeepsTheFirstQueuedPrompt()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    QList<QJsonObject> sent;
+    console.onWorkerLine = [&sent](const QJsonObject &message) { sent << message; };
+    console.deliverWorkerEvent(QJsonObject{{"event", "configured"}, {"model", "test"}});
+    console.deliverWorkerEvent(QJsonObject{{"event", "agent_started"}, {"id", "running"}});
+    auto *editor = console.findChild<QPlainTextEdit *>(QStringLiteral("composerEditor"));
+    CHECK(editor != nullptr);
+    if (!editor) return;
+    const auto enter = [&] {
+        QKeyEvent key(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+        QCoreApplication::sendEvent(editor, &key);
+    };
+    console.draftInComposer(QStringLiteral("first queued prompt"));
+    enter();
+    console.draftInComposer(QStringLiteral("second queued prompt"));
+    enter();
+    CHECK_EQ(console.queuedPrompts(), 2);
+    CHECK(console.composerText().isEmpty());
+    sent.clear();
+    enter();
+    CHECK_EQ(sent.size(), 1);
+    if (sent.size() != 1) return;
+    CHECK_EQ(sent.first().value("type").toString(), QStringLiteral("ask"));
+    CHECK_EQ(sent.first().value("when").toString(), QStringLiteral("steer"));
+    CHECK_EQ(sent.first().value("text").toString(), QStringLiteral("first queued prompt"));
+    const QString steerId = sent.first().value("id").toString();
+    CHECK_EQ(console.queuedPrompts(), 1);
+    sent.clear();
+    enter();
+    CHECK_EQ(sent.size(), 1);
+    if (sent.size() != 1) return;
+    CHECK_EQ(sent.first().value("type").toString(), QStringLiteral("queue_unsteer"));
+    CHECK_EQ(sent.first().value("request").toString(), steerId);
+    CHECK_EQ(console.queuedPrompts(), 1);
+}
+
 }  // namespace cases
 
 int main(int argc, char **argv)
@@ -873,6 +913,7 @@ int main(int argc, char **argv)
     cases::aLineThisConsoleSentComesBackWithUpAsAnUnsentDraft();
     cases::enterOnAnEmptyBoxResumesThisConsolesPausedQueue();
     cases::aTerminalPanesOwnQueueResumesOnEnterToo();
+    cases::repeatedEnterKeepsTheFirstQueuedPrompt();
 
     if (failures == 0)
     std::fprintf(stdout, "consolemode: 20 cases, all passed\n");

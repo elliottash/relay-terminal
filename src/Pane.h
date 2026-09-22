@@ -10024,13 +10024,12 @@ private:
         return steer.requestId;
     }
 
-    // Enter on an empty prompt right after queuing an agent prompt while the agent works: deliver that
-    // prompt at the agent's next tool call instead of after the turn.
-    bool upgradeLastQueuedToSteer() {
+    // Empty Enter promotes the head, never the most recently appended prompt (#QFF1).
+    bool upgradeFirstQueuedToSteer() {
         if (!m_agentBusy || m_entries.isEmpty() || !m_lastQueuedAt.isValid() || m_lastQueuedAt.elapsed() > 15000) return false;
-        const QueueEntry &last = m_entries.last();
-        if (!last.agent || last.written() || last.id != m_lastQueuedEntryId) return false;
-        return !steerQueuedEntry(last.id).isEmpty();
+        const QueueEntry &first = m_entries.first();
+        if (!first.agent || first.written()) return false;
+        return !steerQueuedEntry(first.id).isEmpty();
     }
 
     // A third Enter on the empty prompt box, right after the steer: stop the running turn and run
@@ -14975,7 +14974,7 @@ private:
             if (!m_entries.isEmpty() && m_entries.last().agent) {
                 m_lastQueuedEntryId = m_entries.last().id;
                 m_lastQueuedAt.start();
-                upgradeLastQueuedToSteer();
+                steerQueuedEntry(m_lastQueuedEntryId);
             }
             m_remoteAuthor.clear();
             return;
@@ -15111,7 +15110,7 @@ private:
                    ? QStringLiteral("Queued · checking the command when the agent is ready")
                    : entry.agent
                    ? (m_agentBusy
-                          ? QStringLiteral("Queued · the agent prompt runs after the items ahead of it · Enter again to send at the next tool call")
+                          ? QStringLiteral("Queued · the agent prompt runs after the items ahead of it · Enter again sends the first queued prompt at the next tool call")
                           : QStringLiteral("Queued · the agent prompt runs when its turn comes"))
                    : !entry.guest.isEmpty()
                        ? QStringLiteral("Queued · sent to %1 when it is ready").arg(guestName(entry.guest))
@@ -15525,7 +15524,7 @@ private:
         }
         // Enter queues; Enter again steers at the next tool call; Enter a third time interrupts.
         if (mods == Qt::NoModifier && enter && m_editor->toPlainText().trimmed().isEmpty()
-            && (upgradeLastQueuedToSteer() || escalateSteerToInterrupt()))
+            && (escalateSteerToInterrupt() || upgradeFirstQueuedToSteer()))
             return true;
         // And with nothing left to escalate, Enter on an empty box **resumes a queue a Stop
         // paused** (#7JD1; owner, 2026-09-21: "why don't we just copy the functionality and have
