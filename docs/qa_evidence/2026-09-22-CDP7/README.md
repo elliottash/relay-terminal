@@ -25,3 +25,5 @@ Review of the real ATP7 screenshot found Codex logged in but reporting 0 of 7 mo
 Guest harness catalogs are now exempt from the open-ended heuristic. `sevenCodexModelsRemainAvailableByDefault` fails before the fix (0 instead of 7), passes afterward, and verifies explicit unchecking still works. All 68 model-catalog checks pass, including OpenRouter long-tail behavior.
 
 The full-application stage in `../2026-09-22-VPR7/stage.py` injects seven untiered guest models through the real worker pipe. `live-providers.png` shows 7 of 7 available and `live-available.png` shows all seven checked. These screenshots were visually inspected. No additional discoverability redesign is warranted: the documented search/add interaction remains intentional. Sphinxpad-specific confirmation is still outstanding, but the reported 0/7 symptom now has a reproduced and fixed root cause.
+
+Follow-up commit: `8d03da032c8c58fbf48d4c99b866d25455f1fa0b`. Exact-tree application build passed. Rebuilt widget targets and ran `QT_QPA_PLATFORM=offscreen ctest --test-dir build -R "^(modelpicker|modelspane)$" --output-on-failure`: 2/2 targets passed.

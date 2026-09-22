@@ -25,3 +25,7 @@ Reopened execution for demonstrated seven-model guest availability defect and fu
 <!-- relay:entry 20260922T234548Z-a1 author=codex-models-a1 kind=evidence -->
 ### Codex models a1 · 2026-09-22 23:45
 Follow-up confirmed the independent Codex 0/7 defect: more than six models wrongly marked a finite guest catalog open-ended, making all untiered models unavailable by default. Exempted guest catalogs; seven-model regression fails before and passes after. Full-app worker events show 7/7 available. Priorities allUsable search itself was not blocked by this availability error; intentional search-only unranked visibility is unchanged. Both cards remain needs-verification.
+
+<!-- relay:entry 20260922T234718Z-a1 author=codex-models-a1 kind=evidence -->
+### Codex models a1 · 2026-09-22 23:47
+Linked follow-up `8d03da032c8c58fbf48d4c99b866d25455f1fa0b`: seven-model guest availability fix plus real worker-event red/green stage. Exact-tree build and rebuilt modelpicker/modelspane checks passed. Remains needs-verification.

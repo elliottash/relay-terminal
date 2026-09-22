@@ -7,7 +7,7 @@ labels: [bug, models]
 rank: mopr7
 created: '2026-09-22'
 source: 'User report in Relay; observed on sphinxpad, 2026-09-22'
-links: {plans: [], commits: [3cb7ff33ba054175c93c10b699f0c08804e12f07], evidence: [docs/qa_evidence/2026-09-22-VPR7/README.md], related: [MPA2], github: null}
+links: {plans: [], commits: [3cb7ff33ba054175c93c10b699f0c08804e12f07, 8d03da032c8c58fbf48d4c99b866d25455f1fa0b], evidence: [docs/qa_evidence/2026-09-22-VPR7/README.md], related: [MPA2], github: null}
 ---
 # New OpenRouter models require a restart to appear in Priorities
 
@@ -41,6 +41,7 @@ Provider settings could use m_active while Priorities continued serving another 
 Staged UI evidence: `docs/qa_evidence/2026-09-22-VPR7/priorities.png`.
 
 ## Tests
+- `ctest -R ^modelpicker$` — tests/modelpicker_test.cpp
 - `ctest -R ^modelcatalog$` — tests/modelcatalog_test.cpp
 - `python3 docs/qa_evidence/2026-09-22-VPR7/stage.py` — full-app late helper events and Codex availability passed; pre-fix binary failed as expected.
 - `xvfb-run -a build/relay-modelspane-tests` — 21 passed.

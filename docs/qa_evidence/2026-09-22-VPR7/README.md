@@ -25,3 +25,5 @@ Board `TestsCommands.check_card` was run for both linked cards: no orphaned test
 The driver opens Priorities and searches OpenRouter before triggering the events. The same live window retains its search and displays `late-model` afterward, verified by OCR and screenshots `live-before.png` / `live-after.png`. It then verifies the provider page says 7 of 7 Codex models available, and the Available page shows all seven. `live-events.jsonl` records actual pipe events and request types.
 
 Red/green: running this identical driver with `RELAY_STAGE_BINARY=/tmp/claude-1000/land/azp7/verify/build/relay RELAY_STAGE_PREFIX=baseline` (the pre-VPR7 exact-tree binary) fails the `late-model` assertion. `baseline-after.png` shows no matching rows after the late events; the repaired binary passes. This establishes the helper-event regression beyond the earlier widget and source-wiring checks.
+
+Follow-up commit: `8d03da032c8c58fbf48d4c99b866d25455f1fa0b`. Exact-tree application build passed. Rebuilt widget targets and ran `QT_QPA_PLATFORM=offscreen ctest --test-dir build -R "^(modelpicker|modelspane)$" --output-on-failure`: 2/2 targets passed.
