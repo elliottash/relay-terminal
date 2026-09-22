@@ -75,7 +75,7 @@ EFFORT_LEVELS: dict[str, tuple[str, ...]] = {
     "gemini": ("low", "medium", "high"),
     "none": (),
     "relay": ("low", "medium"),
-    "relay-pro": ("low", "medium", "high", "max"),
+    "relay-pro": ("low", "medium", "high"),
 }
 
 

@@ -204,7 +204,7 @@ class ProClientTests(unittest.TestCase):
         self.operation('store', self.secret)
         row = presets.PRESETS['relay-pro'].to_dict()
         self.assertFalse(row['effort_fixed'])
-        self.assertEqual(row['efforts'], ['low', 'medium', 'high', 'max'])
+        self.assertEqual(row['efforts'], ['low', 'medium', 'high'])
         self.assertTrue(all(not r['effort_fixed'] for r in row['models']))
         self.assertNotIn(self.secret, json.dumps(row))
         for model in relay_pro.MODELS:
