@@ -71,6 +71,11 @@ SUMMARY_PREVIEW_CAP = 160
 DEFAULT_MAX_STEPS = 500
 DEFAULT_MAX_TOOL_CALLS = 2000
 MAX_COMPLETION_REMINDERS = 2   # owner decision: automatic re-prompts per turn
+# A provider can return a structurally valid assistant message with neither text nor tool calls.
+# After tools have run that is not a completion: the user otherwise sees the tool summary and then
+# silence while the ledger marks the request done. Give the model bounded chances to wrap up; a
+# third empty reply fails visibly and leaves the request open.
+MAX_EMPTY_FINAL_RETRIES = 2
 STALE_TODO_STEPS = 8
 # Tool calls into a turn before nudging a model that wrote no todo list (card D8VN). Counted in tool
 # calls, not steps: glm-5.3 issues every write of a five-part job in one parallel batch, so by step 4
@@ -1996,6 +2001,7 @@ class Agent:
         calls_used = 0
         over_budget_steps = 0
         reminders = 0
+        empty_final_retries = 0
         batch = None               # subagents: `agent` calls started for the current response
         pictures = image_attachments(attachments)
         try:
@@ -2098,13 +2104,30 @@ class Agent:
                 self.emit(self.context_event())
                 calls = message.get("tool_calls", [])
                 if not calls:
+                    content = message.get("content")
+                    said = self._unsaid_app_line(content)
+                    if said:
+                        # App actions already return a human-readable result, so that result is a
+                        # sufficient deterministic final answer when the model omits its own.
+                        message["content"] = said
+                        self.emit({"event": "delta", "text": said, "turn_id": turn_id})
+                        content = said
+                    if calls_used and not (isinstance(content, str) and content.strip()):
+                        if empty_final_retries < MAX_EMPTY_FINAL_RETRIES and steps < self.max_steps:
+                            empty_final_retries += 1
+                            add({"role": "user", "content": self._empty_final_reminder(empty_final_retries),
+                                 "relay_kind": "note"})
+                            continue
+                        raise ProviderError(
+                            "The model returned no final response after its tool calls. "
+                            "Tool actions may already have run; inspect their results before retrying.")
                     # A plan turn on a High-list guest (13.7): the guest's reply is its plan.
-                    self._save_guest_plan(record, message.get("content"))
+                    self._save_guest_plan(record, content)
                     # Monologue (card #2CZP): the same answer again, with no action taken. It can only
                     # reach the threshold through the completion checks below — they are the one thing
                     # that keeps a turn without tool calls going — so the nudge is sent inside that
                     # branch, where the turn continues anyway, and never to extend one about to end.
-                    monologue = ctx["loop"].observe_message(message.get("content") or "", False)
+                    monologue = ctx["loop"].observe_message(content or "", False)
                     open_items = self._open_items(ctx) if self.completion_check else []
                     if open_items and reminders < MAX_COMPLETION_REMINDERS and steps < self.max_steps:
                         reminders += 1
@@ -2118,12 +2141,6 @@ class Agent:
                         continue
                     if self.track_requests:
                         self.requests.finish_turn(turn_id, True, self.todos.items)
-                    said = self._unsaid_app_line(message.get("content"))
-                    if said:
-                        # Streamed as text, and kept on the message, so the transcript, the
-                        # saved conversation and a reopened console all read the same.
-                        message["content"] = said
-                        self.emit({"event": "delta", "text": said, "turn_id": turn_id})
                     self._end_turn(record, {"event": "done", "turn_id": turn_id,
                                             "open_items": self._open_items(ctx, final=True)})
                     if self.track_requests and self.audit_requests:
@@ -3352,6 +3369,12 @@ class Agent:
         return (f"[Relay completion check {number}/{MAX_COMPLETION_REMINDERS}: before finishing, these are still "
                 f"open: {listed}. Do them now, or call update_todos to mark each one cancelled, deferred or blocked "
                 "with a reason. Then give your final answer.]")
+
+    @staticmethod
+    def _empty_final_reminder(number: int) -> str:
+        return (f"[Relay final-answer check {number}/{MAX_EMPTY_FINAL_RETRIES}: your last response contained "
+                "neither text nor a tool call, but tools have already run in this turn. Continue the work if "
+                "needed, then give the user a non-empty final answer that states what happened.]")
 
     def _start_audit(self, ctx: dict, answer: str) -> None:
         """Optional flag-only audit on a cheap model (route-assist model when available). Never re-prompts."""

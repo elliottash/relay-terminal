@@ -356,6 +356,28 @@ class AgentRequestTests(Base):
         self.assertEqual(sorted(i['id'] for i in done['open_items']), ['R1', 'T1', 'T2'])
         self.assertEqual(agent.requests.get('R1')['status'], 'open')
 
+    def test_empty_reply_after_tools_is_retried_instead_of_silently_finishing(self):
+        provider = Script([forever_tools, text(''), text('The file was inspected; no changes were needed.')])
+        agent = self.agent(provider)
+        agent.ask('inspect the file')
+        self.assertEqual(len(provider.requests), 3)
+        self.assertIn('Relay final-answer check 1/2', provider.requests[2][-1]['content'])
+        self.assertEqual(self.events[-1]['event'], 'done')
+        self.assertEqual(agent.requests.get('R1')['status'], 'done')
+        self.assertEqual(agent.messages[-1]['content'], 'The file was inspected; no changes were needed.')
+
+    def test_repeated_empty_replies_after_tools_fail_visibly_and_keep_request_open(self):
+        provider = Script([forever_tools, text(''), text(''), text('')])
+        agent = self.agent(provider)
+        agent.ask('inspect the file')
+        self.assertEqual(len(provider.requests), 4)
+        self.assertIn('Relay final-answer check 2/2', provider.requests[3][-1]['content'])
+        failed = self.events[-1]
+        self.assertEqual(failed['event'], 'error')
+        self.assertIn('no final response', failed['text'])
+        self.assertEqual(agent.requests.get('R1')['status'], 'open')
+        self.assertIn('request above is not finished', agent.messages[-1]['content'])
+
     def test_completion_check_resolved_by_update(self):
         provider = Script([todos_call({'text': 'fix X', 'status': 'in_progress'}, {'text': 'rename Y', 'status': 'pending'}),
                            text('done with X'),
