@@ -16,16 +16,55 @@ import sys
 import time
 
 
+def macos_runtime_directory() -> str:
+    """Match Qt's native RuntimeLocation, which does not follow an overridden HOME."""
+    import ctypes as C
+
+    foundation = C.CDLL('/System/Library/Frameworks/Foundation.framework/Foundation')
+    core = C.CDLL('/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation')
+    objc = C.CDLL('/usr/lib/libobjc.A.dylib')
+    objc.objc_autoreleasePoolPush.argtypes = []
+    objc.objc_autoreleasePoolPush.restype = C.c_void_p
+    objc.objc_autoreleasePoolPop.argtypes = [C.c_void_p]
+    objc.objc_autoreleasePoolPop.restype = None
+    search = foundation.NSSearchPathForDirectoriesInDomains
+    search.argtypes = [C.c_ulong, C.c_ulong, C.c_bool]
+    search.restype = C.c_void_p
+    core.CFArrayGetCount.argtypes = [C.c_void_p]
+    core.CFArrayGetCount.restype = C.c_long
+    core.CFArrayGetValueAtIndex.argtypes = [C.c_void_p, C.c_long]
+    core.CFArrayGetValueAtIndex.restype = C.c_void_p
+    core.CFStringGetLength.argtypes = [C.c_void_p]
+    core.CFStringGetLength.restype = C.c_long
+    core.CFStringGetCString.argtypes = [C.c_void_p, C.c_void_p, C.c_long, C.c_uint32]
+    core.CFStringGetCString.restype = C.c_bool
+    pool = objc.objc_autoreleasePoolPush()
+    try:
+        # NSApplicationSupportDirectory=14, NSUserDomainMask=1; NSArray/NSString
+        # are toll-free bridged to CFArray/CFString. Qt selects the last result.
+        paths = search(14, 1, True)
+        count = core.CFArrayGetCount(paths) if paths else 0
+        if not count:
+            raise OSError('Native Application Support directory is unavailable')
+        path = core.CFArrayGetValueAtIndex(paths, count - 1)
+        buffer = C.create_string_buffer(core.CFStringGetLength(path) * 4 + 1)
+        if not core.CFStringGetCString(path, buffer, len(buffer), 0x08000100):
+            raise OSError('Native Application Support path cannot be encoded as UTF-8')
+        return buffer.value.decode('utf-8')
+    finally:
+        objc.objc_autoreleasePoolPop(pool)
+
+
 def socket_address() -> str:
     address = os.environ.get("RELAY_OPEN_SOCKET", "")
     if address:
         return address
     # Launched by the desktop (link click) without Relay's environment: use the last address
     # Relay published for this user.
-    runtime = (os.path.expanduser("~") if os.name == "nt" else
-               os.path.expanduser("~/Library/Application Support") if sys.platform == "darwin" else
-               os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}")
     try:
+        runtime = (os.path.expanduser("~") if os.name == "nt" else
+                   macos_runtime_directory() if sys.platform == "darwin" else
+                   os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}")
         with open(os.path.join(runtime, "relay", "open-socket"), encoding="utf-8") as handle:
             return handle.read().strip()
     except OSError:

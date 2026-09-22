@@ -47,11 +47,35 @@ class MacPlatformTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, \
                 mock.patch.object(sys, 'platform', 'darwin'), \
                 mock.patch.dict(os.environ, RELAY_OPEN_SOCKET=''), \
-                mock.patch.object(os.path, 'expanduser', return_value=directory):
+                mock.patch.object(relay_open, 'macos_runtime_directory', return_value=directory):
             path = Path(directory) / 'relay' / 'open-socket'
             path.parent.mkdir()
             path.write_text('/private/tmp/relay-open-test/open.sock')
             self.assertEqual(relay_open.socket_address(), '/private/tmp/relay-open-test/open.sock')
+
+    def test_explicit_socket_bypasses_native_lookup(self):
+        with mock.patch.dict(os.environ, RELAY_OPEN_SOCKET='/explicit/socket'), \
+                mock.patch.object(relay_open, 'macos_runtime_directory', side_effect=AssertionError):
+            self.assertEqual(relay_open.socket_address(), '/explicit/socket')
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'native Foundation directory lookup')
+    def test_native_discovery_ignores_overridden_home(self):
+        # Fresh processes ensure Foundation has not cached its directory before HOME changes.
+        probe = """import io, os, runpy, sys
+from unittest import mock
+helper = runpy.run_path(sys.argv[1])
+os.environ.pop('RELAY_OPEN_SOCKET', None)
+with mock.patch('builtins.open', return_value=io.StringIO('/test/open.sock')) as opened:
+    assert helper['socket_address']() == '/test/open.sock'
+    print(opened.call_args.args[0])
+"""
+        command = [sys.executable, '-c', probe, str(ROOT / 'scripts' / 'relay-open')]
+        normal = subprocess.check_output(command, text=True).strip()
+        with tempfile.TemporaryDirectory(prefix='relay home ') as home:
+            isolated = subprocess.check_output(command, env={**os.environ, 'HOME': home}, text=True).strip()
+            self.assertEqual(isolated, normal)
+            self.assertFalse(isolated.startswith(home + os.sep))
+            self.assertTrue(isolated.endswith('/Library/Application Support/relay/open-socket'))
 
     @unittest.skipIf(os.name == 'nt', 'macOS platform branch')
     def test_native_open_fallback(self):
