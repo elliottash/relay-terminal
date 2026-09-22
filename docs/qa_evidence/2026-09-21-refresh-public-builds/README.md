@@ -43,3 +43,11 @@ The current immutable release candidate is `59a51d92578b2c77284e2ecb9ffcde98f767
 All six Linux build/test/install gates and the native Windows gates must pass before publication.
 No beta.3 release or new website links have been published yet. Earlier-source artifacts are kept
 separate and will not be mixed into this release.
+
+## Native macOS implementation (verification in progress)
+
+- Source df9ea698: App bundle, private Python/Bash paths, portable signal shutdown, native process argv, Darwin timestamps and Mac update/link handling. Exact-tree Linux GUI build passed.
+- f2888f05 and ed47caac: native libproc identity/usage, sysctl memory/argv and standalone native smoke; targeted Linux platform tests pass.
+- 5c4a321b, cd0f6792, 4b730020: native Keychain, file opening, Bash jobs, Try-it and platform-aware main/delegated/router prompts. Targeted Python regressions pass; Keychain awaits native runner.
+- e1000574: two native Mac runners, pinned private runtimes, DMG packaging, relocation/signature audit and installed GUI/PTY/worker checks. Local script syntax and Bash patch application checks pass.
+- Native workflow: https://github.com/elliottash/relay-terminal/actions/runs/35673472747 (Apple Silicon and Intel). Downloads remain pending successful native gates.

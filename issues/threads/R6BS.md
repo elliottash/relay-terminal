@@ -37,3 +37,7 @@ Native Windows full gates and upload passed on 6fe3554f in 35670149891. Linux an
 <!-- relay:entry 20260922T003311Z-b1 author=codex kind=progress -->
 ### Codex · 2026-09-22 00:33
 Owner added: "can we build for mac as well". Expanded release scope to native Apple Silicon and Intel macOS bundles/DMGs. Plan uses Qt6, private modern Bash/Python, native Keychain and Darwin platform support; delegated platform, packaging and Python parts to the existing subagents. Existing Linux/Windows candidate 59a51d9 continues while the Mac port is implemented.
+
+<!-- relay:entry 20260922T004951Z-b2 author=codex kind=progress -->
+### Codex · 2026-09-22 00:49
+Native macOS implementation and DMG packaging landed through df9ea698; both native architectures are running in 35673472747. Bundles contain modern Bash, Python and Qt, use Keychain, Darwin process APIs and macOS URL handling. Exact Linux app build passes. Windows release gates on 59a51d9 pass; Ubuntu 24 ARM encountered the known PF14 intermittent profiler assertion, with remaining Linux package jobs being checked before publication. No unverified download links deployed.
