@@ -1,9 +1,10 @@
 ---
 id: LSP1
 type: work
-status: inbox
+status: done
 labels: [bug, tests]
-assignee: null
+assignee: codex
+session: isolate-worker-fixture
 rank: zlsp1
 created: '2026-09-22'
 source: 'Measured by Codex during #R6BS release verification'
@@ -40,4 +41,16 @@ Do not delay the current release on speculation: candidate 7d is still being ver
 ## Tests
 Evidence log: `/tmp/relay-linux-82-ubuntu26-evidence/out/logs/build-ubuntu-26-04.log`, line 15952.
 Reproducer: `/tmp/relay-hook-presets-repro.py`; result: `/tmp/relay-hook-presets-repro.log`.
-No source or test fix has been applied by this investigation.
+The investigation initially changed no product/test source. The fixture correction below followed authorization.
+
+## Execution Summary
+Scoped all four worker catalog listeners inside `run_worker` with restoration before returning,
+and mocked unrelated guest CLI, OpenRouter, and Relay Pro refresh starters. Added a regression
+that installs pre-existing listeners, runs the real worker loop, then verifies each listener is
+restored and invoking it cannot emit worker presets into a later stdout capture.
+
+## Resolution
+The deterministic reproducer now reports no surviving OpenRouter listener and the original
+permission test passes. All 102 guest-harness-provider and guest-hook tests pass; all permission
+assertions are unchanged. No product code changed. Candidate 7d remains the frozen beta4 source;
+this test-only correction is for subsequent runs, not a replacement for its tested payloads.

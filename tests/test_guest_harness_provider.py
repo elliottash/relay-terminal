@@ -5,6 +5,7 @@ A guest is a preset, `HarnessProvider` stands in for the chat provider, and one 
 Agent step. Everything here runs on `tests/guest_harness_fake.FakeHarness`: **no test starts a real
 claude or codex**, because a real guest turn spends the owner's subscription (protocol 29).
 """
+from contextlib import ExitStack, redirect_stdout
 import io
 import json
 import os
@@ -1033,13 +1034,25 @@ class WorkerProtocolTests(unittest.TestCase):
     def setUp(self):
         ghp.reset_catalog()
         self.addCleanup(ghp.reset_catalog)
+        from relay_core import customproviders, openrouter_catalog, relay_pro
+        self.listeners = ((ghp, "_catalog_listener"), (openrouter_catalog, "_listener"),
+                          (customproviders, "_listener"), (relay_pro, "_listener"))
+        self.refreshes = ((ghp, "start_catalog_scan"), (openrouter_catalog, "start_refresh"),
+                          (relay_pro, "start_refresh"))
 
     def run_worker(self, messages, harness):
         script = "".join(json.dumps(m) + "\n" for m in messages).encode()
         out = io.StringIO()
         stdin = mock.Mock()
         stdin.buffer = io.BytesIO(script)
-        with tempfile.TemporaryDirectory() as temp:
+        with tempfile.TemporaryDirectory() as temp, ExitStack() as isolated:
+            # #LSP1: worker.main registers process-global catalog callbacks. Restore all
+            # four before another fixture captures stdout, and do not launch unrelated
+            # network/CLI refresh threads from this in-process protocol test.
+            for module, attribute in self.listeners:
+                isolated.enter_context(mock.patch.object(module, attribute, None))
+            for module, method in self.refreshes:
+                isolated.enter_context(mock.patch.object(module, method))
             env = {"HOME": temp, "XDG_DATA_HOME": str(Path(temp) / "data"),
                    "RELAY_KEYRING": "off", "RELAY_INDEX": str(Path(temp) / "index.sqlite")}
             with mock.patch.dict(os.environ, env), \
@@ -1052,12 +1065,25 @@ class WorkerProtocolTests(unittest.TestCase):
                  mock.patch.object(ghp, "adapter_available", lambda guest_id, refresh=False: True), \
                  mock.patch.object(ghp, "_read_codex_catalog", return_value=[]):
                 import worker
-                # main() registers the worker's own "the scan landed" listener (a `presets`
-                # push to stdout) and nothing unregisters it; here it would fire on every
-                # later test's scan, printing the presets into the test run.
-                self.addCleanup(ghp.set_catalog_listener, None)
                 worker.main()
         return [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
+
+    def test_worker_callbacks_do_not_escape_into_later_stdout_capture(self):
+        with ExitStack() as previous:
+            callbacks = []
+            for module, attribute in self.listeners:
+                callback = mock.Mock()
+                callbacks.append(callback)
+                previous.enter_context(mock.patch.object(module, attribute, callback))
+            self.run_worker([{"type": "presets"}, {"type": "shutdown"}], FakeHarness([]))
+            later_output = io.StringIO()
+            with redirect_stdout(later_output):
+                for (module, attribute), callback in zip(self.listeners, callbacks):
+                    restored = getattr(module, attribute)
+                    self.assertIs(restored, callback)
+                    restored()
+                    callback.assert_called_once_with()
+            self.assertEqual(later_output.getvalue(), "")
 
     def test_configure_on_a_guest_then_set_model_away_closes_it(self):
         harness = FakeHarness([{"events": [], "result": ("", "end", {})}],
