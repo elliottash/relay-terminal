@@ -18,9 +18,10 @@ Implementation commit: `9bef2478f4d4071f520d9728cd5b90f88daa31c0`.
 
 `PYTHONPATH=backend:tests python3 -m unittest tests.test_collection_recovery tests.test_junit_runner tests.test_test_history tests.test_signals tests.test_tests_protocol -q`
 
-268 targeted tests passed. New subprocess regressions cover repeated imports, runnable retries,
+269 targeted tests passed. New subprocess regressions cover repeated imports, runnable retries,
 subset exclusion, historical ownership, two-pass recovery and intervening failing executions.
-No full suite or build was run.
+Executions lacking `run_id` remain independent, including rows sharing a timestamp;
+a regression checks both current and legacy collection keys. No full suite or build was run.
 
 Read-only replay used actual private history rows from `20260921T233422Z-ba41` (11 missing
 `fake_cards` errors) and its `-rerun` (one wrapper AttributeError), actual signal claim events,

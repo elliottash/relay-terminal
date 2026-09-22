@@ -356,6 +356,11 @@ def deduplicate_collection(rows: Sequence[Execution]) -> list[Execution]:
     out: list[Execution] = []
     seen: dict[tuple[str, str], int] = {}
     for row in rows:
+        # Without a run id each observation is independent, even at the same
+        # timestamp. There is no evidence that two rows came from one report.
+        if not row.run_id:
+            out.append(row)
+            continue
         key = (row.run_id, row.id)
         if collection_scope(row.id) and key in seen:
             if row.result in BAD_RESULTS:

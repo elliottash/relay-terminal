@@ -105,3 +105,13 @@ class CollectionRecoveryTests(unittest.TestCase):
         state = S.fold(rows)
         self.assertEqual(state[self.key].kind, 'broken')
         self.assertEqual(state[self.key].state, 'resolved')
+
+    def test_no_run_id_observations_remain_independent(self):
+        for key in (self.key, H.LEGACY_COLLECTION_PREFIX + 'test_board_protocol'):
+            rows = [H.Execution(ts=stamp, id=key, result='error') for stamp in
+                    ('2026-09-21T12:00:00Z', '2026-09-22T12:00:00Z',
+                     '2026-09-22T12:00:00Z')]
+            self.assertEqual(H.deduplicate_collection(rows), rows)
+            signal = S.fold(H.deduplicate_collection(rows))[key]
+            self.assertEqual(signal.count, 3)
+            self.assertEqual(signal.state, 'open')
