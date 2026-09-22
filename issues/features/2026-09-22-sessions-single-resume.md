@@ -7,7 +7,7 @@ assignee: codex
 rank: m
 created: '2026-09-22'
 source: 'User request in Relay, 2026-09-22'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-sessions-resume/], related: [R6J0, P7SJ], github: null}
+links: {plans: [], commits: [607ed1c0429be2a3d6c01eee51467b96623025b8], evidence: [docs/qa_evidence/2026-09-22-sessions-resume/], related: [R6J0, P7SJ], github: null}
 ---
 # One Resume action in Sessions
 
