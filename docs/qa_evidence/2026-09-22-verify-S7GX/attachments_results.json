@@ -1,0 +1,103 @@
+[
+  {
+    "check": "collision",
+    "result": {
+      "path": "localhost:/tmp/s7cx-verify-mqiwh1iv/remote/same.txt",
+      "kind": "file",
+      "content": "REMOTE ONLY",
+      "bytes": 11,
+      "truncated": false
+    }
+  },
+  {
+    "check": "explicit_local",
+    "result": {
+      "path": "/tmp/s7cx-verify-mqiwh1iv/local/same.txt",
+      "kind": "file",
+      "content": "LOCAL MUST NOT LEAK",
+      "bytes": 19,
+      "truncated": false
+    }
+  },
+  {
+    "check": "remote_image",
+    "result": {
+      "path": "localhost:/tmp/s7cx-verify-mqiwh1iv/remote/pixel.png",
+      "kind": "image",
+      "media_type": "image/png",
+      "bytes": 68,
+      "content": "",
+      "truncated": false
+    }
+  },
+  {
+    "check": "text_truncated",
+    "result": {
+      "path": "localhost:/tmp/s7cx-verify-mqiwh1iv/remote/large.txt",
+      "kind": "file",
+      "bytes": 131085,
+      "truncated": true
+    }
+  },
+  {
+    "check": "image_too_large",
+    "result": "Remote image too large: localhost:/tmp/s7cx-verify-mqiwh1iv/remote/too-large.png"
+  },
+  {
+    "check": "remote_missing_local_exists",
+    "result": "No such file or directory on localhost: `missing.txt`. List the directory first (list_directory with host), or check the path with the user."
+  },
+  {
+    "check": "binary",
+    "result": "Attachment looks binary: localhost:/tmp/s7cx-verify-mqiwh1iv/remote/binary"
+  },
+  {
+    "check": "wrong_host",
+    "result": "host \"other\" is not the host the user's terminal is logged into (localhost). run_command can only reach localhost, over the user's own connection; for another machine ask the user, or use run_in_terminal if it is offered."
+  },
+  {
+    "check": "unavailable",
+    "result": "run_command host \"localhost\": the user's terminal is not logged into any host over ssh right now, so there is no connection to reuse. Ask the user to ssh in first."
+  },
+  {
+    "check": "unavailable",
+    "result": "the ssh connection to localhost can't be shared (Relay found no connection-sharing socket for it), so a command there would need a new login. Ask the user to run it in their terminal, or use run_in_terminal if it is offered; reconnecting with Relay's ssh wrapper on (Options \u203a Terminal \u203a SSH sessions) makes it shareable."
+  },
+  {
+    "check": "bridge_session_race",
+    "result": {
+      "ok": false,
+      "error": "The SSH session changed while preparing this tool; nothing was executed. Try again against the current host.",
+      "code": "board_call_failed"
+    }
+  },
+  {
+    "check": "bridge_cancel_race",
+    "result": {
+      "ok": false,
+      "error": "Tool was cancelled before execution.",
+      "code": "board_call_failed"
+    }
+  },
+  {
+    "check": "socket_removed",
+    "result": "the ssh connection to localhost has closed (its connection-sharing socket is gone), so nothing ran. Ask the user whether they are still logged in."
+  },
+  {
+    "check": "socket_abandoned",
+    "result": "ssh exited 255: the connection to localhost failed or closed, so nothing was read or written: Control socket connect(/tmp/s7cx-verify-mqiwh1iv/ctl): Connection refused. The user's session may have ended; ask them."
+  },
+  {
+    "check": "passed",
+    "result": true
+  },
+  {
+    "check": "source_sha256",
+    "result": {
+      "backend/relay_core/attachments.py": "270469a0c1e1b651ec7b3c92ace103bada6b8fc136a7ee9adb36534003df3e39",
+      "backend/relay_core/session_protocol.py": "0df2b2d2bc3c3bfc89c31a7e13445d05fc0c05d7a5b077d67b3321c70366e879",
+      "backend/worker.py": "681d479f5a37d16a34985c469053414b967e8923afc1278607cb2c2370f5c1e5",
+      "tests/test_attachments.py": "8a0e354cfdb2aca186217c28f6fafcf38cb3ef89c2e796ed49760b45cf882457"
+    }
+  }
+]

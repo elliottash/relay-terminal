@@ -1,0 +1,333 @@
+[
+  {
+    "check": "initialize",
+    "result": {
+      "protocolVersion": "2025-03-26",
+      "capabilities": {
+        "tools": {}
+      },
+      "serverInfo": {
+        "name": "relay_board",
+        "version": "1"
+      }
+    }
+  },
+  {
+    "check": "discovery",
+    "result": [
+      "board_list",
+      "board_read",
+      "board_update_card",
+      "board_move_card",
+      "board_comment",
+      "run_command",
+      "read_file",
+      "list_directory",
+      "write_file",
+      "edit_file",
+      "run_in_terminal",
+      "command_output",
+      "stop_command"
+    ]
+  },
+  {
+    "check": "codex:run_command",
+    "result": {
+      "output": "/tmp/s7gx-verify-ghn0_gtx/remote\noutput-check\n",
+      "truncated": false,
+      "omitted_bytes": 0,
+      "job_id": "job-1",
+      "host": "localhost",
+      "duration_seconds": 0.236,
+      "exit_code": 7
+    }
+  },
+  {
+    "check": "codex:write_file",
+    "result": {
+      "path": "codex.txt",
+      "written_bytes": 6,
+      "sha256": "b6a98d9ce9a2d9149288fa3df42d377c3e42737afdcdaf714e33c0a100b51060",
+      "added": 1,
+      "removed": 0,
+      "host": "localhost",
+      "created": true
+    }
+  },
+  {
+    "check": "codex:read_file",
+    "result": {
+      "path": "codex.txt",
+      "content": "alpha\n",
+      "sha256": "b6a98d9ce9a2d9149288fa3df42d377c3e42737afdcdaf714e33c0a100b51060",
+      "host": "localhost"
+    }
+  },
+  {
+    "check": "codex:edit_file",
+    "result": {
+      "path": "codex.txt",
+      "written_bytes": 5,
+      "sha256": "f2c82decdd7181cf98945929a62598db7e6b477e11f6e0eb0ae97020eff151ad",
+      "added": 1,
+      "removed": 1,
+      "host": "localhost",
+      "replacements": 1
+    }
+  },
+  {
+    "check": "codex:read_file",
+    "result": {
+      "path": "codex.txt",
+      "content": "beta\n",
+      "sha256": "f2c82decdd7181cf98945929a62598db7e6b477e11f6e0eb0ae97020eff151ad",
+      "host": "localhost"
+    }
+  },
+  {
+    "check": "codex:list_directory",
+    "result": {
+      "entries": [
+        {
+          "name": "codex.txt",
+          "type": "file"
+        }
+      ],
+      "truncated": false,
+      "host": "localhost"
+    }
+  },
+  {
+    "check": "codex:run_command",
+    "result": {
+      "output": "",
+      "truncated": false,
+      "omitted_bytes": 0,
+      "job_id": "job-2",
+      "host": "localhost",
+      "duration_seconds": 0.007,
+      "exit_code": 0
+    }
+  },
+  {
+    "check": "claude:run_command",
+    "result": {
+      "output": "/tmp/s7gx-verify-ghn0_gtx/remote\noutput-check\n",
+      "truncated": false,
+      "omitted_bytes": 0,
+      "job_id": "job-3",
+      "host": "localhost",
+      "duration_seconds": 0.007,
+      "exit_code": 7
+    }
+  },
+  {
+    "check": "claude:write_file",
+    "result": {
+      "path": "claude.txt",
+      "written_bytes": 6,
+      "sha256": "b6a98d9ce9a2d9149288fa3df42d377c3e42737afdcdaf714e33c0a100b51060",
+      "added": 1,
+      "removed": 0,
+      "host": "localhost",
+      "created": true
+    }
+  },
+  {
+    "check": "claude:read_file",
+    "result": {
+      "path": "claude.txt",
+      "content": "alpha\n",
+      "sha256": "b6a98d9ce9a2d9149288fa3df42d377c3e42737afdcdaf714e33c0a100b51060",
+      "host": "localhost"
+    }
+  },
+  {
+    "check": "claude:edit_file",
+    "result": {
+      "path": "claude.txt",
+      "written_bytes": 5,
+      "sha256": "f2c82decdd7181cf98945929a62598db7e6b477e11f6e0eb0ae97020eff151ad",
+      "added": 1,
+      "removed": 1,
+      "host": "localhost",
+      "replacements": 1
+    }
+  },
+  {
+    "check": "claude:read_file",
+    "result": {
+      "path": "claude.txt",
+      "content": "beta\n",
+      "sha256": "f2c82decdd7181cf98945929a62598db7e6b477e11f6e0eb0ae97020eff151ad",
+      "host": "localhost"
+    }
+  },
+  {
+    "check": "claude:list_directory",
+    "result": {
+      "entries": [
+        {
+          "name": "claude.txt",
+          "type": "file"
+        }
+      ],
+      "truncated": false,
+      "host": "localhost"
+    }
+  },
+  {
+    "check": "claude:run_command",
+    "result": {
+      "output": "",
+      "truncated": false,
+      "omitted_bytes": 0,
+      "job_id": "job-4",
+      "host": "localhost",
+      "duration_seconds": 0.008,
+      "exit_code": 0
+    }
+  },
+  {
+    "check": "codex:run_command",
+    "result": {
+      "output": "8192 big.dat\n37 small.dat\n",
+      "truncated": false,
+      "omitted_bytes": 0,
+      "job_id": "job-5",
+      "host": "localhost",
+      "duration_seconds": 0.009,
+      "exit_code": 0
+    }
+  },
+  {
+    "check": "codex:run_command",
+    "result": {
+      "ok": false,
+      "error": "An explicit active SSH host is required; nothing ran locally.",
+      "code": "board_call_failed"
+    }
+  },
+  {
+    "check": "codex:run_command",
+    "result": {
+      "ok": false,
+      "error": "host \"elsewhere\" is not the host the user's terminal is logged into (localhost). run_command can only reach localhost, over the user's own connection; for another machine ask the user, or use run_in_terminal if it is offered.",
+      "code": "board_call_failed"
+    }
+  },
+  {
+    "check": "claude:read_file",
+    "result": {
+      "ok": false,
+      "error": "This path is blocked by Relay's basic secret-file guard, which applies on the host too: .ssh, .gnupg, .git, .env files, and .pem/.key files stay unread. If the user needs something from one, ask them.",
+      "code": "board_call_failed"
+    }
+  },
+  {
+    "check": "claude:write_file",
+    "result": {
+      "ok": false,
+      "error": "This path is blocked by Relay's basic secret-file guard, which applies on the host too: .ssh, .gnupg, .git, .env files, and .pem/.key files stay unread. If the user needs something from one, ask them.",
+      "code": "board_call_failed"
+    }
+  },
+  {
+    "check": "codex:run_command",
+    "result": {
+      "ok": false,
+      "error": "run_command host \"localhost\": the user's terminal is not logged into any host over ssh right now, so there is no connection to reuse. Ask the user to ssh in first.",
+      "code": "board_call_failed"
+    }
+  },
+  {
+    "check": "claude:run_command",
+    "result": {
+      "ok": false,
+      "error": "Board tools require an active Relay turn.",
+      "code": "unavailable"
+    }
+  },
+  {
+    "check": "codex:run_command",
+    "result": {
+      "output": "",
+      "truncated": false,
+      "omitted_bytes": 0,
+      "job_id": "job-6",
+      "host": "localhost",
+      "duration_seconds": 1.0,
+      "still_running": true,
+      "note": "Still running as job-6. Read more with command_output (wait_seconds up to 1800), or end it with stop_command."
+    }
+  },
+  {
+    "check": "codex:stop_command",
+    "result": {
+      "output": "",
+      "truncated": false,
+      "omitted_bytes": 0,
+      "job_id": "job-6",
+      "host": "localhost",
+      "duration_seconds": 2.104,
+      "exit_code": 255,
+      "stopped": true
+    }
+  },
+  {
+    "check": "codex:command_output",
+    "result": {
+      "output": "",
+      "truncated": false,
+      "omitted_bytes": 0,
+      "job_id": "job-6",
+      "host": "localhost",
+      "duration_seconds": 2.104,
+      "exit_code": 255,
+      "stopped": true
+    }
+  },
+  {
+    "check": "codex:run_command",
+    "result": {
+      "ok": false,
+      "error": "the ssh connection to localhost has closed (its connection-sharing socket is gone), so nothing ran. Ask the user whether they are still logged in.",
+      "code": "board_call_failed"
+    }
+  },
+  {
+    "check": "claude:run_command",
+    "result": {
+      "output": "Control socket connect(/tmp/s7gx-verify-ghn0_gtx/ctl): Connection refused\r\nConnection closed by UNKNOWN port 65535\r\n",
+      "truncated": false,
+      "omitted_bytes": 0,
+      "job_id": "job-7",
+      "host": "localhost",
+      "duration_seconds": 0.006,
+      "exit_code": 255,
+      "note": "ssh exited 255: the connection to localhost failed or closed, so the command may not have run. The user's ssh session may have ended; ask them."
+    }
+  },
+  {
+    "check": "claude:read_file",
+    "result": {
+      "ok": false,
+      "error": "ssh exited 255: the connection to localhost failed or closed, so nothing was read or written: Control socket connect(/tmp/s7gx-verify-ghn0_gtx/ctl): Connection refused. The user's session may have ended; ask them.",
+      "code": "board_call_failed"
+    }
+  },
+  {
+    "check": "passed",
+    "result": true
+  },
+  {
+    "check": "source_sha256",
+    "result": {
+      "backend/relay_core/guest_board_bridge.py": "ab45fc0713aae66cf96312d90de29c60e4d6338273df0d50bb40fb08fa9fb90a",
+      "backend/relay_core/guest_instructions.py": "7b9b5e2c38c1bdecea0cef2f93e7386da5510a1e8385b28f3de952eb5823a708",
+      "backend/relay_core/remote_session.py": "a6c68c1d0927cece121cfbbd727dc04819b0559510a170751f4106929cba119d",
+      "tests/test_guest_board_bridge.py": "877a67cf0c304e11356a9466725f3587f5ea66c1a7f61acdc7b0b9036b6b678f",
+      "tests/test_ssh_remote.py": "6afeb14edcd3369af866a5825a49fb07fbb4905ce7c061e9835eb3c45ed95c05"
+    }
+  }
+]
