@@ -1,0 +1,61 @@
+{
+  "verdict": "FAIL_OPTIONS_PROPAGATION",
+  "idle_seconds": 61,
+  "configures_during_idle": 0,
+  "helper_pid": 3112763,
+  "helper_last_max_steps": 500,
+  "terminal_updated_max_steps": 37,
+  "helper_contexts": [
+    {
+      "agent_role": "switchboard",
+      "brief": {
+        "key": "switchboard",
+        "title": "Board agent"
+      },
+      "name": "switchboard",
+      "persist": {
+        "key": "t23ea129d08b8",
+        "scope": "helper"
+      },
+      "routing": "agent",
+      "scope": "console",
+      "shell": false,
+      "surface": "switchboard",
+      "workspace": "/tmp/rl-agnt.JVZD/home/project"
+    },
+    {
+      "agent_role": "switchboard",
+      "brief": {
+        "key": "card",
+        "title": "#9W83"
+      },
+      "name": "card",
+      "persist": {
+        "key": "t23ea129d08b8/card:9W83",
+        "scope": "helper"
+      },
+      "routing": "agent",
+      "scope": "console",
+      "shell": false,
+      "surface": "card:9W83",
+      "workspace": "/tmp/rl-agnt.JVZD/home/project"
+    },
+    {
+      "agent_role": "switchboard",
+      "brief": {
+        "key": "switchboard",
+        "title": "Board agent"
+      },
+      "name": "switchboard",
+      "persist": {
+        "key": "t23ea129d08b8",
+        "scope": "helper"
+      },
+      "routing": "agent",
+      "scope": "console",
+      "shell": false,
+      "surface": "switchboard",
+      "workspace": "/tmp/rl-agnt.JVZD/home/project"
+    }
+  ]
+}

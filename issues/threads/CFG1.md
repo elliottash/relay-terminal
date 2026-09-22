@@ -5,3 +5,18 @@ Filed from the owner's log (15,865 `configured` events in one file). Fixed in `R
 <!-- relay:entry 20260921T184601Z-cs author=codex kind=progress -->
 ### Codex · 2026-09-21 18:46
 Owner: "claim all of these and implement them". The reported loop is already implemented in 4764200e, with before/after live evidence. Checking the landed sendFromConsole guard; no duplicate implementation needed.
+
+<!-- relay:entry 20260922T010703Z-cv author=codex kind=progress -->
+### Codex · 2026-09-22 01:07
+User explicitly authorized takeover and fresh verification. Claimed #CFG1; verify the landed fix with targeted tests and a new isolated Xvfb run, recording evidence in docs/qa_evidence/2026-09-22-verify-CFG1/. No other cards are owned by this session.
+
+<!-- relay:entry 20260922T011122Z-cv author=codex kind=plan -->
+### Codex · 2026-09-22 01:11
+Recorded verification plan and observable done criteria. Existing implementation retained; no duplicate code change needed.
+
+<!-- relay:entry 20260922T011248Z-0x author=agent kind=evidence -->
+Check · 1 not-applicable, 2 passed; 2 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T012233Z-cv author=codex kind=question -->
+### Codex · 2026-09-22 01:22
+1. Coordinate the two-row src/RelayWindow.h fix with its live owners, or authorize proceeding with only those rows? Recommendation: wrap the step/tool-call limit rows with existing alsoBoardWorkers, then rebuild and rerun the isolated driver. The strict live assertion caught terminal max_steps=37 while the helper stayed at 500. Loop and brief checks pass. Updated QA/Verdict and moved to discussing, waiting_on owner, because the user explicitly required coordination for shared code and Relay messaging is unavailable. Proposed patch: docs/qa_evidence/2026-09-22-verify-CFG1/proposed-fix.patch.

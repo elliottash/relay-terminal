@@ -16,3 +16,7 @@ Check · 1 not-applicable, 1 passed. The status is under `## Tests`; earlier che
 <!-- relay:entry 20260922T011811Z-cv author=codex kind=evidence -->
 ### Codex · 2026-09-22 01:18
 Verified independently under isolated Xvfb/config; both terminal and Activity restored on no-argument reopen. Layout tree, cwd, scrollback ID and Activity owner survived unchanged. Recorded windowstate test passed; tests_check clear. Updated Tests, QA checklist and Verdict, linked new evidence, and moved to done. Evidence: docs/qa_evidence/2026-09-22-verify-ACT1/README.md.
+
+<!-- relay:entry 20260922T011850Z-cv author=codex kind=progress -->
+### Codex · 2026-09-22 01:18
+Verification landed as 0babc4281ec481752daf9885af2138cea04335fc; added that commit to links.commits.

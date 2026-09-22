@@ -1,0 +1,23 @@
+--- a/src/RelayWindow.h
++++ b/src/RelayWindow.h
+@@ -3833,10 +3833,18 @@
+         // Card #2CZP: both sit at their maxima by default, so a long overnight run is not stopped by
+         // a count. A turn that has stopped making progress is ended by the loop detector instead;
+         // these two are the fuse behind it, for a runaway turn nothing else catches.
+-        security.rows << numberRow(QStringLiteral("agent/max_steps"), QStringLiteral("Step limit per turn"),
++        {
++            auto limit = numberRow(QStringLiteral("agent/max_steps"), QStringLiteral("Step limit per turn"),
+                                    QStringLiteral("Backstop for a runaway turn; then it stops with Continue"), 500, 1, 500);
+-        security.rows << numberRow(QStringLiteral("agent/max_tool_calls"), QStringLiteral("Tool-call limit per turn"),
++            alsoBoardWorkers(limit);
++            security.rows << limit;
++        }
++        {
++            auto limit = numberRow(QStringLiteral("agent/max_tool_calls"), QStringLiteral("Tool-call limit per turn"),
+                                    QStringLiteral("Backstop for a runaway turn, not the normal stop"), 2000, 1, 2000);
++            alsoBoardWorkers(limit);
++            security.rows << limit;
++        }
+         security.rows << toggleRow(QStringLiteral("agent/audit_requests"), QStringLiteral("Audit requests after each turn"),
+                                    QStringLiteral("A small side call flags asks that may be unaddressed"), false);
+         // Card #K2FV: the opt-in ask. Seven rows, one saved list; an approval ask's "Always

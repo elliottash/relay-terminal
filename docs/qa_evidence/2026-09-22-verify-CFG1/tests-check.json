@@ -1,0 +1,108 @@
+{
+  "card": "CFG1",
+  "statuses": [
+    {
+      "test": "ctest:consolemode",
+      "invocation": "ctest -R consolemode",
+      "status": "passed",
+      "retired": false,
+      "evidence": [
+        {
+          "run_id": "20260922T011245Z-3882",
+          "host": "spark-dcc9",
+          "commit": "0241d05ef19393e84c0ef98655c9687466a92efc",
+          "ts": "2026-09-22T01:12:46Z",
+          "result": "pass",
+          "applicable": true
+        }
+      ],
+      "use_existing": false,
+      "accepted": false,
+      "message": "ctest -R consolemode passed for this revision on spark-dcc9, 2026-09-22T01:12:46Z"
+    },
+    {
+      "test": "ctest:agentcontext",
+      "invocation": "ctest -R agentcontext",
+      "status": "passed",
+      "retired": false,
+      "evidence": [
+        {
+          "run_id": "20260922T011245Z-3882",
+          "host": "spark-dcc9",
+          "commit": "0241d05ef19393e84c0ef98655c9687466a92efc",
+          "ts": "2026-09-22T01:12:46Z",
+          "result": "pass",
+          "applicable": true
+        }
+      ],
+      "use_existing": false,
+      "accepted": false,
+      "message": "ctest -R agentcontext passed for this revision on spark-dcc9, 2026-09-22T01:12:46Z"
+    },
+    {
+      "test": "manual:docs/qa_evidence/2026-09-22-verify-CFG1/README.md",
+      "invocation": "docs/qa_evidence/2026-09-22-verify-CFG1/README.md",
+      "status": "not-applicable",
+      "retired": false,
+      "evidence": [],
+      "use_existing": false,
+      "accepted": false,
+      "message": "manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-verify-CFG1/README.md"
+    },
+    {
+      "test": "manual:docs/qa_evidence/2026-09-21-console-configure-loop/NOTES.md",
+      "invocation": "docs/qa_evidence/2026-09-21-console-configure-loop/NOTES.md",
+      "status": "not-applicable",
+      "retired": false,
+      "evidence": [],
+      "use_existing": false,
+      "accepted": false,
+      "message": "manual evidence, recorded by hand: docs/qa_evidence/2026-09-21-console-configure-loop/NOTES.md"
+    }
+  ],
+  "findings": [],
+  "actions": [],
+  "revision": "4764200e",
+  "ids": [
+    "ctest:consolemode",
+    "ctest:agentcontext"
+  ],
+  "files": {
+    "ctest:consolemode": "tests/consolemode_test.cpp",
+    "ctest:agentcontext": "tests/agentcontext_test.cpp"
+  },
+  "failing": [],
+  "blocks": [],
+  "open_before": [
+    {
+      "key": "run:unittest",
+      "source": "run",
+      "kind": "run",
+      "state": "open",
+      "first_seen": "2026-09-21T23:34:23Z",
+      "last_seen": "2026-09-21T23:34:23Z",
+      "count": 1,
+      "green_streak": 0,
+      "runs": 1,
+      "fingerprint": "",
+      "regressed": false,
+      "stale": false,
+      "version": 1,
+      "excerpt": "11 of 11 executed tests failed in one run: one cause, not 11.",
+      "message": "11 of 11 executed tests failed in one run: one cause, not 11.",
+      "session": "codex-hq",
+      "first_run": "20260921T233422Z-ba41",
+      "opened_run": "20260921T233422Z-ba41",
+      "dismissed": {
+        "reason": "environmental",
+        "comment": "This run-level signal grouped the missing tests/ PYTHONPATH import failures. Corrected environment yielded 11/11 passes in both 20260921T233453Z-1582 and 20260921T233455Z-6953.",
+        "until": "2026-09-22T00:00:00Z",
+        "by": "codex-hq",
+        "expired": true
+      },
+      "members": [
+        "unittest:unittest.loader._FailedTest.test_board_protocol"
+      ]
+    }
+  ]
+}

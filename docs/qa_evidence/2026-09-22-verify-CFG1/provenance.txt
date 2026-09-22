@@ -1,0 +1,5 @@
+Binary: build/relay
+SHA256: afa578396936ec21f523277131e7352a6d8afb87a1054887b4dd044f4ed213e6
+HEAD at recording: f819daa617fa7fc34bde95c9fa0bc1d59c974d36
+Shared checkout; unrelated changes present. Relevant implementation commits: CFG1 4764200e; ACT1 7dd8fdad.
+Targeted recorded test run: 20260922T011245Z-3882; windowstate, consolemode, agentcontext all pass; no signals opened.

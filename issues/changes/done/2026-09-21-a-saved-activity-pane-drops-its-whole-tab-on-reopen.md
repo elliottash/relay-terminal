@@ -7,7 +7,7 @@ assignee: codex
 rank: h
 created: '2026-09-21'
 source: 'Claude Code in a Relay pane, 2026-09-21 — found while landing #MDL1 t:a11'
-links: {plans: [], commits: [7dd8fdad], evidence: [docs/qa_evidence/2026-09-21-models-pane, docs/qa_evidence/2026-09-22-verify-ACT1/README.md], related: [QT8C, MDL1], github: null}
+links: {plans: [], commits: [7dd8fdad, 0babc4281ec481752daf9885af2138cea04335fc], evidence: [docs/qa_evidence/2026-09-21-models-pane, docs/qa_evidence/2026-09-22-verify-ACT1/README.md], related: [QT8C, MDL1], github: null}
 ---
 # A saved Activity pane drops its whole tab on reopen
 
