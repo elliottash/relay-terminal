@@ -29,3 +29,7 @@ Follow-up confirmed the independent Codex 0/7 defect: more than six models wrong
 <!-- relay:entry 20260922T234718Z-a1 author=codex-models-a1 kind=evidence -->
 ### Codex models a1 · 2026-09-22 23:47
 Linked follow-up `8d03da032c8c58fbf48d4c99b866d25455f1fa0b`: seven-model guest availability fix plus real worker-event red/green stage. Exact-tree build and rebuilt modelpicker/modelspane checks passed. Remains needs-verification.
+
+<!-- relay:entry 20260922T234804Z-a1 author=codex-models-a1 kind=evidence -->
+### Codex models a1 · 2026-09-22 23:48
+Removed only the newly added source-string routing test after full-app event red/green coverage replaced it. Preserved legacy tests and behavioral catalog/picker tests. Final summary explicitly records the independent seven-model Codex availability defect.

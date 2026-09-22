@@ -36,7 +36,7 @@ i couldnt get codex to show up in the priorities tab.
 ## Execution Summary
 Follow-up confirmed the independent Codex 0/7 defect: more than six models wrongly marked a finite guest catalog open-ended, making all untiered models unavailable by default. Exempted guest catalogs; seven-model regression fails before and passes after. Full-app worker events show 7/7 available. Priorities allUsable search itself was not blocked by this availability error; intentional search-only unranked visibility is unchanged.
 
-The shared helper-catalog omission also hides Codex even when Providers has discovered it. Fixed through the same catalog routing change as VPR7. A worker-shaped Codex row (label but no provider field) is searchable and addable to Main and High in the staged test. Empty-query unranked hiding and exclusion from Flash/Lite are intentional and unchanged. No separate Codex search/filter defect was reproduced; sphinxpad verification is still needed to establish whether this shared cause explains the reported machine.
+Codex had a separate, reproduced default-availability defect: seven untiered guest models were classified as an open-ended catalog and all hidden from Available. Guest catalogs are now exempt, with a failing-before/passing-after regression and full-app 7/7 screenshots. The shared helper-catalog refresh defect was also fixed and proved with actual worker events. Priorities intentionally shows unranked models only during search and permits guests in Main/High; these rules remain unchanged. Sphinxpad-specific confirmation remains outstanding.
 
 Staged UI evidence: `docs/qa_evidence/2026-09-22-CDP7/priorities.png`.
 
@@ -45,7 +45,6 @@ Staged UI evidence: `docs/qa_evidence/2026-09-22-CDP7/priorities.png`.
 - `ctest -R ^modelcatalog$` — tests/modelcatalog_test.cpp
 - `python3 docs/qa_evidence/2026-09-22-VPR7/stage.py` — full-app late helper events and Codex availability passed; pre-fix binary failed as expected.
 - `xvfb-run -a build/relay-modelspane-tests` — 21 passed.
-- `QT_QPA_PLATFORM=offscreen build/relay-settings-tests providersAndPrioritiesReadTheSameServedPane everyProviderRowHasAModelsLinkIntoTheAvailableTab` — 4 passed.
 - `python3 -m unittest discover -s tests -p test_openrouter_catalog.py` — 13 passed.
 - `python3 -m unittest discover -s tests -p test_guest_harness_provider.py` — 68 passed.
 - `ctest -R ^modelspane$` — tests/modelspane_test.cpp

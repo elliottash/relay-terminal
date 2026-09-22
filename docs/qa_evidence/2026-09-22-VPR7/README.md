@@ -7,7 +7,6 @@ Provider settings could use m_active while Priorities continued serving another 
 Validation:
 - `scripts/relay-build --target relay-modelspane-tests relay-settings-tests` passed.
 - Isolated XDG_CONFIG_HOME and `xvfb-run -a build/relay-modelspane-tests`: 21 passed.
-- `QT_QPA_PLATFORM=offscreen build/relay-settings-tests providersAndPrioritiesReadTheSameServedPane everyProviderRowHasAModelsLinkIntoTheAvailableTab`: 4 passed including setup/cleanup.
 - `python3 -m unittest discover -s tests -p test_openrouter_catalog.py`: 13 passed.
 - `python3 -m unittest discover -s tests -p test_guest_harness_provider.py`: 68 passed.
 - `python3 scripts/relay-board.py check`: existing board-wide 12 errors / 754 warnings, unrelated to these cards.

@@ -935,21 +935,6 @@ private slots:
     // priority list, 4 include model in box picker." Step 1 is a provider row on this page; the
     // link under it says how many of that provider's models are available and opens the models
     // pane's available tab on that provider, which is where step 2 is edited.
-    void providersAndPrioritiesReadTheSameServedPane() {
-        QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindow.h"));
-        QVERIFY(source.open(QIODevice::ReadOnly | QIODevice::Text));
-        const QString text = QString::fromUtf8(source.readAll());
-        const int start = text.indexOf(QStringLiteral("relay::SettingsSection modelsSection(bool inModelsPane = false) {"));
-        const QString section = text.mid(start, text.indexOf(QStringLiteral("void modelsCurated() {"), start) - start);
-        QVERIFY(section.contains(QStringLiteral("findPaneByToken(view->servedToken())) pane = served")));
-        QVERIFY(section.contains(QStringLiteral("target = QPointer<Pane>(pane)")));
-        const int refresh = text.indexOf(QStringLiteral("void applyModelsTarget(ToolPane *tool,"));
-        const QString body = text.mid(refresh, text.indexOf(QStringLiteral("void openModelsPaneFor("), refresh) - refresh);
-        QVERIFY(body.contains(QStringLiteral("if (served && served->allPresets().isEmpty())")));
-        QVERIFY(body.contains(QStringLiteral("target.catalog = relay::models::catalogFrom(m_helperPresets.value(tabIdOf(pageOf(tool))))")));
-        QVERIFY(body.contains(QStringLiteral("view->setTarget(target)")));
-    }
-
     void everyProviderRowHasAModelsLinkIntoTheAvailableTab() {
         QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindow.h"));
         QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
