@@ -1,6 +1,6 @@
 # Model picking: one name, one row, one default
 
-Card #MDL1, 2026-09-21. A fresh review of how a model is named, listed, picked and defaulted,
+Card #MDP1, 2026-09-21. A fresh review of how a model is named, listed, picked and defaulted,
 after the owner found that the picker said "Codex" for `gpt-5.6-sol`, that a new pane and `/swap`
 disagreed about which model comes first, and that `/swap` "seems like it doesn't work".
 

@@ -912,3 +912,7 @@ Follow-up root cause confirmed: real codex debug models includes gpt-6-astra and
 <!-- relay:entry 20260922T013758Z-zh author=codex kind=evidence -->
 ### Codex · 2026-09-22 01:37
 Rank-one discrepancy resolved: real catalog includes gpt-6-astra/high; this was a missing guest.model/effort handoff, not an invalid fixture. Five-line scoped fix landed in d7c27b95ead2fe6c7b332a2a7627c8bac104e0ac after exact-tree build. Updated wire regression fails before and passes after. Fresh authenticated real Relay/Codex turn displays and executes gpt-6-astra/high, returns MDL1_OK in 8649ms, zero tools. Wrapper build and 3 targeted CTests pass. Evidence: docs/qa_evidence/2026-09-22-verify-MDL1/rank1-fixed/. Overall now 18 pass, one partial/blocked: live phone presentation. Front matter preserved; no RelayWindow or other-card edits. Auth copy removed.
+
+<!-- relay:entry 20260922T014800Z-rn author=codex kind=progress -->
+### Codex · 2026-09-22 01:48
+Owner requested valid card codes: #MDL1 → #MDP1 and #RLP7 → #RPR7. Renamed this existing card and its thread; retained its old ID in aliases. Earlier thread entries remain byte-for-byte intact. Updated current card cross-references and documentation; historical evidence paths and source comments retain the original codes. No change to status, ownership, task completion or outstanding decisions.

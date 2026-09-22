@@ -20,3 +20,7 @@ Recorded implementation findings, provisional Done means and a checkable plan. N
 <!-- relay:entry 20260922T010911Z-s1 author=codex kind=progress -->
 ### Codex · 2026-09-22 01:09
 Read-only attempt to inspect the live upstream mapping failed: ssh could not resolve elliott-main-1. No production change made. docs/RELAY-FREE.md records GLM 5.3 Flash for main/high, DeepSeek V4.1 Flash for flash and Gemini 3.5 Flash Lite for lite via OpenRouter; that documentation is not proof of the current deployed mapping.
+
+<!-- relay:entry 20260922T014800Z-rn author=codex kind=progress -->
+### Codex · 2026-09-22 01:48
+Owner requested valid card codes: #MDL1 → #MDP1 and #RLP7 → #RPR7. Renamed this existing card and its thread; retained its old ID in aliases. Earlier thread entries remain byte-for-byte intact. Updated current card cross-references and documentation; historical evidence paths and source comments retain the original codes. No change to status, ownership, task completion or outstanding decisions.

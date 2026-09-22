@@ -6,13 +6,13 @@ labels: [bug, switchboard, agents]
 assignee: codex
 rank: h
 created: '2026-09-21'
-source: 'Claude Code in a Relay pane, 2026-09-21 — found in the owner''s log while working #MDL1'
-links: {plans: [], commits: [c3312a38f031bbdd8734bae95b80bca1ac4e7f5f, 4764200e, 92f3e5b31e5d390ba517a7ef7d588d40b3569a5e], evidence: [docs/qa_evidence/2026-09-21-console-configure-loop, docs/qa_evidence/2026-09-22-verify-CFG1/README.md], related: [MDL1, AGNT, SWPH], github: null}
+source: 'Claude Code in a Relay pane, 2026-09-21 — found in the owner''s log while working #MDP1'
+links: {plans: [], commits: [c3312a38f031bbdd8734bae95b80bca1ac4e7f5f, 4764200e, 92f3e5b31e5d390ba517a7ef7d588d40b3569a5e], evidence: [docs/qa_evidence/2026-09-21-console-configure-loop, docs/qa_evidence/2026-09-22-verify-CFG1/README.md], related: [MDP1, AGNT, SWPH], github: null}
 ---
 # Two consoles in one tab reconfigure the helper worker twice a second, forever
 
 ## Issue
-Found by Claude Code, not reported by the owner: `~/.local/share/relay/logs/relay.log` held 15,865 `configured` events on 2026-09-21, about two a second for hours, for the Switchboard tab's two consoles (list page and card page). The worker log shows the same storm at 11:41 UTC, before any #MDL1 commit.
+Found by Claude Code, not reported by the owner: `~/.local/share/relay/logs/relay.log` held 15,865 `configured` events on 2026-09-21, about two a second for hours, for the Switchboard tab's two consoles (list page and card page). The worker log shows the same storm at 11:41 UTC, before any #MDP1 commit.
 
 ## Execution Summary
 `RelayWindow::sendFromConsole` re-pointed the tab's console context and re-ran `startBoardWorker`

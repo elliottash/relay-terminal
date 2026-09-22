@@ -1,5 +1,6 @@
 ---
-id: MDL1
+id: MDP1
+aliases: [MDL1]
 type: work
 status: needs-verification
 labels: [feature, models]

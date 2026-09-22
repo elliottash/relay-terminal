@@ -7,13 +7,13 @@ assignee: codex
 waiting_on: owner
 rank: n
 created: '2026-09-21'
-source: 'Claude Code in a Relay pane, 2026-09-21 — left over from #MDL1 t:a15'
-links: {plans: [], commits: [], evidence: [], related: [MDL1], github: null}
+source: 'Claude Code in a Relay pane, 2026-09-21 — left over from #MDP1 t:a15'
+links: {plans: [], commits: [], evidence: [], related: [MDP1], github: null}
 ---
 # A custom endpoint's extra request JSON has no home
 
 ## Issue
-Not the owner's words: raised by Claude while retiring the advanced provider dialog for #MDL1
+Not the owner's words: raised by Claude while retiring the advanced provider dialog for #MDP1
 (`cdc4b9bb`). That dialog was the only place to type a per-request JSON body for a provider. A
 custom provider stores a name, base URL, model ids and a reasoning style
 (`backend/relay_core/customproviders.py`) and carries no request body, so the field had nowhere to

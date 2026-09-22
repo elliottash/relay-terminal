@@ -18,7 +18,7 @@ provider refusals retain their existing error shape; other unexpected exceptions
 A pane owning its worker retries once in a fresh process, replaying the same configuration from
 memory. A second failure offers an explicit retry; it does not loop or restart a shared worker.
 Plan/Build selected while a guest's startup is deferred is kept locally and sent as `set_mode`
-after `configured`, before the queued first `ask` (#MDL1).
+after `configured`, before the queued first `ask` (#MDP1).
 
 `configure` accepts, all optional:
 
@@ -36,7 +36,7 @@ after `configured`, before the queued first `ask` (#MDL1).
 
 `configured` event gains: `context_window`, `effort`, `mode`, `instructions` (list of loaded paths), `agents` (count), `session_id`, `model_name`, and — when the request carried one — `context`, the block back with the scope the worker settled on (section 33.1).
 
-**`model_name`: the one name a model has** (card #MDL1, rule 1, 2026-09-21). Every event that names
+**`model_name`: the one name a model has** (card #MDP1, rule 1, 2026-09-21). Every event that names
 a model carries the name beside the id — `configured` and `model_changed` carry `model_name`,
 `model_changed` also `in_flight_model_name`, and `model_applied` carries `model_name` and
 `from_model_name`. The id is what the API takes and never changes (`MiniMax-M3`, `k3`,
@@ -79,7 +79,7 @@ of them. Sending an endpoint with no preset is unchanged: the key is looked up f
 **A level is the provider's own word, and the word offered is the word sent.** Until v3.11 Relay had
 four levels of its own — low, medium, high, max — every provider's knob was mapped onto them, and a
 second table (`effort_labels`) said what each one was really sent as. The owner ended that (card
-#MDL1): *"i want the effort options in relay to be determined by the model … so xhigh shows up for
+#MDP1): *"i want the effort options in relay to be determined by the model … so xhigh shows up for
 codex for example."* `presets.EFFORT_LEVELS` is now the list of words each endpoint takes, weakest
 first, and there is nothing to translate:
 
@@ -1054,7 +1054,7 @@ after a `set_model` (per-provider defaults are recomputed for the new main model
 **only when `warnings` is non-empty**, so a pane that configured cleanly keeps its old event order.
 `warnings` holds one line per role that fell back, e.g.
 `subagents: no stored key for glm; using main.` The role and tier words in these lines, and in the
-`note` a stepped-down tier carries, are lower-case (card #MDL1, rule 1): the same vocabulary the
+`note` a stepped-down tier carries, are lower-case (card #MDP1, rule 1): the same vocabulary the
 GUI's one table uses — `main`, `high`, `flash`, `lite`, `local`, `terminal use`, `subagents`,
 `helpers`, `plan mode`.
 
@@ -1070,7 +1070,7 @@ running. Replies with
 falls back reports `agent_role: "main"`. `configure` with an unusable `agent_role` reports
 `agent_role: "main"` too, plus the warning in `model_roles`.
 
-**`preset` / `model` / `effort`: this pane's own pick for that role** (v4.6, 2026-09-21, card #MDL1). With
+**`preset` / `model` / `effort`: this pane's own pick for that role** (v4.6, 2026-09-21, card #MDP1). With
 no `preset` the role resolves off its tier list exactly as it always has. With one, the three fields are
 read as a single tier-list entry — `{"preset": <id>, "model": <id or absent>, "effort": <Relay level or
 absent>}`, the same object `tiers.<tier>` holds — and resolved by the same rule
@@ -1112,7 +1112,7 @@ presets … then advanced options, which would then reveal the specific actions"
 | `local` | panes on the Local agent (`/local`), and any role pinned to it | the first usable entry of `tiers.local`, else the first saved local endpoint |
 
 The roles a **pane** can be put on are therefore `main` (its own model), `high`, `flash` and `local` — the
-four modes of the model box (v4.6, 2026-09-21, card #MDL1; `/high` joined `/main`, `/flash` and `/local`).
+four modes of the model box (v4.6, 2026-09-21, card #MDP1; `/high` joined `/main`, `/flash` and `/local`).
 Each is named after its tier and resolves on it; `set_agent_role` may carry the pane's own
 `{preset, model, effort}` for the role (13.5) instead of taking the list's first usable entry.
 
@@ -1257,7 +1257,7 @@ buttons only apply one of them and send it back as `tiers`:
                        "openrouter": {"main": [entry…], "high": […], "flash": […], "lite": […], "local": […]}}
 ```
 
-- **`plain`** (v4.5, card #MDL1; two more tables in v3.11, 2026-09-21) — computed from
+- **`plain`** (v4.5, card #MDP1; two more tables in v3.11, 2026-09-21) — computed from
   `backend/relay_core/model-ranking.md`, a file in the repo the owner reviews and edits. Four pipe
   tables: **Providers** (`provider | kind | order`, kind one of `plan`, `harness`, `api`, `router`,
   `free`, `order` the tie-break, lower first and unique), **Models** (`name | classes | score |
@@ -1376,7 +1376,7 @@ keeps a second copy of the backend's tables. The keys modal lists a preset per p
 presets of the same company are both offered. Since 2026-09-20 `label`, `provider` and `plan` are
 lower-case (Warp style) and the GUI shows them as they are.
 
-Since 2026-09-21 (card #MDL1) every row also carries `kind` and `order`: that provider's row of
+Since 2026-09-21 (card #MDP1) every row also carries `kind` and `order`: that provider's row of
 `backend/relay_core/model-ranking.md`'s Providers table, which the owner edits. `kind` is
 `plan` | `harness` | `api` | `router` | `free` — how the provider is reached — and `order` is the
 tie-break, **lower first**, that decides which provider a model folds onto when more than one
@@ -1409,7 +1409,7 @@ keys, so one model box reads both; a local endpoint's preset row carries `models
 list is the probe's (28, `{id, context_window, tools, thinking}`) and it serves one model per row —
 the GUI names that one entry off the row's own `model` with the same rule.
 
-**`name`: one model, one name** (v3.11, card `#MDL1`, 2026-09-21, owner: "model names should always
+**`name`: one model, one name** (v3.11, card `#MDP1`, 2026-09-21, owner: "model names should always
 be lowercase, no spaces … the picker should say gpt-5.6-sol, not Codex"). Every `models` row of
 every row that carries one — the built-in table, OpenRouter's live listing, a guest's own list
 (29.3) and a custom provider's — carries `name`: lower-case, no spaces, no vendor prefix, and
@@ -1882,7 +1882,7 @@ Kimi Coding Plan's `k3` is `kimi-k3`) is not re-derived, wrongly, in the GUI. `s
 `model_name` and `models_named` the same way — the latter deduplicated, so one model that two
 providers served is one entry in "Models used".
 
-`facets.models` holds model **names**, not the ids history recorded (card #MDL1, rule 1): the rows
+`facets.models` holds model **names**, not the ids history recorded (card #MDP1, rule 1): the rows
 written as `k3` and as `kimi-k3` are one entry, and `openai/gpt-5.6-sol` is `gpt-5.6-sol`. The
 stored ids are untouched — nothing is migrated — and the `model` filter and the `model:` operator
 match either, so picking the one menu entry selects every row of that model and a query saved with

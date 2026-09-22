@@ -1,5 +1,6 @@
 ---
-id: RLP7
+id: RPR7
+aliases: [RLP7]
 type: work
 status: discussing
 labels: [feature, models, gateway]
@@ -8,7 +9,7 @@ waiting_on: owner
 rank: n
 created: '2026-09-21'
 source: 'Claude Code in a Relay pane, 2026-09-21'
-links: {plans: [], commits: [], evidence: [], related: [MDL1], github: null}
+links: {plans: [], commits: [], evidence: [], related: [MDP1], github: null}
 ---
 # Relay Pro: stronger hosted models behind a password
 

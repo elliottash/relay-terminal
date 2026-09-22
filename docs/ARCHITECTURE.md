@@ -858,7 +858,7 @@ Default window shortcuts:
 The session manager (`/resume`, `agent.resume`), inside the Projects and Sessions pane, is Ctrl+Shift+Y, Warp's key for
 its conversations menu. It was Ctrl+Shift+M for one day (2026-09-19) until the owner gave M to the
 model options (`agent.modelOptions`, 2026-09-20: "models are more central than sessions"; since
-card #MDL1 t:a11 that key opens the **models pane**, and the model box is Alt+M — Ctrl+Alt+M went
+card #MDP1 t:a11 that key opens the **models pane**, and the model box is Alt+M — Ctrl+Alt+M went
 with the modal picker). The key is a
 **toggle** (owner, 2026-09-20): pressed again with the manager focused it closes the pane, as Esc
 does; pressed while the focus is elsewhere it brings the open manager forward instead, so the key
@@ -874,7 +874,7 @@ the keyboard.
 Unbound by default: `conversations.open`, `files.open`, `terminal.interrupt`, `agent.newChat`,
 `agent.stop`, `agent.clearQueue`, `agent.resumeQueue`, `input.mode*`, `keybindings.edit`,
 `keybindings.reload`. (`agent.provider` was in this list until 2026-09-21: it opened the "Advanced
-provider settings" dialog, and card #MDL1 retired the action with it — providers, keys and custom
+provider settings" dialog, and card #MDP1 retired the action with it — providers, keys and custom
 endpoints are the models pane's first tab, on `agent.modelOptions`.)
 
 **Actions** (Ctrl+Shift+A or Ctrl+?). The action catalog (`rootItems()` in
@@ -2127,7 +2127,7 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
 - GUI: **the jobs tab** — `src/JobsTab.{h,cpp}`, the `relay-jobstab` library, driven headlessly by
   `tests/jobstab_test.cpp` — is the models pane's fourth tab (Alt+4) and the only surface that says
   what each job runs on. `RolesDialog` was that surface until 2026-09-21 and is **retired** with
-  card #MDL1; `src/ModelSettings.*` is the keys modal alone now. The review that replaced it is in
+  card #MDP1; `src/ModelSettings.*` is the keys modal alone now. The review that replaced it is in
   `docs/MODEL-PICKING-DESIGN.md` §5.9: a modal nobody found, fifteen rows in protocol order in
   Title Case, the model a job actually runs on as grey subtitle text, an override that was a tier
   box duplicating the priorities lists, and nothing saying what may not be overridden.
@@ -2156,7 +2156,7 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   The high tier (owner, 2026-09-20) is plan mode's default: Main at max reasoning unless
   `tiers.high` names a model. Plus the pane's model
   chip (role and effective model, all roles in its tooltip), "Flash agent for this pane"
-  (`agent.flashAgent`, Alt+F), the High agent (`agent.highAgent`, Alt+H, card #MDL1) and the
+  (`agent.flashAgent`, Alt+F), the High agent (`agent.highAgent`, Alt+H, card #MDP1) and the
   `/main`, `/high`, `/flash` and `/local` slash commands — the four modes of the model box, each a
   role named after its tier. The "New panes use the
   Flash agent" row went on 2026-09-20 (owner: redundant next to the tier lists); the setting
@@ -2187,7 +2187,7 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   Also: custom ids, favorites, recent, sort,
   a remembered reasoning level per entry, use counts and a tokens/s estimate. `models/shown` (the
   "models in the picker" checklist) and `models/collapsed` (its per-provider fold) are **retired**
-  with card #MDL1 t:a10 and are ignored where an old settings file still holds them — as are the
+  with card #MDP1 t:a10 and are ignored where an old settings file still holds them — as are the
   priority list, its "fallbacks end here" line and the per-model "openrouter fallback" switch of
   2026-09-20, which went earlier.
 - **Four steps of availability** (owner, 2026-09-21; design 5.7): **1** add a provider, **2** make
@@ -2206,7 +2206,7 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   fallback `/model <name>` takes: typing a name is asking for that model), and
   `models::curatable(catalog)` is what the available tab draws, so an un-ticked row stays there greyed
   with a box to tick again.
-  What the two **defaults** are is a file in the repo rather than a table in the code (card #MDL1):
+  What the two **defaults** are is a file in the repo rather than a table in the code (card #MDP1):
   `backend/relay_core/model-ranking.md` holds a **Providers** table (`provider | kind | order`) and
   a **Models** table (`name | classes | score | notes`), one row per model name, and the owner
   reviews and edits it — `backend/relay_core/model_ranking.py` is all of the code that reads it,
@@ -2218,7 +2218,7 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   shape is untouched, so the C++ side applies the same `{tier: [{preset, model, effort}]}` it always
   did. `src/ModelPicker.*`
   (`relay-modelpicker`, `tests/modelpicker_test.cpp`) is the widget behind `/model`, the box's
-  "more models…" and Ctrl+Shift+M, and since card #MDL1 t:a7 it is where models are *prioritized*
+  "more models…" and Ctrl+Shift+M, and since card #MDP1 t:a7 it is where models are *prioritized*
   as well as picked (design 5.2; the lists were "too hard to find" under Options › Models). It was
   a `QDialog` on Ctrl+Alt+M until t:a11, when the owner retired both the modal and the key ("just
   remove ctrl alt m, not worth the extra confusion"): it is a plain `QWidget` now, embedded in
@@ -2247,7 +2247,7 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   through `Pane::selectEntry(key, effort)` **in the pane the models pane serves**, which is
   `selectModel(preset, model)` plus the level;
   `/swap` toggles between rank 1 and rank 2 (#DC4J). Options › Models (`RelayWindow::modelsSection`)
-  is the page for what the picker is *not* about (card #MDL1 t:a10, design 5.5): a
+  is the page for what the picker is *not* about (card #MDP1 t:a10, design 5.5): a
   "models and priorities…" button at the top — `Pane::openModelPicker("main")`, because
   a page is not in a mode — then providers and keys (through the pane's `storeKey` / `testKey` /
   `removeKey`, with a guest's permission posture under its provider row) and the profiles. The five
@@ -2255,7 +2255,7 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   the "fill the lists" defaults buttons all left the page for that dialog. It replaced
   the API keys and Model roles doors and the "Claude Code and Codex" page. Labels are lower-case
   throughout, per the owner.
-- **The models pane (card #MDL1 t:a11, design 5.8).** Owner, 2026-09-21: *"lets build the models
+- **The models pane (card #MDP1 t:a11, design 5.8).** Owner, 2026-09-21: *"lets build the models
   pane … and just remove ctrl alt m, not worth the extra confusion … typing it again closes the
   pane (or esc as you mentioned)."* `src/ModelsPane.*` (`relay-modelspane`,
   `tests/modelspane_test.cpp`) is a `ToolPane` beside the pane it serves, hosted exactly the way
@@ -2287,7 +2287,7 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   preset answer or a list edit lands. **First run** — no saved layout and `instructions/onboarded`
   not yet true — is a terminal pane at the left and this at the right
   (`WindowManager::newWindowAt`).
-- **The reasoning levels are the model's (card #MDL1, 2026-09-21).** Owner: *"i want the effort
+- **The reasoning levels are the model's (card #MDP1, 2026-09-21).** Owner: *"i want the effort
   options in relay to be determined by the model … so xhigh shows up for codex for example"* and
   *"for no knob models, the effort box should be grayed out. same for relay free."* Relay owned
   four levels — low, medium, high, max — and every picker validated against them, which is why a
@@ -2313,7 +2313,7 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   level list say the same instead of changing anything; the pane keeps the level it had for the
   next model that takes one. Evidence:
   `docs/qa_evidence/2026-09-21-effort-by-model`.
-- **One name, one row (card #MDL1, 2026-09-21).** A model has exactly one name — lower-case, no
+- **One name, one row (card #MDP1, 2026-09-21).** A model has exactly one name — lower-case, no
   spaces, no vendor prefix — and everything that prints a model prints it: `gpt-5.6-sol`, never
   "Codex" and never "GPT-5.6 Sol". The worker computes it (`presets.model_name`) and sends it as
   `name` on every catalog row; `relay::models::nameOf` derives the same string for a row that has
@@ -2350,7 +2350,7 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   the exhausted set changed, and arms a single-shot timer for the nearest reset so the row comes
   back by itself. `applyMainDefault` still writes rank 1 itself as the new-pane default.
 - **The pane's model box is a header per class and its top-ranked models** (`src/ModelRows.*`,
-  `Pane::refreshPickers`; card #MDL1 design 5.3, the owner's own alternative to the mode rows and
+  `Pane::refreshPickers`; card #MDP1 design 5.3, the owner's own alternative to the mode rows and
   the Left/Right paging that landed a few hours earlier the same day, confirmed with four rulings).
   One section per class — `high`, `main`, `flash`, and `local` only where this machine serves a
   model; `lite` is never a pane mode and is never in the box — each a **header row** that is a
@@ -2361,7 +2361,7 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   — two by default (`models::curation::boxCutoff`). A class switched off
   (`curation::boxShown`), and one with nothing left to draw, is not drawn at all — with one
   exception: the class the pane is *running*, which comes back with the pane's own row and nothing
-  else, expands to nothing and says so in its header tooltip (card #MDL1 t:a10). Then the Tier B
+  else, expands to nothing and says so in its header tooltip (card #MDP1 t:a10). Then the Tier B
   guest rows (26.9) and "more models…" (`gear:picker`); "⚙ customize…" left the box, because the
   dialog has the Options button (design 5.5).
   **What is left out is the part to know.** "exhausted models dont show up" — a row whose every

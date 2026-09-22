@@ -8,8 +8,8 @@
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
-| `#XJSN` | [A custom endpoint's extra request JSON has no home](features/2026-09-21-a-custom-endpoints-extra-request-json-has-no-home.md) | inbox | unassigned |  | [1](threads/XJSN.md) |
-| `#RLP7` | [Relay Pro: stronger hosted models behind a password](features/2026-09-21-relay-pro-behind-a-password.md) | inbox | unassigned |  | [1](threads/RLP7.md) |
+| `#XJSN` | [A custom endpoint's extra request JSON has no home](features/2026-09-21-a-custom-endpoints-extra-request-json-has-no-home.md) | discussing | codex |  | [6](threads/XJSN.md) |
+| `#RPR7` | [Relay Pro: stronger hosted models behind a password](features/2026-09-21-relay-pro-behind-a-password.md) | discussing | codex |  | [6](threads/RPR7.md) |
 | `#87HB` | [The parts of tmux worth having in Relay itself](features/2026-09-18-tmux-like-features-in-relay.md) | inbox |  |  | [1](threads/87HB.md) |
 | `#Y2BA` | [allow pressing new card multiple times, it splits the second "new card" pane ver…](features/2026-09-19-allow-pressing-new-card-multiple-times-it-splits.md) | inbox |  |  | [2](threads/Y2BA.md) |
 | `#8NCF` | [bug? agent often isnt assigning a summary title to the pane header.](features/2026-09-19-bug-agent-often-isnt-assigning-a-summary-title-t.md) | inbox |  |  | [3](threads/8NCF.md) |
@@ -43,7 +43,7 @@
 | `#Y2JW` | [Curate which models show in the picker (/models command)](features/2026-09-19-new-models-command.md) | ready |  |  | [21](threads/Y2JW.md) |
 | `#5KMQ` | [lite triage of new issues](features/2026-09-19-lite-triage-of-new-issues.md) | ready |  |  | [15](threads/5KMQ.md) |
 | `#8EXS` | [Sessions manager should also survive a restart](features/2026-09-20-sessions-manager-should-also-survive-a-restart.md) | ready |  |  | [2](threads/8EXS.md) |
-| `#MDL1` | [Model picking: one name per model, one row per model, one default](features/2026-09-21-model-picking-one-name-one-row-one-default.md) | executing | codex | 17/17 | [38](threads/MDL1.md) |
+| `#MDP1` | [Model picking: one name per model, one row per model, one default](features/2026-09-21-model-picking-one-name-one-row-one-default.md) | executing | codex | 17/17 | [45](threads/MDP1.md) |
 | `#R6BS` | [Publish refreshed builds and website downloads](features/2026-09-21-refresh-public-builds.md) | executing | codex | 3/6 | [11](threads/R6BS.md) |
 | `#3KB7` | [A Security section in Options, gathering what the agent may reach](features/2026-09-19-a-security-section-in-options.md) | executing | agent | 8/10 | [7](threads/3KB7.md) |
 | `#25XG` | [Refused tool calls keep the ✗ but render in neutral ink, not red](features/2026-09-19-refused-tool-calls-keep-the-but-render-in-neutra.md) | executing | agent |  | [13](threads/25XG.md) |
@@ -314,8 +314,8 @@
 | `#2CDS` | [Checked in "models in the picker" but not offered by the main tier's add-picker](changes/2026-09-21-checked-in-models-in-the-picker-but-not-offered.md) | discussing |  |  | [6](threads/2CDS.md) |
 | `#9MYY` | [TerminalView hot paths: linkAt rebuild per hover cell, colorsFor twice per cell, a11y allText](changes/2026-09-17-terminalview-hot-paths-linkat-rebuild-per-hover.md) | planned |  |  | [3](threads/9MYY.md) |
 | `#BVK1` | [The bevel stylesheet still keys the pane's button row on a property nothing sets](changes/2026-09-19-the-bevel-stylesheet-still-keys-the-pane-row-on.md) | planned | agent |  |  |
-| `#ACT1` | [A saved Activity pane drops its whole tab on reopen](changes/2026-09-21-a-saved-activity-pane-drops-its-whole-tab-on-reopen.md) | needs-verification | claude-code |  | [1](threads/ACT1.md) |
-| `#CFG1` | [Two consoles in one tab reconfigure the helper worker twice a second, forever](changes/2026-09-21-two-consoles-reconfigure-the-helper-in-a-loop.md) | needs-verification | claude-code |  | [2](threads/CFG1.md) |
+| `#ACT1` | [A saved Activity pane drops its whole tab on reopen](changes/done/2026-09-21-a-saved-activity-pane-drops-its-whole-tab-on-reopen.md) | done | codex |  | [8](threads/ACT1.md) |
+| `#CFG1` | [Two consoles in one tab reconfigure the helper worker twice a second, forever](changes/done/2026-09-21-two-consoles-reconfigure-the-helper-in-a-loop.md) | done | codex |  | [12](threads/CFG1.md) |
 | `#W3KD` | [board_move_card cannot retire an alias card: "unknown tab 'aliases'"](changes/2026-09-20-board-move-card-cannot-retire-an-alias-card-unk.md) | needs-verification | agent | 2/2 | [3](threads/W3KD.md) |
 | `#X7NB` | [Drop the plan card type: the protocol already says plans live on the work card](changes/2026-09-20-drop-the-plan-card-type-the-protocol-already-say.md) | needs-verification | agent | 6/6 | [3](threads/X7NB.md) |
 | `#H6VQ` | [The Sessions helper could not open a conversation, and nothing answered its app_open](changes/2026-09-20-sessions-helper-did-nothing-when-asked-to-open-pa.md) | needs-verification | claude-code |  | [5](threads/H6VQ.md) |
@@ -339,7 +339,7 @@
 | `#B7SP` | [Blank space at the bottom while Codex thinks](changes/2026-09-21-blank-space-while-codex-thinks.md) | needs-verification | codex |  | [16](threads/B7SP.md) |
 | `#GH5T` | [The helper agent cannot run on a guest Main: it fell over on the harness base URL](changes/2026-09-20-the-switchboard-agent-could-not-answer-base-url-m.md) | needs-verification | agent |  | [3](threads/GH5T.md) |
 | `#3H5T` | [Phone client: a scroll is sent as a whole-screen snapshot, tool output is pushed to a phone that discards it, a history_get storm, fit() recalcs per frame](changes/2026-09-20-phone-client-a-scroll-is-a-whole-screen-snapshot.md) | needs-verification | claude-code |  | [2](threads/3H5T.md) |
-| `#40SN` | [A failed configure shows only "Protocol error (NameError)." and the pane never recovers](changes/2026-09-19-configure-protocol-error-nameerror-opaque.md) | needs-verification | codex | 5/5 | [2](threads/40SN.md) |
+| `#40SN` | [A failed configure shows only "Protocol error (NameError)." and the pane never recovers](changes/2026-09-19-configure-protocol-error-nameerror-opaque.md) | needs-verification | codex | 5/5 | [3](threads/40SN.md) |
 | `#K3RT` | [Inline output other than your own line still keeps the colours it was printed in](changes/2026-09-19-inline-output-other-than-your-own-line-does-not.md) | needs-verification | codex |  | [7](threads/K3RT.md) |
 | `#4NXH` | [A guest session (Codex/Claude Code) cannot use the Switchboard's board_* tools](changes/2026-09-20-a-guest-session-codex-claude-code-cannot-use-the.md) | needs-verification | codex | 3/3 | [17](threads/4NXH.md) |
 | `#2MF1` | [#3XZV's stage-move thread entry breaks two board_ask protocol tests (bisected to 4f5acd43)](changes/2026-09-20-3xzv-s-stage-move-thread-entry-breaks-two-board.md) | needs-verification | agent |  | [16](threads/2MF1.md) |

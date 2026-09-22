@@ -18,3 +18,7 @@ Recorded implementation findings, provisional Done means and a checkable plan. N
 <!-- relay:entry 20260922T010911Z-s1 author=codex kind=progress -->
 ### Codex · 2026-09-22 01:09
 Confirmed the transport allowlist: thinking, reasoning, reasoning_effort, temperature, top_p. Updated the plan to validate before saving and preserve the current contract.
+
+<!-- relay:entry 20260922T014800Z-rn author=codex kind=progress -->
+### Codex · 2026-09-22 01:48
+Owner requested valid card codes: #MDL1 → #MDP1 and #RLP7 → #RPR7. Updated this card’s current references to the renamed cards; prior thread entries are unchanged.

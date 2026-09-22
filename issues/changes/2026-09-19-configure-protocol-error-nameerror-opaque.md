@@ -59,7 +59,7 @@ The two gaps identified at planning:
 **Steps:**
 1. Report structured configure failures with the exception kind and diagnostic text.
 2. Restart the pane worker once automatically and replay the failed configuration; provide an explicit retry after repeated failure.
-3. Preserve deferred Plan/Build selection before the first prompt (#MDL1).
+3. Preserve deferred Plan/Build selection before the first prompt (#MDP1).
 4. Test worker diagnostics, fresh-process recovery, repeated failures, and pre-start planning; document the wire fields.
 **Risks:** Do not restart a shared worker or a worker with an active turn. Bound automatic retries and preserve queued prompts and provider selection.
 **Verify:** Targeted Python tests, the application build, and isolated Xvfb checks with a deterministic fake worker.
@@ -86,7 +86,7 @@ The two gaps identified at planning:
   types and widened only for exception types whose message is a code symbol — not a blanket unmask.
 
 ## Execution Summary
-The worker reports structured `configure_failed` diagnostics for NameError, AttributeError, TypeError and ImportError. A pane retries the identical configuration once in a fresh process, then offers Retry agent after repeated failure. Queued prompts and Plan/Build selection survive; shared workers and active turns are not restarted. The mode chosen before a deferred guest starts is applied before its first ask (#MDL1).
+The worker reports structured `configure_failed` diagnostics for NameError, AttributeError, TypeError and ImportError. A pane retries the identical configuration once in a fresh process, then offers Retry agent after repeated failure. Queued prompts and Plan/Build selection survive; shared workers and active turns are not restarted. The mode chosen before a deferred guest starts is applied before its first ask (#MDP1).
 
 ## Tests
 `tests/test_configure_recovery.py`

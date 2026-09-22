@@ -39,3 +39,7 @@ Coordinated two-row source fix verified live: both limit edits reach helper PID 
 <!-- relay:entry 20260922T013908Z-pv author=codex kind=evidence -->
 ### Codex · 2026-09-22 01:39
 Parent completed the landing after subagent a2 hit model capacity. Reviewed only the owned +10/-2 source hunk, landed implementation and evidence as c3312a38f031bbdd8734bae95b80bca1ac4e7f5f after exact-tree build. Independently recomputed the final wire assertions and inspected screenshot 10: all three QA items pass. Ticked Options propagation and moved to done. The intermediate tool-call edit required blur; the final driver explicitly blurs both editors and preserves its passing trace. Other sessions’ source hunks remain untouched.
+
+<!-- relay:entry 20260922T014800Z-rn author=codex kind=progress -->
+### Codex · 2026-09-22 01:48
+Owner requested valid card codes: #MDL1 → #MDP1 and #RLP7 → #RPR7. Updated this card’s current references to the renamed cards; prior thread entries are unchanged.

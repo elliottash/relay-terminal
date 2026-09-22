@@ -24,3 +24,7 @@ Verification landed as 0babc4281ec481752daf9885af2138cea04335fc; added that comm
 <!-- relay:entry 20260922T012336Z-cv author=codex kind=progress -->
 ### Codex · 2026-09-22 01:23
 Linked evidence/record commit 92f3e5b31e5d390ba517a7ef7d588d40b3569a5e. ACT1 is closed; CFG1 awaits coordination for the prepared shared-header fix.
+
+<!-- relay:entry 20260922T014800Z-rn author=codex kind=progress -->
+### Codex · 2026-09-22 01:48
+Owner requested valid card codes: #MDL1 → #MDP1 and #RLP7 → #RPR7. Updated this card’s current references to the renamed cards; prior thread entries are unchanged.

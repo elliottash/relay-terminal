@@ -6,8 +6,8 @@ labels: [bug, panes, sessions]
 assignee: codex
 rank: h
 created: '2026-09-21'
-source: 'Claude Code in a Relay pane, 2026-09-21 — found while landing #MDL1 t:a11'
-links: {plans: [], commits: [7dd8fdad, 0babc4281ec481752daf9885af2138cea04335fc, 92f3e5b31e5d390ba517a7ef7d588d40b3569a5e], evidence: [docs/qa_evidence/2026-09-21-models-pane, docs/qa_evidence/2026-09-22-verify-ACT1/README.md], related: [QT8C, MDL1], github: null}
+source: 'Claude Code in a Relay pane, 2026-09-21 — found while landing #MDP1 t:a11'
+links: {plans: [], commits: [7dd8fdad, 0babc4281ec481752daf9885af2138cea04335fc, 92f3e5b31e5d390ba517a7ef7d588d40b3569a5e], evidence: [docs/qa_evidence/2026-09-21-models-pane, docs/qa_evidence/2026-09-22-verify-ACT1/README.md], related: [QT8C, MDP1], github: null}
 ---
 # A saved Activity pane drops its whole tab on reopen
 
