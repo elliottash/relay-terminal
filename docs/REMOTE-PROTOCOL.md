@@ -1602,7 +1602,8 @@ only thing that decides what a given device sees, and `src/PaneState.{h,cpp}` bu
                    "state":"waiting|withdrawing|queued|editing|paused",
                    "actions":["remove","edit","to_queue","send_now","steer","up","down"]}],
           "hint":"↑ select a row · Ctrl+↑↓ move · Shift+Del remove"},
- "model":{"label":"kimi-k3 (main)","choices":[{"id":"m1","label":"kimi-k3 (main)","current":true}]},
+ "model":{"label":"kimi-k3 (main)","choices":[{"id":"m1","label":"kimi-k3 (main)","current":true}],
+          "effort":"high","efforts":["low","medium","high"]},
  "composer":{"mode":"auto|shell|agent","placeholder":"…","modes":["auto","shell","agent"]},
  "context":{"label":"96% left","percent_left":96},
  "theme":"relay-dark",
@@ -1671,6 +1672,7 @@ which a guest editor may send: a guest's prompt is not passed on but held for th
 | `queue_remove` | `{pane,row}` | withdraws or removes it (`item` is the older spelling of `row`) |
 | `queue_resume` | `{pane}` | runs the queue again after a Stop paused it (`queue.paused`, card #7JD1). It is the phone's **empty send**, which is Enter on an empty prompt box at the desk, and it names no row: the pane decides whether there is a pause to lift, and the `pane_state` that follows is the answer. Nothing is resumed on a pane that was not paused, exactly as an empty Enter there does nothing |
 | `model_pick` | `{pane,choice}` | only a model the menu offered, which is only one with a stored key; the pane says "Model changed from <device>" |
+| `effort_pick` | `{pane,effort}` | one of the levels this pane published for its model (`model.efforts`, section 3) — the phone's `/effort`, a partner's level like a `model_pick`. The pane snaps a level the model does not take, keeps a fixed model's level, and says "Effort set from <device>"; the pane's choice alone, never a settings write (card #MDL1) |
 | `conversation_new` | `{pane}` | **owner level.** The same as `/new`, refused while a turn runs |
 | `conversation_open` | `{pane,session}` | **owner level.** Opens one of this pane's past conversations, named by a token from a `pane_state` — never a path or a session file name — resolved by the pane against the list it published. Refused while a turn runs, as the session manager's own rows are |
 | `conversation_id` | `{pane,session,id?}` | **owner level.** The real conversation id behind one of this pane's published tokens, for the owner to copy (`Copy id` in the phone's Conversations sheet). The pane answers only for a token in the list it published, with `conversation_id_text {pane,session,conversation,id?}` to the asking device alone — or `ok:false` and a `error` when the token is gone. The hub holds the ask open for 15 s, as it does a `queue_edit`, and answers a lapse with `internal` |

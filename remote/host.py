@@ -3003,6 +3003,12 @@ class Host:
         self._pane_state_line({"t": "model_pick", "pane": pane, "choice": choice,
                                **self._pane_state_origin(channel)})
 
+    async def _on_effort_pick(self, channel: Channel, message: dict) -> None:
+        pane = self._pane_state_pane(channel, message)
+        effort = pane_state_mod.effort_of(message)
+        self._pane_state_line({"t": "effort_pick", "pane": pane, "effort": effort,
+                               **self._pane_state_origin(channel)})
+
     async def _on_conversation_new(self, channel: Channel, message: dict) -> None:
         pane = self._pane_state_pane(channel, message)
         self._pane_state_line({"t": "conversation_new", "pane": pane,
@@ -3179,6 +3185,7 @@ QUEUE_EDIT_TIMEOUT = 15.0          # a wedged GUI is an error on the phone, not 
 CONVERSATION_ID_TIMEOUT = 15.0    # same shape as a queue_edit: ask, answer, or a refusal
 LIMITS.update({
     "model_pick": (20, 60),        # each one reconfigures the pane's provider
+    "effort_pick": (30, 60),       # a level of the model in force, not a provider change
     "conversation_new": (10, 60),
     "conversation_open": (20, 60),   # reading past conversations, not writing anything
     "conversation_id": (20, 60),     # reading, and the answer goes to the asking device alone

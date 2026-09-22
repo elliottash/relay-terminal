@@ -409,6 +409,20 @@ button.rp-chip:hover { color: var(--qss-stripChip-hover-color); border-color: va
 .rp-model:hover:not(:disabled) { color: var(--qss-statusPicker-hover-color); border-color: var(--qss-statusPicker-hover-border-color); }
 .rp-model:disabled { cursor: default; opacity: 1; }
 .rp-model option { background: var(--qss-menu-background); color: var(--qss-menu-color); }
+/* The reasoning level: the model menu's small sibling, the desktop's own words for the levels. */
+.rp-effort {
+  -webkit-appearance: none;
+  appearance: none;
+  min-height: max(calc(var(--qss-stripChip-min-height) + 6px), var(--rp-tap));
+  padding: var(--qss-statusPicker-padding);
+  background: var(--qss-statusPicker-background);
+  border: var(--qss-statusPicker-border);
+  border-radius: var(--qss-statusPicker-border-radius);
+  color: var(--qss-statusPicker-color);
+  font-size: var(--rt-floor-size);
+  cursor: pointer;
+}
+.rp-effort option { background: var(--qss-menu-background); color: var(--qss-menu-color); }
 .rp-model-chevron {
   position: absolute;
   right: 7px;

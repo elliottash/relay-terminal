@@ -34,6 +34,7 @@ TAIL_MAX = 2000
 ROWS_MAX = 64
 SESSIONS_MAX = 50
 CHOICES_MAX = 32
+EFFORTS_MAX = 8                # reasoning levels a model takes
 EDIT_TEXT_MAX = 32_000
 WAITERS_MAX = 16              # pane_state_get requests waiting for a pane's first state
 EDITS_MAX = 64                # queue_edit requests waiting for the desktop's answer
@@ -57,6 +58,7 @@ THEME_ID = re.compile(r"^[a-z0-9-]{1,40}$")
 ROW_ID = re.compile(r"^(?:steer:[A-Za-z0-9_-]{1,40}|entry:[0-9]{1,19})$")
 CHOICE_ID = re.compile(r"^m[1-9][0-9]{0,8}$")
 SESSION_ID = re.compile(r"^s[1-9][0-9]{0,8}$")
+EFFORT = re.compile(r"^[a-z][a-z0-9-]{0,15}$")
 
 # Defence in depth for text the desktop wrote. Section 4 says key material never appears in any
 # RRP message; these catch the shapes a key takes if one ever reached a label or the reasoning.
@@ -158,6 +160,20 @@ def clean(message) -> dict | None:
         choices.append({"id": choice_id, "label": _model_text(choice.get("label")),
                         "current": _flag(choice.get("current"))})
 
+    # The reasoning level and the levels the model takes (section 3). A level is the desktop's own
+    # word for one — checked, capped, and never anything a provider address could hide inside.
+    efforts = []
+    for level in _list(model.get("efforts")):
+        if len(efforts) >= EFFORTS_MAX:
+            break
+        if not isinstance(level, str) or not EFFORT.match(level):
+            continue
+        if level not in efforts:
+            efforts.append(level)
+    effort = model.get("effort")
+    if not isinstance(effort, str) or not EFFORT.match(effort) or (efforts and effort not in efforts):
+        effort = None
+
     session_rows = []
     for row in _list(sessions.get("rows")):
         if len(session_rows) >= SESSIONS_MAX:
@@ -203,7 +219,8 @@ def clean(message) -> dict | None:
         "queue": {"paused": _flag(queue.get("paused")),
                   "pause_reason": _text(queue.get("pause_reason")),
                   "running": running, "rows": rows, "hint": _text(queue.get("hint"))},
-        "model": {"label": _model_text(model.get("label")), "choices": choices},
+        "model": {"label": _model_text(model.get("label")), "choices": choices,
+                  **({"effort": effort, "efforts": efforts} if efforts else {})},
         "composer": {"mode": _enum(composer.get("mode"), MODES, "auto"),
                      "placeholder": _text(composer.get("placeholder")), "modes": modes},
         "context": {"label": _text(context.get("label")), "percent_left": percent},
@@ -248,6 +265,8 @@ def for_capability(state: dict, capability: str | None) -> dict | None:
         for row in out["queue"]["rows"]:
             row.pop("actions", None)
         out["model"].pop("choices", None)
+        out["model"].pop("efforts", None)
+        out["model"].pop("effort", None)
         out["composer"]["modes"] = []
     elif capability == wire.AGENT:
         out["composer"]["modes"] = [mode for mode in out["composer"]["modes"] if mode == "agent"]
@@ -276,6 +295,14 @@ def choice_of(message: dict) -> str:
         # Never a preset id: only a token this desktop minted in a pane_state it sent.
         raise wire.WireError("unknown_type", "model_pick needs a choice id from pane_state.")
     return choice
+
+
+def effort_of(message: dict) -> str:
+    """The level in an `effort_pick`: only one the pane published (like `choice_of`)."""
+    effort = message.get("effort")
+    if not isinstance(effort, str) or not EFFORT.match(effort):
+        raise wire.WireError("unknown_type", "effort_pick needs a level from pane_state.")
+    return effort
 
 
 def session_of(message: dict) -> str:

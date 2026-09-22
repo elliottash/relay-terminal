@@ -116,6 +116,8 @@ public:
         // {session}: the real conversation id behind a published token, on explicit ask (owner
         // level). Empty when the token is no longer in the list this pane published.
         std::function<QString(const QString &session)> conversationId;
+        // {effort}: one of the model's levels this pane published (section 3, like model_pick).
+        std::function<bool(const QString &effort, const QString &deviceName)> effortPick;
         std::function<void()> publishPaneState;   // pane_state_get: publish this pane now
         std::function<void()> recap;              // recap_request, which used to be dropped here
     };

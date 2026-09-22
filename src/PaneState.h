@@ -40,6 +40,7 @@ constexpr int kTailMax = 2000;      // the reasoning tail
 constexpr int kRowsMax = 64;        // queue rows
 constexpr int kSessionsMax = 50;    // session-manager rows
 constexpr int kChoicesMax = 32;     // model choices
+constexpr int kEffortsMax = 8;      // reasoning levels a model takes
 constexpr int kIntervalMs = 100;    // at most one message per pane this often
 
 // One queue row, as Pane::queueRows() has it plus what the actions depend on.
@@ -81,6 +82,9 @@ struct Inputs {
     // model
     QString modelLabel;
     QList<Choice> choices;
+    QString effort;                  // this pane's reasoning level ("high"); empty: the model
+                                     // takes none, and the phone shows no picker
+    QStringList efforts;             // the model's own levels, in the provider's order
     // composer
     QString mode, placeholder;       // mode: "auto", "shell" or "agent"
     // context

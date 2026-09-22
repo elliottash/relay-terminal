@@ -216,7 +216,8 @@ class CapabilityTests(unittest.TestCase):
 
 class WireTests(unittest.TestCase):
     NEW_CLIENT = ("queue_move", "queue_edit", "queue_send_now", "queue_resume", "model_pick",
-                  "conversation_new", "conversation_open", "conversation_id", "pane_state_get")
+                  "effort_pick", "conversation_new", "conversation_open", "conversation_id",
+                  "pane_state_get")
 
     def test_the_new_client_types_are_classified(self):
         for kind in self.NEW_CLIENT:
@@ -225,7 +226,8 @@ class WireTests(unittest.TestCase):
             self.assertNotIn(kind, wire.GUEST_TYPES, kind)
             self.assertNotIn(kind, wire.NEVER_FROM_CLIENT, kind)
         # A partner types here: the queue and the model are its level.
-        for kind in ("queue_move", "queue_edit", "queue_send_now", "queue_resume", "model_pick"):
+        for kind in ("queue_move", "queue_edit", "queue_send_now", "queue_resume", "model_pick",
+                     "effort_pick"):
             self.assertEqual(wire.CLIENT_TYPES[kind], wire.AGENT, kind)
         # The conversations before this one are the owner's level (owner, 2026-09-18) — and so is
         # naming one of them outside Relay (2026-09-22, `Copy id`).
@@ -252,6 +254,11 @@ class WireTests(unittest.TestCase):
         # from a pane_state: never a path, a session file name or the worker's own types.
         self.assertEqual(wire.CLIENT_TYPES["conversation_open"], wire.FULL)
         self.assertNotIn("conversation_resume", wire.CLIENT_TYPES)
+        with self.assertRaises(wire.WireError):
+            pane_state.effort_of({"effort": "high; rm -rf"})
+        with self.assertRaises(wire.WireError):
+            pane_state.effort_of({"effort": 3})
+        self.assertEqual(pane_state.effort_of({"effort": "xhigh"}), "xhigh")
         with self.assertRaises(wire.WireError):
             pane_state.session_of({"session": "../../etc/passwd"})
         with self.assertRaises(wire.WireError):
@@ -596,6 +603,21 @@ class ActionTests(unittest.TestCase):
                 pick = await harness.settle("model_pick")
                 self.assertEqual(pick["choice"], "m2")
                 self.assertEqual(pick["device_name"], "Elliott's iPhone")
+                await client.close()
+        run(main())
+
+    def test_an_effort_pick_reaches_the_gui_with_its_level(self):
+        async def main():
+            async with Harness() as harness:
+                client, record = await harness.device(name="Pixel 9")
+                await client.send({"t": "effort_pick", "pane": "p1", "effort": "xhigh"})
+                pick = await harness.settle("effort_pick")
+                self.assertEqual(pick, {"t": "effort_pick", "pane": "p1", "effort": "xhigh",
+                                        "origin": f"remote:{record.device_id}",
+                                        "device_name": "Pixel 9"})
+                await client.send({"t": "effort_pick", "pane": "p1", "effort": "high; rm -rf"})
+                refused = await client.expect("error")
+                self.assertEqual(refused["code"], "unknown_type")
                 await client.close()
         run(main())
 

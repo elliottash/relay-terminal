@@ -508,6 +508,35 @@ class PaneViewTests(unittest.TestCase):
 
         self.drive(main())
 
+    def test_the_effort_picker_shows_the_desktops_levels_and_sends_one(self):
+        """The model's levels (section 3), drawn as they arrived, and a pick sent back by name."""
+        state = fixture("idle")
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.open(browser, "idle")
+                levels = await browser.evaluate(
+                    "JSON.stringify([...document.querySelectorAll('.rp-effort option')]"
+                    ".map((o) => [o.value, o.textContent]))")
+                self.assertEqual(json.loads(levels),
+                                 [["low", "low"], ["medium", "medium"], ["high", "✓ high"]])
+                await browser.evaluate(
+                    "(() => { const e = document.querySelector('.rp-effort');"
+                    " e.value = 'low'; e.dispatchEvent(new Event('change')); })()")
+                await browser.wait_for("window.paneDemo.sent.length > 0")
+                self.assertEqual((await self.sent(browser))[-1],
+                                 {"t": "effort_pick", "pane": state["pane"], "effort": "low"})
+                # A model that takes no level draws no picker (a `view` fixture has none at all).
+                await self.open(browser, "view_only")
+                self.assertEqual(await browser.evaluate(
+                    "getComputedStyle(document.querySelector('.rp-effort')).display"), "none")
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
     def test_a_refused_id_ask_is_a_toast_on_the_pane(self):
         state = fixture("sessions_50")
         row = state["sessions"]["rows"][0]

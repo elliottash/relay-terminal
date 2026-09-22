@@ -246,6 +246,9 @@ CLIENT_TYPES.update({
     # {pane, session}: the real conversation id behind a published token, on explicit ask — the
     # pane_state itself keeps carrying tokens (section 16: no session file name ever appears).
     "conversation_id": FULL,
+    # {pane, effort}: one of the model's published levels (section 3), like a model_pick — a
+    # partner may switch the model, so the level is its level too.
+    "effort_pick": AGENT,
 })
 GUEST_NEVER.update({
     "pane_state_get": "the owner's queue, models and sessions are the owner's pane, not the share",
@@ -254,6 +257,7 @@ GUEST_NEVER.update({
     "queue_send_now": "interrupts the owner's turn; not among an editor's actions",
     "queue_resume": "the owner's queue is the owner's: a guest never starts it again",
     "model_pick": "model changes are never a guest's (section 10.1)",
+    "effort_pick": "reasoning levels are never a guest's, as model changes are not",
     "conversation_new": "resets the owner's conversation",
     "conversation_open": "the owner's other conversations are not part of a share",
     "conversation_id": "the owner's conversation ids are the owner's",

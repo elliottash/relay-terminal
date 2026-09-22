@@ -123,7 +123,17 @@ QJsonObject build(qint64 seq, const Inputs &in, Tokens &choiceTokens, Tokens &se
                                    {QStringLiteral("label"), clip(choice.label)},
                                    {QStringLiteral("current"), choice.current}});
     }
-    QJsonObject model{{QStringLiteral("label"), clip(in.modelLabel)}, {QStringLiteral("choices"), choices}};
+    // The reasoning level and the levels this model takes (section 3): empty `efforts` says the
+    // model has none, and a client draws no picker. Labels are the desktop's own words.
+    QJsonArray efforts;
+    for (const QString &level : in.efforts) {
+        if (efforts.size() >= kEffortsMax) break;
+        if (level.simplified().isEmpty()) continue;
+        efforts.append(level);
+    }
+    QJsonObject model{{QStringLiteral("label"), clip(in.modelLabel)}, {QStringLiteral("choices"), choices},
+                      {QStringLiteral("effort"), in.efforts.isEmpty() ? QJsonValue() : QJsonValue(in.effort)},
+                      {QStringLiteral("efforts"), efforts}};
 
     QJsonObject composer{{QStringLiteral("mode"), in.mode},
                          {QStringLiteral("placeholder"), clip(in.placeholder)},

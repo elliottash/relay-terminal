@@ -325,6 +325,11 @@ void RemoteShare::handle(const QJsonObject &message)
         if (it != m_panes.end() && it->hooks.modelPick)
             it->hooks.modelPick(message.value(QStringLiteral("choice")).toString(),
                                 message.value(QStringLiteral("device_name")).toString());
+    } else if (kind == QLatin1String("effort_pick")) {
+        auto it = m_panes.find(message.value(QStringLiteral("pane")).toString());
+        if (it != m_panes.end() && it->hooks.effortPick)
+            it->hooks.effortPick(message.value(QStringLiteral("effort")).toString(),
+                                 message.value(QStringLiteral("device_name")).toString());
     } else if (kind == QLatin1String("conversation_new")) {
         auto it = m_panes.find(message.value(QStringLiteral("pane")).toString());
         if (it != m_panes.end() && it->hooks.conversationNew)

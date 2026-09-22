@@ -7634,6 +7634,9 @@ public:
                 return remoteConversationOpen(session, name);
             };
             hooks.conversationId = [this](const QString &session) { return remoteConversationId(session); };
+            hooks.effortPick = [this](const QString &level, const QString &name) {
+                return remoteEffortPick(level, name);
+            };
             hooks.publishPaneState = [this] { m_paneState.publishNow(); };
             // "manual", not "remote": the worker takes three reasons — away, resume, manual — and
             // refused this one, so the phone's Recap button has never produced a recap (#WMXN).
@@ -13732,6 +13735,10 @@ public:
         // the tokens, the palette and the stylesheet are the application's — the tab in front
         // decides, and that is the theme this pane is being painted in at this instant. A tab change
         // sets it again, which is a themeChanged() and so a republish.
+        // The reasoning level and the levels the model takes (section 3), for the phone's
+        // picker: the desktop's own words, empty when the model takes none.
+        in.effort = m_effort;
+        in.efforts = offeredEfforts();
         in.theme = relay::theme::activeThemeId();
         in.canNew = m_workerReady && !m_agentBusy;
         in.canOpen = m_workerReady && !m_agentBusy;   // as the session manager's own rows behave
@@ -13843,6 +13850,22 @@ public:
             return true;
         }
         return false;
+    }
+
+    // effort_pick: one of the levels this pane published for its model, the phone's /effort.
+    // The same rules the desktop's own picker has: a model whose level is fixed keeps it, a level
+    // the model does not take is snapped to its nearest, and the level never crosses panes
+    // (card #MDL1). False when nothing changed, so the hub can say so.
+    bool remoteEffortPick(const QString &level, const QString &deviceName) {
+        const QStringList levels = offeredEfforts();
+        if (levels.isEmpty() || !levels.contains(level)) return false;
+        if (const QString why = effortFixedReason(); !why.isEmpty()) { status(sentenceCase(why)); return false; }
+        if (level == m_effort) return true;
+        setPaneEffort(level);
+        status(QStringLiteral("Effort set from %1 · %2")
+                   .arg(deviceName.trimmed().isEmpty() ? QStringLiteral("a paired device") : deviceName.trimmed(),
+                        level));
+        return true;
     }
 
     // conversation_id: the real conversation id behind one of this pane's published tokens, for

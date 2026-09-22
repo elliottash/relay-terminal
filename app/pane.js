@@ -290,7 +290,11 @@ export function mountPane(container, options = {}) {
   model.setAttribute('aria-label', 'Model');
   const modelChevron = el('span', 'rp-model-chevron', '▾');
   modelChevron.setAttribute('aria-hidden', 'true');
-  modelWrap.append(model, modelChevron);
+  // The reasoning level (section 3): the model's own levels, as the desktop's effort box has
+  // them. Hidden whole when the model takes none.
+  const effort = el('select', 'rp-chip rp-effort');
+  effort.setAttribute('aria-label', 'Reasoning effort');
+  modelWrap.append(model, modelChevron, effort);
   // Where the host puts a control of its own (the client's microphone), so its buttons sit in the
   // pane's strip instead of a second bar under it. Empty and invisible until the host fills it.
   const hostSlot = el('span', 'rp-host-slot');
@@ -693,6 +697,7 @@ export function mountPane(container, options = {}) {
       // away, which is a smaller cost than a wrong answer on the phone's screen.
       answerAsk(text, when);
       editRow = '';
+      box.blur();                    // sent is sent: the on-screen keyboard comes down
       return;
     }
     sendCompose(text, when);
@@ -703,6 +708,10 @@ export function mountPane(container, options = {}) {
     box.value = '';
     fitBox();
     renderSendState();
+    // Sent is sent: the on-screen keyboard comes down, so the terminal the answer is arriving
+    // in is the whole screen again (a phone's request, 2026-09-22). A physical keyboard's blur
+    // is invisible, so this is unconditional.
+    box.blur();
   }
 
   function enter() {
@@ -1046,6 +1055,26 @@ export function mountPane(container, options = {}) {
     model.selectedIndex = 0;
     model.disabled = choices.length === 0;
     modelWrap.dataset.pickable = choices.length ? 'true' : 'false';
+    renderEffort(m);
+  }
+
+  function renderEffort(m) {
+    const levels = arr(m.efforts).filter((level) => typeof level === 'string' && level);
+    effort.hidden = levels.length === 0;
+    if (!levels.length) return;
+    // Same rule as the model menu above: rebuilt only when the levels moved, so an open native
+    // picker survives the ten-a-second pane_state.
+    const current = typeof m.effort === 'string' ? m.effort : '';
+    const signature = JSON.stringify([current, levels]);
+    if (effort.dataset.signature === signature) return;
+    effort.dataset.signature = signature;
+    effort.textContent = '';
+    for (const level of levels) {
+      const option = el('option', '', `${level === current ? '✓ ' : ''}${level}`);
+      option.value = level;
+      effort.appendChild(option);
+    }
+    effort.value = current || levels[0];
   }
 
   function draw() {
@@ -1193,6 +1222,10 @@ export function mountPane(container, options = {}) {
     const choice = model.value;
     model.selectedIndex = 0;
     if (choice) emit('model_pick', { choice });
+  });
+  on(effort, 'change', () => {
+    const level = effort.value;
+    if (level) emit('effort_pick', { effort: level });
   });
   on(sessionsButton, 'click', (event) => {
     openSessions();
