@@ -41,10 +41,15 @@ def audit(bundle, arch, sign):
                 subprocess.run(['install_name_tool','-delete_rpath',rpath,str(path)],check=True)
         elif rpaths:
             raise RuntimeError(f'{path}: external rpaths {rpaths}')
-        for line in output('otool','-L',str(path)).splitlines()[1:]:
-            if ' (compatibility version ' not in line:
-                continue  # architecture header of a universal binary
-            dep = line.strip().split(' (compatibility version ')[0]
+        # otool -L includes LC_ID_DYLIB (the file's own identity). Only load
+        # commands are dependencies; Bash builtins legitimately have bare IDs.
+        load_commands = {'LC_LOAD_DYLIB', 'LC_LOAD_WEAK_DYLIB', 'LC_REEXPORT_DYLIB',
+                         'LC_LOAD_UPWARD_DYLIB', 'LC_LAZY_LOAD_DYLIB'}
+        dependencies = []
+        for i, line in enumerate(lines):
+            if line.strip().removeprefix('cmd ') in load_commands and i+2 < len(lines):
+                dependencies.append(lines[i+2].strip().removeprefix('name ').split(' (offset')[0])
+        for dep in dependencies:
             if dep.startswith(('/usr/lib/','/System/Library/','@rpath/','@loader_path/','@executable_path/')):
                 continue
             raise RuntimeError(f'{path}: non-relocatable dependency {dep}')
