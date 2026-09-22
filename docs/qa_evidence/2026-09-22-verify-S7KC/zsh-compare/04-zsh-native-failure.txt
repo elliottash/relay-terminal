@@ -1,0 +1,18 @@
+@ work - cpu00%-mem00% = + OQ\4 eG 2 - 0x
+
+\O"E
+
+elliott@spark-dcc9:/tmp/relay-ssh-audit -Ozbesdrw/work$
+
+COMPOSER- SUCCESS
+spark-dec9%
+
+COMPOSER-FAILURE
+spark-dec9%
+spark-dec9%
+
+printf ‘'NATIVE-FAILURE\n' ;
+
+NATIVE- FAILURE
+spark-dec9%
+

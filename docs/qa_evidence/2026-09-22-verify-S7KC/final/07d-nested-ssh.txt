@@ -1,0 +1,37 @@
+@ work - cpu00%-mem00% = + OQ\4 eG 2 - 0x
+(aaa LLL LLL 5d
+
+bash-5.2$
+
+QUEUED-AFTER-SLEEP
+bash-5.2$
+
+INPUT> ANSWER
+RECEIVED=ANSWER.
+bash-5.2$
+
+SHOULD-BE-A- COMMAND
+bash-5.2$
+
+XXXXXK KKH XK HAH HHH KH HHH HHH HHH HHH HHH H HHH HHH HH HHH HHH HH HHH HHH H HHH HH HHH HHH HHH
+WRAP - XXXXXXXXXXXXXKHXXK HAN HAH HAH HHH HHH HHH HHH HHH HHH HHH HH HHH HHH H HHH HH HHH HHH HH HHH HHH HH HHH HHH HHH HHH HHI
+XX XXX KAHAN KKH H KKH H KKH H KKH HHH HK HH HHH HK HHH HHH HHH HH HHH HHH HHH HHH
+
+bash-5.2$
+
+“MULT:
+
+tf ‘MULT
+
+MULTI-A
+MULTI-B
+bash-5.2$
+
+bash-5.2$
+
+Relaying - ssh -o BatchMode=yes -tt 127.0.0.1 'HISTFILE=/dev/null bash -noprofile -norc -i...
+
+Shell commands or agent prompts. 2 for help auto
+
+ester w)
+

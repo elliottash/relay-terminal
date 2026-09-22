@@ -1,0 +1,33 @@
+@ work - cpu00%-mem00% = + OQ\4 eG 2 - 0x
+
+O8r*
+
+/tmp
+bash-5.2$
+
+bash-5.2$
+
+bash-5.2$
+
+QUEUED -AFTER-SLEEP
+bash-5.2$
+
+INPUT> ANSWER
+RECEIVED=ANSWER
+bash-5.2$
+
+SHOULD-BE-A- COMMAND
+bash-5.2$
+
+XXXXXAXXA AX AX A AX NAK KKK KKK KKH KKK K AK KKK K HHH KKK HHH AK K NHK KKK KAA KKK K AK KAKA AA,
+
+WRAP - XXXXXXXXXXXXXKKXXKHKXN HAN HAH HAH HHH HHH HHH HHH HHH HHH HHH HH HHH HHH HH HHH HHH HH HHH HHH H HHH HH HHH HHH HH HHH AHHH
+XX XXX KKH KKH AHH HHH HHH KH HHH HK HHH HHH HK HHH HHH H HHH HH HHH HHH HHH HHH
+bash-5.2$
+
+localhost ready
+
+Shell commands or agent prompts. 2 for help auto
+
+exsmeieeal c) w)
+

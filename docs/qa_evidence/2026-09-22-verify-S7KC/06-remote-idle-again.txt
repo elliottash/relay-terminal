@@ -1,0 +1,34 @@
+= work - cpu00%-mem00% x +
+
+elliott@spark-dcc9:/tmp/relay-ssh-audit -dntih65w/work$
+
+OQ se S 09 - 0x
+
+\O"E
+
+LOCAL-ONE
+LOCAL-TWO
+elliott@spark-dcc9: /tmp/relay-ssh-audit -dntih65w/work$
+
+bash-5.2$
+
+printf ‘REMOTE-ONE\nREMOTE-TWO\n'
+
+REMOTE - ONE
+REMOTE -TWO
+bash-5.2$
+
+/tmp
+bash-5.2$
+
+QUEUED-AFTER-SLEEP
+bash-5.2$
+
+localhost ready
+
+Bhell commands or agent prompts... 2 for help
+
+..st/tmp/relay-ssh-audit-dntih6Sw/remote
+
+a ey
+

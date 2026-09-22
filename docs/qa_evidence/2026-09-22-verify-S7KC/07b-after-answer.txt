@@ -1,0 +1,31 @@
+@ work - cpu00%-mem00% = + OQ\4 eG 2 - 0x
+
+O8r«
+
+bash-5.2$
+
+printf ‘REMOTE-ONE\nREMOTE-TWO\n'
+
+REMOTE - ONE
+REMOTE -TWO
+bash-5.2$
+
+/tmp
+bash-5.2$
+
+QUEUED-AFTER-SLEEP
+bash-5.2$
+
+INPUT> ANSWER
+RECEIVED=ANSWER.
+bash-5.2$
+
+SHOULD -BE-A- COMMAND
+bash-5.2$
+
+‘Agent in control - Ctrl+H to take control
+
+Shell commands or agent prompts. 2 for help auto
+
+exsmeieeal c) w)
+

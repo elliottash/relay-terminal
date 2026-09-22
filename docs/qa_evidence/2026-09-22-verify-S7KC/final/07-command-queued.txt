@@ -1,0 +1,43 @@
+@ work - cpu00%-mem00% = + OQ\4 eG 2 - 0x
+
+(aaa LLL LLL
+
+bash-5.2$
+
+printf ‘REMOTE-ONE\nREMOTE-TWO\n'
+
+REMOTE - ONE
+REMOTE -TWO
+bash-5.2$
+
+/tmp
+bash-5.2$
+
+bash-5.2$
+
+bash-5.2$
+
+printf "QUEUED-AFTER-SLEEP’
+
+QUEUED-AFTER-SLEEP
+
+bash-5.2$
+
+INPUT> Queue e command runs when the terminal is free
+QUEUE 1 take back to edit - drag to reorder - x remove
+» running $ ssh -t localhost 'HISTFILE=/dev/null bash -noprofile -norc i"
+
+| $ echo SHOULD-BE-A-COMMAND x
+
+Relaying - read -r -p 'INPUT>' value; printf 'RECEIVED=%s\n' "$value"...
+
+auto
+
+Shell commands or agent prompts. 2 for help
+
+JM 2)
+
+=
+
+| Loading models... ¥
+

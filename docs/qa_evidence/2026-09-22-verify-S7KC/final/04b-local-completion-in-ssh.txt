@@ -1,0 +1,25 @@
+@ work - cpu00%-mem00% = + OQ\4 eG 2 - 0x
+
+(aaa LLL LLL
+
+elliott@spark-dcc9:/tmp/relay-ssh-audit -1g3c9dbv/work$
+
+LOCAL-ONE
+LOCAL-TWO
+elliott@spark-dcc9:/tmp/relay-ssh-audit-1g3c9dbv/work$
+
+bash-5.2$
+
+printf 'REMOTE-ONE\nREMOTE-TWO
+
+REMOTE - ONE
+REMOTE -TWO
+bash-5.2$
+
+/tmp
+bash-5.2$
+
+x exited with status 1 on localhost. No agent provider is configured to fix it.
+
+cat LOCAL_ONLY_SSH_AU|
+

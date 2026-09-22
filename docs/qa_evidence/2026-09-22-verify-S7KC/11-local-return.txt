@@ -1,0 +1,32 @@
+© work - cpu00%-mem00% x + O\4 eG 2 - 0 x
+
+© work rom
+
+bash-5.2$ exit
+exit
+
+Connection to 127.0.0.1 closed.
+bash-5.2$
+
+Qe
+
+exit
+Shared connection to localhost closed.
+elliott@spark-dcc9: /tmp/relay-ssh-audit -dntih65w/work$
+
+spark-dec9%
+
+printf 'ZSH-OUTPUT
+
+ZSH-OUTPUT
+spark-dec9%
+
+fe
+
+Shared connection to localhost closed.
+elliott@spark-dcc9: /tmp/relay-ssh-audit -dntih65w/work$
+
+Shell commands or agent prompts. 2 for help
+
+| Ttmp/relay-ssh-audit-dntih6sw/work =<
+

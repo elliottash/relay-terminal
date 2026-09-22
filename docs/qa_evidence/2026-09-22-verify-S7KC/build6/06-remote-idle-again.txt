@@ -1,0 +1,38 @@
+= work - cpu00%-mem00% x + OQ\4 eG 2 - 0x
+
+\O"E
+
+elliott@spark-dcc9:/tmp/relay-ssh-audit-n1_um4pi/work$
+
+LOCAL-ONE
+LOCAL-TWO
+elliott@spark-dcc9:/tmp/relay-ssh-audit-n1_um4pi/work$
+
+bash-5.2$
+
+printf ‘REMOTE-ONE\nREMOTE-TWO\n'
+
+REMOTE - ONE
+REMOTE -TWO
+bash-5.2$
+
+/tmp
+bash-5.2$
+
+1_on localhost
+
+No agent provider is configured to fix it.
+
+bash-5.2$
+
+bash-5.2$
+
+QUEUED-AFTER-SLEEP
+bash-5.2$
+
+localhost ready
+
+Shell commands or agent prompts. 2 for help auto
+
+(Tepmprrelayssh-audient_umapiremote | =) (ca)
+

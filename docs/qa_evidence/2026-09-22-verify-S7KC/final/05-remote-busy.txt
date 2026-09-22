@@ -1,0 +1,41 @@
+® work - cpu00%-mem00% x +
+
+elliott@spark-dcc9:/tmp/relay-ssh-audit -1g3c9dbv/work$
+
+Q 4+ eB 2
+
+\O"E
+
+ox
+
+LOCAL-ONE
+LOCAL-TWO
+elliott@spark-dcc9: /tmp/relay-ssh-audit -1g3c9dbv/work$
+
+bash-5.2$
+
+printt
+
+‘REMOTE - ONE
+
+REMOTE-TWO\n*
+
+REMOTE - ONE
+REMOTE - TWO
+bash-5.2$
+
+/tmp
+bash-5.2$
+
+No agent provider is configured to fix it.
+
+Relaying - sleep 7...
+
+Shell commands or agent prompts. 2
+
+..tytmp/relay-ssh-audit-1g3cSdbviremote
+
+for help
+
+a ey
+

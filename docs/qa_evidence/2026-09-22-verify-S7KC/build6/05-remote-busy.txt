@@ -1,0 +1,33 @@
+= work - cpu00%-mem00% x +
+
+elliott@spark-dcc9:/tmp/relay-ssh-audit-n1_um4pi/work$
+
+OQ se S 09 - 0x
+
+\O"E
+
+LOCAL-ONE
+LOCAL-TWO
+elliott@spark-dcc9:/tmp/relay-ssh-audit-n1_um4pi/work$
+
+bash-5.2$
+
+printf ‘REMOTE-ONE\nREMOTE-TWO\n'
+
+REMOTE - ONE
+REMOTE - TWO
+bash-5.2$
+
+/tmp
+bash-5.2$
+
+1 on localhost. No agent provider is configured to fix it.
+
+® Relaying - sleep 7...
+
+Shell commands or agent prompts. 2 for help
+
+..t:/tmp/relay-ssh-audit-n1_um4pi/remote
+
+a ey
+

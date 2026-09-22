@@ -1,0 +1,36 @@
+= work - cpu00%-mem00% x + OQ\4 eG 2 - 0x
+
+@®s
+
+bash-5.2$
+
+rintf 'REMOTE-ONE\nREMOTE-TWO\n'
+
+REMOTE - ONE
+REMOTE -TWO
+bash-5.2$
+
+/tmp
+bash-5.2$
+
+bash-5.2$
+
+bash-5.2$
+
+QUEUED-AFTER-SLEEP
+bash-5.2$
+
+printf ‘RECEIVED
+
+INPUT> 1 command runs when the terminal
+QUEUE 1 take back to edit - drag to reorder - x remove
+» running $ ssh -t localhost 'HISTFILE=/dev/null bash -noprofile -norc i"
+
+| $ echo SHOULD-BE-A-COMMAND x]
+
+® Relaying - read -r -p INPUT>' value; printf 'RECEIVED=%s\n' "$value"...
+
+Shell commands or agent prompts. 2 for help auto
+
+exsmeieeal c) w)
+
