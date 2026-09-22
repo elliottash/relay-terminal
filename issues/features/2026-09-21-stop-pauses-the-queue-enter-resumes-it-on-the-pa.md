@@ -1,7 +1,8 @@
 ---
 id: 7JD1
 type: work
-status: planned
+status: executing
+assignee: agent
 labels: [feature, queue, remote]
 priority: 1
 rank: zzzzzzzzzzzzzzzzz
