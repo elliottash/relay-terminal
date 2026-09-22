@@ -100,7 +100,7 @@ def check_shell(resources, env, root, evidence):
 def main():
     image, evidence = map(lambda p: Path(p).resolve(), sys.argv[1:3])
     evidence.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix='relay-macos-installed-') as tmp:
+    with tempfile.TemporaryDirectory(prefix='relay-install-', dir='/tmp') as tmp:
         root = Path(tmp)
         mount = root / 'disk image'
         mount.mkdir()
@@ -123,7 +123,7 @@ def main():
                    PYTHONPATH=os.pathsep.join(map(str, (resources / 'relay/backend', resources / 'relay',
                                                        resources / 'python/lib/python3.13/site-packages'))),
                    PATH='/usr/bin:/bin:/usr/sbin:/sbin')
-        for key in ('QT_PLUGIN_PATH', 'QTDIR', 'DYLD_LIBRARY_PATH', 'DYLD_FRAMEWORK_PATH', 'PYTHONHOME', 'QT_QPA_PLATFORM', 'SSL_CERT_FILE', 'SSL_CERT_DIR'):
+        for key in ('QT_PLUGIN_PATH', 'QTDIR', 'DYLD_LIBRARY_PATH', 'DYLD_FRAMEWORK_PATH', 'PYTHONHOME', 'QT_QPA_PLATFORM', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'RELAY_OPEN_SOCKET'):
             env.pop(key, None)
         subprocess.run([str(python), '-S', '-c',
                         'import cryptography,ssl; from relay_core import agent, board; import remote.gui_host'],
@@ -176,6 +176,18 @@ def main():
                            for line in children.splitlines()):
                     raise RuntimeError('GUI worker did not use its private Python')
                 (evidence / 'shell-ready.json').write_text(json.dumps(state, indent=2))
+                # Verify desktop discovery and a real manager acknowledgement, not the
+                # helper's successful fallback to another application when no socket exists.
+                open_check = subprocess.run([str(python), '-S', '-c',
+                    "import json,pathlib,runpy,stat,sys; "
+                    "helper=runpy.run_path(sys.argv[1]); address=helper['socket_address'](); "
+                    "assert address and pathlib.Path(address).is_socket(), address; "
+                    "assert len(address.encode()) < 104, address; "
+                    "assert helper['send']({'path':sys.argv[2],'line':1}), 'Relay rejected open request'; "
+                    "print(json.dumps({'socket':address,'acknowledged':True}))",
+                    str(resources / 'relay/scripts/relay-open'), str(work / 'composer-result.txt')],
+                    env=env, check=True, capture_output=True, text=True)
+                (evidence / 'relay-open.json').write_text(open_check.stdout)
                 screenshot = subprocess.run(['/usr/sbin/screencapture', '-x', str(evidence / 'desktop.png')],
                                             capture_output=True, text=True)
                 (evidence / 'screenshot-status.txt').write_text(screenshot.stderr)
