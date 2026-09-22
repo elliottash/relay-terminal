@@ -7,7 +7,7 @@ assignee: claude-code
 rank: m
 created: '2026-09-22'
 source: 'Claude Code in a Relay pane, 2026-09-22'
-links: {plans: [], commits: [], evidence: [], related: [HCR2, R2WQ, K9KC], github: null}
+links: {plans: [], commits: ['8164a9e702a2c6b1b790c5b6f0a0fc6e8ec89db6'], evidence: [], related: [HCR2, R2WQ, K9KC], github: null}
 ---
 # Three more gaps in the prose replacement renderer
 
