@@ -365,7 +365,7 @@ public:
     virtual void setPlainClickOpensLinks(bool on) { Q_UNUSED(on); }
     // Which `#K7Q2` references in the output are real cards, and what they are called
     // (`relay::links::CardLookup`; spelt out here so this header stays QtCore-only). The host
-    // answers from the pane's Switchboard index; until it does, and on engines that cannot
+    // answers from the pane's Board index; until it does, and on engines that cannot
     // hit-test their output, card references stay plain text.
     virtual void setCardLookup(std::function<bool(const QString &id, QString *title)> lookup)
     {

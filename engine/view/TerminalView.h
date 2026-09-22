@@ -116,7 +116,7 @@ public:
     // ---- links in the output (issues YZTK and GWXM)
     //
     // A link the view found: an OSC 8 hyperlink, a URL, a file or folder that exists, or a
-    // `#K7Q2` reference to a Switchboard card the host's board knows.
+    // `#K7Q2` reference to a Board card the host's board knows.
     // The recognition and resolution rules live in src/OutputLinks.* and are tested there.
     struct Link {
         QString target;         // an absolute path, the URL as written, or relay://card/<id>
@@ -130,8 +130,8 @@ public:
         bool valid() const { return !target.isEmpty(); }
     };
 
-    // `#K7Q2` in the output is a card link only when the host's Switchboard index knows the id
-    // (Switchboard design section 5); with no lookup set — a pane that has seen no board, or the
+    // `#K7Q2` in the output is a card link only when the host's Board index knows the id
+    // (Board design section 5); with no lookup set — a pane that has seen no board, or the
     // engine on its own — card references stay plain text.
     void setCardLookup(relay::links::CardLookup lookup);
 
