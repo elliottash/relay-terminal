@@ -900,3 +900,7 @@ Independent takeover verification: all 19 items reconciled with final decisions;
 <!-- relay:entry 20260922T012338Z-za author=codex kind=progress -->
 ### Codex · 2026-09-22 01:23
 Parent handoff: verification evidence landed in abbd41efaac21a0cdefc64f29ef0d83a72d59580; application-wide shortcut fix landed in 85d0dd0f7dea0023dceaea9b6b8d4d858156805c, with live before/after and exact-tree build. Read-only authentication readiness now confirms both installed Codex and Claude Code are signed in; no owner login setup is needed. A real Relay guest turn is still not yet verified. Current result remains 17 pass/2 partial. claude-fable-5.1 in a default chip is consistent with selecting the catalog's fable row; explicit guest:claude opus selection was driven and displays claude-opus-5 (extra/claude-name.png), so the older checklist does not require every Claude guest default to be opus.
+
+<!-- relay:entry 20260922T013039Z-zr author=codex kind=evidence -->
+### Codex · 2026-09-22 01:30
+Real authenticated Codex startup/turn verified through the isolated live Relay UI: MDL1_OK, 4219ms, zero tools. No owner setup needed. Evidence: docs/qa_evidence/2026-09-22-verify-MDL1/real-guest/. The displayed/executed model is gpt-5.6-sol/low despite seeded gpt-6-astra/low; item 1 therefore remains partial pending catalog/fallback versus selection investigation. Live phone remains blocked; total stays 17 pass/2 partial. Earlier hosted fallback attempt is disclosed, not counted as guest proof. Disposable auth copy removed, no secrets committed; front matter unchanged.

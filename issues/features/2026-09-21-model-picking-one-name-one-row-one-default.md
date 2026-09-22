@@ -182,7 +182,7 @@ Independent verification 2026-09-22; item numbers preserve the original 19-item 
 Evidence and limits: `docs/qa_evidence/2026-09-22-verify-MDL1/README.md`.
 Final decisions supersede the old modal/mode-page expectations.
 
-- [ ] 1. PARTIAL: new pane follows main rank 1 and level; deferred guest UI and first-prompt protocol fixture pass. An authenticated guest turn remains unverified.
+- [ ] 1. PARTIAL: new pane follows main rank 1 and level; deferred guest UI and first-prompt protocol fixture pass. A real authenticated Codex turn now passes, but executes gpt-5.6-sol despite seeded gpt-6-astra; guest rank-1 selection remains unresolved.
 - [x] 2. A per-pane pick leaves the next pane on main rank 1.
 - [x] 3. Ctrl+Shift+M → priorities → Alt+Up/Down reorders main; the next pane follows. Live defect fixed in 85d0dd0f.
 - [x] 4. `/swap` from a third model goes to rank 1, retains its explanation, then returns.
@@ -204,9 +204,9 @@ Final decisions supersede the old modal/mode-page expectations.
 
 ## Verdict
 2026-09-22, Codex: **17 pass, 2 partial/blocked; not a full QA pass.**
-The two remaining checks are a real authenticated guest startup/turn and live paired-phone
-presentation. The protocol fixture and JS tests are explicitly not evidence of those external
-paths. Found and fixed Alt+Up/Down being intercepted by window pane navigation; only that hunk
+The two remaining checks are the real guest rank-1 discrepancy and live paired-phone
+presentation. The authenticated Codex startup/turn now passes (real-guest evidence), but uses
+gpt-5.6-sol despite seeded gpt-6-astra. The JS tests do not prove live phone presentation. Found and fixed Alt+Up/Down being intercepted by window pane navigation; only that hunk
 landed in `85d0dd0f7dea0023dceaea9b6b8d4d858156805c`, after wrapper and exact-tree builds,
 targeted modelpicker/modelspane tests, and a successful live reorder/new-pane regression.
 
