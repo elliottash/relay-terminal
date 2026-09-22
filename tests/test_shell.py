@@ -157,6 +157,20 @@ class ShellTests(unittest.TestCase):
         self.assertIn(b'\x1b[1A' + OSC_ROW_MARK + b'\x1b[B\r\nRELAY_OK', s.output)
         self.assertEqual(s.output.count(OSC_ROW_MARK), 1)
 
+    def test_gap_request_follows_background_notification(self):
+        s = self.session
+        s.submit("(sleep 0.2; printf 'LATE_OUTPUT\\n') &")
+        s.wait('ready')
+        time.sleep(0.4)
+        s.drain()
+        start = len(s.output)
+        s.submit("printf 'RESULT\\n'")
+        s.wait('ready'); s.drain()
+        output = bytes(s.output[start:])
+        # The terminal handles this request after Done, before Readline echoes the input.
+        self.assertLess(output.index(b'Done'), output.index(b'\x1b]7772;input-gap\x1b\\'))
+        self.assertLess(output.index(b'\x1b]7772;input-gap\x1b\\'), output.index(b"printf 'RESULT"))
+
     def test_staged_multiline_rows_marked(self):
         s = self.session
         s.submit("printf 'ONE\\n'\nprintf 'TWO\\n'\n")   # two rows of text + a trailing blank row

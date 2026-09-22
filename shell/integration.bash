@@ -324,6 +324,10 @@ __relay_load() {
     IFS= read -r -d '' READLINE_LINE < "$RELAY_RUNTIME_DIR/input.txt" || :
     READLINE_POINT=${#READLINE_LINE}
     __relay_staged_rows=$(__relay_rows_for "$READLINE_LINE")
+    # Bash has printed pending job notifications before entering this binding. Repair the
+    # upper gap now, just before Readline echoes the command; late output can consume PS1's
+    # original gap. The terminal adds nothing when a blank row is already there.
+    printf '\033]7772;input-gap\033\\'
     __relay_event loaded 0 < /dev/null
 }
 

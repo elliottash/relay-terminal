@@ -20,8 +20,9 @@ namespace relay {
 
 class SequenceScanner {
 public:
+    explicit SequenceScanner(bool inputGaps = false) : m_inputGaps(inputGaps) {}
     struct Hit {
-        enum Kind { PromptMark, RowRole, AltScreen, Erase } kind = PromptMark;
+        enum Kind { PromptMark, RowRole, AltScreen, Erase, InputGap } kind = PromptMark;
         size_t end = 0;    // offset just past the sequence within the chunk
         char mark = 0;     // PromptMark: 'A', 'B', 'C', 'D'; Erase: 'J' or 'K'
         int exitCode = -1; // PromptMark 'D'
@@ -225,6 +226,11 @@ private:
     bool finishRowRole(Hit *hit, size_t end)
     {
         m_state = State::Ground;
+        if (m_inputGaps && m_buf == "input-gap") {
+            hit->kind = Hit::InputGap;
+            hit->end = end;
+            return true;
+        }
         if (m_buf == "shell")
             hit->role = MarkUserShell;
         else if (m_buf == "agent")
@@ -239,6 +245,7 @@ private:
     }
 
     State m_state = State::Ground;
+    bool m_inputGaps = false; // consumed by TerminalSession, not a core prompt/role event
     std::string m_buf;
 };
 

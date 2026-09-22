@@ -1,13 +1,14 @@
 ---
 id: BGSP
 type: work
-status: discussing
+status: needs-verification
 labels: [bug, terminal]
-assignee: null
+assignee: codex
+implemented_by: openai/gpt-6-astra via codex
 rank: mbgsp
 created: '2026-09-22'
 source: Codex investigation in a Relay pane, 2026-09-22
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-background-command-spacing/reproduction.md], related: [SG4P], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-background-command-spacing/reproduction.md, docs/qa_evidence/2026-09-22-background-command-spacing/fix.md], related: [SG4P], github: null}
 ---
 # Background job completion removes the gap before the next shell command
 
@@ -29,4 +30,22 @@ Confirmed with a real interactive Bash PTY using the existing BashSession harnes
 - Normal, multiline and native commands retain correct input marking and spacing, without accumulating additional gaps.
 
 ## Tests
-`manual: docs/qa_evidence/2026-09-22-background-command-spacing/reproduction.md`
+`python3 -m unittest tests.test_shell -v`
+`RELAY_ENGINE_TEST=SessionTest build/engine/relay-engine-tests`
+`RELAY_ENGINE_TEST=CoreTest build/engine/relay-engine-tests theRowRoleOscMarksItsLine theScannerReportsAnErasedRow osc133PromptMarks`
+`bash -n shell/integration.bash`
+`manual: docs/qa_evidence/2026-09-22-background-command-spacing/fix.md`
+
+## Plan
+Goal: restore one blank row above staged shell commands after late output/job notifications.
+
+Findings: shell/integration.bash __relay_load executes after Bash's pending job notifications and before command redisplay. PS1 spacing alone cannot survive asynchronous output.
+
+Steps: emit an OSC 7772;input-gap marker from __relay_load; process it in order in TerminalSession, using active-screen text to insert only missing rows; add engine and real Bash tests; document and build the change.
+
+Risks: preserve existing gaps, scrollback, alternate-screen programs, fragmented escape sequences and native input. The new behavior requires the rebuilt terminal and a newly opened shell.
+
+Verify: targeted engine session tests, real Bash PTY tests, and isolated live GUI reproduction.
+
+## Execution Summary
+Fixed command loading after asynchronous output/job notifications with an ordered input-gap request. TerminalSession adds only missing blank rows, preserving row marking and existing gaps, and ignores requests on alternate screens. Verified the original Done → ls scenario in a real Bash PTY and an isolated live Relay window. Evidence: docs/qa_evidence/2026-09-22-background-command-spacing/fix.md and fixed.png. Restart the rebuilt Relay to load both the engine and shell changes.

@@ -101,7 +101,7 @@ void TerminalSession::flushDisplayQueue(bool force)
 {
     if (m_pendingDisplay.isEmpty() || (!force && !m_core->atGround()))
         return;
-    m_core->feed(m_pendingDisplay.constData(), size_t(m_pendingDisplay.size()));
+    feedWithInputGaps(m_pendingDisplay.constData(), size_t(m_pendingDisplay.size()));
     m_pendingDisplay.clear();
     m_pendingDisplaySince.invalidate();
 }
@@ -166,7 +166,7 @@ void TerminalSession::onPtyOutput(const char *data, size_t len)
     m_bytes.fetch_add(len);
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        m_core->feed(data, len);
+        feedWithInputGaps(data, len);
         if (!m_pendingDisplay.isEmpty())
             flushDisplayQueue(false);
         if (m_outputSignal.load() && m_pendingOutput.size() < (64 << 20))
@@ -178,6 +178,38 @@ void TerminalSession::onPtyOutput(const char *data, size_t len)
     // the next chunk; std::mutex is not fair.
     for (int spins = 0; m_guiWaiting.load() > 0 && spins < 2000; ++spins)
         std::this_thread::yield();
+}
+
+void TerminalSession::feedWithInputGaps(const char *data, size_t len)
+{
+    // Split only at a completed gap request, including one split across PTY reads. Never
+    // feed recursively from a core callback: both cores must finish parsing the OSC first.
+    size_t fed = 0, scanned = 0;
+    SequenceScanner::Hit hit;
+    while (m_inputGapScanner.next(data, len, scanned, &hit)) {
+        scanned = hit.end;
+        if (hit.kind != SequenceScanner::Hit::InputGap) continue;
+        m_core->feed(data + fed, hit.end - fed);
+        fed = hit.end;
+        ensureInputGap();
+    }
+    if (fed < len) m_core->feed(data + fed, len - fed);
+}
+
+void TerminalSession::ensureInputGap()
+{
+    if (m_core->altScreen() || !m_core->atGround()) return;
+    const int row = m_core->activeCursor().row;
+    const QStringList lines = m_core->screenText().split(QLatin1Char('\n'));
+    // A late writer can leave an unterminated line. Preserve it, finish its row, then leave
+    // one empty row. Otherwise the cursor already occupies the fresh command-input row.
+    if (!lines.value(row).trimmed().isEmpty()) {
+        m_core->feed("\r\n\r\n", 4);
+        return;
+    }
+    const QString previous = row > 0 ? lines.value(row - 1)
+                                    : m_core->historyText(1).value(0);
+    if (!previous.trimmed().isEmpty()) m_core->feed("\r\n", 2);
 }
 
 void TerminalSession::scheduleDelivery()

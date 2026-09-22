@@ -3336,6 +3336,13 @@ row as a tracked grid ref — the same mechanism the selection anchor uses — a
 that row wherever the viewport or the paged history shows it, so the role scrolls, reflows and
 trims with the line under Ghostty exactly as `relay_marks` do under libvterm.
 
+Staged Bash input also emits `OSC 7772;input-gap` from `__relay_load`, after Bash's pending
+background-job notifications and before Readline redisplays the command (#BGSP). TerminalSession
+processes this marker in stream order for either core: it finishes unterminated output and adds
+an empty row only if one is missing above the input row. Existing prompt gaps stay unchanged;
+the request is ignored on the alternate screen. It neither marks the gap as input nor generates
+an OSC 133 lifecycle event. Native typing keeps the shell's existing prompt spacing.
+
 **A tab owns its theme** (owner, 2026-09-19: "add an option, on by default, that themes are tab
 specific … the theme that you have in the options menu is the default for when relay opens and new
 tabs … you can see the theme visually in the tab picker … add a /theme command"). The tokens, the

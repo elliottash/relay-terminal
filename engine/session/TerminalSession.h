@@ -9,6 +9,7 @@
 #pragma once
 
 #include "core/VtCore.h"
+#include "core/SequenceScanner.h"
 #include "pty/Pty.h"
 
 #include <QElapsedTimer>
@@ -118,10 +119,13 @@ private:
     };
 
     void onPtyOutput(const char *data, size_t len);
+    void feedWithInputGaps(const char *data, size_t len); // m_mutex held
+    void ensureInputGap(); // m_mutex held, between core feed calls
     void scheduleDelivery();
     void deliver();
 
     std::unique_ptr<VtCore> m_core;
+    SequenceScanner m_inputGapScanner{true};
     std::unique_ptr<Pty> m_pty;
     mutable std::mutex m_mutex;
     mutable std::atomic<int> m_guiWaiting{0};
