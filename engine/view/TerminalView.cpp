@@ -471,6 +471,40 @@ void TerminalView::applyGeometry()
     const int rows = std::max(1, (height() - 2 * m_padding) / m_ch);
     if (cols == m_cols && rows == m_rows && m_session->rows() == rows && m_session->columns() == cols)
         return;
+    // Keep content at the top, not its old numeric row: both the core and
+    // the inserted/replacement blocks can rewrap above it (#SRA7).
+    const bool hadFolds = foldsVisible();
+    const bool following = hadFolds ? m_followBottom
+        : m_session->withCore([](VtCore &c) { return c.viewportAtBottom(); });
+    QString topFold;
+    FoldLayer::Row topText;
+    if (!following) {
+        const int realTop = m_session->withCore([](VtCore &c) { return c.viewportTop(); });
+        auto top = hadFolds ? m_folds.at(m_visualTop) : FoldLayer::VisualRow{};
+        if (!hadFolds)
+            top.realRow = realTop;
+        // At its original print width prose is still painted by the core.
+        if (!top.fold) {
+            for (int i = 0; i < int(m_folds.folds().size()); ++i) {
+                const auto &f = m_folds.folds()[size_t(i)];
+                if (f.replacement && top.realRow >= f.anchorStartRow && top.realRow <= f.anchorRow) {
+                    top.fold = true;
+                    top.foldIndex = i;
+                    top.foldRow = top.realRow - f.anchorStartRow;
+                    break;
+                }
+            }
+        }
+        if (top.fold) {
+            const auto &f = m_folds.folds()[size_t(top.foldIndex)];
+            if (top.foldRow >= 0 && top.foldRow < int(f.rows.size())) {
+                topFold = f.uri;
+                topText = f.rows[size_t(top.foldRow)];
+            }
+        } else if (hadFolds) {
+            m_session->withCore([&](VtCore &c) { c.scrollViewportToRow(top.realRow); });
+        }
+    }
     m_rows = rows;
     m_cols = cols;
     m_session->resize(rows, cols, m_cw, m_ch);
@@ -480,7 +514,27 @@ void TerminalView::applyGeometry()
     m_folds.setGeometry(cols, m_folds.indent());
     m_foldSearch.invalidate(); // the block rewrapped: its matches sit on other rows
     if (!m_folds.folds().empty())
-        m_foldAnchorsDirty = true;
+        resolveFoldAnchors();
+    if (!following) {
+        const int realTop = m_session->withCore([](VtCore &c) { return c.viewportTop(); });
+        m_visualTop = m_folds.visualOfReal(realTop);
+        const int index = m_folds.indexOf(topFold);
+        if (index >= 0) {
+            const auto &f = m_folds.folds()[size_t(index)];
+            int row = 0;
+            for (int i = 0; i < int(f.rows.size()); ++i) {
+                const auto &r = f.rows[size_t(i)];
+                if (r.line > topText.line || (r.line == topText.line && r.first > topText.first))
+                    break;
+                row = i;
+            }
+            const int start = m_folds.foldVisualStart(index);
+            m_visualTop = start >= 0 ? start + row : m_folds.visualOfReal(f.anchorStartRow + row);
+            if (!foldsVisible())
+                m_session->withCore([&](VtCore &c) { c.scrollViewportToRow(f.anchorStartRow + row); });
+        }
+    }
+    m_followBottom = following;
     emit gridSizeChanged(rows, cols);
     scheduleFrame();
 }

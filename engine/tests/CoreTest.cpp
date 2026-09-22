@@ -595,6 +595,41 @@ private slots:
         QVERIFY(!h.vt->hasSelection());
     }
 
+    void resizePreservesHistoryTop()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core, 6, 10);
+        h.feed("0123456789abcdefghijKLMNOPQRST\r\n");
+        for (int i = 0; i < 30; ++i)
+            h.feed(QByteArray("line ") + QByteArray::number(i) + "\r\n");
+        h.vt->scrollViewportToRow(1);
+        QCOMPARE(h.frame().lines[0].text(), QStringLiteral("abcdefghij"));
+        h.vt->resize(9, 10, 8, 16);
+        QCOMPARE(h.frame().lines[0].text(), QStringLiteral("abcdefghij"));
+        h.vt->resize(4, 5, 8, 16);
+        QCOMPARE(h.frame().lines[0].text(), QStringLiteral("abcde"));
+        h.vt->resize(8, 20, 8, 16);
+        QCOMPARE(h.frame().lines[0].text(), QStringLiteral("0123456789abcdefghij"));
+        QVERIFY(!h.vt->viewportAtBottom());
+        h.vt->scrollViewportToBottom();
+        h.vt->resize(5, 8, 8, 16);
+        QVERIFY(h.vt->viewportAtBottom());
+    }
+
+    void resizeClampsTrimmedHistoryTop()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core, 4, 10);
+        h.vt->setScrollbackLines(12);
+        for (int i = 0; i < 30; ++i)
+            h.feed("0123456789\r\n");
+        h.vt->scrollViewportToTop();
+        h.vt->resize(4, 2, 8, 16);
+        QCOMPARE(h.vt->viewportTop(), 0);
+        QVERIFY(!h.vt->viewportAtBottom());
+        QVERIFY(!h.frame().lines.empty());
+    }
+
     void reflowOnResize()
     {
         QFETCH_GLOBAL(QString, core);

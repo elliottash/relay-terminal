@@ -613,12 +613,27 @@ void GhosttyCore::feed(const char *data, size_t len)
 
 void GhosttyCore::resize(int rows, int cols, int cellWidthPx, int cellHeightPx)
 {
+    GhosttyTrackedGridRef top = nullptr;
+    if (!viewportAtBottom() && !altScreen()) {
+        GhosttyPoint p{};
+        p.tag = GHOSTTY_POINT_TAG_VIEWPORT;
+        ghostty_terminal_grid_ref_track(d->t, p, &top);
+    }
     d->rowsN = std::max(1, rows);
     d->colsN = std::max(1, cols);
     d->cellW = std::max(1, cellWidthPx);
     d->cellH = std::max(1, cellHeightPx);
     ghostty_terminal_resize(d->t, uint16_t(d->colsN), uint16_t(d->rowsN), uint32_t(d->cellW), uint32_t(d->cellH));
     d->applyScrollbackLimit();
+    if (top) {
+        GhosttyPointCoordinate at{0, 0};
+        if (ghostty_tracked_grid_ref_has_value(top)
+            && ghostty_tracked_grid_ref_point(top, GHOSTTY_POINT_TAG_SCREEN, &at) == GHOSTTY_SUCCESS)
+            scrollViewportToRow(int(at.y));
+        else
+            scrollViewportToTop();
+        ghostty_tracked_grid_ref_free(top);
+    }
 }
 
 int GhosttyCore::rows() const { return d->rowsN; }

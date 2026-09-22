@@ -1,0 +1,23 @@
+********* Start testing of CoreTest *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : CoreTest::initTestCase()
+PASS   : CoreTest::resizePreservesHistoryTop(libvterm)
+PASS   : CoreTest::resizeClampsTrimmedHistoryTop(libvterm)
+PASS   : CoreTest::reflowOnResize(libvterm)
+PASS   : CoreTest::rowsOnlyResizeKeepsCursorBelowAFullRow(libvterm)
+PASS   : CoreTest::cleanupTestCase()
+Totals: 6 passed, 0 failed, 0 skipped, 0 blacklisted, 0ms
+********* Finished testing of CoreTest *********
+********* Start testing of ViewTest *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : ViewTest::initTestCase()
+PASS   : ViewTest::resizeKeepsTopContent(libvterm)
+PASS   : ViewTest::resizeKeepsFoldTopContent(libvterm)
+PASS   : ViewTest::resizeKeepsProseTopContent(libvterm)
+PASS   : ViewTest::proseReflowsOnResize(libvterm)
+PASS   : ViewTest::aFoldStaysUnderItsLineAcrossAResize(libvterm)
+PASS   : ViewTest::aResizeKeepsTheMatchesInsideTheFold(libvterm)
+PASS   : ViewTest::compressedProseKeepsFollowingOutputVisible(libvterm)
+PASS   : ViewTest::cleanupTestCase()
+Totals: 9 passed, 0 failed, 0 skipped, 0 blacklisted, 3875ms
+********* Finished testing of ViewTest *********

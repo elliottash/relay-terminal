@@ -1564,6 +1564,75 @@ private slots:
         QVERIFY(t.view->visibleRowsText().join(QLatin1Char('|')).contains(QStringLiteral("hello prose")));
     }
 
+    void resizeKeepsTopContent()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        for (int i = 0; i < 70; ++i)
+            t.backend->writeToDisplay(QByteArray("history row ") + QByteArray::number(i) + "\r\n");
+        QTest::qWait(80);
+        t.view->scrollToRow(15);
+        QTRY_COMPARE(t.view->visibleRowsText().value(0), QStringLiteral("history row 15"));
+        for (const QSize &size : {QSize(32, 18), QSize(70, 7), QSize(50, 12)}) {
+            t.backend->resizeTerminal(size.height(), size.width());
+            QTest::qWait(80);
+            QCOMPARE(t.view->visibleRowsText().value(0), QStringLiteral("history row 15"));
+        }
+        t.view->scrollToBottom();
+        t.backend->resizeTerminal(8, 40);
+        QTest::qWait(80);
+        QVERIFY(t.backend->session()->withCore([](VtCore &c) { return c.viewportAtBottom(); }));
+    }
+
+    void resizeKeepsProseTopContent()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        QStringList body;
+        for (int i = 0; i < 40; ++i)
+            body << QStringLiteral("paragraph %1 has enough words to wrap when this pane becomes narrower").arg(i);
+        printProse(t, body.join(QLatin1Char('\n')) + QLatin1Char('\n'));
+        t.view->scrollToRow(12);
+        QTRY_VERIFY(t.view->visibleRowsText().value(0).startsWith(QStringLiteral("paragraph 12 ")));
+        for (int width : {40, 70, 100}) {
+            t.backend->resizeTerminal(14, width);
+            QTest::qWait(80);
+            QVERIFY2(t.view->visibleRowsText().value(0).startsWith(QStringLiteral("paragraph 12 ")),
+                     qPrintable(t.view->visibleRowsText().join(QLatin1Char('|'))));
+        }
+    }
+
+    void resizeKeepsFoldTopContent()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.anchoredLines();
+        QStringList body;
+        for (int i = 0; i < 40; ++i)
+            body << QStringLiteral("detail %1: words that rewrap as the pane becomes narrower").arg(i);
+        t.view->setFoldContent(QStringLiteral("relay://call/p/1/a"), foldBody(body));
+        QTest::qWait(80);
+        // Seek a logical line in the middle of the inserted block.
+        for (int row = 0; row < 120; ++row) {
+            t.view->scrollToVisualRow(row);
+            QTest::qWait(5);
+            if (t.view->visibleRowsText().value(0).trimmed().startsWith(QStringLiteral("detail 12:")))
+                break;
+        }
+        QVERIFY(t.view->visibleRowsText().value(0).trimmed().startsWith(QStringLiteral("detail 12:")));
+        const QString evidence = qEnvironmentVariable("RELAY_SRA7_EVIDENCE");
+        if (!evidence.isEmpty())
+            QVERIFY(t.grab().save(evidence + QStringLiteral("/fold-before.png")));
+        for (int width : {30, 80, 50}) {
+            t.backend->resizeTerminal(14, width);
+            QTest::qWait(80);
+            QVERIFY2(t.view->visibleRowsText().value(0).trimmed().startsWith(QStringLiteral("detail 12:")),
+                     qPrintable(t.view->visibleRowsText().join(QLatin1Char('|'))));
+            if (!evidence.isEmpty())
+                QVERIFY(t.grab().save(evidence + QStringLiteral("/fold-width-%1.png").arg(width)));
+        }
+    }
+
     void hostShortcutFilter()
     {
         QFETCH_GLOBAL(QString, core);

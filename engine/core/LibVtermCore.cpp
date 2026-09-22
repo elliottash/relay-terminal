@@ -568,7 +568,7 @@ struct LibVtermCore::Impl {
 
     // Rewrap scrollback lines [fromIndex, count) (extended back to the start of
     // their logical line) to newCols.
-    void rewrap(size_t fromIndex, int newCols)
+    void rewrap(size_t fromIndex, int newCols, int *top = nullptr)
     {
         if (count == 0 || newCols <= 0)
             return;
@@ -584,6 +584,7 @@ struct LibVtermCore::Impl {
         for (size_t i = 0; i < s; ++i)
             out.push_back(std::move(lines[i]));
 
+        const int oldTop = top ? *top : -1;
         std::u32string cps;
         size_t i = s;
         while (i < count) {
@@ -611,6 +612,8 @@ struct LibVtermCore::Impl {
                         cur.wrapColumns = uint16_t(newCols);
                         col = 0;
                     }
+                    if (top && int(k) == oldTop && idx == 0)
+                        *top = int(out.size());
                     Cell nc = c;
                     if (c.attrs & AttrCluster) {
                         cps.clear();
@@ -629,13 +632,18 @@ struct LibVtermCore::Impl {
                     col += w;
                 }
             }
+            if (top && int(i) == oldTop && lines[i].cells.empty())
+                *top = int(out.size());
             while (!cur.cells.empty() && cur.cells.back().isBlank() && cur.cells.back().attrs == 0)
                 cur.cells.pop_back();
             out.push_back(std::move(cur));
             i = j;
         }
-        if (limit > 0 && out.size() > size_t(limit))
+        if (limit > 0 && out.size() > size_t(limit)) {
+            if (top)
+                *top = std::max(0, *top - int(out.size() - size_t(limit)));
             out.erase(out.begin(), out.begin() + long(out.size() - size_t(limit)));
+        }
         const qint64 first = firstId();
         ring = std::move(out);
         head = 0;
@@ -1091,9 +1099,12 @@ void LibVtermCore::resize(int rows, int cols, int, int)
     cols = std::max(2, cols);
     if (rows == d->rowsN && cols == d->colsN)
         return;
+    const bool following = d->scrollOffset == 0;
+    int top = int(d->count) - d->scrollOffset;
     const bool colsChanged = cols != d->colsN;
     if (d->reflow && colsChanged)
-        d->rewrap(0, cols);
+        d->rewrap(0, cols, following ? nullptr : &top);
+    const qint64 first = d->firstId();
     d->resizing = true;
     d->minCountDuringResize = d->count;
     const size_t before = d->count;
@@ -1101,8 +1112,9 @@ void LibVtermCore::resize(int rows, int cols, int, int)
     d->resizing = false;
     d->rowsN = rows;
     d->colsN = cols;
+    top = std::max(0, top - int(d->firstId() - first));
     if (d->reflow && colsChanged && d->count > std::min(before, d->minCountDuringResize))
-        d->rewrap(std::min(before, d->minCountDuringResize), cols);
+        d->rewrap(std::min(before, d->minCountDuringResize), cols, following ? nullptr : &top);
     vterm_screen_flush_damage(d->screen);
     VTermPos pos;
     vterm_state_get_cursorpos(d->state, &pos);
@@ -1113,7 +1125,7 @@ void LibVtermCore::resize(int rows, int cols, int, int)
     // Both halves of a resize rewrite the ring (rewrap, and libvterm popping
     // lines back onto the screen), so every cached hyperlink walk goes.
     ++d->ringEpoch;
-    d->scrollOffset = 0;
+    d->scrollOffset = following ? 0 : std::max(0, int(d->count) - top);
     d->selActive = false;
     d->matches.clear();
     d->current = -1;
