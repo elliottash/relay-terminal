@@ -3945,8 +3945,9 @@ void BoardModelTests::theCardsRowCarriesVerifyOnlyInAQaLane()
     for (const relay::agent::Action &action : consoles.card()->actions())
         labels << action.fullLabel();
     QCOMPARE(labels, QStringList({QStringLiteral("Plan (p)"), QStringLiteral("Execute (x)"),
-                                  QStringLiteral("Verify (v)")}));
+                                  QStringLiteral("Verify (v)"), QStringLiteral("Try it (y)")}));
     QVERIFY(consoles.card()->actions().at(2).leaves);
+    QVERIFY(!consoles.card()->actions().at(3).leaves);
 
     // Back on an ordinary card the action is gone from the list, not merely greyed out.
     QJsonObject plain = card("M3XJ", "M3XJ card", "the issue", "h2");
