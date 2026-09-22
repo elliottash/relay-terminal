@@ -473,6 +473,138 @@ section did not say:
   first terminal pane of its tab; a `SettingsWatch` listener re-reads its target, because a first
   run has no catalog at all until the worker answers `presets`.
 
+
+#### 5.8.1 The owner's review of the pane (2026-09-21) — **built**
+
+He read the three tabs and said five things. Each one and what it became.
+
+> "tab 1: add horizontal line dividers between providers."
+
+A provider is up to three rows — its key, its "models… (N of M available)" link and, for a guest,
+what it may do with a tool — and they ran into the next provider's as one wall of text.
+`SettingRow::ruleAbove` draws a 1px line above a row in the theme's `@border`, the colour a section
+heading is already underlined in, and `modelsSection` sets it on every provider row but the first's.
+The rule belongs to the row under it, so it folds with the group and never leads a page.
+
+> "check the advanced provider settings. not sure whats helpful or needed."
+
+**Retired**, all three of it: `Pane::configure()`, the `agent.provider` action (gone from the keymap
+and from the keybinding presets, not merely unbound) and the "Advanced provider settings" row that
+opened it. It was Relay's first provider surface and every field had since grown a better home.
+
+| the dialog had | where it is now |
+| --- | --- |
+| Preset, API key, "save to the keyring" | the **providers** rows, one per provider, each with add key… / replace key… / test; the worker stores the key |
+| Base URL, Model ID | a **custom endpoint**: "+ add provider" → "custom endpoint…" takes a name, a base URL, a key, the model ids and the reasoning style (`backend/relay_core/customproviders.py`, protocol 28.6) |
+| Output token limit | already a row under **defaults** on the same page, over the same `provider/max_tokens` |
+| Agent workspace | the pane's own directory (`m_workspace`, from the cwd), which the file tools are held to |
+| Import keys from Warp | a row at the bottom of the **providers** group |
+| the consent checkbox | two sentences in the box that asks for a key |
+
+Two of those are decisions rather than moves. The **workspace** field is not replaced by anything: a
+workspace that disagreed with the pane you are typing in is a trap, not a setting, and nothing else
+in the tree wanted a second one. The **consent** is a sentence and not a tick: Relay has no
+per-action tool approvals by ruling, so a checkbox saying "yes, run tools" would gate nothing and
+make the person agree to something they cannot decline and keep an agent. The sentences say where
+the key goes (the keyring, this provider, never Relay's server, never a settings file) and what the
+agent will do with it (prompts and tool results go to the provider; tools run without asking, shell
+commands are not sandboxed, file tools are held to the pane's directory).
+
+The dialog's pair of Base URL / Model ID fields was also actively wrong: they described one nameless
+endpoint, and writing a URL into them while a named preset was selected posted that preset's key to
+a foreign host — the HTTP 401 of 2026-09-18, which `startBoardWorker`'s comment still records.
+
+**Open, and it needs the worker:** *Extra request JSON*. A custom provider stores a name, a base
+URL, model ids and an `effort_style`, and nothing carries a per-request body; adding the field to
+the custom-endpoint form is a change in `customproviders.py`.
+
+> "for available, remove the recent section. i would order the sections alphabetically."
+
+Both. The tab is a checklist — step 2, which of a provider's models exist for the lists, the box and
+the filter — and it is read one provider at a time ("i probably want to uncheck sonnet and haiku and
+gpt 5.5"). A block of lately-picked rows pulls those rows out of their provider and puts them
+somewhere that has moved between two looks. **Favorites stay** at the top: that section is one the
+user made by hand and the alphabet has no opinion about it. `models/recent` and `curation::noteUse`
+stay too — `noteUse` is what counts a model's uses, which the sort menu's "usage" reads — and
+nothing on the tab reads the list any more. The provider sections sort by the provider's shown name,
+case-insensitively; the order they had was "the rank of each provider's first model", which moved
+every time a list was edited.
+
+> "it seems like i cant disable gemini flash lite. just to say -- this tab is only for terminal
+> agents, so gemini flash lite should be optional. and relay lite shouldnt show up."
+
+Two rules, both read off the row rather than off a name.
+
+1. **Only a terminal class pins a model available.** `curation::isAvailable` kept a model ticked
+   while *any* of the five lists named it, and the built-in lite list names
+   `google/gemini-3.5-flash-lite` — so the one model it names could never be un-ticked.
+   `curation::inTerminalList` is that question asked of `boxClasses()` alone — high, main, flash,
+   local — and it is what pins now. Lite is not a pane mode: the box has no lite row (§5.3) and
+   nothing a person types goes there, so what the lite list holds is a statement about the chores,
+   not about what this machine offers a terminal agent. The chores read `models/tier/lite` straight
+   (`Pane::tiersObject`), never `shown()`, so un-ticking a lite model changes nothing for them.
+2. **Relay Free's lite role is not a model.** The gateway exposes one pseudo-model per role and
+   clamps each to that role's ceiling, so `relay-lite` is the lite chore lane and nothing a pane can
+   be put on. `models::liteOnlyRole` is a **hosted** entry whose ranking class is `lite`
+   (`Entry::tier`, what the worker's catalog names it a default for) and `shown`, `allUsable` and
+   `curatable` all skip it — every surface a terminal agent picks from. `relay-main` and
+   `relay-flash` are ordinary rows, and so is anybody else's lite-classed model: gemini-3.5-flash-
+   lite, gpt-5.6-luna and claude-haiku-4.5 are real models, drawn, available by default and the
+   user's to un-tick.
+
+Found with them: a provider serving **one** model could never have that model un-ticked, because
+`presetNamedIn` then found nothing for the preset and the "a provider added after the list keeps the
+default" rule brought every model back. A preset whose every model is un-ticked leaves `"<preset>|"`
+behind — not a key, matching no entry — so the preset goes on being named.
+
+> "tab 3: in a pane, i dont want separate tabs for the modes. they should just be in divided
+> sections. remove the lite section."
+
+The picker's second row of tabs is gone. **priorities** is one scrolling page: a header line per
+class — high, main, flash, and local where this machine serves one — over that class's numbered
+rows, same columns. There is no lite section; its storage is untouched and the **jobs** tab (§5.9)
+is where a chore's model is set.
+
+`ModelPicker` stayed the widget. Everything the page needs was already there and none of it is about
+tabs; a second widget would have duplicated exactly that and the two would have drifted. What
+changed is where "which list is this" is read: it was `m_tier`, the tab in front, and it is now
+`rowTier()`, the class recorded on the row under the highlight — four lists are on screen at once,
+so the class is a property of the row. `m_tier` is `"classes"` on the page, one class id for a
+caller that wants a single list, and `"all"` for the flat tab.
+
+A class's header is a real row rather than a spanned rule, because it carries a control: the tick in
+the **in box** column is that class's "show this class in the box" switch, directly over the cutoff
+ticks it governs — one column, one question, read down — and the class and its note ("new panes
+start on rank 1" for main) go in the model column.
+
+The key map, and what each key reads:
+
+| key | what it does on the sectioned page |
+| --- | --- |
+| ↑ / ↓ | move through the rows **across** the sections, stepping over the headers |
+| enter | use the row in the pane this page serves |
+| alt+↑ / alt+↓ | move the row inside **its own** section, clamped at its edge |
+| a drag | the same; one that crosses a header changes no list at all |
+| delete | take the row out of its own section (backspace, with the filter empty) |
+| ctrl+enter | add the highlighted model to the section it is in |
+| ctrl+z | undo the last list edit, whichever class it was in |
+| → | the providers of a folded row, then the levels; ← comes back |
+| typing | searches every model: each section shows its own matches, then "not in <class>", then an open-ended provider's tail under "more from <provider>" |
+| the "in box" ticks | a cutoff per class; the tick on a section's own line is whether the box draws that class at all |
+| alt+1…4, ←/→ | the pane's four tabs — nothing under them wants the arrows now |
+
+**"not in this list" is per section**, not once at the bottom. A model addable to three classes
+appears under all three, which is the true answer to "where can I put this", and it is what makes
+"ctrl+enter adds to the section the highlight is in" literally true with no fourth place and no
+remembered target to explain. `addableToTier` still applies per section, so a guest harness is
+offered under high and main and not under flash.
+
+Opening on the served pane's class is `focusClass`: the highlight lands on the pane's own model
+where that class holds it, else rank 1, else the section's own header — so an empty class is still
+scrolled to and still says which class the page is on. It is also what a **re-read** comes back to,
+before the pane's own model: a model can be in three lists at once, and without it a fresh catalog
+moved the highlight to the same model's row in high and the page changed class under the person.
+
 ### 5.9 The jobs tab: what each job runs on (owner, 2026-09-21) — **built**
 
 > "for the per-job models, i think that should be reviewed and improved and made a 4th tab. take a

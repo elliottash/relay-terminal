@@ -67,7 +67,8 @@ that conflict.
    add key… for one of them (or Actions › API keys… to **Import from Warp** or **from Claude Code /
    Codex**; **test** checks the key reaches the provider) — then **profiles**. Which models you
    run, and in what order, is the **models pane** beside it (Ctrl+Shift+M, or **models and
-   priorities…** at the top of the page): a tab per list — **main, high, flash, lite and local**. Each row there is a model
+   priorities…** at the top of the page): one page with a section per class — **high, main, flash
+   and local** (what the chores run on is the **jobs** tab). Each row there is a model
    and the reasoning level it runs at in that list, in the provider's own words (xhigh on a GPT
    row, max on a GLM row). The first of a list is what that tier runs on: main for new panes, high
    for plan mode, flash for terminal driving and quick side calls, lite for chores, local for
@@ -252,36 +253,43 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   saying which pane it serves. Pressing the key again while you are in it closes it; pressing it in
   another pane points it at that one; **Esc** puts the cursor back in the pane it serves and leaves
   the pane open. A fresh install opens with a terminal pane at the left and this at the right.
-  **priorities** is a tab per list — **high · main · flash · lite · local** — on a second row of
-  tabs; it opens on the list of the mode the pane is in, ←/→ walk those and **Alt+1/2/3** walk the
-  three. A
-  tier tab *is* that list: numbered, in order, one row per model in lower case with the provider in
+  **priorities** is **one page of divided sections**, one per class — **high**, **main**, **flash**,
+  and **local** where this machine serves a model. There is no lite section: lite is never a pane
+  mode, and what the chores run on is the **jobs** tab. Each section is a header line — the class,
+  its **show this class in the box** switch and a one-line note ("new panes start on rank 1") —
+  over that class's list: numbered, in order, one row per model in lower case with the provider in
   a **via** column, rank 1 of main marked "new panes start here", and a rank whose provider has no
-  key or is spent greyed in place with the reason rather than dropped. **Enter** uses the row in
-  this pane, **Alt+↑/Alt+↓** or a drag moves it, **Delete** takes it out, the level list on the
-  right sets the level that model runs at *in that list*, and **Ctrl+Z** undoes any of it — the
-  same storage Options › Models writes, so the two can never disagree. Nothing switches the pane
-  you came from until you say so: a click only highlights, **Enter** or **use** is the switch.
-  **Typing** searches every
-  model your providers serve: this list's matches first, then "not in this list", where
-  **Ctrl+Enter** adds one, and last **more from openrouter** — a provider with a listing of
-  hundreds is kept out of the lists until you type, so it cannot bury the rest. The
-  **available** tab is every model you can run, grouped by provider — a **sort** menu (priority, a to z,
-  intelligence, speed, most used, subscription left), ★ favorites and the ten most recent above the
-  rest, subscription windows ("5h 62% left, resets 14:30") under the list — with one row per model
-  whatever serves it and **→** opening that row's providers to choose one, and
+  key or is spent greyed in place with the reason rather than dropped. **↑/↓** walk the rows across
+  the sections, **Enter** uses the row in this pane, **Alt+↑/Alt+↓** or a drag moves it inside its
+  own section, **Delete** takes it out, the level list on the right sets the level that model runs
+  at *in that list*, and **Ctrl+Z** undoes any of it — the same storage Options › Models writes, so
+  the two can never disagree. Nothing switches the pane you came from until you say so: a click
+  only highlights, **Enter** or **use** is the switch. **Typing** searches every model your
+  providers serve, per section: each class's own matches, then what that class does not list, where
+  **Ctrl+Enter** adds it *to the section the highlight is in*, and last **more from openrouter** —
+  a provider with a listing of hundreds is kept out of the lists until you type, so it cannot bury
+  the rest. The
+  **available** tab is every model you can run — ★ favorites first, then a section per provider in
+  alphabetical order, a **sort** menu (priority, a to z, intelligence, speed, most used,
+  subscription left) and subscription windows ("5h 62% left, resets 14:30") under the list — with
+  one row per model whatever serves it and **→** opening that row's providers to choose one, and
   **+ add a model by id…** at the end for an id your provider serves but does not list. Its first
   column is **available**: which models your lists, the box and the box's filter may offer at all.
   A provider you have a key for starts with all of its models ticked — un-tick the ones you never
   want — and a provider that lists hundreds, like OpenRouter, starts with a few recommended ones
   instead: type a name, and tick the row that comes up under **more from openrouter** to add it.
+  A model your **lite** list names is still yours to un-tick, because lite is a chore lane and not
+  a pane mode; the chores go on running it either way.
   (The **providers** tab — which is Options › Models' own provider rows, keys and profiles, drawn
-  by the same page — has a **models… (N of M available)** link under every provider that opens this
-  tab on it.) A class tab also says what **Alt+M** shows
+  by the same page, with a rule between one provider and the next — has a
+  **models… (N of M available)** link under every provider that opens the available tab on it, and
+  **keys from warp** at the bottom to bring a Warp install's endpoint keys across in one go.) A
+  section also says what **Alt+M** shows
   of it: the **in box** column is a cutoff (tick rank 3 and the box draws three of that class), and
-  **show this class in the box** takes the class out of it altogether. Both travel with the profile,
-  and **fill from defaults** replaces every list with what your providers can serve. The profile is
-  named in the header and switched there. `/model <name>` switches without opening the pane.
+  the tick on the section's own line takes the class out of the box altogether. Both travel with the
+  profile, and **fill from defaults** replaces every list with what your providers can serve. The
+  profile is named in the header and switched there. `/model <name>` switches without opening the
+  pane.
 - **The model box (Alt+M)** is the short answer: a header per class — **high**, **main**, **flash**,
   and **local** where this machine serves a model — with that class's top two models under it and
   your own highlighted. The headers are labels, so ↑↓ step over them; **→** opens a class to its

@@ -805,3 +805,82 @@ override reaching the served pane), `tests/modelsettings_test.cpp` 6, and `tests
 with a new `BackgroundRoleTests` pinning `BACKGROUND_ROLES` to the set the tab derives. The Xvfb run
 is against a clean `git archive main` export, because another session's uncommitted
 `src/BoardPane.cpp` would not compile in the shared tree.
+
+<!-- relay:entry 20260922T004000Z-k2 author=claude-code kind=progress -->
+### Claude Code · 2026-09-22 00:40
+The owner's review of the models pane, all five notes. `7bef1f17` `f6e0d1f5` `d6e5d2b6` `cdc4b9bb`.
+Evidence: `docs/qa_evidence/2026-09-21-models-pane-review` (thirteen shots, `drive.sh`, and the
+profile Relay left behind). Design: `docs/MODEL-PICKING-DESIGN.md` 5.8.1.
+
+**"tab 1: add horizontal line dividers between providers."** `SettingRow::ruleAbove` draws a 1px
+line above a row in the theme's `@border`, the colour a section heading is already underlined in,
+and `modelsSection` sets it on every provider row but the first's. A provider is up to three rows —
+its key, its "models… (N of M available)" link and, for a guest, what it may do with a tool — and
+they ran into the next provider's as one wall of text. The rule belongs to the row under it, so it
+folds with the group and never leads a page.
+
+**"check the advanced provider settings. not sure whats helpful or needed."** Retired: the dialog
+(`Pane::configure`), the `agent.provider` action — gone from the keymap and from the keybinding
+presets, not merely unbound — and the row that opened it. Every field had grown a better home.
+Preset and API key are the providers rows themselves. Base URL and Model ID are a **custom
+endpoint**, which has had its own path since 2026-09-20 ("+ add provider" → "custom endpoint…":
+name, base URL, key, model ids, reasoning style); the dialog's pair could only describe one nameless
+endpoint, and writing a URL into it while a named preset was selected posted that preset's key to a
+foreign host, which is the HTTP 401 of 2026-09-18. Output token limit is already a row under
+defaults. **Agent workspace** is deleted rather than moved: it is the pane's own directory, and one
+that disagreed with the pane you are typing in is a trap. **Import keys from Warp** is a row at the
+bottom of the providers. The **consent** is a sentence in the box that asks for a key, not a
+checkbox: Relay has no per-action tool approvals by ruling, so a tick saying "yes, run tools" would
+gate nothing and make the person agree to something they cannot decline and keep an agent.
+
+*One field has no home and needs the worker:* **Extra request JSON**. A custom provider stores a
+name, a base URL, model ids and an `effort_style`, and nothing carries a per-request body; adding
+the field is a change in `backend/relay_core/customproviders.py`, which another session holds this
+round. `provider/extra` is still written by `configurePreset` from the worker's own preset row, so
+nothing regressed. Left for the card.
+
+**"for available, remove the recent section. i would order the sections alphabetically."** Both. The
+tab is a checklist read one provider at a time, and a block of lately-picked rows pulls those rows
+out of their provider and puts them somewhere that has moved between two looks. Favorites stay at
+the top — that section is one you made by hand. `models/recent` and `noteUse` stay, because `noteUse`
+is what counts a model's uses for the sort menu's "usage"; nothing on the tab reads the list now.
+
+**"i cant disable gemini flash lite … and relay lite shouldnt show up."** Two rules, both read off
+the row. (1) `curation::inTerminalList` — `inAnyList` over `boxClasses()` alone, high/main/flash/
+local — is what pins a model available now. The lite list does not pin: lite is not a pane mode, the
+box has no lite row, and the chores read `models/tier/lite` straight (`Pane::tiersObject`), never
+`shown()`, so un-ticking a lite model leaves them exactly where they were. The evidence profile is
+seeded with `tier/lite = gemini-3.5-flash-lite` and `lists-after.txt` shows the tick cleared with the
+list untouched. (2) `models::liteOnlyRole` — a **hosted** row whose ranking class is `lite`
+(`Entry::tier`) — is skipped by `shown`, `allUsable` and `curatable`, which is every surface a
+terminal agent picks from. `relay-main` and `relay-flash` are ordinary rows, and gemini-3.5-flash-
+lite, gpt-5.6-luna and claude-haiku-4.5 are real models, drawn and tickable. Found with it: a
+provider serving **one** model could never have that model un-ticked, because `presetNamedIn` then
+found nothing for the preset and the default came back; a preset whose every model is un-ticked
+leaves `"<preset>|"` behind, which is not a key and matches no entry.
+
+**"tab 3: in a pane, i dont want separate tabs for the modes … remove the lite section."**
+priorities is one scrolling page: a banded header line per class — high, main, flash, and local
+where this machine serves one — over that class's numbered rows, same columns. No lite section; its
+storage stays and the jobs tab is where a chore's model is set. `ModelPicker` stayed the widget
+(everything the page needs was already there and none of it is about tabs); what changed is that
+"which list is this" is read from the **row** (`rowTier`) and not from the tab, because four lists
+are on screen at once. A class's header is a real row, not a spanned rule, because it carries a
+control: the tick in the "in box" column is that class's switch, directly over the cutoff ticks it
+governs. Keys: ↑/↓ across the sections stepping over headers, alt+↑/↓ inside a section and clamped
+at its edge, delete and ctrl+z on the row's own class, ctrl+enter into the section the highlight is
+in, ←/→ now the pane's four tabs. **"not in this list" is per section**, which is what makes
+ctrl+enter's rule literally true with no fourth place and no remembered target; a model addable to
+three classes appears under all three.
+
+Looking at the shots found five things, all fixed before landing: the **model's name was elided**
+("claude-opu…") while the via column had room to spare, so both columns stretch and the provider
+elides first; a class header's note was elided for the same reason, so it sits in the via column;
+the notes were still too long and were shortened; rank 1 of main said "new panes start here" twice
+once its header said it; and the sections did not look divided, so each header carries a band
+stepped off the list's own `QPalette::Base`.
+
+Tests: `ctest -R "modelspane|modelpicker|modelcatalog|settings|appcommands|filterpopup"` green —
+nine new cases in `tests/modelpicker_test.cpp`, two in `tests/modelcatalog_test.cpp`, two in
+`tests/settingspane_test.cpp`, the class-tab cases in `tests/modelspane_test.cpp` ported to
+sections; `tests/test_keybindings.py` 25 green.
