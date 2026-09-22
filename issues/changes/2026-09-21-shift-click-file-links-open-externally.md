@@ -8,7 +8,7 @@ implemented_by: openai/gpt-5.6-sol via codex
 rank: m
 created: '2026-09-21'
 source: Codex in a Relay pane, 2026-09-21
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-shift-click-external/], related: [GWXM], github: null}
+links: {plans: [], commits: [79e52714842b008b6071beba52006ef1d2b4c578], evidence: [docs/qa_evidence/2026-09-21-shift-click-external/], related: [GWXM], github: null}
 ---
 # Shift-click file links should open externally
 
