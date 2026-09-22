@@ -34,3 +34,5 @@ Failure indicators: seeded brief did not reveal the expected text before answeri
 2. Preserve prior Human QA questions/answers when recording Try it. Reproduction: seed unrelated answered Human QA, then send try_answer. Current section replacement erases that decision. Expected: update only generated Try it content.
 
 Both are reproducible at the recorded committed backend revision, independent of old screenshots. No code fix was authorized for this verifier. The broader live model run and clean current-main UI validation remain outstanding after repair. Generated board index left to Relay to avoid touching another session's file.
+
+Board format check: `python3 scripts/relay-board.py check` reports 451 cards, 13 errors and 745 warnings; none names #JNYN or its card path. These unrelated shared-board problems were not edited. Evidence commit: `f819daa617fa7fc34bde95c9fa0bc1d59c974d36`.

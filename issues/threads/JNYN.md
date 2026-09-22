@@ -17,3 +17,7 @@ Claimed for fresh independent verification, explicitly authorized to replace the
 <!-- relay:entry 20260922T011420Z-a2 author=codex kind=evidence -->
 ### Codex · 2026-09-22 01:14
 Independent verification FAIL; returned to Ready. Fresh report maps all Done means and Tests: docs/qa_evidence/2026-09-21-verify-JNYN-fresh/report.md. 32 protocol tests and existing cardtests pass, but successful retry reports a stale staging failure and try_answer erases pre-existing Human QA answers. UI open/answer/reveal driven under isolated Xvfb on recorded gate binary, exploratory only; real agent staging blocked without supported provider. No implementation or real Human QA decisions changed. Parent must repair the two concrete backend findings before approval.
+
+<!-- relay:entry 20260922T011456Z-a3 author=codex kind=evidence -->
+### Codex · 2026-09-22 01:14
+Verification record landed as f819daa617fa7fc34bde95c9fa0bc1d59c974d36; linked in commits. Board check reports 13 existing errors / 745 warnings, none naming JNYN or its card path. Relay MCP unavailable, no delegation used.
