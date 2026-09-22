@@ -82,3 +82,25 @@ was even sent):
 No `## Try it` had been written when this landed, and that is the honest state: the section is
 written at the end of the turn, after the pass, which is exactly the order the brief fixes so
 that a card never asks for a review of something that was not staged.
+
+## D. How the real turn ended, and the one thing it found
+
+It did not finish. After **30 minutes, 69 tool calls and 53 steps**, `kimi-k3` stalled at
+`api.moonshot.ai` — sixty seconds with nothing produced, once, retried, and again — and the turn
+ended `outcome=error` (`turn_end … ms=1801432 thinking_ms=902024 tools=69 retries=1
+open_items=6`).
+
+The feature did the right thing with that: **no `## Try it` was written on #7BM4**, the button
+went back to **Try it (y)**, and the card was never put in front of anyone as ready to review.
+That is the rule this whole card exists for, exercised against a real provider failure rather
+than a stub.
+
+But looking at the card afterwards showed a gap, and it is fixed rather than listed: **the card
+carried no trace that Try it had been attempted at all.** The brief asks the *agent* for the
+"Try it could not be staged: …" note (step 7), and an agent whose provider stalled — or whose
+turn was stopped, or whose budget ran out — never reaches it. `TryItCommands._write_failure_note`
+now leaves that note itself whenever a run ends `error`, `stopped` or `cancelled` with neither a
+section nor a note of its own: same first words, plus how it ended, how long it ran, where the
+captures are, and that the card is not asking to be reviewed. A card that was tried and failed
+has to read differently from a card nobody pressed the button on. Four cases in
+`tests/test_tryit_protocol.py` cover it, including "do not write over the agent's own note".

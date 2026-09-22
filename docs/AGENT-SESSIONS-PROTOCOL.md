@@ -7419,6 +7419,15 @@ measures following instructions.
 section at all; `finished` then carries `staging_failed: true` and that sentence, and the pane
 says so in amber.
 
+**And when the turn could not write even that, the worker does.** A run that ends `error`,
+`stopped` or `cancelled` with neither a section nor a note of its own gets one from
+`TryItCommands._write_failure_note`, in the same words and with the same first line: how it
+ended, how long it ran, where whatever it captured is, and that the card is not asking to be
+reviewed. This is not defensive coding — it is a live finding (2026-09-21): a thirty-minute turn
+on `kimi-k3` stalled at the provider at step 53 and ended `error`, and because the brief asks the
+*agent* for that note, the card carried no trace that Try it had been attempted at all. A card
+that was tried and failed has to read differently from a card nobody pressed the button on.
+
 `try_answer` is the person's turn, and does three things in order:
 
 1. their words on the thread, as a `decision` entry that quotes them — policy rule 4's shape. There

@@ -200,6 +200,47 @@ class RunTests(TryItTest):
         card = self.board.card_by_id(self.card)
         self.assertNotIn("## Try it", card.body)
 
+    def test_a_turn_that_ended_badly_leaves_the_note_the_agent_could_not(self):
+        # Live, 2026-09-21: a 30-minute turn on kimi-k3 stalled at the provider at step 53 and
+        # ended `error`. The brief asks the *agent* for the "could not be staged" note, and an
+        # agent whose provider stalled never reaches it — so the card carried no trace of the
+        # attempt at all. The worker writes it now.
+        self.start()
+        done = self.tryit_events(self.finish(outcome="error", text=""))[-1]
+        self.assertEqual(done["state"], "error")
+        self.assertFalse(done["section_written"])
+        self.assertTrue(done["staging_failed"])
+        self.assertIn(TI.FAILED_NOTE, done["message"])
+        self.assertIn("ended with an error", done["message"])
+        notes = [e for e in self.board.thread(self.card) if e.kind == "note"]
+        self.assertTrue(notes[-1].text.startswith(TI.FAILED_NOTE))
+        self.assertIn("press Try it again", notes[-1].text)
+        self.assertNotIn("## Try it", self.board.card_by_id(self.card).body)
+
+    def test_a_stop_leaves_the_same_note_in_its_own_words(self):
+        self.start()
+        self.send(type="try_stop", id="k9")
+        ended = self.tryit_events(self.finish(outcome="cancelled", text=""))[-1]
+        self.assertEqual(ended["state"], "stopped")
+        notes = [e for e in self.board.thread(self.card) if e.kind == "note"]
+        self.assertIn("it was stopped", notes[-1].text)
+
+    def test_the_agents_own_note_is_not_written_over(self):
+        self.start()
+        self.agent_tools.run("board_comment", {
+            "id": self.card, "kind": "note",
+            "text": "Try it could not be staged: build/relay is not built on this machine."})
+        self.tryit_events(self.finish(outcome="error", text=""))
+        notes = [e for e in self.board.thread(self.card) if e.kind == "note"]
+        self.assertEqual(len(notes), 1)
+        self.assertIn("build/relay is not built", notes[-1].text)
+
+    def test_a_finished_turn_that_wrote_the_section_leaves_no_note(self):
+        self.start()
+        self.staged_section()
+        self.tryit_events(self.finish())
+        self.assertEqual([e for e in self.board.thread(self.card) if e.kind == "note"], [])
+
     def test_a_second_run_while_one_is_in_flight_says_already_running(self):
         self.start()
         refused = self.tryit_events(self.send(type="try_run", id="k2", card=self.card))[0]

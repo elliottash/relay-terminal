@@ -322,6 +322,13 @@ class TryItCommands:
         except (B.BoardError, OSError, TryItError):         # pragma: no cover - unreadable tree
             pass
         report = "".join(run.text).strip()[:MAX_REPORT]
+        # A turn that ended badly and left neither a section nor a note of its own: the brief
+        # asks the *agent* for that note (step 7), and an agent whose provider stalled, whose
+        # turn was cancelled or whose budget ran out never reaches it. The worker knows the turn
+        # ended, so it writes the note instead — otherwise the card carries no trace that Try it
+        # was attempted at all, which is the one thing this feature exists to prevent.
+        if outcome != "done" and not section and not failed:
+            failed = self._write_failure_note(run, outcome)
         self._emit({"state": "stopped" if outcome == "stopped" else
                     ("error" if outcome == "error" else "finished"),
                     "outcome": outcome,
@@ -331,6 +338,27 @@ class TryItCommands:
                     "staging_failed": bool(failed),
                     "reusing": bool(run.staged and run.staged.get("stage")),
                     "message": failed or report}, card=run.card, rid=run.rid)
+
+    def _write_failure_note(self, run: "_Run", outcome: str) -> str:
+        """Leave the brief's own sentence on the thread when the turn could not.
+
+        Same first words as the agent's note (`FAILED_NOTE`), so a reader, the pane and
+        `_failed_note` all recognise one shape however the run ended.
+        """
+        minutes = max(1, int((self.clock() - run.started) // 60))
+        why = {"stopped": "it was stopped", "cancelled": "it was stopped"}.get(
+            outcome, "the agent's turn ended with an error")
+        text = (f"{FAILED_NOTE} {why} after {minutes} minute(s), before it wrote the section. "
+                f"Whatever it captured is in {self._rel(run.out)}. Nothing on this card was "
+                "changed, and it is not asking to be reviewed: press Try it again.")
+        try:
+            result = self.tools().run("board_comment", {"id": run.card, "kind": "note",
+                                                        "text": text})
+        except (BoardToolError, B.BoardError, TryItError, OSError):   # pragma: no cover
+            return ""
+        if isinstance(result, dict) and result.get("error"):          # pragma: no cover
+            return ""
+        return text[:PROGRESS_LINE_CAP]
 
     def _failed_note(self, card_id: str) -> str:
         """The turn's own "could not be staged" note, if it left one (brief step 7)."""
