@@ -1,0 +1,91 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+name: Native macOS
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        type: string
+        required: false
+        default: '0.1.0-beta.3'
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: false
+        default: '0.1.0-beta.3'
+  push:
+    paths: ['engine/**', 'src/**', 'backend/**', 'shell/**', 'CMakeLists.txt', 'packaging/macos/**', '.github/workflows/macos.yml']
+permissions:
+  contents: read
+jobs:
+  native:
+    name: macOS ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+            cmake_arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+            cmake_arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install Qt and test dependencies
+        run: |
+          python -m pip install aqtinstall cryptography
+          python -m aqt install-qt mac desktop 6.8.3 clang_64 -O "$RUNNER_TEMP/Qt"
+          echo "$RUNNER_TEMP/Qt/6.8.3/macos/bin" >> "$GITHUB_PATH"
+      - name: Native Python storage, Keychain and worker
+        env:
+          PYTHONPATH: backend
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          python -m unittest discover -s tests -p test_macos_runtime.py -v
+          python -m unittest discover -s tests -p test_macos_tryit.py -v
+          python -m unittest discover -s tests -p test_platform_storage.py -v
+          python -m unittest discover -s tests -p test_worker_encoding.py -v
+      - name: Native process, crash and runtime-directory tests
+        run: |
+          cmake -S packaging/macos -B build-macos-platform -G Ninja \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/Qt/6.8.3/macos" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 -DCMAKE_OSX_ARCHITECTURES=${{ matrix.cmake_arch }}
+          cmake --build build-macos-platform --parallel 3
+          ctest --test-dir build-macos-platform --output-on-failure
+      - name: Configure native desktop and PTY tests
+        run: |
+          cmake -S . -B build-macos -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/Qt/6.8.3/macos" \
+            -DRELAY_QT_MAJOR=6 -DBUILD_TESTING=ON \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 -DCMAKE_OSX_ARCHITECTURES=${{ matrix.cmake_arch }}
+      - name: Build desktop and terminal tests
+        run: cmake --build build-macos --target relay relay-engine-tests --parallel 3
+      - name: Exercise native PTY lifecycle
+        env:
+          RELAY_ENGINE_TEST: PtyTest
+          QT_QPA_PLATFORM: offscreen
+        run: build-macos/engine/relay-engine-tests
+      - name: Bundle private runtimes and create DMG
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          version=${RELEASE_VERSION:-0.1.0-beta.3}
+          /bin/bash packaging/macos/package.sh "$version"
+      - name: Mount, install and run the native application
+        run: python packaging/macos/installed-smoke.py dist/*_macos_${{ matrix.arch }}.dmg macos-evidence
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-${{ matrix.arch }}-evidence
+          path: macos-evidence/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}-installer
+          path: dist/*_macos_${{ matrix.arch }}.dmg
+          if-no-files-found: error
