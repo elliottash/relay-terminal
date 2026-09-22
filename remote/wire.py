@@ -342,6 +342,7 @@ WITHHELD_EVENTS: dict[str, str] = {
     "app_command": "desktop application command; never execute through the pane stream",
     "board_cards": "board state uses the separate owner-only board bridge",
     "board_search": "board search uses the separate owner-only board bridge",
+    "board_resumed": "board queue acknowledgement uses the separate owner-only board bridge",
     "board_survey": "desktop project survey; local paths",
     "custom_provider_deleted": "provider configuration",
     "custom_provider_saved": "provider configuration",
@@ -360,6 +361,7 @@ WITHHELD_EVENTS: dict[str, str] = {
     "tests_run": "desktop test administration; local paths",
     "tests_suggest": "desktop test administration",
     "usage_limits": "provider account usage information",
+    "tryit": "desktop QA staging and results; local paths and instructions",
 
     "key_stored": "key material",
     "key_removed": "key material",
