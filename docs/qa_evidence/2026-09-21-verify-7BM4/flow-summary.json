@@ -1,0 +1,28 @@
+{
+  "checked_revision": "0241d05ef19393e84c0ef98655c9687466a92efc",
+  "real_verify": {
+    "model": "kimi-k3",
+    "turn": "274170d2d250472cb2931921dfc6e4a5",
+    "outcome": "done",
+    "tools": 64,
+    "duration_ms": 1384654,
+    "ended_utc": "2026-09-22T01:44:33.292Z"
+  },
+  "real_tryit": {
+    "model": "kimi-k3",
+    "turn": "0a4e116b35544477b64906b07734ec35",
+    "outcome": "done",
+    "tools": 17,
+    "duration_ms": 411887,
+    "ended_utc": "2026-09-22T01:51:42.220Z"
+  },
+  "answer": {
+    "gui_submitted": true,
+    "kind": "explicitly labeled automated observation, not owner judgment",
+    "recorded_in_disposable_card": true,
+    "expected_revealed_on_disk": true,
+    "original_human_questions_retained_in_disposable_card": false,
+    "original_human_questions_retained_in_shared_card": true
+  },
+  "verdict": "failed: body truncation hides task/question/open/result; verifier identity overwritten; original Human QA lost on answer; clipped Check findings; missing Done means"
+}

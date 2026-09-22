@@ -1,0 +1,8 @@
+............................................................................................................................................................................................................/tmp/verify-7bm4-fresh/src/tests/test_profile_protocol.py:192: ResourceWarning: unclosed file <_io.TextIOWrapper name='/tmp/verify-7bm4-fresh/src/backend/relay_core/profile_protocol.py' mode='r' encoding='UTF-8'>
+  self.assertNotIn("sphinx", open(PP.__file__).read())
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.................................
+----------------------------------------------------------------------
+Ran 237 tests in 8.854s
+
+OK

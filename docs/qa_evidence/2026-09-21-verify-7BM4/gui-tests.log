@@ -1,0 +1,14 @@
+Internal ctest changing into directory: /tmp/verify-7bm4-fresh/src/build
+Test project /tmp/verify-7bm4-fresh/src/build
+    Start 16: testsuites
+1/4 Test #16: testsuites .......................   Passed    0.18 sec
+    Start 17: profilepane
+2/4 Test #17: profilepane ......................   Passed    0.05 sec
+    Start 25: windowstate
+3/4 Test #25: windowstate ......................   Passed    0.08 sec
+    Start 75: cardtests
+4/4 Test #75: cardtests ........................   Passed    0.25 sec
+
+100% tests passed, 0 tests failed out of 4
+
+Total Test time (real) =   0.56 sec

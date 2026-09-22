@@ -1,0 +1,16 @@
+{
+  "revision": "0241d05ef19393e84c0ef98655c9687466a92efc",
+  "binary": "/tmp/verify-7bm4-fresh/src/build/relay",
+  "binary_sha256": "9556303f7aaae6e099650370ec8b487efd8f25d5ce9b6ba3da4a0c7e3d3737dd",
+  "source_export": "/tmp/verify-7bm4-fresh/src",
+  "build_wrapper": "scripts/relay-build",
+  "fixture": "/tmp/verify-7bm4-fresh/orders-own",
+  "fixture_head": "267dedca47321e19dd1d36054a5318515760c894",
+  "test_backend_count": 237,
+  "test_gui_suites": [
+    "testsuites",
+    "cardtests",
+    "profilepane",
+    "windowstate"
+  ]
+}

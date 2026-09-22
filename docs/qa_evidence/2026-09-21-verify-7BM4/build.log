@@ -1,0 +1,595 @@
+relay-build: configuring: cmake -S /tmp/verify-7bm4-fresh/src -B /tmp/verify-7bm4-fresh/src/build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+-- The CXX compiler identification is GNU 13.3.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Relay: building against Qt5
+-- Found Python3: /usr/bin/python3 (found suitable version "3.12.3", minimum required is "3.10") found components: Interpreter 
+-- Relay: file preview syntax highlighting enabled (KF5SyntaxHighlighting)
+-- Relay: PDF preview disabled (Qt5 Pdf not found)
+-- The C compiler identification is GNU 13.3.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE  
+-- Configuring done (0.5s)
+-- Generating done (0.2s)
+-- Build files have been written to: /tmp/verify-7bm4-fresh/src/build
+relay-build: building: cmake --build /tmp/verify-7bm4-fresh/src/build --parallel 8 --target relay relay-testsuites-tests relay-cardtests-tests relay-profilepane-tests relay-windowstate-tests
+[  0%] Built target relay-outputlinks_autogen_timestamp_deps
+[  0%] Built target relay-prompthistory_autogen_timestamp_deps
+[  0%] Built target relay-projects_autogen_timestamp_deps
+[  0%] Built target relay-vterm-c_autogen_timestamp_deps
+[  0%] Built target relay-markdown_autogen_timestamp_deps
+[  0%] Built target relay-toollabel_autogen_timestamp_deps
+[  0%] Built target relay-notifications_autogen_timestamp_deps
+[  0%] Built target relay-modelcatalog_autogen_timestamp_deps
+[  0%] Built target relay-settingscache_autogen_timestamp_deps
+[  0%] Built target relay-windowstate_autogen_timestamp_deps
+[  0%] Built target relay-remotefiles_autogen_timestamp_deps
+[  0%] Built target relay-theme_autogen_timestamp_deps
+[  0%] Built target relay-hints_autogen_timestamp_deps
+[  0%] Built target relay-runtimedirs_autogen_timestamp_deps
+[  0%] Built target relay-backends_autogen_timestamp_deps
+[  0%] Built target relay-completion_autogen_timestamp_deps
+[  0%] Built target relay-fileindex_autogen_timestamp_deps
+[  0%] Built target relay-globalspane_autogen_timestamp_deps
+[  0%] Built target relay-queuenav_autogen_timestamp_deps
+[  0%] Built target relay-input_autogen_timestamp_deps
+[  0%] Built target relay-slash_autogen_timestamp_deps
+[  0%] Built target relay-queuesubmit_autogen_timestamp_deps
+[  0%] Built target relay-panestate_autogen_timestamp_deps
+[  0%] Built target relay-escapees_autogen_timestamp_deps
+[  0%] Built target relay-panes_autogen_timestamp_deps
+[  0%] Built target relay-panestatus_autogen_timestamp_deps
+[  0%] Built target relay-images_autogen_timestamp_deps
+[  0%] Built target relay-titles_autogen_timestamp_deps
+[  0%] Built target relay-remotesession_autogen_timestamp_deps
+[  0%] Built target relay-sshconfig_autogen_timestamp_deps
+[  0%] Built target relay-voice_autogen_timestamp_deps
+[  0%] Built target relay-aliases_autogen_timestamp_deps
+[  0%] Built target relay-sharing_autogen_timestamp_deps
+[  0%] Automatic MOC for target relay-markdown
+[  0%] Automatic MOC for target relay-vterm-c
+[  0%] Automatic MOC for target relay-outputlinks
+[  1%] Automatic MOC for target relay-toollabel
+[  1%] Automatic MOC for target relay-prompthistory
+[  1%] Automatic MOC for target relay-projects
+[  1%] Automatic MOC for target relay-modelcatalog
+[  1%] Automatic MOC for target relay-notifications
+[  1%] Built target relay-toollabel_autogen
+[  1%] Built target relay-markdown_autogen
+[  1%] Built target relay-vterm-c_autogen
+[  1%] Built target relay-outputlinks_autogen
+[  1%] Built target relay-prompthistory_autogen
+[  1%] Built target relay-modelcatalog_autogen
+[  1%] Built target relay-projects_autogen
+[  1%] Automatic MOC for target relay-settingscache
+[  1%] Automatic MOC for target relay-remotefiles
+[  1%] Automatic MOC for target relay-theme
+[  1%] Automatic MOC for target relay-hints
+[  1%] Automatic MOC for target relay-backends
+[  1%] Automatic MOC for target relay-windowstate
+[  1%] Automatic MOC for target relay-runtimedirs
+[  1%] Built target relay-hints_autogen
+[  1%] Built target relay-settingscache_autogen
+[  1%] Built target relay-theme_autogen
+[  1%] Built target relay-remotefiles_autogen
+[  1%] Built target relay-backends_autogen
+[  1%] Built target relay-windowstate_autogen
+[  1%] Built target relay-runtimedirs_autogen
+[  1%] Automatic MOC for target relay-completion
+[  1%] Automatic MOC for target relay-input
+[  1%] Automatic MOC for target relay-fileindex
+[  1%] Automatic MOC for target relay-slash
+[  1%] Automatic MOC for target relay-globalspane
+[  1%] Automatic MOC for target relay-queuesubmit
+[  1%] Automatic MOC for target relay-queuenav
+[  1%] Built target relay-notifications_autogen
+[  1%] Built target relay-completion_autogen
+[  1%] Built target relay-input_autogen
+[  1%] Built target relay-queuenav_autogen
+[  1%] Automatic MOC for target relay-panestate
+[  1%] Built target relay-slash_autogen
+[  1%] Automatic MOC for target relay-escapees
+[  1%] Built target relay-queuesubmit_autogen
+[  1%] Built target relay-globalspane_autogen
+[  3%] Automatic MOC for target relay-panes
+[  5%] Automatic MOC for target relay-images
+[  5%] Automatic MOC for target relay-panestatus
+[  5%] Automatic MOC for target relay-titles
+[  5%] Automatic MOC for target relay-remotesession
+[  5%] Built target relay-escapees_autogen
+[  5%] Built target relay-panes_autogen
+[  5%] Built target relay-panestate_autogen
+[  5%] Built target relay-titles_autogen
+[  5%] Automatic MOC for target relay-sshconfig
+[  5%] Built target relay-images_autogen
+[  5%] Automatic MOC for target relay-aliases
+[  5%] Automatic MOC for target relay-voice
+[  5%] Built target relay-remotesession_autogen
+[  5%] Built target relay-panestatus_autogen
+[  5%] Automatic MOC for target relay-sharing
+[  5%] Building CXX object engine/CMakeFiles/relay-vterm-c.dir/relay-vterm-c_autogen/mocs_compilation.cpp.o
+[  5%] Building CXX object CMakeFiles/relay-markdown.dir/relay-markdown_autogen/mocs_compilation.cpp.o
+[  5%] Building CXX object CMakeFiles/relay-outputlinks.dir/relay-outputlinks_autogen/mocs_compilation.cpp.o
+[  5%] Built target relay-fileindex_autogen
+[  5%] Built target relay-sshconfig_autogen
+[  5%] Built target relay-aliases_autogen
+[  5%] Building C object engine/CMakeFiles/relay-vterm-c.dir/third_party/libvterm/src/encoding.c.o
+[  5%] Building C object engine/CMakeFiles/relay-vterm-c.dir/third_party/libvterm/src/keyboard.c.o
+[  5%] Building C object engine/CMakeFiles/relay-vterm-c.dir/third_party/libvterm/src/mouse.c.o
+[  7%] Building CXX object CMakeFiles/relay-markdown.dir/src/MarkdownAnsi.cpp.o
+[  7%] Built target relay-sharing_autogen
+[  7%] Building CXX object CMakeFiles/relay-outputlinks.dir/src/OutputLinks.cpp.o
+[  7%] Building CXX object CMakeFiles/relay-markdown.dir/src/WordWrap.cpp.o
+[  7%] Building CXX object CMakeFiles/relay-prompthistory.dir/relay-prompthistory_autogen/mocs_compilation.cpp.o
+[  7%] Building CXX object CMakeFiles/relay-prompthistory.dir/src/PromptHistory.cpp.o
+[  7%] Building C object engine/CMakeFiles/relay-vterm-c.dir/third_party/libvterm/src/parser.c.o
+[  9%] Building C object engine/CMakeFiles/relay-vterm-c.dir/third_party/libvterm/src/pen.c.o
+[  9%] Building C object engine/CMakeFiles/relay-vterm-c.dir/third_party/libvterm/src/screen.c.o
+[  9%] Built target relay-voice_autogen
+[ 11%] Building CXX object CMakeFiles/relay-toollabel.dir/relay-toollabel_autogen/mocs_compilation.cpp.o
+[ 11%] Building CXX object CMakeFiles/relay-toollabel.dir/src/ToolLabel.cpp.o
+[ 11%] Building C object engine/CMakeFiles/relay-vterm-c.dir/third_party/libvterm/src/state.c.o
+[ 11%] Building C object engine/CMakeFiles/relay-vterm-c.dir/third_party/libvterm/src/unicode.c.o
+[ 11%] Building C object engine/CMakeFiles/relay-vterm-c.dir/third_party/libvterm/src/vterm.c.o
+[ 11%] Building CXX object CMakeFiles/relay-projects.dir/relay-projects_autogen/mocs_compilation.cpp.o
+[ 11%] Building CXX object CMakeFiles/relay-modelcatalog.dir/relay-modelcatalog_autogen/mocs_compilation.cpp.o
+[ 11%] Building CXX object CMakeFiles/relay-projects.dir/src/Projects.cpp.o
+[ 11%] Building CXX object CMakeFiles/relay-modelcatalog.dir/src/ModelCatalog.cpp.o
+[ 11%] Building CXX object CMakeFiles/relay-projects.dir/src/ProjectInit.cpp.o
+[ 11%] Linking CXX static library librelay-vterm-c.a
+[ 11%] Built target relay-vterm-c
+[ 12%] Building CXX object CMakeFiles/relay-notifications.dir/relay-notifications_autogen/mocs_compilation.cpp.o
+[ 12%] Linking CXX static library librelay-prompthistory.a
+[ 12%] Built target relay-prompthistory
+[ 12%] Building CXX object CMakeFiles/relay-theme.dir/relay-theme_autogen/mocs_compilation.cpp.o
+[ 12%] Building CXX object CMakeFiles/relay-theme.dir/src/ThemeFile.cpp.o
+[ 12%] Linking CXX static library librelay-toollabel.a
+[ 12%] Built target relay-toollabel
+[ 12%] Building CXX object CMakeFiles/relay-settingscache.dir/relay-settingscache_autogen/mocs_compilation.cpp.o
+[ 12%] Building CXX object CMakeFiles/relay-settingscache.dir/src/SettingsCache.cpp.o
+[ 12%] Building CXX object CMakeFiles/relay-notifications.dir/src/Notifications.cpp.o
+[ 12%] Linking CXX static library librelay-outputlinks.a
+[ 12%] Linking CXX static library librelay-markdown.a
+[ 12%] Built target relay-outputlinks
+[ 12%] Building CXX object CMakeFiles/relay-remotefiles.dir/relay-remotefiles_autogen/mocs_compilation.cpp.o
+[ 14%] Building CXX object CMakeFiles/relay-remotefiles.dir/src/RemoteFiles.cpp.o
+[ 14%] Built target relay-markdown
+[ 14%] Building CXX object CMakeFiles/relay-hints.dir/relay-hints_autogen/mocs_compilation.cpp.o
+[ 16%] Building CXX object CMakeFiles/relay-hints.dir/src/Hints.cpp.o
+[ 18%] Building CXX object CMakeFiles/relay-backends.dir/relay-backends_autogen/mocs_compilation.cpp.o
+[ 18%] Building CXX object CMakeFiles/relay-backends.dir/src/TerminalBackends.cpp.o
+[ 18%] Linking CXX static library librelay-settingscache.a
+[ 18%] Built target relay-settingscache
+[ 20%] Building CXX object CMakeFiles/relay-windowstate.dir/relay-windowstate_autogen/mocs_compilation.cpp.o
+[ 20%] Building CXX object CMakeFiles/relay-windowstate.dir/src/WindowState.cpp.o
+[ 20%] Linking CXX static library librelay-notifications.a
+[ 20%] Built target relay-notifications
+[ 20%] Building CXX object CMakeFiles/relay-runtimedirs.dir/relay-runtimedirs_autogen/mocs_compilation.cpp.o
+[ 22%] Building CXX object CMakeFiles/relay-runtimedirs.dir/src/RuntimeDirs.cpp.o
+[ 22%] Linking CXX static library librelay-hints.a
+[ 22%] Built target relay-hints
+[ 22%] Building CXX object CMakeFiles/relay-completion.dir/relay-completion_autogen/mocs_compilation.cpp.o
+[ 22%] Linking CXX static library librelay-backends.a
+[ 22%] Building CXX object CMakeFiles/relay-completion.dir/src/Completion.cpp.o
+[ 22%] Linking CXX static library librelay-projects.a
+[ 22%] Built target relay-backends
+[ 22%] Building CXX object CMakeFiles/relay-fileindex.dir/relay-fileindex_autogen/mocs_compilation.cpp.o
+[ 22%] Built target relay-projects
+[ 22%] Built target relay-logging_autogen_timestamp_deps
+[ 22%] Building CXX object CMakeFiles/relay-input.dir/relay-input_autogen/mocs_compilation.cpp.o
+[ 22%] Building CXX object CMakeFiles/relay-input.dir/src/InputPolicy.cpp.o
+[ 24%] Building CXX object CMakeFiles/relay-fileindex.dir/src/FileIndex.cpp.o
+[ 24%] Linking CXX static library librelay-runtimedirs.a
+[ 24%] Linking CXX static library librelay-completion.a
+[ 24%] Built target relay-runtimedirs
+[ 24%] Building CXX object CMakeFiles/relay-slash.dir/relay-slash_autogen/mocs_compilation.cpp.o
+[ 24%] Building CXX object CMakeFiles/relay-slash.dir/src/SlashCommands.cpp.o
+[ 24%] Built target relay-completion
+[ 24%] Building CXX object CMakeFiles/relay-globalspane.dir/relay-globalspane_autogen/mocs_compilation.cpp.o
+[ 24%] Building CXX object CMakeFiles/relay-globalspane.dir/src/GlobalsPane.cpp.o
+[ 24%] Linking CXX static library librelay-input.a
+[ 24%] Linking CXX static library librelay-theme.a
+[ 24%] Building CXX object CMakeFiles/relay-windowstate.dir/src/ClosedStack.cpp.o
+[ 24%] Linking CXX static library librelay-remotefiles.a
+[ 24%] Built target relay-input
+[ 24%] Building CXX object CMakeFiles/relay-queuenav.dir/relay-queuenav_autogen/mocs_compilation.cpp.o
+[ 24%] Building CXX object CMakeFiles/relay-queuenav.dir/src/QueueNav.cpp.o
+[ 24%] Built target relay-theme
+[ 24%] Built target relay-remotefiles
+[ 24%] Building CXX object CMakeFiles/relay-queuesubmit.dir/relay-queuesubmit_autogen/mocs_compilation.cpp.o
+[ 24%] Building CXX object CMakeFiles/relay-panestate.dir/relay-panestate_autogen/mocs_compilation.cpp.o
+[ 24%] Building CXX object CMakeFiles/relay-queuesubmit.dir/src/QueueSubmit.cpp.o
+[ 24%] Building CXX object CMakeFiles/relay-panestate.dir/src/PaneState.cpp.o
+[ 25%] Linking CXX static library librelay-queuesubmit.a
+[ 25%] Linking CXX static library librelay-queuenav.a
+[ 25%] Built target relay-queuesubmit
+[ 25%] Building CXX object CMakeFiles/relay-escapees.dir/relay-escapees_autogen/mocs_compilation.cpp.o
+[ 25%] Built target relay-queuenav
+[ 25%] Building CXX object CMakeFiles/relay-escapees.dir/src/EscapeeCaps.cpp.o
+[ 27%] Building CXX object CMakeFiles/relay-panes.dir/relay-panes_autogen/mocs_compilation.cpp.o
+[ 27%] Building CXX object CMakeFiles/relay-panes.dir/src/PaneLayout.cpp.o
+[ 27%] Linking CXX static library librelay-fileindex.a
+[ 27%] Built target relay-fileindex
+[ 29%] Building CXX object CMakeFiles/relay-images.dir/relay-images_autogen/mocs_compilation.cpp.o
+[ 29%] Building CXX object CMakeFiles/relay-images.dir/src/Images.cpp.o
+[ 31%] Linking CXX static library librelay-escapees.a
+[ 33%] Linking CXX static library librelay-slash.a
+[ 33%] Built target relay-escapees
+[ 33%] Building CXX object CMakeFiles/relay-titles.dir/relay-titles_autogen/mocs_compilation.cpp.o
+[ 35%] Building CXX object CMakeFiles/relay-titles.dir/src/PaneTitles.cpp.o
+[ 35%] Built target relay-slash
+[ 35%] Building CXX object CMakeFiles/relay-panestatus.dir/relay-panestatus_autogen/mocs_compilation.cpp.o
+[ 35%] Building CXX object CMakeFiles/relay-panestatus.dir/src/PaneStatus.cpp.o
+[ 35%] Linking CXX static library librelay-panes.a
+[ 35%] Built target relay-panes
+[ 35%] Built target relay-paneusage_autogen_timestamp_deps
+[ 35%] Building CXX object CMakeFiles/relay-remotesession.dir/relay-remotesession_autogen/mocs_compilation.cpp.o
+[ 35%] Building CXX object CMakeFiles/relay-remotesession.dir/src/RemoteSession.cpp.o
+[ 35%] Linking CXX static library librelay-modelcatalog.a
+[ 35%] Linking CXX static library librelay-panestate.a
+[ 35%] Built target relay-modelcatalog
+[ 35%] Building CXX object CMakeFiles/relay-sshconfig.dir/relay-sshconfig_autogen/mocs_compilation.cpp.o
+[ 35%] Built target relay-panestate
+[ 35%] Linking CXX static library librelay-images.a
+[ 37%] Building CXX object CMakeFiles/relay-sshconfig.dir/src/SshConfig.cpp.o
+[ 37%] Building CXX object CMakeFiles/relay-aliases.dir/relay-aliases_autogen/mocs_compilation.cpp.o
+[ 37%] Building CXX object CMakeFiles/relay-aliases.dir/src/Aliases.cpp.o
+[ 37%] Built target relay-images
+[ 37%] Building CXX object CMakeFiles/relay-voice.dir/relay-voice_autogen/mocs_compilation.cpp.o
+[ 37%] Linking CXX static library librelay-windowstate.a
+[ 37%] Linking CXX static library librelay-globalspane.a
+[ 37%] Linking CXX static library librelay-titles.a
+[ 37%] Built target relay-globalspane
+[ 37%] Built target relay-windowstate
+[ 37%] Building CXX object CMakeFiles/relay-voice.dir/src/Voice.cpp.o
+[ 37%] Building CXX object CMakeFiles/relay-sharing.dir/relay-sharing_autogen/mocs_compilation.cpp.o
+[ 37%] Built target relay-titles
+[ 37%] Building CXX object CMakeFiles/relay-sharing.dir/src/SharingPane.cpp.o
+[ 37%] Built target relay-terminal-engine_autogen_timestamp_deps
+[ 37%] Built target relay-editor_autogen_timestamp_deps
+[ 37%] Built target relay-agentcontext_autogen_timestamp_deps
+[ 37%] Built target relay-projectpicker_autogen_timestamp_deps
+[ 37%] Built target relay-modelrows_autogen_timestamp_deps
+[ 37%] Built target relay-filterpopup_autogen_timestamp_deps
+[ 37%] Built target relay-modelpicker_autogen_timestamp_deps
+[ 37%] Built target relay-modelsettings_autogen_timestamp_deps
+[ 37%] Built target relay-filepanes_autogen_timestamp_deps
+[ 37%] Built target relay-highlight_autogen_timestamp_deps
+[ 37%] Built target relay-closedlist_autogen_timestamp_deps
+[ 37%] Automatic MOC for target relay-logging
+[ 37%] Built target relay-screen_autogen_timestamp_deps
+[ 37%] Automatic MOC for target relay-paneusage
+[ 37%] Built target relay-logging_autogen
+[ 37%] Automatic MOC for target relay-terminal-engine
+[ 37%] Built target relay-paneusage_autogen
+[ 38%] Automatic MOC for target relay-editor
+[ 38%] Built target relay-editor_autogen
+[ 40%] Automatic MOC for target relay-agentcontext
+[ 40%] Built target relay-agentcontext_autogen
+[ 42%] Automatic MOC for target relay-projectpicker
+[ 42%] Linking CXX static library librelay-panestatus.a
+[ 42%] Linking CXX static library librelay-remotesession.a
+[ 42%] Built target relay-projectpicker_autogen
+[ 42%] Built target relay-terminal-engine_autogen
+[ 42%] Automatic MOC for target relay-modelrows
+[ 44%] Linking CXX static library librelay-aliases.a
+[ 44%] Automatic MOC for target relay-filterpopup
+[ 44%] Built target relay-panestatus
+[ 44%] Built target relay-modelrows_autogen
+[ 44%] Built target relay-remotesession
+[ 44%] Automatic MOC for target relay-modelpicker
+[ 46%] Automatic MOC for target relay-filepanes
+[ 46%] Automatic MOC for target relay-modelsettings
+[ 46%] Built target relay-filterpopup_autogen
+[ 46%] Built target relay-aliases
+[ 46%] Automatic MOC for target relay-highlight
+[ 46%] Built target relay-modelpicker_autogen
+[ 46%] Built target relay-modelsettings_autogen
+[ 46%] Built target relay-filepanes_autogen
+[ 46%] Automatic MOC for target relay-closedlist
+[ 46%] Building CXX object CMakeFiles/relay-logging.dir/relay-logging_autogen/mocs_compilation.cpp.o
+[ 48%] Automatic MOC for target relay-screen
+[ 48%] Building CXX object CMakeFiles/relay-paneusage.dir/relay-paneusage_autogen/mocs_compilation.cpp.o
+[ 48%] Building CXX object CMakeFiles/relay-logging.dir/src/Logging.cpp.o
+[ 48%] Built target relay-closedlist_autogen
+[ 48%] Building CXX object CMakeFiles/relay-paneusage.dir/src/PaneUsage.cpp.o
+[ 48%] Building CXX object CMakeFiles/relay-logging.dir/src/CrashLog.cpp.o
+[ 48%] Built target relay-screen_autogen
+[ 50%] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/relay-terminal-engine_autogen/mocs_compilation.cpp.o
+[ 50%] Built target relay-highlight_autogen
+[ 51%] Building CXX object CMakeFiles/relay-editor.dir/relay-editor_autogen/mocs_compilation.cpp.o
+[ 51%] Building CXX object CMakeFiles/relay-editor.dir/src/RichEditor.cpp.o
+[ 51%] Linking CXX static library librelay-sshconfig.a
+[ 51%] Linking CXX static library librelay-voice.a
+[ 51%] Built target relay-sshconfig
+[ 53%] Building CXX object CMakeFiles/relay-agentcontext.dir/relay-agentcontext_autogen/mocs_compilation.cpp.o
+[ 53%] Building CXX object CMakeFiles/relay-agentcontext.dir/src/AgentContext.cpp.o
+[ 53%] Built target relay-voice
+[ 55%] Building CXX object CMakeFiles/relay-projectpicker.dir/relay-projectpicker_autogen/mocs_compilation.cpp.o
+[ 55%] Building CXX object CMakeFiles/relay-modelrows.dir/relay-modelrows_autogen/mocs_compilation.cpp.o
+[ 55%] Building CXX object CMakeFiles/relay-modelrows.dir/src/ModelRows.cpp.o
+[ 55%] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/core/AnsiSerializer.cpp.o
+[ 55%] Building CXX object CMakeFiles/relay-projectpicker.dir/src/ProjectPicker.cpp.o
+[ 57%] Linking CXX static library librelay-logging.a
+[ 57%] Built target relay-logging
+[ 57%] Building CXX object CMakeFiles/relay-filterpopup.dir/relay-filterpopup_autogen/mocs_compilation.cpp.o
+[ 57%] Building CXX object CMakeFiles/relay-filterpopup.dir/src/FilterPopup.cpp.o
+[ 57%] Linking CXX static library librelay-agentcontext.a
+[ 57%] Built target relay-agentcontext
+[ 57%] Building CXX object CMakeFiles/relay-modelpicker.dir/relay-modelpicker_autogen/mocs_compilation.cpp.o
+[ 57%] Building CXX object CMakeFiles/relay-modelpicker.dir/src/ModelPicker.cpp.o
+[ 57%] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/core/CellTypes.cpp.o
+[ 57%] Linking CXX static library librelay-editor.a
+[ 57%] Built target relay-editor
+[ 57%] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/core/VtCoreFactory.cpp.o
+[ 57%] Linking CXX static library librelay-paneusage.a
+[ 57%] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/core/LibVtermCore.cpp.o
+[ 57%] Built target relay-paneusage
+[ 57%] Built target relay-settings_autogen_timestamp_deps
+[ 57%] Building CXX object CMakeFiles/relay-modelsettings.dir/relay-modelsettings_autogen/mocs_compilation.cpp.o
+[ 57%] Building CXX object CMakeFiles/relay-modelsettings.dir/src/ModelSettings.cpp.o
+[ 57%] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/session/TerminalSession.cpp.o
+[ 57%] Linking CXX static library librelay-sharing.a
+[ 57%] Built target relay-sharing
+[ 59%] Building CXX object CMakeFiles/relay-filepanes.dir/relay-filepanes_autogen/mocs_compilation.cpp.o
+[ 59%] Building CXX object CMakeFiles/relay-filepanes.dir/src/FilePanes.cpp.o
+[ 59%] Linking CXX static library librelay-filterpopup.a
+[ 59%] Built target relay-filterpopup
+[ 59%] Building CXX object CMakeFiles/relay-highlight.dir/relay-highlight_autogen/mocs_compilation.cpp.o
+[ 59%] Linking CXX static library librelay-modelrows.a
+[ 59%] Linking CXX static library librelay-projectpicker.a
+[ 59%] Built target relay-modelrows
+[ 61%] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/view/BoxDrawing.cpp.o
+[ 61%] Built target relay-projectpicker
+[ 61%] Building CXX object CMakeFiles/relay-closedlist.dir/relay-closedlist_autogen/mocs_compilation.cpp.o
+[ 62%] Building CXX object CMakeFiles/relay-screen.dir/relay-screen_autogen/mocs_compilation.cpp.o
+[ 62%] Building CXX object CMakeFiles/relay-closedlist.dir/src/ClosedList.cpp.o
+[ 62%] Building CXX object CMakeFiles/relay-screen.dir/src/ScreenPrompt.cpp.o
+[ 62%] Building CXX object CMakeFiles/relay-highlight.dir/src/ShellHighlighter.cpp.o
+[ 62%] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/view/FoldLayer.cpp.o
+[ 62%] Linking CXX static library librelay-screen.a
+[ 64%] Linking CXX static library librelay-modelsettings.a
+[ 64%] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/view/FoldSearch.cpp.o
+[ 64%] Built target relay-screen
+[ 64%] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/view/KeyMapper.cpp.o
+[ 64%] Built target relay-modelsettings
+[ 64%] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/view/TerminalView.cpp.o
+[ 64%] Building CXX object CMakeFiles/relay-highlight.dir/src/Theme.cpp.o
+[ 66%] Linking CXX static library librelay-closedlist.a
+[ 66%] Linking CXX static library librelay-modelpicker.a
+[ 66%] Built target relay-closedlist
+[ 66%] Built target relay-conversations_autogen_timestamp_deps
+[ 66%] Built target relay-projectspane_autogen_timestamp_deps
+[ 66%] Built target relay-modelpicker
+[ 66%] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/backend/VTermBackend.cpp.o
+[ 66%] Building CXX object engine/CMakeFiles/relay-terminal-engine.dir/pty/PtyUnix.cpp.o
+[ 66%] Built target relay-board_autogen_timestamp_deps
+[ 66%] Automatic MOC for target relay-settings
+[ 66%] Built target relay-settings_autogen
+[ 66%] Built target relay-jobstab_autogen_timestamp_deps
+[ 68%] Automatic MOC for target relay-conversations
+[ 68%] Built target relay-conversations_autogen
+[ 68%] Automatic MOC for target relay-projectspane
+[ 68%] Built target relay-projectspane_autogen
+[ 68%] Building CXX object CMakeFiles/relay-settings.dir/relay-settings_autogen/mocs_compilation.cpp.o
+[ 68%] Automatic MOC for target relay-jobstab
+[ 68%] Automatic MOC for target relay-board
+[ 68%] Building CXX object CMakeFiles/relay-settings.dir/src/SettingsPane.cpp.o
+[ 68%] Built target relay-jobstab_autogen
+[ 68%] Built target relay-board_autogen
+[ 68%] Building CXX object CMakeFiles/relay-projectspane.dir/relay-projectspane_autogen/mocs_compilation.cpp.o
+[ 68%] Building CXX object CMakeFiles/relay-conversations.dir/relay-conversations_autogen/mocs_compilation.cpp.o
+[ 68%] Building CXX object CMakeFiles/relay-projectspane.dir/src/ProjectsPane.cpp.o
+[ 70%] Building CXX object CMakeFiles/relay-conversations.dir/src/Conversations.cpp.o
+[ 70%] Linking CXX static library librelay-filepanes.a
+[ 70%] Building CXX object CMakeFiles/relay-conversations.dir/src/SessionInfo.cpp.o
+[ 70%] Built target relay-filepanes
+[ 70%] Building CXX object CMakeFiles/relay-board.dir/relay-board_autogen/mocs_compilation.cpp.o
+[ 70%] Building CXX object CMakeFiles/relay-jobstab.dir/relay-jobstab_autogen/mocs_compilation.cpp.o
+[ 72%] Building CXX object CMakeFiles/relay-jobstab.dir/src/JobsTab.cpp.o
+[ 72%] Building CXX object CMakeFiles/relay-board.dir/src/BoardModel.cpp.o
+[ 72%] Linking CXX static library librelay-highlight.a
+[ 72%] Built target relay-highlight
+[ 72%] Building CXX object CMakeFiles/relay-board.dir/src/BoardPane.cpp.o
+[ 72%] Linking CXX static library librelay-projectspane.a
+[ 72%] Built target relay-projectspane
+[ 72%] Built target relay-diffview_autogen_timestamp_deps
+[ 72%] Built target relay-remotepane_autogen_timestamp_deps
+[ 72%] Building CXX object CMakeFiles/relay-board.dir/src/BoardSections.cpp.o
+[ 72%] Linking CXX static library librelay-jobstab.a
+[ 72%] Built target relay-jobstab
+[ 72%] Automatic MOC for target relay-diffview
+[ 72%] Built target relay-diffview_autogen
+[ 74%] Automatic MOC for target relay-remotepane
+[ 74%] Built target relay-remotepane_autogen
+[ 74%] Building CXX object CMakeFiles/relay-diffview.dir/relay-diffview_autogen/mocs_compilation.cpp.o
+[ 74%] Building CXX object CMakeFiles/relay-diffview.dir/src/DiffView.cpp.o
+[ 75%] Building CXX object CMakeFiles/relay-remotepane.dir/relay-remotepane_autogen/mocs_compilation.cpp.o
+[ 77%] Linking CXX static library librelay-terminal-engine.a
+[ 77%] Building CXX object CMakeFiles/relay-board.dir/src/BoardSignals.cpp.o
+[ 77%] Built target relay-terminal-engine
+[ 79%] Building CXX object CMakeFiles/relay-board.dir/src/BoardWorker.cpp.o
+[ 79%] Linking CXX static library librelay-settings.a
+[ 79%] Built target relay-settings
+[ 79%] Building CXX object CMakeFiles/relay-board.dir/src/BoardWorkspace.cpp.o
+[ 81%] Linking CXX static library librelay-diffview.a
+[ 81%] Building CXX object CMakeFiles/relay-board.dir/src/BoardRemote.cpp.o
+[ 81%] Built target relay-diffview
+[ 81%] Built target relay-modelspane_autogen_timestamp_deps
+[ 81%] Building CXX object CMakeFiles/relay-remotepane.dir/src/RemotePane.cpp.o
+[ 81%] Built target relay-appcommands_autogen_timestamp_deps
+[ 81%] Built target relay-localmodels_autogen_timestamp_deps
+[ 81%] Built target relay-calllines_autogen_timestamp_deps
+[ 81%] Built target relay-remotesettings_autogen_timestamp_deps
+[ 81%] Automatic MOC for target relay-modelspane
+[ 81%] Built target relay-modelspane_autogen
+[ 81%] Automatic MOC for target relay-appcommands
+[ 81%] Built target relay-appcommands_autogen
+[ 81%] Automatic MOC for target relay-localmodels
+[ 81%] Built target relay-localmodels_autogen
+[ 83%] Automatic MOC for target relay-calllines
+[ 83%] Built target relay-calllines_autogen
+[ 83%] Automatic MOC for target relay-remotesettings
+[ 83%] Built target relay-remotesettings_autogen
+[ 83%] Building CXX object CMakeFiles/relay-appcommands.dir/relay-appcommands_autogen/mocs_compilation.cpp.o
+[ 83%] Building CXX object CMakeFiles/relay-modelspane.dir/relay-modelspane_autogen/mocs_compilation.cpp.o
+[ 85%] Building CXX object CMakeFiles/relay-appcommands.dir/src/AppCommands.cpp.o
+[ 87%] Building CXX object CMakeFiles/relay-modelspane.dir/src/ModelsPane.cpp.o
+[ 88%] Building CXX object CMakeFiles/relay-localmodels.dir/relay-localmodels_autogen/mocs_compilation.cpp.o
+[ 88%] Building CXX object CMakeFiles/relay-localmodels.dir/src/LocalModelsSettings.cpp.o
+/tmp/verify-7bm4-fresh/src/src/AppCommands.cpp: In function ‘QString relay::appcommands::{anonymous}::kindName(relay::SettingRow::Kind)’:
+/tmp/verify-7bm4-fresh/src/src/AppCommands.cpp:365:12: warning: enumeration value ‘Subheading’ not handled in switch [-Wswitch]
+  365 |     switch (kind) {
+      |            ^
+[ 90%] Building CXX object CMakeFiles/relay-calllines.dir/relay-calllines_autogen/mocs_compilation.cpp.o
+[ 90%] Building CXX object CMakeFiles/relay-calllines.dir/src/CallLines.cpp.o
+[ 90%] Building CXX object CMakeFiles/relay-remotesettings.dir/relay-remotesettings_autogen/mocs_compilation.cpp.o
+[ 90%] Building CXX object CMakeFiles/relay-remotesettings.dir/src/RemoteSettings.cpp.o
+[ 90%] Linking CXX static library librelay-modelspane.a
+[ 90%] Built target relay-modelspane
+[ 90%] Linking CXX static library librelay-conversations.a
+[ 90%] Linking CXX static library librelay-localmodels.a
+[ 90%] Built target relay-conversations
+[ 90%] Built target relay-localmodels
+[ 90%] Linking CXX static library librelay-appcommands.a
+[ 90%] Built target relay-appcommands
+[ 90%] Linking CXX static library librelay-remotesettings.a
+[ 90%] Built target relay-remotesettings
+[ 90%] Linking CXX static library librelay-calllines.a
+[ 90%] Built target relay-calllines
+[ 90%] Built target relay-requests_autogen_timestamp_deps
+[ 90%] Built target relay-internals_autogen_timestamp_deps
+[ 92%] Automatic MOC for target relay-internals
+[ 92%] Automatic MOC for target relay-requests
+[ 92%] Built target relay-internals_autogen
+[ 92%] Building CXX object CMakeFiles/relay-internals.dir/src/InternalsLedger.cpp.o
+[ 92%] Building CXX object CMakeFiles/relay-internals.dir/relay-internals_autogen/mocs_compilation.cpp.o
+[ 92%] Building CXX object CMakeFiles/relay-internals.dir/src/AgentInternalsView.cpp.o
+[ 92%] Built target relay-requests_autogen
+[ 92%] Building CXX object CMakeFiles/relay-requests.dir/src/RequestsPanel.cpp.o
+[ 92%] Building CXX object CMakeFiles/relay-requests.dir/relay-requests_autogen/mocs_compilation.cpp.o
+[ 92%] Building CXX object CMakeFiles/relay-requests.dir/src/RequestLedger.cpp.o
+[ 92%] Linking CXX static library librelay-remotepane.a
+[ 92%] Built target relay-remotepane
+[ 92%] Linking CXX static library librelay-internals.a
+[ 92%] Built target relay-internals
+[ 94%] Linking CXX static library librelay-requests.a
+[ 94%] Built target relay-requests
+[ 94%] Built target relay-subagents_autogen_timestamp_deps
+[ 94%] Automatic MOC for target relay-subagents
+[ 94%] Built target relay-subagents_autogen
+[ 94%] Building CXX object CMakeFiles/relay-subagents.dir/relay-subagents_autogen/mocs_compilation.cpp.o
+[ 96%] Building CXX object CMakeFiles/relay-subagents.dir/src/JobsPanel.cpp.o
+[ 96%] Building CXX object CMakeFiles/relay-subagents.dir/src/SubagentsPanel.cpp.o
+[ 96%] Building CXX object CMakeFiles/relay-subagents.dir/src/SubagentTranscript.cpp.o
+[ 96%] Linking CXX static library librelay-board.a
+[ 96%] Built target relay-board
+[ 96%] Linking CXX static library librelay-subagents.a
+[ 96%] Built target relay-subagents
+[ 96%] Built target relay_autogen_timestamp_deps
+[ 98%] Automatic MOC for target relay
+[ 98%] Built target relay_autogen
+[ 98%] Building CXX object CMakeFiles/relay.dir/relay_autogen/mocs_compilation.cpp.o
+[ 98%] Building CXX object CMakeFiles/relay.dir/src/main.cpp.o
+[ 98%] Building CXX object CMakeFiles/relay.dir/src/AgentUi.cpp.o
+[ 98%] Building CXX object CMakeFiles/relay.dir/src/Theme.cpp.o
+[ 98%] Building CXX object CMakeFiles/relay.dir/src/SkillsDialog.cpp.o
+[ 98%] Building CXX object CMakeFiles/relay.dir/src/BackendFactory.cpp.o
+[ 98%] Building CXX object CMakeFiles/relay.dir/src/TurnTranscript.cpp.o
+[100%] Building CXX object CMakeFiles/relay.dir/src/EngineBackend.cpp.o
+[100%] Building CXX object CMakeFiles/relay.dir/src/TestSuitesModel.cpp.o
+[100%] Building CXX object CMakeFiles/relay.dir/src/TestSuitesPane.cpp.o
+[100%] Building CXX object CMakeFiles/relay.dir/src/ProfilePane.cpp.o
+[100%] Building CXX object CMakeFiles/relay.dir/src/RemoteShare.cpp.o
+In file included from /tmp/verify-7bm4-fresh/src/src/main.cpp:161:
+/tmp/verify-7bm4-fresh/src/src/Pane.h: In member function ‘bool Pane::handleSessionEvent(const QString&, const QJsonObject&)’:
+/tmp/verify-7bm4-fresh/src/src/Pane.h:8413:93: warning: missing initializer for member ‘Pane::ForkText::guest’ [-Wmissing-field-initializers]
+ 8413 |             pendingForkText() = ForkText{sessionTextLines(), QDateTime::currentDateTimeUtc()};
+      |                                                                                             ^
+[100%] Linking CXX executable relay
+Numbering this build of relay
+2026-09-21.21H.01
+[100%] Built target relay
+[  0%] Built target relay-theme_autogen_timestamp_deps
+[  0%] Built target relay-theme_autogen
+[  0%] Built target relay-theme
+[  0%] Built target relay-highlight_autogen_timestamp_deps
+[  0%] Built target relay-highlight_autogen
+[  0%] Built target relay-highlight
+[  0%] Built target relay-testsuites-tests_autogen_timestamp_deps
+[100%] Automatic MOC for target relay-testsuites-tests
+[100%] Built target relay-testsuites-tests_autogen
+[100%] Building CXX object CMakeFiles/relay-testsuites-tests.dir/tests/testsuites_test.cpp.o
+[100%] Building CXX object CMakeFiles/relay-testsuites-tests.dir/relay-testsuites-tests_autogen/mocs_compilation.cpp.o
+[100%] Building CXX object CMakeFiles/relay-testsuites-tests.dir/src/TestSuitesModel.cpp.o
+[100%] Building CXX object CMakeFiles/relay-testsuites-tests.dir/src/TestSuitesPane.cpp.o
+[100%] Linking CXX executable relay-testsuites-tests
+[100%] Built target relay-testsuites-tests
+[  0%] Built target relay-projects_autogen_timestamp_deps
+[  0%] Built target relay-toollabel_autogen_timestamp_deps
+[  0%] Built target relay-prompthistory_autogen_timestamp_deps
+[  0%] Built target relay-outputlinks_autogen_timestamp_deps
+[  0%] Built target relay-notifications_autogen_timestamp_deps
+[  0%] Built target relay-modelcatalog_autogen_timestamp_deps
+[  0%] Built target relay-projects_autogen
+[ 12%] Built target relay-toollabel_autogen
+[ 12%] Built target relay-prompthistory_autogen
+[ 12%] Built target relay-outputlinks_autogen
+[ 12%] Built target relay-notifications_autogen
+[ 12%] Built target relay-modelcatalog_autogen
+[ 12%] Built target relay-projects
+[ 25%] Built target relay-toollabel
+[ 25%] Built target relay-outputlinks
+[ 25%] Built target relay-prompthistory
+[ 37%] Built target relay-notifications
+[ 37%] Built target relay-modelcatalog
+[ 37%] Built target relay-editor_autogen_timestamp_deps
+[ 37%] Built target relay-agentcontext_autogen_timestamp_deps
+[ 50%] Built target relay-editor_autogen
+[ 62%] Built target relay-agentcontext_autogen
+[ 75%] Built target relay-editor
+[ 87%] Built target relay-agentcontext
+[ 87%] Built target relay-board_autogen_timestamp_deps
+[ 87%] Built target relay-board_autogen
+[100%] Built target relay-board
+[100%] Built target relay-cardtests-tests_autogen_timestamp_deps
+[100%] Automatic MOC for target relay-cardtests-tests
+[100%] Built target relay-cardtests-tests_autogen
+[100%] Building CXX object CMakeFiles/relay-cardtests-tests.dir/relay-cardtests-tests_autogen/mocs_compilation.cpp.o
+[100%] Building CXX object CMakeFiles/relay-cardtests-tests.dir/tests/cardtests_test.cpp.o
+[100%] Linking CXX executable relay-cardtests-tests
+[100%] Built target relay-cardtests-tests
+[  0%] Built target relay-theme_autogen_timestamp_deps
+[  0%] Built target relay-theme_autogen
+[  0%] Built target relay-theme
+[  0%] Built target relay-highlight_autogen_timestamp_deps
+[  0%] Built target relay-highlight_autogen
+[  0%] Built target relay-highlight
+[  0%] Built target relay-profilepane-tests_autogen_timestamp_deps
+[  0%] Automatic MOC for target relay-profilepane-tests
+[  0%] Built target relay-profilepane-tests_autogen
+[  0%] Building CXX object CMakeFiles/relay-profilepane-tests.dir/relay-profilepane-tests_autogen/mocs_compilation.cpp.o
+[100%] Building CXX object CMakeFiles/relay-profilepane-tests.dir/src/ProfilePane.cpp.o
+[100%] Building CXX object CMakeFiles/relay-profilepane-tests.dir/tests/profilepane_test.cpp.o
+[100%] Linking CXX executable relay-profilepane-tests
+[100%] Built target relay-profilepane-tests
+[  0%] Built target relay-windowstate_autogen_timestamp_deps
+[  0%] Built target relay-windowstate_autogen
+[ 50%] Built target relay-windowstate
+[ 50%] Built target relay-windowstate-tests_autogen_timestamp_deps
+[100%] Automatic MOC for target relay-windowstate-tests
+[100%] Built target relay-windowstate-tests_autogen
+[100%] Building CXX object CMakeFiles/relay-windowstate-tests.dir/relay-windowstate-tests_autogen/mocs_compilation.cpp.o
+[100%] Building CXX object CMakeFiles/relay-windowstate-tests.dir/tests/windowstate_test.cpp.o
+[100%] Linking CXX executable relay-windowstate-tests
+[100%] Built target relay-windowstate-tests
+relay-build: built in 94s; 253 artifact(s) stamped back to 21:12:27, the build's start, so a header edited during it still gets recompiled
