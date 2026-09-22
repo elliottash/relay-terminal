@@ -126,7 +126,11 @@ class ConverterTests(unittest.TestCase):
             rows = {row["name"].split(" ")[0]: row for row in folded["rows"]}
             self.assertIn("leaf", rows)
             # The stack is caller-first, so `leaf` is inside `middle`: its total is the larger.
-            self.assertGreaterEqual(rows["middle"]["total"], rows["leaf"]["self"])
+            self.assertGreaterEqual(
+                rows["middle"]["total"], rows["leaf"]["self"],
+                # #PF14: preserve the failed input, not just its rounded output totals.
+                # This profile contains only this test's generated workload.
+                msg=f"raw pstats: {C._pstats_entries(prof)!r}; speedscope: {document!r}")
             self.assertGreater(folded["wall"], 0.0)
             # And the file that is not a profile is a sentence.
             other = Path(tmp) / "not.prof"

@@ -9,7 +9,7 @@ created: '2026-09-21'
 source: 'Measured by Codex during release verification for #R6BS'
 links: {plans: [], commits: [], evidence: ['https://github.com/elliottash/relay-terminal/actions/runs/35667599551'], related: [R6BS, 7BM4], github: null}
 ---
-# Python 3.14 profile roundtrip intermittently loses the expected caller total
+# Profile roundtrip intermittently loses the expected caller total
 
 ## Issue
 Measured during #R6BS release verification: Ubuntu 26.04 arm64, Python 3.14,
@@ -32,7 +32,12 @@ tests, 500 direct profile conversions, and 1500 invocations of the exact failing
 Those repetitions captured the raw pstats data on failure, but none failed. Diagnostic scripts
 and results are `/tmp/reproduce_profile.py`, `/tmp/reproduce_profile_case.py`,
 `/tmp/profile-repro.log`, and `/tmp/profile-repro-case.log` on the investigating machine.
-No product or test code was changed. A subsequent release must retain the assertion and pass its
+The same failure recurred in release run 35669387286, Debian 13 arm64 (Python 3.13), artifact
+`deb-3`, `out/logs/build-debian-trixie.log`, lines 9889–9895: `middle.total = 0.000006` versus
+`leaf.self = 0.005672`. It occurred on the first backend pass; the retry passed. This rules out a
+Python 3.14-only explanation. The assertion now includes raw pstats and the converted speedscope
+document on failure so the next occurrence preserves the input graph. Its condition is unchanged,
+and no product code was changed. A subsequent release must retain the assertion and pass its
 gates; those passes would be release evidence, not proof that this intermittent issue is fixed.
 
 ## Tests
