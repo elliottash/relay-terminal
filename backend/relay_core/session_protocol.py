@@ -115,6 +115,17 @@ def provider_config(request: dict) -> ProviderConfig:
         preset = entry.as_preset()
     base_url = str(request.get("base_url") or "") or (preset.base_url if preset else "")
     model = str(request.get("model") or "") or (preset.model if preset else "")
+    # A Pro code is an entitlement for Relay, never a generic provider API key. Pin the
+    # endpoint before any keystore lookup, including custom settings that identify Pro by model.
+    if named == "relay-pro":
+        if base_url.rstrip("/") != PRESETS["relay-pro"].base_url:
+            raise ValueError("Relay Pro can only use the Relay gateway; remove the endpoint override.")
+        base_url = PRESETS["relay-pro"].base_url
+    elif preset is None:
+        matched = match_preset(base_url, model)
+        if matched is not None and matched.id == "relay-pro":
+            preset = matched
+            base_url = matched.base_url
     extra = request.get("extra")
     if extra is None:
         extra = dict(preset.extra) if preset else {}
@@ -134,6 +145,8 @@ def provider_config(request: dict) -> ProviderConfig:
             # "Custom" settings that point at a known endpoint still use its stored key.
             match = match_preset(base_url, model)
             preset_id = match.id if match else ""
+        if preset_id == "relay-pro":
+            raise ValueError("Relay Pro access codes cannot be used as provider API keys.")
         api_key = keystore.lookup(preset_id) if preset_id else ""
         if not api_key:
             raise ValueError(f"No stored key for {provider_name(preset_id, base_url)}. "

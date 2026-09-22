@@ -12,7 +12,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from relay_core import hosted, presets, relay_pro, roles
+from relay_core import hosted, presets, relay_pro, roles, session_protocol
 from relay_core.provider import HostedChatProvider, ProviderConfig, ProviderError
 from tests.test_gateway import FakeUpstream, Gateway, KEY_ENV, config_for
 
@@ -79,6 +79,60 @@ class ProClientTests(unittest.TestCase):
         self.assertTrue(self.operation('remove')['removed'])
         self.assertFalse(relay_pro.status()['available'])
         self.assertFalse(relay_pro.status()['has_stored_key'])
+
+    def test_activation_error_distinguishes_access_from_keyring_failure(self):
+        event = self.operation('store', 'bad')
+        self.assertIn('access was denied', event['text'])
+        self.assertNotIn('keyring', event['text'])
+        with patch.object(relay_pro.keystore, 'store', side_effect=relay_pro.keystore.KeystoreError(self.secret)):
+            event = self.operation('store', self.secret)
+        self.assertIn('keyring', event['text'])
+        self.assertFalse(relay_pro.status()['available'])
+
+    def test_partial_pro_roles_cannot_activate_the_full_catalog(self):
+        with patch.object(hosted.session(), 'fetch_pro', return_value={
+                'active': True, 'models': ['relay-pro-main']}):
+            event = self.operation('store', self.secret)
+        self.assertEqual(event['event'], 'error')
+        self.assertIn('not fully enabled', event['text'])
+        self.assertFalse(self.saved)
+
+    def test_configuration_cannot_extract_pro_secret_for_a_foreign_endpoint(self):
+        self.saved['relay-pro'] = self.secret
+        for endpoint in ('https://attacker.example/v1', 'http://127.0.0.1:1/v1',
+                         'https://api.relay-terminal.ai.attacker.example/v1'):
+            with patch.object(relay_pro.keystore, 'lookup') as lookup:
+                with self.assertRaisesRegex(ValueError, 'endpoint override'):
+                    session_protocol.provider_config({'preset': 'relay-pro', 'base_url': endpoint,
+                        'model': 'relay-pro-main', 'use_stored_key': True})
+                lookup.assert_not_called()
+        for named in ('relay-pro', None):
+            with patch.object(relay_pro.keystore, 'lookup') as lookup:
+                config = session_protocol.provider_config({'preset': named,
+                    'base_url': presets.PRESETS['relay-pro'].base_url,
+                    'model': 'relay-pro-main', 'use_stored_key': True, 'api_key': self.secret})
+                lookup.assert_not_called()
+            self.assertTrue(config.hosted)
+            self.assertEqual(config.api_key, '')
+            self.assertNotIn(self.secret, json.dumps(vars(config)))
+
+    def test_callback_failure_does_not_retry_access_validation(self):
+        self.saved['relay-pro'] = self.secret
+        finished = threading.Event()
+        def broken_listener():
+            relay_pro.start_refresh()
+            raise RuntimeError('UI unavailable')
+        relay_pro.set_listener(broken_listener)
+        self.addCleanup(relay_pro.set_listener, None)
+        with patch.object(relay_pro, 'validate', return_value=list(relay_pro.MODELS)) as validate:
+            with patch('relay_core.relay_pro.logging.getLogger') as logger:
+                logger.return_value.warning.side_effect = lambda *args: finished.set()
+                relay_pro.start_refresh()
+                self.assertTrue(finished.wait(2))
+                # The completed state suppresses another refresh even after notification failed.
+                relay_pro.start_refresh()
+            self.assertEqual(validate.call_count, 1)
+        self.assertTrue(relay_pro.status()['available'])
 
     def test_revoked_test_keeps_storage_but_disables_availability(self):
         self.operation('store', self.secret)

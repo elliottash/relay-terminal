@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import threading
 import time
 
@@ -26,7 +27,11 @@ def set_listener(callback):
 
 def _notify():
     if _listener is not None:
-        _listener()
+        try:
+            _listener()
+        except Exception:
+            # Access state is already committed; a failed UI push must not retry validation.
+            logging.getLogger(__name__).warning("Relay Pro availability notification failed.")
 
 
 def _fingerprint(code):
@@ -48,8 +53,9 @@ def validate(value: str) -> list[str]:
         raise hosted.HostedUnavailable(text, exc.code) from None
     models = result.get("models")
     if (result.get("active") is not True or not isinstance(models, list) or not models
-            or any(model not in MODELS for model in models)):
-        raise hosted.HostedUnavailable("Relay Pro is not enabled on this gateway.", "pro_access_denied")
+            or any(not isinstance(model, str) or model not in MODELS for model in models)
+            or set(models) != set(MODELS)):
+        raise hosted.HostedUnavailable("Relay Pro is not fully enabled on this gateway.", "pro_access_denied")
     return models
 
 
@@ -136,13 +142,18 @@ def run(action: str, emit, request_id=None, value=""):
                     event = {"event": "key_stored"} if action == "store" else {
                         "event": "key_tested", "ok": True, "model": "relay-pro-main", "elapsed_ms": 0}
             emit({**event, "id": request_id, "preset": PRESET_ID})
-        except Exception:
+        except Exception as exc:
+            if isinstance(exc, hosted.HostedUnavailable):
+                message = str(exc)  # validate() supplies only our own safe sentences
+            elif isinstance(exc, keystore.KeystoreError):
+                message = "Relay Pro code could not be saved or removed. Unlock your keyring and try again."
+            else:
+                message = "Relay Pro access could not be updated. Try again."
             if action != "store":
                 invalidate(code())
             event = {"event": "key_tested", "ok": False,
-                     "error": "Relay Pro access could not be validated. Check your code or try again."} \
-                if action == "test" else {"event": "error", "text":
-                    "Relay Pro code could not be saved or removed. Check access and your keyring."}
+                     "error": message} \
+                if action == "test" else {"event": "error", "text": message}
             emit({**event, "id": request_id, "preset": PRESET_ID})
         finally:
             _notify()
