@@ -28,3 +28,9 @@ Independent backend verifier: ../verify-S7GX/README.md. Independent GUI verifier
 ## Scope
 
 SSH destinations are aliases on the same physical machine, not independent remote machines. Guest MCP transport/name adapters were exercised without paid Codex/Claude model sessions. Linux/libvterm was built and driven; other platforms/cores and mosh are not live-certified. Enhancement off and unsupported/nested shells deliberately withhold authenticated-host tools. Additional edge-case evidence is recorded by the independent verifier. Runtime records contain only fixture requests and output.
+
+## Final follow-ups
+
+Interactive remote PATH completion landed in 0b4b1798 and passes independent build7 screenshot 13. Delayed results are discarded after draft changes/disconnect (../verify-S7KC/delayed7/). Zsh inline-output/native-control redraw landed in 2944d892 after an independently driven matching fixture trial. Final shell suite: 27 passed; together with the unchanged guest/remote/attachment coverage, 91 Python cases pass. Independent build7 covers cancellation and Ctrl+C. `edge-drive.py` adds a passing real-SSH alternate-screen smoke; see edge/README.md.
+
+The board API reached its 20-write per-turn limit after implementation was handed to needs-verification; final links/task closure could not all be written by the implementer. Code, evidence and independent findings remain committed.
