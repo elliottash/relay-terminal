@@ -1,0 +1,46 @@
+/usr/bin/python3: No module named pytest
+test_a_second_answer_refreshes_human_qa_and_does_not_reveal_twice (test_tryit_protocol.AnswerTests.test_a_second_answer_refreshes_human_qa_and_does_not_reveal_twice) ... ok
+test_a_section_with_no_sealed_file_still_records_the_verdict (test_tryit_protocol.AnswerTests.test_a_section_with_no_sealed_file_still_records_the_verdict) ... ok
+test_an_answer_without_a_try_it_section_is_refused (test_tryit_protocol.AnswerTests.test_an_answer_without_a_try_it_section_is_refused) ... ok
+test_an_empty_answer_is_refused (test_tryit_protocol.AnswerTests.test_an_empty_answer_is_refused) ... ok
+test_the_answer_is_a_verdict_the_seal_breaks_and_human_qa_is_generated (test_tryit_protocol.AnswerTests.test_the_answer_is_a_verdict_the_seal_breaks_and_human_qa_is_generated) ... ok
+test_a_staged_line_on_the_card_wins_over_the_glob (test_tryit_protocol.ReuseTests.test_a_staged_line_on_the_card_wins_over_the_glob) ... ok
+test_a_verify_directory_without_a_stage_script_falls_through (test_tryit_protocol.ReuseTests.test_a_verify_directory_without_a_stage_script_falls_through) ... ok
+test_the_prompt_says_to_reuse_the_verify_staging (test_tryit_protocol.ReuseTests.test_the_prompt_says_to_reuse_the_verify_staging) ... ok
+test_with_no_staging_the_prompt_says_to_stage_it_itself (test_tryit_protocol.ReuseTests.test_with_no_staging_the_prompt_says_to_stage_it_itself) ... ok
+test_a_finished_turn_that_wrote_the_section_leaves_no_note (test_tryit_protocol.RunTests.test_a_finished_turn_that_wrote_the_section_leaves_no_note) ... ok
+test_a_second_run_while_one_is_in_flight_says_already_running (test_tryit_protocol.RunTests.test_a_second_run_while_one_is_in_flight_says_already_running) ... ok
+test_a_staging_failure_writes_a_note_and_no_section (test_tryit_protocol.RunTests.test_a_staging_failure_writes_a_note_and_no_section) ... ok
+test_a_stop_leaves_the_same_note_in_its_own_words (test_tryit_protocol.RunTests.test_a_stop_leaves_the_same_note_in_its_own_words) ... ok
+test_a_turn_that_ended_badly_leaves_the_note_the_agent_could_not (test_tryit_protocol.RunTests.test_a_turn_that_ended_badly_leaves_the_note_the_agent_could_not) ... ok
+test_an_unknown_card_and_a_missing_agent_are_refused_with_a_sentence (test_tryit_protocol.RunTests.test_an_unknown_card_and_a_missing_agent_are_refused_with_a_sentence) ... ok
+test_it_finishes_saying_whether_the_section_was_written (test_tryit_protocol.RunTests.test_it_finishes_saying_whether_the_section_was_written) ... ok
+test_it_starts_one_turn_with_the_brief_the_card_and_the_evidence_directory (test_tryit_protocol.RunTests.test_it_starts_one_turn_with_the_brief_the_card_and_the_evidence_directory) ... ok
+test_progress_lines_stream_while_it_runs (test_tryit_protocol.RunTests.test_progress_lines_stream_while_it_runs) ... ok
+test_stop_ends_the_run (test_tryit_protocol.RunTests.test_stop_ends_the_run) ... ok
+test_the_agents_own_note_is_not_written_over (test_tryit_protocol.RunTests.test_the_agents_own_note_is_not_written_over) ... ok
+test_the_brief_never_puts_the_expected_result_on_the_card (test_tryit_protocol.RunTests.test_the_brief_never_puts_the_expected_result_on_the_card) ... ok
+test_the_types_match_the_protocol_modules (test_tryit_protocol.RunTests.test_the_types_match_the_protocol_modules) ... ok
+test_try_run_is_refused_while_a_cleanup_runs (test_tryit_protocol.RunTests.test_try_run_is_refused_while_a_cleanup_runs) ... ok
+test_a_relay_link_and_a_bare_path_are_both_openable (test_tryit_protocol.SectionTests.test_a_relay_link_and_a_bare_path_are_both_openable) ... ok
+test_a_revealed_section_reads_back_its_expected_text (test_tryit_protocol.SectionTests.test_a_revealed_section_reads_back_its_expected_text) ... ok
+test_it_finds_the_command_the_task_the_question_and_the_sealed_path (test_tryit_protocol.SectionTests.test_it_finds_the_command_the_task_the_question_and_the_sealed_path) ... ok
+test_prose_with_no_shape_is_still_the_task (test_tryit_protocol.SectionTests.test_prose_with_no_shape_is_still_the_task) ... ok
+test_an_unknown_card_is_refused (test_tryit_protocol.ToolTests.test_an_unknown_card_is_refused) ... ok
+test_board_try_hands_back_the_brief_and_records_a_progress_entry (test_tryit_protocol.ToolTests.test_board_try_hands_back_the_brief_and_records_a_progress_entry) ... ok
+test_board_try_is_refused_during_a_cleanup_exactly_as_board_claim_is (test_tryit_protocol.ToolTests.test_board_try_is_refused_during_a_cleanup_exactly_as_board_claim_is) ... ok
+test_board_try_says_when_the_verifying_session_already_staged_it (test_tryit_protocol.ToolTests.test_board_try_says_when_the_verifying_session_already_staged_it) ... ok
+test_the_tool_is_in_the_set_every_turn_carries (test_tryit_protocol.ToolTests.test_the_tool_is_in_the_set_every_turn_carries) ... ok
+
+----------------------------------------------------------------------
+Ran 32 tests in 0.511s
+
+OK
+Internal ctest changing into directory: /home/elliott/repos/relay-terminal/build
+Test project /home/elliott/repos/relay-terminal/build
+    Start 75: cardtests
+1/1 Test #75: cardtests ........................   Passed    0.23 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   0.23 sec

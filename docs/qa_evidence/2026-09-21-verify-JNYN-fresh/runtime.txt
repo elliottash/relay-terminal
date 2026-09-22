@@ -1,0 +1,11 @@
+Backend tests: working files identical to committed blobs at 0241d05ef19393e84c0ef98655c9687466a92efc
+GUI: exploratory existing land/jnyn build gate; not current HEAD.
+Build-gate manifest SHA256: 5107f9723b834624353ffb34bbdaa3c71e3667fde0cd1430140e61c8d01222cf
+GUI binary SHA256: c6dd4d0eee91a9b33a3d616761fac3c032906d172324b8bf5d3caf536738b87c
+src/RelayWindow.h gate blob beddf2abdf474c369ff5fcab2efb695d375de951 current blob 403e33ac583401aedb4023115da0ae47ec84b9ed
+backend/relay_core/tryit_protocol.py gate blob 9e1d5843e471e1c13eab5808941147c3ca310a1c current blob 0a21f3cdd12e3ee92449adbaeed79446232b2c15
+backend/relay_core/board_protocol.py gate blob 0958f9db52b01bafeca5729de45fb6d7aa2b8cff current blob 2cdd479ae196b7bb7c2381a6bb78e89daeac5cb5
+backend/relay_core/board_tools.py gate blob f65f3707372365f829e7c410ac10cf33ca297d07 current blob 8ce227412fae94117bad076740b9f1460d843e08
+
+UI state: {"root": "/tmp/jnyfresh-5j5c664f", "display": ":283", "xvfb": 3023423, "relay": 3023448, "binary": "/tmp/claude-1000/land/jnyn/verify/build/relay", "exit": null}
+build/relay-cardtests-tests SHA256 e7d8669c0b35e81ecbee85860c8d33216bf3ceeefddb55fbab00f42388a1c019

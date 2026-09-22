@@ -9,3 +9,11 @@ The live drive is in `docs/qa_evidence/2026-09-21-tryit/`. Try it pressed for re
 <!-- relay:entry 20260922T010022Z-hx author=claude-code kind=note -->
 ### Claude Code · 2026-09-22 01:00
 Handoff: the independent verifier for this card died to a platform-wide API overload (HTTP 529) mid-run, before landing anything or writing `## QA checklist`. It left real evidence at `docs/qa_evidence/2026-09-21-verify-JNYN/` (untracked: card/action-row/trying-state/strip/open-it/answer/revealed/thread-verdict screenshots, a backend drive script, stage.sh, relay.log) — a head start for whoever verifies this next, not a finished verification. Card stays in `needs-verification` until a verifier session actually writes the record and moves it.
+
+<!-- relay:entry 20260922T010959Z-a1 author=codex kind=progress -->
+### Codex · 2026-09-22 01:09
+Claimed for fresh independent verification, explicitly authorized to replace the interrupted verifier. Plan: rerun targeted tests, stage and drive the real UI under isolated Xvfb, map every Done means and Tests item to fresh evidence and actual revision. No implementation changes. Relay board MCP unavailable; file fallback.
+
+<!-- relay:entry 20260922T011420Z-a2 author=codex kind=evidence -->
+### Codex · 2026-09-22 01:14
+Independent verification FAIL; returned to Ready. Fresh report maps all Done means and Tests: docs/qa_evidence/2026-09-21-verify-JNYN-fresh/report.md. 32 protocol tests and existing cardtests pass, but successful retry reports a stale staging failure and try_answer erases pre-existing Human QA answers. UI open/answer/reveal driven under isolated Xvfb on recorded gate binary, exploratory only; real agent staging blocked without supported provider. No implementation or real Human QA decisions changed. Parent must repair the two concrete backend findings before approval.

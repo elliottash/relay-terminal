@@ -1,14 +1,15 @@
 ---
 id: JNYN
 type: work
-status: needs-verification
+assignee: codex-verify-jnyn-a1
+status: ready
 labels: [feature, switchboard, qa]
 component: [gui, worker]
 parent: YZ8G
 rank: zzzzzzzzzzzzzzzzc
 created: '2026-09-21'
 source: 'owner, 2026-09-21: "i agree with all, go ahead with it" (#YZ8G plan)'
-links: {plans: [], commits: [03701acf, 79ef050e, bca9a82e, a739dd45, 39bab9d9], evidence: [docs/qa_evidence/2026-09-21-tryit/], related: [YZ8G, 7BM4, WC3E], github: null}
+links: {plans: [], commits: [03701acf, 79ef050e, bca9a82e, a739dd45, 39bab9d9], evidence: [docs/qa_evidence/2026-09-21-tryit/, docs/qa_evidence/2026-09-21-verify-JNYN-fresh/], related: [YZ8G, 7BM4, WC3E], github: null}
 ---
 # Try it: stage the situation, complete the mechanical pass, hand the person one task and one question
 
@@ -63,3 +64,24 @@ turn reuses it instead of replaying the mechanical pass; the `started` event say
 - `manual: docs/qa_evidence/2026-09-21-tryit/` — Try it pressed for real on #7BM4, from a
   Relay on an isolated Xvfb display and profile, with the Switchboard agent on its configured
   model.
+
+## QA checklist
+Independent Codex review, 2026-09-21 local / 2026-09-22 UTC. Fresh evidence:
+`docs/qa_evidence/2026-09-21-verify-JNYN-fresh/report.md`.
+- Done means 1 — PARTIAL: protocol reuse tests pass; live agent reuse not exercised.
+- Done means 2 — PARTIAL/BLOCKED: actual isolated UI action/open/answer drive on pinned build-gate binary; supported provider absent, successful agent staging not established.
+- Done means 3 — FAIL: successful retry still reports the previous run's staging failure (`backend.txt`).
+- Done means 4 — FAIL: normal answer/reveal works, but `try_answer` erases existing Human QA decisions (`backend.txt`, `fixture-after.md`, `thread-after.md`). Real card's Human QA untouched.
+- Done means 5 — NOT ESTABLISHED: full GUI/backend/CLI agent staging on own board remains unverified.
+- Tests: `tests/test_tryit_protocol.py` — PASS 32/32 via unittest (`tests.txt`).
+- Tests: `ctest -R cardtests` — PASS 1/1 existing build; source provenance unestablished (`tests.txt`).
+- Tests: configured-model manual #7BM4 — NOT REPRODUCED; fresh #T9QA UI click refused without supported provider (`ui-try.png`).
+Actual backend revision: unchanged tested files at `0241d05ef19393e84c0ef98655c9687466a92efc`.
+GUI is exploratory `/tmp/claude-1000/land/jnyn/verify/build/relay`, not current main;
+binary SHA256 and source manifest/blob identities are in `runtime.txt`.
+
+## Verdict
+2026-09-21 local / 2026-09-22 UTC — **FAIL; returned to Ready for implementation repair.**
+Scope failure-note lookup to the current Try it run and preserve pre-existing Human QA decisions.
+After repair, rerun the two fresh reproductions and complete a clean-revision, configured-provider
+staging pass. Prior interrupted-verifier artifacts are not proof. No implementation changed.
