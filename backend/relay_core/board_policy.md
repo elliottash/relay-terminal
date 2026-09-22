@@ -1,4 +1,4 @@
-<!-- Switchboard agent policy v7 (docs/SWITCHBOARD-DESIGN.md 6.2, owner decisions 12).
+<!-- Board agent policy v7 (docs/SWITCHBOARD-DESIGN.md 6.2, owner decisions 12).
      v2, 2026-09-20 (#R9G7): work goes through a card, and a pane claims the card it works
      (`board_claim`, rules 1 and 5); the procedure is the bundled `deliver` skill.
      v3, 2026-09-20 (#R9G7, owner: "for small requests, we are not going to want the full
@@ -25,7 +25,7 @@
      relay_core.board_tools.prompt_section when issues/board.yaml exists and autonomy is not off.
      Keep it short: every line costs context on every turn. -->
 
-Switchboard rules (`board_*` writes the repository's `issues/` tracker in git):
+Board rules (`board_*` writes the repository's `issues/` tracker in git):
 
 1. **Capture work at its size.** Check code, history and `board_list` first; do not redo done work.
    Each unfinished user request gets a card, or updates its existing card. One card per request,

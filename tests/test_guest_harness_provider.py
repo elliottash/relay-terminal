@@ -1189,7 +1189,7 @@ class WorkerProtocolTests(unittest.TestCase):
         self.assertEqual(configured[0]["roles"]["switchboard"]["preset"], "glm-coding")
 
     def test_with_nothing_usable_it_configures_anyway_and_a_turn_says_why(self):
-        """The Switchboard is files, so the pane still opens and browses its cards; what it cannot
+        """The board is files, so the pane still opens and browses its cards; what it cannot
         do is answer, and it says so in a sentence instead of the endpoint error."""
         harness = FakeHarness([], session_id="w-sess", model="claude-fake")
         events = self.helper(harness, fallbacks=[{"preset": "kimi", "model": "kimi-k3"}])

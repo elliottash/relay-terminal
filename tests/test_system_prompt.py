@@ -75,7 +75,7 @@ def write(path: Path, text: str):
 
 
 def make_workspace(root: Path) -> tuple[Path, Path, Path]:
-    """A fixed workspace, Switchboard and skill library, so nothing here depends on the machine."""
+    """A fixed workspace, board and skill library, so nothing here depends on the machine."""
     workspace = root / 'ws'
     workspace.mkdir()
     write(workspace / 'AGENTS.md', 'Project rules: run the tests before you say it works.\n')
@@ -196,7 +196,7 @@ class StabilityTests(PromptFixture):
         self.assertIn('PLAN MODE', agent_mod.plan_mode_note('plan'))
         self.assertEqual(agent_mod.plan_mode_note('build'), '')
 
-    def test_attaching_a_switchboard_changes_nothing_above_the_workspace_line(self):
+    def test_attaching_a_board_changes_nothing_above_the_workspace_line(self):
         # A project attached or detached mid-session is the other event that used to move the
         # middle of the prompt: the board's header and policy sat above the app and own-session
         # rules. They are at the bottom now, under the workspace line, with the one line naming
@@ -207,8 +207,8 @@ class StabilityTests(PromptFixture):
         attached = self.agent()
         shared = os.path.commonprefix([without.system_prompt(), attached.system_prompt()])
         self.assertIn('Chosen workspace: ' + str(self.workspace), shared,
-                      'attaching a Switchboard changed something above the workspace line')
-        self.assertIn('Switchboard', attached.system_prompt()[len(shared):])
+                      'attaching a board changed something above the workspace line')
+        self.assertIn('Board rules', attached.system_prompt()[len(shared):])
         # The tools before the ones that can only append (TAIL_TOOLS) keep their order too.
         stable = [[t for t in a.tools() if t['function']['name'] not in agent_mod.TAIL_TOOLS]
                   for a in (without, attached)]
@@ -278,7 +278,7 @@ class PolicyCacheTests(unittest.TestCase):
             for _ in range(20):
                 self.assertEqual(board_tools.policy_text(), first)
         self.assertEqual(len(self.reads), 1, self.reads)
-        self.assertIn('Switchboard rules', first)
+        self.assertIn('Board rules', first)
         self.assertNotIn('<!--', first)       # the file's provenance comment is not for the model
 
     def test_an_edited_policy_still_takes_effect(self):
@@ -307,7 +307,7 @@ class SizeTests(PromptFixture):
         self.assertLess(tools, 18 * 1024, f'tool schemas grew to {tools} bytes')
         board = len(self.agent().system_prompt().encode('utf-8'))
         # 8.9 KB since decisions 2, 6 and 8; it was 13.9 KB before any of them.
-        self.assertLess(board, 9 * 1024 + 512, f'prompt with a Switchboard grew to {board} bytes')
+        self.assertLess(board, 9 * 1024 + 512, f'prompt with a board grew to {board} bytes')
 
     def test_the_board_policy_block_stays_tiered(self):
         # #GMCF decision 8: the policy block is what has to be read *before* a board tool is
@@ -318,7 +318,7 @@ class SizeTests(PromptFixture):
         # description can carry, because the model reads it before it has called anything.
         section = board_tools.prompt_section(self.agent().board)
         size = len(section.encode('utf-8'))
-        self.assertLess(size, 3 * 1024, f'the Switchboard policy block grew to {size} bytes')
+        self.assertLess(size, 3 * 1024, f'the board policy block grew to {size} bytes')
         for phrase in ('verbatim', 'board_claim', 'board_rate_limited', 'discussing',
                        "board page's chat", 'deliver'):
             self.assertIn(phrase, section)

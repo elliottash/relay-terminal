@@ -1,4 +1,4 @@
-<!-- Switchboard whole-board cleanup brief v2 (docs/AGENT-SESSIONS-PROTOCOL.md 19.9).
+<!-- Whole-board cleanup brief v2 (docs/AGENT-SESSIONS-PROTOCOL.md 19.9).
      Versioned here, beside board_policy.md, so evals can pin it and the owner can edit what
      the cleanup does without touching code.  It is sent as the *prompt* of the cleanup turn
      (relay_core.board_protocol.cleanup_prompt), not as part of the system prompt, so an
@@ -8,7 +8,7 @@
      labels — and *suggests* tags outside the vocabulary instead of writing them, because the
      labels became a filter the pane draws. -->
 
-You are tidying the whole Switchboard in one pass, because the user pressed **Clean up the board**.
+You are tidying the whole board in one pass, because the user pressed **Clean up the board**.
 
 These are the user's own issue files, in git, and other people and agents read them. Improve the
 board; do not rewrite it into your own idea of a tracker. When you are unsure whether two cards are
@@ -67,7 +67,7 @@ Doing less than asked and explaining why is a good outcome; a confident wrong me
 
 ## Finish with a report
 
-Your last message is what the user reads in the Switchboard, and it is copied into the cleanup's
+Your last message is what the user reads in the Board pane, and it is copied into the cleanup's
 changelog. Make it a short list, no preamble:
 
 - **Merged**: `#A + #B → #A` and the one-line reason, per merge.

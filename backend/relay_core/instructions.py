@@ -198,7 +198,7 @@ def auto_project_files(workspace: str | Path) -> list[Path]:
                 continue
             picked.extend(matches)
             # CLAUDE.md's companions ride with it whether it is the first hit or the first hit
-            # imports it: a Switchboard-created AGENTS.md starts with `@CLAUDE.md` so that the
+            # imports it: a Board-created AGENTS.md starts with `@CLAUDE.md` so that the
             # project's own instructions are not shadowed (board.pointer_files), and the rules
             # under .claude/ must follow CLAUDE.md through that import too (#R9G7).
             if "CLAUDE" in pattern or any(_imports_claude(p, directory) for p in matches):

@@ -113,7 +113,7 @@ def guest_name(preset_or_config) -> str:
 def helper_refusal(name: str) -> str:
     """What the helper agent says when the only model it has is a guest harness (card #GH5T).
 
-    The helper — the Switchboard's agent and the one the Options, Actions and Sessions panes ask
+    The helper — the Board's agent and the one the Options, Actions and Sessions panes ask
     (protocol 30.7) — works through Relay's own `board_*` and `app_*` tools, which a guest does
     not take (#4NXH). So it cannot run on one, and when the Options › Models priority list holds
     nothing else usable there is nothing to fall back to. This is the sentence the user sees then,
@@ -130,7 +130,7 @@ class UnavailableProvider:
 
     Its Main is a guest harness, which the helper may not run on, and the priority list holds
     nothing else — so there is no endpoint to build. The worker is still configured, because the
-    Switchboard is files: the pane opens, its cards are read and its model box says what is wrong.
+    The board is files: the pane opens, its cards are read and its model box says what is wrong.
     Nothing is started and nothing is ever sent; a turn that reaches a provider at all gets
     `helper_refusal` back, the same sentence the agent builder raises before it gets that far.
     """

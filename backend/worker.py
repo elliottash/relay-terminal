@@ -91,7 +91,7 @@ def main():
     # because `ask` reads it and a message may arrive before any `configure` has.
     state = {"agent_role": "main", "context": None}
 
-    # Switchboard (protocol 17). `board` also tags board_ask turn events with their card_id and
+    # Board (protocol 17). `board` also tags board_ask turn events with their card_id and
     # appends the agent's answer to the card thread, so it is created before the supervisor.
     board = board_protocol.BoardCommands(None, emit)
     globals_commands = globals_protocol.GlobalsCommands(emit, workspace=lambda: board.workspace)
@@ -113,7 +113,7 @@ def main():
     subagents.turns = turns
     board.turns = turns
     # Signal threads (#AQ6X step 7b): a failing check nobody is on is picked up as a subagent of
-    # this worker, so the Switchboard's half needs the manager. One line rather than a constructor
+    # this worker, so the board's half needs the manager. One line rather than a constructor
     # argument because `board` is built before `subagents.configure` has anything to configure.
     board.subagents = subagents
 
@@ -233,12 +233,12 @@ def main():
                 # (that is its sandbox), but the *board* may not — `workspace: ""` used to make
                 # `Path("") / "issues"` relative, so a pane with no workspace quietly opened the
                 # board of whatever directory Relay was launched from (186 cards of another
-                # project), which is why the Switchboard looked global rather than per project.
+                # project), which is why the board looked global rather than per project.
                 asked = request.get("workspace")
                 board_workspace = (str(Path(asked).expanduser().resolve())
                                    if isinstance(asked, str) and asked.strip() else None)
                 workspace = board_workspace or str(Path(os.getcwd()).resolve())
-                # The Switchboard is files, not a model: set it up before the provider is resolved,
+                # The board is files, not a model: set it up before the provider is resolved,
                 # so a missing key still lets the pane open and browse the cards (only board_ask
                 # needs the agent). Before 2026-09-17 a keyless window sat on "Loading…" forever.
                 board_summary = board.configure(board_workspace, request)
@@ -341,7 +341,7 @@ def main():
                         config, options["preset_id"] = spare.config, spare.preset_id
                 state["agent_role"] = agent_role
                 # Nothing on the list could take it either, so this worker has no model at all. It
-                # is still configured — the Switchboard is files, so the pane opens, reads its
+                # is still configured — the board is files, so the pane opens, reads its
                 # cards and shows in its model box why it cannot answer — on a provider that is
                 # never called: a turn gets the sentence, not an endpoint error (#GH5T).
                 stand_in = (guest_harness_provider.UnavailableProvider(
@@ -392,7 +392,7 @@ def main():
                 if "max_auto_turns" in agents_request:
                     subagents.set_options(agents_request["max_auto_turns"])
                 turns.set_agent(agent)
-                # Protocol 19.12: the "initialize a Switchboard here?" round trip watches this
+                # Protocol 19.12: the "initialize a board here?" round trip watches this
                 # agent's cancel_event, so Stop ends a turn that is waiting on the dialog.
                 board.bind_agent(agent)
                 # Protocol 30.3: Stop ends an `app_command` this agent is waiting on. And 30.5:
@@ -421,7 +421,7 @@ def main():
                     # — the scope it settled on above all, since that is what decides the tools.
                     event["context"] = {**context.to_json(), "scope": agent.tool_scope}
                 if board_summary is not None:
-                    event["board"] = board_summary   # Switchboard (protocol 17)
+                    event["board"] = board_summary   # Board (protocol 17)
                 if agent.executor.skills is not None:
                     event["skill_commands"] = agent.executor.skills.commands()
                 if skill_index is not None and skill_index.skipped:
@@ -437,11 +437,11 @@ def main():
                 if resolver.warnings:
                     emit(resolver.event(agent_role))
             elif kind == "set_board":
-                # Protocol 19.11: attach this pane to a project's Switchboard, or detach it,
+                # Protocol 19.11: attach this pane to a project's board, or detach it,
                 # **without** ending the conversation. `configure` cannot do it — it builds a new
                 # Agent, and with it a new conversation — so attaching a tab that is already
                 # talking comes through here: the agent object, its messages and its session id
-                # are untouched, and only its board tools and the Switchboard block of its system
+                # are untouched, and only its board tools and the board block of its system
                 # prompt change. Mid-turn it lands when the turn ends, so a running turn keeps the
                 # tool set it started with.
                 board.set_board(request)
@@ -536,7 +536,7 @@ def main():
                         and board.tools is None):
                     raise ValueError(board_protocol.NO_BOARD_CHAT_ERROR)
                 text = request.get("text", "")
-                # The board a Switchboard console's first question is seeded with (19.18): one
+                # The board a Board console's first question is seeded with (19.18): one
                 # line per card, in front of the first prompt of the conversation and never
                 # again. Every later prompt is the owner's words alone, the conversation being
                 # the context — the card sessions' seeding rule.
@@ -735,7 +735,7 @@ def main():
                 sessions.handle(kind, request)
             elif observe.handles(kind):
                 observe.handle(kind, request)
-            # --- Switchboard (protocol section 17) ---
+            # --- Board (protocol section 17) ---
             elif globals_commands.handles(kind):
                 globals_commands.dispatch(request)
             elif board.handles(kind):

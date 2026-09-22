@@ -14,7 +14,7 @@ from relay_core import agent_context as AC
 TERMINAL = {"name": "terminal"}
 SWITCHBOARD = {"name": "switchboard", "agent_role": "switchboard", "workspace": "/w",
                "persist": {"scope": "helper", "key": "t0123456789ab"},
-               "brief": {"key": "switchboard", "title": "Switchboard agent"},
+               "brief": {"key": "switchboard", "title": "Board agent"},
                "scope": "console", "shell": False, "routing": "agent"}
 
 
@@ -52,7 +52,7 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual(spec.to_json(), {
             "name": "switchboard", "agent_role": "switchboard", "workspace": "/w",
             "persist": {"scope": "helper", "key": "t0123456789ab"},
-            "brief": {"key": "switchboard", "title": "Switchboard agent", "screen": ""},
+            "brief": {"key": "switchboard", "title": "Board agent", "screen": ""},
             "scope": "console", "shell": False, "routing": "agent"})
         self.assertEqual(AC.ContextSpec.from_json(spec.to_json()), spec)
 

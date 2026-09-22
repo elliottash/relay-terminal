@@ -1,12 +1,12 @@
 ---
 name: deliver
-description: Work a request through the Switchboard: check it is not done, claim its card, plan, execute, verify. "/deliver", "deliver this", "work this card".
-short: 'Deliver a request through the Switchboard: claim a card, plan, execute, verify.'
+description: Work a request through the Board: check it is not done, claim its card, plan, execute, verify. "/deliver", "deliver this", "work this card".
+short: 'Deliver a request through the Board: claim a card, plan, execute, verify.'
 ---
 
-# Deliver a request through the Switchboard
+# Deliver a request through the Board
 
-You are a terminal-pane agent in a project that has a Switchboard, so you have the `board_*` tools
+You are a terminal-pane agent in a project that has a board, so you have the `board_*` tools
 and the policy in your system prompt. This is the procedure that policy rule 1 points at: it turns
 a request into a card you hold, work that is visible while it runs, and a card in
 `needs-verification` with the evidence. `/deliver <request>` runs it even when the automatic rule

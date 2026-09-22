@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The Switchboard's survey, and the board a console is seeded with (protocol 19.18, 33).
+"""The Board's survey, and the board a console is seeded with (protocol 19.18, 33).
 
 This module was the helper agent: a second `Agent` on the board worker, its own FIFO queue, its
 own `board_chat*` messages, its own event tagging. Card #AGNT retired all of it — owner,
@@ -87,7 +87,7 @@ def mark_survey(board: B.Board, state: str, *, note: str = "") -> None:
 
 
 def chat_brief() -> str:
-    """The Switchboard console's brief (`board_chat_brief.md`), beside the policy.
+    """The Board console's brief (`board_chat_brief.md`), beside the policy.
 
     One reader since #AGNT: every ordinary turn has the brief in its system prompt
     (`agent_context`, `brief.key: "switchboard"`), and this is the same text by the name the
@@ -113,7 +113,7 @@ def roster(tools) -> list[str]:
 
 
 def board_seed(tools) -> str:
-    """The board a Switchboard console's **first** turn is seeded with (19.18).
+    """The board a Board console's **first** turn is seeded with (19.18).
 
     The brief itself is in the system prompt since #AGNT (`agent_context`, `brief.key`); what is
     here is the part that cannot be: the board as it is right now. It goes in front of the first
@@ -139,8 +139,8 @@ def survey_prompt(root: Path, project: Path, probe: dict, proposals: list[dict])
     """
     git = probe.get("git") or {}
     trackers = probe.get("trackers") or []
-    lines = ["[Switchboard survey]",
-             f"A Switchboard was just created for {project} (board folder: {root}).",
+    lines = ["[Board survey]",
+             f"A board was just created for {project} (board folder: {root}).",
              "This is the board's opening turn: survey what the project already tracks, offer to "
              "convert it into cards, and write nothing until the owner says yes.",
              ""]

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The Switchboard console: one worker, one protocol (cards #AGNT, #FEJQ; protocol 19.18, 33).
+"""The Board console: one worker, one protocol (cards #AGNT, #FEJQ; protocol 19.18, 33).
 
 Until #AGNT the helper was a second implementation — `board_chat.PageAgent`, its own FIFO, its
 own `board_chat*` messages, its own event tagging — and the owner's report was that it did not
@@ -190,7 +190,7 @@ class SurveyTest(BoardConsoleTest):
         self.assertTrue(turn["readonly"])
         self.assertEqual(turn["surface"], "switchboard")
         self.assertEqual(turn["when"], "queue")     # it takes its place in the queue like any ask
-        self.assertIn("Switchboard survey", turn["prompt"])
+        self.assertIn("Board survey", turn["prompt"])
         self.assertEqual(board_chat.survey_state(self.commands.tools.board), "done")
 
     def test_a_board_that_predates_the_survey_is_never_surveyed(self):
@@ -206,7 +206,7 @@ class SurveyTest(BoardConsoleTest):
 
     def test_a_terminal_pane_worker_never_surveys_into_the_persons_own_pane(self):
         # The one thing a survey must not do is start a turn in a terminal pane the person is
-        # working in: `board_open` happens whenever a Switchboard pane is opened.
+        # working in: `board_open` happens whenever a Board pane is opened.
         self.commands.console = False
         self.pending()
         self.dispatch(type="board_open", id="r1")
@@ -386,7 +386,7 @@ class WorkerConsoleTest(unittest.TestCase):
     def context(self, name="switchboard", key="t0123456789ab", scope=None):
         block = {"name": name, "agent_role": "switchboard",
                  "workspace": str(self.repo),
-                 "brief": {"key": name, "title": "Switchboard agent"},
+                 "brief": {"key": name, "title": "Board agent"},
                  "shell": False, "routing": "agent"}
         if key:
             block["persist"] = {"scope": "helper", "key": key}
@@ -475,8 +475,8 @@ class WorkerConsoleTest(unittest.TestCase):
         self.assertIn("On screen now: the Inbox column", prompt)
         # The brief is in the system prompt, once, not in front of the prompt.
         system = self.server.seen[0]["messages"][0]["content"]
-        self.assertIn("[Switchboard agent]", system)
-        self.assertNotIn("[Switchboard agent]", prompt)
+        self.assertIn("[Board agent]", system)
+        self.assertNotIn("[Board agent]", prompt)
 
     def test_the_tools_a_console_is_offered_include_the_shell_the_board_set_and_the_panes(self):
         self.run_worker([self.configure(context=self.context()),

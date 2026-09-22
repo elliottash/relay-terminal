@@ -35,7 +35,7 @@ NAMES = ("terminal", "switchboard", "card", "options", "actions", "sessions", "p
 #: The **named** tool scopes.  One agent, one scope, resolved once:
 #:
 #: * ``pane``    — a terminal pane's own agent: the whole executor, as it always was.
-#: * ``console`` — an agent console that is not a terminal (the Switchboard page, Options,
+#: * ``console`` — an agent console that is not a terminal (the Board page, Options,
 #:   Actions, Sessions): the whole executor *plus* the board tools' chat set and the app tools.
 #:   It has the shell and the file tools since the owner's decision of 2026-09-20 — a context
 #:   specialises an agent without fencing it, and the gates are the ones he chose (the
@@ -141,20 +141,20 @@ def helper_session_id(key: str) -> str:
 # of every prompt: a paragraph repeated per turn is the conversation, and a brief the model was
 # told once is also what `session_info` can report.
 
-#: The Switchboard's brief is a file beside the policy (`board_chat_brief.md`) and is unchanged.
+#: The Board's brief is a file beside the policy (`board_chat_brief.md`) and is unchanged.
 _FILE_BRIEFS = {"switchboard": "board_chat_brief.md"}
 
 BRIEFS = {
     "projects": (
         "You are the agent in Relay's Projects tab, beside Sessions and Globals in the shared "
-        "manager. Projects lists remembered projects and entry points for their Switchboards, "
+        "manager. Projects lists remembered projects and entry points for their boards, "
         "sessions, and terminals. Browsing a project does not attach the current terminal to it. "
         "Distinguish opening a new terminal in a project from attaching the current terminal, "
         "and change attachment only when requested. Use app_sessions_search for a project's "
         "past work and app_action_list to discover available navigation actions. Forgetting a "
         "project removes its remembered entry, not its files or live sessions."),
     "globals": (
-        "You are the agent in Relay's Globals tab, the global Switchboard HQ beside Projects "
+        "You are the agent in Relay's Globals tab, the global Board HQ beside Projects "
         "and Sessions. It shows global memory cards, aliases, and original instruction files. "
         "Global cards live at RELAY_GLOBAL_SWITCHBOARD or XDG_CONFIG_HOME/relay/switchboard "
         "(normally ~/.config/relay/switchboard). Inspect the actual sources before answering. "

@@ -1,7 +1,7 @@
 """The short prompt profile: what a model that pays for the prompt in seconds is sent.
 
 #GMCF decision 7, and the owner's two answers of 2026-09-20: the Lite tier defaults to it, and a
-pane with a Switchboard keeps five board tools and the tiered policy. `relay_core.prompt_profiles`
+pane with a board keeps five board tools and the tiered policy. `relay_core.prompt_profiles`
 holds the text and the tool list; these tests pin the four things that can silently go wrong with
 it — the wrong profile being chosen, a hard rule of `SYSTEM` being contradicted rather than
 omitted, the size creeping back up, and a mid-turn model swap leaving the prompt and the tool list
@@ -150,9 +150,9 @@ class AgentTests(unittest.TestCase):
         agent = self.agent(prompt_profile='short', board=False)
         self.assertEqual(self.names(agent), list(prompt_profiles.SHORT_TOOLS[:8]))
         prompt = agent.system_prompt()
-        # A pane with no Switchboard pays nothing for one, and the todo, app and own-session text
+        # A pane with no board pays nothing for one, and the todo, app and own-session text
         # is out of the short profile whatever else is in it.
-        for absent in ('Switchboard', 'update_todos', 'app_option_list', 'session_info'):
+        for absent in ('Board rules', 'update_todos', 'app_option_list', 'session_info'):
             self.assertNotIn(absent, prompt)
         # What a project says about itself stays: it is the user's own rules, not Relay's text.
         self.assertIn('Project rule: run the tests.', prompt)
@@ -179,7 +179,7 @@ class AgentTests(unittest.TestCase):
         prompt = agent.system_prompt()
         # Decision 8's tiered policy block, and the claims line last of all (`session_note`), which
         # is what lets the model call `board_claim` without being told a session token.
-        self.assertIn('Switchboard rules', prompt)
+        self.assertIn('Board rules', prompt)
         self.assertIn('Your Switchboard session: tttttttt.', prompt.rstrip().splitlines()[-1])
         # The board policy names `update_todos` in its own rule 1, so the todo rules are tested for
         # by a sentence only they have.

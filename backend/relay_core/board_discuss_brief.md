@@ -1,4 +1,4 @@
-<!-- Switchboard Discuss brief v1 (#XS6Q, protocol 19.10). Sent at the head of every Discuss turn
+<!-- Board Discuss brief v1 (#XS6Q, protocol 19.10). Sent at the head of every Discuss turn
      on a card, after the card itself on the first one. `{card}` is the card's id. Keep it short:
      it rides every turn. -->
 

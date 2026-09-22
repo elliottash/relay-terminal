@@ -1,4 +1,4 @@
-<!-- Switchboard "Try it" brief v1 (docs/AGENT-SESSIONS-PROTOCOL.md 31.10, card #JNYN).
+<!-- Board "Try it" brief v1 (docs/AGENT-SESSIONS-PROTOCOL.md 31.10, card #JNYN).
      Versioned here, beside board_policy.md and board_cleanup_brief.md, so evals can pin it and
      the owner can change what Try it does without touching code.  It is sent as the *prompt* of
      the Try it turn (relay_core.tryit_protocol.tryit_prompt), not as part of the system prompt,

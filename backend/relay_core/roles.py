@@ -59,7 +59,7 @@ def _preset(preset_id):
         found = entry.as_preset() if entry is not None else None
     return found
 
-# Protocol names. "switchboard" is stored and resolved even though the Switchboard itself is not
+# Protocol names. "switchboard" is stored and resolved even though the Board itself is not
 # built yet (owner decision 2026-09-17); "route_assist" keeps its own fast default.
 # "summaries", "suggestions" and "audit" were split out of "flash"/"chores" on 2026-09-17 so the roles
 # modal's Advanced list can name one action per row; their defaults resolve exactly as before.
@@ -75,7 +75,7 @@ def _preset(preset_id):
 # local, so each of the three that is not the pane's own model needs a role a pane can be put on.
 ROLES = ("main", "terminal_use", "subagent", "switchboard", "high", "flash", "local", "planning",
          "summaries", "suggestions", "chores", "audit", "loop_check", "vision", "route_assist")
-# The role the helper worker runs (protocol 30.7): one per tab, serving the Switchboard and the
+# The role the helper worker runs (protocol 30.7): one per tab, serving the Board and the
 # Options, Actions and Sessions panes. Named because it is the one role that may not run on a
 # guest harness (`leave_guest`, card #GH5T) — its whole job is Relay's own tools.
 HELPER_ROLE = "switchboard"
@@ -87,7 +87,7 @@ LABELS = {"main": "main", "terminal_use": "terminal use", "subagent": "subagents
           # "switchboard" keeps its protocol name — settings, the model box (#BRD3), its Options ›
           # Models row and its Main default are untouched — and is the word for the job since
           # card #FEJQ (owner decision 4, 2026-09-20): one helper worker per tab now serves the
-          # Switchboard *and* the Options, Actions and Sessions panes, so the label names the job
+          # Board *and* the Options, Actions and Sessions panes, so the label names the job
           # rather than the one pane it started in (protocol 30.7).
           "switchboard": "helpers", "high": "high", "flash": "flash",
           "local": "local",
@@ -120,7 +120,7 @@ ACTIONS: tuple[tuple[str, str, str], ...] = (
     ("suggestions", "Next-command and next-prompt suggestions",
      "sends recent command output, so it stays on your own provider"),
     ("summaries", "Summaries, compaction and recaps", "condensing the conversation"),
-    ("switchboard", "Helper agent", "the Switchboard's agent, and the helper in Options, "
+    ("switchboard", "Helper agent", "the Board's agent, and the helper in Options, "
      "Actions and Sessions"),
     ("chores", "Chores: duplicate checks, labels, titles, note scans", "small structured judgements"),
     ("audit", "Request audit", "flags asks that may be unaddressed after a turn"),
