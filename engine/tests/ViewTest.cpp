@@ -1660,6 +1660,55 @@ private slots:
     // The block is built the way the pane builds one: MarkdownAnsi with the anchor set, the
     // rendered text through the streaming wrapper into the grid, the same text before the
     // wrapper handed over as logical lines.
+    void hashReferencesKeepLinkInkAfterRewrap()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        QFont font = t.view->terminalFont();
+        font.setStyleStrategy(QFont::NoAntialias);
+        t.view->setTerminalFont(font);
+        t.backend->resizeTerminal(16, 100);
+        t.view->setCardLookup([](const QString &id, QString *) {
+            return id == QStringLiteral("PRM2") || id == QStringLiteral("SDR1");
+        });
+        ColorScheme scheme = t.view->colorScheme();
+        scheme.link = QColor(0x12, 0x34, 0xab);
+        t.view->setColorScheme(scheme);
+        const QString anchor = QStringLiteral("relay://prose/hash/1");
+        MarkdownAnsi md;
+        const QString rendered = md.feed(QStringLiteral(
+            "- **#PRM2**: fixed restart and retained the reply after resize.\n"
+            "- **#SDR1** / #ZZZZ: known and unknown references.\n")) + md.finish();
+        ProseCollector collector;
+        collector.feed(rendered);
+        const auto lines = collector.take();
+        t.backend->writeToDisplay("\x1b]8;;" + anchor.toUtf8() + "\x1b\\"
+            + QString(rendered).replace("\n", "\r\n").toUtf8() + "\x1b]8;;\x1b\\");
+        QVERIFY(t.waitScreen(QStringLiteral("#SDR1")));
+        t.backend->setProseBlock(anchor, lines, 100);
+        for (int width : {100, 40, 120}) {
+            t.backend->resizeTerminal(16, width);
+            for (bool enabled : {true, false}) {
+                t.view->setLinksColouredAtRest(enabled);
+                const QImage img = t.grab();
+                const QStringList rows = t.view->visibleRowsText();
+                for (const QString &id : {QStringLiteral("#PRM2"), QStringLiteral("#SDR1"), QStringLiteral("#ZZZZ")}) {
+                    int r = -1, col = -1;
+                    for (int j = 0; j < rows.size(); ++j)
+                        if ((col = rows[j].indexOf(id)) >= 0) { r = j; break; }
+                    QVERIFY(r >= 0);
+                    const int cw = t.view->cellWidth(), ch = t.view->cellHeight();
+                    const QImage crop = img.copy(QRect(2 + col * cw, r * ch, id.size() * cw, ch + 2));
+                    QCOMPARE(rowHasColor(crop, 0, ch, scheme.link), enabled && id != QStringLiteral("#ZZZZ"));
+                    QCOMPARE(t.view->linkAtPoint(t.cellPoint(r, col + 1)).target,
+                             id == QStringLiteral("#ZZZZ") ? QString() : QStringLiteral("relay://card/") + id.mid(1));
+                }
+                if (enabled && qEnvironmentVariableIsSet("RELAY_HASH_EVIDENCE"))
+                    img.save(qEnvironmentVariable("RELAY_HASH_EVIDENCE") + QStringLiteral("/%1-%2.png").arg(core).arg(width));
+            }
+        }
+    }
+
     void markdownLinkLabelsAreClickable()
     {
         QFETCH_GLOBAL(QString, core);

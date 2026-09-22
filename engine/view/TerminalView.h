@@ -386,6 +386,7 @@ private:
     // row and set where the link colour applies. Scans are cached per logical line and directory
     // (m_restLinks), so an unchanged screen costs no probe.
     void restLinkColumns(int frameRow, std::vector<char> *cols);
+    std::vector<char> foldRestLinks(const std::vector<FoldLayer::Cell> &cells);
     // The directory the rows of *this frame* are scanned against, resolved once
     // per frame instead of once per painted row (#6W0Z).
     const QString &frameDirectory();

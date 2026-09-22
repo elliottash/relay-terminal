@@ -959,6 +959,36 @@ QColor TerminalView::foldRule() const
 // starting at the indent. Spans bring their own colours (a diff's red and
 // green), so the host decides what the detail looks like. A prose block's row
 // is painted by paintProseRow instead, as a row of the grid it replaces.
+std::vector<char> TerminalView::foldRestLinks(const std::vector<FoldLayer::Cell> &cells)
+{
+    std::vector<char> result(cells.size(), 0);
+    if (!m_linksAtRest || m_frame.altScreen) return result;
+    QString text;
+    for (const auto &cell : cells) text += cell.text;
+    if (m_restLinks.size() > 4096 || (m_restLinksAge.isValid() && m_restLinksAge.elapsed() > 5000))
+        m_restLinks.clear();
+    if (m_restLinks.isEmpty()) m_restLinksAge.start();
+    const QString &cwd = frameDirectory();
+    const QString key = QStringLiteral("prose\n") + cwd + QLatin1Char('\n') + text;
+    auto it = m_restLinks.constFind(key);
+    if (it == m_restLinks.constEnd()) {
+        QVector<QPair<int, int>> spans;
+        for (const auto &found : links::scan(text, cwd, QDir::homePath(),
+                                            m_linkProbe ? m_linkProbe : links::systemProbe(),
+                                            m_cardLookup, links::Mode::Prose))
+            spans.append({found.candidate.start, found.candidate.start + found.candidate.length - 1});
+        it = m_restLinks.insert(key, spans);
+    }
+    int offset = 0;
+    for (size_t i = 0; i < cells.size(); ++i) {
+        const int end = offset + cells[i].text.size();
+        for (const auto &span : *it)
+            if (offset <= span.second && end > span.first) { result[i] = 1; break; }
+        offset = end;
+    }
+    return result;
+}
+
 void TerminalView::paintFoldRow(QPainter &p, int screenRow, int foldIndex, int foldRow)
 {
     const std::vector<FoldLayer::Fold> &folds = m_folds.folds();
@@ -1005,6 +1035,7 @@ void TerminalView::paintFoldRow(QPainter &p, int screenRow, int foldIndex, int f
     // it comes back clipped to this row.
     const std::vector<FoldSearch::RowMatch> hits = m_foldSearch.rowMatches(m_folds, foldIndex, foldRow);
 
+    const auto restLinks = foldRestLinks(cells);
     int col = indent;
     for (int i = row.first; i < row.first + row.count && i < int(cells.size()); ++i) {
         const FoldLayer::Cell &c = cells[size_t(i)];
@@ -1042,7 +1073,9 @@ void TerminalView::paintFoldRow(QPainter &p, int screenRow, int foldIndex, int f
             const int uy = baseline + std::max(1, m_descent / 3);
             p.fillRect(QRect(x, uy, c.width * m_cw, 1), hovered || !c.link.isEmpty() ? m_scheme.link : fg);
         }
-        if (!c.link.isEmpty())
+        // Match grid rest coloring for references resolved by the plain-text hit test.
+        if (!c.link.isEmpty() || (restLinks[size_t(i)] && !c.reverse
+            && ((!c.fg.isValid() && !c.fgPacked) || plainInk(fg))))
             fg = m_scheme.link;
         if (hit)
             fg = m_scheme.searchText;
@@ -1130,6 +1163,7 @@ void TerminalView::paintProseRow(QPainter &p, int screenRow, const FoldLayer::Fo
         foldIndex >= 0 ? m_foldSearch.rowMatches(m_folds, foldIndex, foldRow)
                        : std::vector<FoldSearch::RowMatch>();
 
+    const auto restLinks = role ? std::vector<char>(cells.size(), 0) : foldRestLinks(cells);
     int col = row.startCol;
     for (int i = row.first; i < row.first + row.count && i < int(cells.size()); ++i) {
         const FoldLayer::Cell &c = cells[size_t(i)];
@@ -1175,7 +1209,9 @@ void TerminalView::paintProseRow(QPainter &p, int screenRow, const FoldLayer::Fo
             const int uy = baseline + std::max(1, m_descent / 3);
             p.fillRect(QRect(x, uy, c.width * m_cw, 1), hovered || !c.link.isEmpty() ? m_scheme.link : fg);
         }
-        if (!c.link.isEmpty())
+        // Match grid rest coloring for references resolved by the plain-text hit test.
+        if (!c.link.isEmpty() || (restLinks[size_t(i)] && !c.reverse
+            && ((!c.fg.isValid() && !c.fgPacked) || plainInk(fg))))
             fg = m_scheme.link;
         if (hit)
             fg = m_scheme.searchText;
