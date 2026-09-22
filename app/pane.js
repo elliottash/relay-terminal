@@ -5,6 +5,7 @@
 //   const view = mountPane(container, { send, keymap });
 //   view.update(paneState);        // every pane_state for this pane
 //   view.onEditText(message);      // the desktop's queue_edit_text answer
+//   view.onConversationId(message); // the desktop's conversation_id_text answer
 //   view.onRefused(message);       // an `error` answering one of the view's own requests
 //   view.onAgentEvent(message);    // a worker event: the agent's ask (question/question_closed)
 //   view.onOwnerAsks(message);     // owner_asks: knocks, guest prompts, control requests
@@ -170,6 +171,7 @@ export function mountPane(container, options = {}) {
   let staged = null;          // the three-step Enter: {text, stage, at, rowId, steerId, known}
   let typedAhead = '';        // keys typed on a selected row, for when its text comes back
   let editRow = '';           // the row whose text is in the prompt box
+  let idRequest = '';         // the conversation_id ask waiting for its answer or a refusal
   let editRequest = '';       // the id of the queue_edit waiting for its text or a refusal
   // The agent's ask (sessions protocol 27): the `question` event's own id and its questions, and
   // which of them this view is showing. The desktop puts them up one at a time and each answer is
@@ -642,6 +644,16 @@ export function mountPane(container, options = {}) {
         } else {
           item.append(dot, title, when);
         }
+        // The conversation id never shows on its own (section 16 publishes tokens), so the row
+        // carries the ask: the desktop answers this device alone, and the id goes to the
+        // clipboard — shown in the sheet only where the clipboard refused it.
+        const copy = button('rp-session-copy', 'Copy id', `Copy the conversation id of ${str(session.title)}`);
+        copy.addEventListener('click', (event) => {
+          event.stopPropagation();
+          idRequest = messageId();
+          emit('conversation_id', { session: str(session.id), id: idRequest });
+        });
+        item.appendChild(copy);
         list.appendChild(item);
       }
       node.appendChild(list);
@@ -1251,6 +1263,31 @@ export function mountPane(container, options = {}) {
       box.setSelectionRange(box.value.length, box.value.length);
     },
 
+    // The desktop's `conversation_id_text` answer (section 16): the real conversation id behind a
+    // token this view asked about. Onto the clipboard; shown in the open sheet only where the
+    // clipboard refused it, as text a long-press can still copy. Returns true when the answer
+    // was this view's ask, so the host does not also report it.
+    onConversationId(message) {
+      const m = obj(message);
+      if (!m || !idRequest || str(m.id) !== idRequest) return false;
+      idRequest = '';
+      const conversation = str(m.conversation);
+      if (!conversation) return true;
+      const show = () => showToast(`Conversation id ${conversation} copied`);
+      const fallback = () => {
+        showToast('Clipboard refused — long-press to copy');
+        const sheet = document.querySelector('.rp-sheet');
+        if (!sheet) return;
+        sheet.appendChild(el('p', 'rp-session-id', conversation));
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(conversation).then(show, fallback);
+      } else {
+        fallback();
+      }
+      return true;
+    },
+
     // An `error` answering something this view asked for. The one that matters is a refused
     // `queue_edit`: the row is not coming back, so the keys typed on it must not sit in
     // `typedAhead` waiting to be pushed in front of whatever comes back next — a letter typed on a
@@ -1262,6 +1299,11 @@ export function mountPane(container, options = {}) {
     // a screen (app/app.js, threadNote).
     onRefused(message) {
       const m = obj(message);
+      if (m && idRequest && str(m.id) === idRequest) {
+        idRequest = '';
+        showToast(`The id was refused: ${str(m.message) || 'not permitted'}`);
+        return true;
+      }
       if (!m || !editRequest || str(m.id) !== editRequest) return false;
       editRequest = '';
       editRow = '';

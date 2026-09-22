@@ -337,6 +337,28 @@ void RemoteShare::handle(const QJsonObject &message)
         if (it != m_panes.end() && it->hooks.conversationOpen)
             it->hooks.conversationOpen(message.value(QStringLiteral("session")).toString(),
                                        message.value(QStringLiteral("device_name")).toString());
+    } else if (kind == QLatin1String("conversation_id")) {
+        // The hub holds the device's ask open for this answer, keyed by `id`, so every path
+        // answers: the id on success, `ok: false` when the token is not the pane's to give.
+        const QString paneId = message.value(QStringLiteral("pane")).toString();
+        const QString session = message.value(QStringLiteral("session")).toString();
+        QJsonObject reply{{"t", QStringLiteral("conversation_id_text")}, {"pane", paneId},
+                          {"session", session}, {"id", message.value(QStringLiteral("id"))}};
+        auto it = m_panes.find(paneId);
+        if (it != m_panes.end() && it->hooks.conversationId) {
+            const QString conversation = it->hooks.conversationId(session);
+            if (!conversation.isEmpty()) {
+                reply.insert(QStringLiteral("conversation"), conversation);
+            } else {
+                reply.insert(QStringLiteral("ok"), false);
+                reply.insert(QStringLiteral("error"),
+                             QStringLiteral("that conversation is not in the pane's list anymore."));
+            }
+        } else {
+            reply.insert(QStringLiteral("ok"), false);
+            reply.insert(QStringLiteral("error"), QStringLiteral("that pane is not shared anymore."));
+        }
+        send(reply);
     } else if (kind == QLatin1String("recap_request")) {
         // Forwarded by the sidecar since the phone first had a recap button, and dropped here
         // until now (relay-terminal-71, 2026-09-18).

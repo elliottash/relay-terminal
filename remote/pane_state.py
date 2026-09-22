@@ -37,6 +37,7 @@ CHOICES_MAX = 32
 EDIT_TEXT_MAX = 32_000
 WAITERS_MAX = 16              # pane_state_get requests waiting for a pane's first state
 EDITS_MAX = 64                # queue_edit requests waiting for the desktop's answer
+ASKS_MAX = 16                 # conversation_id asks waiting for the desktop's answer
 
 PHASES = ("idle", "thinking", "tool", "waiting")
 KINDS = ("steer", "agent", "command")
@@ -296,6 +297,19 @@ def edit_answer(message: dict) -> tuple[bool, str]:
     return True, _CONTROL.sub("", text)[:EDIT_TEXT_MAX]
 
 
+def conversation_answer(message: dict) -> tuple[bool, str]:
+    """The GUI's `conversation_id_text` line: (ok, the conversation id or why it failed)."""
+    if message.get("ok") is False:
+        return False, _text(message.get("error")) or "that conversation is not in the pane's list."
+    conversation = message.get("conversation")
+    if not isinstance(conversation, str) or not conversation:
+        return False, "that conversation is not in the pane's list."
+    # An id, not a path: flat text, no separators the caller could ride a directory out of, no
+    # whitespace at all — `_CONTROL` keeps newlines for a queue row's edit, and an id has none.
+    # (`SESSION_ID` stays for what the *client* sends; this is what the desktop answers.)
+    return True, "".join(_CONTROL.sub("", conversation).split()).replace("/", "")[:64]
+
+
 # ---- the hub's book ----------------------------------------------------------------------------
 
 @dataclass
@@ -304,6 +318,15 @@ class PendingEdit:
     request_id: object
     pane: str
     row: str
+
+
+@dataclass
+class PendingConversation:
+    """A `conversation_id` ask waiting for the desktop's answer (owner level, section 16)."""
+    channel: object
+    request_id: object
+    pane: str
+    session: str
 
 
 @dataclass
@@ -318,6 +341,7 @@ class Book:
     seqs: dict = field(default_factory=dict)            # pane -> last seq given out
     waiting: dict = field(default_factory=dict)         # pane -> [(channel, request id)]
     edits: dict = field(default_factory=dict)           # hub-minted id -> PendingEdit
+    asks: dict = field(default_factory=dict)            # hub-minted id -> PendingConversation
     _ids: itertools.count = field(default_factory=lambda: itertools.count(1))
 
     def store(self, state: dict) -> dict:
@@ -347,6 +371,16 @@ class Book:
         edit_id = f"qe{next(self._ids)}"
         self.edits[edit_id] = PendingEdit(channel, request_id, pane, row)
         return edit_id
+
+    def new_ask(self, channel, request_id, pane: str, session: str) -> str | None:
+        if len(self.asks) >= ASKS_MAX:
+            return None
+        ask_id = f"ci{next(self._ids)}"
+        self.asks[ask_id] = PendingConversation(channel, request_id, pane, session)
+        return ask_id
+
+    def take_ask(self, ask_id) -> PendingConversation | None:
+        return self.asks.pop(ask_id, None) if isinstance(ask_id, str) else None
 
     def take_edit(self, edit_id) -> PendingEdit | None:
         return self.edits.pop(edit_id, None) if isinstance(edit_id, str) else None

@@ -505,7 +505,9 @@ button.rp-chip:hover { color: var(--qss-stripChip-hover-color); border-color: va
 .rp-session-list { list-style: none; margin: 0; padding: 0; }
 .rp-session-row {
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto;
+  /* The last cell is the row's copy control: the conversation id never shows on its own (section
+     16 publishes tokens), so the sheet is where a paired owner asks the desktop for it. */
+  grid-template-columns: 8px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 8px;
   min-height: max(28px, var(--rp-tap));
@@ -515,6 +517,9 @@ button.rp-chip:hover { color: var(--qss-stripChip-hover-color); border-color: va
 .rp-session-row.rp-current { background: var(--rt-accent-soft); }
 /* A row that can be opened is a button filling its row; the current one stays a plain line. */
 .rp-session-open {
+  /* One child in this grid would land in the 8px dot column, so the button is told to span
+     everything left of the copy cell (#R2: the phone's conversation rows were 8px wide). */
+  grid-column: 1 / 4;
   display: flex; align-items: center; gap: 8px; width: 100%;
   background: none; border: 0; padding: 0; margin: 0; color: inherit; font: inherit;
   text-align: left; cursor: pointer; min-height: 44px;
@@ -524,6 +529,24 @@ button.rp-chip:hover { color: var(--qss-stripChip-hover-color); border-color: va
 .rp-session-when { color: var(--rt-muted); font-family: var(--rt-mono); font-size: var(--rt-floor-size); }
 .rp-session-dot { width: 7px; height: 7px; border-radius: 50%; }
 .rp-session-dot.rp-running { background: var(--rt-success); }
+/* The row's copy control: asks the desktop for this conversation's real id and copies it. */
+.rp-session-copy {
+  min-height: 28px;
+  padding: 2px 8px;
+  font-size: var(--rt-floor-size);
+  font-family: var(--rt-mono);
+}
+/* The id itself, shown only when the clipboard refused it: selectable, so a long-press copies. */
+.rp-session-id {
+  margin: 4px 10px 0;
+  padding: 6px 8px;
+  font-family: var(--rt-mono);
+  font-size: var(--rt-floor-size);
+  color: var(--rt-muted);
+  user-select: text;
+  -webkit-user-select: text;
+  overflow-wrap: anywhere;
+}
 
 /* A phone gets bottom sheets over a dimmed pane. */
 .relay-pane[data-device="phone"] .rp-backdrop { background: var(--rt-bg); opacity: 0.7; }

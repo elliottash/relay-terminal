@@ -44,6 +44,10 @@ def serve(directory: Path):
     return server, f"http://127.0.0.1:{server.server_address[1]}"
 
 
+def js(value) -> str:
+    return json.dumps(value)
+
+
 def fixture(name: str) -> dict:
     return json.loads((FIXTURES / f"{name}.json").read_text())
 
@@ -434,6 +438,101 @@ class PaneViewTests(unittest.TestCase):
                 await browser.stop()
 
         self.drive(main())
+
+    def test_a_session_row_fills_its_line_and_the_sheet_is_not_squashed(self):
+        """The open button spans the row, not the 8px dot column it used to land in: on a phone
+        the Conversations rows were eight pixels wide and could neither be read nor tapped."""
+        state = fixture("sessions_50")
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await browser.call("Emulation.setDeviceMetricsOverride",
+                                   {"width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": True})
+                await self.open(browser, "sessions_50")
+                await browser.evaluate("document.querySelector('.rp-sessions-button').click()")
+                await browser.wait_for("!!document.querySelector('.rp-session-list')")
+                widths = await browser.evaluate(
+                    "JSON.stringify([...document.querySelectorAll('.rp-session-open')]"
+                    ".slice(0, 3).map((b) => Math.round(b.getBoundingClientRect().width)))")
+                for width in json.loads(widths):
+                    self.assertGreater(width, 200, f"an open button only {width}px wide")
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
+    def test_copy_id_asks_by_the_token_and_copies_the_desktops_answer(self):
+        state = fixture("sessions_50")
+        row = state["sessions"]["rows"][0]
+        conversation = "9f2c7a1e-4b3d-4e5f-8a90-1b2c3d4e5f60"
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.open(browser, "sessions_50")
+                await browser.evaluate("document.querySelector('.rp-sessions-button').click()")
+                await browser.wait_for("!!document.querySelector('.rp-session-list')")
+                await browser.evaluate("""
+                  (() => { let copied = '';
+                    Object.defineProperty(navigator, 'clipboard',
+                      { value: { writeText: (text) => { copied = text; return Promise.resolve(); } },
+                        configurable: true });
+                    window.paneDemo.copied = () => copied; })()
+                """)
+                await browser.evaluate(
+                    "document.querySelector('.rp-session-row[data-session-id=\\\"%s\\\"] "
+                    ".rp-session-copy').click()" % row["id"])
+                await browser.wait_for("window.paneDemo.sent.length > 0")
+                sent = (await self.sent(browser))[-1]
+                self.assertEqual(sent["t"], "conversation_id")
+                self.assertEqual(sent["session"], row["id"])
+                self.assertEqual(sent["pane"], state["pane"])
+                self.assertTrue(sent["id"], "the view mints an id for the ask")
+                await browser.evaluate(
+                    "window.paneDemo.conversationId({t: 'conversation_id_text', pane: %s,"
+                    " session: %s, conversation: %s, id: %s})"
+                    % (js(state["pane"]), js(row["id"]), js(conversation), js(sent["id"])))
+                self.assertEqual(await browser.evaluate("window.paneDemo.copied()"), conversation)
+                self.assertIn("copied", await browser.evaluate("window.paneDemo.toast()"))
+                # An answer to an id this view never asked reaches nobody's clipboard.
+                await browser.evaluate(
+                    "window.paneDemo.conversationId({t: 'conversation_id_text', pane: %s,"
+                    " session: %s, conversation: 'nope', id: 'other'})"
+                    % (js(state["pane"]), js(row["id"])))
+                self.assertEqual(await browser.evaluate("window.paneDemo.copied()"), conversation)
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
+    def test_a_refused_id_ask_is_a_toast_on_the_pane(self):
+        state = fixture("sessions_50")
+        row = state["sessions"]["rows"][0]
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.open(browser, "sessions_50")
+                await browser.evaluate("document.querySelector('.rp-sessions-button').click()")
+                await browser.wait_for("!!document.querySelector('.rp-session-list')")
+                await browser.evaluate(
+                    "document.querySelector('.rp-session-row[data-session-id=\\\"%s\\\"] "
+                    ".rp-session-copy').click()" % row["id"])
+                await browser.wait_for("window.paneDemo.sent.length > 0")
+                sent = (await self.sent(browser))[-1]
+                self.assertTrue(await browser.evaluate(
+                    "window.paneDemo.refuse({id: %s, message: 'not part of a share'})"
+                    % js(sent["id"])))
+                self.assertIn("refused", await browser.evaluate("window.paneDemo.toast()"))
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
 
     # ---- Stop, Recap, the agent's ask and the owner's decisions (card #PH0N, phase 2.6) --------
 

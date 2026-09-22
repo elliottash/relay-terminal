@@ -216,7 +216,7 @@ class CapabilityTests(unittest.TestCase):
 
 class WireTests(unittest.TestCase):
     NEW_CLIENT = ("queue_move", "queue_edit", "queue_send_now", "queue_resume", "model_pick",
-                  "conversation_new", "conversation_open", "pane_state_get")
+                  "conversation_new", "conversation_open", "conversation_id", "pane_state_get")
 
     def test_the_new_client_types_are_classified(self):
         for kind in self.NEW_CLIENT:
@@ -227,14 +227,15 @@ class WireTests(unittest.TestCase):
         # A partner types here: the queue and the model are its level.
         for kind in ("queue_move", "queue_edit", "queue_send_now", "queue_resume", "model_pick"):
             self.assertEqual(wire.CLIENT_TYPES[kind], wire.AGENT, kind)
-        # The conversations before this one are the owner's level (owner, 2026-09-18).
-        for kind in ("conversation_new", "conversation_open"):
+        # The conversations before this one are the owner's level (owner, 2026-09-18) — and so is
+        # naming one of them outside Relay (2026-09-22, `Copy id`).
+        for kind in ("conversation_new", "conversation_open", "conversation_id"):
             self.assertEqual(wire.CLIENT_TYPES[kind], wire.FULL, kind)
         # Reading, like screen_get: a view device is sent pane_state, so it may ask for one.
         self.assertEqual(wire.CLIENT_TYPES["pane_state_get"], wire.VIEW)
 
     def test_the_new_server_types_are_classified(self):
-        for kind in ("pane_state", "queue_edit_text"):
+        for kind in ("pane_state", "queue_edit_text", "conversation_id_text"):
             self.assertIn(kind, wire.SERVER_TYPES, kind)
             if hasattr(wire, "GUEST_SERVER_TYPES"):
                 self.assertNotIn(kind, wire.GUEST_SERVER_TYPES, kind)
@@ -638,6 +639,73 @@ class ActionTests(unittest.TestCase):
                 self.assertIn("already run", refused.exception.message)
                 await client.close()
         run(main())
+
+    def test_conversation_id_goes_to_the_device_that_asked_and_to_nobody_else(self):
+        async def main():
+            async with Harness() as harness:
+                asker, _ = await harness.device(capability=wire.FULL, name="phone")
+                other, _ = await harness.device(capability=wire.FULL, name="tablet")
+                await other.send({"t": "pane_focus", "pane": "p1"})
+                await asker.send({"t": "conversation_id", "pane": "p1", "session": "s2", "id": 7})
+                line = await harness.settle("conversation_id")
+                self.assertEqual(line["session"], "s2")
+                self.assertTrue(line["id"].startswith("ci"), "the hub mints the GUI's id")
+                harness.host.pane_state_from_gui(
+                    {"t": "conversation_id_text", "id": line["id"], "pane": "p1", "session": "s2",
+                     "conversation": "9f2c7a1e-4b3d-4e5f-8a90-1b2c3d4e5f60"})
+                got = await asker.expect("conversation_id_text")
+                self.assertEqual(got, {"t": "conversation_id_text", "pane": "p1", "session": "s2",
+                                       "conversation": "9f2c7a1e-4b3d-4e5f-8a90-1b2c3d4e5f60",
+                                       "id": 7})
+                self.assertFalse([m for m in await drain(other, 0.4)
+                                  if m.get("t") == "conversation_id_text"])
+                # Answered once: a replayed answer to the same id reaches nobody.
+                harness.host.pane_state_from_gui(
+                    {"t": "conversation_id_text", "id": line["id"], "pane": "p1", "session": "s2",
+                     "conversation": "again"})
+                self.assertFalse([m for m in await drain(asker, 0.3)
+                                  if m.get("t") == "conversation_id_text"])
+                await asker.close()
+                await other.close()
+        run(main())
+
+    def test_a_refused_or_wrong_conversation_answer_is_an_error_on_the_phone(self):
+        async def main():
+            async with Harness() as harness:
+                client, _ = await harness.device(capability=wire.FULL)
+                await client.send({"t": "conversation_id", "pane": "p1", "session": "s1", "id": 1})
+                line = await harness.settle("conversation_id")
+                harness.host.pane_state_from_gui(
+                    {"t": "conversation_id_text", "id": line["id"], "pane": "p1", "session": "s1",
+                     "ok": False, "error": "that conversation is not in the pane's list anymore."})
+                with self.assertRaises(wire.WireError) as refused:
+                    await client.expect("conversation_id_text")
+                self.assertIn("not in the pane's list", refused.exception.message)
+                # An answer naming another session than the ask is stopped here, not delivered.
+                await client.send({"t": "conversation_id", "pane": "p1", "session": "s1", "id": 2})
+                line = await harness.settle("conversation_id")
+                harness.host.pane_state_from_gui(
+                    {"t": "conversation_id_text", "id": line["id"], "pane": "p1", "session": "s9",
+                     "conversation": "someone-elses-session"})
+                self.assertFalse([m for m in await drain(client, 0.3)
+                                  if m.get("t") == "conversation_id_text"])
+                await client.close()
+        run(main())
+
+    def test_a_conversation_answer_is_an_id_not_a_path(self):
+        ok, conversation = pane_state.conversation_answer(
+            {"conversation": "9f2c7a1e\n../../../etc/passwd"})
+        self.assertTrue(ok)
+        self.assertNotIn("/", conversation)
+        self.assertNotIn("\n", conversation)
+        ok, conversation = pane_state.conversation_answer({"conversation": "x" * 500})
+        self.assertTrue(ok)
+        self.assertLessEqual(len(conversation), 64)
+        ok, reason = pane_state.conversation_answer({"ok": False, "error": "gone"})
+        self.assertFalse(ok)
+        self.assertEqual(reason, "gone")
+        ok, reason = pane_state.conversation_answer({})
+        self.assertFalse(ok)
 
     def test_a_wedged_gui_is_an_error_not_a_spinner(self):
         async def main():

@@ -2858,12 +2858,14 @@ class Host:
         return book
 
     def pane_state_from_gui(self, message: dict) -> None:
-        """A `pane_state` or `queue_edit_text` line from the GUI (remote/gui_host.py)."""
+        """A `pane_state`, `queue_edit_text` or `conversation_id_text` line from the GUI."""
         kind = message.get("t")
         if kind == "pane_state":
             self.pane_state_published(message)
         elif kind == "queue_edit_text":
             self._queue_edit_answered(message)
+        elif kind == "conversation_id_text":
+            self._conversation_id_answered(message)
 
     def pane_state_published(self, message: dict) -> None:
         state = pane_state_mod.clean(message)
@@ -3018,6 +3020,58 @@ class Host:
         self._pane_state_line({"t": "conversation_open", "pane": pane, "session": session,
                                **self._pane_state_origin(channel)})
 
+    async def _on_conversation_id(self, channel: Channel, message: dict) -> None:
+        """The real conversation id behind a published session token (owner level, section 16).
+
+        `pane_state` itself carries tokens only — no session file name ever appears on the wire —
+        so the phone cannot read an id off a state. It asks, and the desktop answers this device
+        alone: never fanned out, never to a guest, never below `full`.
+        """
+        pane = self._pane_state_pane(channel, message)
+        session = pane_state_mod.session_of(message)
+        book = self._pane_state_book()
+        ask_id = book.new_ask(channel, message.get("id"), pane, session)
+        if ask_id is None:
+            raise wire.WireError("busy", "too many asks waiting on the desktop.")
+        try:
+            self._pane_state_line({"t": "conversation_id", "pane": pane, "session": session,
+                                   "id": ask_id, **self._pane_state_origin(channel)})
+        except wire.WireError:
+            book.take_ask(ask_id)
+            raise
+
+        async def lapse() -> None:
+            await asyncio.sleep(CONVERSATION_ID_TIMEOUT)
+            pending = book.take_ask(ask_id)
+            if pending is not None:
+                await channel.send(wire.error("internal", "the desktop did not answer.",
+                                              pending.request_id))
+
+        self._spawn(lapse())
+
+    def _conversation_id_answered(self, message: dict) -> None:
+        pending = self._pane_state_book().take_ask(message.get("id"))
+        if pending is None:
+            return                              # not an id this hub minted, or it lapsed
+        if message.get("pane") != pending.pane or message.get("session") != pending.session:
+            self._spawn(pending.channel.send(wire.error(
+                "internal", "the desktop answered a different conversation.",
+                pending.request_id)))
+            return
+        ok, conversation = pane_state_mod.conversation_answer(message)
+        channel = pending.channel
+        if channel.participant_id is not None:
+            return
+        if not ok:
+            self._spawn(channel.send(wire.error("not_permitted", conversation,
+                                                pending.request_id)))
+            return
+        reply = {"t": "conversation_id_text", "pane": pending.pane,
+                 "session": pending.session, "conversation": conversation}
+        if pending.request_id is not None:
+            reply["id"] = pending.request_id
+        self._spawn(channel.send(reply))
+
     # ---- the Board on a device (card #SWPH) -------------------------------------------------
     # docs/REMOTE-PROTOCOL.md section 17. The desktop's board runs on a per-window
     # BoardWorker the hub never sees, so the GUI bridges it: a `full` device's
@@ -3122,10 +3176,12 @@ class Host:
 from . import pane_state as pane_state_mod  # noqa: E402
 
 QUEUE_EDIT_TIMEOUT = 15.0          # a wedged GUI is an error on the phone, not a spinner
+CONVERSATION_ID_TIMEOUT = 15.0    # same shape as a queue_edit: ask, answer, or a refusal
 LIMITS.update({
     "model_pick": (20, 60),        # each one reconfigures the pane's provider
     "conversation_new": (10, 60),
     "conversation_open": (20, 60),   # reading past conversations, not writing anything
+    "conversation_id": (20, 60),     # reading, and the answer goes to the asking device alone
     "queue_edit": (60, 60),
 })
 

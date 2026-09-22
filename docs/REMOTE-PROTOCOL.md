@@ -1633,6 +1633,13 @@ only thing that decides what a given device sees, and `src/PaneState.{h,cpp}` bu
 - **Every id is minted by the desktop**: row ids are the pane's own (`steer:<request id>`,
   `entry:<n>`), and choice and session ids are per-publish tokens resolved against the pane's own
   table. No preset id, no path, no session file name, no provider address ever appears.
+- **The conversation id travels on an ask, not on a state** (2026-09-22). A `pane_state` carries
+  tokens only, so a paired owner who needs to name the current conversation outside Relay — a
+  card, a note, a resume command typed elsewhere — asks with `conversation_id` and the desktop
+  answers that device alone. The answer is the session's own id, which is the session file's
+  name on the desktop: exactly why it never rides a state, where it would reach every watching
+  device and sit in replay rings. Here it goes once, to the `full` device that asked, and is
+  cleaned (length, control characters) like any other string on the wire.
 - **Three levels, read live per message** (owner, 2026-09-18), on the capabilities of section 6.2:
 
   | Level | Capability | Sees | May do |
@@ -1666,6 +1673,7 @@ which a guest editor may send: a guest's prompt is not passed on but held for th
 | `model_pick` | `{pane,choice}` | only a model the menu offered, which is only one with a stored key; the pane says "Model changed from <device>" |
 | `conversation_new` | `{pane}` | **owner level.** The same as `/new`, refused while a turn runs |
 | `conversation_open` | `{pane,session}` | **owner level.** Opens one of this pane's past conversations, named by a token from a `pane_state` — never a path or a session file name — resolved by the pane against the list it published. Refused while a turn runs, as the session manager's own rows are |
+| `conversation_id` | `{pane,session,id?}` | **owner level.** The real conversation id behind one of this pane's published tokens, for the owner to copy (`Copy id` in the phone's Conversations sheet). The pane answers only for a token in the list it published, with `conversation_id_text {pane,session,conversation,id?}` to the asking device alone — or `ok:false` and a `error` when the token is gone. The hub holds the ask open for 15 s, as it does a `queue_edit`, and answers a lapse with `internal` |
 | `compose` | `{pane,text,when,msg_id?,agent?,origin_name?}` | `when` is `now`, `queue` or `steer` — a steer is delivered inside the running turn at its next tool call, and both clients fall back to it when the row they meant to edit has gone. Steering needs `agent` and above (the owner's rule for a paired device, 2026-09-19) and is refused for a guest, whose prompt waits for the owner and so can never be aimed at the turn running now. The text is 1–32,000 characters. `msg_id` is the client's own dedup id (`app/pane.js` mints 72 random bits), so a retried send is not two prompts. `agent: false` asks the desktop to route the line the way its own composer does, shell included, and is refused for anything but a `full` device and for every guest — a client only sends it when the state offered it a composer mode other than `agent`. `origin_name` is a guest's display name, which rides onto the queue row while the id stays in `origin` |
 
 Keys, provider and endpoint settings, the keyring and conversation deletion are desktop-only and

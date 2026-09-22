@@ -104,6 +104,7 @@ window.paneDemo = {
   sent,
   update: (state) => (view ? view.update(state) : false),
   editText: (message) => { if (view) view.onEditText(message); },
+  conversationId: (message) => { if (view) return view.onConversationId(message); return false; },
   refuse: (message) => (view ? view.onRefused(message) : false),
   // The agent's ask and the owner's decisions (question / question_closed, owner_asks).
   agentEvent: (message) => (view ? view.onAgentEvent(message) : false),

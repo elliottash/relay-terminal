@@ -113,6 +113,9 @@ public:
         std::function<bool(const QString &deviceName)> conversationNew;
         // {session}: a token from a pane_state this pane sent, never a path (owner level).
         std::function<bool(const QString &session, const QString &deviceName)> conversationOpen;
+        // {session}: the real conversation id behind a published token, on explicit ask (owner
+        // level). Empty when the token is no longer in the list this pane published.
+        std::function<QString(const QString &session)> conversationId;
         std::function<void()> publishPaneState;   // pane_state_get: publish this pane now
         std::function<void()> recap;              // recap_request, which used to be dropped here
     };

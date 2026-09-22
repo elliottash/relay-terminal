@@ -1904,6 +1904,14 @@ rrp.addEventListener('queue_edit_text', (event) => {
   paneView.onEditText(message);
 });
 
+// The desktop's answer to the Conversations sheet's Copy id (protocol section 16): this device's
+// ask, this device's answer.
+rrp.addEventListener('conversation_id_text', (event) => {
+  const message = event.detail || {};
+  if (!paneView || !current || message.pane !== current) return;
+  paneView.onConversationId(message);
+});
+
 rrp.addEventListener('error', (event) => {
   const detail = event.detail || {};
   if (voiceRequest && detail.id === voiceRequest) { voiceFailed(detail.message); return; }

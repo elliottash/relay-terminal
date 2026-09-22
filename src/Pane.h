@@ -7632,6 +7632,7 @@ public:
             hooks.conversationOpen = [this](const QString &session, const QString &name) {
                 return remoteConversationOpen(session, name);
             };
+            hooks.conversationId = [this](const QString &session) { return remoteConversationId(session); };
             hooks.publishPaneState = [this] { m_paneState.publishNow(); };
             // "manual", not "remote": the worker takes three reasons — away, resume, manual — and
             // refused this one, so the phone's Recap button has never produced a recap (#WMXN).
@@ -13841,6 +13842,22 @@ public:
             return true;
         }
         return false;
+    }
+
+    // conversation_id: the real conversation id behind one of this pane's published tokens, for
+    // a paired owner who wants to name the conversation outside Relay. The id only travels on
+    // this explicit ask — pane_state itself carries tokens (section 16: no session file name ever
+    // appears) — and only for a row of the list this pane published, the same members
+    // conversation_open may open. Empty when the token is gone or not the pane's to give.
+    QString remoteConversationId(const QString &sessionId) {
+        if (!m_workerReady) return {};
+        const QString key = m_paneState.sessionKey(sessionId);
+        if (key.isEmpty()) return {};
+        for (const QJsonValue &value : std::as_const(m_remoteSessions)) {
+            const QJsonObject item = value.toObject();
+            if (item.value(QStringLiteral("session_id")).toString() == key) return key;
+        }
+        return {};
     }
 
     // conversation_new: the same as /new, refused while a turn runs exactly as /new is.

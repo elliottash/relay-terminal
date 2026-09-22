@@ -243,6 +243,9 @@ CLIENT_TYPES.update({
     # the conversations before this one. So these two are FULL, not AGENT.
     "conversation_new": FULL,      # {pane}: start a new conversation in this pane
     "conversation_open": FULL,     # {pane, session}: open one of this pane's past conversations
+    # {pane, session}: the real conversation id behind a published token, on explicit ask — the
+    # pane_state itself keeps carrying tokens (section 16: no session file name ever appears).
+    "conversation_id": FULL,
 })
 GUEST_NEVER.update({
     "pane_state_get": "the owner's queue, models and sessions are the owner's pane, not the share",
@@ -253,8 +256,9 @@ GUEST_NEVER.update({
     "model_pick": "model changes are never a guest's (section 10.1)",
     "conversation_new": "resets the owner's conversation",
     "conversation_open": "the owner's other conversations are not part of a share",
+    "conversation_id": "the owner's conversation ids are the owner's",
 })
-SERVER_TYPES = SERVER_TYPES | frozenset({"pane_state", "queue_edit_text"})
+SERVER_TYPES = SERVER_TYPES | frozenset({"pane_state", "queue_edit_text", "conversation_id_text"})
 
 # The Board on a device (card #SWPH, section 17) -----------------------------------------------
 # One client type and one server type. `board_request {rid, request}` wraps the eleven board requests a
