@@ -616,6 +616,21 @@ private slots:
         QVERIFY(h.vt->viewportAtBottom());
     }
 
+    void resizeKeepsBlankWrappedTop()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core, 4, 10);
+        h.feed("          abcdefghij\r\n");
+        for (int i = 0; i < 10; ++i)
+            h.feed("tail\r\n");
+        h.vt->scrollViewportToTop();
+        h.vt->resize(4, 5, 8, 16);
+        QCOMPARE(h.vt->viewportTop(), 0);
+        QVERIFY(h.frame().lines[0].text().trimmed().isEmpty());
+        h.vt->scrollViewportToRow(2);
+        QCOMPARE(h.frame().lines[0].text(), QStringLiteral("abcde"));
+    }
+
     void resizeClampsTrimmedHistoryTop()
     {
         QFETCH_GLOBAL(QString, core);

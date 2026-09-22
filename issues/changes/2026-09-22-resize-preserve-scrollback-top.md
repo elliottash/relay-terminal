@@ -7,7 +7,7 @@ labels: [bug, terminal]
 rank: msra7
 created: '2026-09-22'
 source: 'User report in Relay; observed on sphinxpad, 2026-09-22'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-SRA7/], related: [], github: null}
+links: {plans: [], commits: [a7fd665d48d598aabb056e1dc869a9af7b8cd5f2], evidence: [docs/qa_evidence/2026-09-22-SRA7/], related: [], github: null}
 ---
 # Pane resize should preserve the top visible scrollback location
 
@@ -35,6 +35,6 @@ Preserved the top history content through core resizing/reflow, including a trac
 Evidence: `docs/qa_evidence/2026-09-22-SRA7/` (test output and staged Xvfb screenshots). Keyboard zoom dispatch is unchanged.
 
 ## Tests
-- `RELAY_ENGINE_TEST=CoreTest build/engine/relay-engine-tests resizePreservesHistoryTop resizeClampsTrimmedHistoryTop reflowOnResize rowsOnlyResizeKeepsCursorBelowAFullRow`
+- `RELAY_ENGINE_TEST=CoreTest build/engine/relay-engine-tests resizePreservesHistoryTop resizeKeepsBlankWrappedTop resizeClampsTrimmedHistoryTop reflowOnResize rowsOnlyResizeKeepsCursorBelowAFullRow`
 - `RELAY_ENGINE_TEST=ViewTest QT_QPA_PLATFORM=xcb xvfb-run -a build/engine/relay-engine-tests resizeKeepsTopContent resizeKeepsFoldTopContent resizeKeepsProseTopContent proseReflowsOnResize aFoldStaysUnderItsLineAcrossAResize aResizeKeepsTheMatchesInsideTheFold compressedProseKeepsFollowingOutputVisible`
 - manual: docs/qa_evidence/2026-09-22-SRA7/README.md

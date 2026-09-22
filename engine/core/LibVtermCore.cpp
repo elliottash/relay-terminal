@@ -599,6 +599,8 @@ struct LibVtermCore::Impl {
             for (size_t k = i; k < j; ++k) {
                 const Line &src = lines[k];
                 const int srcCols = k + 1 < j ? std::max<int>(int(src.cells.size()), src.wrapColumns) : int(src.cells.size());
+                if (top && int(k) == oldTop && srcCols == 0)
+                    *top = int(out.size());
                 for (int idx = 0; idx < srcCols; ++idx) {
                     const Cell c = idx < int(src.cells.size()) ? src.cells[size_t(idx)] : Cell();
                     if (c.ch == kWideTail)
@@ -632,8 +634,6 @@ struct LibVtermCore::Impl {
                     col += w;
                 }
             }
-            if (top && int(i) == oldTop && lines[i].cells.empty())
-                *top = int(out.size());
             while (!cur.cells.empty() && cur.cells.back().isBlank() && cur.cells.back().attrs == 0)
                 cur.cells.pop_back();
             out.push_back(std::move(cur));
