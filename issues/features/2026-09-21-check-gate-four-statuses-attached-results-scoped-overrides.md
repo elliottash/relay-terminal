@@ -1,14 +1,14 @@
 ---
 id: PR4Q
 type: work
-status: planned
+status: needs-verification
 labels: [feature, switchboard, tests]
 component: [gui, worker]
 parent: YZ8G
 rank: zzzzzzzzzzzzzzzza
 created: '2026-09-21'
 source: 'owner, 2026-09-21: "i agree with all, go ahead with it" (#YZ8G plan)'
-links: {plans: [], commits: [], evidence: [], related: [YZ8G, 7BM4], github: null}
+links: {plans: [], commits: [bebbe33677a3, 60b3fa43ece4, 2d1901e6613c, 630db31e05e3, c3a88caada6f], evidence: [docs/qa_evidence/2026-09-21-check-gate-statuses/], related: [YZ8G, 7BM4], github: null}
 ---
 # Check and the gate: four statuses, attached results, retired tests, scoped overrides, one status not a pile of blocks
 
@@ -24,3 +24,12 @@ Step 1 of #YZ8G's plan, from Codex's review (docs/research/qa-across-fields/f-co
 - The card body carries one current `### Check` status, replaced in place; history is one link to the thread.
 - A finished run refreshes the strip and the findings without another Check click.
 Failure would show as: an override prompt repeating for a known flake; "never run" on a test sphinxpad ran yesterday; a dated block pile; a card with no Tests section sailing through.
+
+## Tests
+- `tests/test_test_history.py::StatusTests` — tests/test_test_history.py
+- `tests/test_tests_protocol.py::GateTest` — tests/test_tests_protocol.py
+- `tests/test_tests_protocol.py::AcceptResultTest` — tests/test_tests_protocol.py
+- `tests/test_tests_protocol.py::CheckBlockTest` — tests/test_tests_protocol.py
+- `tests/test_tests_protocol.py::RefreshAfterRunTest` — tests/test_tests_protocol.py
+- `ctest -R cardtests` — tests/cardtests_test.cpp
+- manual: docs/qa_evidence/2026-09-21-check-gate-statuses/
