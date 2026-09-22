@@ -9,7 +9,7 @@ session: a352a041-d9f2-4234-9a03-49182f601b42
 rank: zzzzzzzzzzzzzzzzy
 created: '2026-09-22'
 source: pane, 2026-09-22
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-rank-reorder-repro/], related: [YX8Q], github: null}
+links: {commits: [02c32b7813fcc5f0dceea730bab65d23834fe6ee], evidence: [docs/qa_evidence/2026-09-22-rank-reorder-repro/], related: [YX8Q], plans: [], github: null}
 ---
 # Priorities page: move buttons, cross-section drags, honest footer
 
@@ -71,3 +71,12 @@ Live evidence (Xvfb, seeded lists, `docs/qa_evidence/2026-09-22-rank-reorder-rep
 - `QT_QPA_PLATFORM=offscreen ./build/relay-modelpicker-tests` — 51 passed (new: `theMoveButtonsMoveARowAndAreDisabledAtTheEnds`, `aDragAcrossASectionHeaderMovesTheModelBetweenLists`, `aDropIntoAnEmptySectionAddsItThere`, `aDropWithRowsFilteredAwayIsRefusedAndSaysWhy`, `theFooterNamesTheRealKeys`; `aDragInsideASectionRewritesItAndACrossingDragDoesNothing` updated to the move behavior)
 - `QT_QPA_PLATFORM=offscreen ./build/relay-modelspane-tests` — 19 passed
 - `manual: docs/qa_evidence/2026-09-22-rank-reorder-repro/` — drive4.py end-to-end under Xvfb: button click and cross-section drag both persisted to relay.conf; screenshots r1-priorities.png, r2-after-down-button.png, r3-after-cross-drag.png
+
+## Try it
+Open it: `bash docs/qa_evidence/2026-09-22-tryit-RKP3/stage.sh` — then press Ctrl+Shift+M in the Relay window that comes up (it opens on Priorities).
+
+The staged Relay has three seeded classes — high, main, flash — with a few invented models each. Click a row's ▼ once, then drag any row up into the high section and let go. Glance at the bottom line of the pane while you do.
+
+Question (about 2 minutes): could you tell, without being told, what the ▲▼ do and that dragging into another section would move the model there — and does the one-line footer tell you what you need, or is it still noise?
+
+Expected: docs/qa_evidence/2026-09-22-tryit-RKP3/expected.md (sealed until you answer)

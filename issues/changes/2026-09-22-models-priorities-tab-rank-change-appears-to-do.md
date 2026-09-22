@@ -8,7 +8,7 @@ waiting_on: owner
 rank: zzzzzzzzzzzzzzzzz
 created: '2026-09-22'
 source: pane report, 2026-09-22
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-rank-reorder-repro/], related: [], github: null}
+links: {commits: [02c32b7813fcc5f0dceea730bab65d23834fe6ee], evidence: [docs/qa_evidence/2026-09-22-rank-reorder-repro/], related: [RKP3], plans: [], github: null}
 ---
 # Models priorities tab: rank change appears to do nothing
 
