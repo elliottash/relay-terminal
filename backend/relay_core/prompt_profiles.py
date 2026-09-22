@@ -41,14 +41,21 @@ from __future__ import annotations
 
 import copy
 import os
+import sys
 
 
 def platform_prompt(text: str) -> str:
     if os.name == "nt":
         return (text.replace("inside a Linux terminal", "in a native Windows coding workspace")
+                .replace("a Linux terminal's input box", "a native Windows workspace's input box")
                 .replace("Bash", "PowerShell 7").replace("fenced bash block", "fenced powershell block")
                 + "\nThis is native Windows: use PowerShell syntax and Windows paths, not Bash or WSL. "
                   "run_command uses PowerShell 7; use $env:NAME for environment variables.")
+    if sys.platform == "darwin":
+        return (text.replace("inside a Linux terminal", "in a native macOS coding workspace")
+                .replace("a Linux terminal's input box", "a native macOS workspace's input box")
+                + "\nThis is native macOS. Commands run in Relay's bundled Bash; use macOS paths "
+                  "and BSD system tools. Do not assume GNU-only command flags or Linux services.")
     return text
 
 #: The setting: `auto` picks per model, the other two pin it.

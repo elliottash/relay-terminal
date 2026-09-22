@@ -38,6 +38,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable
 
+from . import prompt_profiles
 from .agent import CONTEXT_CLOSE, CONTEXT_OPEN, Agent
 from .agents_defs import DEFAULT_ALIASES, EFFORTS, MAX_STEPS, AgentCatalog, AgentDefinition
 from .presets import PRESETS, apply_effort, match_preset
@@ -123,6 +124,7 @@ run_command is a separate non-interactive Bash process: it has no tty and no std
 Stop the background jobs you started when you no longer need them.
 Keep your final report direct and describe what was actually verified.
 Format it as Markdown: `inline code` for commands, paths and identifiers, fenced code blocks with a language, lists for steps."""
+SUBAGENT_SYSTEM = prompt_profiles.platform_prompt(SUBAGENT_SYSTEM)
 
 
 def subagent_prompt(definition: AgentDefinition, agent_id: str) -> str:
