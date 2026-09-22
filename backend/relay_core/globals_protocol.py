@@ -12,8 +12,9 @@ MAX_TEXT = 128 * 1024
 
 
 class GlobalsCommands:
-    def __init__(self, emit, workspace=lambda: None):
+    def __init__(self, emit, workspace=lambda: None, *, author='owner'):
         self.emit, self.workspace = emit, workspace
+        self.author = author
 
     def handles(self, kind):
         return kind in ('globals_list', 'globals_get', 'globals_save', 'globals_retire')
@@ -37,6 +38,12 @@ class GlobalsCommands:
                                 else memories.identity(card) in local_memories)
                     records.append(dict(kind=kind, key=card.id, title=card.title, path=str(path),
                                         scope='global', status=card.status, shadowed=shadowed, exists=True))
+                    if kind == 'memory':
+                        records[-1].update(memory_scope=card.front.get('scope', 'user'),
+                                           pinned=card.front.get('pinned') is True,
+                                           paths=card.front.get('paths') or [],
+                                           summary=' '.join(line.strip() for line in card.body.splitlines()
+                                                            if line.strip() and not line.startswith('#'))[:240])
                 except (OSError, ValueError, board.BoardError) as exc:
                     problems.append(dict(path=str(path), message=str(exc)))
         # Known sources only, including missing fixed paths so they can be created in place.
@@ -174,7 +181,7 @@ class GlobalsCommands:
                 os.close(lock)
             if kind != 'instruction':
                 board.Board(root).append_thread(key, 'Retired in Globals.' if action == 'globals_retire'
-                                              else 'Saved in Globals.', author='owner', kind='event')
+                                              else 'Saved in Globals.', author=self.author, kind='event')
             result = self._read(self._record(kind, key, workspace))
             self.emit(dict(event='globals_saved', id=ident, record=result))
         except (OSError, ValueError, TypeError, board.BoardError, aliases.AliasError) as exc:

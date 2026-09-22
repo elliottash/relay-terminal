@@ -6049,6 +6049,23 @@ public:
             // the manager's own business; an `option:` one is the console's, which opens Options
             // on the row exactly as a terminal pane's transcript does.
             wireConsoleHost(view, tool, QStringLiteral("sessions.ask"));
+            globals->onInterview = [globalGuard, sessionsGuard] {
+                if (!globalGuard || !sessionsGuard) return;
+                sessionsGuard->focusHelper();
+                if (auto *console = dynamic_cast<Pane *>(sessionsGuard->agentConsole().widget)) {
+                    // createAgentConsole attaches to the tab on the next event-loop turn.
+                    // Submit after that attachment, including on the first interview click.
+                    QTimer::singleShot(0, console, [console] {
+                        // The ordinary agent queue preserves an existing composer draft.
+                        console->askAgent(QStringLiteral(
+                            "Interview me to help Relay learn useful things about me. Review my saved user memories first, "
+                            "then ask one Relay-relevant question at a time, starting with my work and goals. "
+                            "Let me skip or stop. Before saving, show the proposed facts and let me choose what to remember "
+                            "in Globals > User memory. Do not save guesses or secrets."));
+                    });
+                    if (sessionsGuard->onHelperHint) sessionsGuard->onHelperHint();
+                }
+            };
             insertBeside(owner, tool, owner->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
         }
         tool->setProperty("workspaceOwner", QVariant::fromValue<QObject *>(owner));

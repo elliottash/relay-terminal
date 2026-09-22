@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "GlobalsPane.h"
+#include <QComboBox>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -16,22 +17,32 @@ GlobalsPane::GlobalsPane(QWidget *parent) : QWidget(parent) {
     setObjectName("globalsPane");
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(8, 8, 8, 8);
-    auto *intro = new QLabel(tr("Board HQ · memories, aliases and instructions across projects"));
-    intro->setWordWrap(true);
-    layout->addWidget(intro);
+    m_section = new QComboBox;
+    m_section->setObjectName("globalsSection");
+    m_section->addItems({tr("User memory"), tr("Aliases"), tr("Instructions"), tr("All records")});
+    layout->addWidget(m_section);
+    m_intro = new QLabel(tr("What Relay knows about you · saved facts and preferences across projects. "
+        "Review or edit a memory below, or let the helper interview you. "
+        "Applicable memories are sent to the model you choose. Retire stops future loading; it keeps the file and history."));
+    m_intro->setWordWrap(true);
+    layout->addWidget(m_intro);
     m_search = new QLineEdit;
     m_search->setObjectName("globalsSearch");
-    m_search->setPlaceholderText(tr("Search global records…"));
+    m_search->setPlaceholderText(tr("Search memories, aliases or instructions…"));
     layout->addWidget(m_search);
     setFocusProxy(m_search);
     auto *actions = new QHBoxLayout;
     m_newMemory = new QPushButton(tr("New memory"));
     m_newAlias = new QPushButton(tr("New alias"));
+    m_interview = new QPushButton(tr("Interview me"));
+    m_interview->setObjectName("globalsInterview");
+    m_interview->setToolTip(tr("Start a conversation about your work and preferences. You choose which answers to remember."));
     auto *reload = new QPushButton(tr("Refresh"));
     m_newMemory->setObjectName("globalsNewMemory");
     m_newAlias->setObjectName("globalsNewAlias");
     reload->setObjectName("globalsRefresh");
-    actions->addWidget(m_newMemory); actions->addWidget(m_newAlias); actions->addStretch(); actions->addWidget(reload);
+    actions->addWidget(m_newMemory); actions->addWidget(m_newAlias); actions->addWidget(m_interview);
+    actions->addStretch(); actions->addWidget(reload);
     layout->addLayout(actions);
     auto *split = new QSplitter(Qt::Vertical);
     m_list = new QListWidget;
@@ -68,6 +79,16 @@ GlobalsPane::GlobalsPane(QWidget *parent) : QWidget(parent) {
     m_notice->setWordWrap(true);
     layout->addWidget(m_notice);
     connect(m_search, &QLineEdit::textChanged, this, [this] { rebuild(); });
+    connect(m_section, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this] {
+        m_getRequest.clear();
+        display({});
+        rebuild(); updateButtons();
+    });
+    connect(m_interview, &QPushButton::clicked, this, [this] {
+        if (protectDraft()) return;
+        if (onInterview) onInterview();
+        else m_notice->setText(tr("The helper is not available in this view."));
+    });
     connect(m_list, &QListWidget::currentRowChanged, this, [this] { selectRecord(); });
     connect(reload, &QPushButton::clicked, this, [this] { refresh(); });
     connect(m_newMemory, &QPushButton::clicked, this, [this] { newRecord("memory"); });
@@ -108,9 +129,9 @@ void GlobalsPane::setWorkspace(const QString &workspace) {
 }
 void GlobalsPane::focusSearch() { m_search->setFocus(); }
 QString GlobalsPane::agentScreen() const {
-    return tr("Globals / Board HQ\nWorkspace: %1\nSearch: %2\nSelected: %3\nSource: %4\nUnsaved draft: %5")
+    return tr("Globals / Board HQ / %6\nWorkspace: %1\nSearch: %2\nSelected: %3\nSource: %4\nUnsaved draft: %5")
         .arg(m_workspace, m_search->text(), m_record.value("title").toString(m_selected),
-             m_record.value("path").toString(), m_dirty ? "yes" : "no");
+             m_record.value("path").toString(), m_dirty ? "yes" : "no", m_section->currentText());
 }
 bool GlobalsPane::protectDraft() {
     if (!m_dirty && m_writeRequest.isEmpty()) return false;
@@ -130,11 +151,16 @@ void GlobalsPane::rebuild() {
         const QString title = record.value("title").toString(record.value("key").toString());
         const QString kind = record.value("kind").toString();
         const QString status = record.value("status").toString();
+        const int section = m_section->currentIndex();
+        if (section == 0 && (kind != "memory" || record.value("memory_scope").toString("user") != "user")) continue;
+        if (section == 1 && kind != "alias") continue;
+        if (section == 2 && kind != "instruction") continue;
         const QString label = title + " · " + kind + (status.isEmpty() ? QString() : " · " + status)
             + (record.value("shadowed").toBool() ? tr(" · project override") : QString());
-        const QString haystack = label + " " + record.value("path").toString() + " " + record.value("key").toString();
+        const QString summary = record.value("summary").toString();
+        const QString haystack = label + " " + summary + " " + record.value("path").toString() + " " + record.value("key").toString();
         if (!query.isEmpty() && !haystack.contains(query, Qt::CaseInsensitive)) continue;
-        auto *item = new QListWidgetItem(label, m_list);
+        auto *item = new QListWidgetItem(label + (summary.isEmpty() ? QString() : "\n" + summary), m_list);
         item->setData(Qt::UserRole, record);
         item->setToolTip(record.value("path").toString());
         if (identity(record) == m_selected) m_list->setCurrentItem(item);
@@ -165,15 +191,22 @@ void GlobalsPane::display(const QJsonObject &record) {
     source += "\n" + tr("Scope: %1").arg(record.value("scope").toString("global"));
     if (record.value("shadowed").toBool()) source += tr(" · overridden in this project");
     if (record.value("kind").toString() == "instruction") source += tr(" · edits this source file in place");
+    if (record.value("kind").toString() == "memory") {
+        source += "\n" + tr("Memory scope: %1").arg(record.value("memory_scope").toString("user"));
+        source += record.value("pinned").toBool() ? tr(" · pinned across projects") : tr(" · uses workspace path matching");
+        source += tr(" · subject to project overrides, supersession and the context size limit");
+        if (record.value("status").toString() == "retired") source += tr("\nRetired: excluded from future memory context. File and history retained.");
+    }
     m_source->setText(source);
     updateButtons();
 }
 void GlobalsPane::newRecord(const QString &kind) {
     if (protectDraft()) return;
+    m_section->setCurrentIndex(kind == "memory" ? 0 : 1);
     m_getRequest.clear();
     display({{"kind", kind}, {"scope", "global"}});
     const QString text = kind == "memory"
-        ? "---\ntype: memory\nstatus: active\nname: new-memory\nscope: user\npinned: true\npaths: []\n---\n# New memory\n\nRemember this fact.\n"
+        ? "---\ntype: memory\nstatus: active\nname: new-memory\nscope: user\npinned: true\npaths: []\n---\n# New memory\n\nOne useful fact or preference about you, in your own words.\n"
         : "---\ntype: alias\nstatus: active\nname: new-alias\nkind: command\n---\n# New alias\n\n## Run\n```sh\npwd\n```\n";
     m_editor->setPlainText(text);
     m_notice->setText(tr("Edit the name, title and content, then save."));
@@ -182,6 +215,12 @@ void GlobalsPane::newRecord(const QString &kind) {
 }
 void GlobalsPane::updateButtons() {
     const bool ready = m_writeRequest.isEmpty() && !m_loading;
+    m_section->setEnabled(ready && !m_dirty);
+    m_interview->setEnabled(ready && !m_dirty);
+    m_newMemory->setVisible(m_section->currentIndex() == 0 || m_section->currentIndex() == 3);
+    m_newAlias->setVisible(m_section->currentIndex() == 1 || m_section->currentIndex() == 3);
+    m_interview->setVisible(m_section->currentIndex() == 0);
+    m_intro->setVisible(m_section->currentIndex() == 0);
     m_editor->setReadOnly(!ready || m_record.isEmpty());
     m_save->setEnabled(ready && m_dirty);
     m_cancel->setEnabled(ready && m_dirty);
@@ -207,7 +246,9 @@ void GlobalsPane::handleEvent(const QJsonObject &event) {
         }
         if (!problems.isEmpty()) m_notice->setText(problems.join("\n"));
         else if (!m_dirty && !m_loading && m_writeRequest.isEmpty())
-            m_notice->setText(m_records.isEmpty() ? tr("No global records yet. Create a memory or alias to begin.") : QString());
+            m_notice->setText(m_list->count() == 0 ?
+                (m_section->currentIndex() == 0 ? tr("No matching user memories. Add a memory or choose Interview me to begin.")
+                                               : tr("No matching records.")) : QString());
         // Refresh the selected source only when there is no draft to overwrite. A fresh hash
         // lets Cancel + Refresh recover naturally after an external-write conflict.
         if (!m_dirty && !m_loading && m_writeRequest.isEmpty() && !m_record.value("key").toString().isEmpty()) {

@@ -7,6 +7,7 @@
 #include <functional>
 
 class QLabel;
+class QComboBox;
 class QLineEdit;
 class QListWidget;
 class QPlainTextEdit;
@@ -18,6 +19,7 @@ class GlobalsPane final : public QWidget {
 public:
     explicit GlobalsPane(QWidget *parent = nullptr);
     std::function<void(const QJsonObject &)> onRequest;
+    std::function<void()> onInterview;
     void handleEvent(const QJsonObject &event);
     void refresh();
     void setWorkspace(const QString &workspace);
@@ -33,6 +35,9 @@ private:
     void updateButtons();
     bool protectDraft();
     QLineEdit *m_search;
+    QComboBox *m_section;
+    QLabel *m_intro;
+    QPushButton *m_interview;
     QListWidget *m_list;
     QLabel *m_source;
     QLabel *m_notice;

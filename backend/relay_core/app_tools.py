@@ -648,6 +648,20 @@ TOOL_SPECS = [
           "pane": {"type": "string",
                    "description": "Which pane, as app_panes gives it. Your own by default."}},
          ["what", "name"]),
+    spec("app_user_memory",
+         "Review and maintain what Relay remembers about the user across projects, in Globals > User memory. "
+         "List first to avoid duplicates, get a record before changing it, then save its full Markdown "
+         "with the returned base_hash. New records omit key and use base_hash ''. Memory cards need "
+         "type: memory, status: active, a stable name, scope: user, pinned: true, a # title and a concise fact. "
+         "Save only facts/preferences the user explicitly asks to remember or confirms in an interview; "
+         "never infer personal traits or store credentials. Preserve id on edits. Retire stops future "
+         "loading but keeps the source and history; it is not erasure. Read/get do not write. "
+         "Writes use the same validation and conflict checks as the Globals editor.",
+         {"action": {"type": "string", "enum": ["list", "get", "save", "retire"]},
+          "key": {"type": "string", "description": "Memory id from list/get; omit for new memory."},
+          "text": {"type": "string", "description": "Full memory Markdown, including front matter."},
+          "base_hash": {"type": "string", "description": "Hash from get; empty string for new records."}},
+         ["action"]),
     spec("app_sessions_search",
          "Search the person's past Relay conversations — the same index the Sessions pane uses. "
          "One row per conversation: id, title, when, model, workspace and the turns that matched. "
@@ -799,6 +813,7 @@ class AppTools:
         handler = {"app_option_list": self._option_list, "app_option_get": self._option_get,
                    "app_option_set": self._option_set, "app_action_list": self._action_list,
                    "app_action_run": self._action_run, "app_sessions_search": self._sessions_search,
+                   "app_user_memory": self._user_memory,
                    "app_panes": self._panes,
                    "app_send_prompt": self._send_prompt,
                    "app_prefill_prompt": self._prefill_prompt, "app_rename": self._rename,
@@ -807,6 +822,42 @@ class AppTools:
             return handler(dict(args))
         except AppToolError as exc:
             return exc.to_result()
+
+    def _user_memory(self, args: dict) -> dict:
+        from . import board
+        from .globals_protocol import GlobalsCommands
+        action = args.get('action')
+        if action not in ('list', 'get', 'save', 'retire'):
+            raise AppToolError('Choose list, get, save or retire.', code='invalid_value')
+        if action in ('save', 'retire'):
+            self._need_writes('changing user memory')
+        events = []
+        commands = GlobalsCommands(events.append, workspace=lambda: self.workspace, author='agent')
+        try:
+            if args.get('key'):
+                record = commands._record('memory', args['key'], self.workspace)
+                if record.get('memory_scope') != 'user':
+                    raise ValueError('This is not user memory. Use its existing editor.')
+            if action == 'save':
+                text = args.get('text')
+                if not isinstance(text, str):
+                    raise ValueError('Save needs full memory Markdown.')
+                card = board.Card.parse(text)
+                if card.front.get('scope') != 'user' or not card.front.get('name'):
+                    raise ValueError('User memory needs scope: user and a stable name.')
+        except (OSError, ValueError, board.BoardError) as exc:
+            raise AppToolError(str(exc), code='invalid_value') from exc
+        commands.dispatch(dict(type='globals_' + action, id='user-memory', kind='memory',
+                               key=args.get('key'), text=args.get('text', ''),
+                               base_hash=args.get('base_hash')))
+        result = events[-1]
+        if result['event'] == 'globals_error':
+            raise AppToolError(result['message'], code='invalid_value')
+        if action == 'list':
+            return dict(records=[r for r in result['records'] if r['kind'] == 'memory'
+                                 and r.get('memory_scope') == 'user'],
+                        problems=result['problems'], root=result['root'])
+        return dict(ok=True, record=result['record'])
 
     # ---- options ---------------------------------------------------------------
     def _option_list(self, args: dict) -> dict:

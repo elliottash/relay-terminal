@@ -8013,6 +8013,28 @@ are retained for inspection but inactive. `shadowed` means an active project rec
 the same name overrides this global record. Problems contain `path,message`. Errors
 are `globals_error {id,message}` and leave the editor's buffer available for correction.
 
+Memory rows additionally carry `memory_scope` (the card's scope, default `user`), `pinned`,
+`paths`, and a bounded plain-text `summary` for search and review. Globals opens on **User
+memory**, filtering to user-scope memories; Aliases, Instructions and All records remain
+available. A draft disables section switching and Interview me. Memory details explain
+pinning, project precedence, the context budget and retirement; they do not promise that
+every saved record is present in every prompt.
+
+**Interview me** opens the existing Globals console and submits an ordinary queued ask,
+preserving any composer draft. The Globals brief asks one relevant question at a time and
+previews facts before saving the user's selections. It does not automatically mine history
+or infer personal characteristics. Explicit requests to remember something already authorize
+the save. The interview uses the configured helper model and ordinary conversation storage.
+
+The `app_user_memory {action: list|get|save|retire, key?, text?, base_hash?}` agent tool
+uses this same editor service and local store, restricted to user-scope memory. List returns
+`records,problems,root`; other successful operations return `ok,record`, including the fresh
+hash. Writes require the app-writes option, retain identity/history, and use the same size,
+duplicate-name and optimistic-concurrency checks as the editor. It does not write project
+work cards. Retirement prevents future memory loading but does not erase original files,
+thread history or context already sent to models. Refresh reloads helper edits into the view
+and preserves any unsaved draft.
+
 `text` is full Markdown, with front matter for cards. New cards omit `key` and send
 `base_hash: ""`; the server supplies ID, creation date, rank and links. Existing records
 require the hash returned by get/save. Hash comparisons and atomic replacements run

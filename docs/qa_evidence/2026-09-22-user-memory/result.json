@@ -1,0 +1,8 @@
+{
+  "interview_started": true,
+  "globals_brief_present": true,
+  "user_memory_tool_succeeded": true,
+  "saved_user_memory": true,
+  "provider": "scripted localhost stub; no external API",
+  "limitation": "Validates integration, not model interview quality."
+}

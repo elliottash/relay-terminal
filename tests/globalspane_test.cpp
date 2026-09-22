@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "GlobalsPane.h"
+#include <QComboBox>
 #include <QJsonArray>
 #include <QLabel>
 #include <QLineEdit>
@@ -23,6 +24,7 @@ private slots:
     }
     void draftSurvivesSelectionRefreshAndConflict() {
         GlobalsPane pane;
+        pane.findChild<QComboBox *>("globalsSection")->setCurrentIndex(3);
         QList<QJsonObject> requests;
         pane.onRequest = [&](const QJsonObject &r) { requests.append(r); };
         const QJsonObject a{{"kind", "memory"}, {"key", "AB12"}, {"title", "First"}, {"status", "active"}, {"path", "/hq/memory/a.md"}};
@@ -80,6 +82,7 @@ private slots:
     }
     void instructionsExposeSourceAndCannotRetire() {
         GlobalsPane pane;
+        pane.findChild<QComboBox *>("globalsSection")->setCurrentIndex(2);
         QList<QJsonObject> requests;
         pane.onRequest = [&](const QJsonObject &r) { requests.append(r); };
         QJsonObject instruction{{"kind", "instruction"}, {"key", "/home/test/AGENTS.md"}, {"path", "/home/test/AGENTS.md"}, {"title", "Instructions"}, {"scope", "user"}, {"shadowed", true}};
@@ -98,6 +101,33 @@ private slots:
         pane.findChild<QPlainTextEdit *>("globalsEditor")->setPlainText("Updated rules");
         pane.findChild<QPushButton *>("globalsSave")->click();
         QCOMPARE(requests.last().value("key").toString(), QString("/home/test/AGENTS.md"));
+    }
+    void userMemorySectionAndInterview() {
+        GlobalsPane pane;
+        QJsonObject request;
+        pane.onRequest = [&](const QJsonObject &r) { request = r; };
+        bool interviewed = false;
+        pane.onInterview = [&] { interviewed = true; };
+        pane.refresh();
+        pane.handleEvent({{"event", "globals_state"}, {"id", request.value("id")}, {"records", QJsonArray{
+            QJsonObject{{"kind", "memory"}, {"key", "AB12"}, {"title", "Working style"},
+                        {"memory_scope", "user"}, {"summary", "Explain decisions concisely"}},
+            QJsonObject{{"kind", "memory"}, {"key", "AB13"}, {"memory_scope", "team"}},
+            QJsonObject{{"kind", "alias"}, {"key", "AB14"}},
+            QJsonObject{{"kind", "instruction"}, {"key", "rules"}}}}});
+        auto *list = pane.findChild<QListWidget *>("globalsList");
+        QCOMPARE(list->count(), 1);
+        QVERIFY(list->item(0)->text().contains("Explain decisions"));
+        pane.findChild<QLineEdit *>("globalsSearch")->setText("concisely");
+        QCOMPARE(list->count(), 1);
+        pane.findChild<QPushButton *>("globalsInterview")->click();
+        QVERIFY(interviewed);
+        interviewed = false;
+        pane.findChild<QPushButton *>("globalsNewMemory")->click();
+        QVERIFY(!pane.findChild<QComboBox *>("globalsSection")->isEnabled());
+        pane.findChild<QPushButton *>("globalsInterview")->click();
+        QVERIFY(!interviewed);
+        QVERIFY(pane.agentScreen().contains("User memory"));
     }
     void staleRepliesCannotReplaceCurrentSelection() {
         GlobalsPane pane;
