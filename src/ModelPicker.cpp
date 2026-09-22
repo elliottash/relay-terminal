@@ -342,8 +342,12 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QWidget(pare
         if (column == ColRank && item->data(0, AddRole).toBool()) { addSelected(); return; }
         if (column == ColVia && item->data(0, ViaRole).toStringList().size() > 1 && m_vias->isVisible()) m_vias->setFocus();
     });
-    connect(m_list, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item) {
+    connect(m_list, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item, int column) {
         if (!item || item->data(0, SectionRole).toBool()) return;
+        // A tick is a control: two quick clicks on it are two toggles (or one that would not take,
+        // on a row a list pins), never "use". The owner's pane went onto gemini flash lite that
+        // way on 2026-09-21 while he was trying to un-tick it.
+        if (column == ColAvail || column == ColBox) return;
         if (item->data(0, AddRole).toBool()) { addSelected(); return; }   // a double click on a "+ add" row adds it
         use();
     });

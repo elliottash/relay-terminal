@@ -805,6 +805,27 @@ private Q_SLOTS:
         QCOMPARE(picker.pick().effort, QStringLiteral("max"));
     }
 
+    // Owner, 2026-09-21: his pane went onto gemini flash lite while he was trying to un-tick it —
+    // two quick clicks on the tick were read as a double click, and a double click "uses" the row.
+    // A tick cell is a control: a double click there commits nothing.
+    void aDoubleClickOnATickNeverUsesTheRow() {
+        ModelPicker::Context ctx = context();
+        ctx.tier = QStringLiteral("all");
+        ModelPicker picker(ctx);
+        picker.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&picker));
+        picker.selectKey(QStringLiteral("glm-coding|glm-5.3-flash"));
+        QTreeWidgetItem *flash = picker.list()->currentItem();
+        QVERIFY(flash);
+        Q_EMIT picker.list()->itemDoubleClicked(flash, 1);   // ColAvail: the "available" tick
+        QVERIFY(!picker.pick().accepted);
+        Q_EMIT picker.list()->itemDoubleClicked(flash, 2);   // ColBox: the "in box" tick
+        QVERIFY(!picker.pick().accepted);
+        Q_EMIT picker.list()->itemDoubleClicked(flash, 3);   // ColModel: the name — this one uses it
+        QVERIFY(picker.pick().accepted);
+        QCOMPARE(picker.pick().key, QStringLiteral("glm-coding|glm-5.3-flash"));
+    }
+
     void aClickOnlyHighlights() {
         // Owner, 2026-09-20: clicking a row must not close the dialog, so the level can be picked
         // after the model. Enter commits; a double click is the shortcut for both.
