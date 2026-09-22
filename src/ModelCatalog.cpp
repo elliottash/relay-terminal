@@ -42,6 +42,7 @@ QString perKey(const QString &group, const QString &key) { return QStringLiteral
 // runnable guest harness, or Relay Free while the worker reports it available.
 bool usableRow(const QJsonObject &preset) {
     const bool hosted = preset.value(QStringLiteral("hosted")).toBool();
+    if (hosted) return preset.value(QStringLiteral("available")).toBool();
     return preset.value(QStringLiteral("has_stored_key")).toBool()
         || preset.value(QStringLiteral("local")).toBool()
         || preset.value(QStringLiteral("harness")).toBool()

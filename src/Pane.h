@@ -1553,6 +1553,7 @@ public:
     // "When a model subscription is exhausted, it gets grayed-out and skipped in the priority
     // until it's restored." The figures live in m_limits; relay::models::exhausted reads them.
     QString hostedPresetId() const {
+        if (onHostedPreset()) return m_currentPreset;
         for (const auto &item : m_presets)
             if (item.toObject().value(QStringLiteral("hosted")).toBool()) return item.toObject().value(QStringLiteral("id")).toString();
         return QString();
@@ -5545,15 +5546,16 @@ private:
     void updateQuotaLabel() {
         if (!m_quotaLabel) return;
         if (!onHostedPreset()) { m_quotaLabel->hide(); return; }
+        const QString plan = m_currentPreset == QStringLiteral("relay-pro") ? QStringLiteral("Pro") : QStringLiteral("Free");
         if (m_quotaLimit <= 0) {
             // No figure yet: the first request through the gateway brings one.
-            m_quotaLabel->setText(QStringLiteral("Free"));
+            m_quotaLabel->setText(plan);
             m_quotaLabel->setProperty("warn", false);
-            m_quotaLabel->setToolTip(QStringLiteral("Relay Free: an included daily allowance. Usage shows after the first request."));
+            m_quotaLabel->setToolTip(QStringLiteral("Relay %1: hosted daily allowance. Usage shows after the first request.").arg(plan));
         } else {
             // Rounded down: an allowance with one call spent must not read as untouched.
             const double left = std::max(0.0, 100.0 * double(m_quotaLimit - m_quotaUsed) / double(m_quotaLimit));
-            m_quotaLabel->setText(QStringLiteral("Free · %1% left").arg(left > 0 && left < 10 ? QString::number(std::floor(left * 10) / 10, 'f', 1)
+            m_quotaLabel->setText((plan + QStringLiteral(" · %1% left")).arg(left > 0 && left < 10 ? QString::number(std::floor(left * 10) / 10, 'f', 1)
                                                                                            : QString::number(std::floor(left), 'f', 0)));
             m_quotaLabel->setProperty("warn", left <= 10.0);
             m_quotaLabel->setToolTip(QStringLiteral("%1 of %2 tokens today%3")
@@ -5573,7 +5575,7 @@ private:
         if (settings.value(QStringLiteral("hosted/disclosed"), false).toBool()) return;
         settings.setValue(QStringLiteral("hosted/disclosed"), true);
         ensureLineStart();
-        printInline(QStringLiteral("Relay Free: this pane's prompts and tool context go to Relay's hosted service and on to "
+        printInline(QStringLiteral("Relay: this pane's prompts and tool context go to Relay's hosted service and on to "
                                    "the model provider; Relay keeps request metadata only. Add your own key under "
                                    "Options › Models to keep it between you and your provider.\n"), Ink::Note);
         if (!m_agentBusy && !moreTurnsPending()) closeInline();
@@ -6123,7 +6125,11 @@ private:
                                     .arg(guestName(guest),
                                          modelNameFor(preset, event.value(QStringLiteral("model")).toString()))
                               : guestName(guest) + QStringLiteral(": ") + event.value(QStringLiteral("error")).toString());
-                else
+                else if (preset == QStringLiteral("relay-pro")) {
+                    status(ok ? QStringLiteral("Relay Pro access is active.")
+                              : QStringLiteral("Relay Pro: ") + event.value(QStringLiteral("error")).toString());
+                    refreshPresets();
+                } else
                     status(ok ? QStringLiteral("Key works for ") + preset
                               : QStringLiteral("Key test failed: ") + event.value(QStringLiteral("error")).toString());
                 if (!guest.isEmpty()) refreshPresets();   // logged_in on the row follows the test
@@ -11245,15 +11251,16 @@ private:
                 // keyed presets, so they stay last in this list. Relay Free (`hosted`, protocol
                 // 13.8) needs none either, while the worker reports it `available`.
                 const bool hosted = preset.value(QStringLiteral("hosted")).toBool();
-                if (hosted && !preset.value(QStringLiteral("available")).toBool()) hostedUnavailable = true;
+                if (preset.value(QStringLiteral("id")).toString() == QStringLiteral("relay-free")
+                    && !preset.value(QStringLiteral("available")).toBool()) hostedUnavailable = true;
                 // A guest (protocol 29.3) needs no key either: `harness` is the worker saying it
                 // can run this guest's headless harness here, which is what makes the row usable.
                 // A guest row without it is not a row of this box at all — the picker offers that
                 // guest the Tier B way (26.9) instead.
-                if (preset.value(QStringLiteral("has_stored_key")).toBool()
-                    || preset.value(QStringLiteral("local")).toBool()
-                    || preset.value(QStringLiteral("harness")).toBool()
-                    || (hosted && preset.value(QStringLiteral("available")).toBool()))
+                if (hosted ? preset.value(QStringLiteral("available")).toBool()
+                    : (preset.value(QStringLiteral("has_stored_key")).toBool()
+                       || preset.value(QStringLiteral("local")).toBool()
+                       || preset.value(QStringLiteral("harness")).toBool()))
                     m_stored.append({preset.value(QStringLiteral("id")).toString(), preset.value(QStringLiteral("label")).toString()});
                 // The allowance the worker last saw, so the chip has a figure before the first call.
                 if (hosted && preset.value(QStringLiteral("quota")).isObject()) setHostedQuota(preset.value(QStringLiteral("quota")).toObject());

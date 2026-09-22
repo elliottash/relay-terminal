@@ -2631,13 +2631,13 @@ private:
             // Relay Free is not a provider you set up (owner, 2026-09-20: "don't show relay free in
             // the providers list"): it has no key, no login and nothing to test into. Its models
             // still sit in the checklist and the priority list like any other.
-            if (preset.value(QStringLiteral("hosted")).toBool()) continue;
+            if (id == QStringLiteral("relay-free")) continue;
             const bool guest = id.startsWith(QStringLiteral("guest:"));
             const bool usable = preset.value(QStringLiteral("has_stored_key")).toBool()
                 || preset.value(QStringLiteral("custom")).toBool()
                 || (preset.value(QStringLiteral("hosted")).toBool() && preset.value(QStringLiteral("available")).toBool())
                 || (guest && preset.value(QStringLiteral("installed")).toBool(true));
-            (usable || id == QStringLiteral("openrouter") ? listed : waiting) << preset;
+            (usable || id == QStringLiteral("openrouter") || id == QStringLiteral("relay-pro") ? listed : waiting) << preset;
         }
         // Order of addition, then whatever you dragged (owner, 2026-09-20): the first time a
         // provider is listed is its place, and a drop moves it.
@@ -2668,7 +2668,10 @@ private:
             const bool hasKey = preset.value(QStringLiteral("has_stored_key")).toBool();
             const QString limits = relay::models::limitsText(catalog.limits.value(id), now);
             QString status;
-            if (hosted) {
+            if (id == QStringLiteral("relay-pro")) {
+                status = preset.value(QStringLiteral("access_note")).toString(QStringLiteral("enter your personal access code"));
+                if (source == QStringLiteral("env")) status += QStringLiteral(" · code from RELAY_RELAY_PRO_API_KEY");
+            } else if (hosted) {
                 status = preset.value(QStringLiteral("available")).toBool()
                     ? QStringLiteral("included, no key needed") : QStringLiteral("needs python3-cryptography");
             } else if (guest) {
@@ -2702,7 +2705,24 @@ private:
                 relay::models::curation::moveProviderBefore(draggedRowId.section(QLatin1Char(':'), 1), id);
                 curated();
             };
-            if (hosted) {
+            if (id == QStringLiteral("relay-pro")) {
+                row.aliases += QStringLiteral(" pro access code password");
+                row.buttonTexts = QStringList{hasKey ? QStringLiteral("replace code…") : QStringLiteral("add code…"),
+                                              QStringLiteral("check access")};
+                if (source == QStringLiteral("keyring")) row.buttonTexts << QStringLiteral("remove");
+                row.onButton = [this, request, id](int index) {
+                    if (index == 0) {
+                        bool ok = false;
+                        const QString code = QInputDialog::getText(this, QStringLiteral("Relay Pro"),
+                            QStringLiteral("Your personal access code.\nRelay checks it before saving it to the desktop keyring.\nIt is sent only to Relay's hosted service."),
+                            QLineEdit::Password, QString(), &ok).trimmed();
+                        if (ok && !code.isEmpty()) request({{"type", "store_key"}, {"preset", id}, {"api_key", code}});
+                    } else if (index == 1) request({{"type", "test_key"}, {"preset", id}});
+                    else if (QMessageBox::question(this, QStringLiteral("Remove Pro code"),
+                                 QStringLiteral("Remove your Pro access code from this machine's keyring?")) == QMessageBox::Yes)
+                        request({{"type", "remove_key"}, {"preset", id}});
+                };
+            } else if (hosted) {
                 if (!preset.value(QStringLiteral("available")).toBool()) { row.kind = relay::SettingRow::Info; row.label = label + QStringLiteral(" · ") + status; }
                 else {
                     row.buttonTexts = QStringList{QStringLiteral("test")};   // one real call

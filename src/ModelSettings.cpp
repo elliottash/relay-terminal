@@ -138,7 +138,10 @@ void KeysDialog::updateButtons() {
     QTreeWidgetItem *item = m_list->currentItem();
     if (item && item->data(0, PresetRole).toString().isEmpty()) item = nullptr;
     const bool env = item && item->data(0, Qt::UserRole + 3).toString() == QStringLiteral("env");
-    const bool included = item && item->data(0, HostedRole).toBool();
+    const bool included = item && item->data(0, PresetRole).toString() == QStringLiteral("relay-free");
+    const bool pro = item && item->data(0, PresetRole).toString() == QStringLiteral("relay-pro");
+    m_add->setText(pro ? QStringLiteral("Add / replace code…") : QStringLiteral("Add / replace…"));
+    m_test->setText(pro ? QStringLiteral("Check access") : QStringLiteral("Test"));
     m_add->setEnabled(item != nullptr && !included);
     m_test->setEnabled(item != nullptr);
     m_where->setEnabled(item != nullptr);
@@ -150,6 +153,8 @@ void KeysDialog::updateButtons() {
 
 // The status column of the Relay Free row: what stands in for "Stored in keyring" there.
 QString KeysDialog::hostedStatus(const QJsonObject &preset) const {
+    if (str(preset, "id") == QStringLiteral("relay-pro"))
+        return preset.value(QStringLiteral("access_note")).toString(QStringLiteral("Enter your personal access code"));
     if (!preset.value(QStringLiteral("available")).toBool()) return QStringLiteral("Needs python3-cryptography");
     const QJsonObject quota = m_hostedQuota.isEmpty() ? preset.value(QStringLiteral("quota")).toObject()
                                                       : m_hostedQuota;
@@ -216,8 +221,10 @@ void KeysDialog::rebuild() {
 void KeysDialog::addOrReplace(const QString &id, const QString &label) {
     bool ok = false;
     // QInputDialog with Password echo: the key is never rendered and never leaves this call.
-    const QString key = QInputDialog::getText(this, QStringLiteral("API key"),
-        QStringLiteral("Key for %1.\nIt is saved to the desktop keyring and sent only to this provider.").arg(label),
+    const bool pro = id == QStringLiteral("relay-pro");
+    const QString key = QInputDialog::getText(this, pro ? QStringLiteral("Relay Pro access code") : QStringLiteral("API key"),
+        pro ? QStringLiteral("Your personal access code.\nRelay checks it before saving it to the desktop keyring.")
+            : QStringLiteral("Key for %1.\nIt is saved to the desktop keyring and sent only to this provider.").arg(label),
         QLineEdit::Password, QString(), &ok).trimmed();
     if (!ok || key.isEmpty()) return;
     if (key.contains(QRegularExpression(QStringLiteral("\\s")))) {
@@ -277,6 +284,12 @@ void KeysDialog::handleEvent(const QJsonObject &event) {
         bool included = false;
         for (const auto &value : std::as_const(m_presets))
             if (str(value.toObject(), "id") == id) included = hosted(value.toObject());
+        if (id == QStringLiteral("relay-pro")) {
+            m_status->setText(ok ? QStringLiteral("Relay Pro access is active.")
+                                : QStringLiteral("Relay Pro: %1").arg(event.value(QStringLiteral("error")).toString()));
+            if (send) send({{"type", "presets"}});
+            return;
+        }
         m_status->setText(ok ? (included ? QStringLiteral("%1 works — %2 answered in %3 ms%4")
                                          : QStringLiteral("%1: key works — %2 answered in %3 ms%4"))
                                    .arg(presetLabelFor(id),

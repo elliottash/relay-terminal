@@ -1663,6 +1663,29 @@ plan restore then goes back to the pane's own.
 A planning model whose provider will not answer no longer fails the turn: the routing ends and the
 rest of the turn runs on the pane's own model (15.2.3).
 
+### 13.12 Relay Pro access (#RPR7, 2026-09-22)
+
+`relay-pro` is a hosted subscription preset, separately enabled by a personal, revocable code.
+It offers `relay-pro-high` and `relay-pro-main` (GLM 5.3) and `relay-pro-flash` (GLM 5.3 Flash).
+Lite continues to use Relay Free. Relay Ultra is deferred.
+
+Options › Models shows **add code**, **check access** and, for a keyring code, **remove**.
+The existing `store_key` request with `preset: "relay-pro"` validates access before storing;
+`test_key` checks access without generating a completion. Codes use the keyring/environment
+lookup and are never returned in `presets` or saved with a conversation. The Pro preset adds
+`access_note`; its `available` means access was confirmed for the current code. A stored code
+alone does not make a hosted row selectable. Startup validation runs off the worker loop and
+pushes a new `presets` result when it finishes. The Pro effort control remains adjustable;
+Free's stays fixed.
+
+The installation bearer remains required. `GET /v1/pro` with `X-Relay-Pro-Code` confirms access
+and returns `{ "active": true, "models": [ ... ] }`. Every completion to a reserved
+`relay-pro-*` model independently checks that header against the gateway's digest-only code
+store. A missing, invalid or revoked code returns HTTP 403, `pro_access_denied`; an existing
+installation token cannot bypass revocation. The code is not forwarded to the upstream.
+Pro requests retain the gateway's rate, quota, concurrency and spend limits. Issuing and
+revoking codes is an operator operation documented in `gateway/README.md`.
+
 ## 14. Conversation list and full-text search (v1.4, 2026-09-17; v2.8, 2026-09-18; v4.1, 2026-09-20)
 
 Backend: `backend/relay_core/conv_index.py` (the index) with command handlers in

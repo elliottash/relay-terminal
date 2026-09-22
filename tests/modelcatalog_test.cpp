@@ -168,6 +168,26 @@ class ModelCatalogTests : public QObject {
 private Q_SLOTS:
     void init() { QSettings().clear(); }
 
+    void proRequiresConfirmedAccessEvenWithAStoredCode() {
+        QJsonObject pro = provider(QStringLiteral("relay-pro"), QStringLiteral("relay"), QStringLiteral("pro"),
+            {model(QStringLiteral("relay-pro-main"), QStringLiteral("glm-5.3"), QStringLiteral("main"),
+                   {QStringLiteral("low"), QStringLiteral("high")})}, true);
+        pro.insert(QStringLiteral("hosted"), true);
+        pro.insert(QStringLiteral("effort_fixed"), false);
+        pro.insert(QStringLiteral("available"), false);
+        auto catalog = catalogFrom(QJsonArray{pro});
+        const QString key = QStringLiteral("relay-pro|relay-pro-main");
+        QVERIFY(catalog.find(key));
+        QVERIFY(!catalog.find(key)->usable);
+        pro.insert(QStringLiteral("available"), true);
+        catalog = catalogFrom(QJsonArray{pro});
+        QVERIFY(catalog.find(key)->usable);
+        QVERIFY(!catalog.find(key)->effortFixed);
+        pro.insert(QStringLiteral("available"), false); // revoked; the keyring still has the code
+        catalog = catalogFrom(QJsonArray{pro});
+        QVERIFY(!catalog.find(key)->usable);
+    }
+
     void everyModelOfEveryPresetIsAnEntry() {
         const Catalog catalog = catalogFrom(presets());
         QCOMPARE(catalog.entries.size(), 8);   // 2 + 2 + 1 + 2 + 1 (the local row's own model)
