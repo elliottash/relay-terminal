@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Switchboard file format: cards, tasks, threads, ids, ranks (phase 0).
+"""Board file format: cards, tasks, threads, ids, ranks (phase 0).
 
-The board *is* a folder in the project -- `.switchboard/` on a board created from
-2026-09-19 on, `switchboard/` or `issues/` on an older one (`BOARD_FOLDERS`, in that
-precedence order): one Markdown
+The board *is* a folder in the project -- `board/` on a board created from
+2026-09-21 on, `.switchboard/`, `switchboard/` or `issues/` on an older one
+(`BOARD_FOLDERS`, in that precedence order): one Markdown
 file per card (YAML front matter plus a Markdown body), one append-only thread
 per card under `threads/`, and a generated index in `BOARD.md`.  Nothing here
 picks the folder; it is given one.  See `docs/SWITCHBOARD-FORMAT.md`.
@@ -977,7 +977,7 @@ def append_to_thread(path: Path, add: Callable[[bytes], tuple[str, object]]) -> 
 
     This was an `O_APPEND` write under a lock on the file itself until 2026-09-20.  That kept
     every entry, including across a `merge=union` git merge — but a `QFileSystemWatcher`
-    **directory** watch, which is what the Switchboard pane holds, does not fire when an existing
+    **directory** watch, which is what the board pane holds, does not fire when an existing
     file grows.  About two of every three thread writes therefore never reached the pane: 21 of 60
     in a one-write-a-second storm (#N5JJ).  Writing a temporary file and `os.replace`-ing it in
     creates and renames a directory entry, which the watch does see, and is what every other
@@ -1071,41 +1071,45 @@ memory: {autonomy: auto}
 signals: {auto_work: true}
 """
 
-#: The folder a board is kept in, hidden first.  Owner's decision, 2026-09-19: a new board is
-#: created as `<project>/.switchboard/`, so the cards do not clutter the project's root listing —
-#: and so ripgrep-based agents, which skip hidden folders, stop matching every card on every code
-#: search (`docs/SWITCHBOARD-FORMAT.md`, "The folder").  `switchboard/` is what Relay created
-#: between 2026-09-18 and that decision, and `issues/` is the original spelling — including this
-#: repository's own, which is never moved.
+#: The folder a board is kept in, newest spelling first.  Owner's decision, 2026-09-21 (#1CXD):
+#: a new board is created as `<project>/board/` — plain and visible, so an agent reaching for the
+#: cards with a bare `rg` finds them instead of concluding the project has no board.  The other
+#: half of that trade is taught rather than enforced: the generated pointer block and `POLICY.md`
+#: say to exclude the folder from code searches (`rg -g '!board/'`), which is the job the hidden
+#: spelling used to do by itself.  `.switchboard/` is what Relay created between 2026-09-19 and
+#: that decision, `switchboard/` between 2026-09-18 and 2026-09-19, and `issues/` is the original
+#: spelling — including this repository's own.  **Nothing moves a board that already exists.**
+NEW_BOARD_FOLDER = "board"
 HIDDEN_BOARD_FOLDER = ".switchboard"
 VISIBLE_BOARD_FOLDER = "switchboard"
 LEGACY_BOARD_FOLDER = "issues"
 
-#: Where a project keeps its Switchboard, in precedence order: `.switchboard/board.yaml` first,
-#: then `switchboard/board.yaml`, then `issues/board.yaml`, and the **first that exists wins**.
+#: Where a project keeps its board, in precedence order: `board/board.yaml` first, then
+#: `.switchboard/board.yaml`, then `switchboard/board.yaml`, then `issues/board.yaml`, and the
+#: **first that exists wins**.
 #: Reading is always tolerant — a board is used wherever it is found and nothing moves by itself —
 #: so this one list, walked in this one order, is the only definition of "which folder is the
 #: board" in the backend.  The C++ side repeats it once, in `relay::projects::boardFolders()`
 #: (src/Projects.h), and `tests/projects_test.cpp` pins the two to the same order.
-BOARD_FOLDERS = (HIDDEN_BOARD_FOLDER, VISIBLE_BOARD_FOLDER, LEGACY_BOARD_FOLDER)
+BOARD_FOLDERS = (NEW_BOARD_FOLDER, HIDDEN_BOARD_FOLDER, VISIBLE_BOARD_FOLDER, LEGACY_BOARD_FOLDER)
 
-#: The folder a *new* board is created in: hidden, unless the GUI's "Hidden Switchboard folder"
-#: option is off, in which case it sends `board.folder` (protocol 19.1) and `new_board_folder()`
-#: answers with the visible spelling.  Nothing creates `issues/` any more.
-DEFAULT_BOARD_FOLDER = HIDDEN_BOARD_FOLDER
+#: The folder a *new* board is created in.  A `configure` may still name one of the older
+#: spellings in `board.folder` (protocol 19.1) for a project that wants it; nothing creates
+#: `issues/` any more.
+DEFAULT_BOARD_FOLDER = NEW_BOARD_FOLDER
 
 
-def new_board_folder(hidden: bool = True) -> str:
-    """The folder name a board created now gets: `.switchboard`, or `switchboard` when shown."""
-    return HIDDEN_BOARD_FOLDER if hidden else VISIBLE_BOARD_FOLDER
+def new_board_folder() -> str:
+    """The folder name a board created now gets: `board`."""
+    return NEW_BOARD_FOLDER
 
 
 def board_folder(directory: str | os.PathLike) -> Path | None:
     """The board directory inside `directory`, or None.
 
-    `BOARD_FOLDERS` order: `.switchboard/board.yaml`, then `switchboard/board.yaml`, then
-    `issues/board.yaml`.  The first that exists wins, so a project that somehow has two is read
-    as the first of them and the others are left where they are.
+    `BOARD_FOLDERS` order: `board/board.yaml`, then `.switchboard/board.yaml`, then
+    `switchboard/board.yaml`, then `issues/board.yaml`.  The first that exists wins, so a project
+    that somehow has two is read as the first of them and the others are left where they are.
     """
     here = Path(directory)
     for name in BOARD_FOLDERS:
@@ -1126,9 +1130,9 @@ GITIGNORE_TEXT = "# Private cards, plans, threads and memory (Switchboard privat
 
 
 class Board:
-    """The board tree (`.switchboard/`, or the older `switchboard/` or `issues/` on a board that
-    was filed before 2026-09-19): cards, threads, config and the check rules.  `repo` is the
-    project that holds it."""
+    """The board tree (`board/`, or the older `.switchboard/`, `switchboard/` or `issues/` on a
+    board that was filed before 2026-09-21): cards, threads, config and the check rules.  `repo`
+    is the project that holds it."""
 
     def __init__(self, root: str | os.PathLike, repo: str | os.PathLike | None = None):
         self.root = Path(root)
@@ -1245,7 +1249,7 @@ class Board:
     # of what invalidates each answer, so a caller that has already parsed the board can reuse
     # what it has (#7M6E).  One card's problems depend only on that file and on board.yaml; one
     # thread's depend only on that file, except the two that ask which cards exist; the rest are
-    # about the board as a whole.  The Switchboard worker caches the first two per file against
+    # about the board as a whole.  The board worker caches the first two per file against
     # the file's mtime and size, which is why `board_refresh` no longer parses the tree twice.
     def check(self, fix: bool = False) -> list[Problem]:
         problems: list[Problem] = []
@@ -1973,29 +1977,38 @@ def _git(repo: Path, *args: str, check: bool = False) -> subprocess.CompletedPro
 @dataclass
 class FolderMove:
     """What `rename_board_folder` did, for the event the GUI shows."""
-    old: str                       # the old folder name, e.g. "switchboard"
-    new: str                       # the new folder name, e.g. ".switchboard"
+    old: str                       # the old folder name, e.g. ".switchboard"
+    new: str                       # the new folder name, e.g. "board"
     root: str                      # the board's new absolute path
     method: str                    # "git mv" or "rename"
-    hidden: bool                   # whether the board is hidden now
     files: list[str] = field(default_factory=list)   # what else changed, relative to the project
 
+    @property
+    def hidden(self) -> bool:
+        """Whether the board is hidden now.  Carried for `board_folder_changed`, whose `hidden`
+        field is what a phone or a GUI one release behind still reads (protocol 19.17)."""
+        return self.new.startswith(".")
+
     def summary(self) -> str:
-        what = "hidden" if self.hidden else "shown"
-        return f"{self.old}/ is now {self.new}/ ({what}, {self.method})"
+        return f"{self.old}/ is now {self.new}/ ({self.method})"
 
 
-def rename_board_folder(board: Board, hidden: bool) -> FolderMove:
-    """Rename a board's folder to hide it (`.switchboard/`) or show it (`switchboard/`).
+def rename_board_folder(board: Board, to: str = DEFAULT_BOARD_FOLDER) -> FolderMove:
+    """Move a board to `board/` (owner, 2026-09-21, #1CXD), from any of the older spellings.
 
-    The one explicit action that moves an existing board (owner, 2026-09-19): reading is tolerant
-    and nothing moves by itself, so this runs only when the user asks for it.  `git mv` in a
-    checkout, a plain rename elsewhere, and the project's `.gitattributes` line is rewritten
-    against the new name so the threads keep their union merge.
+    The one explicit action that moves an existing board: reading is tolerant and nothing moves by
+    itself, so this runs only when the user asks for it.  `git mv` in a checkout, a plain rename
+    elsewhere, and the project's `.gitattributes` line is rewritten against the new name so the
+    threads keep their union merge.
+
+    `to` is the folder to move to, and defaults to the one a new board would get.  The older
+    spellings are still accepted as a target — `rename_board_folder(board, ".switchboard")` is
+    what the retired hide/show action did (protocol 19.17's `{hidden}` shape, which
+    `board_protocol` still maps for one release) — but `issues/` is never a target.
 
     Refused, with a `BoardError` that says why and changes nothing:
 
-      * the board is already that way round;
+      * the board is already in that folder;
       * the board folder is `issues/` — the original spelling, which whole repositories refer to
         by name in their own instructions, scripts and hooks (this one does).  Relay never moves
         it; a project that wants the new spelling moves it by hand;
@@ -2003,10 +2016,14 @@ def rename_board_folder(board: Board, hidden: bool) -> FolderMove:
       * a card under the board folder has uncommitted text, staged or not.  `git mv` could carry
         it, but the file would change path underneath whatever diff the user is reading; committing
         first makes the move one clean rename.  A folder that has only been *moved* before, and not
-        edited, passes -- otherwise hiding a board and showing it again needed a commit in between.
+        edited, passes -- otherwise moving a board and moving it back needed a commit in between.
     """
     old = board.root.name
-    target = new_board_folder(hidden)
+    target = to
+    if target == LEGACY_BOARD_FOLDER or target not in BOARD_FOLDERS:
+        raise BoardError(f"{target}/ is not a board folder Relay creates. The folders are "
+                         + ", ".join(f"{f}/" for f in BOARD_FOLDERS if f != LEGACY_BOARD_FOLDER)
+                         + ".")
     if old == LEGACY_BOARD_FOLDER:
         raise BoardError(
             f"This board is in {LEGACY_BOARD_FOLDER}/, the original spelling. Relay never renames "
@@ -2014,9 +2031,9 @@ def rename_board_folder(board: Board, hidden: bool) -> FolderMove:
             f"hand if you want {target}/.")
     if old == target:
         raise BoardError(f"This board's folder is already {target}/.")
-    if old != (VISIBLE_BOARD_FOLDER if hidden else HIDDEN_BOARD_FOLDER):
-        raise BoardError(f"This board is in {old}/, which is neither {HIDDEN_BOARD_FOLDER}/ nor "
-                         f"{VISIBLE_BOARD_FOLDER}/. Relay renames only its own two spellings.")
+    if old not in BOARD_FOLDERS:
+        raise BoardError(f"This board is in {old}/, which is not one of Relay's board folders ("
+                         + ", ".join(f"{f}/" for f in BOARD_FOLDERS) + "). Nothing was moved.")
     destination = board.root.parent / target
     if destination.exists():
         raise BoardError(f"{target}/ already exists in {board.root.parent}. Nothing was moved.")
@@ -2068,15 +2085,14 @@ def rename_board_folder(board: Board, hidden: bool) -> FolderMove:
             _atomic_write(attributes, after)
             files.append(".gitattributes")
     board.root = destination
-    return FolderMove(old=old, new=target, root=str(destination), method=method, hidden=hidden,
-                      files=files)
+    return FolderMove(old=old, new=target, root=str(destination), method=method, files=files)
 
 
 # ------------------------------------------------------------------- the policy file
 #
 # A guest agent -- Claude Code or Codex started in a Relay pane -- never sees the worker's system
 # prompt; managed harnesses have a limited board MCP bridge (#4NXH). What every guest reads
-# is the project's own instruction files.  `<board>/POLICY.md` is the Switchboard's rules written
+# is the project's own instruction files.  `<board>/POLICY.md` is the board's rules written
 # out as a file in the board, and a marked block in `CLAUDE.md` / `AGENTS.md` is the pointer at it
 # (card #R9G7; the owner's words: "tell claude md and agents md to read the relay system prompt").
 # Both are generated: `policy_text` is the only author, `scaffold_files` rewrites a copy that has
@@ -2145,7 +2161,7 @@ def _demote_headings(text: str) -> str:
 
 
 def _in_this_board(text: str, folder: str) -> str:
-    """The policy is written against `issues/`; a board may be `.switchboard/` or `switchboard/`."""
+    """The policy is written against `issues/`; a board may be `board/` or an older spelling."""
     return text if folder == LEGACY_BOARD_FOLDER else text.replace(LEGACY_BOARD_FOLDER + "/", folder + "/")
 
 
@@ -2365,7 +2381,7 @@ a value typed by hand is what makes the audit trail a lie.
 
 
 def policy_text(board: "Board") -> str:
-    """`<board>/POLICY.md`: the Switchboard's rules for an agent that has no `board_*` tools.
+    """`<board>/POLICY.md`: the board's rules for an agent that has no `board_*` tools.
 
     Generated, like `BOARD.md`, and from three sources: `board_policy.md` (the block the worker
     puts in its own system prompt, so a guest and a pane agent are told the same thing), the
@@ -2382,18 +2398,24 @@ def policy_text(board: "Board") -> str:
                  "`board_*` tools: Claude Code, Codex, or anyone reading the repository. They "
                  "apply to you. The board is this project's record of what was asked and what was "
                  "done, so work goes through a card.", indent="")
+    # The visible `board/` is in ordinary `rg` range (owner, 2026-09-21), which is how an agent
+    # finds the cards at all -- and why it has to be told, once, to leave them out of a code
+    # search.  A hidden board has the opposite problem, and the appendix covers that one.
+    search = ("" if folder.startswith(".") else
+              f" A code search over this project matches card text too, so leave the board out of "
+              f"one: `rg -g '!{folder}/'`.")
     where = _wrap(f"The board is `{folder}/`: plain Markdown in git, one file per card, one "
                   f"append-only thread per card under `{folder}/threads/`, and a generated index "
-                  f"in `{folder}/BOARD.md`. Below are the rules; then the procedure they point at; "
+                  f"in `{folder}/BOARD.md`.{search} Below are the rules; then the procedure they point at; "
                   "then an appendix that says how to make each `board_*` call by editing files, "
                   "which is the fallback for unavailable tools. When the `relay_board` MCP server "
                   "is connected, prefer its namespaced board_list, board_read, board_comment, "
                   "board_update_card and board_move_card tools. Relay owns their identity and "
                   "guardrails. Creation and claims still use the file fallback.", indent="")
     return f"""<!-- Generated by relay_core.board.policy_text (`relay-board.py policy`). Never hand-edited:
-     every Switchboard scaffold rewrites it from backend/relay_core/board_policy.md and the bundled
+     every board scaffold rewrites it from backend/relay_core/board_policy.md and the bundled
      `deliver` skill, the way {folder}/BOARD.md is regenerated from the cards. Change those. -->
-# Switchboard policy — `{folder}/`
+# Board policy — `{folder}/`
 
 {what}
 
@@ -2412,10 +2434,11 @@ def pointer_text(board: "Board") -> str:
     """The marked block that points an instruction file at `POLICY.md`."""
     folder = board.root.name
     return f"""{POINTER_START}
-## Switchboard (Relay)
+## Board (Relay)
 
-This project has a Relay Switchboard in `{folder}/`: its cards are the record of what was asked and
-what was done, in plain Markdown in git.
+This project has a Relay board in `{folder}/`: its cards are the record of what was asked and
+what was done, in plain Markdown in git. Read them there or in `{folder}/BOARD.md`, and leave the
+folder out of code searches with `rg -g '!{folder}/'`.
 
 **Before doing work, read `{folder}/POLICY.md`** and follow it: check whether the request is already
 done, find the card that asks for it or file one, claim it, plan on it if it needs a plan, do the
@@ -2424,7 +2447,7 @@ agents get in their system prompt; `{folder}/POLICY.md` also says how to do each
 tool calls by editing files, which is what you have.
 
 <!-- Generated by Relay (relay_core.board.pointer_text): this block is replaced whenever the
-     Switchboard scaffold runs. Edit around it, not inside it. -->
+     board scaffold runs. Edit around it, not inside it. -->
 {POINTER_END}"""
 
 
@@ -2534,9 +2557,9 @@ def scaffold_files(board: Board) -> list[tuple[str, str]]:
     """The files a new board needs beside its cards, as (path, content) pairs.
 
     `.gitignore` goes inside the board folder; `.gitattributes` goes beside it in the project and
-    names this board's own folder (`.switchboard/`, `switchboard/` or `issues/`), so a board gets
-    the union-merge rule for the folder it actually has -- and keeps it when
-    `rename_board_folder()` hides or shows that folder.
+    names this board's own folder (`board/`, or an older `.switchboard/`, `switchboard/` or
+    `issues/`), so a board gets the union-merge rule for the folder it actually has -- and keeps
+    it when `rename_board_folder()` moves that folder.
 
     Then `POLICY.md` and the instruction-file pointers (`policy_files`), which are the only entries
     here that are rewritten rather than merely created: both are generated, so a stale copy is a
@@ -2569,10 +2592,10 @@ def scaffold_files(board: Board) -> list[tuple[str, str]]:
 def scaffold(board: Board) -> list[str]:
     """Create an empty board on disk and return the files it wrote, relative to `board.repo`.
 
-    Nothing calls this on its own: a project gets a Switchboard only after the user has said yes
+    Nothing calls this on its own: a project gets a board only after the user has said yes
     (protocol 19.12), either through `board_init` — the GUI already asked — or through the
     `board_init_request` round trip that the first card raises.  Reading a project that has no
-    board creates nothing at all, so opening the Switchboard never leaves a folder behind.
+    board creates nothing at all, so opening the board never leaves a folder behind.
     Safe to call on a board that already exists: it writes only what is missing.
     """
     files = scaffold_files(board)

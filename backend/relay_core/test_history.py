@@ -197,7 +197,7 @@ def default_path(project: str | os.PathLike, board_root: str | os.PathLike | Non
     """`<board>/.private/tests/history.jsonl` for `project`.
 
     The board is found the one way the backend ever finds one — `board.board_folder()`, which
-    walks `.switchboard`, `switchboard`, `issues` in that order — and its `.private/` root is
+    walks `board`, `.switchboard`, `switchboard`, `issues` in that order — and its `.private/` root is
     `Board.private_root()`, already covered by the `.gitignore` `board.GITIGNORE_TEXT` writes.
     A project with no board yet answers with the path it *would* have under the default folder,
     so a caller can create it.

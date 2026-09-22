@@ -24,15 +24,16 @@ from relay_core import qa_verifiers as qa
 
 
 def default_board_dir() -> Path:
-    """The board of the checkout this is run in: `.switchboard/`, else `switchboard/`, else `issues/`.
+    """The board of the checkout this is run in: `board/`, else `.switchboard/`, `switchboard/`
+    or `issues/`.
 
     `board.BOARD_FOLDERS` is the one list of spellings, in precedence order, and this walks it in
     the same order as the worker, so the command line and Relay agree about which board a project
-    has -- including a **hidden** `.switchboard/`, which is what Relay creates since 2026-09-19 and
-    which a shell glob or a plain `ls` does not show.
+    has -- including a **hidden** `.switchboard/`, which is what Relay created between 2026-09-19
+    and 2026-09-21 and which a shell glob or a plain `ls` does not show.
 
     A folder holding `board.yaml` wins over one that merely has the right name, so a half-made
-    `switchboard/` beside a real `.switchboard/` does not shadow the board.
+    `switchboard/` beside a real `board/` does not shadow the board.
     """
     here = Path.cwd()
     names = board_mod.BOARD_FOLDERS
@@ -244,8 +245,8 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--issues', '--board', dest='issues', type=Path, default=None,
-                        help='the board directory: .switchboard/, switchboard/ or issues/ '
-                             '(default: the board of the git checkout it is run in)')
+                        help='the board directory: board/, .switchboard/, switchboard/ or '
+                             'issues/ (default: the board of the git checkout it is run in)')
     sub = parser.add_subparsers(dest='command', required=True)
 
     check = sub.add_parser('check', help='verify the card, task and thread format')

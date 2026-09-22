@@ -728,15 +728,16 @@ def _checklist_sources(project: Path) -> list[Path]:
 # ---------------------------------------------------------------------- existing board
 
 def probe_board(project: Path) -> dict:
-    """Whether this project already has a Switchboard, or something `migrate` could convert.
+    """Whether this project already has a board, or something `migrate` could convert.
 
     Three answers, in the order they are looked for:
 
-    * `board` — a `board.yaml` in one of `board.BOARD_FOLDERS` (`.switchboard/`, `switchboard/`,
-      `issues/`, in that order) exists.  There is nothing to initialize; the init question is not
-      asked at all.  The hidden spelling is looked for explicitly: a project initialized by Relay
-      since 2026-09-19 keeps its board in `.switchboard/`, and a probe that only knew the visible
-      names would offer to initialize a project that already has a board.
+    * `board` — a `board.yaml` in one of `board.BOARD_FOLDERS` (`board/`, `.switchboard/`,
+      `switchboard/`, `issues/`, in that order) exists.  There is nothing to initialize; the init
+      question is not asked at all.  Every older spelling is looked for, hidden ones included: a
+      project initialized by Relay between 2026-09-19 and 2026-09-21 keeps its board in
+      `.switchboard/`, and a probe that only knew the current name would offer to initialize a
+      project that already has a board.
     * `pre-board` — one of those folders holding a tree of Markdown whose files carry the
       old `- **Field**: value` header block.  Detection is `board.migrate(apply=False)`, the
       very code that would convert it, so the count shown is the count that would convert.

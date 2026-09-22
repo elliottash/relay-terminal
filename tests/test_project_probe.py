@@ -714,11 +714,11 @@ class OpenSpecTest(ProbeCase):
 # -------------------------------------------------------------------- board and hints
 
 class BoardAndHintsTest(ProbeCase):
-    def test_an_existing_hidden_switchboard_is_reported_and_not_re_offered(self):
-        # `.switchboard/` is what Relay creates since 2026-09-19. A probe that only knew the
-        # visible names would offer to initialize a project that already has a board.
-        root = self.project / B.DEFAULT_BOARD_FOLDER
-        self.assertEqual(root.name, ".switchboard")
+    def test_an_existing_hidden_board_folder_is_reported_and_not_re_offered(self):
+        # `.switchboard/` is what Relay created between 2026-09-19 and 2026-09-21, and it is
+        # still read: a probe that only knew the current `board/` would offer to initialize a
+        # project that already has a board.
+        root = self.project / ".switchboard"
         (root / "features").mkdir(parents=True)
         (root / B.BOARD_CONFIG).write_text("version: 1\ntabs: [{id: features, folder: features}]\n")
         (root / "features" / "a.md").write_text(
@@ -728,6 +728,16 @@ class BoardAndHintsTest(ProbeCase):
                          (True, "board", ".switchboard"))
         self.assertEqual(board["cards"], 1)
         self.assertEqual(board["path"], ".switchboard")
+
+    def test_a_board_folder_is_reported_and_not_re_offered(self):
+        # The folder a project initialized from 2026-09-21 on has (`B.DEFAULT_BOARD_FOLDER`).
+        root = self.project / B.DEFAULT_BOARD_FOLDER
+        self.assertEqual(root.name, "board")
+        root.mkdir()
+        (root / B.BOARD_CONFIG).write_text("version: 1\ntabs: []\n")
+        board = self.probe()["board"]
+        self.assertEqual((board["present"], board["kind"], board["folder"]),
+                         (True, "board", "board"))
 
     def test_the_visible_switchboard_spelling_is_reported_as_the_board_too(self):
         root = self.project / "switchboard"

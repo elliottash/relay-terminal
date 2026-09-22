@@ -2447,7 +2447,7 @@ class UninitializedTests(unittest.TestCase):
         followed = []
         self.tools.on_created = lambda: followed.append(True)
         files = self.tools.create_board()
-        self.assertEqual(files[0], ".switchboard/board.yaml")
+        self.assertEqual(files[0], "board/board.yaml")
         created = [e for e in self.events if e["event"] == "board_created"][0]
         self.assertEqual(created["root"], str(self.project / B.DEFAULT_BOARD_FOLDER))
         self.assertEqual(created["workspace"], str(self.project))
@@ -2474,11 +2474,12 @@ class BoardFolderResolutionTests(unittest.TestCase):
         return folder
 
     def test_a_dir_that_holds_no_board_is_where_a_new_one_would_go(self):
-        # Hidden unless the pane's `board.folder` says otherwise (the Options toggle).
-        self.assertEqual(T.named_board_root(self.dir), self.dir / ".switchboard")
+        # `board/` unless the pane's `board.folder` names an older spelling (owner, 2026-09-21).
+        self.assertEqual(T.named_board_root(self.dir), self.dir / "board")
+        self.assertEqual(T.named_board_root(self.dir, "board"), self.dir / "board")
         self.assertEqual(T.named_board_root(self.dir, "switchboard"), self.dir / "switchboard")
         self.assertEqual(T.named_board_root(self.dir, ".switchboard"), self.dir / ".switchboard")
-        self.assertEqual(T.named_board_root(self.dir, "nonsense"), self.dir / ".switchboard")
+        self.assertEqual(T.named_board_root(self.dir, "nonsense"), self.dir / "board")
         # A directory already named like a board folder is taken as one, whatever the option says.
         for name in B.BOARD_FOLDERS:
             self.assertEqual(T.named_board_root(self.dir / name, "switchboard"), self.dir / name)
@@ -2501,6 +2502,9 @@ class BoardFolderResolutionTests(unittest.TestCase):
         hidden = self.board("both", ".switchboard")
         self.assertEqual(T.find_board_root(self.dir / "both"), hidden)
         self.assertEqual(T.named_board_root(self.dir / "both"), hidden)
+        current = self.board("both", "board")
+        self.assertEqual(T.find_board_root(self.dir / "both"), current)
+        self.assertEqual(T.named_board_root(self.dir / "both"), current)
 
     def test_a_hidden_board_is_found_from_a_subdirectory_like_any_other(self):
         inner = self.board("proj", ".switchboard")

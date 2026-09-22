@@ -52,13 +52,13 @@ from .provider import Cancelled
 
 AUTONOMY = ("off", "suggest", "auto")
 
-#: The folders a project may keep its Switchboard in, in precedence order (`board.BOARD_FOLDERS`):
-#: `.switchboard/`, `switchboard/`, `issues/`.
+#: The folders a project may keep its board in, in precedence order (`board.BOARD_FOLDERS`):
+#: `board/`, `.switchboard/`, `switchboard/`, `issues/`.
 BOARD_FOLDERS = B.BOARD_FOLDERS
 
-#: The folder a *new* board is created in: `<project>/.switchboard/board.yaml`, hidden since the
-#: owner's decision of 2026-09-19.  A `configure` whose `board.folder` says otherwise overrides it
-#: for that pane (protocol 19.1), which is how the "Hidden Switchboard folder" option reaches here.
+#: The folder a *new* board is created in: `<project>/board/board.yaml`, visible since the owner's
+#: decision of 2026-09-21 (#1CXD).  A `configure` whose `board.folder` names an older spelling
+#: overrides it for that pane (protocol 19.1).
 BOARD_FOLDER = B.DEFAULT_BOARD_FOLDER
 
 #: What a pane's board is, at any moment (protocol 19.12):
@@ -1202,12 +1202,12 @@ def find_board_root(workspace: str | os.PathLike | None,
     tools and `#K7Q2` attachments all land on the same tree, and so does the GUI, which has always
     walked up to the nearest ancestor holding a board.  Before 2026-09-18 the backend took
     `<workspace>/issues` literally, so a pane opened in a subdirectory of a project saw no board
-    at all while the window's Switchboard showed one.
+    at all while the window's board pane showed one.
 
     **The rule, and the C++ `relay::boardRootFor` must match it exactly:** an explicit `board.dir`
     (protocol 19.1) always wins.  Otherwise the walk starts at the resolved workspace and climbs to
     the filesystem root; at each directory the candidates are tried in `B.BOARD_FOLDERS` order —
-    `.switchboard/board.yaml`, then `switchboard/board.yaml`, then `issues/board.yaml` — and the
+    `board/board.yaml`, then `.switchboard/`, `switchboard/` and `issues/board.yaml` — and the
     first hit wins.  So the **nearest ancestor** wins over a further one whatever its spelling, and
     a single directory holding more than one of them is read as the first in that order.
 
@@ -1242,10 +1242,10 @@ def named_board_root(explicit_dir: str | os.PathLike, folder: str | None = None)
     It may name the board folder itself or the project that holds one, because the GUI has both in
     hand and should not have to guess which spelling the worker wants.  An existing `board.yaml`
     decides it — the folder's own, then `B.BOARD_FOLDERS` in order.  With none of them present the
-    name decides: a directory already called `.switchboard`, `switchboard` or `issues` is taken as
-    the board folder, and anything else is a project, whose board **would** go in `folder` — the
-    `board.folder` of the `configure` that pointed this worker, which is the "Hidden Switchboard
-    folder" option, defaulting to `.switchboard`.  Nothing is created here either way.
+    name decides: a directory already called `board`, `.switchboard`, `switchboard` or `issues` is
+    taken as the board folder, and anything else is a project, whose board **would** go in
+    `folder` — the `board.folder` of the `configure` that pointed this worker — defaulting to
+    `board`.  Nothing is created here either way.
 
     Resolved, like the walk's answer in `find_board_root`, because `root` is what a GUI routes
     events by: two spellings of one directory must not look like two boards.

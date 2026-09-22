@@ -54,7 +54,7 @@ qt=${qt^^}
 commit=$(git -C "$root" rev-parse --verify "$rev^{commit}") || exit 2
 run=$(date -u +%Y%m%dT%H%M%SZ)-${commit:0:8}
 board=
-for d in .switchboard switchboard issues; do [[ -f $root/$d/board.yaml ]] && { board=$root/$d; break; }; done
+for d in board .switchboard switchboard issues; do [[ -f $root/$d/board.yaml ]] && { board=$root/$d; break; }; done
 [[ -n $out ]] || out=${board:-$root/build}/.private/tests/incoming/${host%%.*}-$run
 
 stage=$(mktemp -d); trap 'rm -rf "$stage"' EXIT

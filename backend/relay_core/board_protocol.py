@@ -98,15 +98,15 @@ TYPES = {"board_open", "board_refresh", "board_card_get", "board_create", "board
          # runs on *this* worker's turn supervisor, as a cleanup does.
          *TRYIT_TYPES}
 
-#: What every message here says when the pane has no board at all (protocol 19.1).  Both folder
-#: names, because a project may carry either and neither is wrong.
-NO_BOARD_ERROR = ("This project has no Switchboard (no switchboard/board.yaml, and no "
+#: What every message here says when the pane has no board at all (protocol 19.1).  The current
+#: folder and the original one, because a project may carry either and neither is wrong.
+NO_BOARD_ERROR = ("This project has no board (no board/board.yaml, and no "
                   "issues/board.yaml).")
 
-#: What a *Switchboard* ask gets when this tab has no board (protocol 30.7).  The console itself
+#: What a *board* ask gets when this tab has no board (protocol 30.7).  The console itself
 #: still runs — Options, Actions and Sessions are about the app, not about a board — so this is
 #: only for the one surface whose whole subject is the cards.
-NO_BOARD_CHAT_ERROR = ("This tab has no Switchboard, so there is nothing for the Switchboard "
+NO_BOARD_CHAT_ERROR = ("This tab has no board, so there is nothing for the Board "
                        "pane to talk about. Attach a project to the tab, or ask from Options, "
                        "Actions or Sessions.")
 
@@ -269,11 +269,10 @@ def parse_board(block) -> dict:
                  by and used as `dir` when no `dir` is given.  No file is ever searched under it.
       `state`    "uninitialized" says the GUI is willing to offer creating a board here, so a
                  project with none still attaches (19.12).  Default "ready": no board, no attach.
-      `folder`   the folder a board this pane *creates* would go in: `.switchboard` (the default,
-                 hidden since the owner's decision of 2026-09-19) or `switchboard`, which is what
-                 the GUI sends when its "Hidden Switchboard folder" option is off.  It never
-                 affects reading: a board is found wherever it already is, in `B.BOARD_FOLDERS`
-                 order.
+      `folder`   the folder a board this pane *creates* would go in: `board` (the default,
+                 visible since the owner's decision of 2026-09-21) or one of the older spellings
+                 a project may ask for by name.  It never affects reading: a board is found
+                 wherever it already is, in `B.BOARD_FOLDERS` order.
       `autonomy`, `limits`  as before.
     """
     if block is None:
@@ -927,27 +926,36 @@ class BoardCommands:
         """`board_init_answer {id, accept}`: the user's yes or no to a `board_init_request`."""
         self.init.answer(request)
 
-    # ---- hiding and showing the board's folder (protocol 19.17) ----------------
+    # ---- moving the board's folder (protocol 19.17) ----------------------------
     def _folder(self, request: dict, rid) -> None:
-        """`board_folder {hidden}`: rename this board's folder to `.switchboard/` or `switchboard/`.
+        """`board_folder {folder}`: move this board to `board/`, from any older spelling.
 
         The one thing that moves an existing board, and only because the user asked for it: reading
-        is tolerant in both directions (`B.BOARD_FOLDERS`) and nothing migrates by itself.  `git mv`
+        is tolerant of every spelling (`B.BOARD_FOLDERS`) and nothing migrates by itself.  `git mv`
         in a checkout, a plain rename outside one, and a refusal — with the reason, having changed
         nothing — for an `issues/` board, an existing target or uncommitted changes.
 
-        A turn must not be running: the agent holds card paths under the old folder, and the
-        Switchboard pane's watcher is on it.  Afterwards the worker is re-pointed at the new root,
-        so the tools, the agent's tools and the GUI all move together.
+        `{hidden: true|false}` is the retired shape of this message (the "Hidden Switchboard
+        folder" toggle, 2026-09-19 to 2026-09-21).  It is still accepted for one release, as
+        `.switchboard` and `switchboard`, so a phone paired to an older build is not broken.
+
+        A turn must not be running: the agent holds card paths under the old folder, and the board
+        pane's watcher is on it.  Afterwards the worker is re-pointed at the new root, so the
+        tools, the agent's tools and the GUI all move together.
         """
-        hidden = request.get("hidden")
-        if type(hidden) is not bool:
-            raise ValueError("board_folder needs `hidden`: true to hide the folder, false to show it.")
+        folder = request.get("folder")
+        if folder is None and type(request.get("hidden")) is bool:
+            folder = B.HIDDEN_BOARD_FOLDER if request["hidden"] else B.VISIBLE_BOARD_FOLDER
+        if not isinstance(folder, str) or not folder.strip():
+            raise ValueError("board_folder needs `folder`: the folder to move this board to, one "
+                             "of " + ", ".join(f for f in B.BOARD_FOLDERS
+                                               if f != B.LEGACY_BOARD_FOLDER) + ".")
+        folder = folder.strip()
         tools = self._need_ready()
         if getattr(self.turns, "busy", False):
             raise ValueError("Stop the active agent turn before moving this board's folder.")
         try:
-            move = B.rename_board_folder(tools.board, hidden)
+            move = B.rename_board_folder(tools.board, folder)
         except (B.BoardError, OSError) as exc:
             raise ValueError(str(exc)) from exc
         settings = parse_board({**self.settings["raw"], "dir": move.root,
@@ -961,7 +969,7 @@ class BoardCommands:
     def _sections(self, request: dict, rid) -> None:
         """`board_sections {columns, column_statuses, column_titles}`: rewrite the section list.
 
-        The same tool the Switchboard agent calls (`board_sections`), so the gear, a cleanup run
+        The same tool the board agent calls (`board_sections`), so the gear, a cleanup run
         and a person editing `board.yaml` by hand all go through one validator and one writer,
         and the edit lands in the write log where `board_undo` can take it back.  No card is
         touched: sections are a view of the statuses, which is why this is a config write and

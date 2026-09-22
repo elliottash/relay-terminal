@@ -594,7 +594,7 @@ class DeleteWriteTests(ProtocolTest):
         commands = P.BoardCommands(StubTurns(), events.append)
         with self.assertRaises(ValueError) as raised:
             commands.dispatch({"type": "board_delete", "id": "r1", "card": "AAAA"})
-        self.assertIn("no Switchboard", str(raised.exception))
+        self.assertIn("no board", str(raised.exception))
         self.assertEqual(events, [])
 
 
@@ -1832,7 +1832,8 @@ class SectionMessageTests(AttachTest):
 
 
 class FolderMessageTests(AttachTest):
-    """`board_folder {hidden}` (19.15): the one message that renames an existing board's folder."""
+    """`board_folder {folder}` (19.17): the one message that moves an existing board's folder --
+    "move this board to `board/`" since the owner's decision of 2026-09-21 (#1CXD)."""
 
     def point(self, folder: str = "switchboard"):
         project = self.project("shown", folder)
@@ -1841,20 +1842,36 @@ class FolderMessageTests(AttachTest):
         self.assertEqual(block["folder"], folder)
         return project
 
-    def test_hiding_the_folder_moves_it_and_repoints_the_worker(self):
+    def test_moving_the_board_to_board_moves_it_and_repoints_the_worker(self):
+        project = self.point()
+        changed = [e for e in self.send(type="board_folder", id="f1", folder="board")
+                   if e["event"] == "board_folder_changed"][0]
+        self.assertEqual((changed["id"], changed["old"], changed["new"], changed["hidden"]),
+                         ("f1", "switchboard", "board", False))
+        self.assertEqual(changed["method"], "rename")           # no git here
+        self.assertEqual(changed["root"], str(project / "board"))
+        self.assertFalse((project / "switchboard").exists())
+        # The worker is on the new root, so the next card is written there.
+        self.assertEqual(changed["board"]["root"], str(project / "board"))
+        self.assertEqual(changed["board"]["folder"], "board")
+        self.assertEqual(self.commands.tools.board.root, project / "board")
+
+    def test_a_hidden_board_moves_to_board_too(self):
+        project = self.point(".switchboard")
+        changed = [e for e in self.send(type="board_folder", id="f1", folder="board")
+                   if e["event"] == "board_folder_changed"][0]
+        self.assertEqual((changed["old"], changed["new"]), (".switchboard", "board"))
+        self.assertEqual(self.commands.tools.board.root, project / "board")
+
+    def test_the_retired_hidden_shape_is_still_accepted_for_one_release(self):
+        # A phone or a GUI on a build older than 2026-09-21 sends `{hidden}`; it is mapped to
+        # the two spellings that toggle meant, so the pairing is not broken by the rename.
         project = self.point()
         changed = [e for e in self.send(type="board_folder", id="f1", hidden=True)
                    if e["event"] == "board_folder_changed"][0]
-        self.assertEqual((changed["id"], changed["old"], changed["new"], changed["hidden"]),
-                         ("f1", "switchboard", ".switchboard", True))
-        self.assertEqual(changed["method"], "rename")           # no git here
-        self.assertEqual(changed["root"], str(project / ".switchboard"))
-        self.assertFalse((project / "switchboard").exists())
-        # The worker is on the new root, so the next card is written there.
-        self.assertEqual(changed["board"]["root"], str(project / ".switchboard"))
-        self.assertEqual(changed["board"]["folder"], ".switchboard")
+        self.assertEqual((changed["old"], changed["new"], changed["hidden"]),
+                         ("switchboard", ".switchboard", True))
         self.assertEqual(self.commands.tools.board.root, project / ".switchboard")
-        # And back: `hidden: false` shows it again.
         back = [e for e in self.send(type="board_folder", id="f2", hidden=False)
                 if e["event"] == "board_folder_changed"][0]
         self.assertEqual((back["old"], back["new"], back["hidden"]),
@@ -1864,38 +1881,42 @@ class FolderMessageTests(AttachTest):
     def test_an_issues_board_is_refused_and_nothing_moves(self):
         project = self.point("issues")
         with self.assertRaises(ValueError) as caught:
-            self.commands.dispatch({"type": "board_folder", "id": "f1", "hidden": True})
+            self.commands.dispatch({"type": "board_folder", "id": "f1", "folder": "board"})
         self.assertIn("issues/", str(caught.exception))
         self.assertTrue((project / "issues" / B.BOARD_CONFIG).is_file())
-        self.assertFalse((project / ".switchboard").exists())
+        self.assertFalse((project / "board").exists())
 
-    def test_hidden_must_be_a_boolean_and_the_board_must_exist(self):
+    def test_the_folder_must_be_one_relay_creates_and_the_board_must_exist(self):
         self.point()
-        for bad in ({}, {"hidden": "yes"}, {"hidden": 1}):
+        for bad in ({}, {"folder": ""}, {"folder": 1}, {"hidden": "yes"}, {"hidden": 1}):
+            with self.assertRaises(ValueError):
+                self.commands.dispatch({"type": "board_folder", "id": "f1", **bad})
+        for bad in ({"folder": "issues"}, {"folder": "nonsense"}):
             with self.assertRaises(ValueError):
                 self.commands.dispatch({"type": "board_folder", "id": "f1", **bad})
         project = self.project("fresh")
         self.commands.configure(str(project), {"board": {"project": str(project),
                                                          "state": "uninitialized"}})
         with self.assertRaises(ValueError):
-            self.commands.dispatch({"type": "board_folder", "id": "f2", "hidden": True})
+            self.commands.dispatch({"type": "board_folder", "id": "f2", "folder": "board"})
         self.assertEqual(self.tree(project), [])
 
     def test_a_turn_in_flight_refuses_the_move(self):
         self.point()
         self.turns.busy = True
         with self.assertRaises(ValueError) as caught:
-            self.commands.dispatch({"type": "board_folder", "id": "f1", "hidden": True})
+            self.commands.dispatch({"type": "board_folder", "id": "f1", "folder": "board"})
         self.assertIn("agent turn", str(caught.exception))
 
 
 class NewBoardFolderTests(AttachTest):
-    """`board.folder`: which folder a board this pane creates goes in (the Options toggle)."""
+    """`board.folder`: which folder a board this pane creates goes in.  `board/` unless the
+    `configure` names an older spelling (owner, 2026-09-21, #1CXD)."""
 
     def test_the_option_chooses_the_folder_a_new_board_would_go_in(self):
         project = self.project("fresh")
-        for folder, expected in ((None, ".switchboard"), (".switchboard", ".switchboard"),
-                                 ("switchboard", "switchboard")):
+        for folder, expected in ((None, "board"), ("board", "board"),
+                                 (".switchboard", ".switchboard"), ("switchboard", "switchboard")):
             block = self.commands.configure(str(project), {"board": {
                 "project": str(project), "state": "uninitialized",
                 **({"folder": folder} if folder else {})}})
@@ -1932,8 +1953,8 @@ class InitTests(AttachTest):
     def test_an_uninitialized_project_attaches_but_nothing_is_on_disk(self):
         project, request, block = self.uninitialized()
         # Hidden by default (owner, 2026-09-19); nothing on disk either way.
-        self.assertEqual(block["root"], str(project / ".switchboard"))
-        self.assertEqual(block["folder"], ".switchboard")
+        self.assertEqual(block["root"], str(project / "board"))
+        self.assertEqual(block["folder"], "board")
         self.assertEqual(block["state"], "uninitialized")
         self.assertFalse(block["exists"])
         self.assertEqual(block["cards"], 0)
@@ -1984,9 +2005,9 @@ class InitTests(AttachTest):
         self.assertEqual(created[0]["project"], str(project))
         # POLICY.md and AGENTS.md are the guest path's half of #R9G7: the rules as a file in the
         # board, and the instruction file that points at them (`board.policy_files`).
-        self.assertEqual(created[0]["files"], [".switchboard/board.yaml", ".switchboard/.gitignore",
-                                               ".switchboard/threads/.gitkeep", ".gitattributes",
-                                               ".switchboard/POLICY.md", "AGENTS.md"])
+        self.assertEqual(created[0]["files"], ["board/board.yaml", "board/.gitignore",
+                                               "board/threads/.gitkeep", ".gitattributes",
+                                               "board/POLICY.md", "AGENTS.md"])
         # The card the user typed is not lost: the parked write is replayed.
         written = self.of("board_written")
         self.assertEqual(written[0]["id"], "w1")
