@@ -390,7 +390,11 @@ button.rp-chip:hover { color: var(--qss-stripChip-hover-color); border-color: va
 
 /* QComboBox#statusPicker: a quiet chip with a chevron, and the native picker behind it so a phone
    gets its own wheel or sheet. */
-.rp-model-wrap { position: relative; display: inline-flex; max-width: 42%; }
+.rp-model-wrap { display: inline-flex; gap: 4px; max-width: 42%; min-width: 0; }
+/* One box per control. The chevron is absolutely positioned against its own box: with both
+   controls in a single relative wrapper the model's chevron was anchored to the level's right
+   edge and painted over its word (#EFT9). */
+.rp-model-box, .rp-effort-box { position: relative; display: inline-flex; min-width: 0; }
 .rp-model {
   -webkit-appearance: none;
   appearance: none;
@@ -413,15 +417,20 @@ button.rp-chip:hover { color: var(--qss-stripChip-hover-color); border-color: va
 .rp-effort {
   -webkit-appearance: none;
   appearance: none;
+  max-width: 100%;
   min-height: max(calc(var(--qss-stripChip-min-height) + 6px), var(--rp-tap));
   padding: var(--qss-statusPicker-padding);
+  padding-right: 22px;
   background: var(--qss-statusPicker-background);
   border: var(--qss-statusPicker-border);
   border-radius: var(--qss-statusPicker-border-radius);
   color: var(--qss-statusPicker-color);
   font-size: var(--rt-floor-size);
+  text-overflow: ellipsis;
   cursor: pointer;
 }
+.rp-effort:hover:not(:disabled) { color: var(--qss-statusPicker-hover-color); border-color: var(--qss-statusPicker-hover-border-color); }
+.rp-effort:disabled { cursor: default; opacity: 1; }
 .rp-effort option { background: var(--qss-menu-background); color: var(--qss-menu-color); }
 .rp-model-chevron {
   position: absolute;
@@ -434,6 +443,9 @@ button.rp-chip:hover { color: var(--qss-stripChip-hover-color); border-color: va
 }
 .rp-model-wrap[data-pickable="false"] .rp-model-chevron { display: none; }
 .rp-model-wrap[data-pickable="false"] .rp-model { padding-right: 8px; }
+/* A level the pane will not change (`effort_fixed`): a chip to read, with nothing to pull down. */
+.rp-effort-box[data-pickable="false"] .rp-effort-chevron { display: none; }
+.rp-effort-box[data-pickable="false"] .rp-effort { padding-right: 8px; }
 
 /* Send, and when: the one part of the prompt box a desktop does with keys. Same height as a chip. */
 .rp-send-group { display: inline-flex; gap: 2px; }
@@ -629,3 +641,4 @@ button.rp-chip:hover { color: var(--qss-stripChip-hover-color); border-color: va
 .tiny-viewport .rp-sessions-button,
 .tiny-viewport .rp-model-wrap { min-width: 0; flex-shrink: 1; }
 .tiny-viewport .rp-model { min-width: 0; }
+.tiny-viewport .rp-effort { min-width: 0; }

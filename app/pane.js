@@ -286,15 +286,24 @@ export function mountPane(container, options = {}) {
   const contextChip = el('span', 'rp-chip rp-context');
   const allowanceChip = el('span', 'rp-chip rp-allowance');
   const modelWrap = el('span', 'rp-model-wrap');
+  // Two controls, two boxes. The chevron is `position: absolute` against its box, so a single
+  // wrapper around both anchored the model's chevron to the *level*'s right edge and painted it
+  // over the level's own word, while the model kept an empty 22 px gutter (#EFT9).
+  const modelBox = el('span', 'rp-model-box');
   const model = el('select', 'rp-chip rp-model');
   model.setAttribute('aria-label', 'Model');
   const modelChevron = el('span', 'rp-model-chevron', '▾');
   modelChevron.setAttribute('aria-hidden', 'true');
+  modelBox.append(model, modelChevron);
   // The reasoning level (section 3): the model's own levels, as the desktop's effort box has
   // them. Hidden whole when the model takes none.
+  const effortBox = el('span', 'rp-effort-box');
   const effort = el('select', 'rp-chip rp-effort');
   effort.setAttribute('aria-label', 'Reasoning effort');
-  modelWrap.append(model, modelChevron, effort);
+  const effortChevron = el('span', 'rp-model-chevron rp-effort-chevron', '▾');
+  effortChevron.setAttribute('aria-hidden', 'true');
+  effortBox.append(effort, effortChevron);
+  modelWrap.append(modelBox, effortBox);
   // Where the host puts a control of its own (the client's microphone), so its buttons sit in the
   // pane's strip instead of a second bar under it. Empty and invisible until the host fills it.
   const hostSlot = el('span', 'rp-host-slot');
@@ -1031,6 +1040,10 @@ export function mountPane(container, options = {}) {
   function renderModel() {
     const m = obj(state.model);
     modelWrap.hidden = !m;
+    // Before the guard below, and outside it: the model's signature carries the label and the
+    // choices, and the level is in neither — so a `pane_state` in which only the level moved
+    // returned here and the chip kept the level the pane had left (#EFT9).
+    renderEffort(m);
     if (!m) return;
     const choices = arr(m.choices).filter((choice) => obj(choice) && str(choice.id));
     // Rebuilt only when the menu actually changed. A `pane_state` arrives up to ten times a second
@@ -1055,26 +1068,42 @@ export function mountPane(container, options = {}) {
     model.selectedIndex = 0;
     model.disabled = choices.length === 0;
     modelWrap.dataset.pickable = choices.length ? 'true' : 'false';
-    renderEffort(m);
   }
 
   function renderEffort(m) {
-    const levels = arr(m.efforts).filter((level) => typeof level === 'string' && level);
+    const levels = m ? arr(m.efforts).filter((level) => typeof level === 'string' && level) : [];
+    // Both, so the chevron goes with the select: a box left standing around a hidden select is a
+    // lone ▾ in the strip.
     effort.hidden = levels.length === 0;
+    effortBox.hidden = levels.length === 0;
     if (!levels.length) return;
+    // A model whose level the pane will not change draws a chip that cannot be picked from, the
+    // way the desktop's own effort box is greyed (src/Pane.h, `effortFixed`). The field is the
+    // desktop's `effort_fixed`; a state without it leaves the chip live, as before.
+    const fixed = m.effort_fixed === true;
     // Same rule as the model menu above: rebuilt only when the levels moved, so an open native
     // picker survives the ten-a-second pane_state.
     const current = typeof m.effort === 'string' ? m.effort : '';
-    const signature = JSON.stringify([current, levels]);
+    const signature = JSON.stringify([current, levels, fixed]);
     if (effort.dataset.signature === signature) return;
     effort.dataset.signature = signature;
     effort.textContent = '';
+    // The model menu's shape: a disabled placeholder carrying the plain current level, so the
+    // closed control reads `high` and the `✓` that marks the current option stays in the list
+    // where it means something. Before this the closed chip read `✓▾high` (#EFT9).
+    const shown = el('option', '', current || levels[0]);
+    shown.value = '';
+    shown.disabled = true;
+    shown.selected = true;
+    effort.appendChild(shown);
     for (const level of levels) {
       const option = el('option', '', `${level === current ? '✓ ' : ''}${level}`);
       option.value = level;
       effort.appendChild(option);
     }
-    effort.value = current || levels[0];
+    effort.selectedIndex = 0;
+    effort.disabled = fixed;
+    effortBox.dataset.pickable = fixed ? 'false' : 'true';
   }
 
   function draw() {
@@ -1225,6 +1254,9 @@ export function mountPane(container, options = {}) {
   });
   on(effort, 'change', () => {
     const level = effort.value;
+    // Back to the placeholder, as the model menu does: the closed chip says the level the *pane*
+    // is on, and only the pane's own `pane_state` moves it.
+    effort.selectedIndex = 0;
     if (level) emit('effort_pick', { effort: level });
   });
   on(sessionsButton, 'click', (event) => {

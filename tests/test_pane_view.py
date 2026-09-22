@@ -520,8 +520,11 @@ class PaneViewTests(unittest.TestCase):
                 levels = await browser.evaluate(
                     "JSON.stringify([...document.querySelectorAll('.rp-effort option')]"
                     ".map((o) => [o.value, o.textContent]))")
+                # The model menu's shape: a disabled placeholder carrying the plain current level,
+                # then the levels with the ✓ on the one the pane is on (#EFT9).
                 self.assertEqual(json.loads(levels),
-                                 [["low", "low"], ["medium", "medium"], ["high", "✓ high"]])
+                                 [["", "high"], ["low", "low"], ["medium", "medium"],
+                                  ["high", "✓ high"]])
                 await browser.evaluate(
                     "(() => { const e = document.querySelector('.rp-effort');"
                     " e.value = 'low'; e.dispatchEvent(new Event('change')); })()")
@@ -532,6 +535,81 @@ class PaneViewTests(unittest.TestCase):
                 await self.open(browser, "view_only")
                 self.assertEqual(await browser.evaluate(
                     "getComputedStyle(document.querySelector('.rp-effort')).display"), "none")
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
+    def test_a_level_only_state_repaints_the_chip_and_the_closed_chip_has_no_tick(self):
+        """#EFT9: the level is in neither half of the model's signature, so a `pane_state` whose
+        model did not move used to be dropped and the chip kept the level the pane had left. And
+        the closed control read `✓▾high`: the tick was baked into the option's own text and the
+        model's chevron was anchored to the level's right edge."""
+        state = fixture("idle")
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.open(browser, "idle")
+                closed = await browser.evaluate(
+                    "(() => { const e = document.querySelector('.rp-effort');"
+                    " return JSON.stringify([e.value, e.options[e.selectedIndex].textContent]); })()")
+                self.assertEqual(json.loads(closed), ["", "high"],
+                                 "the closed chip says the level, with no ✓ and no value to send")
+                # The chevrons: one each, and neither one over the other control's words.
+                boxes = json.loads(await browser.evaluate("""
+                  JSON.stringify({
+                    model: document.querySelector('.rp-model').getBoundingClientRect().toJSON(),
+                    modelChevron: document.querySelector('.rp-model-box .rp-model-chevron')
+                      .getBoundingClientRect().toJSON(),
+                    effort: document.querySelector('.rp-effort').getBoundingClientRect().toJSON(),
+                    effortChevron: document.querySelector('.rp-effort-chevron')
+                      .getBoundingClientRect().toJSON()})
+                """))
+                self.assertLessEqual(boxes["modelChevron"]["right"], boxes["model"]["right"] + 1)
+                self.assertGreaterEqual(boxes["modelChevron"]["left"], boxes["model"]["left"])
+                self.assertLessEqual(boxes["effortChevron"]["right"], boxes["effort"]["right"] + 1)
+                self.assertGreaterEqual(boxes["effortChevron"]["left"], boxes["effort"]["left"])
+
+                # The same model, one level lower: the chip follows it.
+                lower = dict(state, seq=state["seq"] + 1,
+                             model=dict(state["model"], effort="low"))
+                self.assertTrue(await browser.evaluate(
+                    f"window.paneDemo.update({json.dumps(lower)})"))
+                after = await browser.evaluate(
+                    "(() => { const e = document.querySelector('.rp-effort');"
+                    " return JSON.stringify([e.options[e.selectedIndex].textContent,"
+                    " [...e.options].map((o) => o.textContent)]); })()")
+                self.assertEqual(json.loads(after),
+                                 ["low", ["low", "✓ low", "medium", "high"]])
+                self.assertEqual(browser.console, [])
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
+    def test_a_model_whose_level_is_fixed_draws_a_chip_that_cannot_be_picked_from(self):
+        """#EFT9: `effort_fixed` on the model block (Relay Free is exactly this case). Untested
+        against a real desktop until the wire carries the field."""
+        state = fixture("idle")
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.open(browser, "idle")
+                self.assertFalse(await browser.evaluate(
+                    "document.querySelector('.rp-effort').disabled"))
+                fixed = dict(state, seq=state["seq"] + 1,
+                             model=dict(state["model"], effort_fixed=True))
+                self.assertTrue(await browser.evaluate(
+                    f"window.paneDemo.update({json.dumps(fixed)})"))
+                self.assertTrue(await browser.evaluate(
+                    "document.querySelector('.rp-effort').disabled"))
+                self.assertEqual(await browser.evaluate(
+                    "getComputedStyle(document.querySelector('.rp-effort-chevron')).display"),
+                    "none")
             finally:
                 await browser.stop()
 
