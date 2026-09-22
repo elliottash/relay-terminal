@@ -8,6 +8,7 @@ from pathlib import Path
 import pty
 import re
 import select
+import shlex
 import shutil
 import signal
 import struct
@@ -24,6 +25,9 @@ def check_shell(resources, env, root, evidence):
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 30, 120, 0, 0))
     prompt = b'RELAY_INSTALLED_SMOKE> '
+    rcfile = runtime/'smoke.bash'
+    rcfile.write_text('source ' + shlex.quote(str(resources/'relay/shell/integration.bash'))
+                      + '\nPS1=' + shlex.quote(prompt.decode()) + '\n')
     shellenv = dict(env, TERM='xterm-256color', PS1=prompt.decode(), RELAY_RUNTIME_DIR=str(runtime),
                     RELAY_START_DIR=str(root), RELAY_SESSION_TOKEN='installed-smoke',
                     RELAY_SHELL_EVENT=str(resources / 'relay/shell/event.py'))
@@ -31,7 +35,7 @@ def check_shell(resources, env, root, evidence):
         os.setsid()
         fcntl.ioctl(0, termios.TIOCSCTTY, 0)
     shell = subprocess.Popen([str(resources / 'bash/bin/bash'), '--noprofile', '--rcfile',
-                              str(resources / 'relay/shell/integration.bash'), '-i'],
+                              str(rcfile), '-i'],
                              stdin=slave, stdout=slave, stderr=slave, env=shellenv, cwd=root, preexec_fn=controlling_terminal)
     os.close(slave)
     output = bytearray()
