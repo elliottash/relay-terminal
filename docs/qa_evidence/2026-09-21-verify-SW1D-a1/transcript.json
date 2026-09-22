@@ -1,0 +1,185 @@
+{
+  "binary": "/tmp/claude-1000/land/sw1d-follow/verify/build/relay",
+  "sha256": "90b0a5aba3eab1510009c7aebd5161ba7efd9d8416946270e0492d5a18a6ffbe",
+  "data": "/tmp/claude-1000/land/sw1d-follow/verify/src",
+  "root": "/tmp/vsw1d-z1y315d2",
+  "display": ":300",
+  "steps": [
+    {
+      "op": "action",
+      "name": "board.open",
+      "text": "",
+      "response": {
+        "id": "",
+        "ok": true,
+        "type": "app_command_result"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardChatCheck",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "read",
+      "name": "boardChatCheck",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "Hygiene (k)"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardChatCheck",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "Hygiene (k)"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardTests",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "Tests"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardProfile",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "Performance"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardCleanup",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "press",
+      "name": "boardChatCheck",
+      "text": "",
+      "response": {
+        "ok": true
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardChatFindingsHead",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "Hygiene \u00b7 Format check: nothing to fix"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardCleanup",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "Clean up"
+      },
+      "exit": 0
+    },
+    {
+      "op": "press",
+      "name": "boardCleanup",
+      "text": "",
+      "response": {
+        "ok": true
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "notice",
+      "text": "",
+      "response": {
+        "ok": true,
+        "text": "Hygiene \u00b7 Cleanup preview \u00b7 0:00 \u00b7 failed: The helper agent cannot run on Claude Code. Add a provider under Options \u203a Models, or pick a model for the helper in its model box. \u00b7 nothing is written"
+      },
+      "exit": 0
+    },
+    {
+      "op": "press",
+      "name": "boardProfile",
+      "text": "",
+      "response": {
+        "ok": true
+      },
+      "exit": 0
+    },
+    {
+      "op": "press",
+      "name": "profileTarget:build",
+      "text": "",
+      "response": {
+        "ok": true
+      },
+      "exit": 0
+    },
+    {
+      "op": "panes",
+      "name": "",
+      "text": "",
+      "response": {
+        "id": "",
+        "ok": true,
+        "panes": [
+          {
+            "busy": false,
+            "cwd": "/tmp/vsw1d-z1y315d2",
+            "focused": true,
+            "id": "4ca92675-e7be-42af-a9d6-10fe4c151f3e",
+            "mode": "auto",
+            "model": "guest:claude",
+            "tab": "t83a2bca91d92",
+            "title": "vsw1d-z1y315d2"
+          }
+        ],
+        "type": "app_command_result"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "notice",
+      "text": "",
+      "response": {
+        "ok": true,
+        "text": "Performance of Build (this machine) failed: relay-profile wrote no summary (exit 3)."
+      },
+      "exit": 0
+    }
+  ]
+}

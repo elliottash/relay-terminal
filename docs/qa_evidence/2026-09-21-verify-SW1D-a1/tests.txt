@@ -1,0 +1,26 @@
+********* Start testing of BoardPaneTests *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : BoardPaneTests::initTestCase()
+QWARN  : BoardPaneTests::hygieneChecksBeforeCleanup() This plugin does not support propagateSizeHints()
+QWARN  : BoardPaneTests::hygieneChecksBeforeCleanup() This plugin does not support propagateSizeHints()
+QWARN  : BoardPaneTests::hygieneChecksBeforeCleanup() This plugin does not support propagateSizeHints()
+QWARN  : BoardPaneTests::hygieneChecksBeforeCleanup() This plugin does not support propagateSizeHints()
+QWARN  : BoardPaneTests::hygieneChecksBeforeCleanup() This plugin does not support propagateSizeHints()
+PASS   : BoardPaneTests::hygieneChecksBeforeCleanup()
+PASS   : BoardPaneTests::cleanupTestCase()
+Totals: 3 passed, 0 failed, 0 skipped, 0 blacklisted, 87ms
+********* Finished testing of BoardPaneTests *********
+Internal ctest changing into directory: /home/elliott/repos/relay-terminal/build
+Test project /home/elliott/repos/relay-terminal/build
+    Start 18: profilepane
+1/4 Test #18: profilepane ......................   Passed    0.03 sec
+    Start 61: panestatus
+2/4 Test #61: panestatus .......................   Passed    0.01 sec
+    Start 70: board
+3/4 Test #70: board ............................   Passed    2.35 sec
+    Start 75: boardpane
+4/4 Test #75: boardpane ........................   Passed    0.27 sec
+
+100% tests passed, 0 tests failed out of 4
+
+Total Test time (real) =   2.65 sec
