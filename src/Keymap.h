@@ -512,4 +512,3 @@ private:
     QFileSystemWatcher m_watcher;
     QList<QPair<QPointer<QObject>, std::function<void()>>> m_listeners;
 };
-
