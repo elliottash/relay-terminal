@@ -18,6 +18,8 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QDir>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QtTest>
 
 namespace {
@@ -70,6 +72,7 @@ class BoardPaneTests : public QObject {
     Q_OBJECT
 
 private slots:
+    void longFindingsRemainReadableAndScrollable();
     void namedDriverUsesControlsAndRefusesUnavailableTargets();
     void cleanupOperationsHaveTranscriptNotes();
     void tryItOpenKeepsWindowsPathsWithSpaces();
@@ -80,6 +83,39 @@ private slots:
     void theCardPagesFlagClicksThroughToBoardPriority();
     void hygieneChecksBeforeCleanup();
 };
+
+void BoardPaneTests::longFindingsRemainReadableAndScrollable()
+{
+    relay::BoardView view(QStringLiteral("/tmp/relay-findings-test"));
+    QList<QJsonObject> sent;
+    view.onSend = [&](const QJsonObject &message) { sent << message; };
+    view.resize(900, 650);
+    view.show();
+    view.handleEvent(opened({row(QStringLiteral("K7Q2"), QStringLiteral("inbox"))}));
+    view.openCard(QStringLiteral("K7Q2"));
+    auto reply = cardArrived(QStringLiteral("K7Q2"));
+    reply.insert("id", sent.last().value("id"));
+    reply.insert("body", reply.value("body").toString() + "\n## Tests\n`ctest -R board`\n");
+    reply.insert("sections", QJsonArray{"Issue", "Tests"});
+    view.handleEvent(reply);
+    QJsonArray findings;
+    for (int i = 0; i < 30; ++i)
+        findings.append(QJsonObject{{"test", QStringLiteral("ctest:case%1").arg(i)},
+                                    {"severity", "warning"},
+                                    {"message", "This test has no recorded evidence for the revision."}});
+    view.handleEvent(QJsonObject{{"event", "tests_check"}, {"card", "K7Q2"},
+                                  {"findings", findings}});
+    auto *scroll = view.findChild<QScrollArea *>(QStringLiteral("boardTestsFindings"));
+    QVERIFY(scroll);
+    QTRY_VERIFY(scroll->verticalScrollBar()->maximum() > 0);
+    const auto rows = scroll->findChildren<QLabel *>(QStringLiteral("boardTestsFinding"));
+    QCOMPARE(rows.size(), 31); // the summary plus thirty findings
+    for (const auto *label : rows)
+        QVERIFY(label->height() >= label->fontMetrics().height());
+    scroll->verticalScrollBar()->setValue(scroll->verticalScrollBar()->maximum());
+    QVERIFY(scroll->viewport()->rect().intersects(
+            QRect(rows.last()->mapTo(scroll->viewport(), QPoint()), rows.last()->size())));
+}
 
 void BoardPaneTests::hygieneChecksBeforeCleanup()
 {

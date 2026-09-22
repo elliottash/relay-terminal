@@ -1698,6 +1698,13 @@ class BoardCommands:
                                               "thread_entries": min(50, int(request.get("thread_entries") or 50))})
             if result.get("error"):
                 raise ValueError(result["error"])
+            # Desktop rendering needs the whole document: Tests and Try it may follow a
+            # long plan. The agent-facing board_read keeps its separate context limit.
+            if result.get("body_truncated"):
+                card = tools.board.card_by_id(result["id"])
+                if card is not None:
+                    result["body"] = card.body
+                    result["body_truncated"] = False
             self._send({"event": "board_card", **result, "card_id": result["id"], "id": rid})
         elif kind in ("board_create", "board_update", "board_move", "board_priority",
                       "board_delete", "board_comment", "board_claim"):

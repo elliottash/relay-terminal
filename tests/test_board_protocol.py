@@ -452,6 +452,19 @@ class WriteTests(ProtocolTest):
         self.assertEqual(error["code"], "board_conflict")
         self.assertIn("current_hash", error)
 
+    def test_desktop_card_keeps_sections_after_the_agent_context_limit(self):
+        card_id = self.make_card()
+        card = self.board.card_by_id(card_id)
+        with card.path.open("a", encoding="utf-8") as stream:
+            stream.write("\n## Plan\n" + "Long plan. " * 2000
+                         + "\n## Tests\n`ctest -R board`\n")
+        agent_read = self.commands.tools.run("board_read", {"id": card_id})
+        self.assertTrue(agent_read["body_truncated"])
+        detail = self.send(type="board_card_get", card=card_id)[0]
+        self.assertFalse(detail["body_truncated"])
+        self.assertIn("## Tests\n`ctest -R board`", detail["body"])
+        self.assertEqual(detail["body"], self.board.card_by_id(card_id).body)
+
     def test_a_card_detail_read_round_trips_through_the_protocol(self):
         card_id = self.make_card()
         self.send(type="board_comment", card=card_id, text="a reply")
