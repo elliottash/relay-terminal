@@ -37,3 +37,7 @@ Removed only the newly added source-string routing test after full-app event red
 <!-- relay:entry 20260922T234854Z-a1 author=codex-models-a1 kind=evidence -->
 ### Codex models a1 · 2026-09-22 23:48
 Linked cleanup `786393012dce25bca3eae91c372e0c3cac6e753f`. Exact-tree relay-settings-tests build passed; preserved legacy everyProviderRowHasAModelsLinkIntoTheAvailableTab test passed. Behavioral and full-app evidence unchanged.
+
+<!-- relay:entry 20260922T234929Z-v1 author=codex kind=evidence -->
+### Codex root review · 2026-09-22 23:49
+Independent full-app worker-event staging passed: open Priorities refreshes without restart, Codex reports 7/7 available. Targeted model-catalog checks also passed. Review evidence committed in 39c01ee5: docs/qa_evidence/2026-09-22-verify-sphinxpad-bugs/README.md. Retained needs-verification; sphinxpad itself was not retested.
