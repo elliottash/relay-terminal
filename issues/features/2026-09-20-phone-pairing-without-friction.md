@@ -1,16 +1,17 @@
 ---
 id: FR1C
 type: work
-status: needs-verification
+status: discussing
 labels: [feature, remote]
 component: [gui, remote]
 milestone: beta
 workstream: remote
 assignee: claude-code
+waiting_on: owner
 rank: 6b
 created: '2026-09-20'
-source: 'owner, 2026-09-20, Claude Code session (after #PH0N landed)'
 acceptance: on an iPhone or iPad that has never seen Relay, the owner gets from nothing to a paired, notifying Home Screen app in three acts — install once, type the code the desktop shows, compare five digits — with no switch to find, no QR to scan and nothing to paste; and on the desktop, "Pair a phone" is one click from the window chrome and turns remote control on by itself
+source: 'owner, 2026-09-20, Claude Code session (after #PH0N landed)'
 links: {plans: [], commits: [7fc3f58d, 546bda03, 07367a19, 3bbb1bb8, e5ee36e2, 1ee6b653, 831470e8, 15b0340f, 494a750a, 370eaab2], evidence: [docs/qa_evidence/2026-09-21-fr1c-hosted-drive/, docs/qa_evidence/2026-09-20-fr1c-pair-a-phone/], related: [PH0N, 97EG, W5N2, KBFT], github: null}
 ---
 # Pairing a phone without friction: one entry point on the desktop, a typed code on the phone

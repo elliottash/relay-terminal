@@ -197,3 +197,12 @@ you are at it, #SWPH (the Switchboard on the phone) and #SHRP (the redesigned Sh
 the same pairing and the same devices, so their checklists can run in the same sitting. Four small
 bugs the drives found are filed but unclaimed: #WCLS, #AUDL, #PRM2, #SDR1 — none blocks pairing or
 day-to-day use. Phase 4 (a Capacitor shell) is a decision for after the week, not before it.
+
+<!-- relay:entry 20260922T012000Z-k2 author=agent kind=question model=gpt-6-astra pane=c966ed5f turn=96cbf82e701e4581bd3c303ec3190b30/e2b9681671ba45bebdf35c185a91fa0b -->
+1. Have you completed this card's iPhone/iPad checklist, and which checks passed or failed? Recommendation: keep it open until you report results on the installed Home Screen app; desktop tests cannot prove lock-screen push, touch behavior or a working day over LTE.
+
+<!-- relay:entry 20260922T012000Z-k3 author=agent kind=event model=gpt-6-astra pane=c966ed5f turn=96cbf82e701e4581bd3c303ec3190b30/e2b9681671ba45bebdf35c185a91fa0b -->
+- ✦ agent updated this card · waiting_on: (unset) → owner
+
+<!-- relay:entry 20260922T012000Z-k4 author=agent kind=event model=gpt-6-astra pane=c966ed5f turn=96cbf82e701e4581bd3c303ec3190b30/e2b9681671ba45bebdf35c185a91fa0b -->
+- ✦ agent moved this card · Needs verification → Discussing · Implementation already landed; awaiting owner device results required by the existing checklist.

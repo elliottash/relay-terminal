@@ -1,9 +1,10 @@
 ---
 id: PRM2
 type: work
-status: inbox
+status: executing
 labels: [bug, remote]
 component: [gui, remote]
+assignee: codex
 rank: m
 created: '2026-09-21'
 source: 'Claude Code session on #SWPH, 2026-09-21: found by the hosted drive `docs/qa_evidence/2026-09-21-swph-hosted-drive/`'
@@ -25,3 +26,13 @@ Two faults in #FR1C's pairing dialog, measured by the #SWPH hosted drive on 2026
 - With the dialog open, switching remote control off and on from the plug menu leaves the dialog
   showing a code that no longer works; reopening mints a good one. The dialog should mint again, or
   say the code ended, when `remote_state` goes off and on under it.
+
+## Done means
+Opening the pairing dialog does not remint rooms on repeated state announcements. Turning remote control off invalidates the displayed credentials; turning it on creates usable credentials. Rate-limit errors are visible and no stale code remains.
+
+## Execution Summary
+Pairing waits for the configured service destination to be online, then requests one QR and one typed-code room. Repeated started/remote_state announcements reuse those credentials. Stop clears both displays; restart requests fresh ones. A failed request leaves the error visible and offers New code. Xvfb driver exercises the real dialog and its outgoing sidecar requests.
+
+## Tests
+- `ctest --test-dir build -R '^remotesettings$'`
+- `manual: docs/qa_evidence/2026-09-22-remote-delivery/` (run.py drives the actual dialog under Xvfb)

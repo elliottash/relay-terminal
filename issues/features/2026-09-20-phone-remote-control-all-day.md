@@ -1,12 +1,13 @@
 ---
 id: PH0N
 type: work
-status: needs-verification
+status: discussing
 labels: [feature, remote]
 component: [gui, remote]
 milestone: beta
 workstream: remote
 assignee: claude-code
+waiting_on: owner
 rank: 6c
 created: '2026-09-20'
 acceptance: from the iPhone, over any network, all day and without touching the desktop, the owner opens the app and sees every pane on the desktop with who needs him, reads what an agent did, steers or stops it, answers its question, switches model, starts a new conversation, and gets a lock-screen notification when a turn finishes or an agent waits; the desktop keeps working through drops and sleep of the phone; content stays end-to-end encrypted

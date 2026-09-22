@@ -43,3 +43,12 @@ install-first welcome screen, one-tap notifications. All four tasks landed, driv
 Only the QA checklist above is open — five checks on the owner's own iPhone and iPad. #PRM2 (the
 pairing dialog spends 2–4 of the hour's 20 pairing rooms per look) is the one known rough edge;
 it does not block pairing, just repeated dialog-opening in one hour.
+
+<!-- relay:entry 20260922T012001Z-d2 author=agent kind=question model=gpt-6-astra pane=c966ed5f turn=96cbf82e701e4581bd3c303ec3190b30/e2b9681671ba45bebdf35c185a91fa0b -->
+1. Have you completed this card's iPhone/iPad checklist, and which checks passed or failed? Recommendation: keep it open until you report results on the installed Home Screen app; desktop tests cannot prove lock-screen push, touch behavior or a working day over LTE.
+
+<!-- relay:entry 20260922T012001Z-d3 author=agent kind=event model=gpt-6-astra pane=c966ed5f turn=96cbf82e701e4581bd3c303ec3190b30/e2b9681671ba45bebdf35c185a91fa0b -->
+- ✦ agent updated this card · waiting_on: (unset) → owner
+
+<!-- relay:entry 20260922T012001Z-d4 author=agent kind=event model=gpt-6-astra pane=c966ed5f turn=96cbf82e701e4581bd3c303ec3190b30/e2b9681671ba45bebdf35c185a91fa0b -->
+- ✦ agent moved this card · Needs verification → Discussing · Implementation already landed; awaiting owner device results required by the existing checklist.

@@ -28,3 +28,9 @@ Nothing is leaked today (an unlisted event is not forwarded), but each needs a d
 to devices, or withheld with the reason — by the session that owns the event, and until then the
 suite is red for everyone who runs it. Fix shape: one line per event in `remote/wire.py`; most are
 desktop-local administration or board state and belong in `WITHHELD_EVENTS`.
+
+## Execution Summary
+Already fixed by e4bfa994 (release protocol policy gates). Verified current main: `RELAY_KEYRING=off python3 -m unittest tests.test_remote_wire` passes all 48 tests. The former WCLS id is now WEVT. No implementation duplicated.
+
+## Tests
+- `tests/test_remote_wire.py`
