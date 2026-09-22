@@ -25,3 +25,9 @@ Observed: 7 tests, 5 passing, 2 errors. Retention raises `AttributeError: 'int' 
 - Overlapping windows retain latest-per-day/filter records without summing. Separate QA and all-origin windows remain separate; future snapshots are excluded.
 
 The tests use temporary synthetic data, create no live signals and read no private runtime logs. No full suites, builds, further delegation or board writes were performed. Relay tools were searched in the harness tool catalog and were unavailable; no connection or interim parent-message delivery is claimed.
+
+## Independent verification of correction
+
+After parent fix `e280f0ec` (review tip `96e2e21d`), independently reran the unchanged `check.py` command above: **all 7 tests passed**. The original null/numeric timestamp failures are resolved. Inspected the fix: timestamp inputs are type-checked, and retention/review reject non-object or foreign-kind JSON before timestamp parsing. The original finding above is preserved as the historical reproduction, not an outstanding defect.
+
+The same run also revalidated formatter interoperability, privacy, origins, denominator behavior, retention boundaries, overlapping windows and real signal links. No broad suites were repeated. The separate logging isolation correction was not yet visible at this verification: `logs.py` still changed global `XDG_DATA_HOME` on import. Environment documentation remains deferred until that correction is finalized; this does not reopen the resolved reporter defect.
