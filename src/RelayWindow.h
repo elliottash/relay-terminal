@@ -9426,24 +9426,8 @@ private:
         auto *leftRow = new QHBoxLayout(left);
         leftRow->setContentsMargins(12, 0, 10, 6);   // bottom inset centres the mark on the tab labels
         leftRow->setSpacing(0);
-        auto *icon = new QLabel;
-        icon->setObjectName(QStringLiteral("windowIcon"));
-        // The app icon itself, the same one the launcher and the task bar show (owner, 2026-09-18:
-        // "i want this icon everywhere"). It used to be the bare mark from the theme directory,
-        // drawn without its tile on the grounds that the tile vanishes into the chrome at this
-        // size; on a light theme the tile is what makes it read as the app's icon rather than a
-        // stray chevron, and one icon in every place beats a better one in each.
-        const QIcon appIcon = QApplication::windowIcon();
-        if (appIcon.isNull()) icon->setText(QStringLiteral("◈"));
-        else {
-            // QIcon::pixmap() ignores the screen's scale factor, so ask for the device pixels.
-            const qreal scale = qApp->devicePixelRatio();
-            QPixmap mark = appIcon.pixmap(QSize(22, 22) * scale);
-            mark.setDevicePixelRatio(scale);
-            icon->setPixmap(mark);
-        }
-        icon->setToolTip(QStringLiteral("Relay"));
-        icon->setAttribute(Qt::WA_TransparentForMouseEvents);   // the whole corner drags the window
+        // Keep the launcher's complete app tile, bounded to the chrome's logical size.
+        auto *icon = new ChromeAppIcon(QApplication::windowIcon());
         leftRow->addWidget(icon);
         left->installEventFilter(this);
         m_tabs->setCornerWidget(left, Qt::TopLeftCorner);

@@ -13,6 +13,7 @@
 #include <QFontMetricsF>
 #include <QFrame>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QToolButton>
@@ -36,6 +37,32 @@
 //
 // "window/native_frame" (Actions › System title bar) gives the system decorations back for
 // desktops where they work better; it applies to windows opened after the change.
+
+// The app tile is deliberately a little larger than the 14 px control glyphs, but
+// smaller than their 26 px buttons. Paint in logical coordinates: QIcon selects
+// the raster for this paint device, including after moving between DPI scales.
+class ChromeAppIcon final : public QWidget {
+public:
+    explicit ChromeAppIcon(const QIcon &icon, QWidget *parent = nullptr)
+        : QWidget(parent), m_icon(icon) {
+        setObjectName(QStringLiteral("windowIcon"));
+        setFixedSize(18, 18);
+        setToolTip(QStringLiteral("Relay"));
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+    }
+
+protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter painter(this);
+        if (m_icon.isNull())
+            painter.drawText(rect(), Qt::AlignCenter, QStringLiteral("◈"));
+        else
+            m_icon.paint(&painter, rect(), Qt::AlignCenter);
+    }
+
+private:
+    QIcon m_icon;
+};
 
 // A header button. The glyphs are painted rather than typed: a text bell or gear lands in
 // whatever font the desktop happens to have (often a colour emoji), and these have to sit at
