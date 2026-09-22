@@ -2,8 +2,8 @@
 #include "RichEditor.h"
 #include "Theme.h"
 #include "FilePanes.h"
-#include "BoardPane.h"          // Switchboard: cards, threads, card detail
-#include "BoardWorker.h"        // the per-window Switchboard worker (protocol 17)
+#include "BoardPane.h"          // Board: cards, threads, card detail
+#include "BoardWorker.h"        // the per-window Board worker (protocol 17)
 #include "AgentUi.h"
 #include "Completion.h"
 #include "FileIndex.h"             // the `@` picker's file listing, built without blocking

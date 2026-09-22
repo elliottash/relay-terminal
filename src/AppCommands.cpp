@@ -42,7 +42,7 @@ const QSet<QString> &readActions() {
         // Open or reveal something. Nothing is changed and the pane closes in one click.
         QStringLiteral("app.settings"),        // Options
         QStringLiteral("palette.open"),        // Actions
-        QStringLiteral("board.open"),          // the Switchboard
+        QStringLiteral("board.open"),          // the Board
         QStringLiteral("conversations.open"),  // the session manager
         QStringLiteral("projects.open"), QStringLiteral("globals.open"),
         QStringLiteral("closed.list"),
@@ -59,7 +59,7 @@ const QSet<QString> &readActions() {
         QStringLiteral("notifications.jump"),
         // #AG7R group 3, owner 2026-09-20 ("groups 1-3 all yes"): reversible, in the catalog, and
         // named here only because the first table was written from a short list. Test suites is
-        // the same pane class as the Switchboard and the explorer, which were already safe
+        // the same pane class as the Board and the explorer, which were already safe
         // (#7BM4); About is a dialog with one OK; the two folder actions hand a path to the
         // desktop's file manager and change nothing on either side.
         QStringLiteral("tests.open"),

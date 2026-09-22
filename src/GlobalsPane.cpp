@@ -16,7 +16,7 @@ GlobalsPane::GlobalsPane(QWidget *parent) : QWidget(parent) {
     setObjectName("globalsPane");
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(8, 8, 8, 8);
-    auto *intro = new QLabel(tr("Switchboard HQ · memories, aliases and instructions across projects"));
+    auto *intro = new QLabel(tr("Board HQ · memories, aliases and instructions across projects"));
     intro->setWordWrap(true);
     layout->addWidget(intro);
     m_search = new QLineEdit;
@@ -108,7 +108,7 @@ void GlobalsPane::setWorkspace(const QString &workspace) {
 }
 void GlobalsPane::focusSearch() { m_search->setFocus(); }
 QString GlobalsPane::agentScreen() const {
-    return tr("Globals / Switchboard HQ\nWorkspace: %1\nSearch: %2\nSelected: %3\nSource: %4\nUnsaved draft: %5")
+    return tr("Globals / Board HQ\nWorkspace: %1\nSearch: %2\nSelected: %3\nSource: %4\nUnsaved draft: %5")
         .arg(m_workspace, m_search->text(), m_record.value("title").toString(m_selected),
              m_record.value("path").toString(), m_dirty ? "yes" : "no");
 }

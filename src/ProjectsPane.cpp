@@ -60,7 +60,7 @@ ProjectsPane::ProjectsPane(QWidget *parent) : QWidget(parent) {
     };
     m_open = button(QStringLiteral("Open in new tab"), QStringLiteral("projectsOpen"));
     m_attach = button(QStringLiteral("Attach this tab"), QStringLiteral("projectsAttach"));
-    m_board = button(QStringLiteral("Switchboard"), QStringLiteral("projectsBoard"));
+    m_board = button(QStringLiteral("Board"), QStringLiteral("projectsBoard"));
     m_history = button(QStringLiteral("Sessions"), QStringLiteral("projectsSessions"));
     m_resume = button(QStringLiteral("Go to session"), QStringLiteral("projectsResume"));
     m_allow = button(QStringLiteral("Allow initialization"), QStringLiteral("projectsUndecline"));
@@ -154,7 +154,7 @@ void ProjectsPane::selectionChanged() {
     m_details->setText(row ? row->text(1) : QStringLiteral("Choose a project to see its details. Open folder to add one."));
     if (project) for (const auto &r : m_projects) if (r.path == selectedPath()) {
         m_details->setText(QStringLiteral("%1\n%2 · Last attached: %3\nKnown because %4 · %5")
-            .arg(r.path, r.board == QLatin1String(kBoardRepo) ? QStringLiteral("Switchboard available") : QStringLiteral("No Switchboard yet"), stamp(r.lastAttached), reasonText(r.reason), stamp(r.knownSince)));
+            .arg(r.path, r.board == QLatin1String(kBoardRepo) ? QStringLiteral("Board available") : QStringLiteral("No Board yet"), stamp(r.lastAttached), reasonText(r.reason), stamp(r.knownSince)));
         break;
     }
 }

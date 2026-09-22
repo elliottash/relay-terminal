@@ -78,7 +78,7 @@ void ProjectPickerTests::aFilterRanksByNameThenPathAndDropsTheRest()
 
 void ProjectPickerTests::reasonsAndAgesReadAsWords()
 {
-    QCOMPARE(reasonText(QStringLiteral("switchboard")), QStringLiteral("opened its Switchboard"));
+    QCOMPARE(reasonText(QStringLiteral("switchboard")), QStringLiteral("opened its Board"));
     QCOMPARE(reasonText(QStringLiteral("picker")), QStringLiteral("chosen in the project picker"));
     QCOMPARE(reasonText(QStringLiteral("init-command")), QStringLiteral("initialized with /init"));
     // Every reason of the closed set has words; nothing falls through to the raw id.

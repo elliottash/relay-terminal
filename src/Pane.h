@@ -750,7 +750,7 @@ public:
     // An empty reason never attaches, so the `#` index, the idle tip and the shortcut hints stay
     // quiet in an unattached pane.
     std::function<QString(const QString &reason, QString *why)> onBoardProject;
-    // ----- "Initialize a project and create a Switchboard here?" (protocol 19.12) --------------
+    // ----- "Initialize a project and create a Board here?" (protocol 19.12) --------------
     // What the window knows about this pane before the question is raised: its candidate project,
     // whether that project already has a board, and what the registry remembers about it. The
     // rules live in src/ProjectInit.h; the window only answers facts.
@@ -5079,7 +5079,7 @@ private:
         m_cardChip = new QLabel;
         m_cardChip->setTextFormat(Qt::PlainText);
         m_cardChip->setObjectName(QStringLiteral("paneCardChip"));
-        m_cardChip->setAccessibleName(QStringLiteral("Switchboard card being executed"));
+        m_cardChip->setAccessibleName(QStringLiteral("Board card being executed"));
         m_cardChip->setCursor(Qt::PointingHandCursor);
         m_cardChip->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
         m_cardChip->hide();
@@ -9111,9 +9111,12 @@ private:
             {QStringLiteral("light"), QString(), QStringLiteral("Light theme: IBM Beige")},
             {QStringLiteral("dark"), QString(), QStringLiteral("Dark theme: Dark Copper")},
             {QStringLiteral("theme"), QStringLiteral("[name|random]"), QStringLiteral("Theme for this tab and new ones: pick from every theme, name one, or take one at random")},
-        {QStringLiteral("switchboard"), QString(), QStringLiteral("Open the Switchboard: cards, threads and plans")},
-        {QStringLiteral("card"), QStringLiteral("<text>"), QStringLiteral("Add a card to the Switchboard inbox, verbatim")},
-        {QStringLiteral("init"), QString(), QStringLiteral("Initialize a project here and create its Switchboard")},
+        {QStringLiteral("board"), QString(), QStringLiteral("Open the Board: cards, threads and plans")},
+        // A silent alias (#1CXD): the word was "Switchboard" until 2026-09-21 and the habit outlives
+        // it, so the name still runs and is never taught.
+        {QStringLiteral("switchboard"), QString(), QStringLiteral("Open the Board (same as /board)"), true},
+        {QStringLiteral("card"), QStringLiteral("<text>"), QStringLiteral("Add a card to the Board inbox, verbatim")},
+        {QStringLiteral("init"), QString(), QStringLiteral("Initialize a project here and create its Board")},
             {QStringLiteral("recap"), QString(), QStringLiteral("Summarize this session")},
             {QStringLiteral("tasks"), QString(), QStringLiteral("Task list: what the agent is working on")},
             {QStringLiteral("requests"), QString(), QStringLiteral("Task list (same as /tasks)")},
@@ -9680,7 +9683,7 @@ private:
             // on its UPDATED marker it restarts Relay into the version it just installed.
             if (onUpdateApp) onUpdateApp();
         }
-        else if (name == QStringLiteral("switchboard")) {
+        else if (name == QStringLiteral("board") || name == QStringLiteral("switchboard")) {
             if (onOpenBoard) onOpenBoard();
             boardShortcutHint(QStringLiteral("board.slash"));
         }
@@ -10298,7 +10301,7 @@ private:
                                                      : QStringLiteral("#%1").arg(cardId));
         }
         m_cardChip->setToolTip(named.join(QLatin1Char('\n'))
-                               + QStringLiteral("\n\nClick to open this card in the Switchboard"));
+                               + QStringLiteral("\n\nClick to open this card in the Board"));
         m_cardChip->show();
         updateHeader();
     }
@@ -10347,9 +10350,9 @@ public:
             row(QStringLiteral("*"), QStringLiteral("send this line to the agent"));
             row(QStringLiteral("/"), QStringLiteral("slash commands"));
             row(QStringLiteral("@"), QStringLiteral("attach files and folders"));
-            row(QStringLiteral("#"), QStringLiteral("reference a Switchboard card"));
+            row(QStringLiteral("#"), QStringLiteral("reference a Board card"));
             row(keys.shortcutText(QStringLiteral("input.toggle")), QStringLiteral("switch terminal / agent"));
-            row(keys.shortcutText(QStringLiteral("board.open")), QStringLiteral("Switchboard: cards and threads"));
+            row(keys.shortcutText(QStringLiteral("board.open")), QStringLiteral("Board: cards and threads"));
             // The explorer is one of the keys people reach for most and it was only in the full
             // list (owner, 2026-09-17). One key opens and closes it, which the wording has to say.
             row(keys.shortcutText(QStringLiteral("files.explorer")), QStringLiteral("file explorer (again to close)"));
@@ -12287,7 +12290,7 @@ private:
         if (hasBoard())
             tips << relay::ShortcutHints::Tip{
                 QStringLiteral("idle.board"),
-                QStringLiteral("Tip: %1 opens the Switchboard; # references a card").arg(key("board.open"))};
+                QStringLiteral("Tip: %1 opens the Board; # references a card").arg(key("board.open"))};
         // A tip is the least urgent toast there is: it waits for a quiet pane rather than a queue.
         if (m_toastQueue.size() || (m_toast && m_toast->isVisible())) return;
         const auto tip = relay::ShortcutHints::instance().nextIdleTip(tips);
@@ -12397,7 +12400,7 @@ public:
         if (queued)
             *queued = relay::queuesubmit::decide(queueSubmitState()) != relay::queuesubmit::Decision::StartNow;
         // Not typed at this desk: the same flag a phone's prompt travels under, so the
-        // "initialize a Switchboard here?" question is not raised on somebody else's line and the
+        // "initialize a Board here?" question is not raised on somebody else's line and the
         // queue row carries the author it came from.
         m_remoteSubmit = true;
         m_remoteAuthor = from;
@@ -14590,7 +14593,7 @@ private:
             // other panes again and the chain that reached it is over.
             if (onPersonPrompt) onPersonPrompt();
         }
-        // Trigger (1) of "Initialize a project and create a Switchboard here?": the first prompt
+        // Trigger (1) of "Initialize a project and create a Board here?": the first prompt
         // sent to the agent in a pane standing in a git repository that has no board (19.12). The
         // prompt is **not** held for it — it goes on below and the turn starts now; the question is
         // raised on the next turn of the event loop and a yes takes effect for the turn after, as
@@ -15605,7 +15608,7 @@ private:
         if (!hasBoard()) return;
         const QString keys = Keymap::instance().shortcutText(QStringLiteral("board.open"));
         if (!keys.isEmpty())
-            hint(id, relay::ShortcutHints::nextTime(keys, QStringLiteral("the Switchboard")));
+            hint(id, relay::ShortcutHints::nextTime(keys, QStringLiteral("the Board")));
     }
 
 public:
@@ -15624,7 +15627,7 @@ public:
               {QStringLiteral("board"), board.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(board)}});
     }
 
-    // ----- "Initialize a project and create a Switchboard here?" (protocol 19.12 and 19.13) ----
+    // ----- "Initialize a project and create a Board here?" (protocol 19.12 and 19.13) ----
     //
     // The one question that ever creates `<project>/switchboard/`. Five triggers raise it and
     // nothing else does (the table is in src/ProjectInit.h): the first prompt sent to the agent in
@@ -15638,7 +15641,7 @@ public:
     // conversation (19.11).
     //
     // The order on a yes is fixed by the worker and not by taste: an unattached pane has no board
-    // object at all, so a `board_init` sent there answers "this project has no Switchboard". The
+    // object at all, so a `board_init` sent there answers "this project has no Board". The
     // tab is attached first (`set_board {project, state: "uninitialized"}`) and `board_init` goes
     // out when that lands, which is also exactly what makes a mid-turn yes take effect at turn end.
     //
@@ -15652,7 +15655,7 @@ public:
         if (QString why; !attachForBoard(relay::projects::kReasonCardCommand, &why)) {
             if (askProjectInit(relay::projectinit::Trigger::CardCommand, args.trimmed(), &why)) return;
             if (onPickProject && relay::projects::candidateFor(m_cwd).isEmpty()) { onPickProject(args.trimmed()); return; }
-            status(why.isEmpty() ? QStringLiteral("No Switchboard here.") : why);
+            status(why.isEmpty() ? QStringLiteral("No Board here.") : why);
             return;
         }
         // Quick add to the Inbox without opening the pane; the text is kept verbatim.
@@ -18554,7 +18557,7 @@ private:
         if (m_boardTask.isEmpty()) return;
         QueueEntry entry;
         entry.agent = true; entry.text = m_boardTask;
-        entry.why = QStringLiteral("Switchboard · Execute #%1").arg(m_boardTaskCard);
+        entry.why = QStringLiteral("Board · Execute #%1").arg(m_boardTaskCard);
         entry.cards = QJsonArray{QJsonObject{{QStringLiteral("id"), m_boardTaskCard}}};
         noteWorkCard(m_boardTaskCard);
         m_boardTask.clear(); m_boardTaskCard.clear();

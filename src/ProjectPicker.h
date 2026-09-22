@@ -2,9 +2,9 @@
 #pragma once
 // The project picker (card #916B): which project a tab that has none should attach to.
 //
-// Ctrl+Shift+S, `/card` and the palette reach for a Switchboard. In a pane standing in a project
+// Ctrl+Shift+S, `/card` and the palette reach for a Board. In a pane standing in a project
 // that is the project's board; in `~/Downloads` or an admin folder there is no candidate at all,
-// and this pane is what opens instead of a "no Switchboard here" line. It lists the projects Relay
+// and this pane is what opens instead of a "no Board here" line. It lists the projects Relay
 // knows (`projects::Registry::knownProjects()`, most recently attached first), fuzzy-filtered as
 // the user types, with the "Default project for loose cards" preselected when one is set — and,
 // always at the top, **"Initialize new project here"**, which makes the pane's own directory a
@@ -42,7 +42,7 @@ namespace relay::projects {
 // the rest are left out. A stable sort, so two equal scores keep the registry's order.
 QList<Record> rankProjects(const QList<Record> &known, const QString &filter);
 
-// "opened its Switchboard", "chosen in the project picker", … — a `Record::reason` in words, for
+// "opened its Board", "chosen in the project picker", … — a `Record::reason` in words, for
 // the picker's rows and the Options list. The raw reason when it is not one of the closed set.
 QString reasonText(const QString &reason);
 

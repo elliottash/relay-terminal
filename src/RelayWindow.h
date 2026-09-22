@@ -245,14 +245,14 @@ public:
     // ----- known projects (src/Projects.h) ------------------------------------------------------
     // One registry for the whole process, read from disk the first time it is asked for. A tab
     // attaching to a project is the only thing that writes it (RelayWindow::attachTab), so the
-    // file reads back as "you attached this because you opened its Switchboard" and never as a
+    // file reads back as "you attached this because you opened its Board" and never as a
     // guess Relay made about a directory somebody happened to `cd` into.
     relay::projects::Registry &projects() {
         if (!m_projectsLoaded) { m_projectsLoaded = true; m_projects.load(); }
         return m_projects;
     }
 
-    // "Initialize a project and create a Switchboard here?", raised or answered "Not now" for
+    // "Initialize a project and create a Board here?", raised or answered "Not now" for
     // these projects (normalized paths) since Relay started (protocol 19.12). A no goes in the
     // registry above and outlives the process; this outlives nothing, which is the difference
     // between "no" and "not now". It is the whole process's, not one window's: the same project
@@ -1538,7 +1538,7 @@ private:
         if (tool && tool->board()) { tool->board()->focusChat(); return; }
         if (auto *sessions = sessionsViewOf(tool)) { sessions->focusHelper(); return; }
         notice(QStringLiteral("The helper agent is in Options, Actions, Sessions and the "
-                              "Switchboard — open one of those and ask it there."), 5000);
+                              "Board — open one of those and ask it there."), 5000);
     }
 
     ToolPane *createSettingsPane(relay::SettingsPane::Mode mode) {
@@ -3460,7 +3460,7 @@ private:
         relay::SettingsSection agent;
         agent.id = QStringLiteral("agent");
         agent.title = QStringLiteral("Agent");
-        agent.blurb = QStringLiteral("Instructions, skills and the Switchboard. Most of these apply to the "
+        agent.blurb = QStringLiteral("Instructions, skills and the Board. Most of these apply to the "
                                      "next conversation; the timeout rows apply at once.");
         agent.rows << headingRow(QStringLiteral("Instructions and skills"));
         {
@@ -3539,7 +3539,7 @@ private:
             profile.aliases = QStringLiteral("prompt profile short full local lite tier context window tokens prefill speed");
             agent.rows << profile;
         }
-        agent.rows << headingRow(QStringLiteral("Switchboard"));
+        agent.rows << headingRow(QStringLiteral("Board"));
         {
             // Owner, 2026-09-19: new boards are created hidden from now on, so the cards do not
             // clutter the project's root listing. Only decides what a board created from now on is
@@ -3574,7 +3574,7 @@ private:
                 if (!page) return;
                 if (relay::projects::boardDirOf(boardWorkspaceOfTab(page)).isEmpty()) {
                     notice(QStringLiteral("This tab has no project attached, so there is no "
-                                          "Switchboard to set that on."), 6000);
+                                          "Board to set that on."), 6000);
                     return;
                 }
                 sendToHelper(page, {{QStringLiteral("type"), QStringLiteral("signals_config")},
@@ -4029,7 +4029,7 @@ private:
             mouse.id = QStringLiteral("info:mouse");
             mouse.aliases = QStringLiteral("mouse drag click gestures pointer header grip rename explorer");
             mouse.label = QStringLiteral(
-                "With the mouse: drag a pane's header — or the ⠿ grip on an explorer, preview or Switchboard "
+                "With the mouse: drag a pane's header — or the ⠿ grip on an explorer, preview or Board "
                 "pane — onto another pane's edge to move it there; onto a tab's label to move it into that "
                 "tab; or onto the tab bar's empty space to give it a tab of its own. Esc during the drag "
                 "puts it back. Double click a pane's title to rename it. Click the "
@@ -4476,19 +4476,19 @@ private:
 
         items << actionItem(panes, QStringLiteral("File explorer"), QStringLiteral("Open this pane's directory, or close the explorer again"), QStringLiteral("files.explorer"));
         {
-            // Switchboard: the board of cards, threads, plans and memory (design 4.1).
-            PaletteItem board = actionItem(panes, QStringLiteral("Switchboard"),
+            // Board: the board of cards, threads, plans and memory (design 4.1).
+            PaletteItem board = actionItem(panes, QStringLiteral("Board"),
                                            QStringLiteral("Cards, threads, plans and project memory"),
                                            QStringLiteral("board.open"));
-            board.aliases = QStringLiteral("board issues cards todo trello kanban scratchpad tickets tracker");
+            board.aliases = QStringLiteral("board switchboard issues cards todo trello kanban scratchpad tickets tracker");
             items << board;
         }
         {
-            // The Switchboard's tooling sibling (card #7BM4): the project's tests, their history
+            // The Board's tooling sibling (card #7BM4): the project's tests, their history
             // and their runs. No key of its own — Ctrl+Shift+T is New tab everywhere — so the
             // palette and the board's Tests button are how it is reached.
             PaletteItem tests = actionItem(panes, QStringLiteral("Test suites"),
-                                           QStringLiteral("This project's tests, their history and their runs, beside the Switchboard"),
+                                           QStringLiteral("This project's tests, their history and their runs, beside the Board"),
                                            QStringLiteral("tests.open"));
             tests.aliases = QStringLiteral("tests test suites ctest unittest flaky slow failing suite coverage runs");
             items << tests;
@@ -4496,7 +4496,7 @@ private:
         items << actionItem(panes, QStringLiteral("Projects"),
                             QStringLiteral("Known projects, active sessions and project actions"), QStringLiteral("projects.open"));
         items << actionItem(panes, QStringLiteral("Globals"),
-                            QStringLiteral("Switchboard HQ: global memories, aliases and instructions"), QStringLiteral("globals.open"));
+                            QStringLiteral("Board HQ: global memories, aliases and instructions"), QStringLiteral("globals.open"));
         // Offered only while this tab is attached to a project (#JN7X): with no project there is
         // nothing to detach from, and the quiet state must not advertise itself. No shortcut —
         // detaching is rare, so there is no fast path to teach and no hint entry.
@@ -4504,8 +4504,8 @@ private:
             PaletteItem detach;
             detach.key = QStringLiteral("project.detach"); detach.section = panes;
             detach.label = QStringLiteral("Detach this tab from %1").arg(relay::projects::nameFor(project));
-            detach.detail = QStringLiteral("%1 · its panes lose the card tools; an open Switchboard stays open").arg(project);
-            detach.aliases = QStringLiteral("project switchboard attach unattach board");
+            detach.detail = QStringLiteral("%1 · its panes lose the card tools; an open Board stays open").arg(project);
+            detach.aliases = QStringLiteral("project board switchboard attach unattach");
             detach.run = [this] { detachTab(m_tabs->currentWidget()); };
             items << detach;
         } else {
@@ -4513,7 +4513,7 @@ private:
             PaletteItem pick = actionItem(panes, QStringLiteral("Attach this tab to a project…"),
                                           QStringLiteral("The projects Relay knows, most recent first, or initialize one here"),
                                           QStringLiteral("project.pick"));
-            pick.aliases = QStringLiteral("project switchboard attach known picker initialize init board");
+            pick.aliases = QStringLiteral("project board switchboard attach known picker initialize init");
             pick.run = [this] {
                 openProjectsFor(m_active, QString());
                 hint(QStringLiteral("project.pick.palette"),
@@ -4521,7 +4521,7 @@ private:
             };
             items << pick;
         }
-        // The one passive entry point to "Initialize a project and create a Switchboard here?"
+        // The one passive entry point to "Initialize a project and create a Board here?"
         // (protocol 19.12). Offered only while the active pane is standing in a project that has
         // no board: with a board there is nothing to create, and outside a project there is
         // nothing to create it in. Choosing it here is the slow path, so it teaches `/init`.
@@ -5489,7 +5489,7 @@ public:
         for (QWidget *leaf : leavesIn(page))
             if (auto *found = dynamic_cast<ToolPane *>(leaf); found && found->board()) { board = found; break; }
         if (!board) {
-            notice(QStringLiteral("Open this tab's Switchboard first: the card picker is its list of cards."), 9000);
+            notice(QStringLiteral("Open this tab's Board first: the card picker is its list of cards."), 9000);
             return;
         }
         const QString card = pickCard(board->board()->model(),
@@ -5621,7 +5621,7 @@ public:
         for (QWidget *leaf : leavesIn(page))
             if (auto *found = dynamic_cast<ToolPane *>(leaf); found && found->board()) { board = found; break; }
         if (!board) {
-            notice(QStringLiteral("Open this tab's Switchboard first: the card picker is its list of cards."), 9000);
+            notice(QStringLiteral("Open this tab's Board first: the card picker is its list of cards."), 9000);
             return;
         }
         const QString card = pickCard(board->board()->model(),
@@ -6521,7 +6521,7 @@ public:
     // action does — opening the Switchboard, `/card`, picking a card with `#`, executing a card —
     // and each of those is one of `projects::kReason*`. Attachment is sticky until it is
     // detached, and a tab never switches project silently: a pane that has `cd`-ed into another
-    // checkout says so ("This tab's Switchboard is A; … belongs to B") instead of re-pointing.
+    // checkout says so ("This tab's Board is A; … belongs to B") instead of re-pointing.
     //
     // `attachTab` is the **only** writer of m_tabProject, the only caller of `Registry::remember`
     // and the only place the tab's panes are re-pointed, so there is one answer to "how did this
@@ -6594,9 +6594,9 @@ public:
                 if (!from.isEmpty() && shown != workspace) {
                     statusBar()->showMessage(
                         workspace.isEmpty()
-                            ? QStringLiteral("This tab's Switchboard is %1; %2 has no Switchboard of its own.")
+                            ? QStringLiteral("This tab's Board is %1; %2 has no Board of its own.")
                                   .arg(shown, from)
-                            : QStringLiteral("This tab's Switchboard is %1; %2 belongs to %3.")
+                            : QStringLiteral("This tab's Board is %1; %2 belongs to %3.")
                                   .arg(shown, from, workspace),
                         9000);
                 }
@@ -6608,7 +6608,7 @@ public:
             workspace = candidateProject();
             if (workspace.isEmpty()) workspace = from;
             if (workspace.isEmpty()) {
-                notice(QStringLiteral("Open a terminal in the directory whose Switchboard you want."));
+                notice(QStringLiteral("Open a terminal in the directory whose Board you want."));
                 return;
             }
         }
@@ -6895,7 +6895,7 @@ public:
         };
         // What the worker says about *itself* — it would not start, it exited, its pipe
         // overflowed. The status bar is not shown in this layout, so until 2026-09-20 a
-        // Switchboard whose worker died sat on "Loading the Switchboard…" for ever with the
+        // Board whose worker died sat on "Loading the Board…" for ever with the
         // explanation written somewhere nobody can see (#7M6E). It goes to the tab's board panes
         // as well, which put it where the loading line was, with a Retry.
         worker->onStatus = [guard, tab](const QString &text) {
@@ -7262,7 +7262,7 @@ public:
         const QString workspace = boardWorkspace();
         if (workspace.isEmpty() || relay::projects::boardDirOf(workspace).isEmpty()) return {};
         attachTab(current, workspace, QString::fromLatin1(relay::projects::kReasonSwitchboard));
-        statusBar()->showMessage(QStringLiteral("Switchboard opened from a paired device: this tab is now %1's.")
+        statusBar()->showMessage(QStringLiteral("Board opened from a paired device: this tab is now %1's.")
                                      .arg(relay::projects::nameFor(workspace)), 9000);
         return tabHasBoard(current) ? tabIdOf(current) : QString();
     }
@@ -7702,8 +7702,8 @@ private:
             if (candidate.isEmpty() || relay::projects::boardDirOf(candidate).isEmpty()) {
                 if (why)
                     *why = candidate.isEmpty()
-                               ? QStringLiteral("No Switchboard here: no project above %1 has one.").arg(guard->cwd())
-                               : QStringLiteral("%1 has no Switchboard yet.").arg(relay::projects::nameFor(candidate));
+                               ? QStringLiteral("No Board here: no project above %1 has one.").arg(guard->cwd())
+                               : QStringLiteral("%1 has no Board yet.").arg(relay::projects::nameFor(candidate));
                 return {};
             }
             w->attachTab(page, candidate, reason);
@@ -10664,7 +10664,7 @@ public:
                 const QString boardKeys = Keymap::instance().shortcutText(QStringLiteral("board.open"));
                 if (!boardKeys.isEmpty())
                     hint(QStringLiteral("board.close"),
-                         QStringLiteral("Next time: %1 closes the Switchboard too").arg(boardKeys), 1);
+                         QStringLiteral("Next time: %1 closes the Board too").arg(boardKeys), 1);
             }
         // Once per run, the first time something is closed: say how to get it back (owner, 2026-09-17).
         if (record) {

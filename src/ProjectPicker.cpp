@@ -57,7 +57,7 @@ QList<Record> rankProjects(const QList<Record> &known, const QString &filter)
 
 QString reasonText(const QString &reason)
 {
-    if (reason == QLatin1String(kReasonSwitchboard)) return QStringLiteral("opened its Switchboard");
+    if (reason == QLatin1String(kReasonSwitchboard)) return QStringLiteral("opened its Board");
     if (reason == QLatin1String(kReasonCardCommand)) return QStringLiteral("/card was run in it");
     if (reason == QLatin1String(kReasonCardPicker)) return QStringLiteral("a card was picked with #");
     if (reason == QLatin1String(kReasonExecuteCard)) return QStringLiteral("one of its cards was executed");
@@ -129,7 +129,7 @@ ProjectPicker::ProjectPicker(QWidget *parent) : QWidget(parent)
 
     m_init = new QPushButton(QStringLiteral("Initialize here"));
     m_init->setObjectName(QStringLiteral("projectPickerInit"));
-    m_init->setToolTip(QStringLiteral("Make this pane's directory a project: its Switchboard folder, and git init "
+    m_init->setToolTip(QStringLiteral("Make this pane's directory a project: its board folder, and git init "
                                       "when it is not inside a repository yet"));
     connect(m_init, &QPushButton::clicked, this, [this] { if (onInitHere) onInitHere(); });
     m_attach = new QPushButton(QStringLiteral("Attach"));

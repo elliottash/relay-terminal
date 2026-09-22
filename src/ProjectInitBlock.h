@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
-// The "Initialize a project and create a Switchboard here?" question, drawn inline in a pane.
+// The "Initialize a project and create a Board here?" question, drawn inline in a pane.
 //
 // It is a row of the pane's own column, directly under the terminal, exactly where the thinking
 // panel and the queue strip live: it takes real layout space, so the terminal shrinks and the shell
@@ -54,7 +54,7 @@ public:
     const projectinit::Question &question() const { return m_question; }
 
     // Draw a question and show the block. Every checkbox starts unticked: saying yes to a
-    // Switchboard is not saying yes to an import (docs/PROJECT-INIT-AND-IMPORT.md section 1).
+    // Board is not saying yes to an import (docs/PROJECT-INIT-AND-IMPORT.md section 1).
     // Not called `show()`: that would hide QWidget's, which this calls at the end.
     void ask(const projectinit::Question &question)
     {
@@ -89,7 +89,7 @@ public:
         row->setContentsMargins(0, 4, 0, 0);
         row->setSpacing(8);
         row->addStretch(1);
-        m_notNow = button(QStringLiteral("Not now"), QStringLiteral("Esc · asked again the next time you open the Switchboard, /card or /init"));
+        m_notNow = button(QStringLiteral("Not now"), QStringLiteral("Esc · asked again the next time you open the Board, /card or /init"));
         m_no = button(QStringLiteral("No"), QStringLiteral("N · remembered: Relay stops asking about this project"));
         m_yes = button(QStringLiteral("Yes"), QStringLiteral("Y · creates the folder and nothing else"));
         m_yes->setObjectName(QStringLiteral("projectInitYes"));

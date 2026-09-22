@@ -364,7 +364,7 @@ QString executeTask(const QString &id, const QString &title, bool hasPlan, bool 
     const QString ref = QStringLiteral("#") + id;
     QStringList lines;
     lines << QStringLiteral("Execute %1: %2").arg(ref, title) << QString();
-    QString what = QStringLiteral("The Switchboard card %1 is attached");
+    QString what = QStringLiteral("The Board card %1 is attached");
     if (hasPlan && hasAcceptance)
         what += QStringLiteral(" with its issue, its `## Plan` and its acceptance. Carry out the plan "
                                "until the acceptance holds. Where the plan has an Orchestration "
@@ -381,7 +381,7 @@ QString executeTask(const QString &id, const QString &title, bool hasPlan, bool 
         what += QStringLiteral(" with its issue. It has no plan and no acceptance: read the code "
                                "first, and say what you took \"done\" to mean when you finish.");
     lines << what.arg(ref) << QString();
-    lines << QStringLiteral("The owner handed it to you from the Switchboard; it is already in "
+    lines << QStringLiteral("The owner handed it to you from the Board; it is already in "
                             "progress and assigned to the agent.")
           // #T71W: the worker knows its own preset and model exactly and stamps `implemented_by`
           // itself, so the agent is not asked to type a signature it can only guess at.
@@ -630,7 +630,7 @@ QString verifyTask(const QString &id, const QString &title, const QString &verif
     const bool verifying = status == QStringLiteral("needs-verification");
     QStringList lines;
     lines << QStringLiteral("Verify %1: %2").arg(ref, title) << QString();
-    QString who = QStringLiteral("The Switchboard card %1 is in a %2 and you are its "
+    QString who = QStringLiteral("The Board card %1 is in a %2 and you are its "
                                  "verifier%3. ")
                       .arg(ref,
                            verifying ? QStringLiteral("verify lane (needs-verification)")
