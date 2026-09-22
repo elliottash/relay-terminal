@@ -113,9 +113,9 @@ State resolve(const Facts &facts, quint64 seenSerial);
 // Markdown emphasis and closing quotes or brackets, ends in "?".
 bool endsWithQuestion(const QString &reply);
 
-// ----- what the pane is waiting for (cards #V7QD, #KP4M) ----------------------------------------
-// The line the prompt box shows while a pane's main ("orchestrator") agent is blocked on the
-// background work it started: "waiting for 2 subagents, 1 job . . .". It lives here, beside the
+// ----- what the pane is waiting for (cards #V7QD, #KP4M, #R3YN) ---------------------------------
+// The neutral status line above the prompt shows this while a pane's main ("orchestrator") agent
+// is blocked on background work it started: "waiting for 2 subagents, 1 job . . .". It lives here, beside the
 // pane states, rather than on either model: it is a pure rule about what the pane is doing, and it
 // is fed counts and flags by both `relay::SubagentModel` and `relay::JobsModel`.
 //
@@ -140,9 +140,6 @@ bool isWaiting(const Waiting &waiting);
 // animation", which draws the dots in full (see Pane::refreshBackgroundWait and
 // QApplication::cursorFlashTime). Empty when nothing is waited on.
 QString waitingLine(const Waiting &waiting, int phase);
-// The same line and its shorter forms, longest first, for RichEditor::setPlaceholders in a narrow
-// pane: the full line, then without "waiting for", then the bare counts (one kind) or "waiting".
-QStringList waitingLines(const Waiting &waiting, int phase);
 
 // ----- remote sessions --------------------------------------------------------------------------
 bool isRemoteProgram(const QString &programName);

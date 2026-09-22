@@ -9,6 +9,8 @@
 // `new Pane(workspace, workspace, false, core, &context)`. No window manager, no tabs, no
 // `RelayWindow` — which is the point, because it also shows that a console registers itself
 // nowhere and can be embedded by a host that knows nothing about panes (steps 5-7).
+// `RELAY_CONSOLE_STATUS=waiting` injects one live background subagent after the window opens; it
+// is a deterministic visual fixture for #R3YN's neutral status line without needing a provider.
 //
 // It is not a test and runs no assertions; `tests/consolemode_test.cpp` is the gate. This is what
 // `docs/qa_evidence/2026-09-20-agent-console-extraction/drive-console.sh` drives under Xvfb so
@@ -92,6 +94,13 @@ int main(int argc, char **argv)
     window.setCentralWidget(central);
     window.resize(1400, 900);
     window.show();
+    if (qEnvironmentVariable("RELAY_CONSOLE_STATUS") == QStringLiteral("waiting")) {
+        QTimer::singleShot(250, console, [console] {
+            console->deliverWorkerEvent(QJsonObject{{"event", "subagent_started"}, {"id", "qa1"},
+                                                    {"type", "explore"}, {"description", "visual fixture"},
+                                                    {"background", true}});
+        });
+    }
     // RELAY_CONSOLE_DUMP=1 prints the console's widget tree once it has settled, which is how the
     // drive was debugged when the composer came out clipped. It is not part of any check.
     if (!qEnvironmentVariableIsEmpty("RELAY_CONSOLE_DUMP")) {

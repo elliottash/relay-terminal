@@ -1,0 +1,9 @@
++ explore qal started in the background - visual fixture
+
+© Relaying - waiting for 1 subagent. .
+
+Check (k) Clean up (u)
+Ask about this board...
+"Thome/elliottirepos/relay-terminal | daude-opus5 | high ~ 9
+© main idle 4 from the prompt to select main - agents ~0 tok
+© explore qa1_ visual fixture waiting - 0:05 - 0 tools -~0 tok | modely bg x

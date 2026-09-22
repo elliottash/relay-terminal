@@ -530,6 +530,61 @@ QJsonObject workerRow(const QString &id, const QString &preview, const QString &
                        {QStringLiteral("forced"), false}};
 }
 
+// Card #R3YN: status is chrome immediately above the input, never part of the editable frame.
+// `Pane` is both implementations, so one hierarchy assertion covers the terminal and every
+// shell-less helper console; the live checks below prove both constructors take that path.
+void relayingStatusSitsOutsideEveryPromptFrame()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    auto *editor = console.findChild<QPlainTextEdit *>(QStringLiteral("composerEditor"));
+    auto *lineWidget = console.findChild<QWidget *>(QStringLiteral("paneBusyLine"));
+    CHECK(editor != nullptr);
+    CHECK(lineWidget != nullptr);
+    if (!editor || !lineWidget) return;
+    auto *composer = qobject_cast<QFrame *>(editor->parentWidget());
+    CHECK(composer != nullptr);
+    CHECK(lineWidget->parentWidget() == &console);
+    CHECK(!composer->isAncestorOf(lineWidget));
+    CHECK(console.layout()->indexOf(lineWidget) < console.layout()->indexOf(composer));
+
+    const QString normalPlaceholder = editor->placeholderText();
+    console.deliverWorkerEvent(QJsonObject{{"event", "subagent_started"}, {"id", "a1"},
+                                           {"type", "explore"}, {"description", "inspect the layout"},
+                                           {"background", true}});
+    CHECK(!lineWidget->isHidden());
+    CHECK(lineWidget->accessibleName().startsWith(QStringLiteral("Relaying · waiting for 1 subagent")));
+    CHECK_EQ(lineWidget->property("statusState").toString(), QStringLiteral("idle"));
+    CHECK_EQ(editor->placeholderText(), normalPlaceholder);   // system status never occupies input
+    if (QApplication::cursorFlashTime() > 0) {
+        auto *pulse = lineWidget->findChild<QTimer *>(QStringLiteral("paneBusyPulse"));
+        CHECK(pulse != nullptr);
+        CHECK(pulse && pulse->isActive());
+    }
+
+    Pane terminal(home->path(), home->path(), true);
+    auto *terminalEditor = terminal.findChild<QPlainTextEdit *>(QStringLiteral("composerEditor"));
+    auto *terminalLine = terminal.findChild<QWidget *>(QStringLiteral("paneBusyLine"));
+    CHECK(terminalEditor != nullptr);
+    CHECK(terminalLine != nullptr);
+    if (!terminalEditor || !terminalLine) return;
+    auto *terminalComposer = qobject_cast<QFrame *>(terminalEditor->parentWidget());
+    CHECK(terminalComposer != nullptr);
+    CHECK(terminalLine->parentWidget() == &terminal);
+    CHECK(!terminalComposer->isAncestorOf(terminalLine));
+
+    // Outside the frame means it no longer inherits native-mode hiding. The explicit suppression
+    // keeps the status from becoming an orphan when the whole prompt surface is handed away.
+    auto *busyLine = static_cast<PaneBusyLine *>(terminalLine);
+    busyLine->setBusy(relay::panestatus::State::Running, QStringLiteral("Relaying · sleep…"), QString());
+    CHECK(!busyLine->isHidden());
+    terminal.toggleNative();
+    CHECK(busyLine->isHidden());
+    terminal.toggleNative();
+    CHECK(!busyLine->isHidden());
+}
+
 // Shift-click is a file action, not ordinary link routing: it keeps the real local path and
 // hands it to the desktop opener before a context or Relay preview can consume it (#SFC1).
 void shiftClickOnALocalPathOpensItExternally()
@@ -799,6 +854,7 @@ int main(int argc, char **argv)
     cases::theTranscriptSurfaceIsStillThere();
     cases::theRoutingIsLockedToTheAgent();
     cases::aTerminalPaneIsUnchanged();
+    cases::relayingStatusSitsOutsideEveryPromptFrame();
     cases::theActionRowIsBuiltFromTheContext();
     cases::aChangedContextRebuildsTheRow();
     cases::anActionThatRebuildsItsOwnRowIsSafe();
@@ -819,6 +875,6 @@ int main(int argc, char **argv)
     cases::aTerminalPanesOwnQueueResumesOnEnterToo();
 
     if (failures == 0)
-    std::fprintf(stdout, "consolemode: 19 cases, all passed\n");
+    std::fprintf(stdout, "consolemode: 20 cases, all passed\n");
     return failures == 0 ? 0 : 1;
 }

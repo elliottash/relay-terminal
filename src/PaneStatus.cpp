@@ -150,19 +150,6 @@ QString waitingLine(const Waiting &waiting, int phase) {
     return QStringLiteral("waiting for %1 %2").arg(subject, waitingDots(phase));
 }
 
-QStringList waitingLines(const Waiting &waiting, int phase) {
-    const QString subject = waitingSubject(waiting);
-    if (subject.isEmpty()) return {};
-    const QString dots = waitingDots(phase);
-    // The narrowest rung still has to mean something: with one kind the count alone does ("2 . . ."
-    // beside a turn clock that spells it out), but "2, 1 . . ." would not, so that says "waiting".
-    const QString shortest = subject.contains(QLatin1Char(','))
-                                 ? QStringLiteral("waiting %1").arg(dots)
-                                 : QStringLiteral("%1 %2").arg(subject.section(QLatin1Char(' '), 0, 0), dots);
-    return {QStringLiteral("waiting for %1 %2").arg(subject, dots),
-            QStringLiteral("%1 %2").arg(subject, dots), shortest};
-}
-
 bool isRemoteProgram(const QString &programName) {
     static const QSet<QString> names{QStringLiteral("ssh"), QStringLiteral("mosh"), QStringLiteral("mosh-client"),
                                      QStringLiteral("telnet"), QStringLiteral("autossh")};

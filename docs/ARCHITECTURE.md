@@ -361,17 +361,19 @@ never an opacity, so the ink keeps its contrast). The glyph is the whole of it i
 state's word used to sit beside the title ("Command running", "Relaying…", "Subagents working")
 and **card #0STR took it away** (owner, 2026-09-19: "clean up the headers of tabs and panes. they
 are busy") — the glyph still blinks, `stateLabel` is still what its tooltip says, and the sentence
-is on the busy line above the prompt box, where there is room for the action as well as the
-state. A
+is on the busy line immediately above and outside the prompt's rounded frame, where there is room
+for the action as well as the state. A
 tab with anything live carries a blinking corner dot
 in that colour (`liveMarker`: the agent's violet whenever agent work — a turn or subagents — is
 live, else the terminal's blue) even when its icon is showing more urgent news, so "is something
 running over there?" never waits for the icon's turn. The dot yields its corner to the ssh mark
-and takes the one across. The sentence sits above the prompt box (`Pane::PaneBusyLine`, card
-#4E13): "Relaying · <action>… · N s · Esc stops" in the agent's violet while a turn runs — the
+and takes the one across. The sentence sits above the prompt box (`Pane::PaneBusyLine`, cards
+#4E13 and #R3YN), as a sibling rather than a child of the composer frame: "Relaying · <action>… · N s · Esc stops" in the agent's violet while a turn runs — the
 action a gerund of the live tool call, or what the pane waits for — and "Relaying · <program>…" in the
-terminal's blue while a program owns the terminal. The desktop's reduce-motion signal — a cursor
-flash time of 0, the same one that stills the caret and the waiting dots — draws every live mark at
+terminal's blue while a program owns the terminal. The line's circled Relay mark uses the same
+synchronized scale pulse as the pane header in every visible state; header and tab behavior is
+unchanged. The desktop's reduce-motion signal — a cursor flash time of 0, the same one that stills
+the caret and the waiting dots — draws every live mark at
 rest, and the news states (done, failed, needs you) never move: they pull the eye by being news.
 Every live mark reads its step off the wall clock (`kStepMs`, 600 ms) rather than counting one per
 pane, and each pane's timer is re-armed to the next boundary, so panes that went live seconds apart
@@ -731,20 +733,21 @@ stops" in the agent's violet, left-aligned with the prompt text and in the norma
 (`Pane::PaneBusyLine`, cards #4E13, #HQ2B; the spaced dot after the verb is #RR0G, 2026-09-19 cdot) — the
 action a gerund of the live tool call ("thinking", "reading src/Pane.h") — and a program that owns
 the terminal gets the same line in the terminal's blue, "Relaying · <program>…". **Waiting on
-background work** (cards #V7QD and #KP4M): when the pane's main ("orchestrator") agent is blocked
-on the subagents or the jobs it started, the prompt box's own placeholder says so — "waiting for
-2 subagents, 1 job . . .", the dots growing every 600 ms — and the busy line says "Relaying –
-waiting for 2 subagents… · 48 s · Esc stops" instead of "thinking". `relay::panestatus::waitingLines`
+background work** (cards #V7QD, #KP4M and #R3YN): when the pane's main ("orchestrator") agent is
+blocked on the subagents or jobs it started, the same line says, in neutral white/gray rather than
+agent violet or terminal cyan, "Relaying · waiting for 2 subagents, 1 job . . . · 48 s · Esc
+stops" instead of "thinking". The prompt box keeps its ordinary context placeholder and remains
+available for a steer. `relay::panestatus::waitingLine`
 (`src/PaneStatus.{h,cpp}`, beside the pane states, because it belongs to neither model) holds the
 rule: a kind counts when some of it is live *and*
 either the main agent is explicitly blocked on it — `agent_wait`, a live foreground subagent, or a
 `command_output` call, which waits on a job — or no turn of its own is running. Only the kinds
 actually waited on are named, so a turn blocked on `agent_wait` while a background job also runs
 says "waiting for 2 subagents". A turn that started background work and carried on working says
-nothing, or the line would be up for most of every turn. `Pane::refreshBackgroundWait` draws it
-through `RichEditor::setPlaceholders`, so Qt stops drawing it the instant a steer is typed and the
-narrow-pane rungs ("2 subagents, 1 job . . .", then "waiting . . .") come for free. The timer only
-runs while the line is on screen, and a desktop cursor flash time of 0 ("do not blink", the same
+nothing, or the line would be up for most of every turn. `Pane::refreshBackgroundWait` advances
+the line's padded dots without touching `RichEditor`; middle elision keeps a narrow pane from
+growing for the status. The timer only runs while the line is on screen, and a desktop cursor
+flash time of 0 ("do not blink", the same
 signal `RichEditor::setCaretColor` takes the caret's blink from) draws the dots in full and starts
 no timer at all. `nextTime(shortcut, what)` builds the
 text from the live Keymap, so rebinding changes the hint and unbound actions get none. Current

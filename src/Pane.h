@@ -278,7 +278,7 @@ inline Reading read(const QString &text, const QStringList &labels, bool multipl
 
 }  // namespace relay::ask
 
-// The "Relaying · …" line above the prompt box (cards #4E13, #HQ2B, #RR0G): one verb, the colour
+// The "Relaying · …" line above the prompt box (cards #4E13, #HQ2B, #RR0G, #R3YN): one verb, the colour
 // saying whose work it is — the agent's violet while a turn runs or subagents it started still
 // work, the terminal's blue while a program runs, amber when the turn is blocked on your answer
 // (#MQ9C). A spaced middle dot stands between the verb and what is being done (owner, 2026-09-19:
@@ -286,7 +286,8 @@ inline Reading read(const QString &text, const QStringList &labels, bool multipl
 // step 1/256 · Esc stops", "Relaying · waiting for 1 subagent…", "Relaying · sleep…".
 // Left-aligned with the prompt text and in the normal weight, the caption Warp and Claude carry
 // above their composers (owner, 2026-09-19: "should be at the left and above the prompt box,
-// more like how warp . claude does it. and not in bold."): the row belongs to the box under it,
+// more like how warp . claude does it. and not in bold."): the row sits immediately before the
+// box rather than inside its rounded frame (#R3YN),
 // so it starts where that box's own text starts, and it speaks quietly while the prompt is the
 // loud thing. Painted rather than a QLabel for the same reason the header's chips are
 // (src/PaneChrome.h): the colour follows the state, and the theme can change under
@@ -330,14 +331,26 @@ public:
         m_state = state; m_text = text;
         setToolTip(tip);
         setAccessibleName(text);
-        setVisible(true);
+        setProperty("statusState", relay::panestatus::stateName(state));
+        setVisible(!m_suppressed);
+        armPulse();
         update();
+    }
+    // The row is a sibling of the composer since #R3YN, so native mode must hide it explicitly.
+    // Keep the text while suppressed: returning to composer mode can restore the current status
+    // without waiting for the next worker or shell-poll event.
+    void setSuppressed(bool suppressed) {
+        m_suppressed = suppressed;
+        setVisible(!suppressed && !m_text.isEmpty());
+        armPulse();
     }
     void clearBusy() {
         if (m_text.isEmpty() && isHidden()) return;
         m_text.clear();
         setToolTip(QString());
         setAccessibleName(QString());
+        setProperty("statusState", QVariant());
+        if (m_pulse) m_pulse->stop();
         hide();
     }
     QSize sizeHint() const override {
@@ -358,9 +371,16 @@ protected:
         // (panestatus::stateText), so the line reads in every shipped theme. The button is in the
         // same ink, so the two read as one row and the mark says whose work it is (#4X53).
         const QColor ink = relay::panestatus::stateText(m_state, relay::theme::Background, t);
-        if (hasButton())
-            relay::chrome::paintCircledRelayMark(p, buttonRect(), ink, relay::theme::Background,
+        if (hasButton()) {
+            QRectF mark = buttonRect();
+            const qreal scale = QApplication::cursorFlashTime() > 0
+                ? relay::panestatus::pulseScale(relay::panestatus::pulsePhaseNow()) : 1.0;
+            const QPointF center = mark.center();
+            mark.setSize(mark.size() * scale);
+            mark.moveCenter(center);
+            relay::chrome::paintCircledRelayMark(p, mark, ink, relay::theme::Background,
                                                  m_hover, m_pressed);
+        }
         p.setPen(ink);
         const int left = textLeft();
         p.drawText(rect().adjusted(left, 0, -2, 0), Qt::AlignLeft | Qt::AlignVCenter,
@@ -417,6 +437,21 @@ protected:
         return QWidget::event(happening);
     }
 private:
+    void armPulse() {
+        if (m_suppressed || m_text.isEmpty() || QApplication::cursorFlashTime() <= 0) {
+            if (m_pulse) m_pulse->stop();
+            return;
+        }
+        if (!m_pulse) {
+            m_pulse = new QTimer(this);
+            m_pulse->setObjectName(QStringLiteral("paneBusyPulse"));
+            m_pulse->setSingleShot(true);
+            connect(m_pulse, &QTimer::timeout, this, [this] { update(); armPulse(); });
+        }
+        // Polling paths can call setBusy more often than a pulse step. Do not move the next
+        // boundary every time they do, or a steadily updated shell/agent line would never pulse.
+        if (!m_pulse->isActive()) m_pulse->start(relay::panestatus::msToNextPulseStep());
+    }
     bool hasButton() const { return bool(onOpenActivity); }
     bool overButton(const QMouseEvent *event) const {
         return hasButton() && buttonRect().contains(QPointF(event->pos()));
@@ -434,11 +469,19 @@ private:
     // in, the document's margin moves the text in from that (measured, not assumed: 4 + 4 px with
     // the shipped theme). Zero with no editor set, so a bare PaneBusyLine still paints.
     int leftInset() const {
-        return m_prompt ? m_prompt->viewport()->x() + int(m_prompt->document()->documentMargin()) : 0;
+        // Since #R3YN the row and editor are siblings under different parents. Mapping the
+        // viewport into this widget keeps the mark on the prompt text's actual global edge,
+        // including the composer's styled contents margin, rather than assuming its value.
+        return m_prompt ? m_prompt->viewport()->mapToGlobal(QPoint(0, 0)).x()
+                              - mapToGlobal(QPoint(0, 0)).x()
+                              + int(m_prompt->document()->documentMargin())
+                        : 0;
     }
     relay::panestatus::State m_state = relay::panestatus::State::Idle;
     QString m_text;
     const QPlainTextEdit *m_prompt = nullptr;
+    QTimer *m_pulse = nullptr;
+    bool m_suppressed = false;
     bool m_hover = false, m_pressed = false;
 };
 
@@ -5269,8 +5312,8 @@ private:
         cornerColumn->addLayout(corner);
         cornerColumn->addStretch(1);
         inputRow->addLayout(cornerColumn);
-        // The "Relaying · …" line (cards #4E13, #HQ2B, #RR0G), the first row of the composer frame
-        // so native mode hides it with the prompt box: agent work in the agent's violet, saying what
+        // The "Relaying · …" line (cards #4E13, #HQ2B, #RR0G, #R3YN): agent work in the agent's
+        // violet, saying what
         // it is doing right now ("Relaying · reading src/Pane.h… · 12 s · Esc stops"), a terminal
         // program in the terminal's blue ("Relaying · sleep…"), left-aligned with the prompt text
         // and in the normal weight above the prompt. The turn clock lived in the strip under the box until
@@ -5287,13 +5330,12 @@ private:
         m_actionRowLayout->setSpacing(6);
         m_actionRow->hide();
         composerLayout->addWidget(m_actionRow);
-        m_busyLine = new PaneBusyLine(composer);
+        m_busyLine = new PaneBusyLine(this);
         m_busyLine->setPromptEditor(m_editor);   // the row's left edge is the prompt text's (#HQ2B)
         // The relay mark at its left opens this pane's Activity pane (#4X53) — the same call the
         // keymap action and the palette make, so a second click brings the open one forward.
         // `fromMouse` is what teaches the key the first time (the `internals.open` hint).
         m_busyLine->onOpenActivity = [this] { openInternalsPane(QString(), true); };
-        composerLayout->addWidget(m_busyLine);
         composerLayout->addLayout(inputRow);
         // Password prompts (checkPasswordPrompt): the prompt box becomes a masked field whose
         // line goes to the running program. It is a separate widget so the password can never
@@ -5405,6 +5447,9 @@ private:
         m_guestBar->setFocusPolicy(Qt::StrongFocus);
         m_guestBar->installEventFilter(this);
         m_guestBar->hide();
+        // Status is chrome around the input, not input (#R3YN): it sits immediately above the
+        // rounded composer frame, shared by terminal panes and shell-less helper consoles alike.
+        layout->addWidget(m_busyLine);
         layout->addWidget(composer);
         setupSubagentsUi(layout);   // subagents UI: running-agents list beneath the composer
         setupJobsUi(layout);        // commands the agent left running, beneath that
@@ -10101,13 +10146,13 @@ private:
         m_subagents.onStatus = [this](const QString &text) { status(text); };
     }
 
-    // ----- "waiting for 2 subagents, 1 job . . ." in the prompt box (cards #V7QD, #KP4M) ----------
+    // ----- "Relaying · waiting for 2 subagents, 1 job . . ." above the box (#V7QD, #KP4M, #R3YN) --
     // Owner, 2026-09-18: "if an orchestrator terminal is waiting on subagents, play a … waiting for
-    // subagents . . . blinking text in the prompt", and then the same for background jobs. It is the
-    // prompt box's own placeholder, not a new widget: a placeholder is read as part of the prompt,
-    // and Qt stops drawing it the moment a character is typed, so a steer is never obstructed. The
-    // dots grow on a timer that only runs while the line is actually on screen.
-    // relay::panestatus::waitingLines decides *whether* it shows; everything here is about drawing it.
+    // subagents . . . blinking text in the prompt", and then the same for background jobs. #R3YN
+    // moves system state out of editable input: the neutral busy line owns it now, while the box
+    // keeps its normal context placeholder and remains available for a steer. The dots grow on a
+    // timer only while something is actually waited on. An ask is different: its answer choices
+    // still belong in the box, and the line above it is amber.
     relay::panestatus::Waiting waitingFacts() const {
         relay::panestatus::Waiting w;
         w.subagents = m_subagents.liveCount();
@@ -10120,37 +10165,34 @@ private:
 
     void refreshBackgroundWait() {
         if (!m_editor) return;
-        // An AI ghost suggestion owns the placeholder while it is up (updateGhost). Leave it be;
-        // updateGhost calls this again when it hands the placeholder back.
-        if (m_editor->placeholderText().isEmpty() && !m_savedPlaceholder.isEmpty()) {
-            if (m_waitDots) m_waitDots->stop();
-            return;
-        }
+        // An AI ghost suggestion owns the placeholder while it is up (updateGhost). Leave that
+        // part alone, but keep refreshing the independent status line above the composer.
+        const bool ghostOwnsPlaceholder = m_editor->placeholderText().isEmpty()
+                                          && !m_savedPlaceholder.isEmpty();
         // The desktop's "do not blink" (a cursor flash time of 0) is this app's reduce-motion
-        // signal — RichEditor::setCaretColor already takes the caret's blink from it.
+        // signal — RichEditor::setCaretColor and PaneBusyLine's mark take the same signal.
         const bool animate = QApplication::cursorFlashTime() > 0;
-        // An ask owns the prompt box while it is up: what the box invites you to type is
-        // the answer, not "waiting for 2 subagents" (#MQ9C).
-        const QStringList lines = m_ask.open()
-            ? questionPlaceholders()
-            : relay::panestatus::waitingLines(waitingFacts(), animate ? m_waitPhase : -1);
-        if (lines.isEmpty()) {
-            if (m_waitDots) m_waitDots->stop();
-            m_waitPhase = 0;
-            if (m_waitShown) {   // only ever put back a placeholder this took away
-                m_waitShown = false;
-                m_editor->setPlaceholders({});
-                m_editor->setAccessibleDescription(QString());
+        // Only an ask owns the prompt placeholder now. Background status never does (#R3YN).
+        if (!ghostOwnsPlaceholder) {
+            const QStringList lines = m_ask.open() ? questionPlaceholders() : QStringList{};
+            if (lines.isEmpty()) {
+                if (m_askPlaceholderShown) {   // only ever put back a placeholder this took away
+                    m_askPlaceholderShown = false;
+                    m_editor->setPlaceholders({});
+                    m_editor->setAccessibleDescription(QString());
+                }
+            } else {
+                m_askPlaceholderShown = true;
+                m_editor->setPlaceholders(lines);
+                m_editor->setAccessibleDescription(lines.first().trimmed());
             }
-            return;
         }
-        m_waitShown = true;
-        m_editor->setPlaceholders(lines);
-        m_editor->setAccessibleDescription(lines.first().trimmed());
-        // Nothing is drawn over typed text, so the timer has nothing to animate: stop it and let
-        // the next keystroke (updateGhost) start it again once the box is empty.
-        if (!animate || m_ask.open() || !m_editor->toPlainText().isEmpty()) {
+
+        const bool waiting = !m_ask.open() && relay::panestatus::isWaiting(waitingFacts());
+        if (!animate || !waiting) {
             if (m_waitDots) m_waitDots->stop();
+            if (!waiting) m_waitPhase = 0;
+            refreshBusyLine();
             return;
         }
         if (!m_waitDots) {
@@ -10159,6 +10201,7 @@ private:
             connect(m_waitDots, &QTimer::timeout, this, [this] { ++m_waitPhase; refreshBackgroundWait(); });
         }
         if (!m_waitDots->isActive()) m_waitDots->start();
+        refreshBusyLine();
     }
 
     // The model chip on a subagent row: pick a model, then (with more than one subagent listed)
@@ -12692,8 +12735,9 @@ private:
         if (!m_liveCall.isEmpty() && !m_liveLabel.running.isEmpty()) what = m_liveLabel.running;
         // Blocked on the background work it started, the line says what it is blocked on rather
         // than "thinking" (cards #V7QD, #KP4M).
-        const QString subject = relay::panestatus::waitingSubject(waitingFacts());
-        if (!subject.isEmpty()) what = QStringLiteral("waiting for ") + subject;
+        const bool animateWait = QApplication::cursorFlashTime() > 0;
+        const QString waiting = relay::panestatus::waitingLine(waitingFacts(), animateWait ? m_waitPhase : -1).trimmed();
+        if (!waiting.isEmpty()) what = waiting;
         // Blocked on an ask is the plainest case of all (#MQ9C): the turn is not thinking,
         // it is waiting for the person reading it, and saying "thinking" would be a lie in the one
         // place the user is looking while they decide.
@@ -12702,14 +12746,17 @@ private:
         // While an ask is up Esc skips the question instead (#MQ9C, owner 2026-09-19), so the line
         // offers the key that is actually live and the tooltip says where Stop went.
         const QString keyHint = asked ? QStringLiteral("Esc skips it") : QStringLiteral("%1 stops").arg(stopWord);
-        const QString label = QStringLiteral("Relaying · %1… · %2 s%3 · %4")
-                                  .arg(what)
+        const QString action = waiting.isEmpty() || asked ? what + QStringLiteral("…") : what;
+        const QString label = QStringLiteral("Relaying · %1 · %2 s%3 · %4")
+                                  .arg(action)
                                   .arg(seconds)
                                   .arg(m_turnStep.isEmpty() ? QString() : QStringLiteral(" · ") + m_turnStep)
                                   .arg(keyHint);
         m_turnClockText = label;   // pane_state's clock, for a paired phone (relay-terminal-71)
         if (m_busyLine)
-            m_busyLine->setBusy(asked ? relay::panestatus::State::NeedsYou : relay::panestatus::State::Working,
+            m_busyLine->setBusy(asked ? relay::panestatus::State::NeedsYou
+                                      : waiting.isEmpty() ? relay::panestatus::State::Working
+                                                          : relay::panestatus::State::Idle,
                                 label,
                                 asked
                                     ? QStringLiteral("The agent asked you something and its turn is blocked on the answer "
@@ -12720,19 +12767,21 @@ private:
     }
 
     // The "Relaying…" line when no turn of this pane's own is running (card #4E13): subagents it
-    // started still working (violet, no clock — nothing of this pane's is being timed), or a
+    // started still working (neutral, no clock — nothing of this pane's is being timed), or a
     // program in the terminal (blue, the program's name). Hidden when the pane is idle, so an
     // idle pane looks exactly as it did before. The turn's own line is the turn clock's.
     void refreshBusyLine() {
         if (!m_busyLine) return;
         if (m_agentBusy) { tickTurnClock(); return; }
         const relay::panestatus::Waiting wait = waitingFacts();
-        if (wait.subagents > 0) {
+        if (relay::panestatus::isWaiting(wait)) {
             const QString subject = relay::panestatus::waitingSubject(wait);
-            m_busyLine->setBusy(relay::panestatus::State::Subagents,
-                                QStringLiteral("Relaying · waiting for %1…").arg(subject),
-                                QStringLiteral("%1 started by this pane's agent still running. The agents list under "
-                                                "the composer shows them; the header's relay mark blinks until they end.")
+            const bool animate = QApplication::cursorFlashTime() > 0;
+            const QString waiting = relay::panestatus::waitingLine(wait, animate ? m_waitPhase : -1).trimmed();
+            m_busyLine->setBusy(relay::panestatus::State::Idle,
+                                QStringLiteral("Relaying · %1").arg(waiting),
+                                QStringLiteral("%1 started by this pane's agent still running. The work lists under "
+                                                "the composer show it; the header's relay mark blinks until it ends.")
                                     .arg(subject.isEmpty() ? QStringLiteral("Background work") : subject));
             return;
         }
@@ -15505,8 +15554,8 @@ private:
         if (!aiGhost && !remainder.isEmpty())
             hint(QStringLiteral("history.suggestion.accept"), relay::ShortcutHints::nextTime(
                 QKeySequence(Qt::Key_Right).toString(QKeySequence::NativeText), QStringLiteral("accept suggestion")));
-        // Typing, clearing the box and the ghost coming and going all change whether the
-        // "waiting for N subagents . . ." placeholder is on screen (card #V7QD).
+        // Typing, clearing the box and the ghost coming and going may hand placeholder ownership
+        // back to an ask; background waiting itself stays in the status line (#R3YN).
         refreshBackgroundWait();
     }
 
@@ -17881,7 +17930,10 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
         changed();
         m_editor->setReadOnly(enabled);
         // Human control hides the prompt box entirely; the terminal gets the space and the keys.
-        if (m_composer) keepPaneSizes([this, enabled] { m_composer->setVisible(!enabled); });
+        if (m_composer) keepPaneSizes([this, enabled] {
+            if (m_busyLine) m_busyLine->setSuppressed(enabled);
+            m_composer->setVisible(!enabled);
+        });
         placeSubagentsPanel();   // subagents UI: hidden with the composer
         if (!enabled) m_hideReason = HideReason::None;
         if (enabled) hideAtPopup();
@@ -18519,14 +18571,14 @@ private:
     QElapsedTimer m_turnElapsed;
     QString m_turnStep;
     QString m_turnClockText;              // the turn's line, for pane_state's clock (relay-terminal-71)
-    PaneBusyLine *m_busyLine = nullptr;   // the "Relaying · …" line above the prompt (#4E13, #HQ2B, #RR0G)
-    // "waiting for 2 subagents, 1 job . . ." in the prompt box (cards #V7QD, #KP4M): the call_ids
+    PaneBusyLine *m_busyLine = nullptr;   // the "Relaying · …" line above the prompt (#4E13, #HQ2B, #RR0G, #R3YN)
+    // "Relaying · waiting for 2 subagents, 1 job . . ." above the prompt (#V7QD, #KP4M, #R3YN): the call_ids
     // of the main agent's running agent_wait and command_output (empty when there is none), the dot
     // phase, and the timer that grows them.
     QString m_waitCall, m_jobWaitCall;
     QTimer *m_waitDots = nullptr;
     int m_waitPhase = 0;
-    bool m_waitShown = false;             // this pane, not something else, owns the placeholder now
+    bool m_askPlaceholderShown = false;   // an ask, not background work, owns the placeholder now
     QList<PendingToast> m_toastQueue;     // toasts waiting behind the one up
     QString m_toastHintId;                // the hint the toast up is, if it is one
     QElapsedTimer m_toastShown;

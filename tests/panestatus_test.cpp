@@ -225,8 +225,8 @@ private Q_SLOTS:
         }
     }
 
-    // Cards #V7QD and #KP4M: "waiting for 2 subagents, 1 job . . ." in the prompt box. The rule,
-    // the wording of the mixed case, and the padding that keeps the line still while it animates.
+    // Cards #V7QD, #KP4M and #R3YN: "waiting for 2 subagents, 1 job . . ." in the neutral status
+    // above the prompt. The rule, mixed wording, and padding that keeps it still while it animates.
     void whatThePaneIsWaitingFor() {
         Waiting w;
         QVERIFY(!isWaiting(w));                       // nothing running, nothing to say
@@ -260,19 +260,6 @@ private Q_SLOTS:
         QCOMPARE(waitingLine(one, 4), phases.at(0));
         QCOMPARE(waitingLine(one, -1), phases.at(3));
 
-        // The narrow-pane rungs, longest first. One kind keeps its count; the mixed line cannot be
-        // cut to "2, 4", so its last rung says "waiting".
-        Waiting jobs; jobs.jobs = 2; jobs.onJobs = true; jobs.mainBusy = true;
-        QCOMPARE(waitingLines(jobs, 3), (QStringList{QStringLiteral("waiting for 2 jobs . . ."),
-                                                     QStringLiteral("2 jobs . . ."), QStringLiteral("2 . . .")}));
-        Waiting subs; subs.subagents = 3; subs.onSubagents = true; subs.mainBusy = true;
-        QCOMPARE(waitingLines(subs, 3), (QStringList{QStringLiteral("waiting for 3 subagents . . ."),
-                                                     QStringLiteral("3 subagents . . ."), QStringLiteral("3 . . .")}));
-        Waiting both; both.subagents = 2; both.jobs = 1;
-        QCOMPARE(waitingLines(both, 3), (QStringList{QStringLiteral("waiting for 2 subagents, 1 job . . ."),
-                                                     QStringLiteral("2 subagents, 1 job . . ."),
-                                                     QStringLiteral("waiting . . .")}));
-        QVERIFY(waitingLines(Waiting{}, 3).isEmpty());
         QVERIFY(waitingSubject(Waiting{}).isEmpty());
     }
 
