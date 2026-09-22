@@ -473,6 +473,94 @@ section did not say:
   first terminal pane of its tab; a `SettingsWatch` listener re-reads its target, because a first
   run has no catalog at all until the worker answers `presets`.
 
+### 5.9 The jobs tab: what each job runs on (owner, 2026-09-21) — **built**
+
+> "for the per-job models, i think that should be reviewed and improved and made a 4th tab. take a
+> careful look at it to see how to improve it for that."
+
+**The review.** The surface was `relay::RolesDialog`, a modal opened from Options › Models' last
+row, "per-job models (advanced)", and from the palette. Five things were wrong with it:
+
+1. **It is a modal nobody finds**, and it is the only surface in Relay that answers "where does a
+   summary actually go" — two clicks down, behind the word "advanced".
+2. **Fifteen rows in protocol order, in Title Case.** `roles.py ACTIONS` order is main, plan mode,
+   high, subagents, terminal use, flash, local, suggestions, summaries, helpers, chores, audit,
+   loop check, vision, routing — neither the tier order nor any order a person has in their head —
+   and the labels are Title Case sentences ("Next-command and next-prompt suggestions", "Chores:
+   duplicate checks, labels, titles, note scans"), against rule 1 of this very card.
+3. **What a job runs on is a grey subtitle.** `buildActionRow` printed "flash · glm-5.3-flash —
+   condensing the conversation" under the row's name, only once `model_roles` had arrived, and
+   never said the level. It is the most useful thing on the surface and the least visible.
+4. **The override duplicates the tier lists.** A row's first box was a tier picker (default / high
+   / main / flash / lite / local / "its own provider…") — which re-says what the priorities tab
+   owns — and picking a *model* then took three more boxes that appeared and disappeared. The
+   owner's actual ask ("i might want to pick kimi k3 for main agents and glm 5.3 flash for
+   subagents") is one pick: a model.
+5. **Nothing says what may not be overridden.** A background role (`roles.py BACKGROUND_ROLES`)
+   silently skips a guest harness and falls through to Relay Free; the dialog offered
+   `guest:claude` in its provider box all the same and then displayed a model the job would never
+   use.
+
+**The tab.** `relay::JobsTab` (`src/JobsTab.{h,cpp}`, library `relay-jobstab`,
+`tests/jobstab_test.cpp`), the models pane's fourth tab, **Alt+4**. One row per job, **grouped by
+the tier it follows**, in a lower-case table of its own — main (agent turns, subagents, the helper
+agent), high (plan mode, /high panes), flash (terminal driving, /flash panes, summaries,
+suggestions), lite (chores, the request audit, the loop check), local (/local panes), and the two
+that follow no tier: images and command routing. Four columns:
+
+    job              what it does                          runs on              override
+    ─ lite ────────────────────────────────────────────    relay-lite · low
+      chores         small structured judgements…          relay-lite · low     follows lite
+      request audit  flags an ask that may be unaddressed  relay-lite · low     kimi-k3 · low  ×
+
+- **runs on is the point.** It is `model_roles.roles[<role>]` (protocol 13) — the worker's own
+  answer — resolved to a catalog *name* and its level, refreshed on every report. Nothing in Relay
+  showed a person where a summary went before this column. A job the worker has not resolved yet
+  reads "—" rather than a guess, and that is a real state: a pane whose rank 1 is a guest harness
+  has not configured anything until its first turn.
+- **The group heading carries the tier's own resolution** (`model_roles.tiers[<tier>]`). That is
+  where **lite** is visible: the owner took the lite section off the priorities tab
+  ("remove the lite section"), so there is no lite list to edit anywhere. Lite is Relay Free unless
+  a provider's lite model was filled in by the defaults, the heading says which, and a per-job
+  override is how one lite job moves. That is the answer to "does lite still need an editor": no.
+- **An override is one pick: a model.** Not a tier — which tier a job follows is a property of the
+  job, and moving the tier is what the priorities lists are for. Enter on a row drops
+  `relay::FilterPopup`, the same filter list the model box uses, over the row's own override cell:
+  "follows <tier>" first, then `models::grouped` one row per model name with the provider in the
+  via column. A model with levels of its own then drops its level list, in the model's own words.
+  Delete, or the row's ×, puts the job back on its tier.
+- **A background job may not be overridden onto a guest harness.** `BACKGROUND_ROLES` are side
+  calls into a conversation running somewhere else and a harness is a whole agent with its own
+  transcript, so the worker skips a guest entry for them. The list does not offer one,
+  `rolestore::setOverride` refuses one written any other way, and the row's tooltip says why and
+  says that such a job falls through to Relay Free rather than to the pane's own model. The rule is
+  derived in the GUI from the same fact it is derived from in the worker — the flash and lite
+  tiers, less `flash` itself — and `tests/test_roles.py` pins the two together.
+- **Storage is unchanged**, so nothing migrates: `roles/<role>/{preset,model,effort}`, the keys the
+  modal wrote, now `relay::rolestore` in the tab's own header because `Pane::rolesObject` reads
+  them back. A `roles/<role>/tier` the old dialog could pin is read and shown as "follows <tier>";
+  the × clears it, and nothing writes it any more.
+- **Live.** A write calls `ModelsPane::Target::rolesChanged` → `Pane::rolesChanged()`, the same
+  `set_agent_options {roles, tiers}` a tier-list edit sends; the worker's next `model_roles` fires
+  `Pane::onRolesResolved` → `RelayWindow::refreshModelsPaneFor`, and the column follows. The tab
+  never predicts what a change will resolve to.
+- **Keys.** ↑↓ a job (the group headings are `NoItemFlags`, so they are stepped over — the same
+  ruling the box's class headers got), Enter the override pick, Delete clears, Escape back to the
+  served pane.
+
+**The old dialog is retired.** Options › Models' row is "per-job models" with a `jobs…` button and
+the palette's item is "per-job models…"; both run `agent.modelRoles`, which opens the models pane
+on this tab. `src/ModelSettings.*` is the keys modal alone. Its per-job tests moved to
+`tests/jobstab_test.cpp`.
+
+**Built and driven on 2026-09-21.** Evidence:
+`docs/qa_evidence/2026-09-21-models-pane-jobs/` — `drive.sh`, `NOTES.md` and eleven Xvfb shots: the
+column filled from a live worker, an override set and the column following it, the override
+cleared, and Options' row landing on the tab. Two faults the run found were fixed before the shots
+were kept: the filter list dropped at the top-left of the tree instead of at the row (it anchors on
+the row's override cell now), and four fixed column widths put "runs on" and the override behind a
+horizontal scrollbar whenever the pane was narrow ("what it does" takes the slack now).
+
 ## 6. Order of work
 
 1. `/swap` and the defaults (Rule 3): bugs the owner is hitting now; no visible redesign.

@@ -766,3 +766,42 @@ is 11/11, with `modelspane` at 16 cases.
 <!-- relay:entry 20260921T232514Z-s1 author=claude-code kind=decision -->
 ### Claude Code · 2026-09-21 23:25
 Owner, 2026-09-21, on the models pane: "tab 1: add horizontal line dividers between providers. check the advanced provider settings. not sure whats helpful or needed. for the per-job models, i think that should be reviewed and improved and made a 4th tab. take a careful look at it to see how to improve it for that. for available, remove the recent section. i would order the sections alphabetically. it seems like i cant disable gemini flash lite. just to say -- this tab is only for terminal agents, so gemini flash lite should be optional. and relay lite shouldnt show up. tab 3: in a pane, i dont want separate tabs for the modes. they should just be in divided sections. remove the lite section." Two agents: `fable-tabs` (tabs 1–3, availability rules, the advanced dialog review) and `fable-jobs` (the per-job models as a fourth tab).
+
+<!-- relay:entry 20260922T001500Z-j1 author=claude-fable kind=progress -->
+### Claude Fable · 2026-09-22 00:15
+**The per-job models, reviewed and rebuilt as the fourth tab (owner, 2026-09-21).** Landed as
+`bbb4920` (the tab, its tests, the fourth tab in the models pane), `a4d2e4a` (the modal retired,
+the wiring, the python guard) and `8fb5250` (two faults the driven run found). Design
+`docs/MODEL-PICKING-DESIGN.md` §5.9; evidence `docs/qa_evidence/2026-09-21-models-pane-jobs/`.
+
+**The review of `RolesDialog`, in five lines.** (1) It is a modal nobody finds, and it is the only
+surface that answers "where does a summary actually go". (2) Fifteen rows in the worker's protocol
+order, in Title Case, against rule 1 of this card. (3) What a job *runs on* was a grey subtitle,
+blank until the worker answered, and it never said the level. (4) The override was a tier box that
+re-says what the priorities lists own, plus three more boxes to reach a model — the owner's ask
+("kimi k3 for main agents and glm 5.3 flash for subagents") is one pick. (5) Nothing said what may
+*not* be overridden: a background role silently skips a guest harness, and the dialog offered one.
+
+**The tab** (`src/JobsTab.{h,cpp}`, `relay-jobstab`, Alt+4) is one row per job grouped by the tier
+it follows — main, high, flash, lite, local, then images and command routing — in lower-case words,
+with four columns: job · what it does · **runs on** · override. "runs on" is the worker's own
+`model_roles` by model name and level, and the group heading carries what the *tier* resolves to,
+which is now the only place **lite** is visible: with the lite section gone from priorities there is
+no lite list to edit, lite is Relay Free unless a provider's lite model was filled in, and a per-job
+override is how one lite job moves. An override is one pick — Enter drops the model list over the
+row's own cell, a model with levels then drops its levels, Delete or the × clears it — stored in the
+retired dialog's own keys (`roles/<role>/{preset,model,effort}`, now `relay::rolestore`, which
+`Pane::rolesObject` still reads), so nothing migrates. A background role is not offered a guest
+harness and `setOverride` refuses one, with the reason in the row's tooltip. A write reaches the
+served pane's worker at once and the column follows its next report (`Pane::onRolesResolved` →
+`RelayWindow::refreshModelsPaneFor`).
+
+**The modal is retired.** Options › Models' row is "per-job models" / `jobs…` and the palette's is
+"per-job models…"; both open the pane on this tab. `src/ModelSettings.*` is the keys modal alone,
+about 620 lines lighter.
+
+**Tests.** `tests/jobstab_test.cpp` 20 cases, `tests/modelspane_test.cpp` 18 (four tabs, Alt+4, an
+override reaching the served pane), `tests/modelsettings_test.cpp` 6, and `tests/test_roles.py` 76
+with a new `BackgroundRoleTests` pinning `BACKGROUND_ROLES` to the set the tab derives. The Xvfb run
+is against a clean `git archive main` export, because another session's uncommitted
+`src/BoardPane.cpp` would not compile in the shared tree.

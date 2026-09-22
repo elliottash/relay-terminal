@@ -1,0 +1,35 @@
+[hints]
+count\model.roles.slow=1
+last\model.roles.slow=1790035598
+last_any=1790035598
+
+[instructions]
+onboarded=true
+
+[isolation]
+enabled=false
+
+[models]
+fallbacks=kimi-code|kimi-for-coding
+provider_order=kimi-code, glm-coding, openrouter, guest:claude, guest:codex
+tier\flash=glm-coding|glm-5.3-flash|low
+tier\high=glm-coding|glm-5.3|max
+tier\lite=relay-free|relay-lite|low
+tier\main=glm-coding|glm-5.3|high, kimi-code|kimi-for-coding|high
+
+[provider]
+base=https://api.z.ai/api/coding/paas/v4
+extra="{\"reasoning_effort\":\"high\",\"thinking\":{\"type\":\"enabled\"}}"
+model=glm-5.3
+preset=glm-coding
+
+[security]
+approvals_ask=@Invalid()
+approvals_chosen=true
+
+[suggestions]
+next_command=false
+next_prompt=false
+
+[url_handler]
+announced=true

@@ -297,15 +297,21 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   titles, labels and duplicate checks, **local** for a model served on this machine. Each entry is a
   model plus a reasoning level; the first one is what the tier runs on, the rest are its fallbacks
   in order, and the first entry of the main list is your default provider.
-  **per-job models (advanced)**, on the same page, opens one row per job — agent turns, plan mode,
-  subagents, terminal use, new panes, suggestions, summaries, Switchboard threads, chores, the
-  request audit — plus the vision model. Each row shows the model it resolves to ("flash ·
-  glm-5.3-flash") and follows its tier until you choose "its own provider…"; then you pick the
-  provider, one of its models from a list, and a reasoning level in that provider's own words
-  (xhigh on OpenAI). Providers are named as companies — Kimi, Z.AI (GLM), OpenRouter, OpenAI
-  (ChatGPT), Anthropic (Claude), Google (Gemini) — and only the ones you hold a key for are offered.
-  Command routing is pinned to `google/gemini-3.5-flash-lite` on purpose: routing has a sub-second
-  budget and that model measures 0.5–0.6 s against 2.3–4.9 s for Gemini 3.8 Flash.
+- **per-job models: the jobs tab (Alt+4).** The models pane's fourth tab is one row per job Relay
+  does, grouped by the tier it follows — main (agent turns, subagents, the helper agent), high
+  (plan mode, `/high` panes), flash (terminal driving, `/flash` panes, summaries, suggestions),
+  lite (chores, the request audit, the loop check), local (`/local` panes), and the two that follow
+  no tier: images and command routing. The column that matters is **runs on**: the model each job
+  is using *right now*, by name and level, straight from the worker — `glm-5.3-flash · low`. The
+  group heading says what the tier itself resolves to, which is where **lite** is visible, since
+  there is no lite list to edit.
+  **Override** is one pick: Enter on a row drops the model list, a model with levels of its own
+  then drops its levels, and Delete (or the row's ×) puts the job back on its tier. A background
+  job — anything Relay does *around* a conversation rather than in it — cannot be put on a guest
+  harness, because a harness is a whole agent of its own; the list does not offer one and the row
+  says why. Command routing stays on `google/gemini-3.5-flash-lite` unless you override it:
+  routing has a sub-second budget and that model measures 0.5–0.6 s against 2.3–4.9 s for
+  Gemini 3.8 Flash.
   A tier whose provider has no key steps down to the next one and says so inline; nothing ever fails
   because a key is missing. Every pane starts on the Main agent unless Options › Agent › "New panes
   use the Flash agent" is on, and then every pane after a window's first one starts on the Flash agent.

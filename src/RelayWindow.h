@@ -2454,8 +2454,8 @@ private:
                                       "Relay's hosted service. A profile names the five lists as a set, so \"AI work\" "
                                       "and \"admin work\" can rank models differently and swap in one switch (/profile). "
                                       "The lists themselves are the models pane: Ctrl+Shift+M, /model "
-                                      "or /models opens it — providers, available models and priorities, "
-                                      "three tabs — and Alt+M drops the pane's model box open.");
+                                      "or /models opens it — providers, available models, priorities and "
+                                      "jobs, four tabs — and Alt+M drops the pane's model box open.");
         Pane *pane = m_active;
         QSettings settings;
         QWidget *page = m_tabs->currentWidget();

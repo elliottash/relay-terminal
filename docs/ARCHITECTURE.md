@@ -2122,26 +2122,37 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   wins and the nearest tier that stays on it is used. So Main on Kimi with Flash on the GLM Coding Plan
   is two picks and no typing, and changing the default provider keeps an override that names a
   different provider.
-- GUI: `src/ModelSettings.*` (the `relay-modelsettings` library, so the dialogs are testable
-  headlessly — `tests/modelsettings_test.cpp`) — `RolesDialog`, titled "per-job models" and per-job
-  only since 2026-09-20. The tiers are not in it: they are the five ordered lists on Options ›
-  Models — main, high, flash, lite, local (`relay::models::curation::tierList`, built in
-  `RelayWindow::modelsSection`) — where an entry is a model plus a reasoning level, rank 1 is what
-  the tier runs on, the rest are its fallbacks, and rank 1 of the main list is the default
-  provider. So the dialog's Default provider box, its recommended-pairs line and its Main / Flash /
-  Lite / Local rows are gone, and what sat behind "Advanced options" is the whole dialog: one row
-  per job showing the model it resolves to, a box for what it follows (`default (<its tier>)`,
-  high, main, flash, lite, local, or "its own provider…"), and — once it has a provider of its own
-  — that provider, a model picked from the provider's catalog (`models` on the preset row; Model…
-  and a typed id only when the provider sent none) and a reasoning level in the provider's own
-  word (`efforts`: xhigh on OpenAI), which since card #MDL1 is also the word stored and sent —
-  there is no second table of labels any more. "its own provider…" pins the
-  job to the provider it already resolves to, so the pick alone changes nothing. The vision row is
-  the same minus the tier. `onProviderChosen` / `onMainModelChosen` / `onMainEffortChosen` are
-  still members only because `Pane::openRolesDialog` assigns them; nothing calls them. Reached
-  from Options › Models ("per-job models (advanced)") and the palette (`agent.modelRoles`). The
-  high tier (owner, 2026-09-20) is plan mode's default: Main at max
-  reasoning unless `tiers.high` names a model. Plus the pane's model
+- GUI: **the jobs tab** — `src/JobsTab.{h,cpp}`, the `relay-jobstab` library, driven headlessly by
+  `tests/jobstab_test.cpp` — is the models pane's fourth tab (Alt+4) and the only surface that says
+  what each job runs on. `RolesDialog` was that surface until 2026-09-21 and is **retired** with
+  card #MDL1; `src/ModelSettings.*` is the keys modal alone now. The review that replaced it is in
+  `docs/MODEL-PICKING-DESIGN.md` §5.9: a modal nobody found, fifteen rows in protocol order in
+  Title Case, the model a job actually runs on as grey subtitle text, an override that was a tier
+  box duplicating the priorities lists, and nothing saying what may not be overridden.
+  The tab is one row per job grouped by the tier it follows — main, high, flash, lite, local, then
+  the two that follow none (images, command routing) — in one lower-case table of this file's own
+  (`roles.py ACTIONS` is Title Case and in protocol order, so it is not the source of these words).
+  Four columns: job · what it does · **runs on** · override. "runs on" is
+  `model_roles.roles[<role>]` (protocol 13) resolved to a catalog name and its level, and the group
+  heading carries `model_roles.tiers[<tier>]` — the only place **lite** is visible, since the
+  priorities tab has no lite section (owner, 2026-09-21). An **override** is one pick, a model:
+  Enter drops `relay::FilterPopup` over the row's override cell with "follows <tier>" first and
+  then `models::grouped` one row per name, a model with levels of its own then drops its levels,
+  and Delete or the row's × clears it. A **background role** (`roles.py BACKGROUND_ROLES`, derived
+  in `rolestore::background` from the same rule and pinned by `tests/test_roles.py`) is not offered
+  a guest harness at all, because the worker would skip it; the row's tooltip says so, and says
+  that such a job falls through to Relay Free rather than to the pane's own model.
+  Storage is `relay::rolestore` in the same header, the keys the modal wrote —
+  `roles/<role>/{preset,model,effort}`, read back by `Pane::rolesObject`; a legacy
+  `roles/<role>/tier` is read, shown as "follows <tier>" and cleared, and nothing writes it.
+  Live: a write calls `ModelsPane::Target::rolesChanged` → `Pane::rolesChanged()`, the same
+  `set_agent_options {roles, tiers}` a tier-list edit sends, and the worker's next `model_roles`
+  fires `Pane::onRolesResolved` → `RelayWindow::refreshModelsPaneFor`, which is what makes the
+  column follow. Reached from Options › Models ("per-job models", button "jobs…") and the palette
+  (`agent.modelRoles`), both of which now open the models pane on this tab; `Ctrl+Shift+M` then
+  Alt+4 is the direct route. Evidence: `docs/qa_evidence/2026-09-21-models-pane-jobs/`.
+  The high tier (owner, 2026-09-20) is plan mode's default: Main at max reasoning unless
+  `tiers.high` names a model. Plus the pane's model
   chip (role and effective model, all roles in its tooltip), "Flash agent for this pane"
   (`agent.flashAgent`, Alt+F), the High agent (`agent.highAgent`, Alt+H, card #MDL1) and the
   `/main`, `/high`, `/flash` and `/local` slash commands — the four modes of the model box, each a
@@ -2247,19 +2258,22 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   pane (or esc as you mentioned)."* `src/ModelsPane.*` (`relay-modelspane`,
   `tests/modelspane_test.cpp`) is a `ToolPane` beside the pane it serves, hosted exactly the way
   Options is (`RelayWindow::createModelsPane`, `ToolPane::Kind::Models`, `paneType` "models"), with
-  three tabs for the first three of the four steps of §5.7: **providers** — Options › Models' own
+  four tabs — the four steps of §5.7 and then the step they were all in aid of: **providers** — Options › Models' own
   section, drawn by `relay::SettingsPane` over that one section (`modelsSection(true)`, which drops
   only the row that would be a door to here) with `setEmbedded(true)` taking its tab row and footer
   away, so a key added here is a key added there — **available**, the picker's flat tab, and
-  **priorities**, the picker's class tabs. The two are **one** `ModelPicker`, put on `all` or on a
-  class by this pane's tab bar. ←/→ walk the class tabs, and these three are **Alt+1/2/3** — not
+  **priorities**, the picker's class tabs, and **jobs**, `relay::JobsTab` — what each job Relay does
+  runs on, and a model of its own for one (design 5.9, above). The middle two are **one**
+  `ModelPicker`, put on `all` or on a
+  class by this pane's tab bar. ←/→ walk the class tabs, and these four are **Alt+1…Alt+4** — not
   Ctrl+Tab, which is the window's Next tab (`tab.next`) and never reaches a pane — as a
   `WidgetWithChildrenShortcut`, because the providers tab has a search line of its own that
   swallows keys an event filter on the pane would never see.
   `ModelsPane::Target` is the served pane and nothing else: its title for the header line
   ("for: …"), its session token (how a re-target is told from a re-read), its catalog, model, level
-  and mode, and callbacks for `use` (`Pane::selectEntry`), `fillFromDefaults`, `listsChanged` and
-  `focusBack`. Every one of those is a `std::function`, so the pane knows nothing of `Pane` or
+  and mode, the worker's last `model_roles` (`roleSummary`, `tierSummary` — the jobs tab's "runs
+  on"), and callbacks for `use` (`Pane::selectEntry`), `fillFromDefaults`, `listsChanged`,
+  `rolesChanged` (a per-job override; `Pane::rolesChanged`) and `focusBack`. Every one of those is a `std::function`, so the pane knows nothing of `Pane` or
   `RelayWindow` and its test drives the whole surface offscreen. `Pane::modelsTarget()` builds one;
   `Pane::openModelPicker(tier, filter)` — still the one door every pick takes — hands it to the
   window through `onOpenModelsPane`. `agent.modelOptions` (Ctrl+Shift+M) is a three-state toggle in
@@ -3535,10 +3549,11 @@ of the platform and of the engine itself.
 | `src/Notifications.*` | notification centre behind the header bell |
 | `src/TurnTranscript.*` | turn details pane (tool calls, transcript) |
 | `src/SkillsDialog.*` | skills list, exclude, refine, import, updates |
-| `src/ModelSettings.*` | the API-keys and model-roles modals (roles: "per-job models (advanced)" on Options › Models) |
+| `src/ModelSettings.*` | the API-keys modal (the per-job models modal retired to `src/JobsTab.*` on 2026-09-21) |
+| `src/JobsTab.*` | the models pane's **jobs** tab: what each job runs on, and a model of its own for one (`relay::rolestore` is its storage) |
 | `src/ModelCatalog.*` | the one model catalog behind the box, the picker and Options › Models, and what the user checked and ranked |
 | `src/ModelPicker.*` | the picker widget: picks a model *and* prioritizes the five lists; the models pane's available and priorities tabs |
-| `src/ModelsPane.*` | the models pane (Ctrl+Shift+M, `/model`, `/models`): providers · available · priorities, beside the pane it serves |
+| `src/ModelsPane.*` | the models pane (Ctrl+Shift+M, `/model`, `/models`): providers · available · priorities · jobs, beside the pane it serves |
 | `src/SettingsPane.*` | the Actions pane and the Options pane: one widget, two modes |
 | `src/AgentUi.*` | pickers and instructions dialog |
 | `src/Conversations.*` | the session manager pane (`/resume`, `/conversations`, Ctrl+Shift+Y) and the Ctrl+F find bar |

@@ -1,0 +1,27 @@
+[isolation]
+enabled=false
+
+[instructions]
+onboarded=true
+
+[suggestions]
+next_command=false
+next_prompt=false
+
+[security]
+approvals_chosen=true
+approvals_ask=@Invalid()
+
+[url_handler]
+announced=true
+
+# The five lists, pre-seeded on a cloud provider. Without this, rank 1 of main on this machine is
+# the guest harness Relay finds on PATH, a guest pane starts its process on the **first turn**, and
+# nothing is ever configured — so no model_roles is ever sent and every "runs on" cell reads an em
+# dash. That is the tab telling the truth, but it is not what the column is for. A stored key is
+# all the worker needs to resolve a role: no turn, no network.
+[models]
+tier\main=glm-coding|glm-5.3|high, kimi-code|kimi-for-coding|high
+tier\high=glm-coding|glm-5.3|max
+tier\flash=glm-coding|glm-5.3-flash|low
+tier\lite=relay-free|relay-lite|low
