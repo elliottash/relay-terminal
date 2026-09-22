@@ -134,6 +134,17 @@ class TryItTest(unittest.TestCase):
 # ------------------------------------------------------------------ try_run: the turn
 
 class RunTests(TryItTest):
+    def test_successful_retry_does_not_report_previous_failure(self):
+        self.start()
+        self.finish(outcome="error", text="")
+        self.start()
+        self.staged_section()
+        event = self.tryit_events(self.finish(outcome="done", text="Ready now."))[-1]
+        self.assertTrue(event["section_written"])
+        self.assertFalse(event["staging_failed"])
+        self.assertEqual(event["message"], "Ready now.")
+
+
     def test_the_types_match_the_protocol_modules(self):
         # The same drift guard `tests/test_profile_protocol.py` puts on PROFILE_TYPES: the list in
         # `board_protocol` exists so a worker need not import this module at start-up.
@@ -332,6 +343,19 @@ class ReuseTests(TryItTest):
 # ------------------------------------------------------------------ try_answer: the person's turn
 
 class AnswerTests(TryItTest):
+    def test_answers_preserve_existing_human_judgements(self):
+        self.staged_section()
+        prior = "1. Keep the layout?\n   Answer: Keep the old layout.\n\n2. Is it readable?"
+        self.write_section(prior, heading="Human QA")
+        self.answer("First answer.")
+        self.answer("Second answer.")
+        human = T.section_text(self.board.card_by_id(self.card).body, "Human QA")
+        self.assertIn(prior, human)
+        self.assertIn("Second answer.", human)
+        self.assertNotIn("First answer.", human)
+        self.assertEqual(human.count("relay:tryit-human start"), 1)
+
+
     def answer(self, text="It stopped me, and the notice said which test."):
         return self.send(type="try_answer", id="a1", card=self.card, answer=text)
 

@@ -137,6 +137,7 @@ class _Run:
         self.started = time.time()
         self.text: list[str] = []
         self.turn_id = None
+        self.prior_entries: set[str] = set()
         self.stopped = False
         #: What the verifying session left staged, if anything (`verify_staging`).
         self.staged: dict | None = None
@@ -222,6 +223,7 @@ class TryItCommands:
                 raise TryItError(f"Try it is already running on #{self._run.card}. Stop it before "
                                  "starting another.")
             run = _Run(card_id, f"t-{os.urandom(3).hex()}", self.evidence_dir(card_id), rid)
+            run.prior_entries = {entry.entry_id for entry in tools.board.thread(card_id)}
             self._run = run
         # Its own conversation, not the card's: the brief is the whole instruction, and a Try it
         # turn that inherited a card chat would answer the last thing somebody typed there.
@@ -318,7 +320,7 @@ class TryItCommands:
             card = self.tools().board.card_by_id(run.card)
             if card is not None:
                 section = section_text(card.body, SECTION).strip()
-                failed = self._failed_note(run.card)
+                failed = self._failed_note(run)
         except (B.BoardError, OSError, TryItError):         # pragma: no cover - unreadable tree
             pass
         report = "".join(run.text).strip()[:MAX_REPORT]
@@ -360,15 +362,15 @@ class TryItCommands:
             return ""
         return text[:PROGRESS_LINE_CAP]
 
-    def _failed_note(self, card_id: str) -> str:
+    def _failed_note(self, run: "_Run") -> str:
         """The turn's own "could not be staged" note, if it left one (brief step 7)."""
         try:
-            entries = self.tools().board.thread(card_id)
+            entries = self.tools().board.thread(run.card)
         except (B.BoardError, OSError):                     # pragma: no cover - unreadable thread
             return ""
         for entry in reversed(entries):
             text = (entry.text or "").strip()
-            if entry.kind == "note" and text.startswith(FAILED_NOTE):
+            if entry.entry_id not in run.prior_entries and entry.kind == "note" and text.startswith(FAILED_NOTE):
                 return text[:PROGRESS_LINE_CAP]
         return ""
 
@@ -411,6 +413,14 @@ class TryItCommands:
         card_obj = tools.board.card_by_id(card_id)
         human = human_qa(card_id, parse_section(section_text(card_obj.body, SECTION).strip()),
                          text, expected)
+        prior = section_text(card_obj.body, HUMAN_QA_SECTION).strip()
+        begin, end = "<!-- relay:tryit-human start -->", "<!-- relay:tryit-human end -->"
+        block = f"{begin}\n{human.rstrip()}\n{end}"
+        pattern = re.escape(begin) + r".*?" + re.escape(end)
+        if re.search(pattern, prior, re.S):
+            human = re.sub(pattern, lambda _: block, prior, count=1, flags=re.S)
+        else:
+            human = (prior + "\n\n" if prior else "") + block
         _checked(tools.run("board_update_card",
                            {"id": card_id, "base_hash": B.file_hash(card_obj.path),
                             "replace_section": {"heading": HUMAN_QA_SECTION, "text": human}}))
