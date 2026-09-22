@@ -1,0 +1,35 @@
+@ work - cpu00%-mem00% = + OQ\4 eG 2 - 0x
+
+O8r*
+
+bash-5.2$ exit
+exit
+
+Connection to 127.0.0.1 closed.
+bash-5.2$
+
+Fe
+
+exit
+Shared connection to localhost closed.
+elliott@spark-dcc9: /tmp/relay-ssh-audit -1lvm@ehkm/work$
+
+spark-dec9%
+
+printf 'ZSH-OUTPUT
+
+ZSH-OUTPUT
+spark-dec9%
+
+x exited with status 1 on localhost. No agent provider is configured to fix it.
+
+Shell commands or agent prompts. 2 for help
+
+auto
+
+JM 2)
+
+=
+
+SsHlocalhosty/home/elliott | toading models...»
+

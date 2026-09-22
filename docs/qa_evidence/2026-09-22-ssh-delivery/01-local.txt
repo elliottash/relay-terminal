@@ -1,0 +1,21 @@
+© work - cpu 00%-mem 00% x +
+© work
+
+Q 4+ eB 2
+
+ox
+
+@s
+
+elliott@spark-dcc9:/tmp/relay-ssh-audit-1vm@ehkm/work$
+
+LOCAL -ONE
+
+LOCAL-TWO
+
+elliott@spark-dcc9: /tmp/relay-ssh-audit -1vm@ehkm/work$
+
+Shell ready
+Shell commands or agent prompts. 2. for help auto
+~“Amp/relay-ssh-auditivmOehkm/work “Loading models... Y high vo
+

@@ -1,0 +1,35 @@
+© work - cpu00%-mem00% x + O\4 eG 2 - 0 x
+
+© work rom
+
+INPUT> ANSWER
+RECEIVED=ANSWER.
+bash-5.2$
+
+SHOULD-BE-A- COMMAND
+bash-5.2$
+
+WRAP - XXXXXXXXXXXXXXKXXKHXXN HAH HANH AHH HHH HHH HHH HHH HHH HHH HHH HH HHH HHH H HHH HH HHH HHH HH HHH HHH HH HHH HHH HH HHH HHI
+XXXXXKKXHKAH KKH KKH H KKH H KKH H KKH HK KH HK HHH KH HK HHH HHH HHH HHH HH HHH HHH
+bash-5.2$
+
+MULTI-A
+MULTI-B
+bash-5.2$
+
+bash-5.2$ exit
+exit
+
+Connection to 127.0.0.1 closed.
+bash-5.2$
+
+Fe
+
+exit
+Shared connection to localhost closed.
+elliott@spark-dcc9: /tmp/relay-ssh-audit-1vm@ehkm/work$
+
+Shell commands or agent prompts. 2 for help
+
+| Imp/relay-ssh-audit-1vmoehkm/work
+

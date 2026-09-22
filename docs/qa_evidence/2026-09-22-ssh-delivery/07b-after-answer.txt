@@ -1,0 +1,43 @@
+= work - cpu00%-mem00% x +
+
+printf ‘REMOTE-ONE\nREMOTE-TWO\n'
+
+OQ se S 09 - 0x
+
+O8r*
+
+REMOTE - ONE
+REMOTE -TWO
+bash-5.2$
+
+/tmp
+bash-5.2$
+
+x exited with status 1 on localhost
+
+dit-lvmOehkm/rem
+
+QUEUED-AFTER-SLEEP
+bash-5.2$
+
+INPUT> ANSWER
+RECEIVED=ANSWER.
+bash-5.2$
+
+SHOULD -BE-A- COMMAND
+bash-5.2$
+
+No agent provider is configured to fix it.
+
+‘Agent in control - Ctrl+H to take control
+
+Shell commands or agent prompts.
+
+.citmp/relay-ssh-audit-IvmOehkm/remote
+
+?
+
+for help
+
+a ey
+

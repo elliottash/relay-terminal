@@ -1,0 +1,40 @@
+® work - cpu00%-mem00% x +
+
+OQ se S 09 - 0x
+
+O8r*
+
+/tmp
+bash-5.2$
+
+bash-5.2$
+
+bash-5.2$
+
+QUEUED -AFTER-SLEEP
+bash-5.2$
+
+INPUT> ANSWER
+RECEIVED=ANSWER
+bash-5.2$
+
+SHOULD-BE-A- COMMAND
+bash-5.2$
+
+WRAP - XXXXXXXXXXXXXXXXXXXXXXXXXXKKKAKKKKKKKAK KAKA KAKA AKA K AKA K AKA K KAKA KKH H AHHH KKH H HHH H HHH HHH HHH HHH HK HK HK HHH HH HHH HHH HHH
+
+XXXXXXXXXAXX AXA AX XK K AX AX K AK KKK AH KA K AHH AA K AHH AA K AHH AK AK AA
+
+bash-5.2$
+
+localhost ready
+
+Shell commands or agent prompts.
+
+.citmp/relay-ssh-audit-IvmOehkm/remote
+
+2 for help
+
+(aan)
+©
+

@@ -1,0 +1,467 @@
+{
+  "run_id": "20260922T151933Z-b7e5",
+  "state": "finished",
+  "requested": 90,
+  "ran": 90,
+  "counts": {
+    "pass": 90,
+    "fail": 0,
+    "skip": 0
+  },
+  "tests": [
+    {
+      "id": "unittest:tests.test_attachments.RemoteAttachmentTests.test_collision_uses_remote_bytes_and_provenance",
+      "result": "pass",
+      "duration": 0.001
+    },
+    {
+      "id": "unittest:tests.test_attachments.RemoteAttachmentTests.test_truncation_and_binary_refusal",
+      "result": "pass",
+      "duration": 0.001
+    },
+    {
+      "id": "unittest:tests.test_attachments.RemoteAttachmentTests.test_unverified_or_missing_host_never_reads_local_file",
+      "result": "pass",
+      "duration": 0.0
+    },
+    {
+      "id": "unittest:tests.test_guest_board_bridge.BridgeTests.test_both_adapter_names_preserve_remote_tool_and_host",
+      "result": "pass",
+      "duration": 0.112
+    },
+    {
+      "id": "unittest:tests.test_guest_board_bridge.BridgeTests.test_both_adapter_names_use_native_board_labels_once",
+      "result": "pass",
+      "duration": 0.059
+    },
+    {
+      "id": "unittest:tests.test_guest_board_bridge.BridgeTests.test_cancel_waiting_call_and_shutdown",
+      "result": "pass",
+      "duration": 0.096
+    },
+    {
+      "id": "unittest:tests.test_guest_board_bridge.BridgeTests.test_cancelled_request_never_dispatches",
+      "result": "pass",
+      "duration": 0.095
+    },
+    {
+      "id": "unittest:tests.test_guest_board_bridge.BridgeTests.test_capability_isolation",
+      "result": "pass",
+      "duration": 0.096
+    },
+    {
+      "id": "unittest:tests.test_guest_board_bridge.BridgeTests.test_discovery_allowlist_and_unavailable",
+      "result": "pass",
+      "duration": 0.103
+    },
+    {
+      "id": "unittest:tests.test_guest_board_bridge.BridgeTests.test_duplicate_write_once_and_changed_payload_refused",
+      "result": "pass",
+      "duration": 0.108
+    },
+    {
+      "id": "unittest:tests.test_guest_board_bridge.BridgeTests.test_native_verdict_gate_signature_and_budget",
+      "result": "pass",
+      "duration": 0.133
+    },
+    {
+      "id": "unittest:tests.test_guest_board_bridge.BridgeTests.test_plan_readonly_stop_and_next_turn",
+      "result": "pass",
+      "duration": 0.126
+    },
+    {
+      "id": "unittest:tests.test_guest_board_bridge.BridgeTests.test_policy_prefers_available_tools_and_preserves_fallback",
+      "result": "pass",
+      "duration": 0.068
+    },
+    {
+      "id": "unittest:tests.test_guest_board_bridge.BridgeTests.test_provider_turn_binds_native_context_and_revokes_on_failure",
+      "result": "pass",
+      "duration": 0.109
+    },
+    {
+      "id": "unittest:tests.test_guest_board_bridge.BridgeTests.test_real_stdio_proxy_initialize_list_call_and_malformed",
+      "result": "pass",
+      "duration": 0.12
+    },
+    {
+      "id": "unittest:tests.test_guest_board_bridge.BridgeTests.test_remote_schemas_stable_and_never_fall_back_to_local",
+      "result": "pass",
+      "duration": 0.101
+    },
+    {
+      "id": "unittest:tests.test_guest_board_bridge.BridgeTests.test_terminal_capability_checked_per_turn",
+      "result": "pass",
+      "duration": 0.095
+    },
+    {
+      "id": "unittest:tests.test_guest_board_bridge.BridgeTests.test_update_move_gates_and_scope",
+      "result": "pass",
+      "duration": 0.116
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteContextTests.test_control_characters_are_stripped",
+      "result": "pass",
+      "duration": 0.0
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteContextTests.test_note_says_which_machine_is_which",
+      "result": "pass",
+      "duration": 0.0
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteContextTests.test_note_when_the_connection_cannot_be_shared",
+      "result": "pass",
+      "duration": 0.0
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteContextTests.test_validation_keeps_known_fields_and_drops_unknown",
+      "result": "pass",
+      "duration": 0.0
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteContextTests.test_validation_refuses_wrong_types_and_long_strings",
+      "result": "pass",
+      "duration": 0.0
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteFileToolTests.test_a_broken_connection_says_so",
+      "result": "pass",
+      "duration": 0.002
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteFileToolTests.test_a_closed_socket_reads_and_writes_nothing",
+      "result": "pass",
+      "duration": 0.005
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteFileToolTests.test_a_file_that_changes_under_the_diff_is_not_overwritten",
+      "result": "pass",
+      "duration": 0.013
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteFileToolTests.test_a_host_without_the_commands_says_which",
+      "result": "pass",
+      "duration": 0.003
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteFileToolTests.test_a_new_file_is_private_and_its_parents_are_made",
+      "result": "pass",
+      "duration": 0.021
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteFileToolTests.test_a_read_goes_anywhere_the_users_account_can_read",
+      "result": "pass",
+      "duration": 0.009
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteFileToolTests.test_a_write_stays_in_the_home_or_the_shells_directory",
+      "result": "pass",
+      "duration": 0.035
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteFileToolTests.test_an_absolute_path_needs_no_cd",
+      "result": "pass",
+      "duration": 0.002
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteFileToolTests.test_argv_is_run_commands_own",
+      "result": "pass",
+      "duration": 0.003
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteFileToolTests.test_edit_matches_the_local_tool",
+      "result": "pass",
+      "duration": 0.033
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteFileToolTests.test_empty_host_is_a_local_call",
+      "result": "pass",
+      "duration": 0.002
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteFileToolTests.test_host_only_in_the_schema_while_logged_in",
+      "result": "pass",
+      "duration": 0.001
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteFileToolTests.test_labels_and_detail_name_the_host",
+      "result": "pass",
+      "duration": 0.001
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteFileToolTests.test_list_directory_has_the_local_shape",
+      "result": "pass",
+      "duration": 0.016
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteFileToolTests.test_read_refuses_what_the_local_read_refuses",
+      "result": "pass",
+      "duration": 0.021
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteFileToolTests.test_read_returns_the_file_and_names_the_host",
+      "result": "pass",
+      "duration": 0.005
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteFileToolTests.test_refusals_match_run_commands",
+      "result": "pass",
+      "duration": 0.001
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteFileToolTests.test_secret_looking_paths_are_refused_on_the_host_too",
+      "result": "pass",
+      "duration": 0.001
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteFileToolTests.test_stdin_carries_the_bytes",
+      "result": "pass",
+      "duration": 0.012
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteFileToolTests.test_the_note_offers_the_file_tools",
+      "result": "pass",
+      "duration": 0.001
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteFileToolTests.test_the_rule_is_checked_on_the_host_where_home_is_known",
+      "result": "pass",
+      "duration": 0.001
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteFileToolTests.test_the_write_script_never_carries_the_content",
+      "result": "pass",
+      "duration": 0.001
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteFileToolTests.test_traversal_and_shapeless_paths_are_refused",
+      "result": "pass",
+      "duration": 0.002
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteFileToolTests.test_write_replaces_in_place_and_keeps_the_mode",
+      "result": "pass",
+      "duration": 0.017
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteRouterTests.test_bad_remote_is_refused",
+      "result": "pass",
+      "duration": 0.0
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteRouterTests.test_command_shaped_lines_are_typed_on_the_host",
+      "result": "pass",
+      "duration": 0.001
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteRouterTests.test_english_command_sentences_still_ask",
+      "result": "pass",
+      "duration": 0.0
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteRouterTests.test_explicit_prefixes_and_fixed_modes",
+      "result": "pass",
+      "duration": 0.0
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteRouterTests.test_local_decisions_are_unchanged",
+      "result": "pass",
+      "duration": 0.032
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteRouterTests.test_never_not_found_locally",
+      "result": "pass",
+      "duration": 0.001
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteRouterTests.test_sentences_go_to_the_agent",
+      "result": "pass",
+      "duration": 0.0
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteRouterTests.test_worker_routes_with_remote",
+      "result": "pass",
+      "duration": 0.079
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteRunCommandTests.test_a_closed_socket_runs_nothing",
+      "result": "pass",
+      "duration": 0.001
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteRunCommandTests.test_argv_uses_the_users_connection",
+      "result": "pass",
+      "duration": 0.002
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteRunCommandTests.test_cwd_is_quoted_and_defaults",
+      "result": "pass",
+      "duration": 0.002
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteRunCommandTests.test_empty_host_is_a_local_run",
+      "result": "pass",
+      "duration": 0.002
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteRunCommandTests.test_handed_back_jobs_carry_the_host",
+      "result": "pass",
+      "duration": 1.003
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteRunCommandTests.test_host_only_in_the_schema_while_logged_in",
+      "result": "pass",
+      "duration": 0.001
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteRunCommandTests.test_labels_and_detail_name_the_host",
+      "result": "pass",
+      "duration": 0.0
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteRunCommandTests.test_refusals_the_model_can_act_on",
+      "result": "pass",
+      "duration": 0.001
+    },
+    {
+      "id": "unittest:tests.test_ssh_remote.RemoteRunCommandTests.test_same_job_machinery",
+      "result": "pass",
+      "duration": 0.004
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.RemoteScriptTests.test_a_shell_that_already_uses_the_key_or_the_hook_is_left_alone",
+      "result": "pass",
+      "duration": 0.032
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.RemoteScriptTests.test_bash",
+      "result": "pass",
+      "duration": 0.7
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.RemoteScriptTests.test_bash_keeps_an_existing_debug_trap",
+      "result": "pass",
+      "duration": 0.17
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.RemoteScriptTests.test_bash_prompt_array_and_old_bash_debug_trap",
+      "result": "pass",
+      "duration": 0.226
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.RemoteScriptTests.test_exported_prompt_command_does_not_follow_a_later_tmux",
+      "result": "pass",
+      "duration": 0.234
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.RemoteScriptTests.test_inside_a_real_tmux",
+      "result": "pass",
+      "duration": 0.148
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.RemoteScriptTests.test_other_shells_do_nothing",
+      "result": "pass",
+      "duration": 0.011
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.RemoteScriptTests.test_screen_seen_in_term_alone",
+      "result": "pass",
+      "duration": 0.067
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.RemoteScriptTests.test_screen_wraps_without_doubling_and_skips_a_long_path",
+      "result": "pass",
+      "duration": 0.182
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.RemoteScriptTests.test_small_enough_to_type",
+      "result": "pass",
+      "duration": 0.0
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.RemoteScriptTests.test_staged_multiline_marks_input_once",
+      "result": "pass",
+      "duration": 0.121
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.RemoteScriptTests.test_tmux_wraps_every_sequence_and_asks_for_passthrough",
+      "result": "pass",
+      "duration": 0.187
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.RemoteScriptTests.test_zsh",
+      "result": "pass",
+      "duration": 0.745
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.RemoteScriptTests.test_zsh_in_tmux",
+      "result": "pass",
+      "duration": 0.354
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.RemoteScriptTests.test_zsh_over_ssh",
+      "result": "pass",
+      "duration": 1.118
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.WrapperTests.test_a_destination_after_the_options_still_shares",
+      "result": "pass",
+      "duration": 0.021
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.WrapperTests.test_adds_connection_sharing",
+      "result": "pass",
+      "duration": 0.076
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.WrapperTests.test_alias_named_ssh_does_not_break_the_definition",
+      "result": "pass",
+      "duration": 0.012
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.WrapperTests.test_directory_must_exist_and_be_usable",
+      "result": "pass",
+      "duration": 0.02
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.WrapperTests.test_mosh",
+      "result": "pass",
+      "duration": 0.083
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.WrapperTests.test_mosh_retries_plain_when_the_shared_one_fails",
+      "result": "pass",
+      "duration": 0.009
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.WrapperTests.test_nounset_no_leaks_no_output_completion",
+      "result": "pass",
+      "duration": 0.022
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.WrapperTests.test_off_unless_the_gui_asks",
+      "result": "pass",
+      "duration": 0.009
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.WrapperTests.test_skips_arguments_that_decide_sharing",
+      "result": "pass",
+      "duration": 0.104
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.WrapperTests.test_ssh_g_is_asked_only_when_the_configuration_could_matter",
+      "result": "pass",
+      "duration": 0.077
+    },
+    {
+      "id": "unittest:tests.test_ssh_shell.WrapperTests.test_user_configured_master_is_left_alone",
+      "result": "pass",
+      "duration": 0.044
+    }
+  ],
+  "skipped": [],
+  "opened": [],
+  "rerun": [],
+  "message": "the run produced no results"
+}
