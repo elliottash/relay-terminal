@@ -44,9 +44,9 @@ what do you think about showing the dim button on hover over (i) as well? i thin
 **Verify.** `ctest --test-dir build -R '^conversations$'`; `scripts/relay-build`; an offscreen widget test exercises hover persistence, exact clipboard copying, dim dispatch, and the unchanged circle-i click.
 
 ## Tasks
-- [x] Build and wire the interactive popover <!-- t:ui -->
-- [x] Add focused regression coverage <!-- t:test -->
-- [x] Build, verify, and record evidence <!-- t:verify -->
+- [x] Build and wire the interactive popover <!-- t:b1 -->
+- [x] Add focused regression coverage <!-- t:b2 -->
+- [x] Build, verify, and record evidence <!-- t:b3 -->
 
 ## Execution Summary
 Added `sessioninfo::PaneInfoPopover`, opened by pointer hover or keyboard focus on a terminal pane's circle-i. It shows and copies the pane's eight-character ID, keeps itself open while its controls are in use, and hosts the existing manual Dim action. The permanent dim button was removed from `PaneChrome`; Alt+D and Alt+wheel still use the same dimming state and action paths. Clicking circle-i still opens Conversation info. Styling and architecture documentation were updated with the new surface.

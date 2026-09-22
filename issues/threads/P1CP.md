@@ -21,3 +21,7 @@ build and focused widget/theme/dimming checks pass; evidence recorded at `docs/q
 <!-- relay:entry 20260922T025849Z-cp author=codex kind=evidence -->
 ### Codex · 2026-09-21 22:58
 landed implementation commit `5ce35f2d443b7ba68f95b4971d3cf86dd5fc01a8` and linked it from #P1CP.
+
+<!-- relay:entry 20260922T030020Z-cp author=codex kind=note -->
+### Codex · 2026-09-21 23:00
+corrected the three task markers to the Board's required two-character Crockford IDs after the board validator identified the formatting error.
