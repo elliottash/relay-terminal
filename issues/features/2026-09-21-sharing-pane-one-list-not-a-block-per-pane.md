@@ -1,7 +1,7 @@
 ---
 id: SHRP
 type: work
-status: executing
+status: needs-verification
 labels: [feature, remote]
 component: [gui]
 milestone: beta
@@ -10,7 +10,7 @@ assignee: claude-code
 rank: 6b
 created: '2026-09-21'
 source: 'owner, 2026-09-21, Claude Code session, with a screenshot of the Sharing pane listing three panes with identical blocks'
-links: {plans: [], commits: [], evidence: [], related: [PH0N, SWPH, W5N2, SHCK], github: null}
+links: {plans: [], commits: [2b102129, 964f2f5f], evidence: [docs/qa_evidence/2026-09-21-sharing-pane-redesign/], related: [PH0N, SWPH, W5N2, SHCK], github: null}
 ---
 # The Sharing pane says what varies: your phones once at the top, guests where there are any, one row per quiet pane
 
@@ -55,6 +55,32 @@ one hook block in `src/RelayWindow.h` (feed devices and `remote_state` to the mo
 
 ## Tasks
 
-- [ ] Model carries the devices and the remote state <!-- t:r1 -->
-- [ ] The view: top line, waiting, guests, quiet panes <!-- t:r2 -->
-- [ ] Tests and screenshots (three quiet panes; one pane with a guest and an invite; a knock waiting) <!-- t:r3 -->
+- [x] Model carries the devices and the remote state <!-- t:r1 -->
+- [x] The view: top line, waiting, guests, quiet panes <!-- t:r2 -->
+- [x] Tests and screenshots (three quiet panes; one pane with a guest and an invite; a knock waiting) <!-- t:r3 -->
+
+## Execution Summary
+
+`964f2f5f`: the pane reads, top to bottom, "Remote control on · relay-terminal.ai · iPhone, iPad
+connected" with Pair a phone…; Waiting for you (only when there is something, each row naming its
+pane); Guests, a block only for a pane with a participant or a live invite, its two options on one
+row with the sentences as tooltips and one note under the section; Nobody is visiting, one sentence
+and one row per quiet pane with Invite…. When remote control is off the sentence says so. The old
+per-pane headings and the "your own paired phones are not guests" note are gone. `2b102129`: the
+sidecar's `devices` line carries `online` per device, so the top line can name the phones. The
+#SHCK teardown is unchanged. Screenshots of the three states, from the real pane under Xvfb, in
+the evidence folder.
+
+## Tests
+
+- `ctest --test-dir build -R '^sharing$'` (23 cases, four new)
+- `RELAY_KEYRING=off python3 -m unittest tests.test_remote_gui_host`
+- `manual: docs/qa_evidence/2026-09-21-sharing-pane-redesign/` (`quiet.png`, `guests.png`, `knock.png`)
+
+## QA checklist
+
+- [ ] Open the Sharing pane with no guests: one status line naming your connected phones, one sentence, one row per pane with Invite…, nothing else.
+- [ ] Invite someone to one pane and have them knock: "Waiting for you" appears first and names the pane; after admitting, that pane alone gets a Guests block with the two options on one row.
+- [ ] Toggle both options: no crash, the model follows, the tooltips carry the explanations.
+- [ ] Turn remote control off from the plug menu: the top line says off and the sentence changes.
+
