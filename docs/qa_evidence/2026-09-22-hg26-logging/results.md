@@ -28,3 +28,9 @@ Relay board/delegation/message tools were absent from discovery. Parent owns all
 The initial implementation's import-time XDG mutation was removed after parent review. Test isolation is explicit and scoped to test execution; the regression verifies imports leave the entire environment untouched, the runner restores it, an inherited live pane ID does not defeat isolation, and test-owned directories are preserved. Native exception injection and a real guest bridge dispatch verify safe category producers. Metadata remains after EVENT, compatible with the parent report parser.
 
 Validation: `PYTHONPATH=backend:tests python3 -m relay_core.junit_runner -s tests test_tool_outcomes test_logs test_roles test_junit_runner test_guest_board_bridge test_agent.AgentTests -q` (see `tests-scope.txt`).
+
+## Direct unittest regression
+
+There is no `tests/test_worker.py` in this checkout. The helper used by the `roles.flash=nope` and `tiers.flash=nope` cases is `tests/test_roles.py:run_worker`, already isolated in `a89d2199`. Added a regression that launches the exact plain `python -m unittest tests.test_roles -q` entry point with origin=interactive, an inherited live pane ID, and a sentinel worker log. All role tests pass; the sentinel bytes and log-directory file list remain unchanged. A second regression supplies an explicit XDG fixture to that helper and verifies worker logs are written there with origin=test.
+
+`PYTHONPATH=backend:tests python3 -m relay_core.junit_runner -s tests test_tool_outcomes test_roles -q`: **85 tests passed**, including the nested plain-unittest run; `direct-unittest.txt`. No production code changes were needed for this follow-up.

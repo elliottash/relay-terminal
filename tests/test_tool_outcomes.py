@@ -135,3 +135,27 @@ assert dict(os.environ) == before
             with patch.object(fixture.agent, "_execute", side_effect=exception):
                 result = fixture.call(key="typed-" + str(index))
             self.assertEqual(classify("board_read", result)[0], outcome)
+
+    def test_direct_role_unittest_preserves_inherited_logs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            live = Path(directory) / "relay/logs"
+            live.mkdir(parents=True)
+            sentinel = live / "worker.log"
+            sentinel.write_text("interactive sentinel\n")
+            env = dict(os.environ, XDG_DATA_HOME=directory, RELAY_PANE_ID="live-pane",
+                       RELAY_LOG_ORIGIN="interactive", RELAY_LOG_LEVEL="info")
+            result = subprocess.run([sys.executable, "-m", "unittest", "tests.test_roles", "-q"],
+                                    env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(sentinel.read_text(), "interactive sentinel\n")
+            self.assertEqual(sorted(p.name for p in live.iterdir()), ["worker.log"])
+
+    def test_role_worker_honors_explicit_xdg_fixture(self):
+        from test_roles import run_worker
+        with tempfile.TemporaryDirectory() as directory:
+            _, process = run_worker([{"type": "shutdown"}], {
+                "XDG_DATA_HOME": directory, "RELAY_LOG_LEVEL": "info"})
+            self.assertEqual(process.returncode, 0, process.stderr)
+            body = (Path(directory) / "relay/logs/worker.log").read_text()
+            self.assertIn("worker_start", body)
+            self.assertIn("origin=test", body)
