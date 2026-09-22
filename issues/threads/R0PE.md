@@ -13,3 +13,11 @@ Created and claimed this UI request. Moving the role from the tracker identifier
 
 <!-- relay:entry 20260922T180000Z-r4 author=agent kind=event model=gpt-6-astra pane=aae3603a turn=8210c8c04f034b0fadd3f979334d6e66/89f6c5ef5f324af9a83b68f95839c59c -->
 - ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-22-subagent-… → {"plans": [], "commits": ["7e901529cb2d46335f06b109fbe50d865d15b1bc", "12169c6a5…
+
+<!-- relay:entry 20260922T180000Z-r5 author=codex kind=decision -->
+### Codex · 2026-09-22
+User: "dont show it for general" and "and actually do [explore] and [signal]". Reclaimed this card to omit general and bracket other role prefixes; updated Done means to match.
+
+<!-- relay:entry 20260922T180000Z-r6 author=codex kind=evidence -->
+### Codex · 2026-09-22
+Built relay and both targeted test binaries; subagents and striplayout passed. Refreshed roles.png under isolated Xvfb and inspected general without a prefix and [explore]/[signal] prefixes. Returned to needs-verification.

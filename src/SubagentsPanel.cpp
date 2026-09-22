@@ -852,8 +852,8 @@ void SubagentsPanel::paintEvent(QPaintEvent *) {
                 parts << SubagentModel::formatElapsed(m_model->elapsedNow(*row));
                 parts << QStringLiteral("%1 tool%2").arg(row->tools).arg(row->tools == 1 ? QString() : QStringLiteral("s"));
                 parts << SubagentModel::formatTokens(row->tokens, row->tokensEstimated) + QStringLiteral(" tok");
-                QString description = row->type.isEmpty() ? row->description
-                    : row->type + QStringLiteral(": ") + row->description;
+                QString description = row->type.isEmpty() || row->type == QStringLiteral("general")
+                    ? row->description : QStringLiteral("[%1] %2").arg(row->type, row->description);
                 if (row->live() && !row->lastActivity.isEmpty() && row->lastActivity != QStringLiteral("starting"))
                     description += QStringLiteral("  ·  ") + row->lastActivity;
                 drawRow(leftCell, onRow && (!split || m_column == Subagents), SubagentModel::statusIcon(row->status), color,

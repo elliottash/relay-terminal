@@ -17,8 +17,12 @@ i dont think i want to show those in the tracker like that. instead, pre-pend "g
 
 ## Done means
 The tracker identifier shows only the subagent ID, such as a1.
-The summary starts with its role followed by a colon and space, such as general: or explore:.
+General summaries have no role prefix. Other roles use a bracketed prefix, such as [explore] or [signal].
 Tracker selection, model controls and task pairing keep working.
+
+## Decisions
+"dont show it for general"
+"and actually do [explore] and [signal]"
 
 ## Plan
 Change tracker painting in src/SubagentsPanel.cpp; keep role metadata intact. Build and run the existing subagent and strip-layout tests, and inspect a rendered tracker under Xvfb.
@@ -28,4 +32,4 @@ Change tracker painting in src/SubagentsPanel.cpp; keep role metadata intact. Bu
 manual: docs/qa_evidence/2026-09-22-subagent-role-summary/
 
 ## Execution Summary
-Tracker identifiers now show only a1/a2; summaries start with the role and ': '. Reduced identifier column width to recover summary space. Existing subagent and strip-layout tests pass; Xvfb rendering confirms general and explore labels. Evidence: docs/qa_evidence/2026-09-22-subagent-role-summary/.
+Tracker identifiers show only a1/a2. General summaries have no prefix; other summaries use bracketed roles, including [explore] and [signal]. Reduced identifier column width recovers summary space. Existing subagent and strip-layout tests pass; Xvfb rendering confirms all three roles. Evidence: docs/qa_evidence/2026-09-22-subagent-role-summary/.
