@@ -21,3 +21,7 @@ User: "dont show it for general" and "and actually do [explore] and [signal]". R
 <!-- relay:entry 20260922T180000Z-r6 author=codex kind=evidence -->
 ### Codex · 2026-09-22
 Built relay and both targeted test binaries; subagents and striplayout passed. Refreshed roles.png under isolated Xvfb and inspected general without a prefix and [explore]/[signal] prefixes. Returned to needs-verification.
+
+<!-- relay:entry 20260922T180000Z-r7 author=codex kind=evidence -->
+### Codex · 2026-09-22
+Linked refinement commit ebe54d353eab5be31ba9b5741ee271df4aad5efc; exact committed C++ tree builds.
