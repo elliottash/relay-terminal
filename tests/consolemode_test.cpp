@@ -465,6 +465,38 @@ void aConsoleIsAnOrdinaryChildOfItsHost()
     // it — `BoardView::resolveAgentLink` opens a card, reveals a setting or shows a session by
     // `target.kind` alone — so a console that handed every link over as `Kind::Path` would have
     // every context refuse everything, silently, and the window would open the ones it could.
+void ctrlClickEditsTheActualFile()
+{
+    StubContext context;
+    context.workspace = home->path();
+    context.swallow = true;
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    const QString path = home->filePath(QStringLiteral("edit-click.md"));
+    QFile file(path);
+    CHECK(file.open(QIODevice::WriteOnly));
+    file.write("# Heading\nbody\n");
+    file.close();
+    QString edited, external;
+    int line = -1;
+    console.onEditPath = [&](const QString &p, int l) { edited = p; line = l; };
+    console.onOpenExternal = [&](const QString &p) { external = p; };
+    console.openOutputTarget(path, 2, true, Qt::ControlModifier);
+    CHECK_EQ(edited, path);
+    CHECK_EQ(line, 2);
+    CHECK(context.seen.isEmpty());
+    edited.clear();
+    console.openOutputTarget(path, 0, true);
+    CHECK(edited.isEmpty());
+    CHECK_EQ(context.seen, QStringList({path}));
+    console.openOutputTarget(path, 2, true, Qt::ShiftModifier);
+    CHECK_EQ(external, path);
+    CHECK(edited.isEmpty());
+    context.seen.clear();
+    console.openOutputTarget(home->path(), 0, true, Qt::ControlModifier);
+    CHECK(edited.isEmpty());
+    CHECK_EQ(context.seen, QStringList({home->path()}));
+}
+
 void theContextGetsFirstRefusalOnEveryLinkKind()
 {
     StubContext context;
@@ -1006,6 +1038,7 @@ int main(int argc, char **argv)
     cases::aConsoleIsAnOrdinaryChildOfItsHost();
     cases::theContextGetsFirstRefusalOnEveryLinkKind();
     cases::shiftClickOnALocalPathOpensItExternally();
+    cases::ctrlClickEditsTheActualFile();
     cases::aQueueChangedForThisSurfaceDrawsRowsTheConsoleNeverSubmitted();
     cases::aTerminalPaneIgnoresTheWorkersRowsEntirely();
     cases::aWorkerRowIsRemovedAndMovedWithItsSurface();

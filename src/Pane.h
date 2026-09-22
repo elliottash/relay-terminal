@@ -3129,6 +3129,11 @@ public:
             return;
         }
         if (target.isEmpty()) return;
+        // Ctrl+click is the direct edit action, before Markdown card/context routing.
+        if (modifiers.testFlag(Qt::ControlModifier) && QFileInfo(target).isFile() && onEditPath) {
+            onEditPath(target, std::max(0, line));
+            return;
+        }
         // An agent may link #ID to its backing Markdown file (#K9KC). Resolve that
         // before context dispatch, so embedded consoles and terminal panes agree.
         if (line <= 0 && QDir::isAbsolutePath(target)) {

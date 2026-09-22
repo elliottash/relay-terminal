@@ -13,6 +13,7 @@
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTextBlock>
+#include <QTextLayout>
 #include <QTextBrowser>
 #include <QToolButton>
 #include <QTreeView>
@@ -338,6 +339,40 @@ private slots:
         QVERIFY(!preview.save());
         QVERIFY(preview.isDirty());
         QVERIFY(!preview.notice().isEmpty());
+    }
+
+    void wordWrapTogglesWithoutChangingTheDocument() {
+        QTemporaryDir temp;
+        const QString path = temp.filePath(QStringLiteral("wrap.md"));
+        const QByteArray content = "# Title\n" + QByteArray(300, 'x') + " long line\n";
+        writeFile(path, content);
+        FilePreview preview;
+        preview.resize(600, 300);
+        preview.show();
+        QVERIFY(preview.open(path));
+        auto *wrap = preview.findChild<QToolButton *>(QStringLiteral("filePreviewWrap"));
+        auto *edit = preview.findChild<QPlainTextEdit *>(QStringLiteral("filePreviewText"));
+        auto *mode = preview.findChild<QToolButton *>(QStringLiteral("filePreviewMode"));
+        QVERIFY(wrap && edit && mode);
+        QVERIFY(wrap->isHidden());
+        preview.startEditing();
+        QVERIFY(wrap->isVisible());
+        QCOMPARE(edit->lineWrapMode(), QPlainTextEdit::NoWrap);
+        QTest::mouseClick(wrap, Qt::LeftButton);
+        QVERIFY(wrap->isChecked());
+        QCOMPARE(edit->lineWrapMode(), QPlainTextEdit::WidgetWidth);
+        QCoreApplication::processEvents();
+        QVERIFY(edit->document()->findBlockByNumber(1).layout()->lineCount() > 1);
+        QCOMPARE(edit->toPlainText(), QString::fromUtf8(content));
+        QVERIFY(!preview.isDirty());
+        QTest::mouseClick(mode, Qt::LeftButton);
+        QVERIFY(wrap->isHidden());
+        QTest::mouseClick(mode, Qt::LeftButton);
+        QVERIFY(wrap->isVisible());
+        QVERIFY(wrap->isChecked());
+        QTest::mouseClick(wrap, Qt::LeftButton);
+        QCOMPARE(edit->lineWrapMode(), QPlainTextEdit::NoWrap);
+        QVERIFY(!preview.isDirty());
     }
 
     // Card #SEJ2: a Markdown file is edited as source, so startEditing() leaves the render.

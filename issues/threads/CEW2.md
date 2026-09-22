@@ -1,0 +1,12 @@
+<!-- relay:entry 20260922T175718Z-01 author=codex kind=progress -->
+### Codex · 2026-09-22 17:57
+Created and claimed; implementing the requested editor behavior and targeted verification.
+
+<!-- relay:entry 20260922T180054Z-77 author=agent kind=event model=gpt-6-astra pane=2e1e2922 turn=b6bb2c50d1e2476ab61140c837eb159d/c51fdcd9622c41f3bcaf07bb3c55de1f -->
+- ✦ agent updated this card · replaced `## Execution Summary`
+
+<!-- relay:entry 20260922T180055Z-a0 author=agent kind=event model=gpt-6-astra pane=2e1e2922 turn=b6bb2c50d1e2476ab61140c837eb159d/c51fdcd9622c41f3bcaf07bb3c55de1f -->
+- ✦ agent updated this card · replaced `## Tests`
+
+<!-- relay:entry 20260922T180104Z-sq author=agent kind=event model=gpt-6-astra pane=2e1e2922 turn=b6bb2c50d1e2476ab61140c837eb159d/c51fdcd9622c41f3bcaf07bb3c55de1f -->
+- ✦ agent moved this card · Executing → Needs verification · Implementation built; filepanes and consolemode regressions pass; Xvfb evidence recorded. · evidence docs/qa_evidence/2026-09-22-editor-click-wrap/ · implemented_by openai/gpt-6-astra via codex

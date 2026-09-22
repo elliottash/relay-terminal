@@ -940,11 +940,17 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
     m_edit = headerButton(QStringLiteral("✎ Edit"), QStringLiteral("Edit this file here"));
     m_edit->setObjectName(QStringLiteral("filePreviewEdit"));
     m_edit->hide();
+    m_wrap = headerButton(QStringLiteral("Word wrap"), QStringLiteral("Wrap long lines to the pane width"));
+    m_wrap->setObjectName(QStringLiteral("filePreviewWrap"));
+    m_wrap->setAccessibleName(QStringLiteral("Word wrap"));
+    m_wrap->setCheckable(true);
+    m_wrap->hide();
     header->addWidget(m_title, 1);
     header->addWidget(m_hostChip);
     header->addWidget(m_edit);
     header->addWidget(m_save);
     header->addWidget(m_mode);
+    header->addWidget(m_wrap);
     header->addWidget(m_reload);
     header->addWidget(m_external);
     layout->addLayout(header);
@@ -962,6 +968,9 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
     m_textView->setObjectName(QStringLiteral("filePreviewText"));
     m_textView->setReadOnly(true);
     m_textView->setLineWrapMode(QPlainTextEdit::NoWrap);
+    connect(m_wrap, &QToolButton::toggled, this, [this](bool wrap) {
+        m_textView->setLineWrapMode(wrap ? QPlainTextEdit::WidgetWidth : QPlainTextEdit::NoWrap);
+    });
     m_textView->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
     // Only while it is a preview: setEditable() turns this pane into an editor, and
     // copyOnSelectText() copies nothing from a widget the user is typing in.
@@ -1642,6 +1651,7 @@ void FilePreview::updateImage() {
 }
 
 void FilePreview::updateModeButton() {
+    m_wrap->setVisible(m_kind == Kind::Text || (m_kind == Kind::Markdown && m_markdownSource));
     if (m_kind == Kind::Markdown) {
         // The format is in the label, not only in the tooltip (issue #VXTF, owner 2026-09-18:
         // "in markdown, it should probably say 'source (MD)' rather than 'source'"): "Source" on

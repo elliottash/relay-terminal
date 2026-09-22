@@ -310,6 +310,7 @@ private:
     QHBoxLayout *m_header = nullptr;
     QLabel *m_title = nullptr, *m_noticeLabel = nullptr, *m_info = nullptr, *m_image = nullptr, *m_hostChip = nullptr;
     QToolButton *m_mode = nullptr, *m_reload = nullptr, *m_external = nullptr, *m_save = nullptr, *m_edit = nullptr;
+    QToolButton *m_wrap = nullptr;
     QStackedWidget *m_stack = nullptr;
     QPlainTextEdit *m_textView = nullptr;
     QTextBrowser *m_markdownView = nullptr;
