@@ -1,0 +1,30 @@
+{
+  "requests_before_revocation": 3,
+  "requests_after_revoked_turn": 3,
+  "requests": [
+    {
+      "path": "/ok/chat/completions",
+      "model": "glm-5.3",
+      "reasoning": {
+        "effort": "medium"
+      },
+      "message_count": 2
+    },
+    {
+      "path": "/ok/chat/completions",
+      "model": "fake-model",
+      "reasoning": {
+        "effort": "low"
+      },
+      "message_count": 2
+    },
+    {
+      "path": "/ok/chat/completions",
+      "model": "fake-model",
+      "reasoning": {
+        "effort": "low"
+      },
+      "message_count": 2
+    }
+  ]
+}

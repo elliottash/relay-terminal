@@ -1,0 +1,28 @@
+test_activation_error_distinguishes_access_from_keyring_failure (tests.test_relay_pro.ProClientTests.test_activation_error_distinguishes_access_from_keyring_failure) ... ok
+test_background_check_is_nonblocking_and_stale_check_cannot_reactivate (tests.test_relay_pro.ProClientTests.test_background_check_is_nonblocking_and_stale_check_cannot_reactivate) ... ok
+test_callback_failure_does_not_retry_access_validation (tests.test_relay_pro.ProClientTests.test_callback_failure_does_not_retry_access_validation) ... ok
+test_changed_code_does_not_reuse_validated_availability (tests.test_relay_pro.ProClientTests.test_changed_code_does_not_reuse_validated_availability) ... ok
+test_code_is_not_attached_to_an_overridden_gateway_endpoint (tests.test_relay_pro.ProClientTests.test_code_is_not_attached_to_an_overridden_gateway_endpoint) ... ok
+test_configuration_cannot_extract_pro_secret_for_a_foreign_endpoint (tests.test_relay_pro.ProClientTests.test_configuration_cannot_extract_pro_secret_for_a_foreign_endpoint) ... ok
+test_models_effort_tiers_and_free_lite (tests.test_relay_pro.ProClientTests.test_models_effort_tiers_and_free_lite) ... ok
+test_partial_pro_roles_cannot_activate_the_full_catalog (tests.test_relay_pro.ProClientTests.test_partial_pro_roles_cannot_activate_the_full_catalog) ... ok
+test_real_transport_rechecks_code_each_call_and_revocation_invalidates (tests.test_relay_pro.ProClientTests.test_real_transport_rechecks_code_each_call_and_revocation_invalidates) ... ok
+test_revoked_test_keeps_storage_but_disables_availability (tests.test_relay_pro.ProClientTests.test_revoked_test_keeps_storage_but_disables_availability) ... ok
+test_store_test_remove_validate_access_without_generation (tests.test_relay_pro.ProClientTests.test_store_test_remove_validate_access_without_generation) ... ok
+test_worker_background_validation_and_test_key_do_not_generate (tests.test_relay_pro.ProClientTests.test_worker_background_validation_and_test_key_do_not_generate) ... ok
+test_cli_digest_only_and_live_connection_revocation (tests.test_gateway_pro.OperatorTests.test_cli_digest_only_and_live_connection_revocation) ... ok
+test_code_never_replaces_installation_identity (tests.test_gateway_pro.ProTests.test_code_never_replaces_installation_identity) ... ok
+test_database_failure_fails_closed (tests.test_gateway_pro.ProTests.test_database_failure_fails_closed) ... ok
+test_forged_plan_and_body_code_do_not_grant_access (tests.test_gateway_pro.ProTests.test_forged_plan_and_body_code_do_not_grant_access) ... ok
+test_missing_bad_revoked_and_independent_people (tests.test_gateway_pro.ProTests.test_missing_bad_revoked_and_independent_people) ... ok
+test_pro_and_free_share_concurrency (tests.test_gateway_pro.ProTests.test_pro_and_free_share_concurrency) ... ok
+test_pro_uses_shared_quota_rate_and_spend (tests.test_gateway_pro.ProTests.test_pro_uses_shared_quota_rate_and_spend) ... ok
+test_reserved_config_and_prices (tests.test_gateway_pro.ProTests.test_reserved_config_and_prices) ... ok
+test_unconfigured_pro_and_free_unchanged (tests.test_gateway_pro.ProTests.test_unconfigured_pro_and_free_unchanged) ... ok
+test_valid_roles_proxy_and_no_secret_logging (tests.test_gateway_pro.ProTests.test_valid_roles_proxy_and_no_secret_logging) ... ok
+
+----------------------------------------------------------------------
+Ran 22 tests in 1.639s
+
+OK
+PASS additional direct BYOK probe: one successful request, synthetic BYOK auth, no Pro header
