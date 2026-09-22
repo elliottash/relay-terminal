@@ -91,6 +91,14 @@ struct SettingRow {
     // it are indented one level (Options › Models: a provider and its models).
     int indent = 0;
     bool strong = false;
+    // A thin rule across the page directly above this row, in the theme's `@border`, the same
+    // colour a section heading is underlined in. It is what separates one *group* of rows from the
+    // next inside a section — the providers on Options › Models, each of which is a row, a
+    // "models… (N of M)" link and sometimes a permissions row, and which ran together as one wall
+    // of text until the owner asked for it (2026-09-21: "tab 1: add horizontal line dividers
+    // between providers"). Set it on the first row of each group but the first group's; the rule
+    // hides with the row when a heading folds, and a search result draws the row without it.
+    bool ruleAbove = false;
     // Hover text for the whole row, and a page to read more (an ⓘ button before the control):
     // Options › Models keeps a model's reasoning levels, score and id in the hover so the list
     // stays one line per model (owner, 2026-09-20).
@@ -341,6 +349,7 @@ private:
     void revealSection(Mode mode, const QString &section, const QString &group, int heading = -1);
     void scrollToHeader(const QString &key);
     QWidget *groupHeader(const QString &text, const QString &key = QString());
+    static QWidget *sectionRule();   // the 1px @border divider a `ruleAbove` row draws above itself
     static bool headingCollapsed(const SettingRow &row);
     void addActionsList(QVBoxLayout *into);
     void setCurrent(int index, bool scroll);

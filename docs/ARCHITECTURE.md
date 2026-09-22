@@ -872,8 +872,10 @@ M-i unbound, so a shell keeps the key. Like Alt+A and Alt+R it steps aside for a
 the keyboard.
 
 Unbound by default: `conversations.open`, `files.open`, `terminal.interrupt`, `agent.newChat`,
-`agent.stop`, `agent.clearQueue`, `agent.resumeQueue`, `agent.provider`, `input.mode*`,
-`keybindings.edit`, `keybindings.reload`.
+`agent.stop`, `agent.clearQueue`, `agent.resumeQueue`, `input.mode*`, `keybindings.edit`,
+`keybindings.reload`. (`agent.provider` was in this list until 2026-09-21: it opened the "Advanced
+provider settings" dialog, and card #MDL1 retired the action with it — providers, keys and custom
+endpoints are the models pane's first tab, on `agent.modelOptions`.)
 
 **Actions** (Ctrl+Shift+A or Ctrl+?). The action catalog (`rootItems()` in
 `src/RelayWindow.h`) is the same list the palette overlay used to render: items with a stable key and

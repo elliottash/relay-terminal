@@ -39,7 +39,6 @@ Sources:
 | agent.resume | Ctrl+Shift+Y | W5 Conversations menu. Relay's own default again since 2026-09-20 (it was Ctrl+Shift+M for one day; M is now `agent.modelOptions`, Options › Models). A toggle: pressed again with the Sessions pane focused it closes it, and from anywhere else it brings it forward |
 | agent.newChat | — | Warp's own new-conversation keys are taken: Ctrl+Shift+Enter is Relay's send-to-terminal key, Ctrl+Shift+N is window.new |
 | agent.stop | — | Warp: Ctrl+C while the agent responds (W4). Left unbound (same reason as interrupt) |
-| agent.provider | — | none (a Settings page in Warp) |
 | input.modeAuto | — | none (auto-detection is a setting, W4) |
 | input.modeAgent | — | Superseded 2026-09-17: Relay added `input.toggle`, which now takes Ctrl+I |
 | input.toggle | Ctrl+I | W4: Ctrl+I toggles shell ↔ agent (acts from the prompt box only) |
@@ -81,7 +80,6 @@ the registrations that "Preferences: Open Default Keyboard Shortcuts (JSON)" is 
 | terminal.interrupt | — | none |
 | agent.newChat | Ctrl+N | V9 `chat.newChat` (in chat; secondary Ctrl+L left out because it clears the shell screen) |
 | agent.stop | Ctrl+Esc | V10 `chat.cancel` while a request is running (Windows uses Alt+Backspace) |
-| agent.provider | Ctrl+Alt+. | **adapt:** V10 model picker, the nearest match to Relay's provider/model dialog |
 | input.modeAuto | — | none (Ctrl+. opens the chat mode picker, V10, but there is no auto mode) |
 | input.modeTerminal | — | none |
 | input.modeAgent | Ctrl+Shift+Alt+I | V8: open chat in Agent mode. Linux override (other platforms: Ctrl+Shift+I) |
@@ -128,7 +126,7 @@ Sources:
     "pane.focusLeft": ["Ctrl+Alt+Left"], "pane.focusRight": ["Ctrl+Alt+Right"], "pane.focusUp": ["Ctrl+Alt+Up"], "pane.focusDown": ["Ctrl+Alt+Down"],
     "pane.close": ["Ctrl+Shift+W"], "closed.restore": ["Ctrl+Alt+T"], "palette.open": ["Ctrl+Shift+A"],
     "terminal.native": ["F12"], "terminal.interrupt": [],
-    "agent.newChat": [], "agent.stop": [], "agent.provider": [],
+    "agent.newChat": [], "agent.stop": [],
     "input.modeAuto": [], "input.modeTerminal": ["Ctrl+Shift+I"], "input.modeAgent": [], "input.toggle": ["Ctrl+I"],
     "keybindings.edit": ["Ctrl+,"], "keybindings.reload": []
   },
@@ -139,7 +137,7 @@ Sources:
     "pane.focusLeft": ["Alt+Left"], "pane.focusRight": ["Alt+Right"], "pane.focusUp": ["Alt+Up"], "pane.focusDown": ["Alt+Down"],
     "pane.close": ["Ctrl+W"], "closed.restore": ["Ctrl+Shift+T"], "palette.open": ["Ctrl+Shift+A"],
     "terminal.native": ["Ctrl+`", "F12"], "terminal.interrupt": [],
-    "agent.newChat": ["Ctrl+N"], "agent.stop": ["Ctrl+Esc"], "agent.provider": ["Ctrl+Alt+."],
+    "agent.newChat": ["Ctrl+N"], "agent.stop": ["Ctrl+Esc"],
     "input.modeAuto": [], "input.modeTerminal": [], "input.modeAgent": ["Ctrl+Shift+Alt+I"],
     "keybindings.edit": ["Ctrl+,"], "keybindings.reload": []
   },
@@ -150,7 +148,7 @@ Sources:
     "pane.focusLeft": ["Ctrl+Shift+Left"], "pane.focusRight": ["Ctrl+Shift+Right"], "pane.focusUp": ["Ctrl+Shift+Up"], "pane.focusDown": ["Ctrl+Shift+Down"],
     "pane.close": ["Ctrl+Shift+W"], "closed.restore": [], "palette.open": ["Ctrl+Alt+I"],
     "terminal.native": ["F12"], "terminal.interrupt": [],
-    "agent.newChat": [], "agent.stop": [], "agent.provider": [],
+    "agent.newChat": [], "agent.stop": [],
     "input.modeAuto": [], "input.modeTerminal": [], "input.modeAgent": [],
     "keybindings.edit": ["Ctrl+Alt+,"], "keybindings.reload": []
   }

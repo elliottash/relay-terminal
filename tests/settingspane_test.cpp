@@ -962,6 +962,86 @@ private slots:
             QVERIFY2(terms.contains(word), qPrintable(word));
     }
 
+    // ----- the owner's review of the providers tab (card #MDL1, 2026-09-21) --------------------
+
+    // "tab 1: add horizontal line dividers between providers." One provider is up to three rows —
+    // its key, its "models… (N of M)" link and, for a guest, what it may do with a tool — and they
+    // ran into the next provider's as one wall of text. The rule is `SettingRow::ruleAbove`, drawn
+    // by the pane in the theme's `@border`.
+    void everyProviderButTheFirstDrawsARuleAboveIt() {
+        QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindow.h"));
+        QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
+        const QString text = QString::fromUtf8(source.readAll());
+        const int start = text.indexOf(QStringLiteral("relay::SettingsSection modelsSection(bool inModelsPane = false) {"));
+        QVERIFY2(start > 0, "modelsSection() is gone");
+        const QString page = text.mid(start, text.indexOf(QStringLiteral("void modelsCurated() {"), start) - start);
+        QVERIFY2(page.contains(QStringLiteral("row.ruleAbove = !firstProvider;")), "no divider between providers");
+        QVERIFY(page.contains(QStringLiteral("firstProvider = false;")));
+
+        // …and the pane really draws one: a section of two rows, the second asking for a rule.
+        SettingsSection section;
+        section.id = QStringLiteral("models");
+        section.title = QStringLiteral("Models");
+        SettingRow first;
+        first.kind = SettingRow::Button;
+        first.id = QStringLiteral("provider:kimi");
+        first.label = QStringLiteral("kimi");
+        first.buttonText = QStringLiteral("add key…");
+        first.run = [] {};
+        SettingRow second = first;
+        second.id = QStringLiteral("provider:glm");
+        second.label = QStringLiteral("z.ai (glm)");
+        second.ruleAbove = true;
+        section.rows << first << second;
+        SettingsPane pane(SettingsPane::Mode::Options, [&] { return QList<SettingsSection>{section}; },
+                          [] { return QList<ActionItem>(); });
+        pane.showTab(QStringLiteral("models"));
+        const QList<QWidget *> rules = pane.findChildren<QWidget *>(QStringLiteral("settingsSectionRule"));
+        QCOMPARE(rules.size(), 1);
+        QCOMPARE(rules.first()->height(), 1);
+    }
+
+    // "check the advanced provider settings. not sure whats helpful or needed." Retired: every
+    // field of it had a better home, and the row, the action and the dialog went together
+    // (design 5.8). What replaced the two parts that had nowhere else to go is checked here.
+    void theAdvancedProviderDialogIsGoneAndItsTwoPartsHaveHomes() {
+        const auto read = [](const char *path) {
+            QFile source(QStringLiteral(RELAY_SOURCE_DIR) + QLatin1Char('/') + QLatin1String(path));
+            if (!source.open(QIODevice::ReadOnly | QIODevice::Text)) return QString();
+            return QString::fromUtf8(source.readAll());
+        };
+        const QString window = read("src/RelayWindow.h");
+        const QString pane = read("src/Pane.h");
+        const QString keymap = read("src/Keymap.h");
+        QVERIFY(!window.isEmpty() && !pane.isEmpty() && !keymap.isEmpty());
+        // The row, the dialog and the action, each gone rather than merely unbound.
+        QVERIFY2(!window.contains(QStringLiteral("QStringLiteral(\"Advanced provider settings\")")),
+                 "the advanced row is still on the Models page");
+        QVERIFY2(!window.contains(QStringLiteral("openProviderDialog()")), "the window still opens it");
+        QVERIFY2(!pane.contains(QStringLiteral("void openProviderDialog()")), "Pane still has the door");
+        QVERIFY2(!pane.contains(QStringLiteral("Relay · Bring your own key")), "the dialog is still in Pane");
+        QVERIFY2(!keymap.contains(QStringLiteral("add(\"agent.provider\"")), "the action is still registered");
+        QVERIFY2(!keymap.contains(QStringLiteral("\"agent.provider\":[")), "a keybinding preset still binds it");
+        // "Import keys from Warp" was one of its buttons: a row at the bottom of the providers now.
+        const int start = window.indexOf(QStringLiteral("relay::SettingsSection modelsSection(bool inModelsPane = false) {"));
+        const QString page = window.mid(start, window.indexOf(QStringLiteral("void modelsCurated() {"), start) - start);
+        const int warp = page.indexOf(QStringLiteral("QStringLiteral(\"models.importWarp\")"));
+        QVERIFY2(warp > 0, "there is nowhere to import Warp's keys from");
+        QVERIFY(page.mid(warp, 900).contains(QStringLiteral("\"type\", \"import_warp\"")));
+        // It is under the providers: after the "+ add provider" row and before the profiles.
+        const int add = page.indexOf(QStringLiteral("QStringLiteral(\"models.addProvider\")"));
+        const int profiles = page.indexOf(QStringLiteral("headingRow(QStringLiteral(\"profiles\"))"));
+        QVERIFY(add > 0 && profiles > 0);
+        QVERIFY2(warp > add && warp < profiles, "the Warp import is not at the bottom of the providers");
+        // The consent sentence moved to where a key is actually typed.
+        const int ask = page.indexOf(QStringLiteral("auto askForKey = "));
+        QVERIFY(ask > 0);
+        const QString box = page.mid(ask, 1800);
+        QVERIFY2(box.contains(QStringLiteral("runs tools without asking")), qPrintable(box.left(900)));
+        QVERIFY(box.contains(QStringLiteral("not sandboxed")));
+        QVERIFY(box.contains(QStringLiteral("desktop keyring")));
+    }
+
     // ----- Settings \u203a Local models (card #24XJ) -------------------------------------------------
 
     // The placement is one line of RelayWindow::settingsSections(), which needs a whole window to

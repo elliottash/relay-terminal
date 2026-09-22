@@ -1531,7 +1531,6 @@ public:
               {"max_tokens", settings.value(QStringLiteral("provider/max_tokens"), 0).toInt()}});
         changed();
     }
-    void openProviderDialog() { configure(); }
     // ----- the model catalog (owner, 2026-09-20) ---------------------------------------------
     // Every model of every preset row the worker sent, as relay::models entries; what the user
     // checked and ranked lives in QSettings under models/*. The box, the picker, /model <name> and
@@ -14563,7 +14562,10 @@ private:
         // A harness this pane is holding starts here, on the first prompt (card #MDL1). The
         // prompt itself waits in the queue, which `configured` pumps.
         if (!m_configured && !m_configuring && !startDeferred()) {
-            if (fromEditor) { configure(); return; }
+            // Typed into this pane's own box with nothing configured: open the models pane on
+            // **providers**, which is step 1 and is what the retired provider dialog was reached
+            // for here (card #MDL1, design 5.8). Every other caller only says so.
+            if (fromEditor) { openModelPicker(relay::ModelsPane::providersTab()); return; }
             status(QStringLiteral("No agent provider is configured."));
             return;
         }
@@ -18010,136 +18012,18 @@ public:
     std::function<void(const QString &text, bool edit)> onRenameTab;
 
 private:
-    void configure() {
-        if (m_agentBusy) { status(QStringLiteral("Stop the current agent turn before changing provider settings.")); return; }
-        QDialog dialog(this); dialog.setWindowTitle(QStringLiteral("Relay · Bring your own key")); dialog.resize(650, 520);
-        QSettings settings;
-        auto *layout = new QVBoxLayout(&dialog);
-        auto *form = new QFormLayout;
-        struct PresetRow { const char *id, *label, *base, *model, *extra; };
-        static const PresetRow presets[] = {
-            // Mirrors backend/relay_core/presets.py; tests/test_presets.py fails if the two drift.
-            {"custom", "Custom / current settings", "", "", ""},
-            {"relay-free", "relay free", "https://api.relay-terminal.ai/v1", "relay-main", "{}"},
-            {"kimi", "kimi · k3", "https://api.moonshot.ai/v1", "kimi-k3", "{\"reasoning_effort\":\"high\"}"},
-            {"kimi-code", "kimi code · k3", "https://api.kimi.ai/coding/v1", "k3", "{\"reasoning_effort\":\"high\"}"},
-            {"glm", "z.ai · glm-5.3 · standard api", "https://api.z.ai/api/paas/v4", "glm-5.3",
-             "{\"thinking\":{\"type\":\"enabled\"},\"reasoning_effort\":\"high\"}"},
-            {"glm-coding", "z.ai · glm-5.3 · coding plan", "https://api.z.ai/api/coding/paas/v4", "glm-5.3",
-             "{\"thinking\":{\"type\":\"enabled\"},\"reasoning_effort\":\"high\"}"},
-            {"minimax", "minimax · m3 · coding/token plan", "https://api.minimax.io/v1", "MiniMax-M3", "{}"},
-            {"openrouter", "openrouter", "https://openrouter.ai/api/v1", "deepseek/deepseek-v4.1-flash", "{}"},
-            {"openai", "openai · gpt-6 astra", "https://api.openai.com/v1", "gpt-6-astra", "{\"reasoning_effort\":\"high\"}"},
-            {"anthropic", "anthropic · claude opus 5", "https://api.anthropic.com/v1", "claude-opus-5", "{}"},
-            {"gemini", "google · gemini 3.1 pro", "https://generativelanguage.googleapis.com/v1beta/openai",
-             "gemini-3.1-pro-preview", "{\"reasoning_effort\":\"high\"}"},
-            {"deepseek", "deepseek · v4.1 flash", "https://api.deepseek.com", "deepseek-flash",
-             "{\"thinking\":{\"type\":\"enabled\"},\"reasoning_effort\":\"high\"}"},
-        };
-        auto *preset = new QComboBox;
-        for (const auto &row : presets) preset->addItem(QString::fromUtf8(row.label), QString::fromLatin1(row.id));
-        const QString savedPreset = settings.value(QStringLiteral("provider/preset"), QStringLiteral("custom")).toString();
-        auto *base = new QLineEdit(settings.value(QStringLiteral("provider/base"), QStringLiteral("https://api.moonshot.ai/v1")).toString());
-        auto *model = new QLineEdit(settings.value(QStringLiteral("provider/model"), QStringLiteral("kimi-k3")).toString());
-        auto *key = new QLineEdit(m_apiKey); key->setEchoMode(QLineEdit::Password);
-        auto *extra = new QPlainTextEdit(settings.value(QStringLiteral("provider/extra"), QStringLiteral("{\"reasoning_effort\":\"high\"}")).toString());
-        extra->setMaximumHeight(90);
-        // 0 is the automatic setting: the model's own documented output cap, which the worker
-        // resolves per endpoint (presets.max_output). The spin box shows a word, not a zero.
-        auto *tokens = new QSpinBox; tokens->setRange(0, 131072);
-        tokens->setSpecialValueText(QStringLiteral("Automatic (the model's own limit)"));
-        tokens->setValue(settings.value("provider/max_tokens", 0).toInt());
-        auto *workspace = new QLineEdit(m_workspace);
-        auto *workspaceRow = new QWidget; auto *workspaceLayout = new QHBoxLayout(workspaceRow); workspaceLayout->setContentsMargins(0, 0, 0, 0);
-        auto *browse = new QPushButton(QStringLiteral("Choose…")); workspaceLayout->addWidget(workspace); workspaceLayout->addWidget(browse);
-        connect(browse, &QPushButton::clicked, &dialog, [workspace, &dialog] {
-            const auto path = QFileDialog::getExistingDirectory(&dialog, QStringLiteral("Choose agent workspace"), workspace->text());
-            if (!path.isEmpty()) workspace->setText(path);
-        });
-        connect(preset, qOverload<int>(&QComboBox::currentIndexChanged), &dialog, [base, model, extra, key](int index) {
-            if (index <= 0 || index >= int(std::size(presets))) return;
-            key->clear();
-            base->setText(QString::fromLatin1(presets[index].base));
-            model->setText(QString::fromLatin1(presets[index].model));
-            extra->setPlainText(QString::fromLatin1(presets[index].extra));
-        });
-        // Restore the preset label without overwriting edited fields.
-        { QSignalBlocker blocker(preset); const int i = preset->findData(savedPreset); if (i >= 0) preset->setCurrentIndex(i); }
-        key->setPlaceholderText(QStringLiteral("Leave empty to use the keyring key for this preset"));
-        auto *saveKey = new QCheckBox(QStringLiteral("Save entered key to the desktop keyring"));
-        auto *importWarp = new QPushButton(QStringLiteral("Import keys from Warp"));
-        importWarp->setToolTip(QStringLiteral("Copies Warp's custom-endpoint API keys into Relay's keyring entries. Keys never pass through this window."));
-        connect(importWarp, &QPushButton::clicked, &dialog, [this] { send({{"type", "import_warp"}}); });
-        form->addRow(QStringLiteral("Preset"), preset); form->addRow(QStringLiteral("Base URL"), base);
-        form->addRow(QStringLiteral("Model ID"), model); form->addRow(QStringLiteral("API key"), key);
-        form->addRow(QString(), saveKey); form->addRow(QString(), importWarp);
-        form->addRow(QStringLiteral("Extra request JSON"), extra); form->addRow(QStringLiteral("Output token limit"), tokens);
-        form->addRow(QStringLiteral("Agent workspace"), workspaceRow); layout->addLayout(form);
-        auto *notice = new QLabel(QStringLiteral("Entered keys are kept in process memory unless you choose to save them to the desktop keyring. Keys are never written to settings files. Changing settings starts a new conversation. Provider access and billing depend on your account.\n\nThe agent runs tools without asking. Shell commands are NOT sandboxed: they have your user permissions. File tools are restricted to this workspace. Terminal history is not sent automatically."));
-        notice->setWordWrap(true); layout->addWidget(notice);
-        auto *consent = new QCheckBox(QStringLiteral("Send my submitted agent prompts and tool results to this provider."));
-        layout->addWidget(consent);
-        // The consent is about data leaving the machine. Plain HTTP to a loopback host is a model
-        // server on this machine (the same rule as relay_core.provider.loopback_http): nothing
-        // leaves, there is no key, and asking to "share data with this provider" only confuses
-        // (owner, 2026-09-18, with http://127.0.0.1:8080/v1 in the box).
-        auto *localNote = new QLabel(QStringLiteral("This is a model server on this machine: prompts and tool results stay here, and no API key is needed."));
-        localNote->setWordWrap(true); layout->addWidget(localNote);
-        const auto isLocalServer = [base] {
-            const QUrl url(base->text().trimmed());
-            const QString host = url.host().toLower();
-            return url.scheme().toLower() == QStringLiteral("http")
-                && (host == QStringLiteral("localhost") || host == QStringLiteral("127.0.0.1") || host == QStringLiteral("::1"));
-        };
-        const auto showForServer = [=] {
-            const bool local = isLocalServer();
-            consent->setVisible(!local); localNote->setVisible(local);
-            key->setEnabled(!local); saveKey->setEnabled(!local);
-            key->setPlaceholderText(local ? QStringLiteral("Not needed for a model server on this machine")
-                                          : QStringLiteral("Leave empty to use the keyring key for this preset"));
-        };
-        connect(base, &QLineEdit::textChanged, &dialog, showForServer);
-        showForServer();
-        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel); layout->addWidget(buttons);
-        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-        connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
-            QJsonParseError error;
-            const auto doc = QJsonDocument::fromJson(extra->toPlainText().toUtf8(), &error);
-            // One sentence about the thing that is actually wrong, with the keyboard put on it. The
-            // old message listed all three conditions whichever one had failed.
-            const auto refuse = [&dialog](QWidget *field, const QString &text) {
-                QMessageBox::warning(&dialog, QStringLiteral("Check settings"), text);
-                field->setFocus();
-            };
-            if (error.error != QJsonParseError::NoError || !doc.isObject()) {
-                refuse(extra, QStringLiteral("Extra request JSON must be a JSON object, for example {} or {\"temperature\": 0.7}.")); return;
-            }
-            if (!QFileInfo(workspace->text()).isDir()) {
-                refuse(workspace, QStringLiteral("The agent workspace is not an existing folder. Choose one with “Choose…”.")); return;
-            }
-            if (!isLocalServer() && !consent->isChecked()) {
-                refuse(consent, QStringLiteral("Tick “Send my submitted agent prompts and tool results to this provider.” to continue. "
-                                               "The agent cannot work without sending them.")); return;
-            }
-            if (isLocalServer()) key->clear();      // never send a key to a model server on this machine
-            const QString presetId = preset->currentData().toString();
-            m_apiKey = key->text().trimmed(); m_workspace = QFileInfo(workspace->text()).canonicalFilePath();
-            m_configured = false;
-            settings.setValue("provider/preset", presetId); m_currentPreset = presetId; changed();
-            settings.setValue("provider/base", base->text().trimmed()); settings.setValue("provider/model", model->text().trimmed());
-            settings.setValue("provider/extra", extra->toPlainText()); settings.setValue("provider/max_tokens", tokens->value());
-            if (saveKey->isChecked() && !m_apiKey.isEmpty() && presetId != QStringLiteral("custom"))
-                send({{"type", "store_key"}, {"preset", presetId}, {"api_key", m_apiKey}});
-            send(withSessionFields(QJsonObject{{"type", "configure"}, {"base_url", base->text().trimmed()}, {"model", model->text().trimmed()},
-                  {"api_key", m_apiKey}, {"preset", presetId}, {"use_stored_key", m_apiKey.isEmpty()},
-                  {"workspace", m_workspace}, {"extra", doc.object()}, {"max_tokens", tokens->value()},
-                  {"keybindings", Keymap::instance().catalog()}}));
-            updatePaths();
-            registerWithBridge();   // the bridge routes by workspace too (26.5)
-            dialog.accept();
-        });
-        dialog.exec();
-    }
+    // `configure()` — the "Advanced provider settings" dialog, opened by `agent.provider` and by a
+    // row on Options › Models — was here until 2026-09-21, and card #MDL1 retired all three (design
+    // 5.8). It was Relay's first provider surface and every field of it had since grown a better
+    // home: the Preset combo and the API key are the **providers** rows of the models pane, where
+    // a key is added per provider and saved to the keyring by the worker; a Base URL, a Model ID
+    // and a per-request JSON body are a **custom endpoint**, added on the same tab with a name of
+    // its own; the Output token limit is a row under "defaults"; the agent workspace is the pane's
+    // own directory (`m_workspace`, set from the cwd) and nothing wanted a second one; "Import keys
+    // from Warp" is a row at the bottom of the providers; and the consent sentence is in the box
+    // that asks for the key. What is left of it in the tree is `provider/base`, `provider/model`
+    // and `provider/extra`, which `configurePreset` and `rememberPreset` still write from the
+    // worker's own preset row and which only a pre-preset "custom" install reads back.
 
     QString m_data, m_python, m_workspace, m_cwd, m_token, m_apiKey;
     // Terminal scrollback across a restart: the file this pane's text is saved in, the lines a

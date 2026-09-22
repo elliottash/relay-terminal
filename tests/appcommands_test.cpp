@@ -238,9 +238,10 @@ QString registryLabel(const QString &key) {
         // Registered and *not* in the safe table, which is the third answer. It was
         // `agent.interrupt` until 2026-09-20, when the owner's #AG7R group 5 answer made that one
         // safe — so the example moved to a key that is still off rather than the assertion being
-        // relaxed. `agent.provider` opens the advanced endpoint settings and nobody has asked for
-        // it to be an agent's.
-        {QStringLiteral("agent.provider"), QStringLiteral("Provider and API keys")},
+        // relaxed. It was `agent.provider` until 2026-09-21, when card #MDL1 retired that action
+        // with the dialog it opened; `keybindings.clearOverrides` is named in `refusedByTheOwner`
+        // and so is off because somebody decided, not by omission.
+        {QStringLiteral("keybindings.clearOverrides"), QStringLiteral("Clear my keybinding overrides")},
         {QStringLiteral("agent.interrupt"), QStringLiteral("Interrupt the agent")},
     };
     return registered.value(key);
@@ -634,7 +635,7 @@ private Q_SLOTS:
         writes = true;
         QCOMPARE(run({{QStringLiteral("id"), QStringLiteral("r1")},
                       {QStringLiteral("command"), QStringLiteral("run_action")},
-                      {QStringLiteral("key"), QStringLiteral("agent.provider")}})
+                      {QStringLiteral("key"), QStringLiteral("keybindings.clearOverrides")}})
                      .value(QStringLiteral("error")).toString(),
                  QStringLiteral("not_agent_safe"));
         // Neither the catalog nor the registry: still nothing to run.
@@ -658,7 +659,7 @@ private Q_SLOTS:
         QVERIFY(rowOf(block, QStringLiteral("actions"), QStringLiteral("help.shortcuts"))
                     .value(QStringLiteral("agent_safe")).toBool());
         // Not safe, so not added here: the fallback finds it, the catalog does not advertise it.
-        QVERIFY(rowOf(block, QStringLiteral("actions"), QStringLiteral("agent.provider")).isEmpty());
+        QVERIFY(rowOf(block, QStringLiteral("actions"), QStringLiteral("keybindings.clearOverrides")).isEmpty());
         // …and one the owner *did* allow in group 5 is advertised, from the registry, like the
         // focus keys above it — the same fallback, the other side of the policy.
         QVERIFY(rowOf(block, QStringLiteral("actions"), QStringLiteral("agent.interrupt"))

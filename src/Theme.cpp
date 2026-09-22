@@ -461,6 +461,7 @@ QScrollArea#settingsPage, QWidget#settingsPageBody { background: transparent; bo
 QLabel#settingsBlurb, QLabel#settingsInfo { color: @muted; }
 QLabel#settingsHeading { color: @text; font-size: 11pt; font-weight: 700; padding: 16px 10px 4px 10px; border-bottom: 1px solid @border; }
 QLabel#settingsSubheading { color: @text; font-size: 10pt; font-weight: 600; }
+QWidget#settingsSectionRule { background: @border; border: none; margin: 8px 10px 4px 10px; }
 QFrame#settingsRow { background: transparent; border: 1px solid transparent; border-radius: 8px; }
 QFrame#settingsRow:hover { background: @surface; }
 QFrame#settingsRow[nested="true"] { border-radius: 4px; }

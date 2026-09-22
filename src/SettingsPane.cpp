@@ -732,14 +732,30 @@ void SettingsPane::buildPage(QWidget *page, const SettingsSection &section) {
     int rowIndex = 0;
     for (const SettingRow &row : section.rows) {
         if (row.kind == SettingRow::Heading) folded = row.collapsible && headingCollapsed(row);
+        // The divider between two groups of rows (`SettingRow::ruleAbove`): a 1px line in the
+        // theme's `@border`, the colour a section heading is underlined in. It belongs to the row
+        // under it, so it folds with it and never leads a page.
+        QWidget *rule = nullptr;
+        if (row.ruleAbove && rowIndex > 0) { rule = sectionRule(); layout->addWidget(rule); }
         QWidget *widget = settingRow(row);
         if (row.kind == SettingRow::Heading || row.kind == SettingRow::Subheading)
             m_groups.insert(QStringLiteral("option-section:") + section.id + QLatin1Char(':') + QString::number(rowIndex), widget);
         ++rowIndex;
         layout->addWidget(widget);
-        if (folded && row.kind != SettingRow::Heading) widget->hide();
+        if (folded && row.kind != SettingRow::Heading) { widget->hide(); if (rule) rule->hide(); }
     }
     layout->addStretch(1);
+}
+
+// One divider. A styled QWidget rather than a QFrame line, so the colour is the theme's `@border`
+// token and follows a theme change like every other rule in the app.
+QWidget *SettingsPane::sectionRule() {
+    auto *line = new QWidget;
+    line->setObjectName(QStringLiteral("settingsSectionRule"));
+    line->setAttribute(Qt::WA_StyledBackground);
+    line->setFixedHeight(1);
+    line->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    return line;
 }
 
 bool SettingsPane::headingCollapsed(const SettingRow &row) {

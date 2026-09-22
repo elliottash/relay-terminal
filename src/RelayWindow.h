@@ -1319,7 +1319,6 @@ private:
         else if (id == QStringLiteral("voice.toggle")) pane->toggleVoice(true);
         else if (id == QStringLiteral("pane.share")) pane->toggleShare();
         else if (id == QStringLiteral("pane.sharing")) openSharingPane(pane, true);
-        else if (id == QStringLiteral("agent.provider")) pane->openProviderDialog();
         else if (id == QStringLiteral("agent.modelKeys")) {
             pane->openKeysDialog();
             hint(QStringLiteral("model.keys.slow"),
@@ -2544,8 +2543,21 @@ private:
         auto askForKey = [this, request](const QString &id, const QString &label) {
             bool ok = false;
             // Password echo: the key is never rendered and never leaves this call.
+            //
+            // The two sentences after the first are the ones the retired "Advanced provider
+            // settings" dialog put behind a consent checkbox (card #MDL1, 2026-09-21: "the consent
+            // sentence about tools running without asking moves to wherever the first key is
+            // entered if it is not already said there"). This is where a key is entered, so this
+            // is where they are said. Not a checkbox: Relay has no per-action tool approvals by
+            // ruling (WARP.md), so a tick that only said "yes, run tools" would gate nothing and
+            // make the person agree to something they cannot decline and keep an agent.
             const QString key = QInputDialog::getText(this, QStringLiteral("API key"),
-                QStringLiteral("Key for %1.\nIt is saved to the desktop keyring and sent only to this provider.").arg(label),
+                QStringLiteral("Key for %1.\n"
+                               "It is saved to the desktop keyring and sent only to this provider — never to "
+                               "Relay's server, and never written to a settings file.\n\n"
+                               "Your prompts and tool results go to this provider when the agent runs. The agent "
+                               "runs tools without asking: shell commands are not sandboxed and have your own "
+                               "permissions, and file tools are held to the pane's directory.").arg(label),
                 QLineEdit::Password, QString(), &ok).trimmed();
             if (!ok || key.isEmpty()) return;
             if (key.contains(QRegularExpression(QStringLiteral("\\s")))) {
@@ -2626,6 +2638,12 @@ private:
         // Read once for the whole loop, not once per entry: every `isAvailable` would otherwise be
         // its own QSettings lookup (the same trap as `shown`, #PPR4).
         const QStringList availableKeys = relay::models::curation::availableKeys();
+        // A provider is three rows on a good day — its key, its "models… (N of M)" link and, for a
+        // guest, what it may do with a tool — and they ran into the next provider's as one wall of
+        // text (owner, 2026-09-21: "tab 1: add horizontal line dividers between providers"). The
+        // rule goes on each provider's own row but the first's, in the theme's `@border`, which is
+        // the colour a section heading is underlined in.
+        bool firstProvider = true;
         for (const QJsonObject &preset : std::as_const(listed)) {
             const QString id = str(preset, "id");
             const QString label = str(preset, "label").toLower();
@@ -2662,6 +2680,8 @@ private:
                                                                          : QStringLiteral("https://developers.openai.com/codex"))
                         : preset.value(QStringLiteral("custom")).toBool() ? str(preset, "base_url")
                                                                           : str(preset, "key_url");
+            row.ruleAbove = !firstProvider;
+            firstProvider = false;
             row.dragGroup = QStringLiteral("providers");
             row.onDropBefore = [id, curated](const QString &draggedRowId) {
                 relay::models::curation::moveProviderBefore(draggedRowId.section(QLatin1Char(':'), 1), id);
@@ -2799,6 +2819,20 @@ private:
                     const QJsonObject preset = waiting.at(result.row - 1);
                     askForKey(str(preset, "id"), str(preset, "label").toLower());
                 });
+        }
+        // The last row of the providers group: the one-time migration that was a button in the
+        // retired "Advanced provider settings" dialog (card #MDL1, 2026-09-21). It is step 1 done
+        // in bulk — "add provider", for everything Warp already has a key for — so it belongs
+        // under the providers, at the bottom, where it is out of the way of the first run.
+        {
+            relay::SettingRow warp = buttonRow(QStringLiteral("models.importWarp"),
+                QStringLiteral("keys from warp"),
+                QStringLiteral("Copies the API keys of Warp's custom endpoints into Relay's keyring, once. The keys "
+                               "go from Warp's store straight to the keyring inside the worker: they are never shown "
+                               "here and never written to a settings file"),
+                QStringLiteral("import…"), [request] { request({{"type", "import_warp"}}); });
+            warp.aliases = QStringLiteral("import warp migrate keys keyring move from warp bring my keys");
+            models.rows << warp;
         }
 
         // ----- 2. profiles ----------------------------------------------------------------------
@@ -3032,9 +3066,13 @@ private:
                                  QStringLiteral("Per model call, reasoning included. 0 = automatic: each model's own "
                                                 "documented limit (GLM 131072, Gemini 65536). Applies to the next conversation"),
                                  0, 0, 131072);
-        models.rows << buttonRow(QStringLiteral("agent.provider"), QStringLiteral("Advanced provider settings"),
-                                 QStringLiteral("Base URL, model id, extra request JSON and the agent workspace"),
-                                 QStringLiteral("Open…"), [this] { runAction(QStringLiteral("agent.provider")); });
+        // "Advanced provider settings" was here (card #MDL1, 2026-09-21: "check the advanced
+        // provider settings. not sure whats helpful or needed"). Every field of it had grown a
+        // better home — the preset combo and the key are the providers rows above, a base URL and
+        // a model id are a custom endpoint on "+ add provider", the output token limit is the row
+        // above this one, the agent workspace is the pane's own directory, the Warp import is a
+        // row of its own at the bottom of the providers, and the consent sentence is in the key
+        // box where a key is actually typed. Design 5.8 has the reasoning.
         models.rows << buttonRow(QStringLiteral("agent.modelRoles"), QStringLiteral("per-job models"),
                                  QStringLiteral("What each job — plan mode, subagents, summaries, chores — runs on "
                                                 "right now, and a model of its own for one: the models pane's jobs tab"),
