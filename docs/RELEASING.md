@@ -1,15 +1,17 @@
 # Releasing Relay
 
-How to cut a Linux and native Windows beta. Publishing requires the owner’s authorization.
+How to cut a Linux, native Windows and native macOS beta. Publishing requires the owner’s authorization.
 
 ## What gets built
 
 | Channel | Built by | Files |
 |---|---|---|
-| Ubuntu 24.04 (Qt5/KF5) | `release.yml`, `ubuntu:24.04` container | `relay_<version>_ubuntu24.04_{amd64,arm64}.deb` |
-| Debian 13 (Qt6/KF6) | `release.yml`, `debian:trixie` container | `relay_<version>_debian13_{amd64,arm64}.deb` |
-| Ubuntu 26.04 (Qt6/KF6) | `release.yml`, `ubuntu:26.04` container | `relay_<version>_ubuntu26.04_{amd64,arm64}.deb` |
+| Ubuntu 24.04 (Qt5) | `release.yml`, `ubuntu:24.04` container | `relay_<version>_ubuntu24.04_{amd64,arm64}.deb` |
+| Debian 13 (Qt6) | `release.yml`, `debian:trixie` container | `relay_<version>_debian13_{amd64,arm64}.deb` |
+| Ubuntu 26.04 (Qt6) | `release.yml`, `ubuntu:26.04` container | `relay_<version>_ubuntu26.04_{amd64,arm64}.deb` |
 | Windows x64 (Qt6, ConPTY, PowerShell 7) | `windows.yml`, Windows Server 2022 runner | `relay_<version>_windows_x64_setup.exe` |
+| macOS Apple Silicon (Qt6, native Bash) | `macos.yml`, `macos-15` arm64 runner | `relay_<version>_macos_arm64.dmg` |
+| macOS Intel (Qt6, native Bash) | `macos.yml`, `macos-15-intel` runner | `relay_<version>_macos_x64.dmg` |
 | Source | `release.yml`, `git archive` | `relay-<version>.tar.gz` |
 | Checksums | `release.yml` | `SHA256SUMS` |
 | Arch (AUR) | the owner, or the disabled `aur` job | `packaging/arch/relay-terminal`, `packaging/arch/relay-terminal-git` |
@@ -46,7 +48,7 @@ the `.deb`s, the PKGBUILD and a future Flatpak, and a per-distro `.deb` needs on
 A `debian/` source package becomes worthwhile for a Launchpad PPA or a Debian upload; add it then.
 
 A manual **Release** workflow run accepts a tag name and fixes the source to that run's commit.
-It creates the tag and release only after all native Windows and Linux package checks pass. A
+It creates the tag and release only after all six Linux packages, the native Windows installer and both native macOS disk images pass their build and installation checks. A
 pre-existing tag must point at exactly that source; the workflow never moves tags. Pushing an
 existing release tag remains supported. This avoids tagging an unverified build during preparation.
 
@@ -66,13 +68,47 @@ Release gates exercise ConPTY process lifecycle, real PSReadLine multiline load/
 native process metrics, crash logs, concurrent file locks, credential storage, worker startup,
 PowerShell command jobs and process-tree cancellation. They then silently install the generated
 installer, launch its GUI, await a real PowerShell ready event, capture a screenshot, close normally,
-and uninstall. `windows-evidence` is uploaded for inspection. Release publication depends on both
-this job and all six Linux package jobs succeeding; the installer is included in `SHA256SUMS`.
+and uninstall. `windows-evidence` is uploaded for inspection. Release publication also depends on all six Linux package jobs and both macOS jobs succeeding; the installer is included in `SHA256SUMS`.
 
 Windows beta limitations: voice recording, SSH connection multiplexing, systemd resource limits,
 and remote terminal typing are unavailable. Remote typing is refused because ConPTY does not expose
 a reliable child password-input mode. Local PowerShell and normal SSH commands remain available.
 The installer is unsigned; code signing is a separate release setup task.
+
+## Native macOS disk images
+
+`macos.yml` is a main-branch check and a reusable release job. It builds separate native Apple
+Silicon and Intel applications with Qt6; both require **macOS 13 Ventura or newer**. The user mounts
+the matching DMG and drags `Relay.app` into Applications. No Homebrew, separate Python installation
+or Rosetta is required. The macOS beta uses the libvterm emulator.
+
+`packaging/macos/package.sh VERSION` stages the CMake app, deploys private Qt frameworks/plugins,
+and bundles SHA256-pinned Python 3.13.15 and GNU Bash 5.3.20. Bash is built against the macOS SDK
+with all 20 official 5.3 patches; its corresponding source and build recipe ship inside the app.
+Runtime pins are in `packaging/macos/runtime-pins.json`. The system's old Bash is not used for
+Relay commands. API keys use macOS Keychain.
+
+The bundle layout is `Contents/MacOS/relay`, with application data in `Contents/Resources/relay`,
+Bash in `Contents/Resources/bash/bin/bash`, and Python in
+`Contents/Resources/python/bin/python3`. Worker imports include only explicit private paths, and
+bytecode writes are disabled so launching does not change signed bundle resources.
+
+Each architecture's release gate checks native process identity/metrics, crash logging, runtime
+cleanup, Keychain, worker encoding, native PTY lifecycle, and helper wiring. The installed smoke
+mounts the generated DMG, copies the app to another path containing spaces, ejects the image, and
+runs with a system-only PATH. It verifies bundled-runtime imports, the multiline Bash composer
+load/hash/execute handshake, real GUI shell and worker startup, normal shutdown, and unchanged
+bundle signatures. Evidence uploads are `macos-arm64-evidence` and `macos-x64-evidence`.
+
+These betas are **ad-hoc signed, not Developer ID signed or notarized**. Gatekeeper may block a
+downloaded copy; the user can review it through System Settings → Privacy & Security → Open
+Anyway, following [Apple's instructions](https://support.apple.com/en-us/102445). Do not describe
+ad-hoc signatures as Apple verification. Developer ID signing/notarization requires a separate
+credential setup. Both DMGs are included in the release's `SHA256SUMS`.
+
+macOS beta limitations include Linux systemd resource limits, Linux voice-recording integration
+and remote terminal typing. Local Bash and normal SSH commands remain available. Remote typing is refused when the platform cannot reliably establish password-input
+state. Removing the app leaves the user's settings, conversations and Keychain credentials intact.
 
 ## Version scheme
 
@@ -90,7 +126,7 @@ so users upgrade cleanly from beta to final. Tags containing `-` become GitHub p
 ## Pre-release checklist
 
 1. **Tests green**: CI on `main` passes (`ci.yml`: Ubuntu 24.04 Qt5 build and tests, Debian 13
-   Qt6 build, tests and `.deb`). Locally: `./scripts/build.sh`.
+   Qt6 build, tests and `.deb`), plus both native desktop workflows. Locally: `./scripts/build.sh`.
 2. **QA lane**: every feature in `issues/features/needs_qa_llm/` meant for this release has a
    non-Claude QA session recorded under `docs/qa_evidence/` and the issue moved to `done/`.
    Items still waiting on QA are either QA'd now or listed as known issues in the release notes.
@@ -98,7 +134,7 @@ so users upgrade cleanly from beta to final. Tags containing `-` become GitHub p
 3. **Packages locally** (about 15 minutes with Docker):
    `packaging/deb/docker-build-all.sh /tmp/relay-packages "~beta.1"`
    All three distributions must print `PASS`.
-4. **Manual smoke on a real desktop** for at least Ubuntu 24.04 and one KF6 distro (VM is fine):
+4. **Manual smoke on a real desktop** for at least Ubuntu 24.04 and one Qt6 distro (VM is fine):
    install the `.deb`, start from the application menu, check the icon, run a shell command,
    run an agent request with a real key, save a key in the keyring, split a pane, `relay open .`,
    quit and relaunch.
@@ -107,8 +143,14 @@ so users upgrade cleanly from beta to final. Tags containing `-` become GitHub p
    agent tools run without approval unless that changed).
 6. **Metadata**: add a `<release>` entry to `packaging/org.relayterminal.Relay.metainfo.xml` and run
    `appstreamcli validate --no-net packaging/org.relayterminal.Relay.metainfo.xml`.
-7. **Known limitations** drafted for the release notes (Bash-only rich prompt; zsh/fish/tmux/SSH
-   use native input; Linux only; no PDF preview in Qt6 packages until the QPdfView fix lands).
+7. **Native desktop smoke**: install the Windows installer and both macOS DMGs on matching
+   hardware, verify a shell command and an agent request, save/retrieve a provider key, open a
+   folder with `relay open`, and quit/relaunch. CI evidence covers automated installation checks;
+   record manual first-run and downloaded-app checks separately.
+8. **Known limitations** drafted for the release notes: Bash integration on Linux/macOS,
+   PowerShell 7 on Windows, other shells/programs use native input; platform-specific limitations
+   and unsigned/notarization status are stated above. Preview support depends on the Qt modules
+   actually present in that package; do not advertise unavailable modules.
 
 ## Cutting a beta
 
@@ -120,31 +162,41 @@ so users upgrade cleanly from beta to final. Tags containing `-` become GitHub p
    - `site/index.html`: the `v=` lines and the note under Install.
    - `packaging/arch/relay-terminal/PKGBUILD`: `_tag`, `pkgver`, `pkgrel=1`.
 2. Commit, push `main`, and wait for CI to pass.
-3. **Tag and push**:
+3. **Dispatch the release from the reviewed revision**:
    ```bash
-   git tag -a v0.1.0-beta.1 -m "Relay 0.1.0 beta 1"
-   git push origin v0.1.0-beta.1
+   gh workflow run release.yml --ref main -f tag=v0.1.0-beta.4
    ```
+   Inspect the resulting run's `headSha`: that immutable revision supplies every platform. The
+   publisher creates the tag only when all gates pass. An existing tag must already name that
+   exact revision; tags are never moved by the workflow.
 4. **What CI does** (`.github/workflows/release.yml`):
-   - `source`: checks the tag against `CMakeLists.txt`, builds `relay-0.1.0-beta.1.tar.gz`.
+   - `source`: checks the tag against `CMakeLists.txt`, builds the matching source tarball.
    - `deb` (6 jobs: 3 distributions x amd64/arm64): restores the Zig/libghostty-vt cache,
      builds each `.deb` in its container with
      the checkout mounted read-only (Zig and the ghostty clone come from the network), runs
      ctest, installs the `.deb` in a fresh container and
      runs the smoke test. Logs are uploaded as artifacts even on failure.
-   - `release`: collects the `.deb`s and tarball, writes `SHA256SUMS`, and runs
-     `gh release create --generate-notes --verify-tag` (`--prerelease` for tags with `-`).
+   - `windows`: runs the reusable native Windows tests, installer build and installed GUI smoke.
+   - `macos`: runs the reusable Apple Silicon and Intel tests, DMG builds and installed GUI smoke.
+   - `release`: waits for every platform, collects six `.deb`s, the Windows installer, two DMGs
+     and the source tarball, writes `SHA256SUMS`, verifies/creates the immutable tag, and creates
+     the GitHub release (`--prerelease` for tags with `-`).
    - `aur`: disabled (see below).
    The arm64 jobs use GitHub's `ubuntu-24.04-arm` runners; if they are unavailable for the
-   repository, delete the `arm64` matrix entry.
+   repository, resolve runner availability before promising those assets.
 5. **Edit the release notes** on GitHub: add install commands, known limitations, the privacy
    summary, and the QA status. Keep it a pre-release.
-6. **Download and verify** one `.deb` from the release on a clean VM:
-   `sha256sum --check --ignore-missing SHA256SUMS`, `sudo apt install ./relay_…deb`, launch.
+6. **Download and verify** the published assets, not only workflow artifacts. Use
+   `sha256sum --check --ignore-missing SHA256SUMS` on Linux or
+   `shasum -a 256 -c SHA256SUMS` for locally downloaded files on macOS. Check the Windows installer
+   with `Get-FileHash -Algorithm SHA256`. Install/launch on matching operating systems.
+7. **Publish website downloads** only after the corresponding release assets exist and their
+   checksums match. Link to the explicit version's assets and notes, including unsigned beta
+   instructions for Windows/macOS.
 
-If a tag build fails, fix on `main`, delete the tag locally and remotely
-(`git push --delete origin v0.1.0-beta.1`), delete the draft release if one was created, and
-re-tag. Never re-use a tag that users may have downloaded; bump to `beta.2` instead.
+If an untagged dispatch fails, fix and push `main`, then dispatch again with the unused tag name.
+If the tag already exists, use a new beta tag for changed source. Never move or reuse a tag that
+users may have downloaded.
 
 ## AUR
 
@@ -173,12 +225,14 @@ tarball at the pinned commit and every Zig dependency it needs as `source=()` en
 checksums, building with `zig build --system`, and pinning `zig` to 0.16 in `makedepends`;
 that is its own change.
 
-## Website (GitHub Pages)
+## Website
 
-`site/` is a static page (HTML + CSS, no JavaScript). Preview with
-`python3 -m http.server -d site 8000`.
+`site/` contains the static HTML, CSS and JavaScript. Preview with
+`python3 -m http.server -d site 8000`. Production at `https://relay-terminal.ai/` is deployed with
+`./deploy.sh` after authorization. Verify both apex and www URLs and all platform download links
+following deployment.
 
-To publish:
+GitHub Pages remains an optional mirror. To enable it:
 
 1. Repository **Settings > Pages > Build and deployment > Source: GitHub Actions**.
 2. **Settings > Secrets and variables > Actions > Variables**: add `RELAY_PAGES_ENABLED` = `true`.
