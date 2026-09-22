@@ -7351,6 +7351,22 @@ public:
         view->onFocusPane = [guard](const QString &token) {
             if (auto *w = windowOf(guard)) w->m_manager->focusPane(token);
         };
+        // Try it (#JNYN, §31.10): the card's `## Try it` names one line that opens what the turn
+        // staged, and when that line is a command it runs in a terminal pane beside the board —
+        // the same pane Execute opens, minus the agent task. `queueCommand` waits for that
+        // pane's own shell prompt, so a pane created a moment ago still runs it.
+        view->onRunCommand = [guard, workspace](const QString &command) {
+            auto *w = windowOf(guard);
+            if (!w || command.isEmpty()) return;
+            Pane *pane = nullptr;
+            try { pane = w->createPane({{"cwd", workspace}, {"workspace", workspace}}); }
+            catch (const std::exception &error) { w->statusBar()->showMessage(QString::fromUtf8(error.what()), 9000); return; }
+            w->insertBeside(guard, pane, Qt::Horizontal, false, w->boardSplitFloor(guard));
+            w->setActive(pane);
+            focusLeaf(pane);
+            pane->queueCommand(command);
+            w->updateTitles();
+        };
         view->onSendToTerminal = [guard](const QString &reference) {
             auto *w = windowOf(guard);
             if (!w || !w->m_active) return;

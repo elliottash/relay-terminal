@@ -119,6 +119,12 @@ public:
     // A thread entry's pane link (#HKAP): reveal the pane with this session token, in whatever
     // window it lives in. No pane has it (closed, or another machine's board) → inert.
     std::function<void(const QString &token)> onFocusPane;
+    // Try it (#JNYN, protocol 31.10): the one line a card's `## Try it` section names as how to
+    // open the staged thing, when that line is a *command*. The window opens a terminal pane
+    // beside the board and queues it there, which waits for that pane's own shell prompt. A line
+    // that is a path or a `relay://` link goes to `onOpenFile` instead — the opener the card's
+    // links already use. Unset, the button falls back to putting the command in the composer.
+    std::function<void(const QString &command)> onRunCommand;
     // Execute (`x`, #XS6Q): open a terminal pane beside the board whose agent is handed `task`
     // with card `id` attached. The board has already moved the card to In progress. Returns the
     // pane's session token — empty when no pane could be opened — so the hand-off note can name
@@ -441,6 +447,11 @@ private:
     // a `run_id` and never a `card_id`). Returns true when it was one, so an open card's thread
     // never sees it.
     bool handleCleanupEvent(const QString &type, const QJsonObject &event);
+    // A `tryit` event, or a turn event a Try it run tagged (31.10: `tryit: true` and a `run_id`).
+    // Returns true when it was one, so the run's own commentary never lands in a card thread.
+    bool handleTryItEvent(const QString &type, const QJsonObject &event);
+    // The Try it line in the notice area. Like a cleanup's it stays up until the run ends.
+    void showTryItProgress(const QString &step);
     void buildQuickAdd(QVBoxLayout *layout);
     void closeQuickAdd();
     // One checkbox per section the model has right now, rebuilt only when that set changes.
@@ -686,6 +697,13 @@ private:
     // A worker that dies mid-run would otherwise leave the button on Stop for good: the last turn
     // event starts this, and it ends the run if no summary follows.
     QTimer *m_cleanupGuard = nullptr;
+    // Try it (#JNYN, 31.10). The same three things a cleanup keeps and nothing more: which run
+    // is in flight (empty when none), which card it is about, and how long it has been going —
+    // the progress is one line in the notice area and the result is a section on the card, so
+    // there is no panel and no state to keep for one.
+    QString m_tryRun, m_tryCard;
+    bool m_tryReusing = false;          // it is reusing what the verifying session staged
+    QElapsedTimer m_tryClock;
     // What the list shows: one entry per visible row, in order, so the widget's row i is this
     // list's entry i. The delegate and the drop logic read it; nothing else holds card data.
     QList<board::Row> m_rows;

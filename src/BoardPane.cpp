@@ -1924,6 +1924,46 @@ public:
         relay::installCopyOnSelect(m_doc);
         layout->addWidget(m_doc, 1);
 
+        // The `## Try it` strip (#JNYN, protocol 31.10). Same reasoning and same place as the
+        // Tests strip above it: the body is one Markdown document rendered in one go, and the two
+        // things this section needs — a button that opens the staged thing, and one line to
+        // answer in — are widgets, which cannot live inside a QTextBrowser. The section's own
+        // words stay in the body where they are read; this is the part you *act* on.
+        m_tryStrip = new QWidget(this);
+        m_tryStrip->setObjectName(QStringLiteral("boardTryStrip"));
+        auto *tryBox = new QVBoxLayout(m_tryStrip);
+        tryBox->setContentsMargins(0, 0, 0, 0);
+        tryBox->setSpacing(4);
+        auto *tryHead = new QHBoxLayout;
+        tryHead->setSpacing(6);
+        m_tryLine = new QLabel(m_tryStrip);
+        m_tryLine->setObjectName(QStringLiteral("boardTestsLine"));
+        m_tryLine->setWordWrap(true);
+        m_tryLine->setTextFormat(Qt::RichText);
+        m_tryLine->setTextInteractionFlags(Qt::NoTextInteraction);
+        tryHead->addWidget(m_tryLine, 1);
+        m_tryOpen = new QPushButton(QStringLiteral("Open it"), m_tryStrip);
+        m_tryOpen->setObjectName(QStringLiteral("boardTryOpen"));
+        m_tryOpen->setFocusPolicy(Qt::NoFocus);
+        m_tryOpen->setCursor(Qt::PointingHandCursor);
+        tryHead->addWidget(m_tryOpen, 0);
+        tryBox->addLayout(tryHead);
+        // One line, and Enter sends it. Not the card's reply box: an answer is not a message to
+        // the agent, and putting it there would start a turn instead of recording a verdict.
+        m_tryAnswer = new QLineEdit(m_tryStrip);
+        m_tryAnswer->setObjectName(QStringLiteral("boardTryAnswer"));
+        m_tryAnswer->setPlaceholderText(QStringLiteral("What did you see? Enter to answer — the "
+                                                       "expected result is revealed afterwards"));
+        m_tryAnswer->setClearButtonEnabled(true);
+        tryBox->addWidget(m_tryAnswer);
+        m_tryStrip->hide();
+        // Above the document and under the `## Tests` strip, which is where the card's
+        // machine-read strips live. Built here, after the document, so this block sits in
+        // its own part of the file rather than inside the Tests strip's.
+        layout->insertWidget(layout->indexOf(m_doc), m_tryStrip);
+        connect(m_tryOpen, &QPushButton::clicked, this, [this] { openTry(); });
+        connect(m_tryAnswer, &QLineEdit::returnPressed, this, [this] { answerTry(); });
+
         // Editing the card's own words (`## Issue`). It takes the document's place rather than
         // opening beside it, so the card is either being read or being written, never both.
         m_editFrame = new QFrame(this);
@@ -2281,6 +2321,165 @@ public:
                                    {QStringLiteral("card"), m_id}});
     }
 
+    // ---- Try it: the button, the section and the answer box (#JNYN, protocol 31.10) ---------
+    //
+    // Three surfaces, and no more: **Try it** on the action row starts the turn, the strip above
+    // the body opens what it staged and takes the one-line answer, and the board's notice area
+    // carries the run. The expected result is deliberately *not* here — it is sealed in the
+    // evidence directory until the answer is in, which is the whole point of the feature
+    // (Codex's review §B: "Give the problem without the answer").
+    bool hasTryIt() const
+    {
+        return m_sections.contains(QStringLiteral("Try it"), Qt::CaseInsensitive);
+    }
+    // From needs-verification on: before that there is nothing built to try. It is the same lane
+    // test Verify uses plus the lanes a card reaches after QA, because a card in Done is exactly
+    // the one somebody may want to open and look at again.
+    bool inTryLane() const
+    {
+        return inVerifyLane() || m_statusValue == QStringLiteral("needs-review")
+               || m_statusValue == QStringLiteral("done");
+    }
+    // One `try_*` request for the tab's board worker (31.10); the view stamps it with a request
+    // id and sends it, exactly as `onTestsRequest` does. The GUI never writes the section: the
+    // turn writes `## Try it` and `try_answer` writes the verdict, the reveal and `## Human QA`,
+    // so a person's answer and an agent's leave the same artefact.
+    std::function<void(const QJsonObject &message)> onTryRequest;
+    // What the section's "open" line names, when the person presses the button: a command to run
+    // in a terminal pane, or a path/`relay://` link for the ordinary opener.
+    std::function<void(const QString &target, const QString &kind)> onOpenTry;
+
+    // Press Try it. The run itself takes minutes and reports in the board's notice area, so all
+    // this does is send and say that it went.
+    void tryIt()
+    {
+        if (m_id.isEmpty() || m_editing || !onTryRequest)
+            return;
+        onTryRequest(QJsonObject{{QStringLiteral("type"), QStringLiteral("try_run")},
+                                 {QStringLiteral("card"), m_id}});
+    }
+
+    void openTry()
+    {
+        const TrySummary summary = readTryIt(m_body);
+        if (summary.open.isEmpty() || !onOpenTry)
+            return;
+        onOpenTry(summary.open, summary.kind);
+    }
+
+    void answerTry()
+    {
+        const QString text = m_tryAnswer->text().trimmed();
+        if (m_id.isEmpty() || text.isEmpty() || !onTryRequest)
+            return;
+        m_tryAnswer->clear();
+        m_tryAnswer->setEnabled(false);          // re-enabled by the card's next render
+        onTryRequest(QJsonObject{{QStringLiteral("type"), QStringLiteral("try_answer")},
+                                 {QStringLiteral("card"), m_id},
+                                 {QStringLiteral("answer"), text}});
+    }
+
+    // What the strip draws, read out of the section the turn wrote. The same shape-not-grammar
+    // reading `relay_core.tryit_protocol.parse_section` does on the worker side, kept to the two
+    // things a widget needs: the one line to open, and whether the seal has been broken.
+    struct TrySummary {
+        QString open;        // the command, path or relay:// link
+        QString kind;        // "command", "path" or "link"
+        QString question;
+        bool revealed = false;
+    };
+    // One `## ` section's text, by heading. Its own copy rather than `readTests`'s inlined
+    // version: the Tests strip is another card's work, and two readers of the same three lines
+    // cost less than two sessions in one function.
+    static QString sectionOf(const QString &body, const QString &want)
+    {
+        static const QRegularExpression heading(QStringLiteral("^##[ \\t]+(.+?)[ \\t]*$"),
+                                                QRegularExpression::MultilineOption);
+        int start = -1, end = body.size();
+        QRegularExpressionMatchIterator headings = heading.globalMatch(body);
+        while (headings.hasNext()) {
+            const QRegularExpressionMatch match = headings.next();
+            if (start >= 0) {
+                end = match.capturedStart();
+                break;
+            }
+            if (match.captured(1).trimmed().compare(want, Qt::CaseInsensitive) == 0)
+                start = match.capturedEnd();
+        }
+        return start < 0 ? QString() : body.mid(start, end - start);
+    }
+
+    static TrySummary readTryIt(const QString &body)
+    {
+        TrySummary out;
+        const QString section = sectionOf(body, QStringLiteral("Try it"));
+        static const QRegularExpression code(QStringLiteral("`([^`]+)`"));
+        const QStringList lines = section.split(QLatin1Char('\n'));
+        for (const QString &raw : lines) {
+            const QString line = raw.trimmed();
+            if (line.isEmpty())
+                continue;
+            // `Expected: …` names the sealed file until somebody answers; afterwards the same
+            // prefix carries the expected result itself. The file name is what tells them apart.
+            if (line.startsWith(QStringLiteral("Expected:"))) {
+                if (!line.contains(QStringLiteral("expected.md")))
+                    out.revealed = true;
+                continue;
+            }
+            if (out.open.isEmpty()) {
+                const QRegularExpressionMatch match = code.match(line);
+                if (match.hasMatch()) {
+                    const QString candidate = match.captured(1).trimmed();
+                    if (candidate.startsWith(QStringLiteral("relay://"))) {
+                        out.open = candidate;
+                        out.kind = QStringLiteral("link");
+                    } else if (!candidate.contains(QLatin1Char(' '))) {
+                        out.open = candidate;
+                        out.kind = QStringLiteral("path");
+                    } else {
+                        out.open = candidate;
+                        out.kind = QStringLiteral("command");
+                    }
+                    continue;
+                }
+            }
+            if (out.question.isEmpty() && line.endsWith(QLatin1Char('?')))
+                out.question = line;
+        }
+        return out;
+    }
+
+    // The strip's own line, and whether the strip is there at all.
+    void showTryIt()
+    {
+        const bool has = hasTryIt();
+        m_tryStrip->setVisible(has);
+        if (!has)
+            return;
+        const TrySummary summary = readTryIt(m_body);
+        QString text = QStringLiteral("<span style=\"color:%1\">Try it</span>")
+                           .arg(theme::TextMuted.name());
+        if (summary.revealed) {
+            text += QStringLiteral(" <span style=\"color:%1\">· answered — the expected result is "
+                                   "under the section</span>").arg(theme::TextMuted.name());
+        } else if (!summary.question.isEmpty()) {
+            QString question = summary.question;
+            if (question.size() > 96)
+                question = question.left(95) + QChar(0x2026);
+            // Amber is "a person should look at this" everywhere in Relay, and an unanswered
+            // question on a card is exactly that.
+            text += QStringLiteral(" <span style=\"color:%1\">· %2</span>")
+                        .arg(theme::Warning.name(), question.toHtmlEscaped());
+        }
+        m_tryLine->setText(text);
+        m_tryOpen->setVisible(!summary.open.isEmpty());
+        m_tryOpen->setToolTip(summary.open.isEmpty()
+                                  ? QString()
+                                  : QStringLiteral("Open what Try it staged: %1").arg(summary.open));
+        m_tryAnswer->setEnabled(!m_id.isEmpty());
+        m_tryAnswer->setVisible(!summary.revealed || !summary.question.isEmpty());
+    }
+
     // A `tests_check` answer (31.2): the findings as clickable rows and at most three action
     // buttons, in the shape the helper panel's own findings list uses. Empty findings are one
     // short sentence and nothing else — the card's Check is silent when nothing moved.
@@ -2553,6 +2752,7 @@ public:
         if (!sameCard)
             clearCheck();
         showTests();
+        showTryIt();
 
         m_entries.clear();
         const QJsonArray thread = card.value(QStringLiteral("thread")).toArray();
@@ -2986,8 +3186,46 @@ public:
             };
             actions << verify;
         }
+
+        // Try it (#JNYN), beside Verify and on the same rule: it is a control for a question
+        // nobody has asked until there is something built to open, so it appears from
+        // needs-verification on. It does **not** leave the board — the turn runs on this
+        // worker and reports in the notice area — so it wears no accent outline.
+        if (inTryLane()) {
+            relay::agent::Action tryIt;
+            tryIt.key = QStringLiteral("boardTryIt");
+            tryIt.letter = QStringLiteral("y");
+            tryIt.label = m_tryRunning ? QStringLiteral("Trying…") : QStringLiteral("Try it");
+            tryIt.enabled = !m_busy && !m_tryRunning;
+            tryIt.tooltip = m_tryRunning
+                ? QStringLiteral("Try it is already running on this card — the board's notice "
+                                 "line has its progress, and Stop is there")
+                : (hasTryIt()
+                       ? QStringLiteral("Stage this card's situation again and rewrite `## Try "
+                                        "it` — the open line, one task and one question (y)")
+                       : QStringLiteral("Stage this card's situation, do the mechanical steps, "
+                                        "and leave you one task and one question. The expected "
+                                        "result stays sealed until you answer (y)"));
+            tryIt.run = [self] {
+                const ActionGuard guard;
+                self->tryIt();
+            };
+            actions << tryIt;
+        }
         return actions;
     }
+
+    // Whether a Try it turn is in flight on this card: the view says so from the `tryit` events,
+    // and the row is rebuilt, so a second press cannot start a second staging.
+    void setTryRunning(bool running)
+    {
+        if (m_tryRunning == running)
+            return;
+        m_tryRunning = running;
+        if (onActionsChanged)
+            onActionsChanged();
+    }
+    bool tryRunning() const { return m_tryRunning; }
 
     // Something the action row or the busy strip would now answer differently: the card went
     // busy, a pane claimed it, the QA block arrived. The row is the console's, so the host is
@@ -3901,6 +4139,14 @@ private:
     QLabel *m_busyLabel = nullptr;
     QToolButton *m_stop = nullptr;
     QFrame *m_replyFrame = nullptr, *m_editFrame = nullptr;
+    // The `## Try it` strip (#JNYN): the header line with the unanswered question, the button
+    // that opens what the turn staged, and the one line the person answers in. Nothing of the
+    // run is kept here — the section on the card is the state, and the notice area is the run.
+    QWidget *m_tryStrip = nullptr;
+    QLabel *m_tryLine = nullptr;
+    QPushButton *m_tryOpen = nullptr;
+    QLineEdit *m_tryAnswer = nullptr;
+    bool m_tryRunning = false;        // a Try it turn is in flight on this card
     QLineEdit *m_titleEdit = nullptr;
     QPlainTextEdit *m_issueEdit = nullptr;
     QPushButton *m_saveEdit = nullptr, *m_cancelEdit = nullptr;
@@ -4571,6 +4817,46 @@ void BoardView::buildChrome(QVBoxLayout *layout)
             onHint(QStringLiteral("copyId"), QStringLiteral("y"));
     };
     m_detail->onOpenCard = [this](const QString &id) { openCard(id); };
+    // Try it (#JNYN, 31.10). `try_run` and `try_answer` go to the worker like any other message;
+    // the "open" line the section names is opened here, by what it is: a command runs in a
+    // terminal pane beside the board (the window's `onRunCommand`), and a path or a `relay://`
+    // link goes to the opener the card's own links already use. With no window behind either —
+    // relay-board on its own, a test — the command is put in the notice line so it can be copied
+    // rather than silently doing nothing.
+    m_detail->onTryRequest = [this](const QJsonObject &message) {
+        if (message.value(QStringLiteral("type")).toString() == QStringLiteral("try_run")) {
+            m_tryCard = m_detail->cardId();
+            m_detail->setTryRunning(true);
+            if (!m_tryClock.isValid())
+                m_tryClock.start();
+            showTryItProgress(QStringLiteral("starting"));
+        }
+        send(message);
+    };
+    m_detail->onOpenTry = [this](const QString &target, const QString &kind) {
+        if (target.isEmpty())
+            return;
+        if (kind == QStringLiteral("command")) {
+            if (onRunCommand)
+                onRunCommand(target);
+            else
+                showNotice(QStringLiteral("Run it yourself: %1").arg(target), false);
+            return;
+        }
+        if (kind == QStringLiteral("link")) {
+            // `relay://card/K7Q2` is a card on this board; anything else goes to the desktop's
+            // handler, which is where every other non-file scheme in a card body goes.
+            const QUrl url(target);
+            const QString card = url.path().section(QLatin1Char('/'), -1).toUpper();
+            if (url.host() == QStringLiteral("card") && !card.isEmpty())
+                openCard(card);
+            else
+                QDesktopServices::openUrl(url);
+            return;
+        }
+        if (onOpenFile)
+            onOpenFile(QDir(m_workspace).absoluteFilePath(target));
+    };
     m_detail->onOpenPath = [this](const QString &path) {
         if (!onOpenFile || path.isEmpty())
             return;
@@ -6623,6 +6909,10 @@ void BoardView::handleEvent(const QJsonObject &event)
     // A cleanup's events, and whole: they are tagged `cleanup: true` with a run id and no
     // card id (19.9), and an open card's thread must never see one of them.
     if (handleCleanupEvent(type, event))
+        return;
+    // A Try it run's events (#JNYN, 31.10), for the same reason and in the same place: they
+    // belong to the run and to the board's notice area, never to an open card's thread.
+    if (handleTryItEvent(type, event))
         return;
     // Cards run in parallel with each other but not with a cleanup, and never two turns on one
     // card (19.16): say which of those it was, and put back whatever this pane had started.
@@ -8735,6 +9025,98 @@ void BoardView::hideCleanupPanel()
 {
     if (m_cleanupPanel)
         m_cleanupPanel->hide();
+}
+
+// A Try it run's progress (#JNYN, 31.10). A staging takes minutes, so the line stays up instead
+// of timing out, exactly as a cleanup's does.
+void BoardView::showTryItProgress(const QString &step)
+{
+    const qint64 seconds = m_tryClock.isValid() ? m_tryClock.elapsed() / 1000 : 0;
+    QString text = m_tryCard.isEmpty() ? QStringLiteral("Try it")
+                                       : QStringLiteral("Try it · #%1").arg(m_tryCard);
+    text += QStringLiteral(" · %1:%2").arg(seconds / 60).arg(seconds % 60, 2, 10, QLatin1Char('0'));
+    if (m_tryReusing)
+        text += QStringLiteral(" · reusing the staged environment");
+    if (!step.isEmpty())
+        text += QStringLiteral(" · ") + step;
+    m_noticeText->setText(text);
+    m_notice->setProperty("error", false);
+    m_notice->style()->unpolish(m_notice);
+    m_notice->style()->polish(m_notice);
+    m_noticeUndo->setVisible(false);
+    m_noticeOverride->setVisible(false);
+    m_notice->show();
+    placeNotice();
+    m_noticeTimer->stop();      // it goes when the run does, not on a timer
+}
+
+// 31.10's events. A `tryit` event is the run talking; a turn event the run tagged carries
+// `tryit: true` and a `run_id`, and must not reach the card's thread — the person reads the
+// section the run leaves behind, not the model's commentary while it works.
+bool BoardView::handleTryItEvent(const QString &type, const QJsonObject &event)
+{
+    if (type != QStringLiteral("tryit")) {
+        if (!event.value(QStringLiteral("tryit")).toBool())
+            return false;
+        return true;             // the run's own turn events, swallowed whole
+    }
+    const QString card = event.value(QStringLiteral("card_id")).toString();
+    const QString state = event.value(QStringLiteral("state")).toString();
+    if (state == QStringLiteral("started")) {
+        m_tryRun = event.value(QStringLiteral("run_id")).toString();
+        if (m_tryRun.isEmpty())
+            m_tryRun = QStringLiteral("running");
+        m_tryCard = card;
+        m_tryReusing = event.value(QStringLiteral("reusing")).toBool();
+        if (!m_tryClock.isValid())
+            m_tryClock.start();
+        if (card == m_detail->cardId())
+            m_detail->setTryRunning(true);
+        showTryItProgress(QStringLiteral("reading the card"));
+        return true;
+    }
+    if (state == QStringLiteral("progress")) {
+        showTryItProgress(event.value(QStringLiteral("line")).toString());
+        return true;
+    }
+    if (state == QStringLiteral("answered")) {
+        // The verdict, the reveal and `## Human QA` are all written by now; the card re-reads
+        // itself from `board_changed`, so this only says so.
+        showNotice(QStringLiteral("Answer recorded on #%1. The expected result is under "
+                                  "`## Try it`, and `## Human QA` is written from it.").arg(card),
+                   false);
+        return true;
+    }
+    // finished, stopped or error: the run is over either way.
+    m_tryRun.clear();
+    m_tryReusing = false;
+    m_tryClock.invalidate();
+    m_detail->setTryRunning(false);
+    m_noticeTimer->stop();
+    m_notice->hide();
+    const QString message = event.value(QStringLiteral("message")).toString();
+    const QString out = event.value(QStringLiteral("out")).toString();
+    if (state == QStringLiteral("error")) {
+        showNotice(message.isEmpty() ? QStringLiteral("Try it could not start.") : message, true);
+    } else if (state == QStringLiteral("stopped")) {
+        showNotice(QStringLiteral("Try it stopped. Whatever it captured is in %1.").arg(out),
+                   false);
+    } else if (event.value(QStringLiteral("section_written")).toBool()) {
+        // The card page re-renders from `board_changed`; the notice says where to look, and
+        // reading the card again makes the strip appear without waiting for the watcher.
+        if (!card.isEmpty())
+            send({{QStringLiteral("type"), QStringLiteral("board_card_get")},
+                  {QStringLiteral("card"), card}});
+        showNotice(QStringLiteral("#%1 has a `## Try it`: one task and one question. The expected "
+                                  "result stays sealed until you answer.").arg(card), false);
+    } else {
+        // The turn could not stage it, and said so on the thread (brief step 7). Amber, because
+        // this is the case the whole feature exists to keep off a review request.
+        showNotice(message.isEmpty()
+                       ? QStringLiteral("Try it could not stage #%1, and wrote no section.").arg(card)
+                       : message, true);
+    }
+    return true;
 }
 
 // 19.9's events, kept away from any card thread. They carry `cleanup: true` and a `run_id` and
