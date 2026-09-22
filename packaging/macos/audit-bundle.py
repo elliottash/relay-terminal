@@ -31,11 +31,18 @@ def audit(bundle, arch, sign):
         # macdeployqt may retain a build-directory rpath that is unnecessary after deployment.
         lines = output('otool','-l',str(path)).splitlines()
         rpaths = []
+        all_rpaths = []
         for i,line in enumerate(lines):
             if line.strip() == 'cmd LC_RPATH' and i+2 < len(lines):
                 rpath = lines[i+2].strip().removeprefix('path ').split(' (offset')[0]
+                all_rpaths.append(rpath)
                 if rpath.startswith('/') and not rpath.startswith(('/usr/lib','/System/Library')):
                     rpaths.append(rpath)
+        framework_rpath = '@executable_path/../Frameworks'
+        if path == main_executable and framework_rpath not in all_rpaths:
+            if not sign:
+                raise RuntimeError(f'{path}: missing bundled framework search path')
+            subprocess.run(['install_name_tool', '-add_rpath', framework_rpath, str(path)], check=True)
         if sign:
             for rpath in set(rpaths):
                 subprocess.run(['install_name_tool','-delete_rpath',rpath,str(path)],check=True)
