@@ -101,6 +101,11 @@ never returns to the model the owner was using, and its own sentence is overwrit
 - [x] defaults from a ranking file in the repo: 0 providers → Relay Free's three; 1 → one per class; 2+ → two per class, one per provider per class <!-- t:a9 -->
 - [x] Options › Models: the tier lists and the checklist leave the page for the dialog <!-- t:a10 -->
 - [x] the models pane: providers / available / priorities tabs, opened by Ctrl+Shift+M beside the active pane (again closes; Esc returns focus), first run opens with it at the right; Ctrl+Alt+M and the modal go <!-- t:a11 -->
+- [x] the ranking file's Levels and Provider picks tables; the harness in flash with background jobs stepping past it to relay free; lite on relay free; gemini `-latest`; deepseek on flash <!-- t:a12 -->
+- [x] the effort box offers the model's own levels (xhigh, ultra) and greys where there is no knob or relay free clamps <!-- t:a13 -->
+- [x] step 2 of four: `models/available`, the tick column, the box filter searching every available model <!-- t:a14 -->
+- [x] the owner's review of the pane: provider dividers, the advanced dialog retired, available alphabetical with no recent, lite unpinned and relay-lite hidden, priorities as sections with no lite <!-- t:a15 -->
+- [x] the per-job models as a fourth tab, with what each job runs on right now <!-- t:a16 -->
 
 ## Execution Summary
 Seven tasks, each by an Opus subagent in a named area of the code, each landed through
@@ -129,6 +134,44 @@ Seven tasks, each by an Opus subagent in a named area of the code, each landed t
 - Found on the way and fixed: `Ctrl++` in the keybinding catalogue stopped every `configure`
   (#Z00M's default; `4d540c0e`); the old level box hid a level behind its scrollbar.
 
+Then the owner reviewed it and it went further (t:a12-a16):
+
+- **The ranking file is the source.** `backend/relay_core/model-ranking.md` — four tables the owner
+  edits: Providers (`provider | kind | order`, the preference order), Models (`name | classes |
+  score`), Provider picks (a provider whose defaults differ; openrouter's are its own), Levels
+  (`name | high | main | flash | lite`, the level a model starts at in each class). `model_ranking.py`
+  parses them; `INTELLIGENCE` and the group order are views over it; `check()` reports what does not
+  add up. The defaults: 0 providers → relay free's three, 1 → one per class, 2+ → two per class and
+  never two from one provider.
+- **Jobs.** A harness may sit in the flash list; background jobs (summaries, suggestions, chores…)
+  step past a guest entry, and when a harness pane's list has nothing for them they fall through to
+  relay free. Lite is relay free by default, openrouter's lite for privacy.
+- **Levels are the model's own.** The effort box offers what the provider reports — codex's
+  `xhigh`/`ultra`, kimi's three — and is greyed with a reason where there is no knob or relay free
+  clamps. A level the next model lacks snaps to its nearest and says so once.
+- **Four steps of availability** (§5.7): add provider → available → priority list → box. Step 2 is
+  `models/available`, per machine, defaulting to every model of a branded provider and only the
+  recommended rows of an open-ended one. The box's typed filter searches every available model and
+  puts matches outside the lists under `other models`.
+- **The models pane** (§5.8) replaced the modal: `Ctrl+Shift+M` opens it beside the pane it serves,
+  again closes it, Escape returns focus; four tabs — providers (dividers, keys, the Warp import),
+  available (alphabetical, no recent, a tick per model), priorities (one page of divided sections,
+  no class tabs, no lite), jobs (every job, what it runs on right now, one override each). First run
+  opens with a terminal at the left and the pane at the right. `Ctrl+Alt+M`, the modal, the roles
+  dialog and the advanced provider dialog are all retired.
+- Found on the way and fixed: two consoles reconfiguring their worker twice a second (#CFG1); a
+  saved models pane, and a saved Activity pane, each taking their whole tab with them on reopen
+  (`bb5fba2b`, #ACT1); the app stylesheet costing the popup a row (`a354ef8a`); a double click on a
+  tick being read as "use this model", which is how a pane landed on gemini flash lite
+  (`0b9019177`).
+
+Commits of the second half: 36a7972c f022d3a7 a8fd95c4 edb4a21b ae21d1f8 (the file and its rules),
+3ba73e82 8be86bb6 35e7bccf b6d26b22 (levels), 44e5f91a 08936206 b6921b4e fd8df23c 9fcd5c62 20998265
+(availability), 912dd2e2 449e3baf bb5fba2b (the pane), 7bef1f17 f6e0d1f5 d6e5d2b6 cdc4b9bb b249c5e6
+4faa51e8 (the review), bbb49203 a4d2e4a3 8fb52503 2a660fad (jobs), a354ef8a 0b9019177 (the two fixes).
+Evidence: `2026-09-21-model-box-classes`, `-model-availability`, `-effort-by-model`, `-popup-sizing`,
+`-models-pane`, `-models-pane-review`, `-models-pane-jobs`, `-console-configure-loop`.
+
 ## Tests
 `ctest --test-dir build -R "modelrows|filterpopup|modelcatalog|modelpicker|panestate|conversations"`
 (6/6), and `tests/test_presets.py`, `test_roles.py`, `test_keybindings.py`, `test_model_switch.py`,
@@ -149,4 +192,17 @@ Seven tasks, each by an Opus subagent in a named area of the code, each landed t
       providers is one row on `all` with a "via" choice.
 - [ ] Quit and reopen with no arguments: each pane is back on its own model and mode.
 - [ ] The phone shows the same names.
+- [ ] Ctrl+Shift+M opens the models pane beside the pane it serves; again closes it; Esc returns
+      focus; opened from another pane it re-targets. Ctrl+Alt+M does nothing.
+- [ ] Its four tabs (Alt+1..4): providers with dividers and no advanced dialog; available
+      alphabetical with no recent, gemini flash lite tickable, no relay-lite; priorities as
+      sections with no lite; jobs showing what each job runs on right now.
+- [ ] Un-tick a model on available: it leaves the box, the lists and `/model`'s first pass.
+- [ ] A double click on a tick changes nothing but the tick.
+- [ ] Alt+E on a codex pane lists xhigh and ultra; on a relay free pane it is greyed with a reason.
+- [ ] Quit with the models pane open and reopen with no arguments: the tab comes back with both
+      the terminal and the pane, on the same tab.
+- [ ] A first run (a profile with no keys) opens a terminal at the left and the pane at the right
+      on providers, with the provider rows showing.
+- [ ] Edit `backend/relay_core/model-ranking.md`, press "fill from defaults": the lists follow it.
 
