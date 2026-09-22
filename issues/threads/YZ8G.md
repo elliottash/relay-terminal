@@ -141,3 +141,6 @@ Owner: "i agree with all, go ahead with it". Plan adopted; card claimed; steps 1
 <!-- relay:entry 20260921T234633Z-df author=claude-code kind=decision -->
 ### Claude Code · 2026-09-21 23:46
 Owner: "for apps, the agents should: 1) run tests 2) verify with an AI simulator 3) open the app for the human in a simulated environment that tests that issue. does this map onto our approach? does verify do #2? what button should be added to the board for #3?" Answer recorded in `## Decisions`: Verify did not do (2) — it ran commands and read code; now it does; Try it is the button for (3). The #WC3E and #JNYN agents were told mid-flight; both cards' `## Done means` updated.
+<!-- relay:entry 20260922T003829Z-dj author=claude-code kind=decision -->
+### Claude Code · 2026-09-22 00:38
+Owner: "how do i test out the new QA approach. is the agent going to design simulation? i think the QA agent should also always think about each step of the user experience , and apps should be built for live simulated drives by agents and humans -- the QA agent tries to optimize this to conserve scarce human tester time". Recorded; #74Y5 filed with its expectations.
