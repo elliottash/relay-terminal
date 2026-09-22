@@ -1,0 +1,391 @@
+{
+  "files": [
+    "/home/elliott/.local/share/relay/logs/worker.log",
+    "/home/elliott/.local/share/relay/logs/worker.log.1",
+    "/home/elliott/.local/share/relay/logs/worker.log.2"
+  ],
+  "first": "2026-09-22T00:00:19.556000+00:00",
+  "last": "2026-09-22T14:23:31.589000+00:00",
+  "skipped_lines": 1527,
+  "tools": [
+    {
+      "tool": "run_command",
+      "calls": 2794,
+      "failed": 214,
+      "duration_samples": 2794,
+      "total_ms": 12231568,
+      "failure_pct": 7.66,
+      "mean_ms": 4377.8
+    },
+    {
+      "tool": "agent_wait",
+      "calls": 105,
+      "failed": 85,
+      "duration_samples": 105,
+      "total_ms": 451875,
+      "failure_pct": 80.95,
+      "mean_ms": 4303.6
+    },
+    {
+      "tool": "board_list",
+      "calls": 52,
+      "failed": 6,
+      "duration_samples": 52,
+      "total_ms": 3949,
+      "failure_pct": 11.54,
+      "mean_ms": 75.9
+    },
+    {
+      "tool": "read_file",
+      "calls": 186,
+      "failed": 6,
+      "duration_samples": 186,
+      "total_ms": 369,
+      "failure_pct": 3.23,
+      "mean_ms": 2.0
+    },
+    {
+      "tool": "edit_file",
+      "calls": 106,
+      "failed": 5,
+      "duration_samples": 106,
+      "total_ms": 517,
+      "failure_pct": 4.72,
+      "mean_ms": 4.9
+    },
+    {
+      "tool": "board_read",
+      "calls": 151,
+      "failed": 4,
+      "duration_samples": 151,
+      "total_ms": 18624,
+      "failure_pct": 2.65,
+      "mean_ms": 123.3
+    },
+    {
+      "tool": "agent",
+      "calls": 20,
+      "failed": 3,
+      "duration_samples": 20,
+      "total_ms": 286,
+      "failure_pct": 15.0,
+      "mean_ms": 14.3
+    },
+    {
+      "tool": "board_update_card",
+      "calls": 102,
+      "failed": 3,
+      "duration_samples": 102,
+      "total_ms": 6977,
+      "failure_pct": 2.94,
+      "mean_ms": 68.4
+    },
+    {
+      "tool": "search_files",
+      "calls": 113,
+      "failed": 3,
+      "duration_samples": 113,
+      "total_ms": 19871,
+      "failure_pct": 2.65,
+      "mean_ms": 175.8
+    },
+    {
+      "tool": "board_comment",
+      "calls": 42,
+      "failed": 2,
+      "duration_samples": 42,
+      "total_ms": 4593,
+      "failure_pct": 4.76,
+      "mean_ms": 109.4
+    },
+    {
+      "tool": "write_file",
+      "calls": 6,
+      "failed": 2,
+      "duration_samples": 6,
+      "total_ms": 84,
+      "failure_pct": 33.33,
+      "mean_ms": 14.0
+    },
+    {
+      "tool": "board_move_card",
+      "calls": 28,
+      "failed": 1,
+      "duration_samples": 28,
+      "total_ms": 1890,
+      "failure_pct": 3.57,
+      "mean_ms": 67.5
+    },
+    {
+      "tool": "list_directory",
+      "calls": 4,
+      "failed": 1,
+      "duration_samples": 4,
+      "total_ms": 0,
+      "failure_pct": 25.0,
+      "mean_ms": 0.0
+    },
+    {
+      "tool": "tests_check",
+      "calls": 1,
+      "failed": 1,
+      "duration_samples": 1,
+      "total_ms": 0,
+      "failure_pct": 100.0,
+      "mean_ms": 0.0
+    },
+    {
+      "tool": "update_todos",
+      "calls": 125,
+      "failed": 1,
+      "duration_samples": 125,
+      "total_ms": 334,
+      "failure_pct": 0.8,
+      "mean_ms": 2.7
+    },
+    {
+      "tool": "agent_message",
+      "calls": 61,
+      "failed": 0,
+      "duration_samples": 61,
+      "total_ms": 72,
+      "failure_pct": 0.0,
+      "mean_ms": 1.2
+    },
+    {
+      "tool": "app_panes",
+      "calls": 1,
+      "failed": 0,
+      "duration_samples": 1,
+      "total_ms": 19,
+      "failure_pct": 0.0,
+      "mean_ms": 19.0
+    },
+    {
+      "tool": "app_send_prompt",
+      "calls": 2,
+      "failed": 0,
+      "duration_samples": 2,
+      "total_ms": 151,
+      "failure_pct": 0.0,
+      "mean_ms": 75.5
+    },
+    {
+      "tool": "ask_user",
+      "calls": 2,
+      "failed": 0,
+      "duration_samples": 2,
+      "total_ms": 104177,
+      "failure_pct": 0.0,
+      "mean_ms": 52088.5
+    },
+    {
+      "tool": "board_create_card",
+      "calls": 2,
+      "failed": 0,
+      "duration_samples": 2,
+      "total_ms": 390,
+      "failure_pct": 0.0,
+      "mean_ms": 195.0
+    },
+    {
+      "tool": "board_signals",
+      "calls": 1,
+      "failed": 0,
+      "duration_samples": 1,
+      "total_ms": 33,
+      "failure_pct": 0.0,
+      "mean_ms": 33.0
+    },
+    {
+      "tool": "command_output",
+      "calls": 1,
+      "failed": 0,
+      "duration_samples": 1,
+      "total_ms": 12495,
+      "failure_pct": 0.0,
+      "mean_ms": 12495.0
+    },
+    {
+      "tool": "load_tools",
+      "calls": 2,
+      "failed": 0,
+      "duration_samples": 2,
+      "total_ms": 0,
+      "failure_pct": 0.0,
+      "mean_ms": 0.0
+    },
+    {
+      "tool": "other",
+      "calls": 3,
+      "failed": 0,
+      "duration_samples": 3,
+      "total_ms": 137,
+      "failure_pct": 0.0,
+      "mean_ms": 45.7
+    },
+    {
+      "tool": "run_in_terminal",
+      "calls": 2,
+      "failed": 0,
+      "duration_samples": 2,
+      "total_ms": 170,
+      "failure_pct": 0.0,
+      "mean_ms": 85.0
+    },
+    {
+      "tool": "session_info",
+      "calls": 1,
+      "failed": 0,
+      "duration_samples": 1,
+      "total_ms": 0,
+      "failure_pct": 0.0,
+      "mean_ms": 0.0
+    },
+    {
+      "tool": "set_keybinding",
+      "calls": 3,
+      "failed": 0,
+      "duration_samples": 3,
+      "total_ms": 40,
+      "failure_pct": 0.0,
+      "mean_ms": 13.3
+    },
+    {
+      "tool": "web",
+      "calls": 22,
+      "failed": 0,
+      "duration_samples": 22,
+      "total_ms": 29716,
+      "failure_pct": 0.0,
+      "mean_ms": 1350.7
+    }
+  ],
+  "turn_outcomes": {
+    "cancelled": 10,
+    "done": 140,
+    "error": 9
+  },
+  "events": [
+    {
+      "logger": "relay.agent",
+      "event": "tool",
+      "level": "INFO",
+      "count": 3938
+    },
+    {
+      "logger": "relay.guest_harness_claude",
+      "event": "claude",
+      "level": "DEBUG",
+      "count": 1720
+    },
+    {
+      "logger": "relay.worker",
+      "event": "configured",
+      "level": "INFO",
+      "count": 381
+    },
+    {
+      "logger": "relay.worker",
+      "event": "worker_start",
+      "level": "INFO",
+      "count": 267
+    },
+    {
+      "logger": "relay.worker",
+      "event": "worker_stop",
+      "level": "INFO",
+      "count": 257
+    },
+    {
+      "logger": "relay.agent",
+      "event": "turn_start",
+      "level": "INFO",
+      "count": 162
+    },
+    {
+      "logger": "relay.agent",
+      "event": "turn_end",
+      "level": "INFO",
+      "count": 150
+    },
+    {
+      "logger": "relay.worker",
+      "event": "protocol_error",
+      "level": "ERROR",
+      "count": 97
+    },
+    {
+      "logger": "relay.guest_harness",
+      "event": "guest_harness_started",
+      "level": "INFO",
+      "count": 80
+    },
+    {
+      "logger": "relay.guest_harness",
+      "event": "guest_harness_closed",
+      "level": "INFO",
+      "count": 67
+    },
+    {
+      "logger": "relay.provider",
+      "event": "provider_http_retry",
+      "level": "ERROR",
+      "count": 21
+    },
+    {
+      "logger": "relay.guest_harness_claude",
+      "event": "starting",
+      "level": "DEBUG",
+      "count": 12
+    },
+    {
+      "logger": "relay.guest_sessions",
+      "event": "guest",
+      "level": "INFO",
+      "count": 12
+    },
+    {
+      "logger": "relay.guest_harness",
+      "event": "guest_harness_effort",
+      "level": "INFO",
+      "count": 11
+    },
+    {
+      "logger": "relay.agent",
+      "event": "turn_end",
+      "level": "ERROR",
+      "count": 9
+    },
+    {
+      "logger": "relay.agent",
+      "event": "model_applied",
+      "level": "INFO",
+      "count": 8
+    },
+    {
+      "logger": "relay.agent",
+      "event": "plan_route",
+      "level": "INFO",
+      "count": 4
+    },
+    {
+      "logger": "relay.agent",
+      "event": "provider_failover",
+      "level": "INFO",
+      "count": 3
+    },
+    {
+      "logger": "relay.agent",
+      "event": "model_switch_refused",
+      "level": "INFO",
+      "count": 2
+    },
+    {
+      "logger": "relay.agent",
+      "event": "provider_retry_preempted",
+      "level": "INFO",
+      "count": 1
+    }
+  ]
+}
