@@ -47,3 +47,19 @@ clear succeeded; two actual HTTP captures show parameters present then absent. E
 docs/qa_evidence/2026-09-22-custom-extra-json/README.md. Board format check has no XJSN findings.
 Pre-land tests_check has no failing tests; its orphaned warning refers to the earlier decision-only
 commit and will be rechecked once implementation is linked. No implementer QA checklist.
+
+<!-- relay:entry 20260922T020600Z-xt author=agent kind=evidence -->
+Check · 1 missing-evidence, 1 not-applicable. The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T020600Z-xu author=agent kind=evidence -->
+Check · 1 not-applicable, 1 passed. The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T020600Z-xv author=agent kind=evidence -->
+Check · 1 not-applicable, 1 passed. The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T020700Z-xs author=codex kind=evidence -->
+### Codex · 2026-09-22 02:07
+Linked implementation commit 2ae67cfcf27d95b66e70d3097523ff37092f8caa. The selected tree built
+successfully through land.py; only the custom-form/include and §28.6 hunks were selected from
+shared files. Post-land run 20260922T020115Z-d112: 27 passes, no opened signals. Refreshed
+Tests Check: passed, no findings and no failing tests. Independent verification remains pending.

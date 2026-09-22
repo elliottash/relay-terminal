@@ -7,7 +7,7 @@ assignee: codex
 rank: n
 created: '2026-09-21'
 source: 'Claude Code in a Relay pane, 2026-09-21 — left over from #MDP1 t:a15'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-custom-extra-json/README.md], related: [MDP1], github: null}
+links: {plans: [], commits: [2ae67cfcf27d95b66e70d3097523ff37092f8caa], evidence: [docs/qa_evidence/2026-09-22-custom-extra-json/README.md], related: [MDP1], github: null}
 ---
 # A custom endpoint's extra request JSON has no home
 
@@ -73,8 +73,7 @@ actual local HTTP capture before/after clearing, screenshots, and focused test o
 `tests/test_customproviders.py`
 manual: docs/qa_evidence/2026-09-22-custom-extra-json/README.md
 
-### Check 2026-09-21 21:58
-- passed · unittest:tests.test_customproviders — tests/test_customproviders.py passed for this revision on spark-dcc9, 2026-09-22T01:58:44Z
+### Check 2026-09-21 22:01
+- passed · unittest:tests.test_customproviders — tests/test_customproviders.py passed for this revision on spark-dcc9, 2026-09-22T02:01:16Z
 - not-applicable · manual:docs/qa_evidence/2026-09-22-custom-extra-json/README.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-custom-extra-json/README.md
-- warning · card — none of the listed tests is named after anything this card changed (issues/features/2026-09-21-a-custom-endpoints-extra-request-json-has-no-home.md, issues/features/2026-09-21-relay-pro-behind-a-password.md, issues/threads/RPR7.md…)
 history: thread

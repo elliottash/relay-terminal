@@ -28,3 +28,6 @@ saved, and clicked Test again: the second HTTP record contains none of the extra
 cleared.json is the resulting registry, retaining discovered and storing explicit {}.
 
 These are implementation checks; independent verification remains on the card.
+
+Implementation landed as `2ae67cfcf27d95b66e70d3097523ff37092f8caa`; land.py also built
+the exact selected tree successfully, preserving concurrent Pro work.
