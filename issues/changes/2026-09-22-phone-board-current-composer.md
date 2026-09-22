@@ -7,7 +7,7 @@ assignee: codex
 rank: m
 created: '2026-09-22'
 source: 'owner in Relay, 2026-09-22'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-phone-board/], related: [SWPH], github: null}
+links: {plans: [], commits: [f4baccee], evidence: [docs/qa_evidence/2026-09-22-phone-board/], related: [SWPH], github: null}
 ---
 # Bring the phone Board composer up to date
 
