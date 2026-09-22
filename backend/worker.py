@@ -559,6 +559,9 @@ def main():
             elif kind == "cancel":
                 queue_for(request).cancel()
             elif kind == "resume_queue":
+                # Enter on an empty prompt box, and the queue strip's Resume button (#7JD1). A
+                # prompt submitted instead of it resumes the same queue on its way past
+                # (`TurnSupervisor.submit`), which is why an `ask` carries nothing new.
                 queue_for(request).resume()
             elif kind == "queue_remove":
                 queue_for(request).remove(request.get("item"), request.get("id"))

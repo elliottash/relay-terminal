@@ -209,20 +209,55 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual(self.finished(second)['outcome'], 'done')
         self.assertFalse(self.rec.of('queue_changed')[-1]['paused'])
 
-    def test_now_runs_while_queue_paused(self):
+    def test_a_submit_runs_now_and_resumes_the_paused_queue(self):
+        # Card #7JD1 (owner, 2026-09-21: "why don't we just copy the functionality and have enter
+        # resume"). This replaces `test_now_runs_while_queue_paused`, which asserted the opposite
+        # of its last two lines: that a "now" prompt ran past the pause and **left the queue
+        # paused**, so what was behind it still waited for `resume_queue`. A prompt submitted
+        # after a Stop is the person going on, so the queue goes on with them.
         p = self.use(GatedProvider())
         first = self.sup.submit('first', 'now')
         # Cancellation must race a provider already entered, not the earlier start event.
         self.rec.wait(lambda e: e['event'] == 'delta')
-        waiting = self.sup.submit('waiting', 'queue')
+        self.sup.submit('waiting', 'queue')
         self.sup.cancel(); self.finished(first)
-        direct = self.sup.submit('direct', 'now')
-        p.release.release(); self.finished(direct)
-        time.sleep(0.1)
-        self.assertEqual(p.prompts, ['first', 'direct'])
         self.assertTrue(self.rec.of('queue_changed')[-1]['paused'])
-        self.sup.remove(waiting)
+        # The pane's Enter with text in the box: the agent is free, so it starts now (#N8VK) and
+        # is accepted although a queue is waiting — the `busy` check still reads the pause, which
+        # is why it is cleared only after it.
+        direct = self.sup.submit('direct', 'now')
         self.assertFalse(self.rec.of('queue_changed')[-1]['paused'])
+        p.release.release(); self.finished(direct)
+        # And what was queued behind it runs after it, with no `resume_queue` from anybody.
+        p.release.release()
+        self.rec.wait(lambda e: e.get('text') == 'working on waiting')
+        self.assertEqual(p.prompts, ['first', 'direct', 'waiting'])
+
+    def test_a_queued_submit_resumes_too_and_relays_own_does_not(self):
+        # A card console's prompt is `when="queue"` (`board_turns.CardTurns.submit`), and a
+        # device's `board_ask` is that same call — so the queued door has to resume as well, or
+        # a phone still waits for the desktop (#7JD1, REMOTE-PROTOCOL 17.4).
+        #
+        # `origin="relay"` is the one submit that does not: a background subagent reporting back
+        # (`subagents.py`) is Relay's own prompt, not somebody pressing Enter, and it must not
+        # undo the Stop the person made.
+        p = self.use(GatedProvider())
+        first = self.sup.submit('first', 'now')
+        self.rec.wait(lambda e: e['event'] == 'delta')
+        self.sup.submit('waiting', 'queue')
+        self.sup.cancel(); self.finished(first)
+        self.assertTrue(self.rec.of('queue_changed')[-1]['paused'])
+        self.sup.submit('from relay', 'queue', origin='relay')
+        self.assertTrue(self.rec.of('queue_changed')[-1]['paused'])
+        time.sleep(0.2)
+        self.assertEqual(p.prompts, ['first'])
+        self.sup.submit('from the phone', 'queue')
+        self.assertFalse(self.rec.of('queue_changed')[-1]['paused'])
+        for _ in range(3):
+            p.release.release()
+        self.rec.wait(lambda e: e.get('text') == 'working on from the phone')
+        # Delivery order is the queue's own: what was already waiting, then what arrived after it.
+        self.assertEqual(p.prompts, ['first', 'waiting', 'from relay', 'from the phone'])
 
     def test_cancel_drops_pending_interrupt(self):
         p = self.use(GatedProvider(cancel_delay=0.3))

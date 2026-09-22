@@ -9,8 +9,10 @@ Invariants:
   a turn is dequeued, and ``Agent.stop`` is only called under that lock, so a
   late stop can never hit the prompt that replaced the stopped turn.
 * A user ``cancel`` or a failed turn pauses the queue. Queued (non-forced)
-  prompts then wait for ``resume_queue``. The pause resets when the queue empties.
-  A turn that stops at the step/tool limit ends with ``done`` and does not pause it.
+  prompts then wait for ``resume_queue`` -- or for the next prompt a person submits
+  to this supervisor, which resumes it (card #7JD1). The pause resets when the queue
+  empties. A turn that stops at the step/tool limit ends with ``done`` and does not
+  pause it.
 * Every accepted prompt gets a request ledger entry (``ledger_id``) before it is queued or
   delivered, so no path (queue, steer, interrupt, requeue) can lose it.
 """
@@ -179,6 +181,9 @@ class TurnSupervisor:
                mode: str = "", card: str = "", preview: str = "") -> str:
         """origin "relay" marks prompts Relay queued itself (e.g. a background subagent finished).
 
+        A submit from anyone else **resumes a paused queue** on its way past (#7JD1); the comment
+        at the bottom of this method says why the rule lives here and not in the GUI.
+
         when="steer" delivers the prompt inside the running turn at its next step boundary. If no
         turn is running it is queued like "queue". A steer prompt the turn never reached (the model
         answered without another tool call, or the turn stopped) is reported with steer_returned and,
@@ -279,6 +284,26 @@ class TurnSupervisor:
             if when == "interrupt" and self._running is not None:
                 self._emit({"event": "interrupting", "id": self._running, "by": item["id"]})
                 self._stop_locked()
+            # **A submit is a resume** (card #7JD1; owner, 2026-09-21: "why don't we just copy
+            # the functionality and have enter resume"). A `cancel` pauses this queue, and until
+            # this card the only way back was `resume_queue` — which the pane sends from the
+            # strip's Resume button and a device cannot send at all, so a prompt a phone queued
+            # behind a turn it stopped waited for somebody at the desk. Going on with a new
+            # prompt *is* going on: what was waiting behind it runs after it.
+            #
+            # It is done here rather than by the GUI sending `resume_queue` after its `ask`
+            # because that leaves a pane's wire byte-for-byte what it was — nothing new is sent
+            # when nothing is paused, and nothing new is sent when something is — and because
+            # every surface that can submit gets the rule without asking for it: the pane, a
+            # card console, and a device's `ask`/`board_ask`.
+            #
+            # `origin` "relay" is Relay's own prompt (a background subagent reporting back,
+            # subagents.py), not somebody pressing Enter, and it does not undo a person's Stop.
+            # It is cleared *after* the `busy` check above, which reads `_paused`: a submit that
+            # arrives while a paused queue waits is "now" for the pane, and clearing the pause
+            # first would make it "an agent turn is already active".
+            if self._paused and origin == "user":
+                self._paused = False
             self._changed_locked()
             self._lock.notify_all()
             return item["id"]
@@ -469,7 +494,11 @@ class TurnSupervisor:
             self._queue.appendleft(item)
 
     def cancel(self) -> None:
-        """Stop the running turn and pause the queue (resume with resume_queue)."""
+        """Stop the running turn and pause the queue.
+
+        Back out of the pause by `resume_queue` (the pane's Resume button, a console's Enter on
+        an empty prompt box) or simply by submitting the next prompt, which resumes it (#7JD1).
+        """
         with self._lock:
             # Drop forced items that were waiting for this turn: the user asked to stop.
             self._ledger_cancel([i for i in self._queue if i["force"]], "Dropped when the user stopped the turn.")
@@ -480,6 +509,12 @@ class TurnSupervisor:
             self._changed_locked()
 
     def resume(self) -> None:
+        """resume_queue: run what is queued again after a cancel or a failed turn.
+
+        Enter on an empty prompt box sends this, on a pane and on a card's console alike, and
+        the strip's Resume button is the mouse path (#7JD1). A prompt submitted instead of it
+        resumes on its own way past, in `submit`.
+        """
         with self._lock:
             self._paused = False
             self._changed_locked()

@@ -651,6 +651,19 @@ while todos are open: … ignore this if it is current"). No event; no extra mod
   as well. A queue row is `{id, preview, forced, origin, surface?, mode?, card_id?}` (a `steering`
   row the same without `forced`); the last three are absent, not empty, on a turn that is not a
   card's, so a pane's wire is byte for byte what it was.
+- **Stop pauses the queue; the next prompt resumes it** (v4.7, 2026-09-21, card #7JD1; owner:
+  "why don't we just copy the functionality and have enter resume"). `cancel` pauses the queue it
+  names (`queue_changed {paused: true}`), and a submit to that same queue clears the pause on its
+  way past: `ask`, `board_ask`, a steer with no turn to steer — anything a person sends. The only
+  submit that does not is Relay's own (`origin: "relay"`, a background subagent reporting back),
+  which must not undo somebody's Stop. **No new message is sent for this**, which is the point: a
+  GUI that submits a prompt after a Stop needs no `resume_queue` beside it, so a pane's wire is
+  byte-for-byte what it was, and a device's `ask`/`board_ask` resumes without the device knowing
+  the rule exists. `resume_queue` stays, and is what an *empty* Enter sends — the pane's and a
+  card console's Enter on an empty prompt box, and the queue strip's **Resume** button — with the
+  `surface` of the queue it is for, like every op in the bullet above. Ordering is the queue's
+  own: a forced submit (`now`, `interrupt`) runs ahead of what was waiting, a `queue` one behind
+  it. The pause still resets on its own when the queue empties.
 - **Cancel, interrupt and failure** no longer remove the user's prompt, delivered steers or subagent notes from
   the conversation. A half-finished tool-call group is completed with
   `{"error": "Not completed: the turn stopped before this tool call finished. …"}` results, then a note says the
@@ -3626,7 +3639,9 @@ strip. The GUI routes a `card:` event to that card's console and to no other (33
 **The queue ops name the card** (12.5): `queue_remove`, `queue_move`, `queue_steer`,
 `queue_unsteer`, `queue_clear`, `resume_queue` and `cancel` with `surface: "card:<ID>"` operate that
 card's queue. `resume_queue` matters here: Stop on a card pauses that card's queue the way Esc
-pauses a pane's, so a prompt queued behind a stopped turn waits to be resumed.
+pauses a pane's. Enter on the console's empty prompt box sends it, and the **next `board_ask` on
+that card resumes the queue by itself** (12.5, card #7JD1) — which is how a device, whose ten
+requests include no queue op at all, gets back out of a Stop it made.
 
 **`board_cancel {card?}`** — new. The worker-wide `cancel` stops the pane agent's turn, which here
 is a cleanup; a card turn runs on its own supervisor, so stopping it names the card. Without `card`
