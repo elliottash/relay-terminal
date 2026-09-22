@@ -1,0 +1,244 @@
+{
+  "MSW7": {
+    "card": "MSW7",
+    "statuses": [
+      {
+        "test": "manual:docs/qa_evidence/2026-09-22-quota-suppression/report.md",
+        "invocation": "docs/qa_evidence/2026-09-22-quota-suppression/report.md",
+        "status": "not-applicable",
+        "retired": false,
+        "evidence": [],
+        "use_existing": false,
+        "accepted": false,
+        "message": "manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-quota-suppression/report.md"
+      },
+      {
+        "test": "manual:docs/qa_evidence/2026-09-22-model-switch-fixes/tests.txt",
+        "invocation": "docs/qa_evidence/2026-09-22-model-switch-fixes/tests.txt",
+        "status": "not-applicable",
+        "retired": false,
+        "evidence": [],
+        "use_existing": false,
+        "accepted": false,
+        "message": "manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-model-switch-fixes/tests.txt"
+      },
+      {
+        "test": "manual:docs/qa_evidence/2026-09-22-model-switch-fixes/build.txt",
+        "invocation": "docs/qa_evidence/2026-09-22-model-switch-fixes/build.txt",
+        "status": "not-applicable",
+        "retired": false,
+        "evidence": [],
+        "use_existing": false,
+        "accepted": false,
+        "message": "manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-model-switch-fixes/build.txt"
+      },
+      {
+        "test": "manual:docs/qa_evidence/2026-09-22-model-switch-fixes/drive-result.txt",
+        "invocation": "docs/qa_evidence/2026-09-22-model-switch-fixes/drive-result.txt",
+        "status": "not-applicable",
+        "retired": false,
+        "evidence": [],
+        "use_existing": false,
+        "accepted": false,
+        "message": "manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-model-switch-fixes/drive-result.txt"
+      },
+      {
+        "test": "manual:docs/qa_evidence/2026-09-22-model-session-audit/report.md",
+        "invocation": "docs/qa_evidence/2026-09-22-model-session-audit/report.md",
+        "status": "not-applicable",
+        "retired": false,
+        "evidence": [],
+        "use_existing": false,
+        "accepted": false,
+        "message": "manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-model-session-audit/report.md"
+      }
+    ],
+    "findings": [],
+    "actions": [],
+    "revision": "552982fa58c6",
+    "ids": [],
+    "files": {},
+    "failing": [],
+    "blocks": [],
+    "open_before": [
+      {
+        "key": "unittest:unittest.loader._FailedTest.test_board_protocol",
+        "source": "unittest",
+        "kind": "broken",
+        "state": "open",
+        "first_seen": "2026-09-21T23:34:23Z",
+        "last_seen": "2026-09-21T23:34:23Z",
+        "count": 2,
+        "green_streak": 0,
+        "runs": 2,
+        "fingerprint": "",
+        "regressed": false,
+        "stale": false,
+        "version": 1,
+        "excerpt": "AttributeError: type object '_FailedTest' has no attribute 'test_board_protocol'",
+        "message": "AttributeError: type object '_FailedTest' has no attribute 'test_board_protocol'",
+        "session": "codex-hq",
+        "first_run": "20260921T233422Z-ba41",
+        "opened_run": "20260921T233422Z-ba41-rerun",
+        "dismissed": {
+          "reason": "environmental",
+          "comment": "Tracked invocation omitted tests/ from PYTHONPATH, so fake_cards could not import. Repeated with PYTHONPATH=backend:tests:.; all 11 InitTests passed in runs 20260921T233453Z-1582 and 20260921T233455Z-6953. Synthetic unittest loader key does not correspond to a test.",
+          "until": "2026-09-22T00:00:00Z",
+          "by": "codex-hq",
+          "expired": true
+        }
+      },
+      {
+        "key": "run:unittest",
+        "source": "run",
+        "kind": "run",
+        "state": "open",
+        "first_seen": "2026-09-21T23:34:23Z",
+        "last_seen": "2026-09-21T23:34:23Z",
+        "count": 2,
+        "green_streak": 0,
+        "runs": 2,
+        "fingerprint": "",
+        "regressed": false,
+        "stale": false,
+        "version": 1,
+        "excerpt": "11 of 11 executed tests failed in one run: one cause, not 11.",
+        "message": "11 of 11 executed tests failed in one run: one cause, not 11.",
+        "session": "codex-hq",
+        "first_run": "20260921T233422Z-ba41",
+        "opened_run": "20260921T233422Z-ba41",
+        "dismissed": {
+          "reason": "environmental",
+          "comment": "This run-level signal grouped the missing tests/ PYTHONPATH import failures. Corrected environment yielded 11/11 passes in both 20260921T233453Z-1582 and 20260921T233455Z-6953.",
+          "until": "2026-09-22T00:00:00Z",
+          "by": "codex-hq",
+          "expired": true
+        },
+        "members": [
+          "unittest:unittest.loader._FailedTest.test_board_protocol"
+        ]
+      }
+    ]
+  },
+  "YJG7": {
+    "card": "YJG7",
+    "statuses": [
+      {
+        "test": "manual:docs/qa_evidence/2026-09-22-quota-suppression/report.md",
+        "invocation": "docs/qa_evidence/2026-09-22-quota-suppression/report.md",
+        "status": "not-applicable",
+        "retired": false,
+        "evidence": [],
+        "use_existing": false,
+        "accepted": false,
+        "message": "manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-quota-suppression/report.md"
+      },
+      {
+        "test": "manual:docs/qa_evidence/2026-09-22-model-switch-fixes/tests.txt",
+        "invocation": "docs/qa_evidence/2026-09-22-model-switch-fixes/tests.txt",
+        "status": "not-applicable",
+        "retired": false,
+        "evidence": [],
+        "use_existing": false,
+        "accepted": false,
+        "message": "manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-model-switch-fixes/tests.txt"
+      },
+      {
+        "test": "manual:docs/qa_evidence/2026-09-22-model-switch-fixes/build.txt",
+        "invocation": "docs/qa_evidence/2026-09-22-model-switch-fixes/build.txt",
+        "status": "not-applicable",
+        "retired": false,
+        "evidence": [],
+        "use_existing": false,
+        "accepted": false,
+        "message": "manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-model-switch-fixes/build.txt"
+      },
+      {
+        "test": "manual:docs/qa_evidence/2026-09-22-model-switch-fixes/drive-result.txt",
+        "invocation": "docs/qa_evidence/2026-09-22-model-switch-fixes/drive-result.txt",
+        "status": "not-applicable",
+        "retired": false,
+        "evidence": [],
+        "use_existing": false,
+        "accepted": false,
+        "message": "manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-model-switch-fixes/drive-result.txt"
+      },
+      {
+        "test": "manual:docs/qa_evidence/2026-09-22-model-session-audit/report.md",
+        "invocation": "docs/qa_evidence/2026-09-22-model-session-audit/report.md",
+        "status": "not-applicable",
+        "retired": false,
+        "evidence": [],
+        "use_existing": false,
+        "accepted": false,
+        "message": "manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-model-session-audit/report.md"
+      }
+    ],
+    "findings": [],
+    "actions": [],
+    "revision": "552982fa58c6",
+    "ids": [],
+    "files": {},
+    "failing": [],
+    "blocks": [],
+    "open_before": [
+      {
+        "key": "unittest:unittest.loader._FailedTest.test_board_protocol",
+        "source": "unittest",
+        "kind": "broken",
+        "state": "open",
+        "first_seen": "2026-09-21T23:34:23Z",
+        "last_seen": "2026-09-21T23:34:23Z",
+        "count": 2,
+        "green_streak": 0,
+        "runs": 2,
+        "fingerprint": "",
+        "regressed": false,
+        "stale": false,
+        "version": 1,
+        "excerpt": "AttributeError: type object '_FailedTest' has no attribute 'test_board_protocol'",
+        "message": "AttributeError: type object '_FailedTest' has no attribute 'test_board_protocol'",
+        "session": "codex-hq",
+        "first_run": "20260921T233422Z-ba41",
+        "opened_run": "20260921T233422Z-ba41-rerun",
+        "dismissed": {
+          "reason": "environmental",
+          "comment": "Tracked invocation omitted tests/ from PYTHONPATH, so fake_cards could not import. Repeated with PYTHONPATH=backend:tests:.; all 11 InitTests passed in runs 20260921T233453Z-1582 and 20260921T233455Z-6953. Synthetic unittest loader key does not correspond to a test.",
+          "until": "2026-09-22T00:00:00Z",
+          "by": "codex-hq",
+          "expired": true
+        }
+      },
+      {
+        "key": "run:unittest",
+        "source": "run",
+        "kind": "run",
+        "state": "open",
+        "first_seen": "2026-09-21T23:34:23Z",
+        "last_seen": "2026-09-21T23:34:23Z",
+        "count": 2,
+        "green_streak": 0,
+        "runs": 2,
+        "fingerprint": "",
+        "regressed": false,
+        "stale": false,
+        "version": 1,
+        "excerpt": "11 of 11 executed tests failed in one run: one cause, not 11.",
+        "message": "11 of 11 executed tests failed in one run: one cause, not 11.",
+        "session": "codex-hq",
+        "first_run": "20260921T233422Z-ba41",
+        "opened_run": "20260921T233422Z-ba41",
+        "dismissed": {
+          "reason": "environmental",
+          "comment": "This run-level signal grouped the missing tests/ PYTHONPATH import failures. Corrected environment yielded 11/11 passes in both 20260921T233453Z-1582 and 20260921T233455Z-6953.",
+          "until": "2026-09-22T00:00:00Z",
+          "by": "codex-hq",
+          "expired": true
+        },
+        "members": [
+          "unittest:unittest.loader._FailedTest.test_board_protocol"
+        ]
+      }
+    ]
+  }
+}

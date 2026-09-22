@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: zmsw7
 created: '2026-09-22'
 source: Codex session analysis in a Relay pane, 2026-09-22
-links: {plans: [], commits: [552982fa58c6f82a0999452888e88f980b37c22e], evidence: [docs/qa_evidence/2026-09-22-model-session-audit/, docs/qa_evidence/2026-09-22-model-switch-fixes/], related: [4BPE, YJG7, GH5T], github: null}
+links: {plans: [], commits: [552982fa58c6f82a0999452888e88f980b37c22e], evidence: [docs/qa_evidence/2026-09-22-quota-suppression/report.md, docs/qa_evidence/2026-09-22-model-session-audit/, docs/qa_evidence/2026-09-22-model-switch-fixes/], related: [4BPE, YJG7, GH5T], github: null}
 ---
 # Role model selection can fail while leaving the selected mode changed
 
@@ -32,6 +32,7 @@ timeline and the distinction between observed events and inferred click targets.
 - Six GLM 429 retries per turn recur; quota handling is already tracked by #YJG7.
 
 ## Tests
+- manual: docs/qa_evidence/2026-09-22-quota-suppression/report.md
 - manual: docs/qa_evidence/2026-09-22-model-switch-fixes/tests.txt
 - manual: docs/qa_evidence/2026-09-22-model-switch-fixes/build.txt
 - manual: docs/qa_evidence/2026-09-22-model-switch-fixes/drive-result.txt
@@ -51,6 +52,9 @@ Risks: preserve conversation and pending mid-turn switches; shared checkout requ
 Verify: worker/guest/model-switch/failover/provider tests plus live startup, role/model changes, and a rejected switch.
 
 ## Execution Summary
+
+Follow-up package 2 under HG26: typed exhausted-quota vs transient HTTP429 errors, bounded per-provider suppression capped by the earliest possible reset, calendar validation, cancellation and model-switch preemption. Added guest→native construction-failure regression; retained original atomic switching implementation. 220 focused tests and the isolated 14-stage GUI drive pass. Evidence: docs/qa_evidence/2026-09-22-quota-suppression/report.md
+
 Unified role and direct model transport changes, including guest startup and deferred changes; refused changes preserve the active provider and role. Removed intermediate Main switches. Added picker startup/open/pick/display logs and worker selection outcomes. Startup now displays Loading models… until the catalog arrives. Fallback diagnostics retain each provider's failure.
 
 Verification: 299 targeted tests passed; 22 model-switch tests passed again after the final diagnostics addition; scripts/relay-build --target relay passed. Live rebuilt GUI/real-worker drive passed all 14 stages, including two new panes, guest/API switches, a refused guest, continued answers and quota/fallback errors. HTTP responses and guest harness were deterministic fixtures, not production provider calls. Screenshots, OCR, logs and reproducible driver: docs/qa_evidence/2026-09-22-model-switch-fixes/. Card test checks pass. Board-wide validation retains unrelated existing diagnostics; none apply to these two cards.

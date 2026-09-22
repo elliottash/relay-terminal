@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import email.utils
+from datetime import datetime, timedelta, timezone
 import json
 import re
 import math
@@ -384,14 +385,20 @@ def wire_messages(messages: list[dict], *, tool_arguments_as_object: bool = Fals
 class ProviderError(RuntimeError):
     """A model call failed. The message is for the user and never carries a key or a body.
 
-    ``code`` and ``resets_at`` are set only by Relay's own hosted service (``HostedChatProvider``):
-    one of ``hosted.ERROR_CODES`` and the unix time a quota refusal lifts, so the pane can word the
-    failure and offer a key of the user's own. Every other provider leaves them empty.
+    ``code`` identifies a recognised refusal; ``resets_at`` is a Unix timestamp only when
+    the service supplies an unambiguous reset instant. Provider-local times are display-only.
     """
     def __init__(self, text: str = "", code: str = "", resets_at: int | None = None):
         super().__init__(text)
         self.code = code
         self.resets_at = resets_at
+
+
+class ProviderQuotaExhausted(ProviderError):
+    """A recognised exhausted account quota, distinct from transient HTTP 429."""
+    def __init__(self, text: str, retry_after_s: float):
+        super().__init__(text, code="provider_quota_exhausted")
+        self.retry_after_s = retry_after_s
 
 
 def repair_tool_calls(calls) -> list:
@@ -642,6 +649,7 @@ class ChatProvider:
         self._streaming = False     # a usable chunk has arrived: the idle deadline applies from here
         self._retry_budget = None   # an explicit wall-clock cap on the retry loop, else derived
         self._retry_origin = None   # monotonic start of the logical call the budget is measured from
+        self._quota_refusal = None  # (configuration identity, monotonic deadline, typed error)
         self._retries_used = 0      # retries already spent by this logical call
         # Asked every RETRY_WAIT_TICK during a retry wait (card #DC4J): True ends the wait with
         # ProviderPreempted, so the caller can send the step elsewhere. The agent installs the
@@ -986,6 +994,16 @@ class ChatProvider:
         waited out with the Retry-After the provider sent or the backoff above. Everything else
         is raised at once.
         """
+        identity = (self.config.base_url, self.config.model, self.config.api_key)
+        if self._quota_refusal is not None:
+            previous_identity, deadline, quota = self._quota_refusal
+            if previous_identity == identity and time.monotonic() < deadline:
+                if cancel.is_set():
+                    raise Cancelled()
+                if callable(self.preempt_check) and self.preempt_check():
+                    raise ProviderPreempted(429, 0, 0.0)
+                raise ProviderQuotaExhausted(str(quota), deadline - time.monotonic())
+            self._quota_refusal = None
         loading_announced = False
         origin = self._retry_origin if self._retry_origin is not None else started
         retries = self._retries_used
@@ -995,6 +1013,7 @@ class ChatProvider:
             except urllib.error.HTTPError as exc:
                 quota = self._coding_quota_error(exc)
                 if quota is not None:
+                    self._quota_refusal = (identity, time.monotonic() + quota.retry_after_s, quota)
                     if getattr(exc, "fp", None) is not None:
                         hard_close(exc.fp)
                     emit({"event": "provider_retry", "reason": "quota", "status": exc.code,
@@ -1140,7 +1159,7 @@ class ChatProvider:
         """A wait as the status line shows it: ``8``, ``0.5``, ``0``."""
         return f"{seconds:.1f}".rstrip("0").rstrip(".") or "0"
 
-    def _coding_quota_error(self, exc) -> ProviderError | None:
+    def _coding_quota_error(self, exc) -> ProviderQuotaExhausted | None:
         """Recognise Z.AI's permanent Coding Plan refusal; never echo its arbitrary body."""
         if exc.code != 429 or _host(self.config.base_url) != "api.z.ai":
             return None
@@ -1151,17 +1170,31 @@ class ChatProvider:
                 return None
             message = str(error.get("message", ""))
             reset = re.search(r"reset at (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", message)
-            when = f" Resets at {reset.group(1)} (provider time)." if reset else ""
-            return ProviderError(f"Z.AI Coding Plan quota exhausted for {self.config.model}.{when} "
-                                 "Choose another provider or wait for the quota reset.",
-                                 code="provider_quota_exhausted")
+            when = ""
+            # Provider time has no timezone. Never guess the machine's zone or invent a Unix
+            # reset. Suppress for at most a minute, and never beyond the earliest possible
+            # reset (UTC+14). At/after that boundary, let the service decide again.
+            cooldown = 60.0
+            if reset:
+                try:
+                    wall = datetime.strptime(reset.group(1), "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    pass
+                else:
+                    when = f" Resets at {reset.group(1)} (provider time)."
+                    earliest = wall.replace(tzinfo=timezone(timedelta(hours=14))).timestamp()
+                    cooldown = min(cooldown, max(0.0, earliest - time.time()))
+            return ProviderQuotaExhausted(
+                f"Z.AI Coding Plan quota exhausted for {self.config.model}.{when} "
+                "Choose another provider or wait for the quota reset.", cooldown)
         except (ValueError, OSError, AttributeError):
             return None
 
     def _http_error(self, exc) -> ProviderError:
         """The ProviderError for an HTTP failure. Only the status survives, plus the one phrase a
         local server's overflow body is matched for; HostedChatProvider reads Relay's own body."""
-        return ProviderError(self._local_http_reason(exc) or self.http_message(exc.code))
+        return ProviderError(self._local_http_reason(exc) or self.http_message(exc.code),
+                             code="provider_rate_limited" if exc.code == 429 else "")
 
     def _local_http_reason(self, exc) -> str | None:
         """A sentence for a local server's 4xx, or None. Only a *recognised* phrase survives: the

@@ -76,3 +76,9 @@ Claimed via file fallback as codex, under the user's request to deliver the sess
 
 <!-- relay:entry 20260922T150313Z-fn author=agent kind=evidence model=gpt-6-astra pane=3064d543 turn=42374cc63a8340a9a03cd22ca3f514e3/3649adf8472b427f8ca50c556342b852 -->
 Landed implementation and live-drive evidence in 552982fa58c6f82a0999452888e88f980b37c22e. land.py built the exact committed tree successfully using scripts/relay-build --target relay, excluding concurrent sessions' uncommitted changes. Build-gate record: docs/qa_evidence/2026-09-22-model-switch-fixes/land-build.txt. Awaiting independent verification.
+
+<!-- relay:entry 20260922T165157Z-p2 author=codex-hg26-p2 kind=progress -->
+Claimed follow-up as codex-hg26-p2: existing 552982fa implementation is landed; adding bounded reset-aware exhausted-quota suppression and calendar validation. Existing Done means retained.
+
+<!-- relay:entry 20260922T165621Z-p2 author=codex-hg26-p2 kind=evidence -->
+Follow-up complete; needs-verification. 220 targeted tests and all 14 isolated GUI stages pass; scripts/relay-build --target relay passed. Existing switching/fallback implementation preserved; new quota suppression and failed guest→native transport test. Evidence: docs/qa_evidence/2026-09-22-quota-suppression/report.md. No HG26 or logging edits.

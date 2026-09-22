@@ -3,12 +3,12 @@ id: YJG7
 type: work
 status: needs-verification
 labels: [bug, providers, routing]
-assignee: codex
+assignee: codex-hg26-p2
 implemented_by: openai/gpt-6-astra via codex
 rank: zzzzzzzzzzzzzzzi
 created: '2026-09-20'
 source: pane, 2026-09-20
-links: {plans: [], commits: [552982fa58c6f82a0999452888e88f980b37c22e], evidence: [docs/qa_evidence/2026-09-22-model-switch-fixes/], related: [VMZP, G9VE, DC4J], github: null}
+links: {plans: [], commits: [552982fa58c6f82a0999452888e88f980b37c22e], evidence: [docs/qa_evidence/2026-09-22-quota-suppression/report.md, docs/qa_evidence/2026-09-22-model-switch-fixes/], related: [VMZP, G9VE, DC4J], github: null}
 ---
 # A spent Z.AI Coding Plan quota is retried as a transient 429, and the pane never says when it resets
 
@@ -45,12 +45,19 @@ Related: `#VMZP` (retry transient refusals) and `#G9VE` (fail over when a provid
 - Targeted regression tests and a live GUI failure/fallback drive provide evidence.
 
 ## Tests
+- manual: docs/qa_evidence/2026-09-22-quota-suppression/report.md
 - manual: docs/qa_evidence/2026-09-22-model-switch-fixes/tests.txt
 - manual: docs/qa_evidence/2026-09-22-model-switch-fixes/build.txt
 - manual: docs/qa_evidence/2026-09-22-model-switch-fixes/drive-result.txt
 - manual: docs/qa_evidence/2026-09-22-model-session-audit/report.md
 
 ## Execution Summary
+
+Follow-up package 2 under HG26: typed exhausted-quota vs transient HTTP429 errors, bounded per-provider suppression capped by the earliest possible reset, calendar validation, cancellation and model-switch preemption. Added guest→native construction-failure regression; retained original atomic switching implementation. 220 focused tests and the isolated 14-stage GUI drive pass. Evidence: docs/qa_evidence/2026-09-22-quota-suppression/report.md
+
 Recognise Z.AI HTTP 429/code 1310 as exhausted quota immediately, retain a validated reset timestamp in provider time, and avoid echoing arbitrary response text. Unrecognised 429s still retry. Fallback failures now preserve each provider's error.
 
 Verification: quota/transient regression tests passed in the 299-test suite. Live rebuilt GUI/real-worker drive with deterministic HTTP fixtures made exactly one exhausted GLM request and one Muse fallback request, showing both the quota reset and Muse HTTP 401. Evidence: docs/qa_evidence/2026-09-22-model-switch-fixes/. No production provider calls used.
+
+## Plan
+Follow-up under HG26: retain landed model-switch fixes; add bounded reset-aware suppression of repeated exhausted-quota calls and validated reset timestamps in provider.py. Verify with deterministic provider/model-switch tests and reuse the isolated GUI flow. Unknown provider timezone must not become an invented UTC deadline.

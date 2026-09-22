@@ -1024,3 +1024,62 @@ class CodingQuotaTests(unittest.TestCase):
                                       io.BytesIO(b'{"error":{"code":"1302","message":"Rate limit"}}'))
         self.assertIsNone(provider._coding_quota_error(error))
         self.assertIsNotNone(provider._http_retry_delay(error, 1))
+
+
+class QuotaSuppressionTests(unittest.TestCase):
+    def test_repeated_calls_suppressed_then_rechecked_and_switch_can_preempt(self):
+        from unittest import mock
+        from relay_core.provider import ProviderQuotaExhausted, ProviderPreempted
+        provider = ChatProvider(ProviderConfig('https://api.z.ai/api/coding/paas/v4', 'glm', 'fixture'))
+        error = urllib.error.HTTPError(provider.config.base_url, 429, 'quota', {},
+            io.BytesIO(b'{"error":{"code":"1310","message":"reset at 2030-01-01 00:00:00"}}'))
+        opener = mock.Mock()
+        opener.open.side_effect = [error, 'recovered']
+        def call():
+            return provider._open(opener, mock.Mock(), lambda e: None, threading.Event(), 100.)
+        with mock.patch('relay_core.provider.time.monotonic', return_value=100.), \
+             mock.patch('relay_core.provider.time.time', return_value=0):
+            for _ in range(2):
+                with self.assertRaises(ProviderQuotaExhausted): call()
+            self.assertEqual(opener.open.call_count, 1)
+            provider.preempt_check = lambda: True
+            with self.assertRaises(ProviderPreempted): call()
+            provider.preempt_check = None
+            cancelled = threading.Event()
+            cancelled.set()
+            with self.assertRaises(Cancelled):
+                provider._open(opener, mock.Mock(), lambda e: None, cancelled, 100.)
+        with mock.patch('relay_core.provider.time.monotonic', return_value=161.):
+            self.assertEqual(call(), 'recovered')
+        self.assertEqual(opener.open.call_count, 2)
+
+    def test_reset_boundary_invalid_calendar_and_transient_type(self):
+        from unittest import mock
+        from datetime import datetime, timezone
+        provider = ChatProvider(ProviderConfig('https://api.z.ai/api/coding/paas/v4', 'glm', 'fixture'))
+        def error(message):
+            return urllib.error.HTTPError(provider.config.base_url, 429, 'quota', {},
+                io.BytesIO(json.dumps({'error': {'code': '1310', 'message': message}}).encode()))
+        # Earliest possible interpretation is 2030-01-01 00:00 UTC (provider UTC+14).
+        boundary = datetime(2030, 1, 1, tzinfo=timezone.utc).timestamp()
+        with mock.patch('relay_core.provider.time.time', return_value=boundary - 10):
+            quota = provider._coding_quota_error(error('reset at 2030-01-01 14:00:00'))
+            self.assertEqual(quota.retry_after_s, 10.)
+            self.assertIsNone(quota.resets_at)
+        with mock.patch('relay_core.provider.time.time', return_value=boundary):
+            self.assertEqual(provider._coding_quota_error(error('reset at 2030-01-01 14:00:00')).retry_after_s, 0)
+        invalid = provider._coding_quota_error(error('reset at 2030-99-99 99:99:99'))
+        self.assertNotIn('2030-99', str(invalid))
+        self.assertEqual(invalid.retry_after_s, 60.)
+        self.assertEqual(provider._http_error(error('transient')).code, 'provider_rate_limited')
+
+    def test_credential_change_does_not_reuse_quota_refusal(self):
+        from relay_core.provider import ProviderQuotaExhausted
+        from unittest import mock
+        provider = ChatProvider(ProviderConfig('https://api.z.ai/api/coding/paas/v4', 'glm', 'old'))
+        provider._quota_refusal = ((provider.config.base_url, 'glm', 'old'), time.monotonic()+60,
+                                   ProviderQuotaExhausted('exhausted', 60))
+        provider.config.api_key = 'new'
+        opener = mock.Mock()
+        provider._open(opener, mock.Mock(), lambda e: None, threading.Event(), time.monotonic())
+        opener.open.assert_called_once()

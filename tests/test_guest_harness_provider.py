@@ -1108,6 +1108,28 @@ class WorkerProtocolTests(unittest.TestCase):
         self.assertIn("fixture startup refused", refused["reason"])
         self.assertEqual([e["model"] for e in events if e["event"] == "model_changed"], ["api-model"])
 
+    def test_failed_native_install_preserves_guest_and_high_role(self):
+        from relay_core import agent as agent_module
+        factory = agent_module._provider_for
+        def fail_native(config, *args, **kwargs):
+            if config.model == "api-model":
+                raise ValueError("fixture native transport refused")
+            return factory(config, *args, **kwargs)
+        with tempfile.TemporaryDirectory() as ws, \
+             mock.patch.object(agent_module, "_provider_for", side_effect=fail_native):
+            events = self.run_worker([
+                {"type": "configure", "workspace": ws, "base_url": "http://127.0.0.1:1234/v1",
+                 "model": "api-model", "agent_role": "high",
+                 "tiers": {"high": [{"preset": "guest:codex", "model": "gpt-6-astra", "effort": "high"}]}},
+                {"type": "set_agent_role", "id": "main", "role": "main"},
+                {"type": "set_agent_role", "id": "high", "role": "high"},
+                {"type": "shutdown"}], FakeHarness([], guest="codex", model="gpt-6-astra"))
+        refused = next(e for e in events if e["event"] == "model_switch_refused")
+        self.assertEqual((refused["current_model"], refused["agent_role"]), ("gpt-6-astra", "high"))
+        self.assertIn("fixture native transport refused", refused["reason"])
+        changed = [e for e in events if e["event"] == "model_changed"]
+        self.assertEqual([(e["model"], e["agent_role"]) for e in changed], [("gpt-6-astra", "high")])
+
     def test_worker_callbacks_do_not_escape_into_later_stdout_capture(self):
         with ExitStack() as previous:
             callbacks = []
