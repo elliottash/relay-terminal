@@ -573,6 +573,102 @@ class BoardViewTests(unittest.TestCase):
 
         self.drive(main())
 
+    # ---- the characters the owner typed (card #MDX6) -------------------------------------------
+
+    async def drawn(self, browser, body: str) -> dict:
+        """One card body through the real `renderMarkdown`, as text again.
+
+        `lines` is what a reader sees, line by line, with only the markup gone — the bullet, the
+        indent, the fence. Everything else has to be there character for character, because this
+        is the one screen that promises a build command can be typed back off it.
+        """
+        return json.loads(await browser.evaluate(
+            "(async () => {"
+            " const md = await import('/app/boardmd.js');"
+            f" const root = md.renderMarkdown({js(body)}, {{}});"
+            " const BLOCK = /^(p|div|li|ul|ol|pre|h[1-6]|blockquote|table|thead|tbody|tr|th|td|hr)$/;"
+            " let text = '';"
+            " const walk = (node) => { for (const child of node.childNodes) {"
+            "   if (child.nodeType === 3) { text += child.nodeValue; continue; }"
+            "   const tag = child.tagName.toLowerCase();"
+            "   if (tag === 'br') { text += '\\n'; continue; }"
+            "   const block = BLOCK.test(tag);"
+            "   if (block && text && !text.endsWith('\\n')) text += '\\n';"
+            "   walk(child);"
+            "   if (block && text && !text.endsWith('\\n')) text += '\\n';"
+            " } };"
+            " walk(root);"
+            " return JSON.stringify({"
+            "  lines: text.replace(/\\n+$/, '').split('\\n'),"
+            "  items: [...root.querySelectorAll('.rb-md-list > li')].length,"
+            "  nested: [...root.querySelectorAll('.rb-md-list .rb-md-list > li')].map(e => e.textContent),"
+            "  pre: [...root.querySelectorAll('.rb-md-pre')].map(e => e.textContent),"
+            "  strong: [...root.querySelectorAll('strong')].map(e => e.textContent),"
+            "  em: [...root.querySelectorAll('em')].map(e => e.textContent),"
+            "  tables: [...root.querySelectorAll('.rb-md-table')].map(t =>"
+            "    [...t.querySelectorAll('tr')].map(r => [...r.children].map(c => c.textContent))),"
+            " }); })()"))
+
+    def test_a_card_body_reaches_the_reader_character_for_character(self):
+        """Card #MDX6: an indent was measured in columns (a tab counting four) and then cut off by
+        that many *characters*, so every tab-indented line lost real text with its tab — a `make`
+        line came out `ake`, a nested bullet lost its `-`, a fenced line vanished outright. The
+        bodies here are shapes this repository's cards hold every day."""
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.start(browser)
+
+                # Each body, and the lines it must put on the screen.
+                for body, lines in (
+                    # a command under a bullet, indented with one tab
+                    ("- run this:\n\tmake all", ["run this:", "make all"]),
+                    # the same with two tabs, and with a tab after spaces
+                    ("- run this:\n\t\tmake all", ["run this:", "make all"]),
+                    ("- run this:\n  \tmake all", ["run this:", "make all"]),
+                    # a nested bullet, indented with a tab
+                    ("- a\n\t- b", ["a", "b"]),
+                    # a numbered item's continuation
+                    ("1. first\n\tstill first\n2. second", ["first", "still first", "second"]),
+                    # a dunder is a name; `a__b__c` is three of them
+                    ("the __init__ method and a__b__c", ["the __init__ method and a__b__c"]),
+                    ("__main__ guards __all__", ["__main__ guards __all__"]),
+                    # a table written straight under a sentence, the way GitHub takes it
+                    ("Results:\n| a | b |\n| --- | --- |\n| 1 | 2 |", ["Results:", "a", "b", "1", "2"]),
+                ):
+                    page = await self.drawn(browser, body)
+                    self.assertEqual(page["lines"], lines, f"rendering {body!r}")
+
+                # …and what each of those became, not only what it says.
+                page = await self.drawn(browser, "- run this:\n\tmake all")
+                self.assertEqual((page["items"], page["nested"]), (1, []))
+
+                page = await self.drawn(browser, "- a\n\t- b")
+                self.assertEqual(page["nested"], ["b"], "a tab-indented bullet is still a bullet")
+
+                # A fence inside a list item, and one indented on its own: the tab-indented line
+                # of the block is the line, not an empty one.
+                page = await self.drawn(browser, "- item\n    ```\n\tb\n    ```")
+                self.assertEqual(page["pre"], ["b"])
+                page = await self.drawn(browser, "    ```sh\n\tmake all\n    ```")
+                self.assertEqual(page["pre"], ["make all"])
+
+                # `__` still opens bold when what it wraps is not a bare name.
+                page = await self.drawn(browser, "the __init__ method and a__b__c")
+                self.assertEqual((page["strong"], page["em"]), ([], []))
+                page = await self.drawn(browser, "__also bold__ and **bold** and _italic_")
+                self.assertEqual((page["strong"], page["em"]), (["also bold", "bold"], ["italic"]))
+
+                # The table under the sentence is a table, with the sentence still a paragraph.
+                page = await self.drawn(browser, "Results:\n| a | b |\n| --- | --- |\n| 1 | 2 |")
+                self.assertEqual(page["tables"], [[["a", "b"], ["1", "2"]]])
+                self.clean(browser)
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
     def test_the_thread_highlights_a_question_and_its_options_prefill_the_reply(self):
         async def main():
             browser = Browser()

@@ -9,7 +9,7 @@
 // `<script>` in a card is the eight characters `<script>`, an `<img onerror>` is a sentence, and
 // the worst a hostile card can do is be ugly.
 //
-// Four things are deliberately not Markdown's defaults:
+// Three things are deliberately not Markdown's defaults:
 //
 // * **HTML comments are never shown.** `<!-- t:a3 -->` and `<!-- relay:entry … -->` are the
 //   board's own bookkeeping (docs/BOARD-FORMAT.md 2.5 and 3); GitHub hides them and so does
@@ -20,10 +20,6 @@
 //   fetched, it is the words "image" and its address.
 // * **A single newline is a line break.** The owner's words are stored verbatim and are typed the
 //   way people type on a phone, so folding their lines together would rewrite them.
-// * **`__name__` is a name, not bold.** The cards here write Python dunders — `__init__`,
-//   `__main__`, `__all__` — routinely, and CommonMark would eat four characters of a name the
-//   reader has to type back (card #MDX6). `__` still opens bold when what it wraps is not a bare
-//   identifier, so `__also bold__` is bold and `__init__` is `__init__`.
 
 const FENCE = /^(\s*)(`{3,}|~{3,})\s*([\w+-]*)\s*$/;
 const HEADING = /^(#{1,6})\s+(.*?)\s*#*\s*$/;
@@ -135,17 +131,6 @@ function closing(text, marker, from) {
   return -1;
 }
 
-// Whether a run of `marker` at `at`, closing at `end`, opens bold. `**` and `~~` always do. `__`
-// does not inside a word — `a__b__c` is three names — and does not when all it wraps is a bare
-// identifier, because that is what a Python dunder looks like: `__init__` is a name the reader has
-// to type back, not an instruction to bold "init" (the fourth note at the top of the file).
-function opensStrong(marker, text, at, end) {
-  if (marker !== '__') return true;
-  if (at > 0 && /\w/.test(text[at - 1])) return false;
-  if (/\w/.test(text[end + 2] || '')) return false;
-  return !/^[A-Za-z_]\w*$/.test(text.slice(at + 2, end));
-}
-
 // Inline Markdown into `parent`, as nodes. `depth` stops a pathological nest from recursing away.
 export function renderInline(parent, source, options = {}, depth = 0) {
   const text = String(source ?? '');
@@ -176,7 +161,7 @@ export function renderInline(parent, source, options = {}, depth = 0) {
     if (depth < 6 && (rest.startsWith('**') || rest.startsWith('__') || rest.startsWith('~~'))) {
       const marker = rest.slice(0, 2);
       const end = closing(text, marker, at + 2);
-      if (end > at + 2 && !/\s/.test(text[at + 2]) && opensStrong(marker, text, at, end)) {
+      if (end > at + 2 && !/\s/.test(text[at + 2])) {
         flush();
         const node = el(marker === '~~' ? 'del' : 'strong');
         renderInline(node, text.slice(at + 2, end), options, depth + 1);
@@ -293,34 +278,7 @@ function renderTable(rows, options) {
   return wrap;
 }
 
-// The leading whitespace of a line, counted in columns with a tab worth four (`indentWidth`,
-// `indentOf`), and that line with `columns` of its indent taken off (`stripIndent`). The three
-// belong together: a tab is four columns but one character, so measuring an indent in columns and
-// then slicing by that many *characters* takes the tab and the text behind it (card #MDX6 — a
-// continuation line `\tmake all` came out `ake all`). A tab straddling the cut leaves the columns
-// past it behind, as spaces.
-const indentWidth = (space) => space.replace(/\t/g, '    ').length;
-const indentOf = (line) => indentWidth(line.match(/^\s*/)[0]);
-
-function stripIndent(line, columns) {
-  let column = 0;
-  let at = 0;
-  while (at < line.length && column < columns) {
-    const char = line[at];
-    if (char === ' ') { column += 1; at += 1; continue; }
-    if (char !== '\t') break;
-    at += 1;
-    if (column + 4 > columns) return ' '.repeat(column + 4 - columns) + line.slice(at);
-    column += 4;
-  }
-  return line.slice(at);
-}
-
-// Whether `lines[at]` is the header row of a pipe table: it has a bar, and the line under it is a
-// row of dashes with a bar in it. Both the block pass and the paragraph pass ask, so that a table
-// written straight under a sentence — no blank line, the way GitHub renders it — is a table.
-const startsTable = (lines, at) => at + 1 < lines.length && lines[at].includes('|')
-  && TABLE_RULE.test(lines[at + 1]) && lines[at + 1].includes('-') && lines[at + 1].includes('|');
+const indentOf = (line) => line.match(/^\s*/)[0].replace(/\t/g, '    ').length;
 
 function renderList(lines, start, options) {
   // Every consecutive item at this indent or deeper, with its continuation lines; one blank line
@@ -359,7 +317,7 @@ function renderList(lines, start, options) {
         break;
       }
       if (indentOf(line) <= base) break;
-      inner.push(stripIndent(line, base + 2));
+      inner.push(line.slice(Math.min(indentOf(line), base + 2)));
       at += 1;
     }
     const content = el('div', 'rb-md-item');
@@ -388,7 +346,7 @@ function renderBlocks(parent, lines, options, tight = false) {
       while (at < lines.length) {
         const close = lines[at].match(FENCE);
         if (close && close[2][0] === fence[2][0] && close[2].length >= fence[2].length && !close[3]) break;
-        code.push(stripIndent(lines[at], indentWidth(fence[1])));
+        code.push(lines[at].slice(Math.min(indentOf(lines[at]), fence[1].length)));
         at += 1;
       }
       at += 1;
@@ -423,7 +381,8 @@ function renderBlocks(parent, lines, options, tight = false) {
       continue;
     }
 
-    if (startsTable(lines, at)) {
+    if (line.includes('|') && at + 1 < lines.length && TABLE_RULE.test(lines[at + 1])
+        && lines[at + 1].includes('-') && lines[at + 1].includes('|')) {
       const rows = [];
       while (at < lines.length && lines[at].trim() && lines[at].includes('|')) {
         rows.push(lines[at]);
@@ -443,7 +402,7 @@ function renderBlocks(parent, lines, options, tight = false) {
     const words = [];
     while (at < lines.length && lines[at].trim() && !FENCE.test(lines[at]) && !HEADING.test(lines[at])
            && !QUOTE.test(lines[at]) && !(ITEM.test(lines[at]) && words.length && indentOf(lines[at]) < 4)
-           && !(RULE.test(lines[at])) && !(words.length && startsTable(lines, at))) {
+           && !(RULE.test(lines[at]))) {
       words.push(lines[at].trim());
       at += 1;
     }
