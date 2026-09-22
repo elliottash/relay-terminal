@@ -6,8 +6,8 @@ labels: [bug, remote, models]
 assignee: claude-code
 rank: zeft9
 created: '2026-09-22'
-source: 'Measured by Claude Code driving the phone app at 390x844, 2026-09-22'
-links: {plans: [], commits: [b8222865], evidence: ['docs/qa_evidence/2026-09-22-phone-ux-drive/'], related: [MDL1, PH0N], github: null}
+source: Measured by Claude Code driving the phone app at 390x844, 2026-09-22
+links: {plans: [], commits: [b8222865, 44a46ca1, 7d313776], evidence: [docs/qa_evidence/2026-09-22-phone-ux-drive/, docs/qa_evidence/2026-09-22-streamA-pane/], related: [MDL1, PH0N], github: null}
 ---
 # The phone's reasoning-level chip is stale, reads "✓▾high", and never learns a pick was refused
 
@@ -75,3 +75,50 @@ level is fixed draws a chip that cannot be changed rather than a live picker. Cl
 `high` — no checkmark, no chevron across it — and the model chip beside it keeps its own chevron.
 It fails if any of those still needs a model change to correct itself, or if the closed control
 shows a `✓`.
+
+## Execution Summary
+**Faults 1 and 2 are fixed in the client (`44a46ca1`). Fault 3 is the wire's and is still open** —
+see below, and the `## Tests` line that is deliberately not claimed.
+
+`renderEffort()` was the last line of `renderModel()`, below that function's early return on an
+unchanged model signature — and the level is in neither half of that signature, so every
+`pane_state` in which only the level moved was dropped. It is now called from the top of
+`renderModel`, before the guard and outside it; the guard on the *level's own* signature stays, so
+an open native picker still survives the ten-a-second `pane_state`.
+
+The closed chip read `✓▾high` for two reasons, both fixed. The `✓ ` marking the current option was
+baked into that option's text; the level now uses the model menu's shape — a disabled placeholder
+option carrying the plain current level, with the `✓` only on the options in the list. And
+`.rp-model-chevron` was absolutely positioned against `.rp-model-wrap`, which held
+`model, chevron, effort`, so it was anchored to the level's right edge: each control now has its
+own relative box (`.rp-model-box`, `.rp-effort-box`) and its own chevron. A pick returns the select
+to the placeholder, as the model menu does, so the closed chip says the level the *pane* is on
+rather than the one last tapped, until the pane's own state moves it.
+
+`m.effort_fixed === true` disables the chip and drops its chevron. **That branch is driven from a
+fixture only**: nothing publishes the field yet. Stream E owns making it real — gating
+`remoteState()`'s `in.efforts` on `effortFixed`, publishing `effort_fixed` through `PaneState` and
+the hub's cleaner, and republishing `pane_state` after a refused `effort_pick` so the chip cannot
+keep a rejected word. The `EFFORT = ^[a-z][a-z0-9-]{0,15}$` fault (a provider's level word dropped
+individually rather than the block rejected, `remote/pane_state.py:61`) is on the same stream.
+
+## Tests
+`RELAY_KEYRING=off python3 -m unittest tests.test_pane_view` — 36 tests, OK, 16 s. Re-run by the
+orchestrating session after the landing, not only by the implementer.
+
+- `tests/test_pane_view.py::PaneViewTests::test_the_effort_chip_follows_a_state_that_only_moved_the_level`
+- `tests/test_pane_view.py::PaneViewTests::test_a_fixed_level_draws_a_chip_that_cannot_be_changed`
+- `manual: docs/qa_evidence/2026-09-22-streamA-pane/` — `EFT9-chip.png`,
+  `EFT9-chip-after-level-only-state.png`, `EFT9-chip-fixed.png`.
+- `manual: docs/qa_evidence/2026-09-22-phone-ux-drive/` — the independent probe this card was filed
+  from, re-run unchanged against the landed tree by the orchestrating session. Before:
+  `after effort=low {"shown":"✓ high"}` (the state ignored). After:
+  `start {"shown":"high"} → after effort=low {"shown":"low"}`, and the chip hides whole when the
+  model takes no levels. Chevron geometry, same probe: chevron x 140.2–147.5, model 17–154.5,
+  level 158.5–230.6 — `chevron over effort: False`, where it was 216.4–223.6 across a level at
+  198–289.
+
+**Not proven, and not claimed:** fault 3. Nothing here exercises a fixed-effort model or a refused
+`effort_pick` against a real desktop, because nothing publishes `effort_fixed` yet. A verifier
+should read this card as "the chip is right about what it is told" and hold the rest until stream E
+lands.

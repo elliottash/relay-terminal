@@ -6,8 +6,8 @@ labels: [bug, remote]
 assignee: claude-code
 rank: zpkt5
 created: '2026-09-22'
-source: 'Found by Claude Code reviewing the phone app, 2026-09-22'
-links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-22-phone-ux-drive/'], related: [PH0N], github: null}
+source: Found by Claude Code reviewing the phone app, 2026-09-22
+links: {plans: [], commits: [dc2c00ab, 7d313776], evidence: [docs/qa_evidence/2026-09-22-phone-ux-drive/, docs/qa_evidence/2026-09-22-streamA-pane/], related: [PH0N], github: null}
 ---
 # A phone coming back from a pocket keeps a stale pane, and the back button closes the app
 
@@ -51,3 +51,28 @@ button closes what is open (a sheet, then the card or thread) before it ever lea
 notification for another pane leaves nothing of the previous pane on screen. A finger already down
 on an ask option or a queue row still activates it when a `pane_state` lands mid-press. It fails if
 a resume leaves a stale queue count, or if Back closes the installed app from a thread.
+
+## Execution Summary
+**Item 4 is landed (`dc2c00ab`, stream A, `app/pane.js`). Items 1–3 are stream D's, in
+`app/app.js`, and are still open at the time of writing.** The card stays in Executing until they
+land, so a verifier is never handed a quarter of it.
+
+**Item 4.** `renderAsk` cleared `askChoices` and `renderRows` cleared `rows` on every `draw()`,
+unguarded, while `pane_state` arrives about ten times a second. Both now carry the signature guard
+their neighbours already had: the ask on the question's id, which of its questions is showing,
+whether this device may answer, and the worker's own words and options; the queue on the selected
+row and each row's id, kind, state, label and offered actions. `renderRows`'s `scrollIntoView` was
+fighting the reader at the same rate — it ran on every rebuild — and now runs only when the
+selection itself moved.
+
+## Tests
+Item 4 only. `RELAY_KEYRING=off python3 -m unittest tests.test_pane_view` — 36 tests, OK, 16 s,
+re-run by the orchestrating session after the landing.
+
+- `tests/test_pane_view.py::PaneViewTests::test_an_ask_option_and_a_queue_row_survive_ten_clock_states`
+- `tests/test_pane_view.py::PaneViewTests::test_the_queue_scrolls_to_a_row_only_when_the_selection_moves`
+- `manual: docs/qa_evidence/2026-09-22-streamA-pane/` — `PKT5-ask-across-states.png`; the log
+  records `{"sameNode":true,"marked":true}` across ten clock-only states and the `compose` the held
+  button still sent.
+
+Items 1–3 have no tests yet: they are stream D's and will be `tests/test_remote_browser.py`.

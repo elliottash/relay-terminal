@@ -1,13 +1,14 @@
 ---
 id: KBD7
 type: work
-status: executing
+status: needs-verification
 labels: [bug, remote]
 assignee: claude-code
+implemented_by: anthropic/claude-opus-5 via claude-code
 rank: zkbd7
 created: '2026-09-22'
-source: 'Measured by Claude Code driving the phone app at 390x844, 2026-09-22'
-links: {plans: [], commits: [f919f14b], evidence: ['docs/qa_evidence/2026-09-22-phone-ux-drive/'], related: [PH0N, 7JD1], github: null}
+source: Measured by Claude Code driving the phone app at 390x844, 2026-09-22
+links: {plans: [], commits: [f919f14b, d6116335, 7d313776], evidence: [docs/qa_evidence/2026-09-22-phone-ux-drive/, docs/qa_evidence/2026-09-22-streamA-pane/], related: [PH0N, 7JD1], github: null}
 ---
 # The phone's Send button puts the keyboard straight back up, and the blur it undoes breaks Enter
 
@@ -56,3 +57,44 @@ keyboard the box keeps the focus, so Enter's three-step escalation, `queue_resum
 and ArrowUp row selection all still work. Answering the agent's ask empties the box the way an
 ordinary send does. It fails if a tap on Send leaves the box focused, or if a second Enter after a
 send does nothing on a laptop.
+
+## Execution Summary
+One `keyboardDown()` now blurs the prompt only when `root.dataset.input === 'touch'`, and the Send
+button asks for the focus back only when it is not. So the tap a phone actually uses takes the
+on-screen keyboard down and leaves it down, while a laptop keeps the focus and with it Enter's
+three-step escalation, `queue_resume` on an empty box (#7JD1) and ArrowUp row selection — every one
+of which is reachable only from the box's own keydown listener, and so would have died with an
+unconditional blur. The comment claiming a physical keyboard's blur is invisible is replaced by
+what is actually true.
+
+Third fault on the same path: the ask branch of `compose()` returned without clearing `box.value`,
+`fitBox()` or `renderSendState()`, so the typed answer to question 1 stayed in the box with Send
+enabled and the next tap sent it as the answer to question 2. It now empties the box the way the
+ordinary path does.
+
+The decision behind this — touch-only rather than unconditional — is recorded in
+`docs/qa_evidence/2026-09-22-phone-ux-drive/WORKSTREAM.md` and in this card's `## Decisions`.
+
+## Decisions
+The blur is **touch-only**, decided by the orchestrating session rather than asked, because the
+work would otherwise have stalled on it and the alternative is knowably worse. `f919f14b` blurred
+unconditionally on the premise that "a physical keyboard's blur is invisible". It is not: `enter()`
+is reachable only from the prompt's own `keydown`, so a blur takes Enter's three-step steer
+escalation, `queue_resume` on an empty box and ArrowUp row selection with it. Blurring only where
+there is an on-screen keyboard to dismiss keeps both — the phone gets its screen back, the laptop
+keeps its keys — and the view already knows which it is drawing for. Reversible in one place
+(`keyboardDown()`) if the owner would rather it always blurred.
+
+## Tests
+`RELAY_KEYRING=off python3 -m unittest tests.test_pane_view` — 36 tests, OK, 16 s. Re-run by the
+orchestrating session after the landing.
+
+- `tests/test_pane_view.py::PaneViewTests::test_send_takes_the_keyboard_down_on_touch_and_leaves_the_focus_on_a_keyboard`
+- `tests/test_pane_view.py::PaneViewTests::test_answering_the_agents_ask_empties_the_box`
+- `manual: docs/qa_evidence/2026-09-22-streamA-pane/` — `KBD7-send-touch.png`,
+  `KBD7-send-mouse.png`; the log records `focus=demo-bare box=""` for touch and
+  `focus=rp-input box=""` for mouse.
+- `manual: docs/qa_evidence/2026-09-22-phone-ux-drive/` — the probe this card was filed from,
+  re-run unchanged against the landed tree on a touch mount: **focus after Send is now the body**
+  where it was `rp-input`, the box is empty, and the `compose` still went. Enter behaves the same
+  as before.

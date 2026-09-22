@@ -15,3 +15,9 @@ a fix has to touch rather than by card, because several sessions share this chec
 two fixes in one file collide. This card is stream A + D: app/app.js for the reconnect, Back and the notification hand-off; app/pane.js for the ask-choice and queue-row rebuilds.
 The board writes for every card in the workstream are made by this session, so the
 implementing sessions never edit `issues/` and cannot collide there.
+
+<!-- relay:entry 20260922T144348Z-h9 author=agent kind=event model=claude-opus-5 pane=21ce0a13 turn=9ce3cc66aa5f4d38884b376901d01092/381e26be698647499dd654bd35620d8b -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-22-phone-ux-… → {"plans": [], "commits": ["dc2c00ab", "7d313776"], "evidence": ["docs/qa_evidenc…; replaced `## Execution Summary`
+
+<!-- relay:entry 20260922T144353Z-ws author=agent kind=event model=claude-opus-5 pane=21ce0a13 turn=9ce3cc66aa5f4d38884b376901d01092/381e26be698647499dd654bd35620d8b -->
+- ✦ agent updated this card · replaced `## Tests`

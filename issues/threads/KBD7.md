@@ -15,3 +15,15 @@ a fix has to touch rather than by card, because several sessions share this chec
 two fixes in one file collide. This card is stream A: app/pane.js.
 The board writes for every card in the workstream are made by this session, so the
 implementing sessions never edit `issues/` and cannot collide there.
+
+<!-- relay:entry 20260922T144245Z-4k author=agent kind=event model=claude-opus-5 pane=21ce0a13 turn=9ce3cc66aa5f4d38884b376901d01092/381e26be698647499dd654bd35620d8b -->
+- ✦ agent updated this card · links: {"plans": [], "commits": ["f919f14b"], "evidence": ["docs/qa_evidence/2026-09-22… → {"plans": [], "commits": ["f919f14b", "d6116335", "7d313776"], "evidence": ["doc…; replaced `## Execution Summary`
+
+<!-- relay:entry 20260922T144250Z-82 author=agent kind=event model=claude-opus-5 pane=21ce0a13 turn=9ce3cc66aa5f4d38884b376901d01092/381e26be698647499dd654bd35620d8b -->
+- ✦ agent updated this card · replaced `## Decisions`
+
+<!-- relay:entry 20260922T144257Z-1p author=agent kind=event model=claude-opus-5 pane=21ce0a13 turn=9ce3cc66aa5f4d38884b376901d01092/381e26be698647499dd654bd35620d8b -->
+- ✦ agent updated this card · replaced `## Tests`
+
+<!-- relay:entry 20260922T144301Z-r6 author=agent kind=event model=claude-opus-5 pane=21ce0a13 turn=9ce3cc66aa5f4d38884b376901d01092/381e26be698647499dd654bd35620d8b -->
+- ✦ agent moved this card · Executing → Needs verification · Landed d6116335 with its tests. The orchestrating session re-ran the probe this card was filed from against the landed tree: focus after Send on a touch mount is now the body, where it was rp-input. Suite 36/36. The touch-only blur is a decision made rather than asked and is recorded in ## Decisions for the verifier to weigh. · evidence docs/qa_evidence/2026-09-22-streamA-pane/ · implemented_by anthropic/claude-opus-5 via claude-code
