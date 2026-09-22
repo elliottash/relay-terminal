@@ -1,0 +1,66 @@
+=== app/screen.js at c4a657ed^ (before)
+in : "see https://a.example.com and https://b.example.com now"
+out: "see https://a.example.comsee https://a.example.com  now"   <-- NOT THE ROW
+     link "https://a.example.com" -> https://a.example.com
+     link "ttps://a.example.com " -> https://b.example.com
+in : "https://a.example.com https://b.example.com https://c.example.com"
+out: "https://a.example.comhttps://a.example.com https://a.example.com "   <-- NOT THE ROW
+     link "https://a.example.com" -> https://a.example.com
+     link "ttps://a.example.com " -> https://b.example.com
+     link "ttps://a.example.com " -> https://c.example.com
+in : "banner: WWW.EXAMPLE.COM is the site"
+out: "banner: WWW.EXAMPLE.COM is the site"
+     link "WWW.EXAMPLE.COM" -> WWW.EXAMPLE.COM
+in : "run curl \"https://api.example.com/v1\" twice"
+out: "run curl \"https://api.example.com/v1\" twice"
+     link "https://api.example.com/v1\"" -> https://api.example.com/v1"
+in : "see <https://example.com/a> in the RFC"
+out: "see <https://example.com/a> in the RFC"
+     link "https://example.com/a>" -> https://example.com/a>
+in : "path /var/www.old/index.html is served"
+out: "path /var/www.old/index.html is served"
+     link "www.old/index.html" -> https://www.old/index.html
+in : "one https://example.com/x_(1), ok"
+out: "one https://example.com/x_(1), ok"
+     link "https://example.com/x_(1)" -> https://example.com/x_(1)
+in : "open https://example.com/a/very/long/signed/path"
+out: "open https://example.com/a/very/long/signed/path"
+     link "https://example.com/a/very/long/signed/path" -> https://example.com/a/very/long/signed/path
+in : "see https://a.example.com and https://b.example.com now"   (two runs)
+out: "see https://a.example.commple.com and https://b.exa now"   <-- NOT THE ROW
+     link "https://a.exa" -> https://a.example.com
+     link "mple.com" -> https://a.example.com
+     link "com and https://b.exa" -> https://b.example.com
+
+=== app/screen.js at c4a657ed (after)
+in : "see https://a.example.com and https://b.example.com now"
+out: "see https://a.example.com and https://b.example.com now"
+     link "https://a.example.com" -> https://a.example.com
+     link "https://b.example.com" -> https://b.example.com
+in : "https://a.example.com https://b.example.com https://c.example.com"
+out: "https://a.example.com https://b.example.com https://c.example.com"
+     link "https://a.example.com" -> https://a.example.com
+     link "https://b.example.com" -> https://b.example.com
+     link "https://c.example.com" -> https://c.example.com
+in : "banner: WWW.EXAMPLE.COM is the site"
+out: "banner: WWW.EXAMPLE.COM is the site"
+     link "WWW.EXAMPLE.COM" -> https://WWW.EXAMPLE.COM
+in : "run curl \"https://api.example.com/v1\" twice"
+out: "run curl \"https://api.example.com/v1\" twice"
+     link "https://api.example.com/v1" -> https://api.example.com/v1
+in : "see <https://example.com/a> in the RFC"
+out: "see <https://example.com/a> in the RFC"
+     link "https://example.com/a" -> https://example.com/a
+in : "path /var/www.old/index.html is served"
+out: "path /var/www.old/index.html is served"
+in : "one https://example.com/x_(1), ok"
+out: "one https://example.com/x_(1), ok"
+     link "https://example.com/x_(1)" -> https://example.com/x_(1)
+in : "open https://example.com/a/very/long/signed/path"
+out: "open https://example.com/a/very/long/signed/path"
+in : "see https://a.example.com and https://b.example.com now"   (two runs)
+out: "see https://a.example.com and https://b.example.com now"
+     link "https://a.exa" -> https://a.example.com
+     link "mple.com" -> https://a.example.com
+     link "https://b.example.com" -> https://b.example.com
+

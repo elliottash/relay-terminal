@@ -1,0 +1,172 @@
+# tests/test_web_screen.py against app/screen.js at c4a657ed^ — the five new tests fail,
+# the four that were there pass. Run from a clean export of the parent commit with only
+# the new test file copied in:
+#   git archive c4a657ed^ | tar -x -C /tmp/nk73-before
+#   cp tests/test_web_screen.py /tmp/nk73-before/tests/
+#   cd /tmp/nk73-before && RELAY_KEYRING=off python3 -m unittest tests.test_web_screen.ScreenCostTests -v
+#
+test_a_link_keeps_its_colour_and_a_concealed_one_stays_concealed (tests.test_web_screen.ScreenCostTests.test_a_link_keeps_its_colour_and_a_concealed_one_stays_concealed)
+#NK73. `link()` threw away the `fg, bg, attrs` the painter had carried onto every ... FAIL
+test_a_rate_limit_is_backed_off_and_is_not_the_end_of_the_scrollback (tests.test_web_screen.ScreenCostTests.test_a_rate_limit_is_backed_off_and_is_not_the_end_of_the_scrollback)
+`rate_limited` says this client asked too fast; `more` is about the desktop's rows. ... ok
+test_a_row_with_more_than_one_url_is_painted_exactly_as_it_was_sent (tests.test_web_screen.ScreenCostTests.test_a_row_with_more_than_one_url_is_painted_exactly_as_it_was_sent)
+#NK73. What the reader sees is what the terminal printed, whatever is on the row. ... FAIL
+test_a_streamed_reply_does_not_ask_for_scrollback_once_a_frame (tests.test_web_screen.ScreenCostTests.test_a_streamed_reply_does_not_ask_for_scrollback_once_a_frame) ... ok
+test_a_url_in_the_grid_is_a_real_link (tests.test_web_screen.ScreenCostTests.test_a_url_in_the_grid_is_a_real_link)
+The wire's cells are text only, so the view finds http(s) URLs itself at paint time — ... ok
+test_a_url_that_runs_to_the_last_column_is_not_linked_to_its_prefix (tests.test_web_screen.ScreenCostTests.test_a_url_that_runs_to_the_last_column_is_not_linked_to_its_prefix)
+#NK73. The terminal wraps; a row does not say so. A URL that reaches the last column ... FAIL
+test_fit_measures_when_the_layout_moves_not_when_a_frame_arrives (tests.test_web_screen.ScreenCostTests.test_fit_measures_when_the_layout_moves_not_when_a_frame_arrives) ... ok
+test_the_cursor_stays_in_view_on_a_grid_wider_than_the_screen (tests.test_web_screen.ScreenCostTests.test_the_cursor_stays_in_view_on_a_grid_wider_than_the_screen)
+#NK73. The fit is a floor, so the grid scrolls sideways — and nothing ever scrolled it: ... FAIL
+test_the_font_buttons_work_for_the_session_when_storage_throws (tests.test_web_screen.ScreenCostTests.test_the_font_buttons_work_for_the_session_when_storage_throws)
+#NK73. `fontFloor()` read storage and `setFontFloor()` wrote it, with nothing in ... FAIL
+
+======================================================================
+FAIL: test_a_link_keeps_its_colour_and_a_concealed_one_stays_concealed (tests.test_web_screen.ScreenCostTests.test_a_link_keeps_its_colour_and_a_concealed_one_stays_concealed)
+#NK73. `link()` threw away the `fg, bg, attrs` the painter had carried onto every
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/nk73-before/tests/test_web_screen.py", line 308, in test_a_link_keeps_its_colour_and_a_concealed_one_stays_concealed
+    self.drive(main(), 120)
+  File "/tmp/nk73-before/tests/test_web_screen.py", line 73, in drive
+    return asyncio.run(asyncio.wait_for(coroutine, timeout))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/base_events.py", line 687, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/tasks.py", line 520, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "/tmp/nk73-before/tests/test_web_screen.py", line 295, in main
+    self.assertIn("--rt-ansi-1", styled[0]["color"],
+AssertionError: '--rt-ansi-1' not found in '' : the link painted in the default foreground, not the row's red
+
+======================================================================
+FAIL: test_a_row_with_more_than_one_url_is_painted_exactly_as_it_was_sent (tests.test_web_screen.ScreenCostTests.test_a_row_with_more_than_one_url_is_painted_exactly_as_it_was_sent)
+#NK73. What the reader sees is what the terminal printed, whatever is on the row.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/nk73-before/tests/test_web_screen.py", line 220, in test_a_row_with_more_than_one_url_is_painted_exactly_as_it_was_sent
+    self.drive(main(), 120)
+  File "/tmp/nk73-before/tests/test_web_screen.py", line 73, in drive
+    return asyncio.run(asyncio.wait_for(coroutine, timeout))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/base_events.py", line 687, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/tasks.py", line 520, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "/tmp/nk73-before/tests/test_web_screen.py", line 208, in main
+    self.assertEqual(row["text"], text,
+AssertionError: 'see https://a.example.comsee https://a.example.com  now' != 'see https://a.example.com and https://b.example.com now'
+- see https://a.example.comsee https://a.example.com  now
+?                          ^^^         ^             -
++ see https://a.example.com and https://b.example.com now
+?                          ^^^^         ^
+ : the row was painted as something the terminal never sent
+
+======================================================================
+FAIL: test_a_url_that_runs_to_the_last_column_is_not_linked_to_its_prefix (tests.test_web_screen.ScreenCostTests.test_a_url_that_runs_to_the_last_column_is_not_linked_to_its_prefix)
+#NK73. The terminal wraps; a row does not say so. A URL that reaches the last column
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/nk73-before/tests/test_web_screen.py", line 252, in test_a_url_that_runs_to_the_last_column_is_not_linked_to_its_prefix
+    self.drive(main(), 120)
+  File "/tmp/nk73-before/tests/test_web_screen.py", line 73, in drive
+    return asyncio.run(asyncio.wait_for(coroutine, timeout))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/base_events.py", line 687, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/tasks.py", line 520, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "/tmp/nk73-before/tests/test_web_screen.py", line 246, in main
+    self.assertEqual(painted[0]["links"], [],
+AssertionError: Lists differ: [{'at': 5, 'text': 'https://example.com/a/[74 chars]th'}] != []
+
+First list contains 1 additional elements.
+First extra element 0:
+{'at': 5, 'text': 'https://example.com/a/very/long/signed/path', 'href': 'https://example.com/a/very/long/signed/path'}
+
++ []
+- [{'at': 5,
+-   'href': 'https://example.com/a/very/long/signed/path',
+-   'text': 'https://example.com/a/very/long/signed/path'}] : a URL that may have wrapped was linked to its prefix
+
+======================================================================
+FAIL: test_the_cursor_stays_in_view_on_a_grid_wider_than_the_screen (tests.test_web_screen.ScreenCostTests.test_the_cursor_stays_in_view_on_a_grid_wider_than_the_screen)
+#NK73. The fit is a floor, so the grid scrolls sideways — and nothing ever scrolled it:
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/nk73-before/tests/test_web_screen.py", line 399, in test_the_cursor_stays_in_view_on_a_grid_wider_than_the_screen
+    self.drive(main(), 180)
+  File "/tmp/nk73-before/tests/test_web_screen.py", line 73, in drive
+    return asyncio.run(asyncio.wait_for(coroutine, timeout))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/base_events.py", line 687, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/tasks.py", line 520, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "/tmp/nk73-before/tests/test_web_screen.py", line 371, in main
+    self.assertGreater(seen["left"], 0, "the cursor was left off the right edge")
+AssertionError: 0 not greater than 0 : the cursor was left off the right edge
+
+======================================================================
+FAIL: test_the_font_buttons_work_for_the_session_when_storage_throws (tests.test_web_screen.ScreenCostTests.test_the_font_buttons_work_for_the_session_when_storage_throws)
+#NK73. `fontFloor()` read storage and `setFontFloor()` wrote it, with nothing in
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/nk73-before/tests/test_web_screen.py", line 342, in test_the_font_buttons_work_for_the_session_when_storage_throws
+    self.drive(main(), 120)
+  File "/tmp/nk73-before/tests/test_web_screen.py", line 73, in drive
+    return asyncio.run(asyncio.wait_for(coroutine, timeout))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/base_events.py", line 687, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/tasks.py", line 520, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "/tmp/nk73-before/tests/test_web_screen.py", line 337, in main
+    self.assertEqual(moved[0], 16, "A+ did not move the floor at all")
+AssertionError: 12 != 16 : A+ did not move the floor at all
+
+----------------------------------------------------------------------
+Ran 9 tests in 10.886s
+
+FAILED (failures=5)

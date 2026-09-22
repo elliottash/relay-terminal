@@ -1,0 +1,25 @@
+# tests/test_web_screen.py in the checkout at c4a657ed, all 10 tests:
+#   RELAY_KEYRING=off python3 -m unittest tests.test_web_screen -v
+#
+test_a_refused_page_is_never_the_readers_problem (tests.test_web_screen.RefusedPageTests.test_a_refused_page_is_never_the_readers_problem) ... ok
+test_a_link_keeps_its_colour_and_a_concealed_one_stays_concealed (tests.test_web_screen.ScreenCostTests.test_a_link_keeps_its_colour_and_a_concealed_one_stays_concealed)
+#NK73. `link()` threw away the `fg, bg, attrs` the painter had carried onto every ... ok
+test_a_rate_limit_is_backed_off_and_is_not_the_end_of_the_scrollback (tests.test_web_screen.ScreenCostTests.test_a_rate_limit_is_backed_off_and_is_not_the_end_of_the_scrollback)
+`rate_limited` says this client asked too fast; `more` is about the desktop's rows. ... ok
+test_a_row_with_more_than_one_url_is_painted_exactly_as_it_was_sent (tests.test_web_screen.ScreenCostTests.test_a_row_with_more_than_one_url_is_painted_exactly_as_it_was_sent)
+#NK73. What the reader sees is what the terminal printed, whatever is on the row. ... ok
+test_a_streamed_reply_does_not_ask_for_scrollback_once_a_frame (tests.test_web_screen.ScreenCostTests.test_a_streamed_reply_does_not_ask_for_scrollback_once_a_frame) ... ok
+test_a_url_in_the_grid_is_a_real_link (tests.test_web_screen.ScreenCostTests.test_a_url_in_the_grid_is_a_real_link)
+The wire's cells are text only, so the view finds http(s) URLs itself at paint time — ... ok
+test_a_url_that_runs_to_the_last_column_is_not_linked_to_its_prefix (tests.test_web_screen.ScreenCostTests.test_a_url_that_runs_to_the_last_column_is_not_linked_to_its_prefix)
+#NK73. The terminal wraps; a row does not say so. A URL that reaches the last column ... ok
+test_fit_measures_when_the_layout_moves_not_when_a_frame_arrives (tests.test_web_screen.ScreenCostTests.test_fit_measures_when_the_layout_moves_not_when_a_frame_arrives) ... ok
+test_the_cursor_stays_in_view_on_a_grid_wider_than_the_screen (tests.test_web_screen.ScreenCostTests.test_the_cursor_stays_in_view_on_a_grid_wider_than_the_screen)
+#NK73. The fit is a floor, so the grid scrolls sideways — and nothing ever scrolled it: ... ok
+test_the_font_buttons_work_for_the_session_when_storage_throws (tests.test_web_screen.ScreenCostTests.test_the_font_buttons_work_for_the_session_when_storage_throws)
+#NK73. `fontFloor()` read storage and `setFontFloor()` wrote it, with nothing in ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 16.306s
+
+OK
