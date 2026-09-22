@@ -58,7 +58,14 @@ THEME_ID = re.compile(r"^[a-z0-9-]{1,40}$")
 ROW_ID = re.compile(r"^(?:steer:[A-Za-z0-9_-]{1,40}|entry:[0-9]{1,19})$")
 CHOICE_ID = re.compile(r"^m[1-9][0-9]{0,8}$")
 SESSION_ID = re.compile(r"^s[1-9][0-9]{0,8}$")
-EFFORT = re.compile(r"^[a-z][a-z0-9-]{0,15}$")
+# A reasoning level is the provider's own word, carried untouched (src/ModelCatalog.cpp
+# `effortLadder`), so the shape is an identifier's and nothing more: a letter or digit, then
+# letters, digits, `_` and `-`, 24 characters at most. `^[a-z][a-z0-9-]{0,15}$` was narrower
+# than the providers are — it rejected `very_high`, `Medium` and anything longer than sixteen
+# characters — and card #EFT9 measured what that cost: the word was dropped on its own and the
+# phone drew a picker the pane's real level was not in. No space, no dot and no `/`, so a level
+# can still never be an address, a path or a file name.
+EFFORT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,23}$")
 
 # Defence in depth for text the desktop wrote. Section 4 says key material never appears in any
 # RRP message; these catch the shapes a key takes if one ever reached a label or the reasoning.
@@ -160,19 +167,41 @@ def clean(message) -> dict | None:
         choices.append({"id": choice_id, "label": _model_text(choice.get("label")),
                         "current": _flag(choice.get("current"))})
 
-    # The reasoning level and the levels the model takes (section 3). A level is the desktop's own
-    # word for one — checked, capped, and never anything a provider address could hide inside.
-    efforts = []
-    for level in _list(model.get("efforts")):
-        if len(efforts) >= EFFORTS_MAX:
-            break
+    # The reasoning level, the levels the model takes, and whether the pane will change it at all
+    # (section 3). A level is the provider's own word, shape-checked above and capped by count.
+    #
+    # The block is all of it or none of it (card #EFT9). It used to drop a bad word on its own,
+    # which published half a picker: `efforts: ["low", "very_high"]` with the pane on `very_high`
+    # reached the phone as `{"effort": null, "efforts": ["low"]}`, so the phone showed `low` with
+    # nothing ticked and the pane's real level was unreachable from it. A word that fails the
+    # shape, more levels than the cap, or an `effort` that is not one of the levels now drops
+    # `effort` and `efforts` together: a client then draws no picker, which is what it draws for a
+    # model with no levels, and never one the pane is not on. Duplicates are still folded away —
+    # they cost the current level nothing.
+    efforts: list[str] = []
+    raw_levels = _list(model.get("efforts"))
+    whole = len(raw_levels) <= EFFORTS_MAX
+    for level in raw_levels:
         if not isinstance(level, str) or not EFFORT.match(level):
-            continue
+            whole = False
+            break
         if level not in efforts:
             efforts.append(level)
     effort = model.get("effort")
-    if not isinstance(effort, str) or not EFFORT.match(effort) or (efforts and effort not in efforts):
-        effort = None
+    if not isinstance(effort, str) or effort not in efforts:
+        whole = False
+    if not whole:
+        efforts, effort = [], None
+    # Whether the level is the pane's to set at all: the desktop greys its own box for a model with
+    # no reasoning knob and for Relay Free, where the gateway picks the level for the role whatever
+    # the pane asks (src/Pane.h `effortFixedReason`, src/ModelCatalog.cpp `effortFixedOf`). Relay
+    # Free still has levels worth showing, so the list stays and the fact rides beside it; a client
+    # draws a chip that cannot be picked from rather than a live picker for a level the pane will
+    # refuse. The reason is the desktop's own sentence — the tooltip on its greyed box — cleaned
+    # like a model label, because it names the model.
+    effort_fixed = _flag(model.get("effort_fixed"))
+    effort_block = {"effort": effort, "efforts": efforts, "effort_fixed": effort_fixed,
+                    "effort_fixed_reason": _model_text(model.get("effort_fixed_reason")) if effort_fixed else ""}
 
     session_rows = []
     for row in _list(sessions.get("rows")):
@@ -220,7 +249,7 @@ def clean(message) -> dict | None:
                   "pause_reason": _text(queue.get("pause_reason")),
                   "running": running, "rows": rows, "hint": _text(queue.get("hint"))},
         "model": {"label": _model_text(model.get("label")), "choices": choices,
-                  **({"effort": effort, "efforts": efforts} if efforts else {})},
+                  **(effort_block if efforts else {})},
         "composer": {"mode": _enum(composer.get("mode"), MODES, "auto"),
                      "placeholder": _text(composer.get("placeholder")), "modes": modes},
         "context": {"label": _text(context.get("label")), "percent_left": percent},
@@ -246,7 +275,9 @@ def for_capability(state: dict, capability: str | None) -> dict | None:
     downgrade applies to the very next state. The owner named the three levels on 2026-09-18:
 
     * **viewer** (``view``) observes this conversation: the rows, the model it is on, the reasoning.
-      Nothing to press — no row actions, no model choices, no composer modes.
+      Nothing to press — no row actions, no model choices, no reasoning level and no composer
+      modes. The whole effort block goes, ``effort_fixed`` with it: it is the state of a control a
+      viewer does not have.
     * **partner** (``agent``) can type in this conversation: it composes to the agent (section 6.6),
       so its ``modes`` is ``["agent"]``, and it may act on the queue rows it was offered.
     * **owner** (``full``) can type in this conversation *and* see the ones before it: the session
@@ -267,6 +298,8 @@ def for_capability(state: dict, capability: str | None) -> dict | None:
         out["model"].pop("choices", None)
         out["model"].pop("efforts", None)
         out["model"].pop("effort", None)
+        out["model"].pop("effort_fixed", None)
+        out["model"].pop("effort_fixed_reason", None)
         out["composer"]["modes"] = []
     elif capability == wire.AGENT:
         out["composer"]["modes"] = [mode for mode in out["composer"]["modes"] if mode == "agent"]
@@ -431,7 +464,9 @@ EXAMPLE = {
               "hint": "↑ select a row · Ctrl+↑↓ move · Shift+Del remove"},
     "model": {"label": "fake · local",
               "choices": [{"id": "m1", "label": "kimi-k2", "current": False},
-                          {"id": "m2", "label": "Main · fake", "current": True}]},
+                          {"id": "m2", "label": "Main · fake", "current": True}],
+              "effort": "high", "efforts": ["low", "medium", "high"],
+              "effort_fixed": False, "effort_fixed_reason": ""},
     "composer": {"mode": "auto", "placeholder": "Shell commands or agent prompts…",
                  "modes": ["auto", "shell", "agent"]},
     "context": {"label": "96% left", "percent_left": 96},

@@ -160,6 +160,99 @@ class CleanTests(unittest.TestCase):
         message["context"]["percent_left"] = True
         self.assertIsNone(pane_state.clean(message)["context"]["percent_left"])
 
+    def test_the_reasoning_level_block_is_all_of_it_or_none(self):
+        """Card #EFT9. The cleaner used to drop one bad level word and keep the rest, which
+        published half a picker: the phone drew a list the pane's own level was not in, and could
+        not reach it. The block is now coherent or absent."""
+        # A provider's word is the provider's: an underscore, a capital and twenty characters all
+        # survive, where `^[a-z][a-z0-9-]{0,15}$` dropped them.
+        for level in ("very_high", "Medium", "minimal", "x" * 24, "xhigh", "gpt-5-codex-max"):
+            message = state()
+            message["model"]["efforts"] = ["low", level]
+            message["model"]["effort"] = level
+            cleaned = pane_state.clean(message)
+            self.assertEqual(cleaned["model"]["efforts"], ["low", level], level)
+            self.assertEqual(cleaned["model"]["effort"], level, level)
+        # The measured case from the card: `["low", "very_high"]` on `very_high` published
+        # `{"effort": null, "efforts": ["low"]}`. Anything that still cannot be a level — a space,
+        # a dot, a path, an address, twenty-five characters — takes the whole block with it now,
+        # so the phone draws no picker rather than a wrong one.
+        for level in ("high; rm -rf", "very high", "very.high", "../etc/passwd", "x" * 25,
+                      "https://api.moonshot.ai/v1", "", 7, True, None, ["low"]):
+            message = state()
+            message["model"]["efforts"] = ["low", level]
+            message["model"]["effort"] = "low"
+            model = pane_state.clean(message)["model"]
+            self.assertNotIn("efforts", model, level)
+            self.assertNotIn("effort", model, level)
+            self.assertNotIn("effort_fixed", model, level)
+        # The current level must be one of the levels. A desktop that publishes one that is not —
+        # src/Pane.h can, transiently, while a model change settles — gets no block at all rather
+        # than a list with nothing ticked in it.
+        for effort in ("ultra", "", None, 7, "LOW"):
+            message = state()
+            message["model"]["efforts"] = ["low", "high"]
+            message["model"]["effort"] = effort
+            self.assertNotIn("efforts", pane_state.clean(message)["model"], effort)
+        # No levels at all: no block, which is the older rule and the one a client reads as
+        # "this model has no reasoning knob, draw no chip".
+        message = state()
+        message["model"]["efforts"] = []
+        message["model"]["effort"] = None
+        self.assertNotIn("efforts", pane_state.clean(message)["model"])
+        self.assertNotIn("effort", pane_state.clean(message)["model"])
+        del message["model"]["efforts"]
+        del message["model"]["effort"]
+        self.assertNotIn("efforts", pane_state.clean(message)["model"])
+        # A duplicate costs the current level nothing, so it is folded away rather than fatal.
+        message = state()
+        message["model"]["efforts"] = ["low", "high", "low", "high"]
+        message["model"]["effort"] = "high"
+        self.assertEqual(pane_state.clean(message)["model"]["efforts"], ["low", "high"])
+        # More levels than the cap would truncate the list, and the current level could be the one
+        # truncated away: the block goes instead. EFFORTS_MAX exactly still lands.
+        message = state()
+        message["model"]["efforts"] = [f"l{i}" for i in range(pane_state.EFFORTS_MAX)]
+        message["model"]["effort"] = "l0"
+        self.assertEqual(len(pane_state.clean(message)["model"]["efforts"]), pane_state.EFFORTS_MAX)
+        message["model"]["efforts"] = [f"l{i}" for i in range(pane_state.EFFORTS_MAX + 1)]
+        self.assertNotIn("efforts", pane_state.clean(message)["model"])
+
+    def test_a_fixed_level_says_so_with_the_desktops_reason(self):
+        """`effort_fixed` is the desktop's own greyed box, on the wire (card #EFT9): Relay Free and
+        a model with no reasoning knob keep their levels — they are worth showing — and say that
+        tapping one changes nothing, so a client draws a chip it cannot pick from."""
+        message = state()
+        message["model"]["effort_fixed"] = True
+        message["model"]["effort_fixed_reason"] = "Relay Free sets the level for you"
+        model = pane_state.clean(message)["model"]
+        self.assertTrue(model["effort_fixed"])
+        self.assertEqual(model["effort_fixed_reason"], "Relay Free sets the level for you")
+        self.assertEqual(model["efforts"], ["low", "medium", "high"], "the levels still show")
+        self.assertEqual(model["effort"], "high")
+        # The reason names the model, so it is cleaned like a model label: no local path, no
+        # provider address, no key.
+        message["model"]["effort_fixed_reason"] = ("/home/me/models/q4.gguf has no reasoning level "
+                                                   "· https://api.moonshot.ai/v1")
+        model = pane_state.clean(message)["model"]
+        for leak in ("/home/me", "q4.gguf", "moonshot", "://"):
+            self.assertNotIn(leak, model["effort_fixed_reason"], leak)
+        # Not fixed: false, and no reason to show. Anything but a real `true` is not fixed, so an
+        # older desktop that sends neither field leaves the chip live.
+        for value in (False, None, "true", 1, "yes"):
+            message = state()
+            message["model"]["effort_fixed"] = value
+            message["model"]["effort_fixed_reason"] = "Relay Free sets the level for you"
+            model = pane_state.clean(message)["model"]
+            self.assertFalse(model["effort_fixed"], value)
+            self.assertEqual(model["effort_fixed_reason"], "", value)
+        message = state()
+        del message["model"]["effort_fixed"]
+        del message["model"]["effort_fixed_reason"]
+        model = pane_state.clean(message)["model"]
+        self.assertFalse(model["effort_fixed"])
+        self.assertEqual(model["effort_fixed_reason"], "")
+
     def test_running_is_null_when_nothing_runs(self):
         message = state()
         message["queue"]["running"] = None
@@ -176,6 +269,14 @@ class CapabilityTests(unittest.TestCase):
         for row in view["queue"]["rows"]:
             self.assertNotIn("actions", row)
         self.assertNotIn("choices", view["model"])
+        # The reasoning level is a control too, and the whole block goes with the rest — the
+        # level, the levels, and whether the pane would change it. Without these four the strip
+        # could be deleted from remote/pane_state.py and every other assertion here would still
+        # hold (measured, card #EFT9).
+        self.assertNotIn("effort", view["model"])
+        self.assertNotIn("efforts", view["model"])
+        self.assertNotIn("effort_fixed", view["model"])
+        self.assertNotIn("effort_fixed_reason", view["model"])
         self.assertEqual(view["model"]["label"], "fake · local")
         # A viewer observes *this* conversation. The ones before it are the owner's level, so the
         # whole block goes rather than its buttons (owner, 2026-09-18).
@@ -187,6 +288,10 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(agent["composer"]["modes"], ["agent"])
         self.assertTrue(agent["queue"]["rows"][0]["actions"])
         self.assertTrue(agent["model"]["choices"])
+        # A partner picks a level like it picks a model (section 16's client table).
+        self.assertEqual(agent["model"]["effort"], "high")
+        self.assertEqual(agent["model"]["efforts"], ["low", "medium", "high"])
+        self.assertIn("effort_fixed", agent["model"])
         # "can type in this convo" and nothing about the others: not their titles, not their count.
         self.assertNotIn("sessions", agent)
 
@@ -196,6 +301,7 @@ class CapabilityTests(unittest.TestCase):
         self.assertTrue(full["sessions"]["rows"])
         self.assertTrue(full["sessions"]["can_new"])
         self.assertTrue(full["sessions"]["can_open"])
+        self.assertEqual(full["model"]["effort"], "high")
 
     def test_no_capability_is_nothing(self):
         for capability in (None, "", "owner", "editor", "viewer"):
@@ -212,6 +318,8 @@ class CapabilityTests(unittest.TestCase):
         pane_state.for_capability(self.cleaned, wire.VIEW)
         self.assertIn("actions", self.cleaned["queue"]["rows"][0])
         self.assertIn("choices", self.cleaned["model"])
+        self.assertIn("efforts", self.cleaned["model"])
+        self.assertIn("effort_fixed", self.cleaned["model"])
 
 
 class WireTests(unittest.TestCase):
@@ -259,6 +367,10 @@ class WireTests(unittest.TestCase):
         with self.assertRaises(wire.WireError):
             pane_state.effort_of({"effort": 3})
         self.assertEqual(pane_state.effort_of({"effort": "xhigh"}), "xhigh")
+        # A provider's word, untouched: `very_high` is a level, not an attack (card #EFT9).
+        self.assertEqual(pane_state.effort_of({"effort": "very_high"}), "very_high")
+        with self.assertRaises(wire.WireError):
+            pane_state.effort_of({"effort": "very high"})
         with self.assertRaises(wire.WireError):
             pane_state.session_of({"session": "../../etc/passwd"})
         with self.assertRaises(wire.WireError):
@@ -461,13 +573,14 @@ class GuestTests(unittest.TestCase):
                                 {"t": "queue_send_now", "pane": "p1", "row": "steer:steer-3"},
                                 {"t": "queue_resume", "pane": "p1"},
                                 {"t": "model_pick", "pane": "p1", "choice": "m1"},
+                                {"t": "effort_pick", "pane": "p1", "effort": "low"},
                                 {"t": "conversation_new", "pane": "p1"}):
                     await guest.send(message)
                     with self.assertRaises(wire.WireError) as refused:
                         await guest.expect("pane_state")
                     self.assertEqual(refused.exception.code, "not_permitted", message["t"])
                 for kind in ("queue_move", "queue_edit", "queue_send_now", "queue_resume",
-                             "model_pick", "conversation_new", "pane_state_get"):
+                             "model_pick", "effort_pick", "conversation_new", "pane_state_get"):
                     self.assertFalse(harness.sent(kind), kind)
                 await guest.close()
         run(main())
@@ -615,9 +728,48 @@ class ActionTests(unittest.TestCase):
                 self.assertEqual(pick, {"t": "effort_pick", "pane": "p1", "effort": "xhigh",
                                         "origin": f"remote:{record.device_id}",
                                         "device_name": "Pixel 9"})
+                # A provider's own word reaches the GUI as the provider wrote it (card #EFT9).
+                await client.send({"t": "effort_pick", "pane": "p1", "effort": "very_high"})
+                for _ in range(100):
+                    await asyncio.sleep(0.02)
+                    if len(harness.sent("effort_pick")) == 2:
+                        break
+                self.assertEqual([p["effort"] for p in harness.sent("effort_pick")],
+                                 ["xhigh", "very_high"])
                 await client.send({"t": "effort_pick", "pane": "p1", "effort": "high; rm -rf"})
                 refused = await client.expect("error")
                 self.assertEqual(refused["code"], "unknown_type")
+                await client.close()
+        run(main())
+
+    def test_a_refused_pick_is_answered_by_the_panes_own_state(self):
+        """Card #EFT9. A pick the pane refuses — a fixed-level model, or a model that changed
+        between the state the phone drew and the tap — changes nothing on the pane, so nothing
+        would otherwise be republished and the phone would keep the rejected word for the rest of
+        the session. The GUI answers by publishing (`src/RemoteShare.cpp`, `publishPaneState`);
+        the hub's part is that the state reaches the device that tapped even though its body is
+        the one that device already drew, with a `seq` that makes it the newer of the two.
+        """
+        async def main():
+            async with Harness() as harness:
+                client, _ = await harness.device(name="Pixel 9")
+                await client.send({"t": "pane_focus", "pane": "p1"})
+                await client.expect("screen_snapshot")
+                fixed = state()
+                fixed["model"]["effort_fixed"] = True
+                fixed["model"]["effort_fixed_reason"] = "Relay Free sets the level for you"
+                harness.publish(fixed)
+                drawn = await client.expect("pane_state")
+                self.assertEqual(drawn["model"]["effort"], "high")
+                self.assertTrue(drawn["model"]["effort_fixed"])
+                # The phone taps `low` anyway (an older state, or a client that ignores the field).
+                await client.send({"t": "effort_pick", "pane": "p1", "effort": "low"})
+                self.assertEqual((await harness.settle("effort_pick"))["effort"], "low")
+                # What the GUI does with a refusal: the same state again, unchanged.
+                harness.publish(fixed)
+                answer = await client.expect("pane_state")
+                self.assertEqual(answer["model"]["effort"], "high", "the pane's level, not the tap")
+                self.assertGreater(answer["seq"], drawn["seq"], "newer, so a client draws it")
                 await client.close()
         run(main())
 
