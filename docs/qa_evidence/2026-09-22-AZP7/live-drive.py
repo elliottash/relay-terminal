@@ -29,12 +29,12 @@ for line in sys.stdin:
 ''')
 for name in ['shell','scripts','assets']:(fixture/name).symlink_to(root/name)
 display=next(':'+str(n) for n in range(350,390) if not Path('/tmp/.X11-unix/X'+str(n)).exists())
-gate=Path('/tmp/claude-1000/land/azp7/verify')
+binary=Path(os.environ.get('RELAY_TEST_BINARY', str(root/'build/relay'))).expanduser().resolve()
 env.update(DISPLAY=display,RELAY_KEYRING='off',RELAY_NO_ISOLATION='1',RELAY_DATA_DIR=str(fixture));env.pop('RELAY_OPEN_SOCKET',None)
 x=subprocess.Popen(['Xvfb',display,'-screen','0','1480x940x24'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 time.sleep(1)
 f=(sandbox/'stderr.log').open('w')
-r=subprocess.Popen([str(gate/'build/relay'),'--workspace',str(sandbox),'--clean-shell','--fresh'],env=env,stdout=f,stderr=f)
+r=subprocess.Popen([str(binary),'--workspace',str(sandbox),'--clean-shell','--fresh'],env=env,stdout=f,stderr=f)
 def xd(*args):return subprocess.check_output(['xdotool',*map(str,args)],env=env,text=True).strip()
 def key(*args):xd('key','--delay','100',*args);time.sleep(.5)
 def shot(name):
@@ -55,7 +55,7 @@ try:
     # Exercise a Tab traversal before another keyboard zoom/reset.
     key('Tab');key('ctrl+equal','ctrl+equal');shot('ask-plus')
     key('ctrl+0');shot('ask-reset')
-    (out/'live-results.json').write_text(json.dumps({'binary':str(gate/'build/relay'),'sandbox':str(sandbox),'display':display,'keys':['Alt+Shift+R','Ctrl+= x3','Ctrl+-','Ctrl+0','Tab traversal, Ctrl+= x2','Ctrl+0']},indent=2)+'\n')
+    (out/'live-results.json').write_text(json.dumps({'binary':str(binary),'sandbox':str(sandbox),'display':display,'keys':['Alt+Shift+R','Ctrl+= x3','Ctrl+-','Ctrl+0','Tab traversal, Ctrl+= x2','Ctrl+0']},indent=2)+'\n')
 finally:
     r.terminate();r.wait(timeout=10);x.terminate();x.wait(timeout=5)
 

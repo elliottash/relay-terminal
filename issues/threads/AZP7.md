@@ -27,3 +27,7 @@ Added full Relay keyboard dispatch staging: actual Ctrl+= x3, Ctrl+minus, Ctrl+0
 <!-- relay:entry 20260922T234403Z-a2 author=codex kind=evidence -->
 ### Codex · 2026-09-22 23:44
 Linked full-window keyboard evidence commit 224a1ae144b907c574be25fe52fc5ff0e2a88a38 and earlier evidence link commit.
+
+<!-- relay:entry 20260922T234455Z-a2 author=codex kind=evidence -->
+### Codex · 2026-09-22 23:44
+Made live-drive.py independent of temporary land directories: RELAY_TEST_BINARY override, checkout build/relay default, resolved binary recorded in results. Syntax check passed. Main agent reports independent full-driver rerun passed before/plus/reset and owner-terminal isolation.

@@ -26,3 +26,5 @@ Landed implementation: `7c0774c8fa8cbcf3121ac5b0feb738c24c7e804c`. The land.py e
 `live-ask-plus.png` and `live-ask-reset.png` name the additional Tab-traversal sequence. Activity has Ask chips, not an editable Ask field; focus on a particular chip was not independently measured, so these are not claimed as proof of Ask-input focus. The synthetic editable-field fallback remains covered by the Qt test.
 
 An initial exploratory run used an old provider-setting recipe and selected the default provider; it was stopped. Another fixture with no presets opened Models. Those captures were replaced by the successful deterministic-worker run above. No production code changed for this follow-up. Sphinxpad verification remains separate.
+
+Reproduce from any directory with `python3 /path/to/relay-terminal/docs/qa_evidence/2026-09-22-AZP7/live-drive.py`. The driver defaults to that checkout's `build/relay`; set `RELAY_TEST_BINARY=/absolute/path/to/relay` to test another build. Results record the resolved binary path and SHA-256. The main agent independently reran the full driver and confirmed before/plus/reset and owner-terminal isolation.
