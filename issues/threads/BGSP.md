@@ -18,3 +18,9 @@ Claimed via file fallback following the user's “fix it”. Applying the delive
 
 <!-- relay:entry 20260922T173313Z-9t author=agent kind=event model=gpt-6-astra pane=9fbe8b36 turn=712bf57bf0464b0fa92f3c3cb4dae4e8/9bf900d3f32349f89dc5ccbc7308fb9a -->
 - ✦ agent moved this card · Executing → Needs verification · Real Bash regression, 12 shell tests, 12 session checks and live isolated GUI confirm missing command gap is restored without duplicate gaps. · evidence docs/qa_evidence/2026-09-22-background-command-spacing/fix.md · implemented_by openai/gpt-6-astra via codex
+
+<!-- relay:entry 20260922T173406Z-bv author=agent kind=event model=gpt-6-astra pane=9fbe8b36 turn=712bf57bf0464b0fa92f3c3cb4dae4e8/9bf900d3f32349f89dc5ccbc7308fb9a -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-22-backgroun… → {"plans": [], "commits": ["b352aa9efe34861e4e4e465e0418d63b6433ffff"], "evidence…
+
+<!-- relay:entry 20260922T173425Z-st author=agent kind=evidence model=gpt-6-astra pane=9fbe8b36 turn=712bf57bf0464b0fa92f3c3cb4dae4e8/9bf900d3f32349f89dc5ccbc7308fb9a -->
+Landed b352aa9efe34861e4e4e465e0418d63b6433ffff. Exact proposed tree built relay-engine-tests, and its isolated SessionTest run passed all 12 checks. Live Xvfb screenshot fixed.png confirms Done → blank row → ls → blank row → listing. New implementation awaits the normal separate verification lane.

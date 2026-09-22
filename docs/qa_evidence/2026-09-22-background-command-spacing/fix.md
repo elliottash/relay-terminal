@@ -26,3 +26,7 @@ The build here enables libvterm only. The session-level implementation is core
 independent; Ghostty runtime behavior was not exercised in this environment.
 Restart with the rebuilt Relay so the new session code and freshly sourced shell
 integration are both in use. Existing shells retain their loaded functions.
+
+Landed implementation: `b352aa9efe34861e4e4e465e0418d63b6433ffff`. The commit
+gate built the exact proposed tree's `relay-engine-tests` target, and all 12
+SessionTest checks also passed against that isolated exported tree.

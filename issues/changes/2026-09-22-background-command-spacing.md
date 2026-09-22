@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: mbgsp
 created: '2026-09-22'
 source: Codex investigation in a Relay pane, 2026-09-22
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-background-command-spacing/reproduction.md, docs/qa_evidence/2026-09-22-background-command-spacing/fix.md], related: [SG4P], github: null}
+links: {plans: [], commits: [b352aa9efe34861e4e4e465e0418d63b6433ffff], evidence: [docs/qa_evidence/2026-09-22-background-command-spacing/reproduction.md, docs/qa_evidence/2026-09-22-background-command-spacing/fix.md], related: [SG4P], github: null}
 ---
 # Background job completion removes the gap before the next shell command
 
