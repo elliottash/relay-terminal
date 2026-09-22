@@ -12,3 +12,6 @@ Fresh native Qt6 amd64 compilation succeeded from fff7eb8fdf4617e2cc845805c209f3
 
 <!-- relay:entry 20260922T184257Z-71 author=agent kind=event model=gpt-6-astra pane=eda7f821 turn=678e5e19bfda407591a623f02e9421f6/3d4068e3f6b64f3c866e4bb7d09805ca -->
 - ✦ agent moved this card · Executing → Needs verification · Development package delivered and extracted-package smoke passed; full test failures recorded under SBT2 for follow-up. · evidence docs/qa_evidence/2026-09-22-sphinxpad-build/ · implemented_by openai/gpt-6-astra via codex
+
+<!-- relay:entry 20260922T184330Z-m4 author=agent kind=event model=gpt-6-astra pane=eda7f821 turn=678e5e19bfda407591a623f02e9421f6/3d4068e3f6b64f3c866e4bb7d09805ca -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-22-sphinxpad… → {"plans": [], "commits": ["f589f8c57bb5efdefa4b4bdbceb6bf064b874ebf"], "evidence…

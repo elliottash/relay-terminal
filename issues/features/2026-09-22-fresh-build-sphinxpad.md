@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: mspb2
 created: '2026-09-22'
 source: Codex in Relay, 2026-09-22
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-sphinxpad-build/], related: [SBT2, 3BPH], github: null}
+links: {plans: [], commits: [f589f8c57bb5efdefa4b4bdbceb6bf064b874ebf], evidence: [docs/qa_evidence/2026-09-22-sphinxpad-build/], related: [SBT2, 3BPH], github: null}
 ---
 # Fresh integrated build for sphinxpad
 

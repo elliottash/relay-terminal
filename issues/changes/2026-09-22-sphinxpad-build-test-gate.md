@@ -6,7 +6,7 @@ labels: [bug, tests, build]
 rank: msbt2
 created: '2026-09-22'
 source: Found during SPB2 package validation by Codex, 2026-09-22
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-sphinxpad-build/], related: [SPB2, 3BPH, 99T0], github: null}
+links: {plans: [], commits: [f589f8c57bb5efdefa4b4bdbceb6bf064b874ebf], evidence: [docs/qa_evidence/2026-09-22-sphinxpad-build/], related: [SPB2, 3BPH, 99T0], github: null}
 ---
 # Sphinxpad package gate fails on clean main
 
