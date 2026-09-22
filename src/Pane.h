@@ -13737,8 +13737,25 @@ public:
         // sets it again, which is a themeChanged() and so a republish.
         // The reasoning level and the levels the model takes (section 3), for the phone's
         // picker: the desktop's own words, empty when the model takes none.
-        in.effort = m_effort;
+        //
+        // Two things a view cannot work out for itself, and used to be left to guess at (#EFT9).
+        // **Whether the level is the pane's to change at all**: every other surface gates on
+        // `effortFixed` — the desktop's own box is greyed with the reason in its tooltip
+        // (refreshSessionControls), so are the model picker and the jobs tab — while this one
+        // published a live picker for a level `remoteEffortPick` would refuse. The levels still go
+        // (Relay Free's two are worth showing, `Entry::effortFixedReason`), with the fact and the
+        // desktop's own sentence beside them, so a view draws the greyed chip the desktop draws.
+        // **Which level is the current one**: `m_effort` is the level the pane *carries*, which is
+        // not always one this model takes — it snaps on the next refresh, and until then the
+        // desktop's box shows `nearestEffort` while the wire said the unsnapped word. A view was
+        // then given a list its own `effort` was not in, and ticked nothing. What goes out is the
+        // level the desktop's box has selected, which is what section 16 promises a view: the pane
+        // as it is drawn here.
         in.efforts = offeredEfforts();
+        in.effort = in.efforts.isEmpty() ? m_effort : nearestEffort(in.efforts, m_effort);
+        const QString effortWhy = effortFixedReason();
+        in.effortFixed = !effortWhy.isEmpty();
+        in.effortFixedReason = sentenceCase(effortWhy);   // the greyed box's own tooltip, verbatim
         in.theme = relay::theme::activeThemeId();
         in.canNew = m_workerReady && !m_agentBusy;
         in.canOpen = m_workerReady && !m_agentBusy;   // as the session manager's own rows behave
@@ -13853,9 +13870,12 @@ public:
     }
 
     // effort_pick: one of the levels this pane published for its model, the phone's /effort.
-    // The same rules the desktop's own picker has: a model whose level is fixed keeps it, a level
-    // the model does not take is snapped to its nearest, and the level never crosses panes
-    // (card #MDL1). False when nothing changed, so the hub can say so.
+    // The same rules the desktop's own picker has: a model whose level is fixed keeps it, and the
+    // level never crosses panes (card #MDL1). A level this model does not take is **refused**, not
+    // snapped: the client necessarily drew an older state, and turning its tap into some other
+    // level would set one nobody asked for. False is that refusal, and RemoteShare answers it by
+    // publishing this pane's state — a refusal changes nothing here, so nothing else would, and
+    // the client would keep the word the pane rejected (card #EFT9).
     bool remoteEffortPick(const QString &level, const QString &deviceName) {
         const QStringList levels = offeredEfforts();
         if (levels.isEmpty() || !levels.contains(level)) return false;

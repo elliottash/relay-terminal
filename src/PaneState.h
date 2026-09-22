@@ -83,8 +83,19 @@ struct Inputs {
     QString modelLabel;
     QList<Choice> choices;
     QString effort;                  // this pane's reasoning level ("high"); empty: the model
-                                     // takes none, and the phone shows no picker
+                                     // takes none, and the phone shows no picker. Always one of
+                                     // `efforts` when there are any — the level the desktop's own
+                                     // box has selected — so no view can tick nothing (#EFT9)
     QStringList efforts;             // the model's own levels, in the provider's order
+    bool effortFixed = false;        // the pane will not change the level whatever a view taps: a
+                                     // model with no reasoning knob, or Relay Free, where the
+                                     // gateway picks it for the role. The levels are still
+                                     // published — Relay Free's two are worth showing — so a view
+                                     // draws a chip it cannot pick from, as the desktop's box is
+                                     // greyed rather than hidden (#EFT9, owner 2026-09-21)
+    QString effortFixedReason;       // the desktop's own sentence for that, its greyed box's
+                                     // tooltip ("Relay Free sets the level for you"); empty when
+                                     // the level is the pane's to set
     // composer
     QString mode, placeholder;       // mode: "auto", "shell" or "agent"
     // context

@@ -125,6 +125,11 @@ QJsonObject build(qint64 seq, const Inputs &in, Tokens &choiceTokens, Tokens &se
     }
     // The reasoning level and the levels this model takes (section 3): empty `efforts` says the
     // model has none, and a client draws no picker. Labels are the desktop's own words.
+    // `effort_fixed` says the level is not the pane's to change — a model with no reasoning knob,
+    // or Relay Free, where the gateway picks it for the role — with the reason the desktop's own
+    // greyed box shows in its tooltip. The levels stay published either way: Relay Free has two
+    // worth showing, and a client draws a chip it cannot pick from rather than no chip at all
+    // (card #EFT9). A client that has never heard of the field draws the picker it drew before.
     QJsonArray efforts;
     for (const QString &level : in.efforts) {
         if (efforts.size() >= kEffortsMax) break;
@@ -133,7 +138,9 @@ QJsonObject build(qint64 seq, const Inputs &in, Tokens &choiceTokens, Tokens &se
     }
     QJsonObject model{{QStringLiteral("label"), clip(in.modelLabel)}, {QStringLiteral("choices"), choices},
                       {QStringLiteral("effort"), in.efforts.isEmpty() ? QJsonValue() : QJsonValue(in.effort)},
-                      {QStringLiteral("efforts"), efforts}};
+                      {QStringLiteral("efforts"), efforts},
+                      {QStringLiteral("effort_fixed"), in.effortFixed},
+                      {QStringLiteral("effort_fixed_reason"), in.effortFixed ? clip(in.effortFixedReason) : QString()}};
 
     QJsonObject composer{{QStringLiteral("mode"), in.mode},
                          {QStringLiteral("placeholder"), clip(in.placeholder)},

@@ -326,10 +326,24 @@ void RemoteShare::handle(const QJsonObject &message)
             it->hooks.modelPick(message.value(QStringLiteral("choice")).toString(),
                                 message.value(QStringLiteral("device_name")).toString());
     } else if (kind == QLatin1String("effort_pick")) {
+        // A refused pick is answered by the pane's own state (card #EFT9). `remoteEffortPick`
+        // returns false for the two refusals a client can reach — a model whose level is fixed,
+        // and a model that changed between the state the client drew and the tap — and a refusal
+        // changes nothing on the pane, so nothing else would republish and the client would keep
+        // the rejected word for the rest of the session. `publishPaneState` forces one with a
+        // fresh `seq`, so the authoritative level overwrites the guess, on every watching device:
+        // they all drew the same stale chip. The sibling `conversation_id` answers the one device
+        // that asked instead, which it must — it carries an id nobody else may see — but a
+        // reasoning level is not secret and is already in every state, so the state is both the
+        // cheaper answer and the more correct one. `true` when the level was already the pane's,
+        // which is nothing to correct.
         auto it = m_panes.find(message.value(QStringLiteral("pane")).toString());
-        if (it != m_panes.end() && it->hooks.effortPick)
-            it->hooks.effortPick(message.value(QStringLiteral("effort")).toString(),
-                                 message.value(QStringLiteral("device_name")).toString());
+        if (it != m_panes.end() && it->hooks.effortPick) {
+            const std::function<void()> publish = it->hooks.publishPaneState;
+            const bool took = it->hooks.effortPick(message.value(QStringLiteral("effort")).toString(),
+                                                   message.value(QStringLiteral("device_name")).toString());
+            if (!took && publish) publish();
+        }
     } else if (kind == QLatin1String("conversation_new")) {
         auto it = m_panes.find(message.value(QStringLiteral("pane")).toString());
         if (it != m_panes.end() && it->hooks.conversationNew)
