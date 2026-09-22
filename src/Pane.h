@@ -8600,18 +8600,28 @@ private:
             printInline(QStringLiteral("[end of message]\n"), Ink::Recap);
             if (!finished.isEmpty())
                 printInline(QStringLiteral("finished at %1\n").arg(finished), Ink::Recap);
+            // A blank line between the block's sections (owner request, 2026-09-23): the
+            // marker, the covered stretch, the summary and the follow-ups each stand on their
+            // own instead of running together as one wall of lines.
             const QString span = event.value(QStringLiteral("span_text")).toString();
             const QString summary = event.value(QStringLiteral("text")).toString();
+            const auto indent = [](const QString &s, int n) -> QString {
+                const QString prefix(n, QChar(' '));
+                QString out = prefix + s;
+                out.replace('\n', '\n' + prefix);
+                return out;
+            };
             if (span.isEmpty()) {
-                printInline(QStringLiteral("Recap · ") + summary + '\n', Ink::Recap);
+                printInline(QStringLiteral("\nRecap ·\n"), Ink::Recap);
+                printInline(indent(summary, 2) + '\n', Ink::RecapBody);
             } else {
-                printInline(QStringLiteral("Recap · ") + span + '\n', Ink::Recap);
-                printInline(summary + '\n', Ink::Recap);
+                printInline(QStringLiteral("\nRecap · ") + span + '\n', Ink::Recap);
+                printInline(indent(summary, 2) + '\n', Ink::RecapBody);
             }
             const QString next = event.value(QStringLiteral("next_action")).toString();
-            if (!next.isEmpty()) printInline(QStringLiteral("Next · ") + next + '\n', Ink::Recap);
+            if (!next.isEmpty()) printInline(QStringLiteral("\nNext · ") + next + '\n', Ink::Recap);
             const QString openLine = relay::RequestLedgerModel::openItemsLine(relay::RequestLedgerModel::parseOpenItems(event.value(QStringLiteral("open_items")).toArray()));
-            if (!openLine.isEmpty()) printInline(QStringLiteral("Open · ") + openLine + QStringLiteral("  · /tasks\n"), Ink::Recap);
+            if (!openLine.isEmpty()) printInline(QStringLiteral("\nOpen · ") + openLine + QStringLiteral("  · /tasks\n"), Ink::Recap);
             if (!m_agentBusy && !moreTurnsPending()) closeInline();
             if (reason == QStringLiteral("away")) toast(QStringLiteral("Welcome back · recap above"));
             return true;
@@ -14330,7 +14340,7 @@ private:
         if (ink == Ink::Agent) beginBlock(relay::gaps::Block::Agent);
         else if (ink == Ink::User || ink == Ink::UserAgent) beginBlock(relay::gaps::Block::User);
         else if (ink == Ink::Tool) beginBlock(relay::gaps::Block::Call);
-        else if (ink == Ink::Recap) beginBlock(relay::gaps::Block::Recap);   // span, summary, Next ·, Open ·: one block (#5AWD)
+        else if (ink == Ink::Recap || ink == Ink::RecapBody) beginBlock(relay::gaps::Block::Recap);   // span, summary, Next ·, Open ·: one block (#5AWD)
         QByteArray out;
         if (!m_inlineOpen) {
             // A remote prompt without Relay's integration cannot be asked to redraw itself: keep
@@ -18137,9 +18147,16 @@ public:
                                     : cwdMetrics.elidedText(m_cwdText, Qt::ElideLeft, fit.directory));
         }
         // elidedText() at exactly the text's own advance can still round to an ellipsis, so a title
-        // that was granted everything it asked for is set as it is.
-        m_titleLabel->setText(fit.title >= wants.title ? shown
-                                                      : metrics.elidedText(shown, Qt::ElideRight, fit.title));
+        // that was granted everything it asked for is set as it is. One that must elide may instead
+        // cross two lines (owner, 2026-09-20): the header grows downward by a line and the split
+        // title fills both, whenever the split twoLineTitle() makes shows more than the one elided
+        // line did. The ladder stays width-only — nothing here feeds back into it.
+        const QStringList lines = fit.title >= wants.title ? QStringList()
+                                                           : relay::panes::twoLineTitle(shown, metrics, fit.title);
+        m_titleLabel->setText(!lines.isEmpty() ? lines.join(QLatin1Char('\n'))
+                              : fit.title >= wants.title ? shown
+                                                         : metrics.elidedText(shown, Qt::ElideRight, fit.title));
+        setHeaderWrapped(!lines.isEmpty());
         m_titleLabel->setToolTip(headerTooltip());
         if (m_cwdLabel) m_cwdLabel->setToolTip(headerTooltip());
         // The badge says the name is still the model's to change; a hand-set one loses it.
@@ -18152,6 +18169,7 @@ public:
         m_titleEdit->setText(m_title);
         m_titleEdit->selectAll();
         m_titleLabel->setVisible(false);
+        setHeaderWrapped(false);   // the edit box is one line; the row goes back to one line with it
         m_titleEdit->setVisible(true);
         m_titleEdit->setFocus(Qt::OtherFocusReason);
     }
@@ -18160,6 +18178,7 @@ public:
         if (!m_titleEdit) return;
         m_titleEdit->setVisible(false);
         if (m_titleLabel) m_titleLabel->setVisible(true);
+        updateHeader();   // the title wraps again if the room says it should
         focusInput();
     }
 
@@ -18293,6 +18312,20 @@ private:
     QLineEdit *m_titleEdit = nullptr;
     QHBoxLayout *m_headerLayout = nullptr;
     QWidget *m_headerWidget = nullptr;
+    bool m_headerWrapped = false;
+
+    // The header is one line taller while the title crosses two (owner, 2026-09-20), and
+    // everything but the title then sits beside the title's first line instead of floating
+    // between the two. Applied only when the wrapped state changes, so the re-runs of
+    // updateHeader() that a relayout triggers do not churn the row's alignments.
+    void setHeaderWrapped(bool wrapped) {
+        if (!m_headerLayout || wrapped == m_headerWrapped) return;
+        m_headerWrapped = wrapped;
+        for (int i = 0; i < m_headerLayout->count(); ++i)
+            if (QWidget *w = m_headerLayout->itemAt(i)->widget(); w && w != m_titleLabel && w != m_titleEdit)
+                m_headerLayout->setAlignment(w, wrapped ? Qt::AlignTop : Qt::Alignment());
+        m_headerLayout->invalidate();
+    }
     // Dragging the pane by its header: where the press landed, and whether it has gone far enough
     // to be a drag rather than a click.
     QPoint m_headerPressAt;
@@ -18724,5 +18757,3 @@ private:
     // guessed would report a surface the agent is not actually on.
     QJsonObject m_workerContext;
 };
-
-

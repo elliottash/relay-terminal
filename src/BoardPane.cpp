@@ -96,8 +96,6 @@ constexpr int kAddWidth = 22;        // the `+` at the right of a section header
 // card's own id width, so the header over the list can answer the same question the rows do — a
 // header whose labels had gone while the cells were still drawn would be worse than no header.
 constexpr int kDateGap = 8;
-// Below this width the open card takes the whole pane instead of squeezing the list.
-constexpr int kStackedWidth = 900;
 
 // A section's tooltip, with what the section is for on a line of its own underneath. Every
 // surface that names a section without showing its cards goes through here, so the answer to
@@ -7938,14 +7936,14 @@ void BoardView::updateDetailLayout()
         "<b>v</b> verify &nbsp; <b>d</b> done &nbsp; "
         "<b>n</b> new &nbsp; <b>←/→</b> fold section &nbsp; "
         "<b>Alt+Shift+↑↓</b> reorder &nbsp; <b>Alt+Shift+←→</b> status &nbsp; <b>m</b> move "
-        "&nbsp; <b>/</b> or <b>Esc</b> filter &nbsp; <b>a</b> ask the agent &nbsp; "
+        "&nbsp; <b>Del</b> delete &nbsp; <b>/</b> or <b>Esc</b> filter &nbsp; <b>a</b> ask the agent &nbsp; "
         "<b>t</b> #ID to prompt &nbsp; <b>y</b> copy &nbsp; "
         "<b>o</b> file &nbsp; <b>Ctrl+Z</b> undo");
     static const QString cardKeys = QStringLiteral(
         "<b>Esc</b> back to the board &nbsp; <b>e</b> edit &nbsp; <b>d</b> done &nbsp; <b>Tab</b> reply &nbsp; "
         "<b>Enter</b> discuss &nbsp; <b>p</b> or <b>Ctrl+Enter</b> plan &nbsp; <b>x</b> execute "
-        "&nbsp; <b>v</b> verify &nbsp; <b>Ctrl+Shift+Enter</b> comment only");
-    const bool stacked = width() < kStackedWidth;
+        "&nbsp; <b>v</b> verify &nbsp; <b>Del</b> delete &nbsp; <b>Ctrl+Shift+Enter</b> comment only");
+    const bool stacked = width() < board::kCardSplitWidth;
     const QString keys = detailOpen() && stacked ? cardKeys : boardKeys;
     // Wherever the board's own line is the one on screen, it ends with the Switchboard agent's
     // action row — read off the context's own `actions()` (agentActionKeyLine) rather than
