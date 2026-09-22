@@ -1,0 +1,123 @@
+
+1. try_run with NO Verify staging: it stages and plays the pass itself
+     started: {'state': 'started', 'card_id': 'WJ71', 'out': 'docs/qa_evidence/2026-09-21-tryit-WJ71', 'reusing': False, 'staged': ''}
+  [PASS] started, reusing false, staged empty
+  [PASS] evidence dir made before the brief is sent — docs/qa_evidence/2026-09-21-tryit-WJ71
+  [PASS] out is docs/qa_evidence/<date>-tryit-<ID>
+  [PASS] brief says to stage it itself
+  [PASS] brief carries the card's Issue text
+  [PASS] brief carries ## Done means instruction
+  [PASS] expected result sealed and NOT on the card
+  [PASS] its own conversation (turns.reset)
+
+2. a second try_run while one is in flight
+     error: Try it is already running on #WJ71. Stop it before starting another.
+  [PASS] refused with 'already running'
+  [PASS] no second turn submitted
+
+3. a turn that could not stage: a note, and NO ## Try it
+     finished: section_written=False staging_failed=True
+     message: Try it could not be staged: build/relay is not built here.
+  [PASS] staging_failed true, section_written false
+  [PASS] no ## Try it section on the card
+  [PASS] the note is on the thread, beginning with the fixed sentence
+
+3b. a turn whose provider stalled: the WORKER leaves the note (39bab9d9)
+     error outcome=error section_written=False staging_failed=True
+     message: Try it could not be staged: the agent's turn ended with an error after 1 minute(s), before it wrote the section. Whatever it captured is in docs/qa_evidence/2026-09-21-tryit-569E. Nothing on this card was changed, and it is not asking to be reviewed: press Try it again.
+  [PASS] the worker wrote the note although the agent never did
+  [PASS] the note says the card is not asking to be reviewed
+  [PASS] still no ## Try it section
+
+3c. the agent's own note is never written over
+  [PASS] one note only, the agent's — 1 note(s)
+
+4. try_run REUSING docs/qa_evidence/<date>-verify-<ID>/ (owner's step 3)
+     started: reusing=True staged=docs/qa_evidence/2026-09-21-verify-CNZ7/stage.sh
+  [PASS] reusing true and staged names the script
+  [PASS] brief says ALREADY STAGED and not to replay
+  [PASS] brief names the staging notes
+
+4b. a `staged:` line in the card body wins over the glob
+     verify_staging -> dir=docs/qa_evidence/2026-09-01-verify-elsewhere simulation='drove the gate with xdotool'
+  [PASS] the named dir wins
+  [PASS] the simulation line is carried through
+
+4c. a verify dir with no stage script falls through to staging itself
+  [PASS] reusing false — brief: ...True
+
+5. try_answer: verdict on the thread, the seal broken, ## Human QA generated
+     --- ## Try it before the answer ---
+       1. Open it: `bash docs/qa_evidence/2026-09-21-verify-FZAP/stage.sh`
+       
+       2. The task: open the card the fixture put in Needs verification and move it to Done.
+       
+       3. The question: did it stop you, and did you know why?
+       
+       Expected: docs/qa_evidence/2026-09-21-tryit-FZAP/expected.md (sealed until you answer)
+  [PASS] the expected text is NOT on the card before the answer
+     answered: expected_revealed=True human_qa=True
+     --- the thread's decision entry ---
+       Try it · verdict on #FZAP
+       Q: The question: did it stop you, and did you know why?
+       A: "It stopped me, and the notice said which check."
+  [PASS] a `decision` entry quoting the person, named as the Try it verdict
+     --- ## Try it after the answer ---
+       1. Open it: `bash docs/qa_evidence/2026-09-21-verify-FZAP/stage.sh`
+       
+       2. The task: open the card the fixture put in Needs verification and move it to Done.
+       
+       3. The question: did it stop you, and did you know why?
+       
+       Expected: docs/qa_evidence/2026-09-21-tryit-FZAP/expected.md (sealed until you answer)
+       
+       Expected: The move is refused and the notice names the two checks.
+       A second line, to see the indent.
+  [PASS] the seal is broken under ## Try it
+     --- ## Human QA (generated) ---
+       1. The question: did it stop you, and did you know why?
+          Answer: It stopped me, and the notice said which check.
+       
+          Expected: The move is refused and the notice names the two checks. A second line, to see the indent.
+       
+       Generated from `## Try it` and the answer on the thread (opened with `bash docs/qa_evidence/2026-09-21-verify-FZAP/stage.sh`, evidence in `docs/qa_evidence/2026-09-21-tryit-FZAP`). Press Try it again, or answer again, and it is rewritten.
+  [PASS] Human QA holds the question, the answer and the expected result
+  [PASS] the revealed expected result is indented as ONE block (a739dd45)
+     board_tools.unanswered_human_qa(body) -> []
+  [PASS] the close gate reads it as ANSWERED (interlock)
+  [PASS] the question really is in the numbered/indented shape the gate needs
+
+5b. the gate before the answer says the question is open
+     unanswered_human_qa -> ['1. Did it stop you, and did you know why?']
+  [PASS] an unanswered question holds the card
+
+5c. a second answer refreshes the summary and does not reveal twice
+  [PASS] Expected pasted once only — count=1
+  [PASS] Human QA carries the newest answer, one Answer: line
+
+5d. an answer with no ## Try it section, and an empty answer, are refused
+     no section -> error: #KRZP has no `## Try it` section to answer: press Try it first.
+  [PASS] refused, told to press Try it first
+     empty answer -> error: try_answer needs `answer`: what the person saw, in their words.
+  [PASS] an empty answer is refused
+  [PASS] a section with no sealed file still records the verdict
+  [PASS] …and Human QA has the indented Answer with no Expected
+
+6. try_stop ends the run cleanly, and there is then nothing to stop
+     stopped; cancels=1; running=False
+  [PASS] stopped, the turn cancelled, nothing running
+  [PASS] a second stop is an error — There is no Try it running to stop.
+
+7. board_try: the same brief for a terminal pane, gated like board_claim
+     board_try -> card=CV0Q evidence_dir=docs/qa_evidence/2026-09-21-tryit-CV0Q reusing=False
+  [PASS] hands back the brief, not a turn
+  [PASS] evidence dir is the same convention
+  [PASS] a progress entry is appended
+     during a cleanup: board_try -> board_refused; board_claim -> board_refused
+  [PASS] refused during a cleanup exactly as board_claim is
+  [PASS] try_run is refused while a cleanup runs — board_busy
+  [PASS] an unknown card is refused with a sentence
+  [PASS] no provider configured is refused with a sentence — Configure a provider and workspace first: Try it is an agent turn.
+
+======================================================================
+ALL CHECKS PASSED

@@ -1,0 +1,25 @@
+Internal ctest changing into directory: /home/elliott/repos/relay-terminal/build
+Test project /home/elliott/repos/relay-terminal/build
+    Start 79: boardexecute
+1/1 Test #79: boardexecute .....................***Failed    0.08 sec
+********* Start testing of BoardExecuteTests *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : BoardExecuteTests::initTestCase()
+FAIL!  : BoardExecuteTests::theButtonNamesTheExecutingPaneAndRevealsIt() 'button' returned FALSE. ()
+   Loc: [/home/elliott/repos/relay-terminal/tests/boardexecute_test.cpp(119)]
+FAIL!  : BoardExecuteTests::thePlanButtonNamesThePlanningPaneAndRevealsIt() 'button' returned FALSE. ()
+   Loc: [/home/elliott/repos/relay-terminal/tests/boardexecute_test.cpp(161)]
+FAIL!  : BoardExecuteTests::theVerifyButtonNamesTheVerifyingPaneAndRevealsIt() 'button' returned FALSE. ()
+   Loc: [/home/elliott/repos/relay-terminal/tests/boardexecute_test.cpp(198)]
+PASS   : BoardExecuteTests::cleanupTestCase()
+Totals: 2 passed, 3 failed, 0 skipped, 0 blacklisted, 69ms
+********* Finished testing of BoardExecuteTests *********
+
+
+0% tests passed, 1 tests failed out of 1
+
+Total Test time (real) =   0.08 sec
+
+The following tests FAILED:
+	 79 - boardexecute (Failed)
+Errors while running CTest

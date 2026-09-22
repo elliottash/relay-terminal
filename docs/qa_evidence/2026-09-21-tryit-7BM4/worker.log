@@ -1,0 +1,5 @@
+2026-09-22T00:24:21.079Z INFO relay.worker pane=39ff7ad3 worker_start version=0.1.0 pid=2577336 level=info
+2026-09-22T00:24:29.042Z INFO relay.worker pane=switchboard worker_start version=0.1.0 pid=2577997 level=info
+2026-09-22T00:24:29.065Z INFO relay.worker pane=switchboard configured host=claude role=main skills=2 agents=3 stall_s=60 session=a70d2d73d5cf4a71b5b3ff1c7adedd8d
+2026-09-22T00:24:29.169Z INFO relay.worker pane=switchboard configured host=claude role=main skills=2 agents=3 stall_s=60 session=330b5a4f079c3f16f7be1d65edc66634
+2026-09-22T00:24:42.530Z INFO relay.worker pane=switchboard configured host=claude role=main skills=2 agents=3 stall_s=60 session=7591d4d143b92fb98a9faa9b01d48a3c

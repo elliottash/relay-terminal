@@ -1,0 +1,14 @@
+01 after Ctrl+E: split sizes [694 693] (equal: yes), pixel edges [6 683 689 698 703 1379 1385 1394 1400]
+01 pane shapes: "split": "h" 
+02 drag at x=696 (offset 0) did not move the divider; sizing [694 693]
+02 drag at x=693 (offset -3) did not move the divider; sizing [694 693]
+02 dragged from x=699 (offset 3)
+02 after the drag: sizes [853 534], moved: yes
+02 toast text: > x + © project (2) - cpu 00% - mem 00% 2 & ox © project © project (OE: (OE: To run a command as administrator (user “root"), use "sudo <command>". To run a command as administrator (user “root"), use "sudo <command>". See "man sudo root" for details. See "man sudo root" for details. elliott@spark-dec9:~/project$ Relay Free: this pane's prompts and tool context go to Relay's hosted service and on to elliott@spark-dec9:~/project$ the model provider; Relay keeps request metadata only. Add your own key under Options > Models to keep it between you and your provider. 2 Bhell commands or agent prompts. for help auto Shell commands or agent prompts. auto ~/project io} 100% left Free relay main (main) 5 medium 5 e ~/project o 100% left Free relay mai 5 med 5 e 
+02 drag hint: MISSING (want 'Next time: Alt+0 · equal panes') · FAIL
+03 after Alt+0: sizes [853 534]; equal again: no; moved from the drag: no
+03 Alt+0 equalizes the panes · FAIL (want an equal share back, not [853 534])
+05 '?' list, searched 'auto resize': > x + Q = S © project (3) - cpu 00% - mem 00% ic ] 2 & ox © project x 4 Actions x © project (OE: (OE: To run a command as administratu To run a command as administrator (user “root"), use "sudo <command>". r (user "root"), use "sudo <comm auto resize See "man sudo root" for details. and> See "man sudo root" for details. elliott@spark-dec9:~/project$ Equalize pane sizes (auto-resize) Panes and tabs Alt+o elliott@spark-dec9:~/project$ Every splitter in Relay Free: this pane's prompts this tab back to equal shares and tool context go to Relay's hosted service and on to the model provider; Relay keeps request metadata only. Add your own key under Options » Models to keep it between you and your provider. tL move Enter runs Esc closes 2 Commands or prompts. auto Shell commands or agent prompts. for help auto o 101 Fre 5 ~/project o 100% left Free relay main (main) 5 medi 5 e @Helper Agent (Alt+Q) 
+05 the ? list entry with Alt+0 · FAIL
+05 relay.log: no gui_crash · PASS
+05 relay still running · PASS
