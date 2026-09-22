@@ -25,3 +25,25 @@ Guest bridge implementation passes targeted tests and independent real MCP/local
 
 <!-- relay:entry 20260922T145543Z-jw author=agent kind=event model=gpt-6-astra pane=994d8863 turn=fc8ca9abaf2147cb82e1e6068bae5444/51c7012d200246ccab0062e02e8d12bf -->
 - ✦ agent updated this card · replaced `## Tests`
+
+<!-- relay:entry 20260922T150732Z-gh author=agent kind=evidence -->
+Check · 1 not-applicable, 2 passed; 2 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T150735Z-8x author=agent kind=event model=gpt-6-astra pane=994d8863 turn=fc8ca9abaf2147cb82e1e6068bae5444/51c7012d200246ccab0062e02e8d12bf -->
+- ✦ agent updated this card · replaced `## Tests`
+
+<!-- relay:entry 20260922T150910Z-x8 author=agent kind=evidence -->
+Check · 1 not-applicable, 2 passed; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T151711Z-vz author=codex kind=evidence -->
+### Independent verifier · 2026-09-22 15:17
+Added independent QA checklist and scoped backend verdict for implementation 66bdab9389882388ae425d10510e5864a33fcbf1. Evidence commit 56e73a8418126ae627cbd1b768e8410c21a1422f records 64 passing tests, real MCP/SSH commands/files and attachment cases. All five S7GX source/test hashes match that implementation. GUI handoff remains with #S7KC; status unchanged. Relay board tools were unavailable, so used the policy file fallback.
+
+<!-- relay:entry 20260922T151943Z-xk author=agent kind=evidence -->
+Check · 1 not-applicable, 2 passed; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T152509Z-35 author=agent kind=event model=gpt-6-astra pane=994d8863 turn=fc8ca9abaf2147cb82e1e6068bae5444/51c7012d200246ccab0062e02e8d12bf -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-22-ssh-parit… → {"plans": [], "commits": ["66bdab9389882388ae425d10510e5864a33fcbf1", "5e07a8d64…; tasks: 4/4 done
+
+<!-- relay:entry 20260922T152510Z-q4 author=agent kind=event model=gpt-6-astra pane=994d8863 turn=fc8ca9abaf2147cb82e1e6068bae5444/51c7012d200246ccab0062e02e8d12bf -->
+- ✦ agent moved this card · Executing → Needs verification · Guest bridge implementation and independent real MCP/SSH backend checks pass; real GUI handoff reports exact output and exit before disconnect in coordinated S7KC evidence. · evidence docs/qa_evidence/2026-09-22-verify-S7GX/ · implemented_by openai/gpt-6-astra via codex
