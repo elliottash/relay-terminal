@@ -1087,6 +1087,302 @@ class BoardViewTests(unittest.TestCase):
 
         self.drive(main())
 
+    # ---- the reply box and its modes (card #RCN8) -----------------------------------------------
+
+    OTHER_ID = "80E3"
+
+    async def keyed(self, browser, **modifiers):
+        """Return in the reply box, with whatever modifiers a keyboard would hold down."""
+        keys = js({"key": "Enter", "bubbles": True, "cancelable": True, **modifiers})
+        await browser.evaluate(
+            "(() => { const b = document.querySelector('.rb-reply-text');"
+            f" b.dispatchEvent(new KeyboardEvent('keydown', {keys})); }})()")
+        await browser.evaluate(frames(2), timeout=10)
+
+    async def pick(self, browser, mode: str):
+        await browser.evaluate(
+            "(() => { const m = document.querySelector('.rb-reply-mode');"
+            f" m.value = {js(mode)}; m.dispatchEvent(new Event('change')); }})()")
+
+    async def typing(self, browser, text: str):
+        await browser.evaluate(
+            f"(() => {{ const b = document.querySelector('.rb-reply-text'); b.value = {js(text)};"
+            " b.dispatchEvent(new Event('input', {bubbles: true})); })()")
+
+    def test_a_half_typed_reply_survives_anything_that_re_opens_its_card(self):
+        """Card #RCN8. `openCard` saved the draft only on a *switch* and then assigned the box
+        unconditionally, so opening the card that was already open wrote an empty string over what
+        was being typed — and the ordinary way in is the `card_waiting` push for the very question
+        being answered."""
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.start(browser)
+                await self.open_board(browser)
+                await self.open_card(browser)
+                await self.typing(browser, "1. beside the session f")
+
+                # The push for the question being answered, exactly as app/sw.js posts it
+                # (tests/sw_click_peer.mjs proves the shape) and app/app.js takes it.
+                await browser.evaluate(
+                    "navigator.serviceWorker.dispatchEvent(new MessageEvent('message',"
+                    f" {{ data: {{ t: 'open_card', card: {js(CARD_ID)} }} }}))")
+                await browser.evaluate(frames(3), timeout=10)
+                self.assertEqual(await browser.evaluate("document.querySelector('.rb-reply-text').value"),
+                                 "1. beside the session f")
+
+                # An iPad keeps the list beside the open card, so its own row is a tap away.
+                await self.window(browser, *IPAD)
+                await browser.evaluate(frames(2), timeout=10)
+                self.assertGreater(await browser.evaluate("document.querySelector('.rb-list-col').clientWidth"), 0)
+                await browser.evaluate(
+                    f"document.querySelector('.rb-row[data-card-id=\"{CARD_ID}\"]').click()")
+                await browser.evaluate(frames(3), timeout=10)
+                self.assertEqual(await browser.evaluate("document.querySelector('.rb-reply-text').value"),
+                                 "1. beside the session f")
+
+                # Switching cards still parks the draft and brings it back, which is what the
+                # `drafts` map is for.
+                await browser.evaluate(
+                    f"document.querySelector('.rb-row[data-card-id=\"{self.OTHER_ID}\"]').click()")
+                await browser.wait_for("document.querySelector('.rb-reply-text').value === ''")
+                await self.typing(browser, "not this one")
+                await browser.evaluate(
+                    f"document.querySelector('.rb-row[data-card-id=\"{CARD_ID}\"]').click()")
+                await browser.wait_for("document.querySelector('.rb-reply-text').value"
+                                       " === '1. beside the session f'")
+                self.clean(browser)
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
+    def test_return_sends_the_mode_the_selector_shows(self):
+        """Card #RCN8. The keydown handler read the modifiers and never the select, so **Comment
+        only** plus Return sent `board_ask {mode: "discuss"}` — a real turn on the desktop's queue
+        — while the control on screen said otherwise. The Ctrl shortcuts are unchanged."""
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.start(browser)
+                await self.open_board(browser)
+                await self.open_card(browser)
+
+                async def newest():
+                    return (await self.requests(browser))[-1]["request"]
+
+                async def idle():
+                    """Put the lamp out: a card with a turn running takes no second ask, by design."""
+                    await browser.evaluate("window.fakeRrp.board(null, " + js(
+                        {"event": "board_cancelled", "card_id": CARD_ID, "stopped": True, "cards": []}) + ")")
+                    await browser.wait_for("document.querySelector('.rb-stop').hidden")
+
+                # The thread ends on the agent's question, so Comment only is Answer only: a
+                # `board_comment`, and not one `board_ask`.
+                await self.pick(browser, "comment")
+                await self.typing(browser, "1. beside the session file is fine")
+                await self.keyed(browser)
+                self.assertEqual(await newest(), {"type": "board_comment", "id": CARD_ID, "kind": "decision",
+                                                  "text": "1. beside the session file is fine"})
+                self.assertEqual([m for m in await self.requests(browser)
+                                  if m["request"]["type"] == "board_ask"], [])
+
+                await self.pick(browser, "plan")
+                await self.typing(browser, "plan it with guests")
+                await self.keyed(browser)
+                self.assertEqual(await newest(), {"type": "board_ask", "id": CARD_ID, "mode": "plan",
+                                                  "text": "plan it with guests"})
+                await idle()
+
+                await self.pick(browser, "discuss")
+                await self.typing(browser, "what about guests?")
+                await self.keyed(browser)
+                self.assertEqual(await newest(), {"type": "board_ask", "id": CARD_ID, "mode": "discuss",
+                                                  "text": "what about guests?"})
+                await idle()
+
+                # A modifier still wins over the selector, both ways round.
+                await self.pick(browser, "comment")
+                await self.typing(browser, "ctrl plans")
+                await self.keyed(browser, ctrlKey=True)
+                self.assertEqual(await newest(), {"type": "board_ask", "id": CARD_ID, "mode": "plan",
+                                                  "text": "ctrl plans"})
+                await idle()
+
+                await self.pick(browser, "discuss")
+                await self.typing(browser, "ctrl shift comments")
+                await self.keyed(browser, ctrlKey=True, shiftKey=True)
+                # Still `decision`: nothing has answered the agent's question on this thread yet.
+                self.assertEqual(await newest(), {"type": "board_comment", "id": CARD_ID, "kind": "decision",
+                                                  "text": "ctrl shift comments"})
+
+                # Shift+Enter is still a line break and sends nothing.
+                sent = len(await self.requests(browser))
+                await self.typing(browser, "one line")
+                await self.keyed(browser, shiftKey=True)
+                self.assertEqual(len(await self.requests(browser)), sent)
+                self.assertEqual(await browser.evaluate("document.querySelector('.rb-reply-text').value"), "one line")
+                self.passes_the_hub(await self.requests(browser))
+                self.clean(browser)
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
+    def test_a_second_send_before_the_first_lands_sends_nothing_more(self):
+        """Card #RCN8: `busy` was set in the promise's `.then`, and a thumb is faster than a
+        promise. The second Send re-entered `sendReply` with the box `clearReply` had already
+        emptied — in Discuss an empty send is `board_resume`, in Plan an accepted empty ask."""
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.start(browser)
+                await self.open_board(browser)
+                await self.open_card(browser)
+                before = len(await self.requests(browser))
+
+                # Both taps in one task, which is what two quick taps are.
+                await self.pick(browser, "discuss")
+                await self.typing(browser, "what about guests?")
+                await browser.evaluate(
+                    "(() => { const send = document.querySelector('.rb-reply-send');"
+                    " send.click(); send.click(); send.click(); })()")
+                await browser.evaluate(frames(3), timeout=10)
+                sent = [m["request"] for m in (await self.requests(browser))[before:]]
+                self.assertEqual(sent, [{"type": "board_ask", "id": CARD_ID, "mode": "discuss",
+                                         "text": "what about guests?"}])
+                self.assertEqual([m for m in sent if m["type"] == "board_resume"], [])
+                # The lamp is lit from the tap, not from the answer.
+                self.assertFalse(await browser.evaluate("document.querySelector('.rb-stop').hidden"))
+
+                # A refusal puts it out again and gives the words back.
+                rid = (await self.last_request(browser, "board_ask"))["rid"]
+                await browser.evaluate(f"window.fakeRrp.board({rid}, " + js(
+                    {"event": "error", "code": "board_refused", "request": "board_ask",
+                     "text": "That card is locked."}) + ")")
+                await browser.wait_for("document.querySelector('.rb-stop').hidden")
+                self.assertEqual(await browser.evaluate("document.querySelector('.rb-reply-text').value"),
+                                 "what about guests?")
+                self.clean(browser)
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
+    def test_a_change_to_the_open_card_while_it_is_being_read_is_read_again(self):
+        """Card #RCN8: `board_changed` for the open card was dropped while a `board_card_get` was
+        in flight, and the read that answered carried the card as it was *before* the change, so
+        the page sat on the old text until something else moved."""
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.start(browser)
+                await self.open_board(browser)
+                await self.open_card(browser)
+
+                # A read in flight: a change arrives, the card is asked for, and the answer is
+                # held back.
+                changed = {"event": "board_changed", "upserts": [CARD_ID]}
+                await browser.evaluate(f"window.fakeRrp.board(null, {js(changed)})")
+                await browser.evaluate(frames(2), timeout=10)
+                first = await self.last_request(browser, "board_card_get")
+                reads = len([m for m in await self.requests(browser)
+                             if m["request"]["type"] == "board_card_get"])
+
+                # A second change, while that read is still on the wire.
+                await browser.evaluate(f"window.fakeRrp.board(null, {js(changed)})")
+                await browser.evaluate(frames(2), timeout=10)
+                self.assertEqual(len([m for m in await self.requests(browser)
+                                      if m["request"]["type"] == "board_card_get"]), reads)
+
+                # The held answer lands, carrying the card as it was before the second change —
+                # so the card is read once more, on its own.
+                stale = {**CARD, "thread": CARD["thread"][:-1]}
+                await browser.evaluate(f"window.fakeRrp.board({first['rid']}, {js(stale)})")
+                await browser.wait_for("window.fakeRrp.boardRequests().filter("
+                                       "m => m.request.type === 'board_card_get').length === %d" % (reads + 1))
+                again = await self.last_request(browser, "board_card_get")
+                self.assertEqual(again["request"], {"type": "board_card_get", "id": CARD_ID})
+                await browser.evaluate(f"window.fakeRrp.board({again['rid']}, {js(CARD)})")
+                await browser.evaluate(frames(2), timeout=10)
+                # …and one read at a time still holds: a third change asks once, not twice.
+                await browser.evaluate(f"window.fakeRrp.board(null, {js(changed)})")
+                await browser.evaluate(frames(2), timeout=10)
+                self.assertEqual(len([m for m in await self.requests(browser)
+                                      if m["request"]["type"] == "board_card_get"]), reads + 2)
+                self.clean(browser)
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
+    def test_a_refusal_about_another_card_is_drawn_where_the_reader_is(self):
+        """Card #RCN8: a line about a card other than the open one went to the list's line, and on
+        a phone with a card open that column is `display: none` — so an offline comment's refusal
+        was painted into a hidden node and lost."""
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.start(browser, size=PHONE)
+                await self.open_board(browser)
+                await self.open_card(browser, {**CARD, "card_id": self.OTHER_ID})
+
+                # A comment queued on the bus, on the card being read at the time.
+                await browser.evaluate("window.fakeRrp.drop()")
+                await self.pick(browser, "comment")
+                await self.typing(browser, "go, both recommendations")
+                await browser.evaluate("document.querySelector('.rb-reply-send').click()")
+                await browser.wait_for("!!document.querySelector('.rb-entry[data-pending]')")
+
+                # Back online it goes out; meanwhile the reader has moved to another card.
+                await browser.evaluate("window.dispatchEvent(new Event('online'))")
+                await browser.wait_for("window.fakeRrp.boardRequests().some(m => m.request.type === 'board_comment')")
+                queued = await self.last_request(browser, "board_comment")
+                await browser.evaluate("document.querySelector('.rb-card-back').click()")
+                await self.open_card(browser)
+                self.assertEqual(await browser.evaluate("document.querySelector('.rb-list-col').clientWidth"), 0)
+
+                # The desktop refuses it. It has to land on the screen the reader is on, named.
+                await browser.evaluate(f"window.fakeRrp.board({queued['rid']}, " + js(
+                    {"event": "error", "code": "board_refused", "request": "board_comment",
+                     "text": "That card was closed on the desktop."}) + ")")
+                await browser.wait_for("[...document.querySelectorAll('.rb-line')].some("
+                                       "e => !e.hidden && e.getClientRects().length > 0"
+                                       " && e.textContent.includes('That card was closed'))")
+                shownOn = await browser.evaluate(
+                    "[...document.querySelectorAll('.rb-line')].find("
+                    "e => e.textContent.includes('That card was closed')).className")
+                self.assertIn("rb-card-line", shownOn)
+                self.assertIn(f"#{self.OTHER_ID}", await browser.evaluate(
+                    "document.querySelector('.rb-card-line').textContent"))
+                await self.shot(browser, "phone-390x844-line-about-another-card")
+
+                # What an agent did to another card reaches the same place, with its own name.
+                activity = {"event": "board_activity", "id": self.OTHER_ID, "actor": "agent",
+                            "summary": "moved to Planned"}
+                await browser.evaluate(f"window.fakeRrp.board(null, {js(activity)})")
+                await browser.wait_for("document.querySelector('.rb-card-line').textContent"
+                                       ".includes('moved to Planned')")
+                self.assertGreater(await browser.evaluate(
+                    "document.querySelector('.rb-card-line').getClientRects().length"), 0)
+
+                # An iPad has both columns, so the list's own line keeps the list's news.
+                await self.window(browser, *IPAD)
+                await browser.evaluate(frames(2), timeout=10)
+                await browser.evaluate(f"window.fakeRrp.board(null, {js(activity)})")
+                await browser.wait_for("document.querySelector('.rb-list-col .rb-line').textContent"
+                                       ".includes('moved to Planned')")
+                self.clean(browser)
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
     # ---- offline -----------------------------------------------------------------------------------------
 
     def test_a_write_made_offline_is_queued_once_and_a_read_shows_the_last_board(self):

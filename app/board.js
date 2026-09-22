@@ -229,6 +229,7 @@ export function mountBoard(options) {
   let card = null;              // its last `board_card`
   let wantCard = '';            // a card a notification asked for, before the board was usable
   let cardAsked = 0;            // the rid of the `board_card_get` in flight
+  let cardStale = '';           // a card that changed while that read was on the wire
   const drafts = new Map();     // card id -> what was typed and not sent
   const queuedEntries = new Map();  // rid -> {card, text} : comments waiting for the link
   let sheet = null;
@@ -332,7 +333,7 @@ export function mountBoard(options) {
     replyMode.append(option);
   }
   const replySend = button('rb-send rb-reply-send', 'Send');
-  replySend.title = 'Enter discusses · Ctrl+Enter plans · Ctrl+Shift+Enter comments · Shift+Enter adds a line';
+  replySend.title = 'Enter sends the mode shown · Ctrl+Enter plans · Ctrl+Shift+Enter comments · Shift+Enter adds a line';
   replyBox.title = replySend.title;
   replyRow.append(replyMic, replyMode, el('span', 'rb-spacer'), replyStop, replySend);
   reply.append(replyBox, replyRow);
@@ -385,8 +386,22 @@ export function mountBoard(options) {
     if (!error && !action && !keep) lineTimers.set(node, setTimeout(() => say(node, ''), 6000));
   }
 
-  // Where a line about `cardId` belongs: on the card page when that card is open, else the list.
-  const lineFor = (cardId) => (cardId && cardId === openId ? cardLine : line);
+  // Where a line about `cardId` belongs. Its own card's page when that card is open; the list's
+  // line when the list is on screen; and the card page otherwise — because on a phone with a card
+  // open the list column is `display: none` (app/board.css, "the two columns"), so a refusal about
+  // another card used to be painted into a hidden node and lost (card #RCN8). An iPad shows both
+  // columns and keeps the list's line for the list.
+  const listShowing = () => !openId || listCol.clientWidth > 0;
+  const lineFor = (cardId) => (cardId && cardId === openId ? cardLine
+    : (listShowing() ? line : cardLine));
+
+  // A line about a card, put where the reader is looking. On someone else's card page it carries
+  // the card it is about, since there is nothing else on that screen to say.
+  function sayAbout(cardId, text, options) {
+    const node = lineFor(cardId);
+    const named = text && node === cardLine && cardId && cardId !== openId ? `#${cardId} · ${text}` : text;
+    say(node, named, options);
+  }
 
   function waiting() {
     if (!enabled) return 0;
@@ -445,8 +460,18 @@ export function mountBoard(options) {
 
   function getCard(id) {
     if (!online()) return;
+    cardStale = '';
     cardAsked = seq + 1;          // the rid `request` is about to take: one read in flight per card
     request({ type: 'board_card_get', id }).catch(() => { cardAsked = 0; });
+  }
+
+  // A change to the open card, while one read of it is already on the wire. The read in flight
+  // answers with the card as it was *before* the change, and nothing came back to ask again, so
+  // the page sat on the old text until something else moved (card #RCN8). Remember it instead,
+  // and read once more when the answer lands.
+  function getCardAgain(id) {
+    if (cardAsked) cardStale = id;
+    else getCard(id);
   }
 
   // ---- the list ---------------------------------------------------------------------------
@@ -690,12 +715,23 @@ export function mountBoard(options) {
   function openCard(id) {
     const wanted = str(id).replace(/^#/, '').toUpperCase();
     if (!wanted) return;
-    if (openId && openId !== wanted) drafts.set(openId, replyBox.value);
-    if (openId !== wanted) { card = null; landedOn = ''; executeArmed = ''; say(cardLine, ''); }
+    // Opening the card that is already open must leave the box alone. The half-typed answer is
+    // *in* the box, not in `drafts`, and the re-open is the normal case rather than the odd one:
+    // the `card_waiting` push a phone acts on is the push for the very question being answered,
+    // and on an iPad the open card keeps its own row in the list beside it (card #RCN8).
+    const again = openId === wanted;
+    if (openId && !again) drafts.set(openId, replyBox.value);
+    if (!again) {
+      card = null;
+      landedOn = '';
+      executeArmed = '';
+      cardStale = '';
+      say(cardLine, '');
+      replyBox.value = drafts.get(wanted) || '';
+      growReply();
+    }
     openId = wanted;
     root.dataset.card = 'open';
-    replyBox.value = drafts.get(wanted) || '';
-    growReply();
     paintCard();
     paintList();
     getCard(wanted);
@@ -708,6 +744,7 @@ export function mountBoard(options) {
   function closeCard() {
     if (openId) drafts.set(openId, replyBox.value);
     openId = '';
+    cardStale = '';
     card = null;
     landedOn = '';
     root.dataset.card = 'closed';
@@ -950,12 +987,12 @@ export function mountBoard(options) {
         .then(({ rid, what }) => {
           if (what === 'queued') {
             queuedEntries.set(rid, { card: id, text, kind });
-            say(lineFor(id), `${word} · ${QUEUED_WORDS}`, { keep: true });
+            sayAbout(id, `${word} · ${QUEUED_WORDS}`, { keep: true });
           }
           paintOffline();
           if (id === openId) paintCard();
         })
-        .catch((error) => { restoreReply(id, text); say(lineFor(id), error.message || 'That did not send.', { error: true }); });
+        .catch((error) => { restoreReply(id, text); sayAbout(id, error.message || 'That did not send.', { error: true }); });
       clearReply(id);
       return;
     }
@@ -968,7 +1005,7 @@ export function mountBoard(options) {
       // queue's state, so it asks blind and the answer says whether anything was waiting.
       if (!online()) { say(cardLine, 'Offline — resuming the queue needs your desktop.', { error: true }); return; }
       request({ type: 'board_resume', id })
-        .catch((error) => say(lineFor(id), error.message || 'That did not send.', { error: true }));
+        .catch((error) => sayAbout(id, error.message || 'That did not send.', { error: true }));
       replyBox.focus();
       return;
     }
@@ -978,10 +1015,21 @@ export function mountBoard(options) {
       say(cardLine, `Offline — ${mode === 'plan' ? 'Plan' : 'Discuss'} needs your desktop. Your words are still here.`, { error: true });
       return;
     }
+    // Running from here, not from the answer: `busy` is what stops a second send, and a tap or a
+    // Return lands long before a promise settles. A second Send used to re-enter with the box
+    // already emptied by `clearReply` and send `board_resume`, or an accepted empty `board_ask`
+    // (card #RCN8). A refusal below puts the lamp out again.
+    busy.set(id, mode);
     request({ type: 'board_ask', id, text, mode }, { text, mode })
-      .then(() => { busy.set(id, mode); if (id === openId) paintCard(); paintList(); })
-      .catch((error) => { restoreReply(id, text); say(lineFor(id), error.message || 'That did not send.', { error: true }); });
+      .catch((error) => {
+        busy.delete(id);
+        restoreReply(id, text);
+        sayAbout(id, error.message || 'That did not send.', { error: true });
+      })
+      .finally(() => { if (id === openId) paintCard(); paintList(); });
     clearReply(id);
+    if (id === openId) paintCard();
+    paintList();
   }
 
   function clearReply(id) {
@@ -1022,14 +1070,14 @@ export function mountBoard(options) {
     if (!online()) { say(cardLine, `Offline — ${action === 'verify' ? 'Verify' : 'Execute'} needs your desktop.`, { error: true }); return; }
     say(cardLine, action === 'verify' ? 'Asking your desktop to verify…' : 'Asking your desktop to execute…', { keep: true });
     request({ type: 'board_action', id, action })
-      .catch((error) => say(lineFor(id), error.message || 'That did not send.', { error: true }));
+      .catch((error) => sayAbout(id, error.message || 'That did not send.', { error: true }));
   }
 
   function stopTurn() {
     const id = openId;
     if (!id) return;
     request({ type: 'board_cancel', id })
-      .catch((error) => say(lineFor(id), error.message || 'That did not send.', { error: true }));
+      .catch((error) => sayAbout(id, error.message || 'That did not send.', { error: true }));
   }
 
   // ---- sheets -----------------------------------------------------------------------------
@@ -1086,10 +1134,10 @@ export function mountBoard(options) {
         closeSheet();
         request({ type: 'board_move', id, status, reason: why }, { status })
           .then(({ what }) => {
-            if (what === 'queued') say(lineFor(id), `Move to ${statusTitle(status)} · ${QUEUED_WORDS}`, { keep: true });
+            if (what === 'queued') sayAbout(id, `Move to ${statusTitle(status)} · ${QUEUED_WORDS}`, { keep: true });
             paintOffline();
           })
-          .catch((error) => say(lineFor(id), error.message || 'That did not send.', { error: true }));
+          .catch((error) => sayAbout(id, error.message || 'That did not send.', { error: true }));
       });
       stages.append(pick);
     }
@@ -1376,8 +1424,8 @@ export function mountBoard(options) {
           const was = openId;
           closeCard();
           say(line, `#${was} was deleted on the desktop.`, { error: true });
-        } else if (openId && changed.includes(openId) && !cardAsked) {
-          getCard(openId);
+        } else if (openId && changed.includes(openId)) {
+          getCardAgain(openId);
         }
         paintTabs();
         if (event.more !== true) paintList();
@@ -1392,6 +1440,8 @@ export function mountBoard(options) {
       case 'board_card': {
         settle(rid);
         if (rid === cardAsked) cardAsked = 0;
+        if (cardStale && cardStale === openId && !cardAsked) { const again = cardStale; cardStale = ''; getCard(again); }
+        else if (cardStale !== openId) cardStale = '';
         for (const [waitingRid, entry] of queuedEntries) {
           if (entry.sent && entry.card === cardId) queuedEntries.delete(waitingRid);
         }
@@ -1439,18 +1489,19 @@ export function mountBoard(options) {
           // Open what was just filed — unless the person has moved on to another card since.
           if (made && note.opens && !openId) openCard(made);
         } else if (note.type === 'board_move') {
-          say(lineFor(target), `Moved to ${statusTitle(str(event.status) || note.status)}.`);
+          sayAbout(target, `Moved to ${statusTitle(str(event.status) || note.status)}.`);
         } else if (note.type === 'board_comment') {
-          say(lineFor(target), note.word === 'Answer' ? 'Answer recorded.' : 'Comment added.');
+          sayAbout(target, note.word === 'Answer' ? 'Answer recorded.' : 'Comment added.');
         }
-        if (target && target === openId && !cardAsked) getCard(openId);
+        if (target && target === openId) getCardAgain(openId);
         break;
       }
       case 'board_activity': {
         // What an agent (or the desktop's own pane) just did to a card, in the desktop's words.
         const about = str(event.id || event.card_id);
         if (str(event.actor) && str(event.actor) !== 'owner' && str(event.summary)) {
-          say(line, `◆ #${about} · ${str(event.summary)}`, about && rows.has(about)
+          // `sayAbout` would name the card a second time, so this one picks its own line.
+          say(lineFor(about), `◆ #${about} · ${str(event.summary)}`, about && rows.has(about)
             ? { action: { label: 'Open', run: () => openCard(about) } } : {});
         }
         break;
@@ -1463,14 +1514,14 @@ export function mountBoard(options) {
         // card turn's own events reach a device to put the lamp out later (protocol 17.4).
         if (cardId && event.stopped !== false) still.delete(cardId);
         for (const id of [...busy.keys()]) if (!still.has(id)) busy.delete(id);
-        say(lineFor(cardId), event.stopped === false ? 'Nothing was running on this card.' : 'Stopped.');
+        sayAbout(cardId, event.stopped === false ? 'Nothing was running on this card.' : 'Stopped.');
         paintCard();
         paintList();
         break;
       }
       case 'board_resumed': {
         settle(rid);
-        say(lineFor(cardId), event.resumed === false
+        sayAbout(cardId, event.resumed === false
             ? 'Nothing was waiting on this card.'
             : 'Resumed — what was queued is running again.');
         break;
@@ -1487,11 +1538,11 @@ export function mountBoard(options) {
         // and the inbox's pane ids are those tokens whole: the pane is the one that starts with it.
         const goToPane = () => {
           const found = panes().find((item) => str(item?.id).startsWith(pane));
-          if (!found) { say(lineFor(about), `${text} · that pane is not in your inbox yet.`, { keep: true, action: { label: 'Open pane', run: goToPane } }); return; }
+          if (!found) { sayAbout(about, `${text} · that pane is not in your inbox yet.`, { keep: true, action: { label: 'Open pane', run: goToPane } }); return; }
           hide();
           openPane(found.id);
         };
-        say(lineFor(about), text, { error: failed, keep: true,
+        sayAbout(about, text, { error: failed, keep: true,
           action: !failed && pane ? { label: 'Open pane', run: goToPane } : null });
         break;
       }
@@ -1501,7 +1552,7 @@ export function mountBoard(options) {
         const note = settle(rid);
         const code = event.event === 'error' ? str(event.code) : event.event;
         const about = cardId || str(note?.card);
-        if (rid && rid === cardAsked) cardAsked = 0;
+        if (rid && rid === cardAsked) { cardAsked = 0; cardStale = ''; }
         if (note?.type === 'board_open') {
           openAsked = false;
           // The desktop's project has no board (yet): that is a state of the board, drawn
@@ -1525,14 +1576,14 @@ export function mountBoard(options) {
         if (note && !note.accepted && (note.type === 'board_ask' || note.type === 'board_comment')) restoreReply(about, str(note.text));
         queuedEntries.delete(rid);
         if (code === 'board_conflict') {
-          say(lineFor(about), 'This card changed on the desktop while you were writing. It has been reloaded — try again.', { error: true });
+          sayAbout(about, 'This card changed on the desktop while you were writing. It has been reloaded — try again.', { error: true });
           if (about && about === openId) getCard(about);
         } else if (event.event === 'error' && cardId && !note && !rid) {
           // A card turn that failed on its own (a provider error): the lamp goes out.
           busy.delete(cardId);
-          say(lineFor(cardId), errorText(event), { error: true });
+          sayAbout(cardId, errorText(event), { error: true });
         } else {
-          say(lineFor(about), errorText(event), { error: true });
+          sayAbout(about, errorText(event), { error: true });
         }
         paintCard();
         paintList();
@@ -1615,7 +1666,7 @@ export function mountBoard(options) {
 
   function onLink() {
     paintOffline();
-    if (!online()) { openAsked = false; cardAsked = 0; }
+    if (!online()) { openAsked = false; cardAsked = 0; cardStale = ''; }
     if (visible && !loaded) paintList();
   }
 
@@ -1640,6 +1691,7 @@ export function mountBoard(options) {
     openAsked = false;
     openId = '';
     card = null;
+    cardStale = '';
     wantCard = '';
     rev = 0;
     root.dataset.card = 'closed';
@@ -1659,7 +1711,11 @@ export function mountBoard(options) {
     if (event.key !== 'Enter' || event.isComposing || event.altKey || event.metaKey) return;
     if (event.shiftKey && !event.ctrlKey) return;
     event.preventDefault();
-    const mode = event.ctrlKey ? (event.shiftKey ? 'comment' : 'plan') : 'discuss';
+    // The shortcuts are unchanged; a bare Return sends what the selector says, which is what the
+    // Send button beside it does and what `paintReply` has been showing all along. It used to be
+    // hard-wired to `discuss`, so **Comment only** plus Return started a turn on the desktop's
+    // queue instead of writing a comment (card #RCN8).
+    const mode = event.ctrlKey ? (event.shiftKey ? 'comment' : 'plan') : replyMode.value;
     if (!busy.has(openId) || mode === 'comment') sendReply(mode);
   });
   replyStop.addEventListener('click', stopTurn);
