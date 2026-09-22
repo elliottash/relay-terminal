@@ -10,3 +10,7 @@ from the README plus the instruction files loaded by Codex, Claude and Relay.
 Added the canonical guide and all four discovery links. Relative links resolve, documented version
 pins and package entry commands match the native workflows, shell packaging scripts parse, and the
 documentation diff has no whitespace errors. Marked the medium documentation card done.
+
+<!-- relay:entry 20260922T023700Z-b3 author=codex kind=event -->
+### Codex · 2026-09-21 22:37
+Linked commits d305e473 and 09fcf1f1 to the completed card.

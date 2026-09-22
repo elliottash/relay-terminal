@@ -7,7 +7,7 @@ assignee: codex
 rank: m
 created: '2026-09-21'
 source: 'Codex user request, 2026-09-21'
-links: {plans: [], commits: [d305e473], evidence: [docs/BUILDING.md], related: [R6BS], github: null}
+links: {plans: [], commits: [d305e473, 09fcf1f1], evidence: [docs/BUILDING.md], related: [R6BS], github: null}
 ---
 # Document cross-platform build instructions for every repository agent
 
