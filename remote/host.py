@@ -1062,6 +1062,19 @@ class Host:
     @staticmethod
     def _scrub(event: dict) -> dict:
         """Worker errors interpolate local paths; a phone gets the shape, not the filesystem."""
+        if event.get("event") == "conversations":
+            # The desktop uses these locations to resume sessions. Remote navigation uses
+            # pane_state tokens instead. Scrub before the replay ring as well as live fan-out.
+            def metadata(value):
+                if isinstance(value, dict):
+                    return {key: metadata(item) for key, item in value.items()
+                            if key not in {"session_dir", "workspace", "cwd", "raw_cwd",
+                                           "resume_cwd", "files", "path",
+                                           "resume_command", "fork_command"}}
+                if isinstance(value, list):
+                    return [metadata(item) for item in value]
+                return value
+            event = metadata(event)
         if event.get("event") == "error" and isinstance(event.get("message"), str):
             event = dict(event)
             event["message"] = event["message"].split(":")[0][:200]

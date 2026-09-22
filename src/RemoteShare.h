@@ -329,6 +329,8 @@ public:
     void setTab(const QString &tab, int panes);
 
 private:
+    void refreshPairingService();
+    QString m_pairingBase;
     void updateWholeTab();
     void showPairing(const QString &url, const relay::QrMatrix &qr, int expires);
     // The pairing code beside the QR (#FR1C): minted when this window opens, withdrawn when it

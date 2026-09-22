@@ -1342,6 +1342,13 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     showAddresses(share.addresses());
     connect(&share, &RemoteShare::failed, this, [this](const QString &message) {
         m_status->setText(message);
+        if (m_pairWaiting) {
+            m_pairWaiting = false;
+            m_pairValue->clear();
+            m_pairClock->clear();
+            m_pairNote->setText(QStringLiteral("No code was made: %1").arg(message));
+            m_pairAgain->show();
+        }
         // The sidecar answers a code_create it could not carry out with an `error` line; said
         // here too, where the person is looking, and the button comes back.
         if (m_codeAskedAt) {
@@ -1351,29 +1358,53 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
             fit();
         }
     });
-    connect(&share, &RemoteShare::startedChanged, this, [this, &share] {
-        if (share.running()) {
-            m_status->setText(pairingIntro());
-            m_note->setText(share.note());
-            share.requestPairing();
-            share.requestDevices();
-            askPairCode();
-        }
-    });
+    connect(&share, &RemoteShare::startedChanged, this,
+            &RemoteShareDialog::refreshPairingService);
+    connect(&share, &RemoteShare::remoteStateChanged, this,
+            &RemoteShareDialog::refreshPairingService);
     if (share.running()) {
-        m_status->setText(pairingIntro());
-        m_note->setText(share.note());
         // The phones paired before this window existed — at launch, with remote control on —
         // from the list RemoteShare kept, then a fresh one from the sidecar.
         showDevices(share.devices());
-        share.requestPairing();
-        share.requestDevices();
-        // A code every time this window opens (#FR1C), so the person never reads out a stale one.
-        askPairCode();
     }
+    refreshPairingService();
 }
 
 // ----- the pairing code (#FR1C) -----------------------------------------------------------------
+
+void RemoteShareDialog::refreshPairingService()
+{
+    RemoteShare &share = RemoteShare::instance();
+    m_note->setText(share.note());
+    // Startup announces the local listener before moving to the remembered rendezvous.
+    // Wait for that destination before spending either of its two pairing rooms.
+    if (share.running() && share.alwaysOn()
+        && (!share.remoteState().online
+            || share.remoteState().base != share.base())) return;
+    if (share.running() && m_pairingBase == share.base()) return;
+    m_pairingBase.clear();
+    m_pairingLink.clear();
+    m_qr->clear();
+    m_url->clear();
+    m_pairCopy->setEnabled(false);
+    m_pairWaiting = false;
+    m_pairCode.clear();
+    m_pairPin.clear();
+    m_pairDeadline = 0;
+    m_pairValue->clear();
+    m_pairClock->clear();
+    m_pairAgain->hide();
+    if (!share.running()) {
+        m_status->setText(QStringLiteral("Remote control is off. These pairing codes have ended."));
+        m_pairNote->clear();
+        return;
+    }
+    m_pairingBase = share.base();
+    m_status->setText(pairingIntro());
+    share.requestPairing();
+    share.requestDevices();
+    askPairCode();
+}
 
 void RemoteShareDialog::askPairCode()
 {

@@ -143,6 +143,29 @@ def run(coroutine, timeout=60):
 
 
 class ComposeTests(unittest.TestCase):
+    def test_conversation_locations_never_enter_wire_or_replay(self):
+        async def main():
+            async with Harness() as harness:
+                client, _ = await harness.paired_client()
+                await client.send({"t": "pane_focus", "pane": "p1"})
+                await client.expect("screen_snapshot")
+                event = {"event": "conversations", "workspace": "/private/project",
+                         "items": [{"id": "abc", "title": "Build report",
+                                    "session_dir": "/private/sessions",
+                                    "workspace": "/private/project", "raw_cwd": "/private/raw",
+                                    "resume_cwd": "/private/cwd", "files": ["/private/file"],
+                                    "resume_command": ["tool", "/private/session"],
+                                    "threads": [{"session_dir": "/private/thread"}]}]}
+                harness.source.agent_event("p1", event)
+                message = await client.expect("agent")
+                self.assertNotIn("/private", json.dumps(message))
+                self.assertEqual(message["event"]["items"][0]["title"], "Build report")
+                replay = harness.host.stream("agent:p1").since(0)
+                self.assertNotIn("/private", json.dumps(replay))
+                self.assertEqual(event["items"][0]["session_dir"], "/private/sessions")
+                await client.close()
+        run(main())
+
     def test_a_prompt_reaches_the_pane_with_routing(self):
         """A `full` device's prompt asks the desktop to route it, as its own prompt box would."""
         async def main():
@@ -957,6 +980,36 @@ class AlwaysOnTests(unittest.TestCase):
     """Gap A of card #PH0N: "nothing is shared until the share button is pressed, in this Relay
     session". With `always`, `start` alone brings the service up at the remembered address, keeps
     it registered there across a rendezvous restart, and reports every change as `remote_state`."""
+
+    def test_sidecar_multiplayer_actions_reach_the_device_store_audit(self):
+        async def main():
+            async with Always() as harness:
+                side = harness.side
+                await harness.until(lambda: harness.state().get("online"), what="online")
+                await side.handle({"t": "pane", "id": "p1", "title": "Test"})
+                await side.handle({"t": "invite_create", "panes": ["p1"], "role": "editor"})
+                invite = [m for m in harness.out if m.get("t") == "invite"][-1]
+                guest = client_mod.Client(harness.hosted)
+                joining = asyncio.create_task(guest.knock(invite["url"], name="Audit guest", platform="test"))
+                await harness.until(lambda: any(m.get("t") == "knock" for m in harness.out))
+                knock = [m for m in harness.out if m.get("t") == "knock"][-1]
+                await side.handle({"t": "knock_answer", "participant": knock["participant"],
+                                   "admit": True, "role": "editor"})
+                await joining
+                await guest.send({"t": "compose", "pane": "p1", "text": "audit proof"})
+                pending = await guest.expect("prompt_pending")
+                await side.handle({"t": "prompt_answer", "id": pending["id"], "approve": True})
+                await guest.expect("prompt_decided")
+                rows = [json.loads(line) for path in side.devices.directory.glob("audit-*.jsonl")
+                        for line in path.read_text().splitlines()]
+                kinds = {row["kind"] for row in rows}
+                self.assertTrue({"invite_create", "knock", "admitted", "join",
+                                 "guest_prompt", "prompt_decided"} <= kinds, kinds)
+                self.assertEqual(next(row["text"] for row in rows
+                                      if row["kind"] == "guest_prompt"), "audit proof")
+                await guest.close()
+        run(main())
+
 
     def test_start_with_always_brings_the_service_up_at_the_hosted_rendezvous(self):
         async def main():
