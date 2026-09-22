@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: m
 created: '2026-09-22'
 source: Codex in a Relay pane, 2026-09-22
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-alt-a-close/], related: [WD83], github: null}
+links: {plans: [], commits: [15fa48f6995ed62e2ecc2c7616df918fd640b976], evidence: [docs/qa_evidence/2026-09-22-alt-a-close/], related: [WD83], github: null}
 ---
 # Alt+A closes the active subagent pane
 

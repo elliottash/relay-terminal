@@ -13,3 +13,6 @@ Alt+A now closes the active subagent view through closeToolPane and returns focu
 
 <!-- relay:entry 20260922T132128Z-kw author=agent kind=event model=gpt-6-astra pane=61670941 turn=1697c55d79f24a8ebf3a93f3844d45ba/9efd4a83a8d0424b9b6c1eb0e3554e81 -->
 - ✦ agent moved this card · Executing → Needs verification · Build and subagents test pass; isolated Xvfb keypress check confirms close, restore, and focus-then-close behavior. · evidence docs/qa_evidence/2026-09-22-alt-a-close/ · implemented_by openai/gpt-6-astra via codex
+
+<!-- relay:entry 20260922T132303Z-x7 author=agent kind=event model=gpt-6-astra pane=61670941 turn=1697c55d79f24a8ebf3a93f3844d45ba/9efd4a83a8d0424b9b6c1eb0e3554e81 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-22-alt-a-clo… → {"plans": [], "commits": ["15fa48f6995ed62e2ecc2c7616df918fd640b976"], "evidence…
