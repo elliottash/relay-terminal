@@ -5152,7 +5152,7 @@ private:
         });
     }
 
-    // "← main agent", Esc in the subagent pane, and the subagent pane key from inside it.
+    // "← main agent" and Esc in the subagent pane.
     void backToMainAgent(Pane *owner) {
         if (!owner) return;
         if (QWidget *page = pageOf(owner)) m_tabs->setCurrentWidget(page);
@@ -5160,11 +5160,14 @@ private:
         owner->focusInput();
     }
 
-    // agent.subagentPane (Alt+A): in the subagent pane, back to its main agent; anywhere else, this
-    // pane's subagent pane.
+    // agent.subagentPane (Alt+A): close the active subagent pane and return to its owner;
+    // anywhere else, open this pane's subagent pane.
     void toggleSubagentPane() {
-        if (auto *tool = dynamic_cast<ToolPane *>(leafOf(QApplication::focusWidget())); tool && tool->subagent()) {
-            if (tool->subagent()->onBackToMain) tool->subagent()->onBackToMain();
+        if (auto *tool = dynamic_cast<ToolPane *>(m_activeLeaf.data()); tool && tool->subagent()) {
+            const auto backToMain = tool->subagent()->onBackToMain;
+            tool->setProperty("closedBySubagentShortcut", true);
+            closeToolPane(tool);
+            if (backToMain) backToMain();
             return;
         }
         if (m_active) m_active->openSubagentPane();
@@ -10837,6 +10840,12 @@ public:
                     hint(QStringLiteral("board.close"),
                          QStringLiteral("Next time: %1 closes the Board too").arg(boardKeys), 1);
             }
+        if (auto *tool = dynamic_cast<ToolPane *>(pane);
+            tool && tool->subagent() && !tool->property("closedBySubagentShortcut").toBool()) {
+            hint(QStringLiteral("subagents.close"),
+                 relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("agent.subagentPane")),
+                                                QStringLiteral("close the subagent pane")));
+        }
         // Once per run, the first time something is closed: say how to get it back (owner, 2026-09-17).
         if (record) {
             static bool toldAboutRestore = false;

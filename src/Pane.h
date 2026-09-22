@@ -4731,8 +4731,8 @@ public:
         };
         tabs->onBackClicked = [self] {
             if (self) self->hint(QStringLiteral("subagents.back.mouse"),
-                                 relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("agent.subagentPane")),
-                                                                QStringLiteral("back to the main agent (Esc works too)")));
+                                 relay::ShortcutHints::nextTime(QStringLiteral("Esc"),
+                                                                QStringLiteral("back to the main agent")));
         };
         const QObject *gone = tabs;
         connect(tabs, &QObject::destroyed, this, [this, gone] {

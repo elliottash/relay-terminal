@@ -646,7 +646,7 @@ SubagentTabsView::SubagentTabsView(QWidget *parent) : QWidget(parent) {
 
 void SubagentTabsView::setBackKeys(const QString &keys) {
     m_back->setToolTip(keys.isEmpty() ? QStringLiteral("Back to the main agent's prompt box (Esc)")
-                                      : QStringLiteral("Back to the main agent's prompt box (%1, or Esc)").arg(keys));
+                                      : QStringLiteral("Back to the main agent's prompt box (Esc); %1 closes this pane").arg(keys));
 }
 
 int SubagentTabsView::indexOf(const QString &id) const {
