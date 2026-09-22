@@ -104,6 +104,43 @@ class ScreenCostTests(unittest.TestCase):
                 await browser.stop()
         self.drive(main(), 180)
 
+    def test_a_url_in_the_grid_is_a_real_link(self):
+        """The wire's cells are text only, so the view finds http(s) URLs itself at paint time —
+        live rows and scrollback both — and a tap opens one (a phone's request, 2026-09-22)."""
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await browser.navigate(f"{self.origin}/tests/screen_harness.html")
+                await browser.wait_for("document.body && document.body.dataset.harnessReady === '1'")
+                await browser.evaluate("""
+                  screenHarness.open({});
+                  screenHarness.state.view.apply({t: 'screen_snapshot', rows: 4, cols: 60, alt: false,
+                    cursor: {row: 0, col: 0, visible: false, shape: 0},
+                    lines: [{row: 1, segs: [['see https://example.com/x_(1), ok', 0, 0, 0]]}]});
+                  screenHarness.state.view.applyHistory({
+                    t: 'history', from_row: 100, total: 101, more: false,
+                    lines: [{row: 100, segs: [['older www.example.com/a?b=1 line', 0, 0, 0]]}]});
+                """)
+                live = await browser.evaluate("""
+                  JSON.stringify((() => {
+                    const a = document.querySelector('.screen-grid > .screen-row a.screen-link');
+                    return a ? [a.href, a.textContent, a.target] : null; })())
+                """)
+                self.assertEqual(json.loads(live),
+                                 ["https://example.com/x_(1)", "https://example.com/x_(1)", "_blank"],
+                                 "the trailing comma and space are not the link's")
+                back = await browser.evaluate("""
+                  JSON.stringify((() => {
+                    const a = document.querySelector('.screen-history .screen-row a.screen-link');
+                    return a ? [a.href, a.textContent] : null; })())
+                """)
+                self.assertEqual(json.loads(back),
+                                 ["https://www.example.com/a?b=1", "www.example.com/a?b=1"])
+            finally:
+                await browser.stop()
+        self.drive(main(), 120)
+
     def test_fit_measures_when_the_layout_moves_not_when_a_frame_arrives(self):
         async def main():
             browser = Browser()

@@ -19,6 +19,59 @@ const ATTR = {
   STRIKE: 1 << 8, FAINT: 1 << 9,
 };
 
+// A link in the grid's text. The wire carries no link attribute (section 6's cells are text and
+// colour only), so the client finds http(s) URLs itself, at paint time, in one row at a time — a
+// URL the terminal wrapped across two rows does not link, on this view or on the desktop's.
+const URL_RE = /https?:\/\/[^\s]+|www\.[^\s]+/gi;
+
+// Sentence punctuation ends a URL; a closing bracket ends it only when it closes nothing the URL
+// opened — the Wikipedia kind, `https://example.com/x_(1)`, keeps its bracket.
+function trimUrl(url) {
+  let end = url.length;
+  for (;;) {
+    const ch = url[end - 1];
+    if (!ch) break;
+    if (/[.,;:!?]/.test(ch)) { end -= 1; continue; }
+    const open = ch === ')' ? '(' : ch === ']' ? '[' : null;
+    if (open) {
+      const opens = (url.slice(0, end).split(open).length - 1);
+      const closes = (url.slice(0, end).split(ch).length - 1);
+      if (closes > opens) { end -= 1; continue; }
+    }
+    break;
+  }
+  return url.slice(0, end);
+}
+
+function linkify(segments) {
+  const text = segments.map(([text]) => text).join('');
+  URL_RE.lastIndex = 0;
+  const found = [];
+  for (let match = URL_RE.exec(text); match; match = URL_RE.exec(text)) {
+    let url = trimUrl(match[0]);
+    if (url.length < 5) continue;
+    found.push([match.index, match.index + url.length, url.startsWith('www.') ? `https://${url}` : url]);
+  }
+  if (!found.length) return segments.map(([text, fg, bg, attrs]) => ({ text, fg, bg, attrs }));
+  const pieces = [];
+  let at = 0;
+  for (const [text, fg, bg, attrs] of segments) {
+    let start = at;
+    const end = at + text.length;
+    for (const [from, to, url] of found) {
+      if (to <= start || from >= end) continue;
+      if (from > start) pieces.push({ text: text.slice(0, from - start), fg, bg, attrs });
+      const a = Math.max(from, start);
+      const b = Math.min(to, end);
+      pieces.push({ text: text.slice(a - start, b - start), fg, bg, attrs, url });
+      start = b;
+    }
+    if (start < end) pieces.push({ text: text.slice(start - at), fg, bg, attrs });
+    at = end;
+  }
+  return pieces;
+}
+
 // xterm's first 16, then the 6x6x6 cube and the greys, built once. These are the fallbacks: the
 // first 16 are the theme's, and what the grid actually paints is `THEMED` below.
 const PALETTE = (() => {
@@ -548,8 +601,9 @@ export class ScreenView {
   historyRow(line) {
     const node = document.createElement('div');
     node.className = 'screen-row';
-    for (const [text, fg, bg, attrs] of line.segs || []) {
-      node.append(this.span(text, fg, bg, attrs));
+    for (const piece of linkify(line.segs || [])) {
+      node.append(piece.url ? this.link(piece.text, piece.url)
+                            : this.span(piece.text, piece.fg, piece.bg, piece.attrs));
     }
     if (!node.childNodes.length) node.append(document.createTextNode(' '));
     return node;
@@ -583,19 +637,21 @@ export class ScreenView {
     node.replaceChildren();
 
     let column = 0;
-    for (const [text, fg, bg, attrs] of segments) {
+    for (const piece of linkify(segments)) {
+      const text = piece.text;
+      const make = (part) => (piece.url ? this.link(part, piece.url) : this.span(part, piece.fg, piece.bg, piece.attrs));
       if (!showCursor || this.cursor.col < column || this.cursor.col >= column + text.length) {
-        node.append(this.span(text, fg, bg, attrs));
+        node.append(make(text));
         column += text.length;
         continue;
       }
       // The cursor falls inside this run: split it so one cell can carry the cursor class.
       const at = this.cursor.col - column;
-      if (at > 0) node.append(this.span(text.slice(0, at), fg, bg, attrs));
-      const cell = this.span(text[at], fg, bg, attrs);
+      if (at > 0) node.append(make(text.slice(0, at)));
+      const cell = make(text[at]);
       cell.classList.add('cursor');
       node.append(cell);
-      if (at + 1 < text.length) node.append(this.span(text.slice(at + 1), fg, bg, attrs));
+      if (at + 1 < text.length) node.append(make(text.slice(at + 1)));
       column += text.length;
     }
     if (showCursor && this.cursor.col >= column) {
@@ -606,6 +662,17 @@ export class ScreenView {
       node.append(cell);
     }
     if (!node.childNodes.length) node.append(document.createTextNode(' '));
+  }
+
+  link(text, url) {
+    const node = this.span(text, 0, 0, 0);
+    const anchor = document.createElement('a');
+    anchor.className = 'screen-link';
+    anchor.href = url;
+    anchor.target = '_blank';
+    anchor.rel = 'noopener noreferrer';
+    anchor.append(node);
+    return anchor;
   }
 
   span(text, fg, bg, attrs) {

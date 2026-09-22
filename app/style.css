@@ -283,6 +283,9 @@ details.tool > summary::marker { color: var(--muted); }
 /* The theme's cursor over the theme's ground, with the app's accent for a terminal that is not
    inside a themed pane. */
 .screen-row .cursor { background: var(--rt-term-cursor, var(--accent)); color: var(--term-bg); }
+/* A URL found in the grid's text (app/screen.js): underlined in the theme's link colour, and a
+   real anchor, so a tap opens it — the one link the wire's cells can carry, being text only. */
+a.screen-link { color: inherit; text-decoration: underline; cursor: pointer; }
 
 /* Sits over the bottom of the terminal, clear of the bar below it. It is the only way output
    moves the view while somebody is reading further up. */
