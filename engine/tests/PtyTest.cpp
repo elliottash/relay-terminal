@@ -132,7 +132,7 @@ private slots:
         Pty::StartOptions o;
         o.program = QStringLiteral("bash");
         o.arguments = QStringList{QStringLiteral("--norc"), QStringLiteral("--noprofile"), QStringLiteral("-i")};
-        o.environment = QStringList{QStringLiteral("PS1=$ ")};
+        o.environment = QStringList{QStringLiteral("PS1=relay-ready> ")};
         QVERIFY2(pty->start(o), qPrintable(pty->errorString()));
         const qint64 shell = pty->childPid();
 
@@ -141,31 +141,42 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(pty->foregroundPid(), shell, 3000);
 
         // A cooked line read: ICANON and ECHO both on.
-        pty->write(QByteArray("echo ONE; read -r answer\n"));
-        QVERIFY(c.waitFor("ONE"));
+        pty->write(QByteArray("printf 'ONE\\n'; read -r answer\n"));
+        QVERIFY(c.waitFor("ONE\r\n"));
         QTRY_VERIFY_WITH_TIMEOUT(pty->termiosFlags().canonical && pty->termiosFlags().echo, 3000);
         pty->write(QByteArray("typed\n"));
 
         // A password prompt (`read -s`): still cooked, but the kernel stops echoing.
-        pty->write(QByteArray("echo TWO; read -s -r secret\n"));
-        QVERIFY(c.waitFor("TWO"));
+        pty->write(QByteArray("printf 'TWO\\n'; read -s -r secret\n"));
+        QVERIFY(c.waitFor("TWO\r\n"));
         QTRY_VERIFY_WITH_TIMEOUT(pty->termiosFlags().canonical && !pty->termiosFlags().echo, 3000);
         pty->write(QByteArray("hunter2\n"));
 
         // stty -icanon, held by a foreground job.
-        pty->write(QByteArray("stty -icanon; echo THREE; sleep 20\n"));
-        QVERIFY(c.waitFor("THREE"));
+        pty->write(QByteArray("stty -icanon; printf 'THREE\\n'; sleep 20\n"));
+        QVERIFY(c.waitFor("THREE\r\n"));
         QTRY_VERIFY_WITH_TIMEOUT(!pty->termiosFlags().canonical, 3000);
         QVERIFY(pty->termiosFlags().echo);
+        QTRY_VERIFY_WITH_TIMEOUT(pty->foregroundPid() > 0 && pty->foregroundPid() != shell, 3000);
+        const auto beforeThree = c.snapshot().count("relay-ready> ");
         pty->write(QByteArray("\x03")); // SIGINT still reaches the job: ISIG is untouched
 
+        // Ctrl+C can flush queued input. Wait for the shell's next actual prompt before
+        // sending another command; the echoed command text is not proof it executed.
+        QTRY_COMPARE_WITH_TIMEOUT(pty->foregroundPid(), shell, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(c.snapshot().count("relay-ready> ") > beforeThree, 3000);
+
         // stty -echo, the same way.
-        pty->write(QByteArray("stty icanon -echo; echo FOUR; sleep 20\n"));
-        QVERIFY(c.waitFor("FOUR"));
+        pty->write(QByteArray("stty icanon -echo; printf 'FOUR\\n'; sleep 20\n"));
+        QVERIFY(c.waitFor("FOUR\r\n"));
         QTRY_VERIFY_WITH_TIMEOUT(pty->termiosFlags().canonical && !pty->termiosFlags().echo, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(pty->foregroundPid() > 0 && pty->foregroundPid() != shell, 3000);
+        const auto beforeFour = c.snapshot().count("relay-ready> ");
         pty->write(QByteArray("\x03"));
-        pty->write(QByteArray("stty echo; echo FIVE\n"));
-        QVERIFY(c.waitFor("FIVE"));
+        QTRY_COMPARE_WITH_TIMEOUT(pty->foregroundPid(), shell, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(c.snapshot().count("relay-ready> ") > beforeFour, 3000);
+        pty->write(QByteArray("stty echo; printf 'FIVE\\n'\n"));
+        QVERIFY(c.waitFor("FIVE\r\n"));
 
         // A foreground job runs in its own process group; the prompt is the shell's again.
         pty->write(QByteArray("cat > /dev/null\n"));
