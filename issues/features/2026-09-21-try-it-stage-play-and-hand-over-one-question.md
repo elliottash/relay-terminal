@@ -8,7 +8,7 @@ parent: YZ8G
 rank: zzzzzzzzzzzzzzzzc
 created: '2026-09-21'
 source: 'owner, 2026-09-21: "i agree with all, go ahead with it" (#YZ8G plan)'
-links: {plans: [], commits: [03701acf, 79ef050e, bca9a82e], evidence: [docs/qa_evidence/2026-09-21-tryit/], related: [YZ8G, 7BM4, WC3E], github: null}
+links: {plans: [], commits: [03701acf, 79ef050e, bca9a82e, a739dd45], evidence: [docs/qa_evidence/2026-09-21-tryit/], related: [YZ8G, 7BM4, WC3E], github: null}
 ---
 # Try it: stage the situation, complete the mechanical pass, hand the person one task and one question
 
