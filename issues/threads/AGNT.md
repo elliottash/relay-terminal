@@ -1157,3 +1157,6 @@ It is on the QA checklist with this reason.
 is another session's file and has uncommitted edits in it, so it was left alone; click the
 `option:` token instead, the way
 `docs/qa_evidence/2026-09-21-console-links-and-card-frame/drive.sh` does.
+
+<!-- relay:entry 20260922T005809Z-k0 author=agent kind=note pane=switchboard -->
+Handoff: helpers are now no-shell Pane consoles (relay::agent::Context/Host) sharing the terminal pane's queue, bubbles, tool rows, picker. Retired: HelperChatPanel, HelperModelBox, BoardChat.h, PageAgent, board_chat*. QA checklist on the card is the punch list for the next session: a real provider (everything so far ran on a loopback stub), the phone's inbox excluding consoles, a long queue under load, the guest-harness refusal in a console's model box, pane_usage with four consoles open.

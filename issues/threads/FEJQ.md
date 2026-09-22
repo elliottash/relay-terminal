@@ -165,3 +165,6 @@ Card #AGNT supersedes this card's panel-era UI. `relay::HelperChatPanel`, `Board
 the prompt box a terminal pane has -- a no-shell `Pane` with a `relay::agent::Context` -- in the
 Switchboard, on a card, and in Options, Actions and Sessions. What this card asked for is still
 true and is now true in one widget rather than two: the helper system.
+
+<!-- relay:entry 20260922T005809Z-f1 author=agent kind=note pane=switchboard -->
+Handoff (2026-09-21 evening): superseded in spirit by #AGNT/#CTRN — the helper system this card asked for now exists as agent consoles, not the panel design planned here. Status needs-verification stands for the original app-control tools (app_option_set/app_action_run/app_open/app_undo, the change log and Undo) which are unaffected by #AGNT. Nothing to continue here beyond ordinary QA; do not re-plan it.

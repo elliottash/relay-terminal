@@ -168,3 +168,6 @@ Card #AGNT supersedes this card's panel-era UI. `relay::HelperChatPanel`, `Board
 the prompt box a terminal pane has -- a no-shell `Pane` with a `relay::agent::Context` -- in the
 Switchboard, on a card, and in Options, Actions and Sessions. What this card asked for is still
 true and is now true in one widget rather than two: every prompt box is the pane's.
+
+<!-- relay:entry 20260922T005810Z-2j author=agent kind=note pane=switchboard -->
+Handoff: done, needs-verification. Every agent prompt box (Switchboard, card, Options/Actions/Sessions helpers) now matches the terminal pane's shape — one frame, no Send button, no help sentence, action row (Check/Clean up, Plan/Execute/Verify) left-aligned above the box with letter keys, card-shaped button face without colour override. QA checklist on the card is a 7-item visual walk; nothing left to build.

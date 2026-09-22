@@ -34,3 +34,6 @@ Card #AGNT supersedes this card's panel-era UI. `relay::HelperChatPanel`, `Board
 the prompt box a terminal pane has -- a no-shell `Pane` with a `relay::agent::Context` -- in the
 Switchboard, on a card, and in Options, Actions and Sessions. What this card asked for is still
 true and is now true in one widget rather than two: the queue in every panel.
+
+<!-- relay:entry 20260922T005810Z-gd author=agent kind=note pane=switchboard -->
+Handoff: done, needs-verification. A helper (Sessions especially) can open one or several saved conversations in new panes and says so in text; a dead helper worker resets its panel instead of hanging; the §12 queue and Stop work from every embedded panel, not just the Switchboard's. QA checklist is a 7-item walk; nothing left to build.

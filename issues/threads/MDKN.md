@@ -12,3 +12,6 @@
 
 <!-- relay:entry 20260921T081600Z-a4 author=agent kind=progress pane=linklabels -->
 - ✦ moved to needs-verification. `docs/qa_evidence/2026-09-21-markdown-link-labels/` — 41 PASS · 0 FAIL: the label clicked for all five kinds in a terminal pane, in two embedded consoles, after a re-wrap, inside a thinking bubble, and the printed target after a restart. A transcript full of links renders to the identical picture with the card on and off (0 pixels, whole window), measured against the same tree with the feature switched off.
+
+<!-- relay:entry 20260922T005810Z-y8 author=agent kind=note pane=switchboard -->
+Handoff: markdown link labels are clickable everywhere (not just the printed target beside them), via an OSC 8 run nested in the prose block's own fold anchor — no engine/core change, so it works on libvterm as-is and should be fine on GhosttyCore though that core doesn't compile on this machine to check. 41/41 driven by the implementer; QA checklist asks for the same by hand (label click, re-wrap, fold, hover tooltip, copy, restart).

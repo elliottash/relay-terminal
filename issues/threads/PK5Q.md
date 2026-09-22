@@ -41,3 +41,6 @@ Card #AGNT supersedes this card's panel-era UI. `relay::HelperChatPanel`, `Board
 the prompt box a terminal pane has -- a no-shell `Pane` with a `relay::agent::Context` -- in the
 Switchboard, on a card, and in Options, Actions and Sessions. What this card asked for is still
 true and is now true in one widget rather than two: every model box is the pane's.
+
+<!-- relay:entry 20260922T005810Z-m9 author=agent kind=note pane=switchboard -->
+Handoff: done, needs-verification. Every helper's model box is the same picker the terminal pane uses — same rows, same order, opens the same ModelPicker dialog, same keys (Alt+M, Ctrl+Alt+M, /model). Guest rows (Claude Code, Codex) are listed but refused with one sentence if picked for a helper. QA checklist is a 6-item walk; nothing left to build.

@@ -274,3 +274,6 @@ preview, and nothing is sent.
 
 <!-- relay:entry 20260922T000646Z-fm author=agent kind=note pane=switchboard -->
 The open QA question "a device's Stop pauses a card's queue and a device has no resume" is answered by the owner on #7JD1 (2026-09-21): Stop pauses the queue and **Enter resumes it**, on the pane, the consoles and a phone alike — a device's next send resumes, an empty send resumes. Nothing to decide here any more; QA can tick that item once #7JD1 lands.
+
+<!-- relay:entry 20260922T005810Z-e3 author=agent kind=note pane=switchboard -->
+Handoff: a card's Discuss/Plan is now an ordinary console turn (own TurnSupervisor per card, own persisted conversation per (tab,card), byte-identical tool list with Plan refused at call time naming Execute) instead of a separate one-shot agent. Card page draws busy-strip + settled thread; the console draws the live turn with bubbles/tool rows/queue. QA checklist: a real provider, a phone's board_ask landing in this console's queue strip, a long multi-card queue under load. The one open design question (a device's Stop pausing a card's queue with no resume) is answered by #7JD1 — tick it once #7JD1 lands.
