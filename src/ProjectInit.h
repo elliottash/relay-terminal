@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
-// "Initialize a project and create a Switchboard here?" — when it is asked, what it shows, and
+// "Initialize a project and create a Board here?" — when it is asked, what it shows, and
 // what a ticked box imports.
 //
-// Card #JN7X made the Switchboard per project (src/Projects.h); this is the one question that ever
+// Card #JN7X made the Board per project (src/Projects.h); this is the one question that ever
 // creates one. The owner's rule of 2026-09-18 is that **nothing is created silently**: no agent, no
-// pane, no `cd` and no launch makes `<project>/switchboard/`. The folder appears after one yes.
+// pane, no `cd` and no launch makes `<project>/board/`. The folder appears after one yes.
 //
 // Everything here is pure: `decide()` takes what the window already knows and returns what to do,
 // and `questionFrom()` turns a `project_probe_result` (docs/PROJECT-INIT-AND-IMPORT.md section 3)
@@ -27,7 +27,7 @@ namespace projectinit {
 enum class Trigger {
     AgentWork,     // (1) the first prompt sent to the agent in a pane standing in a git repo
     AgentCard,     // (2) the agent's first card: the worker asked with `board_init_request`
-    Switchboard,   // (3) the Switchboard was opened (Ctrl+Shift+S, the palette, /switchboard)
+    Switchboard,   // (3) the Board was opened (Ctrl+Shift+S, the palette, /board)
     CardCommand,   // (4) `/card <text>`: the text is held and lands on a yes
     InitCommand,   // (5) `/init`, the explicit command, which also clears a remembered no
 };
@@ -107,7 +107,7 @@ struct Finding {
 // Everything the pane draws, derived from one `project_probe_result`.
 struct Question {
     QString project;         // absolute
-    QString folder;          // `<project>/switchboard` — the only thing a yes creates
+    QString folder;          // `<project>/board` — the only thing a yes creates
     QString title;           // the one-line question
     QString folderLine;      // what will be created, naming the folder and nothing else
     QList<Finding> imports;  // a checkbox each, all unticked
@@ -119,9 +119,9 @@ struct Question {
 
 // The one-line question. It names the folder so the answer is never a guess about what appears.
 QString titleLine();
-// "Creates <project>/switchboard/ — and nothing else." `project` empty in, empty out.
+// "Creates <project>/board/ — and nothing else." `project` empty in, empty out.
 QString folderLineFor(const QString &project);
-// `<project>/switchboard`, the folder a yes creates. Mirrors projects::chooseBoard()'s Uninitialized
+// `<project>/board`, the folder a yes creates. Mirrors projects::chooseBoard()'s Uninitialized
 // directory; spelled here so this library needs nothing from the registry.
 QString boardFolderFor(const QString &project);
 
@@ -140,9 +140,9 @@ QStringList importKinds(const QList<Finding> &findings, const QList<bool> &ticke
 
 // The one quiet line after a yes. `imported` < 0 means an import was not asked for.
 //
-//   "Switchboard created in /repo/switchboard/"
-//   "Switchboard created in /repo/switchboard/ · 23 cards imported"
-//   "Switchboard created in /repo/switchboard/ · nothing left to import"
+//   "Board created in /repo/board/"
+//   "Board created in /repo/board/ · 23 cards imported"
+//   "Board created in /repo/board/ · nothing left to import"
 QString createdLine(const QString &project, int imported);
 
 // What the pane says when the user says no, so the line and the remembered answer are written once.

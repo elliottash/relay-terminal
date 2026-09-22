@@ -44,7 +44,7 @@ QString boardFolderIn(const QString &dir, const QString &folder)
 }
 
 // True when `<dir>/<folder>/board.yaml` is there, which is the only thing that makes a directory a
-// board. A bare `.switchboard/` folder with nothing in it is not one.
+// board. A bare `board/` folder with nothing in it is not one.
 bool hasBoardMarker(const QString &dir, const QString &folder)
 {
     return QFileInfo::exists(boardFolderIn(dir, folder) + QLatin1Char('/') + QLatin1String(kBoardMarkerFile));
@@ -112,23 +112,13 @@ QJsonObject jsonFrom(const Record &record)
 QStringList boardFolders()
 {
     // Precedence order, the same order as `BOARD_FOLDERS` in backend/relay_core/board.py: the first
-    // of these that holds a `board.yaml` is the board. Hidden first, because that is what Relay
-    // creates since 2026-09-19; the two older spellings are read for ever and never moved.
-    return {QString::fromLatin1(kHiddenBoardFolder), QString::fromLatin1(kBoardFolder),
-            QString::fromLatin1(kLegacyBoardFolder)};
+    // of these that holds a `board.yaml` is the board. `board/` first, because that is what Relay
+    // creates since 2026-09-21; the three older spellings are read for ever and never moved.
+    return {QString::fromLatin1(kNewBoardFolder), QString::fromLatin1(kHiddenBoardFolder),
+            QString::fromLatin1(kBoardFolder), QString::fromLatin1(kLegacyBoardFolder)};
 }
 
-QString newBoardFolder(bool hidden)
-{
-    return QString::fromLatin1(hidden ? kHiddenBoardFolder : kBoardFolder);
-}
-
-bool hiddenBoardFolder()
-{
-    return QSettings().value(QLatin1String(kHiddenFolderSetting), true).toBool();
-}
-
-QString newBoardFolder() { return newBoardFolder(hiddenBoardFolder()); }
+QString newBoardFolder() { return QString::fromLatin1(kNewBoardFolder); }
 
 QString defaultProject()
 {
@@ -246,9 +236,9 @@ Board chooseBoard(const QString &project, const QString &existingBoardDir, const
     board.key = (known && !known->key.isEmpty()) ? known->key : digest(cleaned);
 
     if (!existingBoardDir.isEmpty()) {
-        // Wherever the board already is — hidden, or an older `switchboard/` or `issues/` — that is
-        // where the cards are. Relay uses it in place and never moves it; only the user's own "Hide
-        // this board's folder" does that.
+        // Wherever the board already is — `board/`, or an older spelling of it — that is
+        // where the cards are. Relay uses it in place and never moves it; only the user's own
+        // "Move this board to board/" action does that.
         board.kind = Board::InRepo;
         board.dir = QDir::cleanPath(existingBoardDir);
         board.needsConsent = false;
@@ -256,11 +246,11 @@ Board chooseBoard(const QString &project, const QString &existingBoardDir, const
     }
 
     // No board yet. `dir` is where one would go; nothing may be written there until the user has
-    // answered "Initialize a project and create a Switchboard here?" for themselves.
+    // answered "Initialize a project and create a Board here?" for themselves.
     board.kind = Board::Uninitialized;
-    // Hidden unless the caller says otherwise, so a Board built by a test or by a pure caller says
-    // what Relay ships with rather than nothing.
-    board.dir = boardFolderIn(cleaned, newFolder.isEmpty() ? QString::fromLatin1(kHiddenBoardFolder)
+    // `board/` unless the caller says otherwise, so a Board built by a test or by a pure caller
+    // says what Relay ships with rather than nothing.
+    board.dir = boardFolderIn(cleaned, newFolder.isEmpty() ? QString::fromLatin1(kNewBoardFolder)
                                                            : newFolder);
     board.needsConsent = true;
     return board;
@@ -445,7 +435,7 @@ bool Registry::remember(const QString &path, const QString &reason, const QStrin
         if (record.name.isEmpty()) record.name = nameFor(normalized);
         record.lastAttached = at;
     }
-    // The user just acted on it, so an older "do not make a Switchboard here" answer is out of date.
+    // The user just acted on it, so an older "do not make a Board here" answer is out of date.
     const int declined = declinedIndexOf(normalized);
     if (declined >= 0) m_declined.removeAt(declined);
     return save(error);

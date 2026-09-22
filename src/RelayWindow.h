@@ -3540,20 +3540,11 @@ private:
             agent.rows << profile;
         }
         agent.rows << headingRow(QStringLiteral("Board"));
-        {
-            // Owner, 2026-09-19: new boards are created hidden from now on, so the cards do not
-            // clutter the project's root listing. Only decides what a board created from now on is
-            // called (`relay::projects::newBoardFolder()`); a board that already exists moves only
-            // through the explicit "Hide this board's folder" / "Show this board's folder" action on
-            // the Switchboard itself (protocol 19.17), never through this row.
-            relay::SettingRow hiddenFolder =
-                toggleRow(QString::fromLatin1(relay::projects::kHiddenFolderSetting),
-                         QStringLiteral("Hidden Switchboard folder"),
-                         QStringLiteral("New boards are created as .switchboard/ rather than switchboard/"),
-                         true);
-            hiddenFolder.aliases = QStringLiteral("switchboard board folder dotfile hide show dotswitchboard");
-            agent.rows << hiddenFolder;
-        }
+        // There is no "where does a new board go" row any more (owner, 2026-09-21, #1CXD): a new
+        // board is `board/` whatever any setting says (`relay::projects::newBoardFolder()`), and a
+        // board that already exists moves only through the explicit "Move this board to board/"
+        // action on the board itself (protocol 19.17). The old `board/hidden_folder` key is left
+        // where it is in QSettings: nothing reads it, so nothing has to migrate.
         {
             // Signals (#AQ6X decision 9, owner: "i think yes by default, but its optional"). The
             // flag itself lives in the *board's* `board.yaml` (`signals: {auto_work: …}`), because
@@ -6589,7 +6580,7 @@ public:
         return m_active ? relay::projects::candidateFor(m_active->cwd()) : QString();
     }
 
-    // ----- Switchboard (docs/SWITCHBOARD-DESIGN.md 4, protocol 17) -----------------------------
+    // ----- Switchboard (docs/BOARD-DESIGN.md 4, protocol 17) -----------------------------
     // Ctrl+Shift+S: open the Switchboard beside the anchor, focus the one this tab already has,
     // or, pressed on it, go back to the last terminal pane.
     void toggleBoardPane() {

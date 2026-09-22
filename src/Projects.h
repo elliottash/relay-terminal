@@ -1,30 +1,30 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
-// Which project a pane is in, where that project's Switchboard lives, and which projects Relay
+// Which project a pane is in, where that project's Board lives, and which projects Relay
 // knows about.
 //
-// Card #JN7X made the Switchboard per project instead of one global board. This is the model the
+// Card #JN7X made the Board per project instead of one global board. This is the model the
 // owner asked for on top of it:
 //
 //   * A tab is attached to no project by default. Nothing is inferred from the directory Relay was
 //     launched in, ever.
 //   * A pane's *candidate* project is derived fresh from its live terminal cwd, by looking at the
 //     filesystem and nothing else — `candidateFor()`. A candidate is an offer, not an attachment.
-//   * Attaching is always an explicit action (opening the Switchboard, `/card`, the `#` picker,
+//   * Attaching is always an explicit action (opening the Board, `/card`, the `#` picker,
 //     executing a card, …). Each of those is one of the closed set of reasons below, and it is the
 //     reason a project is written into the registry.
-//   * **A project's board lives in the project**, in a folder called `.switchboard/` whose marker
-//     is `.switchboard/board.yaml` — hidden since the owner's decision of 2026-09-19, and shown as
-//     `switchboard/` when the "Hidden Switchboard folder" option is off. Relay never creates it
+//   * **A project's board lives in the project**, in a folder called `board/` whose marker is
+//     `board/board.yaml` — the owner's decision of 2026-09-21 (#1CXD). Relay never creates it
 //     behind the user's back: the folder appears only after they answer the one-time "Initialize a
-//     project and create a Switchboard here?" question. That is what `Board::Uninitialized` and
+//     project and create a Board here?" question. That is what `Board::Uninitialized` and
 //     `Board::needsConsent` say.
-//   * Boards that already live at `switchboard/board.yaml` or `issues/board.yaml` keep working
-//     exactly as they are; they are found by the same walk and used where they are. Nothing moves
-//     by itself: `boardFolders()` is the one precedence order, and the one action that renames a
-//     folder is the user's own "Hide this board's folder" (backend `board_folder`, protocol 19.17).
+//   * Boards that already live at `.switchboard/board.yaml`, `switchboard/board.yaml` or
+//     `issues/board.yaml` keep working exactly as they are; they are found by the same walk and
+//     used where they are. Nothing moves by itself: `boardFolders()` is the one precedence order,
+//     and the one action that renames a folder is the user's own "Move this board to board/"
+//     (backend `board_folder`, protocol 19.17).
 //   * The registry of known projects is removable: every record carries why it became known and
-//     when. A "no, do not make a Switchboard here" answer is remembered too (`decline()`), so the
+//     when. A "no, do not make a Board here" answer is remembered too (`decline()`), so the
 //     same project is not asked about twice; an explicit `/init` clears it.
 //
 // **No git subprocess, ever.** The walk is `QDir`/`QFileInfo` only. Running `git` to answer "which
@@ -51,29 +51,25 @@ constexpr int kSchemaVersion = 1;
 // ----- where a board is kept ---------------------------------------------------------------------
 
 // The folders a board may be kept in, and the marker file that makes one a board.
-// `.switchboard/` is what Relay creates since 2026-09-19; `switchboard/` is what it created between
-// 2026-09-18 and then; `issues/` is the original spelling, including this repository's own.
+// `board/` is what Relay creates since 2026-09-21 (owner, card #1CXD); `.switchboard/` is what it
+// created between 2026-09-19 and then, `switchboard/` between 2026-09-18 and 2026-09-19, and
+// `issues/` is the original spelling, including this repository's own.
+inline constexpr const char *kNewBoardFolder = "board";
 inline constexpr const char *kHiddenBoardFolder = ".switchboard";
 inline constexpr const char *kBoardFolder = "switchboard";
 inline constexpr const char *kLegacyBoardFolder = "issues";
 inline constexpr const char *kBoardMarkerFile = "board.yaml";
 
-// The three above, in precedence order: `.switchboard`, `switchboard`, `issues`. **Reading is
-// tolerant and ordered**: every lookup walks this one list and the first folder that holds
+// The four above, in precedence order: `board`, `.switchboard`, `switchboard`, `issues`. **Reading
+// is tolerant and ordered**: every lookup walks this one list and the first folder that holds
 // `board.yaml` is the board. It mirrors `BOARD_FOLDERS` in backend/relay_core/board.py exactly, in
 // the same order, and tests/projects_test.cpp reads that file to keep the two from drifting.
 QStringList boardFolders();
 
-// The folder a *new* board goes in: `.switchboard` hidden, `switchboard` shown. Pure.
-QString newBoardFolder(bool hidden);
-
-// ----- the "Hidden Switchboard folder" option ---------------------------------------------------
-//
-// QSettings, default **on** (owner, 2026-09-19). It decides the folder a board is *created* in and
-// nothing else: it never moves a board that exists and never changes what is read.
-inline constexpr const char *kHiddenFolderSetting = "board/hidden_folder";
-bool hiddenBoardFolder();
-// `newBoardFolder(hiddenBoardFolder())`: what a board created right now would be called.
+// The folder a *new* board goes in: `board`, whatever a project already on disk is called. Pure.
+// There is no setting: the "Hidden Switchboard folder" toggle went with the decision of
+// 2026-09-21, and a board that already exists moves only through the explicit "Move this board to
+// board/" action (protocol 19.17).
 QString newBoardFolder();
 
 // ----- the default project for loose cards ------------------------------------------------------
@@ -88,8 +84,8 @@ QString defaultProject();
 // ----- why a project became known --------------------------------------------------------------
 //
 // A closed set: `remember()` refuses anything else, so the registry can be read back as "you
-// attached this because you opened its Switchboard" and never as a free-text note.
-inline constexpr const char *kReasonSwitchboard = "switchboard";   // the Switchboard was opened on it
+// attached this because you opened its Board" and never as a free-text note.
+inline constexpr const char *kReasonSwitchboard = "switchboard";   // the Board was opened on it
 inline constexpr const char *kReasonCardCommand = "card-command";  // `/card` was run in a pane there
 inline constexpr const char *kReasonCardPicker = "card-picker";    // a card was picked with `#`
 inline constexpr const char *kReasonExecuteCard = "execute-card";  // a card of it was executed
@@ -201,11 +197,11 @@ struct Board {
 // Which board a project's cards belong to. **Pure**: it stats nothing and reads no settings, so the
 // three facts it cannot know — the board folder the project already has, what Relay already recorded
 // about it, and the folder a new board would be created in — are passed in. `known` may be null;
-// `existingBoardDir` is what `boardDirOf()` returned; an empty `newFolder` means `kHiddenBoardFolder`.
+// `existingBoardDir` is what `boardDirOf()` returned; an empty `newFolder` means `kNewBoardFolder`.
 //
 //   * empty or relative `project`   -> None. A board never lives at a relative path.
 //   * `existingBoardDir` non-empty  -> InRepo, at exactly that folder. Wherever the board already
-//                                      is, hidden or in an older `switchboard/` or `issues/`, that
+//                                      is, or in an older `.switchboard/`, `switchboard/` or `issues/`, that
 //                                      is where the cards are; Relay does not move it.
 //   * otherwise                     -> Uninitialized at `<project>/<newFolder>`, with needsConsent.
 //                                      That is where a board *would* go. Nothing may be created
@@ -277,7 +273,7 @@ public:
     QList<Record> knownProjects() const;
     int count() const { return int(m_projects.size()); }
 
-    // "No, do not make a Switchboard here." Remembered so the same project is never asked twice.
+    // "No, do not make a Board here." Remembered so the same project is never asked twice.
     // Declining a known project forgets its record as well; the two lists never hold the same path.
     // An explicit `/init` (or any `remember()`) clears it — the user changed their mind.
     bool decline(const QString &path, qint64 now = 0, QString *error = nullptr);
@@ -301,7 +297,7 @@ QString stateDirectory();
 QString defaultPath();
 
 // The impure convenience over chooseBoard(): calls boardDirOf(), looks the project up in `known`
-// (may be null) and calls chooseBoard() with `newBoardFolder()`, the option's answer. A project the
+// (may be null) and calls chooseBoard() with `newBoardFolder()`, the folder a new board gets. A project the
 // user has already declined still comes back Uninitialized — the Board says where a board would go,
 // and the caller asks the registry whether it is allowed to raise the question again.
 Board boardFor(const QString &project, const Registry *known = nullptr);

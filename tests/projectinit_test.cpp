@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// "Initialize a project and create a Switchboard here?" (src/ProjectInit.h, protocol 19.12/19.13).
+// "Initialize a project and create a Board here?" (src/ProjectInit.h, protocol 19.12/19.13).
 //
 // The owner's rule of 2026-09-18 is that the board folder appears only after one yes -- and since
-// 2026-09-19 that folder is hidden, so the question names `<project>/.switchboard/` unless the
-// "Hidden Switchboard folder" option is off. Only five acts may ask, and
+// 2026-09-21 that folder is `board/`, whatever any setting says, so that is what the question
+// names (#1CXD). Only five acts may ask, and
 // that only five acts may ask. Both halves are rules, not pixels, so both are tested here with no
 // window and no worker: `decide()` is the whole table, and `questionFrom()` turns one
 // `project_probe_result` into the lines the pane draws.
@@ -112,8 +112,8 @@ private slots:
     void theseEventsStayOnTheDesktop();
 
 private:
-    // The folder the question names comes from the "Hidden Switchboard folder" option, so these
-    // cases read and write QSettings: they get their own store, never the developer's.
+    // The cases below read and write QSettings (the default project, the declines), so they get
+    // their own store, never the developer's.
     QTemporaryDir m_settings;
 };
 
@@ -171,7 +171,7 @@ void ProjectInitTests::aProjectWithNoBoardIsAskedAbout()
 }
 
 // ~/Downloads: no project, so nothing is offered and nothing is said. The owner's rule — no
-// switchboard folders all over the machine — starts here.
+// board folders all over the machine — starts here.
 void ProjectInitTests::nothingOutsideAProjectIsEverAsked()
 {
     Situation nowhere;
@@ -196,7 +196,7 @@ void ProjectInitTests::aProjectWithABoardIsAttachedNotAsked()
     }
     const Decision typed = decide(Trigger::InitCommand, ready);
     QCOMPARE(int(typed.outcome), int(Outcome::Attach));
-    QCOMPARE(typed.message, QStringLiteral("widgetworks already has a Switchboard."));
+    QCOMPARE(typed.message, QStringLiteral("widgetworks already has a Board."));
 }
 
 // A no is written to the registry and outlives the process: no trigger but `/init` asks again, in
@@ -268,24 +268,20 @@ void ProjectInitTests::aGuestIsNeverAskedAndNeitherIsASecondQuestion()
 
 void ProjectInitTests::theQuestionNamesTheFolderItWouldCreate()
 {
-    QCOMPARE(titleLine(), QStringLiteral("Initialize a project and create a Switchboard here?"));
-    // Hidden by default (owner, 2026-09-19), so that is what the question offers to create.
-    QCOMPARE(boardFolderFor(kProject), kProject + QStringLiteral("/.switchboard"));
-    QCOMPARE(boardFolderFor(kProject + QStringLiteral("/")), kProject + QStringLiteral("/.switchboard"));
+    QCOMPARE(titleLine(), QStringLiteral("Initialize a project and create a Board here?"));
+    // `board/` since the owner's decision of 2026-09-21 (#1CXD), and there is no setting that
+    // changes it: that is what the question offers to create, on every machine.
+    QCOMPARE(boardFolderFor(kProject), kProject + QStringLiteral("/board"));
+    QCOMPARE(boardFolderFor(kProject + QStringLiteral("/")), kProject + QStringLiteral("/board"));
     QCOMPARE(boardFolderFor(QString()), QString());
     // One folder, named, and the sentence says nothing else is written.
     const QString line = folderLineFor(kProject);
-    QVERIFY(line.contains(kProject + QStringLiteral("/.switchboard/")));
+    QVERIFY(line.contains(kProject + QStringLiteral("/board/")));
     QVERIFY(line.contains(QStringLiteral("nothing else")));
     QVERIFY(!line.contains(QStringLiteral("issues")));
-
-    // With the option off the question names the folder the user will actually get, rather than a
-    // hidden one it would then have to explain.
-    QSettings().setValue(QLatin1String(relay::projects::kHiddenFolderSetting), false);
-    QCOMPARE(boardFolderFor(kProject), kProject + QStringLiteral("/switchboard"));
-    QVERIFY(folderLineFor(kProject).contains(kProject + QStringLiteral("/switchboard/")));
-    QSettings().remove(QLatin1String(relay::projects::kHiddenFolderSetting));
-    QCOMPARE(boardFolderFor(kProject), kProject + QStringLiteral("/.switchboard"));
+    // It is the one folder `relay::projects::newBoardFolder()` names, not a second opinion.
+    QCOMPARE(boardFolderFor(kProject),
+             kProject + QLatin1Char('/') + relay::projects::newBoardFolder());
 }
 
 void ProjectInitTests::theProbeBecomesCheckboxesAndNotes()
@@ -293,7 +289,7 @@ void ProjectInitTests::theProbeBecomesCheckboxesAndNotes()
     const Question question = questionFrom(probeFixture());
     QVERIFY(question.isValid());
     QCOMPARE(question.project, kProject);
-    QCOMPARE(question.folder, kProject + QStringLiteral("/.switchboard"));
+    QCOMPARE(question.folder, kProject + QStringLiteral("/board"));
     QCOMPARE(question.items, 30);
 
     // One checkbox per tracker, in the probe's order, labelled with the probe's own summary.
@@ -327,7 +323,7 @@ void ProjectInitTests::anEmptyProbeIsAQuestionWithNoFindings()
     QVERIFY(question.imports.isEmpty());
     QVERIFY(question.notes.isEmpty());
     QCOMPARE(question.title, titleLine());
-    QCOMPARE(question.folder, kProject + QStringLiteral("/.switchboard"));
+    QCOMPARE(question.folder, kProject + QStringLiteral("/board"));
     QVERIFY(!questionFrom(QJsonObject{}).isValid());
 }
 
@@ -372,8 +368,8 @@ void ProjectInitTests::tickedBoxesBecomeImportKinds()
 void ProjectInitTests::theOneQuietLineAfterAYes()
 {
     QCOMPARE(createdLine(kProject, -1),
-             QStringLiteral("Switchboard created in /home/e/src/widgetworks/.switchboard/"));
-    QVERIFY(createdLine(kProject, 23).endsWith(QStringLiteral(".switchboard/ · 23 card(s) imported")));
+             QStringLiteral("Board created in /home/e/src/widgetworks/board/"));
+    QVERIFY(createdLine(kProject, 23).endsWith(QStringLiteral("board/ · 23 card(s) imported")));
     QVERIFY(createdLine(kProject, 0).endsWith(QStringLiteral("nothing left to import")));
     QCOMPARE(createdLine(QString(), 3), QString());
     // A no says what was remembered and how to undo it; "not now" says only how to come back.

@@ -128,7 +128,7 @@ QString statusTitle(const QString &status)
     return text;
 }
 
-// What a section means, in one clause, from the column table in docs/SWITCHBOARD-DESIGN.md
+// What a section means, in one clause, from the column table in docs/BOARD-DESIGN.md
 // section 3. The pane shows it wherever a section is named without its cards — the header's
 // tooltip and the hide checkboxes — because a header read all day is the one place a person
 // asks "what is this lane for?" and the list itself cannot answer.
@@ -1081,10 +1081,11 @@ bool Card::parked() const
 
 QString Card::folder() const
 {
-    // `.switchboard/changes/2026-09-17-x.md`, or `.switchboard/.private/changes/…` for a private
-    // card. Every spelling of the board folder is stripped — `projects::boardFolders()` is the one
-    // list — and so is `.private/`, which is why a leading dotted part goes too. A board filed
-    // before 2026-09-19 keeps its folder's older name, `switchboard/` or `issues/` (#JN7X).
+    // `board/changes/2026-09-17-x.md`, or `board/.private/changes/…` for a private card. Every
+    // spelling of the board folder is stripped — `projects::boardFolders()` is the one list — and
+    // so is `.private/`, which is why a leading dotted part goes too. A board filed before
+    // 2026-09-21 keeps its folder's older name, `.switchboard/`, `switchboard/` or `issues/`
+    // (#JN7X).
     const QStringList folders = relay::projects::boardFolders();
     QStringList parts = path.split(QLatin1Char('/'), Qt::SkipEmptyParts);
     while (!parts.isEmpty()

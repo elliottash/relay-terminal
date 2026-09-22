@@ -542,7 +542,7 @@ SectionEditor::SectionEditor(QWidget *parent) : QWidget(parent)
     m_folderButton->setObjectName(QStringLiteral("boardFolderButton"));
     connect(m_folderButton, &QPushButton::clicked, this, [this] {
         if (onFolder)
-            onFolder(m_folder != QLatin1String(".switchboard"));   // shown → hide it, hidden → show it
+            onFolder();   // always the same move: to `board/`
     });
     folderCells->addWidget(m_folderButton);
     m_folderRow->hide();
@@ -597,23 +597,21 @@ void SectionEditor::refresh(const Model &model)
 void SectionEditor::setFolder(const QString &folderName)
 {
     m_folder = folderName;
-    const bool hidden = m_folder == QLatin1String(".switchboard");
-    const bool shown = m_folder == QLatin1String("switchboard");
-    if (!hidden && !shown) {
-        // `issues/`, or a folder the worker has not named yet: nothing to offer.
+    // Offered on the two older spellings and on nothing else: `board/` is already where the move
+    // would take it, and `issues/` — this repository's own, and every other project that names it
+    // in its scripts and hooks — is never moved (the worker refuses it too).
+    const bool movable = m_folder == QLatin1String(".switchboard") || m_folder == QLatin1String("switchboard");
+    if (!movable) {
+        // `board/`, `issues/`, or a folder the worker has not named yet: nothing to offer.
         m_folderRow->hide();
         return;
     }
-    m_folderLabel->setText(hidden
-        ? QStringLiteral("This board is kept in %1/, hidden from directory listings and from ripgrep-based agents.").arg(m_folder)
-        : QStringLiteral("This board is kept in %1/, in plain view in the project's root listing.").arg(m_folder));
-    m_folderButton->setText(hidden ? QStringLiteral("Show this board's folder")
-                                   : QStringLiteral("Hide this board's folder"));
-    m_folderButton->setToolTip(hidden
-        ? QStringLiteral("Rename .switchboard/ to switchboard/ — git mv in a checkout, a plain rename otherwise; "
-                         "refused while a turn runs or a card has uncommitted text")
-        : QStringLiteral("Rename switchboard/ to .switchboard/ — git mv in a checkout, a plain rename otherwise; "
-                         "refused while a turn runs or a card has uncommitted text"));
+    m_folderLabel->setText(
+        QStringLiteral("This board is kept in %1/, the folder Relay used before 2026-09-21.").arg(m_folder));
+    m_folderButton->setText(QStringLiteral("Move this board to board/"));
+    m_folderButton->setToolTip(
+        QStringLiteral("Rename %1/ to board/ — git mv in a checkout, a plain rename otherwise; "
+                       "refused while a turn runs or a card has uncommitted text").arg(m_folder));
     m_folderRow->show();
 }
 

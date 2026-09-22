@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
-// The section editor behind the gear at the end of the Switchboard's section checkboxes
+// The section editor behind the gear at the end of the Board's section checkboxes
 // (owner, 2026-09-19: "put a gear after the list of switchboard sections, which allows you to
 // add, remove, merge, or rename sections"; then 2026-09-19: "we do need sorting of sections
 // though. enable those to be dragged and dropped, with up and down buttons for moving them, in
@@ -175,14 +175,15 @@ public:
     std::function<void(const QJsonObject &)> onSave;
     std::function<void()> onClose;
 
-    // The board's folder, and the one action that moves it (protocol 19.17, card #916B): "Hide this
-    // board's folder" on a `switchboard/` board, "Show this board's folder" on a `.switchboard/`
-    // one. `setFolder` takes the folder's name as the worker reported it; an `issues/` board — the
-    // original spelling, which whole repositories name in their own scripts and hooks — gets no
-    // button, because the worker would refuse the move anyway. `onFolder(hidden)` is the click.
+    // The board's folder, and the one action that moves it (protocol 19.17, cards #916B and
+    // #1CXD): **"Move this board to `board/`"**, offered on a `.switchboard/` or a `switchboard/`
+    // board and on neither a `board/` one, which is already there, nor an `issues/` one — the
+    // original spelling, which whole repositories name in their own scripts and hooks, and which
+    // the worker would refuse to move anyway. `setFolder` takes the folder's name as the worker
+    // reported it; `onFolder()` is the click, and it sends `board_folder {folder: "board"}`.
     void setFolder(const QString &folderName);
     QString folder() const { return m_folder; }
-    std::function<void(bool hidden)> onFolder;
+    std::function<void()> onFolder;
 
 protected:
     // Esc leaves the sections as they are, which is what Cancel's tooltip promises and what Esc

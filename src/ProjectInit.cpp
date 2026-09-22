@@ -34,8 +34,8 @@ const QLatin1String kCards("cards");
 const QLatin1String kConvertible("convertible");
 const QLatin1String kItems("items");
 
-// The folder a yes would create: `.switchboard`, or `switchboard` when the "Hidden Switchboard
-// folder" option is off. Read here rather than spelled out, so the question names the folder the
+// The folder a yes would create: `board`, since the owner's decision of 2026-09-21 (#1CXD). Read
+// from `projects::newBoardFolder()` rather than spelled out, so the question names the folder the
 // user will actually get.
 QString folderName() { return relay::projects::newBoardFolder(); }
 
@@ -96,7 +96,7 @@ Decision decide(Trigger trigger, const Situation &situation)
     bool declined = situation.declined;
     if (decision.project.isEmpty()) {
         // `/init` is the one trigger that works with no candidate at all: it offers to treat the
-        // pane's own directory as the project, which is how a brand-new folder gets a Switchboard.
+        // pane's own directory as the project, which is how a brand-new folder gets a Board.
         // Nothing else ever asks outside a project — ~/Downloads must stay silent.
         if (trigger != Trigger::InitCommand) return decision;
         if (situation.cwd.isEmpty()) {
@@ -117,7 +117,7 @@ Decision decide(Trigger trigger, const Situation &situation)
         // silence exactly as they did before this question existed.
         decision.outcome = Outcome::Attach;
         if (trigger == Trigger::InitCommand)
-            decision.message = QStringLiteral("%1 already has a Switchboard.")
+            decision.message = QStringLiteral("%1 already has a Board.")
                                    .arg(relay::projects::nameFor(decision.project));
         return decision;
     }
@@ -127,7 +127,7 @@ Decision decide(Trigger trigger, const Situation &situation)
         decision.clearsDecline = true;
         return decision;
     }
-    // "No, do not make a Switchboard here", remembered on disk: nothing asks again, in any tab,
+    // "No, do not make a Board here", remembered on disk: nothing asks again, in any tab,
     // after any restart. Only `/init` above gets past this.
     if (declined) return decision;
     // "Not now" is not a no. It stops the quiet trigger — the agent prompt — for the rest of this
@@ -139,7 +139,7 @@ Decision decide(Trigger trigger, const Situation &situation)
 
 // ----- what the question shows ---------------------------------------------------------------------
 
-QString titleLine() { return QStringLiteral("Initialize a project and create a Switchboard here?"); }
+QString titleLine() { return QStringLiteral("Initialize a project and create a Board here?"); }
 
 QString boardFolderFor(const QString &project)
 {
@@ -181,7 +181,7 @@ Question questionFrom(const QJsonObject &probeResult)
     }
 
     // An older `issues/` tree that is not a board yet. It is *not* an import: converting it happens
-    // in place and is its own operation (docs/SWITCHBOARD-FORMAT.md section 6), so the question says
+    // in place and is its own operation (docs/BOARD-FORMAT.md section 6), so the question says
     // it is there and that a yes leaves it alone.
     const QJsonObject board = probeResult.value(kBoard).toObject();
     if (trimmedString(board.value(kKind)) == QStringLiteral("pre-board")) {
@@ -261,7 +261,7 @@ QString createdLine(const QString &project, int imported)
 {
     const QString folder = boardFolderFor(project);
     if (folder.isEmpty()) return {};
-    QString line = QStringLiteral("Switchboard created in %1/").arg(folder);
+    QString line = QStringLiteral("Board created in %1/").arg(folder);
     if (imported > 0) line += QStringLiteral(" · %1 card(s) imported").arg(imported);
     else if (imported == 0) line += QStringLiteral(" · nothing left to import");
     return line;
@@ -269,13 +269,13 @@ QString createdLine(const QString &project, int imported)
 
 QString declinedLine(const QString &project)
 {
-    return QStringLiteral("No Switchboard in %1. Relay will not ask again; /init creates one.")
+    return QStringLiteral("No Board in %1. Relay will not ask again; /init creates one.")
         .arg(relay::projects::nameFor(project));
 }
 
 QString notNowLine(const QString &project)
 {
-    return QStringLiteral("Not now. /init creates a Switchboard in %1 when you want one.")
+    return QStringLiteral("Not now. /init creates a Board in %1 when you want one.")
         .arg(relay::projects::nameFor(project));
 }
 

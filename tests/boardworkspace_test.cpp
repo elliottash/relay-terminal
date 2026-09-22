@@ -14,8 +14,9 @@
 namespace {
 
 // A project root: `<dir>/<folder>/board.yaml`, which is the marker the rule looks for. `folder`
-// is `switchboard` on a board made from 2026-09-18 on and `issues` on one filed before that;
-// both are found, and neither is ever created by Relay behind the user's back.
+// is `board` on a board made from 2026-09-21 on (#1CXD) and `.switchboard`, `switchboard` or
+// `issues` on an older one; all four are found, and none is ever created by Relay behind the
+// user's back.
 void makeBoard(const QString &root, const QString &folder = QStringLiteral("issues"))
 {
     QVERIFY(QDir().mkpath(root + '/' + folder));
@@ -183,17 +184,17 @@ void BoardWorkspaceTests::theProcessesOwnDirectoryIsNeverConsulted()
     QVERIFY2(relative.isEmpty(), qPrintable(relative));
 }
 
-// The two spellings of the board folder, and the order they are tried in (protocol 19.1). The
-// nearest ancestor wins whatever its folder is called — a `switchboard/` project nested inside an
-// `issues/` one is its own board and vice versa — and a directory holding both is its
-// `switchboard/`, which is the folder Relay creates today.
+// Every spelling of the board folder, and the order they are tried in (protocol 19.1). The
+// nearest ancestor wins whatever its folder is called — a `board/` project nested inside an
+// `issues/` one is its own board and vice versa — and a directory holding several is its
+// `board/`, which is the folder Relay creates today.
 void BoardWorkspaceTests::eitherFolderNameIsABoardAndTheNearestOneWins()
 {
     QTemporaryDir tmp;
     QVERIFY(tmp.isValid());
-    // A project whose board is the new `switchboard/`.
+    // A project whose board is the new `board/`.
     const QString fresh = tmp.path() + QStringLiteral("/fresh");
-    makeBoard(fresh, QStringLiteral("switchboard"));
+    makeBoard(fresh, QStringLiteral("board"));
     QVERIFY(QDir().mkpath(fresh + QStringLiteral("/src/deep")));
     QCOMPARE(relay::boardRootFor({fresh + QStringLiteral("/src/deep")}), fresh);
 
@@ -203,26 +204,30 @@ void BoardWorkspaceTests::eitherFolderNameIsABoardAndTheNearestOneWins()
     QVERIFY(QDir().mkpath(old + QStringLiteral("/src")));
     QCOMPARE(relay::boardRootFor({old + QStringLiteral("/src")}), old);
 
-    // And the other way round: a `switchboard/` project inside an `issues/` one.
+    // And the other way round: a `board/` project inside an `issues/` one.
     const QString outer = tmp.path() + QStringLiteral("/outer");
     makeBoard(outer, QStringLiteral("issues"));
     const QString inner = outer + QStringLiteral("/tools/inner");
-    makeBoard(inner, QStringLiteral("switchboard"));
+    makeBoard(inner, QStringLiteral("board"));
     QVERIFY(QDir().mkpath(inner + QStringLiteral("/src")));
     QCOMPARE(relay::boardRootFor({inner + QStringLiteral("/src")}), inner);
     // A directory between the two belongs to the outer, older board.
     QCOMPARE(relay::boardRootFor({outer + QStringLiteral("/tools")}), outer);
 
-    // One directory with both folders is still one board root, and it is the `switchboard/` one
-    // (projects::boardDirOf decides, so the GUI and the registry cannot disagree).
+    // One directory with several of the folders is still one board root, and it is the `board/`
+    // one (projects::boardDirOf decides, so the GUI and the registry cannot disagree).
     const QString both = tmp.path() + QStringLiteral("/both");
     makeBoard(both, QStringLiteral("issues"));
     makeBoard(both, QStringLiteral("switchboard"));
+    makeBoard(both, QStringLiteral(".switchboard"));
+    QCOMPARE(relay::projects::boardDirOf(both), both + QStringLiteral("/.switchboard"));
+    makeBoard(both, QStringLiteral("board"));
     QCOMPARE(relay::boardRootFor({both}), both);
-    QCOMPARE(relay::projects::boardDirOf(both), both + QStringLiteral("/switchboard"));
+    QCOMPARE(relay::projects::boardDirOf(both), both + QStringLiteral("/board"));
 
     // A folder with no `board.yaml` in it is not a board: the marker is the switch, not the name.
     const QString named = tmp.path() + QStringLiteral("/named");
+    QVERIFY(QDir().mkpath(named + QStringLiteral("/board")));
     QVERIFY(QDir().mkpath(named + QStringLiteral("/switchboard")));
     QVERIFY(QDir().mkpath(named + QStringLiteral("/issues")));
     QVERIFY(relay::boardRootFor({named}).isEmpty());

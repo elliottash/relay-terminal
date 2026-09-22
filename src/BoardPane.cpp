@@ -4786,11 +4786,12 @@ void BoardView::buildChrome(QVBoxLayout *layout)
         send(request);
         closeSections();
     };
-    // "Hide this board's folder" / "Show this board's folder" (protocol 19.17, #916B): the one
-    // action that renames an existing board's folder. The worker answers `board_folder_changed`
-    // (handled in handleEvent) or a refusal, which the notice line shows like any other error.
-    m_sections->onFolder = [this](bool hidden) {
-        send({{QStringLiteral("type"), QStringLiteral("board_folder")}, {QStringLiteral("hidden"), hidden}});
+    // "Move this board to board/" (protocol 19.17, #916B and #1CXD): the one action that renames
+    // an existing board's folder. The worker answers `board_folder_changed` (handled in
+    // handleEvent) or a refusal, which the notice line shows like any other error.
+    m_sections->onFolder = [this] {
+        send({{QStringLiteral("type"), QStringLiteral("board_folder")},
+              {QStringLiteral("folder"), QStringLiteral("board")}});
         closeSections();
     };
     layout->addWidget(m_sections, 1);
@@ -6197,8 +6198,8 @@ constexpr int kMaxWatchedFiles = 32;
 // rows that actually changed.
 void BoardView::watchIssues()
 {
-    // Which folder that is, rather than an assumption: `switchboard/` on a board made from
-    // 2026-09-18 on and `issues/` on an older one (protocol 19.12). The worker says so on the
+    // Which folder that is, rather than an assumption: `board/` on a board made from 2026-09-21
+    // on, and an older spelling on an older one (protocol 19.12). The worker says so on the
     // `board` event (`m_root`); before the first one, ask the filesystem the same way it does.
     const QString root = m_root.isEmpty() ? projects::boardDirOf(m_workspace) : m_root;
     if (root.isEmpty() || !QFileInfo::exists(root))

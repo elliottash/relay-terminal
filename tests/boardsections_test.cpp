@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The section editor behind the gear at the end of the Switchboard's section checkboxes: the five
+// The section editor behind the gear at the end of the Board's section checkboxes: the five
 // things it offers (add, remove, merge, rename, move), what it refuses, and the one
 // `board_sections` message it produces. `SectionPlan` holds no widgets, so none of this needs the
 // pane.
@@ -98,7 +98,7 @@ private slots:
     void aNewSectionNeedsANameAndStatusesNobodyElseCollects();
     void movingASectionRewritesColumnsAndNeverACard();
     void theRowsMoveWithTheButtonsAndTheDropLandsWhereItWasDropped();
-    void theFolderRowOffersToHideOrShowTheBoardsFolder();
+    void theFolderRowOffersToMoveTheBoardToBoard();
     void theMessageWritesOnlyWhatDiffersFromTheDefault();
     void anUntouchedPlanHasNothingToSay();
     void theGearSitsAfterTheSectionBoxesAndOpensThePage();
@@ -545,9 +545,10 @@ void BoardSectionsTests::aRenameReachesTheCheckboxAsWellAsTheHeader()
     QVERIFY(view.findChild<QToolButton *>(QStringLiteral("boardSectionGear")));
 }
 
-// The board's folder (protocol 19.17, card #916B): the gear's page says where the board is kept and
-// offers the one rename — hide a shown board, show a hidden one — and nothing on an `issues/` board.
-void BoardSectionsTests::theFolderRowOffersToHideOrShowTheBoardsFolder()
+// The board's folder (protocol 19.17, cards #916B and #1CXD): the gear's page says where the board
+// is kept and offers the one move — to `board/` — on the two older spellings, and nothing at all on
+// a `board/` board, which is already there, or an `issues/` one, which is never moved.
+void BoardSectionsTests::theFolderRowOffersToMoveTheBoardToBoard()
 {
     relay::board::SectionEditor editor;
     editor.setModel(Model());
@@ -556,19 +557,26 @@ void BoardSectionsTests::theFolderRowOffersToHideOrShowTheBoardsFolder()
     QVERIFY(row && button);
     QVERIFY(!row->isVisibleTo(&editor));                       // nothing named yet: nothing offered
 
-    QList<bool> asked;
-    editor.onFolder = [&asked](bool hidden) { asked << hidden; };
+    int asked = 0;
+    editor.onFolder = [&asked] { ++asked; };
 
     editor.setFolder(QStringLiteral("switchboard"));
     QVERIFY(row->isVisibleTo(&editor));
-    QCOMPARE(button->text(), QStringLiteral("Hide this board's folder"));
+    QCOMPARE(button->text(), QStringLiteral("Move this board to board/"));
+    QVERIFY(button->toolTip().contains(QStringLiteral("Rename switchboard/ to board/")));
     button->click();
-    QCOMPARE(asked, QList<bool>{true});                        // a shown board: hide it
+    QCOMPARE(asked, 1);
 
     editor.setFolder(QStringLiteral(".switchboard"));
-    QCOMPARE(button->text(), QStringLiteral("Show this board's folder"));
+    QVERIFY(row->isVisibleTo(&editor));
+    QCOMPARE(button->text(), QStringLiteral("Move this board to board/"));   // the same move
+    QVERIFY(button->toolTip().contains(QStringLiteral("Rename .switchboard/ to board/")));
     button->click();
-    QCOMPARE(asked, (QList<bool>{true, false}));               // a hidden board: show it
+    QCOMPARE(asked, 2);
+
+    editor.setFolder(QStringLiteral("board"));                 // already there: nothing to offer
+    QVERIFY(!row->isVisibleTo(&editor));
+    QCOMPARE(editor.folder(), QStringLiteral("board"));
 
     editor.setFolder(QStringLiteral("issues"));                // the original spelling: never moved
     QVERIFY(!row->isVisibleTo(&editor));
