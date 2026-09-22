@@ -7286,6 +7286,104 @@ Row
   hands the file back with `sudo -n chown` because perf refuses a `perf.data` that is neither
   root's nor the caller's.
 
+### 31.10 Try it: `try_run`, `try_stop`, `try_answer`
+
+Card `#JNYN`, step 3 of `#YZ8G`, and section B of Codex's skeptical review of the QA plan
+(`docs/research/qa-across-fields/f-codex-skeptical-review.md`): *"One Try it action launches the
+pinned build and disposable fixture. If preparation fails, report that before requesting review"*;
+*"Ask the person to perform only the task whose usability or interpretation needs observation"*;
+*"Give the problem without the answer. Observe whether they find it; reveal the expected result
+afterwards."*
+
+Owner, 2026-09-21: an app card is checked in **three steps** — the tests run, an AI simulator
+verifies the change, and then the person is put into a simulated environment that exercises the
+issue. Try it is the third. Step 2 is Verify (`#WC3E`), whose record names the environment it
+drove — a `staged:` line pointing at `docs/qa_evidence/<date>-verify-<ID>/` with a rerunnable
+`stage.sh`, beside a `simulation:` line. When that exists, Try it **reuses** it: run the script,
+open the thing, write the section, and do not replay the mechanical pass. Only when there is none
+does Try it stage and play it itself.
+
+Backend: `backend/relay_core/tryit_protocol.py` (`TryItCommands`) over
+`backend/relay_core/board_tryit_brief.md` (the turn's whole instruction, versioned beside
+`board_policy.md`); wired in `board_protocol.py` (`TRYIT_TYPES`, `BoardCommands._tryit`, and one
+line in `observe`). GUI: `src/BoardPane.cpp` — the **Try it** action on the card's row, the
+`## Try it` strip over the body, and `BoardView::handleTryItEvent`. Agent tool: `board_try`.
+Tests: `tests/test_tryit_protocol.py`.
+
+```
+{"type": "try_run",    "card": "K7Q2"}
+{"type": "try_stop"}
+{"type": "try_answer", "card": "K7Q2", "answer": "what the person saw, in their words"}
+```
+
+`try_run` starts **one bounded agent turn** on the Switchboard worker, in `board_cleanup`'s shape
+(19.9) and with its rules: its own conversation (`turns.reset()`), one run at a time, and refused
+while a cleanup or another turn holds the worker. It makes
+`docs/qa_evidence/<date>-tryit-<ID>/` first, so the brief can name it, and the turn puts the
+staging script, the captures, the staging notes and the sealed `expected.md` in it.
+
+```
+{"event":"tryit", "card_id", "state":"started"|"progress"|"finished"|"stopped"|"error"|"answered",
+   "run_id"?, "out"?, "line"?, "message"?, "reusing"?, "staged"?, "section_written"?,
+   "staging_failed"?, "expected_revealed"?, "human_qa"?, "id"?}
+```
+
+One event type for all six states, as `profile` does. `started` says where the evidence goes and
+whether the run is `reusing` what the verifying session `staged`. `progress` carries one `line`
+for the board's notice area. The turn's **own** events (`delta`, `tool_started`, `status`, …) are
+tagged `tryit: true` with the `run_id` and the `card_id` so the pane draws them on the board and
+never in the open card's thread — the person reads the section the run leaves behind, not the
+model's commentary while it works.
+
+**What the turn writes, and what it must not.** `## Try it` is three things and a pointer: one
+line saying how to open the staged thing, one short task in plain words, one question whose answer
+is a judgement, and then `Expected: <evidence dir>/expected.md (sealed until you answer)`. **The
+expected result is never on the card.** The worked example this generalises
+(`docs/qa_evidence/2026-09-20-switchboard-tooling-hub/scenario/`) made the opposite mistake in its
+scenario 2 — it named the flaky test and then asked whether the reviewer could find it, which
+measures following instructions.
+
+**A staging failure is not a review request.** A turn that could not stage writes one
+`board_comment` of kind `note` beginning `Try it could not be staged:` and **no** `## Try it`
+section at all; `finished` then carries `staging_failed: true` and that sentence, and the pane
+says so in amber.
+
+`try_answer` is the person's turn, and does three things in order:
+
+1. their words on the thread, as a `decision` entry that quotes them — policy rule 4's shape. There
+   is no `verdict` entry kind (`relay_core.board.ENTRY_KINDS`), and a judgement the user makes is
+   what `decision` is for; the entry's first line reads `Try it · verdict on #ID`;
+2. **the seal broken**: `expected.md` is read from the directory the section names and appended
+   under `## Try it` as `Expected: …`. Once — a second answer refreshes the summary and leaves the
+   section alone, and the file name is what tells the pointer line from the revealed text;
+3. `## Human QA`, **generated** from `## Try it` and the answer, in the shape
+   `docs/SWITCHBOARD-FORMAT.md` 2.8 fixes — a numbered question with an indented `Answer:` line
+   under it, then the expected result and where the evidence is. That is the only answered form
+   `board_tools.unanswered_human_qa` recognises, so the close gate and Try it interlock by
+   construction: the section is written by `try_answer` and by nothing else, so a card is never
+   held closed by a question nobody was asked, and it reads as answered the moment one is. Nothing
+   is typed twice, which is what the section's shape (open line, task, question) exists for.
+
+**`board_try {card}`** is the same brief for a terminal pane's agent, so `/deliver`'s landing step
+can offer it. It hands back `tryit_prompt`'s text rather than starting a turn elsewhere: a pane's
+worker and the Switchboard's worker are different processes with the board between them, and the
+calling agent already has a shell, a display and a turn — it *is* the machine. It appends a
+`progress` entry and is refused during a cleanup, exactly as `board_claim` is and for the same
+reason.
+
+**Notes and deviations.**
+
+- **From needs-verification on.** The button is on the row for `needs-verification`, the QA lanes,
+  `needs-review` and `done`: before that there is nothing built to open, and a card in Done is
+  exactly the one somebody may want to look at again.
+- **The strip, not the body.** The card body is one Markdown document rendered in one go, so the
+  button that opens the staged thing and the one-line answer box are a strip above it, where the
+  `## Tests` strip is. The answer box is **not** the card's reply box: an answer is a verdict, not
+  a message to the agent, and sending it there would start a turn.
+- **The open line is opened by what it is**: a command runs in a terminal pane beside the board
+  (`Pane::queueCommand`, which waits for that pane's own prompt), a `relay://card/<ID>` opens that
+  card, and a path goes to the opener the card's links already use.
+
 ## 32. Signals: the faults the machine tracks, opens and closes (v4.2, 2026-09-20)
 
 Card `#AQ6X`, decisions 1–12; `docs/SIGNALS-RESEARCH.md` R1–R13 is the reasoning and every

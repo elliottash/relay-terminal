@@ -59,7 +59,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import board as B
-from .board_tools import BoardToolError, card_brief, normalize_id, _section_text
+from .board_tools import BoardToolError, card_brief, normalize_id, section_text
 
 #: The requests this class answers.  `board_protocol.TYPES` includes them and delegates here.
 TYPES = frozenset({"try_run", "try_stop", "try_answer"})
@@ -313,7 +313,7 @@ class TryItCommands:
         try:
             card = self.tools().board.card_by_id(run.card)
             if card is not None:
-                section = _section_text(card.body, SECTION).strip()
+                section = section_text(card.body, SECTION).strip()
                 failed = self._failed_note(run.card)
         except (B.BoardError, OSError, TryItError):         # pragma: no cover - unreadable tree
             pass
@@ -356,7 +356,7 @@ class TryItCommands:
         card_obj = tools.board.card_by_id(card_id)
         if card_obj is None:
             raise TryItError(f"There is no card #{card_id} on this board.")
-        section = _section_text(card_obj.body, SECTION).strip()
+        section = section_text(card_obj.body, SECTION).strip()
         if not section:
             raise TryItError(f"#{card_id} has no `## {SECTION}` section to answer: press Try it "
                              "first.")
@@ -377,7 +377,7 @@ class TryItCommands:
 
         # 3. `## Human QA`, generated from the section and the answer.
         card_obj = tools.board.card_by_id(card_id)
-        human = human_qa(card_id, parse_section(_section_text(card_obj.body, SECTION).strip()),
+        human = human_qa(card_id, parse_section(section_text(card_obj.body, SECTION).strip()),
                          text, expected)
         _checked(tools.run("board_update_card",
                            {"id": card_id, "base_hash": B.file_hash(card_obj.path),
@@ -527,22 +527,32 @@ def _plain(text: str) -> str:
 def human_qa(card_id: str, parsed: dict, answer: str, expected: str) -> str:
     """`## Human QA`, generated from `## Try it` and the answer — never typed twice.
 
-    Four things, in the order a reader wants them: what was asked, what the person said, what
-    was expected, and where the evidence is.  It is regenerated from the same two inputs every
-    time an answer arrives, so a second answer refreshes it rather than appending a second copy.
+    In the form `docs/SWITCHBOARD-FORMAT.md` 2.8 fixes, so the two mechanisms interlock: the
+    question is a **numbered line** and its answer is an **indented line beginning `Answer:`**,
+    which is the only answered shape `board_tools.unanswered_human_qa` recognises.  A Try it
+    section with no answer yet leaves no `## Human QA` at all — this is written by `try_answer`
+    and by nothing else — so the close gate is never held up by a question nobody was asked.
+
+    Regenerated whole on every answer, so a second answer refreshes it rather than appending a
+    second copy.
     """
-    lines = [f"Generated from `## {SECTION}` and the answer on the thread — do not type into "
-             "this section; press Try it again, or answer again, and it is rewritten."]
+    question = parsed.get("question") or "What did you make of it?"
+    lines = [f"1. {question}",
+             f"   Answer: {answer}"]
+    if expected:
+        lines += ["", f"   Expected: {expected}"]
+    where: list[str] = []
     if parsed.get("open"):
-        lines += ["", f"**Opened with** `{parsed['open']}`"]
-    if parsed.get("task"):
-        lines += ["", f"**The task** {parsed['task'].splitlines()[0]}"]
-    lines += ["", f"**The question** {parsed.get('question') or '—'}",
-              "", f"**The answer** {answer}"]
-    lines += ["", f"**Expected** {expected}" if expected else "**Expected** — (nothing sealed)"]
+        where.append(f"opened with `{parsed['open']}`")
     if parsed.get("expected_path"):
-        directory = str(Path(parsed["expected_path"]).parent)
-        lines += ["", f"**Evidence** `{directory}`"]
+        where.append(f"evidence in `{Path(parsed['expected_path']).parent}`")
+    if where:
+        lines += ["", "Generated from `## Try it` and the answer on the thread ("
+                  + ", ".join(where) + "). Press Try it again, or answer again, and it is "
+                  "rewritten."]
+    else:
+        lines += ["", "Generated from `## Try it` and the answer on the thread. Press Try it "
+                  "again, or answer again, and it is rewritten."]
     return "\n".join(lines) + "\n"
 
 
@@ -559,9 +569,10 @@ def verify_staging(repo, card_id: str, body: str = "") -> dict | None:
 
     Two ways of finding it, in this order, because the record is the authority and the glob is
     only the convention: the card's own `staged:` line — written by Verify beside its
-    `simulation:` line — and then `docs/qa_evidence/<date>-verify-<ID>/`, newest date last.  A
-    directory that is not there is not a staging, and a directory without a `stage.sh` is
-    reported with an empty `stage` so the brief's step 2 can say why it fell through to step 3.
+    `simulation:` line (docs/SWITCHBOARD-FORMAT.md 2.8) — and then
+    `docs/qa_evidence/<date>-verify-<ID>/`, newest date last.  A directory that is not there is
+    not a staging, and a directory without a `stage.sh` is reported with an empty `stage` so the
+    brief's step 2 can say why it fell through to step 3.
     """
     root = Path(repo)
     candidates: list[Path] = []

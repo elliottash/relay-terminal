@@ -311,12 +311,12 @@ class AnswerTests(TryItTest):
 
         # 2. the seal, broken under `## Try it` and only there
         body = self.board.card_by_id(self.card).body
-        section = T._section_text(body, "Try it")
+        section = T.section_text(body, "Try it")
         self.assertIn("Expected: The gate refuses the move", section)
         self.assertIn(expected, section)          # the path is still named
 
         # 3. `## Human QA`, built from the section and the answer
-        human = T._section_text(body, "Human QA")
+        human = T.section_text(body, "Human QA")
         self.assertIn("did it stop you", human.lower())
         self.assertIn("It stopped me", human)
         self.assertIn("The gate refuses the move", human)
@@ -328,11 +328,11 @@ class AnswerTests(TryItTest):
         self.answer()
         self.answer("Second time: it was obvious.")
         body = self.board.card_by_id(self.card).body
-        section = T._section_text(body, "Try it")
+        section = T.section_text(body, "Try it")
         self.assertEqual(section.count("Expected: The gate refuses"), 1)
-        human = T._section_text(body, "Human QA")
+        human = T.section_text(body, "Human QA")
         self.assertIn("Second time: it was obvious.", human)
-        self.assertEqual(human.count("**The answer**"), 1)
+        self.assertEqual(human.count("Answer:"), 1)
 
     def test_an_answer_without_a_try_it_section_is_refused(self):
         refused = self.tryit_events(self.answer())[0]
@@ -351,9 +351,9 @@ class AnswerTests(TryItTest):
         answered = self.tryit_events(self.answer("No."))[-1]
         self.assertEqual(answered["state"], "answered")
         self.assertFalse(answered["expected_revealed"])
-        human = T._section_text(self.board.card_by_id(self.card).body, "Human QA")
-        self.assertIn("nothing sealed", human)
-        self.assertIn("No.", human)
+        human = T.section_text(self.board.card_by_id(self.card).body, "Human QA")
+        self.assertNotIn("Expected:", human)
+        self.assertIn("Answer: No.", human)
 
 
 # ------------------------------------------------------------------ reading the section
