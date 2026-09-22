@@ -33,7 +33,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     env:
-      CCACHE_DIR: ${{ runner.temp }}/relay-ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_COMPILERCHECK: content
     steps:
@@ -63,6 +62,8 @@ jobs:
       - name: Configure compiler cache
         id: compiler-key
         run: |
+          export CCACHE_DIR="$RUNNER_TEMP/relay-ccache"
+          echo "CCACHE_DIR=$CCACHE_DIR" >> "$GITHUB_ENV"
           if ! command -v ccache >/dev/null; then brew install ccache; fi
           ccache --set-config=max_size=400M
           ccache --set-config=compression=true
