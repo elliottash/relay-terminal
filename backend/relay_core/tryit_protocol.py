@@ -53,6 +53,9 @@ from __future__ import annotations
 import datetime
 import os
 import re
+import shlex
+import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -76,7 +79,8 @@ EVIDENCE_ROOT = "docs/qa_evidence"
 #: staging and playing a second one.  The record's own `staged:` line wins; this glob is the
 #: convention to fall back on (`docs/qa_evidence/<date>-verify-<ID>/stage.sh`, card #WC3E).
 VERIFY_DIR_GLOB = "*-verify-{card}"
-STAGE_SCRIPT = "stage.sh"
+WINDOWS = os.name == "nt"
+STAGE_SCRIPT = "stage.ps1" if WINDOWS else "stage.sh"
 STAGING_NOTES = "staging-notes.md"
 #: The two lines the verification record carries, read out of the card body wherever they sit:
 #: `staged: docs/qa_evidence/2026-09-21-verify-7BM4/` and `simulation: <what the AI pass drove>`.
@@ -510,6 +514,8 @@ def _open_line(line: str) -> tuple[str, str] | None:
         return None
     if candidate.startswith("relay://"):
         return candidate, "link"
+    if re.match(r"^[A-Za-z]:[\\/]", candidate) or candidate.startswith("\\\\"):
+        return candidate, "path"
     if re.fullmatch(r"[\w./~\-]+", candidate) and ("/" in candidate or candidate.endswith(".sh")):
         return candidate, "path"
     if " " in candidate or candidate.endswith(".sh"):
@@ -617,7 +623,7 @@ def tryit_prompt(tools, card_id: str, out: Path) -> str:
         evidence = str(Path(out).relative_to(repo))
     except ValueError:                                      # pragma: no cover - outside the repo
         evidence = str(out)
-    binary = repo / "build" / "relay"
+    binary = _app_binary(repo)
     staged = verify_staging(repo, card_id, card.body if card is not None else "")
     head = ["[Switchboard Try it]",
             f"Card: #{card_id} — {card.title if card is not None else ''}",
@@ -635,7 +641,7 @@ def tryit_prompt(tools, card_id: str, out: Path) -> str:
     # Step 2's environment, if it left one: the one line that decides whether this turn reuses a
     # fixture (brief step 2) or stages one of its own (step 3).
     if staged and staged["stage"]:
-        head.insert(-1, f"ALREADY STAGED by the verifying session: run `bash {staged['stage']}` "
+        head.insert(-1, f"ALREADY STAGED by the verifying session: run `{_stage_command(staged['stage'])}` "
                         f"and reuse it — do not stage a second fixture and do not replay the "
                         f"mechanical steps.")
         if staged["notes"]:
@@ -648,8 +654,50 @@ def tryit_prompt(tools, card_id: str, out: Path) -> str:
     else:
         head.insert(-1, "No staged environment from the verifying session: stage it yourself "
                         "(step 3).")
-    return "\n".join(head + [card_brief("tryit"), "", "--- the card ---",
+    return "\n".join(head + [_platform_brief(), "", "--- the card ---",
                              _card_text(tools, card_id), "--- end of the card ---"])
+
+
+def _stage_command(path: str) -> str:
+    if WINDOWS:
+        return "pwsh -NoLogo -NoProfile -File '" + path.replace("'", "''") + "'"
+    return "bash " + shlex.quote(path)
+
+
+def _app_binary(repo: Path) -> Path:
+    if not WINDOWS:
+        return repo / "build" / "relay"
+    candidates = [repo / "build" / "Release" / "relay.exe", repo / "build" / "relay.exe",
+                  repo / "build-app" / "Release" / "relay.exe",
+                  repo / "build-windows" / "Release" / "relay.exe"]
+    # The private interpreter is <install>/runtime/python/python.exe.
+    candidates.append(Path(sys.executable).parent.parent.parent / "bin" / "relay.exe")
+    return next((path for path in candidates if path.is_file()), candidates[0])
+
+
+def _platform_brief() -> str:
+    brief = card_brief("tryit")
+    if not WINDOWS:
+        return brief
+    brief = brief.replace("stage.sh", "stage.ps1").replace("`build/relay`", "the binary named above")
+    brief = brief.replace("(`/tmp/claude-…`)", "(the user's temporary directory)")
+    brief = brief.replace("because a socket path over 108 bytes breaks the app; disposable, because", "and disposable, because")
+    start = brief.index("For the app:\n")
+    end = brief.index("For a backend behaviour", start)
+    brief = brief[:start] + """For the app on native Windows:
+
+- Use an isolated disposable profile: put HOME, USERPROFILE, TEMP, TMP, XDG_CONFIG_HOME,
+  XDG_DATA_HOME and XDG_CACHE_HOME under the fixture directory and set RELAY_KEYRING=off.
+  Do not change the owner's real profile or identity. Use a separate test desktop/session
+  when driving input; if one is unavailable, ask the user to perform the manual step.
+- Use native Windows UI Automation or explicit mouse/key input on that test desktop.
+  Never type into a terminal pane inside Relay during a GUI check.
+- Save one screenshot per step under the evidence directory.
+- Write PowerShell staging scripts. The Open line must be an explicit command:
+  `pwsh -NoLogo -NoProfile -File '<path to stage.ps1>'` (double any single quote in the path).
+
+""" + brief[end:]
+    return brief
 
 
 def _run_dir() -> str:
@@ -662,6 +710,8 @@ def _run_dir() -> str:
     override = os.environ.get("RELAY_TRYIT_ROOT")
     if override:
         return override
+    if WINDOWS:
+        return str(Path(tempfile.gettempdir()) / "relay-tryit")
     runtime = os.environ.get("XDG_RUNTIME_DIR") or ""
     if runtime.startswith("/run/user/"):
         return f"/tmp/claude-{os.getuid()}/tryit"
