@@ -53,7 +53,7 @@ optional when `preset` names a built-in preset: the preset supplies each one tha
 rule a `roles` entry follows (13.4). A caller that has only "which provider" to say should send only
 `preset`, because that is what keeps the key and the URL together — the stored key is looked up for the
 preset, so a request that names one preset and carries another provider's `base_url` sends that key to a
-foreign endpoint and is answered with HTTP 401. The Switchboard did exactly that until 2026-09-18 and now
+foreign endpoint and is answered with HTTP 401. The Board did exactly that until 2026-09-18 and now
 sends `preset` alone; the provider dialog, which lets the user edit the endpoint by hand, still sends all
 of them. Sending an endpoint with no preset is unchanged: the key is looked up for the preset whose
 `base_url` matches (`presets.match_preset`).
@@ -505,7 +505,7 @@ Events that gain `ledger_id` (string, or null when tracking is off): `queued`, `
   prompt itself; a card turn is the one submission whose prompt is not the words, because
   `board_ask` builds it out of the card's seed block and the mode's brief (19.10). It rides as
   `preview` on the queue item, and the ledger entry and the queue row show the owner's question
-  instead of "[Switchboard card #CRD1 — …] You are Relay's Switchboard agent…" (v4.5, card #CTRN).
+  instead of "[Board card #CRD1 — …] You are Relay's Board agent…" (v4.5, card #CTRN).
 
 **Statuses:** `open` (not finished: never started, or its turn was cancelled, failed or hit the limit),
 `in_progress` (its turn is running), `done`, `cancelled` (the model cancelled every linked todo; `reason` = notes),
@@ -866,15 +866,15 @@ stands. Backend: `backend/relay_core/request_stream.py`, applied in `worker.py`'
 
 ### 12.12 `prompt_profile` — the short profile (v4.2, 2026-09-20, #GMCF decision 7)
 
-A pane with a Switchboard sends about 14,500 tokens of system prompt and tool schemas before the
+A pane with a Board sends about 14,500 tokens of system prompt and tool schemas before the
 first user word. A hosted provider caches that prefix; a model served on this machine prefills it at
 roughly 800 tokens a second, so it is **eighteen seconds of silence on every cold turn**. The
 `prompt_profile` option (12.1) chooses what that pane sends:
 
 | Profile | Prompt | Tools |
 |---|---|---|
-| `full` | `SYSTEM`, the todo rules, the app and own-session rules, the skill catalogue, the project's instruction files, the workspace line, the Switchboard policy and session note | everything the pane has: files and commands, jobs, skills, `ask_user`, `update_todos`, `write_plan`, subagents, app, own session, the Switchboard, `set_keybinding`, and the terminal pair when offered |
-| `short` | `relay_core.prompt_profiles.SYSTEM_SHORT` (18 rules), the project's instruction files, the workspace line, one line naming the user's skills, and — when a project is attached — the tiered Switchboard policy (19.4) and the session note | eight: `run_command`, `read_file`, `list_directory`, `write_file`, `edit_file`, `command_output`, `stop_command`, `load_skill`; plus the **board five** `board_list`, `board_read`, `board_create_card`, `board_claim`, `board_comment` when a project is attached; plus `run_in_terminal` / `type_into_program` when the turn offers them |
+| `full` | `SYSTEM`, the todo rules, the app and own-session rules, the skill catalogue, the project's instruction files, the workspace line, the Board policy and session note | everything the pane has: files and commands, jobs, skills, `ask_user`, `update_todos`, `write_plan`, subagents, app, own session, the Board, `set_keybinding`, and the terminal pair when offered |
+| `short` | `relay_core.prompt_profiles.SYSTEM_SHORT` (18 rules), the project's instruction files, the workspace line, one line naming the user's skills, and — when a project is attached — the tiered Board policy (19.4) and the session note | eight: `run_command`, `read_file`, `list_directory`, `write_file`, `edit_file`, `command_output`, `stop_command`, `load_skill`; plus the **board five** `board_list`, `board_read`, `board_create_card`, `board_claim`, `board_comment` when a project is attached; plus `run_in_terminal` / `type_into_program` when the turn offers them |
 
 `auto`, the default, is `short` when the model is served from this machine (a `local:` endpoint),
 when the model serving the turn is named on the **Lite** list of Options › Models (13.7), or when its
@@ -897,7 +897,7 @@ byte for byte, so the rest of the conversation hits the prefix it had before the
 The short profile drops no *rule* the full one keeps: every line of `SYSTEM_SHORT` is one of
 `SYSTEM`'s, tightened, and what is absent is about features the profile does not offer. Since the
 owner's decision of 2026-09-20 it carries the **five board tools a card round trip needs** and
-decision 8's tiered policy whenever the pane has a Switchboard — the answer to decision 8's
+decision 8's tiered policy whenever the pane has a Board — the answer to decision 8's
 sub-question, which the draft had left as "none". The five keep their full descriptions, because
 decision 8 moved rules *out* of `board_policy.md` and *into* those schemas. The three writes that are
 not among them (`board_update_card`, `board_move_card`, `board_import_items`), `board_signals` and
@@ -910,7 +910,7 @@ both as `prompt_profile` and `prompt_profile_in_effect`. GUI: Options › Agent 
 `tests/test_prompt_profiles.py`.
 
 Measured on `local:bonsai` with its own tokenizer, at the tip of the day's work
-(`docs/qa_evidence/2026-09-20-perf-fixes/tiers/`): with a Switchboard attached, full is 8,837 tokens
+(`docs/qa_evidence/2026-09-20-perf-fixes/tiers/`): with a Board attached, full is 8,837 tokens
 and 10.0 s of cold prefill, short 3,846 tokens and 4.6 s; with no project attached, short is 1,515
 tokens and 2.26 s. Warm, all of them 0.20 s. The board five and the policy are what separates the
 two short rows — 2,331 tokens — and are paid only where there is a board.
@@ -964,7 +964,7 @@ The newest role is `planning`, which serves plan-mode turns: by default the pane
 | `main` | the pane's own agent | the configured preset (read-only here: set with `configure` / `set_model`) |
 | `terminal_use` | driving programs, fixing commands | Flash tier |
 | `subagent` | subagents that do not name a model | Main tier (the pane's own model) |
-| `switchboard` | the helper agent: the Switchboard's card threads and its page console, and the consoles in Options, Actions and Sessions (19.18, sections 30 and 33) | Main tier |
+| `switchboard` | the helper agent: the Board's card threads and its page console, and the consoles in Options, Actions and Sessions (19.18, sections 30 and 33) | Main tier |
 | `flash` | panes that default to the Flash agent | Flash tier |
 | `local` | panes switched to a model served on this machine (`/local`) | Local tier |
 | `summaries` | compaction summaries and recaps | Flash tier |
@@ -982,7 +982,7 @@ after the deterministic detector has already fired (12.10), never on a timer; ro
 `route_assist`; instruction synthesis stays on `main`.
 
 `switchboard` is **labelled "Helper agent"** in the UI since 2026-09-20 (card `#FEJQ`, owner): the
-role serves one helper worker per tab that answers on the Switchboard and in Options, Actions and
+role serves one helper worker per tab that answers on the Board and in Options, Actions and
 Sessions alike (section 30), so naming it after one of its panes had stopped being true. The
 protocol name, the stored settings, the model box and its Main default are unchanged — the label is
 the only thing that moved. It is also the one role that **cannot follow Main onto a guest harness**:
@@ -991,7 +991,7 @@ preset resolves off it onto the Options › Models priority list instead of star
 (card `#GH5T`, 30.7).
 
 `switchboard` is **labelled "Helper agent"** in the UI since 2026-09-20 (card `#FEJQ`, owner): the
-role serves one helper worker per tab that answers on the Switchboard and in Options, Actions and
+role serves one helper worker per tab that answers on the Board and in Options, Actions and
 Sessions alike (section 30), so naming it after one of its panes had stopped being true. The
 protocol name, the stored settings, the model box and its Main default are unchanged — the label is
 the only thing that moved.
@@ -1106,7 +1106,7 @@ presets … then advanced options, which would then reveal the specific actions"
 | Tier | Used for | Where it comes from |
 |---|---|---|
 | `high` | panes on the High agent (`/high`, the `high` role, v4.6), and any role pinned to it — a `planning` pin included (v4.4, below) | the first usable entry of `tiers.high` — a `guest:` entry starts that guest's harness for the plan turn (v4.4, below) — else the pane's own model at `max` reasoning |
-| `main` | agent turns, subagents, Switchboard threads | the pane's own model (`configure` / `set_model`); `tiers.main` is only the order a failing turn walks |
+| `main` | agent turns, subagents, Board threads | the pane's own model (`configure` / `set_model`); `tiers.main` is only the order a failing turn walks |
 | `flash` | terminal use, fast panes, summaries, suggestions | the first usable entry of `tiers.flash`, else `TIER_DEFAULTS[<main preset>]["flash"]` |
 | `lite` | chores and the request audit; a pane whose model is on this list also sends the **short prompt profile** by default (12.12) | the first usable entry of `tiers.lite`, else `TIER_DEFAULTS[<main preset>]["lite"]` |
 | `local` | panes on the Local agent (`/local`), and any role pinned to it | the first usable entry of `tiers.local`, else the first saved local endpoint |
@@ -2059,7 +2059,7 @@ The first-token budget is also the budget for the response headers (`max(30 s, �
 provider may withhold its `200` until the first token is ready. `RELAY_PROVIDER_TIMEOUT` (seconds,
 clamped 5–900) overrides `stall_timeout_s` in the worker's environment; the GUI passes the pane's
 settings through, from Options › Agent › Turn limits ("Stop a silent model after", "Wait longer for
-the first token"), and the Switchboard's own worker is configured with the same block, so a card's
+the first token"), and the Board's own worker is configured with the same block, so a card's
 Plan runs under the deadlines the panes run under.
 
 When the deadline expires the response is closed with `shutdown()` plus `close()`, so no connection
@@ -2717,20 +2717,21 @@ model call there would hold the exit open for as long as the provider takes. The
 cadence already wrote at the last turn boundary is what a closed session keeps; anything staler
 than that is one `conversation_summarize` away.
 
-## 19. Switchboard: cards, threads and the Switchboard agent (v1.7, 2026-09-17)
+## 19. Board: cards, threads and the Board agent (v1.8, 2026-09-21)
 
 Phase 1 of `docs/SWITCHBOARD-DESIGN.md` (sections 4–6, 9.1 and the owner decisions in 12). The
-Switchboard **is** a folder in the project: `switchboard/` on a board created from 2026-09-18 on,
-`issues/` on one filed before that (19.12). `backend/relay_core/board.py` owns the bytes
+Board **is** a folder in the project: `board/` on a board created from 2026-09-21 on,
+`.switchboard/` or `switchboard/` on one filed between 2026-09-18 and then, `issues/` on one filed
+before that (19.12). `backend/relay_core/board.py` owns the bytes
 (format: `docs/SWITCHBOARD-FORMAT.md`), `backend/relay_core/board_tools.py` owns the six agent
 tools and their guardrails, `backend/relay_core/board_protocol.py` owns the messages below, and
 `backend/relay_core/board_policy.md` is the versioned system-prompt block. The GUI never parses a
 card: it asks for rows and detail and sends back intents. Tests: `tests/test_board_tools.py`,
 `tests/test_board_protocol.py`, `tests/test_board.py`.
 
-Everything here is inert unless the pane has a board. `switchboard/board.yaml`, else
-`issues/board.yaml`, is the marker; its presence is the switch, and 19.12 is the one path that
-ever creates one.
+Everything here is inert unless the pane has a board. `board/board.yaml`, else
+`.switchboard/board.yaml`, `switchboard/board.yaml` or `issues/board.yaml`, is the marker; its
+presence is the switch, and 19.12 is the one path that ever creates one.
 
 ### 19.1 `configure` additions
 
@@ -2740,7 +2741,7 @@ Every field is optional and **every default is what Relay did before the field e
 
 | field | meaning |
 |---|---|
-| `dir` | the board folder, **or** the project that holds one. Both spellings are accepted because the GUI has both in hand: an existing `board.yaml` decides it (the folder's own, then `switchboard/`, then `issues/`), and with none present a directory already called `switchboard` or `issues` is the folder and anything else is a project whose board would be `<project>/switchboard`. Wins over `project`. |
+| `dir` | the board folder, **or** the project that holds one. Both spellings are accepted because the GUI has both in hand: an existing `board.yaml` decides it (the folder's own, then `board/`, `.switchboard/`, `switchboard/`, then `issues/`), and with none present a directory already called `board`, `.switchboard`, `switchboard` or `issues` is the folder and anything else is a project whose board would be `<project>/board`. Wins over `project`. |
 | `project` | the project this board belongs to. Carried through onto `configured.board`, `board`, `board_state`, `board_created` and `board_init_request` as `project`, for a GUI with several projects open to route by; **no file is ever searched for under it**. Used as `dir` when no `dir` is given. Defaults to the directory that holds the board. |
 | `state` | `"uninitialized"` says the GUI is willing to offer creating a board here, so a project that has none still attaches (19.12). Default `"ready"`: no board on disk means no board. |
 | `attach` | `false` means this pane has no board whatever else is in the block — no tools, no policy block, and `board_*` messages answer the usual no-board error. Default `true`. |
@@ -2751,23 +2752,24 @@ When the pane has a board, `configured` gains the block below, and is absent oth
 knows whether to offer the pane. It is the same block `board_state` and `board_init` answer with.
 
 ```json
-"board": {"dir": "/repo/switchboard", "root": "/repo/switchboard", "workspace": "/repo",
-          "project": "/repo", "folder": "switchboard", "state": "ready", "exists": true,
+"board": {"dir": "/repo/board", "root": "/repo/board", "workspace": "/repo",
+          "project": "/repo", "folder": "board", "state": "ready", "exists": true,
           "autonomy": "auto", "limits": {}, "cards": 86}
 ```
 
 `root` is the board folder, `workspace` the project root holding it, `folder` the folder's name
-(`switchboard` or `issues`), `state` `"ready"` or `"uninitialized"` and `exists` whether the board
+(`board`, `.switchboard`, `switchboard` or `issues`), `state` `"ready"` or `"uninitialized"` and `exists` whether the board
 is on disk — `false` only in the uninitialized state (19.12). `dir`, `root`, `workspace`, `autonomy`,
 `limits` and `cards` are unchanged since `384fac4`; the rest are additions.
 
-**Which board, and only that board** (2026-09-18; owner: the Switchboard "behaves as global rather
+**Which board, and only that board** (2026-09-18; owner: the Board "behaves as global rather
 than per project"). Without `board.dir` or `board.project`, the worker walks up from the workspace
 it was given to the nearest ancestor holding a board — the GUI's rule, `relay::boardRootFor` — so a
 pane standing in `backend/relay_core` gets the project's board rather than none. **At each directory
-of the walk the candidates are tried in order, `switchboard/board.yaml` then `issues/board.yaml`, and
-the first hit wins**: the nearest ancestor beats a further one whatever its spelling, and a single
-directory holding both folders is its `switchboard/` one. The project root is what
+of the walk the candidates are tried in order, `board/board.yaml`, `.switchboard/board.yaml`,
+`switchboard/board.yaml` then `issues/board.yaml`, and the first hit wins**: the nearest ancestor
+beats a further one whatever its spelling, and a single directory holding more than one of them is
+its `board/` one. The project root is what
 `.relay/board-rate.json`, the cleanup changelogs and every event `path` hang off, so it is never the
 subdirectory the pane happened to be open in. A `configure` that names **no** workspace, or an empty
 one, has **no** board: the worker's own current directory is never consulted for it. It used to be
@@ -2789,7 +2791,7 @@ The board is set up **before** the provider is resolved (2026-09-17). A `configu
 want of a key answers `error` and no `configured`, but the board messages below still work: only
 `board_ask` needs the model. The GUI therefore sends `board_open` straight after `configure`
 (stdin is read in order) instead of waiting for `configured`, which never comes in a window with
-no key — that window used to show "Loading the Switchboard…" forever.
+no key — that window used to show "Loading the Board…" forever.
 
 ### 19.2 Reading the board
 
@@ -2845,7 +2847,7 @@ A row carried that whole text as `text` from 2026-09-19 until 2026-09-20, for on
 the GUI. It was **92.6 % of the `board` event's bytes** (7,211 B a card), every filter keystroke
 scanned it on the GUI thread (30–80 ms), and past about **1,160 cards the event exceeded the 8 MiB
 read buffer in `src/BoardWorker.cpp` and the GUI killed the worker** — the pane then said "Loading
-the Switchboard…" for ever, with the only explanation going to a status bar this layout does not
+the Board…" for ever, with the only explanation going to a status bar this layout does not
 show. The filter is still full-text search (owner, 2026-09-19); only the scan moved. A GUI too old
 to send `board_search` gets no `text` and filters on the row's fields alone.
 
@@ -2901,7 +2903,7 @@ is its first line (shortened) unless one is given. `section` (2026-09-20, #3XZV)
 card in a manual section — the quick-add field over one — and its status stays what `status` said.
 On `board_move`, `section` is the id of a manual section the card is parked in, leaving `status`
 alone; the empty string takes the card out (a drop on a status column sends exactly that), and the
-board's own stage moves never touch a parking place. On a project with no Switchboard yet it answers
+board's own stage moves never touch a parking place. On a project with no Board yet it answers
 `board_init_request` first and lands once the user accepts (19.12); the other three name a card, so
 a project with no board has nothing for them and they answer the ordinary no-board error. `patch` holds the `board_update_card` arguments
 (`fields`, `title`, `append_section`, `replace_section`, `tasks`). `before`/`after` are the card ids
@@ -2939,7 +2941,7 @@ truncates the thread back to its length at that moment, then records the undo it
 event. Undoing a *creation* deletes the file only when git has never seen it; a committed card is
 closed with `done`/`dropped` instead, and the undo is refused.
 
-### 19.4 `board_ask`: the Switchboard agent
+### 19.4 `board_ask`: the Board agent
 
 | Message | Events |
 |---|---|
@@ -2947,11 +2949,11 @@ closed with `done`/`dropped` instead, and the undo is refused.
 
 `mode` is `discuss` (the default) or `plan` since 2026-09-18 (#XS6Q); what each may do is 19.10.
 
-The Switchboard agent is **a worker per window**, started by the GUI exactly like a pane's worker
+The Board agent is **a worker per window**, started by the GUI exactly like a pane's worker
 but configured with `agent_role: "switchboard"`, so its model is the `switchboard` role of section
 13 — which defaults to the main agent. Card chats therefore never enter a pane's conversation.
 
-The Switchboard pane shows that model and can change it (#BRD3, 2026-09-20). It sends `presets`
+The Board pane shows that model and can change it (#BRD3, 2026-09-20). It sends `presets`
 to list the providers and reads `configured`'s `model`/`roles`/`tiers` — plus the `model_roles`
 event that follows a configure in which a role fell back — to build the box's rows and its
 current row, with the role's `warning`/`note` in the tooltip. No new messages or events: a pick
@@ -2994,7 +2996,7 @@ and **Undo**. This is the only board event a terminal pane needs to handle.
 ### 19.6 `ask {cards: [...]}`
 
 `ask` gains `cards: [{id} | "K7Q2"]` (at most 10): the `#K7Q2` references resolved in the composer.
-Each becomes an attachment-shaped block labelled `Switchboard card #K7Q2` — front matter, body
+Each becomes an attachment-shaped block labelled `Board card #K7Q2` — front matter, body
 (16 KiB cap), open tasks and the last 10 thread entries — so the pane agent has the card in context
 and can post progress back with `board_comment`. The block is labelled as a card rather than as a
 file the user picked with `@`, and it is still data, not instructions.
@@ -3050,7 +3052,7 @@ read tools and drops the four writes.
 
 Owner request: *"there should be a cleanup button, that would have the agent clean up the board,
 merge / split sections, merge redundant cards, split eclectic cards, review card status, etc."*
-One agent turn over the whole board, run by the same Switchboard worker as `board_ask` and with
+One agent turn over the whole board, run by the same Board worker as `board_ask` and with
 the same turn events, so the GUI reuses everything it already has for an ask. The brief is
 `backend/relay_core/board_cleanup_brief.md` — text beside `board_policy.md`, not code — and it is
 sent as the turn's *prompt*, so an ordinary card chat never carries it.
@@ -3230,7 +3232,7 @@ same time, a second prompt on the *same* card **queues** (card #CTRN; it was ref
 
 **Execute** sends **one** message when a pane was opened for the card: `board_claim {card,
 pane_token, text}` (19.19), which does (a), (b) and (d) below in one write and adds the card's
-`session` field, so the Switchboard shows which session holds the card. The three-message path
+`session` field, so the Board shows which session holds the card. The three-message path
 below is what it still does when no pane could be opened, and is what it did before #R9G7.
 
 **Execute** (no pane, and the shape the claim replaces). The pane (a) sends `board_update {patch: {fields: {assignee: "agent"}}}`
@@ -3284,7 +3286,7 @@ left out is that field's default. `board: null` detaches, which is not the same 
 with no `board` block at all — that one still walks up from the workspace.
 
 What changes: the worker's own `BoardTools` (the owner half, for the messages of 19.2–19.3) and
-`agent.board` plus the Switchboard block of `agent.messages[0]`. What does not: the `Agent` object,
+`agent.board` plus the Board block of `agent.messages[0]`. What does not: the `Agent` object,
 its message list, its session id, its model, its queue. `Agent.tools()` is read per step, so the
 tool list follows by itself.
 
@@ -3302,23 +3304,23 @@ denied-by-default, so no remote participant can re-point a pane. Neither is `boa
 
 ### 19.12 Where a board lives, and initializing one (v3.0, 2026-09-18)
 
-Owner, 2026-09-18: a project's board lives **in the project**, in a folder named `switchboard/`,
-and it is created **only after the user confirms** — "Initialize a project and create a Switchboard
-here?" Nothing is ever created silently, and opening a board never leaves a folder behind.
+Owner, 2026-09-18: a project's board lives **in the project**, in a folder of its own, and it is
+created **only after the user confirms** — "Initialize a project and create a Board here?" Nothing is ever created silently, and opening a board never leaves a folder behind.
 
-* **The folder.** A new board is `<project>/switchboard/`, marker `switchboard/board.yaml`. An
-  existing `<project>/issues/board.yaml` keeps working untouched and is never converted. Both names
-  are in `board.BOARD_FOLDERS`, newest first, and every lookup — the workspace walk, a named `dir`,
+* **The folder.** A new board is `<project>/board/`, marker `board/board.yaml` (owner,
+  2026-09-21). An existing `<project>/.switchboard/`, `<project>/switchboard/` or
+  `<project>/issues/` board keeps working untouched and is never converted. All four names are in
+  `board.BOARD_FOLDERS`, newest first, and every lookup — the workspace walk, a named `dir`,
   `aliases.local_root`, `scripts/relay-board.py` — walks that one list in that one order (19.1).
 * **The uninitialized state.** `configure`/`set_board` with `board {project, state:
   "uninitialized"}` on a project that has no board attaches anyway: `configured.board` says
   `"state": "uninitialized"`, `"exists": false`, `"root"` the folder that *would* be created.
   `board_open` answers an ordinary empty board — zero cards, `"exists": false`, the default columns
-  — so the Switchboard pane can show a board ready for its first card. **Reading creates nothing**:
+  — so the Board pane can show a board ready for its first card. **Reading creates nothing**:
   not `board_open`, `board_refresh`, `board_check` or `board_card_get`, and not `board_list` or
   `board_read` from the agent.
 * **What the agent gets there.** `board_create_card` and nothing else, plus one line in the system
-  prompt in place of the policy block: "Switchboard: this project has no Switchboard yet; creating a
+  prompt in place of the policy block: "Board: this project has no Board yet; creating a
   card with board_create_card will ask the user to initialize one." Any other board tool answers
   `code: "board_not_initialized"`.
 
@@ -3328,14 +3330,14 @@ here?" Nothing is ever created silently, and opening a board never leaves a fold
 |---|---|---|
 | `board_init_request {id, request_id?, root, dir, project, reason, title?}` | worker → GUI | ask the user. `dir` is the folder that would be created and `root` is the same path; `reason` is `"agent-card"` (a tool call) or `"card-command"` (a `board_create` message); `title` is the card that is waiting; `request_id` is the message that caused it, when there was one. |
 | `board_init_answer {id, accept}` | GUI → worker | the user's yes or no, `id` being the request's. |
-| `board_init {id?, project?, dir?, git_init?: bool}` | GUI → worker | create it outright, for the paths where the GUI has already asked (`/init`, opening the Switchboard, the project picker). `project`/`dir` default to the board this pane is already pointed at. Answers `board_created` then `board_state {id, applies: "now"}`; on a board that already exists it answers `board_state` alone, so sending it twice is safe. It is refused mid-turn only when it names a *different* project, which would be a re-point; creating the board this pane already has only ever adds tools. `git_init: true` (v3.5, the project picker's "Initialize new project here", #916B) also runs `git init` in the project when it is not inside a repository already — never a re-init, and a parent repository is left exactly as it is — and the answering `board_state` then carries one line, `git: "git repository initialized"` / `"already a git repository"` / `"inside the git repository at <top>, which was left alone"`, which the pane repeats on its created line. A non-boolean `git_init` is an error. |
+| `board_init {id?, project?, dir?, git_init?: bool}` | GUI → worker | create it outright, for the paths where the GUI has already asked (`/init`, opening the Board, the project picker). `project`/`dir` default to the board this pane is already pointed at. Answers `board_created` then `board_state {id, applies: "now"}`; on a board that already exists it answers `board_state` alone, so sending it twice is safe. It is refused mid-turn only when it names a *different* project, which would be a re-point; creating the board this pane already has only ever adds tools. `git_init: true` (v3.5, the project picker's "Initialize new project here", #916B) also runs `git init` in the project when it is not inside a repository already — never a re-init, and a parent repository is left exactly as it is — and the answering `board_state` then carries one line, `git: "git repository initialized"` / `"already a git repository"` / `"inside the git repository at <top>, which was left alone"`, which the pane repeats on its created line. A non-boolean `git_init` is an error. |
 | `board_created {root, workspace, project, files}` | worker → GUI | a board was created. `files` are the paths written, relative to the project. |
 
 On **accept** the board is scaffolded, `board_created` goes out, the tools and the prompt block
 become the full ones in place (no new conversation), and **the create that caused the question is
 completed** — the card the user typed is never lost. On **decline** nothing is written, the worker
 remembers the no until the pane is re-pointed or a `board_init` arrives, and the caller is told:
-the agent gets a plain tool result ("This project has no Switchboard and the user declined to
+the agent gets a plain tool result ("This project has no Board and the user declined to
 create one. Do not call the board tools again in this conversation…"), and a `board_create` message
 gets `error {code: "board_not_initialized"}`.
 
@@ -3345,8 +3347,8 @@ raises `Cancelled` out of the tool and nothing is created. No timeout — the pa
 always answers it. The owner's `board_create` arrives on the protocol thread, which is the thread
 the answer has to come in on, so it cannot block: the write is **parked** and replayed on the yes.
 
-`board_created`'s `files` is `["switchboard/board.yaml", "switchboard/.gitignore",
-"switchboard/threads/.gitkeep", ".gitattributes"]`. The last is the project's own, appended (the
+`board_created`'s `files` is `["board/board.yaml", "board/.gitignore",
+"board/threads/.gitkeep", ".gitattributes"]`. The last is the project's own, appended (the
 union-merge rule for the card threads, named against this board's folder) and is the only file
 written outside the board folder; it is listed so the GUI can say so.
 
@@ -3357,7 +3359,7 @@ and `src/ProjectInitBlock.h` draws it). Exactly five acts may raise the question
 |---|---|---|
 | the first prompt sent to the agent in a pane standing in a git repository with no board | `agent-work` | `Pane::submitAgent` |
 | the agent's first card | `agent-card` | the worker's `board_init_request` |
-| opening the Switchboard (Ctrl+Shift+S, the palette, `/switchboard`) | `switchboard` | `RelayWindow::toggleBoardPane` |
+| opening the Board (Ctrl+Shift+S, the palette, `/switchboard`) | `switchboard` | `RelayWindow::toggleBoardPane` |
 | `/card <text>` — the text is held and lands as the first card on the yes | `card-command` | `Pane` |
 | `/init`, which also clears a remembered no, and with no candidate offers the pane's own directory | `init-command` | `Pane`, and one palette item |
 
@@ -3404,7 +3406,7 @@ is `Proposal.to_dict()` each (title, status, labels, body, `tasks`, `source`, `d
 "create one first" text, since the GUI's path is `board_init` (19.12) and then this. `keys` is the
 ticked subset of the last `board_import_proposals` and nothing else from that message is trusted —
 the proposals are re-derived from the project here, so no card body ever comes off the wire. It
-goes through the same busy guard as an ask (`code: "board_busy"` while a Switchboard turn is
+goes through the same busy guard as an ask (`code: "board_busy"` while a Board turn is
 running, `code: "forge_busy"` while a sync is), writes through `BoardTools` like every other owner
 write, and answers with one row per card (`{id, source_key, path, status, tab}`); `skipped` lists
 the keys that produced no card, because they were imported before or are no longer in the project.
@@ -3483,7 +3485,7 @@ stamps `verified_by` whenever the **agent's** tools move a card to `done` from a
 `implemented_by` with the same value when the card has none — a small card the agent created and
 closed without ever claiming it. A card somebody else implemented keeps *their* `implemented_by`
 and only gains a `verified_by`, so the two differ and it is an ordinary done card: a cross-pane
-close is not a self-close. The **owner's** hand-close from the Switchboard pane (`board_move`,
+close is not a self-close. The **owner's** hand-close from the Board pane (`board_move`,
 19.3) stamps nothing and therefore never folds — the owner-side tools run with `actor: "owner"` and,
 unlike the agent's, never learn a preset or a model, so they have no signature to stamp. `dropped`
 is not stamped on either path: nothing was shipped, so nothing was verified. The stamp rides the
@@ -3566,7 +3568,7 @@ Claude: implemented this card · unavailable Kimi: no key"* — with this machin
 
 Owner, 2026-09-19: *"multiple agents working on planning switchboard cards doesnt seem to work …
 if i was planning in one card, i couldnt plan in another card."* It could not: the whole
-Switchboard worker had one `TurnSupervisor`, one conversation and one `CardScope`, so the second
+Board worker had one `TurnSupervisor`, one conversation and one `CardScope`, so the second
 `board_ask` was refused with `board_busy` and moving to another card reset the conversation of the
 one you left. `relay_core.board_turns.CardTurns` gives **each card its own console**, built from the
 pane agent's provider config, with its own conversation, its own `cancel_event` and its own
@@ -3656,35 +3658,39 @@ surface off nothing, because `board_cancel` named its card before surfaces exist
 {"event": "board_cancelled", "id": "c1", "card_id": "K7Q2", "stopped": true, "cards": ["M3XJ"]}
 ```
 
-### 19.17 Hiding and showing a board's folder (v3.4, 2026-09-19)
+### 19.17 Moving a board's folder (v4.0, 2026-09-21)
 
-Owner, 2026-09-19: new boards are created in `.switchboard/` from now on, so the cards do not
-clutter the project's root listing and a ripgrep-based agent — which skips hidden folders by
-default — stops matching every card on every code search (`docs/SWITCHBOARD-FORMAT.md` §1).
-Reading stays tolerant in both directions: `board.BOARD_FOLDERS` is `.switchboard`, `switchboard`,
-`issues`, newest first, and the first of those that has a `board.yaml` is the board
-(`relay::projects::boardFolders()` on the GUI side, same order, pinned to this file by
-`tests/projects_test.cpp::theBoardFoldersAreOneOrderedList`). **Nothing moves by itself** — a board
-made before this decision keeps the folder it has until a user asks otherwise, which is this
-message.
+Owner, 2026-09-21: new boards are created in `board/`. That replaces the `.switchboard/` of
+2026-09-19, which hid the cards from a ripgrep-based agent so well that an agent reaching for them
+with a bare `rg` found nothing and concluded the project had no board
+(`docs/SWITCHBOARD-FORMAT.md` §1). A visible folder turns that trade the other way round, so the
+generated pointer block and `POLICY.md` teach the exclusion instead: exclude the cards from a code
+search with `rg -g '!board/'`. Reading stays tolerant in every direction: `board.BOARD_FOLDERS` is
+`board`, `.switchboard`, `switchboard`, `issues`, newest first, and the first of those that has a
+`board.yaml` is the board (`relay::projects::boardFolders()` on the GUI side, same order, pinned to
+this file by `tests/projects_test.cpp::theBoardFoldersAreOneOrderedList`). **Nothing moves by
+itself** — a board made before this decision keeps the folder it has until a user asks otherwise,
+which is this message.
 
-`board_folder {hidden}` → `board_folder_changed`. Renames the *current* board's folder, in place,
+`board_folder {folder}` → `board_folder_changed`. Renames the *current* board's folder, in place,
 through `board.rename_board_folder()` (`backend/relay_core/board_protocol.py::_folder`):
 
 ```jsonc
 // GUI -> worker
-{"type": "board_folder", "id": 51, "hidden": true}
+{"type": "board_folder", "id": 51, "folder": "board"}
 // worker -> GUI
 {"event": "board_folder_changed", "id": 51, "board": { … state_block() … },
- "old": "switchboard", "new": ".switchboard", "root": "/home/e/src/widgetworks/.switchboard",
- "hidden": true, "method": "git mv", "files": [".gitattributes"],
- "summary": "switchboard/ is now .switchboard/ (hidden, git mv)"}
+ "old": "switchboard", "new": "board", "root": "/home/e/src/widgetworks/board",
+ "folder": "board", "method": "git mv", "files": [".gitattributes"],
+ "summary": "switchboard/ is now board/ (git mv)"}
 ```
 
-`hidden` is required and boolean: `true` hides (`.switchboard/`), `false` shows (`switchboard/`).
+`folder` is required and is one of `board.BOARD_FOLDERS` other than `issues`. The older
+`{hidden: bool}` shape is accepted for one release — `true` means `.switchboard`, `false` means
+`switchboard` — so a phone paired on an older build is not broken.
 A turn must not be running — a card turn holds paths under the old folder and the pane's watcher is
 on it — so this is refused with `board_busy` exactly as a cleanup or an import is (19.16). Refused,
-with `error` and nothing changed, when: the board is already that way round; the board is
+with `error` and nothing changed, when: the board is in that folder already; the board is
 `issues/`, the original spelling, which whole repositories name in their own instructions, scripts
 and hooks — Relay never renames it, and a project that wants the new spelling moves it by hand;
 the target folder already exists; or a card under the folder has uncommitted text, staged or not
@@ -3700,24 +3706,22 @@ message does. Afterwards the worker re-points itself at the new root (`_point`, 
 does, 19.11), so the tools, the agent's tools and the GUI move together and no message in flight
 still names the old path.
 
-**The one caller.** A board action, not a setting: "Hide this board's folder" / "Show this board's
-folder" (whichever the current folder is not), offered wherever the Switchboard's own actions are
-— never automatic, and never offered on an `issues/` board, which the message would refuse anyway.
-The **"Hidden Switchboard folder" option** (`board/hidden_folder` in `QSettings`,
-`relay::projects::hiddenBoardFolder()`, default **on**) is a different, narrower thing: it decides
-only what a board created from now on is called (`new_board_folder()` / `newBoardFolder()`) and
-never touches a board that already exists. Turning it off does not send `board_folder`, and sending
-`board_folder` does not change the option.
+**The one caller.** A board action, not a setting: **"Move this board to `board/`"**, offered
+wherever the Board's own actions are — shown on a `.switchboard/` or a `switchboard/` board, and on
+neither a `board/` one, which is already there, nor an `issues/` one, which the message would
+refuse anyway. Never automatic. The **"Hidden Switchboard folder" option** went with the decision:
+a new board is `board/` whatever any setting says (`new_board_folder()` / `newBoardFolder()`), and
+a board that already exists is only ever moved by this message.
 
-### 19.18 The Switchboard is a context (v4.4, 2026-09-20, card #AGNT; was the page agent, v3.8)
+### 19.18 The Board is a context (v4.4, 2026-09-20, card #AGNT; was the page agent, v3.8)
 
-Card #8YQ9, owner 2026-09-19: an agent on the Switchboard's **main page** that takes the whole board as
+Card #8YQ9, owner 2026-09-19: an agent on the Board's **main page** that takes the whole board as
 its context by default, for the questions that are about the board rather than one card — reorganizing
 it, merging duplicates, moving cards between sections, explaining what is where.
 
 Since card #AGNT (owner, 2026-09-20) that agent is not a second implementation. *"An agent interface is
 the prompt box. It has a set of options and tools that vary according to the setting/task, but in general
-they are shared systems."* So the Switchboard is one **context** (section 33) of an ordinary pane worker,
+they are shared systems."* So the Board is one **context** (section 33) of an ordinary pane worker,
 and everything the page agent had of its own is gone:
 
 | Was (v3.8) | Is |
@@ -3779,9 +3783,9 @@ before this existed have no file and are **never** surveyed. The first `board_op
    `board_import_items`;
 3. settles the marker to `done` once the turn is queued, so a board is surveyed once; a queue that refuses
    the turn puts it back to `pending` and the next open tries again. **Only a console surveys**: a terminal
-   pane's worker opening a Switchboard must never start a turn in the pane the person is working in.
+   pane's worker opening a Board must never start a turn in the pane the person is working in.
 
-The GitHub corpus is **an offer that links out only** until #GDQN (engine) and #ZKR0 (its Switchboard
+The GitHub corpus is **an offer that links out only** until #GDQN (engine) and #ZKR0 (its Board
 surface) land: the survey's prompt and event carry the issues URL and say so, and nothing is fetched or
 synced.
 
@@ -3800,14 +3804,14 @@ then agents know if another agent already claimed it and can coordinate easily."
 same token `board_comment {pane_token}` has carried since #HKAP, at most 64 characters with no
 whitespace and no `>`, because it persists in a thread entry's marker. `BoardCommands` keeps it and
 hands it to both halves of the board tools, so the owner's writes and the agent's turns name the
-same pane. A worker with no pane of its own — the Switchboard worker, a test — has none, and a
+same pane. A worker with no pane of its own — the Board worker, a test — has none, and a
 value the marker could not hold is a protocol error rather than a quiet drop. A `set_board` without
 the field leaves the worker's token alone: the board changed, not the pane.
 
 **`session`** is the new work-card front-matter field (`SWITCHBOARD-FORMAT.md` 2.2): the pane
 session token of the session holding the card. It is **immutable to a model** — the tool writes it
 from `configure`, so a card cannot be taken by typing a token into a patch — and a card in
-`executing` (or `in-progress`) with a `session` is **held** by that pane. The Switchboard draws it
+`executing` (or `in-progress`) with a `session` is **held** by that pane. The Board draws it
 on the card as a link that reveals the pane; a card that has moved on keeps the field as a record.
 
 **The claim is released on `done`, on `dropped` and when the pane closes** (owner, 2026-09-20).
@@ -3819,7 +3823,7 @@ every card it holds in `executing`/`in-progress`, leaves `status` and `assignee`
 in flight, only the pane is gone) and appends an `event` entry reading
 `Released (<first 8 of the token>) · <reason>`. The worker calls it in its `shutdown` branch, inside
 the 1.5 s a closing pane waits for it, and `set_board` calls it for the board it is leaving; it
-never raises and does nothing for a worker with no pane token. The Switchboard pane is drawn by
+never raises and does nothing for a worker with no pane token. The Board pane is drawn by
 another worker and picks the release up from its own folder watcher, like any other pane's write.
 
 **`board_claim {id, note?, force?}`** is the agent tool, offered wherever the board tools are (not
@@ -3838,13 +3842,13 @@ A card another session holds is refused with `code: "board_claimed_elsewhere"`, 
 `{id, session: <first 8>, status, latest_entry}` — the holder and the age of its last thread entry,
 so the model can read the thread and coordinate — unless `force: true`, which the policy reserves
 for the user saying to take it over. Claiming a card this pane already holds is idempotent: the
-front matter is already right, and the call adds one more progress entry. The prompt's Switchboard
+front matter is already right, and the call adds one more progress entry. The prompt's Board
 header states `Your session: <first 8>.` and `You hold: #A, #B`, so a model never has to remember
 or retype a token.
 
 **The same operation as an owner-side message**, which is what Execute sends: `board_claim {card,
 pane_token, text?, force?}` (19.3). Its `pane_token` is the pane the card was handed to and
-overrides the worker's own for that one call — the Switchboard worker has no pane — `text` is the
+overrides the worker's own for that one call — the Board worker has no pane — `text` is the
 reply box's note, and the answer is `board_written {kind: "board_claim", card_id, session, …}` plus
 `board_changed`, exactly as a move answers; a refusal is the ordinary `error` event with the code
 above. The `card` block is for the model and is not sent down the pipe.
@@ -3922,7 +3926,7 @@ policy makes — nothing else is a stage.
   whose `## Human QA` holds a numbered question with no indented `Answer:` line under it is not
   moved to `done` by an agent: `board_tools._human_qa_gate` refuses it in one sentence
   (`board_refused`, `requires: "human_qa_answer"`), on the agent actor only, so the owner's own
-  close from the Switchboard is untouched. That is the owner's rule of 2026-09-21, "a card with
+  close from the Board is untouched. That is the owner's rule of 2026-09-21, "a card with
   an open judgement waits for the person".
 - **A Plan turn writes only its own `## Plan` and `## Done means`, and that is enforced per
   turn** (card #CTRN, 2026-09-21; the second heading #WC3E, the same day). It is a rule about the
@@ -3936,7 +3940,7 @@ policy makes — nothing else is a stage.
 
 Issue `#G8DK`. An alias is a saved terminal command or agent prompt with `{{parameter}}`
 placeholders, Warp-workflow style. Owner decisions: one Markdown file per alias with defaults;
-**global** aliases in the global Switchboard and **local** ones in the repository Switchboard; run
+**global** aliases in the global Board and **local** ones in the repository Board; run
 from the palette, from `/name`, and by typing the name in terminal mode, with parameters filled in
 the composer and Tab between the fields; **import** Warp workflows and shell aliases **with a
 preview**; the agent **may suggest** an alias for a repeated command — a suggestion only, and
@@ -3951,9 +3955,9 @@ Implementation: `backend/relay_core/aliases.py` (the store, the format, substitu
 | Scope | Root | Files |
 |---|---|---|
 | global | `$XDG_CONFIG_HOME/relay/switchboard` (override: `RELAY_GLOBAL_SWITCHBOARD`) | `aliases/<name>.md` |
-| local | `<repo>/issues` when it has a Switchboard, else `<repo>/.relay` | `aliases/<name>.md` |
+| local | the repository's board folder when it has a Board, else `<repo>/.relay` | `aliases/<name>.md` |
 
-An alias is a Switchboard card (`docs/SWITCHBOARD-FORMAT.md`) of the new type `alias`, with the
+An alias is a Board card (`docs/SWITCHBOARD-FORMAT.md`) of the new type `alias`, with the
 fields `name`, `kind` (`command` \| `prompt`) and `shell` on top of the common ones, statuses
 `active` and `retired`, and `retired` cards under `aliases/archive/`. `relay-board.py check`
 validates them like any other card.
@@ -4457,7 +4461,7 @@ show the result one instead.
 | `agent` | `agent`, `agent_message`, `agent_wait` |
 | `plan` | `write_plan`, `update_todos` |
 | `skill` | `load_skill`, `read_skill_file` |
-| `board` | every `board_*` Switchboard tool, including the cleanup-only three |
+| `board` | every `board_*` Board tool, including the cleanup-only three |
 | `config` | `set_keybinding` |
 | `input` | `type_into_program` |
 | `view`, `web`, `external` | **reserved.** `view` for a future screenshot or preview tool, `web` for a fetch or a search, `external` for an out-of-process tool; today only an MCP-shaped name (one containing `__`) is labelled `external` |
@@ -5652,7 +5656,7 @@ so a planner that was unsure guessed (card #MQ9C, owner: "aksing questions. the 
 it yet"). `ask_user` is that channel. Like `type_into_program` (section 21) it is a round trip
 through the pane, because the worker cannot draw anything. **What the pane puts up is called *the
 ask*** — *the approval ask* for 27.6 — and never a card: it is inline terminal text in `Ink::Ask`
-with no border or surface of its own, and *card* is reserved for a Switchboard record (section 19,
+with no border or surface of its own, and *card* is reserved for a Board record (section 19,
 card #VQ8T). The wire keeps its own names: the events are `question`, `question_closed` and
 `question_answer`, the tool is `ask_user` and the setting is `approvals_ask`. Worker side:
 `backend/relay_core/questions.py`; tests `tests/test_questions.py`.
@@ -6132,7 +6136,7 @@ and file tools. Since card #4NXH, a process-local `relay_board` MCP server expos
 `board_list`, `board_read`, `board_comment`, `board_update_card`, and `board_move_card`.
 Card #GD8K adds `agent`, `agent_message`, `agent_wait`, and `update_todos`: Relay owns the
 children, task links, progress events, transcripts and completion handoffs. These tools also work
-without a Switchboard. Initial discovery supplies provisional delegation schemas before the
+without a Board. Initial discovery supplies provisional delegation schemas before the
 worker binds its configured manager; execution always checks the bound agent's actual tools.
 Guest launches always run in the background and waits are capped at ten seconds; wait on the
 returned child id again to retrieve a later result. Native plan/read-only/card-scope gates apply.
@@ -6371,7 +6375,7 @@ how many turns it cost, and what did not work.
 
 Card `#FEJQ`, owner 2026-09-20: one helper system, not three features that happen to look alike.
 An agent can change an option, run a safe action, search the session manager, and open or zoom
-Options, Actions, Sessions and the Switchboard down to a row, a query or a card; and each of those
+Options, Actions, Sessions and the Board down to a row, a query or a card; and each of those
 panes carries a helper agent, which since card #AGNT is an **agent console** — the same prompt box a
 terminal pane has, with a `context` saying what it is about (33) — on the tab's one worker and its
 one conversation (19.18, 30.7).
@@ -6486,7 +6490,7 @@ them; the submenu itself has no `run` and cannot be run.
 "pass the toggle like `app_open`"; before that the toggle refused every `run_action`, so a helper
 could open a conversation into a new pane through `app_open` and could not open an empty pane
 through `run_action`, which is the same act with two answers). They are: opening or revealing a
-pane (Options, Actions, the Switchboard, the session manager, the closed list, the explorer, ⓘ,
+pane (Options, Actions, the Board, the session manager, the closed list, the explorer, ⓘ,
 Activity, requests, subagents, thinking, the agents menu, the shortcuts page, Test suites, About,
 the log folder, the theme folder, find-in-view, link stepping, jumping to a notification), opening
 a pane (`pane.splitRight`, `…Down`, `…Left`, `…Up`), putting a closed one back (`closed.restore`,
@@ -6735,7 +6739,7 @@ never the tool list.
 | `app_prefill_prompt` | `pane`, `text` | the same, unsent: the text is left in that pane's composer for the person to read, edit and send. `busy` when they have already typed something there, which is never overwritten. |
 | `app_rename` | `what`: `pane` \| `tab`; `name`, `pane?` | `/rename` and `/rename-tab`, which an agent cannot type. An empty `name` restores the automatic one; `previous` comes back so the rename can be described and put back. A write; renaming back is its undo. |
 | `app_sessions_search` | `query`, `limit?` (default 10, at most 25) | worker-side, through the conversation index of section 14 (`conv_index.ConversationIndex.search`, the same query language as 14.2, `scope="all"` so it is the person's sessions and not this workspace's, up to 3 matching lines per row) — the Sessions pane never talks to the worker itself, so this needs no round trip and no open pane. Each row carries the `id` `app_open {target: "conversation"}` takes. |
-| `app_open` | `target`, `section?`, `row?`, `query?`, `card?`, `id?`, `ids?`, `new_pane?`, `pane?` | one of eleven targets — Options, the actions palette, Sessions, the Switchboard, a past conversation, and since #AG7R group 8 the file explorer, Test suites, Activity, ⓘ, the request ledger and a pane's subagents, each of which had an *action* and no way to be named (two of them among group 1's unreachable twelve). `app_command {command: "open"}`; a `row` is checked against the catalog first, so a misremembered id is a tool error rather than a pane opened at nothing, and a `card` is normalised (`#k7q2` → `K7Q2`). With `target: "conversation"` it opens past conversations: `id` for one, `ids` for up to 8, each in a pane of its own, in the order given and one round trip each, so the result answers **per id** (`results: [{id, ok, title?, error?}]`) and one unknown id does not lose the rest. `new_pane` defaults to true, and `pane` says which pane it opens from — the asking agent's own unless it names another, so `new_pane: false` means "into my pane" (30.3). Returns when the pane has opened, so the agent says what it did, not what it asked for. Not a write: it is offered whatever `writes_enabled` says. |
+| `app_open` | `target`, `section?`, `row?`, `query?`, `card?`, `id?`, `ids?`, `new_pane?`, `pane?` | one of eleven targets — Options, the actions palette, Sessions, the Board, a past conversation, and since #AG7R group 8 the file explorer, Test suites, Activity, ⓘ, the request ledger and a pane's subagents, each of which had an *action* and no way to be named (two of them among group 1's unreachable twelve). `app_command {command: "open"}`; a `row` is checked against the catalog first, so a misremembered id is a tool error rather than a pane opened at nothing, and a `card` is normalised (`#k7q2` → `K7Q2`). With `target: "conversation"` it opens past conversations: `id` for one, `ids` for up to 8, each in a pane of its own, in the order given and one round trip each, so the result answers **per id** (`results: [{id, ok, title?, error?}]`) and one unknown id does not lose the rest. `new_pane` defaults to true, and `pane` says which pane it opens from — the asking agent's own unless it names another, so `new_pane: false` means "into my pane" (30.3). Returns when the pane has opened, so the agent says what it did, not what it asked for. Not a write: it is offered whatever `writes_enabled` says. |
 | `app_changes` | — | the writes this worker has made so far, newest first (at most 100 kept): `{change_id, kind: "option", id, label, previous, value, when, undone}` for an option and `{change_id, kind: "action", key, label, when, undone}` for an action, `when` being seconds ago, built from the results it received and not from the GUI's log |
 | `app_undo` | `change_id` | `app_command {command: "undo"}` for one of its own changes, and only one it has not already undone |
 
@@ -6853,7 +6857,7 @@ decision 1).
   and reaches pane agents too; as a **top-level `tab`** beside `workspace`, which is what the board
   side keys by; and, since #AGNT, as `context.persist.key` (33.1), which is the field the *agent*
   reads. They are the same id and `configure` accepts any of them.
-  Switchboards are per tab, so the same project open in two tabs gets two helpers with two
+  Boards are per tab, so the same project open in two tabs gets two helpers with two
   conversations over **one** set of board files; only the conversation and the queue are the tab's
   own.
 - **The conversation is persisted per (project, tab)**, so a restart brings each tab's helper back
@@ -6872,7 +6876,7 @@ decision 1).
   from before this) gets no store: its console behaves as it did, one conversation per worker, gone
   when the worker goes.
 - **Started on the first console**, not when the tab opens (owner decision 5), and it lives as long
-  as the tab: closing the tab stops its worker, and a Switchboard put away no longer ends it. The
+  as the tab: closing the tab stops its worker, and a Board put away no longer ends it. The
   rule moved one step out when the panels became consoles: a pane refuses to submit while it is
   unconfigured, so the window starts the worker as a console attaches itself to the tab rather than
   at that console's first ask — and Options, Actions and Sessions build their console on first
@@ -6911,7 +6915,7 @@ decision 1).
   prompt text of every turn until #AGNT, with a once-per-pane rule to stop it becoming the
   conversation; a brief the model is told once is also what `session_info` can report.
 - **A `switchboard` ask in a tab with no board is refused in a sentence**, not with a protocol
-  error nobody can act on: "This tab has no Switchboard, so there is nothing for the Switchboard
+  error nobody can act on: "This tab has no Board, so there is nothing for the Board
   pane to talk about. Attach a project to the tab, or ask from Options, Actions or Sessions."
   (`board_protocol.NO_BOARD_CHAT_ERROR`, raised by `worker.py` when `context.name` is `switchboard`
   and no board is attached). The other three surfaces are about the app, not about a board, and run
@@ -6939,7 +6943,7 @@ decision 1).
   `configured.roles.switchboard.note` (and `tiers.main.note`) says why, which is what the model box
   shows in its tooltip: *"Main is Claude Code, a guest session the helper agent cannot run on, so it
   fell back to kimi-k3."* A role pick of a real provider or tier still wins over it. When the list
-  holds nothing usable the worker is still configured — the Switchboard is files, so the pane opens
+  holds nothing usable the worker is still configured — the Board is files, so the pane opens
   and its cards are read — on a provider that is never called, and a turn answers one sentence: "The
   helper agent cannot run on Claude Code. Add a provider under Options › Models, or pick a model for
   the helper in its model box." A **pane** on a guest preset is untouched by all of this: 29.3 stands
@@ -6947,7 +6951,7 @@ decision 1).
 
 The `switchboard` role keeps its protocol name — settings, the model box (#BRD3), its Options ›
 Models row and its Main default are untouched — and is **labelled "Helper agent"** in the UI (owner
-decision 4, 13.1). What each surface calls itself — "Switchboard agent", "Options helper",
+decision 4, 13.1). What each surface calls itself — "Board agent", "Options helper",
 "Actions helper", "Sessions helper", `#<ID>` for a card — is `context.brief.title`, the heading the
 brief is written under in the system prompt. On screen the console says it in its placeholder ("Ask
 the Options helper…") and in its busy strip, and Options, Actions and Sessions say it again on the
@@ -6990,7 +6994,7 @@ collapsed row they fold back to; there is no panel header any more.
 
 ## 31. Tests: what the project has, what happened to them, and what proves a card (v4.1, 2026-09-20)
 
-Card `#7BM4`, owner 2026-09-20. The Switchboard is the project's tooling hub, not only its
+Card `#7BM4`, owner 2026-09-20. The Board is the project's tooling hub, not only its
 tracker: a card names the tests that prove it in a `## Tests` section and has a **Check** beside
 them, and a **Test suites** pane lists every test with its history. Both are fed by the five
 `tests_*` requests below, which the **board worker** answers — the same worker as section 19, so
@@ -7232,7 +7236,7 @@ review §B: "update evidence status automatically after runs".
 
 ### 31.6 The agent's two tools
 
-Registered the way `board_claim` is, so a terminal-pane agent and the Switchboard page agent both
+Registered the way `board_claim` is, so a terminal-pane agent and the Board page agent both
 have them:
 
 - **`tests_check {card}`** — the four statuses and the findings as text, plus the `statuses` rows
@@ -7274,7 +7278,7 @@ folders fetched before the marker existed must not be counted a second time. A f
 
 ### 31.9 Profile: `profile_run`, `profile_stop`
 
-Card `#7BM4` phase 5, owner 2026-09-20: the Profile button on the Switchboard's tool row **asks
+Card `#7BM4` phase 5, owner 2026-09-20: the Profile button on the Board's tool row **asks
 which target** — "profile the project" is four different things in this repository — and the build
 target ships first. The two requests below go to the same board worker as the `tests_*` ones, and
 everything they do is `scripts/relay-profile` (docs/PROFILING.md), run through `jobs.JobTable` and
@@ -7387,7 +7391,7 @@ Tests: `tests/test_tryit_protocol.py`.
 {"type": "try_answer", "card": "K7Q2", "answer": "what the person saw, in their words"}
 ```
 
-`try_run` starts **one bounded agent turn** on the Switchboard worker, in `board_cleanup`'s shape
+`try_run` starts **one bounded agent turn** on the Board worker, in `board_cleanup`'s shape
 (19.9) and with its rules: its own conversation (`turns.reset()`), one run at a time, and refused
 while a cleanup or another turn holds the worker. It makes
 `docs/qa_evidence/<date>-tryit-<ID>/` first, so the brief can name it, and the turn puts the
@@ -7446,7 +7450,7 @@ that was tried and failed has to read differently from a card nobody pressed the
 
 **`board_try {card}`** is the same brief for a terminal pane's agent, so `/deliver`'s landing step
 can offer it. It hands back `tryit_prompt`'s text rather than starting a turn elsewhere: a pane's
-worker and the Switchboard's worker are different processes with the board between them, and the
+worker and the Board's worker are different processes with the board between them, and the
 calling agent already has a shell, a display and a turn — it *is* the machine. It appends a
 `progress` entry and is refused during a cleanup, exactly as `board_claim` is and for the same
 reason.
@@ -7712,7 +7716,7 @@ button and the chip on the signal both open that thread's history, the same ⓘ 
 `SessionManager::onOpenThread` opens. A signal thread is a row in the Sessions manager whether or not
 "Subagent threads" is ticked — it is Relay's thread, not the user's — listed under its project rather
 than under the board worker's session, marked `⚑ signal`, titled with the key. Options › Agent ›
-Switchboard's "Work signals unasked" writes `signals_config`.
+Board's "Work signals unasked" writes `signals_config`.
 
 **Deviations from card `#AQ6X` step 7.** Three, each recorded here because the card says otherwise:
 
@@ -7758,7 +7762,7 @@ So there is no second protocol for a helper. A helper worker is `backend/worker.
    "agent_role": "switchboard",      // 13.1; the top-level `agent_role` wins when both are sent
    "workspace": "/home/e/relay-terminal",
    "persist": {"scope": "helper", "key": "t0123456789ab"},
-   "brief": {"key": "switchboard", "title": "Switchboard agent", "screen": ""},
+   "brief": {"key": "switchboard", "title": "Board agent", "screen": ""},
    "scope": "console",               // pane | console — the NAMED tool scope ("card" is retired)
    "shell": false,
    "routing": "agent"}}              // auto | agent
@@ -7793,7 +7797,7 @@ Three additive fields, all the console's; a terminal pane sends none of them and
 |---|---|---|
 | `surface` | string ≤64, one line | which console asked. Free text the GUI mints (`switchboard`, `options`, `card:AGNT`), never an enum. It rides on `queued`, on each `queue_changed` row, on `agent_started` / `agent_finished` and on **every event of that turn**, so several consoles can share one conversation and each still knows which of its own asks an event belongs to. Absent means the field appears on nothing. |
 | `screen` | string, cut at 2000 | what the asking surface is showing (30.7). Reaches the model as an `On screen now: …` line above the prompt; kept out of the prompt the queue and the request ledger hold, because the record is what the person typed. Not `context`, which is the program-context object. |
-| `readonly` | bool, default false | this turn writes nothing by design (the Switchboard's survey, 19.18). The board's write tools refuse with `board_readonly_turn`; the executor's — `write_file`, `edit_file`, `run_command`, `run_in_terminal`, `set_keybinding`, `app_option_set`, `app_action_run`, the subagent tools — refuse with the same sentence. The tool *list* is unchanged, so one read-only turn does not re-prefill every cached request below it. |
+| `readonly` | bool, default false | this turn writes nothing by design (the Board's survey, 19.18). The board's write tools refuse with `board_readonly_turn`; the executor's — `write_file`, `edit_file`, `run_command`, `run_in_terminal`, `set_keybinding`, `app_option_set`, `app_action_run`, the subagent tools — refuse with the same sentence. The tool *list* is unchanged, so one read-only turn does not re-prefill every cached request below it. |
 
 **Three more ride on the queue item, and `board_ask` is what puts them there** (v4.5, 2026-09-21,
 card #CTRN). They are `TurnSupervisor.submit`'s arguments, beside `surface`, `screen` and
@@ -7843,7 +7847,7 @@ got read-only tools: the same agent, two tool sets, decided by whether a board h
 | Scope | Who | Tools |
 |---|---|---|
 | `pane` | a terminal pane's own agent | the whole executor, the app tools, its own session's read tools, the board's ordinary set. Defers the on-demand groups (12.13). |
-| `console` | the Switchboard page, **an open card**, Options, Actions, Sessions | **the same list**, plus `board_merge_cards`, `board_split_card`, `board_import_items` and `search_files`. Defers nothing. |
+| `console` | the Board page, **an open card**, Options, Actions, Sessions | **the same list**, plus `board_merge_cards`, `board_split_card`, `board_import_items` and `search_files`. Defers nothing. |
 
 `card` was the third row until card #CTRN — "one Discuss or Plan turn on one card: the mode's board
 tools and the read-only file tools" — and it is gone, with `CardScope.tool_specs` and `Agent.tools()`'s
@@ -7906,10 +7910,10 @@ What came down with this card, and why each was a fence:
   bought a compatibility shim and a second path to the same two writes for no behaviour the owner asked
   for. What changed is behind it.
 
-## 34. Globals: Switchboard HQ (#P7SJ, #Y2MP)
+## 34. Globals: Board HQ (#P7SJ, #Y2MP)
 
 The Projects / Sessions / Globals manager's Globals tab edits the existing global
-Switchboard at `RELAY_GLOBAL_SWITCHBOARD`, otherwise `$XDG_CONFIG_HOME/relay/switchboard`
+Board at `RELAY_GLOBAL_SWITCHBOARD`, otherwise `$XDG_CONFIG_HOME/relay/switchboard`
 (`~/.config/relay/switchboard` by default). Reads never create it. Saving the first memory
 or alias creates its `board.yaml`. This is an explicit global editor, **not** an implicit
 fallback destination for project work cards.
