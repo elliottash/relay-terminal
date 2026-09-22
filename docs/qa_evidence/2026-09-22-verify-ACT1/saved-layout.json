@@ -1,0 +1,48 @@
+{
+    "saved": 1790039353,
+    "version": 1,
+    "windows": [
+        {
+            "current": 0,
+            "geometry": [
+                0,
+                0,
+                1450,
+                950
+            ],
+            "screen": "screen",
+            "tabs": [
+                {
+                    "children": [
+                        {
+                            "pane": {
+                                "agent_mode": "build",
+                                "agent_role": "main",
+                                "cwd": "/tmp/rl-act.f4NJ/project",
+                                "effort": "high",
+                                "input_mode": "auto",
+                                "preset": "guest:claude",
+                                "scrollback": "794e00a3-7341-4227-a9b5-b7dfc7948e3c",
+                                "workspace": "/tmp/rl-act.f4NJ/project"
+                            }
+                        },
+                        {
+                            "internals": {
+                                "cwd": "/tmp/rl-act.f4NJ/project",
+                                "owner": "794e00a3-7341-4227-a9b5-b7dfc7948e3c"
+                            }
+                        }
+                    ],
+                    "sizes": [
+                        719,
+                        718
+                    ],
+                    "split": "h"
+                }
+            ],
+            "titles": [
+                "project (2)  ·  cpu 00% · mem 00%"
+            ]
+        }
+    ]
+}
