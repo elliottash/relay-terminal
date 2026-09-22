@@ -15,3 +15,12 @@ a fix has to touch rather than by card, because several sessions share this chec
 two fixes in one file collide. This card is stream D: app/index.html, app/app.js and app/style.css.
 The board writes for every card in the workstream are made by this session, so the
 implementing sessions never edit `issues/` and cannot collide there.
+
+<!-- relay:entry 20260922T144900Z-4y author=agent kind=event model=claude-opus-5 pane=21ce0a13 turn=9ce3cc66aa5f4d38884b376901d01092/1624e7a1961d4be7b788e7848e67efb6 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": ["f919f14b"], "evidence": ["docs/qa_evidence/2026-09-22… → {"plans": [], "commits": ["f919f14b", "ad25d4b0", "5f7432db"], "evidence": ["doc…; replaced `## Execution Summary`
+
+<!-- relay:entry 20260922T144910Z-gf author=agent kind=event model=claude-opus-5 pane=21ce0a13 turn=9ce3cc66aa5f4d38884b376901d01092/1624e7a1961d4be7b788e7848e67efb6 -->
+- ✦ agent updated this card · replaced `## Tests`
+
+<!-- relay:entry 20260922T144914Z-ze author=agent kind=event model=claude-opus-5 pane=21ce0a13 turn=9ce3cc66aa5f4d38884b376901d01092/1624e7a1961d4be7b788e7848e67efb6 -->
+- ✦ agent moved this card · Executing → Needs verification · Landed ad25d4b0 with three tests that fail against the old CSS at the drive's own number. The orchestrating session re-ran the probe this card was filed from: the note measures 366/366 unclipped at both capabilities, where it was 178/91 and 226/195, and an agent device is told it may ask rather than only watch. · evidence docs/qa_evidence/2026-09-22-streamD-shell/ · implemented_by anthropic/claude-opus-5 via claude-code
