@@ -1,13 +1,14 @@
 ---
 id: EQM2
 type: work
-status: executing
+status: needs-verification
 labels: [feature, panes]
 assignee: codex
+implemented_by: openai/gpt-5.6-sol via codex
 rank: m
 created: '2026-09-21'
 source: Codex in a Relay pane, 2026-09-21
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {plans: [], commits: [829f6428fd59154366f67899ba5b2941c70a9c66], evidence: [docs/qa_evidence/2026-09-21-opening-new-panes-evenly/README.md, docs/qa_evidence/2026-09-21-opening-new-panes-evenly/], related: [], github: null}
 ---
 # Opening a pane evenly redistributes the tab
 
@@ -33,7 +34,7 @@ Verify: build `relay-panes-tests`, run `ctest --test-dir build -R '^panes$'`, an
 ## Tasks
 - [x] Redistribute the tab after opening a new pane. <!-- t:qn -->
 - [x] Add and run the targeted pane-layout regression test. <!-- t:bp -->
-- [ ] Land the change with verification evidence. <!-- t:4g s=in-progress -->
+- [x] Land the change with verification evidence. <!-- t:4g -->
 
 ## Execution Summary
 New terminal panes now queue whole-tab equalization after their splitter settles. The move/drag insertion path remains size-preserving.
