@@ -2433,7 +2433,9 @@ public:
                     if (candidate.startsWith(QStringLiteral("relay://"))) {
                         out.open = candidate;
                         out.kind = QStringLiteral("link");
-                    } else if (!candidate.contains(QLatin1Char(' '))) {
+                    } else if (QRegularExpression(QStringLiteral("^[A-Za-z]:[\\\\/]")).match(candidate).hasMatch()
+                               || candidate.startsWith(QStringLiteral("\\\\"))
+                               || !candidate.contains(QLatin1Char(' '))) {
                         out.open = candidate;
                         out.kind = QStringLiteral("path");
                     } else {

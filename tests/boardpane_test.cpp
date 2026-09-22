@@ -16,6 +16,8 @@
 #include <QToolButton>
 #include <QLineEdit>
 #include <QLabel>
+#include <QPushButton>
+#include <QDir>
 #include <QtTest>
 
 namespace {
@@ -69,6 +71,7 @@ class BoardPaneTests : public QObject {
 
 private slots:
     void cleanupOperationsHaveTranscriptNotes();
+    void tryItOpenKeepsWindowsPathsWithSpaces();
     void doneButtonAndKeyOfferUndo();
     void navigationSurvivesReload();
     void aCardOpenedInOnePaneDoesNotOpenInTheOther();
@@ -328,6 +331,37 @@ void BoardPaneTests::doneButtonAndKeyOfferUndo()
     view.handleEvent(opened({row(QStringLiteral("K7Q2"), QStringLiteral("done"))}));
     QTest::keyClick(&view, Qt::Key_D);
     QCOMPARE(writes(), before);
+}
+
+void BoardPaneTests::tryItOpenKeepsWindowsPathsWithSpaces()
+{
+    const QStringList targets = {QStringLiteral("C:\\Users\\Some Person\\result.txt"),
+                                 QStringLiteral("\\\\server\\shared folder\\result.txt"),
+                                 QStringLiteral("pwsh -NoProfile -File 'C:\\Some Person\\stage.ps1'")};
+    for (const QString &target : targets) {
+        relay::BoardView view(QStringLiteral("/tmp/workspace"));
+        QList<QJsonObject> sent;
+        QString file, command;
+        view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+        view.onOpenFile = [&file](const QString &path) { file = path; };
+        view.onRunCommand = [&command](const QString &text) { command = text; };
+        view.handleEvent(opened({row(QStringLiteral("K7Q2"), QStringLiteral("inbox"))}));
+        view.openCard(QStringLiteral("K7Q2"));
+        auto reply = cardArrived(QStringLiteral("K7Q2"));
+        reply.insert(QStringLiteral("id"), sent.last().value(QStringLiteral("id")));
+        reply.insert(QStringLiteral("body"), QStringLiteral("# Card\n\n## Try it\nOpen: `%1`\nDoes it work?\nExpected: expected.md\n").arg(target));
+        view.handleEvent(reply);
+        auto *button = view.findChild<QPushButton *>(QStringLiteral("boardTryOpen"));
+        QVERIFY(button);
+        button->click();
+        if (target.startsWith(QStringLiteral("pwsh "))) {
+            QCOMPARE(command, target);
+            QVERIFY(file.isEmpty());
+        } else {
+            QCOMPARE(file, QDir(QStringLiteral("/tmp/workspace")).absoluteFilePath(target));
+            QVERIFY(command.isEmpty());
+        }
+    }
 }
 
 void BoardPaneTests::cleanupOperationsHaveTranscriptNotes()
