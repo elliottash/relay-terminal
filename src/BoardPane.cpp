@@ -3655,18 +3655,32 @@ public:
         if (m_id.isEmpty())
             return;
         m_testsAsking = askWhichChecks;
+        QStringList retired;
+        for (const QJsonValue &value : m_checkStatuses) {
+            const QJsonObject row = value.toObject();
+            if (row.value(QStringLiteral("retired")).toBool())
+                retired << row.value(QStringLiteral("invocation")).toString();
+        }
+        const QString what = retired.isEmpty()
+                                 ? QStringLiteral("the checks this card names.")
+                                 : QStringLiteral("%1 is not in the project any more.")
+                                           .arg(retired.join(QStringLiteral(", ")).toHtmlEscaped());
         m_testsEditHint->setText(
                 askWhichChecks
                     ? QStringLiteral("<span style=\"color:%1\">Which checks prove #%2? One per "
                                      "line. They go in `## Tests`, and Check judges them next "
                                      "time this card moves.</span>")
                               .arg(theme::Warning.name(), m_id)
-                    : QStringLiteral("<span style=\"color:%1\">`## Tests` for #%2 — replace the "
-                                     "check that is not in the project any more, one per "
-                                     "line.</span>")
-                              .arg(theme::TextMuted.name(), m_id));
+                    : QStringLiteral("<span style=\"color:%1\">`## Tests` for #%2 — %3 Replace "
+                                     "it below, one check per line.</span>")
+                              .arg(theme::TextMuted.name(), m_id, what));
         m_testsEditor->setPlainText(askWhichChecks ? QString() : testsSectionText(m_body));
         m_testsEditNone->setVisible(askWhichChecks);
+        // The rows go while the list is being rewritten: the box is about to replace them, the
+        // hint above it names what was wrong, and the strip stays one strip instead of pushing
+        // the card's own words off the page.
+        m_testsFindings->hide();
+        m_testsActions->hide();
         m_testsEdit->show();
         m_testsStrip->show();
         m_testsEditor->setFocus();
@@ -3679,6 +3693,8 @@ private:
     {
         m_testsEdit->hide();
         m_testsAsking = false;
+        m_testsFindings->setVisible(m_testsFindingsBox->count() > 0);
+        m_testsActions->setVisible(m_testsActionsBox->count() > 1);
         showTests();
         if (onControlsResized)
             onControlsResized();
