@@ -446,7 +446,9 @@ public:
     // call setFoldContent(), which opens the block.
     std::function<void(const QString &uri)> onFoldRequested;
     // OSC 8 URI, URL text or an existing absolute path; line/column are -1 when absent.
-    std::function<void(const QString &target, int line, int column)> onLinkActivated;
+    // Mouse modifiers survive the view/backend boundary so the host can distinguish its
+    // ordinary in-app open from actions such as Shift-click's external open.
+    std::function<void(const QString &target, int line, int column, Qt::KeyboardModifiers modifiers)> onLinkActivated;
     std::function<void(const QString &title)> onTitleChanged;
     std::function<void(const QString &path)> onCwdChanged;
     // The same OSC 7 with its host part ("" for file:///path). A shell on another machine (ssh)

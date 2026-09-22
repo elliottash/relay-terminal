@@ -79,7 +79,7 @@ int main(int argc, char **argv)
     w->setWindowTitle(QStringLiteral("relay-vterm-spike (%1)").arg(backend.session()->coreName()));
     backend.resizeTerminal(rows, cols);
 
-    backend.onLinkActivated = [&](const QString &t, int line, int col) {
+    backend.onLinkActivated = [&](const QString &t, int line, int col, Qt::KeyboardModifiers) {
         emitLine(QStringLiteral("CALLBACK linkActivated %1 line=%2 col=%3\n").arg(t).arg(line).arg(col));
     };
     backend.onTitleChanged = [&](const QString &t) {

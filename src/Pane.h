@@ -735,6 +735,9 @@ public:
     // Open a folder (explorer pane) or a file (preview pane); `line` > 0 scrolls the preview there.
     std::function<void(const QString &path, int line)> onOpenPath;
     std::function<void(const QString &path, int line)> onEditPath;
+    // Shift-click/Shift+Enter on a local output link. Tests set this to observe the handoff;
+    // production leaves it unset and uses the desktop's application handler.
+    std::function<void(const QString &path)> onOpenExternal;
     std::function<void(const QString &)> onToggleExplorer;   // open the explorer, or close it again
     std::function<void()> onOpenBoard;                 // Switchboard: /switchboard from this pane
     // /light, /dark and /theme: the window decides whether the theme is this tab's or everyone's
@@ -3062,7 +3065,18 @@ public:
 
     // ----- links in the output (issues YZTK and GWXM) ---------------------------------------
     // Where a clicked or keyboard-selected link goes. `fromMouse` teaches the keyboard path.
-    void openOutputTarget(const QString &target, int line, bool fromMouse) {
+    void openOutputTarget(const QString &target, int line, bool fromMouse,
+                          Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+        // File actions use the actual path, even when ordinary opening resolves a Markdown file
+        // to a Switchboard card. Remote paths never arrive here with Shift (the login branch at
+        // the backend callback keeps handling those on their own machine).
+        if (modifiers.testFlag(Qt::ShiftModifier) && QDir::isAbsolutePath(target)) {
+            if (!QFileInfo::exists(target)) { status(QStringLiteral("No such file or folder: ") + target); return; }
+            if (onOpenExternal) onOpenExternal(target);
+            else if (!QDesktopServices::openUrl(QUrl::fromLocalFile(target)))
+                status(QStringLiteral("Could not open externally: ") + target);
+            return;
+        }
         if (target.isEmpty()) return;
         // An agent may link #ID to its backing Markdown file (#K9KC). Resolve that
         // before context dispatch, so embedded consoles and terminal panes agree.
@@ -3217,17 +3231,12 @@ public:
         if (QDir::isAbsolutePath(link.target)) {
             const QFileInfo file(link.target);
             if (!file.exists()) { status(QStringLiteral("No such file or folder: ") + link.target); return; }
-            if (modifiers.testFlag(Qt::ShiftModifier)) {
-                if (!QDesktopServices::openUrl(QUrl::fromLocalFile(link.target)))
-                    status(QStringLiteral("Could not open externally: ") + link.target);
-                return;
-            }
             if (modifiers.testFlag(Qt::ControlModifier) && file.isFile()) {
                 if (onEditPath) onEditPath(link.target, std::max(0, link.line));
                 return;
             }
         }
-        openOutputTarget(link.target, link.line, false);
+        openOutputTarget(link.target, link.line, false, modifiers);
     }
     void endOutputLinkWalk() {
         m_walkLink = {};
@@ -10766,7 +10775,8 @@ private:
         };
         // Clickable paths (issue YZTK): a file opens in a preview pane at its line, a folder in
         // an explorer pane, a URL in the browser. The engine only reports paths that exist.
-        m_backend->onLinkActivated = [this](const QString &target, int line, int column) {
+        m_backend->onLinkActivated = [this](const QString &target, int line, int column,
+                                            Qt::KeyboardModifiers modifiers) {
             Q_UNUSED(column);
             // The engine links paths that exist here; inside a login the output is the remote
             // machine's, and the same path here is a different file (card #S5SH). URLs still open.
@@ -10775,7 +10785,7 @@ private:
                 openRemoteOutputPath(target, line);
                 return;
             }
-            openOutputTarget(target, line, true);
+            openOutputTarget(target, line, true, modifiers);
         };
         // Which paths in the output are real, and where a relative one is relative to (#S5SH):
         // this machine, until the pane is logged into another one — then the host's own answer,

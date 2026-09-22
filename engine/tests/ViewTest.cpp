@@ -54,7 +54,7 @@ struct Term {
                  qPrintable(backend->session()->errorString()));
         view->setFocus();
         QObject::connect(view, &TerminalView::linkActivated, view,
-                         [this](const QString &target, int, int) { links << target; });
+                         [this](const QString &target, int, int, Qt::KeyboardModifiers) { links << target; });
     }
     // Three lines of output, the middle one an OSC 8 fold anchor. Its first
     // cell is a placeholder the view overpaints with the chevron.
@@ -179,6 +179,7 @@ class ViewTest : public QObject {
 private slots:
     void initTestCase_data()
     {
+        qRegisterMetaType<Qt::KeyboardModifiers>("Qt::KeyboardModifiers");
         QTest::addColumn<QString>("core");
         for (const QString &c : availableVtCores())
             QTest::newRow(qPrintable(c)) << c;
@@ -352,6 +353,27 @@ private slots:
         QCOMPARE(links[1][1].toInt(), 12);
         QCOMPARE(links[1][2].toInt(), 3);
         QCOMPARE(links[2][0].toString(), QStringLiteral("https://relay.test/x"));
+        QCOMPARE(links[2][3].value<Qt::KeyboardModifiers>(), Qt::ControlModifier);
+    }
+
+    void shiftClickCarriesItsModifier()
+    {
+        QFETCH_GLOBAL(QString, core);
+        QTemporaryDir dir;
+        QFile f(dir.filePath(QStringLiteral("report.docx")));
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.close();
+        Term t(core, QStringLiteral("/bin/cat"), {}, dir.path());
+        QSignalSpy links(t.view, &TerminalView::linkActivated);
+        const QByteArray osc7 = "\x1b]7;file://" + QUrl::toPercentEncoding(dir.path(), "/") + "\x07";
+        t.backend->writeToDisplay(osc7 + "report.docx\r\n");
+        QVERIFY(t.waitScreen(QStringLiteral("report.docx")));
+        QTest::qWait(60);
+        QTest::mouseClick(t.view, Qt::LeftButton, Qt::ShiftModifier,
+                          QPoint(2 + 2 * t.view->cellWidth(), 2 + t.view->cellHeight() / 2));
+        QCOMPARE(links.size(), 1);
+        QCOMPARE(links[0][0].toString(), QFileInfo(f).absoluteFilePath());
+        QCOMPARE(links[0][3].value<Qt::KeyboardModifiers>(), Qt::ShiftModifier);
     }
 
     void wrappedUrlClick()

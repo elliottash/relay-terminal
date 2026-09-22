@@ -53,9 +53,10 @@ VTermBackend::VTermBackend(const QString &coreName, QWidget *parent)
         if (onFoldRequested)
             onFoldRequested(uri);
     };
-    connect(m_view, &TerminalView::linkActivated, this, [this](const QString &target, int line, int column) {
+    connect(m_view, &TerminalView::linkActivated, this,
+            [this](const QString &target, int line, int column, Qt::KeyboardModifiers modifiers) {
         if (onLinkActivated)
-            onLinkActivated(target, line, column);
+            onLinkActivated(target, line, column, modifiers);
     });
     connect(m_view, &TerminalView::bellRang, this, [this] {
         if (onBell)

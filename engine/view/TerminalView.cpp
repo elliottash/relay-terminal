@@ -1556,8 +1556,8 @@ void TerminalView::mousePressEvent(QMouseEvent *e)
         Link link;
         int s = 0, en = 0;
         const bool onLink = foldUri.isEmpty() && linkAt(pos, &link, &s, &en);
-        if (onLink && (e->modifiers() & Qt::ControlModifier)) {
-            emit linkActivated(link.target, link.line, link.column);
+        if (onLink && (e->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier))) {
+            emit linkActivated(link.target, link.line, link.column, e->modifiers());
             return;
         }
         // A plain click opens on release, so that dragging from inside a path still
@@ -1678,7 +1678,7 @@ void TerminalView::mouseReleaseEvent(QMouseEvent *e)
             const Link link = m_pressedLink;
             m_pressedLink = Link();
             if (pos.row == m_pressedRow && pos.col >= m_pressedStart && pos.col <= m_pressedEnd)
-                emit linkActivated(link.target, link.line, link.column);
+                emit linkActivated(link.target, link.line, link.column, Qt::NoModifier);
         }
         return;
     }
@@ -3262,7 +3262,7 @@ void TerminalView::contextMenuEvent(QContextMenuEvent *e)
     if (!link.card.isEmpty()) {
         const QString reference = QStringLiteral("#") + link.card;
         menu->addAction(tr("Open %1").arg(reference), this,
-                        [this, link] { emit linkActivated(link.target, -1, -1); });
+                        [this, link] { emit linkActivated(link.target, -1, -1, Qt::NoModifier); });
         menu->addAction(tr("Copy %1").arg(reference), this,
                         [reference] { QApplication::clipboard()->setText(reference); });
         menu->addSeparator();
@@ -3272,12 +3272,15 @@ void TerminalView::contextMenuEvent(QContextMenuEvent *e)
         // one as a path offered "Open <last segment>", "Open in the system editor" and "Copy
         // path" for a setting. The click itself is the only thing that works here, so it is the
         // only thing offered; the host resolves it (Pane::openOutputTarget).
-        menu->addAction(tr("Open"), this, [this, link] { emit linkActivated(link.target, -1, -1); });
+        menu->addAction(tr("Open"), this,
+                        [this, link] { emit linkActivated(link.target, -1, -1, Qt::NoModifier); });
         menu->addSeparator();
     } else if (link.valid()) {
         const QString name = link.url ? link.target : QFileInfo(link.target).fileName();
         menu->addAction(tr("Open %1").arg(name), this,
-                        [this, link] { emit linkActivated(link.target, link.line, link.column); });
+                        [this, link] {
+                            emit linkActivated(link.target, link.line, link.column, Qt::NoModifier);
+                        });
         if (!link.url)
             menu->addAction(tr("Open in the system editor"), this,
                             [link] { QDesktopServices::openUrl(QUrl::fromLocalFile(link.target)); });

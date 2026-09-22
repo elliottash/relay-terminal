@@ -235,7 +235,7 @@ public:
 
 signals:
     // OSC 8 URI, URL text, or an existing absolute path (line/column -1 if absent).
-    void linkActivated(const QString &target, int line, int column);
+    void linkActivated(const QString &target, int line, int column, Qt::KeyboardModifiers modifiers);
     void scrollPositionChanged(int viewportTop, int historyRows, int rows);
     void gridSizeChanged(int rows, int columns);
     // A new frame() is available. Emitted after the view has taken it, before it repaints.

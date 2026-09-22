@@ -530,6 +530,28 @@ QJsonObject workerRow(const QString &id, const QString &preview, const QString &
                        {QStringLiteral("forced"), false}};
 }
 
+// Shift-click is a file action, not ordinary link routing: it keeps the real local path and
+// hands it to the desktop opener before a context or Relay preview can consume it (#SFC1).
+void shiftClickOnALocalPathOpensItExternally()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    const QString path = home->filePath(QStringLiteral("Dissertation-Report.docx"));
+    QFile file(path);
+    CHECK(file.open(QIODevice::WriteOnly));
+    file.close();
+    QStringList external, internal;
+    console.onOpenExternal = [&external](const QString &opened) { external << opened; };
+    console.onOpenPath = [&internal](const QString &opened, int) { internal << opened; };
+
+    console.openOutputTarget(path, -1, true, Qt::ShiftModifier);
+
+    CHECK_EQ(external, QStringList({path}));
+    CHECK(internal.isEmpty());
+    CHECK(context.seen.isEmpty());
+}
+
 QJsonObject queueChanged(const QJsonArray &items, const QJsonArray &steering = {})
 {
     return QJsonObject{{QStringLiteral("event"), QStringLiteral("queue_changed")},
@@ -788,6 +810,7 @@ int main(int argc, char **argv)
     cases::theHostsHandlesWork();
     cases::aConsoleIsAnOrdinaryChildOfItsHost();
     cases::theContextGetsFirstRefusalOnEveryLinkKind();
+    cases::shiftClickOnALocalPathOpensItExternally();
     cases::aQueueChangedForThisSurfaceDrawsRowsTheConsoleNeverSubmitted();
     cases::aTerminalPaneIgnoresTheWorkersRowsEntirely();
     cases::aWorkerRowIsRemovedAndMovedWithItsSurface();
