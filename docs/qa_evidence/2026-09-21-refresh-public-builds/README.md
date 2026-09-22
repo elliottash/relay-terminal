@@ -55,3 +55,9 @@ separate and will not be mixed into this release.
 ## Linux and Windows published
 
 `v0.1.0-beta.3` is live at source `59a51d9`, after all six Linux package jobs and both Windows gates passed. Uploaded digests, package metadata, source provenance and live site checks are recorded in `beta3-publication.txt`. Site downloads deployed from `d4854390`; all direct assets return 200 and both hostnames match the committed HTML/CSS. Mac verification continues separately.
+
+## macOS release candidate and website preview
+
+Candidate `c4c1c50aa571cfd184b5f92f905cffe8507da8c8` is fixed for [beta.4 release run 35676338727](https://github.com/elliottash/relay-terminal/actions/runs/35676338727). It includes native process/Keychain support, private runtimes, macOS bundle relocation and TLS fixes, corrected terminal test synchronization, and a GUI smoke that removes runtime overrides before launch. Publication awaits all native and Linux package gates.
+
+`macos-downloads-desktop.png` and `macos-downloads-mobile.png` show the prepared download section at 1440px and 390px. Playwright finds 15 installation-section links and no horizontal overflow at either width. This is a local preview; beta.3 stays live until beta.4 payloads are published and verified. The heading decoration remains separated from the text.

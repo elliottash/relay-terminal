@@ -45,3 +45,7 @@ Native macOS implementation and DMG packaging landed through df9ea698; both nati
 <!-- relay:entry 20260922T012743Z-b3 author=codex kind=evidence -->
 ### Codex · 2026-09-22 01:27
 Published beta3 Linux/native Windows assets from verified59a51d9 after all platform gates passed. Bot publication failed403; authorized SSH tag plus gh publication succeeded. All uploaded hashes/sizes and eight direct downloads verified. Deployed site d4854390, exact HTML/CSS on apex+www. Mac source/build/runtime tests pass, with packaging audits being completed; final Mac downloads remain pending. Evidence: beta3-publication.txt.
+
+<!-- relay:entry 20260922T013821Z-m4 author=codex kind=progress -->
+### Codex · 2026-09-22 01:38
+Beta.4 release run 35676338727 is building fixed source c4c1c50a for six Linux packages, native Windows and both Mac architectures. Mac DMG signing/mounting/private TLS and shell checks have passed in preceding native runs; corrected shutdown fixture and stronger GUI runtime discovery check are included in this candidate. Desktop/mobile download previews recorded; live beta.3 links remain until successful publication.
