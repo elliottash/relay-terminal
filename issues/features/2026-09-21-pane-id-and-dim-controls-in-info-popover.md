@@ -8,7 +8,7 @@ assignee: codex
 rank: m
 created: '2026-09-21'
 source: 'Codex in a Relay pane, 2026-09-21'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-pane-info-popover/], related: [], github: null}
+links: {plans: [], commits: [5ce35f2d443b7ba68f95b4971d3cf86dd5fc01a8], evidence: [docs/qa_evidence/2026-09-21-pane-info-popover/], related: [], github: null}
 ---
 # Put pane identity and dimming controls in the info hover popover
 
