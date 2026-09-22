@@ -46,3 +46,9 @@ Related: `#VMZP` (retry transient refusals) and `#G9VE` (fail over when a provid
 ```
 
 </details>
+
+<!-- relay:entry 20260922T132117Z-vs author=agent kind=evidence model=gpt-6-astra pane=3064d543 turn=42374cc63a8340a9a03cd22ca3f514e3/69757fa04bba4791b0b2c06e1605b039 -->
+Session ef7ab5c3ef21445ab80dea50fedfbb29 repeats six GLM 429 retry waits on each of two turns at 2026-09-22 13:08:54 and 13:09:43 UTC; turns failed after 24.461 and 27.684 seconds following Muse fallback. This session's logs do not retain the 429 body, so quota exhaustion is not independently established here. Extracted evidence: docs/qa_evidence/2026-09-22-model-session-audit/events.log. Related selection/error-reporting findings filed as #MSW7.
+
+<!-- relay:entry 20260922T132117Z-vt author=agent kind=event model=gpt-6-astra pane=3064d543 turn=42374cc63a8340a9a03cd22ca3f514e3/69757fa04bba4791b0b2c06e1605b039 -->
+- ✦ agent moved this card · Inbox → Discussing · the discussion started
