@@ -11,7 +11,7 @@ rank: m
 created: '2026-09-21'
 acceptance: the share dialog offers All tabs; an invite or meeting code made with it reaches every current pane and panes created later across tabs, while pane-only and whole-tab shares remain narrow
 source: 'Codex in a Relay pane, 2026-09-21'
-links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-21-share-all-tabs/'], related: [T4BS, PH0N], github: null}
+links: {plans: [], commits: [cc57d98a], evidence: ['docs/qa_evidence/2026-09-21-share-all-tabs/'], related: [T4BS, PH0N], github: null}
 ---
 # Share all tabs with one option
 
