@@ -1,0 +1,16 @@
+.................................................................................................................................................................................
+----------------------------------------------------------------------
+Ran 177 tests in 15.006s
+
+OK
+
+Internal ctest changing into directory: /home/elliott/repos/relay-terminal/build
+Test project /home/elliott/repos/relay-terminal/build
+    Start 75: boardpane
+1/2 Test #75: boardpane ........................   Passed    0.28 sec
+    Start 76: cardtests
+2/2 Test #76: cardtests ........................   Passed    0.22 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =   0.50 sec
