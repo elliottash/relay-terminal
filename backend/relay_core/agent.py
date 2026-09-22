@@ -2207,7 +2207,11 @@ class Agent:
                                        "turn_id": turn_id, "call_id": call["id"]})
                             result = self._execute(prepared, turn)
                         except (OSError, UnicodeError) as exc:
+                            from .tool_outcomes import exception_code
                             result = {"error": str(exc)[:2000]}
+                            code = exception_code(exc)
+                            if code:
+                                result["error_code"] = code
                         except ValueError as exc:
                             result = {"error": str(exc)[:2000], "refused": True}
                     add({"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result, ensure_ascii=False)})

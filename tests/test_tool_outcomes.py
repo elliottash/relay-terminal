@@ -84,10 +84,15 @@ class OutcomeTests(unittest.TestCase):
             env.pop("RELAY_LOG_ORIGIN", None)
             script = """
 import unittest, os, subprocess, sys
+before = dict(os.environ)
 from relay_core import logs
-assert os.environ['XDG_DATA_HOME'] != sys.argv[1]
-subprocess.run([sys.executable, '-S', '-c', 'from relay_core import logs; logs.configure(); logs.event(logs.get(), "negative_test")'], check=True)
-print(logs.log_dir().joinpath('worker.log').read_text())
+from relay_core.test_logging import runner_environment
+assert dict(os.environ) == before
+with runner_environment():
+    assert os.environ['XDG_DATA_HOME'] != sys.argv[1]
+    subprocess.run([sys.executable, '-S', '-c', 'from relay_core import logs; logs.configure(); logs.event(logs.get(), "negative_test")'], check=True)
+    print(logs.log_dir().joinpath('worker.log').read_text())
+assert dict(os.environ) == before
 """
             result = subprocess.run([sys.executable, "-c", script, live], env=env,
                                     text=True, capture_output=True, timeout=20)
@@ -95,3 +100,38 @@ print(logs.log_dir().joinpath('worker.log').read_text())
             self.assertIn("origin=test", result.stdout)
             self.assertIn("pane=live-pane", result.stdout)
             self.assertFalse((Path(live) / "relay/logs").exists())
+
+    def test_explicit_test_directory_is_retained(self):
+        from relay_core.test_logging import runner_environment
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+                "XDG_DATA_HOME": directory, "RELAY_LOG_ORIGIN": "test"}):
+            with runner_environment():
+                self.assertEqual(os.environ["XDG_DATA_HOME"], directory)
+            self.assertTrue(Path(directory).exists())
+
+    def test_native_exception_producers(self):
+        from test_agent import FakeProvider, CONFIG, tool
+        for exception, outcome in ((ConnectionResetError("private"), "transport_error"),
+                                   (TimeoutError("private"), "timed_out"),
+                                   (FileNotFoundError("private"), "unknown")):
+            with tempfile.TemporaryDirectory() as directory:
+                agent = Agent(CONFIG, directory, lambda e: None,
+                              provider=FakeProvider(tool("run_command", {"command": "true"})))
+                with patch.object(agent, "_execute", side_effect=exception):
+                    agent.ask("exercise typed failure")
+                record = list(agent.turn_log.values())[-1]
+                self.assertEqual(record["tools"]["call-1"]["outcome"], outcome)
+
+    def test_guest_dispatch_exception_producers(self):
+        from test_guest_board_bridge import BridgeTests
+        fixture = BridgeTests()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        fixture.active()
+        for index, (exception, outcome) in enumerate((
+                (AttributeError("private"), "internal_error"),
+                (ConnectionResetError("private"), "transport_error"),
+                (FileNotFoundError("private"), "unknown"))):
+            with patch.object(fixture.agent, "_execute", side_effect=exception):
+                result = fixture.call(key="typed-" + str(index))
+            self.assertEqual(classify("board_read", result)[0], outcome)

@@ -202,6 +202,12 @@ def build_suite(start_dir: str, pattern: str, names: list[str],
 
 
 def main(argv: list[str] | None = None) -> int:
+    from .test_logging import runner_environment
+    with runner_environment():
+        return _main(argv)
+
+
+def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python3 -m relay_core.junit_runner",
         description="Run the stdlib unittest suite and write JUnit XML beside its usual output.")

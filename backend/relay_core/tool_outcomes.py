@@ -32,3 +32,14 @@ def classify(name: str, result) -> tuple[str, str | None]:
     if result.get("still_running") is True:
         return "pending", "background_job"
     return "success", None
+
+
+def exception_code(exc: Exception) -> str | None:
+    """Only types with a trustworthy meaning; generic filesystem/encoding errors stay unknown."""
+    if isinstance(exc, TimeoutError):
+        return "deadline_exceeded"
+    if isinstance(exc, ConnectionError):
+        return "connection_error"
+    if isinstance(exc, (AttributeError, NameError)):
+        return "internal_error"
+    return None

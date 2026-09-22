@@ -19,7 +19,6 @@ reopens the file when another process has rotated it.
 """
 from __future__ import annotations
 
-import atexit
 import faulthandler
 import hashlib
 from functools import lru_cache
@@ -27,23 +26,11 @@ import logging
 import os
 import re
 import sys
-import tempfile
 import threading
 import uuid
 import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-
-# Test runners can inherit a live Relay pane's environment. Isolate before any worker is
-# spawned, so negative protocol tests cannot append to that pane's diagnostics.
-_test_data = None
-if ("unittest" in sys.modules or "pytest" in sys.modules or os.environ.get("PYTEST_CURRENT_TEST")):
-    if os.environ.get("RELAY_LOG_ORIGIN") != "test":
-        _test_data = tempfile.TemporaryDirectory(prefix="relay-test-data-")
-        atexit.register(_test_data.cleanup)
-        os.environ["XDG_DATA_HOME"] = _test_data.name
-        os.environ["RELAY_LOG_RUN_ID"] = uuid.uuid4().hex
-    os.environ["RELAY_LOG_ORIGIN"] = "test"
 
 _RUN_ID = uuid.uuid4().hex
 

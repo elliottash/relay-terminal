@@ -2,7 +2,7 @@
 
 Implemented bounded outcome classification in `backend/relay_core/tool_outcomes.py`, consumed by `Agent._record_tool` for native and guest records. Guest adapters preserve structured command exit/deadline/refusal metadata. Normal agent wait polling and background commands are pending; ambiguous failures are unknown. Error codes come from a fixed allowlist, without logging result prose.
 
-Worker logs append origin/run/build identity while preserving the existing event position. Tests importing the backend under unittest/pytest inherit a temporary XDG data directory into their worker subprocesses. Explicit test-runner isolation is retained when origin is already test. Backend build identity defaults to a cached source-tree hash, or the supplied packaged/QA identity. GUI worker-exit records use the actual captured running build identity.
+Worker logs append origin/run/build identity while preserving the existing event position. Explicit test entry points (`scripts/test.sh`, `relay_core.junit_runner`, and the direct role-test worker fixture) provide a temporary XDG directory to workers. Importing backend logging never mutates the environment. Explicit test-owned XDG directories are preserved when origin is already test. Backend build identity defaults to a cached source-tree hash, or the supplied packaged/QA identity. GUI worker-exit records use the actual captured running build identity.
 
 `Pane.h` changes only the worker-finished logging block: lifecycle shutdown/reconfigure at INFO, unexpected termination at ERROR, with reason and expected flag. No model/provider switching hunks changed.
 
@@ -21,4 +21,10 @@ Implementation commit: `5304f3a244f829c1b79305f0a6225578089b00a2` on main. The l
 
 ## Scope and limitations
 
-Relay board/delegation/message tools were absent from discovery. Parent owns all HG26 card/thread updates; no further delegation was attempted. Historical missing metadata remains unknown; arbitrary error strings are deliberately not classified by prose. The fixed transport/internal categories apply when structured metadata exists. This work does not broaden exception handling elsewhere to invent missing metadata.
+Relay board/delegation/message tools were absent from discovery. Parent owns all HG26 card/thread updates; no further delegation was attempted. Historical missing metadata remains unknown; arbitrary error strings are deliberately not classified by prose. Typed native connection/timeout catches now supply fixed codes. The existing guest dispatch exception boundary supplies connection/timeout/internal codes where exception type establishes the category; AttributeError/NameError map to internal_error. Generic filesystem and encoding errors remain unknown. No broader exception handling or error-prose guessing was added.
+
+## Parent review follow-up
+
+The initial implementation's import-time XDG mutation was removed after parent review. Test isolation is explicit and scoped to test execution; the regression verifies imports leave the entire environment untouched, the runner restores it, an inherited live pane ID does not defeat isolation, and test-owned directories are preserved. Native exception injection and a real guest bridge dispatch verify safe category producers. Metadata remains after EVENT, compatible with the parent report parser.
+
+Validation: `PYTHONPATH=backend:tests python3 -m relay_core.junit_runner -s tests test_tool_outcomes test_logs test_roles test_junit_runner test_guest_board_bridge test_agent.AgentTests -q` (see `tests-scope.txt`).

@@ -595,12 +595,13 @@ class WiringTests(unittest.TestCase):
 
 # ----- worker protocol -------------------------------------------------------------------------
 def run_worker(messages, env_extra):
-    env = {k: v for k, v in os.environ.items()}
-    env["RELAY_KEYRING"] = "off"          # never the real keyring
-    env.update(env_extra)
-    proc = subprocess.run([sys.executable, "-S", str(ROOT / "backend/worker.py")],
-                          input="".join(json.dumps(m) + "\n" for m in messages),
-                          text=True, capture_output=True, timeout=20, cwd=ROOT, env=env)
+    from relay_core.test_logging import environment
+    with environment() as env:
+        env["RELAY_KEYRING"] = "off"          # never the real keyring
+        env.update(env_extra)
+        proc = subprocess.run([sys.executable, "-S", str(ROOT / "backend/worker.py")],
+                              input="".join(json.dumps(m) + "\n" for m in messages),
+                              text=True, capture_output=True, timeout=20, cwd=ROOT, env=env)
     return [json.loads(line) for line in proc.stdout.splitlines()], proc
 
 

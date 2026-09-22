@@ -229,7 +229,11 @@ class Bridge:
                 result = self.agent._execute(prepared, getattr(self.agent, '_turn', None))
             except Exception as exc:
                 # Cache even an ambiguous dispatch failure: no automatic write replay.
+                from .tool_outcomes import exception_code
                 result = failure('board_call_failed', str(exc))
+                code = exception_code(exc)
+                if code:
+                    result['error_code'] = code
             return remember(result)
 
     def close(self):
