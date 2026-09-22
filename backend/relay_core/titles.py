@@ -3,8 +3,8 @@
 
 The pane header shows what the pane is *doing*, not where it lives. One cheap side call on the
 "chores" role writes the title after the first turn and then only when the work has moved on
-(``REFRESH_TURNS`` turns, or a compaction); it never runs on every turn and never when the user
-named the pane by hand. With no model configured, or when the call fails, the title stays today's
+(``REFRESH_TURNS`` turns, or a compaction). Failed calls retry at the next turn end; hand-named
+panes are never refreshed. With no model configured, or when the call fails, the title stays today's
 first-prompt text (``fallback_title``).
 
 Beside the title, the same machinery writes a *session summary*: two or three sentences (what was
@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import re
 
-from . import sidecall
+from . import logs, sidecall
+
+_log = logs.get("titles")
 
 # ~6 words, per the issue. The cap is characters so a title never breaks a header.
 MAX_TITLE = 60
@@ -81,11 +83,16 @@ def generate(provider, messages: list[dict], cancel=None) -> str:
     """One no-tools call on the chores role. Returns "" when the model gives nothing usable."""
     transcript = sidecall.render_transcript(messages, max_chars=12_000, per_message=1200)
     if not transcript.strip():
+        logs.event(_log, "title_failed", reason="empty_transcript")
         return ""
     text, _ = sidecall.call(provider, TITLE_SYSTEM, "Conversation:\n\n" + transcript, cancel)
-    data = sidecall.parse_json_object(text) or {}
-    candidate = data.get("title") if isinstance(data.get("title"), str) else text
-    return clean(candidate)
+    data = sidecall.parse_json_object(text)
+    candidate = (data.get("title") if isinstance(data.get("title"), str) else "") if data is not None else text
+    title = clean(candidate)
+    if len(title) < 3 or not any(c.isalpha() for c in title):
+        logs.event(_log, "title_failed", reason="unusable_reply")
+        return ""
+    return title
 
 
 # ----- session summaries ---------------------------------------------------------------------

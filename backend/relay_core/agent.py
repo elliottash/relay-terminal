@@ -3650,12 +3650,7 @@ class Agent:
         if text:
             event = self.set_title(text, "model")
         elif claim.get("first") and self.title:
-            # No model, or the call failed: today's first-prompt title names the pane, and the
-            # cadence moves on so a dead provider is not asked again after every turn.
-            with self._lock:
-                if self.title_source != "user":
-                    self.title_turn = claim.get("turns") or self.turns
-                    self._title_stale = False
+            # Keep the fallback visible, but leave the cadence owed so the next turn retries.
             event = self.title_event()
         self._flush_paired_save()
         return event

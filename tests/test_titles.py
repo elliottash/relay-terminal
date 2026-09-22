@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from relay_core import titles
@@ -206,10 +207,81 @@ class SessionTitleTests(unittest.TestCase):
                          ('teach the panes to name themselves', 'model'))
         self.assertEqual(agent.title_source, '')
         self.assertEqual(len(provider.title_calls()), 1)
-        # A provider that cannot answer is not asked again after every turn.
-        self.run_turn('again')
+        self.assertEqual(agent.title_turn, 0)
+        self.assertTrue(agent.title_due())
+        with self.assertLogs('relay.titles', level='INFO') as logged:
+            self.run_turn('again')
+            self.wait_titles(2)
+        self.assertEqual(len(provider.title_calls()), 2)
+        self.assertTrue(any('provider_call' in line and 'ProviderError' in line for line in logged.output))
+        self.assertNotIn('no key for this provider', str(logged.output))
+
+    def test_unusable_reply_keeps_fallback_then_recovers_next_turn(self):
+        provider = SideCallProvider(side_reply='{"title": ""}')
+        agent = self.make_agent(provider)
+        with self.assertLogs('relay.titles', level='INFO') as logged:
+            self.run_turn('please name this pane')
+            self.wait_titles(1)
+        self.assertIn('unusable_reply', str(logged.output))
+        self.assertEqual(agent.title, 'please name this pane')
+        self.assertEqual(agent.title_turn, 0)
+        provider.side_reply = '{"title": "Fixing pane titles"}'
+        self.run_turn('try again')
+        self.wait_titles(2)
+        self.assertEqual(agent.title, 'Fixing pane titles')
+        self.assertEqual(agent.title_turn, 2)
+        self.run_turn('next')
         self.settle()
-        self.assertEqual(len(provider.title_calls()), 1)
+        self.assertEqual(len(provider.title_calls()), 2)
+
+    def test_provider_build_failure_retries_without_logging_exception_text(self):
+        agent = self.make_agent(SideCallProvider(side_reply='{"title": "Naming panes"}'))
+        with patch.object(self.cmds, 'maybe_summary'), patch.object(
+                agent, 'side_provider', side_effect=ValueError('private provider text')):
+            with self.assertLogs('relay.titles', level='INFO') as logged:
+                self.run_turn('name this pane')
+                self.wait_titles(1)
+        self.assertIn('provider_build', str(logged.output))
+        self.assertNotIn('private provider text', str(logged.output))
+        self.assertTrue(agent.title_due())
+        self.run_turn('retry')
+        self.wait_titles(2)
+        self.assertEqual(agent.title, 'Naming panes')
+
+    def test_declining_guest_provider_is_logged_and_remains_due(self):
+        provider = SideCallProvider()
+        provider.serves_side_calls = False
+        agent = self.make_agent(provider)
+        with patch.object(self.cmds, 'maybe_summary'), patch.object(agent, 'side_provider', return_value=provider):
+            with self.assertLogs('relay.titles', level='INFO') as logged:
+                self.run_turn('name this pane')
+                self.wait_titles(1)
+        self.assertIn('side_provider_unavailable', str(logged.output))
+        self.assertIn('guest=True', str(logged.output))
+        self.assertTrue(agent.title_due())
+        self.assertEqual(provider.title_calls(), [])
+
+    def test_failed_refresh_preserves_existing_title_and_compaction_staleness(self):
+        agent = self.make_agent(SideCallProvider(side_reply='{"title": "Naming panes"}'))
+        self.run_turn('name this pane')
+        self.wait_titles(1)
+        self.run_turn('second turn')
+        self.settle()
+        agent._title_stale = True
+        claim = agent.claim_title()
+        self.assertIsNotNone(claim)
+        agent.release_title('', claim)
+        self.assertEqual((agent.title, agent.title_turn), ('Naming panes', 1))
+        self.assertTrue(agent._title_stale)
+        self.assertTrue(agent.title_due())
+
+    def test_unusable_shapes_are_logged_without_reply_text(self):
+        for reply in ('', '{"summary": "private reply"}', '{"title": 42}', '{"title": "x"}', '...'):
+            with self.subTest(reply=reply), self.assertLogs('relay.titles', level='INFO') as logged:
+                self.assertEqual(titles.generate(SideCallProvider(side_reply=reply),
+                                                [{'role': 'user', 'content': 'private prompt'}]), '')
+            self.assertIn('unusable_reply', str(logged.output))
+            self.assertNotIn('private', str(logged.output))
 
     def test_a_new_conversation_drops_the_title(self):
         provider = SideCallProvider(side_reply='{"title": "Fixing pane drag"}')

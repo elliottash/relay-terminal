@@ -30,6 +30,7 @@ from .sessions import SessionStore, check_id, default_session_dir
 
 _log = logs.get("aliases")
 _guest_log = logs.get("guest_sessions")
+_title_log = logs.get("titles")
 
 # The `sources` a `conversations` request may name, for the one error message that lists them.
 LISTABLE_SOURCES = ", ".join(f'"{name}"' for name in conv_index.SOURCES)
@@ -556,7 +557,7 @@ class SessionCommands:
         `session_title` still names the pane.
 
         The session summary rides the same moments (section 18.4), so the two cheap calls happen
-        together and neither one ever runs per turn.
+        together. Failed titles stay due and retry at the next turn end.
         """
         self.maybe_summary()
         agent = self.turns.agent
@@ -567,15 +568,26 @@ class SessionCommands:
             return
         try:
             provider = agent.side_provider(cheap=True, role="chores", max_tokens=titles.MAX_TOKENS)
-        except Exception:
+        except Exception as exc:
+            logs.event(_title_log, "title_failed", reason="provider_build",
+                       error=type(exc).__name__, session=agent.session_id,
+                       guest=not getattr(agent.provider, "serves_side_calls", True))
             provider = None
+        else:
+            if provider is None or not getattr(provider, "serves_side_calls", True):
+                logs.event(_title_log, "title_failed", reason="side_provider_unavailable",
+                           session=agent.session_id,
+                           guest=not getattr(agent.provider, "serves_side_calls", True))
+                provider = None
 
         def work():
             text = ""
             try:
                 if provider is not None:
                     text = titles.generate(provider, claim["messages"], threading.Event())
-            except Exception:
+            except Exception as exc:
+                logs.event(_title_log, "title_failed", reason="provider_call",
+                           error=type(exc).__name__, session=agent.session_id)
                 text = ""
             return agent.release_title(text, claim)
         self._background("session_title", None, work, lambda _text: agent.release_title("", claim) or agent.title_event())
