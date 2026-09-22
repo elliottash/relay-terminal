@@ -31,6 +31,7 @@ jobs:
           python -m unittest discover -s tests -p test_platform_storage.py -v
           python -m unittest discover -s tests -p test_powershell.py -v
           python -m unittest discover -s tests -p test_windows_open.py -v
+          python -m unittest discover -s tests -p test_tryit_windows.py -v
   conpty:
     runs-on: windows-2022
     timeout-minutes: 40
