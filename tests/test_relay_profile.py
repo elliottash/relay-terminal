@@ -11,13 +11,13 @@ Two halves, and both run offline:
   and `meta.json`. Skipped where cmake or ninja is missing, never pointed at this repo's shared
   `build/`, and it compiles three one-line files, so it costs a couple of seconds.
 """
-import cProfile
 import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -108,15 +108,22 @@ class ConverterTests(unittest.TestCase):
         self.assertEqual(rows["b"]["line"], 4)
 
     def test_pstats_round_trips_through_speedscope(self):
-        def leaf():
-            return sum(i * i for i in range(60000))
-
-        def middle():
-            return leaf() + leaf()
-
         with tempfile.TemporaryDirectory() as tmp:
             prof = Path(tmp) / "run.prof"
-            cProfile.runctx("middle()", {"middle": middle, "leaf": leaf}, {}, str(prof))
+            # #PF14: Python 3.12+ cProfile receives interpreter-wide monitoring events.
+            # Other tests' server threads can corrupt its caller stack. Capture in a fresh
+            # interpreter so this live fixture measures only the intended leaf/middle calls.
+            workload = textwrap.dedent("""\
+                import cProfile
+                import sys
+                def leaf():
+                    return sum(i * i for i in range(60000))
+                def middle():
+                    return leaf() + leaf()
+                cProfile.runctx("middle()", globals(), {}, sys.argv[1])
+                """)
+            subprocess.run([sys.executable, "-c", workload, str(prof)],
+                           check=True, capture_output=True, text=True, timeout=30)
             document = C.pstats_to_speedscope(prof)
             self.assertEqual(document["$schema"], C.SCHEMA)
             self.assertEqual(len(document["profiles"]), 1)

@@ -1,9 +1,10 @@
 ---
 id: PF14
 type: work
-status: inbox
+status: done
 labels: [bug, tests, profiling]
-assignee: null
+assignee: codex
+session: windows-platform-profile
 rank: mpf14
 created: '2026-09-21'
 source: 'Measured by Codex during release verification for #R6BS'
@@ -42,3 +43,25 @@ gates; those passes would be release evidence, not proof that this intermittent 
 
 ## Tests
 `PYTHONPATH=backend:tests python3 -m unittest test_relay_profile.ConverterTests -v`
+
+## Done means
+The live cProfile fixture records only its intended workload even while other suite threads
+run; the original caller-total assertion remains and passes under the measured interference.
+
+## Plan
+Run the generated leaf/middle workload in a fresh Python subprocess, then convert and assert
+the real profile in the parent exactly as before. Retain a concurrent idle-server reproducer
+and the failing raw statistics; verify it before and after without changing converter behavior.
+
+## Execution Summary
+Reproduced the same corrupt caller graph with eight idle socketserver threads and the existing
+roundtrip test on Python 3.12.3, without the full suite. cProfile receives interpreter-wide
+monitoring callbacks and mixes these threads into its shared caller context. The fixture now
+captures its generated workload in a fresh Python process; conversion and the original caller
+assertion still run unchanged. No converter/product behavior was modified.
+
+## Resolution
+The test fixture is isolated from other suite threads. Ten converter tests and 100 repetitions
+under the measured idle-server interference pass. Evidence, reproduction, and primary CPython
+references: `docs/qa_evidence/2026-09-22-profile-caller-ubuntu24-arm64/isolation.md`.
+This does not claim to repair CPython's arbitrary multithreaded profile captures.
