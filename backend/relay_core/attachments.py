@@ -40,7 +40,7 @@ def sniff_image(head: bytes, path: str | Path = "") -> str | None:
     return None
 
 
-def load(attachments, workspace: str | Path) -> list[dict]:
+def load(attachments, workspace: str | Path, *, remote_session: dict | None = None) -> list[dict]:
     if attachments is None:
         return []
     if not isinstance(attachments, list) or len(attachments) > MAX_ATTACHMENTS:
@@ -50,6 +50,12 @@ def load(attachments, workspace: str | Path) -> list[dict]:
     for item in attachments:
         if not isinstance(item, dict) or not isinstance(item.get("path"), str) or not item["path"] or "\x00" in item["path"]:
             raise ValueError("Each attachment must be {path}.")
+        if "host" in item:
+            result = load_remote(item, remote_session, max(0, TOTAL_CAP - total))
+            loaded.append(result)
+            if result["kind"] == "file":
+                total += len(result["content"].encode("utf-8"))
+            continue
         path = Path(os.path.expanduser(item["path"]))
         if not path.is_absolute():
             path = root / path
@@ -91,6 +97,43 @@ def load(attachments, workspace: str | Path) -> list[dict]:
         loaded.append({"path": str(path), "kind": "file", "content": data.decode("utf-8", "replace"),
                        "bytes": info.st_size, "truncated": truncated})
     return loaded
+
+
+def load_remote(item: dict, session: dict | None, remaining: int) -> dict:
+    """Read only from the pane's live authenticated host, never a same-named local file."""
+    from . import remote_session as remote, remote_files
+    from .tools import remote_path
+    remote.check_host(session, item["host"])
+    remote.require_socket(session)
+    path = remote_path(item["path"])
+    cwd = session.get("cwd")
+    cap = max(PER_FILE_CAP, provider_transport.MAX_IMAGE_BYTES)
+    proc = remote_files.run(session, remote_files.read_script(path, cwd, cap=cap + 1), cwd=cwd, timeout=10)
+    if proc.returncode == remote_files.WRONG_TYPE:
+        listing = remote_files.run(session, remote_files.list_script(path, cwd, limit=MAX_LISTING), cwd=cwd, timeout=10)
+        data = remote_files.output(listing, session, path, wrong_type="Only regular files and directories are supported.")
+        pieces = data.split(b"\x00")
+        entries = [(pieces[i], pieces[i + 1]) for i in range(0, len(pieces) - 1, 2)]
+        content = "\n".join(name.decode("utf-8", "replace") + ("/" if kind == b"directory" else "")
+                            for kind, name in entries[:MAX_LISTING])
+        return {"path": f"{session['host']}:{path}", "kind": "directory", "content": content,
+                "bytes": len(data), "truncated": len(entries) > MAX_LISTING}
+    if proc.returncode:
+        # File tools provide the same explicit remote error messages and secret guards.
+        remote_files.output(proc, session, path)
+    data = proc.stdout
+    label = f"ssh://{session['host']}/" + path.lstrip("/") if path.startswith("/") else f"{session['host']}:{cwd or '~'}/{path}"
+    media_type = sniff_image(data[:32], path)
+    if media_type:
+        if len(data) > provider_transport.MAX_IMAGE_BYTES:
+            raise ValueError(f"Remote image too large: {label}")
+        return {"path": label, "kind": "image", "media_type": media_type, "raw": data,
+                "bytes": len(data), "content": "", "truncated": False}
+    if b"\x00" in data[:8192]:
+        raise ValueError(f"Attachment looks binary: {label}")
+    shown = data[:min(PER_FILE_CAP, remaining)]
+    return {"path": label, "kind": "file", "content": shown.decode("utf-8", "replace"),
+            "bytes": len(data), "truncated": len(shown) < len(data)}
 
 
 def images(loaded: list[dict] | None) -> list[dict]:

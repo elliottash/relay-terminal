@@ -227,7 +227,7 @@ def load_attachments(request: dict, turns) -> list[dict] | None:
     agent = turns.agent
     if agent is None:
         raise ValueError("Configure a provider and workspace first.")
-    return attachments.load(raw, agent.executor.workspace.root) or None
+    return attachments.load(raw, agent.executor.workspace.root, remote_session=agent.executor.remote_session) or None
 
 
 def open_request_items(agent) -> list[dict]:

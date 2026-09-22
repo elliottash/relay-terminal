@@ -18,6 +18,7 @@ struct Completion {
 
 // line: the text being edited; cursor: position within it. cwd: the pane's directory.
 // commands: known command names, used only for the first word of a shell command.
+Completion completionToken(const QString &line, int cursor);
 Completion completeAt(const QString &line, int cursor, const QString &cwd, const QStringList &commands);
 
 // Quote a path for the shell the way Readline does: backslash-escape the shell-special characters.

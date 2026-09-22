@@ -66,11 +66,18 @@ QString unescapeToken(const QString &text) {
     return out;
 }
 
-Completion completeAt(const QString &line, int cursor, const QString &cwd, const QStringList &commands) {
+Completion completionToken(const QString &line, int cursor) {
     Completion result;
     cursor = std::clamp(cursor, 0, int(line.size()));
     result.start = tokenStart(line, cursor);
     result.length = cursor - result.start;
+    result.commands = firstWord(line, result.start);
+    return result;
+}
+
+Completion completeAt(const QString &line, int cursor, const QString &cwd, const QStringList &commands) {
+    Completion result = completionToken(line, cursor);
+    result.commands = false;
     const QString token = unescapeToken(line.mid(result.start, result.length));
 
     // The first word of a command line is a command name, unless it is written as a path.

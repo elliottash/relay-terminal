@@ -2054,6 +2054,9 @@ class ConversationIndex:
             newest = max(newest, when)
             status = item.get("exit_status")
             status = int(status) if isinstance(status, int) else None
+            host = _clean(str(item.get("host") or ""), 255).strip()
+            if host:
+                command = f"[{host} · {item.get('cwd') or '?'}] {command}"
             rows.append(("command", when, status, command))
             output = _clean(str(item.get("output") or ""), MAX_TEXT).strip()
             if output:
