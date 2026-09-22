@@ -1089,7 +1089,7 @@ class WiringTest(TestsProtocolTest):
         commands = BP.BoardCommands(None, self.events.append)
         with self.assertRaises(ValueError) as caught:
             commands.dispatch({"type": "tests_check", "card": "AAA1"})
-        self.assertIn("no Switchboard", str(caught.exception))
+        self.assertIn("no board", str(caught.exception))
 
 
 # ------------------------------------------------------- signals (protocol 32, #AQ6X)
