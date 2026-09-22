@@ -1,0 +1,12 @@
+Qt 5.15.13 appDpr 1 requested QSize(22, 22) returnedPixels QSize(22, 22) returnedDpr 1 oldLabelHint QSize(22, 22) paint22PhysicalBounds QSize(22, 22)
+@2x logical request 22: pixels QSize(22, 22) DPR 1
+Qt 5.15.13 appDpr 1.5 requested QSize(33, 33) returnedPixels QSize(33, 33) returnedDpr 1 oldLabelHint QSize(22, 22) paint22PhysicalBounds QSize(33, 33)
+@2x logical request 22: pixels QSize(22, 22) DPR 1
+Qt 5.15.13 appDpr 2 requested QSize(44, 44) returnedPixels QSize(44, 44) returnedDpr 1 oldLabelHint QSize(22, 22) paint22PhysicalBounds QSize(44, 44)
+@2x logical request 22: pixels QSize(22, 22) DPR 1
+Qt 6.4.2 appDpr 1 requested QSize(22, 22) returnedPixels QSize(22, 22) returnedDpr 1 oldLabelHint QSize(22, 22) paint22PhysicalBounds QSize(22, 22)
+@2x logical request 22: pixels QSize(22, 22) DPR 1
+Qt 6.4.2 appDpr 1.5 requested QSize(33, 33) returnedPixels QSize(50, 50) returnedDpr 1.5 oldLabelHint QSize(33, 33) paint22PhysicalBounds QSize(31, 31)
+@2x logical request 22: pixels QSize(22, 22) DPR 1
+Qt 6.4.2 appDpr 2 requested QSize(44, 44) returnedPixels QSize(88, 88) returnedDpr 2 oldLabelHint QSize(44, 44) paint22PhysicalBounds QSize(42, 42)
+@2x logical request 22: pixels QSize(44, 44) DPR 2

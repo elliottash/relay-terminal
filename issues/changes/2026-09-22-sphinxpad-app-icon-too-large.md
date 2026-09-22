@@ -16,26 +16,26 @@ top-left app icon looked too big on sphinxpad
 
 ## Done means
 The top-left Relay icon stays smaller than its 26-logical-pixel chrome controls, with the original app artwork intact.
-At 1× and 2× display scaling it has the same logical size, stays centered, and neither clips nor expands the tab row.
+At 1×, 1.5× and 2× display scaling it has the same logical size, stays centered, and neither clips nor expands the tab row.
 
 ## Plan
 **Goal:** constrain the app icon to a proportionate chrome size.
-**Findings:** `src/RelayWindow.h::buildWindowChrome` gives an unconstrained QLabel a 22-pixel icon rasterized using application-wide DPR; neighboring controls paint 14-pixel glyphs in 26-pixel buttons.
+**Findings:** the old `QIcon::pixmap(QSize(22,22) * appDpr)` double-scales on Qt 6: the direct Qt5/Qt6 probe shows old QLabel hints of 22/33/44 logical pixels at DPR 1/1.5/2 on Qt 6, versus 22 throughout on Qt 5. Preserve the intended 22 logical pixels and paint using the current device.
 **Steps:**
 1. Add a bounded, paint-time app icon widget in `src/WindowChrome.h`, using Qt icon painting for the current screen.
-2. Replace only the icon creation block in `buildWindowChrome`, preserving artwork, tooltip, and dragging.
-3. Build and stage the real chrome widgets under Xvfb at 1× and 2×, recording screenshots and geometry checks.
+2. Preserve the intended 22-pixel box (the first 18-pixel implementation is superseded following the Qt-version probe). Replace only the icon creation block in `buildWindowChrome`, preserving artwork, tooltip, and dragging.
+3. Build and stage the real chrome widgets under Xvfb at 1×, 1.5× and 2×, recording screenshots and geometry checks.
 **Risks:** sphinxpad's precise compositor/DPI setup is unavailable locally; staged scaling establishes proportionality but not a remote machine verdict. Keep shared header edits narrow.
 **Verify:** targeted compiled widget assertions and staged screenshots, local Relay build, exact-tree landing build, board validation.
 
 ## Execution Summary
-Replaced the unconstrained 22-pixel QLabel pixmap with an 18×18 logical-pixel `ChromeAppIcon`; QIcon paints against the current device scale. Preserved the complete app artwork, tooltip, and transparent mouse handling. Changes in `src/WindowChrome.h` and only the icon construction block in `src/RelayWindow.h`.
-Evidence: `docs/qa_evidence/2026-09-22-ATP7/` contains the reproducible live-app driver, geometry, and inspected screenshots at 1× and 2×. No sphinxpad-specific compositor check was performed.
+Confirmed Qt6 double scaling in the old QIcon pixmap request: the 22px intent became 33 logical pixels at DPR 1.5 and 44 at DPR 2. Qt5 did not reproduce this. Replaced the cached app-wide-DPR pixmap with a fixed **22×22 logical-pixel** `ChromeAppIcon`, painting the original artwork against the current paint device. This preserves the intended design size; the first 18px implementation is superseded.
+Only `src/WindowChrome.h` and the icon construction block in `src/RelayWindow.h` changed. Other agents' shared-header hunks were excluded. Evidence in `docs/qa_evidence/2026-09-22-ATP7/` includes direct Qt5/Qt6 measurements, @2x asset behavior, Qt6 before/after images at fractional/2× scaling, and live app screenshots. No sphinxpad-specific compositor check was performed.
 
 ## Tests
-- `scripts/relay-build --target relay` — PASS.
-- `python3 docs/qa_evidence/2026-09-22-ATP7/stage.py` — PASS at 1× and 2×; icon 18×18, bell 26×26, bounded corner.
-- `manual: docs/qa_evidence/2026-09-22-ATP7/scale-1.png` — inspected, proportionate and unclipped.
-- `manual: docs/qa_evidence/2026-09-22-ATP7/scale-2.png` — inspected, proportionate and unclipped.
+- `scripts/relay-build --target relay` — PASS after restoring the intended 22px size.
+- `python3 docs/qa_evidence/2026-09-22-ATP7/stage.py` — PASS at 1×, 1.5×, 2×; icon 22×22 and bell 26×26, with icon contained in its corner.
+- `manual: docs/qa_evidence/2026-09-22-ATP7/dpi-probe.log` — compiled probe passes on Qt5.15.13 and Qt6.4.2 at all three scales; old Qt6 QLabel grows to 33/44 logical pixels. @2x variant preserves DPR2 when selected.
+- `manual: docs/qa_evidence/2026-09-22-ATP7/qt6-compare-1.5.png` — inspected old/new rendering comparison.
+- `manual: docs/qa_evidence/2026-09-22-ATP7/qt6-compare-2.png` — inspected old/new rendering comparison.
 - `python3 scripts/relay-board.py check` — existing unrelated board diagnostics; none for ATP7. `tests_check` unavailable in exposed bridge.
-- `scripts/land.py commit atp7-icon` — PASS: exact materialized tree compiled before landing `dcf941a7`; only the app-icon hunk selected in shared RelayWindow.h.

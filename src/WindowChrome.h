@@ -38,15 +38,15 @@
 // "window/native_frame" (Actions › System title bar) gives the system decorations back for
 // desktops where they work better; it applies to windows opened after the change.
 
-// The app tile is deliberately a little larger than the 14 px control glyphs, but
-// smaller than their 26 px buttons. Paint in logical coordinates: QIcon selects
+// Preserve the app tile's 22 logical pixels inside the 26 px chrome row.
+// Do not multiply by DPR: QIcon already does that on Qt 6. QIcon selects
 // the raster for this paint device, including after moving between DPI scales.
 class ChromeAppIcon final : public QWidget {
 public:
     explicit ChromeAppIcon(const QIcon &icon, QWidget *parent = nullptr)
         : QWidget(parent), m_icon(icon) {
         setObjectName(QStringLiteral("windowIcon"));
-        setFixedSize(18, 18);
+        setFixedSize(22, 22);
         setToolTip(QStringLiteral("Relay"));
         setAttribute(Qt::WA_TransparentForMouseEvents);
     }

@@ -1,4 +1,4 @@
-"""Stage the actual Relay window at two DPRs; assert chrome geometry and capture it."""
+"""Stage the actual Relay window at three DPRs; assert chrome geometry and capture it."""
 import json
 import os
 from pathlib import Path
@@ -9,7 +9,7 @@ import time
 ROOT = Path(__file__).resolve().parents[3]
 OUT = Path(__file__).resolve().parent
 results = {}
-for scale in (1, 2):
+for scale in (1, 1.5, 2):
     with tempfile.TemporaryDirectory(prefix='relay-atp7-') as directory:
         tmp = Path(directory)
         env = dict(os.environ)
@@ -41,12 +41,12 @@ for scale in (1, 2):
                         time.sleep(.25)
                 else:
                     raise RuntimeError('No chrome geometry produced')
-                assert (icon['w'], icon['h']) == (18, 18), icon
+                assert (icon['w'], icon['h']) == (22, 22), icon
                 assert (bell['w'], bell['h']) == (26, 26), bell
                 corner = rects['windowChromeLeft']
                 assert corner['x'] <= icon['x'] and corner['y'] <= icon['y']
-                assert icon['x'] + 18 <= corner['x'] + corner['w']
-                assert icon['y'] + 18 <= corner['y'] + corner['h']
+                assert icon['x'] + 22 <= corner['x'] + corner['w']
+                assert icon['y'] + 22 <= corner['y'] + corner['h']
                 results[str(scale)] = {'icon': icon, 'bell': bell, 'corner': corner}
                 # Dismiss the optional first-run instructions dialog in this isolated profile.
                 dialogs = subprocess.run(['xdotool', 'search', '--onlyvisible', '--pid', str(app.pid),
@@ -69,4 +69,4 @@ for scale in (1, 2):
             xvfb.wait()
 (OUT / 'geometry.json').write_text(json.dumps(results, indent=2) + '\n')
 print(json.dumps(results, indent=2))
-print('PASS: 18x18 icon inside chrome at 1x and 2x; adjacent controls remain 26x26')
+print('PASS: 22x22 icon inside chrome at 1x, 1.5x and 2x; adjacent controls remain 26x26')
