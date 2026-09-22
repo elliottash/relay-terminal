@@ -979,6 +979,16 @@ private slots:
                                                                     QStringLiteral("gpt-5.6-sol")}}},
             QDateTime::currentDateTime());
         QVERIFY(html.contains(QStringLiteral("minimax-m3")));
+        // The provider beside it says which key is spending, and does not name the model again:
+        // three preset labels carry the model id, which read as "glm-5.3 · z.ai · glm-5.3 ·
+        // standard api (glm)" before card #MDL1.
+        const QString withProvider = relay::sessioninfo::renderInfo(
+            QJsonObject{{QStringLiteral("kind"), QStringLiteral("session")},
+                        {QStringLiteral("model"), QStringLiteral("glm-5.3")},
+                        {QStringLiteral("provider"), QStringLiteral("z.ai · glm-5.3 · standard api (glm)")}},
+            QDateTime::currentDateTime());
+        QVERIFY(withProvider.contains(QStringLiteral("z.ai · standard api (glm)")));
+        QVERIFY(!withProvider.contains(QStringLiteral("z.ai · glm-5.3 · standard api")));
         QVERIFY(!html.contains(QStringLiteral("MiniMax-M3")));
         QVERIFY(html.contains(QStringLiteral("kimi-k3, gpt-5.6-sol")));
     }
