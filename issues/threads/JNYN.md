@@ -43,3 +43,11 @@ Updated independent QA checklist and Verdict to clear both fixed defects using 1
 
 <!-- relay:entry 20260922T020120Z-5m author=agent kind=event model=gpt-6-astra pane=fe4e4144 turn=a8aa6eac04d048c7ba96c1232b953cda/e17af86989a0419d9ff038915f2577f0 -->
 - ✦ agent updated this card · links: {"plans": [], "commits": ["1f3a7af0e7467dff0037cd56d285e3aef2d19727", "132d35235… → {"plans": [], "commits": ["1f3a7af0e7467dff0037cd56d285e3aef2d19727", "132d35235…
+
+<!-- relay:entry 20260922T034618Z-7e author=agent kind=event model=gpt-6-astra pane=fe4e4144 turn=a8aa6eac04d048c7ba96c1232b953cda/b2f9a50bb88e4c748ed6721b0ef13196 -->
+- ✦ agent updated this card · appended to `## Decisions`
+
+<!-- relay:entry 20260922T034618Z-m5 author=agent kind=decision model=gpt-6-astra pane=fe4e4144 turn=a8aa6eac04d048c7ba96c1232b953cda/b2f9a50bb88e4c748ed6721b0ef13196 -->
+Owner proposed direction: "i think i want to expand the verification concept . a card has a designation of whether human QA is needed. in that case, \"verified\" will require that."
+
+Record for the next design pass: each card designates whether human QA is required; when it is required, automated/AI verification alone is insufficient for the card to count as verified. This broadens verification beyond the app-oriented “Try it” concept. This is a proposed direction, not an implemented gate; designation details and the QA pane design remain to be worked out.

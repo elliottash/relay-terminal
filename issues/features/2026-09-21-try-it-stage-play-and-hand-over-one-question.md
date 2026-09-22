@@ -90,3 +90,8 @@ Actual repair backend: 1f3a7af0e7467dff0037cd56d285e3aef2d19727; exact GUI gate 
 
 ## Verdict
 2026-09-21 local / 2026-09-22 UTC — **PASS for both repaired defects and actual UI answer flow; broader staging verdict PENDING a2.** The earlier blanket FAIL is superseded: independent original reproductions now pass and 34 protocol tests pass. Do not close from this limited recheck alone. Status deliberately unchanged while parent coordinates a2's end-to-end evidence.
+
+## Decisions
+Owner proposed direction: "i think i want to expand the verification concept . a card has a designation of whether human QA is needed. in that case, \"verified\" will require that."
+
+Record for the next design pass: each card designates whether human QA is required; when it is required, automated/AI verification alone is insufficient for the card to count as verified. This broadens verification beyond the app-oriented “Try it” concept. This is a proposed direction, not an implemented gate; designation details and the QA pane design remain to be worked out.
