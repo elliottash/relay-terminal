@@ -33,6 +33,28 @@ from tests.test_remote_browser import Harness, ScrollbackSource
 FRAMES = 200
 FRAME_MS = 10
 
+# Every painted piece of every live row, in order: the row's text as the reader sees it, and each
+# anchor with the offset it sits at. What #NK73 is about is the relation between the two.
+PAINTED_ROWS = """
+  [...document.querySelectorAll('.screen-grid > .screen-row')].map((node) => {
+    let text = '';
+    const links = [];
+    for (const child of node.childNodes) {
+      const piece = child.textContent;
+      if (child.tagName === 'A') links.push({at: text.length, text: piece, href: child.href});
+      text += piece;
+    }
+    return {text, links};
+  })
+"""
+
+
+def same_url(href: str, label: str) -> bool:
+    """Does the anchor go where its visible text says? A browser normalises an href — it lower-
+    cases the host and gives a bare host a path — so the comparison has to."""
+    want = label if label.lower().startswith(("http://", "https://")) else f"https://{label}"
+    return href.lower() in (want.lower(), f"{want.lower()}/")
+
 
 @unittest.skipUnless(find_chrome(), "Chrome is not installed")
 class ScreenCostTests(unittest.TestCase):
@@ -140,6 +162,241 @@ class ScreenCostTests(unittest.TestCase):
             finally:
                 await browser.stop()
         self.drive(main(), 120)
+
+    def test_a_row_with_more_than_one_url_is_painted_exactly_as_it_was_sent(self):
+        """#NK73. What the reader sees is what the terminal printed, whatever is on the row.
+
+        The painter cuts a row into pieces and marks the URLs in it, so the one thing that must
+        always hold is that the pieces sum to the row: two URLs on a line used to lose the word
+        between them, draw the first one twice, and give the second anchor a visible address that
+        was not the one it opened. `git remote -v`, an `npm audit` advisory and a `curl -v` trace
+        all put two on a row."""
+        rows = [
+            # text, the labels expected to be links, in order
+            ("see https://a.example.com and https://b.example.com now",
+             ["https://a.example.com", "https://b.example.com"]),
+            ("https://a.example.com https://b.example.com https://c.example.com",
+             ["https://a.example.com", "https://b.example.com", "https://c.example.com"]),
+            # An uppercase host is still a host: a case-sensitive scheme test made this a
+            # *relative* href into the client's own origin.
+            ("banner: WWW.EXAMPLE.COM is the site", ["WWW.EXAMPLE.COM"]),
+            # A shell's quotes and an RFC's angle brackets are not part of the address.
+            ('run curl "https://api.example.com/v1" twice', ["https://api.example.com/v1"]),
+            ("see <https://example.com/a> in the RFC", ["https://example.com/a"]),
+            # A path that merely contains `www.` is not a host at all.
+            ("path /var/www.old/index.html is served", []),
+            # And the rule that was already right stays right.
+            ("one https://example.com/x_(1), ok", ["https://example.com/x_(1)"]),
+        ]
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await browser.navigate(f"{self.origin}/tests/screen_harness.html")
+                await browser.wait_for("document.body && document.body.dataset.harnessReady === '1'")
+                lines = [{"row": n, "segs": [[text, 0, 0, 0]]}
+                         for n, (text, _) in enumerate(rows)]
+                await browser.evaluate(f"""
+                  screenHarness.open({{}});
+                  screenHarness.state.view.apply({{t: 'screen_snapshot', rows: {len(rows)},
+                    cols: 100, alt: false, cursor: {{row: 0, col: 0, visible: false}},
+                    lines: {json.dumps(lines)}}});
+                """)
+                painted = await browser.evaluate(PAINTED_ROWS)
+                for (text, labels), row in zip(rows, painted):
+                    self.assertEqual(row["text"], text,
+                                     "the row was painted as something the terminal never sent")
+                    self.assertEqual([link["text"] for link in row["links"]], labels, text)
+                    for link in row["links"]:
+                        at = link["at"]
+                        self.assertEqual(text[at:at + len(link["text"])], link["text"],
+                                         f"the anchor's text is not the row's at {at}: {text!r}")
+                        self.assertTrue(
+                            same_url(link["href"], link["text"]),
+                            f"{link['text']!r} is a link to {link['href']!r}")
+            finally:
+                await browser.stop()
+        self.drive(main(), 120)
+
+    def test_a_url_that_runs_to_the_last_column_is_not_linked_to_its_prefix(self):
+        """#NK73. The terminal wraps; a row does not say so. A URL that reaches the last column
+        may be half an address, and an href that is a truncated one is a 404 or — signed — a
+        request silently for something else. The only safe reading is that it is not a link."""
+        wrapped = "open https://example.com/a/very/long/signed/path"
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await browser.navigate(f"{self.origin}/tests/screen_harness.html")
+                await browser.wait_for("document.body && document.body.dataset.harnessReady === '1'")
+                # Two rows on a screen exactly as wide as the first one: the same URL, once
+                # running to the last column and once with a space after it.
+                lines = [{"row": 0, "segs": [[wrapped, 0, 0, 0]]},
+                         {"row": 1, "segs": [[wrapped[5:] + " .", 0, 0, 0]]}]
+                await browser.evaluate(f"""
+                  screenHarness.open({{}});
+                  screenHarness.state.view.apply({{t: 'screen_snapshot', rows: 2,
+                    cols: {len(wrapped)}, alt: false, cursor: {{row: 0, col: 0, visible: false}},
+                    lines: {json.dumps(lines)}}});
+                """)
+                painted = await browser.evaluate(PAINTED_ROWS)
+                self.assertEqual(painted[0]["text"], wrapped)
+                self.assertEqual(painted[0]["links"], [],
+                                 "a URL that may have wrapped was linked to its prefix")
+                self.assertEqual([link["text"] for link in painted[1]["links"]],
+                                 [wrapped[5:]], "a URL that plainly ended was not linked")
+            finally:
+                await browser.stop()
+        self.drive(main(), 120)
+
+    def test_a_link_keeps_its_colour_and_a_concealed_one_stays_concealed(self):
+        """#NK73. `link()` threw away the `fg, bg, attrs` the painter had carried onto every
+        piece, so a URL in a red error line painted default, one in a reverse-video run lost its
+        inversion — and one under CONCEAL, which `span` blanks, was printed in full and made
+        tappable: a hidden token readable on the phone and nowhere else."""
+        red = (1 << 24) | 1
+        bold, reverse, conceal = 1 << 0, 1 << 6, 1 << 7
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await browser.navigate(f"{self.origin}/tests/screen_harness.html")
+                await browser.wait_for("document.body && document.body.dataset.harnessReady === '1'")
+                lines = [
+                    {"row": 0, "segs": [["error: ", red, 0, 0],
+                                        ["https://a.example.com", red, 0, bold],
+                                        [" failed", red, 0, 0]]},
+                    {"row": 1, "segs": [["see https://b.example.com now", red, 0, reverse]]},
+                    {"row": 2, "segs": [["token https://secret.example.com/t", 0, 0, conceal]]},
+                ]
+                await browser.evaluate(f"""
+                  screenHarness.open({{}});
+                  screenHarness.state.view.apply({{t: 'screen_snapshot', rows: 3, cols: 100,
+                    alt: false, cursor: {{row: 0, col: 0, visible: false}},
+                    lines: {json.dumps(lines)}}});
+                """)
+                styled = await browser.evaluate("""
+                  [...document.querySelectorAll('.screen-grid > .screen-row')].map((node) => {
+                    const anchor = node.querySelector('a.screen-link');
+                    const span = anchor && anchor.firstElementChild;
+                    return {
+                      text: node.textContent,
+                      linked: !!anchor,
+                      color: span ? span.style.color : null,
+                      background: span ? span.style.background : null,
+                      weight: span ? span.style.fontWeight : null,
+                    };
+                  })
+                """)
+                self.assertTrue(styled[0]["linked"])
+                self.assertIn("--rt-ansi-1", styled[0]["color"],
+                              "the link painted in the default foreground, not the row's red")
+                self.assertEqual(styled[0]["weight"], "700", "the link lost the run's bold")
+                self.assertTrue(styled[1]["linked"])
+                self.assertIn("--rt-ansi-1", styled[1]["background"],
+                              "the link in a reverse-video run lost its inversion")
+                self.assertFalse(styled[2]["linked"],
+                                 "a concealed URL was linked, which is to print it")
+                self.assertEqual(styled[2]["text"].strip(), "",
+                                 "a concealed URL was painted in full")
+                self.assertEqual(len(styled[2]["text"]), len("token https://secret.example.com/t"))
+            finally:
+                await browser.stop()
+        self.drive(main(), 120)
+
+    def test_the_font_buttons_work_for_the_session_when_storage_throws(self):
+        """#NK73. `fontFloor()` read storage and `setFontFloor()` wrote it, with nothing in
+        memory, so where storage throws — iOS private browsing, a sandboxed iframe, `file://` —
+        A−/A+ were dead rather than session-only: `refit()` re-read and got the default back."""
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await browser.navigate(f"{self.origin}/tests/screen_harness.html")
+                await browser.wait_for("document.body && document.body.dataset.harnessReady === '1'")
+                await browser.evaluate("""
+                  Object.defineProperty(window, 'localStorage', {configurable: true,
+                    get() { throw new DOMException('denied', 'SecurityError'); }});
+                  screenHarness.open({});
+                """)
+                self.assertEqual(await browser.evaluate("screenHarness.state.view.fontFloor()"), 12,
+                                 "the default floor did not stand")
+                moved = await browser.evaluate("""
+                  (() => {
+                    const view = screenHarness.state.view;
+                    view.setFontFloor(view.fontFloor() + 2);   // A+
+                    view.setFontFloor(view.fontFloor() + 2);   // A+
+                    const after = view.grid.style.fontSize;
+                    view.refit();          // the resize that used to undo it
+                    return [view.fontFloor(), after, view.grid.style.fontSize];
+                  })()
+                """)
+                self.assertEqual(moved[0], 16, "A+ did not move the floor at all")
+                self.assertEqual(float(moved[1].rstrip("px")), 16, "A+ did not grow the text")
+                self.assertEqual(moved[2], moved[1], "a refit undid the reader's choice")
+            finally:
+                await browser.stop()
+        self.drive(main(), 120)
+
+    def test_the_cursor_stays_in_view_on_a_grid_wider_than_the_screen(self):
+        """#NK73. The fit is a floor, so the grid scrolls sideways — and nothing ever scrolled it:
+        with direct keys on at 12px the cursor left the right edge around column 30 of 80 and the
+        reader typed blind. It follows the cursor at the live end only, and by arithmetic: the
+        counters below are the same ones finding 4 of #3H5T put here."""
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.bench(browser)
+                wide = "".join(str(n % 10) for n in range(80))
+                frame = ("(col) => screenHarness.state.view.apply({t: 'screen_snapshot',"
+                         " rows: 24, cols: 80, alt: false,"
+                         " cursor: {row: 23, col, visible: true},"
+                         f" lines: [{{row: 23, segs: [[{json.dumps(wide)}, 0, 0, 0]]}}]}})")
+                await browser.evaluate(f"window.typeAt = {frame}; typeAt(70)")
+                seen = await browser.evaluate("""
+                  (() => {
+                    const wrap = document.getElementById('screen-wrap');
+                    const cell = wrap.querySelector('.cursor').getBoundingClientRect();
+                    const box = wrap.getBoundingClientRect();
+                    return {left: wrap.scrollLeft, over: wrap.scrollWidth - wrap.clientWidth,
+                            cellLeft: cell.left, cellRight: cell.right,
+                            boxLeft: box.left, boxRight: box.right};
+                  })()
+                """)
+                self.assertGreater(seen["over"], 0, "the grid was not wider than the screen")
+                self.assertGreater(seen["left"], 0, "the cursor was left off the right edge")
+                self.assertLessEqual(seen["cellRight"], seen["boxRight"] + 1,
+                                     "the cursor cell is past the right edge")
+                self.assertGreaterEqual(seen["cellLeft"], seen["boxLeft"] - 1,
+                                        "the cursor cell is past the left edge")
+
+                # Typing along the row costs no measurement: the cell width and the visible width
+                # come from the last fit(), and where it last scrolled to is remembered.
+                await browser.evaluate("screenHarness.zero()")
+                await browser.evaluate(
+                    "(async () => { for (let col = 0; col < 80; col += 4) { typeAt(col);"
+                    " await new Promise((r) => setTimeout(r, 5)); } })()", timeout=30)
+                report = await browser.evaluate("screenHarness.report()")
+                self.assertEqual(report["style"], 0, "following the cursor resolved style")
+                self.assertEqual(report["clientWidth"], 0, "following the cursor flushed layout")
+
+                # And it never drags somebody who is reading what scrolled away.
+                await browser.evaluate(
+                    "(() => { const w = document.getElementById('screen-wrap');"
+                    " w.scrollTop = 0; w.scrollLeft = 120; })()")
+                await browser.evaluate("new Promise((r) => setTimeout(r, 60))")
+                self.assertFalse((await browser.evaluate("screenHarness.report()"))["atBottom"])
+                await browser.evaluate("typeAt(79)")
+                self.assertEqual(
+                    await browser.evaluate("document.getElementById('screen-wrap').scrollLeft"),
+                    120, "the reader was dragged sideways while reading back")
+            finally:
+                await browser.stop()
+        self.drive(main(), 180)
 
     def test_fit_measures_when_the_layout_moves_not_when_a_frame_arrives(self):
         async def main():

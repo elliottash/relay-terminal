@@ -20,18 +20,30 @@ const ATTR = {
 };
 
 // A link in the grid's text. The wire carries no link attribute (section 6's cells are text and
-// colour only), so the client finds http(s) URLs itself, at paint time, in one row at a time — a
-// URL the terminal wrapped across two rows does not link, on this view or on the desktop's.
+// colour only), so the client finds http(s) URLs itself, at paint time, in one row at a time.
+//
+// A URL the terminal wrapped across two rows is not linked. The header comment here used to say
+// it already was not, and it was: the first row's fragment matches `https?://[^\s]+` all the
+// same, so at 80 columns a long pull-request or signed-S3 link was underlined and tappable and
+// opened its prefix — a 404, or a signed request silently for something else. The only signal a
+// single row carries is that the URL runs to the row's last column, so that is where linking
+// stops (`cols` below); a truncated href is worse than no link.
 const URL_RE = /https?:\/\/[^\s]+|www\.[^\s]+/gi;
 
-// Sentence punctuation ends a URL; a closing bracket ends it only when it closes nothing the URL
+// What may stand to the left of a bare `www.`. The alternative above has no left-hand boundary of
+// its own, so `path /var/www.old/index.html` became a live link to a host that does not exist.
+const WWW_LEFT = /[\s([{<"'`]/;
+
+// Sentence punctuation ends a URL, and so do the quotes and angle brackets a shell line or an RFC
+// wraps one in — `curl "https://api.example.com/v1"` and `<https://example.com/a>` put `%22` and
+// `%3E` on the end of the href. A closing bracket ends it only when it closes nothing the URL
 // opened — the Wikipedia kind, `https://example.com/x_(1)`, keeps its bracket.
 function trimUrl(url) {
   let end = url.length;
   for (;;) {
     const ch = url[end - 1];
     if (!ch) break;
-    if (/[.,;:!?]/.test(ch)) { end -= 1; continue; }
+    if (/[.,;:!?"'`<>]/.test(ch)) { end -= 1; continue; }
     const open = ch === ')' ? '(' : ch === ']' ? '[' : null;
     if (open) {
       const opens = (url.slice(0, end).split(open).length - 1);
@@ -43,28 +55,48 @@ function trimUrl(url) {
   return url.slice(0, end);
 }
 
-function linkify(segments) {
+// The row's runs, cut into the pieces a painter can draw: the same text, in the same order, with
+// the URL spans marked. `cols` is the row's width, for the wrapped-URL rule above.
+//
+// Every offset in `found` is absolute — an index into the whole row — and every slice below is
+// taken against `at`, the origin of the segment being cut, because that is what `text` is indexed
+// by. Slicing against the row cursor `start` instead worked for exactly one URL per segment
+// (where `start === at` on entry) and printed a row the terminal never sent for two: the word
+// between them vanished, the first URL was drawn twice, and the second anchor's visible text was
+// a different address from its href (#NK73). The pieces must always sum to the row.
+function linkify(segments, cols) {
   const text = segments.map(([text]) => text).join('');
   URL_RE.lastIndex = 0;
   const found = [];
   for (let match = URL_RE.exec(text); match; match = URL_RE.exec(text)) {
-    let url = trimUrl(match[0]);
+    // `URL_RE` is case-insensitive, so the scheme test has to be: `WWW.EXAMPLE.COM` failed a
+    // case-sensitive `startsWith('www.')` and became a relative href into the client's own origin.
+    const bare = /^www\./i.test(match[0]);
+    if (bare && match.index > 0 && !WWW_LEFT.test(text[match.index - 1])) continue;
+    const url = trimUrl(match[0]);
     if (url.length < 5) continue;
-    found.push([match.index, match.index + url.length, url.startsWith('www.') ? `https://${url}` : url]);
+    const to = match.index + url.length;
+    if (to >= text.length && text.length >= (cols || Infinity)) continue;
+    found.push([match.index, to, bare ? `https://${url}` : url]);
   }
   if (!found.length) return segments.map(([text, fg, bg, attrs]) => ({ text, fg, bg, attrs }));
   const pieces = [];
   let at = 0;
   for (const [text, fg, bg, attrs] of segments) {
-    let start = at;
     const end = at + text.length;
-    for (const [from, to, url] of found) {
-      if (to <= start || from >= end) continue;
-      if (from > start) pieces.push({ text: text.slice(0, from - start), fg, bg, attrs });
-      const a = Math.max(from, start);
-      const b = Math.min(to, end);
-      pieces.push({ text: text.slice(a - start, b - start), fg, bg, attrs, url });
-      start = b;
+    let start = at;
+    // A concealed run is one `span` blanks. Linking it would print it in full *and* make it
+    // tappable, so a deliberately hidden tokenised URL would be readable on the phone and nowhere
+    // else; it stays a run of spaces here too.
+    if (text.length && !(attrs & ATTR.CONCEAL)) {
+      for (const [from, to, url] of found) {
+        if (to <= start || from >= end) continue;
+        if (from > start) pieces.push({ text: text.slice(start - at, from - at), fg, bg, attrs });
+        const a = Math.max(from, start);
+        const b = Math.min(to, end);
+        pieces.push({ text: text.slice(a - at, b - at), fg, bg, attrs, url });
+        start = b;
+      }
     }
     if (start < end) pieces.push({ text: text.slice(start - at), fg, bg, attrs });
     at = end;
@@ -167,6 +199,10 @@ export class ScreenView {
     this.behind = false;
     this.needsFit = true;        // something may have moved under fit(); nothing else measures
     this.fitCols = 0;            // the `cols` the current font size was measured for
+    this.floor = null;           // the reader's smallest font, read once (fontFloor below)
+    this.cellWidth = 0;          // one cell in px, and the wrap's visible width: measured in
+    this.viewWidth = 0;          // fit(), so followCursor() reads no layout of its own
+    this.scrollX = 0;            // where we last put the horizontal scroll (followCursor)
     this.onNeedHistory = null;   // (beforeRow | null, count) => void
     this.onBehind = null;        // (behind) => void, for the "new output" affordance
     this.fit();
@@ -238,6 +274,11 @@ export class ScreenView {
     const text = `${size.toFixed(2)}px`;
     this.needsFit = false;
     this.fitCols = this.cols;
+    // What followCursor() needs, taken here because here is where the width and the font size are
+    // already measured. Neither can move without a refit, so following the cursor sideways on a
+    // frame of output costs no layout read at all.
+    this.cellWidth = size * this.advance();
+    this.viewWidth = available - inset;
     if (text === this.grid.style.fontSize) return;
     this.grid.style.fontSize = text;
     this.grid.style.lineHeight = `${(size * 1.25).toFixed(2)}px`;
@@ -255,17 +296,26 @@ export class ScreenView {
   // The smallest font the terminal will draw, the reader's own choice (fit() above). Six is the
   // old behaviour — always fit every column, however small that gets — and twelve reads on a
   // phone. A−/A+ in the terminal bar move it in steps of two.
+  //
+  // The field is the reader's choice for as long as this view lives; storage is only how it
+  // outlives the page. Reading and writing storage alone made A−/A+ **dead**, not session-only,
+  // wherever it throws — iOS private browsing, a sandboxed iframe, `file://` — because refit()
+  // re-read the floor and got 12 back every time (#NK73).
   fontFloor() {
-    try {
-      const stored = Number(window.localStorage.getItem('relay.term-font-floor'));
-      if (Number.isFinite(stored) && stored >= 6 && stored <= 24) return stored;
-    } catch { /* private mode: the default stands, and A−/A+ work for the session */ }
-    return 12;
+    if (this.floor === null) {
+      this.floor = 12;
+      try {
+        const stored = Number(window.localStorage.getItem('relay.term-font-floor'));
+        if (Number.isFinite(stored) && stored >= 6 && stored <= 24) this.floor = stored;
+      } catch { /* private mode: the default stands, and A−/A+ work for the session */ }
+    }
+    return this.floor;
   }
 
   setFontFloor(floor) {
+    this.floor = Math.max(6, Math.min(24, floor));
     try {
-      window.localStorage.setItem('relay.term-font-floor', String(Math.max(6, Math.min(24, floor))));
+      window.localStorage.setItem('relay.term-font-floor', String(this.floor));
     } catch { /* private mode: it holds only until the page goes */ }
     this.refit();
   }
@@ -388,6 +438,34 @@ export class ScreenView {
 
   toBottom() {
     this.root.scrollTop = this.root.scrollHeight;
+    this.followCursor();
+  }
+
+  // Keep the cursor's cell in view sideways. Since the fit became a floor rather than a clamp
+  // (fit() above) a grid wider than the screen scrolls horizontally, and nothing ever moved it:
+  // with direct keys on at the 12px floor, 80 columns is about 576px of grid on a 358px view, so
+  // the cursor left the right edge around column 30 and the reader typed blind (#NK73).
+  //
+  // Only from toBottom(), so it never drags somebody who is reading back up in the scrollback,
+  // and only for a cursor that is drawn. It is arithmetic, not measurement: the cell width and
+  // the visible width come from the last fit(), and the position we last set is remembered —
+  // scrolled() re-reads it when the reader drags, which is the only other thing that moves it.
+  followCursor() {
+    if (!this.cursor.visible) return;
+    const cell = this.cellWidth;
+    const view = this.viewWidth;
+    if (!cell || !view) return;
+    const left = this.cursor.col * cell;
+    // A couple of cells of context on whichever side it came in from, so a cursor walking along
+    // a line does not re-scroll on every character.
+    const margin = Math.min(cell * 2, view / 4);
+    let x = this.scrollX;
+    if (left + cell + margin > x + view) x = left + cell + margin - view;
+    else if (left - margin < x) x = left - margin;
+    x = Math.max(0, x);
+    if (Math.abs(x - this.scrollX) < 1) return;
+    this.scrollX = x;
+    this.root.scrollLeft = x;
   }
 
   setBehind(behind) {
@@ -433,6 +511,9 @@ export class ScreenView {
   }
 
   scrolled() {
+    // Where the reader has dragged to sideways is where followCursor() reasons from next. This
+    // is the one place it is read, and a scroll event is not a frame.
+    this.scrollX = this.root.scrollLeft;
     // Even at the bottom there may be a seam to close: the gap sits directly above the live
     // block, which is exactly what somebody at the bottom is looking at the edge of.
     if (this.atBottom()) {
@@ -601,8 +682,8 @@ export class ScreenView {
   historyRow(line) {
     const node = document.createElement('div');
     node.className = 'screen-row';
-    for (const piece of linkify(line.segs || [])) {
-      node.append(piece.url ? this.link(piece.text, piece.url)
+    for (const piece of linkify(line.segs || [], this.cols)) {
+      node.append(piece.url ? this.link(piece.text, piece.url, piece.fg, piece.bg, piece.attrs)
                             : this.span(piece.text, piece.fg, piece.bg, piece.attrs));
     }
     if (!node.childNodes.length) node.append(document.createTextNode(' '));
@@ -637,9 +718,11 @@ export class ScreenView {
     node.replaceChildren();
 
     let column = 0;
-    for (const piece of linkify(segments)) {
+    for (const piece of linkify(segments, this.cols)) {
       const text = piece.text;
-      const make = (part) => (piece.url ? this.link(part, piece.url) : this.span(part, piece.fg, piece.bg, piece.attrs));
+      const make = (part) => (piece.url
+        ? this.link(part, piece.url, piece.fg, piece.bg, piece.attrs)
+        : this.span(part, piece.fg, piece.bg, piece.attrs));
       if (!showCursor || this.cursor.col < column || this.cursor.col >= column + text.length) {
         node.append(make(text));
         column += text.length;
@@ -664,8 +747,12 @@ export class ScreenView {
     if (!node.childNodes.length) node.append(document.createTextNode(' '));
   }
 
-  link(text, url) {
-    const node = this.span(text, 0, 0, 0);
+  // The anchor wraps the run's own span, so a URL keeps the colour and the attributes of the text
+  // it was found in: one inside an ANSI-red error line stayed default-coloured and one inside a
+  // reverse-video run lost its inversion while `linkify` was carrying both onto every piece
+  // (#NK73). `a.screen-link` inherits colour from the span (style.css) and adds the underline.
+  link(text, url, fg, bg, attrs) {
+    const node = this.span(text, fg, bg, attrs);
     const anchor = document.createElement('a');
     anchor.className = 'screen-link';
     anchor.href = url;
