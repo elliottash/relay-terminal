@@ -1,0 +1,28 @@
+=== live
+  desktop      {"choices":[],"effort":"high","effort_fixed":false,"effort_fixed_reason":"","efforts":["low","medium","high"],"label":"kimi-k2 · moonshot"}
+  hub (before) {"effort": "high", "efforts": ["low", "medium", "high"]}
+  hub (now)    {"effort": "high", "efforts": ["low", "medium", "high"], "effort_fixed": false, "effort_fixed_reason": ""}
+  view         {}
+  agent        {"effort": "high", "efforts": ["low", "medium", "high"], "effort_fixed": false, "effort_fixed_reason": ""}
+  full         {"effort": "high", "efforts": ["low", "medium", "high"], "effort_fixed": false, "effort_fixed_reason": ""}
+=== relay-free
+  desktop      {"choices":[],"effort":"high","effort_fixed":true,"effort_fixed_reason":"Relay Free sets the level for you.","efforts":["low","high"],"label":"relay free · main"}
+  hub (before) {"effort": "high", "efforts": ["low", "high"]}
+  hub (now)    {"effort": "high", "efforts": ["low", "high"], "effort_fixed": true, "effort_fixed_reason": "Relay Free sets the level for you."}
+  view         {}
+  agent        {"effort": "high", "efforts": ["low", "high"], "effort_fixed": true, "effort_fixed_reason": "Relay Free sets the level for you."}
+  full         {"effort": "high", "efforts": ["low", "high"], "effort_fixed": true, "effort_fixed_reason": "Relay Free sets the level for you."}
+=== provider-words
+  desktop      {"choices":[],"effort":"very_high","effort_fixed":false,"effort_fixed_reason":"","efforts":["low","very_high"],"label":"kimi-k2 · moonshot"}
+  hub (before) {"effort": null, "efforts": ["low"]}
+  hub (now)    {"effort": "very_high", "efforts": ["low", "very_high"], "effort_fixed": false, "effort_fixed_reason": ""}
+  view         {}
+  agent        {"effort": "very_high", "efforts": ["low", "very_high"], "effort_fixed": false, "effort_fixed_reason": ""}
+  full         {"effort": "very_high", "efforts": ["low", "very_high"], "effort_fixed": false, "effort_fixed_reason": ""}
+=== no-levels
+  desktop      {"choices":[],"effort":null,"effort_fixed":true,"effort_fixed_reason":"kimi-k2 has no reasoning level.","efforts":[],"label":"kimi-k2 · moonshot"}
+  hub (before) {}
+  hub (now)    {}
+  view         {}
+  agent        {}
+  full         {}

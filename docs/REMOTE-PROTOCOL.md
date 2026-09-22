@@ -1603,7 +1603,8 @@ only thing that decides what a given device sees, and `src/PaneState.{h,cpp}` bu
                    "actions":["remove","edit","to_queue","send_now","steer","up","down"]}],
           "hint":"↑ select a row · Ctrl+↑↓ move · Shift+Del remove"},
  "model":{"label":"kimi-k3 (main)","choices":[{"id":"m1","label":"kimi-k3 (main)","current":true}],
-          "effort":"high","efforts":["low","medium","high"]},
+          "effort":"high","efforts":["low","medium","high"],
+          "effort_fixed":false,"effort_fixed_reason":""},
  "composer":{"mode":"auto|shell|agent","placeholder":"…","modes":["auto","shell","agent"]},
  "context":{"label":"96% left","percent_left":96},
  "theme":"relay-dark",
@@ -1628,6 +1629,24 @@ only thing that decides what a given device sees, and `src/PaneState.{h,cpp}` bu
   no block for (a theme of the person's own) leaves the view on the theme it is already showing.
   Absent when the desktop names none. Every level sees it: it is how the pane looks, there is
   nothing to press and nothing in an id to leak.
+- **The reasoning level is published whole or not at all** (card #EFT9, 2026-09-22). `efforts` is
+  the model's own levels in the provider's order and the provider's words, `effort` is the one the
+  pane is on, and `effort` is **always one of `efforts`**: it is the level the desktop's own box
+  has selected (`nearestEffort`), not the raw level the pane is carrying, so no view can be handed
+  a list with nothing ticked in it. A model with no levels publishes none — `efforts` empty,
+  `effort` null — and a client draws no picker at all. The hub's cleaner keeps that coupling: a
+  level word that is not a level's shape, more levels than it caps at, or an `effort` that is not
+  one of them drops `effort` and `efforts` **together**, because half a picker is worse than none.
+  It used to drop the offending word on its own, and `["low","very_high"]` on `very_high` reached
+  the phone as `{"effort": null, "efforts": ["low"]}`.
+- **`effort_fixed` says the pane will not change the level whatever is tapped**, with
+  `effort_fixed_reason`, the sentence the desktop's own greyed box shows in its tooltip ("Relay
+  Free sets the level for you"). Two cases reach it: a model with no reasoning knob, and Relay
+  Free, where the gateway picks the level for the role (`src/ModelCatalog.cpp`, owner 2026-09-21).
+  The levels are **still published** in both — Relay Free's two are worth showing — so a client
+  draws the greyed chip the desktop draws rather than no chip at all, and never a live picker for
+  a level the pane would refuse. `effort_fixed_reason` is empty whenever the level is the pane's
+  to set. A client that has never heard of either field draws the picker it drew before.
 - **A row's `actions` are the whole truth about it.** The client offers those and nothing else; the
   pane checks the row still offers the action when the answer arrives, because the client was
   necessarily looking at an older state.
@@ -1645,7 +1664,7 @@ only thing that decides what a given device sees, and `src/PaneState.{h,cpp}` bu
 
   | Level | Capability | Sees | May do |
   |---|---|---|---|
-  | **viewer** | `view` | this conversation: the rows, the reasoning, the model it is on | nothing: no row `actions`, no `model.choices`, no composer `modes` |
+  | **viewer** | `view` | this conversation: the rows, the reasoning, the model it is on | nothing: no row `actions`, no `model.choices`, no reasoning level (`model.effort`, `model.efforts`, `model.effort_fixed`, `model.effort_fixed_reason` all go: it is the state of a control a viewer does not have), no composer `modes` |
   | **partner** | `agent` | the same | type here (to the agent), act on the rows it was offered, pick a model |
   | **owner** | `full` | the same, **plus the conversations before this one** | everything above, plus `conversation_new` and `conversation_open` |
 
@@ -1658,8 +1677,8 @@ only thing that decides what a given device sees, and `src/PaneState.{h,cpp}` bu
   and other conversations cannot reach a share.
 
 **Client → desktop.** These are `agent` except `pane_state_get`, which is `view`, and
-`conversation_new` and `conversation_open`, which are `full` — the owner's three levels put the
-conversations before this one above typing in this one. All are in `GUEST_NEVER` except `compose`,
+`conversation_new`, `conversation_open` and `conversation_id`, which are `full` — the owner's three
+levels put the conversations before this one, and their ids, above typing in this one. All are in `GUEST_NEVER` except `compose`,
 which a guest editor may send: a guest's prompt is not passed on but held for the owner to admit
 (section 10.4), and `agent: false` is refused whatever their role.
 
@@ -1672,7 +1691,7 @@ which a guest editor may send: a guest's prompt is not passed on but held for th
 | `queue_remove` | `{pane,row}` | withdraws or removes it (`item` is the older spelling of `row`) |
 | `queue_resume` | `{pane}` | runs the queue again after a Stop paused it (`queue.paused`, card #7JD1). It is the phone's **empty send**, which is Enter on an empty prompt box at the desk, and it names no row: the pane decides whether there is a pause to lift, and the `pane_state` that follows is the answer. Nothing is resumed on a pane that was not paused, exactly as an empty Enter there does nothing |
 | `model_pick` | `{pane,choice}` | only a model the menu offered, which is only one with a stored key; the pane says "Model changed from <device>" |
-| `effort_pick` | `{pane,effort}` | one of the levels this pane published for its model (`model.efforts`, section 3) — the phone's `/effort`, a partner's level like a `model_pick`. The pane snaps a level the model does not take, keeps a fixed model's level, and says "Effort set from <device>"; the pane's choice alone, never a settings write (card #MDL1) |
+| `effort_pick` | `{pane,effort}` | one of the levels this pane published for its model (`model.efforts`, section 3) — the phone's `/effort`, a partner's level like a `model_pick`. It says "Effort set from <device>", and is the pane's choice alone, never a settings write (card #MDL1). **A refusal is answered by the pane's own `pane_state`** (card #EFT9): a level this model does not take is refused rather than snapped — the client necessarily drew an older state, and turning its tap into some other level would set one nobody asked for — and a `effort_fixed` model keeps its level. Either refusal changes nothing on the pane, so the desktop republishes rather than leaving the client showing the word it was refused |
 | `conversation_new` | `{pane}` | **owner level.** The same as `/new`, refused while a turn runs |
 | `conversation_open` | `{pane,session}` | **owner level.** Opens one of this pane's past conversations, named by a token from a `pane_state` — never a path or a session file name — resolved by the pane against the list it published. Refused while a turn runs, as the session manager's own rows are |
 | `conversation_id` | `{pane,session,id?}` | **owner level.** The real conversation id behind one of this pane's published tokens, for the owner to copy (`Copy id` in the phone's Conversations sheet). The pane answers only for a token in the list it published, with `conversation_id_text {pane,session,conversation,id?}` to the asking device alone — or `ok:false` and a `error` when the token is gone. The hub holds the ask open for 15 s, as it does a `queue_edit`, and answers a lapse with `internal` |

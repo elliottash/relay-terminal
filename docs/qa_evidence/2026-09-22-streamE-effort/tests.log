@@ -1,0 +1,59 @@
+test_a_conversation_answer_is_an_id_not_a_path (tests.test_remote_pane_state.ActionTests.test_a_conversation_answer_is_an_id_not_a_path) ... ok
+test_a_refused_edit_is_an_error_on_the_phone (tests.test_remote_pane_state.ActionTests.test_a_refused_edit_is_an_error_on_the_phone) ... ok
+test_a_refused_or_wrong_conversation_answer_is_an_error_on_the_phone (tests.test_remote_pane_state.ActionTests.test_a_refused_or_wrong_conversation_answer_is_an_error_on_the_phone) ... ok
+test_a_refused_pick_is_answered_by_the_panes_own_state (tests.test_remote_pane_state.ActionTests.test_a_refused_pick_is_answered_by_the_panes_own_state)
+Card #EFT9. A pick the pane refuses — a fixed-level model, or a model that changed ... ok
+test_a_view_device_cannot_act (tests.test_remote_pane_state.ActionTests.test_a_view_device_cannot_act) ... ok
+test_a_wedged_gui_is_an_error_not_a_spinner (tests.test_remote_pane_state.ActionTests.test_a_wedged_gui_is_an_error_not_a_spinner) ... ok
+test_an_effort_pick_reaches_the_gui_with_its_level (tests.test_remote_pane_state.ActionTests.test_an_effort_pick_reaches_the_gui_with_its_level) ... ok
+test_bad_rows_moves_and_choices_are_refused_before_the_gui (tests.test_remote_pane_state.ActionTests.test_bad_rows_moves_and_choices_are_refused_before_the_gui) ... ok
+test_conversation_id_goes_to_the_device_that_asked_and_to_nobody_else (tests.test_remote_pane_state.ActionTests.test_conversation_id_goes_to_the_device_that_asked_and_to_nobody_else) ... ok
+test_model_pick_names_the_device (tests.test_remote_pane_state.ActionTests.test_model_pick_names_the_device) ... ok
+test_pane_state_get_answers_from_the_latest_state (tests.test_remote_pane_state.ActionTests.test_pane_state_get_answers_from_the_latest_state) ... ok
+test_pane_state_get_before_any_state_asks_the_gui (tests.test_remote_pane_state.ActionTests.test_pane_state_get_before_any_state_asks_the_gui) ... ok
+test_pane_state_get_for_an_unknown_pane_is_refused (tests.test_remote_pane_state.ActionTests.test_pane_state_get_for_an_unknown_pane_is_refused) ... ok
+test_queue_actions_reach_the_gui_with_ids_only (tests.test_remote_pane_state.ActionTests.test_queue_actions_reach_the_gui_with_ids_only) ... ok
+test_queue_edit_text_goes_back_to_the_device_that_asked (tests.test_remote_pane_state.ActionTests.test_queue_edit_text_goes_back_to_the_device_that_asked) ... ok
+test_a_partner_types_here_and_sees_no_other_conversation (tests.test_remote_pane_state.CapabilityTests.test_a_partner_types_here_and_sees_no_other_conversation) ... ok
+test_a_view_device_is_offered_nothing_to_press (tests.test_remote_pane_state.CapabilityTests.test_a_view_device_is_offered_nothing_to_press) ... ok
+test_every_level_sees_the_theme (tests.test_remote_pane_state.CapabilityTests.test_every_level_sees_the_theme)
+How the pane looks is not a permission: there is nothing to press in a theme id and ... ok
+test_filtering_never_touches_the_stored_state (tests.test_remote_pane_state.CapabilityTests.test_filtering_never_touches_the_stored_state) ... ok
+test_no_capability_is_nothing (tests.test_remote_pane_state.CapabilityTests.test_no_capability_is_nothing) ... ok
+test_only_an_owner_device_reaches_the_other_conversations (tests.test_remote_pane_state.CapabilityTests.test_only_an_owner_device_reaches_the_other_conversations) ... ok
+test_a_fixed_level_says_so_with_the_desktops_reason (tests.test_remote_pane_state.CleanTests.test_a_fixed_level_says_so_with_the_desktops_reason)
+`effort_fixed` is the desktop's own greyed box, on the wire (card #EFT9): Relay Free and ... ok
+test_a_key_or_a_base_url_in_a_label_is_cut_out (tests.test_remote_pane_state.CleanTests.test_a_key_or_a_base_url_in_a_label_is_cut_out) ... ok
+test_caps (tests.test_remote_pane_state.CleanTests.test_caps) ... ok
+test_enumerations_are_checked (tests.test_remote_pane_state.CleanTests.test_enumerations_are_checked) ... ok
+test_ids_must_be_ones_the_desktop_mints (tests.test_remote_pane_state.CleanTests.test_ids_must_be_ones_the_desktop_mints)
+A preset id, a path or a session file name cannot be an id: the shapes exclude them. ... ok
+test_not_a_pane_state_is_nothing (tests.test_remote_pane_state.CleanTests.test_not_a_pane_state_is_nothing) ... ok
+test_running_is_null_when_nothing_runs (tests.test_remote_pane_state.CleanTests.test_running_is_null_when_nothing_runs) ... ok
+test_the_allowance_is_the_desktops_words_or_absent (tests.test_remote_pane_state.CleanTests.test_the_allowance_is_the_desktops_words_or_absent)
+Relay Free's chip: cleaned like the context, warn read off the percentage, and dropped ... ok
+test_the_contract_example_survives_whole (tests.test_remote_pane_state.CleanTests.test_the_contract_example_survives_whole) ... ok
+test_the_reasoning_level_block_is_all_of_it_or_none (tests.test_remote_pane_state.CleanTests.test_the_reasoning_level_block_is_all_of_it_or_none)
+Card #EFT9. The cleaner used to drop one bad level word and keep the rest, which ... ok
+test_the_theme_is_an_id_or_it_is_absent (tests.test_remote_pane_state.CleanTests.test_the_theme_is_an_id_or_it_is_absent)
+The desktop's theme reaches the phone so the two panes are the same colour (owner, ... ok
+test_unknown_fields_are_dropped_at_every_level (tests.test_remote_pane_state.CleanTests.test_unknown_fields_are_dropped_at_every_level) ... ok
+test_a_state_for_a_pane_that_is_gone_is_dropped (tests.test_remote_pane_state.FanOutTests.test_a_state_for_a_pane_that_is_gone_is_dropped) ... ok
+test_a_watching_device_gets_the_state_and_an_idle_one_does_not (tests.test_remote_pane_state.FanOutTests.test_a_watching_device_gets_the_state_and_an_idle_one_does_not) ... ok
+test_capability_is_read_as_each_state_is_sent (tests.test_remote_pane_state.FanOutTests.test_capability_is_read_as_each_state_is_sent) ... ok
+test_resume_never_replays_a_state (tests.test_remote_pane_state.FanOutTests.test_resume_never_replays_a_state)
+Kept out of the stream rings: a replay would skip the capability filter. ... ok
+test_a_forged_edit_answer_reaches_nobody (tests.test_remote_pane_state.GuestTests.test_a_forged_edit_answer_reaches_nobody) ... ok
+test_a_guest_can_neither_ask_for_nor_act_on_a_state (tests.test_remote_pane_state.GuestTests.test_a_guest_can_neither_ask_for_nor_act_on_a_state) ... ok
+test_a_guest_on_the_pane_never_receives_a_state (tests.test_remote_pane_state.GuestTests.test_a_guest_on_the_pane_never_receives_a_state) ... ok
+test_the_sidecar_passes_both_lines_to_the_hub (tests.test_remote_pane_state.SidecarTests.test_the_sidecar_passes_both_lines_to_the_hub) ... ok
+test_every_handler_exists (tests.test_remote_pane_state.WireTests.test_every_handler_exists) ... ok
+test_set_model_stays_forbidden (tests.test_remote_pane_state.WireTests.test_set_model_stays_forbidden)
+model_pick is a token from pane_state, never the worker's set_model with a preset. ... ok
+test_the_new_client_types_are_classified (tests.test_remote_pane_state.WireTests.test_the_new_client_types_are_classified) ... ok
+test_the_new_server_types_are_classified (tests.test_remote_pane_state.WireTests.test_the_new_server_types_are_classified) ... ok
+
+----------------------------------------------------------------------
+Ran 45 tests in 5.106s
+
+OK
