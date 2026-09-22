@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: mqan1
 created: '2026-09-22'
 source: Codex in a Relay pane, 2026-09-22
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-question-answers/], related: [QFF1, MQ9C], github: null}
+links: {plans: [], commits: [cf473cd53b74016b741ae8730831caefc4a0495e], evidence: [docs/qa_evidence/2026-09-22-question-answers/], related: [QFF1, MQ9C], github: null}
 ---
 # Question answers wait behind queued prompts
 
@@ -33,6 +33,7 @@ Owner: "i cant remember, analyze them all" — investigate all question presenta
 
 ## Execution Summary
 Audited desktop Enter/Ctrl+Enter, empty Enter, selected queue rows, explicit terminal/comment submits, paired phone, native and managed guest questions, completed prose, and raw TUI limitations. Fixed structured-answer shortcut bypass and empty-Enter queue escalation. Completed prose questions now pause ordinary queue draining using Relay's existing Needs-you punctuation rule; the next user reply runs first, with the pane's start reservation preventing overtaking. Worker background reports do not resume the wait. Full audit and limitations are recorded in docs/qa_evidence/2026-09-22-question-answers/NOTES.md.
+Landed cf473cd5. Exact-tree console build and CTest passed, and the local relay application was rebuilt. Recorded final targeted runs via TestsCommands: 4/4 pass, no opened signals; tests_check now has no findings. Hardened the new worker regression to wait for the provider delta before observing its prompt list.
 
 ## Tests
 - `ctest -R consolemode`
@@ -41,11 +42,10 @@ Audited desktop Enter/Ctrl+Enter, empty Enter, selected queue rows, explicit ter
 - `tests/test_queue.py::SupervisorTests::test_question_detection_matches_pane_punctuation_rule`
 - manual: docs/qa_evidence/2026-09-22-question-answers/NOTES.md
 
-### Check 2026-09-22 13:43
-- passed · ctest:consolemode — ctest -R consolemode passed for this revision on spark-dcc9, 2026-09-22T17:43:47Z
-- passed · unittest:tests.test_queue.SupervisorTests.test_question_reply_precedes_queued_work — tests/test_queue.py::SupervisorTests::test_question_reply_precedes_queued_work passed for this revision on spark-dcc9, 2026-09-22T17:43:10Z
-- passed · unittest:tests.test_queue.SupervisorTests.test_resume_can_skip_a_prose_question — tests/test_queue.py::SupervisorTests::test_resume_can_skip_a_prose_question passed for this revision on spark-dcc9, 2026-09-22T17:43:10Z
-- passed · unittest:tests.test_queue.SupervisorTests.test_question_detection_matches_pane_punctuation_rule — tests/test_queue.py::SupervisorTests::test_question_detection_matches_pane_punctuation_rule passed for this revision on spark-dcc9, 2026-09-22T17:43:10Z
+### Check 2026-09-22 13:45
+- passed · ctest:consolemode — ctest -R consolemode passed for this revision on spark-dcc9, 2026-09-22T17:45:23Z
+- passed · unittest:tests.test_queue.SupervisorTests.test_question_reply_precedes_queued_work — tests/test_queue.py::SupervisorTests::test_question_reply_precedes_queued_work passed for this revision on spark-dcc9, 2026-09-22T17:45:23Z
+- passed · unittest:tests.test_queue.SupervisorTests.test_resume_can_skip_a_prose_question — tests/test_queue.py::SupervisorTests::test_resume_can_skip_a_prose_question passed for this revision on spark-dcc9, 2026-09-22T17:45:23Z
+- passed · unittest:tests.test_queue.SupervisorTests.test_question_detection_matches_pane_punctuation_rule — tests/test_queue.py::SupervisorTests::test_question_detection_matches_pane_punctuation_rule passed for this revision on spark-dcc9, 2026-09-22T17:45:23Z
 - not-applicable · manual:docs/qa_evidence/2026-09-22-question-answers/NOTES.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-question-answers/NOTES.md
-- warning · card — none of the listed tests is named after anything this card changed (issues/changes/2026-09-22-question-answers-queued.md, issues/threads/QAN1.md)
 history: thread

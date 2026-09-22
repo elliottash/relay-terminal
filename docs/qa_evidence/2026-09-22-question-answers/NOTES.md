@@ -33,6 +33,9 @@ are the reliable path. The protocol documents the optional awaiting_reply field.
 - `PYTHONPATH=backend:tests python3 -m unittest test_pane_view.PaneViewTests.test_the_agents_question_is_drawn_and_a_tap_answers_it_agent_bound test_pane_view.PaneViewTests.test_answering_the_ask_empties_the_box_the_way_an_ordinary_send_does`: 2 real-browser tests passed.
 - `git diff --check`: passed.
 - Board check: 12 pre-existing unrelated errors, no findings for QAN1.
+- Exact implementation commit `cf473cd5`: land.py's isolated console target build passed; CTest consolemode in that tree passed (1/1).
+- `scripts/relay-build --target relay`: passed, local application rebuilt.
+- Recorded final targeted run `20260922T174522Z-1832`: consolemode and the three new worker regressions passed (4/4), no opened signals; tests_check has no findings. The ordering regression waits for the provider delta before inspecting the provider's prompt list, avoiding a dispatcher scheduling race.
 
 No live model-provider session was used; deterministic providers and real composer
 events verify dispatch and ordering. Independent verification remains pending.

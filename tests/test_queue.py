@@ -136,6 +136,7 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual(p.prompts, ['which option?'])
         reply = self.sup.submit('the first option', 'queue')
         self.rec.wait(lambda e: e['event'] == 'agent_started' and e['id'] == reply)
+        self.rec.wait(lambda e: e['event'] == 'delta' and e.get('text') == 'working on the first option')
         self.assertEqual(p.prompts, ['which option?', 'the first option'])
         for _ in range(4):
             p.release.release()
