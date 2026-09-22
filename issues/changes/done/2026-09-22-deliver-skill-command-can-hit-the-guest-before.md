@@ -1,13 +1,15 @@
 ---
 id: D6VR
 type: work
-status: executing
+status: done
 labels: [bug, skills, guest]
 assignee: codex
+implemented_by: openai/gpt-5.6-sol via codex
+verified_by: openai/gpt-5.6-sol via codex
 rank: m
 created: '2026-09-22'
 source: Codex in a Relay pane, 2026-09-22
-links: {plans: [], commits: [97b96861635151be9ee1533159a052f618431a8f], evidence: [], related: [62M4], github: null}
+links: {plans: [], commits: [97b96861635151be9ee1533159a052f618431a8f, e8709709e94945fdedd13f395fae439d14730024], evidence: [], related: [62M4], github: null}
 ---
 # /deliver can reach the guest before Relay loads its skill catalog
 

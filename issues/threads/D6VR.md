@@ -14,3 +14,9 @@ Claimed this card; reproducing the deferred-guest skill-catalog race and adding 
 
 <!-- relay:entry 20260922T041403Z-12 author=agent kind=event model=gpt-5.6-sol pane=0611198f turn=c4d6e5c1dfd44f28b46a61f551b2e535/9d9ffd12924d4108a77f78e1d14de614 -->
 - ✦ agent updated this card · appended to `## Tests`
+
+<!-- relay:entry 20260922T041450Z-zc author=agent kind=event model=gpt-5.6-sol pane=0611198f turn=c4d6e5c1dfd44f28b46a61f551b2e535/9d9ffd12924d4108a77f78e1d14de614 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": ["97b96861635151be9ee1533159a052f618431a8f"], "evidence… → {"plans": [], "commits": ["97b96861635151be9ee1533159a052f618431a8f", "e8709709e…
+
+<!-- relay:entry 20260922T041456Z-r4 author=agent kind=event model=gpt-5.6-sol pane=0611198f turn=c4d6e5c1dfd44f28b46a61f551b2e535/9d9ffd12924d4108a77f78e1d14de614 -->
+- ✦ agent moved this card · Executing → Done · Fixed by commits 97b9686 and e870970; relay-slash-tests passes 11/11 and the exact landed Relay tree builds. · implemented_by openai/gpt-5.6-sol via codex · verified_by openai/gpt-5.6-sol via codex
