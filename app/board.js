@@ -1772,6 +1772,20 @@ export function mountBoard(options) {
 
   return {
     setAccess, onEvent, onRefused, onAgent, onLink, onOutbox, open, close: hide, reset, waiting,
+    // What the client's Back closes, deepest first (app/app.js, `closeOneLayer`): a sheet over the
+    // board, then the open card back to the list, and only then the board itself. Each says
+    // whether there was anything there, because Back has to fall through to the next layer when
+    // there was not — and leave the app when nothing is open at all.
+    closeSheet() {
+      if (!sheet) return false;
+      closeSheet();
+      return true;
+    },
+    closeCard() {
+      if (!openId) return false;
+      closeCard();
+      return true;
+    },
     get visible() { return visible; },
   };
 }

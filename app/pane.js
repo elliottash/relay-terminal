@@ -1429,6 +1429,15 @@ export function mountPane(container, options = {}) {
     terminalSlot,
     hostSlot,
 
+    // The client's Back closes the deepest open layer before it closes the pane under it
+    // (app/app.js, `closeOneLayer`), so it has to know whether there was a sheet to close. The
+    // internal `closeSheet` answers with its side effect only; this says whether it did anything.
+    closeSheet() {
+      if (layer.hidden) return false;
+      closeSheet();
+      return true;
+    },
+
     update(message) {
       const next = obj(message);
       if (!next || (next.t !== undefined && next.t !== 'pane_state')) return false;

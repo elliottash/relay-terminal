@@ -1683,6 +1683,52 @@ class PocketAndBackTests(unittest.TestCase):
                     await browser.stop()
         asyncio.run(asyncio.wait_for(main(), 240))
 
+    def test_back_closes_an_open_sheet_before_it_closes_the_pane_under_it(self):
+        """Back unwinds one layer at a time, and a sheet is a layer.
+
+        `closeOneLayer` asks the mounted pane view first and the board next, so each has to say
+        whether there was anything there — the client cannot see inside either. When those handles
+        were missing the calls fell through their `typeof` guards and Back closed the whole pane
+        out from under an open Conversations sheet, which is a worse answer than not listening for
+        Back at all: the reader loses the pane as well as the sheet.
+        """
+        async def main():
+            async with Harness(capability=wire.FULL, source=PublishingSource) as harness:
+                browser = Browser()
+                await browser.start()
+                try:
+                    await self.open_phone(browser, harness)
+                    harness.host.pane_state_published(
+                        a_state("pane-1", 1, "✦ please plan this out"))
+                    await browser.wait_for(shown("pane-view"), timeout=20)
+                    await browser.wait_for(
+                        "!!document.querySelector('.rp-sessions-button')", timeout=20)
+
+                    open_sheet = ("(() => { const l = document.querySelector('.rp-layer');"
+                                  " return !!l && !l.hidden; })()")
+                    await browser.evaluate(
+                        "document.querySelector('.rp-sessions-button').click(); true")
+                    await browser.wait_for(open_sheet, timeout=20)
+
+                    # One Back: the sheet goes, the pane stays.
+                    await browser.evaluate("history.back(); true")
+                    await browser.wait_for(f"{open_sheet} ? null : 'closed'", timeout=20)
+                    self.assertTrue(await browser.evaluate(shown("screen-thread")),
+                                    "Back took the pane away with the sheet")
+                    self.assertTrue(await browser.evaluate(shown("pane-view")))
+
+                    # The next one takes the pane, as it did before there was a sheet to close.
+                    await browser.evaluate("history.back(); true")
+                    await browser.wait_for(shown("screen-inbox"), timeout=20)
+                    self.assertEqual(await browser.evaluate(SCREENS_SHOWN), 1)
+
+                    problems = [line for line in browser.console
+                                if "EXCEPTION" in line or "error:" in line.lower()]
+                    self.assertEqual(problems, [], f"console errors: {problems}")
+                finally:
+                    await browser.stop()
+        asyncio.run(asyncio.wait_for(main(), 240))
+
     def test_back_from_a_thread_lands_in_the_inbox_and_keeps_the_page(self):
         """Android's Back from a thread closed the installed app, and in a tab it left the origin
         — with the connection, the pane list and the outbox. It now closes the thread; from the
