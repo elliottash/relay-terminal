@@ -1,0 +1,2 @@
+<!-- relay:entry 20260922T191545Z-tv author=agent kind=question model=gpt-6-astra pane=eda7f821 turn=678e5e19bfda407591a623f02e9421f6/ba6a76e41c414b65aee73ba7f548100f -->
+1. Which models are missing from Priorities on sphinxpad, and do they appear when you type their name in its search box? Recommendation: confirm this before changing list semantics; current code intentionally hides unranked models until search. SSH is presently unreachable.
