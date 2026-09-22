@@ -66,8 +66,12 @@
   color: var(--rt-term-foreground);
   font-family: var(--rt-mono);
 }
+/* Above the sheet layer below, which is `inset: 0` with a 70%-opaque backdrop over the whole
+   pane: every Copy id outcome used to be painted underneath it, so the button was
+   indistinguishable from dead (#CPY4). */
 .rp-toast {
   position: absolute;
+  z-index: 20;
   right: 12px;
   bottom: 12px;
   max-width: min(80%, 520px);
@@ -562,13 +566,11 @@ button.rp-chip:hover { color: var(--qss-stripChip-hover-color); border-color: va
   font-size: var(--rt-floor-size);
   font-family: var(--rt-mono);
 }
-/* The id itself, shown only when the clipboard refused it: selectable, so a long-press copies. */
+/* The id itself, in the toast, shown only when the clipboard refused it: selectable, so a
+   long-press copies. */
 .rp-session-id {
-  margin: 4px 10px 0;
-  padding: 6px 8px;
   font-family: var(--rt-mono);
   font-size: var(--rt-floor-size);
-  color: var(--rt-muted);
   user-select: text;
   -webkit-user-select: text;
   overflow-wrap: anywhere;

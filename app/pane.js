@@ -87,6 +87,7 @@ const HINT_LIMIT = 3;                // relay::ShortcutHints defaults
 const HINT_COOLDOWN_MS = 600 * 1000;
 const HINT_GAP_MS = 20 * 1000;
 const TOAST_MS = 4000;
+const REFUSED_TOAST_MS = 20000;      // long enough to long-press the id the clipboard refused
 const LONG_PRESS_MS = 450;
 const HINT_STORE = 'relay.pane.hints';
 
@@ -172,6 +173,11 @@ export function mountPane(container, options = {}) {
   let typedAhead = '';        // keys typed on a selected row, for when its text comes back
   let editRow = '';           // the row whose text is in the prompt box
   let idRequest = '';         // the conversation_id ask waiting for its answer or a refusal
+  let idSession = '';         // the published token that ask is about
+  let idOnArrival = false;    // a tap is waiting on that answer to copy it
+  // The ids the desktop has already answered for, by published token, so a tap can write one to
+  // the clipboard inside its own gesture (see askConversationId).
+  const conversationIds = new Map();
   let editRequest = '';       // the id of the queue_edit waiting for its text or a refusal
   // The agent's ask (sessions protocol 27): the `question` event's own id and its questions, and
   // which of them this view is showing. The desktop puts them up one at a time and each answer is
@@ -375,11 +381,18 @@ export function mountPane(container, options = {}) {
   }
 
   // ---- hints (laptop only) ----------------------------------------------------------------
-  function showToast(text) {
-    toast.textContent = text;
+  function showToast(text, ms = TOAST_MS) {
+    showToastNodes(ms, document.createTextNode(text));
+  }
+
+  // The same, when part of what the toast says is a thing to select rather than to read — the
+  // conversation id the clipboard refused.
+  function showToastNodes(ms, ...nodes) {
+    toast.textContent = '';
+    toast.append(...nodes);
     toast.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { toast.hidden = true; }, TOAST_MS);
+    toastTimer = setTimeout(() => { toast.hidden = true; }, ms);
   }
 
   function hint(id, text) {
@@ -618,12 +631,82 @@ export function mountPane(container, options = {}) {
     }, sendMenuButton);
   }
 
+  // Copy id, in two halves. The write itself has to be the first thing in the tap: Safari drops
+  // the user activation across an await, which app/app.js already records for this codebase, and
+  // the id only exists after a round trip to the desktop. So the press that precedes the tap asks
+  // for the id, the answer is kept, and the tap writes it synchronously. `conversation_id` is rate
+  // limited at the hub (20 a minute, remote/host.py) and 16 asks may be open at once, so nothing
+  // here asks for a whole sheet of ids: one press is one ask, and an id already answered for is
+  // never asked for twice.
+  function askConversationId(session) {
+    if (!session || conversationIds.has(session)) return;
+    if (idRequest && idSession === session) return;   // the press already asked
+    idRequest = messageId();
+    idSession = session;
+    idOnArrival = false;
+    emit('conversation_id', { session, id: idRequest });
+  }
+
+  function copyConversationId(session) {
+    const known = conversationIds.get(session);
+    // The sheet closes first, whichever way this goes: the toast is drawn over the terminal and
+    // the reader has to be able to see it. Copy id was the one sheet control that left the sheet
+    // up, so every outcome it had to report was painted underneath it (#CPY4).
+    closeSheet();
+    if (known !== undefined) { writeConversationId(known); return; }
+    // Nothing kept yet — the press had no time, or this is a keyboard's Enter, which has no press.
+    // Ask, and write when the answer lands; on iOS that write is outside the activation and will
+    // be refused, which is what the fallback below is for.
+    askConversationId(session);
+    idOnArrival = true;
+  }
+
+  function writeConversationId(conversation) {
+    const ok = () => showToast(`Conversation id ${conversation} copied`);
+    // Refused — which on iOS is what any write outside the tap gets. The id goes into the toast
+    // itself, as selectable text a long-press can take, and the toast stays up long enough for
+    // that. It used to be appended to `document.querySelector('.rp-sheet')`: a document-global,
+    // kind-blind query against an element `closeSheet()` leaves in the DOM, so it landed in a
+    // hidden layer, or under another sheet's buttons (#CPY4).
+    const refused = () => showToastNodes(REFUSED_TOAST_MS,
+      document.createTextNode('Clipboard refused — long-press to copy: '),
+      el('span', 'rp-session-id', conversation));
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(conversation).then(ok, refused);
+    } else {
+      refused();
+    }
+  }
+
+  // What the conversations sheet is drawn from, minus the clock. `when` is a relative time the
+  // desktop recomputes on every publish and which steps every minute, so a signature over the
+  // whole `sessions` block rebuilt the sheet — scroll back to the top, focus back on "New
+  // conversation" — once a minute while a turn ran (#CPY4). The clock is patched in instead.
+  function sessionsShape(sessions) {
+    if (!sessions) return 'null';
+    return JSON.stringify([sessions.can_new === true, sessions.can_open === true,
+      arr(sessions.rows).filter(obj).map((s) => [str(s.id), str(s.title), s.current === true])]);
+  }
+
+  // The clock and the running dot, moved without rebuilding anything: each row keeps its node, so
+  // the reader's scroll, the focus and any selection inside it survive.
+  function patchSessions(sessions) {
+    for (const session of arr(sessions && sessions.rows).filter(obj)) {
+      const node = sheet.querySelector(`.rp-session-row[data-session-id="${CSS.escape(str(session.id))}"]`);
+      if (!node) continue;
+      const when = node.querySelector('.rp-session-when');
+      if (when && when.textContent !== str(session.when)) when.textContent = str(session.when);
+      const dot = node.querySelector('.rp-session-dot');
+      if (dot) dot.classList.toggle('rp-running', session.running === true);
+    }
+  }
+
   function openSessions() {
     const sessions = obj(state && state.sessions);
     if (!sessions) return;
     openSheet('sessions', '', (node) => {
       node.setAttribute('aria-label', 'Conversations');
-      node.dataset.sessions = JSON.stringify(sessions);   // what draw() compares against
+      node.dataset.sessions = sessionsShape(sessions);   // what draw() compares against
       if (sessions.can_new === true) {
         const fresh = sheetButton('rp-new-conversation', 'New conversation', () => emit('conversation_new'));
         node.appendChild(fresh);
@@ -659,12 +742,15 @@ export function mountPane(container, options = {}) {
         }
         // The conversation id never shows on its own (section 16 publishes tokens), so the row
         // carries the ask: the desktop answers this device alone, and the id goes to the
-        // clipboard — shown in the sheet only where the clipboard refused it.
+        // clipboard — shown in the toast only where the clipboard refused it.
         const copy = button('rp-session-copy', 'Copy id', `Copy the conversation id of ${str(session.title)}`);
+        // The press asks; the tap writes. A finger is down for long enough that the desktop's
+        // answer is usually back before the tap, and that is the whole point: the write is then
+        // inside the tap's own user activation, which is the only kind iOS honours.
+        copy.addEventListener('pointerdown', () => askConversationId(str(session.id)));
         copy.addEventListener('click', (event) => {
           event.stopPropagation();
-          idRequest = messageId();
-          emit('conversation_id', { session: str(session.id), id: idRequest });
+          copyConversationId(str(session.id));
         });
         item.appendChild(copy);
         list.appendChild(item);
@@ -1134,8 +1220,10 @@ export function mountPane(container, options = {}) {
     // open conversations list threw the focus back to the top and scrolled itself there, ten times
     // a second, exactly while the agent was working.
     if (sheetKind === 'sessions') {
-      const signature = JSON.stringify(obj(state.sessions) || null);
-      if (sheet.dataset.sessions !== signature) openSessions();
+      const sessions = obj(state.sessions);
+      const shape = sessionsShape(sessions);
+      if (sheet.dataset.sessions !== shape) openSessions();
+      else patchSessions(sessions);
     }
     if (sheetKind === 'row') {
       const id = sheet.dataset.rowId;
@@ -1346,27 +1434,23 @@ export function mountPane(container, options = {}) {
     },
 
     // The desktop's `conversation_id_text` answer (section 16): the real conversation id behind a
-    // token this view asked about. Onto the clipboard; shown in the open sheet only where the
-    // clipboard refused it, as text a long-press can still copy. Returns true when the answer
-    // was this view's ask, so the host does not also report it.
+    // token this view asked about. It is kept, so the next tap on that row can write it to the
+    // clipboard inside its own gesture, and written now if a tap is already waiting on it — in
+    // the toast, as text a long-press can copy, where the clipboard refuses. Returns true when
+    // the answer was this view's ask, so the host does not also report it.
     onConversationId(message) {
       const m = obj(message);
       if (!m || !idRequest || str(m.id) !== idRequest) return false;
+      const session = idSession;
+      const wanted = idOnArrival;
       idRequest = '';
+      idSession = '';
+      idOnArrival = false;
       const conversation = str(m.conversation);
       if (!conversation) return true;
-      const show = () => showToast(`Conversation id ${conversation} copied`);
-      const fallback = () => {
-        showToast('Clipboard refused — long-press to copy');
-        const sheet = document.querySelector('.rp-sheet');
-        if (!sheet) return;
-        sheet.appendChild(el('p', 'rp-session-id', conversation));
-      };
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(conversation).then(show, fallback);
-      } else {
-        fallback();
-      }
+      // Kept, so the next tap on that row writes it inside its own gesture.
+      if (session) conversationIds.set(session, conversation);
+      if (wanted) writeConversationId(conversation);
       return true;
     },
 
@@ -1383,6 +1467,8 @@ export function mountPane(container, options = {}) {
       const m = obj(message);
       if (m && idRequest && str(m.id) === idRequest) {
         idRequest = '';
+        idSession = '';
+        idOnArrival = false;
         showToast(`The id was refused: ${str(m.message) || 'not permitted'}`);
         return true;
       }

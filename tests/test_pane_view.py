@@ -508,6 +508,176 @@ class PaneViewTests(unittest.TestCase):
 
         self.drive(main())
 
+    CLIPBOARD = """
+      (() => { let copied = ''; let refuse = %s;
+        Object.defineProperty(navigator, 'clipboard',
+          { value: { writeText: (text) => { if (refuse) return Promise.reject(new Error('no'));
+                                            copied = text; return Promise.resolve(); } },
+            configurable: true });
+        window.paneDemo.copied = () => copied; })()
+    """
+
+    async def open_sessions(self, browser, *, query="&input=touch"):
+        await self.open(browser, "sessions_50", query=query)
+        await browser.evaluate("document.querySelector('.rp-sessions-button').click()")
+        await browser.wait_for("!!document.querySelector('.rp-session-list')")
+
+    def test_the_id_is_asked_for_on_the_press_so_the_tap_writes_it_itself(self):
+        """#CPY4: `navigator.clipboard.writeText()` ran in the answer handler, after a wire round
+        trip, with no user activation left — which on iOS is a refusal every time. The press asks;
+        the tap writes what the press brought back."""
+        state = fixture("sessions_50")
+        row = state["sessions"]["rows"][0]
+        conversation = "9f2c7a1e-4b3d-4e5f-8a90-1b2c3d4e5f60"
+        copy = (".rp-session-row[data-session-id=\\\"%s\\\"] .rp-session-copy" % row["id"])
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.open_sessions(browser)
+                await browser.evaluate(self.CLIPBOARD % "false")
+                # The finger goes down: that is where the ask is sent from.
+                await browser.evaluate(
+                    "document.querySelector('%s').dispatchEvent(new PointerEvent('pointerdown',"
+                    " {bubbles: true, pointerType: 'touch'}))" % copy)
+                await browser.wait_for("window.paneDemo.sent.length > 0")
+                asked = (await self.sent(browser))[-1]
+                self.assertEqual(asked["t"], "conversation_id")
+                self.assertEqual(asked["session"], row["id"])
+                self.assertTrue(asked["id"])
+                # The desktop answers while the finger is still down. Nothing is written yet.
+                await browser.evaluate(
+                    "window.paneDemo.conversationId({t: 'conversation_id_text', pane: %s,"
+                    " session: %s, conversation: %s, id: %s})"
+                    % (js(state["pane"]), js(row["id"]), js(conversation), js(asked["id"])))
+                self.assertEqual(await browser.evaluate("window.paneDemo.copied()"), "")
+                # The finger lifts: the write is the first thing in the tap, from what was kept.
+                await browser.evaluate("document.querySelector('%s').click()" % copy)
+                self.assertEqual(await browser.evaluate("window.paneDemo.copied()"), conversation)
+                self.assertIn("copied", await browser.evaluate("window.paneDemo.toast()"))
+                # And the tap closed the sheet, so the toast is not under it.
+                self.assertTrue(await browser.evaluate("document.querySelector('.rp-layer').hidden"))
+                # One press, one ask: the id is kept, so a second tap sends nothing.
+                before = len(await self.sent(browser))
+                await browser.evaluate("document.querySelector('.rp-sessions-button').click()")
+                await browser.wait_for("!!document.querySelector('.rp-session-list')")
+                await browser.evaluate(
+                    "document.querySelector('%s').dispatchEvent(new PointerEvent('pointerdown',"
+                    " {bubbles: true, pointerType: 'touch'}))" % copy)
+                await browser.evaluate("document.querySelector('%s').click()" % copy)
+                self.assertEqual(len(await self.sent(browser)), before,
+                                 "an id already answered for was asked for again")
+                self.assertEqual(browser.console, [])
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
+    def test_a_copy_id_outcome_is_the_topmost_thing_on_the_pane(self):
+        """#CPY4: the toast lives in `.rp-term-wrap`, which has no z-index, under a sheet layer at
+        `z-index: 10` with a 70%-opaque backdrop. Measured before this: `elementFromPoint` at the
+        toast's centre returned `rp-session-when`, a row of the sheet."""
+        state = fixture("sessions_50")
+        row = state["sessions"]["rows"][0]
+        conversation = "9f2c7a1e-4b3d-4e5f-8a90-1b2c3d4e5f60"
+        copy = (".rp-session-row[data-session-id=\\\"%s\\\"] .rp-session-copy" % row["id"])
+        # The measurement the card's "Done means" names: the sheet's row used to be the answer.
+        topmost = """
+          (() => { const t = document.querySelector('.rp-toast');
+            if (t.hidden) return 'the toast is not up';
+            const b = t.getBoundingClientRect();
+            const at = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+            if (!at) return 'nothing';
+            return (at === t || t.contains(at)) ? 'the toast' : at.className; })()
+        """
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await browser.call("Emulation.setDeviceMetricsOverride",
+                                   {"width": 390, "height": 844, "deviceScaleFactor": 1,
+                                    "mobile": True})
+                await self.open_sessions(browser)
+                # The clipboard refuses, which is the iOS path: the id itself goes in the toast.
+                await browser.evaluate(self.CLIPBOARD % "true")
+                await browser.evaluate("document.querySelector('%s').click()" % copy)
+                await browser.wait_for("window.paneDemo.sent.length > 0")
+                asked = (await self.sent(browser))[-1]
+                # The answer lands after the sheet has been re-opened over the terminal.
+                await browser.evaluate("document.querySelector('.rp-sessions-button').click()")
+                await browser.wait_for("!!document.querySelector('.rp-session-list')")
+                await browser.evaluate(
+                    "window.paneDemo.conversationId({t: 'conversation_id_text', pane: %s,"
+                    " session: %s, conversation: %s, id: %s})"
+                    % (js(state["pane"]), js(row["id"]), js(conversation), js(asked["id"])))
+                await browser.wait_for("!document.querySelector('.rp-toast').hidden")
+                self.assertFalse(await browser.evaluate("document.querySelector('.rp-layer').hidden"),
+                                 "the sheet must be up for this to measure anything")
+                self.assertEqual(await browser.evaluate(topmost), "the toast")
+                # The refusal says the id, as selectable text rather than a line in some sheet.
+                self.assertIn(conversation, await browser.evaluate("window.paneDemo.toast()"))
+                self.assertEqual(await browser.evaluate(
+                    "document.querySelector('.rp-toast .rp-session-id').textContent"), conversation)
+                self.assertEqual(await browser.evaluate(
+                    "document.querySelectorAll('.rp-sheet .rp-session-id').length"), 0,
+                    "the id was appended to whatever sheet happened to be in the DOM")
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
+    def test_a_minute_tick_leaves_the_conversations_where_the_reader_left_them(self):
+        """#CPY4: the rebuild was gated on a signature of the whole `sessions` block, which
+        includes each row's `when` — a relative time the desktop recomputes on every publish.
+        Measured before this: `scrollTop` 2010 → 0, focus back on "New conversation"."""
+        state = fixture("sessions_50")
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await browser.call("Emulation.setDeviceMetricsOverride",
+                                   {"width": 390, "height": 844, "deviceScaleFactor": 1,
+                                    "mobile": True})
+                await self.open_sessions(browser)
+                await browser.evaluate("document.querySelector('.rp-sheet').scrollTop = 2010")
+                scrolled = await browser.evaluate("document.querySelector('.rp-sheet').scrollTop")
+                self.assertGreater(scrolled, 0, "the sheet did not scroll, so this proves nothing")
+                node = "document.querySelectorAll('.rp-session-row')[3]"
+                await browser.evaluate(f"{node}.dataset.tickMark = '1'")
+
+                ticked = json.loads(json.dumps(state))
+                ticked["seq"] += 1
+                for r in ticked["sessions"]["rows"]:
+                    r["when"] = "one minute later"
+                self.assertTrue(await browser.evaluate(
+                    f"window.paneDemo.update({json.dumps(ticked)})"))
+                self.assertEqual(await browser.evaluate(
+                    "document.querySelector('.rp-sheet').scrollTop"), scrolled)
+                self.assertTrue(await browser.evaluate(
+                    f"!!{node} && {node}.dataset.tickMark === '1'"),
+                    "the rows were rebuilt, so a finger already down on one is on a dead node")
+                # The clock still moved: it is patched in, not left stale.
+                whens = json.loads(await browser.evaluate(
+                    "JSON.stringify([...document.querySelectorAll('.rp-session-when')]"
+                    ".map((e) => e.textContent))"))
+                self.assertEqual(set(whens), {"one minute later"})
+
+                # A row that really changed still rebuilds the sheet.
+                renamed = json.loads(json.dumps(ticked))
+                renamed["seq"] += 1
+                renamed["sessions"]["rows"][3]["title"] = "a different conversation"
+                self.assertTrue(await browser.evaluate(
+                    f"window.paneDemo.update({json.dumps(renamed)})"))
+                self.assertFalse(await browser.evaluate(f"{node}.dataset.tickMark === '1'"))
+                self.assertEqual(browser.console, [])
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
     def test_the_effort_picker_shows_the_desktops_levels_and_sends_one(self):
         """The model's levels (section 3), drawn as they arrived, and a pick sent back by name."""
         state = fixture("idle")
