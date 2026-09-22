@@ -295,7 +295,7 @@ void install(const QString &buildId) {
     struct sigaction action;
     ::memset(&action, 0, sizeof action);
     action.sa_sigaction = handler;
-    ::sigemptyset(&action.sa_mask);
+    sigemptyset(&action.sa_mask);
     action.sa_flags = SA_SIGINFO | SA_ONSTACK;
     for (const int number : {SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT, SIGSYS}) {
         struct sigaction current;
