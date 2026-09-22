@@ -748,7 +748,8 @@ void SubagentsPanel::paintEvent(QPaintEvent *) {
                    fm.elidedText(foldedText(), Qt::ElideRight, width() - 40));
         return;
     }
-    const int nameWidth = std::max(fm.horizontalAdvance(QStringLiteral("general a00")) + 8, 96);
+    const int nameWidth = std::max(fm.horizontalAdvance(QStringLiteral("main")) + 8,
+                                   fm.horizontalAdvance(QStringLiteral("a00")) + 8);
     const int taskNameWidth = std::max(fm.horizontalAdvance(QStringLiteral("T12")) + 8, 40);
     // Both columns: subagents left, tasks right, split at half width. One column: the full width,
     // so a strip that only lists agents is drawn exactly as it always was.
@@ -851,11 +852,12 @@ void SubagentsPanel::paintEvent(QPaintEvent *) {
                 parts << SubagentModel::formatElapsed(m_model->elapsedNow(*row));
                 parts << QStringLiteral("%1 tool%2").arg(row->tools).arg(row->tools == 1 ? QString() : QStringLiteral("s"));
                 parts << SubagentModel::formatTokens(row->tokens, row->tokensEstimated) + QStringLiteral(" tok");
-                QString description = row->description;
+                QString description = row->type.isEmpty() ? row->description
+                    : row->type + QStringLiteral(": ") + row->description;
                 if (row->live() && !row->lastActivity.isEmpty() && row->lastActivity != QStringLiteral("starting"))
                     description += QStringLiteral("  ·  ") + row->lastActivity;
                 drawRow(leftCell, onRow && (!split || m_column == Subagents), SubagentModel::statusIcon(row->status), color,
-                        QStringLiteral("%1 %2").arg(row->type, row->id), theme::Text, nameWidth, description,
+                        row->id, theme::Text, nameWidth, description,
                         parts.join(QStringLiteral(" · ")), row->background ? QStringLiteral("bg") : QString(), true,
                         row->model, rowIndex);
             }
