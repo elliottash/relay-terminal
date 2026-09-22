@@ -20,3 +20,7 @@ Check · 1 not-applicable, 2 passed; 2 advisory finding(s). The status is under 
 <!-- relay:entry 20260922T012233Z-cv author=codex kind=question -->
 ### Codex · 2026-09-22 01:22
 1. Coordinate the two-row src/RelayWindow.h fix with its live owners, or authorize proceeding with only those rows? Recommendation: wrap the step/tool-call limit rows with existing alsoBoardWorkers, then rebuild and rerun the isolated driver. The strict live assertion caught terminal max_steps=37 while the helper stayed at 500. Loop and brief checks pass. Updated QA/Verdict and moved to discussing, waiting_on owner, because the user explicitly required coordination for shared code and Relay messaging is unavailable. Proposed patch: docs/qa_evidence/2026-09-22-verify-CFG1/proposed-fix.patch.
+
+<!-- relay:entry 20260922T012336Z-cv author=codex kind=progress -->
+### Codex · 2026-09-22 01:23
+Linked evidence/record commit 92f3e5b31e5d390ba517a7ef7d588d40b3569a5e. ACT1 is closed; CFG1 awaits coordination for the prepared shared-header fix.

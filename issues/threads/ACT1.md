@@ -20,3 +20,7 @@ Verified independently under isolated Xvfb/config; both terminal and Activity re
 <!-- relay:entry 20260922T011850Z-cv author=codex kind=progress -->
 ### Codex · 2026-09-22 01:18
 Verification landed as 0babc4281ec481752daf9885af2138cea04335fc; added that commit to links.commits.
+
+<!-- relay:entry 20260922T012336Z-cv author=codex kind=progress -->
+### Codex · 2026-09-22 01:23
+Linked evidence/record commit 92f3e5b31e5d390ba517a7ef7d588d40b3569a5e. ACT1 is closed; CFG1 awaits coordination for the prepared shared-header fix.
