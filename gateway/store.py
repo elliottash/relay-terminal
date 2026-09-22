@@ -35,6 +35,14 @@ DEFAULT_PLAN = "free"
 StoreError = sqlite3.Error
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS pro_codes (
+    code_hash TEXT PRIMARY KEY,
+    person TEXT NOT NULL,
+    created REAL NOT NULL,
+    revoked REAL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS pro_codes_active_person ON pro_codes(person)
+    WHERE revoked IS NULL;
 CREATE TABLE IF NOT EXISTS installations (
     installation_id TEXT PRIMARY KEY,
     static_pubkey TEXT NOT NULL,
@@ -173,6 +181,38 @@ class Store:
 
     def close(self) -> None:
         self.db.close()
+
+    # ---- Pro entitlement (independent of installation identity and quota) -----------------------
+
+    def issue_pro_code(self, person: str) -> str:
+        """Return the secret once; persist only its digest and operator-assigned person label."""
+        person = person.strip()
+        if not person or len(person) > 256 or any(ord(c) < 32 for c in person):
+            raise ValueError("person must be a non-empty label of at most 256 characters")
+        code = "rp_" + secrets.token_urlsafe(32)
+        with self.db:
+            self.db.execute("INSERT INTO pro_codes (code_hash, person, created) VALUES (?, ?, ?)",
+                            (token_hash(code), person, time.time()))
+        return code
+
+    def list_pro_codes(self) -> list[dict]:
+        """Operator metadata only: never return codes or their digests."""
+        return [dict(row) for row in self.db.execute(
+            "SELECT person, created, revoked FROM pro_codes ORDER BY person, created")]
+
+    def revoke_pro_code(self, person: str) -> bool:
+        """Revoke this person's active code, visible to the next request on every connection."""
+        with self.db:
+            result = self.db.execute("UPDATE pro_codes SET revoked = ? "
+                                     "WHERE person = ? AND revoked IS NULL",
+                                     (time.time(), person.strip()))
+        return result.rowcount > 0
+
+    def pro_code_active(self, code: str) -> bool:
+        if not code or len(code) > 128:
+            return False
+        return self.db.execute("SELECT 1 FROM pro_codes WHERE code_hash = ? AND revoked IS NULL",
+                               (token_hash(code),)).fetchone() is not None
 
     # ---- registration --------------------------------------------------------------------------
 

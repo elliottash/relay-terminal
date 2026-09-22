@@ -157,3 +157,96 @@ curl -s http://127.0.0.1:8790/v1/health
 
 The tests (`tests/test_gateway.py`) run a fake provider on loopback and need no key:
 `PYTHONPATH=backend RELAY_KEYRING=off python3 -m unittest tests.test_gateway -v`.
+
+## Relay Pro (optional)
+
+Pro uses the same gateway, installation identity, quotas and spend ceilings as Free. The
+installation `Authorization: Bearer <token>` exchange is unchanged. On **every** Pro completion,
+clients also send `X-Relay-Pro-Code: <person-code>`. The server checks that code in SQLite on
+that request; activating a client or having `plan: pro` in client settings grants no access.
+The header is consumed by the gateway, never forwarded to the model provider or logged.
+
+`GET /v1/pro` requires both headers. A valid code with configured Pro roles returns:
+
+```json
+{"active": true, "models": ["relay-pro-high", "relay-pro-main", "relay-pro-flash"]}
+```
+
+`models` contains only the supported Pro roles configured on this gateway. Missing, invalid or
+revoked codes, no Pro configuration, or a request for an unavailable Pro role receive HTTP 403
+with `error.code: pro_access_denied`. Missing/expired installation credentials still receive
+401 `token_expired`; a database failure fails closed with 503 `free_unavailable`. Success here
+confirms entitlement, not remaining quota or upstream availability; completions still enforce
+all existing identity, rate, concurrency, quota and spend checks. Free roles ignore this header.
+The whole `relay-pro-*` namespace is reserved: unsupported roles are rejected in configuration
+and cannot be called even with a valid code. There is no Pro lite or Ultra role.
+
+### Issue, list and revoke codes
+
+Run locally on the gateway host as the service user, using the service's **existing** database
+(the CLI refuses a missing file to avoid silently operating on the wrong new database):
+
+```sh
+cd /opt/relay
+sudo -u relay-gateway python3 -m gateway.pro --db /var/lib/relay-gateway/gateway.db issue person-label
+sudo -u relay-gateway python3 -m gateway.pro --db /var/lib/relay-gateway/gateway.db list
+sudo -u relay-gateway python3 -m gateway.pro --db /var/lib/relay-gateway/gateway.db revoke person-label
+```
+
+Choose a unique stable person label. `issue` prints the cryptographically random code **once**;
+share it privately with that person. Only a SHA-256 digest and operator metadata are persisted.
+`list` prints labels and creation/revocation timestamps, never codes or digests. Each label may
+have one active code; revoke before issuing a replacement. Revocation takes effect for subsequent
+requests immediately, including requests using an already-issued installation bearer token,
+without restarting the server. A stream already admitted can finish. This is a per-person
+bearer secret, usable on that person's installations; it is not an account/login system or a
+new allowance. Protect terminal output and backups; do not place the code in command arguments,
+access logs, prompts or diagnostics.
+
+### Configure the three Pro roles
+
+Pro is disabled in the existing Free example. Add roles explicitly on the operator's box;
+no production configuration changes are made by installing this code. High and main map to
+`glm5.3`, flash to `glm5.3flash` in the example below. These are operator-supplied upstream model
+identifiers: use the exact IDs offered by your provider (including any provider namespace).
+The provider must support the configured reasoning dialect. Lite continues using `relay-lite`.
+
+This example writes a **new** config from the Free example and prompts for the endpoint, model
+IDs and actual current prices. It has no default prices; do not substitute guessed rates.
+Review the result before installing it and provide `GATEWAY_PRO_KEY` through the service env
+file. Caps and efforts below are explicit example operator settings, not new quota allowances.
+
+```python
+import json
+from pathlib import Path
+
+cfg = json.loads(Path("gateway/gateway.example.json").read_text())
+main = input("GLM 5.3 upstream ID [glm5.3]: ").strip() or "glm5.3"
+flash = input("GLM 5.3 Flash upstream ID [glm5.3flash]: ").strip() or "glm5.3flash"
+prices = {}
+for model in dict.fromkeys((main, flash)):
+    prices[model] = [float(input(f"{model}: input USD/million tokens: ")),
+                     float(input(f"{model}: output USD/million tokens: "))]
+cfg["providers"]["pro"] = {
+    "base_url": input("Provider HTTPS OpenAI-compatible base URL: ").strip(),
+    "key_env": "GATEWAY_PRO_KEY",
+    "effort_style": input("Effort dialect (reasoning/reasoning_effort/none): ").strip(),
+    "price_per_mtok": prices,
+}
+for role, model, effort in (("relay-pro-high", main, "high"),
+                            ("relay-pro-main", main, "medium"),
+                            ("relay-pro-flash", flash, "low")):
+    cfg["roles"][role] = {
+        "upstreams": [{"provider": "pro", "model": model}],
+        "effort": effort, "max_effort": "high",
+        "max_output_tokens": 8192, "max_input_chars": 2000000,
+    }
+Path("gateway.pro.json").write_text(json.dumps(cfg, indent=2) + "\n")
+```
+
+Validate with `gateway.config.load` and the key environment set before restarting. Every served
+upstream requires an explicit price, including fallback models. Existing `quota` and `limits`
+remain shared across Free and Pro; there is no billing or per-code allowance in this version.
+
+Pro regression tests use local synthetic prices and no production secrets:
+`PYTHONPATH=backend RELAY_KEYRING=off python3 -m unittest tests.test_gateway_pro tests.test_gateway -v`.

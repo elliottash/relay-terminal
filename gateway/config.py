@@ -23,6 +23,7 @@ EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 # How a provider takes the effort: OpenRouter nests it, the OpenAI shape (OpenAI, DeepSeek,
 # Gemini's compatibility endpoint) takes a flat key, and "none" is for a model with no knob.
 EFFORT_STYLES = ("reasoning", "reasoning_effort", "none")
+PRO_ROLES = ("relay-pro-high", "relay-pro-main", "relay-pro-flash")
 ROLE_NAME_LIMIT = 64
 # The largest body the HTTP layer accepts, whatever the roles say: the desktop's own request cap
 # (backend/relay_core/provider.py MAX_RESPONSE), so a conversation the client would send fits.
@@ -206,6 +207,8 @@ def _roles(section, providers: dict[str, Provider]) -> dict[str, Role]:
         where = f"roles.{name}"
         if not name or len(name) > ROLE_NAME_LIMIT or not name.replace("-", "").replace("_", "").isalnum():
             raise ConfigError(f"{where}: a role name is letters, digits, '-' and '_'.")
+        if name.startswith("relay-pro-") and name not in PRO_ROLES:
+            raise ConfigError(f"{where}: unsupported reserved Pro role.")
         if not isinstance(raw, dict):
             raise ConfigError(f"{where} must be an object.")
         upstreams_raw = raw.get("upstreams")

@@ -6,13 +6,14 @@ Routes (docs/RELAY-FREE.md):
     POST /v1/challenge          -> {challenge, ephemeral_public, expires_in}
     POST /v1/register           -> {installation_id, token, expires_in, plan, quota}
     POST /v1/chat/completions   -> SSE, with X-Relay-Quota-Limit / -Used / -Resets-At
+    GET  /v1/pro                -> {active: true, models: [...]} (Pro code required)
     GET  /v1/quota              -> {limit, used, resets_at, plan}
     GET  /v1/health             -> {ok, roles, open}
 
-Before a request opens an upstream the checks run in this order: token valid → gateway open
+Before a request opens an upstream the checks run in this order: token valid → Pro entitlement (reserved roles) → gateway open
 (the spend ceilings) → global concurrency → per-install concurrency → per-install requests per
 minute → per-install daily tokens. Every refusal is JSON with a stable code
-(``quota_exhausted | rate_limited | free_unavailable | token_expired | bad_request``) so the
+(``quota_exhausted | rate_limited | free_unavailable | token_expired | pro_access_denied | bad_request``) so the
 desktop can word it, and a database failure fails closed as ``free_unavailable``. A refusal that
 came after the gateway had already tried more than one upstream also carries ``error.retried``,
 which tells the desktop's transport not to run its own retries over the same chain (``error()``).
@@ -27,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -129,6 +131,14 @@ def build(store: Store, config: Config) -> httpd.Server:
                          "register again for a new one.")
         return installation
 
+    def pro_access(request: ws.Request, role: str | None = None) -> httpd.Response | None:
+        models = [name for name in config_mod.PRO_ROLES if name in config.roles]
+        if (not models or (role is not None and role not in models)
+                or not store.pro_code_active(request.header("x-relay-pro-code"))):
+            return error(403, "pro_access_denied",
+                         "Relay Pro access is unavailable or the code is missing, invalid or revoked.")
+        return None
+
     def housekeeping() -> None:
         nonlocal last_expired
         if time.time() - last_expired > EXPIRE_EVERY:
@@ -220,6 +230,21 @@ def build(store: Store, config: Config) -> httpd.Server:
 
     # ---- quota and health ----------------------------------------------------------------------
 
+    @server.route("GET", "/v1/pro")
+    async def pro(request: ws.Request, body: bytes) -> httpd.Response:
+        try:
+            installation = authenticated(request)
+            if isinstance(installation, httpd.Response):
+                return installation
+            denied = pro_access(request)
+            if denied is not None:
+                return denied
+            return httpd.Response.json({"active": True, "models": [
+                name for name in config_mod.PRO_ROLES if name in config.roles]})
+        except StoreError:
+            log.exception("pro: database failure")
+            return error(503, "free_unavailable", "Relay Pro is unavailable right now.")
+
     @server.route("GET", "/v1/quota")
     async def quota(request: ws.Request, body: bytes) -> httpd.Response:
         try:
@@ -253,6 +278,17 @@ def build(store: Store, config: Config) -> httpd.Server:
             installation = authenticated(request)
             if isinstance(installation, httpd.Response):
                 return installation
+            # Check the reserved namespace before ordinary role validation: configuring a role
+            # never grants Free clients access, and an unsupported Pro role fails closed too.
+            try:
+                fields = json.loads(body)
+            except (ValueError, UnicodeError):
+                fields = None
+            model = fields.get("model") if isinstance(fields, dict) else None
+            if isinstance(model, str) and model.startswith("relay-pro-"):
+                denied = pro_access(request, model)
+                if denied is not None:
+                    return denied
             if ceilings_hit() is not None:
                 return error(503, "free_unavailable", "Relay Free has reached its spending limit "
                              "for now; use your own provider key.")
