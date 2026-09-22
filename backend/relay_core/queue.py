@@ -91,6 +91,26 @@ def validate_prompt(prompt) -> str:
     return prompt
 
 
+def ends_with_question(messages: list[dict]) -> bool:
+    """Match PaneStatus::endsWithQuestion on the final assistant reply, not tool output."""
+    if not messages or messages[-1].get("role") != "assistant":
+        return False
+    content = messages[-1].get("content") or ""
+    if isinstance(content, list):
+        content = "".join(part.get("text", "") for part in content
+                          if isinstance(part, dict) and part.get("type") == "text")
+    if not isinstance(content, str):
+        return False
+    for line in reversed(content.splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("```"):
+            return False
+        return line.rstrip("*_`\"')]»”’ ").endswith(("?", "？"))
+    return False
+
+
 class TurnSupervisor:
     def __init__(self, emit: Callable[[dict], None]):
         self._emit = emit
@@ -99,6 +119,7 @@ class TurnSupervisor:
         self._agent = None
         self._running: str | None = None
         self._paused = False
+        self._awaiting_reply = False
         self._closed = False
         self._outcome: str | None = None
         self._stop_reason: str | None = None
@@ -257,6 +278,10 @@ class TurnSupervisor:
                 raise ValueError("Worker is shutting down.")
             if len(self._queue) >= MAX_QUEUE:
                 raise ValueError(f"Queue is full ({MAX_QUEUE} prompts).")
+            # A person's reply to a completed question precedes ordinary queued work,
+            # including on surfaces which submit every line with when="queue" (#QAN1).
+            if self._awaiting_reply and origin == "user" and self._running is None:
+                when = "now"
             busy = self._running is not None or (self._queue and not self._paused)
             if when == "now" and busy:
                 raise ValueError("An agent turn is already active.")
@@ -522,6 +547,7 @@ class TurnSupervisor:
         with self._lock:
             was_paused = self._paused
             self._paused = False
+            self._awaiting_reply = False
             self._changed_locked()
             self._lock.notify_all()
             return was_paused
@@ -623,6 +649,7 @@ class TurnSupervisor:
         self._queue.clear()
         self._steer.clear()
         self._paused = False
+        self._awaiting_reply = False
         if had:
             self._changed_locked()
 
@@ -654,6 +681,7 @@ class TurnSupervisor:
                 agent = self._agent
                 self._running = item["id"]
                 self._outcome = None
+                self._awaiting_reply = False
                 agent.cancel_event.clear()
                 if not self._queue:
                     self._paused = False
@@ -701,8 +729,14 @@ class TurnSupervisor:
                     set_card_turn(None, None)
             with self._lock:
                 outcome = self._outcome or "error"
+                self._awaiting_reply = outcome == "done" and ends_with_question(
+                    getattr(agent, "messages", [])[-1:])
+                if self._awaiting_reply:
+                    self._paused = True
                 finished = {"event": "agent_finished", "id": item["id"], "outcome": outcome,
                             **_surface_of(item), **_card_of(item)}
+                if self._awaiting_reply:
+                    finished["awaiting_reply"] = True
                 if self._stop_reason:
                     finished["stop_reason"] = self._stop_reason
                 self._emit(finished)

@@ -1470,6 +1470,7 @@ public:
     // agent prompt 'continue'"). A password prompt is the one exception: the masked field stands in
     // for the prompt box there, and an agent turn is not started in the middle of one.
     void interruptAgentWithPrompt() {
+        if (m_ask.open()) { requestRoute(true, QStringLiteral("agent")); return; }
         if (sendSelectedSteerNow()) return;   // a selected steer row: that steer, now
         const QString text = m_editor->toPlainText().trimmed();
         if (relay::continueturn::sendNowContinues({m_agentBusy, text.isEmpty()})) {
@@ -4252,6 +4253,7 @@ public:
         }
         for (int i = 0; i < m_ask.questions.size(); ++i) m_ask.answers.append(QStringList());
         m_ask.current = 0;
+        if (inQueueSelection()) leaveQueueSelection();
         printQuestion();
         if (!watched())
             notify(QStringLiteral("Agent needs you"), questionAt(0).value(QStringLiteral("question")).toString(),
@@ -11046,8 +11048,9 @@ private:
             // and the ask's own footer says so.
             const bool toShell = (overrideMode == QStringLiteral("auto") ? m_modeValue : overrideMode)
                                  == QStringLiteral("shell");
-            if (m_ask.open() && !toShell && !m_editor->toPlainText().trimmed().isEmpty()) {
+            if (m_ask.open() && !toShell) {
                 const QString typed = m_editor->toPlainText().trimmed();
+                if (typed.isEmpty()) return;
                 m_editor->remember(typed);
                 m_editor->clear();
                 answerQuestion(typed);
@@ -11699,6 +11702,10 @@ private:
             // "Asked" also covers a command the agent left in the prompt box and waits on.
             m_lastAsked = outcome == QStringLiteral("done")
                           && (relay::panestatus::endsWithQuestion(m_turnText) || (m_handoffOffered && m_handoffPrefill));
+            if (outcome == QStringLiteral("done")
+                && (event.value(QStringLiteral("awaiting_reply")).toBool()
+                    || relay::panestatus::endsWithQuestion(m_turnText)))
+                pauseQueue(QStringLiteral("the agent asked a question · reply to continue"));
             // Notified only for news the user was not watching (#XM0T): a turn that ended by
             // asking them something, a finished turn, a failed one.
             if (outcome == QStringLiteral("done")) {
@@ -14902,6 +14909,7 @@ private:
         // side, which is all a terminal pane's queue ever is, because it sends one `ask` at a
         // time; the worker's half resumes on that `ask` itself (`TurnSupervisor.submit`), which
         // is what keeps this pane's wire byte-for-byte what it was. Nothing is sent from here.
+        const bool resumingEntries = m_entriesPaused;
         if (m_entriesPaused) {
             m_entriesPaused = false; m_pauseReason.clear();
             rebuildQueueStrip(); changed();
@@ -14926,7 +14934,8 @@ private:
         // exactly as the interrupt branch above does, and the queued items keep their order
         // (#N8VK). Only a busy — or just-started — agent turn sends a prompt to the back.
         if (m_configured && relay::queuesubmit::decide(queueSubmitState()) == relay::queuesubmit::Decision::StartNow) {
-            startAgentEntry(entry, false);
+            // Reserve the agent slot while the reply starts, before the busy event arrives.
+            startAgentEntry(entry, resumingEntries);
             return;
         }
         enqueue(entry);
@@ -15224,7 +15233,7 @@ private:
     // there is no second piece of state to keep in step. It also covers the item drifting to the
     // front while it is being edited: the moment it becomes the head, the hold applies.
     bool queueHeldBySelection() const { return m_selected == 0 && !m_entries.isEmpty(); }
-    bool queueBlocked() const { return m_entriesPaused || queueHeldBySelection(); }
+    bool queueBlocked() const { return m_entriesPaused || m_ask.open() || queueHeldBySelection(); }
 
     // Show a queued item in the prompt box. The text is the row's, not the user's, so it is not
     // remembered in prompt history and it must not be treated as a draft.
@@ -15480,6 +15489,12 @@ private:
             return true;
         }
         const bool enter = k == Qt::Key_Return || k == Qt::Key_Enter;
+        // Answers own Enter before queue navigation/escalation and completion popups (#QAN1).
+        if (m_ask.open() && enter
+            && (mods == Qt::ControlModifier || (mods == Qt::NoModifier && m_modeValue != QStringLiteral("shell")))) {
+            requestRoute(true, QStringLiteral("agent"));
+            return true;
+        }
         if (m_tabList && m_tabList->isVisible()) {
             const bool next = (mods == Qt::NoModifier && (k == Qt::Key_Tab || k == Qt::Key_Down));
             const bool previous = ((mods == Qt::ShiftModifier && k == Qt::Key_Tab) || (mods == Qt::NoModifier && k == Qt::Key_Up));

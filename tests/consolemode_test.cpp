@@ -878,6 +878,105 @@ void repeatedEnterKeepsTheFirstQueuedPrompt()
     CHECK_EQ(console.queuedPrompts(), 1);
 }
 
+void answersBypassQueuedPrompts()
+{
+    for (int gesture = 0; gesture < 3; ++gesture) {
+        StubContext context;
+        context.workspace = home->path();
+        Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+        QList<QJsonObject> sent;
+        console.onWorkerLine = [&sent](const QJsonObject &message) { sent << message; };
+        console.deliverWorkerEvent(QJsonObject{{"event", "configured"}, {"model", "test"}});
+        console.deliverWorkerEvent(QJsonObject{{"event", "agent_started"}, {"id", "running"}});
+        auto *editor = console.findChild<QPlainTextEdit *>(QStringLiteral("composerEditor"));
+        CHECK(editor != nullptr);
+        if (!editor) return;
+        const auto enter = [&](Qt::KeyboardModifiers mods = Qt::NoModifier) {
+            QKeyEvent key(QEvent::KeyPress, Qt::Key_Return, mods);
+            QCoreApplication::sendEvent(editor, &key);
+        };
+        console.draftInComposer(QStringLiteral("queued first")); enter();
+        console.draftInComposer(QStringLiteral("queued second")); enter();
+        CHECK_EQ(console.queuedPrompts(), 2);
+        const auto before = console.queueRows();
+        console.showQuestion(QJsonObject{{"id", "question-1"}, {"questions", QJsonArray{
+            QJsonObject{{"header", "Scope"}, {"question", "Which?"}, {"options", QJsonArray{
+                QJsonObject{{"label", "First"}}, QJsonObject{{"label", "Second"}}}}},
+            QJsonObject{{"header", "Detail"}, {"question", "Any details?"}}}}});
+        sent.clear();
+        enter(); // Empty Enter must not steer queued work while an ask is open.
+        CHECK(sent.isEmpty());
+        CHECK(console.questionOpen());
+        // A card's explicit comment/shell chord is not an answer and still reaches its context.
+        context.takeSubmit = true;
+        console.draftInComposer(QStringLiteral("separate comment"));
+        enter(Qt::ControlModifier | Qt::ShiftModifier);
+        CHECK_EQ(context.submitted.last(), QStringLiteral("shell|separate comment"));
+        CHECK(console.questionOpen());
+        CHECK(sent.isEmpty());
+        context.takeSubmit = false;
+        const auto answer = [&](const QString &text) {
+            console.draftInComposer(text);
+            if (gesture == 2) console.interruptAgentWithPrompt(); // action/shortcut entry point
+            else enter(gesture == 1 ? Qt::ControlModifier : Qt::NoModifier);
+        };
+        answer(QStringLiteral("2"));
+        CHECK(sent.isEmpty()); // Multiple answers are sent together.
+        CHECK(console.questionOpen());
+        answer(QStringLiteral("please keep the tests"));
+        CHECK(!console.questionOpen());
+        CHECK_EQ(sent.size(), 1);
+        if (sent.size() == 1) {
+            CHECK_EQ(sent.first().value("type").toString(), QStringLiteral("question_answer"));
+            CHECK_EQ(sent.first().value("id").toString(), QStringLiteral("question-1"));
+            CHECK_EQ(sent.first().value("answers").toArray(),
+                     (QJsonArray{QJsonArray{"Second"}, QJsonArray{"please keep the tests"}}));
+        }
+        CHECK_EQ(console.queuedPrompts(), 2);
+        const auto after = console.queueRows();
+        CHECK_EQ(before.size(), after.size());
+        for (int i = 0; i < before.size() && i < after.size(); ++i) {
+            CHECK_EQ(before[i].id, after[i].id);
+            CHECK_EQ(before[i].preview, after[i].preview);
+        }
+    }
+}
+
+void proseQuestionHoldsTheQueueForItsReply()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    QList<QJsonObject> sent;
+    console.onWorkerLine = [&sent](const QJsonObject &message) { sent << message; };
+    console.deliverWorkerEvent(QJsonObject{{"event", "configured"}, {"model", "test"}});
+    console.deliverWorkerEvent(QJsonObject{{"event", "agent_started"}, {"id", "running"}});
+    auto *editor = console.findChild<QPlainTextEdit *>(QStringLiteral("composerEditor"));
+    CHECK(editor != nullptr);
+    if (!editor) return;
+    const auto enter = [&] {
+        QKeyEvent key(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+        QCoreApplication::sendEvent(editor, &key);
+    };
+    console.draftInComposer(QStringLiteral("queued task")); enter();
+    console.deliverWorkerEvent(QJsonObject{{"event", "delta"}, {"text", "Which option should I use?"}});
+    sent.clear();
+    console.deliverWorkerEvent(QJsonObject{{"event", "agent_finished"}, {"id", "running"}, {"outcome", "done"}});
+    QCoreApplication::processEvents();
+    CHECK(console.queuePaused());
+    CHECK_EQ(console.queuedPrompts(), 1);
+    for (const auto &message : sent) CHECK(message.value("type") != "ask");
+    sent.clear();
+    console.draftInComposer(QStringLiteral("Use the second option")); enter();
+    console.resumeAgentQueue(); // A resume during the worker's busy-event gap must not overtake the reply.
+    QCoreApplication::processEvents();
+    CHECK_EQ(console.queuedPrompts(), 1);
+    QList<QJsonObject> asks;
+    for (const auto &message : sent) if (message.value("type") == "ask") asks << message;
+    CHECK_EQ(asks.size(), 1);
+    if (!asks.isEmpty()) CHECK_EQ(asks.first().value("text").toString(), QStringLiteral("Use the second option"));
+}
+
 }  // namespace cases
 
 int main(int argc, char **argv)
@@ -914,6 +1013,8 @@ int main(int argc, char **argv)
     cases::enterOnAnEmptyBoxResumesThisConsolesPausedQueue();
     cases::aTerminalPanesOwnQueueResumesOnEnterToo();
     cases::repeatedEnterKeepsTheFirstQueuedPrompt();
+    cases::answersBypassQueuedPrompts();
+    cases::proseQuestionHoldsTheQueueForItsReply();
 
     if (failures == 0)
     std::fprintf(stdout, "consolemode: 20 cases, all passed\n");

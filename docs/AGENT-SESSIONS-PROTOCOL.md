@@ -609,6 +609,16 @@ while todos are open: … ignore this if it is current"). No event; no extra mod
 
 ### 12.5 Steers, cancel, interrupt, failure (G2, G3)
 
+A completed assistant reply whose last nonblank line ends with `?` or `？` pauses
+ordinary queued prompts while awaiting the user's reply (#QAN1), using the same
+Markdown-closing-character rule as the pane's Needs-you status; a final fenced code
+block is excluded. `agent_finished` carries optional `awaiting_reply: true` in this
+case. The next user submission runs ahead of ordinary queued prompts and resumes
+them behind it. Background Relay submissions do not answer or resume this wait.
+Explicit Resume (or empty Enter on a paused queue) continues without an answer.
+This is a punctuation heuristic, not semantic detection of every prose question;
+agents should use structured questions for reliable answer delivery.
+
 - **Steers** reach the model as one user message per step boundary, each steer framed:
   `[Sent by the user while you were working (R7, 14:02). Keep your current task (R5) unless this changes it. Add it to your todos if it is a new ask. Say briefly how you handled it in your final answer.]`
   followed by the program-context note, the attachment blocks and the verbatim text. Steer `attachments` and
@@ -5752,6 +5762,10 @@ paragraph); past that it is cut and the cut is marked in the text the model read
 answer that stops mid-sentence with no marker reads as the user trailing off.
 
 ### 27.3 `question` (worker → GUI) and `question_answer` (GUI → worker)
+
+While a structured question is open, Enter and Ctrl+Enter answer it before any
+queue shortcut or new-prompt submission. Empty Enter does nothing. Pending prompts
+remain queued. Explicit terminal submission remains available and is not an answer.
 
 `question.questions` is the validated, normalised list: whitespace collapsed, `multiple` always
 present, `recommended` present only on the recommended option. The pane draws it and answers

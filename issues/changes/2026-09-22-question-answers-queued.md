@@ -1,14 +1,14 @@
 ---
 id: QAN1
 type: work
-status: discussing
+status: needs-verification
 labels: [bug, queue, questions]
 assignee: codex
-waiting_on: owner
+implemented_by: openai/gpt-6-astra via codex
 rank: mqan1
 created: '2026-09-22'
 source: Codex in a Relay pane, 2026-09-22
-links: {plans: [], commits: [], evidence: [], related: [QFF1, MQ9C], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-question-answers/], related: [QFF1, MQ9C], github: null}
 ---
 # Question answers wait behind queued prompts
 
@@ -22,3 +22,30 @@ another issue -- i had prompts queued and the agent asked me questions. i answer
 
 ## Planning notes
 `Pane::requestRoute` already answers a structured `m_ask` directly, before routing or queueing. `recordAnswer` emits `question_answer` after the final answer in a group. Plain prose questions do not establish `m_ask`; their replies can reach ordinary busy-agent queueing. `interruptAgentWithPrompt` also bypasses requestRoute while busy, so the submission gesture matters for structured questions. Need the observed question presentation and submission gesture to reproduce the reported path before changing it.
+
+## Decisions
+Owner: "i cant remember, analyze them all" — investigate all question presentations and submit gestures; no further reproduction detail required.
+
+## Plan
+1. Route Enter/Ctrl+Enter to an open structured question before queue shortcuts; keep explicit terminal submissions separate. Guard the queue while an ask is open.
+2. Pause pending work when a completed reply ends with a question, using Relay's existing Needs-you punctuation rule; make the next user reply run ahead of ordinary queued work on both pane and worker queues. Resume remains available.
+3. Test structured single/multiple questions, empty Enter, Ctrl+Enter, normal prompt FIFO, prose question replies and explicit resume. Build and exercise the exact landed tree; record the audited remote/guest paths and limitations.
+
+## Execution Summary
+Audited desktop Enter/Ctrl+Enter, empty Enter, selected queue rows, explicit terminal/comment submits, paired phone, native and managed guest questions, completed prose, and raw TUI limitations. Fixed structured-answer shortcut bypass and empty-Enter queue escalation. Completed prose questions now pause ordinary queue draining using Relay's existing Needs-you punctuation rule; the next user reply runs first, with the pane's start reservation preventing overtaking. Worker background reports do not resume the wait. Full audit and limitations are recorded in docs/qa_evidence/2026-09-22-question-answers/NOTES.md.
+
+## Tests
+- `ctest -R consolemode`
+- `tests/test_queue.py::SupervisorTests::test_question_reply_precedes_queued_work`
+- `tests/test_queue.py::SupervisorTests::test_resume_can_skip_a_prose_question`
+- `tests/test_queue.py::SupervisorTests::test_question_detection_matches_pane_punctuation_rule`
+- manual: docs/qa_evidence/2026-09-22-question-answers/NOTES.md
+
+### Check 2026-09-22 13:43
+- passed · ctest:consolemode — ctest -R consolemode passed for this revision on spark-dcc9, 2026-09-22T17:43:47Z
+- passed · unittest:tests.test_queue.SupervisorTests.test_question_reply_precedes_queued_work — tests/test_queue.py::SupervisorTests::test_question_reply_precedes_queued_work passed for this revision on spark-dcc9, 2026-09-22T17:43:10Z
+- passed · unittest:tests.test_queue.SupervisorTests.test_resume_can_skip_a_prose_question — tests/test_queue.py::SupervisorTests::test_resume_can_skip_a_prose_question passed for this revision on spark-dcc9, 2026-09-22T17:43:10Z
+- passed · unittest:tests.test_queue.SupervisorTests.test_question_detection_matches_pane_punctuation_rule — tests/test_queue.py::SupervisorTests::test_question_detection_matches_pane_punctuation_rule passed for this revision on spark-dcc9, 2026-09-22T17:43:10Z
+- not-applicable · manual:docs/qa_evidence/2026-09-22-question-answers/NOTES.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-question-answers/NOTES.md
+- warning · card — none of the listed tests is named after anything this card changed (issues/changes/2026-09-22-question-answers-queued.md, issues/threads/QAN1.md)
+history: thread

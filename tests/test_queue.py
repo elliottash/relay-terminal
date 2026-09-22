@@ -11,7 +11,7 @@ from pathlib import Path
 
 from relay_core.agent import Agent
 from relay_core.provider import Cancelled, ProviderConfig
-from relay_core.queue import MAX_QUEUE, TurnSupervisor
+from relay_core.queue import MAX_QUEUE, TurnSupervisor, ends_with_question
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ProviderConfig('http://127.0.0.1:12345/v1', 'mock', '')
@@ -121,6 +121,46 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual(p.prompts, ['first', 'second', 'third'])
         self.assertEqual(p.max_active, 1)
         self.assertEqual([e['id'] for e in self.rec.of('agent_started')], ids)
+
+    def test_question_reply_precedes_queued_work(self):
+        p = self.use(GatedProvider())
+        first = self.sup.submit('which option?', 'queue')
+        self.rec.wait(lambda e: e['event'] == 'agent_started' and e['id'] == first)
+        second = self.sup.submit('second', 'queue')
+        third = self.sup.submit('third', 'queue')
+        p.release.release()
+        self.assertTrue(self.finished(first)['awaiting_reply'])
+        self.rec.wait(lambda e: e['event'] == 'queue_changed' and e['paused'] and e['running'] is None)
+        self.assertEqual(p.prompts, ['which option?'])
+        background = self.sup.submit('background', 'queue', origin='relay')
+        self.assertEqual(p.prompts, ['which option?'])
+        reply = self.sup.submit('the first option', 'queue')
+        self.rec.wait(lambda e: e['event'] == 'agent_started' and e['id'] == reply)
+        self.assertEqual(p.prompts, ['which option?', 'the first option'])
+        for _ in range(4):
+            p.release.release()
+        for item in [reply, second, third, background]:
+            self.assertEqual(self.finished(item)['outcome'], 'done')
+        self.assertEqual(p.prompts, ['which option?', 'the first option', 'second', 'third', 'background'])
+
+    def test_resume_can_skip_a_prose_question(self):
+        p = self.use(GatedProvider())
+        first = self.sup.submit('proceed?', 'queue')
+        self.rec.wait(lambda e: e['event'] == 'agent_started' and e['id'] == first)
+        second = self.sup.submit('second', 'queue')
+        p.release.release()
+        self.assertTrue(self.finished(first)['awaiting_reply'])
+        self.sup.resume()
+        p.release.release()
+        self.assertEqual(self.finished(second)['outcome'], 'done')
+
+    def test_question_detection_matches_pane_punctuation_rule(self):
+        for text, expected in [('Choose one?', True), ('**Choose one?**\n', True),
+                               ('Which？', True), ('Done.', False),
+                               ('```\nquestion?\n```', False), ('', False)]:
+            with self.subTest(text=text):
+                self.assertEqual(ends_with_question([{'role': 'assistant', 'content': text}]), expected)
+        self.assertFalse(ends_with_question([{'role': 'tool', 'content': 'Which?'}]))
 
     def test_now_is_refused_while_busy(self):
         p = self.use(GatedProvider())
