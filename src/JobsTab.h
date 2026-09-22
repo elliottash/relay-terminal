@@ -39,9 +39,10 @@
 // job, and moving the *tier* is what the priorities lists are for — so the tier box is gone. Enter
 // on a row drops the same filter list the model box uses, over the available models by name; a
 // model with levels then drops its level list. Delete clears the row back to "follows its tier".
-// The storage is exactly today's, so nothing migrates: `roles/<role>/{preset,model,effort}`
-// (`relay::rolestore`). A legacy `roles/<role>/tier` is read and shown as "follows <tier>", and
-// the × clears it too.
+// The storage is `roles/<role>/{preset,model,effort}` (`relay::rolestore`). A legacy
+// `roles/<role>/tier` is read and shown as "follows <tier>", and the × clears it too. The one
+// exception is the pre-#HR5E planning override: it is retired once because it silently defeats
+// plan mode's restored own-model default; a model chosen after that migration remains explicit.
 //
 // **A background job may not be overridden onto a guest harness.** `roles.py BACKGROUND_ROLES` —
 // terminal use, summaries, suggestions, chores, request audit, loop check — are side calls into a
@@ -81,6 +82,10 @@ namespace relay {
 //   tiers/<tier>/<field>   the one-entry-per-tier keys the five ordered lists replaced. Read by
 //                          `Pane::tiersObject` on an install that has stored no list yet.
 namespace rolestore {
+// Clear the planning override left by releases whose default planner followed High, once. Called
+// lazily by `roleSetting`, before Pane serializes any roles for a terminal or console worker.
+// Returns true only when at least one obsolete value was removed (exposed for the settings test).
+bool migrateLegacyPlanningOverride();
 QString roleSetting(const QString &role, const QString &field);
 QString tierSetting(const QString &tier, const QString &field);
 

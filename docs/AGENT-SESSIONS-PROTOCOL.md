@@ -1584,6 +1584,13 @@ planning back off the tier (`ROLE_TIERS["planning"] is None`): `tiers.high` no l
 wins over the default, swapping for the turn whatever the pane's effort is. A pin onto a tier
 (`{"tier": "high"}`) restores the v3.9 behaviour explicitly, guest entries included.
 
+The #HR5E change also has a one-shot GUI settings migration (`rolestore::migrateLegacyPlanningOverride`,
+card #PMX7): existing `roles/planning/*` values are removed before any pane or console/helper worker
+serializes its roles. Releases before #HR5E could leave that global override behind, making the restored
+default unreachable and producing an apparently phantom cross-provider swap. The migration marks a fresh
+or upgraded installation immediately; an override picked afterward in Options › Models › Jobs is therefore
+an explicit current choice and survives later launches.
+
 When the effort knob cannot move — the provider has no effort parameter at all (Anthropic, MiniMax;
 effort style `none`, section 3) or the pane's own effort is already `max` — the role resolves back to
 the main agent, and that is not a swap at all. Two outcomes, as for images:

@@ -256,6 +256,35 @@ private Q_SLOTS:
 
     // ----- the override -------------------------------------------------------------------------
 
+    void aLegacyPlanningOverrideIsRetiredExactlyOnce() {
+        // #PMX7's real settings had this pre-#HR5E shape. Seed raw keys: roleSetting() itself is
+        // the migration boundary and would correctly remove them before returning.
+        QSettings settings;
+        settings.setValue(QStringLiteral("roles/planning/preset"), QStringLiteral("glm-coding"));
+        settings.setValue(QStringLiteral("roles/planning/effort"), QStringLiteral("max"));
+        QVERIFY(rolestore::migrateLegacyPlanningOverride());
+        for (const char *field : {"preset", "model", "effort", "tier"})
+            QVERIFY2(!settings.contains(QStringLiteral("roles/planning/") + QLatin1String(field)), field);
+
+        // A current explicit choice is made after the marker. Later migration checks leave it
+        // alone, so fixing an upgrade does not remove a supported user choice forever.
+        QVERIFY(rolestore::setOverride(QStringLiteral("planning"),
+                                       QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max")));
+        QVERIFY(!rolestore::migrateLegacyPlanningOverride());
+        QCOMPARE(setting(QStringLiteral("planning"), QStringLiteral("preset")),
+                 QStringLiteral("glm-coding"));
+        QCOMPARE(setting(QStringLiteral("planning"), QStringLiteral("model")), QStringLiteral("glm-5.3"));
+    }
+
+    void aFreshInstallMarksTheMigrationBeforeItsFirstOverride() {
+        QVERIFY(!rolestore::migrateLegacyPlanningOverride());
+        QVERIFY(rolestore::setOverride(QStringLiteral("planning"),
+                                       QStringLiteral("kimi|kimi-k3"), QStringLiteral("high")));
+        QVERIFY(!rolestore::migrateLegacyPlanningOverride());
+        QCOMPARE(setting(QStringLiteral("planning"), QStringLiteral("preset")), QStringLiteral("kimi"));
+        QCOMPARE(setting(QStringLiteral("planning"), QStringLiteral("model")), QStringLiteral("kimi-k3"));
+    }
+
     void aJobWithNoOverrideSaysWhichTierItFollows() {
         Served served;
         JobsTab tab;

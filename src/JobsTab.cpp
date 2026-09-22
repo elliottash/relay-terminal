@@ -34,8 +34,36 @@ QString str(const QJsonObject &object, const char *key) {
 
 namespace rolestore {
 
-QString roleSetting(const QString &role, const QString &field) {
+namespace {
+QString rawRoleSetting(const QString &role, const QString &field) {
     return QStringLiteral("roles/") + role + '/' + field;
+}
+}  // namespace
+
+bool migrateLegacyPlanningOverride() {
+    QSettings settings;
+    const QString marker = QStringLiteral("migrations/planning_own_model_v1");
+    if (settings.value(marker, false).toBool()) return false;
+
+    bool removed = false;
+    for (const char *field : {"preset", "model", "effort", "tier"}) {
+        const QString key = rawRoleSetting(QStringLiteral("planning"), QLatin1String(field));
+        if (!settings.contains(key)) continue;
+        settings.remove(key);
+        removed = true;
+    }
+    // Mark even a fresh install: a planning model deliberately chosen through today's Jobs UI
+    // must survive every later launch instead of looking like legacy state on the next one.
+    settings.setValue(marker, true);
+    return removed;
+}
+
+QString roleSetting(const QString &role, const QString &field) {
+    // `Pane::rolesObject` reaches every terminal pane and every console/helper worker through this
+    // function. Doing the one-shot migration here makes it happen before either serializes roles,
+    // without a second startup path that one kind of agent could miss (card #PMX7).
+    migrateLegacyPlanningOverride();
+    return rawRoleSetting(role, field);
 }
 
 QString tierSetting(const QString &tier, const QString &field) {
@@ -125,7 +153,7 @@ const QList<JobsTab::Job> &JobsTab::jobs() {
 
         {QStringLiteral("planning"), QStringLiteral("plan mode"),
          QStringLiteral("investigating and writing a plan; the pane's own model at its top level "
-                        "unless high names one"),
+                        "unless overridden here"),
          QStringLiteral("high"), true},
         {QStringLiteral("high"), QStringLiteral("/high panes"),
          QStringLiteral("a pane put on the high tier, for the hardest turns"), QStringLiteral("high"), true},
