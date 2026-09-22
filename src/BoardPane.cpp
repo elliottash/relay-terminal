@@ -1862,9 +1862,58 @@ public:
         m_testsActionsBox->addStretch(1);
         m_testsActions->hide();
         testsBox->addWidget(m_testsActions);
+        // The `## Tests` editor, inside the strip rather than over the card: it is about the
+        // list right above it, and the body stays readable while the list is rewritten. Two
+        // things open it — "Replace retired check" on a check that is no longer in the project,
+        // and the gate asking which checks prove a card that names none (#PR4Q).
+        m_testsEdit = new QFrame(m_testsStrip);
+        m_testsEdit->setObjectName(QStringLiteral("boardTestsEdit"));
+        auto *testsEditBox = new QVBoxLayout(m_testsEdit);
+        testsEditBox->setContentsMargins(0, 4, 0, 0);
+        testsEditBox->setSpacing(4);
+        m_testsEditHint = new QLabel(m_testsEdit);
+        m_testsEditHint->setObjectName(QStringLiteral("boardTestsEditHint"));
+        m_testsEditHint->setWordWrap(true);
+        testsEditBox->addWidget(m_testsEditHint);
+        m_testsEditor = new QPlainTextEdit(m_testsEdit);
+        m_testsEditor->setObjectName(QStringLiteral("boardTestsEditor"));
+        m_testsEditor->setPlaceholderText(
+                QStringLiteral("One check per line, as you would type it: `ctest -R board`, "
+                               "`tests/test_board.py::CardTests::test_roundtrip`, "
+                               "manual: docs/qa_evidence/…"));
+        m_testsEditor->setMaximumHeight(120);
+        testsEditBox->addWidget(m_testsEditor);
+        auto *testsEditButtons = new QHBoxLayout;
+        testsEditButtons->setSpacing(6);
+        m_testsEditNone = new QPushButton(QStringLiteral("None apply"), m_testsEdit);
+        m_testsEditNone->setObjectName(QStringLiteral("boardReplyButton"));
+        m_testsEditNone->setFocusPolicy(Qt::NoFocus);
+        m_testsEditNone->setToolTip(QStringLiteral("Say on the thread that no check in this "
+                                                   "project proves this card, and move it."));
+        m_testsEditNone->hide();
+        testsEditButtons->addWidget(m_testsEditNone);
+        testsEditButtons->addStretch(1);
+        m_testsEditCancel = new QPushButton(QStringLiteral("Cancel"), m_testsEdit);
+        m_testsEditCancel->setObjectName(QStringLiteral("boardReplyButton"));
+        m_testsEditCancel->setFocusPolicy(Qt::NoFocus);
+        m_testsEditSave = new QPushButton(QStringLiteral("Save to `## Tests`"), m_testsEdit);
+        m_testsEditSave->setObjectName(QStringLiteral("primary"));
+        m_testsEditSave->setFocusPolicy(Qt::NoFocus);
+        testsEditButtons->addWidget(m_testsEditCancel);
+        testsEditButtons->addWidget(m_testsEditSave);
+        testsEditBox->addLayout(testsEditButtons);
+        m_testsEdit->hide();
+        testsBox->addWidget(m_testsEdit);
         m_testsStrip->hide();
         layout->addWidget(m_testsStrip);
         connect(m_testsCheck, &QPushButton::clicked, this, [this] { checkTests(); });
+        connect(m_testsEditCancel, &QPushButton::clicked, this, [this] { closeTestsEditor(); });
+        connect(m_testsEditSave, &QPushButton::clicked, this, [this] { saveTestsEditor(); });
+        connect(m_testsEditNone, &QPushButton::clicked, this, [this] {
+            closeTestsEditor();
+            if (onTestsNoneApply)
+                onTestsNoneApply();
+        });
 
         m_doc = new QTextBrowser(this);
         m_doc->setObjectName(QStringLiteral("boardCardDocument"));
@@ -2213,6 +2262,12 @@ public:
     // the lines "Add the tests this card's commits touched" appends are both the worker's
     // writes, so an agent's check and the owner's leave the same artefact.
     std::function<void(const QJsonObject &message)> onTestsRequest;
+    // "None apply" in the gate's question: the view records the answer on the thread and sends
+    // the move that was refused again (#PR4Q).
+    std::function<void()> onTestsNoneApply;
+    // The gate asked this card which checks prove it, and the strip is asking. Whether the box
+    // is the question or the ordinary `## Tests` edit.
+    bool m_testsAsking = false;
 
     // Press Check. Silent about its own progress beyond the button's label: the answer is a
     // deterministic fold over discovery and history, so it comes back in well under a second.
@@ -2239,11 +2294,12 @@ public:
         m_checkFiles = event.value(QStringLiteral("files")).toObject();
         m_checkIds = event.value(QStringLiteral("ids")).toArray();
         m_checkFailing = event.value(QStringLiteral("failing")).toArray();
+        m_checkStatuses = event.value(QStringLiteral("statuses")).toArray();
         const QJsonArray findings = event.value(QStringLiteral("findings")).toArray();
         auto *head = new QLabel(m_testsFindings);
         head->setObjectName(QStringLiteral("boardTestsFinding"));
         head->setWordWrap(true);
-        if (findings.isEmpty()) {
+        if (findings.isEmpty() && m_checkStatuses.isEmpty()) {
             head->setText(QStringLiteral("<span style=\"color:%1\">Check: nothing moved — every "
                                          "test this card names is collected, has run and "
                                          "passed.</span>").arg(theme::TextMuted.name()));
@@ -2252,11 +2308,14 @@ public:
             showTests();
             return;
         }
-        head->setText(QStringLiteral("<span style=\"color:%1\">Check · %2 finding%3</span>")
-                          .arg(theme::TextMuted.name())
-                          .arg(findings.size())
-                          .arg(findings.size() == 1 ? QString() : QStringLiteral("s")));
+        // The status line first: what each listed check says about *this* card (#PR4Q). The
+        // findings under it are advisory — a flake, a slow test, a history that was reset — and
+        // are read after the answer, not instead of it.
+        head->setText(statusHeadText(m_checkStatuses, findings.size(),
+                                     event.value(QStringLiteral("revision")).toString()));
         m_testsFindingsBox->addWidget(head);
+        for (const QJsonValue &value : m_checkStatuses)
+            addStatusRow(value.toObject());
         for (const QJsonValue &value : findings)
             addFindingRow(value.toObject());
         m_testsFindings->show();
@@ -2992,6 +3051,7 @@ private:
         int listed = 0;       // lines that name a test, before the first `### Check` block
         QString stamp;        // the newest `### Check <YYYY-MM-DD HH:MM>`, "" when never checked
         QString verdict;      // that block's first line — "no findings", or the first finding
+        QString statuses;     // "2 passed · 1 failed · 1 not applicable", counted out of it
     };
 
     // The section, read the way the format defines it (SWITCHBOARD-FORMAT, protocol 31.5): one
@@ -3030,6 +3090,7 @@ private:
                 listEnd = match.capturedStart();
             out.stamp = match.captured(1).simplified();
             out.verdict.clear();
+            QMap<QString, int> counts;
             const QStringList rest = section.mid(match.capturedEnd()).split(QLatin1Char('\n'));
             for (const QString &line : rest) {
                 const QString text = line.trimmed();
@@ -3037,9 +3098,27 @@ private:
                     continue;
                 if (text.startsWith(QStringLiteral("###")))
                     break;
-                out.verdict = text;
-                break;
+                if (out.verdict.isEmpty())
+                    out.verdict = text;
+                // `- <status> · <test> — <message>`: one line per listed check (#PR4Q).
+                for (const QString &kind : {QStringLiteral("passed"), QStringLiteral("failed"),
+                                            QStringLiteral("missing-evidence"),
+                                            QStringLiteral("not-applicable")})
+                    if (text.startsWith(QStringLiteral("- ") + kind + QStringLiteral(" ")))
+                        counts[kind] += 1;
             }
+            QStringList parts;
+            for (const QString &kind : {QStringLiteral("passed"), QStringLiteral("failed"),
+                                        QStringLiteral("missing-evidence"),
+                                        QStringLiteral("not-applicable")})
+                if (counts.value(kind) > 0)
+                    parts << QStringLiteral("%1 %2").arg(counts.value(kind))
+                                 .arg(kind == QStringLiteral("missing-evidence")
+                                          ? QStringLiteral("missing evidence")
+                                      : kind == QStringLiteral("not-applicable")
+                                          ? QStringLiteral("not applicable")
+                                          : kind);
+            out.statuses = parts.join(QStringLiteral(" · "));
         }
         if (out.verdict.startsWith(QLatin1Char('-')) || out.verdict.startsWith(QLatin1Char('*')))
             out.verdict = out.verdict.mid(1).trimmed();
@@ -3061,9 +3140,16 @@ private:
     void showTests()
     {
         const bool has = hasTests();
-        m_testsStrip->setVisible(has);
+        m_testsStrip->setVisible(has || m_testsAsking);
         if (!has) {
             clearCheck();
+            if (m_testsAsking) {
+                // The card names no checks and the gate has just asked which ones prove it.
+                m_testsLine->setText(QStringLiteral("<span style=\"color:%1\">Tests</span>&nbsp;"
+                                                    "<span style=\"color:%2\">none named</span>")
+                                         .arg(theme::TextMuted.name(), theme::Warning.name()));
+                m_testsCheck->setEnabled(false);
+            }
             return;
         }
         const TestsSummary summary = readTests(m_body);
@@ -3078,12 +3164,23 @@ private:
         } else {
             text += QStringLiteral(" <span style=\"color:%1\">· checked %2</span>")
                         .arg(theme::TextMuted.name(), summary.stamp.toHtmlEscaped());
-            if (!summary.verdict.isEmpty()) {
+            if (!summary.statuses.isEmpty()) {
+                // The four statuses, counted out of the block the worker wrote, so the line says
+                // what the card says without a check having to be pressed first (#PR4Q).
+                const bool clean = !summary.statuses.contains(QStringLiteral("failed"))
+                                   && !summary.statuses.contains(QStringLiteral("missing"));
+                text += QStringLiteral(" <span style=\"color:%1\">· %2</span>")
+                            .arg(clean ? theme::TextMuted.name() : theme::Warning.name(),
+                                 summary.statuses.toHtmlEscaped());
+            } else if (!summary.verdict.isEmpty()) {
                 const bool clean = summary.verdict.startsWith(QStringLiteral("no findings"),
                                                               Qt::CaseInsensitive);
+                // The whole verdict is under the strip when a check has just run and in the
+                // body either way, so the header line takes only as much of it as keeps the
+                // line one line.
                 QString verdict = summary.verdict;
-                if (verdict.size() > 110)
-                    verdict = verdict.left(109) + QChar(0x2026);
+                if (verdict.size() > 64)
+                    verdict = verdict.left(63) + QChar(0x2026);
                 text += QStringLiteral(" <span style=\"color:%1\">· %2</span>")
                             .arg(clean ? theme::TextMuted.name() : theme::Warning.name(),
                                  verdict.toHtmlEscaped());
@@ -3111,6 +3208,103 @@ private:
         m_checkFiles = QJsonObject();
         m_checkIds = QJsonArray();
         m_checkFailing = QJsonArray();
+        m_checkStatuses = QJsonArray();
+    }
+
+    // "3 passed · 1 failed · 1 not applicable · 2 notices" — the header over the rows, in the
+    // words the card's own `### Check` status uses, so the strip and the card body agree.
+    static QString statusHeadText(const QJsonArray &statuses, int findings,
+                                  const QString &revision)
+    {
+        QStringList parts;
+        for (const QString &kind : {QStringLiteral("passed"), QStringLiteral("failed"),
+                                    QStringLiteral("missing-evidence"),
+                                    QStringLiteral("not-applicable")}) {
+            int count = 0;
+            for (const QJsonValue &value : statuses)
+                if (value.toObject().value(QStringLiteral("status")).toString() == kind)
+                    ++count;
+            if (count > 0)
+                parts << QStringLiteral("%1 %2").arg(count).arg(kind == QStringLiteral("missing-evidence")
+                                                                   ? QStringLiteral("missing evidence")
+                                                               : kind == QStringLiteral("not-applicable")
+                                                                   ? QStringLiteral("not applicable")
+                                                                   : kind);
+        }
+        if (findings > 0)
+            parts << QStringLiteral("%1 finding%2").arg(findings)
+                         .arg(findings == 1 ? QString() : QStringLiteral("s"));
+        QString text = QStringLiteral("Check · ") + parts.join(QStringLiteral(" · "));
+        if (!revision.isEmpty())
+            text += QStringLiteral(" · revision %1").arg(revision.left(12));
+        return QStringLiteral("<span style=\"color:%1\">%2</span>")
+                .arg(theme::TextMuted.name(), text.toHtmlEscaped());
+    }
+
+    // One listed check's status: the word, the test, and what decided it. Red for a failure,
+    // amber for missing evidence (a human has to do something), muted for a retired check and
+    // green for a pass. A pass another machine produced carries the one affordance that takes
+    // it: "Use this existing result", which records the acceptance on the card.
+    void addStatusRow(const QJsonObject &row)
+    {
+        const QString status = row.value(QStringLiteral("status")).toString();
+        const QString test = row.value(QStringLiteral("test")).toString();
+        const QString message = row.value(QStringLiteral("message")).toString();
+        const QColor ink = status == QStringLiteral("failed")           ? theme::Error
+                           : status == QStringLiteral("missing-evidence") ? theme::Warning
+                           : status == QStringLiteral("passed")           ? theme::Success
+                                                                          : theme::TextMuted;
+        auto *holder = new QWidget(m_testsFindings);
+        auto *box = new QHBoxLayout(holder);
+        box->setContentsMargins(0, 0, 0, 0);
+        box->setSpacing(6);
+        auto *label = new QLabel(holder);
+        label->setObjectName(QStringLiteral("boardTestsStatus"));
+        label->setWordWrap(true);
+        label->setTextFormat(Qt::RichText);
+        label->setTextInteractionFlags(Qt::LinksAccessibleByMouse);
+        const QString file = m_checkFiles.value(test).toString();
+        const QString name = test.isEmpty() ? QStringLiteral("this card") : test;
+        const QString head =
+                file.isEmpty()
+                    ? QStringLiteral("<span style=\"color:%1\">%2 · %3</span>")
+                          .arg(ink.name(), status.toHtmlEscaped(), name.toHtmlEscaped())
+                    : QStringLiteral("<a href=\"%1\" style=\"color:%2;text-decoration:none\">%3 · "
+                                     "%4</a>")
+                          .arg(file.toHtmlEscaped(), ink.name(), status.toHtmlEscaped(),
+                               name.toHtmlEscaped());
+        label->setText(head + QStringLiteral(" · %1").arg(message.toHtmlEscaped()));
+        if (!file.isEmpty()) {
+            label->setCursor(Qt::PointingHandCursor);
+            label->setToolTip(QStringLiteral("Open %1").arg(file));
+            connect(label, &QLabel::linkActivated, this, [this](const QString &path) {
+                if (onOpenPath)
+                    onOpenPath(path);
+            });
+        }
+        box->addWidget(label, 1);
+        const QJsonArray evidence = row.value(QStringLiteral("evidence")).toArray();
+        if (row.value(QStringLiteral("use_existing")).toBool() && !evidence.isEmpty()) {
+            const QJsonObject newest = evidence.first().toObject();
+            auto *use = new QPushButton(QStringLiteral("Use this existing result"), holder);
+            use->setObjectName(QStringLiteral("boardTestsUseResult"));
+            use->setFocusPolicy(Qt::NoFocus);
+            use->setToolTip(QStringLiteral("Record that run %1 from %2 proves this card at this "
+                                           "revision. It runs nothing.")
+                                .arg(newest.value(QStringLiteral("run_id")).toString(),
+                                     newest.value(QStringLiteral("host")).toString()));
+            const QString run = newest.value(QStringLiteral("run_id")).toString();
+            connect(use, &QPushButton::clicked, this, [this, test, run] {
+                if (m_id.isEmpty() || !onTestsRequest || run.isEmpty())
+                    return;
+                onTestsRequest(QJsonObject{{QStringLiteral("type"), QStringLiteral("tests_accept")},
+                                           {QStringLiteral("card"), m_id},
+                                           {QStringLiteral("id"), test},
+                                           {QStringLiteral("run_id"), run}});
+            });
+            box->addWidget(use, 0);
+        }
+        m_testsFindingsBox->addWidget(holder);
     }
 
     // One finding: severity, the test, the message — the findings shape the helper panel drew
@@ -3182,6 +3376,10 @@ private:
                                        {QStringLiteral("ids"), m_checkIds}});
             return;
         }
+        if (label.startsWith(QStringLiteral("Replace retired check"))) {
+            openTestsEditor(false);
+            return;
+        }
         if (label.startsWith(QStringLiteral("Add the tests"))) {
             if (onTestsRequest)
                 onTestsRequest(QJsonObject{{QStringLiteral("type"), QStringLiteral("tests_suggest")},
@@ -3205,6 +3403,99 @@ private:
         // section by hand, and the card is never rewritten from here: it goes into the reply box
         // as a request for the agent, the way the helper panel's findings draft a fix.
         restoreReply(QStringLiteral("%1 in #%2's `## Tests` section.").arg(label, m_id));
+    }
+
+public:
+    // ---- the `## Tests` editor (#PR4Q) ------------------------------------------------------
+    //
+    // `askWhichChecks` is the gate's question on a card that names no checks: the box starts
+    // empty, and "None apply" is beside Save because *that* is an answer too — it goes on the
+    // thread, and the move it was asked about goes through. Otherwise the box starts on the
+    // section as it stands, which is how a retired check is replaced.
+    void openTestsEditor(bool askWhichChecks)
+    {
+        if (m_id.isEmpty())
+            return;
+        m_testsAsking = askWhichChecks;
+        m_testsEditHint->setText(
+                askWhichChecks
+                    ? QStringLiteral("<span style=\"color:%1\">Which checks prove #%2? One per "
+                                     "line. They go in `## Tests`, and Check judges them next "
+                                     "time this card moves.</span>")
+                              .arg(theme::Warning.name(), m_id)
+                    : QStringLiteral("<span style=\"color:%1\">`## Tests` for #%2 — replace the "
+                                     "check that is not in the project any more, one per "
+                                     "line.</span>")
+                              .arg(theme::TextMuted.name(), m_id));
+        m_testsEditor->setPlainText(askWhichChecks ? QString() : testsSectionText(m_body));
+        m_testsEditNone->setVisible(askWhichChecks);
+        m_testsEdit->show();
+        m_testsStrip->show();
+        m_testsEditor->setFocus();
+        if (onControlsResized)
+            onControlsResized();
+    }
+
+private:
+    void closeTestsEditor()
+    {
+        m_testsEdit->hide();
+        m_testsAsking = false;
+        showTests();
+        if (onControlsResized)
+            onControlsResized();
+    }
+
+    // The card is never written from here: the patch goes down the same `board_update` path the
+    // `## Issue` editor uses, so one writer owns the card file and the thread records the edit.
+    void saveTestsEditor()
+    {
+        if (m_id.isEmpty() || !onEdit)
+            return;
+        const QString text = m_testsEditor->toPlainText().trimmed();
+        if (text.isEmpty()) {
+            showError(QStringLiteral("Name at least one check, or press None apply."));
+            m_testsEditor->setFocus();
+            return;
+        }
+        const QString heading = QStringLiteral("Tests");
+        QJsonObject patch;
+        patch.insert(hasTests() ? QStringLiteral("replace_section")
+                                : QStringLiteral("append_section"),
+                     QJsonObject{{QStringLiteral("heading"), heading},
+                                 {QStringLiteral("text"), text}});
+        closeTestsEditor();
+        onEdit(patch, m_hash);
+    }
+
+    // The section's own lines, without the `### Check` status under them: the status is the
+    // worker's and is rewritten on every check, so it is not something to hand a person to edit.
+    static QString testsSectionText(const QString &body)
+    {
+        static const QRegularExpression heading(QStringLiteral("^##[ \\t]+(.+?)[ \\t]*$"),
+                                                QRegularExpression::MultilineOption);
+        int start = -1, end = body.size();
+        QRegularExpressionMatchIterator headings = heading.globalMatch(body);
+        while (headings.hasNext()) {
+            const QRegularExpressionMatch match = headings.next();
+            if (start >= 0) {
+                end = match.capturedStart();
+                break;
+            }
+            if (match.captured(1).trimmed().compare(QStringLiteral("Tests"),
+                                                    Qt::CaseInsensitive) == 0)
+                start = match.capturedEnd();
+        }
+        if (start < 0)
+            return QString();
+        QString section = body.mid(start, end - start);
+        static const QRegularExpression check(
+            QStringLiteral("^###[ \\t]+Check[ \\t]+\\d{4}-\\d{2}-\\d{2}"),
+            QRegularExpression::MultilineOption);
+        const QRegularExpressionMatch first = check.match(section);
+        if (first.hasMatch())
+            section = section.left(first.capturedStart());
+        return section.trimmed();
     }
 
     // Two short lines of facts under the pickers, keys muted, the file a link that opens it.
@@ -3583,6 +3874,15 @@ private:
     QHBoxLayout *m_testsActionsBox = nullptr;
     QJsonObject m_checkFiles;
     QJsonArray m_checkIds, m_checkFailing;
+    // The per-check statuses of the last answer (#PR4Q): `passed`, `failed`, `missing-evidence`
+    // or `not-applicable` per listed test, each with the executions that decided it.
+    QJsonArray m_checkStatuses;
+    // The inline `## Tests` editor: "Replace retired check" opens it on the section as it
+    // stands, and the gate's "which checks prove this card?" opens it empty.
+    QFrame *m_testsEdit = nullptr;
+    QLabel *m_testsEditHint = nullptr;
+    QPlainTextEdit *m_testsEditor = nullptr;
+    QPushButton *m_testsEditSave = nullptr, *m_testsEditCancel = nullptr, *m_testsEditNone = nullptr;
     QComboBox *m_status = nullptr, *m_tab = nullptr;
     QToolButton *m_close = nullptr, *m_toPrompt = nullptr, *m_openFile = nullptr, *m_edit = nullptr;
     QToolButton *m_done = nullptr;
@@ -4348,6 +4648,30 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     // The Tests strip's Check and its three actions (#7BM4, protocol 31.1): the card builds the
     // request, the view stamps it with a request id and puts it on the board worker's stdin.
     m_detail->onTestsRequest = [this](const QJsonObject &message) { send(message); };
+    // "None apply" under the gate's question (#PR4Q): the answer goes on the thread — it is a
+    // decision about what proves this card, and the next person to read it should see it — and
+    // the move that was refused is sent again. The worker asks once, so it goes through.
+    m_detail->onTestsNoneApply = [this] {
+        const QString card = m_detail->cardId();
+        if (card.isEmpty())
+            return;
+        send({{QStringLiteral("type"), QStringLiteral("board_comment")},
+              {QStringLiteral("card"), card},
+              {QStringLiteral("kind"), QStringLiteral("note")},
+              {QStringLiteral("text"),
+               QStringLiteral("Asked which checks prove #%1 on its way to a QA lane: none of "
+                              "this project's checks apply to it, and it was moved with `## "
+                              "Tests` left empty.").arg(card)}});
+        if (m_gatedMove.isEmpty())
+            return;
+        QJsonObject move = m_gatedMove;
+        m_gatedMove = QJsonObject();
+        move.remove(QStringLiteral("id"));
+        const QString id = nextRequestId();
+        move.insert(QStringLiteral("id"), id);
+        m_pendingNotes.insert(id, QStringLiteral("Moved #%1 with no checks named").arg(card));
+        send(move);
+    };
     m_detail->onModeHint = [this](const QString &mode) {
         if (!onHint)
             return;
@@ -6394,6 +6718,21 @@ void BoardView::handleEvent(const QJsonObject &event)
         // refused the same way — so it goes in the notice bar, with the one affordance that gets
         // past it: Override…, which asks for the reason in a line and re-sends the same move
         // with it. The worker quotes that reason into a `decision` entry on the thread.
+        // The gate's one question (#PR4Q): this card names no checks, so before it lands the
+        // board asks which ones prove it — once, recorded on the thread by the worker. The
+        // question is a box under the card's own Tests strip, with "None apply" beside Save,
+        // because that is where the answer is going to live.
+        if (event.value(QStringLiteral("code")).toString() == QStringLiteral("tests_none")) {
+            m_gatedMove = m_pendingMoves.value(requestId);
+            showNotice(text, true);
+            if (const QString card = event.value(QStringLiteral("card")).toString();
+                !card.isEmpty() && card == m_detail->cardId()) {
+                m_detail->openTestsEditor(true);
+                send({{QStringLiteral("type"), QStringLiteral("board_card_get")},
+                      {QStringLiteral("card"), card}});
+            }
+            return;
+        }
         if (event.value(QStringLiteral("code")).toString() == QStringLiteral("tests_gate")) {
             m_gatedMove = m_pendingMoves.value(requestId);
             showNotice(text, true, QString(), !m_gatedMove.isEmpty());

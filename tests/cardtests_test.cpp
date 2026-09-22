@@ -21,6 +21,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QToolButton>
 #include <QtTest>
@@ -76,6 +77,23 @@ QJsonObject cardArrived(const QString &id, const QString &status, const QString 
                        {"thread", QJsonArray{}}, {"thread_total", 0}};
 }
 
+// One status row of a `tests_check` answer (#PR4Q): one listed check, its status for this
+// card's revision, and the executions that decided it.
+QJsonObject status(const QString &test, const QString &state, const QString &message,
+                   const QJsonArray &evidence = {}, bool useExisting = false)
+{
+    return QJsonObject{{"test", test}, {"invocation", test}, {"status", state},
+                       {"message", message}, {"evidence", evidence},
+                       {"use_existing", useExisting}, {"retired", state == "not-applicable"},
+                       {"accepted", false}};
+}
+
+QJsonObject execution(const QString &runId, const QString &host, const QString &result)
+{
+    return QJsonObject{{"run_id", runId}, {"host", host}, {"commit", "3f2a9c1e4d5b"},
+                       {"ts", "2026-09-21T02:00:00Z"}, {"result", result}, {"applicable", true}};
+}
+
 // One `tests_check` answer (31.2), with the three machine keys phase 4 added.
 QJsonObject checkAnswered(const QString &card, const QJsonArray &findings,
                           const QStringList &actions, const QJsonObject &files = {},
@@ -91,6 +109,17 @@ QJsonObject checkAnswered(const QString &card, const QJsonArray &findings,
     return QJsonObject{{"event", "tests_check"}, {"card", card}, {"findings", findings},
                        {"actions", actionList}, {"ids", idList}, {"files", files},
                        {"failing", failingList}};
+}
+
+// The same answer with the statuses #PR4Q added: the four words, one per listed check.
+QJsonObject checkAnswered(const QString &card, const QJsonArray &statuses,
+                          const QJsonArray &findings, const QStringList &actions,
+                          const QJsonObject &files = {})
+{
+    QJsonObject out = checkAnswered(card, findings, actions, files);
+    out.insert(QStringLiteral("statuses"), statuses);
+    out.insert(QStringLiteral("revision"), QStringLiteral("3f2a9c1e4d5b"));
+    return out;
 }
 
 QJsonObject finding(const QString &test, const QString &verdict, const QString &severity,
@@ -137,6 +166,26 @@ private:
         return box ? box->findChildren<QLabel *>(QStringLiteral("boardTestsFinding"))
                    : QList<QLabel *>{};
     }
+    static QList<QLabel *> statusRows(relay::BoardView &view)
+    {
+        QWidget *box = view.findChild<QWidget *>(QStringLiteral("boardTestsFindings"));
+        return box ? box->findChildren<QLabel *>(QStringLiteral("boardTestsStatus"))
+                   : QList<QLabel *>{};
+    }
+    static QPushButton *useResult(relay::BoardView &view)
+    {
+        return view.findChild<QPushButton *>(QStringLiteral("boardTestsUseResult"));
+    }
+    static QPlainTextEdit *testsEditor(relay::BoardView &view)
+    {
+        return view.findChild<QPlainTextEdit *>(QStringLiteral("boardTestsEditor"));
+    }
+    // The box's own frame: a child of a hidden parent is not itself `isHidden()`, so the
+    // question "is the editor open?" is asked of the frame the strip shows and hides.
+    static QWidget *testsEditFrame(relay::BoardView &view)
+    {
+        return view.findChild<QWidget *>(QStringLiteral("boardTestsEdit"));
+    }
     static QStringList actionLabels(relay::BoardView &view)
     {
         QStringList out;
@@ -165,6 +214,11 @@ private slots:
     void theActionsSendWhatTheWorkerNamed();
     void anAnswerAboutAnotherCardIsNotDrawn();
     void aRefusedMoveOffersAnOverrideThatResendsIt();
+    void theFourStatusesAreDrawnAboveTheAdvisoryFindings();
+    void useThisExistingResultAcceptsTheRunItNames();
+    void replaceRetiredCheckOpensTheTestsSection();
+    void aCardWithNoTestsIsAskedWhichChecksProveIt();
+    void noneApplyRecordsTheAnswerAndSendsTheMoveAgain();
 };
 
 // The strip is a control for a list, so it is there when the list is. A card with no `## Tests`
@@ -368,6 +422,174 @@ void CardTestsTests::aRefusedMoveOffersAnOverrideThatResendsIt()
             button = candidate;
     QVERIFY(button);
     QVERIFY(!button->isHidden());
+}
+
+// #PR4Q: the answer is the four statuses, one per listed check, above the advisory findings.
+void CardTestsTests::theFourStatusesAreDrawnAboveTheAdvisoryFindings()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    open(view, sent, QStringLiteral("K7Q2"),
+         QStringLiteral("- `ctest -R totals`\n- `ctest -R large`\n- `tests/test_invoice.py`\n"
+                        "- `ctest -R rounding`\n"));
+    const QJsonArray statuses{
+        status(QStringLiteral("ctest:totals"), QStringLiteral("passed"),
+               QStringLiteral("ctest -R totals passed for this revision on laptop")),
+        status(QStringLiteral("ctest:large"), QStringLiteral("failed"),
+               QStringLiteral("ctest -R large failed for this revision on desktop")),
+        status(QStringLiteral("unittest:tests.test_invoice"), QStringLiteral("missing-evidence"),
+               QStringLiteral("no run for this revision, from any host")),
+        status(QStringLiteral("ctest:rounding"), QStringLiteral("not-applicable"),
+               QStringLiteral("ctest -R rounding is not in the project any more"))};
+    view.handleEvent(checkAnswered(
+            QStringLiteral("K7Q2"), statuses,
+            QJsonArray{finding(QStringLiteral("ctest:rounding"), QStringLiteral("retired"),
+                               QStringLiteral("notice"),
+                               QStringLiteral("it is not collected any more"))},
+            {QStringLiteral("Run these"), QStringLiteral("Replace retired check")}));
+    const QList<QLabel *> rows = statusRows(view);
+    QCOMPARE(int(rows.size()), 4);
+    QVERIFY2(rows.at(0)->text().contains(QStringLiteral("passed · ctest:totals")),
+             qPrintable(rows.at(0)->text()));
+    QVERIFY(rows.at(1)->text().contains(QStringLiteral("failed · ctest:large")));
+    QVERIFY(rows.at(2)->text().contains(QStringLiteral("missing-evidence")));
+    QVERIFY(rows.at(3)->text().contains(QStringLiteral("not-applicable · ctest:rounding")));
+    // The header counts them, and the notice is counted apart from the answer.
+    const QList<QLabel *> advisory = findings(view);
+    QVERIFY2(advisory.at(0)->text().contains(QStringLiteral("1 passed · 1 failed · 1 missing "
+                                                            "evidence · 1 not applicable")),
+             qPrintable(advisory.at(0)->text()));
+    QVERIFY(advisory.at(0)->text().contains(QStringLiteral("1 finding")));
+    // …and the advisory finding is still drawn, under the statuses.
+    QVERIFY(advisory.at(1)->text().contains(QStringLiteral("not collected any more")));
+}
+
+// A pass another machine produced is offered, not taken: the button records the acceptance.
+void CardTestsTests::useThisExistingResultAcceptsTheRunItNames()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    open(view, sent, QStringLiteral("K7Q2"), QStringLiteral("- `ctest -R totals`\n"));
+    view.handleEvent(checkAnswered(
+            QStringLiteral("K7Q2"),
+            QJsonArray{status(QStringLiteral("ctest:totals"), QStringLiteral("passed"),
+                              QStringLiteral("passed on laptop"),
+                              QJsonArray{execution(QStringLiteral("seed-19"),
+                                                   QStringLiteral("laptop"),
+                                                   QStringLiteral("pass"))},
+                              true)},
+            QJsonArray{}, {}));
+    QPushButton *use = useResult(view);
+    QVERIFY(use);
+    QVERIFY(!use->isHidden());
+    use->click();
+    QCOMPARE(sent.last().value(QStringLiteral("type")).toString(),
+             QStringLiteral("tests_accept"));
+    QCOMPARE(sent.last().value(QStringLiteral("card")).toString(), QStringLiteral("K7Q2"));
+    QCOMPARE(sent.last().value(QStringLiteral("id")).toString(), QStringLiteral("ctest:totals"));
+    QCOMPARE(sent.last().value(QStringLiteral("run_id")).toString(), QStringLiteral("seed-19"));
+}
+
+// A result nobody has to accept carries no button: an affordance for a decision nobody is
+// being asked to make is noise.
+void CardTestsTests::replaceRetiredCheckOpensTheTestsSection()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    open(view, sent, QStringLiteral("K7Q2"),
+         QStringLiteral("- `ctest -R totals`\n- `ctest -R rounding`\n"));
+    view.handleEvent(checkAnswered(
+            QStringLiteral("K7Q2"),
+            QJsonArray{status(QStringLiteral("ctest:rounding"), QStringLiteral("not-applicable"),
+                              QStringLiteral("not in the project any more"))},
+            QJsonArray{}, {QStringLiteral("Replace retired check")}));
+    QVERIFY(!useResult(view));
+    QVERIFY(testsEditFrame(view) && testsEditFrame(view)->isHidden());
+    QPushButton *replace = action(view, QStringLiteral("Replace retired check"));
+    QVERIFY(replace);
+    replace->click();
+    QVERIFY(!testsEditFrame(view)->isHidden());
+    // It opens on the section as it stands — the lines, never the worker's `### Check` status.
+    QVERIFY2(testsEditor(view)->toPlainText().contains(QStringLiteral("ctest -R rounding")),
+             qPrintable(testsEditor(view)->toPlainText()));
+    QVERIFY(!testsEditor(view)->toPlainText().contains(QStringLiteral("### Check")));
+    // Saving writes the section through the ordinary card-edit path, not from here.
+    testsEditor(view)->setPlainText(QStringLiteral("- `ctest -R totals`\n- `ctest -R rounding2`"));
+    QPushButton *save = view.findChild<QPushButton *>();
+    for (QPushButton *candidate : view.findChildren<QPushButton *>())
+        if (candidate->text().startsWith(QStringLiteral("Save to")))
+            save = candidate;
+    QVERIFY(save && save->text().startsWith(QStringLiteral("Save to")));
+    save->click();
+    QCOMPARE(sent.last().value(QStringLiteral("type")).toString(),
+             QStringLiteral("board_update"));
+    const QJsonObject patch = sent.last().value(QStringLiteral("patch")).toObject();
+    QCOMPARE(patch.value(QStringLiteral("replace_section")).toObject()
+                     .value(QStringLiteral("heading")).toString(), QStringLiteral("Tests"));
+    QVERIFY(patch.value(QStringLiteral("replace_section")).toObject()
+                    .value(QStringLiteral("text")).toString().contains(QStringLiteral("rounding2")));
+}
+
+// A card that names no checks is asked which ones prove it, once, on its way to a QA lane.
+void CardTestsTests::aCardWithNoTestsIsAskedWhichChecksProveIt()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    open(view, sent, QStringLiteral("M3XJ"), QString());
+    QVERIFY(strip(view)->isHidden());
+    view.handleEvent(QJsonObject{
+            {"event", "error"}, {"id", sent.last().value(QStringLiteral("id")).toString()},
+            {"code", "tests_none"}, {"card", "M3XJ"}, {"status", "done"},
+            {"text", QStringLiteral("#M3XJ names no checks, so nothing here says it works: "
+                                    "which checks prove it?")}});
+    QVERIFY(view.notice().contains(QStringLiteral("which checks prove it")));
+    QVERIFY(!strip(view)->isHidden());
+    QVERIFY(testsEditFrame(view) && !testsEditFrame(view)->isHidden());
+    QVERIFY(testsEditor(view)->toPlainText().isEmpty());
+    // An answer goes into a section the card does not have yet, so it is appended, not replaced.
+    testsEditor(view)->setPlainText(QStringLiteral("- `ctest -R totals`"));
+    for (QPushButton *candidate : view.findChildren<QPushButton *>())
+        if (candidate->text().startsWith(QStringLiteral("Save to")))
+            candidate->click();
+    QCOMPARE(sent.last().value(QStringLiteral("type")).toString(),
+             QStringLiteral("board_update"));
+    QVERIFY(sent.last().value(QStringLiteral("patch")).toObject()
+                    .contains(QStringLiteral("append_section")));
+}
+
+void CardTestsTests::noneApplyRecordsTheAnswerAndSendsTheMoveAgain()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    open(view, sent, QStringLiteral("M3XJ"), QString());
+
+    QComboBox *status = nullptr;
+    for (QComboBox *combo : view.findChildren<QComboBox *>(QStringLiteral("boardPicker")))
+        if (combo->findData(QStringLiteral("needs-verification")) >= 0)
+            status = combo;
+    QVERIFY(status);
+    const int done = status->findData(QStringLiteral("done"));
+    QVERIFY(QMetaObject::invokeMethod(status, "activated", Qt::DirectConnection,
+                                      Q_ARG(int, done)));
+    const QString moveId = sent.last().value(QStringLiteral("id")).toString();
+    view.handleEvent(QJsonObject{{"event", "error"}, {"id", moveId}, {"code", "tests_none"},
+                                 {"card", "M3XJ"}, {"status", "done"},
+                                 {"text", QStringLiteral("which checks prove it?")}});
+    QPushButton *none = nullptr;
+    for (QPushButton *candidate : view.findChildren<QPushButton *>())
+        if (candidate->text() == QStringLiteral("None apply"))
+            none = candidate;
+    QVERIFY(none && !none->isHidden());
+    none->click();
+    // The answer is recorded, and the move that was refused is sent again.
+    const QJsonObject comment = sent.at(int(sent.size()) - 2);
+    QCOMPARE(comment.value(QStringLiteral("type")).toString(), QStringLiteral("board_comment"));
+    QVERIFY(comment.value(QStringLiteral("text")).toString()
+                    .contains(QStringLiteral("none of this project's checks apply"),
+                              Qt::CaseInsensitive));
+    QCOMPARE(sent.last().value(QStringLiteral("type")).toString(), QStringLiteral("board_move"));
+    QCOMPARE(sent.last().value(QStringLiteral("status")).toString(), QStringLiteral("done"));
+    QVERIFY(testsEditFrame(view)->isHidden());
 }
 
 QTEST_MAIN(CardTestsTests)
