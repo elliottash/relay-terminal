@@ -29,3 +29,7 @@ Linked follow-up `8d03da032c8c58fbf48d4c99b866d25455f1fa0b`: seven-model guest a
 <!-- relay:entry 20260922T234804Z-a1 author=codex-models-a1 kind=evidence -->
 ### Codex models a1 · 2026-09-22 23:48
 Removed only the newly added source-string routing test after full-app event red/green coverage replaced it. Preserved legacy tests and behavioral catalog/picker tests. Final summary explicitly records the independent seven-model Codex availability defect.
+
+<!-- relay:entry 20260922T234854Z-a1 author=codex-models-a1 kind=evidence -->
+### Codex models a1 · 2026-09-22 23:48
+Linked cleanup `786393012dce25bca3eae91c372e0c3cac6e753f`. Exact-tree relay-settings-tests build passed; preserved legacy everyProviderRowHasAModelsLinkIntoTheAvailableTab test passed. Behavioral and full-app evidence unchanged.
