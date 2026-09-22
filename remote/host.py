@@ -2899,6 +2899,17 @@ class Host:
         self._pane_state_line({"t": "queue_move", "pane": pane, "row": row, "to": to,
                                **self._pane_state_origin(channel)})
 
+    async def _on_queue_resume(self, channel: Channel, message: dict) -> None:
+        """Run that pane's queue again after a Stop paused it (#7JD1).
+
+        The phone's empty send, which is the desk's Enter on an empty prompt box. It names no row
+        and carries nothing else: the pane holds the queue and decides whether there is anything
+        to resume, and the `pane_state` that follows is the answer.
+        """
+        pane = self._pane_state_pane(channel, message)
+        self._pane_state_line({"t": "queue_resume", "pane": pane,
+                               **self._pane_state_origin(channel)})
+
     async def _on_queue_send_now(self, channel: Channel, message: dict) -> None:
         pane = self._pane_state_pane(channel, message)
         row = pane_state_mod.row_of(message)

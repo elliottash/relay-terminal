@@ -298,6 +298,12 @@ void RemoteShare::handle(const QJsonObject &message)
         auto it = m_panes.find(message.value(QStringLiteral("pane")).toString());
         if (it != m_panes.end() && it->hooks.queueSendNow)
             it->hooks.queueSendNow(message.value(QStringLiteral("row")).toString());
+    } else if (kind == QLatin1String("queue_resume")) {
+        // The empty send on a phone, which is Enter on an empty prompt box at the desk (#7JD1).
+        // It names no row: the pane decides whether there is a pause to lift, and the
+        // `pane_state` that follows says whether there still is one.
+        auto it = m_panes.find(message.value(QStringLiteral("pane")).toString());
+        if (it != m_panes.end() && it->hooks.queueResume) it->hooks.queueResume();
     } else if (kind == QLatin1String("queue_edit")) {
         // The hub is holding a device's request open for this answer, keyed by `id`, so every
         // path answers: the text on success, `ok: false` when the row cannot be taken back.

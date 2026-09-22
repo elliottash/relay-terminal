@@ -215,8 +215,8 @@ class CapabilityTests(unittest.TestCase):
 
 
 class WireTests(unittest.TestCase):
-    NEW_CLIENT = ("queue_move", "queue_edit", "queue_send_now", "model_pick", "conversation_new",
-                  "conversation_open", "pane_state_get")
+    NEW_CLIENT = ("queue_move", "queue_edit", "queue_send_now", "queue_resume", "model_pick",
+                  "conversation_new", "conversation_open", "pane_state_get")
 
     def test_the_new_client_types_are_classified(self):
         for kind in self.NEW_CLIENT:
@@ -225,7 +225,7 @@ class WireTests(unittest.TestCase):
             self.assertNotIn(kind, wire.GUEST_TYPES, kind)
             self.assertNotIn(kind, wire.NEVER_FROM_CLIENT, kind)
         # A partner types here: the queue and the model are its level.
-        for kind in ("queue_move", "queue_edit", "queue_send_now", "model_pick"):
+        for kind in ("queue_move", "queue_edit", "queue_send_now", "queue_resume", "model_pick"):
             self.assertEqual(wire.CLIENT_TYPES[kind], wire.AGENT, kind)
         # The conversations before this one are the owner's level (owner, 2026-09-18).
         for kind in ("conversation_new", "conversation_open"):
@@ -451,14 +451,15 @@ class GuestTests(unittest.TestCase):
                                 {"t": "queue_move", "pane": "p1", "row": "entry:4", "to": "up"},
                                 {"t": "queue_edit", "pane": "p1", "row": "entry:4"},
                                 {"t": "queue_send_now", "pane": "p1", "row": "steer:steer-3"},
+                                {"t": "queue_resume", "pane": "p1"},
                                 {"t": "model_pick", "pane": "p1", "choice": "m1"},
                                 {"t": "conversation_new", "pane": "p1"}):
                     await guest.send(message)
                     with self.assertRaises(wire.WireError) as refused:
                         await guest.expect("pane_state")
                     self.assertEqual(refused.exception.code, "not_permitted", message["t"])
-                for kind in ("queue_move", "queue_edit", "queue_send_now", "model_pick",
-                             "conversation_new", "pane_state_get"):
+                for kind in ("queue_move", "queue_edit", "queue_send_now", "queue_resume",
+                             "model_pick", "conversation_new", "pane_state_get"):
                     self.assertFalse(harness.sent(kind), kind)
                 await guest.close()
         run(main())
@@ -530,6 +531,12 @@ class ActionTests(unittest.TestCase):
                                    "text": "ignored", "item": "ignored"})
                 now = await harness.settle("queue_send_now")
                 self.assertEqual(set(now), {"t", "pane", "row", "origin", "device_name"})
+                # The empty send: no row, nothing to aim, and the pane decides (#7JD1).
+                await client.send({"t": "queue_resume", "pane": "p1", "row": "ignored"})
+                resumed = await harness.settle("queue_resume")
+                self.assertEqual(resumed, {"t": "queue_resume", "pane": "p1",
+                                           "origin": f"remote:{record.device_id}",
+                                           "device_name": "Pixel 9"})
                 # conversation_new and conversation_open are the owner's level, so this device
                 # is refused and a full one is not.
                 await client.send({"t": "conversation_new", "pane": "p1"})

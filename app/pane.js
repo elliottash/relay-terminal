@@ -699,6 +699,13 @@ export function mountPane(container, options = {}) {
       compose(text, busy() ? 'queue' : 'now');
       return;
     }
+    // Empty box, and a queue a Stop paused: resume it (#7JD1; owner, 2026-09-21: "why don't we
+    // just copy the functionality and have enter resume"). The same key and the same box as the
+    // desktop's, and the Resume button that was the only way back is the desktop's alone. It is
+    // tried before the steer escalation below because that one needs a turn to steer into, and
+    // after a Stop there is none.
+    const q = obj(state.queue);
+    if (q && q.paused === true) { staged = null; emit('queue_resume'); return; }
     // Empty box: the second Enter makes the last queued prompt a steer, the third sends it now.
     if (!staged || clock() - staged.at > STEER_WINDOW_MS) { staged = null; return; }
     if (staged.stage === 1) {

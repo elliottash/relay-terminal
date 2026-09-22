@@ -107,6 +107,8 @@ public:
         // Takes the row back for the client's own prompt box: `text` is what it held.
         std::function<bool(const QString &row, QString *text)> queueEdit;
         std::function<bool(const QString &row)> queueSendNow;
+        // The phone's empty send: run the queue again after a Stop (#7JD1). It names no row.
+        std::function<bool()> queueResume;
         std::function<bool(const QString &choice, const QString &deviceName)> modelPick;
         std::function<bool(const QString &deviceName)> conversationNew;
         // {session}: a token from a pane_state this pane sent, never a path (owner level).

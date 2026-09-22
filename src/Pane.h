@@ -7565,6 +7565,7 @@ public:
             hooks.queueMove = [this](const QString &row, const QString &to) { return remoteQueueMove(row, to); };
             hooks.queueEdit = [this](const QString &row, QString *text) { return remoteQueueEdit(row, text); };
             hooks.queueSendNow = [this](const QString &row) { return remoteQueueSendNow(row); };
+            hooks.queueResume = [this] { return remoteQueueResume(); };
             hooks.modelPick = [this](const QString &choice, const QString &name) { return remoteModelPick(choice, name); };
             hooks.conversationNew = [this](const QString &name) { return remoteConversationNew(name); };
             hooks.conversationOpen = [this](const QString &session, const QString &name) {
@@ -13674,6 +13675,16 @@ public:
     }
     bool remoteQueueSendNow(const QString &rowId) {
         return remoteRowOffers(rowId, QStringLiteral("send_now")) && sendSteerNow(rowId.mid(6));
+    }
+
+    // queue_resume: the phone's empty send, which is Enter on an empty prompt box here (#7JD1).
+    // A device is sent `queue.paused` and nothing it could aim an op with, so it asks blind and
+    // this decides: with nothing paused it is the no-op the desk's empty Enter is, and the
+    // `pane_state` that follows either way says what the queue is now.
+    bool remoteQueueResume() {
+        if (!queuePaused()) return false;
+        resumeAgentQueue();
+        return true;
     }
 
     // model_pick: a token from this pane's last pane_state, resolved here. Only what the menu

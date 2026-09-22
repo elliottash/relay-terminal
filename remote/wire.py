@@ -235,6 +235,9 @@ CLIENT_TYPES.update({
     "queue_move": AGENT,           # {pane, row, to: to_queue | steer | up | down}
     "queue_edit": AGENT,           # {pane, row}: withdraws the row, answered by queue_edit_text
     "queue_send_now": AGENT,       # {pane, row}: a steer, now, interrupting the running turn
+    # {pane}: run the queue again after a Stop paused it (#7JD1). It names no row and reads no
+    # queue state, which is why it is the one queue op a device can send blind — the empty send.
+    "queue_resume": AGENT,
     "model_pick": AGENT,           # {pane, choice}: only a model with a stored key is ever offered
     # The owner's three levels (2026-09-18): viewer observes, partner types, owner also reaches
     # the conversations before this one. So these two are FULL, not AGENT.
@@ -246,6 +249,7 @@ GUEST_NEVER.update({
     "queue_move": "queue edits of other people's items",
     "queue_edit": "queue edits of other people's items",
     "queue_send_now": "interrupts the owner's turn; not among an editor's actions",
+    "queue_resume": "the owner's queue is the owner's: a guest never starts it again",
     "model_pick": "model changes are never a guest's (section 10.1)",
     "conversation_new": "resets the owner's conversation",
     "conversation_open": "the owner's other conversations are not part of a share",

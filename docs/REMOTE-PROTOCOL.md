@@ -1649,6 +1649,7 @@ which a guest editor may send: a guest's prompt is not passed on but held for th
 | `queue_edit` | `{pane,row}` | withdraws the row and answers `queue_edit_text {pane,row,text}` so the client can edit it in its own prompt box; nothing lands in the desktop's |
 | `queue_send_now` | `{pane,row}` | a waiting steer, now, interrupting the turn |
 | `queue_remove` | `{pane,row}` | withdraws or removes it (`item` is the older spelling of `row`) |
+| `queue_resume` | `{pane}` | runs the queue again after a Stop paused it (`queue.paused`, card #7JD1). It is the phone's **empty send**, which is Enter on an empty prompt box at the desk, and it names no row: the pane decides whether there is a pause to lift, and the `pane_state` that follows is the answer. Nothing is resumed on a pane that was not paused, exactly as an empty Enter there does nothing |
 | `model_pick` | `{pane,choice}` | only a model the menu offered, which is only one with a stored key; the pane says "Model changed from <device>" |
 | `conversation_new` | `{pane}` | **owner level.** The same as `/new`, refused while a turn runs |
 | `conversation_open` | `{pane,session}` | **owner level.** Opens one of this pane's past conversations, named by a token from a `pane_state` — never a path or a session file name — resolved by the pane against the list it published. Refused while a turn runs, as the session manager's own rows are |
