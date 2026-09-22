@@ -8,7 +8,7 @@ parent: YZ8G
 rank: zzzzzzzzzzzzzzzzc
 created: '2026-09-21'
 source: 'owner, 2026-09-21: "i agree with all, go ahead with it" (#YZ8G plan)'
-links: {plans: [], commits: [03701acf, 79ef050e, bca9a82e, a739dd45], evidence: [docs/qa_evidence/2026-09-21-tryit/], related: [YZ8G, 7BM4, WC3E], github: null}
+links: {plans: [], commits: [03701acf, 79ef050e, bca9a82e, a739dd45, 39bab9d9], evidence: [docs/qa_evidence/2026-09-21-tryit/], related: [YZ8G, 7BM4, WC3E], github: null}
 ---
 # Try it: stage the situation, complete the mechanical pass, hand the person one task and one question
 
@@ -54,10 +54,11 @@ directory — `docs/qa_evidence/<date>-verify-<ID>/stage.sh` — `verify_staging
 turn reuses it instead of replaying the mechanical pass; the `started` event says `reusing`.
 
 ## Tests
-- `tests/test_tryit_protocol.py` — 28 cases: the turn's started / progress / finished events,
+- `tests/test_tryit_protocol.py` — 32 cases: the turn's started / progress / finished events,
   the staging-failure path (a note and no section), `try_answer` writing the verdict, the
   reveal and `## Human QA`, "already running", `try_stop`, reuse of a Verify staging, the
-  section parser, and `board_try`'s gate.
+  section parser, `board_try`'s gate, and the worker's own failure note when a run ends
+  `error`, `stopped` or `cancelled` without one.
 - `ctest -R cardtests` — the card page's existing suite, for the `CardDetail` edits.
 - `manual: docs/qa_evidence/2026-09-21-tryit/` — Try it pressed for real on #7BM4, from a
   Relay on an isolated Xvfb display and profile, with the Switchboard agent on its configured
