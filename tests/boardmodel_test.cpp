@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The Switchboard pane's pure logic: which section a card falls into, the filter language, the
+// The Board pane's pure logic: which section a card falls into, the filter language, the
 // ordering, the row list the one scrolling view draws, and the `#` picker's ranking. No worker,
 // no files, no network.
 #include "BoardModel.h"
@@ -1118,11 +1118,11 @@ void BoardModelTests::theViewRendersOneListFromAnEvent()
                              row("DN01", "done", "features")}));
     QCOMPARE(view.model().total(), 3);
     // The title carries the open count, not every card ever filed: done is a status.
-    QCOMPARE(view.title(), QStringLiteral("Switchboard · 2 open"));
+    QCOMPARE(view.title(), QStringLiteral("Board · 2 open"));
     // One list, not seven columns.
     QCOMPARE(view.findChildren<QListWidget *>(QStringLiteral("boardList")).size(), 1);
     QVERIFY(!view.findChild<QListWidget *>(QStringLiteral("boardColumn")));
-    // A new Switchboard is a compact overview: every header is present and every card starts
+    // A new Board is a compact overview: every header is present and every card starts
     // folded away.
     QCOMPARE(sketch(view.rows()),
              (QStringList{"# inbox 1 folded", "# discussing 0 folded", "# ready 1 folded",
@@ -2827,7 +2827,7 @@ void BoardModelTests::aCardKeepsItsOwnTurnWhileAnotherCardIsOnScreen()
     view.handleEvent(QJsonObject{{"event", "error"}, {"code", "board_busy"},
                                  {"cleanup_running", false}, {"card_id", "K7Q2"},
                                  {"cards", QJsonArray{"K7Q2", "R4TT"}},
-                                 {"text", "The Switchboard agent is busy with turns on #K7Q2 and #R4TT."}});
+                                 {"text", "The Board agent is busy with turns on #K7Q2 and #R4TT."}});
     QCOMPARE(reply->toPlainText(), QStringLiteral("what about this one?"));
     QVERIFY(strip->isHidden());
 }
@@ -3464,7 +3464,7 @@ void BoardModelTests::theListPageAsksForASwitchboardConsoleKeyedByTheTab()
     QCOMPARE(spec.persistScope, QStringLiteral("helper"));
     QCOMPARE(spec.persistKey, QStringLiteral("tab-7"));
     QCOMPARE(spec.briefKey, QStringLiteral("switchboard"));
-    QCOMPARE(spec.briefTitle, QStringLiteral("Switchboard agent"));
+    QCOMPARE(spec.briefTitle, QStringLiteral("Board agent"));
     QVERIFY(!spec.shell);                         // no shell: the console is the whole surface
     QCOMPARE(spec.routing, QStringLiteral("agent"));
     QVERIFY(console->context()->placeholder().contains(QStringLiteral("a second prompt queues")));

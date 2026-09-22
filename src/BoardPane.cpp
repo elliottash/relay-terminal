@@ -4236,7 +4236,7 @@ class BoardContext final : public relay::agent::Context {
         spec.persistScope = m_view->m_tabId.isEmpty() ? QString() : QStringLiteral("helper");
         spec.persistKey = m_view->m_tabId;
         spec.briefKey = QStringLiteral("switchboard");
-        spec.briefTitle = QStringLiteral("Switchboard agent");
+        spec.briefTitle = QStringLiteral("Board agent");
         spec.screen = m_view->screenHint();
         spec.shell = false;
         spec.routing = QStringLiteral("agent");
@@ -4340,7 +4340,7 @@ class BoardContext final : public relay::agent::Context {
 
     QString placeholder() const override
     {
-        return QStringLiteral("Ask the Switchboard agent — Enter sends, a second prompt queues");
+        return QStringLiteral("Ask the Board agent — Enter sends, a second prompt queues");
     }
 
   private:
@@ -4742,7 +4742,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     layout->addWidget(m_splitter, 1);
 
     auto *empty = new EmptyBoard(this);
-    empty->setText(QStringLiteral("Loading the Switchboard…"));
+    empty->setText(QStringLiteral("Loading the Board…"));
     m_empty = empty;
     m_empty->setObjectName(QStringLiteral("boardEmpty"));
     m_empty->setAlignment(Qt::AlignCenter);
@@ -4782,7 +4782,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     m_sections->onSave = [this](const QJsonObject &message) {
         QJsonObject request = message;
         request.insert(QStringLiteral("type"), QStringLiteral("board_sections"));
-        request.insert(QStringLiteral("reason"), QStringLiteral("edited in the Switchboard"));
+        request.insert(QStringLiteral("reason"), QStringLiteral("edited in the Board"));
         send(request);
         closeSections();
     };
@@ -5010,7 +5010,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
                          {QStringLiteral("id"), id},
                          {QStringLiteral("card"), card},
                          {what, value},
-                         {QStringLiteral("reason"), QStringLiteral("changed in the Switchboard")}};
+                         {QStringLiteral("reason"), QStringLiteral("changed in the Board")}};
         if (what == QStringLiteral("status"))
             move.insert(QStringLiteral("section"), QString());
         send(move);
@@ -5644,7 +5644,7 @@ int BoardView::showFindings(const QJsonArray &items, const QString &section)
                          .arg(ink.name(), severity.toHtmlEscaped(), file.toHtmlEscaped(),
                               message.toHtmlEscaped()));
         row->setToolTip((path.isEmpty() ? message : path + QStringLiteral(": ") + message)
-                        + QStringLiteral("\n\nClick to draft a fix for the Switchboard agent — it "
+                        + QStringLiteral("\n\nClick to draft a fix for the Board agent — it "
                                          "goes in the composer, it is not sent."));
         // The draft is built now and carried in the connection: the href only has to be clickable.
         const QString request = board::fixRequest(path, message, total);
@@ -6402,8 +6402,8 @@ void BoardView::setEmptyText(const QString &text, bool retry)
 QString BoardView::title() const
 {
     if (m_model.total() == 0)
-        return QStringLiteral("Switchboard");
-    return QStringLiteral("Switchboard · %1 open").arg(m_model.openCount());
+        return QStringLiteral("Board");
+    return QStringLiteral("Board · %1 open").arg(m_model.openCount());
 }
 
 void BoardView::setHeaderRightInset(int pixels)
@@ -6955,7 +6955,7 @@ void BoardView::handleEvent(const QJsonObject &event)
                    ? QStringLiteral("The agent is already working on %1.")
                          .arg(running.join(QStringLiteral(", ")))
                    : (busyCard.isEmpty()
-                          ? QStringLiteral("The Switchboard agent is busy.")
+                          ? QStringLiteral("The Board agent is busy.")
                           : QStringLiteral("The agent is answering on #%1.").arg(busyCard)));
         if (!m_cleanupRequest.isEmpty() && requestId == m_cleanupRequest) {
             endCleanup();
@@ -7083,7 +7083,7 @@ void BoardView::handleEvent(const QJsonObject &event)
             cardBusyChanged();
             m_list->viewport()->update();
             m_detail->setBusy(false);
-            m_detail->showError(QStringLiteral("The Switchboard agent could not answer: %1 "
+            m_detail->showError(QStringLiteral("The Board agent could not answer: %1 "
                                                "Your message is kept in the thread.").arg(text));
             return;
         }
@@ -7121,7 +7121,7 @@ void BoardView::showProblems(const QJsonArray &problems)
     text += QStringLiteral(" · ") + first.toHtmlEscaped();
     m_problems->setText(text);
     m_problems->setToolTip(path + QStringLiteral(": ") + first
-                           + QStringLiteral("\n\nClick to draft a fix for the Switchboard agent — "
+                           + QStringLiteral("\n\nClick to draft a fix for the Board agent — "
                                             "it is put in its composer, not sent. `o` opens the "
                                             "file; python3 scripts/relay-board.py check lists "
                                             "every problem."));
@@ -7421,7 +7421,7 @@ void BoardView::rebuild()
         setEmptyText(m_workerError + QStringLiteral("\n\nThe cards are files; nothing has been "
                                                     "lost."), true);
     else if (!m_open)
-        setEmptyText(QStringLiteral("Loading the Switchboard…"));
+        setEmptyText(QStringLiteral("Loading the Board…"));
     else
         setEmptyText(QStringLiteral("No cards yet.\n\nPress n or click “+ New card” to add the first one."));
     m_empty->setVisible(!m_open || empty);
@@ -8022,7 +8022,7 @@ void BoardView::moveCard(const QString &id, const QString &columnId, const QStri
     QJsonObject message{{QStringLiteral("type"), QStringLiteral("board_move")},
                         {QStringLiteral("id"), requestId},
                         {QStringLiteral("card"), id},
-                        {QStringLiteral("reason"), QStringLiteral("moved in the Switchboard")}};
+                        {QStringLiteral("reason"), QStringLiteral("moved in the Board")}};
     const QString status = m_model.dropStatus(columnId);
     const bool sameSection = moving && m_model.sectionOf(*moving) == columnId;
     if (sameSection && m_model.sort() != board::Sort::Manual) {
@@ -8064,7 +8064,7 @@ void BoardView::moveToTab(const QString &id, const QString &tabId)
                                          id, m_model.tab(tabId) ? m_model.tab(tabId)->title : tabId));
     send({{QStringLiteral("type"), QStringLiteral("board_move")}, {QStringLiteral("id"), requestId},
           {QStringLiteral("card"), id}, {QStringLiteral("tab"), tabId},
-          {QStringLiteral("reason"), QStringLiteral("moved in the Switchboard")}});
+          {QStringLiteral("reason"), QStringLiteral("moved in the Board")}});
 }
 
 void BoardView::doneSelected()
@@ -8081,7 +8081,7 @@ void BoardView::doneSelected()
           {QStringLiteral("id"), requestId}, {QStringLiteral("card"), card},
           {QStringLiteral("status"), QStringLiteral("done")},
           {QStringLiteral("section"), QString()},
-          {QStringLiteral("reason"), QStringLiteral("marked done in the Switchboard")}});
+          {QStringLiteral("reason"), QStringLiteral("marked done in the Board")}});
 }
 
 void BoardView::undoLast()
@@ -8263,7 +8263,7 @@ void BoardView::executeCard(const QString &note)
     // No pane to name, so no `pane_token` and nothing for the thread to link to: the plain
     // Execute wording, which is what the entry said before panes were linked at all.
     const QString entry =
-            QStringLiteral("Execute · handed to a new terminal pane beside the Switchboard, whose "
+            QStringLiteral("Execute · handed to a new terminal pane beside the Board, whose "
                            "agent works on it and records its commits in `links.commits`.");
     send({{QStringLiteral("type"), QStringLiteral("board_comment")}, {QStringLiteral("card"), card},
           {QStringLiteral("kind"), QStringLiteral("progress")},
@@ -8524,7 +8524,7 @@ void BoardView::deleteCard(const QString &id)
     send({{QStringLiteral("type"), QStringLiteral("board_delete")},
           {QStringLiteral("id"), requestId},
           {QStringLiteral("card"), id},
-          {QStringLiteral("reason"), QStringLiteral("deleted in the Switchboard")}});
+          {QStringLiteral("reason"), QStringLiteral("deleted in the Board")}});
 }
 
 bool BoardView::deletedHere(const QString &card) const

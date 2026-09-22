@@ -185,7 +185,7 @@ struct ContextSpec {
     QString persistKey;
     // Which brief goes in front of the agent, and what this surface is called. The paragraph
     // itself is the worker's (the console briefs of 30.7 and 33): the GUI sends the key that
-    // picks it, and the title the host's own header shows — "Switchboard agent", "Options
+    // picks it, and the title the host's own header shows — "Board agent", "Options
     // helper". The brief belongs in the system prompt rather than in front of every prompt,
     // which is also what makes it visible to `session_info` (card #AGNT step 4 item 4).
     QString briefKey;

@@ -27,7 +27,7 @@ void BoardWorker::connectProcess()
         if (m_buffer.size() > kMaxBuffer) {
             m_process.kill();
             if (onStatus)
-                onStatus(QStringLiteral("Switchboard worker protocol overflow; stopped."));
+                onStatus(QStringLiteral("Board worker protocol overflow; stopped."));
             return;
         }
         int index;
@@ -42,7 +42,7 @@ void BoardWorker::connectProcess()
             [this] { m_process.readAllStandardError(); });
     connect(&m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
         if (onStatus)
-            onStatus(QStringLiteral("Switchboard worker failed: ") + m_process.errorString());
+            onStatus(QStringLiteral("Board worker failed: ") + m_process.errorString());
     });
     connect(&m_process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
             [this](int, QProcess::ExitStatus status) {
@@ -55,7 +55,7 @@ void BoardWorker::connectProcess()
                 if (m_stopping)
                     return;
                 if (onStatus)
-                    onStatus(QStringLiteral("The Switchboard worker exited."));
+                    onStatus(QStringLiteral("The Board worker exited."));
                 if (onExit)
                     onExit(status == QProcess::CrashExit);
             });
@@ -128,7 +128,7 @@ void BoardWorker::start(const QJsonObject &configure)
 // configure is not. That is exactly what a console's **first** ask does: it starts the tab's
 // worker and sends its `ask` in the same breath (§33, "started on the first ask"), and the worker
 // refused it with "Configure a provider and workspace first" while the surface sat there running,
-// waiting for an answer that was never coming. The Switchboard never hit it because `open()`
+// waiting for an answer that was never coming. The Board never hit it because `open()`
 // already waited for `ready`.
 //
 // So everything but the configure itself waits for `ready` and is then written in order.

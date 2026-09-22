@@ -381,10 +381,10 @@ BoardRemote::Entry *BoardRemote::hostFor(bool reopen)
     return found;
 }
 
-// The board a device is on is watched the way a Switchboard pane watches its own (BoardView::
+// The board a device is on is watched the way a Board pane watches its own (BoardView::
 // watchIssues): the folder and its subfolders, one debounced `board_refresh` per burst, which the
 // worker answers with the rows that changed — and that `board_changed` is what a phone's list, and
-// the hub's "a card is waiting on you" push, are made from. With no Switchboard pane open on the
+// the hub's "a card is waiting on you" push, are made from. With no Board pane open on the
 // desktop nobody else would ask.
 void BoardRemote::watchBoard()
 {
@@ -526,7 +526,7 @@ void BoardRemote::handleRequest(const QJsonObject &line)
     Entry *entry = hostFor(type == QStringLiteral("board_open"));
     if (!entry || !entry->host.send) {
         refuse(rid, type, QStringLiteral("board_not_found"),
-               QStringLiteral("No tab on the desktop has a Switchboard. Open a project's Switchboard "
+               QStringLiteral("No tab on the desktop has a Board. Open a project's Board "
                               "there once, and it is here too."));
         return;
     }
@@ -536,7 +536,7 @@ void BoardRemote::handleRequest(const QJsonObject &line)
         m_requests.remove(id);
         m_order.removeAll(id);
         refuse(rid, type, QStringLiteral("board_not_found"),
-               QStringLiteral("The desktop's Switchboard could not be reached."));
+               QStringLiteral("The desktop's Board could not be reached."));
         return;
     }
     if (type == QStringLiteral("board_open"))
@@ -613,7 +613,7 @@ void BoardRemote::workerEvent(QObject *owner, const QString &tab, const QJsonObj
     // is the desktop's to answer; the device is told why its card has not appeared.
     if (answers && type == QStringLiteral("board_init_request")) {
         refuse(pending.rid, pending.type, QStringLiteral("board_not_initialized"),
-               QStringLiteral("This project has no Switchboard yet. The desktop is asking whether to "
+               QStringLiteral("This project has no Board yet. The desktop is asking whether to "
                               "create one."));
         return;
     }

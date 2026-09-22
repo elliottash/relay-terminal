@@ -169,7 +169,7 @@ struct Tokens {
 
 struct TypeStyle {
     bool band = false;   // false: the pane stays plain (terminals and file panes)
-    QString label;       // the band's name, in sentence case: "Switchboard"
+    QString label;       // the band's name, in sentence case: "Board"
     Glyph glyph = Glyph::None;
     QString group;       // "tools" or "agents"
     QColor fill;         // the band's ground: a low-strength tint of the hue on the pane's background
@@ -199,7 +199,7 @@ struct ToolButton {
     QString action;      // the action that opens it (a Keymap action id)
     QString label;       // the tooltip while that pane is closed
     QString openLabel;   // ... and while it is open, because the next click will close it
-    QString what;        // the noun the shortcut hint uses ("the Switchboard")
+    QString what;        // the noun the shortcut hint uses ("the Board")
 };
 const QList<ToolButton> &toolButtons();
 

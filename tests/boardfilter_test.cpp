@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The Switchboard pane's filter bar, its chunked open, and what it shows when its worker dies
+// The Board pane's filter bar, its chunked open, and what it shows when its worker dies
 // (#7M6E). All three are the same change: each row used to carry its card's whole body and
 // thread so that the filter's plain words could be matched here. That was 92.6 % of the `board`
 // event's bytes; past about 1,160 cards the event overflowed the worker pipe's 8 MiB read buffer
 // and the GUI killed the worker, with the only explanation going to a status bar this layout
-// does not show — so the pane said "Loading the Switchboard…" for ever. The words are asked of
+// does not show — so the pane said "Loading the Board…" for ever. The words are asked of
 // the worker now (`board_search`), the rows travel in batches, and a worker failure is in the
 // pane with a Retry.
 //
@@ -168,7 +168,7 @@ void BoardFilterTests::theRestOfAChunkedBoardOpenPatchesTheRowsIn()
 }
 
 // A worker that dies says so in the pane, not only in a status bar this layout never shows
-// (#7M6E): the board that never loaded used to sit on "Loading the Switchboard…" for ever, which
+// (#7M6E): the board that never loaded used to sit on "Loading the Board…" for ever, which
 // is what a board of more than about 1,160 cards did to it.
 void BoardFilterTests::aWorkerFailureReplacesTheLoadingLine()
 {
@@ -182,7 +182,7 @@ void BoardFilterTests::aWorkerFailureReplacesTheLoadingLine()
     QVERIFY(empty->text().contains(QStringLiteral("Loading")));
 
     a.handleEvent(QJsonObject{{"event", "board_worker_status"},
-                              {"text", "Switchboard worker protocol overflow; stopped."}});
+                              {"text", "Board worker protocol overflow; stopped."}});
     QVERIFY(!empty->text().contains(QStringLiteral("Loading")));
     QVERIFY(empty->text().contains(QStringLiteral("protocol overflow")));
 
@@ -198,7 +198,7 @@ void BoardFilterTests::aWorkerFailureReplacesTheLoadingLine()
     // A board that is already on screen keeps its cards: the failure is a notice, not a wipe.
     a.handleEvent(opened({row(QStringLiteral("K7Q2"), QStringLiteral("inbox"))}));
     a.handleEvent(QJsonObject{{"event", "board_worker_status"},
-                              {"text", "The Switchboard worker exited."}});
+                              {"text", "The Board worker exited."}});
     QCOMPARE(a.model().total(), 1);
     QVERIFY(a.notice().contains(QStringLiteral("exited")));
 }

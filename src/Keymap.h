@@ -275,15 +275,15 @@ private:
         add("files.explorer", "pane", "File explorer: open or close this pane's folder in an explorer pane",
             {QStringLiteral("Ctrl+B"), QStringLiteral("Ctrl+Shift+B")});
         add("files.open", "pane", "Open a file in a preview pane", {});
-        add("board.open", "pane", "Switchboard: cards, threads and plans (again to close it)", {QStringLiteral("Ctrl+Shift+S")});
+        add("board.open", "pane", "Board: cards, threads and plans (again to close it)", {QStringLiteral("Ctrl+Shift+S")});
         // The Test suites pane (card #7BM4): the project's tests, their history and the runs, in a
-        // pane beside the Switchboard. **No default key.** The obvious one, Ctrl+Shift+T, is New
+        // pane beside the Board. **No default key.** The obvious one, Ctrl+Shift+T, is New
         // tab in the default table and in all four presets, and a tests pane is not worth taking a
         // key every terminal user already knows; the palette and the board's Tests button open it.
-        add("tests.open", "pane", "Test suites: this project's tests, their history and their runs, beside the Switchboard", {});
+        add("tests.open", "pane", "Test suites: this project's tests, their history and their runs, beside the Board", {});
         // The helper agent's ask key (#FEJQ, protocol §30.7). **One** key for Options, Actions and
         // Sessions, because it is one helper — the tab's — wherever it is asked; the panel it
-        // opens is the Switchboard's own panel, and the Switchboard keeps the bare `a` its list
+        // opens is the Board's own panel, and the Board keeps the bare `a` its list
         // page has had since #8YQ9, which it can have because that list takes no typing.
         // Alt+Q: free in the default table and in all four preset tables, and nothing else binds
         // an Alt+Q. It is not a Ctrl+Shift chord because it never has to reach past a program —
@@ -374,7 +374,7 @@ private:
         // available models and priorities are its three tabs. Plain Ctrl+M is not free and never
         // will be: it is the terminal's carriage return.
         // Both work in a helper agent's prompt box too, over the box on its own strip (#PK5Q):
-        // the Switchboard's composer, an open card's reply box, and the panels in Options,
+        // the Board's composer, an open card's reply box, and the panels in Options,
         // Actions and Sessions. It is the same control, so it answers the same keys.
         add("agent.modelBox", "agent", "Models: drop this prompt box's model box open (the quick pick)", {QStringLiteral("Alt+M")});
         // E for effort (owner, 2026-09-20): the level box beside the model box drops open, the

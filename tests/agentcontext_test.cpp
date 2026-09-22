@@ -215,11 +215,11 @@ private slots:
         for (const QString &rung : card)
             if (rung != QStringLiteral("\u2026")) QVERIFY2(card.first().startsWith(rung), qPrintable(rung));
 
-        // The Switchboard's, which has one comma and one dash.
-        QCOMPARE(placeholderRungs(QStringLiteral("Ask the Switchboard agent \u2014 Enter sends, a second prompt queues")),
-                 (QStringList{QStringLiteral("Ask the Switchboard agent \u2014 Enter sends, a second prompt queues"),
-                              QStringLiteral("Ask the Switchboard agent \u2014 Enter sends"),
-                              QStringLiteral("Ask the Switchboard agent"),
+        // The Board's, which has one comma and one dash.
+        QCOMPARE(placeholderRungs(QStringLiteral("Ask the Board agent \u2014 Enter sends, a second prompt queues")),
+                 (QStringList{QStringLiteral("Ask the Board agent \u2014 Enter sends, a second prompt queues"),
+                              QStringLiteral("Ask the Board agent \u2014 Enter sends"),
+                              QStringLiteral("Ask the Board agent"),
                               QStringLiteral("\u2026")}));
         // One short clause: one rung and "…", which is the two-rung ladder this replaces.
         QCOMPARE(placeholderRungs(QStringLiteral("Ask the Options helper\u2026")),

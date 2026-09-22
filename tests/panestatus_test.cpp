@@ -376,7 +376,7 @@ private Q_SLOTS:
         QVERIFY(off.fill != typeStyle(QStringLiteral("board"), ColourMode::ByType, t).fill);
         const TypeStyle board = typeStyle(QStringLiteral("board"), ColourMode::ByType, t);
         QVERIFY(board.band);
-        QCOMPARE(board.label, QStringLiteral("Switchboard"));   // sentence case: legible text rule
+        QCOMPARE(board.label, QStringLiteral("Board"));   // sentence case: legible text rule
         QCOMPARE(board.glyph, Glyph::Switchboard);
         // A type nobody registered is a tool with its own name.
         const TypeStyle mystery = typeStyle(QStringLiteral("db-browser"), ColourMode::ByType, t);
@@ -386,7 +386,7 @@ private Q_SLOTS:
         QCOMPARE(typeStyle(QStringLiteral("sessions"), ColourMode::ByType, t, QStringLiteral("Resume")).label, QStringLiteral("Resume"));
         // The Test suites pane (card #7BM4) is a registered kind, so its band says "Test suites"
         // and not the "Testsuites" an unregistered type would be titled into, and it is a tool
-        // surface like the Switchboard it opens beside.
+        // surface like the Board it opens beside.
         const TypeStyle tests = typeStyle(QStringLiteral("testsuites"), ColourMode::ByType, t);
         QVERIFY(tests.band);
         QCOMPARE(tests.label, QStringLiteral("Test suites"));

@@ -284,9 +284,9 @@ const QList<Kind> &kinds() {
         // The live reasoning and tool calls of one terminal pane (card #QT8C): an agent surface, so
         // the violet and the turn pane's bubble.
         {QStringLiteral("internals"), QStringLiteral("Activity"), QStringLiteral("agents"), Glyph::Turn},
-        {QStringLiteral("board"), QStringLiteral("Switchboard"), QStringLiteral("tools"), Glyph::Switchboard},
+        {QStringLiteral("board"), QStringLiteral("Board"), QStringLiteral("tools"), Glyph::Switchboard},
         // The Test suites pane (card #7BM4): the project's tests and their history, opened beside
-        // the Switchboard and answered by the same worker. A tool surface, like the board it
+        // the Board and answered by the same worker. A tool surface, like the board it
         // hangs off; no glyph of its own yet, so the generic tool mark.
         {QStringLiteral("testsuites"), QStringLiteral("Test suites"), QStringLiteral("tools"), Glyph::Tool},
         // The Settings pane splits into Options and Actions (2026-09-18); "settings" is styled as
@@ -299,7 +299,7 @@ const QList<Kind> &kinds() {
         // the pane it serves. A tool surface like Options, whose gear it borrows.
         {QStringLiteral("models"), QStringLiteral("Models"), QStringLiteral("tools"), Glyph::Options},
         // The project picker (card #916B): which project a tab that has none attaches to. It wears the
-        // Switchboard's jacks because a project is, to Relay, the thing that has a Switchboard.
+        // switchboard jacks because a project is, to Relay, the thing that has a Board.
         {QStringLiteral("projects"), QStringLiteral("Projects"), QStringLiteral("tools"), Glyph::Switchboard},
         // Multiplayer (#W5N2): who is on the panes you are sharing, and what is waiting for you.
         {QStringLiteral("sharing"), QStringLiteral("Sharing"), QStringLiteral("tools"), Glyph::Phone},
@@ -342,7 +342,7 @@ TypeStyle typeStyle(const QString &paneType, ColourMode mode, const Tokens &toke
     // which made one amber mean both "this pane is a tool" and "this is waiting on you"; the second
     // is the one signal that must never be missed, so it keeps the amber and this took a token
     // (src/ThemeFile.cpp, brassFrom, dulls one out of each theme's own amber).
-    // By type: brass for the Switchboard (docs/SWITCHBOARD-AESTHETIC.md), green for Options,
+    // By type: brass for the Board (docs/SWITCHBOARD-AESTHETIC.md), green for Options,
     // red-orange for Actions, the terminal's own blue for Sessions (they are the terminals'
     // conversations), violet for everything the agent does. Options and Actions were one Settings
     // pane until 2026-09-18 and shared the green, telling themselves apart by the glyph alone;
@@ -400,8 +400,8 @@ const QList<ToolButton> &toolButtons() {
          QStringLiteral("Projects, Sessions and Globals"), QStringLiteral("Close Projects and Sessions"),
          QStringLiteral("sessions")},
         {QStringLiteral("board"), QStringLiteral("board.open"),
-         QStringLiteral("Switchboard: cards, threads and plans"), QStringLiteral("Close the Switchboard"),
-         QStringLiteral("the Switchboard")},
+         QStringLiteral("Board: cards, threads and plans"), QStringLiteral("Close the Board"),
+         QStringLiteral("the Board")},
         {QStringLiteral("options"), QStringLiteral("app.settings"),
          QStringLiteral("Options"), QStringLiteral("Close Options"), QStringLiteral("options")},
     };
