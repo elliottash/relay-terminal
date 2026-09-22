@@ -1,9 +1,9 @@
 ---
 id: MDX6
 type: work
-status: inbox
+status: executing
 labels: [bug, remote, switchboard]
-assignee: null
+assignee: claude-code
 rank: zmdx6
 created: '2026-09-22'
 source: 'Measured by Claude Code rendering card bodies through app/boardmd.js in Chrome, 2026-09-22'
@@ -39,3 +39,9 @@ The table case is the paragraph loop's exit conditions (`app/boardmd.js:~395`) n
 No injection was found: there is no `innerHTML`, `DOMParser` or `template` in `app/board.js` or
 `app/boardmd.js`, `<script>` and `javascript:` hrefs in a card body render as text, and `OPENABLE`
 gates both the parse site and the Open button.
+
+## Done means
+A card body renders on the phone character for character where it is not marked up: a
+tab-indented continuation line keeps its first character, a tab-indented nested bullet stays a
+bullet, `__init__` stays `__init__`, and a pipe table directly under a paragraph line is a table.
+It fails if any line of a card body loses a character to the renderer.

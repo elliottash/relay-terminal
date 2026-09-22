@@ -1,9 +1,9 @@
 ---
 id: PKT5
 type: work
-status: inbox
+status: executing
 labels: [bug, remote]
-assignee: null
+assignee: claude-code
 rank: zpkt5
 created: '2026-09-22'
 source: 'Found by Claude Code reviewing the phone app, 2026-09-22'
@@ -43,3 +43,11 @@ also skips the `openQuestions` hand-off, so B's ask, replayed on `pane_focus` be
 and documented for the model `<option>`s (`:1036`) and the conversations list (`:1091`). A finger
 down on an ask option when a `pane_state` lands has its `pointerup` on a different node, so no
 `click` fires and the tap does nothing.
+
+## Done means
+A phone that has been asleep comes back showing the pane as it is now — the queue count,
+Stop and the strip all match the desktop — without waiting for an unrelated change. The system Back
+button closes what is open (a sheet, then the card or thread) before it ever leaves the app. A
+notification for another pane leaves nothing of the previous pane on screen. A finger already down
+on an ask option or a queue row still activates it when a `pane_state` lands mid-press. It fails if
+a resume leaves a stale queue count, or if Back closes the installed app from a thread.

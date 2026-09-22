@@ -1,9 +1,9 @@
 ---
 id: CPY4
 type: work
-status: inbox
+status: executing
 labels: [bug, remote]
-assignee: null
+assignee: claude-code
 rank: zcpy4
 created: '2026-09-22'
 source: 'Measured by Claude Code driving the phone app at 390x844, 2026-09-22'
@@ -49,3 +49,12 @@ was added for; the guard just does not exclude the clock.
 Also on this path: `conversation_id` is not in the outbox's `QUEUEABLE` and the view's `send` passes
 no `onError` (`app/app.js:926`), so tapping Copy id while the link is down is swallowed silently
 and leaves `idRequest` set, waiting for an answer that was never asked for.
+
+## Done means
+Copy id says what happened where the reader is looking: the sheet closes on the tap and
+the toast is on top of whatever is drawn, so success, a refusal and a failure are each legible. On
+iOS the id reaches the clipboard, which means the write happens inside the tap rather than after a
+round trip. The fallback text, when there is one, is attached to the sheet that asked and not to
+whatever sheet happens to be in the DOM. The conversations list holds its scroll while a turn runs.
+It fails if `elementFromPoint` at the toast's centre returns anything but the toast, or if a minute
+tick moves the list's `scrollTop`.

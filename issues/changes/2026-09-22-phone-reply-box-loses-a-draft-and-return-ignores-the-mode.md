@@ -1,9 +1,9 @@
 ---
 id: RCN8
 type: work
-status: inbox
+status: executing
 labels: [bug, remote, switchboard]
-assignee: null
+assignee: claude-code
 rank: zrcn8
 created: '2026-09-22'
 source: 'Measured by Claude Code reviewing and driving the phone app, 2026-09-22'
@@ -43,3 +43,9 @@ Two more, plausible rather than reproduced: a second Send before the first resol
 Discuss mode is a `board_resume` and in Plan mode an accepted empty `board_ask`; and a
 `board_changed` for the open card that arrives while a `board_card_get` is in flight is skipped
 and never re-read (`app/board.js:1379`, guarded by `!cardAsked`).
+
+## Done means
+A half-typed reply survives anything that re-opens the card it is on, including the push
+for the question being answered. Return sends the mode the selector shows. A refusal about any card
+is drawn somewhere the reader can see it on a phone with a card open. It fails if the reply box
+empties on a re-open, or if Return sends `discuss` while the selector says Comment only.

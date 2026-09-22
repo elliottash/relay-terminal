@@ -1,9 +1,9 @@
 ---
 id: KBD7
 type: work
-status: inbox
+status: executing
 labels: [bug, remote]
-assignee: null
+assignee: claude-code
 rank: zkbd7
 created: '2026-09-22'
 source: 'Measured by Claude Code driving the phone app at 390x844, 2026-09-22'
@@ -48,3 +48,11 @@ clears `box.value`, calls `fitBox()` or `renderSendState()`, which the fall-thro
 after answering question 1 of 3 the typed `yes` is still in the box, blurred, with Send enabled: a
 tap sends it as the answer to question 2, and if the ask has closed it goes to the agent as a
 fresh prompt. Pre-existing, but the new blur hides the evidence.
+
+## Done means
+On a touch device, sending from the pane's prompt takes the on-screen keyboard down and
+leaves it down — by the Send button as much as by the return key. On a device with a physical
+keyboard the box keeps the focus, so Enter's three-step escalation, `queue_resume` on an empty box
+and ArrowUp row selection all still work. Answering the agent's ask empties the box the way an
+ordinary send does. It fails if a tap on Send leaves the box focused, or if a second Enter after a
+send does nothing on a laptop.

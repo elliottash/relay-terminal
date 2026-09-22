@@ -1,9 +1,9 @@
 ---
 id: EFT9
 type: work
-status: inbox
+status: executing
 labels: [bug, remote, models]
-assignee: null
+assignee: claude-code
 rank: zeft9
 created: '2026-09-22'
 source: 'Measured by Claude Code driving the phone app at 390x844, 2026-09-22'
@@ -66,3 +66,12 @@ placeholder-option pattern and its own chevron (or move `.rp-model-chevron` insi
 model alone); publish the fixed-ness (`effort_fixed` plus the reason the desktop already writes) so
 the chip can be disabled; and republish `pane_state` on a refused pick so the authoritative state
 overwrites the phone's guess.
+
+## Done means
+The chip on the phone always says the level the pane is actually on. A `pane_state` whose
+model is unchanged and whose `effort` moved repaints it; a pick the pane refuses is followed by the
+pane's own state, so the chip goes back rather than keeping the rejected word; and a model whose
+level is fixed draws a chip that cannot be changed rather than a live picker. Closed, the chip reads
+`high` — no checkmark, no chevron across it — and the model chip beside it keeps its own chevron.
+It fails if any of those still needs a model change to correct itself, or if the closed control
+shows a `✓`.

@@ -1,9 +1,9 @@
 ---
 id: TBR2
 type: work
-status: inbox
+status: executing
 labels: [bug, remote]
-assignee: null
+assignee: claude-code
 rank: ztbr2
 created: '2026-09-22'
 source: 'Measured by Claude Code driving the phone app at 390x844, 2026-09-22'
@@ -33,3 +33,10 @@ for viewing only." (`app/app.js:1113`). But `canCompose` is `agent || full` on t
 lines, so an `agent` device has a working composer on screen — in this drive it typed a prompt and
 the desktop ran it — under a sentence saying it may only watch. `agent` needs its own words: it
 may ask the agent, it may not take the keyboard.
+
+## Done means
+The terminal bar's sentence is readable on a 390 px phone — it is not cut mid-word, which
+means measuring `scrollWidth` against `clientWidth` on the note and finding them equal. A failed
+send says why somewhere the reader can read the whole of. A device paired `agent` is told what it
+can do — ask the agent — and never that it may only watch while its composer is on screen. It fails
+if `#term-note` still overflows at either capability.

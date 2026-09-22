@@ -1,9 +1,9 @@
 ---
 id: NK73
 type: work
-status: inbox
+status: executing
 labels: [bug, remote]
-assignee: null
+assignee: claude-code
 rank: znk73
 created: '2026-09-22'
 source: 'Measured by Claude Code painting rows through the real ScreenView, 2026-09-22'
@@ -66,3 +66,11 @@ ever scrolls the grid horizontally**: `scrollLeft` appears nowhere in `screen.js
 sets `scrollTop` only. With Keyboard (direct keys) on at the 12 px floor, 80 columns is about
 576 px of grid on a 358 px view, so the cursor leaves the right edge around column 30 and the
 reader types blind until they drag.
+
+## Done means
+Every row is painted exactly as the terminal sent it, whatever it contains: the text of
+the row's pieces concatenated equals the row's text, for one URL, two, or three. Every anchor's
+visible text is the address it goes to. A URL keeps the colour and attributes of the run it came
+from, a concealed one stays concealed, an uppercase `WWW.` gets an absolute href, quotes and angle
+brackets stay out of the href, and a URL that runs to the last column is not linked to its prefix.
+It fails if any row's painted text differs by one character from what was sent.
