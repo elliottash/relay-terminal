@@ -84,6 +84,19 @@ Evidence: `docs/qa_evidence/2026-09-21-4nxh-guest-board-tools/NOTES.md`, with se
 - `tests/test_board.py::PolicyFileTests`
 - manual: `docs/qa_evidence/2026-09-21-4nxh-guest-board-tools/NOTES.md`
 
+### Check 2026-09-21 21:39
+- missing-evidence · unittest:tests.test_guest_board_bridge — no run of tests/test_guest_board_bridge.py for this revision, from any host, and no attached result
+- passed · unittest:tests.test_guest_harness_codex — tests/test_guest_harness_codex.py passed for this revision on spark-dcc9, 2026-09-21T23:15:13Z
+- passed · unittest:tests.test_guest_harness_claude — tests/test_guest_harness_claude.py passed for this revision on spark-dcc9, 2026-09-21T23:15:13Z
+- passed · unittest:tests.test_guest_harness_provider — tests/test_guest_harness_provider.py passed for this revision on spark-dcc9, 2026-09-21T23:15:13Z
+- passed · unittest:tests.test_board_tools — tests/test_board_tools.py passed for this revision on spark-dcc9, 2026-09-22T01:39:51Z
+- missing-evidence · unittest:tests.test_board_turns — no run of tests/test_board_turns.py for this revision, from any host, and no attached result
+- passed · unittest:tests.test_board.PolicyFileTests — tests/test_board.py::PolicyFileTests passed for this revision on spark-dcc9, 2026-09-22T01:39:51Z
+- not-applicable · manual:docs/qa_evidence/2026-09-21-4nxh-guest-board-tools/NOTES.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-21-4nxh-guest-board-tools/NOTES.md
+- notice · unittest:tests.test_board_tools — tests/test_board_tools.py: 1 of 257 are not in the project any more (test_the_offered_tools_are_read_only_files_search_and_the_modes_board_tools)
+- notice · unittest:tests.test_board_turns — tests/test_board_turns.py: 4 of 21 never ran here (test_a_second_turn_on_the_same_card_queues_behind_the_first, test_a_cards_queue_is_its_own_and_is_reached_by_its_surface, test_the_next_prompt_never_races_the_last_turns_unwind…)
+- notice · unittest:tests.test_board_turns — tests/test_board_turns.py: 2 of 21 are not in the project any more (test_a_second_turn_on_the_same_card_is_refused_while_the_first_runs, test_the_next_turn_waits_for_the_last_one_to_unwind)
+history: thread
 ## QA checklist
 - [ ] In a managed Codex pane and a managed Claude pane, read/comment/update/move a disposable card; confirm one visible call/result and correct model/session attribution.
 - [ ] Resume, change model/effort, Stop, then send a new turn; confirm tools remain usable and stopped queued writes do not execute.

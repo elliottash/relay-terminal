@@ -2,13 +2,13 @@
 id: 4BPE
 aliases: [MDL1, MDP1]
 type: work
-status: needs-verification
+status: executing
 labels: [feature, models]
-assignee: claude-code
+assignee: codex
 rank: k
 created: '2026-09-21'
 source: 'Claude Code in a Relay pane, 2026-09-21'
-links: {plans: [docs/MODEL-PICKING-DESIGN.md], commits: [bb19b7b0, b2632bf5, 4e14bdca, a61c713b, 9d0b7b8e, 86ddc3b0, 3cac1ecd, f0dede9c, 95773991, 7f8f0616, 0dddb9ee, c5c815de, e76d6eab, e955feb5, 9eccaa8e, 6b2a3c66, a6a7c72e, bae87fd7, 5de41a8f], evidence: [docs/qa_evidence/2026-09-21-model-box-filter, docs/qa_evidence/2026-09-21-model-defaults-and-swap, docs/qa_evidence/2026-09-21-model-dialog-prioritize, docs/qa_evidence/2026-09-21-model-box-modes, docs/qa_evidence/2026-09-21-model-names-everywhere], related: [DC4J], github: null}
+links: {plans: [docs/MODEL-PICKING-DESIGN.md], commits: [bb19b7b0, b2632bf5, 4e14bdca, a61c713b, 9d0b7b8e, 86ddc3b0, 3cac1ecd, f0dede9c, 95773991, 7f8f0616, 0dddb9ee, c5c815de, e76d6eab, e955feb5, 9eccaa8e, 6b2a3c66, a6a7c72e, bae87fd7, 5de41a8f, 274078a8, 394b282d], evidence: [docs/qa_evidence/2026-09-21-model-box-filter, docs/qa_evidence/2026-09-21-model-defaults-and-swap, docs/qa_evidence/2026-09-21-model-dialog-prioritize, docs/qa_evidence/2026-09-21-model-box-modes, docs/qa_evidence/2026-09-21-model-names-everywhere], related: [DC4J], github: null}
 ---
 # Model picking: one name per model, one row per model, one default
 
@@ -42,6 +42,7 @@ great, left/right changes mode. add /high.
 and i realized that the model priority chooser is crtical, and currently its too hard to find -- model options, then scroll down. i think we should beef up the ctrl alt m dialogue to be the main way to select / prioritize models
 
 ## Decisions
+- Owner, startup follow-up: "claim all of these and implement them".
 - 2026-09-21, on the three questions below: "i agree with your rec on all 3". So: a guest harness
   at rank 1 of main is what a new pane starts on (the process starts on the first turn); Claude
   Code's `opus` is named `claude-opus-5`; Relay Free's models are `relay-main`, `relay-flash`,
@@ -91,6 +92,7 @@ never returns to the model the owner was using, and its own sentence is overwrit
 `docs/MODEL-PICKING-DESIGN.md`, section 5.
 
 ## Tasks
+- [x] Preserve Plan/Build selection in a deferred Codex pane before its first prompt <!-- t:sp -->
 - [x] Alt+M / Alt+E: current row highlighted, arrows, type to filter <!-- t:a1 -->
 - [x] catalog: `models::name`, the worker's `name`, `grouped`, the pane's key resolved by name <!-- t:a2 -->
 - [x] defaults: a new pane reads the main list; a pick is per pane; restore the model; re-send tiers <!-- t:a3 -->
@@ -109,6 +111,7 @@ never returns to the model the owner was using, and its own sentence is overwrit
 - [x] the per-job models as a fourth tab, with what each job runs on right now <!-- t:a16 -->
 
 ## Execution Summary
+Startup follow-up (#40SN): Plan/Build selection works before deferred guest startup, is applied before the first queued prompt, and survives configuration recovery. Verified by the isolated GUI drive in `docs/qa_evidence/2026-09-21-pane-startup-recovery/`.
 Seven tasks, each by an Opus subagent in a named area of the code, each landed through
 `scripts/land.py` with its own tests and an Xvfb run.
 
@@ -174,6 +177,7 @@ Evidence: `2026-09-21-model-box-classes`, `-model-availability`, `-effort-by-mod
 `-models-pane`, `-models-pane-review`, `-models-pane-jobs`, `-console-configure-loop`.
 
 ## Tests
+manual: docs/qa_evidence/2026-09-21-pane-startup-recovery/README.md
 `ctest --test-dir build -R "modelrows|filterpopup|modelcatalog|modelpicker|panestate|conversations"`
 (6/6), and `tests/test_presets.py`, `test_roles.py`, `test_keybindings.py`, `test_model_switch.py`,
 `test_conv_index.py`, `test_web_model_name.py`, all run green on 2026-09-21 after the last commit.

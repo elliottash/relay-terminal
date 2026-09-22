@@ -1,11 +1,12 @@
 ---
 id: 1CXD
 type: work
-status: needs-verification
+status: executing
 labels: [feature, switchboard, docs]
 component: [gui, worker]
-assignee: codex
+assignee: agent
 implemented_by: openai/gpt-6-astra via codex
+session: 95b050f5-5361-4f69-9d08-9fb952f59f17
 rank: zzzzzzzzzzzzzzzzd
 created: '2026-09-21'
 source: owner, 2026-09-21

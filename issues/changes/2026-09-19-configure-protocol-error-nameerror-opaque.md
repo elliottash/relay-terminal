@@ -93,6 +93,12 @@ The worker reports structured `configure_failed` diagnostics for NameError, Attr
 `tests/test_session_protocol.py`
 manual: docs/qa_evidence/2026-09-21-pane-startup-recovery/README.md
 
+### Check 2026-09-21 22:15
+- missing-evidence · unittest:tests.test_configure_recovery — no run of tests/test_configure_recovery.py for this revision, from any host, and no attached result
+- passed · unittest:tests.test_session_protocol — tests/test_session_protocol.py passed for this revision on spark-dcc9, 2026-09-22T02:15:37Z
+- not-applicable · manual:docs/qa_evidence/2026-09-21-pane-startup-recovery/README.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-21-pane-startup-recovery/README.md
+- notice · unittest:tests.test_session_protocol — tests/test_session_protocol.py: 7 of 35 are slow (test_the_row_moves_while_nobody_is_typing, test_two_claudes_in_one_directory_tail_their_own_sessions, test_indexing_the_guests_off_means_no_tail…)
+history: thread
 ## QA checklist
 - [ ] Open a new Codex pane; select Plan before typing; the first prompt runs in Plan.
 - [ ] Inject an initial configure defect; verify its diagnostic is visible and a fresh process recovers without reopening the pane.

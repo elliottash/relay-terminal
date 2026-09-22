@@ -84,3 +84,9 @@ Check · 2 missing-evidence, 1 not-applicable, 8 passed; 5 advisory finding(s). 
 
 <!-- relay:entry 20260922T020006Z-16 author=agent kind=event model=gpt-6-astra pane=fe4e4144 turn=a8aa6eac04d048c7ba96c1232b953cda/e17af86989a0419d9ff038915f2577f0 -->
 - ✦ agent updated this card · appended to `## Execution Summary`
+
+<!-- relay:entry 20260922T041237Z-kw author=owner kind=event pane=switchboard -->
+- ✦ owner claimed this card · assignee agent, Needs verification → Executing, session 95b050f5
+
+<!-- relay:entry 20260922T041237Z-kx author=owner kind=progress pane=switchboard pane_token=95b050f5-5361-4f69-9d08-9fb952f59f17 -->
+Claimed (95b050f5) · working on it from a terminal pane

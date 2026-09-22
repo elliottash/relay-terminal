@@ -33,3 +33,15 @@ Owner: "completion does not ovefrride manual dimming"; "otherwise i agree with y
 
 <!-- relay:entry 20260921T190509Z-7q author=agent kind=evidence model=gpt-6-astra pane=9255636d turn=bde50672e69443a48e42855349d1893a/f33091886e6c4af78bad54a1ddf55a5f -->
 Landed a4c930d05b9964c05a7b7b932c736c6137785d4c through scripts/land.py. The exact committed tree passed its isolated build gate. Four targeted CTest cases passed in the shared checkout; Xvfb evidence covers dark/light themes, focus dimming, Alt keys/wheel, keyboard focus retention and temporary reveal. Card remains needs-verification for independent live agent/GUI QA.
+
+<!-- relay:entry 20260921T205648Z-k4 author=agent kind=note model=gpt-6-astra pane=8362237d turn=8348624294224e0d8d5b4bb26370542d/371c1ac186c144008e87f9fabe0a7dc3 -->
+User reports: "can you find the card for the dimmer? alt mousewheel isnt working". Alt+mousewheel is not working in the user’s running app; the cause has not yet been investigated. This is covered by the existing Alt+wheel QA checklist item and remains unresolved.
+
+<!-- relay:entry 20260921T210513Z-bb author=agent kind=decision model=gpt-6-astra pane=059ac420 turn=cc704b9809304a888913483e4eaae5aa/6b2aa065f6bf4d9ebcdae01e8918f46e -->
+Owner: and change "hide until you need me" to "dim while working". Updated the Options and Actions labels and keybinding description in 617b7b68. Ctrl+Alt+D and behavior are unchanged.
+
+<!-- relay:entry 20260921T212846Z-dw author=codex kind=progress -->
+Claimed the Alt+wheel fix after owner request "fix that issue". Native Qt/X11 probe reproduces Alt converting vertical wheel deltas to the horizontal axis; Relay discards that component. Plan: accept either angle axis, add directional/partial-notch regression tests, run the targeted Qt test and native Xvfb probe, build and land. Board bridge unavailable this turn; using file fallback.
+
+<!-- relay:entry 20260921T213136Z-dw author=codex kind=evidence -->
+Alt+wheel fix landed as 5bac2a5d: accept the horizontal angle delta produced by Qt/X11 while Alt is held. Targeted regression and exact committed app build pass. Full app under isolated Xvfb: four native Alt+wheel-down events show the dim overlay; four up hide it. Added commit link, tests and wheel-fix.md evidence; returned to needs-verification. Shared app build remains blocked by concurrent model-picker changes. Thread entries left in working tree because landing only this append conflicts with pre-existing uncommitted entries; preserved all entries.

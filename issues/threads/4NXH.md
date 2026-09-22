@@ -96,3 +96,6 @@ Owner authorized landing the earlier session's draft: "Include the existing plan
 <!-- relay:entry 20260921T124515Z-d0 author=codex kind=evidence -->
 ### Codex · 2026-09-21 12:45
 Landed implementation, approved plan/thread and needs-verification evidence in 590829dc9a39fdcdea6f5c3e6d685e4c0f45c3ae; linked the implementation commit.
+
+<!-- relay:entry 20260922T013953Z-1s author=agent kind=evidence -->
+Check · 2 missing-evidence, 1 not-applicable, 5 passed; 3 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

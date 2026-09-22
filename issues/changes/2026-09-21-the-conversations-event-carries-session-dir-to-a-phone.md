@@ -1,9 +1,11 @@
 ---
 id: SDR1
 type: work
-status: inbox
+status: executing
 labels: [bug, remote]
 component: [remote]
+assignee: codex
+priority: 1
 rank: m
 created: '2026-09-21'
 source: 'Claude Code session on #SWPH, 2026-09-21: found by the hosted drive while grepping every frame the phone decrypted for machine paths'
@@ -19,3 +21,12 @@ passed for every `board_event`, and while making it the drive saw that the pane 
 the owner's data directory. It predates #SWPH. The forwarding filter in `remote/wire.py` /
 `remote/host.py` should strip it (the phone opens a conversation by the per-publish token in
 `pane_state`, never by a path), with a test that greps a forwarded `conversations` for `/`.
+
+## Done means
+Forwarded conversations events and replay contain no session_dir, while usable conversation metadata is preserved; regression covers the actual outbound stream.
+
+## Execution Summary
+Scrub local conversation metadata before inserting an event into the replay ring or forwarding it. Preserve conversation titles and IDs without mutating the desktop's original event. Real-socket regression checks live forwarding and replay.
+
+## Tests
+- `tests/test_remote_gui_host.py::ComposeTests::test_conversation_locations_never_enter_wire_or_replay`
