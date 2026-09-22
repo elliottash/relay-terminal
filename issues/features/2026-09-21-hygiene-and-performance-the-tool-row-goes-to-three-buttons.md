@@ -9,7 +9,7 @@ parent: YZ8G
 rank: zzzzzzzzzzzzzzzzf
 created: '2026-09-21'
 source: 'owner, 2026-09-21'
-links: {plans: [], commits: [e325845d59af145ea6b692d38e7c526ad48b9f2e], evidence: [docs/qa_evidence/2026-09-21-sw1d/], related: [YZ8G, 1CXD, SJTR], github: null}
+links: {plans: [], commits: [e325845d59af145ea6b692d38e7c526ad48b9f2e, 7133156a0d1955c4ecf35c68ac705b2cd4a218d0], evidence: [docs/qa_evidence/2026-09-21-sw1d/], related: [YZ8G, 1CXD, SJTR], github: null}
 ---
 # Hygiene and Performance: the board's tool row goes from four buttons to three
 

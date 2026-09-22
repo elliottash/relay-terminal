@@ -33,3 +33,9 @@ pane chrome title. All 87 board cases and all four targeted CTest suites pass; r
 20260922T013718Z-2031 opens no signals. GUI screenshot 04-performance-pane.png confirms the
 actual pane title. Tests check retains only an advisory historical board-suite speed notice.
 Preserved parent verify-brief assertions; card remains needs-verification.
+
+<!-- relay:entry 20260922T030003Z-s2 author=codex kind=evidence -->
+### Codex · 2026-09-22 03:00
+Follow-up landed 7133156a0d1955c4ecf35c68ac705b2cd4a218d0. Exact-tree application build passed;
+isolated-tree board and panestatus suites also passed 2/2 (2.37 seconds). All parent-owned
+changes were preserved. Shared combined four-suite run and GUI evidence are recorded above.
