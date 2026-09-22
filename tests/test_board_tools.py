@@ -795,6 +795,25 @@ class SignatureTests(BoardToolsTest):
         self.assertIn("verified_by", B.FIELD_ORDER)          # and it survives a rewrite of the file
         self.assertEqual(self.board.check(), [])
 
+    def test_verifier_updates_and_qa_transition_preserve_the_implementer(self):
+        self.sign("anthropic", "claude-fable-5.1")
+        self.tools.run("board_move_card", {"id": self.card_id, "status": "needs-verification",
+                                           "reason": "implemented"})
+
+        self.sign("kimi-code", "k3")
+        current = self.tools.run("board_read", {"id": self.card_id})["hash"]
+        self.tools.run("board_update_card", {
+            "id": self.card_id, "base_hash": current,
+            "replace_section": {"heading": "QA checklist", "text": "all checks passed"}})
+        self.assertEqual(self.board.card_by_id(self.card_id).front["implemented_by"],
+                         "anthropic/claude-fable-5.1")
+
+        self.tools.run("board_move_card", {
+            "id": self.card_id, "status": "needs-qa-llm", "reason": "verified",
+            "evidence": "docs/qa_evidence/x/", "implemented_by": "kimi/kimi-k3"})
+        self.assertEqual(self.board.card_by_id(self.card_id).front["implemented_by"],
+                         "anthropic/claude-fable-5.1")
+
     def _with_verdict(self):
         current = self.tools.run("board_read", {"id": self.card_id})["hash"]
         self.tools.run("board_update_card", {"id": self.card_id, "base_hash": current,

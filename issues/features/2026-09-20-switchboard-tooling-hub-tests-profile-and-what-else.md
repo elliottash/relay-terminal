@@ -1,15 +1,15 @@
 ---
 id: 7BM4
 type: work
-status: ready
+status: needs-verification
 labels: [feature, switchboard, tests, profiling]
 component: [gui, worker]
 assignee: codex
-implemented_by: anthropic/claude-fable-5.1
+implemented_by: openai/gpt-5.6-sol via codex
 rank: zzzzzzzzzzzzzzzy
 created: '2026-09-20'
 source: owner, Claude Code session, 2026-09-20
-links: {plans: [], commits: [c8b0a8d2, 912ab11a, eb0a9b76, 4ac7b57d, 71355e7a, db035cfd, 5e306871, 8ad92248, 6348ebef, 6bb87f04, cf7d1a5f, 97a019fc, 0152697f, f56a6ea0, 432a17f0, a10bb2a4, fd45d116, f86266da, b81c861a, fd7a9a71, 936bc28a, 4818709e, 2bd23344, e34b1df6, 21f5b001, 20c4e29e, d8b255157167a80c2693833019a8964bce6d0330, 0014fa103f756ab06b0fd4670ec256626eb19ac3, 34030318c2d20632c979787895d765026f37083f], evidence: [docs/qa_evidence/2026-09-21-verify-7BM4/report.md, docs/qa_evidence/2026-09-20-test-suites-pane/, docs/qa_evidence/2026-09-20-card-tests-check/, docs/qa_evidence/2026-09-20-profile-button/, docs/qa_evidence/2026-09-20-switchboard-tooling-hub/HUMAN-QA.md, docs/qa_evidence/2026-09-21-7BM4-repair/, docs/qa_evidence/2026-09-21-verify-7BM4/], related: [R9G7, SDXE, PF4K, YZ8G, 561P], github: null}
+links: {plans: [], commits: [c8b0a8d2, 912ab11a, eb0a9b76, 4ac7b57d, 71355e7a, db035cfd, 5e306871, 8ad92248, 6348ebef, 6bb87f04, cf7d1a5f, 97a019fc, 0152697f, f56a6ea0, 432a17f0, a10bb2a4, fd45d116, f86266da, b81c861a, fd7a9a71, 936bc28a, 4818709e, 2bd23344, e34b1df6, 21f5b001, 20c4e29e, d8b255157167a80c2693833019a8964bce6d0330, 0014fa103f756ab06b0fd4670ec256626eb19ac3, 34030318c2d20632c979787895d765026f37083f], evidence: [docs/qa_evidence/2026-09-21-verify-7BM4/report.md, docs/qa_evidence/2026-09-20-test-suites-pane/, docs/qa_evidence/2026-09-20-card-tests-check/, docs/qa_evidence/2026-09-20-profile-button/, docs/qa_evidence/2026-09-20-switchboard-tooling-hub/HUMAN-QA.md, docs/qa_evidence/2026-09-21-7BM4-repair/, docs/qa_evidence/2026-09-21-verify-7BM4/, docs/qa_evidence/2026-09-21-7BM4-attribution/], related: [R9G7, SDXE, PF4K, YZ8G, 561P], github: null}
 ---
 # Switchboard as the project's tooling hub: a Tests section with Check, a Test suites pane, a Profile button, and what else fits
 
@@ -260,6 +260,12 @@ three phases touch no file that #R9G7 (deliver workflow) currently holds.
 - notice · unittest:tests.test_relay_profile — tests/test_relay_profile.py: 21 of 21 never ran here (test_ninja_log_becomes_a_per_output_table, test_an_output_built_twice_counts_once_at_its_last_time, test_an_empty_log_is_a_sentence_not_a_traceback…)
 - notice · unittest:tests.test_relay_profile — tests/test_relay_profile.py: 11 of 21 are skipped for good (test_it_succeeded_and_printed_where_it_wrote, test_the_five_files_are_there, test_the_summary_table_names_every_object…)
 history: thread
+### Implementer rerun 2026-09-21
+- `python3 -m unittest tests.test_board_tools.SignatureTests` — 11 passed.
+- `python3 -m unittest tests.test_board_tools` — 257 passed.
+- Six listed backend modules — 237 passed.
+- Four listed CTest suites — 4 passed.
+- `python3 scripts/relay-board.py check` — no diagnostic for #7BM4; repository-wide pre-existing diagnostics remain.
 ## QA checklist
 Independent verifier: gpt-6-astra via Codex (Relay a2), 2026-09-21 America/New_York.
 Checked revision: `0241d05ef19393e84c0ef98655c9687466a92efc`, clean archive export;
@@ -318,3 +324,10 @@ Details: fresh evidence `report.md`, `flow-summary.json`, and before/after `kimi
 
 ## Execution Summary
 Session handoff, 2026-09-21: a2 completed the real Verify → Try it → automated-answer sequence on clean 0241d05e, after GLM HTTP429 and a Kimi fallback. 237 backend tests, four GUI suites and fresh gate/history/profile/attachment scenarios passed. Full baseline report: docs/qa_evidence/2026-09-21-verify-7BM4/report.md (not an all-green verdict). Three baseline failures are already repaired: d8b25515 fixes desktop body truncation and clipped findings; 1f3a7af0 fixes lost prior Human QA. Parent clean-build repair proof: docs/qa_evidence/2026-09-21-7BM4-repair/ (177 backend tests, two GUI suites, 20-test long-card live drive). The verifier's baseline checklist is retained as historical evidence, not a claim the repaired revision still fails. Next: independently recheck the generated Try it handoff on exact repaired GUI/backend; fix/file the remaining verifier-identity overwrite in board_tools.py (_update/_move stamp implemented_by during verification); record missing Done means from original Issue/Decisions before any new implementation. All three original Human QA questions remain intact and unanswered. Do not close or invent owner answers. No verification process remains running.
+2026-09-21 attribution repair: `board_move_card` now preserves an existing `implemented_by` when a verifier moves the card into QA, while unsigned cards retain worker/guest stamping. Added a regression covering verifier section update plus QA transition. Evidence: `docs/qa_evidence/2026-09-21-7BM4-attribution/README.md`.
+
+## Done means
+- A card’s complete `## Tests` section remains visible and Check reports stale, slow, flaky, failed, and missing evidence clearly enough to gate an unproven completion, including on long cards.
+- The attached Test suites pane discovers the project’s tests and exposes run history, reliability, duration, failure detail, and card actions.
+- Profile offers build, tests, and app targets; a completed run shows its hotspot table and can attach durable evidence to a card.
+- Verification and Human QA updates preserve the original implementer attribution and all existing unanswered owner questions; failure is any silent attribution or question loss.

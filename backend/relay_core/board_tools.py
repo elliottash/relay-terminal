@@ -2317,9 +2317,11 @@ class BoardTools:
         # typed. It wins over the agent's `implemented_by` argument, which stays for the one case
         # the worker cannot know — a guest CLI writing through the bridge.
         mine = self.context.signature()
+        existing_implemented_by = str(card.front.get("implemented_by") or "").strip()
         stamped = ""
         if mine and (status in ("in-progress", "executing", "needs-verification")
-                     or (status in QA_STATUSES and old_status not in QA_STATUSES)):
+                     or (status in QA_STATUSES and old_status not in QA_STATUSES
+                         and not existing_implemented_by)):
             stamped = mine
             card.set("implemented_by", mine)
         if status in QA_STATUSES and old_status not in QA_STATUSES:
@@ -2328,7 +2330,7 @@ class BoardTools:
                     "Moving a card into a QA lane needs `evidence`: the path of the evidence folder "
                     "(docs/qa_evidence/<date>-<slug>/) recorded with the change.",
                     code="board_refused", requires="evidence")
-            implemented_by = stamped or args.get("implemented_by") or card.front.get("implemented_by")
+            implemented_by = stamped or card.front.get("implemented_by") or args.get("implemented_by")
             if not implemented_by:
                 raise BoardToolError(
                     "Moving a card into a QA lane needs `implemented_by`: the model that implemented "
@@ -2396,7 +2398,7 @@ class BoardTools:
                 paths.append(evidence)
             links["evidence"] = paths
             card.set("links", links)
-        if args.get("implemented_by") and not stamped:
+        if args.get("implemented_by") and not stamped and not existing_implemented_by:
             card.set("implemented_by", args["implemented_by"])
         if section_arg == "":
             card.drop("section")
