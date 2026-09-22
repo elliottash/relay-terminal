@@ -7,7 +7,7 @@ assignee: codex
 rank: zh26
 created: '2026-09-22'
 source: Codex in a Relay pane, 2026-09-22
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-debug-hygiene/report.md], related: [AQ6X, MSW7, YJG7, WEVT, SW1D, SJTR, 25XG], github: null}
+links: {plans: [], commits: [b1e58b5ee771dba09ce7fc541595dbb8ef5fa46d], evidence: [docs/qa_evidence/2026-09-22-debug-hygiene/report.md], related: [AQ6X, MSW7, YJG7, WEVT, SW1D, SJTR, 25XG], github: null}
 ---
 # Debug and hygiene workstream grounded in runtime logs and signals
 
