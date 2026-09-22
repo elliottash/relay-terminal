@@ -10,7 +10,8 @@ Card #M7RY, 2026-09-22. This is implementation evidence, not independent QA.
 - `python3 docs/qa_evidence/2026-09-22-user-memory/drive.py`: passed in Xvfb with isolated HOME/XDG/global memory and a scripted localhost provider. It opens Globals, clicks Interview me, checks that the Globals interview brief reaches the model, executes the real list/save tools, saves an explicitly requested preference, refreshes and selects it in the editor. See `result.json` and screenshots.
 - `git diff --check`: passed.
 - `python3 scripts/relay-board.py check --json`: no diagnostics for this card; checkout has 12 errors and 754 warnings in unrelated cards/threads at check time. No unrelated board records changed.
-- `TestsCommands('.', 'issues').check_card('M7RY')`: test references resolve except the newly added, not-yet-tracked test file is called retired before landing; test history has no registered run for app_tools. Direct command results above establish execution. Recheck discovery after landing.
+- `TestsCommands('.', 'issues').check_card('M7RY')`: test history has no registered run for app_tools. The repository-wide discovery cap incorrectly calls the new user-memory tests retired: discovery returns 5,000 entries (92 CTest + 4,908 unittest), `truncated: true`, while direct discovery of `tests/test_user_memory_tools.py` returns all four tests. Reproduced after landing; it is unrelated to tracking or this feature. Direct command results above establish execution.
+- Landed `6d8cbe29d48a65b8dbf28e3a6422145cc77d76fa`. The commit gate materialized the exact commit tree, built it and passed `ctest -R ^globalspane$` before advancing main.
 
 ## Screenshots
 

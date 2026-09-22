@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: mumry
 created: '2026-09-22'
 source: Codex in Relay, 2026-09-22
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-user-memory/], related: [Y2MP, P7SJ], github: null}
+links: {plans: [], commits: [6d8cbe29d48a65b8dbf28e3a6422145cc77d76fa], evidence: [docs/qa_evidence/2026-09-22-user-memory/], related: [Y2MP, P7SJ], github: null}
 ---
 # User memory research, review and interview in Globals
 
