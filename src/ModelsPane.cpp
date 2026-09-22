@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ModelsPane.h"
+#include "PaneTabNavigation.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -8,7 +9,6 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QTreeWidget>
-#include <QShortcut>
 #include <QSignalBlocker>
 #include <QStackedWidget>
 #include <QTabBar>
@@ -57,6 +57,7 @@ ModelsPane::ModelsPane(std::function<QList<SettingsSection>()> sections, QWidget
     m_tabs->setTabToolTip(2, QStringLiteral("Steps 3 and 4 — one section per class: its order, levels and box cutoffs"));
     m_tabs->setTabToolTip(3, QStringLiteral("What each job relay does runs on right now, and a model of its own for one"));
     layout->addWidget(m_tabs);
+    relay::paneTabs::registerTabs(this, m_tabs);
 
     m_pages = new QStackedWidget;
     layout->addWidget(m_pages, 1);
@@ -92,16 +93,6 @@ ModelsPane::ModelsPane(std::function<QList<SettingsSection>()> sections, QWidget
         showTab(m_tabs->tabData(index).toString());
     });
     m_tabs->installEventFilter(this);
-    // Alt+1…Alt+4 as **shortcuts**, not as an event filter: the providers tab is a whole
-    // `SettingsPane` with a search line of its own, and a filter installed on that pane never sees
-    // what its QLineEdit swallows — the first Xvfb run typed "2" into the search box instead of
-    // changing tab. A WidgetWithChildren shortcut fires wherever the focus is inside this pane.
-    for (int i = 0; i < tabIds().size(); ++i) {
-        auto *jump = new QShortcut(QKeySequence(Qt::ALT | (Qt::Key_1 + i)), this);
-        jump->setContext(Qt::WidgetWithChildrenShortcut);
-        const QString id = tabIds().at(i);
-        connect(jump, &QShortcut::activated, this, [this, id] { showTab(id); focusFilter(); });
-    }
     updateHeader();
     // Priorities is the tab a pick is made on, so it is where the key lands by default; the window
     // asks for providers on a first run, where there is nothing to pick yet.
@@ -263,24 +254,11 @@ void ModelsPane::stepTab(int delta) {
     focusFilter();
 }
 
-// There is one row of tabs now: **Alt+1 … Alt+4**, and ←/→ as well. The priorities page used to
-// carry a second row, one tab per class, which took ←/→ for itself; since it became one page of
-// sections (card #MDL1, owner 2026-09-21) nothing below this row wants the arrows, so they walk
-// these tabs everywhere the caret is not in typed filter text.
-//
-// Not Ctrl+Tab, which is the window's **Next tab** (Keymap `tab.next`) and never reaches a pane:
-// a first Xvfb run of this pane pressed it three times and stayed on the same tab.
+// Left/Right retain the existing pane navigation wherever a text caret or model row
+// does not need them. Tab navigation is registered with the shared pane convention.
 bool ModelsPane::handleShortcut(QKeyEvent *event) {
     const Qt::KeyboardModifiers mods = event->modifiers();
     const int key = event->key();
-    // The same tabs, for the controls this pane filters directly. The QShortcut above is
-    // what covers the providers tab's own search line; this is what answers where there is no
-    // active window for a shortcut to match against, which is every headless test.
-    if ((mods & Qt::AltModifier) && key >= Qt::Key_1 && key < Qt::Key_1 + tabIds().size()) {
-        showTab(tabIds().at(key - Qt::Key_1));
-        focusFilter();
-        return true;
-    }
     if (mods != Qt::NoModifier || (key != Qt::Key_Left && key != Qt::Key_Right)) return false;
     // Only where nothing below is using them: in a filter line with text in it they are the
     // caret's, and a row's → opens its providers (the picker answers both itself).

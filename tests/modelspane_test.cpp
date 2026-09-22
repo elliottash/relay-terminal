@@ -14,6 +14,7 @@
 // dialog — `customizeAsksTheHostForTheProvidersPage` in the widget's own test is what is left of
 // it, and `providersIsWhereCustomizeGoes` below is this pane's half.
 #include "ModelsPane.h"
+#include "PaneTabNavigation.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -25,6 +26,8 @@
 #include <QListWidget>
 #include <QPushButton>
 #include <QSettings>
+#include <QShortcut>
+#include <QRegularExpression>
 #include <QTabBar>
 #include <QTemporaryDir>
 #include <QTest>
@@ -219,20 +222,22 @@ private Q_SLOTS:
         QCOMPARE(pane.tier(), QStringLiteral("main"));
     }
 
-    // Two rows of tabs, a key each. **Not Ctrl+Tab**: that is the window's Next tab (Keymap
-    // `tab.next`) and never reaches a pane — the first Xvfb run of this pane pressed it three
-    // times and stayed where it was (docs/qa_evidence/2026-09-21-models-pane).
-    void altDigitsWalkTheThreeTabsAndCtrlTabIsTheWindows() {
+    // Alt+digits are reserved for future use, even when there is no window shortcut handler.
+    void altDigitsAreUnclaimedAndArrowsStillWalkTabs() {
         Served served;
         ModelsPane pane(providerSections());
         pane.setTarget(targetFor(&served));
         pane.showTab(ModelsPane::providersTab());
-        QTest::keyClick(&pane, Qt::Key_2, Qt::AltModifier);
-        QCOMPARE(pane.currentTab(), QStringLiteral("available"));
-        QTest::keyClick(&pane, Qt::Key_3, Qt::AltModifier);
-        QCOMPARE(pane.currentTab(), QStringLiteral("priorities"));
-        QTest::keyClick(pane.picker()->filter(), Qt::Key_1, Qt::AltModifier);
-        QCOMPARE(pane.currentTab(), QStringLiteral("providers"));
+        for (int key = Qt::Key_0; key <= Qt::Key_9; ++key) {
+            QKeyEvent digit(QEvent::KeyPress, key, Qt::AltModifier);
+            QCoreApplication::sendEvent(&pane, &digit);
+            QVERIFY(!digit.isAccepted());
+            QCOMPARE(pane.currentTab(), ModelsPane::providersTab());
+        }
+        for (auto *shortcut : pane.findChildren<QShortcut *>()) {
+            const QString key = shortcut->key().toString(QKeySequence::PortableText);
+            QVERIFY2(!QRegularExpression(QStringLiteral("^Alt\\+[0-9]$")).match(key).hasMatch(), qPrintable(key));
+        }
         // Ctrl+Tab is left alone wherever it is pressed.
         QTest::keyClick(&pane, Qt::Key_Tab, Qt::ControlModifier);
         QCOMPARE(pane.currentTab(), QStringLiteral("providers"));
@@ -243,6 +248,21 @@ private Q_SLOTS:
         QCOMPARE(pane.currentTab(), QStringLiteral("priorities"));
         QTest::keyClick(pane.picker()->filter(), Qt::Key_Right);
         QCOMPARE(pane.currentTab(), ModelsPane::jobsTab());
+    }
+
+    void sharedTabNavigationUsesTheModelsBar() {
+        Served served;
+        ModelsPane pane(providerSections());
+        pane.setTarget(targetFor(&served));
+        pane.showTab(ModelsPane::prioritiesTab());
+        pane.resize(1000, 700);
+        pane.show();
+        QKeyEvent next(QEvent::KeyPress, Qt::Key_Tab, Qt::NoModifier);
+        QVERIFY(relay::paneTabs::handle(pane.picker()->filter(), &next));
+        QCOMPARE(pane.currentTab(), ModelsPane::jobsTab());
+        QKeyEvent previous(QEvent::KeyPress, Qt::Key_Backtab, Qt::ShiftModifier);
+        QVERIFY(relay::paneTabs::handle(pane.jobs()->list(), &previous));
+        QCOMPARE(pane.currentTab(), ModelsPane::prioritiesTab());
     }
 
     // "fill from defaults" is two buttons the picker makes in its constructor, so a target that
@@ -399,9 +419,9 @@ private Q_SLOTS:
 
     // ----- the fourth tab: what each job runs on (card #MDL1, design 5.9) ---------------------
 
-    // Alt+4 reaches it wherever the focus is in the pane, and it is handed the worker's report
-    // rather than any state of its own — `Target::roleSummary` is the "runs on" column.
-    void altFourIsTheJobsTabAndItDrawsTheWorkersReport() {
+    // The jobs tab is handed the worker's report rather than state of its own;
+    // `Target::roleSummary` is the "runs on" column.
+    void jobsTabDrawsTheWorkersReport() {
         Served served;
         ModelsPane pane(providerSections());
         ModelsPane::Target target = targetFor(&served);
@@ -411,12 +431,12 @@ private Q_SLOTS:
                                                       {QStringLiteral("effort"), QStringLiteral("low")}}}};
         target.rolesChanged = [&served] { ++served.listEdits; };
         pane.setTarget(target);
-        QKeyEvent alt4(QEvent::KeyPress, Qt::Key_4, Qt::AltModifier);
-        QCoreApplication::sendEvent(&pane, &alt4);
+        pane.showTab(ModelsPane::jobsTab());
+        pane.focusFilter();
         QCOMPARE(pane.currentTab(), ModelsPane::jobsTab());
         QVERIFY(pane.jobs() != nullptr);
         QCOMPARE(pane.jobs()->runsOn(QStringLiteral("summaries")), QStringLiteral("glm-5.3-flash · low"));
-        // The keyboard lands on the list, not on a filter line the tab does not have.
+        // Focusing the jobs page selects its main role.
         QCOMPARE(pane.jobs()->currentRole(), QStringLiteral("main"));
     }
 
