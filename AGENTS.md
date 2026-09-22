@@ -2,6 +2,13 @@
 
 @CLAUDE.md
 
+## Building Relay
+
+Read `docs/BUILDING.md` before building Relay or producing a package. It is the canonical map for
+developer builds, Linux packages, the native Windows installer, native macOS disk images, and the
+release workflows. In this shared checkout, use `scripts/relay-build` for local Linux builds as
+described there; do not invoke `cmake --build` directly.
+
 <!-- The import(s) above are this project's own instructions. They are imported rather than
      repeated because a tool that reads AGENTS.md instead of CLAUDE.md would otherwise miss
      them: Relay takes the first instruction file it finds per directory
