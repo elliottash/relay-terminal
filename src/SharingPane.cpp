@@ -495,7 +495,6 @@ ChipState Model::chip(const QString &pane, bool phone) const
         return state;
     }
     if (guests == 0) {
-        state.text = QStringLiteral("phone");
         state.tooltip = QStringLiteral(
             "Shared with your phone: it sees this pane and can type into it.\n"
             "The share chip under the prompt box shows the code or stops it.");

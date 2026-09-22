@@ -266,7 +266,7 @@ void SharingTest::theOwnersOwnPhoneIsADriverToo()
     // The keyboard coming back to the desktop clears it — `control` carries no device then.
     model.setControl(QStringLiteral("p1"), QStringLiteral("owner"), QStringLiteral("this desktop"));
     QVERIFY(model.deviceDriverOn(QStringLiteral("p1")).isEmpty());
-    QCOMPARE(model.chip(QStringLiteral("p1"), true).text, QStringLiteral("phone"));
+    QVERIFY(model.chip(QStringLiteral("p1"), true).text.isEmpty());
 }
 
 void SharingTest::removingSomeoneTakesTheirQuestions()
@@ -312,9 +312,11 @@ void SharingTest::theChipSaysWhatIsGoingOn()
     model.setSharedPanes({{QStringLiteral("p1"), QStringLiteral("build")}});
     // Not shared at all: no chip.
     QVERIFY(model.chip(QStringLiteral("p1"), false).text.isEmpty());
-    // Shared, nobody else on it: the phone chip that was there before multiplayer.
-    QCOMPARE(model.chip(QStringLiteral("p1"), true).text, QStringLiteral("phone"));
-    QVERIFY(!model.chip(QStringLiteral("p1"), true).guestDriving);
+    // Shared, nobody else on it: the phone glyph is sufficient, so its display text is empty.
+    const ChipState phoneOnly = model.chip(QStringLiteral("p1"), true);
+    QVERIFY(phoneOnly.text.isEmpty());
+    QVERIFY(phoneOnly.tooltip.contains(QStringLiteral("Shared with your phone")));
+    QVERIFY(!phoneOnly.guestDriving);
 
     model.setParticipants(items(R"([{"id":"a1","name":"alice","role":"editor","panes":["p1"]}])"), {});
     QCOMPARE(model.chip(QStringLiteral("p1"), true).text, QStringLiteral("1 guest"));

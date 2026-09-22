@@ -109,7 +109,7 @@ struct ShareOptions {
 
 // What the pane's own header says. Empty when this pane is not shared at all.
 struct ChipState {
-    QString text;            // "phone", "2 guests", "alice is typing"
+    QString text;            // empty for icon-only, otherwise "2 guests" or "alice is typing"
     QString tooltip;
     bool guestDriving = false;
 };

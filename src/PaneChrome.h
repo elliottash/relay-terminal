@@ -864,7 +864,7 @@ public:
     // title row — because it means the same thing: the keys landing here are not yours.
     void setSharing(const QString &text, const QString &tooltip, bool guestDriving) {
         if (!m_phoneChip) return;
-        m_phoneChip->setText(text.isEmpty() ? QStringLiteral("phone") : text);
+        m_phoneChip->setText(text);
         m_phoneChip->setToolTip(tooltip);
         if (guestDriving == m_guestDriving) return;
         m_guestDriving = guestDriving;
@@ -935,7 +935,6 @@ private:
         m_usageChip = new PaneUsageChip(pane);
         m_remoteChip = new PaneHeaderChip(relay::panestatus::Glyph::Remote);
         m_phoneChip = new PaneHeaderChip(relay::panestatus::Glyph::Phone);
-        m_phoneChip->setText(QStringLiteral("phone"));
         m_phoneChip->setToolTip(QStringLiteral("Shared with your phone: it sees this pane and can type into it.\n"
                                                "The share button beside the folder in the prompt shows sharing controls."));
         m_remoteChip->hide(); m_phoneChip->hide();
@@ -1027,7 +1026,8 @@ private:
         QTimer *m_pulse = nullptr;
     };
 
-    // "⇄ me@box" and "phone" in the title row: a glyph and a word on a small outlined chip.
+    // "⇄ me@box" and the phone indicator in the title row: an outlined glyph, with text only
+    // when sharing state has something more specific to say.
     class PaneHeaderChip final : public QWidget {
     public:
         explicit PaneHeaderChip(relay::panestatus::Glyph glyph) : m_glyph(glyph) {
@@ -1036,8 +1036,7 @@ private:
         }
         // The chip's own text, and — rung 4 of the ladder — the host on its own, which is what is
         // left of an "me@box" once the header cannot keep the chip at its 150 px floor. It is
-        // derived here rather than passed in, so the phone chip, whose text has no `@` in it, has
-        // one form and never gives way.
+        // derived here rather than passed in, so the phone chip has one form and never gives way.
         void setText(const QString &text) {
             if (m_text == text) return;
             m_text = text;
