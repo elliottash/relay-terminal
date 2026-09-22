@@ -23,12 +23,16 @@ def check_shell(resources, env, root, evidence):
     runtime.mkdir()
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 30, 120, 0, 0))
-    shellenv = dict(env, TERM='xterm-256color', RELAY_RUNTIME_DIR=str(runtime),
+    prompt = b'RELAY_INSTALLED_SMOKE> '
+    shellenv = dict(env, TERM='xterm-256color', PS1=prompt.decode(), RELAY_RUNTIME_DIR=str(runtime),
                     RELAY_START_DIR=str(root), RELAY_SESSION_TOKEN='installed-smoke',
                     RELAY_SHELL_EVENT=str(resources / 'relay/shell/event.py'))
+    def controlling_terminal():
+        os.setsid()
+        fcntl.ioctl(0, termios.TIOCSCTTY, 0)
     shell = subprocess.Popen([str(resources / 'bash/bin/bash'), '--noprofile', '--rcfile',
                               str(resources / 'relay/shell/integration.bash'), '-i'],
-                             stdin=slave, stdout=slave, stderr=slave, env=shellenv, cwd=root)
+                             stdin=slave, stdout=slave, stderr=slave, env=shellenv, cwd=root, preexec_fn=controlling_terminal)
     os.close(slave)
     output = bytearray()
     def wait(stage):
@@ -45,20 +49,41 @@ def check_shell(resources, env, root, evidence):
             if shell.poll() is not None:
                 raise RuntimeError(f'Bundled Bash exited {shell.returncode}: {output!r}')
         raise RuntimeError(f'Bundled Bash did not emit {stage}: {output!r}')
+    def wait_prompt(start):
+        deadline = time.monotonic() + 20
+        while prompt not in output[start:]:
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f'Bundled Bash did not render its input prompt: {output!r}')
+            if select.select([master], [], [], .05)[0]:
+                output.extend(os.read(master, 65536))
     try:
         wait('ready')
+        wait_prompt(0)
         command = "printf 'héllo 世界\\n' > composer-result.txt\nfalse".encode()
         (runtime / 'input.txt').write_bytes(command)
         os.write(master, b'\x18\x12')
         state = wait('loaded')
         assert state['input_sha256'] == hashlib.sha256(command).hexdigest(), state
         assert not (root / 'composer-result.txt').exists(), 'Composer executed before acknowledgement'
+        prompt_start = len(output)
         os.write(master, b'\r')
         state = wait('ready')
         assert state['status'] == 1, state
         assert (root / 'composer-result.txt').read_text() == 'héllo 世界\n'
+        # Ready is emitted inside PROMPT_COMMAND, before Readline switches terminal
+        # modes. Wait for its actual prompt so a terminal input flush cannot eat exit.
+        wait_prompt(prompt_start)
         os.write(master, b'exit 0\r')
-        if shell.wait(timeout=10) != 0:
+        deadline = time.monotonic() + 10
+        while shell.poll() is None and time.monotonic() < deadline:
+            if select.select([master], [], [], .05)[0]:
+                try:
+                    data = os.read(master, 65536)
+                    if data:
+                        output.extend(data)
+                except OSError:
+                    break  # Linux reports EIO when the PTY slave closes.
+        if shell.wait(timeout=1) != 0:
             raise RuntimeError('Bundled Bash did not exit normally')
     finally:
         if shell.poll() is None:
