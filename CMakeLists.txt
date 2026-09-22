@@ -566,8 +566,8 @@ option(RELAY_BUILD_ENGINE_SPIKE "Deprecated alias for RELAY_BUILD_ENGINE" OFF)
 add_subdirectory(engine)
 
 if(RELAY_BUILD_APP)
-    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT WIN32)
-        message(FATAL_ERROR "Relay currently supports Linux and Windows.")
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT WIN32 AND NOT APPLE)
+        message(FATAL_ERROR "Relay supports Linux, Windows and macOS.")
     endif()
     # main.cpp was split into one header per unit on 2026-09-18 (scripts/split-main.py); it is
     # still one translation unit -- main.cpp includes them -- and they are listed so AUTOMOC and
@@ -605,10 +605,16 @@ if(RELAY_BUILD_APP)
     if(WIN32)
         set_target_properties(relay PROPERTIES WIN32_EXECUTABLE TRUE)
         target_link_libraries(relay-paneusage PRIVATE psapi)
+    elseif(APPLE)
+        set_target_properties(relay PROPERTIES MACOSX_BUNDLE TRUE
+            MACOSX_BUNDLE_GUI_IDENTIFIER "org.relayterminal.Relay"
+            MACOSX_BUNDLE_BUNDLE_NAME "Relay"
+            MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+            MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}")
     else()
         target_link_options(relay PRIVATE -rdynamic)
     endif()
-    install(TARGETS relay RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(TARGETS relay RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} BUNDLE DESTINATION .)
     # The build id (owner, 2026-09-19): 2026-09-19.14H.01 — the date, the hour, the count that hour.
     # POST_BUILD runs exactly when `relay` was relinked, so the number counts real builds; it is
     # written beside the binary (relay.build-id), which the app reads when it starts and shows in
@@ -659,7 +665,7 @@ if(RELAY_BUILD_APP)
     install(PROGRAMS scripts/relay-open scripts/relay-agent.py scripts/relay-local.py scripts/relay-update.py DESTINATION ${CMAKE_INSTALL_DATADIR}/relay/scripts)
     install(FILES packaging/org.relayterminal.Relay.metainfo.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo)
     install(FILES README.md packaging/copyright DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/relay)
-    if(NOT WIN32)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         include(packaging/cpack.cmake)
     endif()
 endif()

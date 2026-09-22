@@ -147,6 +147,7 @@
 #include <QListWidget>
 #include <QTreeWidget>
 #include <QToolButton>
+#include "SshConfig.h"
 #include <QToolTip>
 #include <QHelpEvent>
 #include <QTimer>
@@ -160,7 +161,7 @@
 #ifndef Q_OS_WIN
 #include <sys/stat.h>
 #endif
-#ifndef Q_OS_WIN
+#ifdef Q_OS_LINUX
 #include <sys/syscall.h>
 #endif
 #include <algorithm>
@@ -2152,11 +2153,7 @@ public:
             if (fallback <= 0 || fallback == shell) return {};
             group = fallback;
         }
-        QFile file(QStringLiteral("/proc/%1/cmdline").arg(group));
-        if (!file.open(QIODevice::ReadOnly)) return {};
-        QByteArray raw = file.read(4096);
-        while (raw.endsWith('\0')) raw.chop(1);
-        QString line = QString::fromLocal8Bit(raw.replace('\0', ' ')).simplified();
+        QString line = relay::ssh::processArgv(int(group)).join(QLatin1Char(' ')).simplified();
         if (line.size() > 200) line = line.left(200) + QStringLiteral("…");
         return line;
     }
@@ -10810,7 +10807,7 @@ private:
             QStringLiteral("-NoExit"), QStringLiteral("-ExecutionPolicy"), QStringLiteral("Bypass"),
             QStringLiteral("-File"), m_data + QStringLiteral("/shell/integration.ps1")};
 #else
-        const QStringList shell{QStringLiteral("/bin/bash"), QStringLiteral("--noprofile"),
+        const QStringList shell{relayBash(), QStringLiteral("--noprofile"),
             QStringLiteral("--rcfile"), m_data + QStringLiteral("/shell/integration.bash"), QStringLiteral("-i")};
 #endif
         m_shellUnit.clear();
@@ -16451,13 +16448,7 @@ private:
         long group = shell > 0 ? foregroundGroup(shell) : -1;
         if (group <= 0 || group == shell) group = foregroundPid();
         if (group <= 0 || group == shell) return {};
-        QFile file(QStringLiteral("/proc/%1/cmdline").arg(group));
-        if (!file.open(QIODevice::ReadOnly)) return {};
-        QByteArray raw = file.read(16384);
-        if (raw.endsWith('\0')) raw.chop(1);
-        QStringList argv;
-        for (const QByteArray &part : raw.split('\0')) argv << QString::fromLocal8Bit(part);
-        return argv;
+        return relay::ssh::processArgv(int(group));
     }
 
     // The prompt box types into the login instead of routing to the local shell.
@@ -16938,8 +16929,8 @@ private:
     // /proc/<pid>/syscall needs ptrace access, so programs running as another user (sudo) are
     // not visible here.
     bool programWaitingForInput() const {
-#ifdef Q_OS_WIN
-        return false; // No Windows API exposes another process's pending console read.
+#ifndef Q_OS_LINUX
+        return false; // Pending reads are inspected through Linux procfs only.
 #else
         if (!m_backend) return false;
         const int shell = shellPid();
@@ -17678,13 +17669,18 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
 #ifndef Q_OS_WIN
         struct stat info;
         if (::stat(QFile::encodeName(statePath).constData(), &info) != 0) return;
+#ifdef Q_OS_MACOS
+        const timespec modified = info.st_mtimespec;
+#else
+        const timespec modified = info.st_mtim;
+#endif
         if (m_stateSeen && info.st_ino == m_stateInode && info.st_size == m_stateSize
-            && info.st_mtim.tv_sec == m_stateMtime.tv_sec && info.st_mtim.tv_nsec == m_stateMtime.tv_nsec) return;
+            && modified.tv_sec == m_stateMtime.tv_sec && modified.tv_nsec == m_stateMtime.tv_nsec) return;
 #endif
         QFile file(statePath);
         if (!file.open(QIODevice::ReadOnly) || file.size() > 1024 * 1024) return;
 #ifndef Q_OS_WIN
-        m_stateSeen = true; m_stateInode = info.st_ino; m_stateSize = info.st_size; m_stateMtime = info.st_mtim;
+        m_stateSeen = true; m_stateInode = info.st_ino; m_stateSize = info.st_size; m_stateMtime = modified;
 #endif
         const auto event = QJsonDocument::fromJson(file.readAll()).object();
         file.close(); // Allow Windows shell events to atomically replace state.json.

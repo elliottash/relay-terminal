@@ -6427,6 +6427,11 @@ public:
     // UPDATED marker, Relay restarts itself: the new binary is started first, then the windows
     // close through their ordinary path so layout and scrollback are saved for it to reopen.
     void updateApp() {
+#ifdef Q_OS_MACOS
+        QDesktopServices::openUrl(QUrl(QStringLiteral("https://relay-terminal.ai/#install")));
+        notice(QStringLiteral("Download the macOS disk image to update Relay."));
+        return;
+#endif
 #ifdef Q_OS_WIN
         QDesktopServices::openUrl(QUrl(QStringLiteral("https://relay-terminal.ai/#install")));
         notice(QStringLiteral("Download the Windows installer to update Relay."));

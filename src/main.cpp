@@ -132,7 +132,7 @@
 #ifndef Q_OS_WIN
 #include <sys/stat.h>
 #endif
-#ifndef Q_OS_WIN
+#ifdef Q_OS_LINUX
 #include <sys/syscall.h>
 #endif
 #include <algorithm>
@@ -169,8 +169,8 @@
 // Install a user-level x-scheme-handler/relay entry that runs relay-open (idempotent, silent;
 // one status message the first time). RELAY_NO_URL_HANDLER=1 skips it.
 static void registerUrlHandler() {
-#ifdef Q_OS_WIN
-    return; // The per-user installer registers relay:// with the private Python runtime.
+#if defined(Q_OS_WIN) || defined(Q_OS_MACOS)
+    return; // The installer or app bundle registers relay://.
 #endif
     if (qEnvironmentVariableIntValue("RELAY_NO_URL_HANDLER")) return;
     const QString helper = qEnvironmentVariable("RELAY_OPEN_HELPER");
@@ -266,7 +266,17 @@ static void quitSignalHandler(int) {
 }
 
 static void installQuitSignals(QCoreApplication &app) {
+#ifdef Q_OS_MACOS
+    if (::pipe(g_quitPipe) != 0) return;
+    for (const int fd : g_quitPipe) {
+        if (::fcntl(fd, F_SETFD, FD_CLOEXEC) < 0 || ::fcntl(fd, F_SETFL, O_NONBLOCK) < 0) {
+            ::close(g_quitPipe[0]); ::close(g_quitPipe[1]);
+            return;
+        }
+    }
+#else
     if (::pipe2(g_quitPipe, O_CLOEXEC | O_NONBLOCK) != 0) return;
+#endif
     auto *notifier = new QSocketNotifier(g_quitPipe[0], QSocketNotifier::Read, &app);
     QObject::connect(notifier, &QSocketNotifier::activated, &app, [] {
         char drained[16];
@@ -291,8 +301,41 @@ static void installQuitSignals(QCoreApplication &app) {
 static void installQuitSignals(QCoreApplication &) {} // Qt handles Windows session shutdown.
 #endif
 
+#ifdef Q_OS_MACOS
+#include <QFileOpenEvent>
+class RelayMacApplication : public QApplication {
+public:
+    using QApplication::QApplication;
+    bool event(QEvent *event) override {
+        if (event->type() == QEvent::FileOpen) {
+            const QUrl url = static_cast<QFileOpenEvent *>(event)->url();
+            if (url.scheme() == QStringLiteral("relay")) {
+                QProcess::startDetached(relayPython(),
+                    {dataRoot() + QStringLiteral("/scripts/relay-open"), url.toString()});
+                return true;
+            }
+        }
+        return QApplication::event(event);
+    }
+};
+#endif
+
 int main(int argc, char **argv) {
+#ifdef Q_OS_MACOS
+    RelayMacApplication app(argc, argv);
+    qputenv("RELAY_THEME_DIR", (QCoreApplication::applicationDirPath() + QStringLiteral("/../Resources/relay/theme")).toUtf8());
+    qputenv("RELAY_PYTHON", relayPython().toUtf8());
+    qputenv("RELAY_BASH", relayBash().toUtf8());
+    qputenv("PYTHONDONTWRITEBYTECODE", "1");
+    const QString privateSites = QCoreApplication::applicationDirPath()
+        + QStringLiteral("/../Resources/python/lib/python3.13/site-packages");
+    if (QDir(privateSites).exists()) {
+        const QString existing = qEnvironmentVariable("PYTHONPATH");
+        qputenv("PYTHONPATH", (privateSites + (existing.isEmpty() ? QString() : QDir::listSeparator() + existing)).toUtf8());
+    }
+#else
     QApplication app(argc, argv);
+#endif
 #ifdef Q_OS_WIN
     if (qEnvironmentVariableIsEmpty("XDG_DATA_HOME"))
         qputenv("XDG_DATA_HOME", QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation).toUtf8());

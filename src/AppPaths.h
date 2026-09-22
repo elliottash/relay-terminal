@@ -37,8 +37,27 @@ inline QString relayPython() {
     const QString configured = qEnvironmentVariable("RELAY_PYTHON");
     if (!configured.isEmpty() && QFileInfo::exists(configured)) return configured;
     return QStandardPaths::findExecutable(QStringLiteral("python.exe"));
+#elif defined(Q_OS_MACOS)
+    const QString bundled = QCoreApplication::applicationDirPath() + QStringLiteral("/../Resources/python/bin/python3");
+    if (QFileInfo::exists(bundled)) return QDir::cleanPath(bundled);
+    const QString configured = qEnvironmentVariable("RELAY_PYTHON");
+    if (!configured.isEmpty() && QFileInfo::exists(configured)) return configured;
+    return QStandardPaths::findExecutable(QStringLiteral("python3"));
 #else
     return QStandardPaths::findExecutable(QStringLiteral("python3"));
+#endif
+}
+inline QString relayBash() {
+#ifdef Q_OS_MACOS
+    const QString bundled = QCoreApplication::applicationDirPath() + QStringLiteral("/../Resources/bash/bin/bash");
+    if (QFileInfo::exists(bundled)) return QDir::cleanPath(bundled);
+    const QString configured = qEnvironmentVariable("RELAY_BASH");
+    if (!configured.isEmpty() && QFileInfo::exists(configured)) return configured;
+    // macOS system Bash is 3.2; source builds need a modern Bash too.
+    return QStandardPaths::findExecutable(QStringLiteral("bash"),
+        {QStringLiteral("/opt/homebrew/bin"), QStringLiteral("/usr/local/bin")});
+#else
+    return QStringLiteral("/bin/bash");
 #endif
 }
 inline QString relayPowerShell() {
@@ -49,6 +68,9 @@ inline QString relayPowerShell() {
 
 inline QString dataRoot() {
     const QStringList choices{qEnvironmentVariable("RELAY_DATA_DIR"),
+#ifdef Q_OS_MACOS
+        QCoreApplication::applicationDirPath() + QStringLiteral("/../Resources/relay"),
+#endif
         QCoreApplication::applicationDirPath() + QStringLiteral("/../share/relay"),
         QStringLiteral(RELAY_DATA_DIR), QStringLiteral(RELAY_SOURCE_DIR)};
     for (const auto &path : choices) {
