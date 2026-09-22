@@ -75,6 +75,7 @@ EFFORT_LEVELS: dict[str, tuple[str, ...]] = {
     "gemini": ("low", "medium", "high"),
     "none": (),
     "relay": ("low", "medium"),
+    "relay-pro": ("low", "medium", "high", "max"),
 }
 
 
@@ -222,7 +223,7 @@ class Preset:
                 # picker offers is the word that is sent. `effort_fixed` is "grey the box": no
                 # knob at all, or Relay Free, whose gateway clamps each role whatever is asked.
                 "efforts": effort_levels(self.effort_style),
-                "effort_fixed": effort_fixed(effort_levels(self.effort_style), self.hosted),
+                "effort_fixed": effort_fixed(effort_levels(self.effort_style), self.id == "relay-free"),
                 "effort_note": effort_note(self.effort_style), "group": self.group,
                 "key_url": self.key_url, "note": self.note, "vision": self.vision,
                 "provider": self.provider or self.label.split(" · ")[0], "plan": self.plan,
@@ -272,6 +273,10 @@ PRESETS: dict[str, Preset] = {p.id: p for p in [
            # Server-side and remotely configurable, so this tracks the shipped config, not a
            # provider's published limit like the rows above.
            max_output=16_000),
+    Preset("relay-pro", "relay pro", "https://api.relay-terminal.ai/v1", "relay-pro-main",
+           {"reasoning_effort": "medium"}, 1_000_000, "relay-pro", "subscription",
+           "https://relay-terminal.ai", "Per-person access to GLM 5.3 and GLM 5.3 Flash through Relay.",
+           provider="relay", plan="pro", hosted=True, max_output=16_000),
     Preset("kimi", "kimi · k3", "https://api.moonshot.ai/v1", "kimi-k3", {"reasoning_effort": "high"},
            1_048_576, "kimi", "payg", "https://platform.kimi.ai/console/api-keys",
            "Moonshot platform, pay-as-you-go.",
@@ -398,6 +403,10 @@ TIER_DEFAULTS: dict[str, dict[str, tuple[str, str, dict]]] = {
     "relay-free": {"main": ("relay-free", "relay-main", {"reasoning_effort": "medium"}),
                    "flash": ("relay-free", "relay-flash", {"reasoning_effort": "low"}),
                    "lite": ("relay-free", "relay-lite", {})},   # the gateway's Lite default: minimal
+    "relay-pro": {"high": ("relay-pro", "relay-pro-high", {"reasoning_effort": "high"}),
+                  "main": ("relay-pro", "relay-pro-main", {"reasoning_effort": "medium"}),
+                  "flash": ("relay-pro", "relay-pro-flash", {"reasoning_effort": "low"}),
+                  "lite": ("relay-free", "relay-lite", {})},
     "glm": {"main": ("glm", "glm-5.3", GLM_EXTRA),
             "flash": ("glm", "glm-5.3-flash", GLM_FAST_EXTRA),
             "lite": _LITE_VIA_OPENROUTER},
@@ -477,6 +486,11 @@ MODEL_CATALOG: dict[str, list[dict]] = {
         {"id": "relay-main", "tier": "main", "efforts": None},
         {"id": "relay-flash", "tier": "flash", "efforts": None},
         {"id": "relay-lite", "tier": "lite", "efforts": None},
+    ],
+    "relay-pro": [
+        {"id": "relay-pro-high", "name": "glm-5.3", "tier": "high", "efforts": None},
+        {"id": "relay-pro-main", "name": "glm-5.3", "tier": "main", "efforts": None},
+        {"id": "relay-pro-flash", "name": "glm-5.3-flash", "tier": "flash", "efforts": None},
     ],
     "kimi": [
         {"id": "kimi-k3", "tier": "main", "efforts": None},
@@ -727,7 +741,7 @@ def catalog_rows(preset_id) -> list[dict]:
         name = model_name(preset_id, row["id"])
         out.append({"id": row["id"], "name": name, "label": name, "tier": row["tier"],
                     "efforts": efforts,
-                    "effort_fixed": effort_fixed(efforts, preset.hosted),
+                    "effort_fixed": effort_fixed(efforts, preset_id == "relay-free"),
                     "intelligence": INTELLIGENCE.get(name),
                     "openrouter": openrouter_twin(row["id"]),
                     "default_effort": provider_default,
@@ -1052,6 +1066,10 @@ def _builtin_candidates(preset_id: str, rank) -> list[_Candidate]:
     picked = {cls: model for cls, model in picked.items() if model}
 
     def classes_of(model_id: str) -> tuple[str, ...]:
+        if preset_id == "relay-pro":
+            # The same GLM model has distinct server routes for high and main. Keep each
+            # route in its own class while ranking both by their shared model name.
+            return (model_id.removeprefix("relay-pro-"),)
         name = model_name(preset_id, model_id)
         shared = tuple(cls for cls in _ranked_classes(rank, name) if cls not in picked)
         return tuple(cls for cls in model_ranking.CLASSES
@@ -1246,7 +1264,7 @@ def tier_list_defaults(usable, *, local=(), custom=(), guests=(), listing=None) 
     usable = [p for p in PRESETS if p in set(usable)]             # PRESETS order, built-ins only
     candidates: list[_Candidate] = []
     for preset_id in usable:
-        if PRESETS[preset_id].hosted:
+        if preset_id == "relay-free":
             continue                      # Relay Free is what "no providers" means, not a provider
         candidates.extend(_builtin_candidates(preset_id, rank))
     for row in guests:
@@ -1257,7 +1275,7 @@ def tier_list_defaults(usable, *, local=(), custom=(), guests=(), listing=None) 
 
     providers = {candidate.provider for candidate in candidates}
     limit = 2 if len(providers) > 1 else 1
-    hosted_id = next((p for p in usable if PRESETS[p].hosted), "")
+    hosted_id = "relay-free" if "relay-free" in usable else ""
     if not providers:
         candidates = _builtin_candidates(hosted_id, rank) if hosted_id else []
 
@@ -1335,6 +1353,8 @@ def match_preset(base_url: str, model: str = "") -> Preset | None:
     """Find the preset for an endpoint. Model is only used to break ties."""
     candidates = [p for p in PRESETS.values() if normalize_url(p.base_url) == normalize_url(base_url)]
     for preset in candidates:
+        if preset.id == "relay-pro" and model.strip().startswith("relay-pro-"):
+            return preset
         if preset.model == model.strip():
             return preset
     return candidates[0] if candidates else None

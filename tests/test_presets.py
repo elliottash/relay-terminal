@@ -95,7 +95,7 @@ class PresetTableTests(unittest.TestCase):
         by_group = {}
         for preset in P.PRESETS.values():
             by_group.setdefault(preset.group, []).append(preset.id)
-        self.assertEqual(sorted(by_group["subscription"]), ["glm-coding", "kimi-code", "minimax"])
+        self.assertEqual(sorted(by_group["subscription"]), ["glm-coding", "kimi-code", "minimax", "relay-pro"])
         self.assertEqual(by_group["aggregator"], ["openrouter"])
         self.assertEqual(sorted(by_group["payg"]),
                          ["anthropic", "deepseek", "gemini", "glm", "kimi", "openai"])
@@ -105,7 +105,7 @@ class PresetTableTests(unittest.TestCase):
     def test_relay_free_is_the_one_hosted_preset_and_is_listed_first(self):
         free = P.PRESETS["relay-free"]
         self.assertTrue(free.hosted)
-        self.assertEqual([p.id for p in P.PRESETS.values() if p.hosted], ["relay-free"])
+        self.assertEqual([p.id for p in P.PRESETS.values() if p.hosted], ["relay-free", "relay-pro"])
         # The keys modal groups by GROUPS in order; "Included" leads, because a fresh install runs
         # on it before any key is stored.
         self.assertEqual(P.GROUPS[0], "included")
@@ -140,7 +140,7 @@ class PresetTableTests(unittest.TestCase):
 
     def test_every_preset_names_its_company_and_its_plan(self):
         # The roles modal picks a provider, so it shows the company, never the preset's model name.
-        expected = {"relay-free": "relay", "kimi": "kimi", "kimi-code": "kimi", "glm": "z.ai (glm)",
+        expected = {"relay-free": "relay", "relay-pro": "relay", "kimi": "kimi", "kimi-code": "kimi", "glm": "z.ai (glm)",
                     "glm-coding": "z.ai (glm)", "minimax": "minimax", "openrouter": "openrouter",
                     "openai": "openai (chatgpt)", "anthropic": "anthropic (claude)",
                     "gemini": "google (gemini)", "deepseek": "deepseek"}
@@ -379,7 +379,8 @@ class TierTableTests(unittest.TestCase):
         # resolved from the local-endpoint registry, so it has no row here (2026-09-18).
         self.assertEqual(sorted(P.TIER_DEFAULTS), sorted(P.PRESETS))
         for provider, table in P.TIER_DEFAULTS.items():
-            self.assertEqual(sorted(table), sorted(P.PROVIDER_TIERS), provider)
+            self.assertEqual(sorted(table), sorted((*P.PROVIDER_TIERS, "high")
+                             if provider == "relay-pro" else P.PROVIDER_TIERS), provider)
             for tier, (preset_id, model, extra) in table.items():
                 self.assertIn(preset_id, P.PRESETS, f"{provider}.{tier}")
                 self.assertTrue(model.strip(), f"{provider}.{tier}")
@@ -429,6 +430,9 @@ class TierTableTests(unittest.TestCase):
         self.assertIn("max reasoning", P.TIER_HINTS["high"])
         self.assertEqual(P.validate_tier("high"), "high")
         for provider in P.TIER_DEFAULTS:
+            if provider == "relay-pro":
+                self.assertEqual(P.tier_default(provider, "high")[1], "relay-pro-high")
+                continue
             self.assertNotIn("high", P.TIER_DEFAULTS[provider], provider)
             self.assertIsNone(P.tier_default(provider, "high"), provider)
             # Naming a provider for High means its Main model: there is no bigger one to pick.
@@ -467,7 +471,8 @@ class TierTableTests(unittest.TestCase):
         self.assertEqual(catalog["tiers"][0], {"id": "high", "label": "high", "hint": P.TIER_HINTS["high"]})
         self.assertEqual(sorted(catalog["providers"]), sorted(P.PRESETS))
         for provider, table in catalog["providers"].items():
-            self.assertEqual(sorted(table), sorted(P.PROVIDER_TIERS), provider)
+            self.assertEqual(sorted(table), sorted((*P.PROVIDER_TIERS, "high")
+                             if provider == "relay-pro" else P.PROVIDER_TIERS), provider)
 
 
 class ModelCatalogTests(unittest.TestCase):
@@ -522,7 +527,7 @@ class ModelCatalogTests(unittest.TestCase):
                 if row["tier"] is None:
                     self.assertEqual(named, set(), (preset_id, row["id"]))
                 else:
-                    self.assertIn(row["tier"], P.PROVIDER_TIERS)
+                    self.assertIn(row["tier"], P.TIERS)
         # Two tiers naming one model (DeepSeek on OpenRouter) keep the first in PROVIDER_TIERS order.
         deepseek = next(r for r in P.MODEL_CATALOG["openrouter"] if r["id"] == "deepseek/deepseek-v4.1-flash")
         self.assertEqual(deepseek["tier"], "main")

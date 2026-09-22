@@ -364,7 +364,10 @@ class PlanRoleTests(unittest.TestCase):
         self.assertEqual((high.model, high.preset_id, high.effort, high.tier), ("kimi-k3", "kimi", "max", "high"))
         # And it needs no per-provider row: nothing in the tier table names a "high" model.
         for provider in PRESETS:
-            self.assertIsNone(tier_default(provider, "high"), provider)
+            if provider == "relay-pro":
+                self.assertEqual(tier_default(provider, "high")[1], "relay-pro-high")
+            else:
+                self.assertIsNone(tier_default(provider, "high"), provider)
 
     def test_planning_is_not_tiered(self):
         # Card #HR5E: planning follows no tier. Its default is the `_high_default` resolution —

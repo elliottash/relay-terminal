@@ -22,7 +22,7 @@ from .presets import (EFFORT_LADDER, PRESETS, TIER_LABELS, TIERS, apply_effort, 
                       openrouter_twin, provider_tier_model, tier_default,
                       tier_fallbacks, validate_effort, validate_tier)
 from .provider import MIN_OUTPUT_TOKENS, ProviderConfig
-from . import customproviders, hosted, localmodels
+from . import customproviders, hosted, localmodels, relay_pro
 
 
 def _hostname(base_url: str) -> str:
@@ -585,6 +585,8 @@ class RoleResolver:
 
     def has_key(self, preset_id: str) -> bool:
         """Whether a tier on this preset can run: a stored key, or Relay Free where it works."""
+        if preset_id == "relay-pro":
+            return relay_pro.status()["available"]
         if _hosted(preset_id):
             return hosted.available()
         return bool(self._key_for(preset_id))
@@ -597,7 +599,7 @@ class RoleResolver:
         local = localmodels.provider_fields(preset_id, base_url, model)
         # Relay Free has none either: its transport takes a token. It is usable only where the
         # token can be made (cryptography imports), and otherwise falls back like a missing key.
-        is_hosted = _hosted(preset_id) and hosted.available()
+        is_hosted = _hosted(preset_id) and self.has_key(preset_id)
         if not key and not local and not is_hosted:
             where = preset_id or base_url
             return self._main(role, "fallback",
@@ -664,9 +666,9 @@ class RoleResolver:
         if preset and not model:
             # An entry that names a provider and no model means that provider's model *for this
             # tier* (presets.provider_tier_model): "Flash on Z.AI" is glm-5.3-flash, not glm-5.3.
-            # High and Main have no smaller model to mean, so they get the provider's Main one.
+            # High normally uses Main; Pro has a distinct server route for High.
             try:
-                model, tier_extra = provider_tier_model(preset.id, "main" if tier == "high" else tier)
+                model, tier_extra = provider_tier_model(preset.id, tier)
             except KeyError:        # a custom provider has no tier table: its own model
                 model, tier_extra = preset.model, dict(preset.extra)
             if extra is None:
@@ -794,7 +796,7 @@ class RoleResolver:
             # The pane's own model, whatever `tiers.main` lists: that list is the order a failing
             # Main turn walks (failover_chain), never a pick.
             return self._main(role, "main", tier="main")
-        if tier == "high" and not self.tiers.get("high"):
+        if tier == "high" and not self.tiers.get("high") and self.main_preset_id != "relay-pro":
             return self._high_default(role, source, effort)
         for candidate in tier_fallbacks(tier):
             if candidate == "main":

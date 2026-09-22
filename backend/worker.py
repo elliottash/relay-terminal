@@ -11,7 +11,7 @@ import urllib.parse
 from pathlib import Path
 
 from relay_core import globals_protocol
-from relay_core import (__version__, board_protocol, customproviders, hosted, keystore, keytest, localmodels, logs,
+from relay_core import (__version__, board_protocol, customproviders, hosted, relay_pro, keystore, keytest, localmodels, logs,
                         observe_protocol, roles as model_roles, session_protocol, skills, voice)
 from relay_core.agent import Agent, validate_turn_options
 from relay_core import activity_tools, agent_context, agents_defs, app_tools, guest_harness_provider
@@ -155,6 +155,8 @@ def main():
         # Relay Free (protocol 13.9): nothing is stored and nothing can be, so key_source
         # says "included"; `available` (cryptography imports) is what makes the row usable,
         # and `quota` is the last allowance seen, null before the first exchange.
+        relay_pro.start_refresh()
+        pro_status = relay_pro.status()
         relay_free = {"has_stored_key": False, "key_source": "included", **hosted.status()}
         # OpenRouter's live model list is the `openrouter` row's catalog (owner, 2026-09-20):
         # served from the day-old cache now, fetched on its own thread once per process when
@@ -165,14 +167,15 @@ def main():
         guest_rows = guest_harness_provider.preset_rows()
         custom_rows = customproviders.rows()
         list_defaults = tier_list_defaults(
-            [p for p in PRESETS if sources.get(p) or (PRESETS[p].hosted and relay_free.get("available"))],
+            [p for p in PRESETS if (pro_status["available"] if p == "relay-pro" else
+             relay_free["available"] if p == "relay-free" else bool(sources.get(p)))],
             local=[(e.id, e.model) for e in localmodels.catalog().values()],
             custom=[(row["id"], row.get("model") or "") for row in custom_rows if row.get("has_stored_key")],
             guests=guest_rows)
         emit({"event": "presets", "id": request_id, "warp_default": keystore.warp_default_preset(),
               "tier_defaults": model_roles.tier_catalog(), "role_actions": model_roles.action_catalog(),
               "tier_list_defaults": list_defaults,
-              "presets": [{**p.to_dict(), **(relay_free if p.hosted else
+              "presets": [{**p.to_dict(), **(pro_status if p.id == "relay-pro" else relay_free if p.id == "relay-free" else
                                              {"has_stored_key": bool(sources[p.id]),
                                               "key_source": sources[p.id]})}
                           for p in PRESETS.values()]
@@ -198,6 +201,7 @@ def main():
     # And for a custom provider's /models listing (28.6): the save answers at once, the probe
     # lands later and pushes the row with the served models added.
     customproviders.set_listener(lambda: emit_presets())
+    relay_pro.set_listener(lambda: emit_presets())
 
     emit({"event": "ready", "version": __version__})
     while True:
@@ -481,6 +485,8 @@ def main():
                               "text": f"Relay Free quota check failed ({type(exc).__name__})."})
 
                 threading.Thread(target=quota_work, name="relay-hosted-quota", daemon=True).start()
+            elif kind in ("store_key", "remove_key", "test_key") and request.get("preset") == "relay-pro":
+                relay_pro.run(kind.removesuffix("_key"), emit, request.get("id"), request.get("api_key", ""))
             elif kind == "store_key":
                 keystore.store(request.get("preset", ""), request.get("api_key", ""))
                 emit({"event": "key_stored", "id": request.get("id"), "preset": request.get("preset")})

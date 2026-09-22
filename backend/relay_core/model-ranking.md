@@ -103,6 +103,7 @@ the list, they run on Relay Free's role for the tier instead.
 | glm-coding | plan | 21 |
 | kimi-code | plan | 22 |
 | minimax | plan | 23 |
+| relay-pro | plan | 24 |
 | openai | api | 31 |
 | anthropic | api | 32 |
 | gemini | api | 33 |

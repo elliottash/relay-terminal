@@ -53,7 +53,7 @@ QUOTA_HEADERS = {"limit": "X-Relay-Quota-Limit", "used": "X-Relay-Quota-Used",
 # The gateway's error codes and how each reads in a pane. The server's own `message` is Relay's
 # text, not a model provider's, but it still only ever stands in for an unknown code: the wording
 # the user sees is decided here, where it can name the way out (a key of their own).
-ERROR_CODES = ("quota_exhausted", "rate_limited", "free_unavailable", "token_expired", "bad_request")
+ERROR_CODES = ("quota_exhausted", "rate_limited", "free_unavailable", "token_expired", "bad_request", "pro_access_denied")
 MAX_MESSAGE = 200
 
 _log = logs.get("hosted")
@@ -227,6 +227,8 @@ def describe_error(status: int, body: bytes | None) -> tuple[str, str, int | Non
     elif code == "free_unavailable":
         text = ("Relay Free is not available right now. Use one of your own providers "
                 "(Options › Models › API keys…), or try again later.")
+    elif code == "pro_access_denied":
+        text = "Relay Pro access was denied. Check or replace your access code in Options › Models."
     elif code == "token_expired":
         text = "Relay Free: the session token was refused; Relay will register again."
     elif message:
@@ -354,6 +356,9 @@ class Session:
                 self.plan = reply["plan"]
         return quota
 
+    def fetch_pro(self, code: str) -> dict:
+        return self._get("/pro", {"X-Relay-Pro-Code": code})
+
     def forget(self) -> None:
         """Drop the cached token (tests, and a gateway that says the token is gone)."""
         with self._lock:
@@ -413,8 +418,9 @@ class Session:
             headers={"Content-Type": "application/json", "User-Agent": "Relay/0.1"}, method="POST")
         return self._exchange(request, path)
 
-    def _get(self, path: str) -> dict:
-        headers = {"User-Agent": "Relay/0.1", "Authorization": "Bearer " + self.token()}
+    def _get(self, path: str, extra_headers: dict | None = None) -> dict:
+        headers = {"User-Agent": "Relay/0.1", **(extra_headers or {}),
+                   "Authorization": "Bearer " + self.token()}
         request = urllib.request.Request(self.base + path, headers=headers, method="GET")
         try:
             return self._exchange(request, path)

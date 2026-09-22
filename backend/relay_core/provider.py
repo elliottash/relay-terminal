@@ -1471,6 +1471,15 @@ class HostedChatProvider(ChatProvider):
             emit({"event": "hosted_quota", **quota})
 
     def _open(self, opener, request, emit, cancel: threading.Event, started: float):
+        if self.config.model.startswith("relay-pro-"):
+            from . import relay_pro
+            if self.config.base_url.rstrip("/") != self.session.base.rstrip("/"):
+                raise ProviderError("Relay Pro can only use the configured Relay gateway.", "pro_access_denied")
+            value = relay_pro.code()
+            if not value:
+                relay_pro.invalidate()
+                raise ProviderError("Enter your Relay Pro access code in Options › Models.", "pro_access_denied")
+            request.add_header("X-Relay-Pro-Code", value)
         response = super()._open(opener, request, emit, cancel, started)
         self._quota_headers = response.headers
         return response
@@ -1524,6 +1533,13 @@ class HostedChatProvider(ChatProvider):
         # A refusal carries the quota headers too, and a 429 is exactly when the chip must update.
         self._quota_headers = getattr(exc, "headers", None)
         text, code, resets_at = hosted.describe_error(exc.code, self._refusal_body(exc))
+        if self.config.model.startswith("relay-pro-"):
+            from . import relay_pro
+            if code == "pro_access_denied":
+                relay_pro.invalidate(relay_pro.code())
+            # Never display unrecognised server text alongside an access-code request.
+            text = ("Relay Pro access was denied. Check or replace your code." if code == "pro_access_denied"
+                    else "Relay Pro: the hosted request failed (HTTP %s)." % exc.code)
         return ProviderError(text, code, resets_at)
 
 
