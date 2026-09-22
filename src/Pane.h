@@ -1402,6 +1402,9 @@ public:
         keepSelectionOn(0);   // nothing left to select: the prompt box gives the item's text back
         rebuildQueueStrip(); changed();
     }
+    // Run the queue again after a Stop: the strip's Resume button, and Enter on an empty prompt
+    // box (#7JD1). Both halves again — the pane's own entries, and the worker's queue for this
+    // console's surface, which is the one a card's Stop paused.
     void resumeAgentQueue() {
         m_entriesPaused = false; m_pauseReason.clear();
         send(queueOp(QStringLiteral("resume_queue")));
@@ -14588,6 +14591,16 @@ private:
                 if (guard) guard->askProjectInit(relay::projectinit::Trigger::AgentWork);
             });
         }
+        // A submit is a resume, here as on the worker (#7JD1). Going on with a new prompt means
+        // what was queued behind it goes on too, rather than waiting for the strip's Resume
+        // button. This clears the pane's *own* half of the queue — the entries it holds client
+        // side, which is all a terminal pane's queue ever is, because it sends one `ask` at a
+        // time; the worker's half resumes on that `ask` itself (`TurnSupervisor.submit`), which
+        // is what keeps this pane's wire byte-for-byte what it was. Nothing is sent from here.
+        if (m_entriesPaused) {
+            m_entriesPaused = false; m_pauseReason.clear();
+            rebuildQueueStrip(); changed();
+        }
         QueueEntry entry;
         entry.agent = true; entry.text = text; entry.why = why; entry.attachments = attachmentsFor(text);
         entry.shellText = shellText;
@@ -15182,6 +15195,22 @@ private:
         if (mods == Qt::NoModifier && enter && m_editor->toPlainText().trimmed().isEmpty()
             && (upgradeLastQueuedToSteer() || escalateSteerToInterrupt()))
             return true;
+        // And with nothing left to escalate, Enter on an empty box **resumes a queue a Stop
+        // paused** (#7JD1; owner, 2026-09-21: "why don't we just copy the functionality and have
+        // enter resume"). One rule on every surface — Stop pauses, Enter resumes — so a card's
+        // console does the same with its own queue (`resumeAgentQueue` names the surface) and a
+        // phone, which has no Resume button to reach for, gets it by sending anything at all.
+        // The strip's Resume button stays as the mouse path. Ctrl+Enter is untouched: on an empty
+        // box it always sends `Continue` (#SXF1), and the queue resumes behind that prompt like
+        // any other submit. A row being edited in the box owns Enter (it holds the queue rather
+        // than pausing it), so the selection is left to the queue-navigation block below.
+        if (mods == Qt::NoModifier && enter && !inQueueSelection()
+            && relay::continueturn::enterResumes({m_agentBusy,
+                                                  m_editor->toPlainText().trimmed().isEmpty(),
+                                                  queuePaused()})) {
+            resumeAgentQueue();
+            return true;
+        }
         // Ctrl+C with nothing selected in the prompt box copies what is highlighted in the
         // terminal — the reasoning is a fold there now, so its selection is the terminal's.
         if (mods == Qt::ControlModifier && k == Qt::Key_C && !m_editor->textCursor().hasSelection() && copySelection())
@@ -17308,12 +17337,18 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
                                    && (!queued.isEmpty()
                                        || (!m_entries.isEmpty() && m_entries.first().agent
                                            && !m_entries.first().written()));
+        // Paused by a Stop or a failed turn, with no row holding the queue instead: the two ways
+        // back are the Resume button and Enter on the empty prompt box, and the hint says the
+        // second one wherever the button is offered (#7JD1).
+        const bool paused = (m_entriesPaused || workerPaused) && !held;
         auto *hint = new QLabel(!m_selectedSteer.isEmpty()
                                     ? QStringLiteral("Enter or type to edit · Ctrl+↓ back to the queue · Ctrl+Enter now · Shift+Del withdraw · Esc")
                                 : headSteerable
                                     ? QStringLiteral("Ctrl+↑ next tool call · Ctrl+↓ move · Enter save · Esc cancel · Shift+Del remove")
                                 : inQueueSelection()
                                     ? QStringLiteral("↑↓ row · Ctrl+↑↓ move · Enter save · Esc cancel · Shift+Del remove")
+                                : paused
+                                    ? QStringLiteral("Enter resumes · ↑ take back to edit · × remove")
                                     : QStringLiteral("↑ take back to edit · drag to reorder · × remove"));
         hint->setObjectName(QStringLiteral("queueHint"));
         hint->setToolTip(QStringLiteral(
@@ -17321,10 +17356,13 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
             "↑ on the empty prompt box removes the top editable row and restores it as an unsent draft.\n"
             "Enter submits that draft again; the remaining queued rows keep their order.\n"
             "Drag queued rows to reorder; × removes a row. A ↪ row is withdrawn if the agent has not taken it yet.\n"
-            "Rows without editable text stay selected: Ctrl+↑↓ moves them, Shift+Delete removes, Esc leaves."));
+            "Rows without editable text stay selected: Ctrl+↑↓ moves them, Shift+Delete removes, Esc leaves.\n"
+            "A queue a Stop paused runs again on Enter in the empty prompt box, or on the Resume button;"
+            " typing a prompt and sending it resumes the rows behind it too."));
         header->addWidget(hint);
-        if ((m_entriesPaused || workerPaused) && !held) {
+        if (paused) {
             auto *resume = new QToolButton; resume->setText(QStringLiteral("Resume")); resume->setFocusPolicy(Qt::NoFocus);
+            resume->setToolTip(QStringLiteral("Run the queue again · Enter on the empty prompt box does the same"));
             connect(resume, &QToolButton::clicked, this, [this] { resumeAgentQueue(); });
             header->addWidget(resume);
         }

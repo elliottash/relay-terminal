@@ -688,6 +688,79 @@ void aWorkerRowIsRemovedAndMovedWithItsSurface()
     CHECK_EQ(sent.at(0).value(QStringLiteral("surface")).toString(), QStringLiteral("card:K7Q2"));
 }
 
+// ----- Stop pauses the queue, Enter resumes it (card #7JD1) ------------------------------------
+//
+// Owner, 2026-09-21: "why don't we just copy the functionality and have enter resume." A Stop
+// pauses the queue of the surface it named, and until this card the only way back was the strip's
+// **Resume** button — which a card page has (it is this same `Pane`) and a phone has not. One rule
+// everywhere instead: Enter on the empty prompt box resumes, with the op naming this console's own
+// queue; Enter with text submits that prompt and the *worker* resumes the queue behind it, so
+// nothing extra goes on the wire and a terminal pane's wire is byte-for-byte what it was.
+void enterOnAnEmptyBoxResumesThisConsolesPausedQueue()
+{
+    StubContext context;
+    context.workspace = home->path();
+    context.surface = QStringLiteral("card:K7Q2");
+    context.takeSubmit = true;
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    QList<QJsonObject> sent;
+    console.onWorkerLine = [&sent](const QJsonObject &message) { sent << message; };
+    auto *editor = console.findChild<QPlainTextEdit *>(QStringLiteral("composerEditor"));
+    CHECK(editor != nullptr);
+    if (editor == nullptr) return;
+
+    // Nothing paused: Enter on an empty box is what it always was, and sends nothing.
+    console.deliverWorkerEvent(queueChanged({workerRow(QStringLiteral("q1"), QStringLiteral("and then the tests"), QStringLiteral("card:K7Q2"))}));
+    CHECK(!console.queuePaused());
+    QKeyEvent idle(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+    QCoreApplication::sendEvent(editor, &idle);
+    CHECK(sent.isEmpty());
+
+    // A Stop on this card paused its queue: `queue_changed {paused}` with a row of this surface's.
+    QJsonObject paused = queueChanged({workerRow(QStringLiteral("q1"), QStringLiteral("and then the tests"), QStringLiteral("card:K7Q2"))});
+    paused.insert(QStringLiteral("paused"), true);
+    paused.insert(QStringLiteral("running"), QString());
+    console.deliverWorkerEvent(paused);
+    CHECK(console.queuePaused());
+
+    // Enter on the empty box resumes **that card's** queue, not the tab's.
+    sent.clear();
+    QKeyEvent resume(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+    QCoreApplication::sendEvent(editor, &resume);
+    CHECK_EQ(sent.size(), 1);
+    CHECK_EQ(sent.at(0).value(QStringLiteral("type")).toString(), QStringLiteral("resume_queue"));
+    CHECK_EQ(sent.at(0).value(QStringLiteral("surface")).toString(), QStringLiteral("card:K7Q2"));
+    CHECK(context.submitted.isEmpty());   // a resume, never a prompt
+
+    // And Enter with text submits it through the context and sends **no** resume of its own: the
+    // worker clears the pause as that `board_ask` goes past it (`TurnSupervisor.submit`).
+    console.deliverWorkerEvent(paused);
+    sent.clear();
+    console.draftInComposer(QStringLiteral("carry on with the tests then"));
+    QKeyEvent typed(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+    QCoreApplication::sendEvent(editor, &typed);
+    CHECK_EQ(context.submitted.size(), 1);
+    CHECK(sent.isEmpty());
+}
+
+// A terminal pane's half of this is its own: it holds its queued prompts client side, so a Stop
+// pauses `m_entries` and no `queue_changed` says so. Enter on the empty box resumes them, and the
+// only message it sends is the `resume_queue` the Resume button already sent — nothing new when
+// nothing is paused, which is the byte-for-byte promise.
+void aTerminalPanesOwnQueueResumesOnEnterToo()
+{
+    Pane pane(home->path(), home->path(), true);
+    QList<QJsonObject> sent;
+    pane.onWorkerLine = [&sent](const QJsonObject &message) { sent << message; };
+    auto *editor = pane.findChild<QPlainTextEdit *>(QStringLiteral("composerEditor"));
+    CHECK(editor != nullptr);
+    if (editor == nullptr) return;
+    CHECK(!pane.queuePaused());
+    QKeyEvent idle(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+    QCoreApplication::sendEvent(editor, &idle);
+    CHECK(sent.isEmpty());
+}
+
 }  // namespace cases
 
 int main(int argc, char **argv)
@@ -719,6 +792,8 @@ int main(int argc, char **argv)
     cases::aTerminalPaneIgnoresTheWorkersRowsEntirely();
     cases::aWorkerRowIsRemovedAndMovedWithItsSurface();
     cases::aLineThisConsoleSentComesBackWithUpAsAnUnsentDraft();
+    cases::enterOnAnEmptyBoxResumesThisConsolesPausedQueue();
+    cases::aTerminalPanesOwnQueueResumesOnEnterToo();
 
     if (failures == 0)
     std::fprintf(stdout, "consolemode: 19 cases, all passed\n");
