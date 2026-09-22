@@ -6332,11 +6332,28 @@ public:
                 Pane *target = w->paneWithToken(pane);
                 if (target) target->toggleShare();
             };
+            // The pane's top line (#SHRP): remote control, its address and which of the owner's
+            // phones are connected, read off the state RemoteShare already holds for the plug and
+            // fed to the shared model whenever either moves. Bound to the view, so it stops with it.
+            view->onPairPhone = [guard] { if (auto *w = windowOf(guard)) w->pairPhone(); };
+            auto feed = [view, &share] {
+                const relay::remotesettings::State &state = share.remoteState();
+                const QString where = state.address.isEmpty() ? relay::remotesettings::address()
+                                                              : state.address;
+                share.sharingModel().setRemote(state.on, relay::remotesettings::addressName(where),
+                                               state.online, state.devices, state.reason);
+                share.sharingModel().setDevices(share.devices());
+                view->refresh();
+            };
+            connect(&share, &relay::RemoteShare::remoteStateChanged, view, feed);
+            connect(&share, &relay::RemoteShare::devicesChanged, view, [feed](const QJsonArray &) { feed(); });
+            feed();
             insertBeside(owner, tool, owner->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
         }
         if (view) {
             view->focusPane(owner->sessionToken());
             view->refresh();
+            relay::RemoteShare::instance().requestDevices();   // the `online` flags, fresh (#SHRP)
         }
         if (focus) {
             if (QWidget *shown = pageOf(tool)) m_tabs->setCurrentWidget(shown);

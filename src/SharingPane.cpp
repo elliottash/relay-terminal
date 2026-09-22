@@ -346,6 +346,68 @@ void Model::setOptions(const QString &pane, const ShareOptions &options)
     m_options.insert(pane, options);
 }
 
+void Model::setRemote(bool on, const QString &addressLabel, bool online, int connected,
+                      const QString &reason)
+{
+    m_remoteOn = on;
+    m_remoteAddress = addressLabel;
+    m_remoteOnline = online;
+    m_remoteConnected = connected;
+    m_remoteReason = reason;
+}
+
+void Model::setDevices(const QList<Device> &devices)
+{
+    m_devices = devices;
+}
+
+void Model::setDevices(const QJsonArray &items)
+{
+    QList<Device> devices;
+    for (const QJsonValue &value : items) {
+        const QJsonObject item = value.toObject();
+        Device device;
+        device.id = item.value(QStringLiteral("id")).toString();
+        device.name = item.value(QStringLiteral("name")).toString();
+        device.platform = item.value(QStringLiteral("platform")).toString();
+        device.online = item.value(QStringLiteral("online")).toBool();
+        devices.append(device);
+    }
+    m_devices = devices;
+}
+
+QStringList Model::connectedDeviceNames() const
+{
+    QStringList names;
+    for (const Device &device : m_devices) {
+        if (!device.online) continue;
+        const QString name = device.name.isEmpty()
+                                 ? (device.platform.isEmpty() ? device.id : device.platform)
+                                 : device.name;
+        if (!name.isEmpty() && !names.contains(name)) names << name;
+    }
+    return names;
+}
+
+QString Model::topLine() const
+{
+    if (!m_remoteOn) return QStringLiteral("Remote control off");
+    QString line = QStringLiteral("Remote control on");
+    if (!m_remoteAddress.isEmpty()) line += QStringLiteral(" · ") + m_remoteAddress;
+    if (!m_remoteOnline) {
+        return line + (m_remoteReason.isEmpty() ? QStringLiteral(" · offline")
+                                                : QStringLiteral(" · offline: %1").arg(m_remoteReason));
+    }
+    const QStringList names = connectedDeviceNames();
+    if (!names.isEmpty())
+        return line + QStringLiteral(" · %1 connected").arg(names.join(QStringLiteral(", ")));
+    // A sidecar from before the `online` flag only says how many (#SHRP).
+    if (m_remoteConnected == 1) return line + QStringLiteral(" · 1 phone connected");
+    if (m_remoteConnected > 1)
+        return line + QStringLiteral(" · %1 phones connected").arg(m_remoteConnected);
+    return line + QStringLiteral(" · no phone connected");
+}
+
 QList<Request> Model::requests(const QString &pane) const
 {
     if (pane.isEmpty()) return m_requests;
@@ -481,6 +543,20 @@ QString usesText(int uses)
     return uses == 1 ? QStringLiteral("1 use left") : QStringLiteral("%1 uses left").arg(uses);
 }
 
+QString promptsImmediateSentence()
+{
+    return QStringLiteral("Guest prompts run immediately — off, every prompt an editor writes "
+                          "waits here for you; on, it goes straight to that pane's agent, on "
+                          "your key, unread.");
+}
+
+QString presentOnlySentence()
+{
+    return QStringLiteral("Guests can act only while I'm here — on, whenever Relay's window is "
+                          "not the one you are looking at, guests are paused, as though you had "
+                          "pressed Pause.");
+}
+
 // ---- the pane --------------------------------------------------------------------------------
 
 SharingView::SharingView(QWidget *parent) : QWidget(parent)
@@ -574,9 +650,60 @@ QWidget *SharingView::heading(const QString &text)
     return label;
 }
 
+QWidget *SharingView::subheading(const QString &text)
+{
+    return plain(text, "settingsSubheading");
+}
+
 QWidget *SharingView::note(const QString &text)
 {
     return plain(text, "settingsRowDetail");
+}
+
+QWidget *SharingView::remoteRow()
+{
+    auto *row = new QWidget;
+    auto *line = new QHBoxLayout(row);
+    line->setContentsMargins(0, 0, 0, 0);
+    line->setSpacing(8);
+    auto *text = plain(m_model ? m_model->topLine() : QStringLiteral("Remote control off"),
+                       "settingsRowLabel");
+    text->setObjectName(QStringLiteral("sharingTopLine"));
+    if (m_model && m_model->remoteOn()) {
+        QStringList paired;
+        for (const Device &device : m_model->devices())
+            paired << QStringLiteral("%1%2").arg(device.name.isEmpty() ? device.id : device.name,
+                                                 device.online ? QString()
+                                                               : QStringLiteral(" (not connected)"));
+        text->setToolTip(paired.isEmpty()
+                             ? QStringLiteral("No phone is paired with this desktop yet.")
+                             : QStringLiteral("Paired: %1.").arg(paired.join(QStringLiteral(", "))));
+    }
+    line->addWidget(text, 1);
+    auto *pair = button(QStringLiteral("Pair a phone…"),
+                        QStringLiteral("A code to type on your phone. It sees every pane and can "
+                                       "type into any of them; it is you, not a guest."));
+    QObject::connect(pair, &QPushButton::clicked, this, [this] { if (onPairPhone) onPairPhone(); });
+    line->addWidget(pair, 0, Qt::AlignTop);
+    return row;
+}
+
+QWidget *SharingView::quietRow(const SharedPane &pane)
+{
+    auto *frame = new QFrame;
+    frame->setObjectName(QStringLiteral("settingsRow"));
+    frame->setProperty("current", false);
+    auto *line = new QHBoxLayout(frame);
+    line->setContentsMargins(10, 4, 10, 4);
+    line->setSpacing(8);
+    auto *title = plain(m_model ? m_model->paneTitle(pane.id) : pane.title, "settingsRowLabel");
+    line->addWidget(title, 1);
+    auto *invite = button(QStringLiteral("Invite…"),
+                          QStringLiteral("A link and a QR for somebody else on this pane."));
+    const QString id = pane.id;
+    QObject::connect(invite, &QPushButton::clicked, this, [this, id] { if (onInvite) onInvite(id); });
+    line->addWidget(invite, 0);
+    return frame;
 }
 
 QWidget *SharingView::requestRow(const Request &request, bool editorAllowed)
@@ -584,9 +711,14 @@ QWidget *SharingView::requestRow(const Request &request, bool editorAllowed)
     QFrame *frame = card();
     auto *column = qobject_cast<QVBoxLayout *>(frame->layout());
     const QString who = request.name.isEmpty() ? QStringLiteral("Someone") : request.name;
+    // Every question names its pane: the rows of every pane sit under one "Waiting for you"
+    // (#SHRP), so "this pane" would say nothing.
+    const QString where = request.pane.isEmpty() || !m_model
+                              ? QStringLiteral("a pane")
+                              : QStringLiteral("pane “%1”").arg(m_model->paneTitle(request.pane));
 
     if (request.kind == Request::Kind::Knock) {
-        column->addWidget(plain(QStringLiteral("%1 wants to join this pane").arg(who),
+        column->addWidget(plain(QStringLiteral("%1 wants to join %2").arg(who, where),
                                 "settingsRowLabel"));
         QStringList facts;
         if (!request.platform.isEmpty()) facts << request.platform;
@@ -604,13 +736,13 @@ QWidget *SharingView::requestRow(const Request &request, bool editorAllowed)
             "Admit them only if their screen shows this same code. Anyone who saw the link can "
             "knock; the code is what says it is the person you sent it to.")));
     } else if (request.kind == Request::Kind::Control) {
-        column->addWidget(plain(QStringLiteral("%1 asks to type in this pane").arg(who),
+        column->addWidget(plain(QStringLiteral("%1 asks to type in %2").arg(who, where),
                                 "settingsRowLabel"));
         column->addWidget(note(QStringLiteral(
             "While they hold it their keys go straight to this terminal, as yours do. Typing in "
             "the pane yourself takes it back at once.")));
     } else {
-        column->addWidget(plain(QStringLiteral("%1 wrote a prompt for this pane's agent").arg(who),
+        column->addWidget(plain(QStringLiteral("%1 wrote a prompt for the agent in %2").arg(who, where),
                                 "settingsRowLabel"));
         // The whole text, wrapped and selectable, never elided: approving this row is approving
         // exactly these words, so the owner has to be able to read all of them.
@@ -807,26 +939,26 @@ QWidget *SharingView::shareControls(const QString &pane)
                              "type or send is accepted.")));
     }
 
+    // The two options on one line, the sentence behind each as its tooltip; the sentences are
+    // said once, in full, under the whole Guests section (#SHRP), not under every pane.
+    auto *optionRow = new FlowRow;
     auto addOption = [&](const QString &label, const QString &detail, bool on,
                          std::function<void(bool)> set) {
         auto *box = new QCheckBox(label);
         box->setChecked(on);
+        box->setToolTip(detail);
         QObject::connect(box, &QCheckBox::toggled, this, [set](bool checked) { set(checked); });
-        column->addWidget(box);
-        column->addWidget(note(detail));
+        optionRow->add(box);
     };
-    addOption(QStringLiteral("Guest prompts run immediately"),
-              QStringLiteral("Off: every prompt an editor writes waits here for you. On: it goes "
-                             "straight to this pane's agent, on your key, unread."),
+    addOption(QStringLiteral("Guest prompts run immediately"), promptsImmediateSentence(),
               options.promptsImmediate, [this, pane, options](bool on) {
                   if (onOptions) onOptions(pane, on, options.presentOnly);
               });
-    addOption(QStringLiteral("Guests can act only while I'm here"),
-              QStringLiteral("On: whenever Relay's window is not the one you are looking at, "
-                             "guests are paused, as though you had pressed Pause."),
+    addOption(QStringLiteral("Guests can act only while I'm here"), presentOnlySentence(),
               options.presentOnly, [this, pane, options](bool on) {
                   if (onOptions) onOptions(pane, options.promptsImmediate, on);
               });
+    column->addWidget(optionRow);
     return frame;
 }
 
@@ -856,20 +988,22 @@ void SharingView::build()
             if (panes.at(index).id == m_pane) { panes.move(index, 0); break; }
     }
 
+    // In reading order (#SHRP): whether remote control is on and which of your phones are
+    // connected; anything waiting for you; who is visiting which pane, with that pane's
+    // controls; and one line per pane nobody is visiting. Since #PH0N every pane with a screen
+    // is published to the owner's own phones, so the list of panes is the list of panes — what
+    // varies between them is the guests, and that is all the pane says per pane.
+    m_column->addWidget(remoteRow());
+
     if (panes.isEmpty()) {
         m_column->addWidget(plain(QStringLiteral("Nothing is shared right now."), "settingsRowLabel"));
         m_column->addWidget(note(QStringLiteral(
-            "The share button under a pane's prompt box pairs your own phone, and offers a link "
-            "you can send to somebody else. Whoever is here, whoever is knocking and whatever is "
-            "waiting for you shows up on this pane.")));
-        m_column->addStretch(1);
-        if (onTitleChanged) onTitleChanged();
-        return;
-    }
-
-    for (const SharedPane &pane : std::as_const(panes)) {
-        m_column->addWidget(heading(QStringLiteral("Pane “%1”").arg(m_model->paneTitle(pane.id))));
-        const QList<Request> waiting = m_model->requests(pane.id);
+            "With remote control on, every pane with a screen is reachable from your paired "
+            "phones. The share button under a pane's prompt box offers a link you can send to "
+            "somebody else. Whoever is here, whoever is knocking and whatever is waiting for you "
+            "shows up on this pane.")));
+    } else {
+        const QList<Request> waiting = m_model->requests();
         if (!waiting.isEmpty()) {
             m_column->addWidget(heading(QStringLiteral("Waiting for you")));
             for (const Request &request : waiting) {
@@ -878,28 +1012,45 @@ void SharingView::build()
                 m_column->addWidget(requestRow(request, editorAllowed));
             }
         }
-        const QList<Participant> people = m_model->participantsOn(pane.id);
-        m_column->addWidget(heading(people.isEmpty() ? QStringLiteral("Nobody here yet")
-                                                     : QStringLiteral("Here now")));
-        if (people.isEmpty())
-            m_column->addWidget(note(QStringLiteral(
-                "Your own paired phones are not guests and are not listed here; the share window "
-                "lists those.")));
-        for (const Participant &person : people) m_column->addWidget(participantRow(person, pane.id));
 
-        const QList<Invite> invites = m_model->invitesOn(pane.id);
-        if (!invites.isEmpty()) {
-            m_column->addWidget(heading(QStringLiteral("Live invite links")));
-            for (const Invite &invite : invites) m_column->addWidget(inviteRow(invite));
+        QList<SharedPane> visited, quiet;
+        for (const SharedPane &pane : std::as_const(panes)) {
+            const bool busy = !m_model->participantsOn(pane.id).isEmpty()
+                              || !m_model->invitesOn(pane.id).isEmpty();
+            (busy ? visited : quiet).append(pane);
         }
-        m_column->addWidget(heading(QStringLiteral("This share")));
-        m_column->addWidget(shareControls(pane.id));
+
+        if (!visited.isEmpty()) {
+            m_column->addWidget(heading(QStringLiteral("Guests")));
+            for (const SharedPane &pane : std::as_const(visited)) {
+                m_column->addWidget(subheading(QStringLiteral("Pane “%1”").arg(m_model->paneTitle(pane.id))));
+                for (const Participant &person : m_model->participantsOn(pane.id))
+                    m_column->addWidget(participantRow(person, pane.id));
+                for (const Invite &invite : m_model->invitesOn(pane.id))
+                    m_column->addWidget(inviteRow(invite));
+                m_column->addWidget(shareControls(pane.id));
+            }
+            auto *shared = note(promptsImmediateSentence() + QLatin1Char(' ') + presentOnlySentence());
+            shared->setObjectName(QStringLiteral("sharingOptionsNote"));
+            m_column->addWidget(shared);
+        }
+
+        if (!quiet.isEmpty()) {
+            m_column->addWidget(heading(QStringLiteral("Nobody is visiting")));
+            m_column->addWidget(note(m_model->remoteOn()
+                ? QStringLiteral("Every pane is reachable from your phones. To let someone else "
+                                 "in, invite them.")
+                : QStringLiteral("Remote control is off, so your phones cannot reach these panes. "
+                                 "To let someone else in, invite them.")));
+            for (const SharedPane &pane : std::as_const(quiet)) m_column->addWidget(quietRow(pane));
+        }
     }
     m_column->addStretch(1);
     for (QWidget *child : m_body->findChildren<QWidget *>()) {
         child->style()->unpolish(child);
         child->style()->polish(child);
     }
+    if (panes.isEmpty() && onTitleChanged) onTitleChanged();
 }
 
 }  // namespace relay::sharing

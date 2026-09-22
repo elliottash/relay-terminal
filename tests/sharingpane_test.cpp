@@ -10,7 +10,9 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QCheckBox>
+#include <QLabel>
 #include <QPointer>
+#include <QPushButton>
 #include <QtTest>
 
 using namespace relay::sharing;
@@ -28,6 +30,31 @@ QJsonArray items(const char *text)
 }
 
 constexpr qint64 kNow = 1'700'000'000'000LL;
+
+// The texts of the view's labels with this object name, in the order they are laid out
+// (findChildren walks the children in the order they were added, depth first).
+QStringList labels(const QWidget &view, const char *name)
+{
+    QStringList texts;
+    for (const QLabel *label : view.findChildren<QLabel *>(QLatin1String(name)))
+        texts << label->text();
+    return texts;
+}
+
+QStringList allLabels(const QWidget &view)
+{
+    QStringList texts;
+    for (const QLabel *label : view.findChildren<QLabel *>()) texts << label->text();
+    return texts;
+}
+
+QStringList buttons(const QWidget &view, const QString &text)
+{
+    QStringList found;
+    for (const QPushButton *press : view.findChildren<QPushButton *>())
+        if (press->text() == text) found << press->text();
+    return found;
+}
 
 }  // namespace
 
@@ -51,6 +78,10 @@ private slots:
     void expiryIsReadInWhicheverUnitArrived();
     void sentences();
     void togglingAnOptionSurvivesTheRebuildItCauses();
+    void theTopLineSaysWhatIsOnAndWhoIsConnected();
+    void quietPanesAreOneRowEach();
+    void guestsGetABlockEachAndTheOptionsNoteOnce();
+    void aKnockComesFirstAndNamesItsPane();
 };
 
 void SharingTest::sharedPanesAndTitles()
@@ -433,6 +464,181 @@ void SharingTest::togglingAnOptionSurvivesTheRebuildItCauses()
         if (candidate->text() == QStringLiteral("Guest prompts run immediately")) fresh = candidate;
     QVERIFY(fresh);
     QVERIFY(fresh->isChecked());
+}
+
+// #SHRP: the top line is the model's, so the window feeds it and the view only prints it.
+void SharingTest::theTopLineSaysWhatIsOnAndWhoIsConnected()
+{
+    Model model;
+    QCOMPARE(model.topLine(), QStringLiteral("Remote control off"));
+    model.setRemote(false, QStringLiteral("relay-terminal.ai"), true, 2);
+    QCOMPARE(model.topLine(), QStringLiteral("Remote control off"));
+
+    model.setRemote(true, QStringLiteral("relay-terminal.ai"), true, 0);
+    QCOMPARE(model.topLine(), QStringLiteral("Remote control on · relay-terminal.ai · no phone connected"));
+
+    // The `devices` line names them and says which hold a channel; a paired phone that is not
+    // connected is not on the line.
+    model.setDevices(items(R"([
+        {"id":"d1","name":"iPhone","platform":"Safari","online":true},
+        {"id":"d2","name":"iPad","platform":"Safari","online":true},
+        {"id":"d3","name":"old Pixel","platform":"Chrome","online":false}
+    ])"));
+    QCOMPARE(model.connectedDeviceNames(), (QStringList{QStringLiteral("iPhone"), QStringLiteral("iPad")}));
+    QCOMPARE(model.topLine(), QStringLiteral("Remote control on · relay-terminal.ai · iPhone, iPad connected"));
+
+    // An older sidecar's records carry no `online`: the hub's count is what there is.
+    model.setDevices(items(R"([{"id":"d1","name":"iPhone","platform":"Safari"}])"));
+    model.setRemote(true, QStringLiteral("your tailnet"), true, 1);
+    QCOMPARE(model.topLine(), QStringLiteral("Remote control on · your tailnet · 1 phone connected"));
+    model.setRemote(true, QStringLiteral("your tailnet"), true, 2);
+    QCOMPARE(model.topLine(), QStringLiteral("Remote control on · your tailnet · 2 phones connected"));
+
+    // On but not registered anywhere: the reason, not a phone count.
+    model.setRemote(true, QStringLiteral("relay-terminal.ai"), false, 0,
+                    QStringLiteral("the rendezvous link is down; reconnecting."));
+    QCOMPARE(model.topLine(), QStringLiteral("Remote control on · relay-terminal.ai · offline: "
+                                             "the rendezvous link is down; reconnecting."));
+
+    // The view prints exactly that line, with Pair a phone… beside it, in every state.
+    SharingView view;
+    view.setModel(&model);
+    view.refresh();
+    QCOMPARE(labels(view, "sharingTopLine"), QStringList{model.topLine()});
+    QCOMPARE(buttons(view, QStringLiteral("Pair a phone…")).size(), 1);
+    bool paired = false;
+    view.onPairPhone = [&] { paired = true; };
+    for (QPushButton *press : view.findChildren<QPushButton *>())
+        if (press->text() == QStringLiteral("Pair a phone…")) press->click();
+    QVERIFY(paired);
+}
+
+// Three panes nobody is visiting: one section, one row and one Invite… each — none of the
+// per-pane kit that made the pane the same block three times over (#SHRP).
+void SharingTest::quietPanesAreOneRowEach()
+{
+    Model model;
+    model.setRemote(true, QStringLiteral("relay-terminal.ai"), true, 0);
+    model.setSharedPanes({{QStringLiteral("p1"), QStringLiteral("build")},
+                          {QStringLiteral("p2"), QStringLiteral("logs")},
+                          {QStringLiteral("p3"), QStringLiteral("deploy")}});
+    SharingView view;
+    view.setModel(&model);
+    view.refresh();
+
+    QCOMPARE(labels(view, "settingsHeading"), QStringList{QStringLiteral("Nobody is visiting")});
+    QVERIFY(labels(view, "settingsSubheading").isEmpty());
+    const QStringList rows = labels(view, "settingsRowLabel");
+    QVERIFY2(rows.contains(QStringLiteral("build")) && rows.contains(QStringLiteral("logs"))
+                 && rows.contains(QStringLiteral("deploy")), qPrintable(rows.join(QStringLiteral(" | "))));
+    QCOMPARE(buttons(view, QStringLiteral("Invite…")).size(), 3);
+    QVERIFY(view.findChildren<QCheckBox *>().isEmpty());
+    QVERIFY(buttons(view, QStringLiteral("Pause guests")).isEmpty());
+    QVERIFY(buttons(view, QStringLiteral("End sharing")).isEmpty());
+    const QStringList everything = allLabels(view);
+    for (const QString &text : everything) {
+        QVERIFY2(!text.contains(QStringLiteral("This share")), qPrintable(text));
+        QVERIFY2(!text.contains(QStringLiteral("Nobody here yet")), qPrintable(text));
+        QVERIFY2(!text.contains(QStringLiteral("not guests and are not listed here")), qPrintable(text));
+        QVERIFY2(!text.startsWith(QStringLiteral("Pane “")), qPrintable(text));
+    }
+    QVERIFY(everything.contains(QStringLiteral("Every pane is reachable from your phones. To let "
+                                               "someone else in, invite them.")));
+
+    // Invite… on a row asks for that row's pane.
+    QString invited;
+    view.onInvite = [&](const QString &pane) { invited = pane; };
+    QList<QPushButton *> invites;
+    for (QPushButton *press : view.findChildren<QPushButton *>())
+        if (press->text() == QStringLiteral("Invite…")) invites << press;
+    invites.at(1)->click();
+    QCOMPARE(invited, QStringLiteral("p2"));
+
+    // Remote control off: the sentence says so instead of promising the phones.
+    model.setRemote(false, QString(), false, 0);
+    view.refresh();
+    QVERIFY(allLabels(view).contains(QStringLiteral("Remote control is off, so your phones cannot "
+                                                    "reach these panes. To let someone else in, "
+                                                    "invite them.")));
+}
+
+void SharingTest::guestsGetABlockEachAndTheOptionsNoteOnce()
+{
+    Model model;
+    model.setRemote(true, QStringLiteral("relay-terminal.ai"), true, 0);
+    model.setSharedPanes({{QStringLiteral("p1"), QStringLiteral("build")},
+                          {QStringLiteral("p2"), QStringLiteral("logs")},
+                          {QStringLiteral("p3"), QStringLiteral("deploy")}});
+    model.setParticipants(items(R"([{"id":"a1","name":"alice","role":"editor","panes":["p1"],
+                                     "platform":"Chrome","expires":600}])"),
+                          items(R"([{"id":"i1","panes":["p3"],"role":"viewer","uses":1,
+                                     "expires":3600}])"));
+    SharingView view;
+    view.setModel(&model);
+    view.refresh();
+
+    QCOMPARE(labels(view, "settingsHeading"),
+             (QStringList{QStringLiteral("Guests"), QStringLiteral("Nobody is visiting")}));
+    QCOMPARE(labels(view, "settingsSubheading"),
+             (QStringList{QStringLiteral("Pane “build”"), QStringLiteral("Pane “deploy”")}));
+    // Two checkboxes per block, side by side, with the sentences as tooltips…
+    const QList<QCheckBox *> boxes = view.findChildren<QCheckBox *>();
+    QCOMPARE(boxes.size(), 4);
+    int prompts = 0, present = 0;
+    for (const QCheckBox *box : boxes) {
+        if (box->text() == QStringLiteral("Guest prompts run immediately")) {
+            ++prompts;
+            QCOMPARE(box->toolTip(), promptsImmediateSentence());
+        } else if (box->text() == QStringLiteral("Guests can act only while I'm here")) {
+            ++present;
+            QCOMPARE(box->toolTip(), presentOnlySentence());
+        }
+    }
+    QCOMPARE(prompts, 2);
+    QCOMPARE(present, 2);
+    // …and the note that spells both out exactly once, under the section.
+    QCOMPARE(labels(view, "sharingOptionsNote").size(), 1);
+    QCOMPARE(labels(view, "sharingOptionsNote").first(),
+             promptsImmediateSentence() + QLatin1Char(' ') + presentOnlySentence());
+    // The three buttons, per visited pane, and Invite… for the quiet one.
+    QCOMPARE(buttons(view, QStringLiteral("Invite someone…")).size(), 2);
+    QCOMPARE(buttons(view, QStringLiteral("Pause guests")).size(), 2);
+    QCOMPARE(buttons(view, QStringLiteral("End sharing")).size(), 2);
+    QCOMPARE(buttons(view, QStringLiteral("Invite…")).size(), 1);
+    QVERIFY(allLabels(view).contains(QStringLiteral("logs")));
+    QVERIFY(allLabels(view).contains(QStringLiteral("Viewer link i1 — 1 use left, expires in 60 min")));
+    QVERIFY(allLabels(view).contains(QStringLiteral("alice — editor")));
+
+    // The pane the view was opened from comes first within its section, and only there.
+    view.focusPane(QStringLiteral("p3"));
+    QCOMPARE(labels(view, "settingsSubheading"),
+             (QStringList{QStringLiteral("Pane “deploy”"), QStringLiteral("Pane “build”")}));
+    QCOMPARE(labels(view, "settingsHeading"),
+             (QStringList{QStringLiteral("Guests"), QStringLiteral("Nobody is visiting")}));
+}
+
+void SharingTest::aKnockComesFirstAndNamesItsPane()
+{
+    Model model;
+    model.setRemote(true, QStringLiteral("relay-terminal.ai"), true, 0);
+    model.setSharedPanes({{QStringLiteral("p1"), QStringLiteral("build")},
+                          {QStringLiteral("p2"), QStringLiteral("logs")}});
+    model.setParticipants(items(R"([{"id":"b2","name":"bob","role":"viewer","panes":["p1"]}])"), {});
+    model.addKnock(json(R"({"participant":"a1","name":"alice","platform":"Chrome","code":"48213",
+        "role":"editor","pane":"p2"})"), QDateTime::currentMSecsSinceEpoch());
+    SharingView view;
+    view.setModel(&model);
+    view.refresh();
+
+    QCOMPARE(labels(view, "settingsHeading"),
+             (QStringList{QStringLiteral("Waiting for you"), QStringLiteral("Guests"),
+                          QStringLiteral("Nobody is visiting")}));
+    QVERIFY(allLabels(view).contains(QStringLiteral("alice wants to join pane “logs”")));
+    QCOMPARE(allLabels(view).filter(QStringLiteral("48213")).size(), 1);
+    QCOMPARE(buttons(view, QStringLiteral("Admit as editor")).size(), 1);
+    QCOMPARE(view.paneTitle(), QStringLiteral("Sharing · 1 waiting"));
+    // The top line is still the first thing on the pane.
+    QCOMPARE(allLabels(view).first(), model.topLine());
 }
 
 QTEST_MAIN(SharingTest)

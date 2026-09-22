@@ -93,6 +93,13 @@ struct SharedPane {
     bool operator!=(const SharedPane &other) const { return !(*this == other); }
 };
 
+// One of the owner's own paired phones, as the sidecar's `devices` line lists them (#SHRP). Not a
+// guest: it is the owner, on another screen, and the pane's top line is the only place it shows.
+struct Device {
+    QString id, name, platform;
+    bool online = false;     // holding a live channel right now
+};
+
 // Per shared pane, and per share: both off by default (section 10.5).
 struct ShareOptions {
     bool paused = false;
@@ -145,6 +152,22 @@ public:
     void setOptions(const QString &pane, const ShareOptions &options);
     ShareOptions options(const QString &pane) const { return m_options.value(pane); }
 
+    // Remote control as the window chrome knows it (`remote_state`, #PH0N) and the owner's own
+    // paired devices (`devices`), for the pane's top line (#SHRP). `addressLabel` is the address
+    // as a person says it (remotesettings::addressName); `connected` is the hub's count, which
+    // is what an older sidecar sends when its device records carry no `online` flag.
+    void setRemote(bool on, const QString &addressLabel, bool online, int connected = 0,
+                   const QString &reason = QString());
+    void setDevices(const QList<Device> &devices);
+    void setDevices(const QJsonArray &items);       // the `devices` line as it arrives
+    bool remoteOn() const { return m_remoteOn; }
+    QList<Device> devices() const { return m_devices; }
+    // The names of the devices holding a live channel, in the sidecar's order.
+    QStringList connectedDeviceNames() const;
+    // "Remote control on · relay-terminal.ai · iPhone, iPad connected", "… · no phone
+    // connected", "… · offline: <reason>" or "Remote control off".
+    QString topLine() const;
+
     // ---- what the UI asks -------------------------------------------------------------------
     QList<Request> requests(const QString &pane = QString()) const;
     QList<Participant> participantsOn(const QString &pane) const;
@@ -175,6 +198,12 @@ private:
     QHash<QString, ShareOptions> m_options;
     QHash<QString, QString> m_pauseReason;
     QList<SharedPane> m_shared;
+    QList<Device> m_devices;
+    bool m_remoteOn = false;
+    bool m_remoteOnline = false;
+    int m_remoteConnected = 0;
+    QString m_remoteAddress;
+    QString m_remoteReason;
 };
 
 // ---- the sentences, in one place so the dialog, the pane and the tests agree ------------------
@@ -188,6 +217,10 @@ QString expiryText(qint64 seconds);
 QString countdown(int secondsLeft);
 // "1 use left" / "3 uses left" / "spent"
 QString usesText(int uses);
+// What each of the two share options does, in full: the checkbox's tooltip, and the one note
+// under the Guests section that says both once (#SHRP).
+QString promptsImmediateSentence();
+QString presentOnlySentence();
 
 // ---- the pane --------------------------------------------------------------------------------
 
@@ -207,6 +240,7 @@ public:
     std::function<void(const QString &pane)> onEndShare;
     std::function<void(const QString &pane, bool promptsImmediate, bool presentOnly)> onOptions;
     std::function<void(const QString &pane)> onInvite;      // open the share dialog on this pane
+    std::function<void()> onPairPhone;                      // the plug menu's "Pair a phone…"
     std::function<void()> onClose;                          // Esc, or the pane chrome's ×
     std::function<void()> onTitleChanged;
 
@@ -232,10 +266,16 @@ protected:
 private:
     void build();
     QWidget *heading(const QString &text);
+    QWidget *subheading(const QString &text);
+    // The top line: remote control, the address, which of your phones are connected, and the
+    // Pair a phone… button (#SHRP).
+    QWidget *remoteRow();
     QWidget *requestRow(const Request &request, bool editorAllowed);
     QWidget *participantRow(const Participant &person, const QString &pane);
     QWidget *inviteRow(const Invite &invite);
     QWidget *shareControls(const QString &pane);
+    // One line for a pane nobody is visiting: its title and Invite….
+    QWidget *quietRow(const SharedPane &pane);
     QWidget *note(const QString &text);
 
     Model *m_model = nullptr;
