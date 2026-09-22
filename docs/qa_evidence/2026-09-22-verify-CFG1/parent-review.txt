@@ -1,0 +1,8 @@
+Independent parent verification, 2026-09-22 UTC
+Recomputed assertions from post-fix/wire.jsonl and timestamps, all passed:
+61 seconds with no configure; card/list asks follow matching context; helper receives max_steps=37 and max_tool_calls=43; no ask/context switch after edits.
+Inspected final screenshot post-fix/10-tool-limit-43.png.
+Reviewed scoped source diff (+10/-2): wraps step/tool-call rows in existing alsoBoardWorkers, including reset callback.
+Exact committed tree build passed via scripts/land.py commit cfgact-fix.
+Commit c3312a38f031bbdd8734bae95b80bca1ac4e7f5f.
+Unrelated uncommitted changes were excluded by snapshot merge.

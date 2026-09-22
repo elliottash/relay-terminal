@@ -35,3 +35,7 @@ Check · 2 not-applicable, 2 passed. The status is under `## Tests`; earlier che
 <!-- relay:entry 20260922T013523Z-cv author=codex kind=evidence -->
 ### Codex · 2026-09-22 01:35
 Coordinated two-row source fix verified live: both limit edits reach helper PID 3253763 with no later ask or context switch; 61-second idle and card/list brief assertions pass. Frozen binary SHA256 is in post-fix/provenance.txt. Both targeted CTest cases and four Security placement checks pass. Moved to needs-verification for parent review of the newly implemented fix; no owner approval needed. Updated execution summary, tests and verdict; preserved the earlier failed-run evidence.
+
+<!-- relay:entry 20260922T013908Z-pv author=codex kind=evidence -->
+### Codex · 2026-09-22 01:39
+Parent completed the landing after subagent a2 hit model capacity. Reviewed only the owned +10/-2 source hunk, landed implementation and evidence as c3312a38f031bbdd8734bae95b80bca1ac4e7f5f after exact-tree build. Independently recomputed the final wire assertions and inspected screenshot 10: all three QA items pass. Ticked Options propagation and moved to done. The intermediate tool-call edit required blur; the final driver explicitly blurs both editors and preserves its passing trace. Other sessions’ source hunks remain untouched.
