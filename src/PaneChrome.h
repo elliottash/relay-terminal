@@ -18,6 +18,7 @@
 #include "PaneView.h"
 #include "ModelsPane.h"   // the models pane is a hosted PaneView, and node() saves which tab it is on
 #include "PaneDimming.h"
+#include "SessionInfo.h"
 
 #include "PaneStatus.h"
 #include "RelayMark.h"   // the app's own mark, painted: the state glyph and the tab icons
@@ -632,13 +633,15 @@ private:
 // A small overlay in each pane's top-right corner. The three a person reaches for — new pane,
 // move to a tab of its own, close — are on screen in every pane at all times (owner, 2026-09-17:
 // buttons that appear only under the mouse are buttons you have to go looking for). There is one
-// new-pane button, which puts the pane on the right (card #803C). Dragging a pane's header moves it.
+// new-pane button, which puts the pane on the right (card #803C). The low-frequency pane ID and
+// Dim action live behind the circle-i instead of taking permanent width (#P1CP). Dragging a pane's
+// header moves it.
 class PaneChrome final : public QFrame {
 public:
     std::function<void(const QString &action)> onAction;
     relay::dimming::State dimming;
     relay::dimming::Overlay *dimOverlay = nullptr;
-    QToolButton *dimButton = nullptr;
+    relay::sessioninfo::PaneInfoPopover *infoPopover = nullptr;
     int dimAmount = 0;
 
     void paintDimming(int amount) {
@@ -650,11 +653,11 @@ public:
         else if (auto *tool = dynamic_cast<ToolPane *>(parentWidget()); tool && tool->bandShown())
             header = tool->band()->geometry().bottom() + 1;
         dimOverlay->refresh(amount, relay::theme::Background, header);
-        if (dimButton) {
-            dimButton->setChecked(dimming.manual > 0);
-            dimButton->setToolTip(QStringLiteral("Dim this pane · %1% dimmed\nAlt+wheel adjusts this pane; click again to restore automatic behavior").arg(amount));
-        }
+        if (infoPopover) infoPopover->setDimState(amount, dimming.manual > 0);
         raise();
+        // The dim layer is raised as it repaints. An open controls popover belongs with the
+        // undimmed chrome above it, including immediately after its own Dim button is clicked.
+        if (infoPopover && infoPopover->isVisible()) infoPopover->raise();
     }
 
     explicit PaneChrome(QWidget *leaf) : QFrame(leaf) {
@@ -672,9 +675,6 @@ public:
         // placed by dragging its header. Its tooltip shows the key (pane.splitRight).
         button(m_row, QStringLiteral("⊞"), QStringLiteral("pane.newByMouse"), QStringLiteral("New pane (drag its header to place it)"))
             ->setProperty("keysFrom", QStringLiteral("pane.splitRight"));
-        dimButton = button(m_row, QStringLiteral("◐"), QStringLiteral("pane.dimToggle"), QStringLiteral("Dim this pane"));
-        dimButton->setCheckable(true);
-        dimButton->setProperty("liveTooltip", true);
         button(m_row, QStringLiteral("⇱"), QStringLiteral("pane.moveToNewTab"), QStringLiteral("Move to new tab"));
         button(m_row, QStringLiteral("×"), QStringLiteral("pane.close"), QStringLiteral("Close pane"));
         // The header gives up exactly this much room for good, so the title and the folder line
@@ -1349,4 +1349,3 @@ private:
     QString m_remoteHost;
     int m_layoutLogSerial = 0;        // RELAY_LAYOUT_LOG only: which pane a line is about
 };
-

@@ -195,8 +195,12 @@ Layout rules:
   (#78BN) — the pointer is already in hand, so the pane is placed by dragging its header. It
   toasts "New pane · drag its header to place it" and, per the hint registry (`pane.new.mouse`),
   "Next time: <live `pane.splitRight` keys> · new pane". The tooltip shows the
-  `pane.splitRight` keys through the button's `keysFrom` property. The other buttons run the same
-  actions as the keys (`pane.moveToNewTab`, `pane.close`).
+  `pane.splitRight` keys through the button's `keysFrom` property. The other permanent buttons run
+  the same actions as the keys (`pane.moveToNewTab`, `pane.close`). In a terminal pane, hovering or
+  keyboard-focusing the circle-i opens `PaneInfoPopover`: it shows the pane's eight-character ID
+  with a Copy button and the low-frequency Dim pane action (`pane.dimToggle`, Alt+D). The popover
+  stays open across the gap from the circle-i to its controls; clicking the circle-i still opens
+  Conversation info. Dim no longer spends permanent width in the button row (#P1CP).
   `PaneChrome` has no `Q_OBJECT`, so it is found with `dynamic_cast` (`chromeOf`), never
   `findChild<PaneChrome*>` (that matches any `QFrame`, such as the transcript panel).
   `showChromeFor()` records the wanted leaf **before** hiding or showing anything: `hide()` and

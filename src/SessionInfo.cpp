@@ -4,6 +4,8 @@
 #include "ModelCatalog.h"
 
 #include <QApplication>
+#include <QClipboard>
+#include <QCursor>
 #include <QEvent>
 #include <QFileInfo>
 #include <QHBoxLayout>
@@ -22,6 +24,8 @@
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
+
+#include <algorithm>
 
 namespace relay::sessioninfo {
 namespace {
@@ -382,7 +386,7 @@ QString renderInfo(const QJsonObject &info, const QDateTime &now) {
 
 InfoButton::InfoButton(QWidget *parent) : QToolButton(parent) {
     setAutoRaise(true);
-    setFocusPolicy(Qt::NoFocus);
+    setFocusPolicy(Qt::TabFocus);
     setAccessibleName(QStringLiteral("Conversation info"));
 }
 
@@ -414,6 +418,109 @@ void InfoButton::paintEvent(QPaintEvent *) {
     painter.drawEllipse(QPointF(cx, circle.top() + side * 0.29), dot / 2.0 + 0.3, dot / 2.0 + 0.3);
     const qreal stemWidth = std::max(1.6, side / 8.0);
     painter.drawRoundedRect(QRectF(cx - stemWidth / 2.0, circle.top() + side * 0.43, stemWidth, side * 0.36), 0.6, 0.6);
+}
+
+PaneInfoPopover::PaneInfoPopover(QWidget *pane, QWidget *anchor, const QString &paneId)
+    : QFrame(pane), m_anchor(anchor), m_paneId(paneId) {
+    setObjectName(QStringLiteral("paneInfoPopover"));
+    setAttribute(Qt::WA_StyledBackground);
+    setFocusPolicy(Qt::NoFocus);
+    hide();
+
+    auto *layout = new QVBoxLayout(this);
+    layout->setContentsMargins(10, 8, 10, 8);
+    layout->setSpacing(6);
+    auto *idRow = new QHBoxLayout;
+    idRow->setContentsMargins(0, 0, 0, 0);
+    idRow->setSpacing(6);
+    auto *label = new QLabel(QStringLiteral("Pane ID"));
+    label->setObjectName(QStringLiteral("paneInfoLabel"));
+    idRow->addWidget(label);
+    m_id = new QLabel(m_paneId);
+    m_id->setObjectName(QStringLiteral("paneInfoId"));
+    m_id->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    idRow->addWidget(m_id, 1);
+    m_copy = new QToolButton;
+    m_copy->setObjectName(QStringLiteral("popupTextButton"));
+    m_copy->setText(QStringLiteral("Copy"));
+    m_copy->setAccessibleName(QStringLiteral("Copy pane ID"));
+    idRow->addWidget(m_copy);
+    layout->addLayout(idRow);
+
+    m_dim = new QToolButton;
+    m_dim->setObjectName(QStringLiteral("popupTextButton"));
+    m_dim->setText(QStringLiteral("◐  Dim pane"));
+    m_dim->setCheckable(true);
+    m_dim->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    m_dim->setAccessibleName(QStringLiteral("Dim pane"));
+    layout->addWidget(m_dim, 0, Qt::AlignLeft);
+
+    m_closeTimer = new QTimer(this);
+    m_closeTimer->setSingleShot(true);
+    m_closeTimer->setInterval(220);
+    connect(m_closeTimer, &QTimer::timeout, this, [this] {
+        if (!pointerOrFocusInside()) hide();
+    });
+    m_copyTimer = new QTimer(this);
+    m_copyTimer->setSingleShot(true);
+    m_copyTimer->setInterval(1200);
+    connect(m_copyTimer, &QTimer::timeout, this, [this] { m_copy->setText(QStringLiteral("Copy")); });
+    connect(m_copy, &QToolButton::clicked, this, [this] {
+        QApplication::clipboard()->setText(m_paneId);
+        m_copy->setText(QStringLiteral("Copied"));
+        m_copyTimer->start();
+    });
+    connect(m_dim, &QToolButton::clicked, this, [this] { if (onToggleDim) onToggleDim(); });
+
+    if (m_anchor) m_anchor->installEventFilter(this);
+    if (pane) pane->installEventFilter(this);
+    installEventFilter(this);
+}
+
+void PaneInfoPopover::setDimState(int amount, bool manual) {
+    m_dim->setChecked(manual);
+    m_dim->setText(manual ? QStringLiteral("◐  Restore automatic dimming")
+                          : QStringLiteral("◐  Dim pane"));
+    m_dim->setToolTip(QStringLiteral("%1% dimmed · Alt+wheel adjusts this pane")
+                          .arg(amount));
+}
+
+bool PaneInfoPopover::eventFilter(QObject *object, QEvent *event) {
+    if (object == m_anchor) {
+        if (event->type() == QEvent::Enter || event->type() == QEvent::FocusIn) showAtAnchor();
+        else if (event->type() == QEvent::Leave || event->type() == QEvent::FocusOut) scheduleClose();
+    } else if (object == this) {
+        if (event->type() == QEvent::Enter || event->type() == QEvent::FocusIn) m_closeTimer->stop();
+        else if (event->type() == QEvent::Leave || event->type() == QEvent::FocusOut) scheduleClose();
+    } else if (object == parentWidget() && event->type() == QEvent::Resize && isVisible()) {
+        showAtAnchor();
+    }
+    return QFrame::eventFilter(object, event);
+}
+
+void PaneInfoPopover::showAtAnchor() {
+    if (!m_anchor || !parentWidget()) return;
+    m_closeTimer->stop();
+    adjustSize();
+    const QPoint below = m_anchor->mapTo(parentWidget(), QPoint(m_anchor->width(), m_anchor->height() + 4));
+    const int margin = 4;
+    const int maxX = std::max(margin, parentWidget()->width() - width() - margin);
+    const int x = std::clamp(below.x() - width(), margin, maxX);
+    int y = below.y();
+    if (y + height() > parentWidget()->height() - margin)
+        y = std::max(margin, m_anchor->mapTo(parentWidget(), QPoint(0, -height() - 4)).y());
+    move(x, y);
+    raise();
+    show();
+}
+
+void PaneInfoPopover::scheduleClose() { m_closeTimer->start(); }
+
+bool PaneInfoPopover::pointerOrFocusInside() const {
+    QWidget *under = QApplication::widgetAt(QCursor::pos());
+    const bool overAnchor = under && (under == m_anchor || m_anchor->isAncestorOf(under));
+    const bool overPopover = under && (under == this || isAncestorOf(under));
+    return overAnchor || overPopover || (m_anchor && m_anchor->hasFocus()) || isAncestorOf(QApplication::focusWidget());
 }
 
 // ----- the view ----------------------------------------------------------------------------------

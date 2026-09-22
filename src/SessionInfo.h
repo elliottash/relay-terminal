@@ -14,6 +14,7 @@
 #include "PaneView.h"
 
 #include <QDateTime>
+#include <QFrame>
 #include <QHash>
 #include <QJsonObject>
 #include <QList>
@@ -39,6 +40,35 @@ public:
 
 protected:
     void paintEvent(QPaintEvent *event) override;
+};
+
+// The low-frequency controls behind the header's circle-i. It is a child of the pane rather than
+// a Qt::Popup window: hovering it must not steal focus from the terminal, and it must remain
+// reachable while the pointer crosses the small gap below the button.
+class PaneInfoPopover final : public QFrame {
+public:
+    PaneInfoPopover(QWidget *pane, QWidget *anchor, const QString &paneId);
+
+    std::function<void()> onToggleDim;
+    QToolButton *dimButton() const { return m_dim; }
+    QString paneId() const { return m_paneId; }
+    void setDimState(int amount, bool manual);
+
+protected:
+    bool eventFilter(QObject *object, QEvent *event) override;
+
+private:
+    void showAtAnchor();
+    void scheduleClose();
+    bool pointerOrFocusInside() const;
+
+    QWidget *m_anchor = nullptr;
+    QLabel *m_id = nullptr;
+    QToolButton *m_copy = nullptr;
+    QToolButton *m_dim = nullptr;
+    QTimer *m_closeTimer = nullptr;
+    QTimer *m_copyTimer = nullptr;
+    QString m_paneId;
 };
 
 // The `session_info` event as HTML for the view's text browser. Links use the relay-info: scheme

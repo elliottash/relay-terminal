@@ -615,6 +615,60 @@ private slots:
         QCOMPARE(compactNumber(1300000), QStringLiteral("1.3M"));
     }
 
+    void paneInfoPopoverCopiesAndKeepsTheInfoClick() {
+        using namespace relay::sessioninfo;
+        QWidget pane;
+        pane.resize(320, 180);
+        InfoButton info(&pane);
+        info.setObjectName(QStringLiteral("paneInfoAnchor"));
+        info.move(280, 4);
+        info.show();
+        PaneInfoPopover popover(&pane, &info, QStringLiteral("a1b2c3d4"));
+        int infoClicks = 0, dimClicks = 0;
+        connect(&info, &QToolButton::clicked, &pane, [&] { ++infoClicks; });
+        popover.onToggleDim = [&] { ++dimClicks; };
+        pane.show();
+
+        // Hover opens it, and the delayed close is cancelled when the pointer crosses from the
+        // circle-i onto the popover. This is what makes its buttons genuinely reachable.
+        QEvent enter(QEvent::Enter);
+        QApplication::sendEvent(&info, &enter);
+        QVERIFY(popover.isVisible());
+        QEvent leave(QEvent::Leave);
+        QApplication::sendEvent(&info, &leave);
+        QEvent enterPopover(QEvent::Enter);
+        QApplication::sendEvent(&popover, &enterPopover);
+        QTest::qWait(260);
+        QVERIFY(popover.isVisible());
+
+        auto buttons = popover.findChildren<QToolButton *>();
+        QToolButton *copy = nullptr, *dim = nullptr;
+        for (QToolButton *button : buttons) {
+            if (button->accessibleName() == QStringLiteral("Copy pane ID")) copy = button;
+            if (button->accessibleName() == QStringLiteral("Dim pane")) dim = button;
+        }
+        QVERIFY(copy);
+        QVERIFY(dim);
+        QTest::mouseClick(copy, Qt::LeftButton);
+        QCOMPARE(QApplication::clipboard()->text(), QStringLiteral("a1b2c3d4"));
+        QCOMPARE(copy->text(), QStringLiteral("Copied"));
+        QTest::mouseClick(dim, Qt::LeftButton);
+        QCOMPARE(dimClicks, 1);
+
+        // Dimming state changes the low-frequency action in place; it never adds a header button.
+        popover.setDimState(90, true);
+        QVERIFY(dim->isChecked());
+        QVERIFY(dim->text().contains(QStringLiteral("Restore automatic")));
+        QTest::mouseClick(&info, Qt::LeftButton);
+        QCOMPARE(infoClicks, 1);   // the circle-i's original Conversation info action is intact
+
+        info.clearFocus();
+        QApplication::processEvents();
+        popover.hide();
+        info.setFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(popover.isVisible());   // keyboard users get the same surface as hover
+    }
+
     void infoViewNavigatesAndGoesBack() {
         using namespace relay::sessioninfo;
         InfoView view;

@@ -9873,7 +9873,7 @@ private:
                     chrome = new PaneChrome(leaf);
                     QPointer<QWidget> guard(leaf);
                     // The conversation info button (ⓘ, card #Y63Z), first in an agent pane's row.
-                    if (dynamic_cast<Pane *>(leaf)) {
+                    if (auto *pane = dynamic_cast<Pane *>(leaf)) {
                         // The button row is the chrome's own layout while it is one row, and the
                         // first row inside the column once the share button hangs below it
                         // (2026-09-20). Casting only chrome->layout() found nothing after that move,
@@ -9891,6 +9891,15 @@ private:
                             // PaneChrome::refreshTooltips appends the live key, so the tooltip
                             // reads "Conversation info  (Alt+I)" and follows a rebinding.
                             info->setProperty("label", QStringLiteral("Conversation info"));
+                            auto *popover = new relay::sessioninfo::PaneInfoPopover(
+                                leaf, info, pane->sessionToken().left(8));
+                            chrome->infoPopover = popover;
+                            popover->onToggleDim = [guard] {
+                                auto *w = windowOf(guard);
+                                if (!w) return;
+                                w->setActiveLeaf(guard);
+                                w->runAction(QStringLiteral("pane.dimToggle"));
+                            };
                             QObject::connect(info, &QToolButton::clicked, chrome, [guard] {
                                 auto *w = windowOf(guard);
                                 if (!w) return;
