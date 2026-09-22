@@ -1,0 +1,25 @@
+PACKAGE /home/elliott/relay-debs/relay_0.1.0~gitfff7eb8f-1~ubuntu26.04_amd64.deb
+SHA256 af2d9b011f596b00510c8785145c252f967e4389e8c18414006e2e335229fc2c
+Package: relay
+Version: 0.1.0~gitfff7eb8f-1~ubuntu26.04
+Architecture: amd64
+PASS package files and Ghostty core
+relay 0.1.0
+
+Usage: /home/elliott/relay-build/20260922-fff7eb8f/extracted/usr/bin/relay [options]
+Terminal with rich input and BYOK agents.
+
+Options:
+  -h, --help              Displays help on commandline options.
+  --help-all              Displays help, including generic Qt options.
+  -v, --version           Displays version information.
+  -w, --workspace <path>  Initial terminal directory and agent workspace.
+  --clean-shell           Do not source ~/.bashrc; useful for incompatible
+                          DEBUG/preexec prompt hooks.
+  --engine-core <name>    Emulator core of Relay-engine panes: ghostt
+PASS extracted worker ready and shutdown
+/home/elliott/relay-build/20260922-fff7eb8f/extracted/usr/bin/relay --workspace /tmp/relay-spb2-smoke-1bv31jkd
+/usr/bin/python3 -X utf8 -S -u /home/elliott/relay-build/20260922-fff7eb8f/extracted/usr/share/relay/backend/worker.py
+/bin/bash --noprofile --rcfile /home/elliott/relay-build/20260922-fff7eb8f/extracted/usr/share/relay/shell/integration.bash -i
+PASS GUI stays running with packaged worker and integration shell
+PASS extracted-package smoke

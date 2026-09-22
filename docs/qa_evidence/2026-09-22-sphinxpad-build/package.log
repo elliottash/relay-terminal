@@ -1,0 +1,6 @@
+CPack: Create package using DEB
+CPack: Install projects
+CPack: - Install project: Relay []
+CPack: Create package
+CPackDeb: - Generating dependency list
+CPack: - package: /home/elliott/relay-build/20260922-fff7eb8f/build/relay_0.1.0~gitfff7eb8f-1~ubuntu26.04_amd64.deb generated.
