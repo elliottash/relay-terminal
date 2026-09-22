@@ -15,3 +15,14 @@ Validation:
 Files: src/AuxiliaryZoom.h, src/RelayWindow.h (three narrow hunks), tests/auxiliaryzoom_test.cpp, CMakeLists.txt, the AZP7 card/thread, and this evidence directory. Other sessions' changes excluded at landing.
 
 Landed implementation: `7c0774c8fa8cbcf3121ac5b0feb738c24c7e804c`. The land.py exact-tree application build passed. A fresh `tests_check` through TestsCommands after landing reports auxiliaryzoom passed for revision 7c0774c8, no findings/signals. Activity staging was also rerun under Xvfb with an isolated temporary XDG_CONFIG_HOME: 3 passed, 0 failed (activityView plus init/cleanup).
+
+
+## Full-window keyboard dispatch follow-up
+
+`live-drive.py` launches the exact-tree full Relay binary under Xvfb with isolated XDG directories and a synthetic stdio worker (no provider calls in the recorded successful run). It opens Activity with Alt+Shift+R, supplies deterministic reasoning through worker events, focuses Activity with Alt+Right, and sends actual X11 Ctrl+= three times, Ctrl+minus once, and Ctrl+0. It then repeats zoom/reset after Tab traversal. The earlier widget fixture did not test window dispatch; this drive does.
+
+`live-before.png`, `live-plus.png`, `live-minus.png`, and `live-reset.png` show that sequence. OCR measures the word “Checking” as 66, 85, 80, then 66 pixels wide. Activity's content region is pixel-identical to baseline after reset. The owner terminal's content region is pixel-identical across all six captures. `live-results.json` records measurements, input sequence and binary hash; assertions passed. Before/plus images were visually inspected.
+
+`live-ask-plus.png` and `live-ask-reset.png` name the additional Tab-traversal sequence. Activity has Ask chips, not an editable Ask field; focus on a particular chip was not independently measured, so these are not claimed as proof of Ask-input focus. The synthetic editable-field fallback remains covered by the Qt test.
+
+An initial exploratory run used an old provider-setting recipe and selected the default provider; it was stopped. Another fixture with no presets opened Models. Those captures were replaced by the successful deterministic-worker run above. No production code changed for this follow-up. Sphinxpad verification remains separate.

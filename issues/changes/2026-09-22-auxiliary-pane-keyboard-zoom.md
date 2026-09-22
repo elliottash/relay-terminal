@@ -31,10 +31,11 @@ Zoom from an auxiliary pane never changes its owner terminal.
 
 ## Execution Summary
 Fixed keyboard zoom dispatch for auxiliary read-only text panes, including Activity. It selects the active transcript instead of the owner terminal, supports reset after wheel or keyboard zoom, and teaches the configured shortcut on Ctrl+wheel. Unsupported auxiliary panes leave the terminal alone.
-Evidence: docs/qa_evidence/2026-09-22-AZP7/README.md, including staged Activity screenshots.
+Evidence: docs/qa_evidence/2026-09-22-AZP7/README.md, including staged Activity screenshots and full-window X11 keyboard dispatch evidence. Actual Ctrl+=/minus/0 changes only Activity; the owner terminal remains pixel-identical.
 
 ## Tests
 `ctest -R auxiliaryzoom`
+manual: docs/qa_evidence/2026-09-22-AZP7/live-results.json
 manual: docs/qa_evidence/2026-09-22-AZP7/tests.txt
 manual: docs/qa_evidence/2026-09-22-AZP7/README.md
 

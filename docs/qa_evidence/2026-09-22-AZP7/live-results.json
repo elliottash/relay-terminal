@@ -1,0 +1,52 @@
+{
+  "binary": "/tmp/claude-1000/land/azp7/verify/build/relay",
+  "sandbox": "/tmp/azp7-live-f8slmass",
+  "display": ":350",
+  "keys": [
+    "Alt+Shift+R",
+    "Ctrl+= x3",
+    "Ctrl+-",
+    "Ctrl+0",
+    "Tab traversal, Ctrl+= x2",
+    "Ctrl+0"
+  ],
+  "binary_sha256": "89b9ae0ea809ac62ef4cb06886fa93dff9b6b33c2cd791872377da3fb8acd320",
+  "measurements": {
+    "before": {
+      "checking_word_width": 66,
+      "checking_word_height": 14,
+      "owner_terminal_content_identical": true,
+      "activity_content_matches_baseline": true
+    },
+    "plus": {
+      "checking_word_width": 85,
+      "checking_word_height": 18,
+      "owner_terminal_content_identical": true,
+      "activity_content_matches_baseline": false
+    },
+    "minus": {
+      "checking_word_width": 80,
+      "checking_word_height": 18,
+      "owner_terminal_content_identical": true,
+      "activity_content_matches_baseline": false
+    },
+    "reset": {
+      "checking_word_width": 66,
+      "checking_word_height": 14,
+      "owner_terminal_content_identical": true,
+      "activity_content_matches_baseline": true
+    },
+    "ask-plus": {
+      "checking_word_width": 80,
+      "checking_word_height": 18,
+      "owner_terminal_content_identical": true,
+      "activity_content_matches_baseline": false
+    },
+    "ask-reset": {
+      "checking_word_width": 66,
+      "checking_word_height": 14,
+      "owner_terminal_content_identical": true,
+      "activity_content_matches_baseline": true
+    }
+  }
+}
