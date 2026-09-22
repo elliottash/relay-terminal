@@ -11,9 +11,9 @@
 //
 // and `request.type` is one of `board_open`, `board_refresh`, `board_card_get {id}`,
 // `board_search {query}`, `board_comment {id, text, kind}`, `board_move {id, status, reason}`,
-// `board_create {tab, title, request, labels}`, `board_ask {id, text, mode}`, `board_cancel {id}`
-// and `board_action {id, action}`. Nothing else is ever sent from here: no delete, no folders, no
-// cleanup, nothing that names a file.
+// `board_create {tab, title, request, labels}`, `board_ask {id, text, mode}`, `board_cancel {id}`,
+// `board_resume {id}` and `board_action {id, action}`. Nothing else is ever sent from here: no
+// delete, no folders, no cleanup, nothing that names a file.
 //
 // Everything a card says was written by a model, a collaborator or a merged branch, so every
 // string goes in through textContent and Markdown is drawn by app/boardmd.js, which builds nodes
@@ -950,7 +950,19 @@ export function mountBoard(options) {
       clearReply(id);
       return;
     }
-    if (mode === 'discuss' && !text) { say(cardLine, 'A Discuss needs your words. A Plan can go without.', { error: true }); replyBox.focus(); return; }
+    if (mode === 'discuss' && !text) {
+      // The empty send **resumes this card's queue** (#7JD1; owner, 2026-09-21: "why don't we
+      // just copy the functionality and have enter resume"). At the desk that is Enter on an
+      // empty prompt box; here it is Discuss with nothing typed, which is the same box and the
+      // same key. Stop is `board_cancel` and pauses the card's queue, and until this a phone had
+      // no way back at all — the Resume button is the desktop's, and a device is sent none of a
+      // queue's state, so it asks blind and the answer says whether anything was waiting.
+      if (!online()) { say(cardLine, 'Offline — resuming the queue needs your desktop.', { error: true }); return; }
+      request({ type: 'board_resume', id })
+        .catch((error) => say(lineFor(id), error.message || 'That did not send.', { error: true }));
+      replyBox.focus();
+      return;
+    }
     if (!online()) {
       // A turn is work that starts now, on the desktop: it is not something to find running
       // twenty minutes after the thought. The words stay where they are.
@@ -1445,6 +1457,13 @@ export function mountBoard(options) {
         say(lineFor(cardId), event.stopped === false ? 'Nothing was running on this card.' : 'Stopped.');
         paintCard();
         paintList();
+        break;
+      }
+      case 'board_resumed': {
+        settle(rid);
+        say(lineFor(cardId), event.resumed === false
+            ? 'Nothing was waiting on this card.'
+            : 'Resumed — what was queued is running again.');
         break;
       }
       case 'board_action_result': {

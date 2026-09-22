@@ -833,6 +833,66 @@ class AskTests(ProtocolTest):
         self.cards.agent(second).release()
         self.assertTrue(self.cards.wait())
 
+    def test_board_resume_runs_a_stopped_cards_queue_again(self):
+        """A device's Stop pauses that card's queue; its empty send starts it again (#7JD1).
+
+        `board_resume {card}` is `resume_queue` by the road a device can reach — the owner's rule
+        of 2026-09-21, "why don't we just copy the functionality and have enter resume", with the
+        phone copying the pane rather than getting a behaviour of its own. `resumed` is what tells
+        it whether there was a pause at all, because a device is sent none of a queue's state.
+        """
+        card_id = self.make_card()
+        # Nothing has ever run on this card: no session, nothing to resume, and it says so
+        # rather than failing.
+        answered = [e for e in self.send(type="board_resume", id="r0", card=card_id)
+                    if e["event"] == "board_resumed"][0]
+        self.assertEqual((answered["card_id"], answered["resumed"]), (card_id, False))
+        # Without a card there is no queue to name, and it says so rather than resuming every one.
+        with self.assertRaises(ValueError):
+            self.commands.dispatch({"type": "board_resume", "id": "r1"})
+
+        self.cards.hold(card_id)
+        self.send(type="board_ask", card=card_id, text="one")
+        self.assertTrue(self.cards.wait_running())
+        self.send(type="board_ask", card=card_id, text="two")   # queued behind the running turn
+        queue = self.commands.card_queue(f"card:{card_id}")
+        self.send(type="board_cancel", id="c1", card=card_id)
+        for _ in range(400):
+            if queue._paused:
+                break
+            time.sleep(0.005)
+        self.assertTrue(queue._paused, "board_cancel pauses that card's queue")
+        answered = [e for e in self.send(type="board_resume", id="r2", card=card_id)
+                    if e["event"] == "board_resumed"][0]
+        self.assertEqual((answered["card_id"], answered["resumed"]), (card_id, True))
+        self.assertFalse(queue._paused)
+        self.cards.agent(card_id).release()
+        self.assertTrue(self.cards.wait())
+
+    def test_a_devices_next_ask_resumes_the_card_it_stopped(self):
+        """The other door, and the one that needs nothing new on the wire (#7JD1).
+
+        A `board_ask` is a submit, and a submit resumes the queue it lands in
+        (`TurnSupervisor.submit`) — so a phone that stopped a card and then asks it something
+        else has the rows behind its question run too, without knowing the rule exists.
+        """
+        card_id = self.make_card()
+        self.cards.hold(card_id)
+        self.send(type="board_ask", card=card_id, text="one")
+        self.assertTrue(self.cards.wait_running())
+        self.send(type="board_ask", card=card_id, text="two")
+        queue = self.commands.card_queue(f"card:{card_id}")
+        self.send(type="board_cancel", id="c1", card=card_id)
+        for _ in range(400):
+            if queue._paused:
+                break
+            time.sleep(0.005)
+        self.assertTrue(queue._paused)
+        self.send(type="board_ask", card=card_id, text="three")
+        self.assertFalse(queue._paused)
+        self.cards.agent(card_id).release()
+        self.assertTrue(self.cards.wait())
+
     def test_observe_is_a_no_op_before_any_question(self):
         event = {"event": "delta", "text": "hi"}
         self.assertIs(self.commands.observe(event), event)

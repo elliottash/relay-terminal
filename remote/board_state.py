@@ -7,8 +7,8 @@ it: a ``full`` device sends ``board_request {rid, request}``, the hub hands the 
 what its worker emitted. This module is the two gates in between, so that no caller has to
 remember the rules:
 
-* **Requests are an allow-list, rebuilt field by field.** :func:`clean_request` knows ten request
-  types and, per type, which fields exist, their shapes and their caps. A card id has the board's
+* **Requests are an allow-list, rebuilt field by field.** :func:`clean_request` knows eleven
+  request types and, per type, which fields exist, their shapes and their caps. A card id has the board's
   own alphabet, a status is one of the board's statuses, a mode, a kind and an action are
   enumerations. Anything else the device sent is not copied. Three things are *refused* rather
   than dropped, because each is somebody trying a door: a type on the never-list (deleting,
@@ -86,6 +86,11 @@ REQUESTS: dict[str, tuple[str, ...]] = {
     "board_create": ("tab", "title", "request", "labels"),
     "board_ask": ("id", "text", "mode"),
     "board_cancel": ("id",),
+    # Stop and go, per card (#7JD1): `board_cancel` pauses that card's queue and `board_resume`
+    # runs it again. It is what a device's *empty* send is — the send with no words in the box,
+    # which at the desk is Enter on an empty prompt box — and it is the only queue op a device
+    # has, because it is the only one that needs no row id and no queue state to aim.
+    "board_resume": ("id",),
     "board_action": ("id", "action"),
 }
 
@@ -298,7 +303,7 @@ def clean_request(request) -> dict:
 EVENT_TYPES = frozenset({
     "board", "board_cards", "board_card", "board_changed", "board_search",
     "board_thread_appended", "board_written", "board_activity", "board_cancelled",
-    "board_busy", "board_conflict", "error", "board_action_result",
+    "board_resumed", "board_busy", "board_conflict", "error", "board_action_result",
 })
 EVENT_PREFIXES = ("board_chat_",)
 
@@ -609,5 +614,6 @@ EXAMPLE_REQUESTS = [
      "request": "make the inbox row show the count", "labels": ["remote"]},
     {"type": "board_ask", "id": "K7Q2", "text": "what is left?", "mode": "discuss"},
     {"type": "board_cancel", "id": "K7Q2"},
+    {"type": "board_resume", "id": "K7Q2"},
     {"type": "board_action", "id": "K7Q2", "action": "execute"},
 ]

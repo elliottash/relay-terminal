@@ -508,17 +508,23 @@ class TurnSupervisor:
                 self._stop_locked()
             self._changed_locked()
 
-    def resume(self) -> None:
+    def resume(self) -> bool:
         """resume_queue: run what is queued again after a cancel or a failed turn.
 
         Enter on an empty prompt box sends this, on a pane and on a card's console alike, and
         the strip's Resume button is the mouse path (#7JD1). A prompt submitted instead of it
         resumes on its own way past, in `submit`.
+
+        Answers whether there *was* a pause to lift, because a device asks blind: the phone is
+        sent none of a queue's state (remote protocol 17.4), so its empty send has to be told
+        whether it resumed something or found nothing waiting (`board_resume`).
         """
         with self._lock:
+            was_paused = self._paused
             self._paused = False
             self._changed_locked()
             self._lock.notify_all()
+            return was_paused
 
     def remove(self, item_id, request_id=None) -> None:
         """queue_remove: a queued prompt, or a steer the running turn has not taken yet (the ×

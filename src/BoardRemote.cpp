@@ -72,6 +72,11 @@ const QStringList &allowedRequests()
         QStringLiteral("board_open"),    QStringLiteral("board_refresh"), QStringLiteral("board_card_get"),
         QStringLiteral("board_search"),  QStringLiteral("board_comment"), QStringLiteral("board_move"),
         QStringLiteral("board_create"),  QStringLiteral("board_ask"),     QStringLiteral("board_cancel"),
+        // Stop and go, per card (#7JD1): `board_cancel` pauses that card's queue, `board_resume`
+        // runs it again. It is what a device's *empty* send is, the way Enter on an empty prompt
+        // box is at the desk, and the only queue op a device has — the only one that needs
+        // neither a row id nor any of a queue's state to aim.
+        QStringLiteral("board_resume"),
         QStringLiteral("board_action")};
     return types;
 }
@@ -160,7 +165,8 @@ Translated toWorker(const QJsonObject &request, const QString &workerId, const Q
         return refused(QStringLiteral("%1 needs a card id such as K7Q2.").arg(type));
     message.insert(QStringLiteral("card"), card);
 
-    if (type == QStringLiteral("board_card_get") || type == QStringLiteral("board_cancel"))
+    if (type == QStringLiteral("board_card_get") || type == QStringLiteral("board_cancel")
+        || type == QStringLiteral("board_resume"))
         return {message, QString(), QString()};
 
     if (type == QStringLiteral("board_comment")) {
@@ -232,8 +238,10 @@ bool eventForwarded(const QString &type, bool answersRequest)
         QStringLiteral("board_conflict")};
     if (broadcast.contains(type))
         return true;
+    // `board_resumed` answers the device that asked and nobody else: a resume changes a queue,
+    // and a device is sent none of a queue's state to bring up to date (#7JD1, remote 17.4).
     static const QStringList answers{QStringLiteral("board_card"), QStringLiteral("board_search"),
-                                     QStringLiteral("error")};
+                                     QStringLiteral("board_resumed"), QStringLiteral("error")};
     return answersRequest && answers.contains(type);
 }
 

@@ -777,12 +777,12 @@ class BoardViewTests(unittest.TestCase):
                 self.assertEqual(await browser.evaluate("document.getElementById('thread-title').textContent"),
                                  "execute #card")
 
-                # Nothing but the contract's ten request types ever went out, and only `board_request`
-                # messages carry them.
+                # Nothing but the contract's eleven request types ever went out, and only
+                # `board_request` messages carry them (`board_resume` joined with card #7JD1).
                 kinds = {m["request"]["type"] for m in await self.requests(browser)}
                 self.assertLessEqual(kinds, {"board_open", "board_refresh", "board_card_get", "board_search",
                                              "board_comment", "board_move", "board_create", "board_ask",
-                                             "board_cancel", "board_action"})
+                                             "board_cancel", "board_resume", "board_action"})
                 self.assertGreater(len(await self.requests(browser)), before)
                 self.passes_the_hub(await self.requests(browser))
                 self.clean(browser)

@@ -498,6 +498,16 @@ the client does not have, so it would be a row that goes nowhere.
   started from a phone needs no card page open on the desktop and no console published to the
   device — which is the second reason decision 4 above costs nothing. The turn's own events
   (`queued`, `queue_changed`, `delta`, tool rows) are the console's and stay off the wire.
+- **Stopping and going again are both the device's** (card #7JD1, 2026-09-21; owner: *"why don't we
+  just copy the functionality and have enter resume"*). A device's Stop is `board_cancel {id}`,
+  which pauses that card's queue the way Esc pauses a pane's — and the way back needed a **Resume
+  button the device does not have**, so a prompt a phone queued behind a turn it stopped waited
+  for somebody at the desk. It no longer does, and still without publishing a console or a queue:
+  the next `board_ask` resumes the queue on the worker as any person's submit does, and the empty
+  send — Discuss with nothing typed, which is the same box and the same key as the desk's Enter on
+  an empty prompt box — is `board_resume {id}`, the one queue op on §17.1's list. A device is
+  still sent none of a queue's state; `board_resumed {card_id, resumed}` is what tells it whether
+  there was anything waiting, which is the whole of what it needs to know.
 - **What would be needed to change it.** Three things, in this order: a Switchboard surface on the
   phone worth opening a console *into* (section 5's item 9 and #SWPH's card view are the start);
   a decision about which surface a remote ask names, since `ask {surface}` is how the desktop tells

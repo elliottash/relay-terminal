@@ -108,9 +108,11 @@ private slots:
 
 void BoardRemoteTests::theAllowListIsTheCardsAndNothingElse()
 {
+    // Eleven since card #7JD1: `board_resume` joined `board_cancel`, because a device that can
+    // stop a card's turn has to be able to start its queue again without the desktop's button.
     const QStringList expected{"board_open", "board_refresh", "board_card_get", "board_search",
                                "board_comment", "board_move", "board_create", "board_ask",
-                               "board_cancel", "board_action"};
+                               "board_cancel", "board_resume", "board_action"};
     QCOMPARE(br::allowedRequests(), expected);
     for (const char *never : {"board_delete", "board_folder", "board_folder_rename", "board_cleanup",
                               "board_claim", "set_board", "board_init", "board_init_answer",
@@ -137,6 +139,8 @@ void BoardRemoteTests::aRefusedRequestNeverReachesTheWorker_data()
     QTest::newRow("a move to nowhere") << QJsonObject{{"type", "board_move"}, {"id", "K7Q2"}};
     QTest::newRow("a cleanup mode") << QJsonObject{{"type", "board_ask"}, {"id", "K7Q2"}, {"text", "x"}, {"mode", "cleanup"}};
     QTest::newRow("cancel everything") << QJsonObject{{"type", "board_cancel"}};
+    // `board_resume` names one card's queue, like every other op that names a queue (#7JD1).
+    QTest::newRow("resume everything") << QJsonObject{{"type", "board_resume"}};
     QTest::newRow("an unknown action") << QJsonObject{{"type", "board_action"}, {"id", "K7Q2"}, {"action", "delete"}};
 }
 
@@ -198,6 +202,9 @@ void BoardRemoteTests::eachRequestBecomesTheWorkersOwnMessage_data()
                                               << QJsonObject{{"type", "board_ask"}, {"card", "K7Q2"}, {"text", ""}, {"mode", "plan"}};
     QTest::newRow("board_cancel") << QJsonObject{{"type", "board_cancel"}, {"id", "K7Q2"}}
                                   << QJsonObject{{"type", "board_cancel"}, {"card", "K7Q2"}};
+    // The empty send from a card view: the queue that Stop paused runs again (#7JD1).
+    QTest::newRow("board_resume") << QJsonObject{{"type", "board_resume"}, {"id", "K7Q2"}}
+                                  << QJsonObject{{"type", "board_resume"}, {"card", "K7Q2"}};
 }
 
 void BoardRemoteTests::eachRequestBecomesTheWorkersOwnMessage()
@@ -490,6 +497,18 @@ void BoardRemoteTests::aCardTurnsFailureReachesTheDeviceThatAsked()
     // A turn the desktop started on another card is the desktop's.
     rig.event({{"event", "error"}, {"id", "t-15"}, {"card_id", "M3XJ"}, {"text", "x"}});
     QCOMPARE(rig.toHub.size(), 1);
+
+    // `board_resumed` answers the device that asked and nobody else (#7JD1): a resume changes a
+    // queue, and no device is sent a queue's state that would have to be brought up to date.
+    rig.toHub.clear();
+    rig.event({{"event", "board_resumed"}, {"card_id", "K7Q2"}, {"resumed", true}});
+    QVERIFY(rig.toHub.isEmpty());
+    rig.request(11, {{"type", "board_resume"}, {"id", "K7Q2"}});
+    rig.toHub.clear();
+    rig.event({{"event", "board_resumed"}, {"id", rig.lastWorkerId()}, {"card_id", "K7Q2"}, {"resumed", true}});
+    QCOMPARE(rig.toHub.size(), 1);
+    QCOMPARE(rig.toHub.first().rid.toInt(), 11);
+    QCOMPARE(rig.toHub.first().event.value("resumed").toBool(), true);
 }
 
 void BoardRemoteTests::everythingIsRefusedWhileRemoteControlIsOff()

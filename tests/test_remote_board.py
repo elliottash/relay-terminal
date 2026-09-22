@@ -85,10 +85,13 @@ class RequestTests(unittest.TestCase):
             self.assertEqual(set(cleaned) - {"type"}, set(board_state.REQUESTS[example["type"]])
                              & set(cleaned), example["type"])
 
-    def test_the_contract_names_exactly_these_ten(self):
+    def test_the_contract_names_exactly_these_eleven(self):
+        # `board_resume` joined the list with card #7JD1: a device that can stop a card's turn
+        # has to be able to run its queue again, and the Resume button is the desktop's.
         self.assertEqual(sorted(board_state.REQUESTS), sorted([
             "board_open", "board_refresh", "board_card_get", "board_search", "board_comment",
-            "board_move", "board_create", "board_ask", "board_cancel", "board_action"]))
+            "board_move", "board_create", "board_ask", "board_cancel", "board_resume",
+            "board_action"]))
         self.assertEqual(board_state.READS, {"board_open", "board_refresh", "board_card_get",
                                              "board_search"})
 
@@ -156,7 +159,7 @@ class RequestTests(unittest.TestCase):
     def test_a_card_id_has_the_boards_alphabet(self):
         for bad in ("", "k7q2", "K7Q", "K7Q22", "#K7Q2", "KIQ2", "KLQ2", "KOQ2", "KUQ2",
                     "../x", "K7 2", 7, None, ["K7Q2"]):
-            for kind in ("board_card_get", "board_cancel"):
+            for kind in ("board_card_get", "board_cancel", "board_resume"):
                 with self.assertRaises(board_state.Refused, msg=(kind, bad)):
                     board_state.clean_request({"type": kind, "id": bad})
         for good in ("K7Q2", "0000", "ZZZZ", "SWPH", "3XZV"):
@@ -255,7 +258,8 @@ class PinnedNamesTests(unittest.TestCase):
 class EventTests(unittest.TestCase):
     def test_only_the_contracts_event_types_pass(self):
         for name in ("board", "board_cards", "board_card", "board_changed", "board_thread_appended",
-                     "board_written", "board_activity", "board_cancelled", "board_busy",
+                     "board_written", "board_activity", "board_cancelled", "board_resumed",
+                     "board_busy",
                      "board_conflict", "error", "board_action_result", "board_search",
                      "board_chat_state", "board_chat_queued"):
             self.assertEqual(board_state.clean_event({"event": name})["event"], name)

@@ -1683,7 +1683,7 @@ a client shows its Switchboard row when it sees it and not otherwise.
 `[A-Za-z0-9_.:-]`. It is echoed and never read. A `board_request` without a usable `rid` is answered
 with an ordinary `error unknown_type`, because there is nothing to answer it under.
 
-`request.type` is one of these ten and nothing else. `id` is always a **card id** — four characters
+`request.type` is one of these eleven and nothing else. `id` is always a **card id** — four characters
 of `[0-9A-HJKMNP-TV-Z]`, the board's own alphabet — so it can be neither a path nor a file name.
 Each request is **rebuilt** from the fields below: a field not listed is not copied.
 
@@ -1697,7 +1697,8 @@ Each request is **rebuilt** from the fields below: a field not listed is not cop
 | `board_move` | `id`, `status`, `reason` ≤ 500 | write | moves the card. `status` is one of the board's statuses (`inbox` … `retired`, `backend/relay_core/board.py` `ALL_STATUSES`); the worker's own gates — evidence before a QA lane, say — still apply and answer `error` |
 | `board_create` | `tab`?, `title` ≤ 200, `request` ≤ 8,000, `labels` ≤ 16 | write | files a card. `request` is stored verbatim as its `## Issue`; one of `title` and `request` must have words. `tab` is a tab id `[a-z0-9][a-z0-9_-]{0,39}`, a label 1–40 characters of letters, digits, space and `_.:+-` |
 | `board_ask` | `id`, `text` ≤ 8,000, `mode` | write | a Discuss (`discuss`, the default; needs `text`) or a Plan (`plan`; `text` is the note to the planner and may be empty) turn on the card. Since card #CTRN that turn runs on the card's own queue on the desktop's worker, like any console turn; the request is unchanged and no GUI has to be looking at the card |
-| `board_cancel` | `id` | write | stops that card's turn; answers `board_cancelled` |
+| `board_cancel` | `id` | write | stops that card's turn **and pauses that card's queue**, as Esc does in a pane; answers `board_cancelled` |
+| `board_resume` | `id` | write | runs that card's queue again after a `board_cancel` — `resume_queue` (sessions protocol 12.5) by the road a device can reach, and the only queue op it has. It is what a device's **empty send** is: at the desk Enter on an empty prompt box resumes, and in the card view a Discuss with nothing typed does the same (card #7JD1). Answers `board_resumed {card_id, resumed}`, and `resumed: false` means nothing was waiting — a device is sent none of a queue's state, so it asks blind and is told after |
 | `board_action` | `id`, `action` | write | GUI-level: `execute` or `verify`, run through the same hooks as the desktop's buttons; answers `board_action_result` |
 
 Text that is too long is **refused**, not cut: a comment that silently lost its last paragraph is
@@ -1712,7 +1713,7 @@ named `path`, `paths`, `root`, `folder`, `file`, `files`, `dir`, `directory`, `c
 `project` or `repo` — or ending `_path`, `_root`, `_dir`, `_file`, `_folder`, `_cwd` — at any
 depth, and a field not on the list whose value looks like an absolute path (`/a/b`, `~/a`, `C:\a`,
 `file:/…`). The owner's own words may mention a path: `text`, `title`, `request`, `reason` and
-`query` are text, and text is on the list. None of the ten request types is a wire type of its own,
+`query` are text, and text is on the list. None of the eleven request types is a wire type of its own,
 so `{"t":"board_delete"}` is an `unknown_type` like any other.
 
 **A refusal is a `board_event`**, so a client has one path for the hub's refusals and the worker's:
@@ -1776,7 +1777,8 @@ as the no-op it is. An answer whose asker has gone reaches nobody. An event with
 to every connected `full` device.
 
 **Which events pass.** `board`, `board_cards`, `board_card`, `board_changed`, `board_search`,
-`board_thread_appended`, `board_written`, `board_activity`, `board_cancelled`, `board_busy`,
+`board_thread_appended`, `board_written`, `board_activity`, `board_cancelled`, `board_resumed`,
+`board_busy`,
 `board_conflict`, `error`, `board_action_result`, and anything named `board_chat_*`. Every other
 event is **dropped and counted** (`Book.dropped`), `board_state`, `board_created`,
 `board_init_request`, `board_folder_changed`, the import and GitHub-sync events among them — the
@@ -1838,10 +1840,15 @@ worth knowing, both of them behaviour a device sees rather than a message:
 - **A second ask on a card that is working now queues** instead of answering `board_busy`. The phone
   sees nothing at all until that turn's answer lands as `board_thread_appended`; `board_busy` still
   comes back for a cleanup, for the console's own turn and for a write to a card that has work on it.
-- **`board_cancel` stops the running turn and pauses that card's queue**, as Esc does in a pane. A
-  device has no `resume_queue` — the ops that name a queue by `surface` (sessions protocol 12.5) are
-  not on §17.1's list of ten — so a prompt queued behind a turn a phone stopped waits for the desktop
-  to resume it.
+- **`board_cancel` stops the running turn and pauses that card's queue**, as Esc does in a pane —
+  and the way back is the device's own (card #7JD1, 2026-09-21; owner: *"why don't we just copy the
+  functionality and have enter resume"*). Two doors, both of them the pane's own doors copied:
+  the device's **next `board_ask` on that card resumes the queue by itself** (sessions protocol
+  12.5 — the worker clears the pause as any person's submit goes past it, so nothing new is on the
+  wire for it), and its **empty send** is `board_resume {id}` — Discuss with nothing typed, which
+  is the box and the key that resume at the desk. The ops that name a queue by `surface` are still
+  not a device's: `board_resume` is the one queue op on §17.1's list, because it is the only one
+  that needs neither a row id nor any of a queue's state to aim.
 
 ### 17.5 The `card_waiting` push
 

@@ -71,7 +71,9 @@ TP_GATE_TO = ("needs-qa", "needs-qa-llm", "needs-qa-human", "needs-review", "don
 
 TYPES = {"board_open", "board_refresh", "board_card_get", "board_create", "board_update",
          "board_move", "board_priority", "board_delete", "board_comment", "board_undo", "board_ask",
-         "board_cancel", "board_check",
+         # Stop and go, per card: `board_cancel` pauses that card's queue, `board_resume` runs it
+         # again — `cancel` and `resume_queue` (12.5) by the road a device can reach (#7JD1).
+         "board_cancel", "board_resume", "board_check",
          # The pane's filter bar, answered here over the text the rows stopped carrying (#7M6E).
          "board_search",
          # Execute's hand-off in one message (19.19, #R9G7): the three writes it used to send
@@ -1709,6 +1711,8 @@ class BoardCommands:
             raise ValueError(RETIRED_CHAT)
         elif kind == "board_cancel":
             self._cancel_card(request, rid)
+        elif kind == "board_resume":
+            self._resume_card(request, rid)
         elif kind == "board_cleanup":
             self._cleanup(request, rid)
         elif kind == "board_init":
@@ -2037,6 +2041,26 @@ class BoardCommands:
             running = [card for card in running if card != card_id] if card_id else []
         self._send({"event": "board_cancelled", "id": rid, "card_id": card_id or None,
                     "stopped": stopped, "cards": running})
+
+    def _resume_card(self, request: dict, rid) -> None:
+        """`board_resume {card}`: run that card's queue again after a Stop (#7JD1).
+
+        `resume_queue` (12.5) by the road a device can reach, the way `board_cancel` is `cancel`'s:
+        a device's requests carry no `surface`, so the op that names a queue names it as a card.
+        Enter on an empty prompt box is what sends it — at the desk, on a card's console and on a
+        phone alike (owner, 2026-09-21: "why don't we just copy the functionality and have enter
+        resume") — and a device's next `board_ask` resumes the same queue without it.
+
+        `resumed` says whether there was a pause to lift, because a phone asks blind: it is sent
+        none of a queue's state (remote protocol 17.4), so it cannot know before it sends and has
+        to be told after.
+        """
+        card_id = normalize_id(request.get("card")) if request.get("card") else ""
+        if not card_id:
+            raise ValueError("board_resume names the card whose queue to run again.")
+        queue = self.cards.queue_of(card_id)
+        resumed = bool(queue is not None and queue.resume())
+        self._send({"event": "board_resumed", "id": rid, "card_id": card_id, "resumed": resumed})
 
     def _problem_section(self, problem: dict) -> str | None:
         """Which section a problem belongs to, for `board_check {section}` (a triage button).

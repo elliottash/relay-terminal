@@ -253,7 +253,7 @@ GUEST_NEVER.update({
 SERVER_TYPES = SERVER_TYPES | frozenset({"pane_state", "queue_edit_text"})
 
 # The Switchboard on a device (card #SWPH, section 17) -----------------------------------------------
-# One client type and one server type. `board_request {rid, request}` wraps the ten board requests a
+# One client type and one server type. `board_request {rid, request}` wraps the eleven board requests a
 # device may make — which ones, their fields and their caps are remote/board_state.py's allow-list,
 # and everything else about a board (deleting, folders, cleanup, claiming, attaching, initializing,
 # imports, GitHub sync, anything carrying a path) is refused there. It is `full` and nothing less:
