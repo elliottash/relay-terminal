@@ -271,6 +271,26 @@ private Q_SLOTS:
         QCOMPARE(shown(catalog).size(), 7);
     }
 
+    void sevenCodexModelsRemainAvailableByDefault() {
+        QJsonArray models;
+        for (int i = 0; i < 7; ++i)
+            models << model(QStringLiteral("codex-model-%1").arg(i), QStringLiteral("codex-model-%1").arg(i),
+                            QString(), {QStringLiteral("low"), QStringLiteral("high")});
+        const Catalog catalog = catalogFrom(QJsonArray{QJsonObject{
+            {QStringLiteral("id"), QStringLiteral("guest:codex")}, {QStringLiteral("label"), QStringLiteral("Codex")},
+            {QStringLiteral("harness"), true}, {QStringLiteral("models"), models}}});
+        QCOMPARE(curatable(catalog).size(), 7);
+        QCOMPARE(shown(catalog).size(), 7);
+        for (const Entry &entry : catalog.entries) {
+            QVERIFY(!entry.openEnded);
+            QVERIFY(curation::isAvailable(entry));
+        }
+        // An explicit user choice still wins and the unchecked row stays in Available.
+        curation::setAvailable(QStringLiteral("guest:codex|codex-model-0"), false, catalog);
+        QCOMPARE(shown(catalog).size(), 6);
+        QCOMPARE(curatable(catalog).size(), 7);
+    }
+
     // An open-ended provider (OpenRouter's live listing) is the other way round: only the rows the
     // worker's own catalog recommends — the ones carrying a `tier` — are available to begin with,
     // and the rest are checked in one at a time.

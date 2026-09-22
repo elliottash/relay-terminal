@@ -17,3 +17,7 @@ Added board-discoverable test identifiers alongside exact invocations; tests_che
 <!-- relay:entry 20260922T234004Z-a1 author=codex-models-a1 kind=evidence -->
 ### Codex models a1 · 2026-09-22 23:40
 Landed `3cb7ff33ba054175c93c10b699f0c08804e12f07` after the exact-tree application build passed. Linked commit and build evidence; remains needs-verification.
+
+<!-- relay:entry 20260922T234548Z-a1 author=codex-models-a1 kind=evidence -->
+### Codex models a1 · 2026-09-22 23:45
+Full-app worker-pipe regression now proves refresh: a helper-only late key_stored/presets event updates an already open OpenRouter search without restart. Identical driver fails on the pre-fix binary. See live/baseline screenshots and stage.py in the evidence folder. Both cards remain needs-verification.

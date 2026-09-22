@@ -268,7 +268,9 @@ Catalog catalogFrom(const QJsonArray &presets) {
             // would translate them twice. It is read by nobody and ignored here.
             entry.effortFixed = effortFixedOf(row, preset, entry.efforts, hosted);
             entry.usable = usable;
-            entry.openEnded = models.size() > 6;
+            // Guest harnesses enumerate a finite selectable catalog. Codex can ship seven or
+            // more models without tier markers; treating that as an aggregator hides them all.
+            entry.openEnded = !guest && models.size() > 6;
             entry.guest = guest;
             entry.local = local;
             entry.hosted = hosted;
