@@ -721,17 +721,17 @@ class ModelCatalogTests(unittest.TestCase):
 
 
 class GuiMirrorTests(unittest.TestCase):
-    """The advanced provider dialog in src/Pane.h keeps its own copy of the preset table."""
+    """The GUI consumes the worker's presets instead of maintaining a second table."""
 
-    def test_the_cpp_preset_table_matches_presets_py(self):
+    def test_the_gui_uses_worker_presets_without_a_duplicate_table(self):
         source = (ROOT / "src/Pane.h").read_text(encoding="utf-8")
-        block = source.split("// Mirrors backend/relay_core/presets.py", 1)[1].split("};", 1)[0]
-        rows = re.findall(r'\{"([a-z0-9-]+)",\s*"([^"]*)",\s*"([^"]*)",\s*"([^"]*)",', block)
-        # Labels are compared case-insensitively: presets.py went lower-case on 2026-09-20 (Warp
-        # style) and the C++ mirror's casing belongs to the GUI session; endpoint and model are exact.
-        mirrored = {row[0]: (row[1].lower(), row[2], row[3]) for row in rows if row[0] != "custom"}
-        expected = {p.id: (p.label.lower(), p.base_url, p.model) for p in P.PRESETS.values()}
-        self.assertEqual(mirrored, expected)
+        # #MDL1 retired the advanced provider dialog and its hand-maintained mirror.
+        # The surviving provider UI must still receive the worker's authoritative rows.
+        self.assertNotIn("// Mirrors backend/relay_core/presets.py", source)
+        block = source.split('type == QStringLiteral("presets")', 1)[1].split(
+            'else if (type ==', 1)[0]
+        self.assertIn('m_presets = event.value(QStringLiteral("presets")).toArray();', block)
+        self.assertIn('m_keysDialog->setPresets(providerPresets());', block)
 
     def test_one_serving_model_state_feeds_the_picker(self):
         """The model box names the model actually serving the turn, from one state (C5).

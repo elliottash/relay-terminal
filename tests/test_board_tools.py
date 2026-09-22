@@ -79,7 +79,9 @@ class SpecTests(unittest.TestCase):
                                         # protocol 31 (#7BM4): the tests a card names
                                         "tests_check", "tests_run",
                                         # protocol 32 (#AQ6X): the faults the machine tracks
-                                        "board_signals"))
+                                        "board_signals",
+                                        # protocol 31.10 (#JNYN): stage the card for its verifier
+                                        "board_try"))
 
     def test_there_is_no_delete_tool(self):
         names = " ".join(T.TOOL_NAMES)
