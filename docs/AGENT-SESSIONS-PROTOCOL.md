@@ -5982,7 +5982,7 @@ more model ids — and it is then a provider like any other: a `presets` row wit
 lower-cased, `plan: "custom endpoint"`, `group: "custom"`, `base_url`, `model` the first id,
 `models` in the catalog row shape (`{id, label, tier: null, efforts, intelligence: null,
 openrouter}`, the given ids in order and then whatever the endpoint's `/models` listed the last
-time a save probed it), `model_ids` (the ids as given, for an edit form), `effort_style`, and
+time a save probed it), `model_ids` (the ids as given, for an edit form), `effort_style`, `extra` (a JSON object, default `{}`), and
 `has_stored_key`/`key_source` read from the keyring like a built-in row's. `configure`,
 `set_model`, a `tiers` or `roles` entry and `test_key` take `preset: "custom:<slug>"` and resolve
 URL, model and key through the same path as a built-in id; a loopback `http://` URL is allowed
@@ -5992,7 +5992,7 @@ the keyring under the entry id (`RELAY_CUSTOM_<SLUG>_API_KEY` overrides), never 
 event. Backend: `backend/relay_core/customproviders.py`; tests: `tests/test_customproviders.py`.
 
 ```
-GUI    → custom_provider_save   {id, provider: {id?, name, base_url, api_key?, models: [ids], effort_style?}}
+GUI    → custom_provider_save   {id, provider: {id?, name, base_url, api_key?, models: [ids], effort_style?, extra?}}
 worker → custom_provider_saved  {id, provider: <the presets row>}     then a fresh `presets`
 GUI    → custom_provider_delete {id, provider_id}
 worker → custom_provider_deleted {id, provider_id, removed, key_removed, error?}   then a fresh `presets`
@@ -6010,6 +6010,20 @@ for `/models` on its own thread and, when that listing changes the row, pushes a
 nothing waits on it, and a remote endpoint is only asked when there is a key to ask with. An
 invalid entry — no name, no model id, an `http://` URL off loopback, a URL carrying credentials,
 an unknown `effort_style` — is an `error` with a sentence the user can act on.
+
+`extra` accepts only the top-level keys `thinking`, `reasoning`, `reasoning_effort`,
+`temperature` and `top_p`, matching `ProviderConfig.validate`; values retain their JSON types
+and are interpreted by the endpoint. Invalid JSON values, a non-object or unsupported keys are
+rejected before either the entry or key is saved. On a new entry an omitted `extra` means `{}`;
+on an edit omission preserves the saved object (for older callers), while explicit `{}` clears
+it. Model discovery and re-saving preserve the object. The add/edit form offers multiline JSON,
+prefills the saved object, treats an empty field as `{}`, and keeps invalid input open with an
+inline explanation.
+
+The preset row carries the saved `extra`; configure/model selection and roles use it as their
+default request parameters. An explicit configure `extra` replaces that default, and a selected
+reasoning effort applies the existing preset effort mapping over the corresponding key. These
+parameters never replace protected request fields such as `model`, `messages` or `stream`.
 
 ## 29. Tier A: the guest as the pane's agent, through its headless harness (v3.7, 2026-09-19)
 

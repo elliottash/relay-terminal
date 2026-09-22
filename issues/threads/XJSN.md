@@ -30,3 +30,20 @@ Owner requested valid card codes: #MDL1 → #MDP1 and #RLP7 → #RPR7. Updated t
 Implement the optional JSON-object field on custom providers, preserving the transport's existing supported-parameter contract.
 
 Resumed execution under the existing claim.
+
+<!-- relay:entry 20260922T020500Z-xs author=codex kind=progress -->
+### Codex · 2026-09-22 02:05
+Implementing the approved JSON field under the existing claim. Backend storage/preset propagation and the multiline form are in place; omission preserves older callers' saved extra, explicit {} clears. Next: persistence/probe/validation tests and isolated live form-to-HTTP evidence. Board MCP tools are unavailable in this guest harness; using the policy file fallback.
+
+<!-- relay:entry 20260922T020500Z-xt author=agent kind=evidence -->
+Check · 1 not-applicable, 1 passed; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T020600Z-xs author=codex kind=evidence -->
+### Codex · 2026-09-22 02:06
+Moved to needs-verification with Execution Summary and Tests. Focused unittest run: 27 passed;
+TestsCommands run 20260922T015843Z-34b3 also records 27 passes and no opened signals.
+Build through relay-build passed. Isolated Xvfb add/edit validation, prefill, discovery and
+clear succeeded; two actual HTTP captures show parameters present then absent. Evidence:
+docs/qa_evidence/2026-09-22-custom-extra-json/README.md. Board format check has no XJSN findings.
+Pre-land tests_check has no failing tests; its orphaned warning refers to the earlier decision-only
+commit and will be rechecked once implementation is linked. No implementer QA checklist.

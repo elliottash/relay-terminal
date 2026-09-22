@@ -32,7 +32,7 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from . import keystore
@@ -92,6 +92,7 @@ class CustomProvider:
     effort_style: str = "none"
     served_models: tuple[str, ...] = ()   # what /models listed at the last probe
     note: str = ""
+    extra: dict = field(default_factory=dict)
 
     @property
     def slug(self) -> str:
@@ -107,7 +108,7 @@ class CustomProvider:
 
     def as_preset(self) -> Preset:
         """This provider in the shape the rest of the backend already reads."""
-        return Preset(self.id, self.label, self.base_url, self.model, {},
+        return Preset(self.id, self.label, self.base_url, self.model, dict(self.extra),
                       context_window=DEFAULT_CONTEXT_WINDOW, effort_style=self.effort_style,
                       group=GROUP, note=self.note, provider=self.label, plan=PLAN, custom=True)
 
@@ -136,7 +137,7 @@ class CustomProvider:
     def stored(self) -> dict:
         return {"id": self.id, "name": self.name, "base_url": self.base_url, "models": list(self.models),
                 "effort_style": self.effort_style, "served_models": list(self.served_models),
-                "note": self.note}
+                "note": self.note, "extra": self.extra}
 
 
 def _model_ids(value, name: str) -> tuple[str, ...]:
@@ -185,9 +186,20 @@ def from_dict(spec: dict) -> CustomProvider:
         style = default_effort_style(base_url)
     if style not in EFFORT_STYLES:
         raise ValueError("effort_style must be one of " + ", ".join(EFFORT_STYLES) + ".")
+    extra = spec.get("extra", {})
+    if not isinstance(extra, dict):
+        raise ValueError("Extra parameters must be a JSON object.")
+    # Keep the same top-level contract as ProviderConfig.validate; values belong to the endpoint.
+    allowed = {"thinking", "reasoning", "reasoning_effort", "temperature", "top_p"}
+    if set(extra) - allowed:
+        raise ValueError("Extra parameters may only contain thinking, reasoning, reasoning_effort, temperature, and top_p.")
+    try:
+        extra = json.loads(json.dumps(extra, allow_nan=False))
+    except (ValueError, TypeError) as exc:
+        raise ValueError("Extra parameters must contain valid JSON values.") from exc
     served = _model_ids(spec.get("served_models"), "served_models")
     return CustomProvider(make_id(spec.get("id") or name), name[:MAX_NAME], base_url, models, style,
-                          served, str(spec.get("note") or "")[:200])
+                          served, str(spec.get("note") or "")[:200], extra)
 
 
 # ----- the registry file ---------------------------------------------------------------------
@@ -261,9 +273,12 @@ def save(spec: dict) -> CustomProvider:
     entry = from_dict(spec)
     items = catalog()
     previous = items.get(entry.id)
-    if previous is not None and not entry.served_models and previous.base_url == entry.base_url:
-        entry = CustomProvider(entry.id, entry.name, entry.base_url, entry.models, entry.effort_style,
-                               previous.served_models, entry.note)
+    if previous is not None:
+        # Older callers omit extra: preserve it on edits. An explicit {} clears it.
+        if "extra" not in spec:
+            entry = replace(entry, extra=previous.extra)
+        if not entry.served_models and previous.base_url == entry.base_url:
+            entry = replace(entry, served_models=previous.served_models)
     items[entry.id] = entry
     _write(items)
     return entry
@@ -332,8 +347,7 @@ def _record_served(provider_id: str, served: list[str]) -> bool:
     entry = items.get(provider_id)
     if entry is None or tuple(served) == entry.served_models:
         return False
-    items[provider_id] = CustomProvider(entry.id, entry.name, entry.base_url, entry.models,
-                                        entry.effort_style, tuple(served), entry.note)
+    items[provider_id] = replace(entry, served_models=tuple(served))
     _write(items)
     return True
 

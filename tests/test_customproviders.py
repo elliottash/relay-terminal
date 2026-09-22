@@ -8,13 +8,15 @@ and that it never appears in an event.
 import json
 import os
 import tempfile
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from relay_core import customproviders as C
 from relay_core import keystore, keytest, presets as P, roles, session_protocol as S
-from relay_core.provider import ProviderConfig
+from relay_core.provider import ChatProvider, ProviderConfig
 from relay_core.roles import RoleResolver, validate_roles
 
 REAL_FETCH = C.fetch_models          # the tests below patch C.fetch_models; this one tests it
@@ -179,6 +181,106 @@ class SaveTests(Case):
         C.handle({"type": "custom_providers", "id": "l1"}, events.append)
         self.assertEqual(events[0]["event"], "custom_providers")
         self.assertEqual([r["id"] for r in events[0]["items"]], ["custom:my-proxy"])
+
+
+class ExtraTests(Case):
+    EXTRA = {"thinking": {"type": "enabled", "budget_tokens": 2048},
+             "reasoning": {"effort": "low"}, "reasoning_effort": "high",
+             "temperature": 0.7, "top_p": 0.9}
+
+    def test_save_reload_probe_and_legacy_edit_preserve_extra_then_clear(self):
+        row = self.save({**PROXY, "extra": self.EXTRA})[0]["provider"]
+        self.assertEqual(row["extra"], self.EXTRA)
+        C._cache = None
+        self.assertEqual(C.find(row["id"]).extra, self.EXTRA)
+        C._record_served(row["id"], ["discovered"])
+        self.save({**PROXY, "api_key": None})  # older caller omits the new field
+        entry = C.find(row["id"])
+        self.assertEqual(entry.extra, self.EXTRA)
+        self.assertEqual(entry.served_models, ("discovered",))
+        self.assertEqual(entry.as_preset().extra, self.EXTRA)
+        self.assertEqual(C.rows()[0]["extra"], self.EXTRA)
+        self.save({**PROXY, "extra": {}})
+        C._cache = None
+        self.assertEqual(C.find(row["id"]).extra, {})
+        self.assertEqual(json.loads(C.config_path().read_text())["providers"][0]["extra"], {})
+
+    def test_legacy_file_without_extra_still_loads(self):
+        C.config_path().write_text(json.dumps({"version": 1, "providers": [PROXY]}))
+        self.assertEqual(C.find("custom:my-proxy").extra, {})
+
+    def test_invalid_extra_never_changes_file_or_key(self):
+        self.save({**PROXY, "extra": self.EXTRA})
+        before = C.config_path().read_bytes()
+        for extra in (None, [], "{}", "{broken", 1, {"model": "override"},
+                      {"messages": []}, {"temperature": float("nan")}, {"thinking": object()}):
+            with self.subTest(extra=extra):
+                with self.assertRaisesRegex(ValueError, "Extra parameters"):
+                    self.save({**PROXY, "extra": extra, "api_key": "replacement-key"})
+                self.assertEqual(C.config_path().read_bytes(), before)
+                self.assertEqual(self.keys["custom:my-proxy"], PROXY["api_key"])
+
+    def test_supported_keys_match_transport_and_roles_keep_defaults(self):
+        config = ProviderConfig("https://llm.example.com/v1", "big-model", "key", self.EXTRA)
+        config.validate()
+        self.save({**PROXY, "extra": self.EXTRA})
+        got = S.provider_config({"preset": "custom:my-proxy", "model": "small-model", "use_stored_key": True})
+        self.assertEqual(got.extra, self.EXTRA)
+        self.assertEqual(S.provider_config({"preset": "custom:my-proxy", "use_stored_key": True,
+                                            "extra": {"temperature": 0.1}}).extra, {"temperature": 0.1})
+        resolver = RoleResolver(config, "custom:my-proxy",
+                                validate_roles({"subagent": {"preset": "custom:my-proxy"}}),
+                                key_lookup=keystore.lookup)
+        self.assertEqual(resolver.resolve("subagent").config.extra, self.EXTRA)
+        self.assertEqual(resolver.fallback_candidate({"preset": "custom:my-proxy"}, "main", set()).config.extra,
+                         self.EXTRA)
+
+    def test_real_http_after_save_probe_reload_and_model_switch(self):
+        captures = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'{"data":[{"id":"discovered"}]}')
+
+            def do_POST(self):
+                captures.append((self.path, self.headers.get("Authorization"),
+                                 json.loads(self.rfile.read(int(self.headers["Content-Length"])))))
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                self.wfile.write(b'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        spec = {"name": "Capture", "base_url": f"http://127.0.0.1:{server.server_port}/v1",
+                "models": ["first", "second"], "extra": self.EXTRA}
+        with mock.patch.object(C, "fetch_models", REAL_FETCH):
+            self.save(spec)
+        C._cache = None
+        self.assertEqual(C.find("custom:capture").served_models, ("discovered",))
+        for model in ("first", "second"):
+            config = S.provider_config({"preset": "custom:capture", "model": model})
+            result = ChatProvider(config).complete([{"role": "user", "content": "capture"}], [],
+                                                   lambda event: None, threading.Event())
+            self.assertEqual(result["content"], "ok")
+            path, auth, body = captures[-1]
+            self.assertEqual(path, "/v1/chat/completions")
+            self.assertIsNone(auth)
+            self.assertEqual(body["model"], model)
+            self.assertEqual({k: body[k] for k in self.EXTRA}, self.EXTRA)
+        self.save({**spec, "extra": {}})
+        config = S.provider_config({"preset": "custom:capture"})
+        ChatProvider(config).complete([{"role": "user", "content": "clear"}], [],
+                                      lambda event: None, threading.Event())
+        self.assertFalse(set(self.EXTRA) & set(captures[-1][2]))
 
 
 class ConfigureTests(Case):

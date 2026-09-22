@@ -1,13 +1,13 @@
 ---
 id: XJSN
 type: work
-status: executing
+status: needs-verification
 labels: [feature, models]
 assignee: codex
 rank: n
 created: '2026-09-21'
 source: 'Claude Code in a Relay pane, 2026-09-21 — left over from #MDP1 t:a15'
-links: {plans: [], commits: [], evidence: [], related: [MDP1], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-custom-extra-json/README.md], related: [MDP1], github: null}
 ---
 # A custom endpoint's extra request JSON has no home
 
@@ -59,3 +59,22 @@ Existing custom providers without the field and built-in providers behave as bef
 **Risks:** the transport's existing merge precedence must remain consistent. Shared
 `src/RelayWindow.h` currently contains other sessions' edits; snapshot and land only owned hunks.
 **Verify:** focused custom-provider tests and an isolated live form-to-request round trip.
+
+## Execution Summary
+Added optional validated `extra` storage and preset/catalog propagation, preserving it through
+model discovery and legacy edits. Explicit `{}` clears it. The add/edit form prefills multiline
+JSON and retains invalid input with an inline error before sending a save. Protocol §28.6
+records the supported keys and replacement/clear semantics.
+
+Evidence: `docs/qa_evidence/2026-09-22-custom-extra-json/README.md` (isolated Xvfb form,
+actual local HTTP capture before/after clearing, screenshots, and focused test output).
+
+## Tests
+`tests/test_customproviders.py`
+manual: docs/qa_evidence/2026-09-22-custom-extra-json/README.md
+
+### Check 2026-09-21 21:58
+- passed · unittest:tests.test_customproviders — tests/test_customproviders.py passed for this revision on spark-dcc9, 2026-09-22T01:58:44Z
+- not-applicable · manual:docs/qa_evidence/2026-09-22-custom-extra-json/README.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-custom-extra-json/README.md
+- warning · card — none of the listed tests is named after anything this card changed (issues/features/2026-09-21-a-custom-endpoints-extra-request-json-has-no-home.md, issues/features/2026-09-21-relay-pro-behind-a-password.md, issues/threads/RPR7.md…)
+history: thread

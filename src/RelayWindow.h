@@ -101,6 +101,7 @@
 #include <QMouseEvent>
 #include <QResizeEvent>
 #include <QLabel>
+#include <QPlainTextEdit>
 #include <QDialogButtonBox>
 #include <QLineEdit>
 #include <QListWidget>
@@ -2604,13 +2605,54 @@ private:
             effort->addItem(QStringLiteral("openrouter · reasoning.effort"), QStringLiteral("openrouter"));
             effort->addItem(QStringLiteral("kimi · reasoning_effort"), QStringLiteral("kimi"));
             effort->setCurrentIndex(qMax(0, effort->findData(existing.value(QStringLiteral("effort_style")).toString(QStringLiteral("none")))));
+            auto *extra = new QPlainTextEdit;
+            extra->setObjectName(QStringLiteral("customProviderExtra"));
+            extra->setPlaceholderText(QStringLiteral("Optional JSON object, e.g. {\"temperature\": 0.7}\nEmpty clears extra parameters."));
+            extra->setMaximumHeight(130);
+            const QJsonObject savedExtra = existing.value(QStringLiteral("extra")).toObject();
+            if (!savedExtra.isEmpty()) extra->setPlainText(QString::fromUtf8(QJsonDocument(savedExtra).toJson(QJsonDocument::Indented)));
             form->addRow(QStringLiteral("name"), name);
             form->addRow(QStringLiteral("base url"), url);
             form->addRow(QStringLiteral("api key"), key);
             form->addRow(QStringLiteral("models"), models);
             form->addRow(QStringLiteral("reasoning"), effort);
+            form->addRow(QStringLiteral("extra request JSON"), extra);
+            auto *error = new QLabel;
+            error->setObjectName(QStringLiteral("customProviderExtraError"));
+            error->setWordWrap(true);
+            error->hide();
+            form->addRow(error);
+            QJsonObject extraObject;
             auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel);
-            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
+                const QByteArray input = extra->toPlainText().trimmed().toUtf8();
+                QJsonParseError parseError;
+                const QJsonDocument parsed = QJsonDocument::fromJson(input.isEmpty() ? QByteArray("{}") : input, &parseError);
+                QString message;
+                if (parseError.error != QJsonParseError::NoError)
+                    message = QStringLiteral("Extra request JSON: %1 (offset %2). Enter a JSON object or leave empty.")
+                        .arg(parseError.errorString()).arg(parseError.offset);
+                else if (!parsed.isObject())
+                    message = QStringLiteral("Extra request JSON must be an object, for example {\"temperature\": 0.7}.");
+                else {
+                    const QStringList allowed{QStringLiteral("thinking"), QStringLiteral("reasoning"),
+                        QStringLiteral("reasoning_effort"), QStringLiteral("temperature"), QStringLiteral("top_p")};
+                    for (const QString &field : parsed.object().keys()) {
+                        if (!allowed.contains(field)) {
+                            message = QStringLiteral("Unsupported extra parameter '%1'. Allowed: %2.").arg(field, allowed.join(QStringLiteral(", ")));
+                            break;
+                        }
+                    }
+                }
+                if (!message.isEmpty()) {
+                    error->setText(message);
+                    error->show();
+                    extra->setFocus();
+                    return;
+                }
+                extraObject = parsed.object();
+                dialog.accept();
+            });
             connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
             form->addRow(buttons);
             dialog.resize(560, dialog.sizeHint().height());
@@ -2618,7 +2660,8 @@ private:
             QJsonObject provider{{QStringLiteral("name"), name->text().trimmed()},
                                  {QStringLiteral("base_url"), url->text().trimmed()},
                                  {QStringLiteral("models"), models->text().trimmed()},
-                                 {QStringLiteral("effort_style"), effort->currentData().toString()}};
+                                 {QStringLiteral("effort_style"), effort->currentData().toString()},
+                                 {QStringLiteral("extra"), extraObject}};
             if (!existing.isEmpty()) provider.insert(QStringLiteral("id"), existing.value(QStringLiteral("id")).toString());
             if (!key->text().trimmed().isEmpty()) provider.insert(QStringLiteral("api_key"), key->text().trimmed());
             request({{"type", "custom_provider_save"}, {"provider", provider}});
