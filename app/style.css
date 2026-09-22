@@ -296,10 +296,14 @@ a.screen-link { color: inherit; text-decoration: underline; cursor: pointer; }
 }
 
 #term-bar {
-  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px;
   border-top: 1px solid var(--line); background: var(--panel);
 }
-#term-note { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Its own line under the controls, wrapping as far as it needs to. Sharing the row left it 91 px
+   at `full` and 195 px at `agent` on a 390 px phone, and it was cut mid-word every time — a
+   failed send included, which is reported here and nowhere else (#TBR2). It is `hidden` while
+   empty (app.js `termNote`), so the line costs nothing when there is nothing to say. */
+#term-note { flex: 1 0 100%; white-space: normal; overflow-wrap: anywhere; }
 /* A−/A+: the terminal font floor (app/screen.js). Quiet, unlike Take over. */
 #term-font-smaller, #term-font-bigger {
   background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px;

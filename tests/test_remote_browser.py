@@ -9,7 +9,10 @@ without a certificate.
 Skipped when Chrome is not installed.
 """
 import asyncio
+import base64
 import json
+import os
+import re
 import tempfile
 import time
 import unittest
@@ -24,6 +27,27 @@ from rendezvous.server import Store, build
 from tests.browser import SCREENS_SHOWN, Browser, find_chrome, shown
 
 APP_DIR = Path(__file__).resolve().parent.parent / "app"
+
+# The screen every measurement in #TBR2 and #PKT5 was taken on, and the one the app is written
+# for: an iPhone's CSS pixels in portrait.
+PHONE = (390, 844)
+# Set to a directory to keep the screenshots the phone tests take
+# (docs/qa_evidence/2026-09-22-streamD-shell/).
+SHOTS = os.environ.get("RELAY_SHELL_SHOTS", "")
+
+
+async def phone_screen(browser) -> None:
+    await browser.call("Emulation.setDeviceMetricsOverride",
+                       {"width": PHONE[0], "height": PHONE[1], "deviceScaleFactor": 1,
+                        "mobile": True})
+
+
+async def shot(browser, name: str) -> None:
+    if not SHOTS:
+        return
+    Path(SHOTS).mkdir(parents=True, exist_ok=True)
+    data = await browser.call("Page.captureScreenshot", {"format": "png"})
+    (Path(SHOTS) / f"{name}.png").write_bytes(base64.b64decode(data["data"]))
 
 
 class ScrollbackSource(panes_mod.DemoPaneSource):
@@ -1374,6 +1398,187 @@ class InstallFirstTests(unittest.TestCase):
                         "'#notify-kinds input')]; return boxes.length"
                         " ? boxes.map(b => b.checked) : null; })()", timeout=20)
                     self.assertEqual(switches, [True, True])
+                finally:
+                    await browser.stop()
+        asyncio.run(asyncio.wait_for(main(), 240))
+
+
+# What `#term-note` is holding and whether the whole of it is on screen. `scrollWidth` wider than
+# `clientWidth` is the measurement from the drive: the sentence is in the DOM and the reader can
+# see only the start of it. `ownLine` is the other half of the fix — it sits under the controls
+# rather than beside them, so there is room for a second line when the sentence needs one.
+NOTE = """
+(() => {
+  const note = document.getElementById('term-note');
+  const bigger = document.getElementById('term-font-bigger');
+  const box = note.getBoundingClientRect();
+  return {
+    text: note.textContent, hidden: note.hidden,
+    scrollWidth: note.scrollWidth, clientWidth: note.clientWidth,
+    scrollHeight: note.scrollHeight, clientHeight: note.clientHeight,
+    ownLine: box.top >= bigger.getBoundingClientRect().bottom,
+    onScreen: box.right <= innerWidth && box.left >= 0,
+  };
+})()
+"""
+
+
+def fixed_sentences() -> list[str]:
+    """Every fixed sentence app.js writes into the terminal bar, read out of the file itself.
+
+    A list written out here would go stale the first time somebody adds a sentence. This cannot: a
+    new `termNote('…')` or `note('…')` is measured by the test the moment it is written.
+    """
+    source = (APP_DIR / "app.js").read_text()
+    found = re.findall(r"(?<![A-Za-z])(?:termNote|voiceNote|note)\(\s*'([^'\\]+)'\s*\)", source)
+    return sorted({text for text in found if text.strip()}, key=len)
+
+
+# The sentences the client does not spell out in one literal, so no sweep of the file can find
+# them: the microphone refusal it builds from a DOMException, the holder line with a name from
+# the wire in it, a `model_changed` line (app.js `modelLine`, the longest of the lot), and the
+# desktop's own refusal, which is what the label says when a send does not go.
+BUILT_SENTENCES = [
+    "This browser refused the microphone. Allow it for this site and try again.",
+    "Alice on the laptop by the window has the keyboard.",
+    "↻ claude-opus-5 takes over once the conversation is compacted to fit its window"
+    " · kimi-k2 summarises it",
+    "this device is paired for agent.",
+]
+
+
+@unittest.skipUnless(find_chrome(), "no Chrome or Chromium installed")
+class TerminalBarTests(unittest.TestCase):
+    """The sentence under the terminal, on a 390 px phone (#TBR2).
+
+    It shared its row with the "Watching" chip, A−/A+ and "Take over", and every sentence it
+    said was cut mid-word: 91 px of "Agent running…" at `full`, 195 px of the capability line at
+    `agent` (docs/qa_evidence/2026-09-22-phone-ux-drive, findings 7 and 8). That label is also
+    where a send that did not go says why, so what was cut included the reason.
+
+    And an `agent` device was told "This device is paired for viewing only." with a working
+    composer under the sentence — the drive typed a prompt through it and the desktop ran it.
+    """
+
+    async def open_pane(self, browser, harness) -> None:
+        url, _ = await harness.host.open_pairing()
+        await phone_screen(browser)
+        await browser.navigate(url)
+        await browser.wait_for(shown("screen-inbox"), timeout=60)
+        await browser.wait_for("document.querySelectorAll('.pane-row').length > 0", timeout=30)
+        await browser.evaluate("document.querySelector('[data-pane-id=\"pane-1\"]').click()")
+        await browser.wait_for(shown("screen-thread"), timeout=20)
+        await browser.wait_for(shown("term-bar"), timeout=20)
+
+    def fits(self, note: dict, where: str) -> None:
+        self.assertFalse(note["hidden"], f"{where}: the bar said nothing at all")
+        self.assertTrue(note["text"].strip(), f"{where}: the bar said nothing at all")
+        self.assertEqual(note["scrollWidth"], note["clientWidth"],
+                         f"{where}: {note['text']!r} is cut off "
+                         f"({note['scrollWidth']} px of sentence in {note['clientWidth']} px)")
+        self.assertEqual(note["scrollHeight"], note["clientHeight"],
+                         f"{where}: {note['text']!r} is taller than the room it has")
+        self.assertTrue(note["ownLine"], f"{where}: the note is still beside the buttons")
+        self.assertTrue(note["onScreen"], f"{where}: the note runs off a {PHONE[0]} px screen")
+
+    async def note(self, browser) -> dict:
+        return await browser.evaluate(NOTE)
+
+    async def note_saying(self, browser, fragment: str) -> dict:
+        await browser.wait_for(
+            "(() => { const n = document.getElementById('term-note');"
+            f" return n.textContent.includes({json.dumps(fragment)}) ? n.textContent : null; }})()",
+            timeout=20)
+        return await self.note(browser)
+
+    def test_an_agent_device_is_told_it_may_ask_and_reads_the_whole_sentence(self):
+        """`agent` composes; only `view` watches. The client said "paired for viewing only" for
+        both, above a prompt box the desktop answers."""
+        async def main():
+            async with Harness(capability=wire.AGENT, source=ScrollbackSource) as harness:
+                browser = Browser()
+                await browser.start()
+                try:
+                    await self.open_pane(browser, harness)
+                    note = await self.note(browser)
+                    self.assertNotIn("viewing only", note["text"])
+                    self.assertIn("ask the agent", note["text"])
+                    self.fits(note, "agent, standing note")
+                    # …and the composer really is there, which is what made the old sentence
+                    # wrong rather than merely terse.
+                    self.assertFalse(await browser.evaluate(
+                        "document.getElementById('composer').hidden"))
+                    await shot(browser, "term-bar-agent")
+
+                    # The longest sentence the client can write there: a model change, in the
+                    # desktop's own words (app.js `modelLine`).
+                    harness.source._emit("pane-1", {
+                        "event": "model_changed", "model": "claude-opus-5",
+                        "applies": "after_compaction", "in_flight_model": "kimi-k2"})
+                    note = await self.note_saying(browser, "compacted to fit")
+                    self.fits(note, "agent, a model change")
+                    await shot(browser, "term-bar-agent-model-change")
+
+                    problems = [line for line in browser.console
+                                if "EXCEPTION" in line or "error:" in line.lower()]
+                    self.assertEqual(problems, [], f"console errors: {problems}")
+                finally:
+                    await browser.stop()
+        asyncio.run(asyncio.wait_for(main(), 240))
+
+    def test_a_full_device_reads_the_whole_sentence_too(self):
+        """"Agent running…" in 91 px was the `full` half of the finding."""
+        async def main():
+            async with Harness(capability=wire.FULL, source=ScrollbackSource) as harness:
+                browser = Browser()
+                await browser.start()
+                try:
+                    await self.open_pane(browser, harness)
+                    note = await self.note(browser)
+                    self.assertNotIn("viewing only", note["text"])
+                    self.fits(note, "full, standing note")
+                    self.assertFalse(await browser.evaluate(
+                        "document.getElementById('term-take').hidden"),
+                        "Take over is what `full` has and `agent` does not")
+
+                    harness.source._emit("pane-1", {"event": "agent_started"})
+                    note = await self.note_saying(browser, "Agent running")
+                    self.fits(note, "full, agent running")
+                    await shot(browser, "term-bar-full-agent-running")
+
+                    harness.source._emit("pane-1", {
+                        "event": "model_changed", "model": "claude-opus-5",
+                        "applies": "after_compaction", "in_flight_model": "kimi-k2"})
+                    note = await self.note_saying(browser, "compacted to fit")
+                    self.fits(note, "full, a model change")
+                    await shot(browser, "term-bar-full-model-change")
+
+                    problems = [line for line in browser.console
+                                if "EXCEPTION" in line or "error:" in line.lower()]
+                    self.assertEqual(problems, [], f"console errors: {problems}")
+                finally:
+                    await browser.stop()
+        asyncio.run(asyncio.wait_for(main(), 240))
+
+    def test_every_sentence_the_bar_can_say_fits_on_a_390px_screen(self):
+        """Each one in the real bar, in the real layout, at 390×844 — including the ones only a
+        refusal or a microphone reaches, which no drive would produce on a good day."""
+        async def main():
+            async with Harness(capability=wire.FULL, source=ScrollbackSource) as harness:
+                browser = Browser()
+                await browser.start()
+                try:
+                    await self.open_pane(browser, harness)
+                    sentences = fixed_sentences() + BUILT_SENTENCES
+                    self.assertIn("This device is paired for viewing only.", sentences,
+                                  f"the sweep of app.js found {sentences}")
+                    for sentence in sentences:
+                        await browser.evaluate(
+                            "(() => { const n = document.getElementById('term-note');"
+                            f" n.textContent = {json.dumps(sentence)}; n.hidden = false;"
+                            " return true; })()")
+                        self.fits(await self.note(browser), f"written: {sentence[:30]}…")
+                    await shot(browser, "term-bar-longest-sentence")
                 finally:
                     await browser.stop()
         asyncio.run(asyncio.wait_for(main(), 240))

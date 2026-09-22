@@ -181,7 +181,6 @@
       <button type="button" id="term-new-output" hidden>New output &darr;</button>
       <div id="term-bar">
         <span id="term-mode" class="chip">Watching</span>
-        <span id="term-note" class="muted small"></span>
         <button type="button" id="term-font-smaller" aria-label="Smaller terminal font"
                 title="Smaller terminal text">A&minus;</button>
         <button type="button" id="term-font-bigger" aria-label="Larger terminal font"
@@ -189,6 +188,10 @@
         <button type="button" id="term-direct" hidden>Keyboard</button>
         <button type="button" id="term-take">Take over</button>
         <button type="button" id="term-release" hidden>Hand back</button>
+        <!-- Last in the row and a full line wide (style.css), so the sentence wraps under the
+             controls instead of sharing 91 px with them. This is where a refused send says why
+             it did not go, and on a 390 px phone every one of those was cut mid-word (#TBR2). -->
+        <span id="term-note" class="muted small" role="status" aria-live="polite" hidden></span>
       </div>
       <!-- Who else is on this pane (protocol 10.3): "alice is typing · bob is watching". The
            desktop fans `participants` out to everyone on the pane, its own devices included. -->

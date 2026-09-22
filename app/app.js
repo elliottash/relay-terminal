@@ -911,6 +911,17 @@ function threadNote(text, isError = false) {
   node.classList.toggle('error', !!text && isError);
 }
 
+// The sentence in the terminal bar: what this device may do, what the agent is doing, and why a
+// send did not go. It has its own line under the controls (index.html, style.css) because it used
+// to share the row with the chip and three buttons and was cut mid-word at every capability
+// (#TBR2) — and it is hidden while empty so that line is only there when it says something.
+// Everything that speaks in that bar comes through here.
+function termNote(text) {
+  const node = $('term-note');
+  node.textContent = text || '';
+  node.hidden = !text;
+}
+
 // ---- the pane view ------------------------------------------------------------------------
 
 let paneView = null;
@@ -1072,7 +1083,7 @@ function updateSecretRow() {
   $('secret-row').hidden = !ask;
   if (ask) {
     $('composer').hidden = true;
-    $('term-note').textContent = 'This pane is asking for a password.';
+    termNote('This pane is asking for a password.');
   } else if (capability === 'agent' || capability === 'full') {
     updateDriveUi();               // restore the composer's own visibility rules
   }
@@ -1086,7 +1097,7 @@ function sendSecret() {
   rrp.send({ t: 'secret_input', pane: current, nonce: pane.secret_nonce,
              bytes: b64(new TextEncoder().encode(text)) })
     .then(() => { box.value = ''; })
-    .catch((error) => { $('term-note').textContent = error.message; });
+    .catch((error) => { termNote(error.message); });
 }
 
 function updateDriveUi() {
@@ -1109,15 +1120,20 @@ function updateDriveUi() {
   $('composer').hidden = !!paneView || !canCompose || (driving && directKeys);
   updateVoiceUi();
   $('composer-text').placeholder = driving ? 'Type a line for the program…' : 'Ask or run…';
-  if (!allowed) {
-    $('term-note').textContent = 'This device is paired for viewing only.';
+  if (canCompose && !allowed) {
+    // `agent` has its own words. It was told "paired for viewing only" with a working composer
+    // under the sentence — and the desktop ran what it typed (#TBR2). What it may not do is take
+    // the keyboard, which is the one thing `full` adds here.
+    termNote('You can ask the agent here. Taking the keyboard needs full access.');
+  } else if (!allowed) {
+    termNote('This device is paired for viewing only.');
   } else if (!driving) {
     // Said here rather than once when the handoff arrives, because the row is repainted from the
     // pane list about once a second and a note written beside it would not survive.
-    $('term-note').textContent = someoneElseHasIt()
-      ? `${holderLabel()} has the keyboard.` : 'Read only until you take over.';
+    termNote(someoneElseHasIt()
+      ? `${holderLabel()} has the keyboard.` : 'Read only until you take over.');
   } else {
-    $('term-note').textContent = '';
+    termNote('');
   }
 }
 
@@ -1200,7 +1216,7 @@ function sendKeys(text) {
   toLive();
   const bytes = new TextEncoder().encode(text);
   rrp.send({ t: 'keys', pane: current, bytes: b64(bytes) })
-    .catch((error) => { $('term-note').textContent = error.message; });
+    .catch((error) => { termNote(error.message); });
 }
 
 function buildKeyRow() {
@@ -1260,7 +1276,7 @@ function onAgent(message) {
   // The pane view draws the agent's ask (question / question_closed); everything else the agent
   // says is already on the screen above.
   if (paneView) paneView.onAgentEvent(message);
-  const note = (text) => { $('term-note').textContent = text; };
+  const note = (text) => termNote(text);
   // A desktop with no screen stream — the agent companion — has no terminal to print into, so
   // the reply is rendered here instead. With a terminal, this is silent: the same text is
   // already arriving as screen state.
@@ -1682,7 +1698,7 @@ function updateVoiceUi() {
 }
 
 function voiceNote(text) {
-  $('term-note').textContent = text;
+  termNote(text);
 }
 
 function toggleVoice() {
@@ -1801,7 +1817,7 @@ function sendPrompt() {
   const box = $('composer-text');
   const text = box.value.trim();
   if (!text || !current) return;
-  const fail = (error) => { $('term-note').textContent = error.message; };
+  const fail = (error) => { termNote(error.message); };
   // Sent is sent: the on-screen keyboard comes down, so the terminal the answer is arriving
   // in is the whole screen again (a phone's request, 2026-09-22).
   const clear = () => { box.value = ''; box.style.height = 'auto'; box.blur(); };
@@ -2048,7 +2064,7 @@ window.addEventListener('DOMContentLoaded', () => {
   $('term-take').addEventListener('click', () => {
     rrp.send({ t: 'control_request', pane: current })
       .then(() => { driving = true; updateDriveUi(); $('composer-text').focus(); })
-      .catch((error) => { $('term-note').textContent = error.message; });
+      .catch((error) => { termNote(error.message); });
   });
   $('term-release').addEventListener('click', () => {
     rrp.send({ t: 'control_release', pane: current }).catch(() => {});
