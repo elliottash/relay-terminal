@@ -1,4 +1,4 @@
-# Board (the "Switchboard"): design v2 (proposal, 2026-09-17)
+# Board: design v2 (proposal, 2026-09-17)
 
 Supersedes sections 3–6 of `docs/SCRATCHPAD-DESIGN.md` (single pad file, `### S<n>` items, numbered-answer merge,
 `Ctrl+Shift+J`); its section 2 (research) still applies. Nothing here is implemented. Owner request (2026-09-17): a
@@ -13,6 +13,17 @@ tool and command names, reads like a settings screen, and the owner suspects it 
 tracking and QA lanes; Desk is vague; Dispatch collides with `Pane::dispatch` and routing vocabulary; "Relay Board" is
 redundant inside Relay. **Recommendation: "Board"** in product, code, tools and docs (`BoardPane`, `board_*`,
 `/board`): short, obvious (Trello, GitHub Projects). "Switchboard" only as a website nickname.
+
+**Taken on 2026-09-21**, card #1CXD. The owner: *"also im sold to change switchboard to board, lets
+just use the switchboard icon / aesthetic. i would change .switchboard to /board"*, and, on the
+plan: *"the product word is **Board**; the switchboard icon and aesthetic are kept; the board folder
+in a project changes from `.switchboard/` to `board/`."* So every string a user reads says Board,
+and "Switchboard" survives as the name of the aesthetic
+([`SWITCHBOARD-AESTHETIC.md`](SWITCHBOARD-AESTHETIC.md): bakelite, brass, jacks, cords, the lamp),
+as the busy strip's verb *Switchboarding* (4.13), and as the identifiers keyed on it that a user
+never sees — the `switchboard` model role, `Glyph::Switchboard`, `kReasonSwitchboard`, the
+`relay:switchboard-policy` pointer markers and the `switchboard` card label. It replaces owner
+decision 12.1 below, which kept the word "for now … revisit during QA".
 
 ## 2. Storage: the board IS `issues/`, with a UI
 
@@ -125,17 +136,18 @@ and there is no project to talk about.
 - A pane's **candidate** project is `relay::projects::candidateFor(<the pane's live terminal cwd>)`, derived fresh
   whenever it is needed and never cached on the pane: the nearest ancestor with a board, else the nearest with `.git`.
   A candidate is an offer, not an attachment.
-- **Terminal commands never attach.** Only an explicit project action does: opening the Switchboard, `/card`, picking
+- **Terminal commands never attach.** Only an explicit project action does: opening the Board, `/card`, picking
   a card with `#`, Execute-from-card. Each is one of the closed set of reasons in `src/Projects.h`, and that reason is
   what the known-projects registry records.
 - Attachment is **sticky until detached**, and a tab never switches project silently: a pane that has `cd`-ed into
-  another checkout says so ("This tab's Switchboard is A; … belongs to B") instead of re-pointing. Detaching is the
+  another checkout says so ("This tab's Board is A; … belongs to B") instead of re-pointing. Detaching is the
   palette's "Detach this tab from <project>", offered only while the tab is attached; it closes nothing — an open
-  Switchboard stays open on its board — and the panes simply lose the card tools.
+  Board stays open on its board — and the panes simply lose the card tools.
 - Attaching and detaching send `set_board` (protocol 19.11) to every pane in the tab, so an agent **gains or loses the
   card tools without losing the conversation it was in the middle of**.
-- A project's board is `<project>/switchboard/` (new) or `<project>/issues/` (an existing tracker, kept where it is),
-  and **it is only ever created after the user answers "Initialize a project and create a Switchboard here?"**
+- A project's board is `<project>/board/` (new since 2026-09-21) or the `.switchboard/`, `switchboard/` or `issues/`
+  it already has (an existing tracker, kept where it is),
+  and **it is only ever created after the user answers "Initialize a project and create a Board here?"**
   (protocol 19.12). Until then an attached project sends `board {project, state: "uninitialized"}` and a candidate with
   no board gets one quiet status line on Ctrl+Shift+S and `/card` — nothing is written anywhere.
 - The layout saves an attached tab as `{"project": "…", "node": <tab node>}` and an unattached one as the bare node it
@@ -160,12 +172,13 @@ thinking collapses to "Thought 9 s"; tools collapse to one `turn_summary` line (
 `turn_transcript_get` (`TurnTranscript`). Reply box: `RichEditor` with composer keys and `/plan`, `/move`, `/assign`.
 
 **Which agent answers:** a dedicated **board worker** per board root per window (an ordinary `worker.py` with its own
-queue), so card chats never pollute a pane's conversation. The Switchboard is per project: a window showing two
-projects' boards runs a worker for each, keyed by the board root, and each worker's events reach only the Switchboard
-views of that root. The worker is started with the first Switchboard opened on a root and stopped when the last one in
+queue), so card chats never pollute a pane's conversation. The Board is per project: a window showing two
+projects' boards runs a worker for each, keyed by the board root, and each worker's events reach only the Board
+views of that root. The worker is started with the first Board opened on a root and stopped when the last one in
 the window closes. Which project a pane's board is comes from that pane alone — its **live terminal directory** and
-nothing else (`relay::boardRootFor`, `src/BoardWorkspace.h`, walking up to `/` and trying `switchboard/board.yaml`
-then `issues/board.yaml` at each level, so the nearest ancestor wins whatever its folder is called). There is
+nothing else (`relay::boardRootFor`, `src/BoardWorkspace.h`, walking up to `/` and trying `board/board.yaml`,
+`.switchboard/board.yaml`, `switchboard/board.yaml` then `issues/board.yaml` at each level, so the nearest ancestor
+wins whatever its folder is called). There is
 deliberately no window-wide or process-wide fallback and the pane's own `workspace()` is not a candidate either: all
 three are the directory Relay was launched in, which is how one project's board reached every pane. It is stateless between turns: each turn is seeded from the body plus the
 thread (older entries summarized past a cap), so the *file* is the memory and a collaborator's Relay continues the same
@@ -236,7 +249,7 @@ Planning, Deferred, Done) mixed three different ideas — type, area and status 
 has no tabs at all. So:
 
 - **One view.** The pane is one list of every card that is not done or dropped. There is no tab
-  row; the counts live in the pane's title (`Switchboard · 84 open`) and beside the filter box.
+  row; the counts live in the pane's title (`Board · 84 open`) and beside the filter box.
   *(4.7: that filter box moved out of the pane's header and became the top of the list page.)*
 - **`bug` and `feature` are labels**, like `voice` or `design`: a badge on the row and
   `label:bug` in the filter box. Labels display as bare words and copy `label:<name>`
@@ -717,7 +730,7 @@ see, open and turn off.
 The pane whose own run opened a signal is told in that run's result and is expected to fix it before
 it reports. Everything it leaves unclaimed for a whole fold is picked up by a **signal thread**: an
 agent of the board worker, on the signal and nothing else, at most three per project, never when the
-board's autonomy is off, and not at all when Options › Agent › Switchboard's *"Work signals unasked"*
+board's autonomy is off, and not at all when Options › Agent › Board's *"Work signals unasked"*
 is unticked (it writes `signals: {auto_work: false}` into that project's `board.yaml`, because
 whether a checkout's red tests are worth working is a property of the project and not of this
 installation). The thread claims the signal under its own thread id, so the row's `⧉` chip reads live
@@ -870,7 +883,7 @@ changed <label>: <before> → <after> · Undo` and undoable without an agent (pr
 #AGNT the shell and the file tools as well (owner decision 3; a card's Plan turn still writes only its
 `## Plan`). A context carries no tool list of its own. The `switchboard` model role keeps its name and
 its model box and is labelled **"Helper agent"**; Options, Actions and Sessions say where they are on
-the collapsed row they fold back to ("Helper Agent (Alt+Q)"), and the Switchboard's console — which is
+the collapsed row they fold back to ("Helper Agent (Alt+Q)"), and the Board's console — which is
 the page it is on — is named by its placeholder and its busy strip instead (4.13a).
 
 ### 4.13a Every prompt box is the main pane's prompt box (#PBX1, owner 2026-09-20)
@@ -891,20 +904,20 @@ and every other box in the app is that control:
 - **No Send button anywhere.** Enter sends, as it always has in a pane, and the placeholder says
   so. A turn is stopped by the busy strip's `✕ Stop` or by **Esc** in the box.
 - **Nothing else in the box.** An action that needs no typing goes in the row **above** it: Check
-  and Clean up on the Switchboard's head row, Plan / Execute / Verify above the card's box, all
+  and Clean up on the Board's head row, Plan / Execute / Verify above the card's box, all
   wearing one face so every action row in the app reads the same.
 - **An action row is left-aligned buttons and nothing else** (owner, 2026-09-20: "the plan /
   execute buttons etc, would those work better at the left?" — "yes, lets do both left-aligned,
   drop the label"). The buttons start at the row's left edge and the space is behind them, in the
   order the work is done: Plan, Execute, Verify on a card; Check, Clean up, Tests, Profile on the
-  Switchboard. The Switchboard's **"Switchboard agent" label is gone** from that row — the box's
+  Board. The Board's **agent label is gone** from that row — the box's
   placeholder names the agent, and the busy strip names it again while a turn runs, carrying the
   turn clock and the `· survey` word that used to sit beside the label. A panel that folds
   (Options, Actions, Sessions) has no actions on its head row, so it keeps its name there and the
   fold control at the right; its own action row is the collapsed `? Helper Agent (Alt+Q)` row, at
   the pane's bottom right.
 - **No help sentence and no reserved space.** The paragraph that used to stand over an empty
-  conversation is gone; the placeholder names the agent instead ("Ask the Switchboard agent —
+  conversation is gone; the placeholder names the agent instead ("Ask the Board agent —
   Enter sends, a second prompt queues", "Ask the Options helper — …"), and the log is hidden
   outright until there is a conversation, then grows with its content up to its cap (320 px on the
   board, ~40 % of the pane elsewhere).
@@ -915,7 +928,7 @@ Evidence: `docs/qa_evidence/2026-09-20-prompt-boxes-like-the-pane/`, and
 ### 4.14 The tool row is the project's tooling hub: Tests, Check and Profile (#7BM4, owner 2026-09-20)
 
 The owner's direction, agreed 2026-09-20 (card #7BM4, research in
-[`SWITCHBOARD-TOOLING-RESEARCH.md`](SWITCHBOARD-TOOLING-RESEARCH.md)): the Switchboard is not only
+[`SWITCHBOARD-TOOLING-RESEARCH.md`](SWITCHBOARD-TOOLING-RESEARCH.md)): the Board is not only
 the tracker but the project's control panel. Every recurring engineering activity is a button in
 the page agent's action row (4.13) or a sibling pane beside the board, never a pane-header control
 and never an overlay, and **what it produces is written into cards**, so the agents that claim cards
@@ -938,7 +951,7 @@ becomes a menu.
   is not gated — the finding for that case is advice. Protocol §31.
 - **The Test suites pane** (`relay::tests::TestSuitesPane`, layout node `testsuites`, palette
   `tests.open`, no default key since Ctrl+Shift+T is New tab everywhere): opened from the row's
-  **Tests** button beside the Switchboard, attached to the tab's board worker. TestGrid's grid —
+  **Tests** button beside the Board, attached to the tab's board worker. TestGrid's grid —
   rows are tests, the last executions newest-left as coloured cells — then Buildkite's columns
   trimmed to reliability, p50, p95, runs, last run and cards; nextest's summary line
   (`68 tests · 64 passed (2 slow, 1 flaky) · 3 never run · 12.4 s`); sort by flake score, p95,
@@ -974,7 +987,7 @@ Evidence: `docs/qa_evidence/2026-09-20-test-suites-pane/`, `…-card-tests-check
   a Bash comment. A resolved `#ID` forces the agent route (the `!` prefix still forces terminal).
 - **Links in the output.** A `#K7Q2` the agent prints — in a recap, in its prose, or in a
   board-activity line — is a link like a path or a URL is (`src/OutputLinks.*`): hovering
-  underlines it and shows `#K7Q2 · <title>`, clicking opens the Switchboard in that tab and the
+  underlines it and shows `#K7Q2 · <title>`, clicking opens the Board in that tab and the
   card in it, `Ctrl+Shift+L` walks it with the other links, and right-clicking offers the card,
   `#K7Q2` to the clipboard, and `#K7Q2` to the prompt box. Only ids the pane's board knows link;
   an unfiled `#ABCD` and a `#` comment stay text.

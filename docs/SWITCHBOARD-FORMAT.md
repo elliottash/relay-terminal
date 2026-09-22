@@ -1,27 +1,28 @@
-# Switchboard file format (reference)
+# Board file format (reference)
 
-The Switchboard **is** a folder in the project: plain Markdown in git that works without Relay, on
+The Board **is** a folder in the project: plain Markdown in git that works without Relay, on
 GitHub and in any editor. This is the normative reference for the bytes; the product design is in
 [`SWITCHBOARD-DESIGN.md`](SWITCHBOARD-DESIGN.md) and [`TASKS-AND-MEMORY-DESIGN.md`](TASKS-AND-MEMORY-DESIGN.md).
 
-**The folder is `.switchboard/`** on a board created from 2026-09-19 on — hidden, so the cards do
-not clutter the project's root listing — `switchboard/` on one created between 2026-09-18 and
-then, and `issues/` on one that existed before either, including this repository's own, which
-stays `issues/` and is never converted. All three names are in `board.BOARD_FOLDERS`
-(`relay::projects::boardFolders()` on the GUI side), newest first, and every lookup walks that one
-list in that one order, so `.switchboard/board.yaml` wins in a project that somehow has more than
-one. Nothing moves a board that already exists — the only thing that renames one is the explicit
-"Hide this board's folder" / "Show this board's folder" action (protocol 19.17). The trees below
-are written with `issues/` because that is the one in this repository; read the first path element
-as *the board folder*, whichever of the three a project has.
+**The folder is `board/`** on a board created from 2026-09-21 on, `.switchboard/` on one created
+between 2026-09-19 and then (hidden, so the cards did not clutter the project's root listing),
+`switchboard/` on one created between 2026-09-18 and 2026-09-19, and `issues/` on one that existed
+before any of them, including this repository's own, which stays `issues/` and is never converted.
+All four names are in `board.BOARD_FOLDERS` (`relay::projects::boardFolders()` on the GUI side),
+newest first, and every lookup walks that one list in that one order, so `board/board.yaml` wins in
+a project that somehow has more than one. Nothing moves a board that already exists — the only
+thing that renames one is the explicit "Move this board to `board/`" action (protocol 19.17). The
+trees below are written with `issues/` because that is the one in this repository; read the first
+path element as *the board folder*, whichever of the four a project has.
 
-**A hidden folder is invisible to a plain `grep`/`rg` over the project**, which is the point — an
-agent working the codebase should not turn up a card on every unrelated search — but it also means
-an agent reaching for the cards with a bare `rg` finds nothing and may conclude there is no board.
-Ripgrep and similar tools skip dotted directories by default; an agent that wants the cards should
-use the board tools (`board_read`, `board_card_get`, …), read the generated `BOARD.md` index, or
-pass `--hidden` (`rg --hidden` / `grep -r` without ripgrep's default) to see into `.switchboard/`
-the way it already sees into `switchboard/` or `issues/`.
+**A visible `board/` is what an ordinary `rg` over the project finds**, which is the point: the
+hidden spelling was invisible to a plain `grep`/`rg`, so an agent reaching for the cards with a
+bare `rg` found nothing and concluded there was no board. The cost is the opposite noise — a search
+for a common word now matches card text as well as code — so the generated pointer block in
+`CLAUDE.md`/`AGENTS.md` and the top of `POLICY.md` say it in one sentence: read the cards with the
+board tools (`board_read`, `board_card_get`, …) or the generated `BOARD.md` index, and **exclude
+them from a code search with `rg -g '!board/'`**. A board still in `.switchboard/` is the other way
+round: `rg --hidden` (or `grep -r`, which has no such default) is what sees into it.
 
 Implementation: `backend/relay_core/board.py` (parsing, ids, ranks, task markers, thread appends,
 atomic hash-checked writes, the check rules) and `scripts/relay-board.py` (`check`, `index`,
@@ -34,11 +35,11 @@ sync ([`GITHUB-SYNC.md`](GITHUB-SYNC.md)) — and all of them write exactly thes
 
 ```text
 issues/board.yaml              tabs, columns, autonomy (committed config); the marker that
-                               says this project has a Switchboard at all
-                               (`switchboard/board.yaml` in a project initialized from
-                               2026-09-18 on — same bytes, same rules)
+                               says this project has a Board at all
+                               (`board/board.yaml` in a project initialized from
+                               2026-09-21 on — same bytes, same rules)
 issues/BOARD.md                generated index; never hand-edited
-issues/POLICY.md               generated: the Switchboard's rules for an agent that has no
+issues/POLICY.md               generated: the Board's rules for an agent that has no
                                `board_*` tools (section 4.1); never hand-edited
 issues/<category>/             features/ changes/ design/ marketing/ … = tabs
 issues/<category>/<state>/     needs_qa_llm/ needs_qa_human/ needs_review/ needs_labels/
@@ -48,7 +49,7 @@ issues/aliases/                alias cards (type: alias), retired ones in aliase
 issues/threads/<ID>.md         one append-only thread per card
 issues/import-state.json       what an import has already brought in (key → card id), so nothing
                                is imported twice; written by `board_import.apply`, committed
-issues/survey-state.json       `{state: pending|running|done}` — whether the Switchboard page
+issues/survey-state.json       `{state: pending|running|done}` — whether the Board page
                                agent's opening survey (protocol 19.18) is still owed. Written
                                `pending` by `board_init` when it creates the board, settled
                                `done` when the survey turn ends. A board with no file predates
@@ -124,7 +125,7 @@ rank, created, acceptance, source, links`, then any other key, sorted).
 Every type: `id`, `type`, `status`, `priority`, `rank`, `created`, `labels`, `assignee`,
 `private`, `links`, `aliases`, `source`, `blocked_by`, `parent`, `waiting_on`.
 
-`priority` (2026-09-20, #VKFV) is the row's flag in the Switchboard: an integer from −1 to +3.
+`priority` (2026-09-20, #VKFV) is the row's flag in the Board: an integer from −1 to +3.
 It is written only when nonzero — a card with no flag carries no `priority` key — and a value
 outside the range is clamped on every write.
 
@@ -175,18 +176,18 @@ outside the range is clamped on every write.
   **agent's own** tools move a card to `done` from a status before QA (`executing`, `in-progress`
   or any earlier stage), and gives the card an `implemented_by` in the same write when it has none
   — a small card the agent created and closed without ever claiming it. The **owner's** hand-close
-  from the Switchboard is never stamped, so it never reads as self-closed: the owner-side tools
+  from the Board is never stamped, so it never reads as self-closed: the owner-side tools
   carry `actor: owner` and no model of their own. `dropped` is never stamped either — nothing was
   shipped. Where done cards are listed, Relay folds the self-closed ones into a single
   "N closed by the agent" row.
 - `session` (2026-09-20, #R9G7) is the **pane session token of the session that holds the card**:
-  the terminal pane doing the work. Only a claim writes it — the Switchboard's **Execute** button
+  the terminal pane doing the work. Only a claim writes it — the Board's **Execute** button
   (`board_claim` with the token of the pane it just opened) or the pane agent's own `board_claim`
   tool — and always from the pane's own `configure {pane_token}`, never from anything a model
   typed: `session` is an immutable field, so a front-matter patch naming one is refused. A card in
   `executing` (or `in-progress`) **with** a `session` is claimed by that pane, and another agent
   reading the card sees it is taken: its `board_claim` is refused with `board_claimed_elsewhere`
-  until the user says to take it over. The Switchboard draws the token's first eight characters on
+  until the user says to take it over. The Board draws the token's first eight characters on
   the card as a link that reveals that pane, and the claim's `progress` entry carries the same
   token in its attributes (`pane_token`, section 3) so the thread links there too. A card that has
   moved on keeps the field as a record of who did the work; it stops meaning "taken" the moment
@@ -205,7 +206,7 @@ outside the range is clamped on every write.
   The runnable text is the first fenced block of a `## Run` section (or the section itself, for a
   prompt), and the parameters are a list in `## Parameters` (`` - `arg` = `default` — note ``).
   They are in the body, not the front matter, because a default may hold any character while a
-  front matter scalar is single-line. The same layout serves the global Switchboard
+  front matter scalar is single-line. The same layout serves the global Board
   (`$XDG_CONFIG_HOME/relay/switchboard/aliases/`), where a repository's `issues/` is not the root.
 - A **plan** card's body holds the plan prose and a `## Steps` checklist. It may be used on its own;
   `links.cards` and per-step `card=` markers connect it to work cards.
@@ -410,7 +411,7 @@ reopen the staged situation for a person instead of staging it a second time.
 answered by an **indented line under it beginning `Answer:`**, and that is the only answered form
 the board recognises, because a rule that closes cards has to be checkable by reading the file.
 While a numbered question has no such line, no agent moves the card to `done`
-(`board_tools._human_qa_gate`); the owner still can, from the Switchboard. Prose in the section
+(`board_tools._human_qa_gate`); the owner still can, from the Board. Prose in the section
 with no numbered question in it gates nothing — the section is as often a brief as a question
 list.
 
@@ -464,13 +465,13 @@ where should transcription run? cheap is fine
 - `kind` is `comment | question | decision | evidence | progress | note | event | task | plan |
   rewrite`. Attributes are `key=value`, quoted with `"` when the value contains spaces.
 - `pane_token=<session token>` on a `progress` entry is the terminal pane the card was handed to
-  or claimed by (#HKAP, #R9G7): the Switchboard draws such an entry as a link that reveals that
+  or claimed by (#HKAP, #R9G7): the Board draws such an entry as a link that reveals that
   pane. At most 64 characters, and neither whitespace nor `>` — a value the entry marker could
   not hold is refused rather than rewritten.
 - An append **replaces the file** — read, render, `os.replace` — under an exclusive `flock` on the
   threads **directory**, so two processes never interleave a write. It was an `O_APPEND` write under
   a lock on the file itself until 2026-09-20: a `QFileSystemWatcher` directory watch, which is what
-  the Switchboard pane holds, does not fire when an existing file grows, and about two of every
+  the Board pane holds, does not fire when an existing file grows, and about two of every
   three writes never reached the pane (#N5JJ). The lock is on the directory because `os.replace`
   gives the path a new inode. Threads are otherwise never rewritten in place except by
   `check --fix` (re-sort).
@@ -502,7 +503,7 @@ memory: {autonomy: auto}
 ```
 
 A tab names either a `folder` (a category) or a `filter` across categories. Its presence is also
-the switch that tells Relay and the agents that this repository has a Switchboard.
+the switch that tells Relay and the agents that this repository has a Board.
 
 **Sections.** `columns:` is the ordered list of sections the one list is divided into, and two
 optional keys say the rest:
@@ -531,7 +532,7 @@ column_titles: {needs-qa: Checks, research: Research}
   after the configured ones (`Model::sections()`, `src/BoardModel.cpp`).
 
 Add, remove, merge, rename and move are one write of this file, from any of three places: the gear
-at the end of the section checkboxes in the Switchboard pane, the agent's `board_sections` tool
+at the end of the section checkboxes in the Board pane, the agent's `board_sections` tool
 during a cleanup run, or your editor. Moving a section rewrites `columns:` in the new order and
 touches no card; the two that are always last (Verified, Done) do not move and nothing moves past
 them. The first two go through one validator and land in the write log, so `board_undo` takes a
@@ -559,8 +560,8 @@ that does the same job: reading `BOARD.md` and the card files, a new card file w
 of section 2, a claim as `status: executing` plus `assignee:` — never `session:`, which is Relay's
 pane token and immutable (section 2.2) — a thread entry in the format of section 3, a status change
 with the file move of section 1, and `relay-board.py check` as the validator. The board's own folder
-name is substituted throughout, and a hidden `.switchboard/` carries the `rg --hidden` note from the
-top of this document.
+name is substituted throughout, and the search note from the top of this document rides with it —
+`rg -g '!board/'` on a visible folder, `rg --hidden` on a `.switchboard/` one.
 
 The pointer is a marked block, `<!-- relay:switchboard-policy start -->` … `<!-- … end -->`, naming
 the board folder and telling the reader to read `POLICY.md` before doing work. `board.scaffold_files`

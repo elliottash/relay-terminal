@@ -1,4 +1,4 @@
-# Switchboard as the project's tooling hub: tests, profiling and what else fits (research, 2026-09-20)
+# The Board as the project's tooling hub: tests, profiling and what else fits (research, 2026-09-20)
 
 Research date: 2026-09-20. Two surveys feed this: an external one of the products that already ship
 each shape (primary docs, URLs inline), and a read-only survey of this checkout (file:line refs read,
@@ -14,11 +14,11 @@ signatures are the stable anchors. What could not be confirmed from a primary so
 
 Four things, in the owner's order: **(a)** a `## Tests` section on a card listing the tests that
 belong to it, with a **Check** button that checks them — are they stale, are they slow; **(b)** a
-**Test suites** pane beside the Switchboard, listing tests with their stats (failure history,
+**Test suites** pane beside the Board, listing tests with their stats (failure history,
 execution time); **(c)** a **Profile** button that profiles the project; **(d)** an answer to "what
 other project/SWE tooling could smoothly be added?"
 
-Read together they are one request, not four. The Switchboard stops being a card board and becomes
+Read together they are one request, not four. The Board stops being a card board and becomes
 **the project's control panel**: every engineering activity that today happens by typing a command
 into a pane becomes a button or a pane beside the board, and — the part that makes it worth doing
 rather than a dashboard — **its results are written back into the cards**, so the agent that picks a
@@ -418,7 +418,7 @@ else has a list plus the GitHub PR list — Devin's `blocked` as a first-class s
 ACTIVE/IDLE/ARCHIVED (https://cursor.com/docs/cloud-agent/api/endpoints), Codex rows with a
 `+57 / −27` diff-size badge, Claude Code's `claude agents` columns Pinned / Ready for review / Needs
 input / Working / Completed with a PR label coloured by check status
-(https://code.claude.com/docs/en/agent-view). **The Switchboard's columns are already a superset of
+(https://code.claude.com/docs/en/agent-view). **The Board's columns are already a superset of
 every status vocabulary above**; what it lacks is the per-card *detail* those products show — plan,
 step log with tool calls, diff, and log citations behind every claim. Two Claude Code mechanisms are
 the most transferable of anything here, and §6 returns to both: the **`TaskCompleted` hook that exits
