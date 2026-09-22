@@ -67,6 +67,40 @@ async def quiet(client, kind: str, pane: str, seconds: float = 0.6) -> list[dict
 
 
 class TabScopeTests(unittest.TestCase):
+    def test_all_tabs_invite_has_every_current_pane_and_follows_later_tabs(self):
+        async def main():
+            async with Harness() as harness:
+                add_pane(harness, "pane-1", TAB)
+                add_pane(harness, "pane-2", OTHER)
+                _, url = await harness.invite(panes=("pane-1",), role=wire.EDITOR,
+                                              tab=guests_mod.ALL_TABS)
+                client, _ = await harness.guest(url)
+                ids = await panes_seen(client, lambda ids: "pane-2" in ids)
+                self.assertEqual(ids, ["pane-1", "pane-2"])
+
+                add_pane(harness, "pane-3", "tab-c")
+                ids = await panes_seen(client, lambda ids: "pane-3" in ids)
+                self.assertEqual(ids, ["pane-1", "pane-2", "pane-3"])
+                await client.send({"t": "screen_get", "pane": "pane-3"})
+                self.assertEqual((await client.expect("screen_snapshot"))["pane"], "pane-3")
+                await client.close()
+        run(main())
+
+    def test_ending_all_tabs_does_not_require_withdrawing_its_panes(self):
+        async def main():
+            async with Harness() as harness:
+                add_pane(harness, "pane-1", TAB)
+                invite, url = await harness.invite(tab=guests_mod.ALL_TABS)
+                client, joined = await harness.guest(url)
+                self.assertTrue(harness.source.has_pane("pane-1"))
+                self.assertEqual(harness.host.scope_end(guests_mod.ALL_TABS), 1)
+                self.assertTrue(harness.source.has_pane("pane-1"),
+                                "ending the broad scope withdrew a pane another share may use")
+                self.assertTrue(harness.guests.invite(invite.invite_id).burned)
+                self.assertIsNone(harness.guests.participant(joined.participant))
+                await client.close()
+        run(main())
+
     def test_a_pane_added_to_the_tab_reaches_its_guests_at_once(self):
         async def main():
             async with Harness() as harness:
@@ -184,6 +218,18 @@ class StoreTests(unittest.TestCase):
         again = guests_mod.GuestStore(Path(self.temporary.name))
         self.assertEqual(again.invite(invite.invite_id).tab, TAB)
         self.assertEqual(again.live()[0].tab, TAB)
+
+    def test_all_tabs_is_a_persisted_dynamic_scope(self):
+        invite, _ = self.store.create_invite(["p1"], wire.VIEWER, "room", uses=2,
+                                             tab=guests_mod.ALL_TABS)
+        alice = self.admit(invite)
+        self.store.add_to_tab(guests_mod.ALL_TABS, "p2")
+        again = guests_mod.GuestStore(Path(self.temporary.name))
+        self.assertEqual(again.invite(invite.invite_id).panes, ["p1", "p2"])
+        self.assertEqual(again.participant(alice.participant_id).tab, guests_mod.ALL_TABS)
+        removed = again.end_tab_scope(guests_mod.ALL_TABS)
+        self.assertEqual([person.participant_id for person in removed], [alice.participant_id])
+        self.assertIsNone(again.participant(alice.participant_id))
 
     def test_growth_stops_at_the_ceiling(self):
         invite, _ = self.store.create_invite(["p0"], wire.VIEWER, "room", tab=TAB)

@@ -50,6 +50,10 @@ MAX_PANES_PER_INVITE = 8
 # A whole-tab invite grows as the owner splits the tab, so it has its own, larger ceiling; past it a
 # new pane is simply not added to the guests' scope (the owner can still share it on its own).
 MAX_PANES_PER_TAB = 32
+# A persisted scope token, not a GUI tab id. Tab ids begin ``tab-``; this one means every pane the
+# desktop publishes now and later, across every window (card #A11T).
+ALL_TABS = "all-tabs"
+MAX_PANES_PER_ALL_TABS = 128
 MAX_USES = 32
 
 KNOCKS_PER_MINUTE = 5                # per invite (section 10.2)
@@ -255,8 +259,9 @@ class GuestStore:
         `add_to_tab` extends it as panes are added."""
         if role not in wire.GUEST_ROLES:
             raise wire.WireError("not_permitted", f"{role!r} is not a role an invite may grant.")
-        wanted = [pane for pane in panes if isinstance(pane, str) and pane][
-            :MAX_PANES_PER_TAB if tab else MAX_PANES_PER_INVITE]
+        limit = (MAX_PANES_PER_ALL_TABS if tab == ALL_TABS
+                 else MAX_PANES_PER_TAB if tab else MAX_PANES_PER_INVITE)
+        wanted = [pane for pane in panes if isinstance(pane, str) and pane][:limit]
         if not wanted:
             raise wire.WireError("no_such_pane", "an invite has to name a pane.")
         lifetime = max(60.0, min(float(expires_in or DEFAULT_EXPIRY), MAX_EXPIRY))
@@ -299,16 +304,17 @@ class GuestStore:
         """
         if not tab or not pane:
             return []
+        limit = MAX_PANES_PER_ALL_TABS if tab == ALL_TABS else MAX_PANES_PER_TAB
         changed = False
         for invite in self.invites.values():
             if invite.tab == tab and not invite.dead and pane not in invite.panes \
-                    and len(invite.panes) < MAX_PANES_PER_TAB:
+                    and len(invite.panes) < limit:
                 invite.panes.append(pane)
                 changed = True
         grown: list[Participant] = []
         for participant in self.participants.values():
             if participant.tab == tab and participant.live and pane not in participant.panes \
-                    and len(participant.panes) < MAX_PANES_PER_TAB:
+                    and len(participant.panes) < limit:
                 participant.panes.append(pane)
                 grown.append(participant)
         if changed or grown:
@@ -352,6 +358,32 @@ class GuestStore:
         for participant in shrunk:
             self._notify(participant.participant_id)
         return shrunk
+
+    def end_tab_scope(self, tab: str) -> list[Participant]:
+        """Burn every invite and remove every participant following one dynamic scope.
+
+        Used when Whole tab or All tabs is switched off while some panes remain published for a
+        different scope. Withdrawing those panes would incorrectly end the narrower shares too.
+        """
+        if not tab:
+            return []
+        changed = False
+        for invite in self.invites.values():
+            if invite.tab == tab and not invite.burned:
+                invite.burned = True
+                changed = True
+        removed: list[Participant] = []
+        for participant in self.participants.values():
+            if participant.tab == tab and participant.live:
+                participant.removed = True
+                participant.panes = []
+                removed.append(participant)
+        if changed or removed:
+            self.prune()
+            self.save()
+        for participant in removed:
+            self._notify(participant.participant_id)
+        return removed
 
     def burn_invite(self, invite_id: str) -> bool:
         invite = self.invites.get(invite_id)

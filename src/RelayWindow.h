@@ -8855,12 +8855,12 @@ private:
         QTimer::singleShot(0, this, [this] { m_tabShareSyncQueued = false; syncTabShares(); });
     }
 
-    // Make sharing match the tabs: every terminal in a tab shared whole is shared under that tab,
-    // and one shared under a tab it is no longer in follows it — into the tab it is in now if that
-    // one is shared whole, else out of the share altogether, since it was the tab that shared it.
+    // Make sharing match the selected scope: a whole-tab share follows that tab, while All tabs
+    // publishes every pane in every window and keeps following panes and tabs created later.
     void syncTabShares() {
         relay::RemoteShare &share = relay::RemoteShare::instance();
         if (!share.hasTabShares()) return;   // unshareTab already ended every pane it shared
+        const bool all = share.isAllTabsShared();
         for (int i = 0; i < m_tabs->count(); ++i) {
             QWidget *page = m_tabs->widget(i);
             const QString id = page->property("relayShareTab").toString();
@@ -8868,8 +8868,18 @@ private:
             for (Pane *pane : panesIn(page)) {
                 const QString token = pane->sessionToken();
                 const QString under = share.tabOf(token);
-                if (whole) {
-                    if (!share.isSharing(token) || under != id) pane->shareUnderTab(id);
+                if (all || whole) {
+                    const QString wanted = whole ? id : QString();
+                    if (!share.isSharing(token)) {
+                        QString error;
+                        if (pane->startSharing(wanted, &error)) {
+                            if (all) share.markAllTabsPane(token);
+                        } else if (!error.isEmpty()) {
+                            pane->toast(error, 5000);
+                        }
+                    } else if (under != wanted) {
+                        share.setPaneTab(token, wanted);
+                    }
                 } else if (!under.isEmpty() && share.isSharing(token)) {
                     share.stopSharing(token);
                     pane->toast(QStringLiteral("No longer shared — this pane left a shared tab."), 5000);

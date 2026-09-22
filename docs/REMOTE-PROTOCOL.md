@@ -930,6 +930,15 @@ GUI's `pane` line carries it as `tab` for every pane shared under it, and an inv
   in a shared tab, a guest of one tab never gains a pane of another, and growth stops at
   `MAX_PANES_PER_TAB` (32). Every rule above applies to a pane that joined later exactly as to the
   first — a later pane's password prompt is refused to a guest the same way.
+
+**The unit may also be all tabs** (card #A11T). The sharing dialog's **Share all tabs** option
+publishes every pane in every Relay window and uses the reserved dynamic-scope token `all-tabs` in
+the desktop-to-sidecar `tab` field. It names every currently published pane and grows whenever any
+later pane or tab is published, regardless of its ordinary tab id, up to 128 panes. Turning it off
+sends `scope_end {tab:"all-tabs"}`: only all-tabs invites and participants end, so a pane that is
+still published for a narrower whole-tab share is not withdrawn. Pane-only invites carry no `tab`
+and remain narrow. This guest option is separate from pairing: an owner's paired device is already
+scoped to the whole desktop by section 5.3.
 Whatever their role a participant never gets: `secret_input`, `compose` with `agent:false` (the
 routing that can reach the shell), `set_mode`, model changes, reset, queue edits of other people's
 items, `voice`, `history_get` beyond the shared pane, push notifications, or the device list.
@@ -1141,14 +1150,17 @@ its text (10.6) and still reaches the agent and only the agent.
 ### 10.5 The owner's controls (desktop only)
 
 Between the GUI and its sidecar (`remote/gui_host.py`), as line JSON, never on the wire:
-`invite_create {pane, role, expires, uses}` → `invite {id, url, qr}`; `invite_revoke {id}`;
+`invite_create {pane, role, expires, uses, tab?}` → `invite {id, url, qr}` (`tab` is a GUI tab id
+for whole-tab scope or the reserved `all-tabs` token); `invite_revoke {id}`;
 `knock {participant, name, platform, code, role, pane}` → `knock_answer {participant, admit, role}`;
 `participants {items}` (each item carries `online` and the panes it is `driving`);
 `control_ask {pane, participant, name}` → `control_answer {pane, participant, grant}`;
 `control_take {pane}` (the owner's keystroke) and `control_revoke {pane}` (the same from the
 sharing panel); `prompt_ask {id, participant, name, pane, text, when, plan}` →
 `prompt_answer {id, approve}`; `role_set {participant, role}`; `participant_remove {participant}`;
-`share_pause {pane?, on}`; `share_options {pane, prompts_immediate, present_only}`; `share_end`.
+`share_pause {pane?, on}`; `share_options {pane, prompts_immediate, present_only}`; `share_end`;
+`scope_end {tab}` ends one dynamic whole-tab or all-tabs scope without withdrawing panes another
+scope still uses.
 The desktop is told of every handoff and every stop with `control {pane, holder, name}` and
 `share_state {pane, paused, reason}` — the same two facts the phones are sent, from the same one
 state, so the desktop's "alice is typing" cannot drift from theirs. A `share_pause` or a
@@ -1224,8 +1236,9 @@ secret), `refused`, `admitted`, `join`, `leave`, `role_set`, `participant_remove
 `control_take`, `share_pause`, `share_options`, the meeting-code kinds of §10.7 (`code_create`,
 `code_attempt`, `code_used`, `code_burned`, `code_expired`, each carrying `code_kind` — `invite`
 or `pair`, §5.2 — since the line's own `kind` is already taken), `scope_grown` and `scope_shrunk` (a
-pane joining or leaving a tab shared whole, §10.1, with the tab, the pane and the participant or
-invite), and the input a participant or a device sent:
+pane joining or leaving a dynamic tab or all-tabs scope, §10.1, with the scope, the pane and the
+participant or invite), `scope_end` (the owner ended that dynamic scope), and the input a
+participant or a device sent:
 `line` with its text, `keys` and `paste` as byte counts. Every one of them carries the participant
 id, which is minted at the knock, so a refusal and an admission name the same person as the join
 and the leave that follow; a device's input names the device id instead, and neither line ever

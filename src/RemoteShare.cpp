@@ -604,6 +604,7 @@ bool RemoteShare::sharePane(const QString &paneId, const PaneHooks &hooks, QStri
 void RemoteShare::stopSharing(const QString &paneId)
 {
     if (!m_panes.remove(paneId)) return;
+    m_allTabsPanes.remove(paneId);
     send({{"t", "unpane"}, {"id", paneId}});
     refreshSharedPanes();
     emit sharingChanged();
@@ -613,6 +614,8 @@ void RemoteShare::stopAll()
 {
     for (const QString &paneId : m_panes.keys()) send({{"t", "unpane"}, {"id", paneId}});
     m_panes.clear();
+    m_allTabsPanes.clear();
+    m_allTabsShared = false;
     if (!m_tabShares.isEmpty()) {
         m_tabShares.clear();
         emit tabSharesChanged();
@@ -644,9 +647,44 @@ void RemoteShare::shareTab(const QString &tab)
 void RemoteShare::unshareTab(const QString &tab)
 {
     if (!m_tabShares.remove(tab)) return;
+    if (m_allTabsShared) {
+        // End only this tab's guests. Its panes remain published for All tabs, and changing their
+        // tab field to empty keeps later panes from regrowing the tab scope we just ended.
+        send({{"t", "scope_end"}, {"tab", tab}});
+        for (const QString &paneId : panesInTab(tab)) setPaneTab(paneId, QString());
+        emit tabSharesChanged();
+        emit sharingChanged();
+        return;
+    }
     // Every pane that is shared because the tab was ends its share, which is what the owner
     // asked for: the tab's guests leave, its invites burn, and nothing more of it is published.
     for (const QString &paneId : panesInTab(tab)) endShare(paneId);
+    emit tabSharesChanged();
+    emit sharingChanged();
+}
+
+void RemoteShare::shareAllTabs()
+{
+    if (m_allTabsShared) return;
+    m_allTabsShared = true;
+    emit tabSharesChanged();       // every window publishes the panes it already has
+    emit sharingChanged();
+}
+
+void RemoteShare::unshareAllTabs()
+{
+    if (!m_allTabsShared) return;
+    m_allTabsShared = false;
+    // End the desktop-wide invitations and participants even for panes that stay published by a
+    // whole-tab share. Unpublishing those panes would also cut off the narrower tab's guests.
+    send({{"t", "scope_end"}, {"tab", allTabsScope()}});
+    const QSet<QString> automatic = m_allTabsPanes;
+    m_allTabsPanes.clear();
+    for (const QString &paneId : automatic) {
+        const auto it = m_panes.constFind(paneId);
+        if (it != m_panes.cend() && m_tabShares.contains(it->tab)) continue;
+        stopSharing(paneId);
+    }
     emit tabSharesChanged();
     emit sharingChanged();
 }
@@ -1116,6 +1154,18 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
         updateWholeTab();
     });
     column->addWidget(m_wholeTab);
+
+    m_allTabs = new QCheckBox(QStringLiteral("Share all tabs"));
+    m_allTabs->setToolTip(QStringLiteral(
+        "Every pane in every tab is shared, including panes and tabs you create later. A link or "
+        "meeting code made while this is ticked gives its guests that desktop-wide scope."));
+    connect(m_allTabs, &QCheckBox::toggled, this, [this](bool on) {
+        RemoteShare &share = RemoteShare::instance();
+        if (on) share.shareAllTabs();
+        else share.unshareAllTabs();
+        updateWholeTab();
+    });
+    column->addWidget(m_allTabs);
 
     m_inviteHeading = new QLabel(QStringLiteral("Invite someone to this pane"));
     m_inviteHeading->setObjectName(QStringLiteral("settingsHeading"));
@@ -1599,11 +1649,18 @@ void RemoteShareDialog::updateWholeTab()
 {
     if (!m_wholeTab) return;
     m_wholeTab->setVisible(!m_tab.isEmpty());
-    const bool whole = RemoteShare::instance().isTabShared(m_tab);
+    RemoteShare &share = RemoteShare::instance();
+    const bool whole = share.isTabShared(m_tab);
+    const bool all = share.isAllTabsShared();
     {
         const QSignalBlocker quiet(m_wholeTab);
         m_wholeTab->setChecked(whole);
     }
+    if (m_allTabs) {
+        const QSignalBlocker quiet(m_allTabs);
+        m_allTabs->setChecked(all);
+    }
+    m_wholeTab->setEnabled(!all);
     // Scope growth is the thing to be told about before, not after: the guests of a tab shared
     // whole will see a pane the moment it is split off, so the box says so in its own words.
     m_wholeTab->setToolTip(QStringLiteral(
@@ -1614,17 +1671,22 @@ void RemoteShareDialog::updateWholeTab()
                             ? QStringLiteral("Share the whole tab (%1 panes, and any you add)").arg(m_tabPanes)
                             : QStringLiteral("Share the whole tab (and any pane you add to it)"));
     if (m_inviteHeading)
-        m_inviteHeading->setText(whole ? QStringLiteral("Invite someone to this tab")
-                                       : QStringLiteral("Invite someone to this pane"));
-    setWindowTitle(whole ? QStringLiteral("Share this tab") : QStringLiteral("Share this pane"));
+        m_inviteHeading->setText(all ? QStringLiteral("Invite someone to all tabs")
+                                     : whole ? QStringLiteral("Invite someone to this tab")
+                                             : QStringLiteral("Invite someone to this pane"));
+    setWindowTitle(all ? QStringLiteral("Share all tabs")
+                       : whole ? QStringLiteral("Share this tab")
+                               : QStringLiteral("Share this pane"));
 }
 
 void RemoteShareDialog::createInvite()
 {
     RemoteShare &share = RemoteShare::instance();
+    const QString scope = share.isAllTabsShared() ? RemoteShare::allTabsScope()
+                                                  : share.isTabShared(m_tab) ? m_tab : QString();
     share.createInvite(m_paneId, m_inviteRole->currentData().toString(),
                        m_inviteExpiry->currentData().toInt(), m_inviteUses->value(),
-                       share.isTabShared(m_tab) ? m_tab : QString());
+                       scope);
     m_inviteNote->setText(QStringLiteral("Making a link…"));
 }
 
@@ -1653,9 +1715,14 @@ void RemoteShareDialog::showInvite(const QString &url, const QrMatrix &qr, const
     m_inviteSend->show();
     // In the invite section, not in the status line at the top: that line is about the pairing QR
     // still on screen above, and two different things were claiming it.
-    m_inviteNote->setText(QStringLiteral("Send this to the person you want on this pane. It lets in "
-                                         "%1 and stops working in %2. %3")
-                              .arg(uses == 1 ? QStringLiteral("one person")
+    RemoteShare &share = RemoteShare::instance();
+    const QString place = share.isAllTabsShared() ? QStringLiteral("all tabs")
+                         : share.isTabShared(m_tab) ? QStringLiteral("this tab")
+                                                    : QStringLiteral("this pane");
+    m_inviteNote->setText(QStringLiteral("Send this to the person you want on %1. It lets in "
+                                         "%2 and stops working in %3. %4")
+                              .arg(place,
+                                   uses == 1 ? QStringLiteral("one person")
                                              : QStringLiteral("%1 people").arg(uses),
                                    sharing::expiryText(expires), sharing::roleSentence(role)));
     fit();
@@ -1677,7 +1744,9 @@ void RemoteShareDialog::createCode()
     m_makeCode->setEnabled(false);
     m_codeAgain->setEnabled(false);
     RemoteShare &share = RemoteShare::instance();
-    share.createCode(m_paneId, m_codeRole, share.isTabShared(m_tab) ? m_tab : QString());
+    const QString scope = share.isAllTabsShared() ? RemoteShare::allTabsScope()
+                                                  : share.isTabShared(m_tab) ? m_tab : QString();
+    share.createCode(m_paneId, m_codeRole, scope);
     m_codeNote->setText(QStringLiteral("Making a code…"));
     fit();
 }

@@ -668,6 +668,10 @@ class Sidecar:
             if self.host is not None:
                 self.host.pane_gone(str(message.get("id", "")))
             self.source.drop_pane(message.get("id", ""))
+        elif kind == "scope_end":
+            if self.host is not None:
+                self.host.scope_end(str(message.get("tab") or ""))
+                self.report_participants()
         elif kind == "frame":
             self.source.set_frame(message)
         elif kind == "agent":

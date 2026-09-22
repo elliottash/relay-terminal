@@ -130,13 +130,21 @@ public:
     // page; every pane in it is shared under that id, the window shares each pane added later,
     // and an invite made with the id grows with the tab (docs/REMOTE-PROTOCOL.md section 10.1).
     bool isTabShared(const QString &tab) const { return !tab.isEmpty() && m_tabShares.contains(tab); }
-    bool hasTabShares() const { return !m_tabShares.isEmpty(); }
+    bool hasTabShares() const { return !m_tabShares.isEmpty() || m_allTabsShared; }
+    bool isAllTabsShared() const { return m_allTabsShared; }
+    static QString allTabsScope() { return QStringLiteral("all-tabs"); }
     QString tabOf(const QString &paneId) const { return m_panes.value(paneId).tab; }
     QStringList panesInTab(const QString &tab) const;
     // Start sharing the tab whole. The window then shares its panes (tabSharesChanged).
     void shareTab(const QString &tab);
     // Stop: every pane shared under the tab stops being shared, and the tab's guests go with it.
     void unshareTab(const QString &tab);
+    // "All tabs" is the process-wide sibling of whole-tab sharing. Every Relay window publishes
+    // every pane it has now and later; invites carrying allTabsScope() grow with every published
+    // pane, regardless of its tab id.
+    void shareAllTabs();
+    void unshareAllTabs();
+    void markAllTabsPane(const QString &paneId) { m_allTabsPanes.insert(paneId); }
     // A shared pane moved into a tab shared whole, or out of one ("" for on its own).
     void setPaneTab(const QString &paneId, const QString &tab);
 
@@ -300,6 +308,8 @@ private:
         bool needFull = true;
     };
     QSet<QString> m_tabShares;
+    QSet<QString> m_allTabsPanes;       // panes published only because All tabs is on
+    bool m_allTabsShared = false;
 
     QProcess *m_process = nullptr;
     QByteArray m_pending;
@@ -362,6 +372,7 @@ private:
     QString m_tab;
     int m_tabPanes = 0;
     QCheckBox *m_wholeTab = nullptr;
+    QCheckBox *m_allTabs = nullptr;
     QLabel *m_inviteHeading = nullptr;
     QLabel *m_status = nullptr;
     QLabel *m_qr = nullptr;

@@ -1808,7 +1808,13 @@ class Host:
         for pane in panes:
             if not self.source.has_pane(pane):
                 raise wire.WireError("no_such_pane", "no such pane.")
-        if tab:
+        if tab == guests_mod.ALL_TABS:
+            # The GUI has already published every pane before it asks for the invite. Take the
+            # source's current list rather than trusting a caller-supplied subset; pane_tab grows
+            # this scope for every pane published later.
+            panes = [str(item.get("id") or "") for item in self.source.snapshot()
+                     if item.get("id")]
+        elif tab:
             # A whole-tab invite names every pane the tab holds now; later ones join by pane_tab.
             panes = list(panes) + sorted(pane for pane, where in self.pane_tabs.items()
                                          if where == tab and pane not in panes)
@@ -1904,17 +1910,32 @@ class Host:
             # Already in this tab — but an invite minted since may not name it yet; add_to_tab
             # is a no-op for rows that already hold it.
             self._grow(tab, pane)
+            self._grow(guests_mod.ALL_TABS, pane)
             return
         if old:
             self._shrink(old, pane, reason="moved")
         if tab:
             self._grow(tab, pane)
+        # All-tabs scopes follow publication, not membership in any one GUI tab. This call is a
+        # no-op unless an all-tabs invite or participant exists.
+        self._grow(guests_mod.ALL_TABS, pane)
 
     def pane_gone(self, pane: str) -> None:
         """A shared pane closed or stopped being shared: it leaves every tab scope it was in."""
         old = self.pane_tabs.pop(pane, "")
         if old:
             self._shrink(old, pane, reason="closed")
+        self._shrink(guests_mod.ALL_TABS, pane, reason="closed")
+
+    def scope_end(self, tab: str) -> int:
+        """End one dynamic tab scope without withdrawing panes used by another share."""
+        invites, people = self.guests.tab_rows(tab)
+        if not invites and not people:
+            return 0
+        self.audit.record("scope_end", tab=tab,
+                          invites=[invite.invite_id for invite in invites],
+                          participants=[person.participant_id for person in people])
+        return len(self.guests.end_tab_scope(tab))
 
     def _grow(self, tab: str, pane: str) -> None:
         invites, people = self.guests.tab_rows(tab)
