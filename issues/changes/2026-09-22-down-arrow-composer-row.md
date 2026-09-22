@@ -7,7 +7,7 @@ assignee: codex
 rank: m
 created: '2026-09-22'
 source: 'Codex in a Relay pane, 2026-09-22'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-down-arrow/README.md], related: [], github: null}
+links: {plans: [], commits: [ac680c85d680021615e489decb0602769027a607], evidence: [docs/qa_evidence/2026-09-22-down-arrow/README.md], related: [], github: null}
 ---
 # Down leaves the composer only from its bottom visual row
 
