@@ -96,6 +96,21 @@ traceback continuation
             report.save_snapshot(data, root, now=now + timedelta(seconds=1))
             self.assertEqual(len(report.review_snapshots(root, now=now + timedelta(seconds=1))), 2)
 
+    def test_invalid_snapshot_metadata_does_not_interrupt_review_or_retention(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            invalid = [None, 123, [], {}, {'kind': 'foreign', 'generated_at': None}]
+            invalid.extend({'kind': report.SNAPSHOT_KIND, 'generated_at': value}
+                           for value in (None, 123, [], 'not-a-date'))
+            files = []
+            for i, data in enumerate(invalid):
+                path = root / f'relay-events-20260922T120000{i:06d}Z.json'
+                path.write_text(json.dumps(data))
+                files.append(path)
+            self.assertEqual(report.review_snapshots(root), [])
+            self.assertTrue(report.save_snapshot(report.summarize([]), root).exists())
+            self.assertTrue(all(path.exists() for path in files))
+
     def test_signal_report_uses_explicit_links_and_excludes_message(self):
         import sys
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'backend'))

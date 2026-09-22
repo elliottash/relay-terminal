@@ -28,6 +28,8 @@ SNAPSHOT_NAME = re.compile(r'relay-events-\d{8}T\d{12}Z\.json')
 
 
 def timestamp(value):
+    if not isinstance(value, str):
+        raise ValueError('timestamp must be an ISO date/time string')
     value = datetime.fromisoformat(value.replace('Z', '+00:00'))
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
 
@@ -185,6 +187,8 @@ def save_snapshot(report, directory, retention_days=30, now=None):
             continue
         try:
             data = json.loads(old.read_text())
+            if not isinstance(data, dict) or data.get('kind') != SNAPSHOT_KIND:
+                continue
             created = timestamp(data['generated_at'])
             if data.get('kind') == SNAPSHOT_KIND and created < now - timedelta(days=retention_days):
                 old.unlink()
@@ -199,6 +203,8 @@ def review_snapshots(directory, days=7, now=None):
     for path in directory.glob('relay-events-*.json'):
         try:
             data = json.loads(path.read_text())
+            if not isinstance(data, dict) or data.get('kind') != SNAPSHOT_KIND:
+                continue
             created = timestamp(data['generated_at'])
             if data.get('kind') != SNAPSHOT_KIND or not now - timedelta(days=days) <= created <= now:
                 continue
