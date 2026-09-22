@@ -7,7 +7,7 @@ assignee: codex
 rank: m
 created: '2026-09-21'
 source: 'Codex conversation, 2026-09-21'
-links: {plans: [], commits: [72311d28bec6c603758d24ac0c737b3124a96cb6, b70fb8b4c3f76d0b2b741d3f67bc2faef9e988dc], evidence: [docs/qa_evidence/2026-09-21-pane-tab-navigation/], related: [], github: null}
+links: {plans: [], commits: [72311d28bec6c603758d24ac0c737b3124a96cb6, b70fb8b4c3f76d0b2b741d3f67bc2faef9e988dc, 0a31d5d2e7b2675a6a2d09a41c2efec084be4d19], evidence: [docs/qa_evidence/2026-09-21-pane-tab-navigation/], related: [], github: null}
 ---
 # Tab and Shift+Tab navigate tabs inside eligible panes
 
