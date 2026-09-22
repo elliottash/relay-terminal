@@ -17,13 +17,15 @@
 //     starttime 987654321
 //
 // One `key value` per line, mode 0600, written atomically (QSaveFile: temp file + rename), so a
-// sweeping Relay never reads half a mark. `starttime` is field 22 of `/proc/<pid>/stat` — the boot
+// sweeping Relay never reads half a mark. On Linux, `starttime` is field 22 of `/proc/<pid>/stat` — the boot
 // ticks at which that process started — and it is what makes the mark trustworthy: pids are
 // recycled, and without the start time a sweep would spare an unrelated process's directory (or,
 // worse, believe a live pane dead is impossible but a dead one alive is a leak that never ends).
-// The owner is alive iff `/proc/<pid>/stat` still exists *and* records the same start time.
+// Windows uses the process creation FILETIME; macOS uses libproc start seconds/microseconds.
+// The owner is alive when its native process identity still matches. On macOS an inaccessible
+// identity is conservatively kept unless kill(pid, 0) proves the process no longer exists.
 //
-// When the start time cannot be read at all (no /proc), markOwned() writes nothing and returns
+// When the start time cannot be read at all (no native process identity), markOwned() writes nothing and returns
 // false: an unmarked directory is kept for the grace period, which is the safe way to be wrong.
 //
 // sweep() is deliberately timid. It looks only at names `QTemporaryDir` itself could have made
@@ -99,7 +101,7 @@ Owner self();
 Owner readOwner(const QString &dir);
 
 // Write this process's mark into `dir` (mode 0600, atomic). False when there is nothing to write
-// (no /proc) or the file could not be created; the directory then simply looks unmarked.
+// (no native process identity) or the file could not be created; the directory then simply looks unmarked.
 bool markOwned(const QString &dir);
 
 // Is that process still running, and still the same process? True only when `/proc/<pid>/stat`

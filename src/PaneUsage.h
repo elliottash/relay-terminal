@@ -3,8 +3,11 @@
 
 // relay::usage — what a pane's own processes cost this machine, as CPU and memory percentages.
 //
+// Linux reads /proc; Windows uses Toolhelp/process counters; macOS uses libproc. Windows and
+// macOS count live processes only, so short commands reaped between polls are not included.
+//
 // A terminal pane owns two process trees: the shell its pty spawned (and whatever it is running,
-// an ssh client included) and the pane's agent worker. Summing their /proc counters over the
+// an ssh client included) and the pane's agent worker. Summing their native counters over the
 // status poll's interval gives the pane's share of the machine, which PaneChrome shows as a small
 // "cpu 12% · mem 3%" chip beside the pane's title (issue #D03W) and RelayWindow appends to the tab
 // label. Every surface prints that one wording (issue #6BGA) except the tab label, which prints
@@ -52,11 +55,11 @@ struct Sample {
 // A process tree's counters at one instant. `ok` is false when there was nothing to measure.
 struct Reading {
     bool ok = false;
-    qint64 ticks = 0;     // CPU ticks booked to the tree, live and reaped alike (see below)
+    qint64 ticks = 0;     // CPU ticks booked to the tree (Linux includes reaped children)
     qint64 rssBytes = 0;  // resident memory summed over the live processes
 };
 
-// One process as the walk found it. `startTicks` is /proc/<pid>/stat's starttime, which together
+// One process as the walk found it. `startTicks` is the native creation time, which together
 // with the pid identifies the process across polls: pids are recycled, and without it a fresh
 // process wearing a dead one's number would be read as one that had burned every tick of its
 // predecessor's life in a single interval.
@@ -65,8 +68,8 @@ struct ProcessInfo {
     qint64 ppid = 0;
     QString comm;
     char state = '\0';      // 'R', 'S', 'D', 'Z' … as /proc spells it
-    qint64 ticks = 0;       // utime + stime + cutime + cstime
-    qint64 startTicks = 0;  // starttime (field 22), the pid's identity
+    qint64 ticks = 0;       // native CPU units; clockTicksPerSecond() supplies their scale
+    qint64 startTicks = 0;  // native creation time, the pid's identity
     qint64 rssBytes = 0;
 };
 
@@ -80,7 +83,7 @@ bool parseStat(const QByteArray &line, ProcessInfo *info);
 // The ticks alone, for callers that want nothing else.
 bool parseStatTicks(const QByteArray &line, qint64 *ticks);
 
-// Where the walk reads from: "/proc", unless a test points it at a directory it built.
+// Linux only: where the walk reads from: "/proc", unless a test points it at a directory it built.
 QString procRoot();
 void setProcRoot(const QString &root);
 

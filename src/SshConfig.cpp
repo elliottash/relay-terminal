@@ -12,6 +12,10 @@
 
 #ifndef Q_OS_WIN
 #include <glob.h>
+#ifdef Q_OS_MACOS
+#include <sys/sysctl.h>
+#include <cstring>
+#endif
 #endif
 
 namespace relay::ssh {
@@ -334,6 +338,32 @@ QString typedTarget(const QString &search) {
 
 QStringList processArgv(int pid) {
     if (pid <= 0) return {};
+#ifdef Q_OS_MACOS
+    int maxBytes = 0;
+    size_t size = sizeof(maxBytes);
+    if (::sysctlbyname("kern.argmax", &maxBytes, &size, nullptr, 0) != 0
+        || maxBytes <= int(sizeof(int)) || maxBytes > 16 * 1024 * 1024) return {};
+    QByteArray raw(maxBytes, '\0');
+    size = size_t(raw.size());
+    int mib[] = {CTL_KERN, KERN_PROCARGS2, pid};
+    if (::sysctl(mib, 3, raw.data(), &size, nullptr, 0) != 0 || size < sizeof(int)) return {};
+    raw.resize(int(size));
+    int argc = 0;
+    std::memcpy(&argc, raw.constData(), sizeof(argc));
+    if (argc <= 0 || argc > raw.size()) return {};
+    // The kernel prefixes argc and the executable path, then NUL padding, then argv.
+    int offset = int(raw.indexOf('\0', sizeof(int)));
+    if (offset < 0) return {};
+    while (offset < raw.size() && raw.at(offset) == '\0') ++offset;
+    QStringList argv;
+    for (int index = 0; index < argc; ++index) {
+        const int end = int(raw.indexOf('\0', offset));
+        if (end < 0) return {};
+        argv << QString::fromLocal8Bit(raw.constData() + offset, end - offset);
+        offset = end + 1;
+    }
+    return argv; // Never expose the environment block following the argument vector.
+#else
     QFile file(QStringLiteral("/proc/%1/cmdline").arg(pid));
     if (!file.open(QIODevice::ReadOnly)) return {};
     QByteArray raw = file.readAll();
@@ -342,6 +372,7 @@ QStringList processArgv(int pid) {
     QStringList argv;
     for (const QByteArray &part : raw.split('\0')) argv << QString::fromLocal8Bit(part);
     return argv;
+#endif
 }
 
 QString rerunCommand(const QStringList &argv, QString *host) {

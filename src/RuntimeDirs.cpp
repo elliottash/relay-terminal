@@ -14,6 +14,12 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#ifdef Q_OS_MACOS
+#include <libproc.h>
+#include <signal.h>
+#include <cerrno>
+#include <climits>
+#endif
 #endif
 
 namespace relay {
@@ -40,6 +46,13 @@ bool startTimeOf(qint64 pid, qulonglong *out) {
     CloseHandle(process);
     if (ok) *out = (qulonglong(created.dwHighDateTime) << 32) | created.dwLowDateTime;
     return ok;
+#elif defined(Q_OS_MACOS)
+    if (pid <= 0 || pid > INT_MAX) return false;
+    struct proc_bsdinfo info {};
+    if (proc_pidinfo(int(pid), PROC_PIDTBSDINFO, 0, &info, sizeof(info)) != sizeof(info))
+        return false;
+    *out = qulonglong(info.pbi_start_tvsec) * 1000000 + info.pbi_start_tvusec;
+    return true;
 #else
     QFile stat(QStringLiteral("/proc/%1/stat").arg(pid));
     if (!stat.open(QIODevice::ReadOnly)) return false;
@@ -113,12 +126,17 @@ bool DirStamp::changed(const QString &path) {
 #else
     struct stat info;
     if (::stat(QFile::encodeName(path).constData(), &info) != 0) { m_seen = false; return false; }
+#ifdef Q_OS_MACOS
+    const timespec modified = info.st_mtimespec;
+#else
+    const timespec modified = info.st_mtim;
+#endif
     if (m_seen && info.st_ino == m_inode
-        && info.st_mtim.tv_sec == m_mtime.tv_sec && info.st_mtim.tv_nsec == m_mtime.tv_nsec)
+        && modified.tv_sec == m_mtime.tv_sec && modified.tv_nsec == m_mtime.tv_nsec)
         return false;
     m_seen = true;
     m_inode = info.st_ino;
-    m_mtime = info.st_mtim;
+    m_mtime = modified;
     return true;
 #endif
 }
@@ -131,7 +149,7 @@ Owner self() {
     const qint64 pid = qint64(::getpid());
 #endif
     qulonglong ticks = 0;
-    if (!startTimeOf(pid, &ticks)) return owner;   // no /proc: better to leave no mark at all
+    if (!startTimeOf(pid, &ticks)) return owner;   // no identity: better to leave no mark at all
     owner.pid = pid;
     owner.startTime = ticks;
     return owner;
@@ -185,7 +203,15 @@ bool markOwned(const QString &dir) {
 bool ownerAlive(const Owner &owner) {
     if (!owner.isValid()) return false;
     qulonglong ticks = 0;
-    if (!startTimeOf(owner.pid, &ticks)) return false;
+    if (!startTimeOf(owner.pid, &ticks)) {
+#ifdef Q_OS_MACOS
+        // A denied identity query is not proof of death. Only ESRCH permits cleanup.
+        if (owner.pid > INT_MAX) return false;
+        return ::kill(pid_t(owner.pid), 0) == 0 || errno != ESRCH;
+#else
+        return false;
+#endif
+    }
     // The pid is in use again by somebody else if the start times differ.
     return ticks == owner.startTime;
 }

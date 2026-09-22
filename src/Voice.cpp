@@ -119,9 +119,9 @@ QString chooseTool(const QString &preferred, const std::function<bool(const QStr
 }
 
 bool toolOnPath(const QString &tool) {
-#ifdef Q_OS_WIN
+#if defined(Q_OS_WIN) || defined(Q_OS_MACOS)
     // The supported capture arguments use PipeWire, PulseAudio or ALSA; an installed
-    // ffmpeg.exe does not make those Linux audio inputs available on Windows.
+    // ffmpeg.exe does not make those Linux audio inputs available on Windows or macOS.
     Q_UNUSED(tool);
     return false;
 #else
@@ -132,6 +132,9 @@ bool toolOnPath(const QString &tool) {
 QString missingToolsMessage() {
 #ifdef Q_OS_WIN
     return QStringLiteral("Microphone capture is not available in this Windows beta. "
+                          "Relay's current recorder integration requires Linux audio services.");
+#elif defined(Q_OS_MACOS)
+    return QStringLiteral("Microphone capture is not available in this macOS beta. "
                           "Relay's current recorder integration requires Linux audio services.");
 #else
     return QStringLiteral("No microphone recorder found. Install pipewire-utils (pw-record), "

@@ -12,6 +12,9 @@
 #include <chrono>
 #include <cmath>
 #include <utility>
+#include <climits>
+#include <cstring>
+#include <vector>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -19,13 +22,18 @@
 #include <psapi.h>
 #else
 #include <unistd.h>
+#ifdef Q_OS_MACOS
+#include <libproc.h>
+#include <mach/mach_time.h>
+#include <sys/sysctl.h>
+#endif
 #endif
 
 namespace relay::usage {
 
 namespace {
 
-#ifndef Q_OS_WIN
+#ifdef Q_OS_LINUX
 // sysconf answers are constant for the life of the process; ask once.
 template <int Name>
 qint64 cachedSysconf()
@@ -42,7 +50,7 @@ qint64 pageSizeBytes() { return cachedSysconf<_SC_PAGESIZE>(); }
 // walk: only a test ever moves it, and it moves it before anything is running.
 QString g_procRoot = QStringLiteral("/proc");
 
-#ifndef Q_OS_WIN
+#ifdef Q_OS_LINUX
 QString procPath(qint64 pid, const QString &leaf)
 {
     return QStringLiteral("%1/%2/%3").arg(g_procRoot).arg(pid).arg(leaf);
@@ -175,6 +183,58 @@ QList<ProcessInfo> walkTrees(const QList<qint64> &roots, int cap, Detail detail)
     }
     // These are the live processes' counters. Unlike wait()/proc on Linux, Windows
     // does not transfer reaped children's CPU time into their parent's counters.
+    return out;
+#elif defined(Q_OS_MACOS)
+    QList<ProcessInfo> out;
+    if (cap <= 0) return out;
+    // Bound both allocation and kernel result buffers, including callers with an excessive cap.
+    cap = std::min(cap, kProcessCap);
+    QList<qint64> queue;
+    QSet<qint64> seen;
+    for (qint64 pid : roots) {
+        if (pid > 0 && pid <= INT_MAX && !seen.contains(pid) && queue.size() < cap) {
+            seen.insert(pid);
+            queue.append(pid);
+        }
+    }
+    static const mach_timebase_info_data_t timebase = [] {
+        mach_timebase_info_data_t value{};
+        mach_timebase_info(&value);
+        return value;
+    }();
+    std::vector<pid_t> children(size_t(cap), 0);
+    for (int i = 0; i < queue.size() && i < cap; ++i) {
+        const int pid = int(queue.at(i));
+        struct proc_bsdinfo bsd {};
+        if (proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &bsd, sizeof(bsd)) != sizeof(bsd)) continue;
+        ProcessInfo info;
+        info.pid = pid;
+        if (detail == Detail::Counters) {
+            info.ppid = bsd.pbi_ppid;
+            info.comm = QString::fromLocal8Bit(bsd.pbi_comm, int(strnlen(bsd.pbi_comm, sizeof(bsd.pbi_comm))));
+            info.startTicks = qint64(bsd.pbi_start_tvsec) * 1000000 + bsd.pbi_start_tvusec;
+            struct proc_taskinfo task {};
+            if (proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &task, sizeof(task)) == sizeof(task)) {
+                // Darwin returns Mach absolute units (not nanoseconds on Apple Silicon).
+                if (timebase.denom)
+                    info.ticks = qint64((static_cast<long double>(task.pti_total_user)
+                                        + task.pti_total_system) * timebase.numer / timebase.denom);
+                info.rssBytes = qint64(task.pti_resident_size);
+            }
+        }
+        out.append(info);
+        const int bytes = proc_listpids(PROC_PPID_ONLY, uint32_t(pid), children.data(),
+                                       int(children.size() * sizeof(pid_t)));
+        const int count = std::min(cap, std::max(0, bytes) / int(sizeof(pid_t)));
+        for (int n = 0; n < count && queue.size() < cap; ++n) {
+            const pid_t child = children[size_t(n)];
+            if (child > 0 && !seen.contains(child)) {
+                seen.insert(child);
+                queue.append(child);
+            }
+        }
+    }
+    // Like Windows, these counters cover live processes, not already reaped children.
     return out;
 #else
     QList<ProcessInfo> out;
@@ -341,6 +401,17 @@ qint64 totalMemoryBytes() {
     return GlobalMemoryStatusEx(&memory) ? qint64(memory.ullTotalPhys) : 0;
 }
 qint64 clockTicksPerSecond() { return 10000000; } // FILETIME units: 100 ns
+#elif defined(Q_OS_MACOS)
+int processorCount() { return int(::sysconf(_SC_NPROCESSORS_ONLN)); }
+qint64 totalMemoryBytes() {
+    static const qint64 total = [] {
+        uint64_t bytes = 0;
+        size_t length = sizeof(bytes);
+        return ::sysctlbyname("hw.memsize", &bytes, &length, nullptr, 0) == 0 ? qint64(bytes) : 0;
+    }();
+    return total;
+}
+qint64 clockTicksPerSecond() { return 1000000000; } // normalized nanoseconds
 #else
 int processorCount() { return int(cachedSysconf<_SC_NPROCESSORS_ONLN>()); }
 
