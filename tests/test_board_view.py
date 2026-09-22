@@ -602,7 +602,7 @@ class BoardViewTests(unittest.TestCase):
                 self.assertNotEqual(colours[5], colours[2])
                 self.assertEqual(colours[4], colours[2])
                 # …and it is what the reply box is for: the primary send reads Answer.
-                self.assertEqual(await browser.evaluate("document.querySelector('.rb-send-comment').textContent"), "Answer")
+                self.assertEqual(await browser.evaluate("document.querySelector('.rb-reply-mode').options[2].textContent"), "Answer only")
                 await browser.evaluate("document.querySelector('.rb-option[data-option=\"2\"]').click()")
                 self.assertEqual(await browser.evaluate("document.querySelector('.rb-reply-text').value"), "2. ")
                 self.assertTrue(await browser.evaluate(
@@ -640,7 +640,7 @@ class BoardViewTests(unittest.TestCase):
                 # The thread ends on the agent's question, so the reply is an answer: `decision`,
                 # which the desktop writes down as the owner's own words, quoted.
                 await typed("1. beside the session file is fine")
-                await browser.evaluate("document.querySelector('.rb-send-comment').click()")
+                await browser.evaluate("document.querySelector('.rb-reply-mode').value = 'comment'; document.querySelector('.rb-reply-mode').dispatchEvent(new Event('change')); document.querySelector('.rb-reply-send').click()")
                 answer = await newest()
                 self.assertEqual(answer, {"t": "board_request", "rid": answer["rid"], "msg_id": answer["msg_id"],
                                           "request": {"type": "board_comment", "id": CARD_ID, "kind": "decision",
@@ -657,12 +657,12 @@ class BoardViewTests(unittest.TestCase):
                     {"attrs": {}, "author": "owner", "entry_id": "20260921T024029Z-5k", "kind": "decision",
                      "text": "owner, from Elliott's iPhone: “1. beside the session file is fine”"}]}
                 await browser.evaluate(f"window.fakeRrp.board({reread['rid']}, {js(answered)})")
-                await browser.wait_for("document.querySelector('.rb-send-comment').textContent === 'Comment'")
+                await browser.wait_for("document.querySelector('.rb-reply-mode').options[2].textContent === 'Comment only'")
 
                 # With nothing to answer it is a comment: `note`, the kind the desktop's own reply
                 # box sends (protocol 19.3).
                 await typed("and keep the cap at 512 KiB")
-                await browser.evaluate("document.querySelector('.rb-send-comment').click()")
+                await browser.evaluate("document.querySelector('.rb-reply-mode').value = 'comment'; document.querySelector('.rb-reply-mode').dispatchEvent(new Event('change')); document.querySelector('.rb-reply-send').click()")
                 comment = await newest()
                 self.assertEqual(comment, {"t": "board_request", "rid": comment["rid"], "msg_id": comment["msg_id"],
                                            "request": {"type": "board_comment", "id": CARD_ID, "kind": "note",
@@ -672,14 +672,14 @@ class BoardViewTests(unittest.TestCase):
 
                 # Discuss and Plan: `board_ask` with the mode. A Plan may go without words.
                 await typed("what about guests?")
-                await browser.evaluate("document.querySelector('.rb-send-discuss').click()")
+                await browser.evaluate("document.querySelector('.rb-reply-mode').value = 'discuss'; document.querySelector('.rb-reply-mode').dispatchEvent(new Event('change')); document.querySelector('.rb-reply-send').click()")
                 discuss = await newest()
                 self.assertEqual(discuss, {"t": "board_request", "rid": discuss["rid"],
                                            "request": {"type": "board_ask", "id": CARD_ID, "mode": "discuss",
                                                        "text": "what about guests?"}})
                 # The turn runs: the lamp is lit on the row, Stop is offered, a second ask is not.
                 await browser.wait_for("!document.querySelector('.rb-stop').hidden")
-                self.assertTrue(await browser.evaluate("document.querySelector('.rb-send-plan').disabled"))
+                self.assertTrue(await browser.evaluate("document.querySelector('.rb-reply-send').disabled"))
                 self.assertTrue(await browser.evaluate("document.querySelector('.rb-action-execute').disabled"))
                 await browser.evaluate("document.querySelector('.rb-stop').click()")
                 stop = await newest()
@@ -692,7 +692,7 @@ class BoardViewTests(unittest.TestCase):
                 await browser.evaluate(f"window.fakeRrp.board({stop['rid']}, {js(cancelled)})")
                 await browser.wait_for("document.querySelector('.rb-stop').hidden")
 
-                await browser.evaluate("document.querySelector('.rb-send-plan').click()")
+                await browser.evaluate("document.querySelector('.rb-reply-mode').value = 'plan'; document.querySelector('.rb-reply-mode').dispatchEvent(new Event('change')); document.querySelector('.rb-reply-send').click()")
                 plan = await newest()
                 self.assertEqual(plan["request"], {"type": "board_ask", "id": CARD_ID, "mode": "plan", "text": ""})
                 # The agent's answer lands on the thread and the lamp goes out.
@@ -801,7 +801,7 @@ class BoardViewTests(unittest.TestCase):
                 await self.open_card(browser)
                 await browser.evaluate(
                     "(() => { const b = document.querySelector('.rb-reply-text'); b.value = 'plan it with guests';"
-                    " document.querySelector('.rb-send-plan').click(); })()")
+                    " document.querySelector('.rb-reply-mode').value = 'plan'; document.querySelector('.rb-reply-mode').dispatchEvent(new Event('change')); document.querySelector('.rb-reply-send').click(); })()")
                 await browser.evaluate(frames(2), timeout=10)
                 ask = (await self.requests(browser))[-1]
                 other = BOARD["cards"][3]["id"]
@@ -821,7 +821,7 @@ class BoardViewTests(unittest.TestCase):
                 await self.open_card(browser)
                 await browser.evaluate(
                     "(() => { const b = document.querySelector('.rb-reply-text'); b.value = 'a note';"
-                    " document.querySelector('.rb-send-comment').click(); })()")
+                    " document.querySelector('.rb-reply-mode').value = 'comment'; document.querySelector('.rb-reply-mode').dispatchEvent(new Event('change')); document.querySelector('.rb-reply-send').click(); })()")
                 await browser.evaluate(frames(2), timeout=10)
                 note = (await self.requests(browser))[-1]
                 conflict = {"event": "board_conflict", "card_id": CARD_ID, "current_hash": "ffff"}
@@ -1008,7 +1008,7 @@ class BoardViewTests(unittest.TestCase):
                 # A comment typed on the bus: kept, shown as waiting, and said in a line.
                 await browser.evaluate(
                     "(() => { const b = document.querySelector('.rb-reply-text'); b.value = 'go, both recommendations';"
-                    " document.querySelector('.rb-send-comment').click(); })()")
+                    " document.querySelector('.rb-reply-mode').value = 'comment'; document.querySelector('.rb-reply-mode').dispatchEvent(new Event('change')); document.querySelector('.rb-reply-send').click(); })()")
                 await browser.wait_for("!!document.querySelector('.rb-entry[data-pending]')")
                 self.assertIn("sends when back online", await browser.evaluate(
                     "document.querySelector('.rb-entry[data-pending] .rb-entry-meta').textContent"))
@@ -1017,7 +1017,7 @@ class BoardViewTests(unittest.TestCase):
                 # A turn is not something to find running later: refused in a line, words kept.
                 await browser.evaluate(
                     "(() => { const b = document.querySelector('.rb-reply-text'); b.value = 'and plan it';"
-                    " document.querySelector('.rb-send-plan').click(); })()")
+                    " document.querySelector('.rb-reply-mode').value = 'plan'; document.querySelector('.rb-reply-mode').dispatchEvent(new Event('change')); document.querySelector('.rb-reply-send').click(); })()")
                 await browser.wait_for("document.querySelector('.rb-card-line').textContent.includes('Offline')")
                 self.assertEqual(await browser.evaluate("document.querySelector('.rb-reply-text').value"), "and plan it")
                 await browser.evaluate("document.querySelector('.rb-action-execute').click()")
@@ -1082,6 +1082,52 @@ class BoardViewTests(unittest.TestCase):
 
     # ---- layouts -----------------------------------------------------------------------------------------
 
+    def test_composer_space_growth_and_desktop_keyboard_actions(self):
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.start(browser, size=PHONE)
+                await self.open_board(browser)
+                await self.open_card(browser)
+                self.assertEqual(await browser.evaluate("document.querySelector('.rb-reply-mode').value"), "discuss")
+                for width, height in (PHONE, (390, 430), IPAD):
+                    await self.window(browser, width, height)
+                    await browser.evaluate(frames(), timeout=10)
+                    dimensions = json.loads(await browser.evaluate(
+                        "JSON.stringify((() => { const b = document.querySelector('.rb-reply-text').getBoundingClientRect();"
+                        " const c = document.querySelector('.rb-card-col').getBoundingClientRect();"
+                        " return [b.height, b.width / c.width]; })())"))
+                    self.assertGreaterEqual(dimensions[0], 72 if height < 520 else 112)
+                    self.assertGreater(dimensions[1], 0.9)
+                await self.window(browser, *PHONE)
+                await browser.evaluate("(() => { const b = document.querySelector('.rb-reply-text');"
+                                       " b.value = ('A long sentence to edit before sending.\\n').repeat(30);"
+                                       " b.dispatchEvent(new Event('input')); })()")
+                self.assertGreater(await browser.evaluate(
+                    "document.querySelector('.rb-reply-text').getBoundingClientRect().height"), 112)
+                await self.shot(browser, "phone-expanded-prompt")
+                for modifiers, kind, mode in [({}, 'board_ask', 'discuss'),
+                                               ({'ctrlKey': True}, 'board_ask', 'plan'),
+                                               ({'ctrlKey': True, 'shiftKey': True}, 'board_comment', None)]:
+                    await browser.evaluate(f"window.fakeRrp.board(null, {{event: 'board_cancelled', card_id: {js(CARD_ID)}}})")
+                    await browser.evaluate("(() => { const b = document.querySelector('.rb-reply-text'); b.value = 'keyboard reply';"
+                                           f" b.dispatchEvent(new KeyboardEvent('keydown', {{key: 'Enter', bubbles: true, ...{js(modifiers)}}})); }})()")
+                    await browser.evaluate(frames(), timeout=10)
+                    request = (await self.requests(browser))[-1]['request']
+                    self.assertEqual(request['type'], kind)
+                    self.assertEqual(request['text'], 'keyboard reply')
+                    if mode:
+                        self.assertEqual(request['mode'], mode)
+                count = len(await self.requests(browser))
+                for modifiers in ({'shiftKey': True}, {'isComposing': True}):
+                    await browser.evaluate("document.querySelector('.rb-reply-text').dispatchEvent("
+                                           f"new KeyboardEvent('keydown', {{key: 'Enter', bubbles: true, ...{js(modifiers)}}}))")
+                self.assertEqual(len(await self.requests(browser)), count)
+            finally:
+                await browser.stop()
+        self.drive(main())
+
     def test_a_phone_in_portrait_shows_one_column_and_the_reply_box_at_the_bottom(self):
         async def main():
             browser = Browser()
@@ -1104,7 +1150,7 @@ class BoardViewTests(unittest.TestCase):
                     " actions: [...document.querySelectorAll('.rb-actions button')].map(b => b.getBoundingClientRect().height)})"))
                 self.assertEqual(layout["list"], "none")
                 self.assertEqual(round(layout["reply"][3]), PHONE[1])          # pinned to the bottom
-                self.assertEqual([s[0] for s in layout["sends"]], ["Answer", "Discuss", "Plan"])
+                self.assertEqual([s[0] for s in layout["sends"]], ["Send"])
                 for name, left, right, top, bottom, height in layout["sends"]:
                     self.assertGreaterEqual(left, 0, name)
                     self.assertLessEqual(right, PHONE[0], name)
@@ -1144,7 +1190,7 @@ class BoardViewTests(unittest.TestCase):
                 self.assertGreaterEqual(top, 0)
                 self.assertLessEqual(bottom, gap)
                 self.assertGreaterEqual(right - left, 300)       # a box wide enough to type a sentence in
-                self.assertEqual([s[0] for s in layout["sends"]], ["Answer", "Discuss", "Plan"])
+                self.assertEqual([s[0] for s in layout["sends"]], ["Send"])
                 for name, s_left, s_right, s_top, s_bottom, s_height in layout["sends"]:
                     self.assertGreaterEqual(s_top, 0, name)
                     self.assertLessEqual(s_bottom, gap, name)
@@ -1275,7 +1321,7 @@ class ThroughTheHubTests(unittest.TestCase):
                     # The answer to the agent's question reaches the GUI as the contract's message.
                     await browser.evaluate(
                         "(() => { const b = document.querySelector('.rb-reply-text'); b.value = 'go, both';"
-                        " document.querySelector('.rb-send-comment').click(); })()")
+                        " document.querySelector('.rb-reply-mode').value = 'comment'; document.querySelector('.rb-reply-mode').dispatchEvent(new Event('change')); document.querySelector('.rb-reply-send').click(); })()")
                     comment = await asked("board_comment")
                     self.assertEqual(comment["request"], {"type": "board_comment", "id": CARD_ID,
                                                           "kind": "decision", "text": "go, both"})

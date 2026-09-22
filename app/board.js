@@ -312,7 +312,7 @@ export function mountBoard(options) {
   const reply = el('div', 'rb-reply');
   const replyBox = document.createElement('textarea');
   replyBox.className = 'rb-reply-text';
-  replyBox.rows = 1;
+  replyBox.rows = 4;
   replyBox.placeholder = 'Reply on this card…';
   replyBox.setAttribute('aria-label', 'Reply on this card');
   replyBox.autocapitalize = 'sentences';
@@ -322,10 +322,19 @@ export function mountBoard(options) {
   replyMic.hidden = true;
   const replyStop = button('rb-stop', 'Stop');
   replyStop.hidden = true;
-  const sendComment = button('rb-send rb-send-comment', 'Comment');
-  const sendDiscuss = button('rb-send-alt rb-send-discuss', 'Discuss');
-  const sendPlan = button('rb-send-alt rb-send-plan', 'Plan');
-  replyRow.append(replyMic, el('span', 'rb-spacer'), replyStop, sendComment, sendDiscuss, sendPlan);
+  const replyMode = document.createElement('select');
+  replyMode.className = 'rb-reply-mode';
+  replyMode.setAttribute('aria-label', 'Reply mode');
+  for (const [value, label] of [['discuss', 'Discuss'], ['plan', 'Plan'], ['comment', 'Comment only']]) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    replyMode.append(option);
+  }
+  const replySend = button('rb-send rb-reply-send', 'Send');
+  replySend.title = 'Enter discusses · Ctrl+Enter plans · Ctrl+Shift+Enter comments · Shift+Enter adds a line';
+  replyBox.title = replySend.title;
+  replyRow.append(replyMic, replyMode, el('span', 'rb-spacer'), replyStop, replySend);
   reply.append(replyBox, replyRow);
   reply.hidden = true;
 
@@ -906,12 +915,10 @@ export function mountBoard(options) {
   function paintReply() {
     const running = busy.has(openId);
     const answer = answering();
-    sendComment.textContent = answer ? 'Answer' : 'Comment';
-    sendComment.dataset.kind = answer ? 'decision' : 'note';
+    replyMode.options[2].textContent = answer ? 'Answer only' : 'Comment only';
     replyBox.placeholder = answer ? 'Answer the question…' : 'Reply on this card…';
     replyStop.hidden = !running;
-    sendDiscuss.disabled = running;
-    sendPlan.disabled = running;
+    replySend.disabled = running && replyMode.value !== 'comment';
     const micOn = voiceUsable();
     replyMic.hidden = !micOn;
     replyMic.classList.toggle('rb-recording', !!recorder && voiceTarget === replyBox);
@@ -920,8 +927,10 @@ export function mountBoard(options) {
 
   function growReply() {
     replyBox.style.height = 'auto';
-    const cap = Math.max(44, Math.round((window.visualViewport?.height || window.innerHeight) * 0.3));
-    replyBox.style.height = `${Math.min(replyBox.scrollHeight, cap)}px`;
+    const height = window.visualViewport?.height || window.innerHeight;
+    const floor = height < 260 ? 44 : height < 520 ? 72 : 112;
+    const cap = Math.max(floor, Math.round(height * 0.3));
+    replyBox.style.height = `${Math.max(floor, Math.min(replyBox.scrollHeight, cap))}px`;
   }
 
   // ---- the three sends, and the actions ---------------------------------------------------
@@ -953,7 +962,7 @@ export function mountBoard(options) {
     if (mode === 'discuss' && !text) {
       // The empty send **resumes this card's queue** (#7JD1; owner, 2026-09-21: "why don't we
       // just copy the functionality and have enter resume"). At the desk that is Enter on an
-      // empty prompt box; here it is Discuss with nothing typed, which is the same box and the
+      // empty prompt box; here it is Send in Discuss mode with nothing typed, which is the same box and the
       // same key. Stop is `board_cancel` and pauses the card's queue, and until this a phone had
       // no way back at all — the Resume button is the desktop's, and a device is sent none of a
       // queue's state, so it asks blind and the answer says whether anything was waiting.
@@ -1644,9 +1653,15 @@ export function mountBoard(options) {
   cardBack.addEventListener('click', closeCard);
   refresh.addEventListener('click', refreshBoard);
   add.addEventListener('click', openCreateSheet);
-  sendComment.addEventListener('click', () => sendReply('comment'));
-  sendDiscuss.addEventListener('click', () => sendReply('discuss'));
-  sendPlan.addEventListener('click', () => sendReply('plan'));
+  replyMode.addEventListener('change', paintReply);
+  replySend.addEventListener('click', () => sendReply(replyMode.value));
+  replyBox.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || event.isComposing || event.altKey || event.metaKey) return;
+    if (event.shiftKey && !event.ctrlKey) return;
+    event.preventDefault();
+    const mode = event.ctrlKey ? (event.shiftKey ? 'comment' : 'plan') : 'discuss';
+    if (!busy.has(openId) || mode === 'comment') sendReply(mode);
+  });
   replyStop.addEventListener('click', stopTurn);
   replyMic.addEventListener('click', () => toggleVoice(replyBox, replyMic, null));
   replyBox.addEventListener('input', growReply);
@@ -1655,7 +1670,7 @@ export function mountBoard(options) {
   // finished arriving, which is when the strip gets its final height.
   const toThreadEnd = () => { if (document.activeElement === replyBox) cardScroll.scrollTop = cardScroll.scrollHeight; };
   replyBox.addEventListener('focus', () => { toThreadEnd(); setTimeout(toThreadEnd, 350); });
-  window.visualViewport?.addEventListener('resize', () => requestAnimationFrame(toThreadEnd));
+  window.visualViewport?.addEventListener('resize', () => requestAnimationFrame(() => { growReply(); toThreadEnd(); }));
 
   search.addEventListener('input', () => {
     query = search.value;
@@ -1694,7 +1709,7 @@ export function mountBoard(options) {
   list.addEventListener('touchend', endPull, { passive: true });
   list.addEventListener('touchcancel', () => { pullFrom = null; pulled = 0; pull.hidden = true; }, { passive: true });
 
-  window.addEventListener('resize', placeDevice);
+  window.addEventListener('resize', () => { placeDevice(); growReply(); });
   document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && sheet) closeSheet(); });
 
   paintInboxRow();

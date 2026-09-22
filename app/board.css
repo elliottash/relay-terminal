@@ -400,13 +400,13 @@ button.rb-chip-link::after { content: ""; position: absolute; left: 0; right: 0;
 
 /* ---- the thread ----------------------------------------------------------------------------- */
 .rb-entry {
-  margin: 0 0 10px;
-  padding: 8px 10px;
-  background: var(--rt-surface);
-  border: 1px solid var(--rt-border);
-  border-radius: 8px;
+  margin: 0 0 12px;
+  padding: 8px 0;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--rt-border);
 }
-.rb-entry[data-author="owner"] { background: var(--rt-raised); }
+.rb-entry[data-author="owner"] { background: transparent; }
 .rb-entry-head { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; margin-bottom: 4px; }
 .rb-entry-author { font-weight: 600; }
 .rb-entry[data-author="agent"] .rb-entry-author { color: var(--rt-agent); }
@@ -415,7 +415,7 @@ button.rb-chip-link::after { content: ""; position: absolute; left: 0; right: 0;
 .rb-entry-event .rb-md-p { margin: 0; }
 /* A question is the one entry that wants something from the reader: amber, like every other
    "waiting on you" in Relay. */
-.rb-entry-question { border-color: var(--rt-warning-border); border-left: 3px solid var(--rt-warning); }
+.rb-entry-question { padding-left: 10px; border-color: var(--rt-warning-border); border-left: 3px solid var(--rt-warning); }
 .rb-entry-question .rb-entry-meta { color: var(--rt-warning); }
 .rb-entry[data-pending] { border-style: dashed; }
 .rb-entry[data-pending] .rb-entry-meta { color: var(--rt-accent); }
@@ -446,10 +446,14 @@ button.rb-chip-link::after { content: ""; position: absolute; left: 0; right: 0;
   align-items: flex-end;
   gap: 6px;
   padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
-  background: var(--rt-surface);
-  border-top: 1px solid var(--rt-border);
+  background: var(--qss-composer-background);
+  border: var(--qss-composer-border);
+  border-radius: var(--qss-composer-border-radius);
 }
-.rb-reply:focus-within { border-top-color: var(--rt-accent-border); }
+.rb-reply:focus-within {
+  background: var(--qss-composer-relay-active-true-background);
+  border: var(--qss-composer-relay-active-true-border);
+}
 .rb .rb-reply-text, .rb .rb-field {
   min-height: var(--rb-tap);
   padding: 10px 12px;
@@ -461,6 +465,15 @@ button.rb-chip-link::after { content: ""; position: absolute; left: 0; right: 0;
   resize: none;
   -webkit-appearance: none;
   appearance: none;
+}
+.rb .rb-reply-text {
+  background: transparent; border: 0; border-radius: 0;
+  padding: 8px 2px; caret-color: var(--rt-agent);
+}
+.rb .rb-reply-mode {
+  min-height: var(--rb-tap); min-width: 0; max-width: 50%;
+  background: var(--rt-surface); border: 1px solid var(--rt-border);
+  border-radius: 6px; padding: 0 8px; font-size: 16px;
 }
 .rb-reply-text { flex: 1 1 100%; min-width: 0; overflow-y: auto; }
 .rb-reply-text:focus, .rb-field:focus { outline: none; border-color: var(--rt-accent-border); }
@@ -529,14 +542,6 @@ select.rb-field { padding-top: 0; padding-bottom: 0; }
   .rb[data-card="open"] .rb-bar { display: none; }
 }
 
-/* ---- wide: a tablet's reply box is one row --------------------------------------------------- */
-@media (min-width: 600px) {
-  .rb-reply { flex-wrap: nowrap; }
-  .rb-reply-text { flex: 1 1 0; }
-  .rb-reply-row { flex: 0 0 auto; }
-  .rb-reply-row .rb-spacer { display: none; }
-}
-
 /* ---- an iPad: the list and the card side by side --------------------------------------------- */
 @media (min-width: 900px) {
   .rb[data-card="open"] .rb-list-col, .rb[data-card="closed"] .rb-card-col { display: flex; }
@@ -549,18 +554,18 @@ select.rb-field { padding-top: 0; padding-bottom: 0; }
 }
 
 /* ---- a keyboard is up ------------------------------------------------------------------------ */
-.short-viewport .rb-reply { padding-top: 4px; padding-bottom: 4px; flex-wrap: nowrap; }
-.short-viewport .rb-reply-text { flex: 1 1 0; }
-.short-viewport .rb-reply-row { flex: 0 0 auto; }
-.short-viewport .rb-reply-row .rb-spacer { display: none; }
+.short-viewport .rb-reply { padding-top: 4px; padding-bottom: 4px; }
+.tiny-viewport .rb-reply-text { flex: 1 1 0; }
+.tiny-viewport .rb-reply-row { flex: 0 0 auto; }
+.tiny-viewport .rb-reply-row .rb-spacer { display: none; }
 .short-viewport .rb-card-scroll { padding-top: 6px; padding-bottom: 6px; }
 .short-viewport .rb-sheet { gap: 6px; padding-top: 6px; }
 /* A phone in landscape with its keyboard: 185 px. The app's bar has already gone (style.css); the
    card's bar goes too, and the row of sends tightens, so what is left is the end of the thread and
-   the box with all three sends on it. */
+   the box with its mode and Send controls. */
 .tiny-viewport .rb-card-bar { display: none; }
 .tiny-viewport .rb-tabs { display: none; }
-.tiny-viewport .rb-reply { gap: 4px; padding: 2px 6px; }
+.tiny-viewport .rb-reply { flex-wrap: nowrap; gap: 4px; padding: 2px 6px; }
 .tiny-viewport .rb-reply-row { gap: 4px; }
 .tiny-viewport .rb-reply .rb-mic { display: none; }
 .tiny-viewport .rb-send, .tiny-viewport .rb-send-alt, .tiny-viewport .rb-stop { padding: 0 10px; }
