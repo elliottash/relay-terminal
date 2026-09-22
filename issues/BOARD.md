@@ -2,12 +2,14 @@
      edit the card files and regenerate. -->
 # Board
 
-449 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+451 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
-## Features (272)
+## Features (274)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
+| `#XJSN` | [A custom endpoint's extra request JSON has no home](features/2026-09-21-a-custom-endpoints-extra-request-json-has-no-home.md) | inbox | unassigned |  | [1](threads/XJSN.md) |
+| `#RLP7` | [Relay Pro: stronger hosted models behind a password](features/2026-09-21-relay-pro-behind-a-password.md) | inbox | unassigned |  | [1](threads/RLP7.md) |
 | `#87HB` | [The parts of tmux worth having in Relay itself](features/2026-09-18-tmux-like-features-in-relay.md) | inbox |  |  | [1](threads/87HB.md) |
 | `#Y2BA` | [allow pressing new card multiple times, it splits the second "new card" pane ver…](features/2026-09-19-allow-pressing-new-card-multiple-times-it-splits.md) | inbox |  |  | [2](threads/Y2BA.md) |
 | `#8NCF` | [bug? agent often isnt assigning a summary title to the pane header.](features/2026-09-19-bug-agent-often-isnt-assigning-a-summary-title-t.md) | inbox |  |  | [3](threads/8NCF.md) |
@@ -41,7 +43,7 @@
 | `#Y2JW` | [Curate which models show in the picker (/models command)](features/2026-09-19-new-models-command.md) | ready |  |  | [21](threads/Y2JW.md) |
 | `#5KMQ` | [lite triage of new issues](features/2026-09-19-lite-triage-of-new-issues.md) | ready |  |  | [15](threads/5KMQ.md) |
 | `#8EXS` | [Sessions manager should also survive a restart](features/2026-09-20-sessions-manager-should-also-survive-a-restart.md) | ready |  |  | [2](threads/8EXS.md) |
-| `#MDL1` | [Model picking: one name per model, one row per model, one default](features/2026-09-21-model-picking-one-name-one-row-one-default.md) | executing | codex | 17/17 | [37](threads/MDL1.md) |
+| `#MDL1` | [Model picking: one name per model, one row per model, one default](features/2026-09-21-model-picking-one-name-one-row-one-default.md) | executing | codex | 17/17 | [38](threads/MDL1.md) |
 | `#R6BS` | [Publish refreshed builds and website downloads](features/2026-09-21-refresh-public-builds.md) | executing | codex | 3/6 | [11](threads/R6BS.md) |
 | `#3KB7` | [A Security section in Options, gathering what the agent may reach](features/2026-09-19-a-security-section-in-options.md) | executing | agent | 8/10 | [7](threads/3KB7.md) |
 | `#25XG` | [Refused tool calls keep the ✗ but render in neutral ink, not red](features/2026-09-19-refused-tool-calls-keep-the-but-render-in-neutra.md) | executing | agent |  | [13](threads/25XG.md) |
