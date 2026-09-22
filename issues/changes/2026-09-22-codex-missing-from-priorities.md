@@ -7,7 +7,7 @@ labels: [bug, models]
 rank: mcdp7
 created: '2026-09-22'
 source: 'User report in Relay; observed on sphinxpad, 2026-09-22'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-CDP7/README.md], related: [MPA2], github: null}
+links: {plans: [], commits: [3cb7ff33ba054175c93c10b699f0c08804e12f07], evidence: [docs/qa_evidence/2026-09-22-CDP7/README.md], related: [MPA2], github: null}
 ---
 # Codex does not appear in Priorities
 

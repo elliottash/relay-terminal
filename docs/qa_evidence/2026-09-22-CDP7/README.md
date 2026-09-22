@@ -13,3 +13,7 @@ Validation:
 - `python3 scripts/relay-board.py check`: existing board-wide 12 errors / 754 warnings, unrelated to these cards.
 
 Screenshots are real Qt widgets under Xvfb with synthetic provider payloads, not a live provider call or a reproduction on sphinxpad. `ssh -o BatchMode=yes -o ConnectTimeout=5 sphinxpad` timed out. The initial build invocation named a nonexistent relay-settingspane-tests target; the corrected target passed. An initial Codex test forgot that adding clears search; correcting the test to search again passed without changing eligibility.
+
+Implementation commit: `3cb7ff33ba054175c93c10b699f0c08804e12f07`. `scripts/land.py` built the exact merged Relay application tree successfully before landing; only the three model-routing hunks in RelayWindow.h were included.
+
+Board `TestsCommands.check_card` was run for both linked cards: no orphaned tests, errors, or warnings. Its remaining `never-run` notices refer to machine test-history records; the direct unittest executions above passed but do not populate that store. Board-wide validation reports no findings for either assigned card/thread.

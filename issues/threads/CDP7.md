@@ -13,3 +13,7 @@ Implemented catalog target alignment, recorded passing targeted tests and staged
 <!-- relay:entry 20260922T233859Z-a1 author=codex-models-a1 kind=evidence -->
 ### Codex models a1 · 2026-09-22 23:38
 Added board-discoverable test identifiers alongside exact invocations; tests_check does not parse raw binary commands.
+
+<!-- relay:entry 20260922T234004Z-a1 author=codex-models-a1 kind=evidence -->
+### Codex models a1 · 2026-09-22 23:40
+Landed `3cb7ff33ba054175c93c10b699f0c08804e12f07` after the exact-tree application build passed. Linked commit and build evidence; remains needs-verification.
