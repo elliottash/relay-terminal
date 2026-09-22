@@ -24,11 +24,15 @@ RELAY_BOARD_SHOTS=docs/qa_evidence/2026-09-22-phone-ux-drive/board \
 
 ## What is right
 
-* **The link painter (`88ba42ab`) behaved on every row it was given.** `B-02-terminal.png` and the
-  log: a URL in a sentence stops at the full stop, `…/pull/12#issue-7,` drops the comma and keeps
-  the fragment, `(see https://example.com/a_(b)_c)` keeps its inner brackets and loses the outer
-  one, `www.example.com` gains `https://`, and `mailto:` and `ftp://` are left alone. Every anchor
-  is `target=_blank rel="noopener noreferrer"`.
+* **The link painter's rules are right for one URL on a row.** `B-02-terminal.png` and the log: a
+  URL in a sentence stops at the full stop, `…/pull/12#issue-7,` drops the comma and keeps the
+  fragment, `(see https://example.com/a_(b)_c)` keeps its inner brackets and loses the outer one,
+  `www.example.com` gains `https://`, and `mailto:` and `ftp://` are left alone. Every anchor is
+  `target=_blank rel="noopener noreferrer"`, and there is no injection: text goes in through
+  `textContent` and an `href` can only ever have matched `https?://` or `www.`.
+  **Two** URLs on a row is a different story — finding 11 below, and the reason this list says
+  "for one URL": every row in this drive's terminal had at most one, which is also true of
+  `tests/test_web_screen.py`.
 * **The sideways scroll survives output** (`F-hscroll-long-lines.png`): 80 columns of real text at
   the 12 px floor make the grid 617 px wide on a 390 px screen; scrolled to `scrollLeft: 227`, six
   more frames of output leave it at 227. The grid is only as wide as its widest line, so short
@@ -136,6 +140,30 @@ outbox with it.
 `openPane()` sends `pane_focus` **and** `pane_state_get` (`app/app.js:977-978`); the reconnect path
 sends only `pane_focus`. A phone that slept through the end of a turn comes back with the old
 queue, the old Stop and the old strip until something else moves.
+
+### 11. Two URLs on one row corrupt the row — `app/screen.js:29-72`  (card #NK73)
+
+`linkify()` slices each piece against the row cursor `start` rather than the segment's own origin
+`at`. Painted through the real `ScreenView` (`G-two-links-on-a-row.png`):
+
+```
+in : 'see https://a.example.com and https://b.example.com now'
+out: 'see https://a.example.comsee https://a.example.com  now'
+     link 'https://a.example.com'   -> https://a.example.com/
+     link 'ttps://a.example.com '   -> https://b.example.com/     <-- label is not on the row
+```
+
+Two of seven ordinary rows painted text the terminal never printed, and the second anchor's visible
+text disagrees with where it goes. Four smaller faults in the same painter (an uppercase `WWW.`
+becoming a **relative** href into the client's own origin, `"` and `>` riding into the href,
+`/var/www.old/index.html` becoming a live link, a wrapped URL linking to its truncated prefix) and
+two from the font work (A−/A+ dead rather than session-only when `localStorage` throws; nothing
+ever scrolls the grid horizontally, so with direct keys on the cursor leaves the right edge at
+about column 30) are on the card.
+
+## Cards
+
+#EFT9 #KBD7 #CPY4 #TBR2 #MDX6 #RCN8 #PKT5 (commit `9b699389`) and #NK73 (`ec850bb6`).
 
 ## Provenance
 
