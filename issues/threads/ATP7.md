@@ -9,3 +9,7 @@ Claimed #ATP7; recorded Done means and Plan before code. Board/delegation bridge
 <!-- relay:entry 20260922T233501Z-a4 author=codex kind=evidence -->
 ### Codex · 2026-09-22 23:35
 Implementation and live-app scaling checks complete; moved #ATP7 to needs-verification with Execution Summary, Tests, and docs/qa_evidence/2026-09-22-ATP7/. Both DPRs retain 18×18 icon bounds and 26×26 controls. Local screenshot evidence only; sphinxpad not accessed.
+
+<!-- relay:entry 20260922T233630Z-a4 author=codex kind=evidence -->
+### Codex · 2026-09-22 23:36
+Linked implementation commit dcf941a726cdb35669aac435e4c0aa698c41d198; exact materialized-tree build passed. Reviewed and selected only the app-icon hunk from RelayWindow.h, leaving seven unrelated hunks untouched. Card remains needs-verification.

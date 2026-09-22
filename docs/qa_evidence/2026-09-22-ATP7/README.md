@@ -9,3 +9,5 @@ The old top-left QLabel used a 22-logical-pixel app tile beside 14-pixel control
 - `python3 scripts/relay-board.py check`: existing board-wide failures (12 errors, 754 warnings at the initial check), no ATP7 diagnostic. No unrelated board repairs made.
 
 This is local staged evidence, not a sphinxpad compositor/DPI reproduction. Physical screenshots scale with DPR while logical widget bounds remain identical. Moving a live window between physical displays has not been tested. Board/delegation MCP methods and `tests_check` are not exposed in this guest; policy file fallback was used.
+
+Implementation commit: `dcf941a726cdb35669aac435e4c0aa698c41d198`. The `scripts/land.py` exact-tree build passed before landing; unrelated shared-header hunks were explicitly excluded.
