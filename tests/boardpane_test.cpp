@@ -77,7 +77,62 @@ private slots:
     void aCardOpenedInOnePaneDoesNotOpenInTheOther();
     void boardDataStillReachesBothPanes();
     void theCardPagesFlagClicksThroughToBoardPriority();
+    void hygieneChecksBeforeCleanup();
 };
+
+void BoardPaneTests::hygieneChecksBeforeCleanup()
+{
+    relay::BoardView view(QStringLiteral("/tmp/relay-hygiene-test"));
+    QList<QJsonObject> sent;
+    relay::agent::Context *context = nullptr;
+    view.onSend = [&](const QJsonObject &message) { sent << message; };
+    view.onCreateConsole = [&](relay::agent::Context *value, QWidget *parent) {
+        context = value;
+        relay::agent::ConsoleHandle handle;
+        handle.widget = new QWidget(parent);
+        return handle;
+    };
+    view.resize(900, 700);
+    view.show();
+    view.handleEvent(opened({row("AB12", "inbox")}));
+    QCoreApplication::processEvents();
+    QVERIFY(context);
+    const auto actions = context->actions();
+    QCOMPARE(actions.size(), 3);
+    QCOMPARE(actions[0].label, QStringLiteral("Hygiene"));
+    QCOMPARE(actions[1].label, QStringLiteral("Tests"));
+    QCOMPARE(actions[2].label, QStringLiteral("Performance"));
+    QCOMPARE(actions[1].key, QStringLiteral("boardTests"));
+    QCOMPARE(actions[2].key, QStringLiteral("boardProfile"));
+    sent.clear();
+    actions[0].run();
+    QCOMPARE(sent.size(), 1);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_check"));
+    QVERIFY(!view.findChild<QToolButton *>("boardCleanup"));
+    view.handleEvent({{"event", "board_problems"}, {"id", sent.last().value("id")},
+                      {"items", QJsonArray{}}});
+    auto *cleanup = view.findChild<QToolButton *>("boardCleanup");
+    QVERIFY(cleanup && cleanup->isVisible());
+    QVERIFY(view.findChild<QLabel *>("boardChatFindingsHead")->text().contains("Hygiene"));
+    cleanup->click();
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_cleanup"));
+    QVERIFY(sent.last().value("dry_run").toBool());
+    QCOMPARE(cleanup->text(), QStringLiteral("Stop"));
+    cleanup->click();
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("cancel"));
+    view.handleEvent({{"event", "board_cleanup_summary"}, {"dry_run", true}, {"outcome", "done"},
+                      {"changes", QJsonArray{QJsonObject{{"action", "update"}, {"id", "AB12"}}}}});
+    auto *panel = view.findChild<QWidget *>("boardCleanupPanel");
+    QVERIFY(panel && panel->isVisible());
+    QCOMPARE(panel->parentWidget(), view.findChild<QWidget *>("boardChatArea"));
+    QToolButton *apply = nullptr;
+    for (auto *button : panel->findChildren<QToolButton *>())
+        if (button->text() == QStringLiteral("Apply")) apply = button;
+    QVERIFY(apply && apply->isVisible());
+    apply->click();
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_cleanup"));
+    QVERIFY(!sent.last().value("dry_run").toBool());
+}
 
 void BoardPaneTests::navigationSurvivesReload()
 {

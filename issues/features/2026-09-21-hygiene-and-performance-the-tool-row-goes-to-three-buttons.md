@@ -1,14 +1,15 @@
 ---
 id: SW1D
 type: work
-status: planned
+status: needs-verification
+assignee: codex
 labels: [feature, switchboard, qa]
 component: [gui]
 parent: YZ8G
 rank: zzzzzzzzzzzzzzzzf
 created: '2026-09-21'
 source: 'owner, 2026-09-21'
-links: {plans: [], commits: [], evidence: [], related: [YZ8G, 1CXD, SJTR], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-sw1d/], related: [YZ8G, 1CXD, SJTR], github: null}
 ---
 # Hygiene and Performance: the board's tool row goes from four buttons to three
 
@@ -56,3 +57,23 @@ missed a string a person actually sees.
 Sequence after #1CXD's Area B (the GUI product word and folder) lands and releases its claim on
 `src/BoardPane.cpp` — this card edits the same tool-row construction code and would otherwise
 collide with it.
+
+**Goal:** Deliver the three-action row and a deterministic-first Hygiene flow.
+**Findings:** `BoardContext::actions`, `showFindings`, and the existing cleanup preview/apply panel in `src/BoardPane.cpp` own the flow.
+**Steps:** 1. Combine actions and expose cleanup after findings. 2. Rename Performance presentation. 3. Run targeted tests and isolated Xvfb evidence; land only owned hunks.
+**Risks:** Shared parent driver edits are excluded; wire and settings identifiers stay stable.
+**Verify:** Board and performance pane tests, application build, isolated GUI exercise.
+
+## Execution Summary
+The Board row is Hygiene · Tests · Performance. Hygiene runs the format check without an agent,
+then offers Clean up beside its findings. Cleanup retains preview, Stop, Apply and changelog;
+its result panel now shares the board-agent area with the format findings. Performance keeps
+its four targets, with updated pane titles and notices. Card-page Check and wire/settings keys
+are unchanged. Parent #74Y5 driver changes were excluded from the landing diff.
+
+## Tests
+- `QT_QPA_PLATFORM=offscreen build/relay-boardpane-tests hygieneChecksBeforeCleanup` — passed; order, deterministic request, preview, cancel, and explicit Apply.
+- `ctest -R profilepane --test-dir build --output-on-failure` — tests/profilepane_test.cpp
+- `scripts/relay-build --target relay relay-boardpane-tests relay-profilepane-tests` — passed.
+- manual: docs/qa_evidence/2026-09-21-sw1d/README.md
+- `python3 scripts/relay-board.py check` — no SW1D findings; existing board-wide errors remain outside this change.

@@ -107,7 +107,7 @@ void showTargetMenu(QWidget *anchor, std::function<void(const QString &)> chosen
     }
     if (running) {
         menu->addSeparator();
-        QAction *stopAction = menu->addAction(QStringLiteral("Stop the profile that is running"));
+        QAction *stopAction = menu->addAction(QStringLiteral("Stop the performance measurement that is running"));
         QObject::connect(stopAction, &QAction::triggered, menu, [stop] { if (stop) stop(); });
     }
     menu->popup(anchor ? anchor->mapToGlobal(QPoint(0, anchor->height())) : QCursor::pos());
@@ -216,7 +216,7 @@ void ProfilePane::buildUi() {
     layout->setContentsMargins(10, 8, 8, 8);
     layout->setSpacing(6);
 
-    m_title = new QLabel(QStringLiteral("Profile"));
+    m_title = new QLabel(QStringLiteral("Performance"));
     m_title->setTextFormat(Qt::PlainText);
     m_title->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     QFont bold = m_title->font();
@@ -289,8 +289,8 @@ void ProfilePane::buildUi() {
 }
 
 QString ProfilePane::paneTitle() const {
-    return m_label.isEmpty() ? QStringLiteral("Profile")
-                             : QStringLiteral("Profile: %1").arg(m_label);
+    return m_label.isEmpty() ? QStringLiteral("Performance")
+                             : QStringLiteral("Performance: %1").arg(m_label);
 }
 
 void ProfilePane::focusView() {
@@ -404,13 +404,13 @@ QString ProfilePane::headerText() const { return paneTitle(); }
 QString ProfilePane::statusText() const {
     if (m_state.isEmpty()) return {};
     if (running())
-        return QStringLiteral("Profiling %1 — %2")
+        return QStringLiteral("Performance: measuring %1 — %2")
             .arg(m_label, m_lines.isEmpty() ? QStringLiteral("starting") : m_lines.last());
     if (m_state == QLatin1String("error"))
-        return QStringLiteral("Profile of %1 failed: %2").arg(m_label, m_message);
+        return QStringLiteral("Performance of %1 failed: %2").arg(m_label, m_message);
     if (m_state == QLatin1String("stopped"))
-        return QStringLiteral("Profile of %1 stopped").arg(m_label);
-    return QStringLiteral("Profile of %1 — %2").arg(m_label, m_line.isEmpty() ? m_message : m_line);
+        return QStringLiteral("Performance of %1 stopped").arg(m_label);
+    return QStringLiteral("Performance of %1 — %2").arg(m_label, m_line.isEmpty() ? m_message : m_line);
 }
 
 void ProfilePane::updateChrome() {

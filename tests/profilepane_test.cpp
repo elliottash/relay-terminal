@@ -79,12 +79,12 @@ void ProfilePaneTest::targetsMirrorTheWorker() {
 
 void ProfilePaneTest::titleNamesTheTarget() {
     ProfilePane pane;
-    QCOMPARE(pane.paneTitle(), QStringLiteral("Profile"));
+    QCOMPARE(pane.paneTitle(), QStringLiteral("Performance"));
     pane.startWaitingFor(QStringLiteral("build"));
-    QCOMPARE(pane.paneTitle(), QStringLiteral("Profile: Build (this machine)"));
+    QCOMPARE(pane.paneTitle(), QStringLiteral("Performance: Build (this machine)"));
     QVERIFY(pane.running());
     pane.startWaitingFor(QStringLiteral("app"));
-    QCOMPARE(pane.paneTitle(), QStringLiteral("Profile: The app"));
+    QCOMPARE(pane.paneTitle(), QStringLiteral("Performance: The app"));
     QCOMPARE(pane.rowCount(), 0);
 }
 
@@ -108,7 +108,7 @@ void ProfilePaneTest::progressLinesAccumulate() {
     QCOMPARE(pane.lines().last(), QStringLiteral("relay-profile: building target relay"));
     QVERIFY(pane.running());
     // The board's notice line hears the same thing Clean up's progress puts there.
-    QVERIFY(notices.last().startsWith(QStringLiteral("Profiling Build (this machine) — ")));
+    QVERIFY(notices.last().startsWith(QStringLiteral("Performance: measuring Build (this machine) — ")));
     QVERIFY(notices.last().endsWith(QStringLiteral("building target relay")));
 }
 
@@ -205,7 +205,7 @@ void ProfilePaneTest::stopSendsTheRequest() {
     stopped.insert(QStringLiteral("message"), QStringLiteral("the profile was stopped"));
     pane.handleEvent(stopped);
     QVERIFY(!pane.running());
-    QCOMPARE(pane.statusText(), QStringLiteral("Profile of The app stopped"));
+    QCOMPARE(pane.statusText(), QStringLiteral("Performance of The app stopped"));
     pane.stopRun();
     QCOMPARE(sent.size(), 1);             // and not again once it has ended
 }

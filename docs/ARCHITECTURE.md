@@ -1609,7 +1609,7 @@ Initialize supplies the destination. Options links to Projects; Forget changes o
   page's and an open card's; `RelayWindow` turns either into an embedded console — a no-shell `Pane`
   — through `relay::agent::ConsoleFactory`. "Agents are consoles; contexts are what they are about"
   below, card #AGNT, protocol 33. The Board's console sits at the bottom of the list page,
-  outside the splitter, with **Check**, **Clean up**, **Tests** and **Profile** as its action row and
+  outside the splitter, with **Hygiene**, **Tests** and **Performance** as its action row and
   `a` from anywhere on the board to put the keyboard in it; the Check findings and the survey offer
   are board widgets *above* it, and a finding still **drafts** a fix request into the composer rather
   than sending one (owner, 2026-09-19: "draft you confirm"). There is no `relay::HelperChatPanel`
@@ -1772,7 +1772,7 @@ named — is one more class implementing `Context`, and nothing else.
 | Context | Where | Role | Shell | Persist | Action row | Links it resolves | A finished turn |
 |---|---|---|---|---|---|---|---|
 | **Terminal** (`Pane::TerminalContext`) | `src/Pane.h` | the pane's own (`main`/`flash`/`local`) | yes | `pane` / the pane's scrollback id | — | path, url, `#ID` | the transcript |
-| **Board** (`board::BoardContext`) | `src/BoardPane.cpp` | `switchboard` | no | `helper` / the tab id | Check (k), Clean up (u), Tests, Profile | `option:`, `session:`, `card:` | the transcript |
+| **Board** (`board::BoardContext`) | `src/BoardPane.cpp` | `switchboard` | no | `helper` / the tab id | Hygiene (k), Tests, Performance | `option:`, `session:`, `card:` | the transcript |
 | **Card** (`board::CardContext`) | `src/BoardPane.cpp` | `switchboard` | no | `helper` / `<tab id>/card:<ID>` | Plan (p), Execute (x), Verify (v) in a QA lane | as the board | the answer is appended to `issues/threads/<ID>.md` by the worker |
 | **Options / Actions** (`OptionsContext`) | `src/SettingsPane.cpp` | `switchboard` | no | `helper` / the tab id | — | `option:` reveals the row here | the transcript |
 | **Sessions** (`SessionsContext`) | `src/Conversations.cpp` | `switchboard` | no | `helper` / the tab id | — | `session:` selects the row here | the transcript |
@@ -3672,3 +3672,12 @@ control straight back (`control_take`), from the two places that already do this
 
 Everything else — pairing, capabilities, the password-prompt refusal, revocation — is the protocol's
 job and is described in [REMOTE-PROTOCOL.md](REMOTE-PROTOCOL.md).
+
+### Board Hygiene and Performance (#SW1D)
+
+The board row is Hygiene · Tests · Performance. Hygiene first runs the deterministic format
+check and shows its findings without calling a model. Its Clean up stage then previews agent
+changes; Apply starts the existing writing run, with Stop and the changelog available. The
+format findings and cleanup results share the board agent panel. The card page’s Check still
+checks that card’s tests. Performance opens the existing four-target measurement menu. Wire
+names, settings keys, and the `boardTests` / `boardProfile` action identifiers are unchanged.

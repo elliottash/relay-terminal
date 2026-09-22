@@ -4243,13 +4243,7 @@ class BoardContext final : public relay::agent::Context {
         return spec;
     }
 
-    // Check, Clean up, Tests and Profile — the four board-wide things that need no typing
-    // (owner, 2026-09-20: "we put the 'clean up' button there for the main switchboard agent, for
-    // example", and "it should have the letter hotkeys for each switchboard action as well").
-    // They were reparented `QToolButton`s until this card; they are actions now, and the console
-    // draws the row. Check is `k` and Clean up is `u` — the two free letters on a page that
-    // already spends n, e, p, x, v, m, c, y, t, a, o and `/` (BoardView::handleBoardKey). Tests
-    // and Profile are keyless, exactly as their buttons were: the row does not invent a letter.
+    // Hygiene runs the deterministic check before offering the agent cleanup stage.
     QList<relay::agent::Action> actions() const override
     {
         QList<relay::agent::Action> actions;
@@ -4258,7 +4252,7 @@ class BoardContext final : public relay::agent::Context {
         relay::agent::Action check;
         check.key = QStringLiteral("boardChatCheck");
         check.letter = QStringLiteral("k");
-        check.label = QStringLiteral("Check");
+        check.label = QStringLiteral("Hygiene");
         check.tooltip = QStringLiteral("Re-run the board's format check over every card — ids, "
                                        "front matter, threads — and list what is wrong. Click a "
                                        "finding to draft a fix for the agent. Nothing is written "
@@ -4267,29 +4261,9 @@ class BoardContext final : public relay::agent::Context {
             const ActionGuard guard;
             view->requestCheck();
             if (view->onStatus)
-                view->onStatus(QStringLiteral("Checking every card…"));
+                view->onStatus(QStringLiteral("Hygiene: checking every card…"));
         };
         actions << check;
-
-        // Clean up keeps every bit of its machinery in the view — its run, its Stop, its preview
-        // rule (19.9) — and the row only says the word. The first click is always a preview.
-        relay::agent::Action cleanup;
-        cleanup.key = QStringLiteral("boardCleanup");
-        cleanup.letter = QStringLiteral("u");   // clean **up**
-        const bool running = view->cleanupRunning();
-        cleanup.label = running ? QStringLiteral("Stop") : QStringLiteral("Clean up");
-        cleanup.tooltip = running
-            ? (view->m_cleanupDry
-                   ? QStringLiteral("Stop the preview. Nothing has been written either way.")
-                   : QStringLiteral("Stop the cleanup. What it has already written stays, and the "
-                                    "changelog says what that was."))
-            : QStringLiteral("Have the agent tidy the board: merge or split sections and cards, "
-                             "review statuses. The first run is a preview that writes nothing.");
-        cleanup.run = [view] {
-            const ActionGuard guard;
-            view->requestCleanup();
-        };
-        actions << cleanup;
 
         // Tests (#7BM4, design 4.13: board-wide buttons live in this row) opens the Test suites
         // pane; Profile (#7BM4 phase 5) asks the window which of four things to profile. Both
@@ -4309,8 +4283,8 @@ class BoardContext final : public relay::agent::Context {
 
         relay::agent::Action profile;
         profile.key = QStringLiteral("boardProfile");
-        profile.label = QStringLiteral("Profile");
-        profile.tooltip = QStringLiteral("Profile the project: the build, the Python tests or "
+        profile.label = QStringLiteral("Performance");
+        profile.tooltip = QStringLiteral("Performance of the project: the build, the Python tests or "
                                          "the app — a table of where the time goes, in a pane "
                                          "beside the board");
         // The menu has to be anchored under the button, and an `Action` is a `std::function<void()>`
@@ -4581,7 +4555,6 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     listLayout->setContentsMargins(0, 0, 0, 0);
     listLayout->setSpacing(0);
     buildListTools(listLayout);
-    buildCleanupPanel(listLayout);
     buildQuickAdd(listLayout);
     // The list's column header, between the tools and the rows: the sort lives here now (owner,
     // 2026-09-19). It measures against the list, so it is wired once the list is up.
@@ -5150,7 +5123,7 @@ void BoardView::buildListTools(QVBoxLayout *layout)
 // surface is a pane or in-pane, never a floating strip).
 void BoardView::buildCleanupPanel(QVBoxLayout *layout)
 {
-    m_cleanupPanel = new QWidget(m_listPane);
+    m_cleanupPanel = new QWidget(m_chatArea);
     m_cleanupPanel->setObjectName(QStringLiteral("boardCleanupPanel"));
     m_cleanupPanel->setAttribute(Qt::WA_StyledBackground);
     auto *panel = new QVBoxLayout(m_cleanupPanel);
@@ -5254,6 +5227,7 @@ void BoardView::buildChatArea(QVBoxLayout *layout)
     m_findingsLayout->setSpacing(2);
     m_findings->hide();
     column->addWidget(m_findings);
+    buildCleanupPanel(column);
 
     m_survey = new QWidget(m_chatArea);
     m_survey->setObjectName(QStringLiteral("boardChatSurvey"));
@@ -5593,15 +5567,25 @@ int BoardView::showFindings(const QJsonArray &items, const QString &section)
     auto *head = new QLabel(m_findings);
     head->setObjectName(QStringLiteral("boardChatFindingsHead"));
     const QString scope = section.isEmpty()
-                              ? QStringLiteral("Check")
+                              ? QStringLiteral("Hygiene · Format check")
                               : QStringLiteral("Triage · %1").arg(prettySectionName(section));
     head->setText(total == 0 ? QStringLiteral("%1: nothing to fix").arg(scope)
                              : QStringLiteral("%1: %2").arg(scope, problemCountText(total)));
     headRow->addWidget(head, 1);
+    if (section.isEmpty()) {
+        auto *cleanup = new QToolButton(m_findings);
+        cleanup->setObjectName(QStringLiteral("boardCleanup"));
+        cleanup->setText(cleanupRunning() ? QStringLiteral("Stop") : QStringLiteral("Clean up"));
+        cleanup->setToolTip(QStringLiteral("Hygiene stage 2: ask the agent for a cleanup preview. "
+                                          "Nothing is written until you choose Apply."));
+        cleanup->setFocusPolicy(Qt::NoFocus);
+        headRow->addWidget(cleanup);
+        connect(cleanup, &QToolButton::clicked, this, [this] { requestCleanup(); });
+    }
     auto *dismiss = new QToolButton(m_findings);
     dismiss->setObjectName(QStringLiteral("boardChatFindingsClose"));
     dismiss->setText(QStringLiteral("×"));
-    dismiss->setToolTip(QStringLiteral("Put this list away. Check lists them again."));
+    dismiss->setToolTip(QStringLiteral("Put this list away. Hygiene lists them again."));
     dismiss->setCursor(Qt::PointingHandCursor);
     dismiss->setFocusPolicy(Qt::NoFocus);
     headRow->addWidget(dismiss, 0);
@@ -6876,8 +6860,12 @@ void BoardView::handleEvent(const QJsonObject &event)
         const QString section = event.value(QStringLiteral("section")).toString();
         if (mine) {
             showFindings(items, section);
-            if (section.isEmpty())
+            if (section.isEmpty()) {
                 showProblems(items);
+                if (onStatus)
+                    onStatus(items.isEmpty() ? QStringLiteral("Hygiene: format check passed")
+                                            : QStringLiteral("Hygiene: %1 format findings").arg(items.size()));
+            }
             return;
         }
         showProblems(items);
@@ -9016,9 +9004,13 @@ void BoardView::endCleanup()
 
 void BoardView::updateCleanupButton()
 {
-    // Clean up is an action on the console's row (board::BoardContext::actions), so the word —
-    // "Clean up" or "Stop" — and its tooltip are answered fresh there. All this has to do is say
-    // that they would now answer differently. The letter never changes; only the word does.
+    if (auto *button = m_findings->findChild<QToolButton *>(QStringLiteral("boardCleanup"))) {
+        button->setText(cleanupRunning() ? QStringLiteral("Stop") : QStringLiteral("Clean up"));
+        button->setToolTip(cleanupRunning() ? QStringLiteral("Stop the Hygiene cleanup run. Existing writes stay in the changelog.")
+                                          : QStringLiteral("Hygiene stage 2: preview agent cleanup before Apply writes changes."));
+    }
+    // The cleanup stage lives beside the format findings. Refresh the context too so the
+    // board and card action availability follows the running turn.
     refreshContexts();
     layoutListTools();
 }
@@ -9028,7 +9020,7 @@ void BoardView::updateCleanupButton()
 void BoardView::showCleanupProgress(const QString &step)
 {
     const qint64 seconds = m_cleanupClock.isValid() ? m_cleanupClock.elapsed() / 1000 : 0;
-    QString text = m_cleanupDry ? QStringLiteral("Cleanup preview") : QStringLiteral("Cleanup");
+    QString text = m_cleanupDry ? QStringLiteral("Hygiene · Cleanup preview") : QStringLiteral("Hygiene · Cleanup");
     text += QStringLiteral(" · %1:%2").arg(seconds / 60).arg(seconds % 60, 2, 10, QLatin1Char('0'));
     if (!step.isEmpty())
         text += QStringLiteral(" · ") + step;
@@ -9245,8 +9237,8 @@ void BoardView::showCleanupSummary(const QJsonObject &summary)
 
     // The heading says which of the two ran, and how it ended, in that order: whether anything
     // was written to the owner's files is the first thing to know.
-    QString head = dry ? QStringLiteral("Cleanup preview — nothing was written")
-                       : QStringLiteral("Cleanup — the board was rewritten");
+    QString head = dry ? QStringLiteral("Hygiene · Cleanup preview — nothing was written")
+                       : QStringLiteral("Hygiene · Cleanup — the board was rewritten");
     if (outcome == QStringLiteral("cancelled"))
         head += dry ? QStringLiteral(" · stopped") : QStringLiteral(" · stopped part way");
     else if (outcome == QStringLiteral("error"))
