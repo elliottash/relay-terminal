@@ -1,0 +1,8 @@
+2026-09-22T01:12:23.784Z INFO relay.gui gui_start version=0.1.0 build=2026-09-21.21H.03 pid=3028850 level=info
+2026-09-22T01:12:23.830Z INFO relay.gui worker_start pane=2ce9333c workspace_set=1
+2026-09-22T01:12:23.963Z INFO relay.gui event type=ready pane=2ce9333c
+2026-09-22T01:12:24.021Z INFO relay.gui harness_deferred pane=2ce9333c preset=guest:claude model=opus
+2026-09-22T01:12:24.137Z INFO relay.gui harness_deferred pane=2ce9333c preset=guest:claude model=opus
+2026-09-22T01:12:24.218Z INFO relay.gui harness_deferred pane=2ce9333c preset=guest:claude model=opus
+2026-09-22T01:12:35.637Z INFO relay.gui gui_quit reason=signal pid=3028850 uptime_s=11 build=2026-09-21.21H.03
+2026-09-22T01:12:35.644Z ERROR relay.gui worker_exit pane=2ce9333c code=15 crashed=1
