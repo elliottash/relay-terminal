@@ -6386,7 +6386,9 @@ to pick the model and reasoning effort for those"). The `guest` block of a `conf
 `set_effort` on a guest pane tells the harness and answers the ordinary `effort_changed` rather
 than writing into a `ProviderConfig`, because the effort is a flag on the guest's own command line
 or a field of its own `turn/start`. `configured`, `model_changed` and `effort_changed` carry
-`guest_effort`. An effort is one short lowercase word, **not** one of Relay's four levels
+`guest_effort` and the same value in `effort`, the field the pane's picker reads. Both report
+the running harness's level, never the wrapper Agent's API effort; an unknown guest default
+is an empty string. An effort is one short lowercase word, **not** one of Relay's four levels
 (`validate_effort`): Claude Code has five, and codex's catalogue names six and differs by model, so
 Relay's enum must not be mapped onto them. The `guest:` preset rows therefore carry the lists:
 `efforts` for the guest, and `models` as `[{id, label, efforts, default_effort, tier_effort}]` — claude's

@@ -404,8 +404,7 @@ class SessionCommands:
                         changed["guest"] = guest_id
                         if outcome["applies"] == "now" and provider is not None:
                             changed.update(model=provider.config.model, model_name=model_name(preset_id, provider.config.model),
-                                           guest_session=provider.session_id,
-                                           guest_effort=provider.effort)
+                                           **guest_harness_provider.configured_fields(agent))
                     self.emit(changed)
                 return outcome
         self.turns.now_or_later(lambda: decide(True), lambda: decide(False))

@@ -794,10 +794,11 @@ class AgentWiringTests(unittest.TestCase):
                       session_dir=str(Path(temp.name) / "sessions"), track_requests=False)
         ghp.attach(agent, provider)
         self.assertEqual(ghp.configured_fields(agent),
-                         {"guest": "claude", "guest_session": "guest-sess-7", "guest_effort": ""})
+                         {"guest": "claude", "guest_session": "guest-sess-7", "guest_effort": "", "effort": ""})
         fields = session_protocol.configured_fields(agent)
         self.assertEqual(fields["guest"], "claude")
         self.assertEqual(fields["guest_session"], "guest-sess-7")
+        self.assertEqual(fields["effort"], "")
         data = agent.session_data()
         self.assertEqual((data["guest"], data["guest_session"]), ("claude", "guest-sess-7"))
         self.assertEqual(ghp.session_guest(data), ("claude", "guest-sess-7"))
@@ -1176,6 +1177,20 @@ class WorkerProtocolTests(unittest.TestCase):
         self.assertEqual(changed[0]["model"], "m")
         self.assertTrue(harness.closed)
 
+    def test_codex_startup_reports_the_harness_effort_in_the_pane_field(self):
+        for level in ("medium", "xhigh", "ultra"):
+            with self.subTest(level=level):
+                harness = FakeHarness([], guest="codex", model="gpt-6-astra")
+                events = self.run_worker([
+                    {"type": "configure", "preset": "guest:codex", "workspace": str(ROOT),
+                     "effort": level, "guest": {"model": "gpt-6-astra", "effort": level}},
+                    {"type": "shutdown"}], harness)
+                configured = [e for e in events if e["event"] == "configured"]
+                self.assertTrue(configured, [e for e in events if e["event"] == "error"])
+                self.assertEqual(harness.starts[0]["effort"], level)
+                self.assertEqual(configured[0]["guest_effort"], level)
+                self.assertEqual(configured[0]["effort"], level)
+
     def test_the_pane_sets_the_guests_effort_and_the_event_carries_it(self):
         """The owner's ask (2026-09-19): pick the model *and* the reasoning effort for a guest.
 
@@ -1192,6 +1207,7 @@ class WorkerProtocolTests(unittest.TestCase):
         configured = [e for e in events if e["event"] == "configured"]
         self.assertTrue(configured, [e for e in events if e["event"] == "error"])
         self.assertEqual(configured[0]["guest_effort"], "high")
+        self.assertEqual(configured[0]["effort"], "high")
         self.assertEqual(harness.starts[0]["effort"], "high")
         changed = [e for e in events if e["event"] == "effort_changed"]
         self.assertEqual(changed[-1]["effort"], "xhigh")
@@ -1211,6 +1227,7 @@ class WorkerProtocolTests(unittest.TestCase):
         self.assertEqual(changed[0]["model"], "opus")
         self.assertEqual(changed[0]["guest"], "claude")
         self.assertEqual(changed[0]["guest_effort"], "max")
+        self.assertEqual(changed[0]["effort"], "max")
         self.assertIn(("set_model", "opus"), harness.calls)
         self.assertIn(("set_effort", "max"), harness.calls)
         self.assertEqual(len(harness.starts), 1)         # the harness was kept, not restarted

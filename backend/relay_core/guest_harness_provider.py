@@ -1610,15 +1610,15 @@ def agent_provider(agent) -> HarnessProvider | None:
 def configured_fields(agent) -> dict:
     """What a guest pane adds to `configured` and `model_changed` (29.3); empty for a normal pane.
 
-    `guest_effort` and not `effort`: the event's `effort` is the pane's own level on Relay's
-    four-level scale, and a guest's is the guest's own (`xhigh`, `ultra`), so the two travel
-    side by side rather than one pretending to be the other.
+    The pane reads `effort`, so it must name the running harness's level as well as
+    `guest_effort`. The wrapper Agent's API effort can snap medium to high (or xhigh
+    to max); it is not the level sent to the harness. An unknown guest default stays empty.
     """
     provider = agent_provider(agent)
     if provider is None:
         return {}
     return {"guest": provider.guest_id, "guest_session": provider.session_id,
-            "guest_effort": provider.effort}
+            "guest_effort": provider.effort, "effort": provider.effort}
 
 
 def set_effort(agent, effort) -> dict | None:

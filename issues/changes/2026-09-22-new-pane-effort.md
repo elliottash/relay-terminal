@@ -1,0 +1,36 @@
+---
+id: EFM7
+type: work
+status: needs-verification
+labels: [bug, models]
+assignee: codex
+implemented_by: openai/gpt-6-astra via codex
+rank: mefm7
+created: '2026-09-22'
+source: Codex in a Relay pane, 2026-09-22
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-EFM7/results.txt], related: [], github: null}
+---
+# New pane changes its displayed effort on first submission
+
+## Issue
+there is an issue when i open a pane, it says gpt 6 astra medium effort, but when i press enter, it changes to high
+
+## Done means
+- Starting a Codex pane with medium effort reports medium in the configured event and runs the harness at medium.
+- Model switches report the harness's actual effort, including levels such as xhigh and ultra.
+- API-only panes retain their existing effort reporting.
+
+## Plan
+Goal: keep startup effort reporting consistent with the running harness.
+Findings: guest_harness_provider.configured_fields reports guest_effort but leaves the generic effort field on the wrapper Agent's value.
+Steps: reproduce through the worker; publish the harness effort in the shared event fields; update protocol documentation and run targeted tests.
+Risks: legacy callers with no explicit guest effort must not be given a fabricated API level.
+Verify: worker protocol regressions using FakeHarness, plus the guest provider and session protocol tests.
+
+## Execution Summary
+The generic effort field now reports the active guest harness's effort on configure and immediate model changes. This prevents the wrapper Agent's API effort mapping from changing medium to high or xhigh/ultra to max in the picker. The protocol documents the shared value. No C++ or layout changes; worker protocol behavior is tested with FakeHarness. Live GUI verification remains for a separate session.
+
+## Tests
+- `PYTHONPATH=backend:tests python3 -m unittest test_guest_harness_provider test_session_protocol` — 104 passed.
+- `PYTHONPATH=backend:tests python3 -m unittest test_model_switch` — 22 passed.
+- manual: docs/qa_evidence/2026-09-22-EFM7/results.txt

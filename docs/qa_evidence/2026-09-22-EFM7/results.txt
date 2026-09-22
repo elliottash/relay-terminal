@@ -1,0 +1,21 @@
+Card #EFM7 — new-pane effort reporting
+
+Before fix:
+PYTHONPATH=backend:tests python3 -m unittest test_guest_harness_provider.WorkerProtocolTests.test_codex_startup_reports_the_harness_effort_in_the_pane_field
+FAILED: medium reported high; xhigh and ultra reported max.
+In all three cases the harness startup effort and guest_effort field were correct.
+
+After fix:
+PYTHONPATH=backend:tests python3 -m unittest test_guest_harness_provider test_session_protocol
+Ran 104 tests in 14.082s — OK.
+Includes startup at medium/xhigh/ultra, unknown guest default, set_effort,
+model switching, and API session behavior.
+One ResourceWarning for an unclosed test socket was printed; no test failed.
+
+PYTHONPATH=backend:tests python3 -m unittest test_model_switch
+Ran 22 tests in 2.740s — OK.
+
+Verification uses FakeHarness and the real worker protocol. No real subscription
+turn was spent. No C++ changes or build required; live GUI verification is pending.
+The system Python has no pytest; the project's unittest tests were run directly.
+Board-wide check reports existing issues elsewhere; this card is checked separately.
