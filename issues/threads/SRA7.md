@@ -17,3 +17,7 @@ Landed a7fd665d48d598aabb056e1dc869a9af7b8cd5f2 after exact-tree app/engine buil
 <!-- relay:entry 20260922T234323Z-a3 author=codex kind=evidence -->
 ### Codex · 2026-09-22 23:43
 Linked follow-up f1f8126a0b96a35cb7c0a77c3413eb73ffbc6a4a. Exact-tree app and engine build passed with Ghostty; all 5 core and 7 view cases pass on both backends (24 cases). Local card check has no findings or blocking signals. #SRA7 remains needs-verification for independent QA.
+
+<!-- relay:entry 20260922T234824Z-r1 author=codex kind=evidence -->
+### Codex root review · 2026-09-22 23:48
+Independent local review passed. Evidence and scope: docs/qa_evidence/2026-09-22-verify-sphinxpad-bugs/README.md. Re-ran live UI staging and/or focused tests as recorded there. Retained needs-verification for the board handoff; no sphinxpad retest claimed.

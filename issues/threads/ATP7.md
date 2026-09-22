@@ -25,3 +25,7 @@ Follow-up confirms Qt6 double scaling and @2x metadata behavior. Restored intend
 <!-- relay:entry 20260922T234206Z-a4 author=codex kind=evidence -->
 ### Codex · 2026-09-22 23:42
 Linked final 22px implementation 2be99a0f125bca97534856dbf083fab24483d679 and recorded successful exact-tree build. Supersedes initial 18px size; all original artwork and scale-independent bounds retained. No further RelayWindow.h edits.
+
+<!-- relay:entry 20260922T234824Z-r2 author=codex kind=evidence -->
+### Codex root review · 2026-09-22 23:48
+Independent local review passed. Evidence and scope: docs/qa_evidence/2026-09-22-verify-sphinxpad-bugs/README.md. Re-ran live UI staging and/or focused tests as recorded there. Retained needs-verification for the board handoff; no sphinxpad retest claimed.

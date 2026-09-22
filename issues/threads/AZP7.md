@@ -31,3 +31,7 @@ Linked full-window keyboard evidence commit 224a1ae144b907c574be25fe52fc5ff0e2a8
 <!-- relay:entry 20260922T234455Z-a2 author=codex kind=evidence -->
 ### Codex · 2026-09-22 23:44
 Made live-drive.py independent of temporary land directories: RELAY_TEST_BINARY override, checkout build/relay default, resolved binary recorded in results. Syntax check passed. Main agent reports independent full-driver rerun passed before/plus/reset and owner-terminal isolation.
+
+<!-- relay:entry 20260922T234824Z-r0 author=codex kind=evidence -->
+### Codex root review · 2026-09-22 23:48
+Independent local review passed. Evidence and scope: docs/qa_evidence/2026-09-22-verify-sphinxpad-bugs/README.md. Re-ran live UI staging and/or focused tests as recorded there. Retained needs-verification for the board handoff; no sphinxpad retest claimed.

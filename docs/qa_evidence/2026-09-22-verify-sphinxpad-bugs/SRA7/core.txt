@@ -1,0 +1,14 @@
+********* Start testing of CoreTest *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : CoreTest::initTestCase()
+PASS   : CoreTest::resizePreservesHistoryTop(ghostty)
+PASS   : CoreTest::resizePreservesHistoryTop(libvterm)
+PASS   : CoreTest::resizeClampsTrimmedHistoryTop(ghostty)
+PASS   : CoreTest::resizeClampsTrimmedHistoryTop(libvterm)
+PASS   : CoreTest::reflowOnResize(ghostty)
+PASS   : CoreTest::reflowOnResize(libvterm)
+PASS   : CoreTest::rowsOnlyResizeKeepsCursorBelowAFullRow(ghostty)
+PASS   : CoreTest::rowsOnlyResizeKeepsCursorBelowAFullRow(libvterm)
+PASS   : CoreTest::cleanupTestCase()
+Totals: 10 passed, 0 failed, 0 skipped, 0 blacklisted, 1ms
+********* Finished testing of CoreTest *********
