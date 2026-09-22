@@ -924,9 +924,8 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     emptyRow->addWidget(m_clearFilters);
     m_emptyRow->setVisible(false);
 
-    m_resume = new QPushButton(QStringLiteral("Resume here"));
+    m_resume = new QPushButton(QStringLiteral("Resume"));
     m_resume->setDefault(true);
-    m_newPane = new QPushButton(QStringLiteral("Open in new pane"));
     m_info = new QPushButton(QStringLiteral("Info"));
     m_info->setToolTip(QStringLiteral("Its ⓘ view: model, tokens, file and history with subagent threads (Ctrl+I)"));
     m_rename = new QPushButton(QStringLiteral("Rename…"));
@@ -986,7 +985,6 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     buttons->addWidget(m_delete);
     buttons->addStretch(1);
     buttons->addWidget(m_reopen);
-    buttons->addWidget(m_newPane);
     buttons->addWidget(m_resume);
     buttons->addWidget(close);
 
@@ -1003,7 +1001,7 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     box->addWidget(m_confirm);
     box->addWidget(m_emptyRow);
     box->addWidget(splitter, 1);
-    auto *hint = new QLabel(QStringLiteral("Enter resumes here · Shift+Enter a new pane · → a quick look · F2 rename · Ctrl+P pin · Ctrl+F search · Esc closes"));
+    auto *hint = new QLabel(QStringLiteral("Enter resumes · → a quick look · F2 rename · Ctrl+P pin · Ctrl+F search · Esc closes"));
     hint->setObjectName(QStringLiteral("dialogHint"));
     hint->setWordWrap(true);
     box->addWidget(hint);
@@ -1105,9 +1103,11 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
         requery();
     });
     connect(m_tree, &QTreeWidget::currentItemChanged, this, &SessionManager::selectionChanged);
-    connect(m_tree, &QTreeWidget::itemActivated, this, [this] { activate(false); });
-    connect(m_resume, &QPushButton::clicked, this, [this] { activate(false); });
-    connect(m_newPane, &QPushButton::clicked, this, [this] { activate(true); });
+    connect(m_tree, &QTreeWidget::itemActivated, this, [this] { activate(true); });
+    connect(m_resume, &QPushButton::clicked, this, [this] {
+        if (onResumeHint) onResumeHint();
+        activate(true);
+    });
     connect(m_info, &QPushButton::clicked, this, [this] {
         const QJsonObject item = selectedItem();
         if (item.isEmpty() || isTerminal(item)) return;
@@ -2220,8 +2220,7 @@ void SessionManager::updateButtons() {
     // has nothing to read.
     const bool guest = isGuestItem(item);
     m_resume->setEnabled(has && !terminal);
-    m_resume->setText(thread ? QStringLiteral("Open history") : QStringLiteral("Resume here"));
-    m_newPane->setEnabled(has && !terminal && !thread);
+    m_resume->setText(thread ? QStringLiteral("Open history") : QStringLiteral("Resume"));
     m_info->setEnabled(has && !terminal && !guest);
     m_rename->setEnabled(has);
     m_pin->setEnabled(has);
@@ -2229,13 +2228,13 @@ void SessionManager::updateButtons() {
     m_pin->setText(item.value(QStringLiteral("pinned")).toInt() > 0 ? QStringLiteral("Unpin") : QStringLiteral("Pin"));
     m_resume->setToolTip(terminal ? QStringLiteral("Terminal history cannot be resumed; it is here to be searched.")
                          : thread ? QStringLiteral("Open this subagent thread's history, with the way back to its owner session.")
-                         : guest ? QStringLiteral("Runs %1 in this pane, in %2 — %3 resumes its own session.")
+                         : guest ? QStringLiteral("Resume in the open pane, or run %1 in a new pane in %2 — %3 resumes its own session.")
                                        .arg(guestCommand(item),
                                             guestCwd(item).isEmpty() ? QStringLiteral("this pane's directory") : guestCwd(item),
                                             guestLabel(item.value(QStringLiteral("source")).toString()))
                          : m_openSessions.contains(selectedId())
                              ? QStringLiteral("This conversation is already open: Relay goes to that pane rather than loading it twice.")
-                             : QStringLiteral("Replace this pane's conversation with the selected one."));
+                             : QStringLiteral("Open this conversation in a new pane (Enter)."));
     const QString sessionId = item.value(QStringLiteral("session_id")).toString();
     m_reopen->setVisible(m_closed.contains(sessionId));
     const bool summarisable = has && !thread && !terminal && !guest && bool(onSummarise);
@@ -2275,7 +2274,7 @@ void SessionManager::reopenClosed() {
     const QString id = selectedId();
     const auto it = m_closed.constFind(id);
     if (it == m_closed.constEnd()) {
-        m_note = QStringLiteral("That conversation was not closed from this window; Enter resumes it here.");
+        m_note = QStringLiteral("That conversation was not closed from this window; Enter resumes it in a new pane.");
         updateStatus();
         return;
     }
@@ -2610,7 +2609,7 @@ bool SessionManager::eventFilter(QObject *object, QEvent *event) {
     if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) {
         if (key->modifiers() & Qt::ControlModifier) fork();
         else if (key->modifiers() & Qt::AltModifier) reopenClosed();
-        else activate(key->modifiers() & Qt::ShiftModifier);
+        else activate(true);
         return true;
     }
     if (key->key() == Qt::Key_P && key->modifiers() == Qt::ControlModifier) { togglePin(); return true; }

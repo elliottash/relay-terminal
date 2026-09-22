@@ -373,7 +373,7 @@ private slots:
         auto buttons = dialog.findChildren<QPushButton *>();
         QPushButton *resume = nullptr;
         for (QPushButton *button : buttons)
-            if (button->text() == QStringLiteral("Resume here")) resume = button;
+            if (button->text() == QStringLiteral("Resume")) resume = button;
         QVERIFY(resume);
         QVERIFY(!resume->isEnabled());
         tree->setCurrentItem(tree->topLevelItem(0)->child(0));
@@ -1407,9 +1407,22 @@ private slots:
         manager.onReopenClosed = [&reopened](const QString &id) { reopened = id; };
         manager.onPin = [&pinned](const QString &id, bool on) { pinned = id + (on ? QStringLiteral(" on") : QStringLiteral(" off")); };
         QTest::keyClick(tree, Qt::Key_Return);
-        QCOMPARE(resumed, 1);
-        QTest::keyClick(tree, Qt::Key_Return, Qt::ShiftModifier);
+        QCOMPARE(resumed, 0);
         QCOMPARE(newPane, 1);
+        QTest::keyClick(tree, Qt::Key_Return, Qt::ShiftModifier);
+        QCOMPARE(newPane, 2);
+        QPushButton *resume = nullptr;
+        for (auto *button : manager.findChildren<QPushButton *>()) {
+            QVERIFY(button->text() != QStringLiteral("Resume here"));
+            QVERIFY(button->text() != QStringLiteral("Open in new pane"));
+            if (button->text() == QStringLiteral("Resume")) resume = button;
+        }
+        QVERIFY(resume);
+        resume->click();
+        QCOMPARE(newPane, 3);
+        QTest::keyClick(search, Qt::Key_Return);
+        QCOMPARE(newPane, 4);
+        QCOMPARE(resumed, 0);
         QTest::keyClick(tree, Qt::Key_Return, Qt::ControlModifier);
         QCOMPARE(forked, QStringLiteral("a"));
         QTest::keyClick(tree, Qt::Key_Return, Qt::AltModifier);
@@ -1542,7 +1555,7 @@ private slots:
         QTreeWidgetItem *row = tree->topLevelItem(0)->child(0);
         QCOMPARE(row->text(0), QStringLiteral("Wire the pane"));
         QCOMPARE(row->text(3), QStringLiteral("claude code"));      // where a session shows its model
-        // Enter resumes it here, Shift+Enter in a new pane, Ctrl+Enter forks — all with the row,
+        // Enter and Shift+Enter request a new pane; Ctrl+Enter forks — all with the row,
         // which is what carries the argv.
         QString resumed, newPaned, forked;
         manager.onResume = [&resumed, &newPaned](const QJsonObject &item, bool other) {
@@ -1550,7 +1563,8 @@ private slots:
         };
         manager.onFork = [&forked](const QJsonObject &item) { forked = guestCommand(item, true); };
         QTest::keyClick(tree, Qt::Key_Return);
-        QCOMPARE(resumed, QStringLiteral("claude -r ") + id);
+        QVERIFY(resumed.isEmpty());
+        QCOMPARE(newPaned, QStringLiteral("claude -r ") + id);
         QTest::keyClick(tree, Qt::Key_Return, Qt::ShiftModifier);
         QCOMPARE(newPaned, QStringLiteral("claude -r ") + id);
         QTest::keyClick(tree, Qt::Key_Return, Qt::ControlModifier);
@@ -1562,13 +1576,13 @@ private slots:
                 if (candidate->text() == text) return candidate;
             return nullptr;
         };
-        QVERIFY(button(QStringLiteral("Resume here"))->isEnabled());
+        QVERIFY(button(QStringLiteral("Resume"))->isEnabled());
         QVERIFY(!button(QStringLiteral("Info"))->isEnabled());
         QVERIFY(button(QStringLiteral("Rename…"))->isEnabled());
         QVERIFY(button(QStringLiteral("Pin"))->isEnabled());
         QVERIFY(button(QStringLiteral("Delete…"))->isEnabled());
-        QVERIFY(button(QStringLiteral("Resume here"))->toolTip().contains(QStringLiteral("claude -r ") + id));
-        QVERIFY(button(QStringLiteral("Resume here"))->toolTip().contains(QStringLiteral("/home/u/repos/relay-terminal")));
+        QVERIFY(button(QStringLiteral("Resume"))->toolTip().contains(QStringLiteral("claude -r ") + id));
+        QVERIFY(button(QStringLiteral("Resume"))->toolTip().contains(QStringLiteral("/home/u/repos/relay-terminal")));
     }
 
     void summariesFromTheButtonAndTheBatch() {

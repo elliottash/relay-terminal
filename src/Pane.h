@@ -1073,6 +1073,7 @@ public:
     // same model twice in models/recent and models/uses).
     QString paneModel() const { return m_paneModel.isEmpty() ? m_model : m_paneModel; }
     QString sessionId() const { return m_sessionId; }
+    QString guestSessionId() const { return m_guestSession; }
     QString sessionDir() const { return m_sessionDir; }
 
     // ----- saved window layout ("reopen where I left off", src/WindowState.h) ------------------

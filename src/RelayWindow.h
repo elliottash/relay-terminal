@@ -6061,7 +6061,7 @@ public:
         view->onReopenClosed = [windowGuard](const QString &closedId) {
             if (windowGuard) windowGuard->m_manager->restoreClosed(windowGuard, closedId);
         };
-        // Bound to the pane that asked, every time: Enter resumes where /resume was typed.
+        // Bind requests to the initiating pane; Resume resolves its destination below.
         owner->bindSessionManager(view);
         QPointer<ToolPane> guard(tool);
         QPointer<Pane> ownerGuard(owner);
@@ -6074,7 +6074,34 @@ public:
         auto resume = view->onResume;
         // Close first: a resume may focus another pane (the one that already has the session),
         // and closing afterwards would take the focus back.
-        view->onResume = [resume, close](const QJsonObject &item, bool newPane) { close(); if (resume) resume(item, newPane); };
+        view->onResume = [resume, close, ownerGuard](const QJsonObject &item, bool) {
+            close();
+            const QString id = item.value(QStringLiteral("session_id")).toString();
+            if (id.isEmpty()) return;
+            Pane *existing = nullptr;
+            if (relay::conversations::isGuestItem(item)) {
+                const QString source = item.value(QStringLiteral("source")).toString();
+                for (QWidget *top : QApplication::topLevelWidgets())
+                    if (auto *w = dynamic_cast<RelayWindow *>(top))
+                        for (Pane *pane : w->allPanes())
+                            if (pane->sessionTextSource() == source && pane->guestSessionId() == id)
+                                existing = pane;
+            } else {
+                QString dir = item.value(QStringLiteral("session_dir")).toString();
+                if (dir.isEmpty() && ownerGuard) dir = ownerGuard->sessionDir();
+                existing = paneWithSession(id, dir, nullptr);
+            }
+            if (existing) {
+                if (auto *w = windowOf(existing)) w->revealPane(existing);
+                return;
+            }
+            if (resume) resume(item, true);
+        };
+        view->onResumeHint = [windowGuard] {
+            if (windowGuard) windowGuard->hint(QStringLiteral("sessions.resume"),
+                relay::ShortcutHints::nextTime(QKeySequence(Qt::Key_Return).toString(QKeySequence::NativeText),
+                                               QStringLiteral("resume selected session")));
+        };
         view->onOpenInfo = [ownerGuard, guard](const QJsonObject &item) {
             auto *w = windowOf(guard);
             if (!w || !ownerGuard) return;

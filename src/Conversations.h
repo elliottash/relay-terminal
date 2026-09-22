@@ -202,7 +202,7 @@ public:
     // include_threads, sort, offset}.
     std::function<void(const QJsonObject &request)> onQuery;
     std::function<void(const QString &sessionId, const QString &query)> onPreview;
-    // The whole result row (session_id, session_dir, title, workspace…) plus Shift+Enter.
+    // The whole result row; Resume requests a new pane unless the window finds it open already.
     std::function<void(const QJsonObject &item, bool newPane)> onResume;
     // Enter on a subagent thread row: open its history (the ⓘ view).
     std::function<void(const QJsonObject &item)> onOpenThread;
@@ -283,6 +283,7 @@ public:
     // and the window does. The key path teaches nothing — somebody who pressed it knows it.
     void setHelperShortcut(const QString &hintId, const QString &keys);
     std::function<void()> onHelperHint;
+    std::function<void()> onResumeHint;
     // Open the helper and put the cursor in it — the pane's ask key, and what a click on the row
     // does. `helperDraft` prefills the composer without sending.
     void focusHelper();
@@ -403,7 +404,7 @@ private:
     QLabel *m_status = nullptr, *m_header = nullptr, *m_empty = nullptr;
     QWidget *m_emptyRow = nullptr;
     QPushButton *m_searchAll = nullptr, *m_clearFilters = nullptr;
-    QPushButton *m_resume = nullptr, *m_newPane = nullptr, *m_info = nullptr, *m_rename = nullptr,
+    QPushButton *m_resume = nullptr, *m_info = nullptr, *m_rename = nullptr,
                 *m_pin = nullptr, *m_delete = nullptr, *m_more = nullptr, *m_summarise = nullptr,
                 *m_cancelBatch = nullptr, *m_reopen = nullptr;
     QFrame *m_confirm = nullptr;
