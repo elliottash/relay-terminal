@@ -1,0 +1,10 @@
+scripts/relay-build --target relay-projects-tests relay-boardworkspace-tests relay-boardsections-tests relay-projectinit-tests
+QT_QPA_PLATFORM=offscreen ctest --test-dir build -R '^(projects|boardworkspace|boardsections|projectinit)$' --output-on-failure
+4/4 pass.
+scripts/relay-build --target relay-board-tests relay-boardpane-tests relay
+QT_QPA_PLATFORM=offscreen ctest --test-dir build -R '^(board|boardpane)$' --output-on-failure
+2/2 pass before #74Y5/#SW1D changes.
+PYTHONPATH=tests scripts/test.sh --junit /tmp/rename-tail-junit.xml tests.test_board tests.test_board_tools tests.test_board_protocol tests.test_tryit_protocol tests.test_app_tools tests.test_memories tests.test_aliases tests.test_tests_protocol tests.test_signal_threads
+848 tests pass.
+PYTHONPATH=tests scripts/test.sh --junit /tmp/rename-extra-junit.xml tests.test_keybindings tests.test_remote_board tests.test_configure_provider tests.test_queue tests.test_session_protocol tests.test_remote_browser tests.test_prompt_profiles tests.test_forge_sync tests.test_board_import tests.test_project_probe tests.test_test_history tests.test_board_chat tests.test_agent_context tests.test_roles tests.test_system_prompt tests.test_skills tests.test_board_view tests.test_remote_wire tests.test_guest_harness_provider
+834 tests pass.
