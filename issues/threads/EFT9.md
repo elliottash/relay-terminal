@@ -32,3 +32,31 @@ Verified the client half independently of the implementing session's own report,
 * `RELAY_KEYRING=off python3 -m unittest tests.test_pane_view` → 36 tests, OK.
 
 The seam to check when stream E reports: the client reads `m.effort_fixed === true` from the model block and nothing else. If E publishes the fact under another name or shape, this branch is dead code and the chip is live for a level the pane will refuse — which is exactly fault 3 with an extra step.
+
+<!-- relay:entry 20260922T145510Z-ad author=agent kind=event model=claude-opus-5 pane=21ce0a13 turn=9ce3cc66aa5f4d38884b376901d01092/07e3de33b34a4b49af98b45413370b96 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": ["b8222865", "44a46ca1", "7d313776"], "evidence": ["doc… → {"plans": [], "commits": ["b8222865", "44a46ca1", "2ee01f0c", "d329d88a", "a0882…; replaced `## Execution Summary`
+
+<!-- relay:entry 20260922T145527Z-th author=agent kind=event model=claude-opus-5 pane=21ce0a13 turn=9ce3cc66aa5f4d38884b376901d01092/07e3de33b34a4b49af98b45413370b96 -->
+- ✦ agent updated this card · replaced `## Tests`
+
+<!-- relay:entry 20260922T145537Z-0x author=agent kind=decision model=claude-opus-5 pane=21ce0a13 turn=9ce3cc66aa5f4d38884b376901d01092/07e3de33b34a4b49af98b45413370b96 -->
+A departure from what this card's `## Discussion points` guessed at, made by the implementing session and endorsed here because it is right.
+
+That section suggested "gating `remoteState()`'s `in.efforts` on `effortFixed`", and stream A's earlier summary repeated it. Stream E did **not** do that, and said why: publishing no levels would meet the letter of the suggestion and break the card's own `## Done means`. `renderEffort` hides the chip whole when `levels.length === 0`, so a Relay Free pane would have drawn **no chip at all** where the card asks for "a chip that cannot be changed rather than a live picker". `Entry::effortFixedReason()` exists precisely because a fixed model's levels are still worth showing — Relay Free has two.
+
+So the levels stay published and `effort_fixed` rides beside them. The `## Discussion points` were a guess written before the work, and the work found the better answer; the card's `## Done means` is what governs, and it is met.
+
+Verified here rather than taken on trust — the real hub cleaner into the real view:
+
+```
+hub publishes  {"label":"Relay Free","effort":"high","efforts":["low","high"],
+                "effort_fixed":true,"effort_fixed_reason":"Relay free sets the level for you."}
+chip, fixed    {"hidden":false,"disabled":true,"shown":"high"}
+chip, ordinary {"hidden":false,"disabled":false,"shown":"high"}
+view device    {"label":"Relay Free"}          <- no level, no levels, no fixed flag
+```
+
+The seam this card's thread flagged when the client half landed — "the client reads `m.effort_fixed` and nothing else, so if E publishes that fact under another name the branch is dead code" — is therefore closed: the name matches and the chip really is disabled.
+
+<!-- relay:entry 20260922T145539Z-8f author=agent kind=event model=claude-opus-5 pane=21ce0a13 turn=9ce3cc66aa5f4d38884b376901d01092/07e3de33b34a4b49af98b45413370b96 -->
+- ✦ agent moved this card · Executing → Needs verification · All three faults landed, across both halves: 44a46ca1 for the chip, 2ee01f0c/d329d88a/a0882679 for the wire. The orchestrating session verified the seam itself — the real cleaner's output into the real view gives a visible, disabled chip for a fixed level, and a view device is told none of it. Suites 36/36, 45/45. · evidence docs/qa_evidence/2026-09-22-streamE-effort/ · implemented_by anthropic/claude-opus-5 via claude-code
