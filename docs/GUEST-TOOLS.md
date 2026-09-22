@@ -7,7 +7,7 @@ and repeat MCP discovery. Existing Codex-owned subagents are not imported into R
 ## Delegation and tasks
 
 The `relay_board` server exposes `agent`, `agent_message`, `agent_wait`, and `update_todos`,
-as well as its five existing board tools. Delegation and tasks do not require a Switchboard.
+as well as its five existing board tools. Delegation and tasks do not require a Board.
 The worker checks that its bound agent actually has the requested capability before dispatch.
 
 Guests create tasks with `update_todos`, then pass the returned `T<n>` id as `todo_id` to

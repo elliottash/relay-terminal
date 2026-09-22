@@ -336,7 +336,7 @@ more light, or `\e[37m` text vanishes on the page. Asserted by `theBeigeTerminal
 
 ---
 
-## 6. The Switchboard materials, in every theme
+## 6. The Board materials, in every theme
 
 `SWITCHBOARD-AESTHETIC.md` defines bakelite, brass, enamel and cord, and one rule — brass is
 structure, never state. Since 2026-09-19 (owner, review item D7: "yeah build that out") the board
@@ -344,7 +344,7 @@ structure, never state. Since 2026-09-19 (owner, review item D7: "yeah build tha
 
 ```toml
 [board]
-face = "#17140f"       # the board the cards are mounted on: the ground of the Switchboard pane
+face = "#17140f"       # the board the cards are mounted on: the ground of the Board pane
 metal = "#c8a45c"      # lit hardware: the engraved rule under the section the pointer is on
 metal_dim = "#6b5637"  # the same hardware unlit: every other rule, and an empty board's jack rings
 
@@ -536,7 +536,7 @@ scrollback.
 
 ### 10.4 What the harness could not show
 
-The Switchboard pane opens in every theme but stayed on "Loading the Switchboard…" for the full 15
+The Board pane opens in every theme but stayed on "Loading the Board…" for the full 15
 seconds in all six (a copied `issues/` tree in a sandbox with no git history), so the board shots
 show only the pane frame and its filter field, and at that date the board widgets did not paint the
 `[board]` materials at all. Both are fixed: the materials landed 2026-09-19 (§6), and the live board

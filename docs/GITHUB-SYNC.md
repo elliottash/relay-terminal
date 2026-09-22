@@ -1,4 +1,4 @@
-# Switchboard ↔ GitHub Issues, two-way
+# The Board ↔ GitHub Issues, two-way
 
 Card [`#GDQN`](../issues/features/2026-09-17-github-issues-sync.md). Design context:
 [`SWITCHBOARD-DESIGN.md`](SWITCHBOARD-DESIGN.md) §10 phase 3, format:
@@ -36,7 +36,7 @@ it safer.
 
 ## 2. The mapping
 
-| Switchboard | GitHub |
+| Board | GitHub |
 |---|---|
 | card title (the body's `# ` heading) | issue title |
 | card body below the title | issue body, with a hidden footer appended |
@@ -99,7 +99,7 @@ never issues: they are filtered out of every listing.
   listing time was a way to lose a remote edit: a card whose baseline is intact and whose issue is
   missing from the listing reads as "the issue equals the baseline", and the next run would push the
   local version over the remote change without seeing a conflict.)
-- It sits in the board's **private root**, which `switchboard/.gitignore` excludes from git; the
+- It sits in the board's **private root**, which the board folder's own `.gitignore` excludes from git; the
   engine writes that line if the board does not have it yet. It is per machine: the ETags and the
   `updated_at` values are conversations with one server, and a shared file would conflict on every
   sync.
@@ -207,8 +207,8 @@ holds that line, including the case where the forge echoes the token back in an 
 ## 8. Protocol (wired 2026-09-18; `AGENT-SESSIONS-PROTOCOL.md` §19.14)
 
 Two messages, on the worker that already owns the board (`board_protocol.BoardCommands`), so the
-Switchboard pane can show the plan and then run it. Both need a board that exists (an
-uninitialized one answers the "create one first" error), and both take the Switchboard worker's
+Board pane can show the plan and then run it. Both need a board that exists (an
+uninitialized one answers the "create one first" error), and both take the Board worker's
 busy guard: a sync while an ask or a cleanup is running answers `error {code: "board_busy"}`, and
 a second sync while one is running answers `error {code: "forge_busy"}`.
 

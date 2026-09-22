@@ -288,7 +288,7 @@ decisions visible (registry, multiverse, specification curve) rather than to cer
   - Documentation: "(A) Don't write documentation you will not maintain. (B) Code should be
     self-documenting."
   - Management: "(A) Manage tasks with a task management system. (B) E-mail is not a task management
-    system." — *this repo's Switchboard is exactly that rule.*
+    system." — *this repo's Board is exactly that rule.*
 
   And, in the Code Style appendix, the two that matter for QA: **"Check for errors"** —
   "If you have a large program many of whose functions operate on a data matrix X … write a function

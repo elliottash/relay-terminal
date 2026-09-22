@@ -1,4 +1,4 @@
-# Tasks and project memory in the Switchboard: design (proposal, 2026-09-17)
+# Tasks and project memory in the Board: design (proposal, 2026-09-17)
 
 Owner requests (2026-09-17): "we need the task list for sure -- you can compare how warp and claude code do it and give
 me a proposal on that, and make it integrated with the switchboard as much as possible (tasks can be whole cards, or
@@ -34,7 +34,7 @@ third-party posts only).
 
 **Lessons.** (1) Keep the model-facing todo tool tiny and familiar; put durability elsewhere. (2) Claude Code's shared
 list is a local directory and Warp's is per conversation: neither survives into git, a collaborator or a QA session.
-The Switchboard can. (3) Dependencies and claiming matter once several agents share a list. (4) Every product that
+The Board can. (3) Dependencies and claiming matter once several agents share a list. (4) Every product that
 auto-writes memory needed caps, an index, and a review path; two retreated to human-owned rules.
 
 ## 2. Task model: three layers, one vocabulary
@@ -73,7 +73,7 @@ rule 1). Otherwise it is an item on the card whose acceptance it serves. A step 
 ### 2.2 Shared status vocabulary
 
 The model-facing enum stays as it ships in `update_todos` (models know these words from TodoWrite, `todowrite` and
-`update_plan`). The worker maps it at the boundary; card markers and the UI use Switchboard words.
+`update_plan`). The worker maps it at the boundary; card markers and the UI use Board words.
 
 | `update_todos` | Item marker | Box | Child card status mirrored into its parent item | Glyph |
 |---|---|---|---|---|
@@ -102,7 +102,7 @@ request status from linked todos (`requests.py apply_todos`). Exact changes:
 
 - `SPEC` properties and the allowed-field set in `validate()` gain `ref` and `blocked_by`. A resent todo without them
   keeps its earlier values, as `request_ids` already does. `owner` is worker-set only (2.6) and never accepted from
-  the model. `RULES` gains one sentence: "When a todo is work on a Switchboard card or card item, set ref."
+  the model. `RULES` gains one sentence: "When a todo is work on a Board card or card item, set ref."
 - Because each call replaces the list, the worker **diffs old vs new status per id** to find transitions.
 - The `todos` event items gain `ref`, `ref_title`, `ref_status`, `owner`, `blocked_by`; the result gains
   `ref_errors` and `card_writes`. Stored session state gains the same fields (old sessions load with none).
@@ -131,7 +131,7 @@ Worker rules:
 ### 2.4 Plans on cards (owner decision 12.4)
 
 - `write_plan` gains `card?` and `steps?: [string]`. On a card it writes `## Plan` (goal, findings, risks,
-  verification; prose, no checkboxes) and turns `steps` into `## Tasks` items. Without a Switchboard it writes the file
+  verification; prose, no checkboxes) and turns `steps` into `## Tasks` items. Without a Board it writes the file
   as today.
 - **Re-planning** matches steps to existing items by id (the model receives ids in the attached card block) or by exact
   text. Done items are kept. Unmatched open items become `dropped` with reason "removed by re-plan", never deleted.
@@ -191,11 +191,11 @@ Expanded (at most 6 rows, then "+3 more"):
   free. Ctrl+Shift+K is unbound in Relay defaults; preset conflicts are *unverified* (check KEYBINDING-PRESETS.md).
   The expanded state persists per pane, like Claude Code's.
 - **Down** from the composer's last line focuses the strip, then the agents list, as in Design C. On a row: Enter opens
-  the ref'd card on that item in the Switchboard, `t` inserts `#K7Q2.a3` into the composer, `x` cancels the todo
+  the ref'd card on that item in the Board, `t` inserts `#K7Q2.a3` into the composer, `x` cancels the todo
   (asks for a reason), `r` re-asks a request, Esc returns to the composer.
 - Linked-item writes print the SWITCHBOARD 5 inline line, merged per turn: `◆ #K7Q2 · 2 tasks done, 1 in progress`.
 
-### 3.2 In the Switchboard
+### 3.2 In the Board
 
 - **Card face**: progress bar and count, next open item on hover or selection, blocked badge (`⏸ waits on #M3XJ`).
 - **Card detail**: `## Tasks` is an interactive checklist above the body; Tab moves focus between header, tasks, body
@@ -220,7 +220,7 @@ Expanded (at most 6 rows, then "+3 more"):
 | clicking the Memory tab or palette "Memory" | "Next time: /memory" |
 | palette "Remember…" | "Next time: /remember <text>" |
 
-## 4. Project memory in the Switchboard
+## 4. Project memory in the Board
 
 ### 4.1 Roles
 
@@ -312,7 +312,7 @@ Re-injected after compaction (research item 4 block). Subagents and the board wo
 tools. `/context` lists what loaded and what was cut. Precedence on conflict: instruction files > private > shared >
 global, and a newer `supersedes` wins.
 
-### 4.5 Memory UI in the Switchboard
+### 4.5 Memory UI in the Board
 
 - A **Memory** tab next to Tasks, a list rather than columns: groups Shared / Private / Global, then type; each row
   shows name, description, unreviewed dot, `paths` chip and last used. The detail pane reuses `CardDetailView`: header
@@ -390,7 +390,7 @@ Order: T0 → T1 → M1 → T2 → T3 → M2. T3 must land before subagent workt
    visible to editors and agents), or `$XDG_DATA_HOME/relay/private/<repo>/` (survives `git clean` and is shared across
    worktrees, but hidden)?
 2. **Task toggle key**: Ctrl+Shift+K (recommended; Ctrl+T is New tab in Relay), or no global key and only Down-focus?
-3. **Status words**: keep the model-facing `update_todos` enum and map to Switchboard words (recommended), or switch
+3. **Status words**: keep the model-facing `update_todos` enum and map to Board words (recommended), or switch
    the tool to `open/in-progress/done/dropped`?
 4. **Sync timing**: write linked items on every transition, batched per call (recommended), or once at end of turn
    (fewer writes, but a crash loses progress)?
@@ -413,20 +413,20 @@ Recommendations accepted for questions 1, 2, 3, 4, 7, 10 and 11. Changes:
 
 - **5. Item vs card:** no rigid rule ("anything landable is a card" is too strict). The agent follows the user's
   observed preferences for granularity; it may nudge and propose reorganizations in that direction, never force them.
-  The Switchboard gets a **Reorganize** action (button, palette, `/switchboard-review`): the agent reviews the whole
+  The Board gets a **Reorganize** action (button, palette, `/switchboard-review`): the agent reviews the whole
   board (duplicates, cards that should be items or vice versa, stale statuses, missing links, unconverted notes) and
   presents proposals, applied per the board's autonomy setting and logged in the affected threads.
-- **6. Global Switchboard:** global memory lives in a **global Switchboard** (per user, e.g. `~/.config/relay/switchboard/`)
+- **6. Global Board:** global memory lives in a **global Board** (per user, e.g. `~/.config/relay/switchboard/`)
   holding everything cross-project: guidance (global `RELAY.md`), global skills, aliases/prebaked commands and prompts
-  (intake: Warp-workflow-style), memory, and possibly MCP server config. The **local (repo) Switchboard** holds local
+  (intake: Warp-workflow-style), memory, and possibly MCP server config. The **local (repo) Board** holds local
   skills, cards, plans and project memory. Same UI for both, switchable.
-- **8. Learned preferences** are global-Switchboard memory, inspectable and editable there. A local Switchboard may
+- **8. Learned preferences** are global-Board memory, inspectable and editable there. A local Board may
   also hold **team characteristics** memories (e.g. one collaborator is an economist, another a computer scientist, who
   knows databases), each public (in git) or private.
 - **9. Instruction files:** Relay uses `RELAY.md` by default and may edit it, as well as `AGENTS.md`, `CLAUDE.md`,
   `WARP.md` and similar, as agents do. Edits to instruction files are surfaced as highlighted tool-call notifications.
 - **One object model: plans and memories are card types (supersedes 2.4, the memory storage in section 3, and the
-  "plans on cards" part of Switchboard decision 12.4).** Every Switchboard object is a card with a `type`; each type
+  "plans on cards" part of Board decision 12.4).** Every Board object is a card with a `type`; each type
   has its own view and statuses and shares ids, threads (history), privacy, links, search, the `#` picker, Reorganize,
   git merging and undo.
 
@@ -445,7 +445,7 @@ Recommendations accepted for questions 1, 2, 3, 4, 7, 10 and 11. Changes:
     items, so a plan covers part of a card, one card or several; finishing a step updates its target and logs a thread
     event there. Cards list linked plans in `links.plans`; "Plan this" on a card creates a linked plan card; a step can
     be promoted to a work card. Execute seeds todos from open steps; re-planning keeps done steps, drops removed ones,
-    and records the previous version as a thread event (compare / restore). Without a Switchboard a plan is a single
+    and records the previous version as a thread event (compare / restore). Without a Board a plan is a single
     file of the same format in `.relay/plans/` (configurable), adoptable into a board later without conversion. A plan
     linked from a private card defaults to private; a shared plan never names a private card in git.
   - **Memories** (`type: memory`): one small card file per fact, with `scope` (project, team, user), `topic`
@@ -453,4 +453,4 @@ Recommendations accepted for questions 1, 2, 3, 4, 7, 10 and 11. Changes:
     privacy per fact. The Memory tab shows them as one list per topic (edit a line, history, shared/private toggle), not
     as board cards. A memory may record where it was learned (`source: #K7Q2`); cards and plans may cite memories. The
     agent loads a compact index (cap 8 KB) plus pinned and path-matched bodies, as in section 3. The global
-    Switchboard uses the same layout for user-scope memory.
+    Board uses the same layout for user-scope memory.

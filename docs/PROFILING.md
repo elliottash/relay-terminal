@@ -1,6 +1,6 @@
 # Profiling and test tooling: machine setup and the commands behind the buttons
 
-Card #7BM4 (2026-09-20). The Switchboard's **Test suites** pane and **Profile** button run
+Card #7BM4 (2026-09-20). The Board's **Test suites** pane and **Profile** button run
 ordinary tools; this page says which, how a machine is set up for them, and the exact commands,
 so everything the buttons do can also be done by hand and checked. Research and sources:
 [`SWITCHBOARD-TOOLING-RESEARCH.md`](SWITCHBOARD-TOOLING-RESEARCH.md). The measured profile of

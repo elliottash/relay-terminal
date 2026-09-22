@@ -9,7 +9,7 @@ operator — not a person looking at a screen. The recurring shape, stated once 
 
 The "human QA" step in these disciplines is almost never "a person uses the feature." It is a person
 judging *whether the evidence is adequate* — a review, a witness signature, a readiness sign-off.
-That distinction is the single most transferable finding for the Switchboard design.
+That distinction is the single most transferable finding for the Board design.
 
 ---
 
@@ -205,7 +205,7 @@ required between code development and test case derivation, to satisfy the indep
 objectives A6-3 and 4 for software level A and B." In practice this means *the engineer who wrote the code
 may not be the engineer who derives the test cases or reviews the requirement* — at DAL A/B a separate
 reviewer breaks the author-reviewer link. This is the clearest statement in any of these standards of the
-rule a Switchboard should encode: **the agent that implemented the card is disqualified from being the
+rule a Board should encode: **the agent that implemented the card is disqualified from being the
 verifier of the card.**
 
 **Objective counts.** The widely cited figures are 71 objectives at Level A, 69 at B, 62 at C, 26 at D
@@ -956,7 +956,7 @@ organisation.
 
 **Borrow as:** **the agent that implemented a card may not be the agent that verifies it, and may not be the
 agent that writes its QA checklist.** This single rule is what three separate industries independently
-converged on, and it is cheap to encode in a Switchboard.
+converged on, and it is cheap to encode in a Board.
 
 ---
 

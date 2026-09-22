@@ -1,11 +1,11 @@
 # Initializing a project, and importing what is already there
 
-A project gets a Switchboard only when the user answers one question, once:
+A project gets a Board only when the user answers one question, once:
 
-> **Initialize a project and create a Switchboard here?**
+> **Initialize a project and create a Board here?**
 
-Owner's rule, 2026-09-18. Nothing creates `<project>/switchboard/` before that yes — not an
-agent, not opening the Switchboard pane, not a `board_*` tool
+Owner's rule, 2026-09-18. Nothing creates `<project>/board/` before that yes — not an
+agent, not opening the Board pane, not a `board_*` tool
 (`board_tools.BoardTools.create_board` is the only path, and every route into it goes through
 the `board_init_request` round trip).
 
@@ -13,7 +13,7 @@ This document covers the other half of that question: **what it shows**. Most pr
 are worth initializing already keep their work somewhere — a `TODO.md`, a `backlog/`, a
 `tasks.json`, a `specs/` tree. The question shows what Relay found, offline, and offers to
 bring it across. The offer is a checkbox per finding and **every checkbox starts unchecked**:
-saying yes to a Switchboard is not saying yes to an import.
+saying yes to a Board is not saying yes to an import.
 
 Implementation: `backend/relay_core/project_probe.py` (finding) and
 `backend/relay_core/board_import.py` (proposing, writing). The board format itself is
@@ -25,7 +25,7 @@ non-compliant notes", is `docs/SWITCHBOARD-DESIGN.md`.
 ## 1. What the question shows
 
 ```text
-┌─ Initialize a project and create a Switchboard here? ───────────────┐
+┌─ Initialize a project and create a Board here? ───────────────┐
 │  /home/elliott/src/widgetworks                                      │
 │                                                                     │
 │  This project already has                                           │
@@ -41,7 +41,7 @@ non-compliant notes", is `docs/SWITCHBOARD-DESIGN.md`.
 │   ·  the branch name carries ENG-1204, which looks like a Jira or   │
 │      Linear key; Relay does not contact either                      │
 │                                                                     │
-│                                   [ Not now ]  [ Create Switchboard ]│
+│                                   [ Not now ]  [ Create Board ]│
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -60,7 +60,7 @@ explicit act asks again. The five acts that may ask at all, and nothing else, ar
 
 **What creating a board writes.** `board.scaffold` writes `board.yaml`, `threads/`, the board's
 `.gitignore` and the `.gitattributes` union-merge line — and, since card #R9G7, the two files that
-carry the Switchboard's rules to an agent that has no `board_*` tools. `<board>/POLICY.md` is those
+carry the Board's rules to an agent that has no `board_*` tools. `<board>/POLICY.md` is those
 rules, generated from `board_policy.md` and the bundled `deliver` skill with an appendix that says
 how to file, claim, comment on and move a card by editing files; and a marked block is appended to
 the project's `CLAUDE.md` and `AGENTS.md` pointing at it, with `AGENTS.md` created when the project
@@ -86,7 +86,7 @@ Three rules the GUI must keep:
 
 Since 2026-09-19 (card #916B) there is a sixth way a board comes to exist, and it is the one that
 asks nothing. In a pane standing in no project at all — `~/Downloads`, an admin folder — reaching
-for the Switchboard opens the **project picker** (`src/ProjectPicker.h`): the projects Relay knows,
+for the Board opens the **project picker** (`src/ProjectPicker.h`): the projects Relay knows,
 and, always first, **"Initialize new project here"**. Choosing that row *is* the explicit user
 action the consent rule exists for, so the question above is not shown a second time and no probe
 runs: `Pane::initProjectHere()` attaches the tab to the pane's own directory and sends
@@ -502,7 +502,7 @@ board_import.read_state(board) / write_state(board, imported) / state_path(board
 ```
 
 `propose` reads and returns; it writes nothing and, like the probe, opens no socket and runs
-no subprocess. `apply` writes, and only through `BoardTools` — the same code the Switchboard
+no subprocess. `apply` writes, and only through `BoardTools` — the same code the Board
 pane writes with — so every card gets an id, a rank, a thread, an undo record and a
 `board_changed` event. The per-turn and per-hour ceilings and the duplicate check are the
 *agent's* guardrails; an import is the user's own act, so it runs with them off, exactly as the
@@ -592,7 +592,7 @@ run to some of `TRACKER_KINDS`; an unknown kind is an error. This message needs 
  "project": "/home/elliott/src/widgetworks",
  "kinds": ["checklist", "backlog-md"]}               // optional; omitted = all
 // worker -> GUI
-{"event": "board_import_proposals", "id": 42, "root": "/…/switchboard",
+{"event": "board_import_proposals", "id": 42, "root": "/…/board",
  "proposals": [ {"source_key": "checklist:TODO.md#ed481825",
                  "kind": "checklist", "title": "Wrap long lines in the composer",
                  "status": "inbox", "labels": ["imported", "checklist", "todo"],
@@ -616,9 +616,9 @@ already on the board, so the dialog can say "23 of 30, 7 already imported". Noth
  "keys": ["checklist:TODO.md#ed481825", "backlog-md:backlog/tasks/task-1 - X.md#TASK-1"],
  "tab": "features"}                                  // optional
 // worker -> GUI
-{"event": "board_imported", "id": 43, "root": "/…/switchboard",
+{"event": "board_imported", "id": 43, "root": "/…/board",
  "cards": [{"id": "K7Q2", "source_key": "checklist:TODO.md#ed481825",
-            "path": "switchboard/features/2026-09-18-wrap-long-lines.md",
+            "path": "board/features/2026-09-18-wrap-long-lines.md",
             "status": "inbox"}],
  "skipped": []}                                      // keys that were already imported
 ```
@@ -634,7 +634,7 @@ Ordering: `board_import_apply` requires a board **that exists**, so it comes **a
 through, which is what a single `board_create` does (19.12). The GUI sends `board_init` (the user
 said yes), then `board_import_apply` with whatever was ticked. `project` defaults to the pane's
 own board's project and may not name a different one. Like every other write here it goes through
-the Switchboard worker's busy guard (`code: "board_busy"`).
+the Board worker's busy guard (`code: "board_busy"`).
 
 All three reply events are desktop-only in `remote/wire.py`: they are a survey of one directory on
 this machine, every path in them is local, and they answer a dialog only the desktop shows.

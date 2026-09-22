@@ -472,11 +472,11 @@ Two things the design did not anticipate, both confirmed by use:
 ### 12.8 Agent consoles are not published (card #AGNT, owner decision 4, 2026-09-20)
 
 Since card #AGNT a helper agent is an **agent console**: a `Pane` with no shell, embedded in the
-Switchboard's list page and card page, in Options, Actions and Sessions (`ARCHITECTURE.md`, "Agents
+Board's list page and card page, in Options, Actions and Sessions (`ARCHITECTURE.md`, "Agents
 are consoles; contexts are what they are about"; protocol 33). It is a real `Pane`, so the question
 this document has to answer is whether it appears on the phone. **It does not, and that is a
 decision rather than an omission** — the owner's decision 4 on the card: *not in this card.* The
-phone's inbox is a list of panes you can open; a console row would open onto a Switchboard surface
+phone's inbox is a list of panes you can open; a console row would open onto a Board surface
 the client does not have, so it would be a row that goes nowhere.
 
 - **What keeps it out.** `RelayWindow::panesIn` stops at a `ToolPane` the way `leavesIn` already
@@ -487,7 +487,7 @@ the client does not have, so it would be a row that goes nowhere.
 - **Nothing leaks on the event streams either.** A console's turns run on the tab's board worker,
   whose events are the hub's allow-list decision, not a pane's screen stream: `board_chat*` is
   retired, and a turn's `surface` field (33.2) is the only thing that says which console asked.
-  Card #SWPH's Switchboard bridge forwards an allow-listed set of `board_*` events to the owner's
+  Card #SWPH's Board bridge forwards an allow-listed set of `board_*` events to the owner's
   full devices and nothing else.
 - **A card turn is a console turn now, and the phone still does not need one** (card #CTRN,
   2026-09-21). A card's Discuss and Plan stopped being a runner of their own and became ordinary
@@ -508,7 +508,7 @@ the client does not have, so it would be a row that goes nowhere.
   an empty prompt box — is `board_resume {id}`, the one queue op on §17.1's list. A device is
   still sent none of a queue's state; `board_resumed {card_id, resumed}` is what tells it whether
   there was anything waiting, which is the whole of what it needs to know.
-- **What would be needed to change it.** Three things, in this order: a Switchboard surface on the
+- **What would be needed to change it.** Three things, in this order: a Board surface on the
   phone worth opening a console *into* (section 5's item 9 and #SWPH's card view are the start);
   a decision about which surface a remote ask names, since `ask {surface}` is how the desktop tells
   four consoles apart and a phone would be a fifth; and a rule for the console's transcript. 12.6

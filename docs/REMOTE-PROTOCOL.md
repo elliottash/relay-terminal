@@ -1432,7 +1432,7 @@ against **real shells** — including Relay's own panes, from the share button i
 | Always on (§8.1) | `remote/gui_host.py`, `remote/host.py` | `start` with `"always"` and an `"address"` brings the service up with no share asked for, and keeps it there: the hub's socket reconnects for ever with a jittered back-off and **registers again before each retry**, so a rendezvous restart is survived rather than ending the day's reachability, and it never moves to another address on its own. `remote_state` reports `on`, `address`, `base`, `online`, `devices` and one sentence of `reason` whenever any of them changes. `tests/test_remote_gui_host.py` (`AlwaysOnTests`, `AutoPublishTests`), `tests/test_remote_host.py` (`AlwaysOnLinkTests`). The desktop's half — the Options › Remote switch, the chrome indicator and "Disconnect all" — is card #PH0N's Phase 1.1 |
 | How the phone gets a secure context | `remote/tailnet.py`, `remote/devtls.py`, `remote/httpd.py` | `tailscale serve` with a real certificate, or a self-signed one. Both reach the same `httpd.Server`: it takes several listeners with one set of routes, so the CSP, `/pair` and `/join` behave the same at every origin |
 | Voice (§6.4) | `app/app.js`, `remote/gui_host.py`, `src/Pane.h` (`transcribeForRemote`) | A `MediaRecorder` clip from the phone, carried to the pane and transcribed by its own worker on the desktop's key; the text returns to the phone's prompt box, matched to the clip by id. Tested through a headless browser with Chrome's fake capture device; not yet tried with a real microphone on a real phone |
-| The Switchboard on a device (§17) | `remote/board_state.py`, `remote/wire.py`, `remote/host.py`, `remote/gui_host.py`, `remote/notify.py` | The hub half, built 2026-09-20 (#SWPH): `board_request` from a `full` device against an allow-list of ten request types with per-field shapes and caps, the never-list, per-device read and write buckets, audit lines without text, the GUI's `board_event` scrubbed of every path and routed by `rid` or fanned out to `full` devices, never to a guest, and the `card_waiting` push. `tests/test_remote_board.py`. The desktop bridge (`src/BoardRemote.*`) and the phone's view (`app/board.js`) are the card's other two halves |
+| The Board on a device (§17) | `remote/board_state.py`, `remote/wire.py`, `remote/host.py`, `remote/gui_host.py`, `remote/notify.py` | The hub half, built 2026-09-20 (#SWPH): `board_request` from a `full` device against an allow-list of ten request types with per-field shapes and caps, the never-list, per-device read and write buckets, audit lines without text, the GUI's `board_event` scrubbed of every path and routed by `rid` or fanned out to `full` devices, never to a guest, and the `card_waiting` push. `tests/test_remote_board.py`. The desktop bridge (`src/BoardRemote.*`) and the phone's view (`app/board.js`) are the card's other two halves |
 
 Every Relay pane is an engine pane, so every pane can be shared.
 
@@ -1658,11 +1658,11 @@ which a guest editor may send: a guest's prompt is not passed on but held for th
 Keys, provider and endpoint settings, the keyring and conversation deletion are desktop-only and
 have no type here at all (section 6.6, `NEVER_FROM_CLIENT`).
 
-## 17. The Switchboard on a device
+## 17. The Board on a device
 
-Card #SWPH, 2026-09-20. The Switchboard — the cards, their threads and the card actions — is the
+Card #SWPH, 2026-09-20. The Board — the cards, their threads and the card actions — is the
 best surface Relay has for driving work from a phone, and until this section it could not be
-reached from one: remote control publishes panes that have a terminal screen, the Switchboard is a
+reached from one: remote control publishes panes that have a terminal screen, the Board is a
 tool pane with none, and it runs on a per-window `BoardWorker` (sessions protocol 19) that the hub
 never sees. The shape follows section 16's rule: **the desktop's board is the model**. The GUI
 bridges its own `BoardWorker` to the hub, the hub allow-lists what goes in and scrubs what comes
@@ -1671,7 +1671,7 @@ never reads `issues/`, never names a file, and there is no second writer: every 
 the one worker, which already serialises them and answers `board_conflict`.
 
 `welcome.features` carries `"board"` for a `full` device on a desktop whose GUI is there to answer;
-a client shows its Switchboard row when it sees it and not otherwise.
+a client shows its Board row when it sees it and not otherwise.
 
 ### 17.1 Client → desktop: `board_request`
 
@@ -1739,7 +1739,7 @@ per-type ceiling (`LIMITS["board_request"]`, 720 a minute) sits above both.
 **Audit.** An accepted request records `board_request {device, type, card}`; a refused one records
 `board_refused {device, type, code}`, where `type` is a name this module knows or `"unknown"`.
 Never the text, the title, the reason or the query. A request refused **at the gate** — a `view` or
-`agent` device's, or a guest's, neither of which reaches the Switchboard's handler — records the
+`agent` device's, or a guest's, neither of which reaches the Board's handler — records the
 same line (`participant` in place of `device` for a guest, `code: "not_permitted"`), at most once a
 minute per channel: somebody let into a pane who tries the board is what the owner most wants the
 log to show, and the log is not a guest's to fill.
@@ -1859,7 +1859,7 @@ whether or not any device is connected, which is the point — keeping the last 
 per `board_key`.
 
 - **A change, never first sight.** Nothing fires for a board seen for the first time, so opening
-  the Switchboard does not ring the phone once per card already waiting; nothing fires for a card
+  the Board does not ring the phone once per card already waiting; nothing fires for a card
   first seen before its board has been seen whole (`more` false), because a card not read yet cannot
   be told from a new one. Once the board is known, a card that *arrives in a change*
   (`board_changed`, `board_card`) already waiting on the owner is a change like any other; one

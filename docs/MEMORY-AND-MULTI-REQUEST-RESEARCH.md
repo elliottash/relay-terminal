@@ -139,7 +139,7 @@ cannot be summarized away.
 | 6 | P1 | **Ledger UI.** A "Requests 3/5" chip in the queue strip. The expanded list shows each request with ✓ ◐ ○ ✕ ⏸, linked todos and deferred reasons. The user can mark done or cancelled, or "Re-ask" (queues the verbatim text). On resume and in away recaps, list open items ("2 requests still open"). `sessions` listing gains `open_requests` | M |
 | 7 | P1 | **Stale reminders.** If no `update_todos` call has happened for 8 steps while todos are open, add a short reminder at the step boundary (Claude Code pattern, text in the prompt, not a model call) | S |
 | 8 | P1 | **Optional audit side call** (setting, off by default). On `done`, a cheap no-tools call (the route-assist model) receives the turn's user messages and the final answer and returns `{unaddressed:[{request_id, quote}]}`. Results are only flagged in the UI ("may be unaddressed: …"), never auto-continued. This catches asks the model never put in a todo | S |
-| 9 | P2 | **Project memory.** `remember {text, scope: project\|user}` writes to `<workspace>/.relay/memory.md` or `~/.config/relay/memory.md`. Every write shows a toast plus diff and can be undone. Files are plain Markdown the user edits; loaded after instruction files (cap 8 KB, first 200 lines like Claude Code) and re-read at compaction. Keep roles separate: **WARP.md/AGENTS.md** = human-authored rules (read-only for the agent unless asked); **memory.md** = durable facts and preferences the agent learned ("tests need Xvfb", "owner prefers terse answers"); **Switchboard cards** (`issues/feature_intake.txt`, `docs/SCRATCHPAD-DESIGN.md`) = work items. The bridge: at session end or `/new`, open or deferred ledger items can be offered as Switchboard cards ("Save 2 open requests as cards?"), and a card's thread seeds a ledger when started | M |
+| 9 | P2 | **Project memory.** `remember {text, scope: project\|user}` writes to `<workspace>/.relay/memory.md` or `~/.config/relay/memory.md`. Every write shows a toast plus diff and can be undone. Files are plain Markdown the user edits; loaded after instruction files (cap 8 KB, first 200 lines like Claude Code) and re-read at compaction. Keep roles separate: **WARP.md/AGENTS.md** = human-authored rules (read-only for the agent unless asked); **memory.md** = durable facts and preferences the agent learned ("tests need Xvfb", "owner prefers terse answers"); **Board cards** (`issues/feature_intake.txt`, `docs/SCRATCHPAD-DESIGN.md`) = work items. The bridge: at session end or `/new`, open or deferred ledger items can be offered as Board cards ("Save 2 open requests as cards?"), and a card's thread seeds a ledger when started | M |
 | 10 | P2 | **Cross-session memory consolidation** (Codex phase 1/2 style): an opt-in background pass over idle sessions proposes memory edits for review (Devin/Gemini "suggest, don't write" pattern from `SCRATCHPAD-DESIGN.md`) | L |
 
 ### Protocol sketches (additive to `docs/AGENT-SESSIONS-PROTOCOL.md`)
@@ -215,16 +215,16 @@ R2: "…full text…"
 ## 8. Order of work
 
 1 (drop fixes + tests) → 2 + 3 (ledger, todo tool, `requests`/`todos` events) → 4 (compaction block) → 5 + 7
-(completion check, reminders) → eval baseline before and after → 6 (UI) → 8 → 9 alongside the Switchboard → 10.
+(completion check, reminders) → eval baseline before and after → 6 (UI) → 8 → 9 alongside the Board → 10.
 Open questions for the owner: default turn limit; whether the completion check may re-prompt automatically (proposed
-yes, max 2); whether memory lives in the repo (`.relay/memory.md`, shareable like the Switchboard) or per user.
+yes, max 2); whether memory lives in the repo (`.relay/memory.md`, shareable like the Board) or per user.
 
 ## 9. Owner decisions (2026-09-17)
 
 - **Do all recommended fixes.** Items 1–8 are being implemented now. The todo tool (item 3) ships in the minimal
   form above; the user-facing task list is redesigned in a separate proposal (Warp vs Claude Code, integrated with the
-  Switchboard: a task can be a whole card or an item on a card).
+  Board: a task can be a whole card or an item on a card).
 - **Step limit:** default 50 model steps (tool-call cap 150), configurable in Agent options.
 - **End-of-turn check:** yes, automatic re-prompt, at most 2 per turn.
-- **Project memory:** lives in the repo's Switchboard, viewable and editable alongside plans and issues, with private
+- **Project memory:** lives in the repo's Board, viewable and editable alongside plans and issues, with private
   (not synced to git) memories, like private cards. Supersedes the `.relay/memory.md` location in item 9.

@@ -16,7 +16,7 @@ Contents:
 8. [Inline agent output](#8-inline-agent-output)
 9. [Human and agent control](#9-human-and-agent-control)
 10. [File panes and `relay open`](#10-file-panes-and-relay-open)
-10a. [The Switchboard pane](#10a-the-switchboard-pane)
+10a. [The Board pane](#10a-the-board-pane)
 11. [Agent backend](#11-agent-backend)
 11a. [Guest agents: Claude Code and Codex in a pane](#11a-guest-agents-claude-code-and-codex-in-a-pane)
 12. [Keys, keyring and imports](#12-keys-keyring-and-imports)
@@ -110,8 +110,8 @@ logged as `runtime_sweep` only when something was removed or failed.
 Pane anatomy, top to bottom: the header (the pane title on the left, the terminal's directory
 on the right — the bare path, and nothing at all when the title already says that folder, #0STR;
 clicking the directory opens the explorer, and what the row does when it runs out of room is the
-give-way ladder below; while the pane's agent turn works a Switchboard card its `#id` sits beside
-the title, clickable to open that card in the Switchboard, and it never gives way as the row
+give-way ladder below; while the pane's agent turn works a Board card its `#id` sits beside
+the title, clickable to open that card in the Board, and it never gives way as the row
 narrows (#C7PF)), an optional
 banner (memory kill, restart), the terminal, the transcript panel (section 8), the composer
 frame (route label, input-mode picker, model picker, interrupt-shell button, Submit, editor,
@@ -257,7 +257,7 @@ title bar, with two `QTabWidget` corner widgets on it (`buildWindowChrome`):
 | Corner | Holds |
 |---|---|
 | Top left | The Relay icon |
-| Top right | Bell (notification centre); a hairline (`ChromeSeparator`); then one button per tool pane — Actions, Sessions, Switchboard, and the gear for Options — each drawn with its pane's own header glyph (`relay::chrome::paintTypeGlyph`) and running the pane's action, so it behaves exactly as the key does and its tooltip and "Next time" hint name that key; a hairline; the join plug ("Join a shared session"); a hairline; then minimize, maximize/restore and close |
+| Top right | Bell (notification centre); a hairline (`ChromeSeparator`); then one button per tool pane — Actions, Sessions, Board, and the gear for Options — each drawn with its pane's own header glyph (`relay::chrome::paintTypeGlyph`) and running the pane's action, so it behaves exactly as the key does and its tooltip and "Next time" hint name that key; a hairline; the join plug ("Join a shared session"); a hairline; then minimize, maximize/restore and close |
 
 `ChromeButton` paints each glyph with `QPainter` instead of using a font character, so the header
 does not depend on an emoji font and hover, disabled and close-button colours come from the theme.
@@ -509,13 +509,13 @@ pane's session token, so clicking it
 calls `WindowManager::focusPane()` → `RelayWindow::revealPane()` and lands on that pane in
 whatever window it now lives.
 
-One source beside the pane token (#NQP9): `board:<workspace>#<card-id>` names a Switchboard card.
+One source beside the pane token (#NQP9): `board:<workspace>#<card-id>` names a Board card.
 It is posted by the `onTurnEnded` wiring in `RelayWindow::createBoardPane` when a card's Plan turn
 ends — "Plan ready: #ID" or "Plan failed: #ID", with the card title as the body; discuss turns and
 cancellations post nothing, and nothing on the posting path ever moves focus (the card's "don't
 instantly move the active pane" rule). `RelayWindow::openNotificationSource` routes a clicked (or
 jumped-to) entry: tokens go to `WindowManager::focusPane()` as before, a `board:` source goes to an
-open Switchboard on that workspace — this window's first, then any other window's, which is raised
+open Board on that workspace — this window's first, then any other window's, which is raised
 — or opens one beside the active leaf; both land through `revealBoardCard`, which selects and opens
 the card and retries while its rows load (`waitForBoardCard`).
 
@@ -748,8 +748,8 @@ mode → `input.toggle`, with the mode chip flashing), dropping an image on the 
 paste shortcut) and "Screenshot this pane" from the palette (→ `agent.screenshotPane`,
 Ctrl+Shift+G), running an alias from the palette (→ `/name`, and for a command the name typed in
 terminal mode), asking for a skill by name in a prompt that says "skill" (→ `/name`), renaming a pane or a tab by double click (→ `/rename`, `/rename-tab`),
-starting a card edit in the Switchboard with the Edit button, a click on the title or a
-double-click in the text (→ `e`), a card's Discuss, Plan, Execute and Verify buttons (→ Enter, `p`, `x`, `v`; `board.verify` is #T71W's, on a card in a QA lane), a click on the ⧉ beside a card's `#ID` in the Switchboard (→ `y`; #FT77),
+starting a card edit in the Board with the Edit button, a click on the title or a
+double-click in the text (→ `e`), a card's Discuss, Plan, Execute and Verify buttons (→ Enter, `p`, `x`, `v`; `board.verify` is #T71W's, on a card in a QA lane), a click on the ⧉ beside a card's `#ID` in the Board (→ `y`; #FT77),
 the program banner's "Let the agent drive" / "Take over" buttons (→ `program.delegate`, `control.human`), a click on a running-agents row or its folded line (→ `agent.subagentPane`, Alt+A, or ↓ then Enter), a click on a task row of the strip under the prompt and the Tasks chip menu's task rows (→ ↓ then →, `tasks.strip.open.mouse`), the subagent pane's "← main agent" (→ `agent.subagentPane`), a turn that printed tool-call
 lines (→ click a ▸ line to unfold it, `Ctrl+Shift+Return` for the nearest) and a diff pane opening
 (→ n and p step through the hunks), the share button on a pane that is already shared (→ the palette, then "Sharing", because
@@ -758,7 +758,7 @@ option out in full (→ its number, `question.number`; an answer in the user's o
 ask working and is never corrected), dropping a pane on another's bottom edge (→ the move
 toward that pane then Move-down, `pane.dockBeneath`; the chord's own arming line is
 `pane.dockBeneath.chord`), the first reasoning delta of a turn (→ a click or `agent.thinkingPanel`
-folds it away, `thinking.fold`), closing a focused Switchboard by its button or the palette
+folds it away, `thinking.fold`), closing a focused Board by its button or the palette
 (→ `board.toggle` again, which closes it when it already has the focus, `board.close`; card #4XR8),
 and rotating idle tips 4 s after a finished agent turn with an
 empty prompt box. **Every new feature with a shortcut should add a hint on its slow path** (rule
@@ -826,12 +826,12 @@ Surfaces that install it: the pane's reasoning bubble and program transcript (`s
 conversation info pane (`src/SessionInfo.cpp`), the conversations pane's preview
 (`src/Conversations.cpp`), the turn log (`src/TurnTranscript.cpp`), a subagent's transcript
 (`src/SubagentTranscript.cpp`), the diff view (`src/DiffView.cpp`), the file explorer's path line
-and the file preview's text, rendered Markdown and info page (`src/FilePanes.cpp`), the Switchboard
+and the file preview's text, rendered Markdown and info page (`src/FilePanes.cpp`), the Board
 card document and its cleanup panel (`src/BoardPane.cpp`), the tasks panel's detail
 (`src/RequestsPanel.cpp`), the sharing pane's request text (`src/SharingPane.cpp`) and the share
 dialog's address and invite link (`src/RemoteShare.cpp`). Tests: `tests/copyonselect_test.cpp`.
 
-Copying something that is not a selection says so the same way. The Switchboard's `BoardView` has
+Copying something that is not a selection says so the same way. The Board's `BoardView` has
 a toast of its own (`BoardView::toast`, `src/BoardPane.cpp`, #Y2F4) — the same small fading popup,
 wearing the same `toast` object name a pane's does, so the theme styles both — because the board is
 a `ToolPane` rather than a `Pane` and cannot reach `Pane::toast`. A click on a hashtag in the board
@@ -1529,7 +1529,7 @@ an answer that has not come back yet reads as "nothing there"; when the batch la
 is told (`linkProbeAnswered()`) and the view re-reads the cell the pointer is on. `--flags`, bare numbers, version strings and `FOO=bar` are rejected
 before the probe.
 
-`candidates()` also finds `#K7Q2` card references (Switchboard design section 5): four
+`candidates()` also finds `#K7Q2` card references (Board design section 5): four
 Crockford-base32 characters with at least one letter, opening a word, the whole word. Those are
 resolved against a `CardLookup` the host hands in rather than against the filesystem —
 `Pane::lookupOutputCard` answers from the pane's `relay::board::Model` — so, exactly as with a
@@ -1547,21 +1547,23 @@ plain click (only in the active pane, so the click that moves the focus cannot o
 Ctrl+click, the right-click menu ("Open …", "Open in the system editor", "Copy path"; on a card
 "Open #K7Q2 …", "Copy #K7Q2", "#K7Q2 → prompt") and the ordered link list behind
 `Ctrl+Shift+L`. `Pane::openOutputTarget` routes the result: a folder to an explorer pane, a file
-to a preview pane at `line`, a URL to `QDesktopServices`, a card to this tab's Switchboard
+to a preview pane at `line`, a URL to `QDesktopServices`, a card to this tab's Board
 (opening the pane first when the tab has none), selected and scrolled into view.
 
 `relay-open` falls back to `xdg-open` when Relay is not reachable.
 
-## 10a. The Switchboard pane
+## 10a. The Board pane
 
-The Switchboard **is** a folder in the project shown as a board: one card per issue, plan or
-memory, a thread per card, and an agent that writes to it. The folder is `.switchboard/` (hidden,
-so the cards do not clutter the project's listing and a ripgrep-based agent does not match every
-card on every code search) on a board made from 2026-09-19 on, `switchboard/` on one made between
-2026-09-18 and then, and `issues/` on one filed before either — `board.BOARD_FOLDERS` /
+The Board **is** a folder in the project shown as a board: one card per issue, plan or
+memory, a thread per card, and an agent that writes to it. The folder is `board/` on a board made
+from 2026-09-21 on, `.switchboard/` on one made between 2026-09-19 and then (hidden, so the cards
+did not clutter the project's listing), `switchboard/` on one made between 2026-09-18 and
+2026-09-19, and `issues/` on one filed before any of them — `board.BOARD_FOLDERS` /
 `relay::projects::boardFolders()`, read in that order, and the only one a project ever keeps is the
-one it already has: nothing moves by itself, except the explicit "Hide this board's folder" /
-"Show this board's folder" action (protocol 19.17). Its `board.yaml` is the marker, and that marker
+one it already has: nothing moves by itself, except the explicit "Move this board to `board/`"
+action (protocol 19.17). A visible `board/` is found by an ordinary `rg`, which is the point; the
+generated pointer block and `POLICY.md` teach `rg -g '!board/'` for the searches that do not want
+it. Its `board.yaml` is the marker, and that marker
 is the switch — everything here is inert without it. Design:
 `docs/SWITCHBOARD-DESIGN.md`; bytes: `docs/SWITCHBOARD-FORMAT.md`; protocol:
 `docs/AGENT-SESSIONS-PROTOCOL.md` section 19.
@@ -1572,14 +1574,14 @@ no board tools, no board policy in the prompt, no tip and no offer. A pane's *ca
 derived fresh from its live terminal directory (`projects::candidateFor`) and is an offer, not an
 attachment; the pane's own `workspace()` is never consulted, because it is frozen at creation and
 inherited from the directory Relay was launched in — the reason one project's board used to appear
-in every pane of every window. Only an explicit project action attaches: opening the Switchboard,
+in every pane of every window. Only an explicit project action attaches: opening the Board,
 `/card`, picking a card with `#`, Execute-from-card. `RelayWindow::attachTab()` is the one funnel —
 the only writer of the tab → project map, the only caller of `projects::Registry::remember()` and
 the only place the tab's panes are re-pointed — and `set_board` (protocol 19.11) re-points a pane's
 worker **without ending its conversation**. Nothing on the tab header names the attachment (the
 attached-project chip went with the theme swatch and the ⧉ button; owner, 2026-09-19); "Detach
 this tab from <project>" in the palette is the one way to detach, and it closes nothing — an open
-Switchboard stays open. An unattached tab shows nothing at all. Ctrl+Shift+S always opens Switchboard: the attached project's board, the terminal's candidate
+Board stays open. An unattached tab shows nothing at all. Ctrl+Shift+S always opens the Board: the attached project's board, the terminal's candidate
 project, or an empty board for its current directory. Opening an empty board creates no files.
 Project selection lives only in the shared Projects tab (Ctrl+Shift+P); the legacy project-picker
 page was removed (#P7SJ followup). A loose `/card` request is held there until Attach this tab or
@@ -1606,7 +1608,7 @@ Initialize supplies the destination. Options links to Projects; Forget changes o
   in a window. `board::BoardContext` and `board::CardContext` (in `src/BoardPane.cpp`) are the list
   page's and an open card's; `RelayWindow` turns either into an embedded console — a no-shell `Pane`
   — through `relay::agent::ConsoleFactory`. "Agents are consoles; contexts are what they are about"
-  below, card #AGNT, protocol 33. The Switchboard's console sits at the bottom of the list page,
+  below, card #AGNT, protocol 33. The Board's console sits at the bottom of the list page,
   outside the splitter, with **Check**, **Clean up**, **Tests** and **Profile** as its action row and
   `a` from anywhere on the board to put the keyboard in it; the Check findings and the survey offer
   are board widgets *above* it, and a finding still **drafts** a fix request into the composer rather
@@ -1617,7 +1619,7 @@ Initialize supplies the destination. Options links to Projects; Forget changes o
   pane's conversation. It is started lazily on the first console and answers every `board_*` message
   of protocol 19. It serves every agent console of the tab, not the board's alone: "Agents are
   consoles; contexts are what they are about" below.
-- **`src/BoardRemote.{h,cpp}`** (card #SWPH): the Switchboard on the owner's paired devices. The
+- **`src/BoardRemote.{h,cpp}`** (card #SWPH): the Board on the owner's paired devices. The
   sidecar hands `RemoteShare` a `board_request {rid, device, name, request}` line; the bridge
   re-checks `request.type` against the device allow-list (`board_open`, `board_refresh`,
   `board_card_get`, `board_search`, `board_comment`, `board_move`, `board_create`, `board_ask`,
@@ -1629,16 +1631,16 @@ Initialize supplies the destination. Options links to Projects; Forget changes o
   `board_event {rid|null, event}` with every path field removed. `board_action` is GUI-level like
   `x` and `v`: it reads the card, builds `board::executeTask` / `verifyTask`, opens the pane through
   the board pane's own `onExecuteCard` / `onVerifyCard` (or the same pane beside the last active
-  one when the tab has no Switchboard pane), sends the `board_claim` / Verify note, and answers
+  one when the tab has no Board pane), sends the `board_claim` / Verify note, and answers
   `board_action_result`. A device stays on the board its last `board_open` found; the bridge
-  watches that board folder itself while no Switchboard pane does, so a card an agent writes
+  watches that board folder itself while no Board pane does, so a card an agent writes
   still reaches the phone. A device's write is said in the status line ("Card #K7Q2 moved to Done
   from iPhone"). All of it is refused, and nothing forwarded, while remote control is off.
   `tests/boardremote_test.cpp`.
 
 Opening: **Ctrl+Shift+S** (`board.open`) splits it in beside the anchor pane, focuses the one the
 tab already has, or, pressed on it, returns to the last terminal pane. Also the palette
-("Switchboard") and `/switchboard`. `/card <text>` adds a card to the Inbox verbatim without
+("Board") and `/switchboard`. `/card <text>` adds a card to the Inbox verbatim without
 opening anything. Both attach the tab to the pane's candidate project; a candidate with no board
 yet gets one quiet status line and **nothing is created** (the init question is protocol 19.12).
 The layout node is `{"board": {"workspace", "tab"}}`, and a tab attached to a project is saved as
@@ -1770,7 +1772,7 @@ named — is one more class implementing `Context`, and nothing else.
 | Context | Where | Role | Shell | Persist | Action row | Links it resolves | A finished turn |
 |---|---|---|---|---|---|---|---|
 | **Terminal** (`Pane::TerminalContext`) | `src/Pane.h` | the pane's own (`main`/`flash`/`local`) | yes | `pane` / the pane's scrollback id | — | path, url, `#ID` | the transcript |
-| **Switchboard** (`board::BoardContext`) | `src/BoardPane.cpp` | `switchboard` | no | `helper` / the tab id | Check (k), Clean up (u), Tests, Profile | `option:`, `session:`, `card:` | the transcript |
+| **Board** (`board::BoardContext`) | `src/BoardPane.cpp` | `switchboard` | no | `helper` / the tab id | Check (k), Clean up (u), Tests, Profile | `option:`, `session:`, `card:` | the transcript |
 | **Card** (`board::CardContext`) | `src/BoardPane.cpp` | `switchboard` | no | `helper` / `<tab id>/card:<ID>` | Plan (p), Execute (x), Verify (v) in a QA lane | as the board | the answer is appended to `issues/threads/<ID>.md` by the worker |
 | **Options / Actions** (`OptionsContext`) | `src/SettingsPane.cpp` | `switchboard` | no | `helper` / the tab id | — | `option:` reveals the row here | the transcript |
 | **Sessions** (`SessionsContext`) | `src/Conversations.cpp` | `switchboard` | no | `helper` / the tab id | — | `session:` selects the row here | the transcript |
@@ -1816,7 +1818,7 @@ and is handed a `relay::agent::ConsoleHandle` — the widget to embed plus `focu
 `relay::PaneView` pattern. `RelayWindow::createAgentConsole(Context *, QWidget *parent)` builds it and
 `wireConsoleHost(view, leaf, hintId)` is the one template that sets the factory, the tab id, the tab's
 workspace and the live `helper.ask` key on Options, Actions and Sessions; `createBoardPane` does the
-same for the Switchboard. Options, Actions and Sessions build their console **on first expand** of the
+same for the Board. Options, Actions and Sessions build their console **on first expand** of the
 collapsed "Helper Agent (Alt+Q)" row, which is the host's — so a tab nobody asks anything pays for
 nothing.
 
@@ -1880,7 +1882,7 @@ got the whole executor while a board-attached one got read-only tools.
 | Scope | Who | Tools |
 |---|---|---|
 | `pane` | a terminal pane's agent | the whole executor, the app tools, its own session's read tools, the ordinary board tools. The only scope that defers its on-demand tool groups (protocol 12.13) |
-| `console` | the Switchboard page, an open card, Options, Actions, Sessions | the same list, plus `board_merge_cards`, `board_split_card`, `board_import_items` and `search_files` |
+| `console` | the Board page, an open card, Options, Actions, Sessions | the same list, plus `board_merge_cards`, `board_split_card`, `board_import_items` and `search_files` |
 
 There was a third row, `card`, until card #CTRN: one Discuss or Plan turn on one card, offered the
 mode's board tools and the read-only file tools. It is gone. A card console is a console, and what a
@@ -2022,10 +2024,10 @@ in native mode never pass through Relay and are not indexed.
 The shared Projects and Sessions pane has three primary tabs (card #P7SJ): Projects
 (`projects.open`, Ctrl+Shift+P), Sessions (`agent.resume`, Ctrl+Shift+Y), and Globals
 (`globals.open`, Ctrl+Shift+G). Each shortcut selects its tab in the existing pane. The
-Projects page (`ProjectsPane`) manages known/pinned projects, attachment, Switchboard access,
+Projects page (`ProjectsPane`) manages known/pinned projects, attachment, Board access,
 and live panes including No project; its Sessions action applies the matching project filter.
 Options links to this page rather than repeating the project registry. Globals (`GlobalsPane`)
-is Switchboard HQ: it edits global memory/alias cards and existing instruction sources through
+is Board HQ: it edits global memory/alias cards and existing instruction sources through
 `globals_*` worker messages. The same pane helper gets the selected tab's context. Page state
 and unsaved Globals drafts survive tab switches. Entering Sessions refreshes its existing query
 and filters; Recently closed is a button within Sessions, with a Back to sessions action, rather
@@ -2804,8 +2806,8 @@ cannot compact its own turn.
 
 `src/Aliases.*` and `backend/relay_core/aliases.py` (issue `#G8DK`, protocol section 20). An alias
 is a saved terminal command or agent prompt with `{{parameter}}` placeholders, stored as one
-Switchboard card per alias: **global** aliases in the global Switchboard
-(`$XDG_CONFIG_HOME/relay/switchboard/aliases/`), **local** ones in the repository Switchboard
+Board card per alias: **global** aliases in the global Board
+(`$XDG_CONFIG_HOME/relay/switchboard/aliases/`), **local** ones in the repository Board
 (`issues/aliases/`, or `.relay/aliases/` before a board exists). A local alias hides a global one
 of the same name.
 
@@ -3050,7 +3052,7 @@ keybindings.json).
   real controls.
 
 Each mode is its own pane, beside the focused pane in the splitter layout like the explorer and the
-Switchboard — a full pane, not a strip over the right edge (owner, 2026-09-18). **Both can be open
+Board — a full pane, not a strip over the right edge (owner, 2026-09-18). **Both can be open
 at once** (owner, 2026-09-18: "you cant have the options menu and actions menu both open
 simultaneously"); until then it was one pane whose mode the other key swapped, so a setting could
 not be read beside the action that used it. `RelayWindow::openSettingsPane(mode)` looks up the pane
@@ -3251,11 +3253,11 @@ There are three channels, and one meaning per colour:
 | `warning` (amber) | **something is waiting on a person** | the NeedsYou glyph and tab icon, the ask (`Ink::Ask`), `**Need:**`, the notification, the work chip's attention state, a context or quota chip near its limit, the board's problems, the composer hint *only* while a program waits for input |
 | `error` (red) | failed, or the pane is typing into another machine | the Failed glyph, `**Problem:**`, the fill of diff removals, the ssh band |
 | `action` (red-orange) | the Actions pane | its band, glyph and title-bar button |
-| `tool` (brass) | this pane is a tool | the Switchboard's band and its neighbours' |
+| `tool` (brass) | this pane is a tool | the Board's band and its neighbours' |
 | `link` (dark green) | **you can open this** | a path, folder, URL or `#card` in program output (at rest, since 2026-09-19), the hover underline and the keyboard walk, a fold's "open x.py" row, OSC 8 hyperlinks, the agent's Markdown links (ANSI 2), the composer's path token, `QPalette::Link` |
 
 **Amber has one job.** Until 2026-09-19 it also drew a tool pane's header band, the `!` terminal
-prefix chip and a Switchboard cleanup *while it ran* — none of which is waiting on anybody — so the
+prefix chip and a Board cleanup *while it ran* — none of which is waiting on anybody — so the
 one signal that must never be missed was the busiest colour in the app. The band took `[ui] tool`
 (brass: the same family, dulled, derived from each theme's own amber by `brassFrom()` when a file
 is silent, so it inherits the amber's contrast); the cleanup went violet, because it is the agent
@@ -3408,7 +3410,7 @@ of text a person reads, in every shipped theme; new UI follows them.
    italic + muted + monospace for anything a person has to read. Faint (SGR 2) and a fold's dim
    rows should fade toward the ground only as far as 4.5:1; the engine's view still draws them at
    60% alpha (2.9:1 for the muted grey on Relay Dark), which is the engine's to change.
-4. **Case.** Engraved headings (Switchboard sections, Options groups) may stay in letter-spaced
+4. **Case.** Engraved headings (Board sections, Options groups) may stay in letter-spaced
    capitals because they are at or above the floor and one or two words long. A name — a pane's
    header band, a chip that says what something is — is in sentence case.
 
@@ -3529,17 +3531,17 @@ of the platform and of the engine itself.
 | `src/EscapeeCaps.{h,cpp}` | the opt-in, off-by-default cap on tmux and Chrome, which scope themselves out of their pane: the prefix drop-ins Relay writes and removes (section 13) |
 | `src/CopyOnSelect.h` | copy on highlight: the one `terminal/copy_on_select` reading and the event filter every read-only text surface installs (section 4, "Copy on highlight"). Header-only, because those surfaces are spread across a dozen libraries |
 | `src/Pane.h` | `Pane` — the terminal pane: its backend, Bash bridge, composer, queue, agent worker and conversation — and `QueueRowDelegate`, which draws the queue rows. `Pane` never names a window; it calls up through `std::function` callbacks |
-| `src/PaneChrome.h` | `ToolPane` (explorer, preview, plan, transcript, Switchboard, settings) and `PaneChrome`, the button row and drag grip in a pane's corner |
+| `src/PaneChrome.h` | `ToolPane` (explorer, preview, plan, transcript, Board, settings) and `PaneChrome`, the button row and drag grip in a pane's corner |
 | `src/WindowChrome.h` | `ChromeButton`, the painted header glyphs Relay draws instead of taking the desktop's title bar, and `NotificationsPopup`, the list behind the bell |
 | `src/RelayWindow.h` | `ClosedItem` and `WindowManager` (the windows, what was closed, `relay open PATH`, the saved layout), then `RelayWindow` — the tab row that is the title bar, the splitter tree, the palette, and shortcut routing. The two share a header because they name each other inline |
 | `src/WindowManagerImpl.h` | the `WindowManager` members that need the complete `RelayWindow`: opening and restoring windows, and reading and writing the saved layout. Included after `RelayWindow.h` |
 | `src/RichEditor.*` | composer editor |
 | `src/FilePanes.*` | explorer and preview widgets |
-| `src/BoardModel.*`, `src/BoardPane.*`, `src/BoardWorker.*` | the Switchboard: card rows, tabs, columns, filters; the pane and card detail; the per-tab worker that serves every agent console of the tab (the board, a card, Options, Actions and Sessions). `BoardContext` and `CardContext` live in `src/BoardPane.cpp` |
+| `src/BoardModel.*`, `src/BoardPane.*`, `src/BoardWorker.*` | the Board: card rows, tabs, columns, filters; the pane and card detail; the per-tab worker that serves every agent console of the tab (the board, a card, Options, Actions and Sessions). `BoardContext` and `CardContext` live in `src/BoardPane.cpp` |
 | `src/AgentContext.*`, `src/AgentHost.h` | an agent is the prompt box (card #AGNT, protocol 33): `relay::agent::Context` — what an agent is about (spec, action row, `submit`, link resolution, `turnFinished`, placeholder; **no tool list, ever**) — with `ContextSpec`, `Action`, `TurnRecord`, `ConsoleHandle` and `ConsoleFactory`; and `relay::agent::Host`, what a console is drawn on. Library `relay-agentcontext`, QtCore only, so a pane library can supply a context without naming a window |
 | `src/AppCommands.*` | the agent drives the app (protocol 30): the `app` catalog the window sends its workers, what is settable and which actions are agent-safe, the executor that carries out an `app_command`, and the change log behind Undo. No window is named here, so it is a library tested headless |
-| `src/BoardRemote.*` | the Switchboard on the owner's paired devices (#SWPH): `board_request` lines allow-listed and rebuilt into the tab worker's messages, the worker's events tapped and sent back as `board_event`, Execute/Verify through the board pane's hooks |
-| `src/BoardWorkspace.*` | which project's Switchboard a pane is looking at: the walk up to `/`, trying every folder of `projects::boardFolders()` (`.switchboard/board.yaml`, `switchboard/board.yaml`, `issues/board.yaml`) at each level |
+| `src/BoardRemote.*` | the Board on the owner's paired devices (#SWPH): `board_request` lines allow-listed and rebuilt into the tab worker's messages, the worker's events tapped and sent back as `board_event`, Execute/Verify through the board pane's hooks |
+| `src/BoardWorkspace.*` | which project's Board a pane is looking at: the walk up to `/`, trying every folder of `projects::boardFolders()` (`board/board.yaml`, `.switchboard/board.yaml`, `switchboard/board.yaml`, `issues/board.yaml`) at each level |
 | `src/Projects.*` | which project a pane is in (`candidateFor`, a filesystem walk with no `git` subprocess), where its board folder is or would be, and the removable registry of known projects in `state/projects.json` |
 | `src/Theme.*` | live tokens, palette, stylesheet, the theme switch |
 | `src/ThemeFile.*` | the theme file format: reader, token contract, discovery, generated colour scheme |
@@ -3572,7 +3574,7 @@ of the platform and of the engine itself.
 | `remote/`, `rendezvous/`, `app/` | the remote protocol and its Noise handshake, the ciphertext-only relay, and the phone's web client (`docs/REMOTE-PROTOCOL.md`) |
 | `shell/integration.bash`, `shell/event.py` | Bash bridge |
 | `backend/worker.py` | worker protocol loop |
-| `backend/relay_core/` | `router`, `provider`, `presets` (providers and the Main/Flash/Lite tiers), `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keytest` (the keys modal's Test button), `keybindings`, `skills`, `roles` (model roles), `titles` (pane titles and session summaries), `voice` (transcription), `program_input` (the agent typing into the visible pane), `conv_index` (conversation index and search), `logs` (rotating `worker.log`), `board` (card format), `board_tools` (the `board_*` agent tools and their guardrails), `board_protocol` (the Switchboard messages), `app_tools` (the `app_*` tools: the options and actions catalogs, the command round trip, the session search), `activity_tools` (`session_info` and `activity` over an agent's own session), `agent_context` (the `context` block of `configure`: the named tool scopes, the briefs and where a console's conversation is kept), `board_chat` (what is left of the page agent: the board seed, the survey state and its prompt), `aliases` and `alias_import` (saved commands and prompts, and importing Warp workflows and shell aliases) |
+| `backend/relay_core/` | `router`, `provider`, `presets` (providers and the Main/Flash/Lite tiers), `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keytest` (the keys modal's Test button), `keybindings`, `skills`, `roles` (model roles), `titles` (pane titles and session summaries), `voice` (transcription), `program_input` (the agent typing into the visible pane), `conv_index` (conversation index and search), `logs` (rotating `worker.log`), `board` (card format), `board_tools` (the `board_*` agent tools and their guardrails), `board_protocol` (the Board messages), `app_tools` (the `app_*` tools: the options and actions catalogs, the command round trip, the session search), `activity_tools` (`session_info` and `activity` over an agent's own session), `agent_context` (the `context` block of `configure`: the named tool scopes, the briefs and where a console's conversation is kept), `board_chat` (what is left of the page agent: the board seed, the survey state and its prompt), `aliases` and `alias_import` (saved commands and prompts, and importing Warp workflows and shell aliases) |
 | `scripts/` | `build.sh`, `test.sh`, `relay-open`, `relay-agent.py` |
 | `src/EngineBackend.*` | the `TerminalBackend` implementation over `engine/` |
 | `src/TerminalBackends.*`, `src/BackendFactory.cpp` | per-pane engine selection and the factory |
@@ -3582,7 +3584,7 @@ of the platform and of the engine itself.
 | `data/` | colour themes, `terminal.conf`, icons |
 | `packaging/`, `.github/workflows/`, `site/` | packages, CI, release, website |
 | `tests/` | Python backend and PTY tests, Qt editor and file pane tests |
-| `issues/` | file-based tracker, and the Switchboard's storage (`board.yaml`, cards, `threads/`) |
+| `issues/` | file-based tracker, and the Board's storage (`board.yaml`, cards, `threads/`) |
 
 ## 19. Sharing a pane with a phone
 
