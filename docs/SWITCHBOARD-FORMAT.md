@@ -274,8 +274,11 @@ one — with an optional ` — path` tail naming its source.
 - manual: docs/qa_evidence/2026-09-20-thing/
 
 ### Check 2026-09-20 21:04
-- failure · ctest:panelayout — `ctest -R panelayout` is not in the project any more
+- not-applicable · ctest:panelayout — `ctest -R panelayout` is not in the project any more
+- passed · unittest:tests.test_board_chat.BoardChatTests.test_steer — passed for this revision on sphinxpad, 2026-09-20T18:12:00Z
 - notice · unittest:tests.test_board_chat.BoardChatTests.test_steer — was edited; its history was reset
+- accepted · unittest:tests.test_board_chat.BoardChatTests.test_steer — run sphinxpad-7 from sphinxpad accepted as evidence for this revision <!-- relay:accept test=unittest:tests.test_board_chat.BoardChatTests.test_steer run=sphinxpad-7 rev=9f2c1ab40dd1 -->
+history: thread
 ```
 
 - Three spellings, and the parser is deliberately forgiving about the bullet, the backticks and
@@ -283,16 +286,32 @@ one — with an optional ` — path` tail naming its source.
   may name several tests), a Python path with optional `::Class::test_method` (the file or the
   class alone is every case under it), and `manual: <path>` for evidence a person recorded by
   hand. A prose line naming no invocation is ignored rather than reported as a broken test.
-- **`### Check <YYYY-MM-DD HH:MM>`** is written by the worker, never by hand: one line per
-  finding as `- <severity> · <test> — <message>`, or `- no findings`. Severities are GitHub
-  Checks' `failure` / `warning` / `notice`. At most one block per card per hour, and a block
-  from the same day is replaced rather than stacked on, so a day of checking leaves one current
-  answer. The block's own lines are prose about tests and are never read back as tests.
+- **`### Check <YYYY-MM-DD HH:MM>`** is written by the worker, never by hand, and there is exactly
+  **one** of them: every check replaces the block where it stands (and removes any older ones the
+  card still carries), so a day of checking leaves one current answer instead of a pile. Its
+  first lines are one per listed check — `- <status> · <test> — <message>`, where the status is
+  `passed`, `failed`, `missing-evidence` or `not-applicable` (card #PR4Q) — then the advisory
+  findings as `- <severity> · <test> — <message>` in GitHub Checks' `failure` / `warning` /
+  `notice`, then any `- accepted ·` line, and finally `history: thread`: the earlier checks are
+  the thread's `evidence` entries, which is where the history lives. The block's own lines are
+  prose about tests and are never read back as tests.
+- **A status is about a revision.** A run counts as evidence for a card when it ran at one of the
+  card's `links.commits`, or is newer than the newest of them and carries the test's current
+  `source_hash` — from *any* host, so a result `scripts/relay-remote-tests` fetched from a second
+  runner proves the card as well as a local run does. "Use this existing result" accepts one
+  explicitly: it appends an `- accepted ·` line carrying
+  `<!-- relay:accept test=<id> run=<run id> rev=<sha12> -->` to the block (never a front-matter
+  field), and the next check carries it forward while the revision holds.
 - The section **gates the landing**: a card does not leave `needs-verification` for a QA lane or
-  `done` while a test it lists is gone, has never run, or last failed. A card with no `## Tests`
-  section at all is not gated — the missing section is a warning on the card, not a reason it can
-  never close. A move may carry `override: "<reason>"`, and the reason is quoted into a
-  `decision` thread entry.
+  `done` while a check it lists is `failed` or `missing-evidence` for this revision. A retired
+  check (`not-applicable`) never blocks — it is a thing to replace, and the card page offers
+  *Replace retired check*. A move may carry `override: "<reason>"`: the reason is quoted into a
+  `decision` thread entry, which also carries one
+  `<!-- relay:override test=<id> rev=<sha12> until=<date> -->` marker per check it waived, so the
+  same override is never asked for twice for the same check and revision and stops holding after
+  fourteen days or when the card gets a new commit. A card with **no** `## Tests` section is asked
+  once, on its first landing move, which checks prove it (`tests_none`, recorded on the thread as
+  a note); the second attempt goes through.
 - `tests` is in `board_tools.AGENT_SECTIONS`, so an agent writes the section without the write
   being recorded as a rewrite of the owner's own words.
 

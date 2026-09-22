@@ -7001,7 +7001,14 @@ zero.** A p95 of 0.0 and a p95 nobody measured are different facts.
 {"type": "tests_history", "id": "ctest:board", "limit": 100}
 {"type": "tests_check", "card": "7BM4"}
 {"type": "tests_suggest", "card": "7BM4", "apply": true}
+{"type": "tests_accept", "card": "7BM4", "id": "ctest:board", "run_id": "sphinxpad-7"}
 ```
+
+`tests_accept` (#PR4Q) is "Use this existing result": it records that a run already in the store —
+another machine's, ingested from `.private/tests/incoming/` — is this card's evidence for this
+revision. It runs nothing, writes the acceptance into the card's `### Check` status and a thread
+entry, and answers with a fresh `tests_check` event. Its `id` is the **test**, as on
+`tests_history`; a run the store does not have is one sentence.
 
 `tests_suggest` (#7BM4 phase 4) maps the files this card's commits touched to discovered tests by
 the same naming convention Check's `orphaned` verdict uses, and — unless `apply` is `false` —
@@ -7023,13 +7030,32 @@ the id ceiling and nothing else — there is no request that means "the whole su
 {"event":"tests_run", "run_id", "state":"started"|"progress"|"finished"|"stopped"|"error",
    "id"?, "result"?, "duration"?, "done":int, "total":int, "message"?}
 {"event":"tests_history", "id", "executions":[Execution]}          newest first
-{"event":"tests_check", "card", "findings":[{test, verdict, message, severity}], "actions":[str],
-   "ids":[str], "files":{test id: path}, "failing":[str], "block"?}
+{"event":"tests_check", "card", "statuses":[Status], "findings":[{test, verdict, message, severity}],
+   "actions":[str], "ids":[str], "files":{test id: path}, "failing":[str], "revision", "block"?}
 {"event":"tests_suggest", "card", "changed":[path], "lines":[str], "ids":[str], "added":bool,
    "message"}
 ```
 
-`tests_check`'s last three keys are the same resolution its findings were folded from, so the
+`statuses` is Check's **answer** (#PR4Q): one row per listed `## Tests` line,
+
+```
+Status
+  test         str   the test id the line resolves to
+  invocation   str   what a person types to run it
+  status       str   "passed" | "failed" | "missing-evidence" | "not-applicable"
+  message      str   one sentence: what decided it
+  retired      bool  listed, but discovery no longer finds it — the `not-applicable` case
+  evidence     [{run_id, host, commit, ts, result, applicable}]   newest first, at most 3
+  use_existing bool  the newest result is another host's pass this card has not accepted
+  accepted     bool  …and this one already was
+```
+
+`revision` is the 12 characters of the card's newest commit that a status, an accepted result and
+an override are all scoped to. `findings` are what is *additionally* worth reading — the older
+verdicts (`retired`, `never-run`, `skipped-forever`, `edited`, `flaky`, `slow`, `failing`,
+`orphaned`), advisory now and severity `notice` unless they decide a status.
+
+`tests_check`'s three machine keys are the same resolution its findings were folded from, so the
 card's action buttons act on what was found rather than re-deriving it: `ids` are the runnable
 test ids the section's lines resolve to (what *Run these* sends), `files` maps a test id to its
 source (so a finding row opens it), and `failing` are the ids whose last stored result was not a
@@ -7139,33 +7165,63 @@ path, the whole of what an implementer lands: since #WC3E the implementer writes
 `## QA checklist` — the verifying session writes that, against the `## Done means` the card
 carried before the work started (19.20).
 
-**The dated block.** `tests_check` on the wire also *writes*: the **worker** appends a
-`### Check <YYYY-MM-DD HH:MM>` block under `## Tests`, one line per finding
-(`- <severity> · <test> — <message>`) or `- no findings`, through the board's own save with an
-`evidence` thread entry. At most one block per card per hour, and a block from the same day is
-replaced rather than stacked on, so a day of checking leaves one current answer instead of twelve
-historical ones. A card with **no** `## Tests` section gets no block: there is nowhere to put it,
-and the `no-tests` finding already says the section is missing. The block's own lines are never
-read back as tests. The agent-facing `tests_check` tool (31.6) still writes nothing.
+**One current status.** `tests_check` on the wire also *writes*: the **worker** puts a
+`### Check <YYYY-MM-DD HH:MM>` block under `## Tests` — one line per listed check with its status,
+then the advisory findings, then any accepted result, then `history: thread` — through the board's
+own save with an `evidence` thread entry. It **replaces** the block where it stands and removes any
+older ones (Codex's review §B: "show the latest status; retain history behind a link"), so there is
+no one-an-hour rule any more and no pile of dated blocks: the history is the thread's `evidence`
+entries. A card with **no** `## Tests` section gets no block: there is nowhere to put it, and the
+`no-tests` finding already says the section is missing. The block's own lines are never read back
+as tests. The agent-facing `tests_check` tool (31.6) still writes nothing.
+
+**A status is about a revision** (#PR4Q). An execution is evidence for a card when it ran at one of
+its `links.commits`, or is newer than the newest of them and carries the test's current
+`source_hash` — from any host, because the store is host-agnostic and "never run *here*" is not
+"never run". A run the card accepted through `tests_accept` is evidence whatever its commit. So the
+four statuses are: `passed` (an applicable run passed), `failed` (it did not), `missing-evidence`
+(no applicable run from any host and no attached result) and `not-applicable` (a retired or renamed
+check, or a `manual:` line). A card with no commits at all has no revision to compare against: every
+run of today's version of the test counts, which is the answer this gave before statuses existed.
 
 **The gate** (owner, 2026-09-20: Check "is a gate on leaving `needs-verification`, with a
-recorded override"). `board_protocol` refuses a `board_move` **out of** `needs-verification`
-towards `needs-qa*`, `needs-review`, `done` or `verified` while a test the card *names* is gone,
-has never run, or last failed — one sentence, nothing written, and an `error` event with
-`code: "tests_gate"` carrying `card`, `status` and the offending `tests`. A card with **no**
-`## Tests` section is not gated: the missing section is advisory, and gating on it would strand
-every card filed before the section existed. A move carrying `override: "<reason>"` goes through,
-and the reason is quoted into a `decision` thread entry. Any failure of the check itself (no
-discovery, no build directory) lets the move through: a gate that fires when its own evidence is
-missing stops work for reasons nobody can act on. In the GUI the refusal is a notice with an
-**Override…** beside it, which asks for the reason in one line and re-sends the same move.
+recorded override"; rewritten by #PR4Q). `board_protocol` refuses a `board_move` **out of**
+`needs-verification` towards `needs-qa*`, `needs-review`, `done` or `verified` while a check the
+card *names* is `failed` or `missing-evidence` for this revision — one sentence, nothing written,
+and an `error` event with `code: "tests_gate"` carrying `card`, `status`, the offending `tests`,
+the `statuses` and the `revision`. A `not-applicable` check never blocks: a retired check is a
+thing to replace, which is what the *Replace retired check* action does.
+
+A move carrying `override: "<reason>"` goes through, and the reason is quoted into a `decision`
+thread entry that also carries one `<!-- relay:override test=<id> rev=<sha12> until=<date> -->`
+marker per check it waived (fourteen days). `gate_move` reads those back, so **the same override is
+never asked for twice** for the same check and revision — and it stops holding when the fortnight
+passes or the card gets a new commit, because the conditions it was granted under have changed.
+
+A card with **no** `## Tests` section is no longer waved through in silence (§C: "a card without
+`## Tests` is ungated. That rewards omitting evidence"). Its first landing move is answered with
+`code: "tests_none"` — one sentence asking which checks prove it — and a note on the thread
+carrying `<!-- relay:tests-none card=<ID> -->`, so it is asked **once**: the second attempt goes
+through. In the GUI that question is a box under the card's own Tests strip, with *None apply*
+beside *Save to `## Tests`*, and the answer is recorded on the thread either way.
+
+Any failure of the check itself (no discovery, no build directory) lets the move through: a gate
+that fires when its own evidence is missing stops work for reasons nobody can act on. In the GUI a
+`tests_gate` refusal is a notice with an **Override…** beside it, which asks for the reason in one
+line and re-sends the same move.
+
+**A finished run refreshes it.** After a `tests_run` ends, the worker re-emits `tests_check` for
+every card whose `## Tests` names a test that ran (`refresh_checks`, at most 20 cards), so the card
+page's strip and the card file's own status are current without anybody pressing Check — Codex's
+review §B: "update evidence status automatically after runs".
 
 ### 31.6 The agent's two tools
 
 Registered the way `board_claim` is, so a terminal-pane agent and the Switchboard page agent both
 have them:
 
-- **`tests_check {card}`** — the findings as text plus the actions. Runs nothing, writes nothing.
+- **`tests_check {card}`** — the four statuses and the findings as text, plus the `statuses` rows
+  and the actions, so an agent decides what the card page decides. Runs nothing, writes nothing.
   Policy rule 6 asks for it before a card moves to `needs-verification`.
 - **`tests_run {ids, repeat_until_fail?, timeout_seconds?}`** — at most 50 ids, waits (300 s by
   default, 1800 s ceiling) and answers with a per-test table and the failure message for anything

@@ -1,0 +1,48 @@
+#PR4Q — Check and the gate, driven live on the #7BM4 staged scenario
+====================================================================
+
+Binary: /tmp/claude-1000/land/pr4q/verify/build/relay — land.py's verify tree, i.e. exactly what
+this card put on main (commits bebbe336, 60b3fa43, 2d1901e6, 630db31e), with nothing of any other
+session's uncommitted work in it.
+
+Scenario: python3 docs/qa_evidence/2026-09-20-switchboard-tooling-hub/scenario/stage.py
+          --dir /tmp/claude-1000/pr4q/orders --fresh
+Driven under Xvfb on an isolated profile (own HOME/XDG/TMPDIR, RELAY_KEYRING=off), xdotool only,
+ended with kill -TERM. Cards: ZH1E "Order totals are wrong above 100 items" (needs-verification,
+four listed checks), 800P "CI goes red about once a week" (no `## Tests`).
+
+a-four-statuses.png
+    ZH1E, one Check click. The strip's header counts the answer — "1 passed · 1 failed ·
+    1 missing evidence · 1 not applicable" — and one row per listed check says which is which:
+      passed           ctest:totals              (laptop's run of this revision)
+      failed           ctest:totals_large_order
+      not-applicable   ctest:rounding            (retired: not in the project any more)
+      missing-evidence unittest:tests.test_invoice
+    The three advisory notices are under them, and the actions are Run these · Replace retired
+    check · Open the failing one. "Use this existing result" sits on the passed row, because the
+    newest run of it is the laptop's, not this machine's.
+
+b-accepted.png
+    After clicking "Use this existing result". The offer is gone (it is never asked twice), and
+    the card's `### Check` status gained
+      - accepted · ctest:totals — run seed-19 from laptop … <!-- relay:accept test=… run=…
+        rev=a80b86eab4af -->
+    with an `evidence` entry on the thread. No front-matter field was written. See card-ZH1E.md.
+
+c-replace-retired.png
+    "Replace retired check" opens the `## Tests` lines in a box inside the strip; the hint names
+    the retired check ("ctest -R rounding is not in the project any more"). Save writes the
+    section through the ordinary card-edit path.
+
+d1-gate-refusal.png … d4-not-asked-again.png
+    Needs verification → Done is refused: "#ZH1E is not proven yet: 1 failed, 1 missing-evidence
+    (totals_large_order, test_invoice)…" — the retired check does not block. Override… asks once
+    (d2), the move lands (d3), and the decision entry carries one marker per waived check, scoped
+    to revision a80b86eab4af and expiring 2026-10-05 (thread-ZH1E.md). Moving the card back to
+    Needs verification and to Done again lands it with no question at all (d4).
+
+e1-which-checks-prove-it.png, e2-none-apply-recorded.png
+    800P has no `## Tests`. Its first move towards a QA lane is answered with the one question —
+    "Which checks prove #800P?" — with "None apply" beside Save, and the worker records
+    `<!-- relay:tests-none card=800P -->` as a note so it is asked exactly once. "None apply"
+    puts the answer on the thread and re-sends the move, which goes through (thread-800P.md).
