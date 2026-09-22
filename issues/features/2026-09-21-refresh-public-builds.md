@@ -1,13 +1,13 @@
 ---
 id: R6BS
 type: work
-status: executing
+status: needs-verification
 labels: [feature, packaging, website]
 assignee: codex
 rank: m
 created: '2026-09-21'
 source: 'Codex user request, 2026-09-21'
-links: {plans: [], commits: [aa104e92, 92563ceb, ff18787e, f2216313, 2cfcb3f0, bb769e98, a5535f4c, 460e8063, fcf44e13], evidence: [docs/qa_evidence/2026-09-21-refresh-public-builds/README.md], related: [W9ST, P4GP, 3AZG, YJK8], github: null}
+links: {plans: [], commits: [aa104e92, 92563ceb, ff18787e, f2216313, 2cfcb3f0, bb769e98, a5535f4c, 460e8063, fcf44e13, df9ea698, 5c4a321b, f2888f05, e1000574, 82b837c5, 7d59e967, d4854390, 06418a97, 7d0f1718, 8e6094d9], evidence: [docs/qa_evidence/2026-09-21-refresh-public-builds/README.md], related: [W9ST, P4GP, 3AZG, YJK8, PF14, LSP1], github: null}
 ---
 # Publish refreshed builds and website downloads
 
@@ -23,6 +23,9 @@ can we build for mac as well
 
 ## Planning notes
 Published releases end at v0.1.0-beta.2 and contain six Linux packages, source and checksums. The release pipeline builds Linux only. `engine/pty/PtyWin.cpp` explicitly returns “ConPTY backend not implemented yet”; Windows native packaging is absent. Asked whether Windows means WSL or a native installer while preparing the independent Linux work.
+
+## Done means
+Verified Linux packages, native Windows installer and native Apple Silicon/Intel Mac DMGs are published from a fixed tested source. The live website describes Relay accurately, keeps its heading decoration clear of text, and links to those downloadable assets with platform requirements and signing limitations. Release checksums and deployed bytes are recorded for independent verification.
 
 ## Plan
 **Goal:** Push committed work, publish verified Linux, native Windows and native macOS packages, and expose accurate downloads on the site.
@@ -40,9 +43,12 @@ Published releases end at v0.1.0-beta.2 and contain six Linux packages, source a
 - [x] Review website changes, correct product description and heading decoration. <!-- t:a1 -->
 - [x] Implement native ConPTY, PowerShell integration and Windows runtime support with subagents. <!-- t:a2 -->
 - [x] Build and exercise a per-user Windows installer on a native runner. <!-- t:a3 -->
-- [ ] Implement and smoke-test native macOS application bundles for Apple Silicon and Intel. <!-- t:a6 -->
-- [ ] Pass final release gates, publish supported platform assets and verify checksums. <!-- t:a4 -->
-- [ ] Deploy versioned website downloads and verify the live page. <!-- t:a5 -->
+- [x] Implement and smoke-test native macOS application bundles for Apple Silicon and Intel. <!-- t:a6 -->
+- [x] Pass final release gates, publish supported platform assets and verify checksums. <!-- t:a4 -->
+- [x] Deploy versioned website downloads and verify the live page. <!-- t:a5 -->
+
+## Execution Summary
+Published [beta.4](https://github.com/elliottash/relay-terminal/releases/tag/v0.1.0-beta.4) from 7d59e967 after every Linux, Windows and Mac package gate passed in run 35677749794. Native Mac DMGs include Bash, Python and Qt; Keychain and Darwin integration work on both architectures. Website 06418a97 is committed, pushed and deployed at https://relay-terminal.ai/, with verified asset links and corrected heading layout. All 11 files match their release API digests and all 10 payloads match SHA256SUMS; both hostnames match the committed HTML/CSS. Evidence: `docs/qa_evidence/2026-09-21-refresh-public-builds/README.md`. Mac bundles are ad-hoc signed, not notarized; Windows installer is unsigned. Independent desktop QA remains the next stage.
 
 ## Tests
 - `python3 -m unittest discover -s tests -p test_platform_storage.py -v`
@@ -50,3 +56,7 @@ Published releases end at v0.1.0-beta.2 and contain six Linux packages, source a
 - `python3 -m unittest discover -s tests -p test_windows_open.py -v`
 - `ctest --test-dir build-windows -C Release --output-on-failure`
 - `manual: docs/qa_evidence/2026-09-21-refresh-public-builds/README.md`
+
+- `manual: docs/qa_evidence/2026-09-21-refresh-public-builds/beta4-publication.json`
+- `manual: docs/qa_evidence/2026-09-21-refresh-public-builds/macos-arm64-checks.txt`
+- `manual: docs/qa_evidence/2026-09-21-refresh-public-builds/macos-intel-checks.txt`

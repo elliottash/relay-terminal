@@ -49,3 +49,7 @@ Published beta3 Linux/native Windows assets from verified59a51d9 after all platf
 <!-- relay:entry 20260922T013821Z-m4 author=codex kind=progress -->
 ### Codex · 2026-09-22 01:38
 Beta.4 release run 35676338727 is building fixed source c4c1c50a for six Linux packages, native Windows and both Mac architectures. Mac DMG signing/mounting/private TLS and shell checks have passed in preceding native runs; corrected shutdown fixture and stronger GUI runtime discovery check are included in this candidate. Desktop/mobile download previews recorded; live beta.3 links remain until successful publication.
+
+<!-- relay:entry 20260922T022623Z-b4 author=codex kind=evidence -->
+### Codex · 2026-09-22 02:26
+Beta.4 published from 7d59e967 after all six Linux, both Windows and both Mac gates passed in release run 35677749794. Verified all 11 uploaded asset digests, SHA256SUMS, exact source/tag, 10 live direct download URLs, and deployed site 06418a97 bytes on apex and www. Mac screenshots/logs, publication JSON and release notes are in docs/qa_evidence/2026-09-21-refresh-public-builds/. All tasks complete; moved #R6BS to needs-verification for independent desktop QA. Mac ad-hoc/not-notarized and Windows unsigned status are explicit on site/notes.

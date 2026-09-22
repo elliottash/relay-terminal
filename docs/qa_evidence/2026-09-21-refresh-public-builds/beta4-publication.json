@@ -1,0 +1,84 @@
+{
+  "release": "https://github.com/elliottash/relay-terminal/releases/tag/v0.1.0-beta.4",
+  "source": "7d59e9673f680baf34a29fbebfc95cd31f667eab",
+  "site": "https://relay-terminal.ai/",
+  "assets": {
+    "SHA256SUMS": {
+      "size": 1035,
+      "sha256": "6f78672d763c11f839b14e94dd3f45bec9187131cf70b6540a3e385047b92b33"
+    },
+    "relay-0.1.0-beta.4.tar.gz": {
+      "size": 345268270,
+      "sha256": "c3ccfec1f8e61df51be79512b03312cf377dbcb33bc7852d21c781a619741538"
+    },
+    "relay_0.1.0-beta.4_debian13_amd64.deb": {
+      "size": 9710542,
+      "sha256": "035203ae1128c043534686540ddb903859c79e3996b6a7bc2e3426c0030e49c4"
+    },
+    "relay_0.1.0-beta.4_debian13_arm64.deb": {
+      "size": 9527198,
+      "sha256": "b04f7f7c755e66fbd030ee2046f6d6349726628b0955bb18b6c7da694da5d9ed"
+    },
+    "relay_0.1.0-beta.4_macos_arm64.dmg": {
+      "size": 96828599,
+      "sha256": "cdf95503f7369844a7613a62e982462dbab8e99cffb81818892bc882b2b9e8e5"
+    },
+    "relay_0.1.0-beta.4_macos_x64.dmg": {
+      "size": 97869201,
+      "sha256": "30c2f4bcdeabd8b5b411c5922e3fa86ece32c8be3886704a6f524980ca9f8fc1"
+    },
+    "relay_0.1.0-beta.4_ubuntu24.04_amd64.deb": {
+      "size": 9073764,
+      "sha256": "72167c5c660c0c472b59c0adc80c5f856f4fc5ef005449dd458639a2f5723096"
+    },
+    "relay_0.1.0-beta.4_ubuntu24.04_arm64.deb": {
+      "size": 9003434,
+      "sha256": "b92b339c01e4b7a27b01837e5ec8ee01cda31a4029ac5b3c1cd156139b2809e0"
+    },
+    "relay_0.1.0-beta.4_ubuntu26.04_amd64.deb": {
+      "size": 10218360,
+      "sha256": "d492b535a8ea00eeaa4650b409103a9ad51ab39edf0308e47c6f25f0070ccf0d"
+    },
+    "relay_0.1.0-beta.4_ubuntu26.04_arm64.deb": {
+      "size": 9840562,
+      "sha256": "4e59bb58b989d1f0bb9029bd72967982e4cae003a5d038eb4553187243ef9f6a"
+    },
+    "relay_0.1.0-beta.4_windows_x64_setup.exe": {
+      "size": 110441947,
+      "sha256": "e371ef205b80966d2782775ed309028f32985a36864c2bd06d5e428e2fbd6bed"
+    }
+  },
+  "download_urls": [
+    "https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.4/SHA256SUMS",
+    "https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.4/relay_0.1.0-beta.4_debian13_amd64.deb",
+    "https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.4/relay_0.1.0-beta.4_debian13_arm64.deb",
+    "https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.4/relay_0.1.0-beta.4_macos_arm64.dmg",
+    "https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.4/relay_0.1.0-beta.4_macos_x64.dmg",
+    "https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.4/relay_0.1.0-beta.4_ubuntu24.04_amd64.deb",
+    "https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.4/relay_0.1.0-beta.4_ubuntu24.04_arm64.deb",
+    "https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.4/relay_0.1.0-beta.4_ubuntu26.04_amd64.deb",
+    "https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.4/relay_0.1.0-beta.4_ubuntu26.04_arm64.deb",
+    "https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.4/relay_0.1.0-beta.4_windows_x64_setup.exe"
+  ],
+  "release_run": "https://github.com/elliottash/relay-terminal/actions/runs/35677749794",
+  "release_conclusion": "success",
+  "site_commit": "06418a97bb39ad8a73ae7bd233bb42651c542d63",
+  "live_site_bytes": [
+    {
+      "url": "https://relay-terminal.ai/",
+      "sha256": "e9d99854aef4f63376fa5fae7aab3bae97f5cd81d455ed537b7b0f524a36d1f6"
+    },
+    {
+      "url": "https://relay-terminal.ai/style.css",
+      "sha256": "031b52587fe19e682f344888d5344f628931b254e27b7e317dc1c7a41fc08fa9"
+    },
+    {
+      "url": "https://www.relay-terminal.ai/",
+      "sha256": "e9d99854aef4f63376fa5fae7aab3bae97f5cd81d455ed537b7b0f524a36d1f6"
+    },
+    {
+      "url": "https://www.relay-terminal.ai/style.css",
+      "sha256": "031b52587fe19e682f344888d5344f628931b254e27b7e317dc1c7a41fc08fa9"
+    }
+  ]
+}
