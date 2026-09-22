@@ -283,6 +283,14 @@ void RichEditor::paintEvent(QPaintEvent *event) {
                      fontMetrics().elidedText(m_ghost, Qt::ElideRight, std::max(0, area.width())));
 }
 
+bool RichEditor::onBottomRow() const {
+    const QTextCursor caret = textCursor();
+    if (caret.blockNumber() != document()->blockCount() - 1) return false;
+    const QTextLayout *layout = caret.block().layout();
+    const QTextLine row = layout ? layout->lineForTextPosition(caret.positionInBlock()) : QTextLine();
+    return !row.isValid() || row.lineNumber() == layout->lineCount() - 1;
+}
+
 void RichEditor::keyPressEvent(QKeyEvent *event) {
     if (isReadOnly()) { QPlainTextEdit::keyPressEvent(event); return; }
     // Numpad Enter arrives as Qt::Key_Enter with Qt::KeypadModifier set; drop that flag so
@@ -314,8 +322,7 @@ void RichEditor::keyPressEvent(QKeyEvent *event) {
     const QTextLayout *layout = caret.block().layout();
     const QTextLine row = layout ? layout->lineForTextPosition(caret.positionInBlock()) : QTextLine();
     const bool topRow = caret.blockNumber() == 0 && (!row.isValid() || row.lineNumber() == 0);
-    const bool bottomRow = caret.blockNumber() == document()->blockCount() - 1
-        && (!row.isValid() || row.lineNumber() == layout->lineCount() - 1);
+    const bool bottomRow = onBottomRow();
     if (mods == Qt::NoModifier && (up || down) && !caret.hasSelection() && ((up && topRow) || (down && bottomRow))) {
         // A browse begins here: re-read the file first, so this box walks back through what was
         // typed before Relay was last closed and what the other panes have added since.

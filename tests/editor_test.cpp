@@ -17,6 +17,32 @@
 class EditorTests : public QObject {
     Q_OBJECT
 private Q_SLOTS:
+    void bottomRowFollowsVisualLines() {
+        RichEditor editor; editor.resize(220, 150); editor.show(); editor.setFocus();
+        QVERIFY(QTest::qWaitForWindowExposed(&editor));
+        QVERIFY(editor.onBottomRow()); // an empty draft still enters the strip
+        const QString wrapped = QStringLiteral("one two three four five six seven eight nine ten ").repeated(3);
+        editor.setPlainText(wrapped);
+        editor.moveCursor(QTextCursor::Start);
+        QVERIFY(editor.document()->firstBlock().layout()->lineCount() > 2);
+        QVERIFY(!editor.onBottomRow());
+        QTest::keyClick(&editor, Qt::Key_Down);
+        QVERIFY(editor.textCursor().position() > 0);
+        QVERIFY(!editor.onBottomRow());
+        editor.moveCursor(QTextCursor::End);
+        editor.moveCursor(QTextCursor::StartOfLine);
+        QVERIFY(editor.onBottomRow()); // anywhere in the last row, not just end-of-text
+        editor.setPlainText(QStringLiteral("first\n") + wrapped);
+        editor.moveCursor(QTextCursor::Start);
+        QVERIFY(!editor.onBottomRow());
+        editor.moveCursor(QTextCursor::NextBlock);
+        QVERIFY(!editor.onBottomRow()); // first visual row of the final paragraph
+        editor.moveCursor(QTextCursor::End);
+        QVERIFY(editor.onBottomRow());
+        editor.setPlainText(QStringLiteral("first\n"));
+        editor.moveCursor(QTextCursor::End);
+        QVERIFY(editor.onBottomRow()); // trailing blank row
+    }
     void nativeSelectionAndUndo() {
         RichEditor editor; editor.resize(600, 150); editor.show(); editor.setFocus();
         QTest::keyClicks(&editor, "hello world");

@@ -20,6 +20,8 @@ public:
     const QStringList &history() const { return m_history; }
     // True unless Up/Down is browsing history (Down on the last line then has nothing to do).
     bool atDraft() const { return m_historyIndex == m_history.size(); }
+    // Last visual row, including word wrapping, rather than merely the last paragraph.
+    bool onBottomRow() const;
 
     // Keep this box's history in a file instead of only in this session (src/PromptHistory.h):
     // what is in the file now is loaded, and every later remember() is appended to it. The file

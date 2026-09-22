@@ -15736,13 +15736,13 @@ private:
         // subagents at all; ←/→ then move between the two columns inside the widget.
         // Up stays queue/history; the @ picker and a queue selection above already took their keys.
         if (mods == Qt::NoModifier && k == Qt::Key_Down && m_agentsPanel && m_agentsPanel->isVisible()
-            && m_editor->textCursor().blockNumber() == m_editor->document()->blockCount() - 1 && m_editor->atDraft()) {
+            && m_editor->onBottomRow() && m_editor->atDraft()) {
             m_agentsPanel->enter();
             return true;
         }
         // The jobs list is next: entered straight from the prompt when no agents are listed above it.
         if (mods == Qt::NoModifier && k == Qt::Key_Down && m_jobsPanel && m_jobsPanel->isVisible()
-            && m_editor->textCursor().blockNumber() == m_editor->document()->blockCount() - 1 && m_editor->atDraft()) {
+            && m_editor->onBottomRow() && m_editor->atDraft()) {
             m_jobsPanel->enter();
             return true;
         }
