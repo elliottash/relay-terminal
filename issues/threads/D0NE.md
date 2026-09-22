@@ -9,3 +9,6 @@ Implemented Done (d) and undo routing. Seven Qt cases passed under isolated Xvfb
 <!-- relay:entry 20260921T121221Z-c3 author=codex kind=evidence -->
 ### Codex · 2026-09-21 12:12
 Landed 832e48498357f3e00f19e67996245873445e3f7c; exact-tree build and ctest -R ^boardpane$ passed. The workspace relay target also builds. Recorded the commit link.
+
+<!-- relay:entry 20260922T013727Z-g8 author=agent kind=evidence -->
+Check · 1 passed. The status is under `## Tests`; earlier checks are in this thread.

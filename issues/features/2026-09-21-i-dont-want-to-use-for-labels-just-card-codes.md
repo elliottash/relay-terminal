@@ -6,7 +6,7 @@ assignee: agent
 session: 93ac5915-9b34-4252-a54a-dee24df0cf0a
 rank: zzzzzzzzzzzzzzzzw
 created: '2026-09-21'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-s53z-labels/NOTES.md], related: [], github: null}
+links: {plans: [], commits: [36032e9d], evidence: [docs/qa_evidence/2026-09-21-s53z-labels/NOTES.md], related: [], github: null}
 ---
 # i dont want to use # for labels, just card codes.
 
@@ -67,6 +67,11 @@ Evidence: `docs/qa_evidence/2026-09-21-s53z-labels/NOTES.md` (logs and screensho
 - `ctest -R ^board$`
 - manual: docs/qa_evidence/2026-09-21-s53z-labels/NOTES.md
 
+### Check 2026-09-21 21:37
+- passed · ctest:board — ctest -R board passed for this revision on spark-dcc9, 2026-09-22T01:37:20Z
+- not-applicable · manual:docs/qa_evidence/2026-09-21-s53z-labels/NOTES.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-21-s53z-labels/NOTES.md
+- notice · ctest:board — ctest -R board is slow: p95 2.58 s, p50 0.93 s
+history: thread
 ## QA checklist
 - [ ] Labels in the list, filter chips and card meta row show bare words.
 - [ ] Click a row badge and meta label; each copies `label:<name>` and shows matching feedback. Paste into the filter and confirm matching cards only.

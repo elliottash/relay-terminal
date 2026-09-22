@@ -1,12 +1,12 @@
 ---
 id: R8PK
 type: work
-status: needs-verification
+status: done
 labels: [bug, switchboard]
 assignee: codex
 rank: m
 created: '2026-09-21'
-source: 'Codex in a Relay pane, 2026-09-21'
+source: Codex in a Relay pane, 2026-09-21
 links: {plans: [], commits: [d4ac69d7872aabf184794faa4cc8366f22f3bbe9], evidence: [docs/qa_evidence/2026-09-21-restore-switchboard-card/README.md], related: [XAME], github: null}
 ---
 # Restore the open Switchboard card
@@ -27,6 +27,9 @@ The layout saves BoardView navigation (open card, selected card and filter), res
 ## Tests
 `ctest -R ^boardpane$`
 
+### Check 2026-09-21 21:37
+- passed · ctest:boardpane — ctest -R boardpane passed for this revision on spark-dcc9, 2026-09-22T01:37:20Z
+history: thread
 ## QA checklist
 - [ ] Open a card, quit Relay, relaunch and confirm the same card opens.
 - [ ] Return to the list, quit and relaunch; confirm the list remains open.

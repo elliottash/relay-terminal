@@ -4,6 +4,7 @@ type: work
 status: inbox
 labels: [bug, remote]
 component: [remote, worker]
+priority: 2
 rank: m
 created: '2026-09-21'
 source: 'Claude Code session on #PH0N, 2026-09-21: found by `tests/test_remote_wire.py` while landing Phase 2.6'

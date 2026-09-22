@@ -282,3 +282,9 @@ Handoff: a card's Discuss/Plan is now an ordinary console turn (own TurnSupervis
 #7JD1's code is landed, so this card's open device-Stop item has an answer in the tree: `2d2993e1` (a submit resumes the queue it lands in, so a device's `ask`/`board_ask` resumes with nothing new on the wire), `69260659` (Enter on an empty prompt box resumes, on a pane and on a card's console, with the op naming that card's queue), `b8582fea` (`board_resume {id}` — a device's empty send — and REMOTE-PROTOCOL 17.4's "waits for the desktop" is gone) and `7d36ec3a` (`queue_resume {pane}` for the pane view). #7JD1's own live drive is not finished, so QA should tick this item against #7JD1's evidence when that card reaches needs-verification rather than now.
 
 Also noticed and not fixed by me, because the file is not mine: an untracked `threads/CTRN.md` at the repository root holds one #CTRN entry (`20260921T223622Z-fr`, "Step 6 landed (`cd75da79`): the docs say a card turn is an ordinary console turn") that never reached `issues/threads/CTRN.md`. It is what `relay_core.board.Board('.')` writes instead of `Board('issues')` — the same mistake cost me an entry today. Whoever wrote it should move it across; I have left both files alone.
+
+<!-- relay:entry 20260922T011251Z-ej author=agent kind=evidence -->
+Check · 1 missing-evidence, 1 not-applicable; 3 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T012700Z-ca author=agent kind=evidence -->
+Check · 1 missing-evidence, 1 not-applicable; 3 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

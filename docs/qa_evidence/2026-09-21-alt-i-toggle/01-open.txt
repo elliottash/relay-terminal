@@ -1,0 +1,75 @@
+x
+
++
+
+© work (2) - cpu 00% - mem 00%
+
+Q
+
+-
+
+4
+
+2 &
+
+2
+
+-
+
+ox
+
+© work
+
+K
+
+x
+
+© Info
+
+2 ©
+
+K
+
+x
+
+@2 0
+
+elliott@spark-dcc9: /tmp/relay-context-
+
+Conversation info
+
+j7_qv5tj /work$
+
+Loading...
+
+Queued - the agent prompt runs when its turn comes.
+
+C
+
+J
+
+auto
+
+Shell commands or agent prompts.
+
+Ask the agent about this session There is nothing to ask about yet: this page's figures have not arrived.
+
+What it has done
+
+Costliest turn
+
+o
+
+5
+
+5
+
+e
+
+‘/tmp/relay...qv5tj/work
+
+ptt
+
+high
+
+Links open subagent threads - Alt+Left back - F5 refresh - Esc closes  Alt#I opens this

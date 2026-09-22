@@ -158,10 +158,10 @@ Evidence: [GUI screenshots, driver and notes](../../docs/qa_evidence/2026-09-21-
 - `tests/test_remote_wire.py`
 - manual: docs/qa_evidence/2026-09-21-projects-sessions-globals/
 
-### Check 2026-09-21 19:48
-- missing-evidence · unittest:tests.test_board_protocol.InitTests — no run of tests/test_board_protocol.py::InitTests for this revision, from any host, and no attached result
+### Check 2026-09-21 21:39
+- passed · unittest:tests.test_board_protocol.InitTests — tests/test_board_protocol.py::InitTests passed for this revision on spark-dcc9, 2026-09-22T01:39:51Z
 - not-applicable · manual:docs/qa_evidence/2026-09-21-projects-sessions-globals/07-switchboard-direct.png — manual evidence, recorded by hand: docs/qa_evidence/2026-09-21-projects-sessions-globals/07-switchboard-direct.png
-- passed · ctest:conversations — ctest -R conversations passed for this revision on spark-dcc9, 2026-09-21T23:48:04Z
+- missing-evidence · ctest:conversations — no run of ctest -R conversations for this revision, from any host, and no attached result
 - missing-evidence · ctest:projectspane — no run of ctest -R projectspane for this revision, from any host, and no attached result
 - missing-evidence · ctest:globalspane — no run of ctest -R globalspane for this revision, from any host, and no attached result
 - missing-evidence · unittest:tests.test_keybindings — no run of tests/test_keybindings.py for this revision, from any host, and no attached result

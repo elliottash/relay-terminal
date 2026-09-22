@@ -43,3 +43,6 @@ Check · 8 missing-evidence, 2 not-applicable, 1 passed; 2 advisory finding(s). 
 <!-- relay:entry 20260921T235015Z-s2 author=codex kind=evidence -->
 ### Codex · 2026-09-21 23:50
 Landed 56d671cf. Targeted Conversations tests and clean full application build pass. Isolated GUI confirms the saved session and preview load after clicking Sessions from Projects, and Recently closed opens via its button inside Sessions with Back navigation. Screenshots 08/09 and driver: docs/qa_evidence/2026-09-21-projects-sessions-globals/. tests_check has no failure findings. Returned to needs-verification.
+
+<!-- relay:entry 20260922T013954Z-kk author=agent kind=evidence -->
+Check · 8 missing-evidence, 2 not-applicable, 1 passed; 2 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

@@ -1,8 +1,9 @@
 ---
 id: 25XG
 type: work
-status: planned
+status: executing
 labels: [feature, ux]
+assignee: agent
 rank: zzzzzzzw
 created: '2026-09-19'
 source: 'pane 1, 2026-09-19 (Discuss on #SFP6)'
@@ -14,6 +15,49 @@ links: {plans: [], commits: [], evidence: [], related: [SFP6], github: null}
 i agree that non-actionable "errors" like this one should have the x but not in red. plan that
 
 ## Plan
+## Goal
+
+A tool call a guard deliberately refused (edit_file's 128 KiB cap, path guards, secret guards, budget) keeps its ✗ and its message but wears the neutral tool ink instead of red. Red stays strictly for *failed*; amber keeps its one job (waiting on a person). Decision recorded on #SFP6, 2026-09-19. Plan refreshed 2026-09-21: the design is unchanged; every line reference below was re-verified against the tree today.
+
+## Findings
+
+- Every guard refusal in `backend/relay_core/tools.py` is a `raise ValueError(…)` (size caps, path/secret guards, arg validation). Runtime failures raise `OSError` instead; there is no other tool exception type.
+- One catch site turns both into results: `backend/relay_core/agent.py:2116` `except (OSError, ValueError, UnicodeError) as exc:` → `result = {"error": str(exc)[:2000]}` (:2117), wrapping both `_prepare` (:2107) and `_execute` (:2115) — so the card's screenshot case (prepare-time over-size) flows through here. The budget result at :2084 (`{"error": "Tool budget reached…"}`) is the same grade. `UnicodeError` is a subclass of `ValueError`, so clause order matters.
+- The label is computed by `tool_labels.result_label` (`backend/relay_core/tool_labels.py:301`, `ok = call_ok(result)` at :308) at event time (`agent.py:2099`/:2121) and recomputed from the stored result for `turn_summary`/`tool_output_get`, so a flag in the result dict survives replays. `call_ok` (:334; not ok → ✗, no merge, fold on click) must stay as it is. Note `_error_message` (:350) already treats a *string* `refused` code (:358, program_input/terminal_handoff results like `{ok: false, refused: "busy"}`) — that is a different, runtime thing and stays red.
+- The ink is the surface's, not the backend's (§ 23). Red sites today:
+  - terminal pane: `src/Pane.h` — **this file is over the 128 KiB search/read cap (the very refusal in the card's screenshot), so the board tools cannot cite its lines; the executor must grep it.** The 2026-09-20 survey found the ink decision at :4745 (`row.failed ? Ink::Error : Ink::Tool`), :4935 (replay bytes), :9262 (the no-fold-layer `tool_result` print), the cached hidden row at :4687 (`hidden.failed = row.failed`), and `Ink::Tool → theme::TextMuted` at :11180. Grep for `Ink::Error`, `hidden.failed` and `Ink::Tool` and take the current line numbers.
+  - `src/SubagentTranscript.cpp:236` (`call.done && call.label.failed() ? Ink::Error : Ink::Tool`) and the one-row rewrite at :227 (`ink == Ink::Error ? Ink::Error : Ink::Tool`); its `inkColor` maps `Ink::Tool` → `theme::TextMuted` at :46.
+  - `src/TurnTranscript.cpp:81` (`ok ? Text : SyntaxUnknown`, addRow) and :234 (`label.failed() ? SyntaxUnknown : Text`, setToolOutput).
+  - `src/AgentInternalsView.cpp:476` `drawRow()` (`call.done && call.label.failed() ? Ink::Error : Ink::Tool`); its `inkColor` maps `Ink::Tool` → `theme::TextMuted` at :52.
+- The neutral ink exists; no new theme token is needed (`Ink::Tool`/`TextMuted` above). `calllines::Row` (`src/CallLines.h:72–75`) carries `failed` but not the refusal grade; `toollabel::Label` (`src/ToolLabel.h`, `hasOk`/`ok` at :39–40 is the pattern to copy) parses `ok` but not `refused`. `finishedRow` (`src/CallLines.cpp:125`) appends `" ✗"` at :129.
+- The colour table is `docs/ARCHITECTURE.md` with the "**Amber has one job.**" paragraph at :3025 — where a matching "red is only for failures" sentence belongs. The label contract is the § 23.2 table at `docs/AGENT-SESSIONS-PROTOCOL.md:4082–4110` (the `ok` row at :4105).
+- BoardPane shows its agent's calls as progress text ("failed: …", `src/BoardPane.cpp:8641`), not ✗ rows — no ink change there.
+
+## Steps
+
+1. **Backend, mark the refusal** — `backend/relay_core/agent.py` ~2116: split the except so a `ValueError` (a guard's deliberate refusal) sets the flag: `except (OSError, UnicodeError) as exc:` → `result = {"error": str(exc)[:2000]}` (UnicodeError listed *first* — it is a ValueError subclass and a decode error is a failure, not a refusal), then `except ValueError as exc:` → `result = {"error": str(exc)[:2000], "refused": True}`. Add `"refused": True` to the budget result at :2084. The flag rides the stored result and therefore the model's tool message too — intended, harmless.
+2. **Backend, label** — `backend/relay_core/tool_labels.py` `result_label()` after :308 (`ok = call_ok(result)`): add `if result.get("refused") is True: label["refused"] = True`. Nothing else changes: `call_ok` still False (✗, no merge, fold-on-click), `_error_message` still supplies the text after the ✗, and a string `refused` code (`is True` is strict) does not fire.
+3. **Wire contract** — `docs/AGENT-SESSIONS-PROTOCOL.md` § 23.2 table (after the `ok` row at :4105): add `| refused | bool | on tool_result only. A guard's deliberate refusal (a ValueError from the tool's guards): the call did not happen and nothing failed. Surfaces keep the ✗ but draw it in the neutral tool ink, never the error ink |`.
+4. **Parse it** — `src/ToolLabel.h`/`.cpp`: `Label` gains `bool hasRefused = false, refused = false;` beside `hasOk`/`ok` (:39–40), parsed from the label object exactly as `ok` is. `failed()` unchanged. `src/CallLines.h`/`.cpp`: `Row` (:72–75) gains `bool refused = false;` (comment: the ink grade — error when merely failed, tool ink when refused); `finishedRow()` (:125) sets it from the label and keeps appending `" ✗"` (:129).
+5. **Terminal pane** — `src/Pane.h` (grep first; see Findings): change `failed ? Ink::Error : Ink::Tool` to `failed && !refused ? Ink::Error : Ink::Tool` at each of the three sites (row.refused at the live/replay rows, label.refused at the no-fold-layer print) and carry `refused` beside `failed` in the cached hidden row. A refused row is then TextMuted like any tool row, with its ✗ and message.
+6. **Other surfaces** — same one-condition change: `src/SubagentTranscript.cpp:236` (and check :227 keeps working — it takes the already-decided ink), `src/AgentInternalsView.cpp:476`, and `src/TurnTranscript.cpp` (:81 and :234: refused failed rows take `theme::TextMuted` instead of `SyntaxUnknown`; the ✗ marker stays everywhere).
+7. **Colour table** — `docs/ARCHITECTURE.md` beside the table (~:3025): one short paragraph "**Red is only for failures.** A tool call a guard refused on purpose keeps its ✗ but wears the neutral tool ink (#25XG); amber still means waiting on a person."
+
+## Risks
+
+- **Which refusals count.** This plan marks guards' `ValueError`s (and the budget message) per the recorded decision. Board tools return coded results instead (`board_refused`, `board_mode_refused`, `board_confused`…) and program-input refusals carry a string code; those stay red here. *Question for the owner:* fold `board_mode_refused` (Plan/Discuss-mode write attempts, common in this repo) in as a one-line addition to `BoardToolError.to_result()`? Recommendation: yes, as a follow-up card once this lands — the hash-conflict codes name an action and should stay red.
+- **UnicodeError ordering** is the one real trap: catching `ValueError` first would paint decode failures as refusals. Step 1's clause order is load-bearing; test both.
+- **Pane.h is unsearchable by the board tools** (over the 128 KiB cap). The step-5 line numbers are from a 2026-09-20 survey and will have drifted; the executor must grep `Ink::Error`/`hidden.failed` there before editing. This is also a live demonstration of the card's case.
+- A refused row is visually identical to a successful one in the terminal beyond the ✗ (both TextMuted). If that reads too flat, a dim attribute on the span is the escape hatch — try the plain neutral first.
+- Build/test through `scripts/relay-build` and `python3 scripts/land.py begin|commit` per repo rules.
+
+## Verify
+
+- `python3 -m pytest tests/test_tool_labels.py -k "refus or error" -q` — new cases: a result with `refused: True` yields a label with `refused` and `ok: False`, no `merge`; a string `refused` code does not; an `OSError` result does not.
+- Extend `tests/test_agent.py`: a fake tool raising `ValueError` → `tool_result` event's label carries `refused: true` and the model-facing result too; one raising `OSError` (and a `UnicodeDecodeError`) → no flag.
+- `ctest --test-dir build -R "toollabel|calllines"` — `toollabel_test.cpp`: `refused` parses, `failed()` still true; `calllines_test.cpp`: `finishedRow` on a refused label sets `failed` and `refused` and keeps the `" ✗"` suffix.
+- Live under Xvfb with an isolated `XDG_CONFIG_HOME`: have the agent `edit_file` on a >128 KiB file (`src/BoardPane.cpp` or `src/Pane.h`) — expect `▸ edit … ✗ · File exceeds the 128 KiB preview/read limit.` in the muted tool ink; then `run_command ls /nonexistent` — still red. Screenshot both into `docs/qa_evidence/2026-MM-DD-refused-neutral-ink/` and move the card to `needs_qa_llm` with the checklist.
+
 ## Goal
 
 A tool call a guard deliberately refused (edit_file's 128 KiB cap, path guards, secret guards, budget) keeps its ✗ and its message but wears the neutral tool ink instead of red. Red stays strictly for *failed*; amber keeps its one job (waiting on a person). Decision recorded on #SFP6, 2026-09-19.

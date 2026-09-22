@@ -701,6 +701,13 @@ drive and what it found.
   back as an editable row). `board` gained the card-to-card transcript hand-over.
 - `boardexecute` fails 3 of 5 exactly as #48S3's thread records, unchanged by any commit here.
 
+### Check 2026-09-21 21:27
+- not-applicable · unittest:test_roles — test_roles.py is not in the project any more
+- missing-evidence · ctest:consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit — no run of ctest -R consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit for this revision, from any host, and no attached result
+- notice · unittest:test_roles — test_roles.py is not in the project any more
+- notice · ctest:consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit — ctest -R consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit: 1 of 8 are slow (board)
+- notice · ctest:consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit — ctest -R consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit: 3 of 8 never ran here (boardsections, boardworkspace, boardfilter)
+history: thread
 ## QA checklist
 
 The evidence is three drives: `docs/qa_evidence/2026-09-21-card-turns-backend` (the wire, end to

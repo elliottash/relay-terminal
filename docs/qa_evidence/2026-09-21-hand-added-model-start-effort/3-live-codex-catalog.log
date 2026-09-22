@@ -1,0 +1,6 @@
+scan done: True
+gpt-6-astra        default=medium tier_effort={'main': 'medium', 'high': 'xhigh', 'flash': 'low', 'lite': 'low'}
+gpt-5.6-sol        default=low tier_effort={'main': 'low', 'high': 'xhigh', 'flash': 'low', 'lite': 'low'}
+gpt-5.6-terra      default=medium tier_effort={'main': 'medium', 'high': 'xhigh', 'flash': 'low', 'lite': 'low'}
+gpt-5.6-luna       default=medium tier_effort={'main': 'medium', 'high': 'xhigh', 'flash': 'low', 'lite': 'low'}
+gpt-5.5            default=medium tier_effort={'main': 'medium', 'high': 'xhigh', 'flash': 'low', 'lite': 'low'}

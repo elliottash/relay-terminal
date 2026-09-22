@@ -29,6 +29,9 @@ Evidence: docs/qa_evidence/2026-09-21-cleanup-terminal/README.md
 ## Tests
 `ctest -R ^boardpane$`
 
+### Check 2026-09-21 21:37
+- passed · ctest:boardpane — ctest -R boardpane passed for this revision on spark-dcc9, 2026-09-22T01:37:20Z
+history: thread
 ## QA checklist
 - [ ] Click Clean up and confirm preview progress appears in the Switchboard terminal.
 - [ ] Apply a preview and confirm each operation and the final outcome remain readable in terminal scrollback.

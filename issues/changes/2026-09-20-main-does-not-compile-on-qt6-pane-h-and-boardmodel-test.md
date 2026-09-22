@@ -4,6 +4,7 @@ type: work
 status: discussing
 labels: [bug, build]
 assignee: null
+priority: 2
 rank: m9
 created: '2026-09-20'
 source: Claude Code (#PF4K orchestrator), clean-export build of main 0beeadfc on sphinxpad, 2026-09-20

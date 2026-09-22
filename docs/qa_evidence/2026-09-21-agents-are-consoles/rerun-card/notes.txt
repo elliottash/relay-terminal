@@ -1,9 +1,0 @@
-===== (b) the card console =====
-PASS b1 the card page carries the console's reply box ("Enter discusses" in b02-card.png)
-PASS b1 Plan (p) is on the action row above the box ("^plan" read in b02-card.png)
-PASS b1 and Execute (x) ("Execute (x)" in b02-card.png)
-PASS b2 Enter discussed: the owner's words are in issues/threads/DYNH.md
-PASS b2 the answer carries its model=/turn= provenance
-FAIL b3 Ctrl+Shift+Enter did not write a comment
-----
-PASS 5  FAIL 1

@@ -1,7 +1,7 @@
 ---
 id: GPF7
 type: work
-status: inbox
+status: discussing
 labels: [bug, tests, planning]
 assignee: null
 rank: mgpf7
