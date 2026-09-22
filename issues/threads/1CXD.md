@@ -31,3 +31,6 @@ the aesthetic the owner is keeping, and it is what the theme files cite.
 <!-- relay:entry 20260921T235808Z-d2 author=claude-code kind=decision -->
 ### Claude Code · 2026-09-21 23:58
 Owner answered the four questions ("1 about about _board rather than board? (i dont feel strongly about this) 2 yes 3 what is the role id? 4 ok"); recorded in `## Decisions`. Implementation waits for #PR4Q, #WC3E and #JNYN to land, then one subagent per area in the plan's order.
+<!-- relay:entry 20260922T003445Z-p3 author=claude-code kind=progress -->
+### Claude Code · 2026-09-22 00:34
+#PR4Q, #WC3E and #JNYN have landed; claimed. Areas A, B (B1+B2), C and D start as four Opus subagents with disjoint files; E (the doc renames) follows when they have landed.

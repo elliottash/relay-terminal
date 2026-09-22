@@ -1,9 +1,10 @@
 ---
 id: 1CXD
 type: work
-status: planned
+status: executing
 labels: [feature, switchboard, docs]
 component: [gui, worker]
+assignee: claude-code
 rank: zzzzzzzzzzzzzzzzd
 created: '2026-09-21'
 source: 'owner, 2026-09-21'
