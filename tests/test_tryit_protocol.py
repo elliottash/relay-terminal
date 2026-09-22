@@ -49,7 +49,7 @@ class StubTurns:
 
 
 class StubBoardAgent:
-    """Stands in for the Switchboard worker's Agent: it only has to carry the board tools."""
+    """Stands in for the Board worker's Agent: it only has to carry the board tools."""
 
     def __init__(self, tools):
         self.board = tools
@@ -160,7 +160,7 @@ class RunTests(TryItTest):
         self.assertEqual(started["out"], f"docs/qa_evidence/{_today()}-tryit-{self.card}")
         self.assertTrue((self.repo / started["out"]).is_dir())
         prompt = self.turns.submitted[-1]["prompt"]
-        self.assertIn("[Switchboard Try it]", prompt)
+        self.assertIn("[Board Try it]", prompt)
         self.assertIn(f"#{self.card}", prompt)
         self.assertIn("one task and one question", prompt)        # the brief
         self.assertIn("totals go negative past a hundred lines", prompt)   # the card
@@ -463,7 +463,7 @@ class ToolTests(TryItTest):
         result = self.agent_tools.run("board_try", {"card": self.card})
         self.assertNotIn("error", result)
         self.assertEqual(result["card"], self.card)
-        self.assertIn("[Switchboard Try it]", result["text"])
+        self.assertIn("[Board Try it]", result["text"])
         self.assertIn("expected.md", result["text"])
         self.assertEqual(result["evidence_dir"],
                          f"docs/qa_evidence/{_today()}-tryit-{self.card}")
@@ -484,7 +484,7 @@ class ToolTests(TryItTest):
         self.agent_tools.begin_cleanup("c-1")
         refused = self.agent_tools.run("board_try", {"card": self.card})
         self.assertEqual(refused["code"], "board_refused")
-        self.assertIn("not available during a Switchboard cleanup", refused["error"])
+        self.assertIn("not available during a Board cleanup", refused["error"])
         claim = self.agent_tools.run("board_claim", {"id": self.card})
         self.assertEqual(claim["code"], "board_refused")
 

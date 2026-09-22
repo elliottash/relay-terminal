@@ -2,7 +2,7 @@
 """`relay_core.board_import`: proposing cards from a tracker, and writing the accepted ones.
 
 Every test builds a throwaway project from a fixture tree under `tests/fixtures/trackers/`
-and a throwaway Switchboard beside it.  Two rules are checked over and over because they are
+and a throwaway Board beside it.  Two rules are checked over and over because they are
 the ones that would hurt: **the files the import read are never touched**, and **the same
 item is never imported twice**.  Nothing here calls a model or the network.
 """
@@ -34,7 +34,7 @@ agent: {autonomy: auto, max_creates_per_turn: 5}
 
 
 class ImportCase(unittest.TestCase):
-    """A project copied from fixtures, with an initialized Switchboard inside it."""
+    """A project copied from fixtures, with an initialized Board inside it."""
 
     fixtures: tuple = ()
     config = CONFIG

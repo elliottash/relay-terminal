@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Aliases: saved terminal commands and prompts, Warp-workflow style (issue G8DK).
 
-One Markdown file per alias, in the Switchboard format (`docs/BOARD-FORMAT.md`): YAML front
-matter with `type: alias`, then the body.  Global aliases live in the global Switchboard
-(`$XDG_CONFIG_HOME/relay/switchboard/aliases/`), local ones in the repository Switchboard
+One Markdown file per alias, in the Board format (`docs/BOARD-FORMAT.md`): YAML front
+matter with `type: alias`, then the body.  Global aliases live in the global Board
+(`$XDG_CONFIG_HOME/relay/switchboard/aliases/`), local ones in the repository Board
 (`<repo>/.switchboard/aliases/`, `<repo>/switchboard/aliases/`, `<repo>/issues/aliases/`, or
 `<repo>/.relay/aliases/`
 in a project that has no board yet) --
@@ -442,7 +442,7 @@ def validate(alias: Alias) -> Alias:
 # ------------------------------------------------------------------------------------- the store
 
 def global_root() -> Path:
-    """The global Switchboard: `$XDG_CONFIG_HOME/relay/switchboard` (owner decision, section 9)."""
+    """The global Board: `$XDG_CONFIG_HOME/relay/switchboard` (owner decision, section 9)."""
     override = os.environ.get("RELAY_GLOBAL_SWITCHBOARD", "").strip()
     if override:
         return Path(override).expanduser()
@@ -541,7 +541,7 @@ def save(alias: Alias, workspace: str | os.PathLike | None = None,
          scope: str = "local") -> Alias:
     """Write one alias card, replacing any earlier file of the same name in the same scope.
 
-    Writing is atomic (a temp file plus `os.replace`), as every Switchboard write is.
+    Writing is atomic (a temp file plus `os.replace`), as every Board write is.
     """
     if scope not in SCOPES:
         raise AliasError('An alias scope is "local" or "global".')
@@ -563,7 +563,7 @@ def save(alias: Alias, workspace: str | os.PathLike | None = None,
     if previous is not None and previous.path:
         old_path = Path(previous.path)
         if not old_path.resolve().is_relative_to(root.resolve()):
-            raise AliasError("Alias source is outside its Switchboard.")
+            raise AliasError("Alias source is outside its Board.")
         if previous.name == alias.name and previous.status == alias.status:
             path = old_path
         elif path.exists() and path != old_path:
@@ -592,7 +592,7 @@ def delete(name: str, workspace: str | os.PathLike | None = None, scope: str = "
     """Remove an alias card.  Returns the path it removed."""
     alias = resolve(name, workspace, scope)
     if not alias.path:
-        raise AliasError(f"No alias named {name!r} in the {scope} Switchboard.")
+        raise AliasError(f"No alias named {name!r} in the {scope} Board.")
     Path(alias.path).unlink()
     return alias.path
 

@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The `app_*` tools: the agent drives the Relay app (card #FEJQ, protocol §30).
 
-The Switchboard tools (`board_tools.BoardTools`) are the model this copies.  There the agent
+The Board tools (`board_tools.BoardTools`) are the model this copies.  There the agent
 changes *files*; here it changes the *app* — the rows of Options, the entries of the actions
 palette, which pane is open and what it is zoomed to — and the app lives in the GUI process, so
 every write is a round trip: the tool emits an `app_command` and blocks on the GUI's
 `app_command_result` (§30.3), exactly as `BoardTools.init` (`BoardInit.ask_and_wait`) blocks on
-the "initialize a Switchboard here?" dialog.  A tool result therefore says what *happened*,
+the "initialize a Board here?" dialog.  A tool result therefore says what *happened*,
 never what was asked for.
 
 What the GUI sends and what this module owns:
@@ -77,7 +77,7 @@ ANSWER_TIMEOUT = 20.0
 OPTION_KINDS = ("toggle", "choice", "text", "number", "button", "buttons", "info", "heading")
 VALUE_KINDS = ("toggle", "choice", "text", "number")
 
-#: What `app_open` can open.  The four panes the card is about; a card id opens the Switchboard,
+#: What `app_open` can open.  The four panes the card is about; a card id opens the Board,
 #: and `conversation` resumes a saved conversation in a pane — the Sessions row's own Enter
 #: (`SessionManager::onResume`), which until 2026-09-20 no tool could reach: the helper could
 #: search the index and then only open the *list* at the search, so "open a group of previous
@@ -661,7 +661,7 @@ TOOL_SPECS = [
     spec("app_open",
          "Open one of Relay's panes for the person and zoom it to what you are talking about: "
          "Options or the actions palette at a section or a row, Sessions at a search, the "
-         "Switchboard at a card, the file explorer, Test suites, Activity, \u24d8 (conversation "
+         "Board at a card, the file explorer, Test suites, Activity, \u24d8 (conversation "
          "info), the request ledger or the subagents of a pane — or, with target "
          "`conversation`, open a past conversation "
          "itself, which is what pressing Enter on a Sessions row does. `id` is a conversation's "
@@ -676,7 +676,7 @@ TOOL_SPECS = [
           "section": {"type": "string", "description": "Options/actions: the section to open at."},
           "row": {"type": "string", "description": "Options: the row id to reveal and highlight."},
           "query": {"type": "string", "description": "Sessions or actions: the search to open with."},
-          "card": {"type": "string", "description": "Switchboard: a card id such as K7Q2 to open."},
+          "card": {"type": "string", "description": "Board: a card id such as K7Q2 to open."},
           "id": {"type": "string",
                  "description": "conversation: the id of one conversation to open, as "
                                 "app_sessions_search gives it."},
@@ -1434,7 +1434,7 @@ def prompt_section(tools: "AppTools | None") -> str:
         f"({len(catalog.options)} rows), app_action_list the actions ({safe} of "
         f"{len(catalog.actions)} are ones you may run), app_sessions_search their past "
         "conversations, and app_open puts any of Options, the actions palette, Sessions, the "
-        "Switchboard, the file explorer, Test suites, Activity, \u24d8, requests or subagents on "
+        "Board, the file explorer, Test suites, Activity, \u24d8, requests or subagents on "
         "screen zoomed to the row, search or card you are talking about — do that instead of "
         "describing where a setting lives.",
         # The owner, 2026-09-20: "it also needs to reply in text that it is doing it." A turn that

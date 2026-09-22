@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Switchboard agent tools: the six `board_*` tools and their guardrails (phase 1).
+"""Board agent tools: the six `board_*` tools and their guardrails (phase 1).
 
 Design: `docs/BOARD-DESIGN.md` sections 6.1-6.3 and the owner decisions in 12
 (especially 12.3: owner text *may* be rewritten, but every change is logged in the card's
@@ -65,21 +65,21 @@ BOARD_FOLDER = B.DEFAULT_BOARD_FOLDER
 #:   "ready"          - the board exists; the full tools and the full policy block.
 #:   "uninitialized"  - the project has no board and the GUI says one may be offered: the agent
 #:                      gets `board_create_card` alone and a one-line note, and the first card
-#:                      asks the user "Initialize a project and create a Switchboard here?".
+#:                      asks the user "Initialize a project and create a Board here?".
 #: A pane with no board at all has no `BoardTools` and neither state.
 BOARD_STATES = ("ready", "uninitialized")
 
 #: Why the worker is asking to initialize a project (`board_init_request.reason`).
 INIT_REASONS = ("agent-card", "card-command")
 
-#: What the agent is told when there is no Switchboard and the user has said not to make one.
+#: What the agent is told when there is no Board and the user has said not to make one.
 #: A tool result, not an exception: the turn carries on without the board.
-NO_BOARD_TEXT = ("This project has no Switchboard and the user declined to create one. Do not "
+NO_BOARD_TEXT = ("This project has no Board and the user declined to create one. Do not "
                  "call the board tools again in this conversation; say what you would have "
                  "filed, in your reply, and carry on with the work.")
 
 #: The one-line note an uninitialized board puts in the system prompt, in place of the policy.
-UNINITIALIZED_NOTE = ("\n\nSwitchboard: this project has no Switchboard yet; creating a card with "
+UNINITIALIZED_NOTE = ("\n\nBoard: this project has no Board yet; creating a card with "
                       "board_create_card will ask the user to initialize one.\n")
 
 #: What an uninitialized board offers: creating a card, and nothing else.  There is nothing to
@@ -126,7 +126,7 @@ QA_STATUSES = ("needs-qa-llm", "needs-qa-human")
 
 #: The `ToolContext.actor` of the person at the keyboard.  `board_protocol` builds the owner's half
 #: of the tools with it and restores it after every message it relabels with a `author` (its
-#: `_build` and `_write`), so it is what a write from the Switchboard pane carries and an agent
+#: `_build` and `_write`), so it is what a write from the Board pane carries and an agent
 #: turn never does.  Read where a write must know which side asked for it: the self-close stamp of
 #: `_move` (#93WR) is the owner's hand-close and stays unstamped.
 OWNER_ACTOR = "owner"
@@ -180,8 +180,8 @@ MAX_TEST_TIMEOUT = 1800
 
 TOOL_SPECS = [
     spec("board_list",
-         "List Switchboard cards: the project's own tracker, in a folder a ripgrep search of the "
-         "project skips, so this tool — not `rg` — is how you find cards. One row per card: id, "
+         "List Board cards: the project's own tracker, in the board folder. Exclude it from code searches; "
+         "use this tool to find cards. One row per card: id, "
          "title, type, status, tab, labels, assignee, waiting_on and thread size. Search here "
          "before creating a card, so a request that already has one updates it instead.",
          {"tab": {"type": "string", "description": "Tab id from board.yaml, e.g. features, bugs, design, planning."},
@@ -295,8 +295,8 @@ TOOL_SPECS = [
                                             "Relay's own stamp wins."}},
          ["id", "reason"]),
     spec("board_import_items",
-         "Create Switchboard cards from tracking the project already has — a TODO.md, a backlog/ "
-         "folder, an issues list, spec files — through the Switchboard page's own import, so every "
+         "Create Board cards from tracking the project already has — a TODO.md, a backlog/ "
+         "folder, an issues list, spec files — through the Board page's own import, so every "
          "card carries a `source` and is never imported twice. Only after the owner said yes: it "
          "writes. Returns what each key became.",
          {"keys": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 1000,
@@ -320,7 +320,7 @@ TOOL_SPECS = [
          ["id", "kind", "text"]),
     spec("board_claim",
          "Take a card: this terminal pane is the session working on it. One call does what the "
-         "Switchboard's Execute button does — assignee agent, status executing, the card's "
+         "Board's Execute button does — assignee agent, status executing, the card's "
          "`session` set to this pane's token, a progress entry that links back to this pane — and "
          "returns the whole card (front matter, body, tasks, recent thread), so you need no second "
          "read. Claim before you change any code, and only a card whose request is the one you are "
@@ -396,12 +396,12 @@ TOOL_SPECS = [
     spec("board_try",
          "Try it (protocol 31.10, #JNYN): prepare the card's situation for a person and hand them "
          "one task and one question. Call it as the last step of delivering a card, once it is in "
-         "needs-verification. It answers with the brief the Switchboard's Try it button runs — "
+         "needs-verification. It answers with the brief the Board's Try it button runs — "
          "what the thing to open is, whether the verifying session already staged the situation "
          "(then you run its stage.sh instead of staging a second one), where the evidence goes, "
          "and the rule that the expected result is sealed in expected.md and never written on the "
          "card. Do that work in this turn and write `## Try it` with board_update_card. It is "
-         "refused during a Switchboard cleanup, which has no machine of its own to stage on.",
+         "refused during a Board cleanup, which has no machine of its own to stage on.",
          {"card": _ID_ARG}, ["card"]),
 ]
 
@@ -476,7 +476,7 @@ TOOL_NAMES = tuple(s["function"]["name"] for s in TOOL_SPECS)
 CLEANUP_TOOL_NAMES = tuple(s["function"]["name"] for s in CLEANUP_TOOL_SPECS)
 
 #: Cleanup-only tools the owner may also reach directly, through a control in the GUI rather than
-#: through a model: the section editor behind the gear on the Switchboard's list of sections. The
+#: through a model: the section editor behind the gear on the Board's list of sections. The
 #: fence is on the agent's autonomy, and this is the owner asking for it by hand.
 OWNER_TOOLS = ("board_sections",)
 ALL_TOOL_NAMES = TOOL_NAMES + CLEANUP_TOOL_NAMES
@@ -500,7 +500,7 @@ CLAIM_LINE_NO_TOKEN = "Claimed · working on it from a terminal pane"
 #: `Released (xxxxxxxx) …` and it is obvious which pane let go of the card.
 RELEASE_LINE = "Released ({short}) · {reason}"
 
-#: Said in the result when this worker has no pane token: the Switchboard worker, a test, or a
+#: Said in the result when this worker has no pane token: the Board worker, a test, or a
 #: GUI too old to send one.  The claim still happens; it just cannot be linked to a pane.
 NO_TOKEN_NOTE = ("This worker has no pane session token, so the card records no `session` and the "
                  "entry carries no pane link. The claim itself stands.")
@@ -821,7 +821,7 @@ class CleanupLog:
 
     def markdown(self) -> str:
         counts = self.counts()
-        head = [f"# Switchboard cleanup {self.run_id}",
+        head = [f"# Board cleanup {self.run_id}",
                 "",
                 f"- **Run**: {self.run_id} ({'dry run, nothing written' if self.dry_run else 'applied'})",
                 f"- **Finished**: {datetime.fromtimestamp(self.finished or time.time(), timezone.utc).isoformat(timespec='seconds')}"
@@ -896,7 +896,7 @@ def cleanup_brief() -> str:
 # A card's "Ask the agent" became Discuss / Plan / Execute (#XS6Q, owner 2026-09-18). Discuss
 # and Plan are one `board_ask` turn each, told apart by `mode`; Execute hands the card to a
 # terminal pane and is not a turn here at all. What a mode may touch is enforced below, not
-# left to the brief: a card turn runs on the Switchboard worker, whose executor would otherwise
+# left to the brief: a card turn runs on the Board worker, whose executor would otherwise
 # offer the whole pane tool set (commands, file writes, subagents).
 
 CARD_MODES = ("discuss", "plan")
@@ -1023,7 +1023,7 @@ class ConsoleScope:
         return f"{name} is not available in this console."
 
 
-#: The name this scope had while it was the Switchboard page agent's alone (19.18).  Kept so a
+#: The name this scope had while it was the Board page agent's alone (19.18).  Kept so a
 #: caller written against that name still compiles; there is one class.
 ChatScope = ConsoleScope
 
@@ -1281,7 +1281,7 @@ def board_for(workspace: str | os.PathLike | None,
 
 
 class BoardInit:
-    """"Initialize a project and create a Switchboard here?" — the one round trip (protocol 19.12).
+    """"Initialize a project and create a Board here?" — the one round trip (protocol 19.12).
 
     One instance per worker, shared by the owner's tools and the agent's, so a yes or a no is the
     pane's and not one instance's.  The shape is `terminal_handoff.TerminalHandoff`'s, for the same
@@ -1380,7 +1380,7 @@ class BoardInit:
 
 
 class BoardTools:
-    """The `board_*` tools for one pane (or for the Switchboard worker)."""
+    """The `board_*` tools for one pane (or for the Board worker)."""
 
     def __init__(self, board: B.Board, *, emit: Callable[[dict], None] | None = None,
                  autonomy: str | None = None, limits: dict | None = None,
@@ -1390,8 +1390,8 @@ class BoardTools:
                  init=None, pane_token: str | None = None):
         self.board = board
         #: This pane's session token, from `configure {pane_token}` (protocol 19.19), or None for
-        #: the Switchboard worker and for tests.  `board_claim` writes it onto the card as
-        #: `session` and onto its progress entry as `pane_token`, so the Switchboard can draw the
+        #: the Board worker and for tests.  `board_claim` writes it onto the card as
+        #: `session` and onto its progress entry as `pane_token`, so the Board can draw the
         #: claim as a link that reveals the pane doing the work.
         self.pane_token = check_pane_token(pane_token)
         #: The cards this pane has claimed this conversation (#R9G7), newest last.  Named in the
@@ -1434,7 +1434,7 @@ class BoardTools:
             state_path = Path(board.repo) / ".relay" / "board-rate.json"
         self.rate = RateState(state_path, clock)
         # The guardrails exist to keep an *agent* honest; the owner's own writes from the
-        # Switchboard pane go through the same code with them turned off.
+        # Board pane go through the same code with them turned off.
         self.enforce_limits = enforce_limits
         self.duplicate_check = duplicate_check
         self.writes: dict[str, WriteRecord] = {}
@@ -1484,7 +1484,7 @@ class BoardTools:
         """Scaffold this board and announce it.  The caller has the user's yes.
 
         Nothing else writes `board.yaml`: the owner's rule of 2026-09-18 is that a project gets a
-        Switchboard only when the user answers "Initialize a project and create a Switchboard
+        Board only when the user answers "Initialize a project and create a Board
         here?", so every path to this method runs through `board_init` (the GUI asked) or a
         `board_init_request` the user accepted.
         """
@@ -1522,7 +1522,7 @@ class BoardTools:
     # ---- lifecycle ------------------------------------------------------------
     @classmethod
     def for_workspace(cls, workspace: str | os.PathLike, **kwargs) -> "BoardTools | None":
-        """The tools for a workspace, or None when it has no Switchboard or autonomy is off."""
+        """The tools for a workspace, or None when it has no Board or autonomy is off."""
         board = board_for(workspace)
         if board is None:
             return None
@@ -1671,10 +1671,10 @@ class BoardTools:
         for key in ("id", "tab", "status", "title", "kind", "query", "reason", "pattern", "glob"):
             if args.get(key):
                 bits.append(f"{key}: {str(args[key])[:120]}")
-        return f"SWITCHBOARD {head}\n\n" + ("\n".join(bits) or "(no arguments)")
+        return f"BOARD {head}\n\n" + ("\n".join(bits) or "(no arguments)")
 
     def run(self, name: str, args: dict, *, by_owner: bool = False) -> dict:
-        """Run one Switchboard tool.  `by_owner` is the GUI acting for the person at the keyboard.
+        """Run one Board tool.  `by_owner` is the GUI acting for the person at the keyboard.
 
         The cleanup-only tools are fenced off because an *agent* must not restructure the board
         in the middle of an ordinary turn — not because the structure is off limits.  The owner
@@ -1682,14 +1682,14 @@ class BoardTools:
         `OWNER_TOOLS` names the ones a direct request may reach, and only when it says so.
         """
         if not self.handles(name):
-            raise BoardToolError(f"unknown Switchboard tool {name!r}")
+            raise BoardToolError(f"unknown Board tool {name!r}")
         if not isinstance(args, dict):
             raise BoardToolError("Tool arguments must be an object.")
         try:
             if (name in CLEANUP_TOOL_NAMES and self.cleanup is None
                     and not (by_owner and name in OWNER_TOOLS)
                     and not getattr(self.card_scope, "chat", False)):
-                raise BoardToolError(f"{name} is only available during a Switchboard cleanup.",
+                raise BoardToolError(f"{name} is only available during a Board cleanup.",
                                      code="board_refused")
             self._check_card_scope(name, args)
             if self.readonly and name in WRITE_TOOLS:
@@ -1699,26 +1699,26 @@ class BoardTools:
                     code="board_readonly_turn")
             if name == "board_try" and self.cleanup is not None:
                 # Gated exactly as `board_claim` is, and for the same reason: a cleanup is the
-                # Switchboard worker tidying files, with no terminal pane of its own to stage a
+                # Board worker tidying files, with no terminal pane of its own to stage a
                 # fixture on or open an app in. Preparing a Try it is not tidying.
                 raise BoardToolError(
-                    "board_try is not available during a Switchboard cleanup: preparing Try it "
+                    "board_try is not available during a Board cleanup: preparing Try it "
                     "stages a fixture and opens it, and a cleanup has no pane of its own to do "
                     "that in. Press Try it on the card, or call this from a terminal pane.",
                     code="board_refused")
             if name == "board_claim" and self.cleanup is not None:
-                # A cleanup is the Switchboard worker tidying the whole board (19.9): it has no
+                # A cleanup is the Board worker tidying the whole board (19.9): it has no
                 # terminal pane of its own to claim *for*, and putting a card into Executing is
                 # not tidying. The ordinary move is still there if a card is genuinely mis-filed.
                 raise BoardToolError(
-                    "board_claim is not available during a Switchboard cleanup: a cleanup has no "
+                    "board_claim is not available during a Board cleanup: a cleanup has no "
                     "terminal pane of its own, and taking a card is not tidying one. Move a "
                     "mis-filed card with board_move_card.", code="board_refused")
             if name == "search_files":
                 return search_workspace(Path(self.board.repo), dict(args))
             if self.state == "uninitialized" and name not in UNINITIALIZED_TOOLS:
                 raise BoardToolError(
-                    "This project has no Switchboard yet, so there is nothing to read or change. "
+                    "This project has no Board yet, so there is nothing to read or change. "
                     "board_create_card is the only board tool here: calling it asks the user "
                     "whether to create one.", code="board_not_initialized")
             if name in WRITE_TOOLS:
@@ -1795,24 +1795,24 @@ class BoardTools:
                 card_id=str((args or {}).get("id") or (args or {}).get("into") or "").lstrip("#").upper(),
                 summary=preview_line(name, args or {}), proposed=True))
             raise BoardToolError(
-                "This is a dry run of the Switchboard cleanup: nothing is written. Carry on "
+                "This is a dry run of the Board cleanup: nothing is written. Carry on "
                 "reading the board and call the write tools as you would — each call is recorded "
                 "as a proposal — then summarize the plan in your reply.",
                 code="board_cleanup_dry_run")
         if not self.enforce_limits:
             return
         if self.autonomy == "off":
-            raise BoardToolError("Switchboard writes are turned off for this workspace (autonomy: off).",
+            raise BoardToolError("Board writes are turned off for this workspace (autonomy: off).",
                                  code="board_autonomy_off")
         if name == "board_create_card":
             if self.creates_this_turn >= self.limit("max_creates_per_turn"):
                 raise BoardToolError(
-                    f"Switchboard limit: {self.limit('max_creates_per_turn')} new cards per turn. "
+                    f"Board limit: {self.limit('max_creates_per_turn')} new cards per turn. "
                     "Summarize the remaining requests in your reply instead of creating more.",
                     code="board_rate_limited", scope="turn", limit=self.limit("max_creates_per_turn"))
         elif self.writes_this_turn >= self.limit("max_writes_per_turn"):
             raise BoardToolError(
-                f"Switchboard limit: {self.limit('max_writes_per_turn')} card writes per turn. "
+                f"Board limit: {self.limit('max_writes_per_turn')} card writes per turn. "
                 "Summarize the rest in your reply.",
                 code="board_rate_limited", scope="turn", limit=self.limit("max_writes_per_turn"))
 
@@ -1891,7 +1891,7 @@ class BoardTools:
                 # on every row so that fold needs no second request. The row stays light otherwise:
                 # the `qa` recommendation is computed per card in `board_read`, not for every row.
                 "verified_by": card.front.get("verified_by"),
-                # Which pane holds the card (#R9G7): the Switchboard draws the token's first eight
+                # Which pane holds the card (#R9G7): the Board draws the token's first eight
                 # characters as a link to that pane, and an agent listing the board sees from the
                 # row alone that a card is taken.
                 "session": card.front.get("session"),
@@ -2110,7 +2110,7 @@ class BoardTools:
 
         if self.enforce_limits and not self.rate.claim(self.limit("max_creates_per_hour")):
             raise BoardToolError(
-                f"Switchboard limit: {self.limit('max_creates_per_hour')} new cards per hour for this "
+                f"Board limit: {self.limit('max_creates_per_hour')} new cards per hour for this "
                 "workspace. Summarize the remaining requests in your reply.",
                 code="board_rate_limited", scope="hour", limit=self.limit("max_creates_per_hour"))
 
@@ -2372,7 +2372,7 @@ class BoardTools:
             # keeps *their* signature and only gains a `verified_by`, the two differ, and it stays
             # an ordinary done card — which is the point: a cross-pane close is not a self-close.
             #
-            # The owner's hand-close from the Switchboard is never stamped, so it never folds.
+            # The owner's hand-close from the Board is never stamped, so it never folds.
             # Two independent things say it is the owner, and either alone would do: the
             # owner-side tools are built with `actor="owner"` (`board_protocol._build`) and, unlike
             # the agent's, never learn a preset or a model — only `Agent.sign_board` sets those, on
@@ -2406,7 +2406,7 @@ class BoardTools:
         card.set("status", status)
         # Auto-release (#R9G7, owner 2026-09-20): a card that lands in `done` or `dropped` drops
         # its claim in the same write. This is the one place a status change goes through — the
-        # `board_move_card` tool, the Switchboard's `board_move` message (19.3) and the close out
+        # `board_move_card` tool, the Board's `board_move` message (19.3) and the close out
         # of a QA lane above are all here — so no closing path can forget it.
         released = self._release_on_close(card, status)
         rank = self._rank_for(card, status, args.get("before"), args.get("after"))
@@ -2642,7 +2642,7 @@ class BoardTools:
     def _claim(self, args: dict) -> dict:
         """`board_claim`: this terminal pane takes the card, in one call (protocol 19.19, #R9G7).
 
-        The same four writes the Switchboard's Execute button makes, in the same order —
+        The same four writes the Board's Execute button makes, in the same order —
         `assignee: agent`, status `executing`, the card's `session` set to this pane's token, and
         a `progress` entry carrying that token so the thread draws it as a link back to this
         pane — plus the card itself in the result, so the turn that claimed it has the front
@@ -2802,9 +2802,9 @@ class BoardTools:
     def _board_try(self, args: dict) -> dict:
         """`board_try`: the Try it brief for one card, for an agent that has a machine to run it on.
 
-        It hands back the same prompt the Switchboard's Try it button runs
+        It hands back the same prompt the Board's Try it button runs
         (`tryit_protocol.tryit_prompt`) rather than starting a turn somewhere else, because there
-        is nowhere else to start one: a terminal pane's worker and the Switchboard's worker are
+        is nowhere else to start one: a terminal pane's worker and the Board's worker are
         different processes and the board is the only thing between them. The calling agent
         already has a shell, a display and this turn — it *is* the machine — so the useful act is
         to give it the brief and the card, which is what `/deliver`'s landing step needs.
@@ -2865,7 +2865,7 @@ class BoardTools:
                 "Say what you would do; the write happens once the owner answers.",
                 code="board_readonly_turn")
         if action != "list" and self.enforce_limits and self.autonomy == "off":
-            raise BoardToolError("Switchboard writes are turned off for this workspace "
+            raise BoardToolError("Board writes are turned off for this workspace "
                                  "(autonomy: off).", code="board_autonomy_off")
         key = str(args.get("key") or "").strip()
         if not key:
@@ -3055,7 +3055,7 @@ class BoardTools:
         cards within their own authority -- the implementer to `needs-verification`, the verifier
         on to a QA lane or back a stage -- and this is the one move that is not theirs to make.
         The person at the keyboard still closes it: the refusal is on the *agent* actor, so the
-        Switchboard's own Done column is unaffected, which is what "waits for the person" means.
+        Board's own Done column is unaffected, which is what "waits for the person" means.
 
         A question is a numbered line in `## Human QA`; it is answered by an indented line under
         it beginning `Answer:` (docs/BOARD-FORMAT.md 2.7).  Prose with no numbered question
@@ -3146,9 +3146,9 @@ class BoardTools:
         the card files, a write only for the cards that name this token, no model, no network and
         no undo record (there is no window left to undo in). It never raises — a card it cannot
         read or write is skipped and the others are still released — and it does nothing at all
-        for a worker with no pane token: the Switchboard's own, or a test's.
+        for a worker with no pane token: the Board's own, or a test's.
 
-        Nothing is announced on the pipe: the Switchboard pane is drawn by a different worker and
+        Nothing is announced on the pipe: the Board pane is drawn by a different worker and
         already learns of another pane's writes from its `QFileSystemWatcher` on the board folder
         (`BoardView::watchIssues`), which debounces 400 ms and then asks its own worker for a
         `board_refresh` — a fresh read of every card file, so the dropped field is simply there.
@@ -3291,7 +3291,7 @@ class BoardTools:
             for _ in clean:
                 if not self.rate.claim(self.limit("max_creates_per_hour")):
                     raise BoardToolError(
-                        f"Switchboard limit: {self.limit('max_creates_per_hour')} new cards per hour "
+                        f"Board limit: {self.limit('max_creates_per_hour')} new cards per hour "
                         "for this workspace. Summarize the rest of the split in your reply.",
                         code="board_rate_limited", scope="hour")
         category = (B.MEMORY_FOLDER if card.type == "memory" else B.ALIAS_FOLDER if card.type == "alias"
@@ -3462,7 +3462,7 @@ class BoardTools:
     def undo(self, write_id: str) -> dict:
         record = self.writes.get(write_id)
         if record is None:
-            raise BoardToolError(f"no undoable Switchboard write {write_id!r}.", code="board_not_found")
+            raise BoardToolError(f"no undoable Board write {write_id!r}.", code="board_not_found")
         if record.undone:
             raise BoardToolError("that write was already undone.")
         current = record.path
@@ -3765,7 +3765,7 @@ def _tracked_by_git(repo: Path, path: Path) -> bool:
 
 #: The parsed `board_policy.md`, keyed on what the file looked like when it was read (#GMCF): the
 #: policy is ~5 KB of the system prompt and `policy_text` used to re-read and re-regex it on every
-#: call. An edit to the file changes its mtime or its size, so a Switchboard worked on in this
+#: call. An edit to the file changes its mtime or its size, so a Board worked on in this
 #: checkout still picks the new policy up on the next prompt build — no restart.
 _POLICY_CACHE: tuple[tuple[int, int], str] | None = None
 
@@ -3790,7 +3790,7 @@ def policy_text() -> str:
 
 
 def prompt_section(tools: "BoardTools | None") -> str:
-    """What `Agent.system_prompt` appends when this workspace has a Switchboard.
+    """What `Agent.system_prompt` appends when this workspace has a Board.
 
     Only the part that is the same on every request of the conversation: what this pane holds
     changes as it works, so it is `session_note`, which the prompt carries at the end (#GMCF).
@@ -3804,9 +3804,9 @@ def prompt_section(tools: "BoardTools | None") -> str:
         return UNINITIALIZED_NOTE
     tabs = ", ".join(t for t in tools._tab_map())
     folder = tools.board.root.name
-    header = (f"\n\nSwitchboard: this project has one ({folder}/board.yaml). Tabs: {tabs}. "
+    header = (f"\n\nBoard: this project has one ({folder}/board.yaml). Tabs: {tabs}. "
               f"Autonomy: {tools.autonomy}"
-              + (" — your card writes are proposals the user accepts in the Switchboard pane."
+              + (" — your card writes are proposals the user accepts in the Board pane."
                  if tools.autonomy == "suggest" else "") + "\n")
     return header + text
 
@@ -3824,7 +3824,7 @@ def session_note(tools: "BoardTools | None") -> str:
     if not policy_text():
         return ""
     token = tools.pane_token or ""
-    mine = (f"Your Switchboard session: {token[:8]}." if token else "")
+    mine = (f"Your Board session: {token[:8]}." if token else "")
     if tools.claimed:
         mine += (" " if mine else "") + "You hold: " + ", ".join(f"#{c}" for c in tools.claimed) + "."
     return f"\n{mine}\n" if mine else ""

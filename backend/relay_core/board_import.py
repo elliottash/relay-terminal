@@ -8,7 +8,7 @@ Two steps, deliberately apart:
   status, labels, `## Tasks` items and where it came from.  It proposes nothing that has been
   imported before.
 * `apply(board, proposals)` writes the accepted ones **through `BoardTools`**, the same code
-  the Switchboard pane writes with, so every card gets an id, a rank, a thread and an undo
+  the Board pane writes with, so every card gets an id, a rank, a thread and an undo
   record.  It touches no file the import came from: a `TODO.md` is byte-identical afterwards.
 
 Neither calls a model and neither uses the network.
@@ -357,7 +357,7 @@ def _tools_for(board, *, actor: str, emit=None) -> T.BoardTools:
 
     The per-turn and per-hour ceilings and the duplicate check are the agent's guardrails:
     they exist to stop a model filing forty cards nobody asked for.  An import is the user's
-    own act — they saw the list and ticked the boxes — so it runs the way the Switchboard
+    own act — they saw the list and ticked the boxes — so it runs the way the Board
     pane's own writes do, with them off (`BoardTools.__init__`, "the owner's own writes").
     """
     if isinstance(board, T.BoardTools):
@@ -397,7 +397,7 @@ def apply(board, proposals: Sequence[Proposal], *, tab: str | None = None,
 
     Every write goes through `BoardTools`, so each card gets an id, a rank at the end of its
     column, a thread, an undo record and a `board_changed` event — exactly as if the user had
-    typed it into the Switchboard pane.  **Nothing the import read is touched**: a `TODO.md`,
+    typed it into the Board pane.  **Nothing the import read is touched**: a `TODO.md`,
     a `tasks.json` and a `backlog/` are byte-identical afterwards, which is the owner's rule
     that converting must never mutate the source (`docs/BOARD-DESIGN.md` §7).
 
@@ -412,7 +412,7 @@ def apply(board, proposals: Sequence[Proposal], *, tab: str | None = None,
     tools = _tools_for(board, actor=actor, emit=emit)
     real = tools.board
     if not tools.exists():
-        raise ImportError_(f"{real.root} has no board.yaml: initialize the Switchboard first")
+        raise ImportError_(f"{real.root} has no board.yaml: initialize the Board first")
     proposals = list(proposals)[:MAX_PROPOSALS]
     if not proposals:
         return []

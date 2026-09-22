@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Switchboard command line: check the card format, regenerate the index, migrate.
+"""Board command line: check the card format, regenerate the index, migrate.
 
 For collaborators without the Relay GUI, for CI and for pre-commit hooks.
 Never calls a model and never uses the network.
@@ -124,7 +124,7 @@ def cmd_verifier(args, board: board_mod.Board) -> int:
     """Who should verify a card, from this machine's guests, keys and local endpoints.
 
     The same function the worker and the card detail use (`relay_core.qa_verifiers.recommend`), so
-    a collaborator without the GUI gets the same answer the Switchboard would give.
+    a collaborator without the GUI gets the same answer the Board would give.
     """
     card_id = str(args.id).strip().lstrip('#').upper()
     card = board.card_by_id(card_id)

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Two-way sync between Switchboard cards and GitHub issues (`#GDQN`).
+"""Two-way sync between Board cards and GitHub issues (`#GDQN`).
 
 Every test works in a temporary board against `tests/fake_github.py` on 127.0.0.1: no model call,
 no real network, no keyring.  The engine is driven through the real `forge_github.GitHubProvider`,
@@ -1068,7 +1068,7 @@ class _StopsAfterOneCard(F.ForgeSync):
 class _EditsUnderneath(F.ForgeSync):
     """An engine with somebody else writing the card file while it works.
 
-    A sync runs on its own thread (protocol 19.14) while the Switchboard pane and the agent write
+    A sync runs on its own thread (protocol 19.14) while the Board pane and the agent write
     through `BoardTools`, so this is what actually happens when the user edits a card during a sync.
     """
 

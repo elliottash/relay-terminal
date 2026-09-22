@@ -180,7 +180,7 @@ class AgentTests(unittest.TestCase):
         # Decision 8's tiered policy block, and the claims line last of all (`session_note`), which
         # is what lets the model call `board_claim` without being told a session token.
         self.assertIn('Board rules', prompt)
-        self.assertIn('Your Switchboard session: tttttttt.', prompt.rstrip().splitlines()[-1])
+        self.assertIn('Your Board session: tttttttt.', prompt.rstrip().splitlines()[-1])
         # The board policy names `update_todos` in its own rule 1, so the todo rules are tested for
         # by a sentence only they have.
         for absent in ('Requests and todos:', 'app_option_list', 'session_info'):

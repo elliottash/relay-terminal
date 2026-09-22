@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Per-card consoles for the Switchboard tests (protocol 19.16), with no model behind them.
+"""Per-card consoles for the Board tests (protocol 19.16), with no model behind them.
 
 A card turn runs on its own `Agent` and, since card #CTRN, on that card's own
 `TurnSupervisor` (`relay_core.board_turns`), so the tests that used to read the stub

@@ -33,7 +33,7 @@ def cid(n: int) -> str:
 
 
 TITLES = [
-    "The Switchboard on the phone: cards, threads and the card actions, by touch",
+    "The Board on the phone: cards, threads and the card actions, by touch",
     "Voice transcription mode (microphone button, hold Right Alt)",
     "Pairing by typing the code the desktop shows",
     "Changing models during rate limit retries",

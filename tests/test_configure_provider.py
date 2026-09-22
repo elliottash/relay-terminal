@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """How `configure` / `set_model` turn a request into a provider, and what a refused key reads like.
 
-The Switchboard regression (owner, 2026-09-18: "'ask the agent' didnt work. it said provider HTTP
+The Board regression (owner, 2026-09-18: "'ask the agent' didnt work. it said provider HTTP
 401"): the board built its `configure` out of four independent QSettings keys — `provider/preset`,
 which every model switch rewrites, and `provider/base|model|extra`, which only a full re-configure
 rewrites. Once those disagreed it named one preset and carried another provider's URL, and
@@ -40,7 +40,7 @@ class ConfigureProviderTests(unittest.TestCase):
         self.assertEqual(self.looked_up, ["glm-coding"])
 
     def test_the_board_s_configure_cannot_pair_a_key_with_a_foreign_endpoint(self):
-        """What the Switchboard sends now: the preset, and no endpoint of its own.
+        """What the Board sends now: the preset, and no endpoint of its own.
 
         Whatever stale `provider/base` sits in the settings, the key that is looked up and the URL
         it is sent to belong to the same preset.

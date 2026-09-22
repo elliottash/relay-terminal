@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The Switchboard on a paired device: the hub's half (docs/REMOTE-PROTOCOL.md section 17, #SWPH).
+"""The Board on a paired device: the hub's half (docs/REMOTE-PROTOCOL.md section 17, #SWPH).
 
 The two cleaners on their own first — what a device may ask and what it may be told — then the hub
 over real sockets: a rendezvous, a Noise session per client and a GUI whose side of the pipe is a
@@ -616,7 +616,7 @@ class RequestPathTests(unittest.TestCase):
         run(main())
 
     def test_a_request_refused_at_the_gate_is_in_the_audit_log_without_its_text(self):
-        """A guest's, and a `view` device's: neither reaches the Switchboard's own handler, which
+        """A guest's, and a `view` device's: neither reaches the Board's own handler, which
         is where `board_refused` used to be written, so the hosted drive found no line for the
         one asker the owner most wants to hear about. Once a minute per channel, not per try."""
         async def main():

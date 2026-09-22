@@ -641,7 +641,7 @@ class ConsoleFieldTests(unittest.TestCase):
         p.release.release()
         # …and so is everything `ask` makes out of the prompt. The hint used to be composed into
         # the string before `ask` saw it, so the **title** was "On screen now: Appearance › Copy
-        # on select which row is…" — which is what the Switchboard console's pane header showed,
+        # on select which row is…" — which is what the Board console's pane header showed,
         # and what the Sessions list would have kept for ever.
         self.rec.wait(lambda e: e['event'] == 'agent_finished' and e['id'] != item)
         self.assertNotIn('On screen', self.agent.title)
@@ -756,14 +756,14 @@ class ConsoleFieldTests(unittest.TestCase):
         """`submit {preview}` (card #CTRN): a card turn's prompt is not the owner's question.
 
         `board_ask` builds the model's prompt out of the card's seed block and the mode's brief,
-        so the row on the card page — and the request ledger's — would read "[Switchboard card
-        #CRD1 …] You are Relay's Switchboard agent…" where the question belongs. It is `screen`'s
+        so the row on the card page — and the request ledger's — would read "[Board card
+        #CRD1 …] You are Relay's Board agent…" where the question belongs. It is `screen`'s
         rule one field along: the record is what the person typed.
         """
         p = self.use(GatedProvider())
         self.sup.submit('running', 'now')
         self.rec.wait(lambda e: e['event'] == 'agent_started')
-        self.sup.submit('[Switchboard card #CRD1] the brief\n\nand the queue?', 'queue',
+        self.sup.submit('[Board card #CRD1] the brief\n\nand the queue?', 'queue',
                         surface='card:CRD1', mode='discuss', card='CRD1',
                         preview='and the queue?')
         row = self.rec.of('queue_changed')[-1]['items'][-1]
@@ -774,7 +774,7 @@ class ConsoleFieldTests(unittest.TestCase):
         self.rec.wait(lambda e: e['event'] == 'agent_started' and e.get('card_id') == 'CRD1')
         p.release.release()
         self.rec.wait(lambda e: e['event'] == 'agent_finished' and e.get('card_id') == 'CRD1')
-        self.assertIn('[Switchboard card #CRD1]', p.prompts[-1])
+        self.assertIn('[Board card #CRD1]', p.prompts[-1])
 
     def test_a_mode_without_a_card_is_refused_before_anything_is_queued(self):
         self.use(GatedProvider())

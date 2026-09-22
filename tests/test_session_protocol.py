@@ -117,7 +117,7 @@ class InstructionTests(unittest.TestCase):
         return path
 
     def test_an_agents_md_that_imports_claude_md_brings_its_rules_along(self):
-        # A Switchboard-created AGENTS.md starts with `@CLAUDE.md` so that CLAUDE.md is not
+        # A Board-created AGENTS.md starts with `@CLAUDE.md` so that CLAUDE.md is not
         # shadowed by the first-hit rule; the companions under .claude/ follow it (#R9G7).
         self.write(self.repo / 'CLAUDE.md', 'claude body')
         self.write(self.repo / '.claude/rules/style.md', 'rule body')

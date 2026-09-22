@@ -130,7 +130,7 @@ def task_text(signal: "S.Signal", *, project: str, board_folder: str = "",
     if signal.regressed:
         lines.append("It was fixed once and has come back, so look at what changed since.")
     if signal.card:
-        lines.append(f"It is already card #{signal.card} on the Switchboard: read that card "
+        lines.append(f"It is already card #{signal.card} on the Board: read that card "
                      "before you start, and put what you find on it.")
     if signal.message:
         lines += ["", "The failure, in the check's own words:", "```", signal.message[:600], "```"]

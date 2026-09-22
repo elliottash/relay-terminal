@@ -1359,7 +1359,7 @@ class InstallFirstTests(unittest.TestCase):
                         "document.getElementById('notify-offer-note').textContent"))
                     self.assertEqual(stored["endpoint"], "https://push.example.test/abc")
                     # Both switches on is every kind there is — `card_waiting` among them since
-                    # the Switchboard reached the phone (#SWPH).
+                    # the Board reached the phone (#SWPH).
                     self.assertEqual(sorted(stored["kinds"]), sorted(notify.KINDS))
 
                     # The row collapses into the settings that were always there, with both

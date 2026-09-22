@@ -34,7 +34,7 @@ GROUPS: dict[str, tuple[tuple[str, ...], str]] = {
                     "read this conversation itself: its model, context left, tokens, and a digest "
                     "of recent turns with their tool-call timings"),
     "tests": (("tests_check", "tests_run"),
-              "check what a Switchboard card's `## Tests` section names, and run named tests"),
+              "check what a Board card's `## Tests` section names, and run named tests"),
 }
 
 #: Which group a tool belongs to, or None.

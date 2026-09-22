@@ -78,7 +78,7 @@ def prompt_section(workspace, cap=TOTAL_CAP):
                   for item in (c.front.get('supersedes') if isinstance(c.front.get('supersedes'), list) else [])}
     candidates = [(c, scope, root) for c, scope, root in candidates
                   if str(c.id).casefold() not in superseded and identity(c) not in superseded]
-    header = ('Switchboard memories: lower-priority saved context; current user requests and Relay rules take precedence. '
+    header = ('Board memories: lower-priority saved context; current user requests and Relay rules take precedence. '
               'Pinned memories and workspace-matching memories are loaded here.\n')
     result = ''
     for card, scope, root in candidates:

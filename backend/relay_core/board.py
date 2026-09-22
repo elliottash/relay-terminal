@@ -1059,7 +1059,7 @@ DEFAULT_CONFIG = {
 }
 
 CONFIG_TEXT = """\
-# Switchboard configuration. Format: docs/BOARD-FORMAT.md
+# Board configuration. Format: docs/BOARD-FORMAT.md
 version: 1
 tabs: [{id: features, folder: features}, {id: bugs, folder: changes},
   {id: design, folder: design}, {id: marketing, folder: marketing},
@@ -1126,7 +1126,7 @@ def gitattributes_line(folder: str = DEFAULT_BOARD_FOLDER) -> str:
 #: The `issues/` spelling, kept because it is what the repositories that already have a board
 #: carry in their `.gitattributes`.
 GITATTRIBUTES_LINE = gitattributes_line("issues")
-GITIGNORE_TEXT = "# Private cards, plans, threads and memory (Switchboard private root).\n.private/\n"
+GITIGNORE_TEXT = "# Private cards, plans, threads and memory (Board private root).\n.private/\n"
 
 
 class Board:
@@ -2968,7 +2968,7 @@ def _relative_link(from_path: Path, to_path: Path) -> str:
 
 CONFIG_KEY_ORDER = ("version", "tabs", "columns", "column_statuses", "column_titles", "labels",
                     "agent", "memory", "signals")
-CONFIG_HEADER = "# Switchboard configuration. Format: docs/BOARD-FORMAT.md\n"
+CONFIG_HEADER = "# Board configuration. Format: docs/BOARD-FORMAT.md\n"
 
 _FLOW_UNSAFE_RE = re.compile(r"[,:\[\]{}]")
 

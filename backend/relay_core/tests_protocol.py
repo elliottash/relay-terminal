@@ -245,7 +245,7 @@ class TestsCommands:
         #: This pane's session token (19.19), when there is one.  A signal claim writes it
         #: exactly as a card claim does, and the `run` line every run leaves in the signal log
         #: carries it — which is how the verification gate of decision 8 knows *whose* run first
-        #: failed a key.  The Switchboard's own worker and a test have none.
+        #: failed a key.  The Board's own worker and a test have none.
         self.pane_token = pane_token or None
         self._signals_sent: dict | None = None
         self._tools = None
@@ -272,7 +272,7 @@ class TestsCommands:
         return table
 
     def board(self) -> B.Board | None:
-        """This project's board, or None when it has no Switchboard at all."""
+        """This project's board, or None when it has no Board at all."""
         if self.board_root is None:
             root = B.board_folder(self.project)
             if root is None:
@@ -982,7 +982,7 @@ class TestsCommands:
         else:                                              # promote
             tools = self._board_tools()
             if tools is None:
-                return refuse("This project has no Switchboard to file a card on.",
+                return refuse("This project has no Board to file a card on.",
                               "signal_refused")
             result = tools.promote_signal(key, "by hand")
             if result.get("error"):
@@ -1000,7 +1000,7 @@ class TestsCommands:
         A board that cannot be read at all answers the defaults rather than refusing to work:
         `signals.auto_work` absent means true (the owner's "yes by default"), and the autonomy of
         a board with no config is the one `DEFAULT_CONFIG` gives it.  A project with no
-        Switchboard has nothing to fold and nothing to work, and says so with `autonomy: off`.
+        Board has nothing to fold and nothing to work, and says so with `autonomy: off`.
         """
         from . import signal_threads as ST
         board = self.board()
@@ -1161,7 +1161,7 @@ class TestsCommands:
         """`signals_config {auto_work}` (§32.2): the Options row, written into `board.yaml`.
 
         One flag, through `board.write_config` like every other board setting, and the answer is a
-        `signals_written {kind: "config"}` followed by the state event — so a second Switchboard
+        `signals_written {kind: "config"}` followed by the state event — so a second Board
         pane on the same project learns the new value without asking.
         """
         from . import signal_threads as ST
@@ -1176,7 +1176,7 @@ class TestsCommands:
             return refuse("signals_config needs `auto_work`: true or false.")
         board = self.board()
         if board is None:
-            return refuse("This project has no Switchboard to configure.")
+            return refuse("This project has no Board to configure.")
         try:
             B.write_config(board, ST.with_auto_work(board.config(), on))
         except (B.BoardError, OSError, ValueError) as exc:

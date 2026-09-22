@@ -311,7 +311,7 @@ property on the leaf widget (the `ToolPane`), read at paint time:
 | `paneType` | Band | By type | By group |
 |---|---|---|---|
 | unset, `terminal`, `explorer`, `preview`, `plan`, `diff` | none — plain | | |
-| `board` | jacks, SWITCHBOARD | brass (`warning`) | tools: brass |
+| `board` | jacks, BOARD | brass (`warning`) | tools: brass |
 | `options` (and `settings`, until nothing sets it) | gear (as on the title-bar button), OPTIONS | green (`success`) | tools: brass |
 | `actions` | bolt, ACTIONS | green, shared with Options | tools: brass |
 | `sessions` | list, SESSIONS | the shell blue (`shell`) | tools: brass |

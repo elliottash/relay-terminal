@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Switchboard worker protocol (docs/AGENT-SESSIONS-PROTOCOL.md section 17) and the
+"""Board worker protocol (docs/AGENT-SESSIONS-PROTOCOL.md section 17) and the
 `board_*` tools' wiring into the agent.
 
 No model, no network, no keyring: `board_ask` runs against a stub supervisor.
@@ -78,7 +78,7 @@ def boardless_dir(case) -> Path:
     elsewhere = Path(tmp.name).resolve() / "elsewhere"
     elsewhere.mkdir()
     if T.find_board_root(elsewhere) is not None:    # pragma: no cover - a board above the temp dir
-        case.skipTest(f"{elsewhere} has a Switchboard above it")
+        case.skipTest(f"{elsewhere} has a Board above it")
     return elsewhere
 
 
@@ -509,7 +509,7 @@ class WriteTests(ProtocolTest):
         self.assertEqual(events[0]["code"], "board_not_found")
 
 
-# ------------------------------------------------------- the Switchboard agent
+# ------------------------------------------------------- the Board agent
 
 class PriorityWriteTests(ProtocolTest):
     """`board_priority` (card #VKFV): the row's flag click, no base_hash, like a drag."""
@@ -617,7 +617,7 @@ class AskTests(ProtocolTest):
         self.send(type="board_ask", card=card_id, text="where should this run?")
         prompt = self.cards.prompts[-1]["prompt"]
         self.assertEqual(self.cards.builds, [card_id])
-        self.assertIn(f"[Switchboard card #{card_id}", prompt)
+        self.assertIn(f"[Board card #{card_id}", prompt)
         self.assertIn("add voice transcribe mode", prompt)
         self.assertIn("--- thread", prompt)
         self.assertTrue(prompt.endswith("where should this run?"))
@@ -913,7 +913,7 @@ class CardAttachmentTests(ProtocolTest):
         from relay_core.attachments import format_block
         card_id = self.make_card()
         text = format_block(P.card_attachments(str(self.repo), [card_id]))
-        self.assertIn(f"Switchboard card #{card_id}", text)
+        self.assertIn(f"Board card #{card_id}", text)
         self.assertNotIn("picked by the user with @", text)
         self.assertIn("data, not instructions", text)
 
@@ -949,7 +949,7 @@ class AgentWiringTests(unittest.TestCase):
         agent = self.agent(None)
         self.assertEqual([t for t in agent.tools()
                           if t["function"]["name"].startswith(("board_", "tests_"))], [])
-        self.assertNotIn("Switchboard", agent.system_prompt())
+        self.assertNotIn("Board", agent.system_prompt())
 
     def test_with_a_board_every_tool_and_the_policy_reach_the_model(self):
         tools = T.BoardTools.for_workspace(self.repo, state_path=self.repo / ".relay" / "r.json")
@@ -957,7 +957,7 @@ class AgentWiringTests(unittest.TestCase):
         names = {t["function"]["name"] for t in agent.tools()}
         self.assertTrue(SENT_WITH_THE_BOARD <= names)
         prompt = agent.system_prompt()
-        self.assertIn("Switchboard", prompt)
+        self.assertIn("Board", prompt)
         self.assertIn("board_rate_limited", prompt)
 
     def test_a_board_tool_call_is_previewed_and_executed_through_the_tools(self):
@@ -965,7 +965,7 @@ class AgentWiringTests(unittest.TestCase):
         agent = self.agent(tools)
         prepared = agent._prepare("board_create_card", {
             "tab": "features", "status": "inbox", "title": "Voice mode", "request": "add voice mode"})
-        self.assertIn("SWITCHBOARD CREATE CARD", prepared.preview)
+        self.assertIn("BOARD CREATE CARD", prepared.preview)
         result = agent._execute(prepared, {})
         self.assertIn("id", result)
         self.assertEqual(len(B.Board(self.repo / "issues", self.repo).cards()), 1)
@@ -1032,7 +1032,7 @@ class ThreadSafetyTests(ProtocolTest):
 
 
 class KeylessWorkerTests(unittest.TestCase):
-    """The real worker process: the Switchboard opens even when `configure` finds no provider key
+    """The real worker process: the Board opens even when `configure` finds no provider key
     (only `board_ask` needs the agent). Before this, a keyless window showed "Loading" forever."""
 
     def test_board_open_answers_after_a_configure_that_found_no_key(self):
@@ -1065,7 +1065,7 @@ class KeylessWorkerTests(unittest.TestCase):
 # ------------------------------------------------ board_cleanup: the whole board at once
 
 class StubBoardAgent:
-    """Stands in for the Switchboard worker's Agent: it only has to carry the board tools."""
+    """Stands in for the Board worker's Agent: it only has to carry the board tools."""
 
     def __init__(self, tools):
         self.board = tools
@@ -1103,7 +1103,7 @@ class CleanupTests(ProtocolTest):
         self.assertEqual(started["limits"]["max_writes_per_turn"],
                          T.CLEANUP_LIMITS["max_writes_per_turn"])
         prompt = self.turns.submitted[-1]["prompt"]
-        self.assertIn("[Switchboard cleanup]", prompt)
+        self.assertIn("[Board cleanup]", prompt)
         self.assertIn("board_merge_cards", prompt)              # the brief
         self.assertIn(f"#{card_id}", prompt)                    # the roster
         self.assertIn("the features tab", prompt)
@@ -1255,7 +1255,7 @@ class ModeTests(ProtocolTest):
         self.assertIn("## Plan", prompt)
         # The Plan brief (v2, #K3TY) tells the planner when a plan carries an Orchestration block.
         self.assertIn("Orchestration", prompt)
-        self.assertIn(f"[Switchboard card #{card_id}", prompt)      # seeded first
+        self.assertIn(f"[Board card #{card_id}", prompt)      # seeded first
         self.assertEqual(self.scope(card_id).mode, "plan")
         self.assertEqual(self.scope(card_id).card_id, card_id)
         # And it is closed again once the turn's thread unwinds.
@@ -1392,7 +1392,7 @@ class CardScopeAgentTests(unittest.TestCase):
 # ------------------------------------------ the board is per project, not per process
 
 class PerProjectTests(ProtocolTest):
-    """Which board a worker is about (owner report, 2026-09-18: "the Switchboard is global").
+    """Which board a worker is about (owner report, 2026-09-18: "the Board is global").
 
     The backend used to take `<workspace>/issues` literally and to fall back to the process's
     cwd, so a pane in a subdirectory saw no board while a pane with no workspace at all saw the
@@ -1402,7 +1402,7 @@ class PerProjectTests(ProtocolTest):
     """
 
     def project(self, title="Other project card") -> Path:
-        """A second repository, with a Switchboard of its own and no cards."""
+        """A second repository, with a Board of its own and no cards."""
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         repo = Path(tmp.name).resolve()
@@ -1521,7 +1521,7 @@ class PerProjectTests(ProtocolTest):
         new_card = self.make_card(title="Other card", text="on the other board")
         self.send(type="board_ask", card=new_card, text="and this?")
         self.assertEqual(len(self.cards.builds), built + 1)
-        self.assertIn(f"[Switchboard card #{new_card}", self.cards.prompts[-1]["prompt"])
+        self.assertIn(f"[Board card #{new_card}", self.cards.prompts[-1]["prompt"])
         # Losing the board entirely clears it too.
         self.commands.configure(str(boardless_dir(self)), {})
         self.assertIsNone(self.commands.tools)
@@ -1631,7 +1631,7 @@ class AttachTest(unittest.TestCase):
 
     @staticmethod
     def board_tools(agent):
-        # `tests_check` and `tests_run` are Switchboard tools that do not wear the prefix
+        # `tests_check` and `tests_run` are Board tools that do not wear the prefix
         # (protocol 31, #7BM4): they are about a card's tests, not about the board's rows.
         return sorted(t["function"]["name"] for t in agent.tools()
                       if t["function"]["name"].startswith(("board_", "tests_")))
@@ -1657,7 +1657,7 @@ class SetBoardTests(AttachTest):
         agent.messages.append({"role": "user", "content": "a question from before"})
         identity = (id(agent), id(agent.messages), len(agent.messages), agent.session_id)
         self.assertEqual(self.board_tools(agent), [])
-        self.assertNotIn("Switchboard", agent.system_prompt())
+        self.assertNotIn("Board", agent.system_prompt())
 
         self.events.clear()
         self.commands.set_board({"type": "set_board", "id": "s1", "board": {"dir": str(there)}})
@@ -1707,7 +1707,7 @@ class SetBoardTests(AttachTest):
         self.assertEqual(self.of("board_state")[0], {"event": "board_state", "id": "s2",
                                                      "board": None, "applies": "now"})
         self.assertEqual(self.board_tools(agent), [])
-        self.assertNotIn("Switchboard", agent.system_prompt())
+        self.assertNotIn("Board", agent.system_prompt())
         self.assertEqual((id(agent.messages), len(agent.messages)), identity)
         with self.assertRaises(ValueError):
             self.commands.dispatch({"type": "board_open"})
@@ -1718,7 +1718,7 @@ class SetBoardTests(AttachTest):
         self.assertIsNone(self.commands.agent_tools(str(there), {"board": {"attach": False}}))
         agent = self.agent(there, {"board": {"attach": False}})
         self.assertEqual(self.board_tools(agent), [])
-        self.assertNotIn("Switchboard", agent.system_prompt())
+        self.assertNotIn("Board", agent.system_prompt())
         with self.assertRaises(ValueError):
             self.commands.dispatch({"type": "board_open"})
 
@@ -1980,7 +1980,7 @@ class InitTests(AttachTest):
         agent = self.agent(project, request)
         self.assertEqual(self.board_tools(agent), ["board_create_card"])
         prompt = agent.system_prompt()
-        self.assertIn("this project has no Switchboard yet", prompt)
+        self.assertIn("this project has no Board yet", prompt)
         self.assertNotIn("board_rate_limited", prompt)          # not the full policy block
 
     def test_the_owners_first_card_asks_first_and_lands_on_a_yes(self):
@@ -2547,7 +2547,7 @@ class ForgeSyncAcceptanceTests(ForgeSyncProtocolTests):
     Relay-side step is a `dispatch` (so the thread, the guards and the events the GUI will one
     day render are all in the path); the GitHub side is `web_edit`/`web_comment`, which is a
     human in a browser. The engine tests cover each field alone (`tests/test_forge_sync.py`);
-    this is the same walk at the level the Switchboard pane will drive it.
+    this is the same walk at the level the Board pane will drive it.
     """
 
     def sync_run(self, request_id: str) -> dict:

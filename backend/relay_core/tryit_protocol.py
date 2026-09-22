@@ -7,7 +7,7 @@ things, and this module is those three:
 
 * *"One Try it action launches the pinned build and disposable fixture. If preparation fails,
   report that before requesting review."* — `try_run` starts one bounded agent turn on the
-  Switchboard worker whose whole job is to stage the card's situation and open it; a turn that
+  Board worker whose whole job is to stage the card's situation and open it; a turn that
   could not stage writes a thread `note` and **no** `## Try it` section, so a card never asks for
   a review of something that was never staged.
 * *"Automate [the mechanical steps]. Ask the person to perform only the task whose usability or
@@ -203,7 +203,7 @@ class TryItCommands:
     def tools(self):
         tools = self._need()
         if tools is None:                                   # pragma: no cover - defensive
-            raise TryItError("This pane has no Switchboard.")
+            raise TryItError("This pane has no Board.")
         return tools
 
     # ---- try_run ---------------------------------------------------------------
@@ -216,7 +216,7 @@ class TryItCommands:
         if agent is None:
             raise TryItError("Configure a provider and workspace first: Try it is an agent turn.")
         if getattr(agent, "board", None) is None:
-            raise TryItError("The Switchboard agent has no board tools here (this project has no "
+            raise TryItError("The Board agent has no board tools here (this project has no "
                              "board.yaml, or its autonomy is off).")
         with self._lock:
             if self.running():
@@ -666,7 +666,7 @@ def tryit_prompt(tools, card_id: str, out: Path) -> str:
         evidence = str(out)
     binary = _app_binary(repo)
     staged = verify_staging(repo, card_id, card.body if card is not None else "")
-    head = ["[Switchboard Try it]",
+    head = ["[Board Try it]",
             f"Card: #{card_id} — {card.title if card is not None else ''}",
             f"Card file: {card.path.relative_to(repo) if card is not None and card.path else ''}",
             f"Board: {tools.board.root}",

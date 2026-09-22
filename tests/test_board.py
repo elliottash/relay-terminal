@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Switchboard format tests: cards, ids, ranks, task markers, threads, check, migrate."""
+"""Board format tests: cards, ids, ranks, task markers, threads, check, migrate."""
 import os
 import shutil
 import subprocess
@@ -352,7 +352,7 @@ class ThreadTests(TempBoardTest):
             self.board.append_thread("K7Q2", "x", kind="gossip")
 
     def test_an_append_replaces_the_file_so_a_directory_watch_sees_it(self):
-        # #N5JJ: the Switchboard pane holds a QFileSystemWatcher on the board's *directories*,
+        # #N5JJ: the Board pane holds a QFileSystemWatcher on the board's *directories*,
         # and a directory watch fires when an entry is created, renamed or removed — not when an
         # existing file grows. The append was `O_APPEND` until 2026-09-20, so about two of every
         # three thread writes never reached the pane. It writes a temporary file and renames it

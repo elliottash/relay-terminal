@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Switchboard agent tools: the six `board_*` tools, their refusals and their guardrails.
+"""Board agent tools: the six `board_*` tools, their refusals and their guardrails.
 
 Every test works in a temporary board; nothing here reads the repository's own `issues/` tree,
 calls a model or touches the network or the keyring.
@@ -33,7 +33,7 @@ class BoardToolsTest(unittest.TestCase):
     config = CONFIG
     #: This pane's session token (protocol 19.19): what `board_claim` writes onto a card as
     #: `session` and onto its progress entry as `pane_token`. A subclass sets it to None to be
-    #: a worker that has none — the Switchboard's own, or a GUI too old to send one.
+    #: a worker that has none — the Board's own, or a GUI too old to send one.
     pane_token = "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
 
     def setUp(self):
@@ -963,15 +963,15 @@ class SelfCloseTests(BoardToolsTest):
         self.tools.context.actor = T.OWNER_ACTOR
         self.sign(None, None)
         self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
-                                           "reason": "moved in the Switchboard"})
+                                           "reason": "moved in the Board"})
         self.assertIsNone(self.front().get("verified_by"))
         self.assertNotIn("verified_by", self.thread_text(self.card_id))
         # Reopened and hand-closed again by an owner who does have a signature: still unstamped.
         self.sign("anthropic", "claude-opus-5")
         self.tools.run("board_move_card", {"id": self.card_id, "status": "executing",
-                                          "reason": "reopened in the Switchboard"})
+                                          "reason": "reopened in the Board"})
         self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
-                                           "reason": "moved in the Switchboard"})
+                                           "reason": "moved in the Board"})
         self.assertIsNone(self.front().get("verified_by"))
 
     def test_dropping_a_card_stamps_nothing(self):
@@ -1077,7 +1077,7 @@ class CommentTests(BoardToolsTest):
         # (or an old worker) gets no attr at all.
         result = self.tools.run("board_comment", {
             "id": self.card_id, "kind": "progress", "pane_token": "abcd1234efgh5678",
-            "text": "Executing (abcd1234) · handed to a new terminal pane beside the Switchboard"})
+            "text": "Executing (abcd1234) · handed to a new terminal pane beside the Board"})
         self.assertNotIn("error", result)
         # The first non-event entry also moves the card to Discussing (#3XZV), so find the
         # entry by kind rather than taking the last one.
@@ -1128,7 +1128,7 @@ class CommentTests(BoardToolsTest):
 # ------------------------------------------------------------------------- claim
 
 class ClaimTests(BoardToolsTest):
-    """`board_claim` (#R9G7): one call does what the Switchboard's Execute button does."""
+    """`board_claim` (#R9G7): one call does what the Board's Execute button does."""
 
     def setUp(self):
         super().setUp()
@@ -1252,7 +1252,7 @@ class ClaimTests(BoardToolsTest):
         # prompt and a card handed back by a claim read identically.
         self.assertEqual(block, P.seed_block(self.board,
                                              self.board.card_by_id(self.card_id)))
-        self.assertIn(f"[Switchboard card #{self.card_id}", block)
+        self.assertIn(f"[Board card #{self.card_id}", block)
         self.assertIn("--- card front matter ---", block)
         self.assertIn(self.pane_token, block)
         self.assertIn("Write the parser", block)
@@ -1276,7 +1276,7 @@ class ClaimTests(BoardToolsTest):
         self.assertNotIn("session", self.board.card_by_id(self.card_id).front)
 
     def test_the_row_carries_the_session_so_the_board_shows_who_holds_the_card(self):
-        # `board_list`'s rows and the pane's rows are one builder (`_row`): the Switchboard draws
+        # `board_list`'s rows and the pane's rows are one builder (`_row`): the Board draws
         # the chip from this field, and an agent listing the board sees a card is taken.
         rows = self.tools.run("board_list", {"query": ""})["cards"]
         self.assertIsNone(next(r for r in rows if r["id"] == self.card_id)["session"])
@@ -1286,7 +1286,7 @@ class ClaimTests(BoardToolsTest):
                          self.pane_token)
 
     def test_a_cleanup_cannot_claim_a_card(self):
-        # A cleanup is the Switchboard worker tidying the whole board (19.9): no pane of its own,
+        # A cleanup is the Board worker tidying the whole board (19.9): no pane of its own,
         # and moving a card to Executing is not tidying.
         self.tools.begin_cleanup("c-1")
         refused = self.tools.run("board_claim", {"id": self.card_id})
@@ -1305,27 +1305,27 @@ class ClaimTests(BoardToolsTest):
 class ClaimPromptTests(BoardToolsTest):
     def test_the_prompt_names_this_session_and_the_cards_it_holds(self):
         note = T.session_note(self.tools)
-        self.assertIn(f"Your Switchboard session: {self.pane_token[:8]}.", note)
+        self.assertIn(f"Your Board session: {self.pane_token[:8]}.", note)
         self.assertNotIn("You hold:", note)
         card_id = self.create()
         self.tools.run("board_claim", {"id": card_id})
         self.assertIn(f"You hold: #{card_id}.", T.session_note(self.tools))
 
     def test_what_this_pane_holds_is_not_in_the_middle_of_the_prompt(self):
-        # The claim line is the one part of the Switchboard block that changes while the
+        # The claim line is the one part of the Board block that changes while the
         # conversation runs, so `Agent.system_prompt` carries it at the very end (#GMCF): the
         # policy above it has to stay byte-identical for a prompt cache to survive a claim.
         before = T.prompt_section(self.tools)
         self.tools.run("board_claim", {"id": self.create()})
         self.assertEqual(T.prompt_section(self.tools), before)
-        self.assertNotIn("Your Switchboard session:", before)
+        self.assertNotIn("Your Board session:", before)
         self.assertNotIn("You hold:", before)
 
     def test_a_worker_with_no_token_says_nothing_about_a_session(self):
         tools = T.BoardTools(self.board, autonomy="auto",
                              state_path=self.repo / ".relay" / "none.json")
         self.assertEqual(T.session_note(tools), "")
-        self.assertNotIn("Your Switchboard session:", T.prompt_section(tools))
+        self.assertNotIn("Your Board session:", T.prompt_section(tools))
 
     def test_a_board_that_is_off_or_uninitialized_has_no_session_note(self):
         self.assertEqual(T.session_note(None), "")
@@ -1337,7 +1337,7 @@ class ClaimMessageTests(BoardToolsTest):
     """The same claim as a GUI→worker message: `board_claim` (protocol 19.3, 19.19).
 
     Execute's hand-off (19.10) is this one message now, and its `pane_token` is the pane the card
-    was handed to — never the worker's own, since the Switchboard worker has no pane of its own.
+    was handed to — never the worker's own, since the Board worker has no pane of its own.
     """
 
     class Turns:
@@ -1426,7 +1426,7 @@ class ReleaseOnCloseTests(BoardToolsTest):
     """Closing a card drops its claim (#R9G7, owner 2026-09-20: "auto-release on done and on closed").
 
     The release sits in `_move`, the one function both the `board_move_card` tool and the
-    Switchboard's `board_move` message go through, so neither can close a card and leave it held.
+    Board's `board_move` message go through, so neither can close a card and leave it held.
     """
 
     class Turns:
@@ -1984,7 +1984,7 @@ class ActivityEventTests(BoardToolsTest):
 
     def test_a_preview_is_produced_for_every_tool(self):
         for name in T.TOOL_NAMES:
-            self.assertTrue(self.tools.preview(name, {"id": "K7Q2"}).startswith("SWITCHBOARD "))
+            self.assertTrue(self.tools.preview(name, {"id": "K7Q2"}).startswith("BOARD "))
 
 
 class SectionWriterTests(unittest.TestCase):
@@ -2406,7 +2406,7 @@ class SearchFilesTests(BoardToolsTest):
 
 
 class UninitializedTests(unittest.TestCase):
-    """A project with no Switchboard yet (protocol 19.12): one tool, one line, nothing on disk."""
+    """A project with no Board yet (protocol 19.12): one tool, one line, nothing on disk."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -2424,7 +2424,7 @@ class UninitializedTests(unittest.TestCase):
 
     def test_the_prompt_block_is_one_line_and_not_the_policy(self):
         note = T.prompt_section(self.tools)
-        self.assertIn("this project has no Switchboard yet", note)
+        self.assertIn("this project has no Board yet", note)
         self.assertNotIn("board_rate_limited", note)
         self.assertEqual(note.strip().count("\n"), 0)
 

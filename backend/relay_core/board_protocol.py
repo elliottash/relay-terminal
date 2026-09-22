@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Worker protocol handlers for the Switchboard pane (docs/AGENT-SESSIONS-PROTOCOL.md section 17).
+"""Worker protocol handlers for the Board pane (docs/AGENT-SESSIONS-PROTOCOL.md section 17).
 
 The GUI never parses a card: it asks for rows and detail and sends back intents.  Every write
 goes through `relay_core.board_tools.BoardTools`, the same code the agent tools use, so the
 owner's writes and the agent's writes log the same thread events and share the undo snapshots.
 The owner's instance simply runs with the rate limit and the duplicate check turned off.
 
-`board_ask` is the Switchboard agent: the worker it runs in is started by the GUI with
+`board_ask` is the Board agent: the worker it runs in is started by the GUI with
 `agent_role: "switchboard"`, so its model is the `switchboard` role (protocol 13), which
 defaults to the main agent.  The agent is stateless per card: the first question about a card
 seeds the conversation from the card file plus the tail of its thread, and any later edit of
@@ -124,7 +124,7 @@ INIT_WRITES = ("board_create",)
 
 #: What an import or a sync says when the pane's board has not been created yet (19.13, 19.14).
 #: Both write cards, and a card needs a board.yaml; the GUI's path is `board_init` first.
-NOT_INITIALIZED_ERROR = ("This project has no Switchboard yet. Create one first "
+NOT_INITIALIZED_ERROR = ("This project has no Board yet. Create one first "
                          "(board_init), then import or sync into it.")
 
 #: `board_import_apply`: how many keys one message may carry.  The proposals themselves are
@@ -152,7 +152,7 @@ FORGE_ERROR_CODES = {"ForgeAuthError": "forge_auth", "ForgeRateLimited": "forge_
                      "ForgeUnavailable": "forge_unavailable", "ForgePrivacyError": "forge_privacy",
                      "ForgeError": "forge_failed"}
 
-#: How much of a card the Switchboard agent is seeded with (design 5, "Attach").
+#: How much of a card the Board agent is seeded with (design 5, "Attach").
 SEED_BODY_BYTES = 16384
 SEED_THREAD_ENTRIES = 10
 MAX_ASK_TEXT = 32768
@@ -165,7 +165,7 @@ MAX_CLEANUP_NOTE = 4000
 
 
 class _CardEntry:
-    """One card file in the Switchboard's parse cache (#7M6E): what it was when we read it, and
+    """One card file in the Board's parse cache (#7M6E): what it was when we read it, and
     everything derived from it.  `key` is its (mtime_ns, size) and `thread_key` its thread file's,
     because the row's entry count and the searchable text come from both; either moving re-reads
     the card.  `row` is None for a file that would not parse, and `problems` then holds the
@@ -345,10 +345,10 @@ class BoardCommands:
         self.settings: dict = parse_board(None)
         #: This pane's session token, from `configure {pane_token}` (protocol 19.19). The board
         #: tools carry it so `board_claim` can write it onto a card as `session` and onto the
-        #: claim's thread entry as `pane_token`. None for the Switchboard worker, which has no
+        #: claim's thread entry as `pane_token`. None for the Board worker, which has no
         #: terminal pane of its own, and for a GUI too old to send one.
         self.pane_token: str | None = None
-        #: "Initialize a project and create a Switchboard here?" (protocol 19.12), shared by the
+        #: "Initialize a project and create a Board here?" (protocol 19.12), shared by the
         #: owner's tools and the agent's so one yes or no is the pane's.
         self.init = BoardInit(emit)
         #: A `set_board` that arrived mid-turn: applied when the turn ends, so the running turn
@@ -538,7 +538,7 @@ class BoardCommands:
         it was seeded at, the turn's collected text and the mode its last brief was sent in all
         belong to the old board, and diffing the new board against the old board's snapshot
         would report every card of one project as an upsert of the other.  The user's answer to
-        "initialize a Switchboard here?" belongs to the old project too, so a new one may ask.
+        "initialize a Board here?" belongs to the old project too, so a new one may ask.
         """
         current = self.tools.board.root if self.tools is not None else None
         if root is not None and root == current:
@@ -589,7 +589,7 @@ class BoardCommands:
     def bind_agent(self, agent) -> None:
         """`configure` built a new Agent: the init dialog follows its Stop.
 
-        A user who presses Stop while "Initialize a project and create a Switchboard here?" is
+        A user who presses Stop while "Initialize a project and create a Board here?" is
         open must not leave the turn thread parked on it, so the round trip watches the agent's
         own `cancel_event` — the same event every other blocking tool watches.
         """
@@ -626,7 +626,7 @@ class BoardCommands:
         `configure` cannot do this — it builds a new `Agent` and with it a new conversation — so
         attaching a project to a tab that is already talking goes through here: the agent object,
         its messages and its session id are untouched; only `agent.board` and the system prompt's
-        Switchboard block change.  `Agent.tools()` is read per step, so the tool list follows by
+        Board block change.  `Agent.tools()` is read per step, so the tool list follows by
         itself; `refresh_system_prompt` rewrites `messages[0]` in place.
         """
         agent = self._agent()
@@ -652,7 +652,7 @@ class BoardCommands:
         A guest harness is not an endpoint: its ``harness://claude`` base URL is the pane agent's
         because the *guest process* is that agent's provider, and there is no second one to give a
         card or page turn. Building one anyway is what the owner saw on 2026-09-20 — "The
-        Switchboard agent could not answer: Base URL must be an HTTPS URL without credentials,
+        Board agent could not answer: Base URL must be an HTTPS URL without credentials,
         query, or fragment", raised five frames down in ``ProviderConfig.validate`` (card #GH5T).
         The helper worker no longer configures itself on a guest at all (`worker.py`, `configure`);
         this is the backstop, and it says the same thing that worker does.
@@ -666,7 +666,7 @@ class BoardCommands:
         """Build the console one card's turns run on (19.16, card #CTRN): an ordinary console.
 
         The provider config, the skills, the roles chain and the failover switches are the pane
-        agent's, so a card turn answers on the model the Switchboard is configured with and
+        agent's, so a card turn answers on the model the Board is configured with and
         fails over the way the pane does.  Everything that carries state is this card's own: its
         conversation, its `cancel_event` (so Stop on one card cannot stop another) and its own
         `BoardTools`, which is where `card_scope` lives — which is why enforcing what a Plan may
@@ -693,7 +693,7 @@ class BoardCommands:
             raise ValueError("Configure a provider and workspace first.")
         tools = self.agent_tools(self.workspace, {"board": self.settings["raw"]})
         if tools is None:
-            raise ValueError("The Switchboard agent has no board tools here "
+            raise ValueError("The Board agent has no board tools here "
                              "(this project has no board.yaml, or its autonomy is off).")
         workspace = str(tools.board.repo)
         session_dir, session_id = self._card_session_file(card_id)
@@ -898,7 +898,7 @@ class BoardCommands:
         root = (named_board_root(named, self.settings.get("folder")) if named
                 else (self.tools.board.root if self.tools else None))
         if root is None:
-            raise ValueError("board_init needs a project to create the Switchboard in.")
+            raise ValueError("board_init needs a project to create the Board in.")
         if self.tools is not None and root != self.tools.board.root and getattr(self.turns, "busy", False):
             raise ValueError("Stop the active agent turn before pointing this pane at another board.")
         settings = dict(self.settings)
@@ -935,7 +935,7 @@ class BoardCommands:
         in a checkout, a plain rename outside one, and a refusal — with the reason, having changed
         nothing — for an `issues/` board, an existing target or uncommitted changes.
 
-        `{hidden: true|false}` is the retired shape of this message (the "Hidden Switchboard
+        `{hidden: true|false}` is the retired shape of this message (the "Hidden Board
         folder" toggle, 2026-09-19 to 2026-09-21).  It is still accepted for one release, as
         `.switchboard` and `switchboard`, so a phone paired to an older build is not broken.
 
@@ -980,7 +980,7 @@ class BoardCommands:
                 if request.get(k) is not None}
         if not args:
             raise ValueError("board_sections needs columns, column_statuses or column_titles.")
-        args["reason"] = str(request.get("reason") or "edited in the Switchboard")[:200]
+        args["reason"] = str(request.get("reason") or "edited in the Board")[:200]
         tools.context.actor = str(request.get("author") or "owner")[:64]
         try:
             result = tools.run("board_sections", args, by_owner=True)
@@ -1102,7 +1102,7 @@ class BoardCommands:
         project = (self._project(request, "board_import_apply") if request.get("project")
                    else Path(tools.board.repo))
         if Path(tools.board.repo) != project:
-            raise ValueError(f"This pane's Switchboard is {tools.board.root}, which is not in "
+            raise ValueError(f"This pane's Board is {tools.board.root}, which is not in "
                              f"{project}. Point the pane at that project first (set_board).")
         keys = request.get("keys")
         if not isinstance(keys, list) or not keys or not all(isinstance(k, str) for k in keys):
@@ -1156,7 +1156,7 @@ class BoardCommands:
         return True
 
     def _forge_sync(self, kind: str, request: dict, rid) -> None:
-        """`forge_sync_plan` / `forge_sync_run`: the Switchboard against its repository.
+        """`forge_sync_plan` / `forge_sync_run`: the Board against its repository.
 
         The network part runs on a thread, like `hosted_quota` (13.9), so the message loop never
         waits on GitHub; **exactly one** terminal event follows either way —
@@ -1662,7 +1662,7 @@ class BoardCommands:
             self.rev += 1
             # The rows in batches, the first with the `board` event itself (#7M6E): one line of
             # every card overflowed the GUI's 8 MiB read buffer at about 1,160 cards and killed
-            # the worker, and the pane showed "Loading the Switchboard…" for ever.
+            # the worker, and the pane showed "Loading the Board…" for ever.
             batches = _row_batches(list(self._snapshot.values()))
             self._send({"event": "board", "id": rid, "rev": self.rev,
                         "root": str(tools.board.root), "workspace": str(tools.board.repo),
@@ -1781,11 +1781,11 @@ class BoardCommands:
         # heartbeat ago has no running turn yet, and a delete must not slip through that gap.
         running_cards = self.cards.working_cards()
         if cleanup:
-            running, busy_card = "a Switchboard cleanup", None
+            running, busy_card = "a Board cleanup", None
         elif self.console and bool(getattr(self.turns, "busy", False)):
             # The console's own prompts never reach here — they queue, which is what a pane's
             # queue is for. Everything else waits, because the console can write any card.
-            running, busy_card = "the Switchboard console's turn", None
+            running, busy_card = "the Board console's turn", None
         elif card_id is not None and card_id in running_cards and not queues:
             running, busy_card = f"{_turn_phrase(self.cards.mode_of(card_id))} on #{card_id}", card_id
         elif card_id is None and (running_cards or bool(getattr(self.turns, "busy", False))):
@@ -1797,7 +1797,7 @@ class BoardCommands:
         self.emit({"event": "error", "id": rid, "code": "board_busy", "agent_busy": True,
                    "cleanup_running": cleanup, "card_id": busy_card,
                    "cards": running_cards,
-                   "text": f"The Switchboard agent is busy with {running}. Stop it first, then "
+                   "text": f"The Board agent is busy with {running}. Stop it first, then "
                            f"start {what}."})
         return True
 
@@ -1832,7 +1832,7 @@ class BoardCommands:
                 if self._tests_gate(request, rid):
                     return
                 result = tools.run("board_move_card", {
-                    "id": request.get("card"), "reason": request.get("reason") or "moved in the Switchboard",
+                    "id": request.get("card"), "reason": request.get("reason") or "moved in the Board",
                     # `section` rides along even when it is the empty string: that is how a drop
                     # on a status column takes a card out of the manual section it was parked in.
                     **{k: request[k] for k in ("status", "tab", "before", "after", "evidence", "section")
@@ -1862,7 +1862,7 @@ class BoardCommands:
             elif kind == "board_claim":
                 # Execute (19.10, 19.19): the card goes to the terminal pane whose token this
                 # message carries, and the claim is the three writes Execute used to send by
-                # hand. That token is the pane's, not this worker's — the Switchboard worker has
+                # hand. That token is the pane's, not this worker's — the Board worker has
                 # no pane of its own — so it overrides the one `configure` gave the tools for as
                 # long as this one call runs.
                 note = request.get("text")
@@ -1927,7 +1927,7 @@ class BoardCommands:
                 "against.")
 
     def _ask_to_initialize(self, kind: str, request: dict, rid) -> None:
-        """A write reached a project with no Switchboard: ask the user, and park the write.
+        """A write reached a project with no Board: ask the user, and park the write.
 
         The agent's tool call blocks its turn thread on the same question (`BoardTools.ensure_board`);
         an owner-side message cannot, because it arrives on the protocol thread and that is the
@@ -1961,7 +1961,7 @@ class BoardCommands:
                                 callback=answered)
         self._parked[init_id] = (kind, request, rid)
 
-    # ---- the Switchboard agent -------------------------------------------------
+    # ---- the Board agent -------------------------------------------------
     def _ask(self, request: dict, rid) -> None:
         tools = self._need()
         card_id = normalize_id(request.get("card"))
@@ -2146,7 +2146,7 @@ class BoardCommands:
     def _cleanup(self, request: dict, rid) -> None:
         """`board_cleanup`: the agent tidies the whole board in one turn (protocol 19.9).
 
-        The same machinery as `board_ask` — one turn on the Switchboard worker, the ordinary
+        The same machinery as `board_ask` — one turn on the Board worker, the ordinary
         turn events, `cancel` to stop it — with three differences: the events carry
         `cleanup: true` and a `run_id` instead of a `card_id`, so the pane draws progress in
         the board's notice area rather than in a card thread; the agent's tools run on the
@@ -2160,7 +2160,7 @@ class BoardCommands:
             raise ValueError("Configure a provider and workspace first.")
         agent_tools = getattr(agent, "board", None)
         if agent_tools is None:
-            raise ValueError("The Switchboard agent has no board tools here "
+            raise ValueError("The Board agent has no board tools here "
                              "(this project has no board.yaml, or its autonomy is off).")
         scope = request.get("scope")
         if scope is not None and (not isinstance(scope, str) or len(scope) > 200):
@@ -2213,7 +2213,7 @@ class BoardCommands:
             pass
 
     def observe(self, event: dict) -> dict:
-        """Tag and record the Switchboard agent's turn; called before every emit."""
+        """Tag and record the Board agent's turn; called before every emit."""
         if event.get("event") in ("done", "error", "cancelled") and self._pending_board is not None:
             # A `set_board` that arrived mid-turn lands here, once the turn that kept the old
             # tool set has finished with it.
@@ -2276,7 +2276,7 @@ def cleanup_prompt(tools: BoardTools, scope: str | None = None, note: str | None
         labels = ",".join(str(l) for l in (card.front.get("labels") or [])) or "-"
         lines.append(f"#{card.id} [{card.status}] {card.title} · labels {labels} · "
                      f"{card.path.relative_to(tools.board.root)}")
-    head = ["[Switchboard cleanup]",
+    head = ["[Board cleanup]",
             f"Board: {tools.board.root} ({len(lines)} of {sum(counts.values())} cards listed below).",
             "Sections (board.yaml columns): " + ", ".join(str(c) for c in config.get("columns") or []),
             "Category folders (board.yaml tabs): "
@@ -2326,12 +2326,12 @@ def mode_prompt(mode: str, card_id: str, text: str) -> str:
 
 
 def seed_block(board: B.Board, card: B.Card) -> str:
-    """The card, as the Switchboard agent sees it at the start of a conversation."""
+    """The card, as the Board agent sees it at the start of a conversation."""
     entries = sorted(board.thread(card.id, card.private), key=lambda e: e.entry_id)
     tail = entries[-SEED_THREAD_ENTRIES:]
     body = card.body[:SEED_BODY_BYTES]
-    lines = [f"[Switchboard card #{card.id} — {card.path.name}]",
-             "You are Relay's Switchboard agent. You are talking to the user about this one card. "
+    lines = [f"[Board card #{card.id} — {card.path.name}]",
+             "You are Relay's Board agent. You are talking to the user about this one card. "
              "Answer about the card, use the board_* tools to change it, and keep your reply short. "
              "The card file and its thread are the shared record; this conversation is not.",
              "", "--- card front matter ---", B.dump_front_matter(dict(card.front)).rstrip(),
@@ -2373,5 +2373,5 @@ def card_attachments(workspace: str | os.PathLike, cards, board: B.Board | None 
         out.append({"path": str(card.path.relative_to(board.repo)), "kind": "card",
                     "content": content, "bytes": len(content.encode("utf-8")),
                     "truncated": len(card.body) > SEED_BODY_BYTES,
-                    "label": f"Switchboard card #{card_id}, referenced by the user as #{card_id}"})
+                    "label": f"Board card #{card_id}, referenced by the user as #{card_id}"})
     return out

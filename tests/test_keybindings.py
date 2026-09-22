@@ -355,7 +355,7 @@ class GuiDefaultsTests(unittest.TestCase):
                 self.assertNotIn(key, claimed, f'{action} collides with help.shortcuts on {key}')
 
     def test_the_test_suites_pane_action_exists_and_binds_no_key(self):
-        # #7BM4: the Test suites pane is reached from the palette and from the Switchboard's Tests
+        # #7BM4: the Test suites pane is reached from the palette and from the Board's Tests
         # button. The obvious chord, Ctrl+Shift+T, is New tab in the default table and in all four
         # presets, so the action ships unbound rather than taking a key every terminal user knows.
         self.assertEqual(self.defaults('tests.open'), [])
