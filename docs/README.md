@@ -7,6 +7,7 @@ Start with [ARCHITECTURE.md](ARCHITECTURE.md) for how Relay works today and
 
 | Document | What it covers |
 |---|---|
+| [DEBUG-HYGIENE.md](DEBUG-HYGIENE.md) | Local diagnostic summaries, outcome/origin coverage, private daily snapshots and weekly signal/card review (#HG26) |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Process model, panes, keyboard, routing, inline agent output, control, file panes, agent backend, keys, isolation, packaging layout, engine interface |
 | [ROADMAP.md](ROADMAP.md) | Goals, decisions already made, near/mid/longer-term work with issue links, non-goals |
 | [CRASH-DIAGNOSIS.md](CRASH-DIAGNOSIS.md) | What to do when Relay dies: telling a crash from a quit, the `gui_crash` report in relay.log and `worker-faults.log`, `scripts/relay-debug`, reproducing it outside the app, and why this machine keeps no cores |
