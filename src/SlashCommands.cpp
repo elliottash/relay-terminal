@@ -57,6 +57,10 @@ QString attemptedName(const QString &text, const Probe &exists) {
     return word;
 }
 
+bool waitsForCatalog(const QString &text, bool configured, bool configurationPending) {
+    return !configured && configurationPending && !attemptedName(text).isEmpty();
+}
+
 QStringList closest(const QString &name, const QStringList &known, int max) {
     if (name.isEmpty() || max <= 0) return {};
     const QString lower = name.toLower();

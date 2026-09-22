@@ -508,6 +508,9 @@ class Pane final : public QWidget, public relay::agent::Host {
 public:
     struct QueueEntry {
         quint64 id = 0; bool agent = false, fix = false, watch = false;
+        // A slash line entered before `configured.skill_commands` arrives. It cannot be classified
+        // as Relay skill vs guest command yet, so it waits and is resolved by pumpQueue().
+        bool awaitingSkillCatalog = false;
         // A guest-composer entry is neither a Relay-agent prompt nor a shell command. It stays
         // in the pane's one delivery queue until this named guest reports that it is idle.
         QString guest;
@@ -9437,6 +9440,30 @@ private:
         return true;
     }
 
+    // A deferred guest harness starts on its first prompt, but its Relay skill catalog arrives
+    // only with `configured`. Before that event `/deliver` looked unknown and fell through to the
+    // guest CLI, which quite correctly rejected a command it does not own (#D6VR). Preserve the
+    // line in the ordinary queue and classify it once both catalogs are known.
+    bool deferSlashUntilSkillCatalog(const QString &text) {
+        const bool canConfigure = m_configuring || !m_deferredPreset.isEmpty();
+        if (!relay::slash::waitsForCatalog(text, m_configured, canConfigure)) return false;
+        if (!m_configuring && !startDeferred()) return false;
+        const QString trimmed = text.trimmed();
+        m_editor->remember(trimmed);
+        m_editor->clear();
+        hideSlashPopup();
+        clearAiGhost();
+        QueueEntry entry;
+        entry.text = trimmed;
+        entry.awaitingSkillCatalog = true;
+        entry.attachments = attachmentsFor(trimmed);
+        entry.cards = cardsFor(trimmed);
+        for (const QJsonValue &card : entry.cards)
+            noteWorkCard(card.toObject().value(QStringLiteral("id")).toString());
+        enqueue(entry);
+        return true;
+    }
+
     // The slow path the hint teaches: asking for a skill by name in prose ("use the clean-commit
     // skill to …") when `/clean-commit …` says the same thing and sends the skill with it. Shown
     // when that turn ends: while it runs, the turn's own status holds the same spot.
@@ -10961,6 +10988,7 @@ private:
             if (tryRunSlashCommand(m_editor->toPlainText())) return;
             if (tryRunAliasSlash(m_editor->toPlainText())) return;
             if (tryRunSkillSlash(m_editor->toPlainText())) return;
+            if (deferSlashUntilSkillCatalog(m_editor->toPlainText())) return;
             // A guest pane (26.8): the prompt box, the mode chip and the auto router work exactly
             // as in any other pane; only the delivery differs. A line that is a terminal command —
             // terminal mode, Ctrl+Shift+Enter, a typed `!`, or (below) the router's `shell`
@@ -14885,7 +14913,9 @@ private:
         if (entry.agent && m_agentBusy) { m_lastQueuedEntryId = entry.id; m_lastQueuedAt.start(); }
         // The steer offer ("Enter again…") promises a running turn to steer into; an entry queued
         // while a turn is merely starting has none yet, so it says only that it waits (#N8VK).
-        status(entry.agent
+        status(entry.awaitingSkillCatalog
+                   ? QStringLiteral("Queued · checking the command when the agent is ready")
+                   : entry.agent
                    ? (m_agentBusy
                           ? QStringLiteral("Queued · the agent prompt runs after the items ahead of it · Enter again to send at the next tool call")
                           : QStringLiteral("Queued · the agent prompt runs when its turn comes"))
@@ -14945,7 +14975,28 @@ private:
     // Start the head when its resource is free. Guest prompts do not need the launch command to exit.
     void pumpQueue() {
         if (queueBlocked() || m_entries.isEmpty()) return;
-        const QueueEntry head = m_entries.first();
+        QueueEntry head = m_entries.first();
+        if (head.awaitingSkillCatalog) {
+            if (!m_configured) return;
+            head.awaitingSkillCatalog = false;
+            if (!skillFor(head.text).isEmpty()) {
+                head.agent = true;
+            } else if (guestInFront()) {
+                head.guest = m_guest;
+            } else {
+                // It is neither a Relay skill nor a guest command. Put it back through the normal
+                // unknown-command path without touching whatever the person has typed meanwhile.
+                const QString name = relay::slash::attemptedName(head.text);
+                m_entries.removeFirst();
+                ensureLineStart();
+                printInline(QStringLiteral("✗ ") + relay::slash::unknownLine(name, slashNames()) + '\n', Ink::Error);
+                closeInline();
+                status(QStringLiteral("Unknown command: /%1").arg(name));
+                rebuildQueueStrip(); changed();
+                pumpQueue();
+                return;
+            }
+        }
         if (!relay::queuesubmit::queueResourceAvailable(!head.guest.isEmpty(), m_activeValid)) return;
         const quint64 selected = selectedEntryId();
         if (!head.guest.isEmpty()) {

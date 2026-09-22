@@ -30,6 +30,11 @@ using Probe = std::function<bool(const QString &)>;
 // The caller decides whether the name is real: an unknown one is answered by `unknownLine()`.
 QString attemptedName(const QString &text, const Probe &exists = {});
 
+// A name-shaped slash line that Relay has not recognised yet may still be a skill: a deferred
+// agent does not publish its skill catalog until configuration finishes. Keep that line out of a
+// guest CLI (and out of the unknown-command error) while the catalog can still arrive.
+bool waitsForCatalog(const QString &text, bool configured, bool configurationPending);
+
 // The real names closest to `name`, best first, at most `max`. A name the user was completing
 // (`/conv` for `/conversations`) ranks first, then one or two typing slips away — an optimal
 // string alignment distance, so a transposition ("comapct") counts as the one slip it is.

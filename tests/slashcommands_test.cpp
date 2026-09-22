@@ -48,6 +48,16 @@ private Q_SLOTS:
         QCOMPARE(attemptedName(QStringLiteral("/compact the older turns"), machine()), QStringLiteral("compact"));
     }
 
+    void aSlashLineWaitsForADeferredAgentsSkillCatalog() {
+        // Owner report #D6VR: `/deliver #62M4` was entered before a fresh Codex pane received
+        // configured.skill_commands. Relay must not send it to Codex as a guest slash command.
+        QVERIFY(waitsForCatalog(QStringLiteral("/deliver #62M4"), false, true));
+        QVERIFY(!waitsForCatalog(QStringLiteral("/deliver #62M4"), true, true));
+        QVERIFY(!waitsForCatalog(QStringLiteral("/deliver #62M4"), false, false));
+        QVERIFY(!waitsForCatalog(QStringLiteral("please deliver #62M4"), false, true));
+        QVERIFY(!waitsForCatalog(QStringLiteral("/usr/bin/printf hi"), false, true));
+    }
+
     // ----- a name Relay answers to but never teaches (card #SHE3) ---------------------------
     //
     // The list a person reads is the task list now, so the palette must not put "todos" back in
