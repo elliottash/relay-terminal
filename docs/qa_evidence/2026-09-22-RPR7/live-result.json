@@ -1,0 +1,13 @@
+{
+  "invalid_code_not_stored": true,
+  "valid_code_stored": true,
+  "pro_turn_model": "glm-5.3",
+  "upstream_requests_before_revocation": 3,
+  "upstream_requests_after_revocation": 3,
+  "code_removed": true,
+  "upstream_models": [
+    "glm-5.3",
+    "fake-model",
+    "fake-model"
+  ]
+}

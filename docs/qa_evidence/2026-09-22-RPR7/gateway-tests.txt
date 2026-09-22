@@ -1,0 +1,45 @@
+test_cli_digest_only_and_live_connection_revocation (tests.test_gateway_pro.OperatorTests.test_cli_digest_only_and_live_connection_revocation) ... ok
+test_code_never_replaces_installation_identity (tests.test_gateway_pro.ProTests.test_code_never_replaces_installation_identity) ... ok
+test_database_failure_fails_closed (tests.test_gateway_pro.ProTests.test_database_failure_fails_closed) ... ok
+test_forged_plan_and_body_code_do_not_grant_access (tests.test_gateway_pro.ProTests.test_forged_plan_and_body_code_do_not_grant_access) ... ok
+test_missing_bad_revoked_and_independent_people (tests.test_gateway_pro.ProTests.test_missing_bad_revoked_and_independent_people) ... ok
+test_pro_and_free_share_concurrency (tests.test_gateway_pro.ProTests.test_pro_and_free_share_concurrency) ... ok
+test_pro_uses_shared_quota_rate_and_spend (tests.test_gateway_pro.ProTests.test_pro_uses_shared_quota_rate_and_spend) ... ok
+test_reserved_config_and_prices (tests.test_gateway_pro.ProTests.test_reserved_config_and_prices) ... ok
+test_unconfigured_pro_and_free_unchanged (tests.test_gateway_pro.ProTests.test_unconfigured_pro_and_free_unchanged) ... ok
+test_valid_roles_proxy_and_no_secret_logging (tests.test_gateway_pro.ProTests.test_valid_roles_proxy_and_no_secret_logging) ... ok
+test_a_served_model_without_a_price_is_a_startup_error (tests.test_gateway.ConfigTests.test_a_served_model_without_a_price_is_a_startup_error) ... ok
+test_cost (tests.test_gateway.ConfigTests.test_cost) ... ok
+test_effort_settings_are_checked (tests.test_gateway.ConfigTests.test_effort_settings_are_checked) ... ok
+test_example_config_loads (tests.test_gateway.ConfigTests.test_example_config_loads) ... ok
+test_plain_http_needs_loopback_and_the_flag (tests.test_gateway.ConfigTests.test_plain_http_needs_loopback_and_the_flag) ... ok
+test_a_bad_proof_is_refused (tests.test_gateway.GatewayTests.test_a_bad_proof_is_refused) ... ok
+test_a_refusal_says_how_many_upstreams_it_already_tried (tests.test_gateway.GatewayTests.test_a_refusal_says_how_many_upstreams_it_already_tried) ... ok
+test_all_upstreams_down_is_free_unavailable (tests.test_gateway.GatewayTests.test_all_upstreams_down_is_free_unavailable) ... ok
+test_daily_quota_exhausted (tests.test_gateway.GatewayTests.test_daily_quota_exhausted) ... ok
+test_database_failure_fails_closed (tests.test_gateway.GatewayTests.test_database_failure_fails_closed) ... ok
+test_effort_is_clamped_to_the_roles_ceiling (tests.test_gateway.GatewayTests.test_effort_is_clamped_to_the_roles_ceiling) ... ok
+test_effort_style_is_the_providers_dialect (tests.test_gateway.GatewayTests.test_effort_style_is_the_providers_dialect) ... ok
+test_expired_token (tests.test_gateway.GatewayTests.test_expired_token) ... ok
+test_failover_before_the_first_byte_only (tests.test_gateway.GatewayTests.test_failover_before_the_first_byte_only) ... ok
+test_global_spend_ceiling_closes_the_gateway (tests.test_gateway.GatewayTests.test_global_spend_ceiling_closes_the_gateway) ... ok
+test_json_reply_is_passed_through (tests.test_gateway.GatewayTests.test_json_reply_is_passed_through) ... ok
+test_log_line_has_no_prompt_and_no_key (tests.test_gateway.GatewayTests.test_log_line_has_no_prompt_and_no_key) ... ok
+test_max_tokens_clamped_and_the_roles_extra_wins (tests.test_gateway.GatewayTests.test_max_tokens_clamped_and_the_roles_extra_wins) ... ok
+test_oversized_request_is_refused_per_role (tests.test_gateway.GatewayTests.test_oversized_request_is_refused_per_role) ... ok
+test_per_install_concurrency (tests.test_gateway.GatewayTests.test_per_install_concurrency) ... ok
+test_per_ip_registration_limit (tests.test_gateway.GatewayTests.test_per_ip_registration_limit) ... ok
+test_re_registering_rotates_the_token (tests.test_gateway.GatewayTests.test_re_registering_rotates_the_token) ... ok
+test_redirects_are_not_followed (tests.test_gateway.GatewayTests.test_redirects_are_not_followed) ... ok
+test_register_then_stream_with_quota_headers (tests.test_gateway.GatewayTests.test_register_then_stream_with_quota_headers) ... ok
+test_requests_per_minute (tests.test_gateway.GatewayTests.test_requests_per_minute) ... ok
+test_the_retryable_statuses_are_the_ones_the_client_retries (tests.test_gateway.GatewayTests.test_the_retryable_statuses_are_the_ones_the_client_retries)
+One set, two layers. A status the gateway calls transient and the client calls final ... ok
+test_unknown_model_and_disallowed_field (tests.test_gateway.GatewayTests.test_unknown_model_and_disallowed_field) ... ok
+test_message_shapes (tests.test_gateway.ValidateTests.test_message_shapes) ... ok
+test_shapes (tests.test_gateway.ValidateTests.test_shapes) ... ok
+
+----------------------------------------------------------------------
+Ran 39 tests in 2.494s
+
+OK

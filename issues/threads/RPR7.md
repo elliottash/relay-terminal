@@ -37,3 +37,13 @@ Owner requested valid card codes: #MDL1 → #MDP1 and #RLP7 → #RPR7. Renamed t
 Implementation: per-person revocable codes; Pro high/main use GLM 5.3 and flash uses GLM 5.3 Flash. Ultra is explicitly deferred. Lite retains Relay Free (the prior recommendation; no Pro lite was requested). Keep current quota/spend ceilings unless configured otherwise; no billing or production deployment in this change.
 
 Resumed execution under the existing claim.
+
+<!-- relay:entry 20260922T021355Z-tz author=agent kind=evidence -->
+Check · 7 missing-evidence, 1 not-applicable, 5 passed; 7 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T021539Z-dm author=agent kind=evidence -->
+Check · 1 not-applicable, 12 passed; 3 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T021612Z-dv author=codex kind=progress -->
+### Codex · 2026-09-22 02:16
+Implemented Pro personal codes, gateway checks and revocation, desktop activation/removal, GLM high/main/flash defaults and Free lite. Final live isolated Relay passed activation, generation, denial after revocation with no upstream request, and keyring removal. 281 targeted backend tests, 63 effort follow-up tests and all 3 C++ test groups pass. tests_check has no failures or signals (only existing timing notices). Evidence docs/qa_evidence/2026-09-22-RPR7/README.md. Landed to needs-verification; separate Relay verifier a5 is checking final implementation. No production deployment or production code issuance.
