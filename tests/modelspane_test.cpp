@@ -299,6 +299,60 @@ private Q_SLOTS:
         QVERIFY(rowKeys(pane.picker()->list()).contains(QStringLiteral("glm-coding|glm-5.3")));
     }
 
+    void lateProviderCatalogBecomesSearchableInPriorities() {
+        Served served;
+        ModelsPane pane(providerSections());
+        auto target = targetFor(&served);
+        pane.setTarget(target);
+        pane.showTab(ModelsPane::prioritiesTab());
+        pane.picker()->filter()->setText(QStringLiteral("openrouter"));
+        QVERIFY(rowKeys(pane.picker()->list()).isEmpty());
+        QJsonArray fresh = presets();
+        fresh << QJsonObject{{"id", "openrouter"}, {"provider", "openrouter"},
+                            {"has_stored_key", true}, {"models", QJsonArray{
+                                model("vendor/new-model", "new-model", "", {})}}};
+        target.catalog = catalogFrom(fresh);
+        pane.setTarget(target);
+        QCOMPARE(pane.currentTab(), QStringLiteral("priorities"));
+        QCOMPARE(pane.picker()->filter()->text(), QStringLiteral("openrouter"));
+        QVERIFY(rowKeys(pane.picker()->list()).contains(QStringLiteral("openrouter|vendor/new-model")));
+        pane.picker()->focusClass(QStringLiteral("main"));
+        pane.picker()->addSelected();
+        QVERIFY(listKeys(QStringLiteral("main")).contains(QStringLiteral("openrouter|vendor/new-model")));
+        if (const QString path = qEnvironmentVariable("RELAY_VPR7_SCREENSHOT"); !path.isEmpty()) {
+            pane.resize(1100, 720); pane.show(); QTest::qWait(80);
+            QVERIFY(pane.grab().save(path));
+        }
+    }
+
+    void codexSearchAddsToMainAndHighWithoutChangingGuestEligibility() {
+        Served served;
+        ModelsPane pane(providerSections());
+        auto target = targetFor(&served);
+        QJsonArray fresh = presets();
+        // Match the worker payload: guest rows have a label but no provider field.
+        fresh << QJsonObject{{"id", "guest:codex"}, {"label", "Codex"}, {"harness", true},
+                            {"models", QJsonArray{model("gpt-6-astra", "gpt-6-astra", "", {"low", "high"})}}};
+        target.catalog = catalogFrom(fresh);
+        pane.setTarget(target);
+        pane.showTab(ModelsPane::prioritiesTab());
+        QVERIFY(!rowKeys(pane.picker()->list()).contains(QStringLiteral("guest:codex|gpt-6-astra")));
+        pane.picker()->filter()->setText(QStringLiteral("codex"));
+        QCOMPARE(rowKeys(pane.picker()->list()).count(QStringLiteral("guest:codex|gpt-6-astra")), 2);
+        for (const QString &tier : {QStringLiteral("main"), QStringLiteral("high")}) {
+            pane.picker()->filter()->setText(QStringLiteral("codex"));
+            pane.picker()->focusClass(tier);
+            QTest::keyClick(pane.picker()->filter(), Qt::Key_Return, Qt::ControlModifier);
+            QVERIFY(listKeys(tier).contains(QStringLiteral("guest:codex|gpt-6-astra")));
+        }
+        QVERIFY(listKeys(QStringLiteral("flash")).isEmpty());
+        QVERIFY(listKeys(QStringLiteral("lite")).isEmpty());
+        if (const QString path = qEnvironmentVariable("RELAY_CDP7_SCREENSHOT"); !path.isEmpty()) {
+            pane.resize(1100, 720); pane.show(); QTest::qWait(80);
+            QVERIFY(pane.grab().save(path));
+        }
+    }
+
     void providersIsWhereCustomizeGoes() {
         Served served;
         ModelsPane pane(providerSections());

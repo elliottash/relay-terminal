@@ -1723,6 +1723,10 @@ private:
         if (!view) return;
         QPointer<ToolPane> guard(tool);
         QPointer<Pane> back(served);
+        // Before this pane's worker has answered, Providers uses the tab helper's presets.
+        // Share that snapshot on both initial opening and refresh, including late guest scans.
+        if (served && served->allPresets().isEmpty())
+            target.catalog = relay::models::catalogFrom(m_helperPresets.value(tabIdOf(pageOf(tool))));
         target.now = QDateTime::currentSecsSinceEpoch();
         target.focusBack = [guard, back] {
             auto *w = windowOf(guard);
@@ -2503,6 +2507,11 @@ private:
         Pane *pane = m_active;
         QSettings settings;
         QWidget *page = m_tabs->currentWidget();
+        // The providers page must use the same worker as Available and Priorities. The active
+        // terminal can change while this Models pane continues to serve its original target.
+        if (inModelsPane)
+            if (auto *view = modelsViewOf(modelsPaneIn(page)))
+                if (Pane *served = findPaneByToken(view->servedToken())) pane = served;
         // The pane's worker answers when a pane's agent is up. Otherwise the tab's helper agent
         // does (owner, 2026-09-20: "if there is no agent loaded yet, load the helper agent"): it
         // is started on the first look at this page, asked for `presets`, and every request the
@@ -2855,10 +2864,9 @@ private:
                         QStringLiteral("Which of this provider's models your lists, the alt+m box and its filter may "
                                        "offer. Opens the models pane's available tab on this provider"),
                         QStringLiteral("models… (%1 of %2 available)").arg(available).arg(usable),
-                        [this, provider, label] {
-                            // From Options *and* from the models pane's own providers tab: both
-                            // land on the available tab of the one models pane this tab has.
-                            Pane *on = m_active ? m_active.data() : focusedConsole();
+                        [this, provider, label, target = QPointer<Pane>(pane)] {
+                            // Follow the provider page's target even if focus moved meanwhile.
+                            Pane *on = target ? target.data() : focusedConsole();
                             if (on) on->openModelPicker(QStringLiteral("all"), provider.isEmpty() ? label : provider);
                             else notice(QStringLiteral("Focus a pane first: the models pane always serves one."));
                         });
