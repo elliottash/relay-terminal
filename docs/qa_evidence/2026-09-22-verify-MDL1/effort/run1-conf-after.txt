@@ -1,0 +1,37 @@
+[agent]
+effort=xhigh
+
+[hosted]
+disclosed=true
+
+[instructions]
+onboarded=true
+
+[isolation]
+enabled=false
+
+[models]
+fallbacks=openai|gpt-6-astra, relay-free|relay-main
+provider_order=kimi-code, glm-coding, openrouter, openai, guest:claude, guest:codex
+tier\flash=glm-coding|glm-5.3-flash|low
+tier\high=openai|gpt-6-astra|xhigh
+tier\lite=glm-coding|glm-5.3-flash|low
+tier\local=@Invalid()
+tier\main=kimi-code|k3|, openai|gpt-6-astra|, relay-free|relay-main|
+
+[provider]
+base=https://api.relay-terminal.ai/v1
+extra={\"reasoning_effort\":\"medium\"}
+model=relay-main
+preset=relay-free
+
+[security]
+approvals_ask=@Invalid()
+approvals_chosen=true
+
+[suggestions]
+next_command=false
+next_prompt=false
+
+[url_handler]
+announced=true

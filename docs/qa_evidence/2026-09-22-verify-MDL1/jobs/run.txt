@@ -1,0 +1,2 @@
+display :840
+done; shots in /tmp/mdl1verify-artifacts/jobs

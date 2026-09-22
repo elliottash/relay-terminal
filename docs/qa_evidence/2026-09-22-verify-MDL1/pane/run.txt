@@ -1,0 +1,6 @@
+display :720
+models nodes in the saved layout: 1
+  node:    {"cwd": "/tmp/mv-mp/project", "tab": "available"}
+  beside:  ['pane']
+OK: one models node, tab=available, beside a terminal pane
+done; shots in /tmp/mdl1verify-artifacts/pane

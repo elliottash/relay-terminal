@@ -1,0 +1,51 @@
+{
+    "saved": 1790039439,
+    "version": 1,
+    "windows": [
+        {
+            "current": 0,
+            "geometry": [
+                0,
+                0,
+                1600,
+                900
+            ],
+            "screen": "screen",
+            "tabs": [
+                {
+                    "node": {
+                        "children": [
+                            {
+                                "pane": {
+                                    "agent_mode": "build",
+                                    "agent_role": "main",
+                                    "cwd": "/tmp/mv-mp/project",
+                                    "effort": "high",
+                                    "input_mode": "auto",
+                                    "preset": "guest:claude",
+                                    "scrollback": "ab27cfe8-cc7c-49fa-b1a9-0d37da9ed55f",
+                                    "workspace": "/tmp/mv-mp/project"
+                                }
+                            },
+                            {
+                                "models": {
+                                    "cwd": "/tmp/mv-mp/project",
+                                    "tab": "available"
+                                }
+                            }
+                        ],
+                        "sizes": [
+                            529,
+                            1058
+                        ],
+                        "split": "h"
+                    },
+                    "tab_id": "t324abb129690"
+                }
+            ],
+            "titles": [
+                "project (2)  \u00b7  cpu 00% \u00b7 mem 00%"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,2 @@
+display :640
+done; shots in /tmp/mdl1verify-artifacts/effort

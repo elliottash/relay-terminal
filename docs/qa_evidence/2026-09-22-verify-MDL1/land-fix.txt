@@ -1,0 +1,15 @@
+warning: session 1cxd-b (contact: Opus subagent, #1CXD areas B1+B2) has also claimed src/RelayWindow.h — hunks that appeared after it began are contested and will be held for review
+warning: session active-dim (no --contact given; you cannot reach it) has also claimed src/RelayWindow.h — hunks that appeared after it began are contested and will be held for review
+warning: session delivery-docs (no --contact given; you cannot reach it) has also claimed src/RelayWindow.h — hunks that appeared after it began are contested and will be held for review
+warning: session driven (no --contact given; you cannot reach it) has also claimed src/RelayWindow.h — hunks that appeared after it began are contested and will be held for review
+warning: session fable-tabs (contact: fable-tabs session (#MDL1 models pane review)) has also claimed src/RelayWindow.h — hunks that appeared after it began are contested and will be held for review
+warning: session ssh-modal (no --contact given; you cannot reach it) has also claimed src/RelayWindow.h — hunks that appeared after it began are contested and will be held for review
+onto main (tip 1f3a7af0e746), 1 path(s), digest 6d6aa7fcf8e5:
+  src/RelayWindow.h: 1 hunk; +10 -0; snapshot 6m old; 1 left out; 2 CONTESTED; also claimed by session active-dim (no --contact given; you cannot reach it), session ssh-modal (no --contact given; you cannot reach it), session fable-tabs (contact: fable-tabs session (#MDL1 models pane review)), session 1cxd-b (contact: Opus subagent, #1CXD areas B1+B2), session delivery-docs (no --contact given; you cannot reach it), session driven (no --contact given; you cannot reach it)
+verify: tree a1f0dd4c5b6d materialised in /tmp/claude-1000/land/mdl1verify/verify/src (56 file(s) refreshed)
+verify: cmake --build /tmp/claude-1000/land/mdl1verify/verify/build --parallel 8 --target relay
+verify: the exact tree builds
+landed 85d0dd0f7dea0023dceaea9b6b8d4d858156805c on main
+  src/RelayWindow.h
+  src/RelayWindow.h: 1 hunk(s) left uncommitted in the working tree; a later commit picks them up
+85d0dd0f7dea0023dceaea9b6b8d4d858156805c

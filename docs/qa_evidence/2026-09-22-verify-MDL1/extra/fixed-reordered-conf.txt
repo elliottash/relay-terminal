@@ -1,0 +1,36 @@
+[hints]
+count\pane.focus.mouse=1
+last\pane.focus.mouse=1790039534
+last_any=1790039534
+
+[instructions]
+onboarded=true
+
+[isolation]
+enabled=false
+
+[models]
+available=relay-free|relay-main, relay-free|relay-flash, relay-free|relay-lite, kimi|kimi-k3, kimi|kimi-k2.7-code-highspeed, kimi-code|k3, kimi-code|k3-256k, kimi-code|kimi-for-coding, kimi-code|kimi-for-coding-highspeed, glm|glm-5.3, glm|glm-5.3-flash, glm-coding|glm-5.3, glm-coding|glm-5.3-flash, minimax|MiniMax-M3, minimax|MiniMax-M2.7, minimax|MiniMax-M2.7-highspeed, minimax|MiniMax-M2.5, openrouter|deepseek/deepseek-v4.1-flash, openrouter|google/gemini-3.8-flash, openrouter|google/gemini-3.5-flash-lite, openai|gpt-6-astra, openai|gpt-5.6-sol, openai|gpt-5.6-terra, openai|gpt-5.6-luna, anthropic|claude-opus-5, anthropic|claude-sonnet-5, anthropic|claude-haiku-4-5, anthropic|claude-fable-5-1, gemini|gemini-pro-latest, gemini|gemini-flash-latest, gemini|gemini-3.1-pro-preview, gemini|gemini-3.8-flash, deepseek|deepseek-flash, deepseek|deepseek-v4-pro, guest:claude|fable, guest:claude|opus, guest:claude|sonnet, guest:claude|haiku, guest:codex|gpt-6-astra, guest:codex|gpt-5.6-sol, guest:codex|gpt-5.6-terra, guest:codex|gpt-5.6-luna, guest:codex|gpt-5.5
+fallbacks=glm-coding|glm-5.3
+provider_order=kimi-code, glm, glm-coding, openrouter, anthropic, gemini, guest:claude, guest:codex
+tier\flash=glm-coding|glm-5.3-flash|
+tier\high=anthropic|claude-opus-5|, guest:claude|sonnet|max
+tier\lite=gemini|gemini-3.5-flash-lite|
+tier\main=kimi-code|k3|, glm-coding|glm-5.3|
+
+[provider]
+base=https://api.z.ai/api/coding/paas/v4
+extra="{\"reasoning_effort\":\"high\",\"thinking\":{\"type\":\"enabled\"}}"
+model=glm-5.3
+preset=glm-coding
+
+[security]
+approvals_ask=@Invalid()
+approvals_chosen=true
+
+[suggestions]
+next_command=false
+next_prompt=false
+
+[url_handler]
+announced=true

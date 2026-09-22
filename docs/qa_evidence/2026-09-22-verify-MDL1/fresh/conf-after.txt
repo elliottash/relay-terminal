@@ -1,0 +1,21 @@
+[isolation]
+enabled=false
+
+[models]
+provider_order=openrouter, guest:claude, guest:codex
+tier\flash=guest:claude|sonnet|low
+tier\high=guest:claude|fable|high
+tier\lite=relay-free|relay-lite|low
+tier\local=@Invalid()
+tier\main=guest:claude|opus|high
+
+[security]
+approvals_ask=@Invalid()
+approvals_chosen=true
+
+[suggestions]
+next_command=false
+next_prompt=false
+
+[url_handler]
+announced=true

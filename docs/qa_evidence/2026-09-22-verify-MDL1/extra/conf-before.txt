@@ -1,0 +1,22 @@
+[isolation]
+enabled=false
+
+[suggestions]
+next_command=false
+next_prompt=false
+
+[security]
+approvals_chosen=true
+approvals_ask=@Invalid()
+
+[url_handler]
+announced=true
+
+[instructions]
+onboarded=true
+
+[models]
+tier\lite=gemini|gemini-3.5-flash-lite|
+tier\main=glm-coding|glm-5.3|, kimi-code|k3|
+tier\high=anthropic|claude-opus-5|
+tier\flash=glm-coding|glm-5.3-flash|

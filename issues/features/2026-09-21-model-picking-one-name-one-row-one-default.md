@@ -178,31 +178,41 @@ Evidence: `2026-09-21-model-box-classes`, `-model-availability`, `-effort-by-mod
 `test_conv_index.py`, `test_web_model_name.py`, all run green on 2026-09-21 after the last commit.
 
 ## QA checklist
-- [ ] A new pane opens on rank 1 of the main list, model and level; a harness at rank 1 says it
-      starts on the first prompt, and does.
-- [ ] Pick another model in one pane; the next new pane is still rank 1.
-- [ ] Reorder main in Ctrl+Alt+M (Alt+Up/Down); the next new pane follows.
-- [ ] `/swap` from a third model goes to rank 1, the sentence stays, `/swap` again comes back.
-- [ ] Alt+M: current model highlighted; Up/Down; typing filters; Left/Right change mode in place;
-      Enter on a flash-list model gives `<model> · flash`; Escape changes nothing.
-- [ ] Alt+E: current level highlighted, no scrollbar, inside the window.
-- [ ] The Switchboard agent's box is the same list as a pane's, with no "(switchboard)"/"(main)".
-- [ ] A Codex pane's box says the model (`gpt-6-astra`), a Claude Code pane `claude-opus-5`.
-- [ ] Ctrl+Alt+M: add a model by typing + Ctrl+Enter, Delete it, Ctrl+Z; a model served by two
-      providers is one row on `all` with a "via" choice.
-- [ ] Quit and reopen with no arguments: each pane is back on its own model and mode.
-- [ ] The phone shows the same names.
-- [ ] Ctrl+Shift+M opens the models pane beside the pane it serves; again closes it; Esc returns
-      focus; opened from another pane it re-targets. Ctrl+Alt+M does nothing.
-- [ ] Its four tabs (Alt+1..4): providers with dividers and no advanced dialog; available
-      alphabetical with no recent, gemini flash lite tickable, no relay-lite; priorities as
-      sections with no lite; jobs showing what each job runs on right now.
-- [ ] Un-tick a model on available: it leaves the box, the lists and `/model`'s first pass.
-- [ ] A double click on a tick changes nothing but the tick.
-- [ ] Alt+E on a codex pane lists xhigh and ultra; on a relay free pane it is greyed with a reason.
-- [ ] Quit with the models pane open and reopen with no arguments: the tab comes back with both
-      the terminal and the pane, on the same tab.
-- [ ] A first run (a profile with no keys) opens a terminal at the left and the pane at the right
-      on providers, with the provider rows showing.
-- [ ] Edit `backend/relay_core/model-ranking.md`, press "fill from defaults": the lists follow it.
+Independent verification 2026-09-22; item numbers preserve the original 19-item checklist.
+Evidence and limits: `docs/qa_evidence/2026-09-22-verify-MDL1/README.md`.
+Final decisions supersede the old modal/mode-page expectations.
 
+- [ ] 1. PARTIAL: new pane follows main rank 1 and level; deferred guest UI and first-prompt protocol fixture pass. An authenticated guest turn remains unverified.
+- [x] 2. A per-pane pick leaves the next pane on main rank 1.
+- [x] 3. Ctrl+Shift+M → priorities → Alt+Up/Down reorders main; the next pane follows. Live defect fixed in 85d0dd0f.
+- [x] 4. `/swap` from a third model goes to rank 1, retains its explanation, then returns.
+- [x] 5. Alt+M highlights the current row; arrows skip class headers; text filters; Left/Right collapses/expands a class; Enter selects a flash model; chip is model-only; Escape cancels.
+- [x] 6. Alt+E highlights the current level, with all rows inside the window and no scrollbar.
+- [x] 7. Board console and terminal offer the same model rows, without role suffixes.
+- [x] 8. Guest chips display gpt-6-astra and claude-opus-5, not harness names.
+- [x] 9. Models priorities: typing + Ctrl+Enter adds, Delete removes, Ctrl+Z restores. Available folds providers into one model row with via choices.
+- [x] 10. No-argument restart preserves each pane's own model, level and role, including flash.
+- [ ] 11. PARTIAL: six phone naming tests pass; no paired-phone UI session was available or driven.
+- [x] 12. Ctrl+Shift+M opens/closes; Escape returns focus; opening from another terminal re-targets. Ctrl+Alt+M is retired.
+- [x] 13. Four tabs: provider dividers/no advanced dialog; alphabetical availability/no recent/no relay-lite, Gemini Flash Lite tickable; sectioned priorities/no lite; jobs reports worker resolutions.
+- [x] 14. Unticking an unlisted terminal model removes it from available lookup/Alt+M. Terminal priority entries stay pinned; lite-only membership does not pin; explicit `/model name` may fall back to all usable entries.
+- [x] 15. Double-clicking an availability tick does not change the served pane's model.
+- [x] 16. Codex catalog fixture offers xhigh/ultra; Relay Free effort is fixed with a reason.
+- [x] 17. Models pane and terminal restore together on the saved Models tab.
+- [x] 18. No-key first run opens terminal left and expanded providers right.
+- [x] 19. Edit an isolated ranking copy, restart worker, fill from defaults: lists follow the edit. Worker restart is required by the file's documented contract.
+
+## Verdict
+2026-09-22, Codex: **17 pass, 2 partial/blocked; not a full QA pass.**
+The two remaining checks are a real authenticated guest startup/turn and live paired-phone
+presentation. The protocol fixture and JS tests are explicitly not evidence of those external
+paths. Found and fixed Alt+Up/Down being intercepted by window pane navigation; only that hunk
+landed in `85d0dd0f7dea0023dceaea9b6b8d4d858156805c`, after wrapper and exact-tree builds,
+targeted modelpicker/modelspane tests, and a successful live reorder/new-pane regression.
+
+Fresh evidence: `docs/qa_evidence/2026-09-22-verify-MDL1/README.md` (all 19 results, drives,
+screenshots, settings, targeted tests). The card stays needs-verification on main. Its existing
+uncommitted executing/codex/links front matter belongs to an earlier session and is unchanged;
+this verification does not absorb it. Commit and evidence references are recorded here and in
+the thread because that links hunk is contested. Pre-existing card-format errors and old thread
+ordering are documented in board-check-MDL1.json, not rewritten. CFG1/ACT1/RLP7/XJSN unchanged.

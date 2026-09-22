@@ -1,0 +1,30 @@
+[instructions]
+onboarded=true
+
+[isolation]
+enabled=false
+
+[models]
+fallbacks=kimi-code|k3
+provider_order=kimi-code, glm, glm-coding, openrouter, anthropic, gemini, guest:claude, guest:codex
+tier\flash=glm-coding|glm-5.3-flash|
+tier\high=anthropic|claude-opus-5|
+tier\lite=gemini|gemini-3.5-flash-lite|
+tier\main=glm-coding|glm-5.3|, kimi-code|k3|
+
+[provider]
+base=https://api.z.ai/api/coding/paas/v4
+extra="{\"reasoning_effort\":\"high\",\"thinking\":{\"type\":\"enabled\"}}"
+model=glm-5.3
+preset=glm-coding
+
+[security]
+approvals_ask=@Invalid()
+approvals_chosen=true
+
+[suggestions]
+next_command=false
+next_prompt=false
+
+[url_handler]
+announced=true

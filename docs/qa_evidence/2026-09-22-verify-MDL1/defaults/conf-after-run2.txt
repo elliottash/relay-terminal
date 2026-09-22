@@ -1,0 +1,63 @@
+[agent]
+effort=high
+
+[hints]
+count\model.swap.key=1
+last\model.swap.key=1790039329
+last_any=1790039329
+
+[instructions]
+onboarded=true
+
+[isolation]
+enabled=false
+
+[models]
+box\flash=2
+box\high=2
+box\local=2
+box\main=2
+fallbacks=glm-coding|glm-5.3, kimi-code|k3
+profile=work
+profile_order=work, admin
+profiles\admin\box\flash=2
+profiles\admin\box\high=2
+profiles\admin\box\local=2
+profiles\admin\box\main=2
+profiles\admin\tier\flash=glm-coding|glm-5.3-flash|low
+profiles\admin\tier\high=glm-coding|glm-5.3|max
+profiles\admin\tier\lite=glm-coding|glm-5.3-flash|low
+profiles\admin\tier\local=@Invalid()
+profiles\admin\tier\main=kimi-code|k3|high, glm-coding|glm-5.3-flash|low, glm-coding|glm-5.3|max
+profiles\work\box\flash=2
+profiles\work\box\high=2
+profiles\work\box\local=2
+profiles\work\box\main=2
+profiles\work\tier\flash=glm-coding|glm-5.3-flash|low
+profiles\work\tier\high=glm-coding|glm-5.3|max
+profiles\work\tier\lite=glm-coding|glm-5.3-flash|low
+profiles\work\tier\local=@Invalid()
+profiles\work\tier\main=glm-coding|glm-5.3-flash|low, glm-coding|glm-5.3|max, kimi-code|k3|high
+provider_order=kimi-code, glm-coding, openrouter, guest:claude, guest:codex
+tier\flash=glm-coding|glm-5.3-flash|low
+tier\high=glm-coding|glm-5.3|max
+tier\lite=glm-coding|glm-5.3-flash|low
+tier\local=@Invalid()
+tier\main=glm-coding|glm-5.3-flash|low, glm-coding|glm-5.3|max, kimi-code|k3|high
+
+[provider]
+base=https://api.z.ai/api/coding/paas/v4
+extra="{\"reasoning_effort\":\"high\",\"thinking\":{\"type\":\"enabled\"}}"
+model=glm-5.3
+preset=glm-coding
+
+[security]
+approvals_ask=@Invalid()
+approvals_chosen=true
+
+[suggestions]
+next_command=false
+next_prompt=false
+
+[url_handler]
+announced=true

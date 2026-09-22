@@ -1,0 +1,24 @@
+Internal ctest changing into directory: /home/elliott/repos/relay-terminal/build
+Test project /home/elliott/repos/relay-terminal/build
+    Start  3: modelpicker
+1/9 Test  #3: modelpicker ......................   Passed    1.76 sec
+    Start  4: filterpopup
+2/9 Test  #4: filterpopup ......................   Passed    0.10 sec
+    Start  5: modelrows
+3/9 Test  #5: modelrows ........................   Passed    0.75 sec
+    Start  6: modelcatalog
+4/9 Test  #6: modelcatalog .....................   Passed    3.74 sec
+    Start  7: modelsettings
+5/9 Test  #7: modelsettings ....................   Passed    0.04 sec
+    Start  8: modelspane
+6/9 Test  #8: modelspane .......................   Passed    0.54 sec
+    Start  9: jobstab
+7/9 Test  #9: jobstab ..........................   Passed    0.16 sec
+    Start 25: windowstate
+8/9 Test #25: windowstate ......................   Passed    0.08 sec
+    Start 43: panestate
+9/9 Test #43: panestate ........................   Passed    0.30 sec
+
+100% tests passed, 0 tests failed out of 9
+
+Total Test time (real) =   7.48 sec

@@ -1,0 +1,27 @@
+PASS: preset, model, role and effort unchanged across no-argument restart for all four terminals.
+[
+  {
+    "preset": "glm-coding",
+    "model": "glm-5.3",
+    "agent_role": "main",
+    "effort": "high"
+  },
+  {
+    "preset": "glm-coding",
+    "model": "glm-5.3",
+    "agent_role": "main",
+    "effort": "high"
+  },
+  {
+    "preset": "kimi-code",
+    "model": "k3",
+    "agent_role": "flash",
+    "effort": "high"
+  },
+  {
+    "preset": "glm-coding",
+    "model": "glm-5.3",
+    "agent_role": "main",
+    "effort": "high"
+  }
+]

@@ -1,0 +1,2 @@
+2026-09-22T01:08:26.831Z INFO relay.worker pane=8e873dee worker_start version=0.1.0 pid=2986036 level=info
+2026-09-22T01:08:26.897Z INFO relay.worker pane=8e873dee configured model=k3 host=api.kimi.ai role=main skills=2 agents=3 stall_s=60 session=e2518ed39951401aad2814690d548866

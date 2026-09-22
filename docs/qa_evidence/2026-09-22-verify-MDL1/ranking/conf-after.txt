@@ -1,0 +1,31 @@
+[instructions]
+onboarded=true
+
+[isolation]
+enabled=false
+
+[models]
+fallbacks=glm-coding|glm-5.3
+provider_order=kimi-code, glm-coding, openrouter, guest:claude, guest:codex
+tier\flash=glm-coding|glm-5.3-flash|high, kimi-code|kimi-for-coding-highspeed|
+tier\high=kimi-code|k3|max, glm-coding|glm-5.3|max
+tier\lite=@Invalid()
+tier\local=@Invalid()
+tier\main=kimi-code|k3|high, glm-coding|glm-5.3|high
+
+[provider]
+base=https://api.z.ai/api/coding/paas/v4
+extra="{\"reasoning_effort\":\"high\",\"thinking\":{\"type\":\"enabled\"}}"
+model=glm-5.3
+preset=glm-coding
+
+[security]
+approvals_ask=@Invalid()
+approvals_chosen=true
+
+[suggestions]
+next_command=false
+next_prompt=false
+
+[url_handler]
+announced=true

@@ -1,0 +1,79 @@
+{
+    "saved": 1790039397,
+    "version": 1,
+    "windows": [
+        {
+            "current": 0,
+            "geometry": [
+                0,
+                0,
+                1600,
+                900
+            ],
+            "screen": "screen",
+            "tabs": [
+                {
+                    "node": {
+                        "children": [
+                            {
+                                "pane": {
+                                    "agent_mode": "build",
+                                    "agent_role": "main",
+                                    "cwd": "/tmp/mv-df/project",
+                                    "effort": "high",
+                                    "input_mode": "auto",
+                                    "model": "k3",
+                                    "preset": "kimi-code",
+                                    "scrollback": "ba33e6c5-8b98-4ca9-8884-993effe9f97f",
+                                    "session_id": "40a8c4259b7e4f85a1ea5b223c1848f5",
+                                    "workspace": "/tmp/mv-df/project"
+                                }
+                            },
+                            {
+                                "pane": {
+                                    "agent_mode": "build",
+                                    "agent_role": "main",
+                                    "cwd": "/tmp/mv-df/project",
+                                    "effort": "high",
+                                    "input_mode": "auto",
+                                    "model": "k3",
+                                    "preset": "kimi-code",
+                                    "scrollback": "85ffa774-9ceb-43ea-a2c0-8b8fc350e58e",
+                                    "session_id": "ed0e23f2278e4580b8469769b748a88e",
+                                    "workspace": "/tmp/mv-df/project"
+                                }
+                            }
+                        ],
+                        "sizes": [
+                            794,
+                            793
+                        ],
+                        "split": "h"
+                    },
+                    "tab_id": "tce87eea9131a"
+                },
+                {
+                    "node": {
+                        "pane": {
+                            "agent_mode": "build",
+                            "agent_role": "main",
+                            "cwd": "/tmp/mv-df/project",
+                            "effort": "max",
+                            "input_mode": "auto",
+                            "model": "glm-5.3",
+                            "preset": "glm-coding",
+                            "scrollback": "181216c6-acb5-4d30-aa8e-7e994b83c3be",
+                            "session_id": "654fd12ddfd24bfab14d888c81e40d13",
+                            "workspace": "/tmp/mv-df/project"
+                        }
+                    },
+                    "tab_id": "t76a0d1d82427"
+                }
+            ],
+            "titles": [
+                "project (2)  \u00b7  cpu 00% \u00b7 mem 00%",
+                "project  \u00b7  cpu 00% \u00b7 mem 00%"
+            ]
+        }
+    ]
+}

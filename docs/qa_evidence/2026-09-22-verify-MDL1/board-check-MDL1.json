@@ -1,0 +1,72 @@
+[
+  {
+    "code": "bad_id",
+    "path": "features/2026-09-21-model-picking-one-name-one-row-one-default.md",
+    "message": "id 'MDL1' is not 4 Crockford-base32 characters with a letter",
+    "severity": "error",
+    "fixable": false
+  },
+  {
+    "code": "bad_task_marker",
+    "path": "features/2026-09-21-model-picking-one-name-one-row-one-default.md",
+    "message": "task id 'a10' is not 2 Crockford-base32 characters",
+    "severity": "error",
+    "fixable": false
+  },
+  {
+    "code": "bad_task_marker",
+    "path": "features/2026-09-21-model-picking-one-name-one-row-one-default.md",
+    "message": "task id 'a11' is not 2 Crockford-base32 characters",
+    "severity": "error",
+    "fixable": false
+  },
+  {
+    "code": "bad_task_marker",
+    "path": "features/2026-09-21-model-picking-one-name-one-row-one-default.md",
+    "message": "task id 'a12' is not 2 Crockford-base32 characters",
+    "severity": "error",
+    "fixable": false
+  },
+  {
+    "code": "bad_task_marker",
+    "path": "features/2026-09-21-model-picking-one-name-one-row-one-default.md",
+    "message": "task id 'a13' is not 2 Crockford-base32 characters",
+    "severity": "error",
+    "fixable": false
+  },
+  {
+    "code": "bad_task_marker",
+    "path": "features/2026-09-21-model-picking-one-name-one-row-one-default.md",
+    "message": "task id 'a14' is not 2 Crockford-base32 characters",
+    "severity": "error",
+    "fixable": false
+  },
+  {
+    "code": "bad_task_marker",
+    "path": "features/2026-09-21-model-picking-one-name-one-row-one-default.md",
+    "message": "task id 'a15' is not 2 Crockford-base32 characters",
+    "severity": "error",
+    "fixable": false
+  },
+  {
+    "code": "bad_task_marker",
+    "path": "features/2026-09-21-model-picking-one-name-one-row-one-default.md",
+    "message": "task id 'a16' is not 2 Crockford-base32 characters",
+    "severity": "error",
+    "fixable": false
+  },
+  {
+    "code": "bad_thread_name",
+    "path": "threads/MDL1.md",
+    "message": "thread file is not named <ID>.md",
+    "severity": "error",
+    "fixable": false
+  },
+  {
+    "code": "thread_unsorted",
+    "path": "threads/MDL1.md",
+    "message": "entries are not in id order (a union merge interleaved them)",
+    "severity": "warning",
+    "fixable": true
+  }
+]

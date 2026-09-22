@@ -1,0 +1,37 @@
+[hints]
+count\pane.focus.mouse=1
+last\pane.focus.mouse=1790039417
+last_any=1790039417
+
+[instructions]
+files=/tmp/mv-mp/.config/relay/relay.md
+onboarded=true
+
+[isolation]
+enabled=false
+
+[models]
+fallbacks=glm-coding|glm-5.3
+provider_order=kimi-code, glm-coding, openrouter, guest:claude, guest:codex
+tier\flash=guest:claude|sonnet|low
+tier\high=guest:claude|fable|high, glm-coding|glm-5.3|max
+tier\lite=relay-free|relay-lite|low
+tier\local=@Invalid()
+tier\main=guest:claude|opus|high, glm-coding|glm-5.3|high
+
+[provider]
+base=harness://claude
+extra={}
+model=
+preset=guest:claude
+
+[security]
+approvals_ask=@Invalid()
+approvals_chosen=true
+
+[suggestions]
+next_command=false
+next_prompt=false
+
+[url_handler]
+announced=true

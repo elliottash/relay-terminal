@@ -1,0 +1,135 @@
+{
+    "saved": 1790039800,
+    "version": 1,
+    "windows": [
+        {
+            "current": 2,
+            "geometry": [
+                0,
+                0,
+                1600,
+                900
+            ],
+            "screen": "screen",
+            "tabs": [
+                {
+                    "node": {
+                        "children": [
+                            {
+                                "pane": {
+                                    "agent_mode": "build",
+                                    "agent_role": "main",
+                                    "cwd": "/tmp/mv-extra/project",
+                                    "effort": "high",
+                                    "input_mode": "auto",
+                                    "model": "glm-5.3",
+                                    "preset": "glm-coding",
+                                    "scrollback": "f183a923-35d1-4885-be59-1e30d37038e3",
+                                    "session_id": "18c5c1f506844554959bd0c998fb3a47",
+                                    "workspace": "/tmp/mv-extra/project"
+                                }
+                            },
+                            {
+                                "models": {
+                                    "cwd": "/tmp/mv-extra/project",
+                                    "tab": "priorities"
+                                }
+                            }
+                        ],
+                        "sizes": [
+                            319,
+                            318
+                        ],
+                        "split": "h"
+                    },
+                    "tab_id": "tbf1c83b4b3d6"
+                },
+                {
+                    "node": {
+                        "children": [
+                            {
+                                "pane": {
+                                    "agent_mode": "build",
+                                    "agent_role": "main",
+                                    "cwd": "/tmp/mv-extra/project",
+                                    "effort": "high",
+                                    "input_mode": "auto",
+                                    "model": "glm-5.3",
+                                    "preset": "glm-coding",
+                                    "scrollback": "518dd92a-84f8-42ea-b68e-cbef6d0d33f1",
+                                    "session_id": "10a6cc5fdd4f4778b95ed1e921d4fc16",
+                                    "workspace": "/tmp/mv-extra/project"
+                                }
+                            },
+                            {
+                                "models": {
+                                    "cwd": "/tmp/mv-extra/project",
+                                    "tab": "priorities"
+                                }
+                            }
+                        ],
+                        "sizes": [
+                            794,
+                            793
+                        ],
+                        "split": "h"
+                    },
+                    "tab_id": "t0cdb29cde2ff"
+                },
+                {
+                    "node": {
+                        "children": [
+                            {
+                                "pane": {
+                                    "agent_mode": "build",
+                                    "agent_role": "flash",
+                                    "cwd": "/tmp/mv-extra/project",
+                                    "effort": "high",
+                                    "input_mode": "auto",
+                                    "model": "k3",
+                                    "preset": "kimi-code",
+                                    "scrollback": "99a53684-e6f7-4ec0-ade8-d185a91362b7",
+                                    "session_id": "4b975de9bbaf43fea216e79728df0a86",
+                                    "workspace": "/tmp/mv-extra/project"
+                                }
+                            },
+                            {
+                                "pane": {
+                                    "agent_mode": "build",
+                                    "agent_role": "main",
+                                    "cwd": "/tmp/mv-extra/project",
+                                    "effort": "high",
+                                    "input_mode": "auto",
+                                    "model": "glm-5.3",
+                                    "preset": "glm-coding",
+                                    "scrollback": "a63c3766-5f3b-4141-9342-b7088f1340c1",
+                                    "session_id": "1fd7c377f41c4bc3943392e53ebdb203",
+                                    "workspace": "/tmp/mv-extra/project"
+                                }
+                            },
+                            {
+                                "models": {
+                                    "cwd": "/tmp/mv-extra/project",
+                                    "tab": "available"
+                                }
+                            }
+                        ],
+                        "sizes": [
+                            663,
+                            330,
+                            591
+                        ],
+                        "split": "h"
+                    },
+                    "project": "/tmp/mv-extra/project",
+                    "tab_id": "te86d85cde1be"
+                }
+            ],
+            "titles": [
+                "project (2)  ·  cpu 00% · mem 00%",
+                "project (2)  ·  cpu 00% · mem 00%",
+                "project (3)  ·  cpu 00% · mem 00%"
+            ]
+        }
+    ]
+}
