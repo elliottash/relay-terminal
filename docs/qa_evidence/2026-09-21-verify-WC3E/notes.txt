@@ -1,0 +1,35 @@
+Verification of #WC3E — Expectations before implementation, and a verification record
+written by a separate session.
+
+Revision checked: 486852e0 (the card's move to needs-verification; the code it records is
+0ef3ee13, its parent-but-one).  Everything below was run on a clean `git archive` export of that
+revision in a scratch directory, never in the shared checkout: the working tree holds other
+sessions' uncommitted code, so "it works here" would say nothing about the commit.
+
+Rerun all of it with:   docs/qa_evidence/2026-09-21-verify-WC3E/stage.sh
+(optionally `stage.sh <revision> <output directory>`).
+
+Files
+  stage.sh                  exports the revision and reruns 1-4 below
+  unittest.txt              1. the four Python modules the card's `## Tests` names
+  drives.txt                2. the request/response reproduction (the three scripts beside it)
+  policy-regen.txt          3. issues/POLICY.md regenerated from board_policy.md, and diffed
+  ctest.txt                 4. ctest -R '^(board|boardpane)$' on a RelWithDebInfo build
+  drive-human-qa.py         the Human QA gate, and the Plan turn's two writable sections
+  drive-sections.py         what `relay-board.py check` warns on, before and after
+  drive-execute-notice.py   Execute (board_claim) with and without `## Done means`, on the wire
+
+The one failing test in unittest.txt is NOT this card's.
+  tests.test_board_tools.SpecTests.test_the_designed_tools_are_offered_and_nothing_else
+fails because `board_try` is in TOOL_SPECS and not in the test's expected tuple.  `board_try`
+landed in 03701acf (#JNYN, "try it: the turn, the brief and the agent tool"), which is *before*
+this card's own parent 2d1901e6 — so the failure is present at the revision #WC3E was built on,
+and is still present at main's tip 3a5fa029 (`git show 3a5fa029:tests/test_board_tools.py`, line
+76, lists nine names and not `board_try`).  It belongs to #JNYN, not here.
+
+No simulation in the app.  This card's whole app surface is one notice line
+(`BoardView::handleEvent` appends the worker's `notice` to the notice line the write already
+draws), and the change is otherwise policy text, tool descriptions and two briefs.  The
+not-about-the-app form of the simulation — the request and its response — is drives.txt: each
+rule driven through the tools and through the protocol wire, with the answer the board actually
+gave.

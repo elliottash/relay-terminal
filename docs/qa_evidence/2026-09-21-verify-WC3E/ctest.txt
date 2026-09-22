@@ -1,0 +1,9 @@
+Test project /tmp/verify-WC3E.3LmV/build
+    Start 69: board
+1/2 Test #69: board ............................   Passed    2.37 sec
+    Start 74: boardpane
+2/2 Test #74: boardpane ........................   Passed    0.19 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =   2.56 sec

@@ -1,0 +1,3 @@
+unchanged /tmp/verify-WC3E.3LmV/issues/POLICY.md (and the instruction files)
+-- diff committed vs regenerated --
+IDENTICAL

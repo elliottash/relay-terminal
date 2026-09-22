@@ -1,0 +1,35 @@
+..........................................................................................................................................................................................................F................................................................................................................................................................................................................................................................................................................................................................................
+======================================================================
+FAIL: test_the_designed_tools_are_offered_and_nothing_else (tests.test_board_tools.SpecTests.test_the_designed_tools_are_offered_and_nothing_else)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/verify-WC3E.3LmV/tests/test_board_tools.py", line 76, in test_the_designed_tools_are_offered_and_nothing_else
+    self.assertEqual(T.TOOL_NAMES, ("board_list", "board_read", "board_create_card",
+AssertionError: Tuples differ: ('boa[133 chars]aim', 'tests_check', 'tests_run', 'board_signals', 'board_try') != ('boa[133 chars]aim', 'tests_check', 'tests_run', 'board_signals')
+
+First tuple contains 1 additional elements.
+First extra element 11:
+'board_try'
+
+  ('board_list',
+   'board_read',
+   'board_create_card',
+   'board_update_card',
+   'board_move_card',
+   'board_import_items',
+   'board_comment',
+   'board_claim',
+   'tests_check',
+   'tests_run',
+-  'board_signals',
+?                 ^
+
++  'board_signals')
+?                 ^
+
+-  'board_try')
+
+----------------------------------------------------------------------
+Ran 571 tests in 20.715s
+
+FAILED (failures=1)

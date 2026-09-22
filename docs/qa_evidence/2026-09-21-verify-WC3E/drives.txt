@@ -1,0 +1,35 @@
+### drive-human-qa.py — the Human QA gate and the Plan turn's two sections
+=== D: agent move to done over an UNANSWERED numbered Human QA question ===
+  result: {'error': "#5QN7 has 2 unanswered question(s) in `## Human QA` (1. Is the beige icon acceptable on the dark header?; 2. Does the meter read right at 90%?) — that judgement is the person's, so an agent does not move the card to done: leave it in its QA lane and ask.", 'code': 'board_refused', 'requires': 'human_qa_answer'}
+  questions: ['1. Is the beige icon acceptable on the dark header?', '2. Does the meter read right at 90%?']
+  status now: inbox
+=== D2: same card, now with an indented Answer: under question 1 only ===
+  result: {'error': "#5QN7 has 1 unanswered question(s) in `## Human QA` (2. Does the meter read right at 90%?) — that judgement is the person's, so an agent does not move the card to done: leave it in its QA lane and ask.", 'code': 'board_refused'}
+  remaining questions: ['2. Does the meter read right at 90%?']
+=== D3: both answered -> the agent's move goes through ===
+  error: None  status now: done
+=== D4: the OWNER's own close over an unanswered question is untouched ===
+  error: None  status now: done
+=== D5: prose Human QA with no numbered question gates nothing ===
+  error: None  status now: done
+=== P: a Plan turn may write Done means and Plan, and nothing else ===
+  Done means         -> OK
+  Plan               -> OK
+  Execution Summary  -> board_mode_refused: A Plan turn writes the card's `## Plan` and `## Done means` sections and nothing else: call board_update_card 
+  QA checklist       -> board_mode_refused: A Plan turn writes the card's `## Plan` and `## Done means` sections and nothing else: call board_update_card 
+  sections on card: ['## Done means', '## Plan']
+
+### drive-sections.py — what `check` warns on
+=== C: `check` on the four new headings, and on an invented one ===
+  unknown_section after the six: []
+  unknown_section after an invented one: ['`## Invented Heading` is not one of the card body sections (docs/SWITCHBOARD-FORMAT.md, card file)']
+
+### drive-execute-notice.py — Execute on a card with and without `## Done means`
+----------------------------------------------------------------------
+Ran 1 test in 0.077s
+
+OK
+NO Done means -> notice: '#MJQ4 has no Done means; the verifier will have nothing to check against.'
+                errors: []  status: executing
+WITH Done means -> notice key present: False  status: executing
+gained-it-first    -> notice key present: False
