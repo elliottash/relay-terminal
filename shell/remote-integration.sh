@@ -6,7 +6,6 @@ __relay_r=1
 __relay_r_token=${RELAY_REMOTE_TOKEN-}
 unset RELAY_REMOTE_TOKEN
 __relay_r_h=${HOSTNAME:-${HOST:-$(hostname 2>/dev/null)}}
-# Only hostname characters may enter an OSC.
 case $__relay_r_h in *[!A-Za-z0-9.-]*) __relay_r_h=$(printf %s "$__relay_r_h" | tr -cd 'A-Za-z0-9.-');; esac
 [ -n "$__relay_r_h" ] || __relay_r_h=remote
 # Multiplexers require wrapped OSCs.
@@ -98,7 +97,7 @@ __relay_r_pc() { local s=$?; [ -n "${__relay_r_off-}" ] && return $s
 [ -n "${__relay_r_x-}" ] && __relay_r_o "133;D;$s"; __relay_r_x=; __relay_r_7; __relay_r_confirm
 case $PS1 in *133\;A*) ;; *) case $PS1 in *$'\n') ;; *) PS1=$PS1$'\n';; esac; case $PS1 in *$'\n\n') ;; *) PS1=$PS1$'\n';; esac; PS1="%{$__relay_r_p"$'\e]133;A\a'"$__relay_r_s%}"$PS1"%{$__relay_r_p"$'\e]133;B\a'"$__relay_r_s%}";; esac; return $s; }
 __relay_r_pre() { [ -n "${__relay_r_off-}" ] && return; __relay_r_gap "$1"; __relay_r_rows=; __relay_r_x=1; }
-__relay_r_redraw() { __relay_r_rows=$(__relay_r_rows_for "$BUFFER"); }
+__relay_r_redraw() { if [ -n "$BUFFER" ]; then __relay_r_rows=$(__relay_r_rows_for "$BUFFER"); else printf "\n\n"; zle reset-prompt; fi; }
 eval 'precmd_functions+=(__relay_r_pc); preexec_functions+=(__relay_r_pre)'
 zle -N __relay_r_redraw
 case $(bindkey -M emacs '^X^P' 2>/dev/null) in *undefined-key*|'')
