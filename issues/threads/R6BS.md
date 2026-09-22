@@ -29,3 +29,7 @@ Native desktop and installer ran on Windows Server 2022 (35666469644); inspected
 <!-- relay:entry 20260921T234250Z-a8 author=codex kind=progress -->
 ### Codex · 2026-09-21 23:42
 Native installer launch and worker startup passed again with clean logs. Runtime tests found module-heavy command discovery truncation (fixed 694ab9a8) and then an event publication failure under a deliberately held Windows file lock. Test cleanup now preserves the original assertion (e8fb83a3); shell integration owner is fixing publication. Linux builds continue; website links remain staged until all release gates pass. These failures occur on Windows x64, not the owner’s ARM64 system.
+
+<!-- relay:entry 20260922T002724Z-a9 author=codex kind=progress -->
+### Codex · 2026-09-22 00:27
+Native Windows full gates and upload passed on 6fe3554f in 35670149891. Linux and local broad checks exposed stale fixtures from recent repository changes; corrected and targeted checks pass. New Try-it functionality received native Windows path/PowerShell support. Current release candidate 59a51d9 is running in 35671890154; previous artifacts are isolated. PF14 records the unresolved intermittent profiling assertion without weakening it. Updated evidence README with exact scope and results.

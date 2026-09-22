@@ -14,15 +14,32 @@ main through land.py; the shared checkout's unrelated unfinished changes are exc
 
 ## Final release gates
 
-Native desktop compilation, private runtime packaging and the installed app launch/uninstall passed
-again in release run [35667599551](https://github.com/elliottash/relay-terminal/actions/runs/35667599551).
-The worker log confirms startup, configured model and clean shutdown; stderr and crash logs are empty.
-The screenshot shows the first-run instructions dialog, so it does not establish composer usability.
+Native Windows source `6fe3554f` passed the complete runtime, console lifecycle, desktop build,
+installer packaging, bundled Unicode worker, installed GUI launch and normal exit/uninstall gates.
+The release run's final installer upload received a GitHub HTTP 403; an identical-source standalone
+[rerun](https://github.com/elliottash/relay-terminal/actions/runs/35670149891) passed and uploaded it.
+The screenshot `windows-installed.png` shows the first-run instructions dialog. Logs confirm the
+worker configured and shut down cleanly; stderr and crash output were empty. This is launch evidence,
+not full interactive desktop QA.
 
-The runtime gate exposed broad PowerShell command discovery truncating core commands on module-heavy
-Windows runners. Fixed in 694ab9a8 with imported-command discovery and a 21,000-export regression case.
-That regression now passes natively. A subsequent intentional file-lock regression exposed an event
-publication failure; e8fb83a3 first fixed test cleanup to preserve its original assertion, and the
-product fix is in progress. This occurs on GitHub Windows x64 and is unrelated to the owner's ARM64 host.
-All six Linux builds are still running. No beta.3 release has been published. The release workflow now requires both platforms and includes the
-Windows installer in SHA256SUMS. Prepared website download edits remain unpublished until then.
+PowerShell discovery now keeps core commands on module-heavy machines (694ab9a8). Atomic prompt-state
+replacement retries Windows access-denied/sharing failures (a613f215); the deliberate file-lock test
+passes natively. These failures occurred on GitHub's Windows x64 runner, unrelated to the owner's ARM64 host.
+
+The six Linux package builds exposed stale fixtures for root file permissions, native path separators,
+queue recall, Ghostty's documented approximate byte budget, project initialization and newer Switchboard
+features. Corrections preserve the product contracts and assert the new behavior. A local committed
+snapshot ran 4,960 backend tests with three identified failures; all three were corrected and their
+110 targeted checks pass. An isolated Qt5 build ran 88 C++ tests with one stale QA-action fixture;
+that fixture was corrected, and board/console/continue tests pass. #PF14 separately records an intermittent
+live profiling assertion; it remains enabled, with raw profiler diagnostics added.
+
+Newer Try-it staging now handles native Windows temporary paths, PowerShell scripts and paths containing
+spaces; the native release gate includes its tests. New desktop-only events remain explicitly withheld
+from the remote terminal stream, with the board's existing scrubbed owner bridge handling queue replies.
+
+The current immutable release candidate is `59a51d92578b2c77284e2ecb9ffcde98f7671b7d`,
+[release run 35671890154](https://github.com/elliottash/relay-terminal/actions/runs/35671890154).
+All six Linux build/test/install gates and the native Windows gates must pass before publication.
+No beta.3 release or new website links have been published yet. Earlier-source artifacts are kept
+separate and will not be mixed into this release.
