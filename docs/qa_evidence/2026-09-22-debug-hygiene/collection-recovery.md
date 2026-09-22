@@ -12,6 +12,8 @@ outcomes answer both historical records; two consecutive passing executions reso
 Historical green rows without scope metadata are deliberately not inferred to be full collection.
 The legacy short-module spelling maps to `tests.<name>`, matching this project's old discovery.
 
+Implementation commit: `9bef2478f4d4071f520d9728cd5b90f88daa31c0`.
+
 ## Verification
 
 `PYTHONPATH=backend:tests python3 -m unittest tests.test_collection_recovery tests.test_junit_runner tests.test_test_history tests.test_signals tests.test_tests_protocol -q`
@@ -26,7 +28,7 @@ and fresh JUnit output from a valid temporary module. No private history/events 
 
 | Replay stage | Historical wrapper | Historical run container | Owner |
 | --- | --- | --- | --- |
-| Recorded failures | open; 2 distinct executions | open; 1 failing run | codex-hq |
+| Recorded failures | open; 2 distinct executions | open; 2 failing runs | codex-hq |
 | Two passing method subsets | open; 0 green | open; 0 green | codex-hq |
 | First passing full module | open; 1 green | open; 1 green | codex-hq |
 | Second passing full module | resolved; 2 green | resolved; 2 green | cleared by normal fold |
