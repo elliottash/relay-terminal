@@ -22,3 +22,6 @@ Three research passes complete: methods, existing infrastructure, calibration. A
 
 <!-- relay:entry 20260922T020000Z-a8 author=agent kind=evidence model=gpt-6-astra pane=73b4c2b2 turn=a502516a07124653b8b2fd982852128d/1931a6f54c874fb89172ec6cf6cef505 -->
 Research complete: reports/Relay QA attack system.md, with three supporting research notes and primary citations. Checked report/local source references and spot-checked primary sources. No code, runtime tests or attacks performed. Board validator exits 1 on 13 existing errors elsewhere and existing section warnings; #SJTR has only its three pre-existing nonstandard-heading warnings. Feature remains discussing for owner scope decisions.
+
+<!-- relay:entry 20260922T020000Z-a9 author=agent kind=event model=gpt-6-astra pane=73b4c2b2 turn=a502516a07124653b8b2fd982852128d/1931a6f54c874fb89172ec6cf6cef505 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["reports/Relay QA attack system.md", "… → {"plans": [], "commits": ["cf2089d68f62f618e29830d78f28c92e884c2965"], "evidence…

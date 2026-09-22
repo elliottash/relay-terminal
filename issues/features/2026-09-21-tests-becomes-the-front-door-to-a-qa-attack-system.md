@@ -9,7 +9,7 @@ parent: YZ8G
 rank: zzzzzzzzzzzzzzzzg
 created: '2026-09-21'
 source: owner, 2026-09-21
-links: {plans: [], commits: [], evidence: [reports/Relay QA attack system.md, research_notes/Relay QA attack system/], related: [YZ8G, SW1D], github: null}
+links: {plans: [], commits: [cf2089d68f62f618e29830d78f28c92e884c2965], evidence: [reports/Relay QA attack system.md, research_notes/Relay QA attack system/], related: [YZ8G, SW1D], github: null}
 ---
 # Tests becomes the front door to a QA attack system: agents that try to break the project
 
