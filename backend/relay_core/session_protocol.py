@@ -23,7 +23,8 @@ from . import (alias_import, aliases, attachments, conv_index, customproviders,
 from .agent import validate_turn_options
 from .requests import check_ledger_id
 from .context import validate_threshold, validate_window
-from .presets import PRESETS, match_preset, model_name, resolve_preset, validate_effort
+from .presets import (PRESETS, match_preset, model_name, resolve_preset, validate_effort,
+                      model_efforts, effort_style, effort_levels)
 from .provider import AUTOMATIC_OUTPUT_TOKENS, ProviderConfig, ProviderError
 from . import sessions as session_files
 from .sessions import SessionStore, check_id, default_session_dir
@@ -313,93 +314,101 @@ class SessionCommands:
         which `model_applied` announces; idle, it applies at once as it always did. A conversation
         over the new window's limit is compacted first (by the model in force); one that cannot fit
         the new window at all is refused with `model_switch_refused`, and the model stays."""
+        self.switch_model(request, provider_config(request), request.get("preset"))
+
+    def switch_model(self, request, config, preset_id, *, follow=None, fields=None, refused_fields=None):
+        """One landing path for direct picks and role picks, including guest harnesses (#MSW7).
+
+        Start a replacement only when it can land. A superseded deferred pick must not leak
+        a harness or change the guest currently answering. Build before retiring the old one.
+        """
         agent = self._agent()
-        # Resolved now, turn or no turn: a missing key is refused here, not at the next step.
-        config = provider_config(request)
         window = request.get("context_window")
         window = validate_window(window) if window is not None else None
-        preset_id = request.get("preset") if isinstance(request.get("preset"), str) else None
-        # Protocol 29.3: switching to a `guest:` preset starts the guest's harness *here*, for the
-        # same reason the key is looked up here — a guest that cannot start refuses the switch at
-        # the request and the pane keeps the model it has, rather than failing at the next step.
-        # Staying on the same guest and only naming another of its models keeps the harness (and
-        # with it the guest's own context); every other move to a guest starts a fresh one.
+        fields = dict(fields or {})
+        follow = follow or self.on_model_changed
         guest_id = guest_harness_provider.preset_guest_id(preset_id)
-        guest_provider = guest_harness_provider.switch_model(agent, guest_id, request)
-        restart_guest = guest_id is not None and guest_provider is None
-        if restart_guest:
-            guest_provider = guest_harness_provider.start_provider(
-                preset_id, request, str(agent.executor.workspace.root), agent.stall_timeout_s,
-                skill_index=agent.executor.skills)
-        if guest_provider is not None:
-            config = guest_provider.config
-        preset = resolve_preset(preset_id, config.base_url, config.model)
-        agent.on_model_applied = self.on_model_changed
+        if guest_id is None and request.get("effort") is not None:
+            target = resolve_preset(preset_id, config.base_url, config.model)
+            levels = model_efforts(preset_id, config.model)
+            validate_effort(request["effort"], levels if levels is not None else
+                            effort_levels(effort_style(target, config.extra, config.base_url)))
 
-        def apply_now():
-            # Leaving a guest ends its process and hands provider-building back to the Agent; a
-            # guest replacing a guest is a restart, which is what 29.3 says a guest-to-guest
-            # switch is (the Relay conversation is kept, the guest's context is not).
-            if restart_guest or guest_id is None:
-                guest_harness_provider.detach(agent)
+        def active_fields():
+            return {"current_model": agent.config.model,
+                    "preset": agent.preset.id if agent.preset else None,
+                    "context_window": agent.context.window, "effort": agent.effort,
+                    **(refused_fields() if refused_fields else {})}
+
+        def apply_target():
+            guest_provider = guest_harness_provider.switch_model(agent, guest_id, request)
+            if guest_id is not None and guest_provider is None:
+                guest_provider = guest_harness_provider.start_provider(
+                    preset_id, request, str(agent.executor.workspace.root), agent.stall_timeout_s,
+                    skill_index=agent.executor.skills)
             if guest_provider is not None:
-                agent.set_model(config, preset_id, window, provider=guest_provider)
+                previous = guest_harness_provider.agent_provider(agent)
+                agent.set_model(guest_provider.config, preset_id, window, provider=guest_provider)
                 guest_harness_provider.attach(agent, guest_provider)
+                if previous is not None and previous is not guest_provider:
+                    previous.close()
             else:
-                agent.set_model(config, preset_id, window)
-            # Protocol 26.7: the pane's live guest session follows the switch — onto the new
-            # harness's own session, or, for a pane that has just left its guest, onto nothing.
-            self.follow_agent_guest(agent)
-            self.on_model_changed(agent)
-
-        # A switch off a guest harness accepted while a turn runs lands through the Agent's
-        # `_land_switch`, never through `apply_now` above — and `set_model` cannot replace an
-        # injected provider. The landing therefore carries the same two steps `apply_now` takes:
-        # end the harness before the swap, then let the live-guest tail follow it (protocol 26.7).
-        # Without them the pane's config would name the new model while the old guest's harness
-        # still served the turn (card #B9V4).
-        def land_off_guest():
-            guest_harness_provider.detach(agent)
+                previous = guest_harness_provider.agent_provider(agent)
+                if previous is not None:
+                    # Build first: a bad endpoint must not kill the current harness.
+                    from .agent import _provider_for, _with_first_token
+                    replacement = _with_first_token(_provider_for(config, agent.stall_timeout_s),
+                                                    agent.first_token_timeout_s)
+                    guest_harness_provider.detach(agent)
+                    agent._injected_provider = False
+                    agent.provider = agent._hook_preempt(replacement)
+                    agent._adopt_model(config, resolve_preset(preset_id, config.base_url, config.model), window)
+                else:
+                    agent.set_model(config, preset_id, window)
+                if request.get("effort"):
+                    agent.set_effort(request["effort"])
 
         def landed(switched):
             self.follow_agent_guest(switched)
-            self.on_model_changed(switched)
+            follow(switched)
 
-        def decide(idle: bool) -> dict:
-            # Under the agent's model lock, so `model_changed` always precedes the `model_applied`
-            # (or `model_switch_refused`) of the same switch.
+        def apply_now():
+            apply_target()
+            landed(agent)
+
+        def decide(idle):
             with agent._model_lock:
-                leaving_guest = guest_id is None and guest_harness_provider.agent_provider(agent) is not None
-                outcome = agent.request_model(config, preset_id, window, idle=idle, apply_now=apply_now,
-                                              start_exclusive=lambda task: self.turns.start_exclusive_locked(
-                                                  "set_model", task),
-                                              on_applied=landed if leaving_guest else None,
-                                              pre_land=land_off_guest if leaving_guest else None)
+                try:
+                    outcome = agent.request_model(
+                        config, preset_id, window, idle=idle, apply_now=apply_now,
+                        start_exclusive=lambda task: self.turns.start_exclusive_locked("set_model", task),
+                        on_applied=landed, fields=fields, refused_fields=active_fields,
+                        apply_model=apply_target)
+                except Exception as exc:
+                    outcome = {"applies": "refused", "reason": f"Model switch failed: {str(exc)[:600]}"}
+                logs.event(logs.get("models"), "model_selection", model=config.model, preset=preset_id,
+                           role=fields.get("agent_role", "main"), applies=outcome["applies"],
+                           current_model=agent.config.model, reason=outcome.get("reason", "")[:300])
                 if outcome["applies"] == "refused":
-                    if restart_guest and guest_provider is not None:
-                        guest_provider.close()   # started for a switch that is not happening
                     self.emit({"event": "model_switch_refused", "id": request.get("id"), "at": "request",
-                               "model": config.model, "current_model": agent.config.model,
-                               "preset": agent.preset.id if agent.preset else None,
-                               "context_window": agent.context.window, "effort": agent.effort,
-                               "reason": outcome["reason"]})
+                               "model": config.model, "code": "model_switch_failed",
+                               **active_fields(), "reason": outcome["reason"]})
                 else:
-                    # `model_name` (protocol 13, card #MDL1 rule 1): the one name this model has,
-                    # so the pane's status line and the phone's both read "model: kimi-k3" without
-                    # either deriving it.
-                    named = preset.id if preset else preset_id if guest_provider else None
+                    if not idle and outcome["applies"] == "now":
+                        landed(agent)  # same transport; commit the role/cancelled pending pick too
                     changed = {"event": "model_changed", "id": request.get("id"), "model": config.model,
-                               "model_name": model_name(named, config.model),
-                               "preset": named,
-                               "effort": agent.effort, **outcome}
-                    if guest_provider is not None:
-                        changed["guest"] = guest_provider.guest_id
-                        changed["guest_session"] = guest_provider.session_id
-                        changed["guest_effort"] = guest_provider.effort
+                               "model_name": model_name(preset_id, config.model), "preset": preset_id,
+                               "effort": agent.effort, **fields, **outcome}
+                    provider = guest_harness_provider.agent_provider(agent)
+                    if guest_id is not None:
+                        changed["guest"] = guest_id
+                        if outcome["applies"] == "now" and provider is not None:
+                            changed.update(model=provider.config.model, model_name=model_name(preset_id, provider.config.model),
+                                           guest_session=provider.session_id,
+                                           guest_effort=provider.effort)
                     self.emit(changed)
                 return outcome
         self.turns.now_or_later(lambda: decide(True), lambda: decide(False))
-        # Every outcome moves the context bar: the window now in force, or the one about to be.
         self.emit(agent.context_event())
 
     def _set_effort(self, request):

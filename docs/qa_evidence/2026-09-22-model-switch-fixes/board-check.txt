@@ -1,0 +1,16 @@
+Board validation: 488 card(s) checked: 12 error(s), 754 warning(s)
+Diagnostics for changed cards/threads: 0
+
+Existing board errors:
+error: changes/2026-09-21-python314-profile-caller-intermittent.md: folder_status_mismatch: status 'done' belongs in changes/done/, file is in changes/
+error: changes/2026-09-22-worker-fixture-leaks-presets-listeners.md: bad_id: id 'LSP1' is not 4 Crockford-base32 characters with a letter
+error: changes/2026-09-22-worker-fixture-leaks-presets-listeners.md: folder_status_mismatch: status 'done' belongs in changes/done/, file is in changes/
+error: features/2026-09-21-model-picking-one-name-one-row-one-default.md: bad_task_marker: task id 'a10' is not 2 Crockford-base32 characters
+error: features/2026-09-21-model-picking-one-name-one-row-one-default.md: bad_task_marker: task id 'a11' is not 2 Crockford-base32 characters
+error: features/2026-09-21-model-picking-one-name-one-row-one-default.md: bad_task_marker: task id 'a12' is not 2 Crockford-base32 characters
+error: features/2026-09-21-model-picking-one-name-one-row-one-default.md: bad_task_marker: task id 'a13' is not 2 Crockford-base32 characters
+error: features/2026-09-21-model-picking-one-name-one-row-one-default.md: bad_task_marker: task id 'a14' is not 2 Crockford-base32 characters
+error: features/2026-09-21-model-picking-one-name-one-row-one-default.md: bad_task_marker: task id 'a15' is not 2 Crockford-base32 characters
+error: features/2026-09-21-model-picking-one-name-one-row-one-default.md: bad_task_marker: task id 'a16' is not 2 Crockford-base32 characters
+error: threads/A9QR.md: bad_thread_entry: entry id(s) not sortable timestamps: 20260921T220818Z-claim
+error: threads/LSP1.md: bad_thread_name: thread file is not named <ID>.md

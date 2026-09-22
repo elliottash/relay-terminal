@@ -1,0 +1,1 @@
+PASS: startup and second pane; High guest; Flash; Main; rejected High preserves Kimi; one quota request; separate fallback error; exactly four successful model acknowledgments.

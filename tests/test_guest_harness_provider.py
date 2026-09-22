@@ -1068,6 +1068,46 @@ class WorkerProtocolTests(unittest.TestCase):
                 worker.main()
         return [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
 
+    def test_first_configuration_on_high_starts_guest_and_preserves_main(self):
+        with tempfile.TemporaryDirectory() as ws:
+            events = self.run_worker([
+                {"type": "configure", "workspace": ws, "base_url": "http://127.0.0.1:1234/v1",
+                 "model": "api-model", "agent_role": "high",
+                 "tiers": {"high": [{"preset": "guest:codex", "model": "gpt-6-astra", "effort": "high"}]}},
+                {"type": "set_agent_role", "id": "main", "role": "main"},
+                {"type": "shutdown"}], FakeHarness([], guest="codex", model="gpt-6-astra"))
+        configured = next(e for e in events if e["event"] == "configured")
+        self.assertEqual((configured["agent_role"], configured["model"]), ("high", "gpt-6-astra"))
+        changed = next(e for e in events if e["event"] == "model_changed")
+        self.assertEqual(changed["model"], "api-model")
+
+    def test_api_high_guest_pick_starts_harness_and_main_returns_to_api(self):
+        with tempfile.TemporaryDirectory() as ws:
+            events = self.run_worker([
+                {"type": "configure", "workspace": ws, "base_url": "http://127.0.0.1:1234/v1", "model": "api-model"},
+                {"type": "set_agent_role", "id": "high", "role": "high", "preset": "guest:codex",
+                 "model": "gpt-6-astra", "effort": "high"},
+                {"type": "set_agent_role", "id": "main", "role": "main"},
+                {"type": "shutdown"}], FakeHarness([], guest="codex", model="gpt-6-astra"))
+        changes = [e for e in events if e["event"] == "model_changed"]
+        self.assertEqual([(e["agent_role"], e["model"]) for e in changes],
+                         [("high", "gpt-6-astra"), ("main", "api-model")])
+        self.assertEqual(changes[0]["guest"], "codex")
+        self.assertFalse([e for e in events if e["event"] in ("error", "model_switch_refused")])
+
+    def test_failed_guest_role_pick_keeps_api_model_and_main_role(self):
+        with tempfile.TemporaryDirectory() as ws:
+            events = self.run_worker([
+                {"type": "configure", "workspace": ws, "base_url": "http://127.0.0.1:1234/v1", "model": "api-model"},
+                {"type": "set_agent_role", "id": "high", "role": "high", "preset": "guest:codex",
+                 "model": "gpt-6-astra"},
+                {"type": "set_agent_role", "id": "main", "role": "main"},
+                {"type": "shutdown"}], FakeHarness([], start_error=HarnessError("fixture startup refused")))
+        refused = next(e for e in events if e["event"] == "model_switch_refused")
+        self.assertEqual((refused["current_model"], refused["agent_role"]), ("api-model", "main"))
+        self.assertIn("fixture startup refused", refused["reason"])
+        self.assertEqual([e["model"] for e in events if e["event"] == "model_changed"], ["api-model"])
+
     def test_worker_callbacks_do_not_escape_into_later_stdout_capture(self):
         with ExitStack() as previous:
             callbacks = []

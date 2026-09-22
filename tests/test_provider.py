@@ -996,3 +996,31 @@ class UsageEventCacheTests(unittest.TestCase):
                                    threading.Event())
         usage = [e['usage'] for e in self.events if e['event'] == 'usage'][-1]
         self.assertEqual(usage['cached_tokens'], 54)
+
+
+class CodingQuotaTests(unittest.TestCase):
+    def test_spent_coding_quota_is_not_retried_and_only_reset_time_is_disclosed(self):
+        import urllib.error
+        from unittest import mock
+        provider = ChatProvider(ProviderConfig('https://api.z.ai/api/coding/paas/v4', 'glm-5.3', 'fixture'))
+        body = io.BytesIO(json.dumps({'error': {'code': '1310', 'message':
+            'Weekly/Monthly Limit Exhausted. Your limit will reset at 2026-09-23 05:53:09 secret-body'}}).encode())
+        error = urllib.error.HTTPError(provider.config.base_url, 429, 'quota', {}, body)
+        opener = mock.Mock()
+        opener.open.side_effect = error
+        events = []
+        with self.assertRaises(ProviderError) as caught:
+            provider._open(opener, mock.Mock(), events.append, threading.Event(), time.monotonic())
+        self.assertEqual(opener.open.call_count, 1)
+        self.assertIn('2026-09-23 05:53:09', str(caught.exception))
+        self.assertNotIn('secret-body', str(caught.exception))
+        self.assertEqual(caught.exception.code, 'provider_quota_exhausted')
+        self.assertTrue(body.closed)
+
+    def test_transient_coding_429_keeps_retry_policy(self):
+        import urllib.error
+        provider = ChatProvider(ProviderConfig('https://api.z.ai/api/coding/paas/v4', 'glm-5.3', 'fixture'))
+        error = urllib.error.HTTPError(provider.config.base_url, 429, 'rate limit', {},
+                                      io.BytesIO(b'{"error":{"code":"1302","message":"Rate limit"}}'))
+        self.assertIsNone(provider._coding_quota_error(error))
+        self.assertIsNotNone(provider._http_retry_delay(error, 1))

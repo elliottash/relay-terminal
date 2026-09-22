@@ -6,6 +6,7 @@ import base64
 import contextlib
 import email.utils
 import json
+import re
 import math
 import os
 import random
@@ -992,6 +993,13 @@ class ChatProvider:
             try:
                 return opener.open(request, timeout=self.open_timeout)
             except urllib.error.HTTPError as exc:
+                quota = self._coding_quota_error(exc)
+                if quota is not None:
+                    if getattr(exc, "fp", None) is not None:
+                        hard_close(exc.fp)
+                    emit({"event": "provider_retry", "reason": "quota", "status": exc.code,
+                          "attempt": 0, "text": str(quota)})
+                    raise quota from None
                 waited = time.monotonic() - started
                 if self.config.local and exc.code == 503:
                     # The weights are still loading: wait inside the first-token budget instead
@@ -1131,6 +1139,24 @@ class ChatProvider:
     def _wait_text(seconds: float) -> str:
         """A wait as the status line shows it: ``8``, ``0.5``, ``0``."""
         return f"{seconds:.1f}".rstrip("0").rstrip(".") or "0"
+
+    def _coding_quota_error(self, exc) -> ProviderError | None:
+        """Recognise Z.AI's permanent Coding Plan refusal; never echo its arbitrary body."""
+        if exc.code != 429 or _host(self.config.base_url) != "api.z.ai":
+            return None
+        try:
+            body = json.loads(exc.read(8192))
+            error = body.get("error", {}) if isinstance(body, dict) else {}
+            if not isinstance(error, dict) or str(error.get("code")) != "1310":
+                return None
+            message = str(error.get("message", ""))
+            reset = re.search(r"reset at (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", message)
+            when = f" Resets at {reset.group(1)} (provider time)." if reset else ""
+            return ProviderError(f"Z.AI Coding Plan quota exhausted for {self.config.model}.{when} "
+                                 "Choose another provider or wait for the quota reset.",
+                                 code="provider_quota_exhausted")
+        except (ValueError, OSError, AttributeError):
+            return None
 
     def _http_error(self, exc) -> ProviderError:
         """The ProviderError for an HTTP failure. Only the status survives, plus the one phrase a

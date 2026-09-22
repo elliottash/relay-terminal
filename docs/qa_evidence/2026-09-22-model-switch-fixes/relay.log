@@ -1,0 +1,128 @@
+2026-09-22T14:51:54.471Z INFO relay.gui gui_start version=0.1.0 build=2026-09-22.10H.04 pid=973427 level=debug
+2026-09-22T14:51:54.514Z INFO relay.gui model_picker pane=df8433f5 state={"configured":false,"data":"guest:claude","display":"Loading models…","effort":"high","model":"","picked":"","preset":"","reason":"initial","role":"main","row":"Claude Code","rows":[]}
+2026-09-22T14:51:54.517Z INFO relay.gui worker_start pane=df8433f5 workspace_set=1
+2026-09-22T14:51:54.593Z INFO relay.gui event type=ready pane=df8433f5
+2026-09-22T14:51:54.593Z DEBUG relay.gui event type=route pane=df8433f5 reason=Type a shell command or an agent request.
+2026-09-22T14:51:54.613Z DEBUG relay.gui event type=presets pane=df8433f5
+2026-09-22T14:51:54.622Z INFO relay.gui model_picker pane=df8433f5 state={"configured":false,"data":"pick:main|kimi|kimi-k3","display":"kimi-k3","effort":"high","model":"","picked":"","preset":"","reason":"changed","role":"main","row":"kimi-k3","rows":[]}
+2026-09-22T14:51:54.630Z INFO relay.gui model_picker pane=df8433f5 state={"configured":false,"data":"pick:main|kimi|kimi-k3","display":"kimi-k3","effort":"high","model":"","picked":"","preset":"kimi","reason":"changed","role":"main","row":"kimi-k3","rows":[]}
+2026-09-22T14:51:54.632Z INFO relay.gui configure_sent pane=df8433f5 preset=kimi model=kimi-k3 worker=2
+2026-09-22T14:51:54.657Z DEBUG relay.gui event type=aliases pane=df8433f5
+2026-09-22T14:51:54.698Z INFO relay.gui event type=configured pane=df8433f5 model=kimi-k3
+2026-09-22T14:51:54.707Z INFO relay.gui model_picker pane=df8433f5 state={"configured":true,"data":"pick:main|kimi|kimi-k3","display":"kimi-k3","effort":"high","model":"kimi-k3","picked":"","preset":"kimi","reason":"changed","role":"main","row":"kimi-k3","rows":[]}
+2026-09-22T14:51:54.715Z DEBUG relay.gui event type=agents pane=df8433f5
+2026-09-22T14:51:58.683Z INFO relay.gui model_picker pane=df8433f5 state={"configured":true,"data":"pick:main|kimi|kimi-k3","display":"kimi-k3","effort":"high","model":"kimi-k3","picked":"","preset":"kimi","reason":"open","role":"main","row":"kimi-k3","rows":[{"data":"class:high","enabled":false,"text":"high"},{"data":"pick:high|guest:codex|gpt-6-astra","enabled":true,"text":"gpt-6-astra"},{"data":"pick:high|guest:codex|gpt-5.6-sol","enabled":true,"text":"gpt-5.6-sol"},{"data":"class:main","enabled":false,"text":"main"},{"data":"pick:main|kimi|kimi-k3","enabled":true,"text":"kimi-k3"},{"data":"pick:main|glm-coding|glm-5.3","enabled":true,"text":"glm-5.3"},{"data":"class:flash","enabled":false,"text":"flash"},{"data":"pick:flash|glm-coding|glm-5.3-flash","enabled":true,"text":"glm-5.3-flash"},{"data":"","enabled":false,"text":""},{"data":"guest:claude","enabled":true,"text":"Claude Code"},{"data":"","enabled":false,"text":""},{"data":"gear:picker","enabled":true,"text":"more models…"}]}
+2026-09-22T14:52:00.611Z INFO relay.gui model_picker pane=df8433f5 state={"configured":true,"data":"pick:main|kimi|kimi-k3","display":"kimi-k3","effort":"high","model":"kimi-k3","picked":"pick:high|guest:codex|gpt-6-astra","preset":"kimi","reason":"pick","role":"main","row":"kimi-k3","rows":[]}
+2026-09-22T14:52:00.624Z DEBUG relay.gui event type=model_changed pane=df8433f5 model=gpt-6-astra
+2026-09-22T14:52:00.626Z INFO relay.gui model_picker pane=df8433f5 state={"configured":true,"data":"pick:high|guest:codex|gpt-6-astra","display":"gpt-6-astra","effort":"high","model":"gpt-6-astra","picked":"","preset":"kimi","reason":"changed","role":"high","row":"gpt-6-astra","rows":[]}
+2026-09-22T14:52:00.631Z DEBUG relay.gui event type=context pane=df8433f5
+2026-09-22T14:52:02.659Z DEBUG relay.gui event type=requests pane=df8433f5
+2026-09-22T14:52:02.659Z DEBUG relay.gui event type=queued pane=df8433f5
+2026-09-22T14:52:02.665Z INFO relay.gui event type=agent_started pane=df8433f5 turn_id=3695a7264b59449f93b0a946faf6ee83
+2026-09-22T14:52:02.673Z DEBUG relay.gui event type=requests pane=df8433f5
+2026-09-22T14:52:02.675Z DEBUG relay.gui event type=status pane=df8433f5
+2026-09-22T14:52:02.675Z DEBUG relay.gui event type=status pane=df8433f5
+2026-09-22T14:52:02.676Z DEBUG relay.gui event type=context pane=df8433f5
+2026-09-22T14:52:02.678Z DEBUG relay.gui event type=requests pane=df8433f5
+2026-09-22T14:52:02.678Z INFO relay.gui event type=turn_summary pane=df8433f5 turn_id=3695a7264b59449f93b0a946faf6ee83 outcome=done ms=15
+2026-09-22T14:52:02.678Z DEBUG relay.gui event type=done pane=df8433f5 turn_id=3695a7264b59449f93b0a946faf6ee83
+2026-09-22T14:52:02.680Z DEBUG relay.gui event type=session_summary pane=df8433f5
+2026-09-22T14:52:02.680Z INFO relay.gui event type=agent_finished pane=df8433f5 outcome=done
+2026-09-22T14:52:02.694Z DEBUG relay.gui event type=session_title pane=df8433f5
+2026-09-22T14:52:02.793Z DEBUG relay.gui event type=route pane=df8433f5 reason=Type a shell command or an agent request.
+2026-09-22T14:52:05.597Z INFO relay.gui model_picker pane=df8433f5 state={"configured":true,"data":"pick:high|guest:codex|gpt-6-astra","display":"gpt-6-astra","effort":"high","model":"gpt-6-astra","picked":"","preset":"kimi","reason":"open","role":"high","row":"gpt-6-astra","rows":[{"data":"class:high","enabled":false,"text":"high"},{"data":"pick:high|guest:codex|gpt-6-astra","enabled":true,"text":"gpt-6-astra"},{"data":"pick:high|guest:codex|gpt-5.6-sol","enabled":true,"text":"gpt-5.6-sol"},{"data":"class:main","enabled":false,"text":"main"},{"data":"pick:main|kimi|kimi-k3","enabled":true,"text":"kimi-k3"},{"data":"pick:main|glm-coding|glm-5.3","enabled":true,"text":"glm-5.3"},{"data":"class:flash","enabled":false,"text":"flash"},{"data":"pick:flash|glm-coding|glm-5.3-flash","enabled":true,"text":"glm-5.3-flash"},{"data":"","enabled":false,"text":""},{"data":"guest:claude","enabled":true,"text":"Claude Code"},{"data":"","enabled":false,"text":""},{"data":"gear:picker","enabled":true,"text":"more models…"}]}
+2026-09-22T14:52:08.669Z INFO relay.gui model_picker pane=df8433f5 state={"configured":true,"data":"pick:high|guest:codex|gpt-6-astra","display":"gpt-6-astra","effort":"high","model":"gpt-6-astra","picked":"pick:flash|glm-coding|glm-5.3-flash","preset":"kimi","reason":"pick","role":"high","row":"gpt-6-astra","rows":[]}
+2026-09-22T14:52:08.709Z DEBUG relay.gui event type=model_changed pane=df8433f5 model=glm-5.3-flash
+2026-09-22T14:52:08.713Z INFO relay.gui model_picker pane=df8433f5 state={"configured":true,"data":"pick:flash|glm-coding|glm-5.3-flash","display":"glm-5.3-flash","effort":"high","model":"glm-5.3-flash","picked":"","preset":"kimi","reason":"changed","role":"flash","row":"glm-5.3-flash","rows":[]}
+2026-09-22T14:52:08.721Z DEBUG relay.gui event type=context pane=df8433f5
+2026-09-22T14:52:10.673Z DEBUG relay.gui event type=requests pane=df8433f5
+2026-09-22T14:52:10.673Z DEBUG relay.gui event type=queued pane=df8433f5
+2026-09-22T14:52:10.683Z INFO relay.gui event type=agent_started pane=df8433f5 turn_id=4da35e4e48b149819cbc99037469d31f
+2026-09-22T14:52:10.696Z DEBUG relay.gui event type=requests pane=df8433f5
+2026-09-22T14:52:10.696Z DEBUG relay.gui event type=status pane=df8433f5
+2026-09-22T14:52:10.700Z DEBUG relay.gui event type=context pane=df8433f5
+2026-09-22T14:52:10.704Z DEBUG relay.gui event type=requests pane=df8433f5
+2026-09-22T14:52:10.704Z INFO relay.gui event type=turn_summary pane=df8433f5 turn_id=4da35e4e48b149819cbc99037469d31f outcome=done ms=2
+2026-09-22T14:52:10.704Z DEBUG relay.gui event type=done pane=df8433f5 turn_id=4da35e4e48b149819cbc99037469d31f
+2026-09-22T14:52:10.704Z INFO relay.gui event type=agent_finished pane=df8433f5 outcome=done
+2026-09-22T14:52:10.800Z DEBUG relay.gui event type=route pane=df8433f5 reason=Type a shell command or an agent request.
+2026-09-22T14:52:13.183Z INFO relay.gui model_picker pane=df8433f5 state={"configured":true,"data":"pick:flash|glm-coding|glm-5.3-flash","display":"glm-5.3-flash","effort":"high","model":"glm-5.3-flash","picked":"","preset":"kimi","reason":"open","role":"flash","row":"glm-5.3-flash","rows":[{"data":"class:high","enabled":false,"text":"high"},{"data":"pick:high|guest:codex|gpt-6-astra","enabled":true,"text":"gpt-6-astra"},{"data":"pick:high|guest:codex|gpt-5.6-sol","enabled":true,"text":"gpt-5.6-sol"},{"data":"class:main","enabled":false,"text":"main"},{"data":"pick:main|kimi|kimi-k3","enabled":true,"text":"kimi-k3"},{"data":"pick:main|glm-coding|glm-5.3","enabled":true,"text":"glm-5.3"},{"data":"class:flash","enabled":false,"text":"flash"},{"data":"pick:flash|glm-coding|glm-5.3-flash","enabled":true,"text":"glm-5.3-flash"},{"data":"","enabled":false,"text":""},{"data":"guest:claude","enabled":true,"text":"Claude Code"},{"data":"","enabled":false,"text":""},{"data":"gear:picker","enabled":true,"text":"more models…"}]}
+2026-09-22T14:52:14.742Z INFO relay.gui model_picker pane=df8433f5 state={"configured":true,"data":"pick:flash|glm-coding|glm-5.3-flash","display":"glm-5.3-flash","effort":"high","model":"glm-5.3-flash","picked":"pick:main|kimi|kimi-k3","preset":"kimi","reason":"pick","role":"flash","row":"glm-5.3-flash","rows":[]}
+2026-09-22T14:52:14.743Z INFO relay.gui model_pick pane=df8433f5 key=kimi|kimi-k3 level=high current=kimi configured=1 deferred= guest_in_front=
+2026-09-22T14:52:14.775Z DEBUG relay.gui event type=model_roles pane=df8433f5
+2026-09-22T14:52:14.779Z INFO relay.gui model_picker pane=df8433f5 state={"configured":true,"data":"pick:main|kimi|kimi-k3","display":"kimi-k3","effort":"high","model":"glm-5.3-flash","picked":"","preset":"kimi","reason":"changed","role":"main","row":"kimi-k3","rows":[]}
+2026-09-22T14:52:14.784Z DEBUG relay.gui event type=model_changed pane=df8433f5 model=kimi-k3
+2026-09-22T14:52:14.796Z INFO relay.gui model_picker pane=df8433f5 state={"configured":true,"data":"pick:main|kimi|kimi-k3","display":"kimi-k3","effort":"high","model":"kimi-k3","picked":"","preset":"kimi","reason":"changed","role":"main","row":"kimi-k3","rows":[]}
+2026-09-22T14:52:14.801Z DEBUG relay.gui event type=context pane=df8433f5
+2026-09-22T14:52:16.838Z DEBUG relay.gui event type=requests pane=df8433f5
+2026-09-22T14:52:16.838Z DEBUG relay.gui event type=queued pane=df8433f5
+2026-09-22T14:52:16.844Z INFO relay.gui event type=agent_started pane=df8433f5 turn_id=70165cb430f94685ae3398cb5616da95
+2026-09-22T14:52:16.852Z DEBUG relay.gui event type=requests pane=df8433f5
+2026-09-22T14:52:16.855Z DEBUG relay.gui event type=status pane=df8433f5
+2026-09-22T14:52:16.855Z DEBUG relay.gui event type=context pane=df8433f5
+2026-09-22T14:52:16.857Z DEBUG relay.gui event type=requests pane=df8433f5
+2026-09-22T14:52:16.857Z INFO relay.gui event type=turn_summary pane=df8433f5 turn_id=70165cb430f94685ae3398cb5616da95 outcome=done ms=2
+2026-09-22T14:52:16.857Z DEBUG relay.gui event type=done pane=df8433f5 turn_id=70165cb430f94685ae3398cb5616da95
+2026-09-22T14:52:16.857Z INFO relay.gui event type=agent_finished pane=df8433f5 outcome=done
+2026-09-22T14:52:16.961Z DEBUG relay.gui event type=route pane=df8433f5 reason=Type a shell command or an agent request.
+2026-09-22T14:52:19.892Z INFO relay.gui model_picker pane=df8433f5 state={"configured":true,"data":"pick:main|kimi|kimi-k3","display":"kimi-k3","effort":"high","model":"kimi-k3","picked":"","preset":"kimi","reason":"open","role":"main","row":"kimi-k3","rows":[{"data":"class:high","enabled":false,"text":"high"},{"data":"pick:high|guest:codex|gpt-6-astra","enabled":true,"text":"gpt-6-astra"},{"data":"pick:high|guest:codex|gpt-5.6-sol","enabled":true,"text":"gpt-5.6-sol"},{"data":"class:main","enabled":false,"text":"main"},{"data":"pick:main|kimi|kimi-k3","enabled":true,"text":"kimi-k3"},{"data":"pick:main|glm-coding|glm-5.3","enabled":true,"text":"glm-5.3"},{"data":"class:flash","enabled":false,"text":"flash"},{"data":"pick:flash|glm-coding|glm-5.3-flash","enabled":true,"text":"glm-5.3-flash"},{"data":"","enabled":false,"text":""},{"data":"guest:claude","enabled":true,"text":"Claude Code"},{"data":"","enabled":false,"text":""},{"data":"gear:picker","enabled":true,"text":"more models…"}]}
+2026-09-22T14:52:20.934Z INFO relay.gui model_picker pane=df8433f5 state={"configured":true,"data":"pick:main|kimi|kimi-k3","display":"kimi-k3","effort":"high","model":"kimi-k3","picked":"pick:high|guest:codex|gpt-5.6-sol","preset":"kimi","reason":"pick","role":"main","row":"kimi-k3","rows":[]}
+2026-09-22T14:52:20.998Z DEBUG relay.gui event type=model_switch_refused pane=df8433f5 model=gpt-5.6-sol reason=Model switch failed: Fixture guest startup refused
+2026-09-22T14:52:21.024Z DEBUG relay.gui event type=context pane=df8433f5
+2026-09-22T14:52:23.046Z INFO relay.gui model_picker pane=df8433f5 state={"configured":true,"data":"pick:main|kimi|kimi-k3","display":"kimi-k3","effort":"high","model":"kimi-k3","picked":"","preset":"kimi","reason":"open","role":"main","row":"kimi-k3","rows":[{"data":"class:high","enabled":false,"text":"high"},{"data":"pick:high|guest:codex|gpt-6-astra","enabled":true,"text":"gpt-6-astra"},{"data":"pick:high|guest:codex|gpt-5.6-sol","enabled":true,"text":"gpt-5.6-sol"},{"data":"class:main","enabled":false,"text":"main"},{"data":"pick:main|kimi|kimi-k3","enabled":true,"text":"kimi-k3"},{"data":"pick:main|glm-coding|glm-5.3","enabled":true,"text":"glm-5.3"},{"data":"class:flash","enabled":false,"text":"flash"},{"data":"pick:flash|glm-coding|glm-5.3-flash","enabled":true,"text":"glm-5.3-flash"},{"data":"","enabled":false,"text":""},{"data":"guest:claude","enabled":true,"text":"Claude Code"},{"data":"","enabled":false,"text":""},{"data":"gear:picker","enabled":true,"text":"more models…"}]}
+2026-09-22T14:52:24.930Z DEBUG relay.gui event type=requests pane=df8433f5
+2026-09-22T14:52:24.931Z DEBUG relay.gui event type=queued pane=df8433f5
+2026-09-22T14:52:24.940Z INFO relay.gui event type=agent_started pane=df8433f5 turn_id=964e0819b682464eb88cf60a3133a5c8
+2026-09-22T14:52:24.953Z DEBUG relay.gui event type=requests pane=df8433f5
+2026-09-22T14:52:24.953Z DEBUG relay.gui event type=status pane=df8433f5
+2026-09-22T14:52:24.957Z DEBUG relay.gui event type=context pane=df8433f5
+2026-09-22T14:52:24.961Z DEBUG relay.gui event type=requests pane=df8433f5
+2026-09-22T14:52:24.961Z INFO relay.gui event type=turn_summary pane=df8433f5 turn_id=964e0819b682464eb88cf60a3133a5c8 outcome=done ms=2
+2026-09-22T14:52:24.961Z DEBUG relay.gui event type=done pane=df8433f5 turn_id=964e0819b682464eb88cf60a3133a5c8
+2026-09-22T14:52:24.961Z INFO relay.gui event type=agent_finished pane=df8433f5 outcome=done
+2026-09-22T14:52:25.051Z DEBUG relay.gui event type=route pane=df8433f5 reason=Type a shell command or an agent request.
+2026-09-22T14:52:28.099Z INFO relay.gui model_picker pane=df8433f5 state={"configured":true,"data":"pick:main|kimi|kimi-k3","display":"kimi-k3","effort":"high","model":"kimi-k3","picked":"","preset":"kimi","reason":"open","role":"main","row":"kimi-k3","rows":[{"data":"class:high","enabled":false,"text":"high"},{"data":"pick:high|guest:codex|gpt-6-astra","enabled":true,"text":"gpt-6-astra"},{"data":"pick:high|guest:codex|gpt-5.6-sol","enabled":true,"text":"gpt-5.6-sol"},{"data":"class:main","enabled":false,"text":"main"},{"data":"pick:main|kimi|kimi-k3","enabled":true,"text":"kimi-k3"},{"data":"pick:main|glm-coding|glm-5.3","enabled":true,"text":"glm-5.3"},{"data":"class:flash","enabled":false,"text":"flash"},{"data":"pick:flash|glm-coding|glm-5.3-flash","enabled":true,"text":"glm-5.3-flash"},{"data":"","enabled":false,"text":""},{"data":"guest:claude","enabled":true,"text":"Claude Code"},{"data":"","enabled":false,"text":""},{"data":"gear:picker","enabled":true,"text":"more models…"}]}
+2026-09-22T14:52:29.138Z INFO relay.gui model_picker pane=df8433f5 state={"configured":true,"data":"pick:main|kimi|kimi-k3","display":"kimi-k3","effort":"high","model":"kimi-k3","picked":"pick:main|glm-coding|glm-5.3","preset":"kimi","reason":"pick","role":"main","row":"kimi-k3","rows":[]}
+2026-09-22T14:52:29.139Z INFO relay.gui model_pick pane=df8433f5 key=glm-coding|glm-5.3 level=max current=kimi configured=1 deferred= guest_in_front=
+2026-09-22T14:52:29.167Z INFO relay.gui model_picker pane=df8433f5 state={"configured":true,"data":"class:high","display":"kimi-k3","effort":"high","model":"kimi-k3","picked":"","preset":"glm-coding","reason":"changed","role":"main","row":"high","rows":[]}
+2026-09-22T14:52:29.173Z INFO relay.gui model_picker pane=df8433f5 state={"configured":true,"data":"class:high","display":"kimi-k3","effort":"max","model":"kimi-k3","picked":"","preset":"glm-coding","reason":"changed","role":"main","row":"high","rows":[]}
+2026-09-22T14:52:29.179Z DEBUG relay.gui event type=model_roles pane=df8433f5
+2026-09-22T14:52:29.186Z DEBUG relay.gui event type=model_changed pane=df8433f5 model=glm-5.3
+2026-09-22T14:52:29.200Z INFO relay.gui model_picker pane=df8433f5 state={"configured":true,"data":"pick:main|glm-coding|glm-5.3","display":"glm-5.3","effort":"high","model":"glm-5.3","picked":"","preset":"glm-coding","reason":"changed","role":"main","row":"glm-5.3","rows":[]}
+2026-09-22T14:52:29.204Z DEBUG relay.gui event type=context pane=df8433f5
+2026-09-22T14:52:29.206Z DEBUG relay.gui event type=effort_changed pane=df8433f5
+2026-09-22T14:52:29.209Z INFO relay.gui model_picker pane=df8433f5 state={"configured":true,"data":"pick:main|glm-coding|glm-5.3","display":"glm-5.3","effort":"max","model":"glm-5.3","picked":"","preset":"glm-coding","reason":"changed","role":"main","row":"glm-5.3","rows":[]}
+2026-09-22T14:52:30.842Z DEBUG relay.gui event type=requests pane=df8433f5
+2026-09-22T14:52:30.842Z DEBUG relay.gui event type=queued pane=df8433f5
+2026-09-22T14:52:30.851Z INFO relay.gui event type=agent_started pane=df8433f5 turn_id=8cabde05fe954b7db7684b4e14d70eb7
+2026-09-22T14:52:30.864Z DEBUG relay.gui event type=requests pane=df8433f5
+2026-09-22T14:52:30.864Z DEBUG relay.gui event type=status pane=df8433f5
+2026-09-22T14:52:30.868Z INFO relay.gui event type=provider_retry pane=df8433f5 reason=quota attempt=0
+2026-09-22T14:52:30.868Z INFO relay.gui event type=provider_retry pane=df8433f5 turn_id=8cabde05fe954b7db7684b4e14d70eb7 reason=failover attempt=1
+2026-09-22T14:52:30.873Z INFO relay.gui model_picker pane=df8433f5 state={"configured":true,"data":"serving:meta/muse-spark-1.3","display":"⇄ muse-spark-1.3 · this turn","effort":"max","model":"glm-5.3","picked":"","preset":"glm-coding","reason":"changed","role":"main","row":"⇄ muse-spark-1.3 · this turn","rows":[]}
+2026-09-22T14:52:30.873Z DEBUG relay.gui event type=status pane=df8433f5
+2026-09-22T14:52:30.873Z DEBUG relay.gui event type=requests pane=df8433f5
+2026-09-22T14:52:30.873Z INFO relay.gui event type=provider_retry pane=df8433f5 turn_id=8cabde05fe954b7db7684b4e14d70eb7 reason=failover_ended attempt=1
+2026-09-22T14:52:30.878Z INFO relay.gui model_picker pane=df8433f5 state={"configured":true,"data":"pick:main|glm-coding|glm-5.3","display":"glm-5.3","effort":"max","model":"glm-5.3","picked":"","preset":"glm-coding","reason":"changed","role":"main","row":"glm-5.3","rows":[]}
+2026-09-22T14:52:30.878Z DEBUG relay.gui event type=status pane=df8433f5
+2026-09-22T14:52:30.878Z INFO relay.gui event type=turn_summary pane=df8433f5 turn_id=8cabde05fe954b7db7684b4e14d70eb7 outcome=error ms=3
+2026-09-22T14:52:30.878Z ERROR relay.gui event type=error pane=df8433f5 turn_id=8cabde05fe954b7db7684b4e14d70eb7 msg="glm-5.3 failed; original: Z.AI Coding Plan quota exhausted for glm-5.3. Resets at 2026-09-23 05:53:09 (provider time). Choose another provider or wait for the quota reset.; fallbacks: meta/muse-spark-"
+2026-09-22T14:52:30.878Z INFO relay.gui event type=agent_finished pane=df8433f5 outcome=error
+2026-09-22T14:52:30.964Z DEBUG relay.gui event type=route pane=df8433f5 reason=Type a shell command or an agent request.
+2026-09-22T14:52:34.471Z INFO relay.gui model_picker pane=344775b2 state={"configured":false,"data":"guest:claude","display":"Loading models…","effort":"high","model":"","picked":"","preset":"","reason":"initial","role":"main","row":"Claude Code","rows":[]}
+2026-09-22T14:52:34.475Z INFO relay.gui worker_start pane=344775b2 workspace_set=1
+2026-09-22T14:52:34.572Z INFO relay.gui event type=ready pane=344775b2
+2026-09-22T14:52:34.572Z DEBUG relay.gui event type=route pane=344775b2 reason=Type a shell command or an agent request.
+2026-09-22T14:52:34.589Z DEBUG relay.gui event type=presets pane=344775b2
+2026-09-22T14:52:34.598Z INFO relay.gui model_picker pane=344775b2 state={"configured":false,"data":"pick:main|kimi|kimi-k3","display":"kimi-k3","effort":"high","model":"","picked":"","preset":"","reason":"changed","role":"main","row":"kimi-k3","rows":[]}
+2026-09-22T14:52:34.610Z INFO relay.gui model_picker pane=344775b2 state={"configured":false,"data":"pick:main|kimi|kimi-k3","display":"kimi-k3","effort":"high","model":"","picked":"","preset":"kimi","reason":"changed","role":"main","row":"kimi-k3","rows":[]}
+2026-09-22T14:52:34.612Z INFO relay.gui configure_sent pane=344775b2 preset=kimi model=kimi-k3 worker=2
+2026-09-22T14:52:34.623Z DEBUG relay.gui event type=aliases pane=344775b2
+2026-09-22T14:52:34.637Z DEBUG relay.gui event type=app_catalog_updated pane=df8433f5
+2026-09-22T14:52:34.673Z INFO relay.gui event type=configured pane=344775b2 model=kimi-k3
+2026-09-22T14:52:34.682Z INFO relay.gui model_picker pane=344775b2 state={"configured":true,"data":"pick:main|kimi|kimi-k3","display":"kimi-k3","effort":"high","model":"kimi-k3","picked":"","preset":"kimi","reason":"changed","role":"main","row":"kimi-k3","rows":[]}
+2026-09-22T14:52:34.690Z DEBUG relay.gui event type=agents pane=344775b2
+2026-09-22T14:52:37.297Z INFO relay.gui model_picker pane=344775b2 state={"configured":true,"data":"pick:main|kimi|kimi-k3","display":"kimi-k3","effort":"high","model":"kimi-k3","picked":"","preset":"kimi","reason":"open","role":"main","row":"kimi-k3","rows":[{"data":"class:high","enabled":false,"text":"high"},{"data":"pick:high|guest:codex|gpt-6-astra","enabled":true,"text":"gpt-6-astra"},{"data":"pick:high|guest:codex|gpt-5.6-sol","enabled":true,"text":"gpt-5.6-sol"},{"data":"class:main","enabled":false,"text":"main"},{"data":"pick:main|kimi|kimi-k3","enabled":true,"text":"kimi-k3"},{"data":"pick:main|glm-coding|glm-5.3","enabled":true,"text":"glm-5.3"},{"data":"class:flash","enabled":false,"text":"flash"},{"data":"pick:flash|glm-coding|glm-5.3-flash","enabled":true,"text":"glm-5.3-flash"},{"data":"","enabled":false,"text":""},{"data":"guest:claude","enabled":true,"text":"Claude Code"},{"data":"","enabled":false,"text":""},{"data":"gear:picker","enabled":true,"text":"more models…"}]}
+2026-09-22T14:52:38.360Z INFO relay.gui gui_quit reason=signal pid=973427 uptime_s=43 build=2026-09-22.10H.04
+2026-09-22T14:52:38.423Z ERROR relay.gui worker_exit pane=df8433f5 code=0 crashed=0
+2026-09-22T14:52:38.443Z ERROR relay.gui worker_exit pane=344775b2 code=0 crashed=0

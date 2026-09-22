@@ -1,0 +1,87 @@
+© work - cpu 00% - mem 00%
+
+x
+
++
+
+Q
+
+O
+
+4
+
+= a
+
+2
+
+-
+
+ox
+
+(© API fixture answered on google/gemini-3.8-flash auto
+
+stmpimsw7-drive-p_Sévmce/work (|G)
+
+=
+
+x
+
+elliott@spark-dcec9: /tmp/msw7-drive-p_56vmce/work$
+
+J Reply with a short greetimg
+
+> gpt-6-astra
+
+Guest fixture answered.
+
+Pe
+
+> glm-5.3-flas|
+
+API fixture answered on glm-5.3-flash.
+
+Pee
+
+.
+
+kimi-k3
+
+API fixture answered on kimi-k3.
+
+x Model switch failed:
+
+Fixture guest startup refused
+
+} Reply after the refused pick
+
+:
+
+kimi-k3
+
+API fixture answered on kimi-k3.
+
+| Ready |
+
+Shell commands or agent prompts.
+
+2
+
+for help
+
+auto
+
+99% left
+
+kimi-k3.
+
+5
+
+5
+
+e
+
+‘/tmp/msw7-drive-p_S6vmce/work
+
+<
+
+high

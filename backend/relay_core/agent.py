@@ -1332,7 +1332,7 @@ class Agent:
                       context_window: int | None = None, *, idle: bool, apply_now: Callable,
                       start_exclusive: Callable, on_applied: Callable | None = None,
                       fields: dict | None = None, refused_fields: Callable | None = None,
-                      pre_land: Callable | None = None) -> dict:
+                      pre_land: Callable | None = None, apply_model: Callable | None = None) -> dict:
         """One model switch, idle or mid-turn; returns what its `model_changed` says.
 
         Idle and fitting: ``apply_now()`` switches at once (``applies: "now"``). Idle but over the
@@ -1351,14 +1351,15 @@ class Agent:
                 return {"applies": "refused", "reason": fit["refuse"], "context_window": window}
             if not idle:
                 return self.defer_model(config, preset_id, context_window, on_applied=on_applied,
-                                        fields=fields, refused_fields=refused_fields, pre_land=pre_land)
+                                        fields=fields, refused_fields=refused_fields, pre_land=pre_land,
+                                        apply_model=apply_model)
             if not fit["compacts"] or same:
                 self._pending_model = None
                 apply_now()
                 return {"applies": "now", "context_window": self.context.window}
             self._pending_model = {"config": config, "preset_id": preset_id, "window": context_window,
                                    "on_applied": on_applied, "fields": dict(fields or {}),
-                                   "refused_fields": refused_fields, "pre_land": pre_land}
+                                   "refused_fields": refused_fields, "pre_land": pre_land, "apply_model": apply_model}
             start_exclusive(lambda agent: agent.apply_pending_model(at="now"))
             return {"applies": "after_compaction", "in_flight_model": self.config.model,
                     "in_flight_model_name": model_name(self.preset.id if self.preset else None,
@@ -1368,7 +1369,7 @@ class Agent:
     def defer_model(self, config: ProviderConfig, preset_id: str | None = None,
                     context_window: int | None = None, *, on_applied: Callable | None = None,
                     fields: dict | None = None, refused_fields: Callable | None = None,
-                    pre_land: Callable | None = None) -> dict:
+                    pre_land: Callable | None = None, apply_model: Callable | None = None) -> dict:
         """Accept a set_model while a turn runs; it lands at the next step boundary.
 
         A request that has started answering is never aborted: it finishes on the model it started
@@ -1389,7 +1390,8 @@ class Agent:
         ``refused_fields()`` to its `model_switch_refused` event if it cannot land.
         ``pre_land()`` runs under the model lock immediately before `set_model` swaps the provider
         — the hook a switch off a guest harness uses to end it, as the idle path's `apply_now`
-        does (card #B9V4). Absent, a landing behaves exactly as before.
+        does (card #B9V4). `apply_model()` may own transport installation instead (#MSW7),
+        so a deferred guest starts only at the boundary where it can take over.
         """
         preset = resolve_preset(preset_id, config.base_url, config.model)
         window = context_window or context_window_for(preset)
@@ -1407,7 +1409,7 @@ class Agent:
                 return {"applies": "now", "context_window": self.context.window}
             self._pending_model = {"config": config, "preset_id": preset_id, "window": context_window,
                                    "on_applied": on_applied, "fields": dict(fields or {}),
-                                   "refused_fields": refused_fields, "pre_land": pre_land}
+                                   "refused_fields": refused_fields, "pre_land": pre_land, "apply_model": apply_model}
             # A routed turn (plan mode, or an image turn on its vision model) stays on the swapped
             # model to the end: the new model applies after it, and so does a turn that has failed
             # over — `_end_failover` would undo a step switch.
@@ -1447,11 +1449,13 @@ class Agent:
             fit = self.switch_fit(pending["config"], _pending_window(pending))
             return fit["compacts"] and "refuse" not in fit
 
-    def _refuse_switch(self, pending: dict, reason: str, turn_id, at: str) -> dict:
+    def _refuse_switch(self, pending: dict, reason: str, turn_id, at: str, code=None) -> dict:
         config = pending["config"]
         event = {"event": "model_switch_refused", "turn_id": turn_id, "at": at, "model": config.model,
                  "current_model": self.config.model, "preset": self.preset.id if self.preset else None,
                  "context_window": self.context.window, "effort": self.effort, "reason": reason}
+        if code:
+            event["code"] = code
         if pending.get("refused_fields") is not None:
             event.update(pending["refused_fields"]())
         logs.event(_log, "model_switch_refused", session=self.session_id, turn=turn_id, at=at,
@@ -1535,7 +1539,7 @@ class Agent:
         self._refuse_switch(pending, refuse, turn_id, at)
         return None
 
-    def _land_switch(self, pending: dict, turn_id, step, at: str, *, compacted: bool) -> dict:
+    def _land_switch(self, pending: dict, turn_id, step, at: str, *, compacted: bool) -> dict | None:
         """Under the model lock: make the switch and announce it."""
         # First the landing's own step, if it has one: `set_model` cannot replace an injected
         # provider, so a switch off a guest harness must end it here or the pane's config would
@@ -1546,7 +1550,14 @@ class Agent:
         from_model = self.config.model
         from_preset = self.preset.id if self.preset else None
         from_style = self._effort_style()
-        self.set_model(pending["config"], pending["preset_id"], pending["window"])
+        try:
+            if pending.get("apply_model") is not None:
+                pending["apply_model"]()
+            else:
+                self.set_model(pending["config"], pending["preset_id"], pending["window"])
+        except Exception as exc:
+            self._refuse_switch(pending, f"Model switch failed: {str(exc)[:600]}", turn_id, at, "model_switch_failed")
+            return None
         # `model_name` / `from_model_name` (protocol 13, card #MDL1 rule 1): the names the
         # transcript line prints, beside the ids the API takes.
         event = {"event": "model_applied", "turn_id": turn_id, "at": at, "model": self.config.model,
@@ -2862,6 +2873,8 @@ class Agent:
                 or self._planning or self._produced_output or self.cancel_event.is_set()):
             return False
         swap = self._failover
+        if swap is not None:
+            swap.setdefault("errors", {})[_provider_name(self.config.model, self.preset)] = str(exc)[:600]
         if swap is None:
             swap = {"turn_id": record["turn_id"], "provider": self.provider, "config": self.config,
                     "preset": self.preset, "window": self.context.window, "effort": self.effort,
@@ -3001,21 +3014,15 @@ class Agent:
         self.emit({"event": "status", "text": f"Back to {back}"})
 
     def _failover_failure(self, exc: Exception) -> tuple[str, Exception] | None:
-        """What a turn that failed over and then failed altogether reports, or None.
-
-        The last provider's message is the wrong one to show: "Relay Free's allowance is spent" is
-        not why the turn failed, the pane's own provider is, and its message is the one that says
-        what to do. The original failure is reported, prefixed with what else was tried, and only
-        the original's `code`/`resets_at` travel with it — a spare provider's quota window is not
-        this pane's to offer a key for (protocol 13.9).
-        """
+        """Keep each provider's own failure, while structured quota fields remain the original's."""
         swap = self._failover
         if swap is None or not swap["names"] or not isinstance(exc, ProviderError):
             return None
-        names = swap["names"]
-        also = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+        errors = swap.setdefault("errors", {})
+        errors[swap["names"][-1]] = str(exc)[:600]
         first = swap["first_error"]
-        return f"{swap['from_model']} failed; {also} too: {str(first)[:1800]}", first
+        reasons = "; ".join(f"{name}: {errors.get(name, 'failed')}" for name in swap["names"])
+        return f"{swap['from_model']} failed; original: {str(first)[:600]}; fallbacks: {reasons}", first
 
     def _model_call_on_provider(self, record: dict, ctx: dict, step: int) -> dict:
         """One model call, retried once when the provider stalls.

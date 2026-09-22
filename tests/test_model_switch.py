@@ -59,6 +59,49 @@ class ModelSwitchMidTurnTests(unittest.TestCase):
             return first_reply
         return step, gate, entered
 
+    def test_deferred_guest_pick_starts_only_at_landing_and_serves_next_step(self):
+        from relay_core import guest_harness_provider as ghp
+        from guest_harness_fake import FakeHarness, ev
+        ref, seen = [], []
+        step, gate, entered = self.blocked_first_step(ref, seen, tools_msg(call('list_directory', {'path': '.'})))
+        agent = self.make_agent(ScriptedProvider([step]))
+        agent.completion_check = False
+        ref.append(agent)
+        harness = FakeHarness([{'events': [ev('delta', text='guest answered')],
+                                'result': ('guest answered', 'end', {})}], guest='codex', model='gpt-6-astra')
+        self.sup.submit('look around', 'now')
+        self.assertTrue(entered.wait(5))
+        with mock.patch.object(ghp, 'make_harness', return_value=harness) as make:
+            self.cmds.handle('set_model', {'preset': 'guest:codex', 'guest': {'model': 'gpt-6-astra'}})
+            self.assertFalse(make.called)
+            self.assertIsNone(ghp.agent_provider(agent))
+            gate.set()
+            self.rec.wait(lambda e: e['event'] == 'agent_finished')
+        self.assertEqual(agent.config.model, 'gpt-6-astra')
+        self.assertIs(ghp.agent_provider(agent).harness, harness)
+        self.assertTrue(harness.sent)
+        self.assertFalse(self.rec.of('error'))
+        ghp.detach(agent)
+
+    def test_deferred_guest_start_failure_keeps_current_provider(self):
+        from relay_core import guest_harness_provider as ghp
+        ref, seen = [], []
+        step, gate, entered = self.blocked_first_step(ref, seen, tools_msg(call('list_directory', {'path': '.'})))
+        original = ScriptedProvider([step, text('old answered')])
+        agent = self.make_agent(original)
+        ref.append(agent)
+        self.sup.submit('answer', 'now')
+        self.assertTrue(entered.wait(5))
+        with mock.patch.object(ghp, 'start_provider', side_effect=ValueError('fixture guest unavailable')):
+            self.cmds.handle('set_model', {'preset': 'guest:codex', 'guest': {'model': 'gpt-6-astra'}})
+            gate.set()
+            refused = self.rec.wait(lambda e: e['event'] == 'model_switch_refused')
+            self.rec.wait(lambda e: e['event'] == 'agent_finished')
+        self.assertFalse(self.rec.of('error'))
+        self.assertEqual(refused['code'], 'model_switch_failed')
+        self.assertEqual(agent.config.model, 'old')
+        self.assertIs(agent.provider, original)
+
     def test_next_step_runs_on_the_new_model_and_the_request_in_flight_finishes_on_the_old(self):
         seen, ref = [], []
         step, gate, entered = self.blocked_first_step(ref, seen, tools_msg(call('list_directory', {'path': '.'})))

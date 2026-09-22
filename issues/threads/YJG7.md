@@ -52,3 +52,21 @@ Session ef7ab5c3ef21445ab80dea50fedfbb29 repeats six GLM 429 retry waits on each
 
 <!-- relay:entry 20260922T132117Z-vt author=agent kind=event model=gpt-6-astra pane=3064d543 turn=42374cc63a8340a9a03cd22ca3f514e3/69757fa04bba4791b0b2c06e1605b039 -->
 - ✦ agent moved this card · Inbox → Discussing · the discussion started
+
+<!-- relay:entry 20260922T144034Z-rn author=agent kind=progress model=gpt-6-astra pane=3064d543 turn=42374cc63a8340a9a03cd22ca3f514e3/3649adf8472b427f8ca50c556342b852 -->
+Claimed via file fallback as codex, under the user's request to deliver the session's diagnosed fixes (#MSW7). Implemented narrow Z.AI 429/code 1310 recognition: no retry, provider reset time retained, arbitrary body excluded. New quota and transient-rate-limit regressions pass; live-drive verification underway.
+
+<!-- relay:entry 20260922T144048Z-7n author=agent kind=event model=gpt-6-astra pane=3064d543 turn=42374cc63a8340a9a03cd22ca3f514e3/3649adf8472b427f8ca50c556342b852 -->
+- ✦ agent updated this card · replaced `## Done means`
+
+<!-- relay:entry 20260922T145029Z-ax author=agent kind=event model=gpt-6-astra pane=3064d543 turn=42374cc63a8340a9a03cd22ca3f514e3/3649adf8472b427f8ca50c556342b852 -->
+- ✦ agent updated this card · replaced `## Tests`
+
+<!-- relay:entry 20260922T145511Z-4y author=agent kind=event model=gpt-6-astra pane=3064d543 turn=42374cc63a8340a9a03cd22ca3f514e3/3649adf8472b427f8ca50c556342b852 -->
+- ✦ agent updated this card · replaced `## Tests`
+
+<!-- relay:entry 20260922T145831Z-1j author=agent kind=event model=gpt-6-astra pane=3064d543 turn=42374cc63a8340a9a03cd22ca3f514e3/3649adf8472b427f8ca50c556342b852 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": [], "related": ["VMZP", "G9VE", "DC4J"]… → {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-22-model-swi…; replaced `## Execution Summary`
+
+<!-- relay:entry 20260922T145831Z-7c author=agent kind=event model=gpt-6-astra pane=3064d543 turn=42374cc63a8340a9a03cd22ca3f514e3/3649adf8472b427f8ca50c556342b852 -->
+- ✦ agent moved this card · Executing → Needs verification · Implemented and tested; live GUI drive and picker logs saved for independent verification. · evidence docs/qa_evidence/2026-09-22-model-switch-fixes/ · implemented_by openai/gpt-6-astra via codex

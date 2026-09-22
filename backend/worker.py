@@ -333,12 +333,16 @@ def main():
                     request.get("preset"), request, workspace, config=config)
                     if is_guest and not helper_on_guest else None)
                 if guest_provider is not None:
-                    # A guest pane's agent *is* the guest: no role may put another model's config
-                    # under the harness (the provider would stay the guest's and the pane would
-                    # report a model it is not running).
                     agent_role = "main"
                 elif not pane_role.is_main:
                     config, options["preset_id"] = pane_role.config, pane_role.preset_id
+                    if guest_harness_provider.is_guest_preset(pane_role.preset_id):
+                        # A mode chosen before the pane's first prompt needs the same harness
+                        # startup as a later role pick (#MSW7), while its Main stays in resolver.
+                        role_request = {**request, "guest": {"model": config.model,
+                                                            "effort": pane_role.effort}}
+                        guest_provider = guest_harness_provider.start_provider(
+                            pane_role.preset_id, role_request, workspace, config=config)
                 else:
                     agent_role = "main"   # the role follows the main agent, or fell back to it
                     if spare is not None:
@@ -666,39 +670,20 @@ def main():
                 if board.refuse_model_selection(request, resolved.config):
                     continue
                 new_role = "main" if resolved.is_main else role
-                changed = {"event": "model_changed", "id": request.get("id"), "model": resolved.config.model,
-                           "model_name": model_name(resolved.preset_id, resolved.config.model),
-                           "preset": resolved.preset_id, "effort": agent.effort, "agent_role": new_role,
-                           **({"warning": resolved.warning} if resolved.warning else {})}
+                def follow_role(_agent, new_role=new_role):
+                    state["agent_role"] = new_role
 
-                def role_decide(idle, agent=agent, resolved=resolved, new_role=new_role, changed=changed):
-                    # Idle: at once, or after the compaction a smaller window needs. Mid-turn (issue
-                    # 3ES1): like set_model, it lands before the turn's next request. Its own
-                    # follow-up: a role switch sets the pane's role, it does not rebase the roles.
-                    def follow(_agent, new_role=new_role):
-                        state["agent_role"] = new_role
-
-                    def apply_now():
-                        state["agent_role"] = new_role
-                        agent.set_model(resolved.config, resolved.preset_id)
-                    with agent._model_lock:
-                        outcome = agent.request_model(
-                            resolved.config, resolved.preset_id, idle=idle, apply_now=apply_now,
-                            start_exclusive=lambda task: turns.start_exclusive_locked("set_agent_role", task),
-                            on_applied=follow, fields={"agent_role": new_role},
-                            refused_fields=lambda: {"agent_role": state["agent_role"]})
-                        if outcome["applies"] == "refused":
-                            emit({"event": "model_switch_refused", "id": request.get("id"), "at": "request",
-                                  "model": resolved.config.model, "current_model": agent.config.model,
-                                  "preset": agent.preset.id if agent.preset else None,
-                                  "context_window": agent.context.window, "effort": agent.effort,
-                                  "agent_role": state["agent_role"], "reason": outcome["reason"]})
-                            return
-                        if outcome["applies"] == "now":
-                            state["agent_role"] = new_role
-                        emit({**changed, **outcome})
-                turns.now_or_later(lambda: role_decide(True), lambda: role_decide(False))
-                emit(agent.context_event())
+                role_request = dict(request)
+                if guest_harness_provider.is_guest_preset(resolved.preset_id):
+                    role_request["guest"] = {"model": resolved.config.model,
+                                             "effort": resolved.effort or agent.effort}
+                elif resolved.effort:
+                    role_request["effort"] = resolved.effort
+                sessions.switch_model(
+                    role_request, resolved.config, resolved.preset_id, follow=follow_role,
+                    fields={"agent_role": new_role,
+                            **({"warning": resolved.warning} if resolved.warning else {})},
+                    refused_fields=lambda: {"agent_role": state["agent_role"]})
             # --- the agent typing into the program in the visible pane (protocol 17) ---
             elif kind == "program_state":
                 # The pane's live view: who owns the terminal, what it is asking, and whether the
@@ -769,6 +754,13 @@ def main():
                      "agent_busy": turns.busy,
                      "text": str(exc)[:2000] if configure_fault or isinstance(exc, (ValueError, OSError, keystore.KeystoreError))
                      else f"Protocol error ({type(exc).__name__})."}
+            if kind in ("set_model", "set_agent_role") and turns.agent is not None:
+                active = turns.agent
+                error.update(event="model_switch_refused", code="model_switch_failed", at="request",
+                             model=request.get("model", ""), current_model=active.config.model,
+                             preset=active.preset.id if active.preset else None,
+                             agent_role=state["agent_role"], context_window=active.context.window,
+                             effort=active.effort, reason=error["text"])
             if configure_fault:
                 error.update(code="configure_failed", exception=type(exc).__name__, restart_worker=not turns.busy)
             emit(error)

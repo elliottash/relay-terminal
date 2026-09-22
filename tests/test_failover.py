@@ -712,7 +712,7 @@ class FailoverTests(unittest.TestCase):
         # The spare still counts as a model this conversation ran on.
         self.assertEqual(agent.session_data()['model'], MAIN.model)
 
-    def test_the_turn_reports_the_first_failure_not_the_last_providers(self):
+    def test_the_turn_reports_each_failure_with_its_provider(self):
         first = ProviderError('The pane key was rejected: HTTP 401 for glm-5.3.')
         spent = ProviderError('Your Relay Free allowance is spent.', 'quota_exhausted', 1758326400)
         self.stubs[MAIN.model] = Refuser(first)
@@ -727,7 +727,8 @@ class FailoverTests(unittest.TestCase):
         self.assertIn('kimi-k3', failed['text'])
         self.assertIn(PRESETS['relay-free'].label, failed['text'])
         self.assertIn(str(first), failed['text'])
-        self.assertNotIn('allowance', failed['text'])
+        self.assertIn('allowance', failed['text'])
+        self.assertIn('HTTP 503', failed['text'])
         # Relay Free's code and reset time belong to Relay Free, not to this pane's failure.
         self.assertNotIn('code', failed)
         self.assertNotIn('resets_at', failed)

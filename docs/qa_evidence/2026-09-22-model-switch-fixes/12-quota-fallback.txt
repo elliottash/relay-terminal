@@ -1,0 +1,145 @@
+© work - cpu 00% - mem 00%
+
+x
+
++
+
+Q
+
+-
+
+4
+
+= a
+
+2
+
+-
+
+ox
+
+© API fixture answered on google/gemini-3.8-flash
+
+auto
+
+stmpimsw7-drive-p_Sévmce/work (|G)
+
+=
+
+x
+
+elliott@spark-dcec9: /tmp/msw7-drive-p_56vmce/work$
+
+J Reply with a short greetimg
+
+> gpt-6-astra
+
+Guest fixture answered.
+
+Pe
+
+> glm-5.3-flash
+
+API fixture answered on glm-5.3-flash.
+
+Pee
+
+.
+
+kimi-k3
+
+API fixture answered on kimi-k3.
+
+x Model switch failed:
+
+Fixture guest startup refused
+
+} Reply after the refused pick
+
+:
+
+kimi-k3
+
+API fixture answered on kimi-k3.
+
++ Exercise quota and fallback
+
+Choose another
+
+or wait for
+
+Z.AI Coding Plan quota exhausted for
+
+gim-5.3
+
+Resets at 2026-09-23 05:53:09 (provider
+
+time)
+
+provider
+
+the quota reset
+
+=
+
+a
+
+gim-5.3 (z.ai
+
+gim-5.3
+
+coding plan)
+
+keeps failing;
+
+continuing this turn on meta/muse-spark-1.3 (openrouter)
+
+» Back to glm-5.3 (z.ai
+
+gim-5.3
+
+coding plan)
+
+x glm-5.3 failed; original: Z.AI Coding Plan quota exhausted for glm-5.3. Resets at 2026-09-23 05:53:09 (provider time). Choose
+
+another provider or wait for the quota reset.;
+
+fallbacks: meta/muse-spark-1.3 (openrouter) :
+
+Provider HTTP 401: the API key was
+
+rejected for meta/muse-spark-1.3 at openrouter.ai (openrouter). The stored key is missing, wrong
+
+belongs to a different endpoint of
+
+the same provider, or is not allowed this model - open Options » Models to check it.
+
+| gim-5.3 (zai - glm-5.3 - coding plan) failed -
+
+continuing on meta/muse-spark-1.3 (openrouter)
+
+J
+
+Shell commands or agent prompts.
+
+2
+
+for help
+
+auto
+
+99% left
+
+5
+
+max
+
+5
+
+e
+
+‘/tmp/msw7-drive-p_S6vmce/work
+
+<
+
+gim-5.3

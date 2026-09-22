@@ -1,0 +1,170 @@
+{
+  "MSW7": {
+    "card": "MSW7",
+    "statuses": [
+      {
+        "test": "manual:docs/qa_evidence/2026-09-22-model-switch-fixes/tests.txt",
+        "invocation": "docs/qa_evidence/2026-09-22-model-switch-fixes/tests.txt",
+        "status": "not-applicable",
+        "retired": false,
+        "evidence": [],
+        "use_existing": false,
+        "accepted": false,
+        "message": "manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-model-switch-fixes/tests.txt"
+      },
+      {
+        "test": "manual:docs/qa_evidence/2026-09-22-model-switch-fixes/build.txt",
+        "invocation": "docs/qa_evidence/2026-09-22-model-switch-fixes/build.txt",
+        "status": "not-applicable",
+        "retired": false,
+        "evidence": [],
+        "use_existing": false,
+        "accepted": false,
+        "message": "manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-model-switch-fixes/build.txt"
+      },
+      {
+        "test": "manual:docs/qa_evidence/2026-09-22-model-switch-fixes/drive-result.txt",
+        "invocation": "docs/qa_evidence/2026-09-22-model-switch-fixes/drive-result.txt",
+        "status": "not-applicable",
+        "retired": false,
+        "evidence": [],
+        "use_existing": false,
+        "accepted": false,
+        "message": "manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-model-switch-fixes/drive-result.txt"
+      },
+      {
+        "test": "manual:docs/qa_evidence/2026-09-22-model-session-audit/report.md",
+        "invocation": "docs/qa_evidence/2026-09-22-model-session-audit/report.md",
+        "status": "not-applicable",
+        "retired": false,
+        "evidence": [],
+        "use_existing": false,
+        "accepted": false,
+        "message": "manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-model-session-audit/report.md"
+      }
+    ],
+    "findings": [],
+    "actions": [],
+    "revision": "de744f13",
+    "ids": [],
+    "files": {},
+    "failing": [],
+    "blocks": [],
+    "open_before": [
+      {
+        "key": "run:unittest",
+        "source": "run",
+        "kind": "run",
+        "state": "open",
+        "first_seen": "2026-09-21T23:34:23Z",
+        "last_seen": "2026-09-21T23:34:23Z",
+        "count": 1,
+        "green_streak": 0,
+        "runs": 1,
+        "fingerprint": "",
+        "regressed": false,
+        "stale": false,
+        "version": 1,
+        "excerpt": "11 of 11 executed tests failed in one run: one cause, not 11.",
+        "message": "11 of 11 executed tests failed in one run: one cause, not 11.",
+        "session": "codex-hq",
+        "first_run": "20260921T233422Z-ba41",
+        "opened_run": "20260921T233422Z-ba41",
+        "dismissed": {
+          "reason": "environmental",
+          "comment": "This run-level signal grouped the missing tests/ PYTHONPATH import failures. Corrected environment yielded 11/11 passes in both 20260921T233453Z-1582 and 20260921T233455Z-6953.",
+          "until": "2026-09-22T00:00:00Z",
+          "by": "codex-hq",
+          "expired": true
+        },
+        "members": [
+          "unittest:unittest.loader._FailedTest.test_board_protocol"
+        ]
+      }
+    ]
+  },
+  "YJG7": {
+    "card": "YJG7",
+    "statuses": [
+      {
+        "test": "manual:docs/qa_evidence/2026-09-22-model-switch-fixes/tests.txt",
+        "invocation": "docs/qa_evidence/2026-09-22-model-switch-fixes/tests.txt",
+        "status": "not-applicable",
+        "retired": false,
+        "evidence": [],
+        "use_existing": false,
+        "accepted": false,
+        "message": "manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-model-switch-fixes/tests.txt"
+      },
+      {
+        "test": "manual:docs/qa_evidence/2026-09-22-model-switch-fixes/build.txt",
+        "invocation": "docs/qa_evidence/2026-09-22-model-switch-fixes/build.txt",
+        "status": "not-applicable",
+        "retired": false,
+        "evidence": [],
+        "use_existing": false,
+        "accepted": false,
+        "message": "manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-model-switch-fixes/build.txt"
+      },
+      {
+        "test": "manual:docs/qa_evidence/2026-09-22-model-switch-fixes/drive-result.txt",
+        "invocation": "docs/qa_evidence/2026-09-22-model-switch-fixes/drive-result.txt",
+        "status": "not-applicable",
+        "retired": false,
+        "evidence": [],
+        "use_existing": false,
+        "accepted": false,
+        "message": "manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-model-switch-fixes/drive-result.txt"
+      },
+      {
+        "test": "manual:docs/qa_evidence/2026-09-22-model-session-audit/report.md",
+        "invocation": "docs/qa_evidence/2026-09-22-model-session-audit/report.md",
+        "status": "not-applicable",
+        "retired": false,
+        "evidence": [],
+        "use_existing": false,
+        "accepted": false,
+        "message": "manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-model-session-audit/report.md"
+      }
+    ],
+    "findings": [],
+    "actions": [],
+    "revision": "de744f13",
+    "ids": [],
+    "files": {},
+    "failing": [],
+    "blocks": [],
+    "open_before": [
+      {
+        "key": "run:unittest",
+        "source": "run",
+        "kind": "run",
+        "state": "open",
+        "first_seen": "2026-09-21T23:34:23Z",
+        "last_seen": "2026-09-21T23:34:23Z",
+        "count": 1,
+        "green_streak": 0,
+        "runs": 1,
+        "fingerprint": "",
+        "regressed": false,
+        "stale": false,
+        "version": 1,
+        "excerpt": "11 of 11 executed tests failed in one run: one cause, not 11.",
+        "message": "11 of 11 executed tests failed in one run: one cause, not 11.",
+        "session": "codex-hq",
+        "first_run": "20260921T233422Z-ba41",
+        "opened_run": "20260921T233422Z-ba41",
+        "dismissed": {
+          "reason": "environmental",
+          "comment": "This run-level signal grouped the missing tests/ PYTHONPATH import failures. Corrected environment yielded 11/11 passes in both 20260921T233453Z-1582 and 20260921T233455Z-6953.",
+          "until": "2026-09-22T00:00:00Z",
+          "by": "codex-hq",
+          "expired": true
+        },
+        "members": [
+          "unittest:unittest.loader._FailedTest.test_board_protocol"
+        ]
+      }
+    ]
+  }
+}

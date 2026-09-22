@@ -1508,10 +1508,10 @@ public:
             // …and on through the ordinary preset path below.
         }
         // Picking a model from the chip puts the pane back on the main agent (protocol 13).
-        if (m_agentRole != QStringLiteral("main")) { setAgentRole(QStringLiteral("main")); if (id == m_currentPreset) return; }
+        // set_model changes the model and Main role together; no intermediate role request (#MSW7).
         // …unless the pane is only *holding* that preset for its first prompt (card #MDL1):
         // picking it by hand is somebody asking for it now, and the configure below starts it.
-        if (id.isEmpty() || (id == m_currentPreset && m_deferredPreset.isEmpty())) return;
+        if (id.isEmpty() || (id == m_currentPreset && m_deferredPreset.isEmpty() && m_agentRole == QStringLiteral("main") && model.isEmpty())) return;
         const auto preset = presetById(id);
         // A full configure starts a new conversation, which a running turn cannot have.
         if (!m_configured || preset.isEmpty()) {
@@ -1549,14 +1549,14 @@ public:
         // Picking a model is a pick for this pane's own agent, so it comes off a role exactly as
         // the model chip does (card #MDL1). The worker already resets `agent_role` on any
         // set_model; it was the GUI that went on labelling the pane "Flash agent" afterwards.
-        if (m_agentRole != QStringLiteral("main")) setAgentRole(QStringLiteral("main"));
+        // The worker lands Main together with the requested model (#MSW7).
         const QJsonObject preset = presetById(m_currentPreset);
         // On a guest preset (29.4) the model belongs to the guest: the harness is asked to switch
         // (`set_model` with `guest.model`, which restarts it) and nothing is written to Relay's
         // own provider settings — "sonnet" is not a default for the next pane's provider.
         if (const QString guest = guestOfPreset(m_currentPreset); !guest.isEmpty()) {
             const QString want = model.trimmed();
-            if (want.isEmpty() || want == m_model) return;
+            if (want.isEmpty() || (want == m_model && m_agentRole == QStringLiteral("main"))) return;
             if (!m_configured) { status(QStringLiteral("%1 is not running yet.").arg(guestName(guest))); return; }
             m_guestRequest = QJsonObject{{"model", want}};
             QJsonObject request{{"type", "set_model"}, {"preset", m_currentPreset}, {"use_stored_key", true},
@@ -1577,7 +1577,7 @@ public:
             changed();
             return;
         }
-        if (id == paneModel()) return;
+        if (id == paneModel() && m_agentRole == QStringLiteral("main")) return;
         send({{"type", "set_model"}, {"preset", m_currentPreset}, {"use_stored_key", true},
               {"base_url", preset.value(QStringLiteral("base_url")).toString()},
               {"model", id},
@@ -1863,10 +1863,10 @@ public:
                              .arg(paneLogId(), key, level, m_currentPreset, m_configured ? QStringLiteral("1") : QStringLiteral("0"),
                                   m_deferredPreset, guestInFront() ? m_guest : QString()));
         if (const QString guest = guestOfPreset(preset); !guest.isEmpty()) {
-            if (preset != m_currentPreset || model != m_guestModel) pickGuest(guest, model);
+            if (preset != m_currentPreset || model != m_guestModel || m_agentRole != QStringLiteral("main")) pickGuest(guest, model);
         } else if (preset != m_currentPreset) {
             leaveGuest([this, preset, model] { selectModel(preset, model); });
-        } else if (model != paneModel()) {
+        } else if (model != paneModel() || m_agentRole != QStringLiteral("main")) {
             setMainModel(model);
         }
         // The list's word for that entry, snapped onto the model it names if it does not take it.
@@ -2014,10 +2014,12 @@ public:
     void setAgentRole(const QString &role, bool announce = true,
                       const relay::modelrows::ModePick &pick = {}) {
         const QString mode = relay::modelrows::roleTier(role);
-        if (!pick.key.isEmpty()) m_modePick.insert(mode, pick);
         if (role == m_agentRole && pick.key.isEmpty()) return;
         // Allowed mid-turn (issue 3ES1): the worker applies it before the turn's next request.
-        m_agentRole = role;
+        if (!m_configured) {
+            m_agentRole = role;
+            if (!pick.key.isEmpty()) m_modePick.insert(mode, pick);
+        }
         // The model this mode runs in this pane: the one just picked, else the one this pane last
         // picked for that mode. "Enter on a mode row switches the mode and keeps that mode's
         // model" (design 5.1), and /flash, /high, /local and Alt+F come back the same way. Main is
@@ -8196,7 +8198,12 @@ private:
             m_model = event.value(QStringLiteral("model")).toString();
             const QString preset = event.value(QStringLiteral("preset")).toString();
             const QString role = event.value(QStringLiteral("agent_role")).toString();   // protocol 13
-            if (!role.isEmpty()) m_agentRole = role;
+            if (!role.isEmpty()) {
+                m_agentRole = role;
+                if (role != QStringLiteral("main") && !preset.isEmpty())
+                    m_modePick.insert(relay::modelrows::roleTier(role),
+                        {preset + QLatin1Char('|') + m_model, event.value(QStringLiteral("effort")).toString()});
+            }
             // A role's turn reports that role's model; only this pane's own agent moves the model
             // the pane *is on* (card #MDL1, design 1.4.3).
             if (role.isEmpty() || role == QStringLiteral("main")) m_paneModel = m_model;
@@ -8303,7 +8310,7 @@ private:
             const QString role = event.value(QStringLiteral("agent_role")).toString();
             const QString preset = event.value(QStringLiteral("preset")).toString();
             if (!role.isEmpty()) m_agentRole = role;
-            else if (!preset.isEmpty()) { m_currentPreset = preset; rememberPreset(preset); }
+            if (!preset.isEmpty() && (role.isEmpty() || role == QStringLiteral("main"))) { m_currentPreset = preset; rememberPreset(preset); }
             if (role.isEmpty() || role == QStringLiteral("main")) m_paneModel = m_model;
             const qint64 window = event.value(QStringLiteral("context_window")).toVariant().toLongLong();
             if (window > 0) m_ctxWindow = window;
@@ -8315,6 +8322,7 @@ private:
                         Ink::Error);
             if (!m_agentBusy && !moreTurnsPending()) closeInline();
             const QString what = event.value(QStringLiteral("code")).toString() == QStringLiteral("board_model_unavailable")
+                || event.value(QStringLiteral("code")) == QStringLiteral("model_switch_failed")
                 ? QStringLiteral("Still on %1 · %2").arg(modelNameFor(m_currentPreset, m_model), reason)
                 : QStringLiteral("Still on %1 · %2's window is too small for this conversation")
                       .arg(modelNameFor(m_currentPreset, m_model), refused);
@@ -12843,6 +12851,7 @@ private:
     // One row of the model box, chosen. Split out of the box's `activated` handler so a choice
     // made while a guest is running can be made again once the guest has left (26.9).
     void modelBoxPicked(const QString &data) {
+        logModelPicker(QStringLiteral("pick"), data);
         // Owner report, 2026-09-18: "selecting model options in the model dropdown didnt do
         // anything. the main use case for that is going to be swapping between the main and
         // flash models." Two entries in this list are not models: the gear (the model options
@@ -12876,7 +12885,6 @@ private:
             if (mode == QStringLiteral("main")) {
                 // Main is the pane's own model: the ordinary pick, and it puts the pane back on
                 // its main role if a mode had taken it off.
-                if (m_agentRole != role) setAgentRole(role, false);
                 hintSwapForPick(key);
                 selectEntry(key);
             } else {
@@ -13165,6 +13173,17 @@ private:
         return true;
     }
 
+    void logModelPicker(const QString &reason, const QString &picked = QString(),
+                        const QJsonArray &rows = {}) const {
+        if (!m_modelBox) return;
+        const QJsonObject state{{"reason", reason}, {"display", m_modelBox->displayText()},
+            {"row", m_modelBox->currentText()}, {"data", m_modelBox->currentData().toString()},
+            {"role", m_agentRole}, {"preset", m_currentPreset}, {"model", m_model},
+            {"effort", m_effort}, {"configured", m_configured}, {"picked", picked}, {"rows", rows}};
+        relay::log::info(QStringLiteral("model_picker pane=%1 state=%2").arg(paneLogId(),
+            QString::fromUtf8(QJsonDocument(state).toJson(QJsonDocument::Compact))));
+    }
+
     void refreshPickers() {
         // A restored pick whose entry has left the catalog or lost its key is dropped, silently:
         // the mode reads rank 1 of its list again, which is what it would have done had the pick
@@ -13198,7 +13217,14 @@ private:
         relay::modelrows::fill(m_modelBox, rows);
         // The rows are read again the moment the list is about to be drawn, so the box always
         // opens on this pane's own model with no class expanded (card #MDL1, design 5.3).
-        m_modelBox->onRows = [this](int *current) { return modelBoxRows(current); };
+        m_modelBox->onRows = [this](int *current) {
+            const auto rows = modelBoxRows(current);
+            QJsonArray logged;
+            for (const auto &row : rows)
+                logged.append(QJsonObject{{"text", row.text}, {"data", row.data}, {"enabled", row.enabled}});
+            logModelPicker(QStringLiteral("open"), QString(), logged);
+            return rows;
+        };
         m_modelBox->onExpandKey = [this](const QString &klass, int delta) { return expandModelClass(klass, delta); };
         m_modelBox->onQueryRows = [this](const QString &) { return modelBoxFilterRows(); };
         m_modelBox->onPickedData = [this](const QString &data) { modelBoxPicked(data); };
@@ -13207,6 +13233,8 @@ private:
         // above it: that is what CurrentTextComboBox::setCollapsedText is for. The mode is in the
         // box's tooltip instead.
         m_modelBox->setCollapsedText(m_serving.isEmpty() ? relay::modelrows::collapsedText(rows) : QString());
+        if (m_presets.isEmpty() && m_currentPreset.isEmpty())
+            m_modelBox->setCollapsedText(QStringLiteral("Loading models…"));
         m_modelBox->setEnabled(true);
         // The model actually serving the turn, when it is not the pane's own (C5): plan mode's
         // planning model, an image turn's vision model, or the provider a failover moved to. One
@@ -13234,6 +13262,12 @@ private:
                        m_guestSession.isEmpty() ? QString() : QStringLiteral(" (session %1)").arg(m_guestSession.left(8)))
             : QString()));
         m_modelBox->updateGeometry();   // the collapsed box's width follows the new current row
+        const QString state = m_modelBox->displayText() + QLatin1Char('|') + m_agentRole
+            + QLatin1Char('|') + m_currentPreset + QLatin1Char('|') + m_model + QLatin1Char('|') + m_effort;
+        if (state != m_loggedPickerState) {
+            logModelPicker(m_loggedPickerState.isEmpty() ? QStringLiteral("initial") : QStringLiteral("changed"));
+            m_loggedPickerState = state;
+        }
     }
 
     // ----- Claude Code and Codex from the model picker (GT7X, 26.9) ---------------------------
@@ -18606,6 +18640,7 @@ private:
     QString m_currentPreset;
     // model roles (protocol 13): this pane's role and the worker's last role table
     QString m_agentRole = QStringLiteral("main");
+    QString m_loggedPickerState;
     // The models serving this pane's running turn instead of its own, innermost last, or empty
     // when the turn is on the pane's own model (C5, owner 2026-09-19). Relay moves a turn off that
     // model in three places — plan mode's `planning` role (protocol 13.11), an image turn's vision

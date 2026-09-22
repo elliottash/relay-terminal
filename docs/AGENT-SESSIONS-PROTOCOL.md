@@ -73,6 +73,20 @@ of them. Sending an endpoint with no preset is unchanged: the key is looked up f
   - **Board consoles (#BMS1).** A helper refuses a guest model (including a guest resolved by `set_agent_role`) before launching a harness, and refuses model changes while any card turn is running or queued. It emits `model_switch_refused` with `at: "request"`, `code: "board_model_unavailable"`, the actual `current_model`/`preset`, and a human-readable `reason`. The picker restores that model and displays the reason rather than the context-window message. Cached idle card agents adopt the helper's selected native provider before their next ask, preserving conversation history. This does not enable guest card execution; terminal-pane guest switching is unchanged.
   - **The context bar agrees with the chip.** While a switch waits, `context` carries `next {model, window, limit_tokens, used_tokens, percent, will_compact, in_flight_model}`: the conversation measured against the window that will serve the next request (the top-level fields stay the model in force). `set_model` is followed by `context` whatever the outcome, so the bar moves with the chip.
   - Idle, it applies at once as before: `applies: "now"`, then `context`. An idle switch that must compact first runs that compaction as an exclusive task (queued prompts wait for it, like `/compact`): `model_changed {applies: "after_compaction", in_flight_model, will_compact: true}`, then the compaction, then `model_applied {at: "now", compacted: true}`. A turn-end landing that must compact does the same, before the next queued turn starts. `set_agent_role` goes through all of this too.
+- **Selection failures (#MSW7).** Both direct picks and role picks use the same transport
+  landing path, including guest harness startup. Failed startup/validation emits
+  `model_switch_refused {code: "model_switch_failed", current_model, preset, agent_role?, reason}`;
+  role state is committed only after a successful landing. Deferred guest selections start their
+  harness at landing, not while another provider is answering. Direct Main-page model picks
+  send one `set_model`, without a preceding `set_agent_role` acknowledgment of the old Main.
+- **Picker diagnostics (#MSW7).** GUI logs `model_picker` with JSON state at initial rendering,
+  display changes, popup opening and row selection. It records the visible label, selected row,
+  role/model/preset/effort and (on opening) displayed rows. No prompt text or credentials.
+- **Provider failures (#MSW7 / #YJG7).** Failover errors retain the original failure and each
+  fallback's own reason; structured error codes/reset timestamps still belong to the original
+  provider. Z.AI HTTP 429 code 1310 is quota exhaustion, not a transient retry: a `provider_retry`
+  event with `reason: "quota"`, `attempt: 0` precedes `provider_quota_exhausted`. The message includes
+  a recognised reset timestamp in provider time, never the arbitrary response body.
 - `set_effort {effort}` → event `effort_changed {effort, applied: {...provider params}}`.
 
 ## 3. Effort levels (v3.11, 2026-09-21: the model's own words)
