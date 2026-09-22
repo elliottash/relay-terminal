@@ -172,6 +172,37 @@ QStringList rowKeys(QTreeWidget *list) {
     return out;
 }
 
+// The sectioned priorities page as a list of lines: `#<class>` for a class's own header row,
+// `[text]` for a rule, and the key for a model row.
+QStringList pageRows(QTreeWidget *list) {
+    QStringList out;
+    for (int i = 0; i < list->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *item = list->topLevelItem(i);
+        if (item->data(0, Qt::UserRole + 9).toBool()) { out << QStringLiteral("#") + item->data(0, Qt::UserRole + 8).toString(); continue; }
+        const QString key = item->data(0, Qt::UserRole).toString();
+        out << (key.isEmpty() ? QStringLiteral("[%1]").arg(item->text(0)) : key);
+    }
+    return out;
+}
+
+QTreeWidgetItem *classHeader(QTreeWidget *list, const QString &tier) {
+    for (int i = 0; i < list->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *item = list->topLevelItem(i);
+        if (item->data(0, Qt::UserRole + 9).toBool() && item->data(0, Qt::UserRole + 8).toString() == tier) return item;
+    }
+    return nullptr;
+}
+
+QTreeWidgetItem *rowFor(QTreeWidget *list, const QString &key, const QString &tier = QString()) {
+    for (int i = 0; i < list->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *item = list->topLevelItem(i);
+        if (item->data(0, Qt::UserRole).toString() != key) continue;
+        if (!tier.isEmpty() && item->data(0, Qt::UserRole + 8).toString() != tier) continue;
+        return item;
+    }
+    return nullptr;
+}
+
 QStringList tabs(QTabBar *bar) {
     QStringList out;
     for (int i = 0; i < bar->count(); ++i) out << bar->tabData(i).toString();
@@ -456,6 +487,210 @@ private Q_SLOTS:
                                                                 QStringLiteral("glm-coding|glm-5.3")}));
         QCOMPARE(curation::tierList(QStringLiteral("main")).at(1).effort, QStringLiteral("high"));   // levels travel with the rows
         QCOMPARE(told, 1);
+    }
+
+
+    // ----- the priorities page: one page, four sections (owner, 2026-09-21) --------------------
+    // "tab 3: in a pane, i dont want separate tabs for the modes. they should just be in divided
+    // sections. remove the lite section."
+
+    void thePrioritiesPageIsOneSectionPerClassAndNeverLite() {
+        setList(QStringLiteral("high"), {{QStringLiteral("anthropic|claude-opus-5"), QString()}});
+        setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()},
+                                         {QStringLiteral("guest:claude|opus"), QString()}});
+        setList(QStringLiteral("flash"), {{QStringLiteral("glm-coding|glm-5.3-flash"), QString()}});
+        setList(QStringLiteral("lite"), {{QStringLiteral("anthropic|claude-opus-5"), QString()}});
+        ModelPicker::Context ctx = context();
+        ctx.tier = ModelPicker::classesTier();
+        ModelPicker picker(ctx);
+        QCOMPARE(picker.tier(), QStringLiteral("classes"));
+        // high, main, flash — and no lite, and no local (nothing is served here).
+        QCOMPARE(picker.sectionTiers(), (QStringList{QStringLiteral("high"), QStringLiteral("main"),
+                                                     QStringLiteral("flash")}));
+        QCOMPARE(pageRows(picker.list()), (QStringList{
+            QStringLiteral("#high"), QStringLiteral("anthropic|claude-opus-5"),
+            QStringLiteral("#main"), QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("guest:claude|opus"),
+            QStringLiteral("#flash"), QStringLiteral("glm-coding|glm-5.3-flash")}));
+        // The lite list is untouched underneath: only the page stopped drawing it.
+        QCOMPARE(listKeys(QStringLiteral("lite")), QStringList{QStringLiteral("anthropic|claude-opus-5")});
+        // Each header carries its class's "show this class in the box" switch and a one-line note.
+        QTreeWidgetItem *mainHead = classHeader(picker.list(), QStringLiteral("main"));
+        QVERIFY(mainHead != nullptr);
+        QVERIFY(mainHead->text(ColModel).startsWith(QStringLiteral("main")));
+        QVERIFY(mainHead->text(ColModel).contains(QStringLiteral("new panes start on rank 1")));
+        QCOMPARE(mainHead->checkState(ColBox), Qt::Checked);
+        // …and rank 1 of main still says what it is, on the row rather than in a tab's tooltip.
+        QVERIFY(rowFor(picker.list(), QStringLiteral("glm-coding|glm-5.3"))->text(ColModel)
+                    .contains(QStringLiteral("new panes start here")));
+    }
+
+    // "↑/↓ move across sections": the one key that has to cross a header, and it steps over them.
+    void upAndDownWalkTheRowsAcrossTheSections() {
+        setList(QStringLiteral("high"), {{QStringLiteral("anthropic|claude-opus-5"), QString()}});
+        setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()}});
+        setList(QStringLiteral("flash"), {{QStringLiteral("glm-coding|glm-5.3-flash"), QString()}});
+        ModelPicker::Context ctx = context();
+        ctx.tier = ModelPicker::classesTier();
+        ModelPicker picker(ctx);
+        picker.selectKey(QStringLiteral("anthropic|claude-opus-5"));
+        QCOMPARE(picker.currentClass(), QStringLiteral("high"));
+        QTest::keyClick(picker.list(), Qt::Key_Down);
+        QCOMPARE(picker.selectedKey(), QStringLiteral("glm-coding|glm-5.3"));
+        QCOMPARE(picker.currentClass(), QStringLiteral("main"));
+        QTest::keyClick(picker.list(), Qt::Key_Down);
+        QCOMPARE(picker.selectedKey(), QStringLiteral("glm-coding|glm-5.3-flash"));
+        QCOMPARE(picker.currentClass(), QStringLiteral("flash"));
+        QTest::keyClick(picker.list(), Qt::Key_Down);   // the last row: it stays there
+        QCOMPARE(picker.selectedKey(), QStringLiteral("glm-coding|glm-5.3-flash"));
+        QTest::keyClick(picker.list(), Qt::Key_Up);
+        QCOMPARE(picker.selectedKey(), QStringLiteral("glm-coding|glm-5.3"));
+        // …and from the filter line, which forwards them.
+        QTest::keyClick(picker.filter(), Qt::Key_Up);
+        QCOMPARE(picker.selectedKey(), QStringLiteral("anthropic|claude-opus-5"));
+    }
+
+    // Alt+↑/↓ reorders **inside** a section and stops at its edge: pushing the last flash row down
+    // must not drop the model into another class.
+    void altUpAndDownMoveARowInsideItsOwnSection() {
+        setList(QStringLiteral("high"), {{QStringLiteral("anthropic|claude-opus-5"), QString()}});
+        setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()},
+                                         {QStringLiteral("guest:claude|opus"), QString()}});
+        setList(QStringLiteral("flash"), {{QStringLiteral("glm-coding|glm-5.3-flash"), QString()}});
+        ModelPicker::Context ctx = context();
+        ctx.tier = ModelPicker::classesTier();
+        ModelPicker picker(ctx);
+        picker.selectKey(QStringLiteral("guest:claude|opus"));
+        QTest::keyClick(picker.list(), Qt::Key_Up, Qt::AltModifier);
+        QCOMPARE(listKeys(QStringLiteral("main")), (QStringList{QStringLiteral("guest:claude|opus"),
+                                                                QStringLiteral("glm-coding|glm-5.3")}));
+        // At the top of its own section it goes no further, and no other list moves.
+        QTest::keyClick(picker.list(), Qt::Key_Up, Qt::AltModifier);
+        QCOMPARE(listKeys(QStringLiteral("main")), (QStringList{QStringLiteral("guest:claude|opus"),
+                                                                QStringLiteral("glm-coding|glm-5.3")}));
+        QCOMPARE(listKeys(QStringLiteral("high")), QStringList{QStringLiteral("anthropic|claude-opus-5")});
+        // The only flash row cannot leave flash either.
+        picker.selectKey(QStringLiteral("glm-coding|glm-5.3-flash"));
+        QTest::keyClick(picker.list(), Qt::Key_Down, Qt::AltModifier);
+        QCOMPARE(listKeys(QStringLiteral("flash")), QStringList{QStringLiteral("glm-coding|glm-5.3-flash")});
+        // Delete reads the row's own class too.
+        QTest::keyClick(picker.list(), Qt::Key_Delete);
+        QVERIFY(listKeys(QStringLiteral("flash")).isEmpty());
+        QCOMPARE(listKeys(QStringLiteral("main")).size(), 2);
+        QTest::keyClick(picker.list(), Qt::Key_Z, Qt::ControlModifier);
+        QCOMPARE(listKeys(QStringLiteral("flash")), QStringList{QStringLiteral("glm-coding|glm-5.3-flash")});
+    }
+
+    // "ctrl+enter adds the typed model to the section the highlight is in": each section draws its
+    // own "not in <class>" block, so the highlight's section is the list it lands in and there is
+    // no fourth place with a rule of its own.
+    void ctrlEnterAddsIntoTheSectionTheHighlightIsIn() {
+        setList(QStringLiteral("high"), {{QStringLiteral("anthropic|claude-opus-5"), QString()}});
+        setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()}});
+        setList(QStringLiteral("flash"), {{QStringLiteral("glm-coding|glm-5.3-flash"), QString()}});
+        ModelPicker::Context ctx = context();
+        ctx.tier = ModelPicker::classesTier();
+        ModelPicker picker(ctx);
+        picker.filter()->setText(QStringLiteral("opus"));
+        // claude-opus-5 is already in high, so high shows it as a rank; main and flash offer it.
+        QCOMPARE(pageRows(picker.list()), (QStringList{
+            QStringLiteral("#high"), QStringLiteral("anthropic|claude-opus-5"),
+            QStringLiteral("[not in high — ctrl+enter adds it here]"), QStringLiteral("guest:claude|opus"),
+            QStringLiteral("#main"), QStringLiteral("[not in main — ctrl+enter adds it here]"),
+            QStringLiteral("anthropic|claude-opus-5"), QStringLiteral("guest:claude|opus"),
+            QStringLiteral("#flash"), QStringLiteral("[not in flash — ctrl+enter adds it here]"),
+            QStringLiteral("anthropic|claude-opus-5")}));
+        // A guest harness is offered where it can be a whole agent — high and main — and nowhere
+        // else, so flash's block holds the API row alone. The rule is `addableToTier`, per section.
+        QVERIFY(rowFor(picker.list(), QStringLiteral("guest:claude|opus"), QStringLiteral("flash")) == nullptr);
+        // The flash one: the row under the flash header, and ctrl+enter puts it in flash.
+        QTreeWidgetItem *offered = rowFor(picker.list(), QStringLiteral("anthropic|claude-opus-5"), QStringLiteral("flash"));
+        QVERIFY(offered != nullptr);
+        picker.list()->setCurrentItem(offered);
+        QCOMPARE(picker.currentClass(), QStringLiteral("flash"));
+        QTest::keyClick(picker.list(), Qt::Key_Return, Qt::ControlModifier);
+        QCOMPARE(listKeys(QStringLiteral("flash")), (QStringList{QStringLiteral("glm-coding|glm-5.3-flash"),
+                                                                 QStringLiteral("anthropic|claude-opus-5")}));
+        QCOMPARE(listKeys(QStringLiteral("main")), QStringList{QStringLiteral("glm-coding|glm-5.3")});
+        QCOMPARE(listKeys(QStringLiteral("high")), QStringList{QStringLiteral("anthropic|claude-opus-5")});
+    }
+
+    // Each section's header tick is that class's switch and the ticks under it are its cutoff —
+    // one column, one question, read down. Two classes on one page keep their own answers.
+    void everySectionCarriesItsOwnSwitchAndCutoff() {
+        setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()},
+                                         {QStringLiteral("anthropic|claude-opus-5"), QString()},
+                                         {QStringLiteral("guest:claude|opus"), QString()}});
+        setList(QStringLiteral("flash"), {{QStringLiteral("glm-coding|glm-5.3-flash"), QString()}});
+        ModelPicker::Context ctx = context();
+        ctx.tier = ModelPicker::classesTier();
+        ModelPicker picker(ctx);
+        int told = 0;
+        picker.onListsChanged = [&told] { ++told; };
+        QVERIFY(!picker.list()->isColumnHidden(ColBox));
+        QVERIFY(picker.classSwitch()->isHidden() || !picker.isVisible());   // it is on the headers now
+        // Two per class by default: main's first two, flash's one.
+        QCOMPARE(rowFor(picker.list(), QStringLiteral("guest:claude|opus"))->checkState(ColBox), Qt::Unchecked);
+        QCOMPARE(rowFor(picker.list(), QStringLiteral("glm-coding|glm-5.3-flash"))->checkState(ColBox), Qt::Checked);
+        // Checking rank 3 of main moves main's cutoff and leaves flash alone.
+        rowFor(picker.list(), QStringLiteral("guest:claude|opus"))->setCheckState(ColBox, Qt::Checked);
+        QCOMPARE(curation::boxCutoff(QStringLiteral("main")), 3);
+        QCOMPARE(curation::boxCutoff(QStringLiteral("flash")), 2);
+        QCOMPARE(told, 1);
+        // The header's own tick switches the class off; the rows under it go blank, flash does not.
+        classHeader(picker.list(), QStringLiteral("main"))->setCheckState(ColBox, Qt::Unchecked);
+        QVERIFY(!curation::boxShown(QStringLiteral("main")));
+        QVERIFY(curation::boxShown(QStringLiteral("flash")));
+        QCOMPARE(rowFor(picker.list(), QStringLiteral("glm-coding|glm-5.3"))->checkState(ColBox), Qt::Unchecked);
+        QCOMPARE(rowFor(picker.list(), QStringLiteral("glm-coding|glm-5.3-flash"))->checkState(ColBox), Qt::Checked);
+        QCOMPARE(told, 2);
+        classHeader(picker.list(), QStringLiteral("main"))->setCheckState(ColBox, Qt::Checked);
+        QVERIFY(curation::boxShown(QStringLiteral("main")));
+        QCOMPARE(rowFor(picker.list(), QStringLiteral("glm-coding|glm-5.3"))->checkState(ColBox), Qt::Checked);
+    }
+
+    // A drag inside one section rewrites that section; a drag that crosses a header changes no
+    // list at all — its two sections no longer have their lists' lengths, so there is no order to
+    // store and the page is simply drawn again.
+    void aDragInsideASectionRewritesItAndACrossingDragDoesNothing() {
+        setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()},
+                                         {QStringLiteral("anthropic|claude-opus-5"), QStringLiteral("high")}});
+        setList(QStringLiteral("flash"), {{QStringLiteral("glm-coding|glm-5.3-flash"), QString()}});
+        ModelPicker::Context ctx = context();
+        ctx.tier = ModelPicker::classesTier();
+        ModelPicker picker(ctx);
+        const int mainAt = picker.list()->indexOfTopLevelItem(rowFor(picker.list(), QStringLiteral("glm-coding|glm-5.3")));
+        QTreeWidgetItem *moved = picker.list()->takeTopLevelItem(mainAt);
+        picker.list()->insertTopLevelItem(mainAt + 1, moved);
+        picker.commitDragOrder();
+        QCOMPARE(listKeys(QStringLiteral("main")), (QStringList{QStringLiteral("anthropic|claude-opus-5"),
+                                                                QStringLiteral("glm-coding|glm-5.3")}));
+        QCOMPARE(curation::tierList(QStringLiteral("main")).first().effort, QStringLiteral("high"));
+        // Now drag main's last row past the flash header. Neither list moves.
+        const int last = picker.list()->indexOfTopLevelItem(rowFor(picker.list(), QStringLiteral("glm-coding|glm-5.3")));
+        QTreeWidgetItem *crossed = picker.list()->takeTopLevelItem(last);
+        picker.list()->addTopLevelItem(crossed);
+        picker.commitDragOrder();
+        QCOMPARE(listKeys(QStringLiteral("main")), (QStringList{QStringLiteral("anthropic|claude-opus-5"),
+                                                                QStringLiteral("glm-coding|glm-5.3")}));
+        QCOMPARE(listKeys(QStringLiteral("flash")), QStringList{QStringLiteral("glm-coding|glm-5.3-flash")});
+    }
+
+    // An empty class still has a header, still says how to fill it, and still says which class the
+    // page is on — a page with nothing ranked would otherwise have no answer at all.
+    void anEmptySectionKeepsItsHeaderAndItsPlace() {
+        setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()}});
+        ModelPicker::Context ctx = context();
+        ctx.tier = ModelPicker::classesTier();
+        ModelPicker picker(ctx);
+        QCOMPARE(pageRows(picker.list()), (QStringList{
+            QStringLiteral("#high"), QStringLiteral("[nothing in high — type a model's name, then ctrl+enter adds it here]"),
+            QStringLiteral("#main"), QStringLiteral("glm-coding|glm-5.3"),
+            QStringLiteral("#flash"), QStringLiteral("[nothing in flash — type a model's name, then ctrl+enter adds it here]")}));
+        picker.focusClass(QStringLiteral("flash"));
+        QCOMPARE(picker.currentClass(), QStringLiteral("flash"));
+        QVERIFY(picker.selectedKey().isEmpty());   // a header is not a model
+        picker.focusClass(QStringLiteral("main"));
+        QCOMPARE(picker.selectedKey(), QStringLiteral("glm-coding|glm-5.3"));
     }
 
     // ----- the flat tab -----------------------------------------------------------------------------
@@ -1007,20 +1242,24 @@ private Q_SLOTS:
         QVERIFY(!picker.pick().accepted);   // it is a door, not a pick
     }
 
-    // Hosted in the models pane the flat tab is the host's own, so it leaves this tab row — and
-    // ctrl+tab, which the host needs for its three tabs, stops being answered here.
-    void hostedTheFlatTabLeavesTheRowAndCtrlTabIsTheHosts() {
+    // Hosted in the models pane there is no tab row at all: the flat tab is the host's own
+    // **available** and the classes are sections, not tabs. ←/→ and ctrl+tab both go to the host.
+    void hostedTheTabRowGoesAndTheArrowsAreTheHosts() {
         ModelPicker picker(context());
         picker.setHosted(true);
-        QCOMPARE(tabs(picker.tabBar()), (QStringList{QStringLiteral("high"), QStringLiteral("main"),
-                                                     QStringLiteral("flash"), QStringLiteral("lite")}));
+        QVERIFY(tabs(picker.tabBar()).isEmpty());
+        QVERIFY(!picker.tabBar()->isVisibleTo(&picker));
         QVERIFY(picker.tabIds().contains(QStringLiteral("all")));   // still a tier it can be put on
+        const QString was = picker.tier();
         QTest::keyClick(picker.filter(), Qt::Key_Right);
-        QCOMPARE(picker.tier(), QStringLiteral("flash"));
+        QCOMPARE(picker.tier(), was);                               // left for the host
         QTest::keyClick(picker.list(), Qt::Key_Tab, Qt::ControlModifier);
-        QCOMPARE(picker.tier(), QStringLiteral("flash"));           // left for the host
+        QCOMPARE(picker.tier(), was);
         picker.setTier(QStringLiteral("all"));
         QCOMPARE(picker.tier(), QStringLiteral("all"));
+        picker.setTier(ModelPicker::classesTier());
+        QCOMPARE(picker.tier(), QStringLiteral("classes"));
+        QVERIFY(!picker.tabBar()->isVisibleTo(&picker));
     }
 };
 

@@ -13,11 +13,16 @@
 //                Options' own machinery (`relay::SettingsPane` over one section, embedded), so a
 //                key added here is a key added there. Profiles live here too.
 //   available    step 2: the flat `all` tab — one row per model, the `available` tick column,
-//                favorites, recents, the sort menu, OpenRouter's long tail behind typing, and
-//                "+ add a model by id…".
-//   priorities   steps 3 and 4: the five class lists — high · main · flash · lite · local — each
-//                numbered and reorderable, with the level list, the "in box" cutoff column, the
-//                class switch, "fill from defaults", the profile combo and undo.
+//                favorites, then a section per provider alphabetically, the sort menu, OpenRouter's
+//                long tail behind typing, and "+ add a model by id…". No "recent" section.
+//   priorities   steps 3 and 4: **one scrolling page of sections**, one per class — high, main,
+//                flash, and local where this machine serves one — each a header line (the class,
+//                its "show this class in the box" switch and a one-line note) over that class's
+//                numbered rows, with the level list, the "in box" cutoff column, "fill from
+//                defaults", the profile combo and undo. No class tabs and no lite section (owner,
+//                2026-09-21: "in a pane, i dont want separate tabs for the modes. they should just
+//                be in divided sections. remove the lite section"); lite's storage stays and the
+//                jobs tab is where a chore's model is set.
 //   jobs         what each **job** relay does runs on right now, grouped by the tier it follows,
 //                and a per-job override. This is the retired "per-job models (advanced)" modal,
 //                reviewed and rebuilt (`relay::JobsTab`, design 5.9).
@@ -33,8 +38,9 @@
 // opens one per window, re-targets it when Ctrl+Shift+M is pressed from another pane, and closes
 // it when the key is pressed while it has the focus.
 //
-// The keys: ←/→ walk the class tabs on priorities, Alt+1…Alt+4 walk these four, and everything
-// else is the hosted widget's own map (the picker's ↑↓, →, enter, alt+↑↓, delete, ctrl+enter,
+// The keys: Alt+1…Alt+4 and ←/→ walk these four tabs — the priorities page has no class tabs left
+// to want the arrows — and everything else is the hosted widget's own map (the picker's ↑↓ across
+// its sections, →, enter, alt+↑↓ inside a section, delete, ctrl+enter into the highlighted section,
 // ctrl+z; the jobs tab's ↑↓, enter, delete).
 //
 // It knows nothing about `Pane`, `RelayWindow` or the worker — every one of those arrives as a
@@ -116,8 +122,8 @@ public:
     QString currentTab() const;
     void setFilter(const QString &text);
     void focusFilter();
-    // The class tab priorities is on. Reading it is how a test says "it opened on the served
-    // pane's mode"; writing it is what the window does when it re-targets.
+    // The class the priorities page's highlight is in. Reading it is how a test says "it opened on
+    // the served pane's mode"; it was the class tab in front until the page became sections.
     QString tier() const;
 
     ModelPicker *picker() const { return m_picker; }
@@ -151,8 +157,8 @@ private:
     QWidget *m_pickerPage = nullptr;
     ModelPicker *m_picker = nullptr;
     JobsTab *m_jobs = nullptr;
-    // The class tab priorities goes back to. It starts as the served pane's mode and then follows
-    // whatever the person last looked at, so available → priorities does not throw the tab away.
+    // The class the priorities page goes back to. It starts as the served pane's mode and then
+    // follows whatever the person last looked at, so available → priorities keeps your place.
     QString m_classTab = QStringLiteral("main");
     QString m_pendingFilter;
     // Whether the picker on screen was built with a "fill from defaults" action. The two buttons

@@ -176,19 +176,24 @@ private Q_SLOTS:
         QCOMPARE(pane.servedTitle(), QStringLiteral("~/src/relay"));
     }
 
-    // "tab = the served pane's mode (tier) on priorities" (design 5.8).
+    // "tab = the served pane's mode (tier) on priorities" (design 5.8) — which, since the page
+    // became one set of sections, is where the **highlight** lands (owner, 2026-09-21: "in a pane,
+    // i dont want separate tabs for the modes. they should just be in divided sections").
     void prioritiesOpensOnTheServedPanesOwnClass() {
+        setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()}});
         setList(QStringLiteral("flash"), {{QStringLiteral("glm-coding|glm-5.3-flash"), QStringLiteral("low")}});
         Served served;
         ModelsPane pane(providerSections());
         pane.setTarget(targetFor(&served, QStringLiteral("flash")));   // the pane is on /flash
         pane.showTab(ModelsPane::prioritiesTab());
         QCOMPARE(pane.tier(), QStringLiteral("flash"));
-        QCOMPARE(rowKeys(pane.picker()->list()), QStringList{QStringLiteral("glm-coding|glm-5.3-flash")});
-        // The class tabs are the picker's second row, and the flat tab is not among them: it is
-        // this pane's own "available".
-        QCOMPARE(tabs(pane.picker()->tabBar()), (QStringList{QStringLiteral("high"), QStringLiteral("main"),
-                                                             QStringLiteral("flash"), QStringLiteral("lite")}));
+        QCOMPARE(pane.picker()->selectedKey(), QStringLiteral("glm-coding|glm-5.3-flash"));
+        // Every class is on the one page — both lists are drawn, main above flash — and there is
+        // no second row of tabs above them.
+        QCOMPARE(rowKeys(pane.picker()->list()), (QStringList{QStringLiteral("glm-coding|glm-5.3"),
+                                                              QStringLiteral("glm-coding|glm-5.3-flash")}));
+        QVERIFY(tabs(pane.picker()->tabBar()).isEmpty());
+        QVERIFY(!pane.picker()->tabBar()->isVisibleTo(pane.picker()));
     }
 
     void availableIsTheFlatTabAndKeepsTheTickColumn() {
@@ -231,14 +236,13 @@ private Q_SLOTS:
         // Ctrl+Tab is left alone wherever it is pressed.
         QTest::keyClick(&pane, Qt::Key_Tab, Qt::ControlModifier);
         QCOMPARE(pane.currentTab(), QStringLiteral("providers"));
-        // ←/→ walk them too, but only where the picker is not using them for its class tabs.
+        // ←/→ walk them too, and they keep walking: the priorities page has no class tabs left to
+        // take the arrows for itself.
         pane.showTab(ModelsPane::availableTab());
         QTest::keyClick(pane.picker()->filter(), Qt::Key_Right);
         QCOMPARE(pane.currentTab(), QStringLiteral("priorities"));
-        QCOMPARE(pane.tier(), QStringLiteral("main"));
-        QTest::keyClick(pane.picker()->filter(), Qt::Key_Right);   // now the class tabs
-        QCOMPARE(pane.currentTab(), QStringLiteral("priorities"));
-        QCOMPARE(pane.tier(), QStringLiteral("flash"));
+        QTest::keyClick(pane.picker()->filter(), Qt::Key_Right);
+        QCOMPARE(pane.currentTab(), ModelsPane::jobsTab());
     }
 
     // "fill from defaults" is two buttons the picker makes in its constructor, so a target that
@@ -313,8 +317,13 @@ private Q_SLOTS:
         pane.setTarget(targetFor(&served));
         pane.showTab(ModelsPane::prioritiesTab());
         QTreeWidget *list = pane.picker()->list();
-        emit list->itemClicked(list->topLevelItem(1), ColModel);
-        list->setCurrentItem(list->topLevelItem(1));
+        QTreeWidgetItem *opus = nullptr;
+        for (int i = 0; i < list->topLevelItemCount() && !opus; ++i)
+            if (list->topLevelItem(i)->data(0, Qt::UserRole).toString() == QStringLiteral("anthropic|claude-opus-5"))
+                opus = list->topLevelItem(i);
+        QVERIFY(opus != nullptr);
+        emit list->itemClicked(opus, ColModel);
+        list->setCurrentItem(opus);
         QCOMPARE(served.uses, 0);
         QCOMPARE(pane.picker()->selectedKey(), QStringLiteral("anthropic|claude-opus-5"));
     }
@@ -371,7 +380,7 @@ private Q_SLOTS:
         pane.showTab(ModelsPane::prioritiesTab());
         QCOMPARE(pane.tier(), QStringLiteral("main"));
         // The same pane again, with a fresh catalog: the class being looked at is kept.
-        pane.picker()->setTier(QStringLiteral("flash"));
+        pane.picker()->focusClass(QStringLiteral("flash"));
         ModelsPane::Target again = targetFor(&first, QStringLiteral("main"), QStringLiteral("pane one"));
         pane.setTarget(again);
         QCOMPARE(pane.tier(), QStringLiteral("flash"));

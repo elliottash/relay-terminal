@@ -53,8 +53,24 @@ constexpr int AddRole = Qt::UserRole + 4;      // "not in this list": ctrl+enter
 constexpr int GroupRole = Qt::UserRole + 5;    // the folded row's group id, for the via choice
 constexpr int AddByIdRole = Qt::UserRole + 6;  // the `all` tab's "+ add a model by id…" row
 constexpr int AvailRole = Qt::UserRole + 7;    // a model row of the `all` tab: its tick is step 2
+constexpr int TierRole = Qt::UserRole + 8;     // the class list this row belongs to
+constexpr int ClassHeadRole = Qt::UserRole + 9;  // a section's own header: its tick is the class switch
 
 const QString kAll = QStringLiteral("all");
+const QString kClasses = QStringLiteral("classes");
+const QString kLite = QStringLiteral("lite");
+const QString kMain = QStringLiteral("main");
+
+// The one line under a class's name on the sectioned page: what running in that class means, so
+// the four headers are not four bare words (owner, 2026-09-21: "a header line … and a one-line
+// note such as 'new panes start on rank 1' for main").
+QString classNote(const QString &tier) {
+    if (tier == QStringLiteral("high")) return QStringLiteral("what /high runs on, and a plan turn");
+    if (tier == kMain) return QStringLiteral("new panes start on rank 1");
+    if (tier == QStringLiteral("flash")) return QStringLiteral("what /flash runs on, and the quick jobs");
+    if (tier == QStringLiteral("local")) return QStringLiteral("the model servers on this machine");
+    return QString();
+}
 
 QString percent(double left) { return left < 0 ? QString() : QStringLiteral("%1%").arg(qRound(left)); }
 
@@ -304,10 +320,8 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QWidget(pare
     connect(m_list, &QTreeWidget::currentItemChanged, this, [this] { onRowChanged(); });
     connect(m_list, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem *item, int column) { onCheckChanged(item, column); });
     connect(m_boxSwitch, &QCheckBox::toggled, this, [this](bool on) {
-        if (m_building || !boxClassTab() || on == curation::boxShown(m_tier)) return;
-        curation::setBoxShown(m_tier, on);
-        refreshBoxChecks();
-        changed();
+        if (m_building || sectionsPage() || !boxClassTier(m_tier)) return;
+        setClassShown(m_tier, on);
     });
     // A click only highlights (owner, 2026-09-20: "don't pick immediately on click … so you can
     // pick effort as well"). Enter, the "use" button or a double click commit the pair. The two
@@ -347,9 +361,11 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QWidget(pare
     setTabOrder(m_list, m_vias);
     setTabOrder(m_vias, m_levels);
     setTabOrder(m_levels, m_favorite);
+    // What it opens on: `classes` (the sectioned priorities page), `all`, or one class alone.
     const QStringList ids = tabIds();
-    m_tier = ids.contains(m_context.tier) ? m_context.tier
-           : ids.contains(QStringLiteral("main")) ? QStringLiteral("main") : ids.value(0, kAll);
+    m_tier = m_context.tier == kClasses ? kClasses
+           : ids.contains(m_context.tier) ? m_context.tier
+           : ids.contains(kMain) ? kMain : ids.value(0, kAll);
     syncTabBar();
     // What the caller asked to be typed (Options › Models' per-provider "models…" link opens the
     // `all` tab filtered to that provider). Set before the first rebuild so the dialog never draws
@@ -386,13 +402,62 @@ QStringList ModelPicker::tabIds() const {
     return ids;
 }
 
-// The tab row this widget draws. Hosted in the models pane the flat tab is the host's own
-// **available** tab (design 5.8), so it is not repeated here and the row holds the five classes;
-// `tabIds()` still lists it, because "all" is a tier this widget can be *put* on.
+// The tab row this widget draws. Since the priorities page became one scrolling page of sections
+// (owner, 2026-09-21) there is nothing left for it to hold when hosted: the flat tab is the host's
+// own **available** tab and the four classes are sections, not tabs. It survives for a caller that
+// puts this widget on one class alone, and `syncTabBar` hides it everywhere else.
 QStringList ModelPicker::tabBarIds() const {
     QStringList ids = tabIds();
-    if (m_hosted) ids.removeAll(kAll);
+    if (m_hosted) ids.clear();
     return ids;
+}
+
+bool ModelPicker::sectionsPage() const { return m_tier == kClasses; }
+
+// high · main · flash, then local where this machine serves one. Never lite: it is not a pane mode,
+// the box has never had a row for it (design 5.3), and its list is the jobs tab's business now.
+QStringList ModelPicker::sectionTiers() const {
+    QStringList out;
+    for (const QString &id : tabIds())
+        if (id != kAll && id != kLite) out << id;
+    return out;
+}
+
+QString ModelPicker::rowTier(const QTreeWidgetItem *row) const {
+    return row ? row->data(0, TierRole).toString() : QString();
+}
+
+QString ModelPicker::editTier() const { return rowTier(currentRow()); }
+
+QString ModelPicker::currentClass() const {
+    const QString tier = editTier();
+    if (!tier.isEmpty()) return tier;
+    if (!sectionsPage()) return m_tier == kAll ? QString() : m_tier;
+    // The highlight is on no row of a class — an empty section, or nothing ranked yet. The class
+    // the page was last pointed at is still where it is; the first section answers before anything
+    // has pointed it anywhere.
+    const QStringList sections = sectionTiers();
+    return sections.contains(m_focusClass) ? m_focusClass : sections.value(0);
+}
+
+void ModelPicker::focusClass(const QString &tier) {
+    if (!sectionsPage() || tier.isEmpty() || !sectionTiers().contains(tier)) return;
+    m_focusClass = tier;
+    // The pane's own model where this section holds it — the row you are most likely to want —
+    // then rank 1, and failing both the section's own header, so an empty class is still scrolled
+    // to and still says which class the page is on.
+    for (int pass = 0; pass < 3; ++pass)
+        for (int i = 0; i < m_list->topLevelItemCount(); ++i) {
+            QTreeWidgetItem *item = m_list->topLevelItem(i);
+            if (rowTier(item) != tier) continue;
+            const bool header = item->data(0, ClassHeadRole).toBool();
+            if (pass < 2 && (header || item->data(0, SectionRole).toBool())) continue;
+            if (pass == 0 && item->data(0, KeyRole).toString() != m_context.currentKey) continue;
+            if (pass == 2 && !header) continue;
+            m_list->setCurrentItem(item);
+            m_list->scrollToItem(item);
+            return;
+        }
 }
 
 void ModelPicker::populateTabs() {
@@ -416,9 +481,11 @@ void ModelPicker::setCatalog(const Catalog &catalog, const QString &currentKey,
     const QString selected = selectedKey();
     rebuild();
     // Whatever was highlighted, if the fresh catalog still has it; otherwise the pane's own model,
-    // which is what a first draw would have selected.
+    // which is what a first draw would have selected. `rebuild()` has already put the highlight on
+    // the class this page was pointed at, so a highlight sitting on a section's own header — an
+    // empty class — is an answer and not a miss.
     if (!selected.isEmpty()) selectKey(selected);
-    if (selectedKey().isEmpty() && !currentKey.isEmpty()) selectKey(currentKey);
+    if (selectedKey().isEmpty() && !m_list->currentItem() && !currentKey.isEmpty()) selectKey(currentKey);
     if (!m_list->currentItem()) selectFirstRow();
 }
 
@@ -443,9 +510,10 @@ void ModelPicker::setHosted(bool hosted) {
 }
 
 void ModelPicker::syncTabBar() {
-    // Hosted and on the flat tab, the row would be five classes none of which is in front: the
-    // host's own tab row is saying where you are, so this one steps aside.
-    m_tabs->setVisible(m_tabs->count() > 0 && !(m_hosted && m_tier == kAll));
+    // The sectioned page and the flat tab both draw their own headings; a row of class tabs above
+    // either would be a second answer to "where am I" (owner, 2026-09-21: "in a pane, i dont want
+    // separate tabs for the modes").
+    m_tabs->setVisible(m_tabs->count() > 0 && !sectionsPage() && !(m_hosted && m_tier == kAll));
     for (int i = 0; i < m_tabs->count(); ++i)
         if (m_tabs->tabData(i).toString() == m_tier) {
             if (m_tabs->currentIndex() != i) { QSignalBlocker block(m_tabs); m_tabs->setCurrentIndex(i); }
@@ -454,7 +522,7 @@ void ModelPicker::syncTabBar() {
 }
 
 void ModelPicker::setTier(const QString &tier) {
-    if (tier == m_tier || !tabIds().contains(tier)) return;
+    if (tier == m_tier || !(tier == kClasses || tabIds().contains(tier))) return;
     m_tier = tier;
     syncTabBar();
     m_filter->clear();
@@ -472,16 +540,43 @@ void ModelPicker::stepTab(int delta) {
 
 // ----- drawing -----------------------------------------------------------------------------------
 
-void ModelPicker::addSection(const QString &title) {
+void ModelPicker::addSection(const QString &title, const QString &tier) {
     // The title goes in column 0 because that is the column a spanned row draws.
     auto *item = new QTreeWidgetItem(m_list, QStringList{title});
     item->setData(0, SectionRole, true);
+    if (!tier.isEmpty()) item->setData(0, TierRole, tier);
     item->setFlags(Qt::ItemIsEnabled);   // not selectable, not a drop target
     item->setFirstColumnSpanned(true);
     QFont font = item->font(0);
     font.setBold(true);
     item->setFont(0, font);
     item->setForeground(0, palette().color(QPalette::Disabled, QPalette::Text));
+}
+
+// A class's own header on the sectioned page. It is **not** a spanned row, because it carries a
+// control: the tick in the "in box" column is that class's "show this class in the box" switch
+// (design 5.3), sitting directly above the cutoff ticks it governs — one column, one question,
+// read down. The class and its note go in the model column, which is the one that stretches.
+QTreeWidgetItem *ModelPicker::addClassHeader(const QString &tier) {
+    const QString note = classNote(tier);
+    auto *item = new QTreeWidgetItem(m_list, QStringList{
+        QString(), QString(), QString(),
+        note.isEmpty() ? tier : tier + QStringLiteral("   · ") + note});
+    item->setData(0, SectionRole, true);        // not a model: never selected, never used, never moved
+    item->setData(0, ClassHeadRole, true);
+    item->setData(0, TierRole, tier);
+    item->setFlags(Qt::ItemIsEnabled | (boxClassTier(tier) ? Qt::ItemIsUserCheckable : Qt::NoItemFlags));
+    if (boxClassTier(tier))
+        item->setCheckState(ColBox, curation::boxShown(tier) ? Qt::Checked : Qt::Unchecked);
+    QFont font = item->font(ColModel);
+    font.setBold(true);
+    item->setFont(ColModel, font);
+    const QString tip = boxClassTier(tier)
+        ? QStringLiteral("%1 · %2. The tick is whether alt+m shows this class at all; the ticks below it "
+                         "say how far down").arg(tier, note)
+        : QStringLiteral("%1 · %2").arg(tier, note);
+    for (int c = 0; c < ColCount; ++c) item->setToolTip(c, tip);
+    return item;
 }
 
 QString ModelPicker::effectiveEffort(const Entry &entry) const {
@@ -496,7 +591,8 @@ QString ModelPicker::effectiveEffort(const Entry &entry) const {
     return entry.efforts.last();
 }
 
-QTreeWidgetItem *ModelPicker::addListRow(int rank, const curation::TierEntry &item, const Entry *entry) {
+QTreeWidgetItem *ModelPicker::addListRow(const QString &tier, int rank, const curation::TierEntry &item,
+                                         const Entry *entry) {
     const qint64 now = nowSeconds();
     const qint64 until = entry ? exhaustedUntil(m_context.catalog, entry->preset, now) : -1;
     // Unusable and exhausted rows are greyed *in place*, with the reason where the figure goes —
@@ -505,7 +601,7 @@ QTreeWidgetItem *ModelPicker::addListRow(int rank, const curation::TierEntry &it
     const bool dead = !entry || !entry->usable || until >= 0;
     QString name = entry ? entry->name : item.key;
     if (curation::isFavorite(item.key)) name.prepend(QStringLiteral("★ "));
-    if (rank == 1 && m_tier == QStringLiteral("main")) name += QStringLiteral("   · new panes start here");
+    if (rank == 1 && tier == kMain) name += QStringLiteral("   · new panes start here");
     QString left;
     if (!entry) left = QStringLiteral("unavailable");
     else if (!entry->usable) left = QStringLiteral("no key");
@@ -521,21 +617,23 @@ QTreeWidgetItem *ModelPicker::addListRow(int rank, const curation::TierEntry &it
         speed > 0 ? QString::number(qRound(speed)) : QString(), left});
     row->setData(0, KeyRole, item.key);
     row->setData(0, ListedRole, true);
+    row->setData(0, TierRole, tier);
     row->setData(0, ViaRole, QStringList{item.key});
     row->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled
-                  | (boxClassTab() ? Qt::ItemIsUserCheckable : Qt::NoItemFlags));
+                  | (boxClassTier(tier) ? Qt::ItemIsUserCheckable : Qt::NoItemFlags));
     // The cutoff, as a column of checkboxes: rank 1..cutoff checked, the rest not, and clicking
     // one moves the cutoff to it (design 5.3, `setBoxCutoffFromRow`).
-    if (boxClassTab())
-        row->setCheckState(ColBox, curation::boxShown(m_tier) && rank <= curation::boxCutoff(m_tier)
+    if (boxClassTier(tier))
+        row->setCheckState(ColBox, curation::boxShown(tier) && rank <= curation::boxCutoff(tier)
                                        ? Qt::Checked : Qt::Unchecked);
     row->setToolTip(0, !entry ? QStringLiteral("%1 is not in the catalog right now: its provider has no key, or it left the listing")
                                     .arg(item.key)
                    : !entry->usable ? QStringLiteral("No key for %1 · skipped until you add one").arg(entry->provider)
                    : until >= 0 ? QStringLiteral("Exhausted · skipped until it resets")
-                   : rank == 1 && m_tier == QStringLiteral("main")
+                   : rank == 1 && tier == kMain
                        ? QStringLiteral("%1 · rank 1 of main: what a new pane and /swap run on").arg(entry->model)
-                       : QStringLiteral("%1 · fallback %2 of the %3 list").arg(entry->model).arg(rank - 1).arg(m_tier));
+                       : rank == 1 ? QStringLiteral("%1 · rank 1 of the %2 list").arg(entry->model, tier)
+                       : QStringLiteral("%1 · fallback %2 of the %3 list").arg(entry->model).arg(rank - 1).arg(tier));
     for (int c = 0; c < ColCount; ++c) row->setToolTip(c, row->toolTip(0));
     row->setTextAlignment(ColRank, Qt::AlignRight | Qt::AlignVCenter);
     for (int c = ColReasoning; c < ColCount; ++c) row->setTextAlignment(c, Qt::AlignRight | Qt::AlignVCenter);
@@ -550,7 +648,7 @@ QTreeWidgetItem *ModelPicker::addListRow(int rank, const curation::TierEntry &it
     return row;
 }
 
-QTreeWidgetItem *ModelPicker::addGroupRow(const Group &group, bool addable) {
+QTreeWidgetItem *ModelPicker::addGroupRow(const Group &group, bool addable, const QString &tier) {
     const qint64 now = nowSeconds();
     Entry entry = group.preferred(m_context.catalog, now);
     QStringList vias;
@@ -578,6 +676,7 @@ QTreeWidgetItem *ModelPicker::addGroupRow(const Group &group, bool addable) {
     row->setData(0, KeyRole, entry.key);
     row->setData(0, ViaRole, vias);
     row->setData(0, GroupRole, groupId(group));
+    if (!tier.isEmpty()) row->setData(0, TierRole, tier);
     if (addable) row->setData(0, AddRole, true);
     row->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
     QStringList others;
@@ -585,7 +684,7 @@ QTreeWidgetItem *ModelPicker::addGroupRow(const Group &group, bool addable) {
     row->setToolTip(0, entry.model + (entry.custom ? QStringLiteral(" (added by you)") : QString())
                     + (others.isEmpty() ? QString() : QStringLiteral(" · also on ") + others.join(QStringLiteral(", ")) + QStringLiteral(" (→ chooses)"))
                     + (group.spent(m_context.catalog, now) ? QStringLiteral(" · every provider of it is spent") : QString())
-                    + (addable ? QStringLiteral(" · ctrl+enter adds it to the %1 list").arg(m_tier) : QString()));
+                    + (addable ? QStringLiteral(" · ctrl+enter adds it to the %1 list").arg(tier) : QString()));
     for (int c = 0; c < ColCount; ++c) row->setToolTip(c, row->toolTip(0));
     row->setTextAlignment(ColRank, Qt::AlignRight | Qt::AlignVCenter);
     for (int c = ColReasoning; c < ColCount; ++c) row->setTextAlignment(c, Qt::AlignRight | Qt::AlignVCenter);
@@ -615,8 +714,24 @@ QTreeWidgetItem *ModelPicker::addGroupRow(const Group &group, bool addable) {
     return row;
 }
 
-void ModelPicker::buildTier(const QString &query) {
-    const QList<curation::TierEntry> list = curation::tierList(m_tier);
+// The priorities page: every class, one under the other, in the order the box draws them (owner,
+// 2026-09-21: "in a pane, i dont want separate tabs for the modes. they should just be in divided
+// sections. remove the lite section"). A section header is a class and its rows are that class's
+// list, so the four lists are one page you scroll rather than four tabs you have to know to visit.
+void ModelPicker::buildSections(const QString &query) {
+    for (const QString &tier : sectionTiers()) {
+        addClassHeader(tier);
+        buildTier(tier, query);
+    }
+}
+
+// One class's rows: its list in order, then — while something is typed — what it does not list.
+// Both halves are drawn **per section**, so "the section the highlight is in" is the list ctrl+enter
+// adds to and there is no fourth place with a rule of its own to remember (owner, 2026-09-21:
+// "ctrl+enter adds the typed model to the section the highlight is in"). A model addable to three
+// classes therefore appears under all three, which is the true answer to "where can I put this".
+void ModelPicker::buildTier(const QString &tier, const QString &query) {
+    const QList<curation::TierEntry> list = curation::tierList(tier);
     QStringList inList;
     for (const curation::TierEntry &item : list) inList << item.key;
     int rank = 0, drawn = 0;
@@ -624,13 +739,16 @@ void ModelPicker::buildTier(const QString &query) {
         ++rank;
         const Entry *entry = m_context.catalog.find(item.key);
         if (!query.isEmpty() && !(entry ? matches(*entry, query) : item.key.contains(query, Qt::CaseInsensitive))) continue;
-        addListRow(rank, item, entry);
+        addListRow(tier, rank, item, entry);
         ++drawn;
     }
     if (query.isEmpty()) {
-        addSection(list.isEmpty()
-                       ? QStringLiteral("this list is empty — type a model's name, then ctrl+enter adds it")
-                       : QStringLiteral("type a model's name to add it to this list"));
+        // One hint, and only where it is the answer: an empty list says how to fill it. The
+        // sectioned page would otherwise carry four copies of a line the footer already says.
+        if (list.isEmpty())
+            addSection(QStringLiteral("nothing in %1 — type a model's name, then ctrl+enter adds it here").arg(tier), tier);
+        else if (!sectionsPage())
+            addSection(QStringLiteral("type a model's name to add it to this list"), tier);
         return;
     }
     // Typing searches every model, not only this list: the rows of this list that match come
@@ -642,20 +760,23 @@ void ModelPicker::buildTier(const QString &query) {
     for (const Entry &entry : shown(m_context.catalog)) listed << entry.key;
     QList<Entry> rest, tail;
     for (const Entry &entry : allUsable(m_context.catalog)) {
-        if (inList.contains(entry.key) || !addableToTier(entry, m_tier) || !matches(entry, query)) continue;
+        if (inList.contains(entry.key) || !addableToTier(entry, tier) || !matches(entry, query)) continue;
         (listed.contains(entry.key) ? rest : tail) << entry;
     }
     if (rest.isEmpty() && tail.isEmpty()) {
-        if (drawn == 0) addSection(QStringLiteral("no model matches “%1”").arg(query));
+        if (drawn == 0)
+            addSection(sectionsPage() ? QStringLiteral("nothing in %1 matches “%2”").arg(tier, query)
+                                      : QStringLiteral("no model matches “%1”").arg(query), tier);
         return;
     }
     if (!rest.isEmpty()) {
-        addSection(QStringLiteral("not in this list"));
-        for (const Group &group : grouped(m_context.catalog, rest, nowSeconds())) addGroupRow(group, true);
+        addSection(sectionsPage() ? QStringLiteral("not in %1 — ctrl+enter adds it here").arg(tier)
+                                  : QStringLiteral("not in this list"), tier);
+        for (const Group &group : grouped(m_context.catalog, rest, nowSeconds())) addGroupRow(group, true, tier);
     }
     if (!tail.isEmpty()) {
-        addSection(tailRule(tail));
-        for (const Group &group : grouped(m_context.catalog, tail, nowSeconds())) addGroupRow(group, true);
+        addSection(tailRule(tail), tier);
+        for (const Group &group : grouped(m_context.catalog, tail, nowSeconds())) addGroupRow(group, true, tier);
     }
 }
 
@@ -816,29 +937,39 @@ void ModelPicker::promptAddModelById() {
     addModelById(provider->currentData().toString(), id->text());
 }
 
-bool ModelPicker::boxClassTab() const {
-    return m_tier != kAll && curation::boxClasses().contains(m_tier);
+bool ModelPicker::boxClassTier(const QString &tier) const {
+    return !tier.isEmpty() && tier != kAll && tier != kClasses && curation::boxClasses().contains(tier);
 }
 
 void ModelPicker::syncClassSwitch() {
     if (!m_boxSwitch) return;
-    m_boxSwitch->setVisible(boxClassTab());
+    // On the sectioned page every class carries its own switch on its own header, where it sits
+    // over the cutoff ticks it governs; one control beside the filter could only mean one class.
+    const bool single = !sectionsPage() && boxClassTier(m_tier);
+    m_boxSwitch->setVisible(single);
     const QSignalBlocker block(m_boxSwitch);
-    m_boxSwitch->setChecked(!boxClassTab() || curation::boxShown(m_tier));
+    m_boxSwitch->setChecked(!single || curation::boxShown(m_tier));
 }
 
-void ModelPicker::setBoxCutoffFromRow(int rank, bool on) {
-    if (!boxClassTab() || rank < 1) return;
+void ModelPicker::setClassShown(const QString &tier, bool on) {
+    if (!boxClassTier(tier) || on == curation::boxShown(tier)) return;
+    curation::setBoxShown(tier, on);
+    refreshBoxChecks();
+    changed();
+}
+
+void ModelPicker::setBoxCutoffFromRow(const QString &tier, int rank, bool on) {
+    if (!boxClassTier(tier) || rank < 1) return;
     // Checking rank n checks 1..n; unchecking n unchecks n and everything below it. Unchecking
     // rank 1 leaves nothing to show, which is the class switched off — the same statement said
     // from the other control, so the two can never disagree.
     if (on) {
-        curation::setBoxCutoff(m_tier, rank);
-        curation::setBoxShown(m_tier, true);
+        curation::setBoxCutoff(tier, rank);
+        curation::setBoxShown(tier, true);
     } else if (rank == 1) {
-        curation::setBoxShown(m_tier, false);
+        curation::setBoxShown(tier, false);
     } else {
-        curation::setBoxCutoff(m_tier, rank - 1);
+        curation::setBoxCutoff(tier, rank - 1);
     }
     // The ticks are moved in place rather than by a rebuild: this runs inside the itemChanged of
     // the row that was clicked, and clearing the list under it deletes the item mid-signal.
@@ -852,10 +983,16 @@ void ModelPicker::refreshBoxChecks() {
     m_building = true;   // our own setCheckState calls are not clicks
     for (int i = 0; i < m_list->topLevelItemCount(); ++i) {
         QTreeWidgetItem *row = m_list->topLevelItem(i);
+        const QString tier = rowTier(row);
+        if (row->data(0, ClassHeadRole).toBool()) {
+            if (boxClassTier(tier))
+                row->setCheckState(ColBox, curation::boxShown(tier) ? Qt::Checked : Qt::Unchecked);
+            continue;
+        }
         if (!row->data(0, ListedRole).toBool()) continue;
         const int rank = row->text(ColRank).toInt();
-        row->setCheckState(ColBox, boxClassTab() && curation::boxShown(m_tier)
-                                           && rank >= 1 && rank <= curation::boxCutoff(m_tier)
+        row->setCheckState(ColBox, boxClassTier(tier) && curation::boxShown(tier)
+                                           && rank >= 1 && rank <= curation::boxCutoff(tier)
                                        ? Qt::Checked : Qt::Unchecked);
     }
     m_building = wasBuilding;
@@ -868,9 +1005,15 @@ void ModelPicker::onCheckChanged(QTreeWidgetItem *item, int column) {
         setRowAvailable(item->data(0, KeyRole).toString(), item->checkState(ColAvail) == Qt::Checked);
         return;
     }
-    if (column != ColBox || !boxClassTab()) return;
+    if (column != ColBox) return;
+    const QString tier = rowTier(item);
+    // A section's own header: the tick is that class's switch, not a rank.
+    if (item->data(0, ClassHeadRole).toBool()) {
+        setClassShown(tier, item->checkState(ColBox) == Qt::Checked);
+        return;
+    }
     if (!item->data(0, ListedRole).toBool()) return;
-    setBoxCutoffFromRow(item->text(ColRank).toInt(), item->checkState(ColBox) == Qt::Checked);
+    setBoxCutoffFromRow(tier, item->text(ColRank).toInt(), item->checkState(ColBox) == Qt::Checked);
 }
 
 // ----- step 2: available (owner, 2026-09-21; design 5.7) --------------------------------------
@@ -946,7 +1089,7 @@ void ModelPicker::rebuild() {
     m_sortLabel->setVisible(all);
     m_sort->setVisible(all);
     syncClassSwitch();
-    m_list->setColumnHidden(ColBox, !boxClassTab());
+    m_list->setColumnHidden(ColBox, !(sectionsPage() || boxClassTier(m_tier)));
     // Step 2 is edited in one place: the `all` tab. A tier tab is step 3 and the box column is
     // step 4, and three checkbox columns on one row would say nothing.
     m_list->setColumnHidden(ColAvail, !availabilityTab());
@@ -958,17 +1101,44 @@ void ModelPicker::rebuild() {
     // run that showed it). "left" stays: it is where an exhausted row says why it is greyed.
     m_list->setColumnHidden(ColIntelligence, m_hosted);
     m_list->setColumnHidden(ColSpeed, m_hosted);
-    // Dragging is how a list is reordered; on the flat tab there is no order to write down.
+    // Dragging is how a list is reordered; on the flat tab there is no order to write down. On the
+    // sectioned page a drag that crosses a header changes no list — `commitDragOrder` reads each
+    // section's rows back and a section whose count has changed is not an order to store.
     m_list->setDragDropMode(all ? QAbstractItemView::NoDragDrop : QAbstractItemView::InternalMove);
-    if (all) buildAll(query); else buildTier(query);
+    if (all) buildAll(query);
+    else if (sectionsPage()) buildSections(query);
+    else buildTier(m_tier, query);
     m_building = false;
     if (!keep.isEmpty()) selectKey(keep);
-    // A tab that does not hold the row you were on opens on the pane's own model where it has it —
-    // the one row you are most likely to want — and on rank 1 otherwise.
-    if (!currentRow()) selectKey(m_context.currentKey);
-    if (!currentRow()) selectFirstRow();
+    // A page that does not hold the row you were on comes back to the **class** it was pointed at —
+    // on the pane's own model where that class holds it, which is what `focusClass` prefers — then
+    // to the pane's model anywhere, then to rank 1. The class comes first because a model can be in
+    // three lists at once: without it a re-read of the flash section landed on the same model's row
+    // in high, and the page changed class under the person every time a fresh catalog arrived.
+    if (sectionsPage() && !currentRow() && !m_focusClass.isEmpty()) focusClass(m_focusClass);
+    if (!currentRow() && !m_list->currentItem()) selectKey(m_context.currentKey);
+    if (!currentRow() && !m_list->currentItem()) selectFirstRow();
     updateFooter();
     onRowChanged();
+}
+
+// ↑/↓ over the **rows**, stepping over the section headers. Qt's own cursor movement makes the
+// current item whatever is next, header or not, and a header is `currentRow() == nullptr` — so on
+// the sectioned page, where a header sits between every two classes, Down out of the last high row
+// used to land on nothing at all and the level list emptied. It is the one key that has to cross a
+// section, which is what the owner asked of it: "↑/↓ move across sections".
+void ModelPicker::stepRow(int delta) {
+    const int count = m_list->topLevelItemCount();
+    if (count == 0 || delta == 0) return;
+    const int at = m_list->indexOfTopLevelItem(m_list->currentItem());
+    if (at < 0) { selectFirstRow(); return; }
+    for (int i = at + delta; i >= 0 && i < count; i += delta) {
+        QTreeWidgetItem *item = m_list->topLevelItem(i);
+        if (item->data(0, SectionRole).toBool()) continue;
+        m_list->setCurrentItem(item);
+        m_list->scrollToItem(item);
+        return;
+    }
 }
 
 void ModelPicker::selectFirstRow() {
@@ -1044,10 +1214,11 @@ void ModelPicker::onRowChanged() {
         // On a row that is in this tab's list, the level list is the level the *entry carries in
         // the list* (TierEntry::effort), "default" included — picking one writes it there. On the
         // flat tab it is the level this pick would run at and nothing more.
-        const bool listed = row && row->data(0, ListedRole).toBool() && m_tier != kAll;
+        const QString tier = rowTier(row);
+        const bool listed = row && row->data(0, ListedRole).toBool() && !tier.isEmpty();
         QString stored;
         if (listed) {
-            for (const curation::TierEntry &item : curation::tierList(m_tier))
+            for (const curation::TierEntry &item : curation::tierList(tier))
                 if (item.key == key) stored = item.effort;
             auto *fallback = new QListWidgetItem(QStringLiteral("default"), m_levels);
             fallback->setData(Qt::UserRole, QString());
@@ -1103,35 +1274,37 @@ void ModelPicker::onViaChanged() {
 void ModelPicker::onLevelChanged() {
     if (m_filling) return;
     QTreeWidgetItem *row = currentRow();
-    if (!row || m_tier == kAll || !row->data(0, ListedRole).toBool()) return;
+    const QString tier = rowTier(row);
+    if (!row || tier.isEmpty() || !row->data(0, ListedRole).toBool()) return;
     const QString key = row->data(0, KeyRole).toString();
     const QString level = selectedEffort();
     bool moved = false;
-    for (const curation::TierEntry &item : curation::tierList(m_tier))
+    for (const curation::TierEntry &item : curation::tierList(tier))
         if (item.key == key) moved = moved || item.effort != level;
     if (!moved) return;   // nothing changed, or the key is no longer in the list
-    pushUndo(m_tier);
-    curation::setTierEffort(m_tier, key, level);
+    pushUndo(tier);
+    curation::setTierEffort(tier, key, level);
     // The word the list now holds is the provider's own, so it is what the column prints.
     row->setText(ColReasoning, level.isEmpty() ? QStringLiteral("default") : level);
     changed();
 }
 
 void ModelPicker::updateFooter() {
-    // Hosted on the flat tab the class row is hidden, so ←→ has no tab of this widget's to walk:
-    // it is the host's three tabs the arrows belong to then, and the footer says so.
-    const QString tabs = !m_hosted                ? QStringLiteral("←→ tab · ")
-                       : m_tier == kAll           ? QStringLiteral("←→ alt+1/2/3 tab · ")
-                                                  : QStringLiteral("←→ class · alt+1/2/3 tab · ");
+    // Hosted, this widget draws no tab row of its own: the host's tabs are ←→ and alt+1…, and the
+    // priorities page has sections rather than class tabs, so ←→ belong to the host everywhere.
+    const QString tabs = m_hosted ? QStringLiteral("←→ alt+1… tab · ") : QStringLiteral("←→ tab · ");
     QString text = m_tier == kAll
         ? tabs + QStringLiteral("↑↓ row · enter uses it in the pane · type to search every model, openrouter's "
                                 "long tail included · tab, then → : the providers of a folded row, and the levels · "
                                 "“available” is what the lists, the alt+m box and its filter may offer — un-tick one "
                                 "to take it out everywhere, tick a row under “more from…” to bring one in")
-        : tabs + QStringLiteral("↑↓ row · enter uses it in the pane · alt+↑↓ moves it · del removes it · type a name, "
-                                "ctrl+enter adds it · ctrl+z undoes")
-              + (boxClassTab() ? QStringLiteral(" · “in box” is a cutoff: alt+m shows this class down to the last one ticked")
-                               : QString());
+        : tabs + QStringLiteral("↑↓ row, across the sections · enter uses it in the pane · alt+↑↓ moves it inside its "
+                                "section · del removes it · type a name, ctrl+enter adds it to the section the "
+                                "highlight is in · ctrl+z undoes")
+              + (sectionsPage() || boxClassTier(m_tier)
+                     ? QStringLiteral(" · “in box” is a cutoff: alt+m shows a class down to the last one ticked, and "
+                                      "the tick on a section's own line is whether it shows that class at all")
+                     : QString());
     if (onEscape) text += QStringLiteral(" · esc back to the pane");
     m_footer->setText(text);
 }
@@ -1147,18 +1320,25 @@ void ModelPicker::changed() {
     if (onListsChanged) onListsChanged();
 }
 
+// Each of the four edits reads the **row's** class rather than a tab: on the sectioned page four
+// lists are on screen at once, so which list a key acts on is a property of the row under the
+// highlight (`editTier`). On a single-class page that is the page's own class, unchanged.
+
 void ModelPicker::moveSelected(int delta) {
     QTreeWidgetItem *row = currentRow();
-    if (!row || m_tier == kAll || !row->data(0, ListedRole).toBool() || delta == 0) return;
+    const QString tier = rowTier(row);
+    if (!row || tier.isEmpty() || !row->data(0, ListedRole).toBool() || delta == 0) return;
     const QString key = row->data(0, KeyRole).toString();
-    QList<curation::TierEntry> list = curation::tierList(m_tier);
+    QList<curation::TierEntry> list = curation::tierList(tier);
     int at = -1;
     for (int i = 0; i < list.size(); ++i) if (list.at(i).key == key) at = i;
     const int to = at + delta;
+    // Clamped inside its own section: alt+↓ on the last rank of flash does not push the model into
+    // the next class, which would be a second edit nobody asked for.
     if (at < 0 || to < 0 || to >= list.size()) return;
-    pushUndo(m_tier);
+    pushUndo(tier);
     list.move(at, to);
-    curation::setTierList(m_tier, list);
+    curation::setTierList(tier, list);
     rebuild();
     selectKey(key);
     changed();
@@ -1166,12 +1346,13 @@ void ModelPicker::moveSelected(int delta) {
 
 void ModelPicker::removeSelected() {
     QTreeWidgetItem *row = currentRow();
-    if (!row || m_tier == kAll || !row->data(0, ListedRole).toBool()) return;
+    const QString tier = rowTier(row);
+    if (!row || tier.isEmpty() || !row->data(0, ListedRole).toBool()) return;
     const QString key = row->data(0, KeyRole).toString();
     // No confirmation (owner, design 5.2: "Delete takes it out of the list") — ctrl+z is the
     // answer to a wrong one, and the footer says so.
-    pushUndo(m_tier);
-    curation::removeFromTier(m_tier, key);
+    pushUndo(tier);
+    curation::removeFromTier(tier, key);
     const int at = m_list->indexOfTopLevelItem(row);
     rebuild();
     if (!m_list->currentItem() || selectedKey().isEmpty()) {
@@ -1183,15 +1364,16 @@ void ModelPicker::removeSelected() {
 
 void ModelPicker::addSelected() {
     QTreeWidgetItem *row = currentRow();
-    if (!row || m_tier == kAll || row->data(0, ListedRole).toBool()) return;
+    const QString tier = rowTier(row);
+    if (!row || tier.isEmpty() || row->data(0, ListedRole).toBool()) return;
     const QString key = row->data(0, KeyRole).toString();
     const Entry *entry = m_context.catalog.find(key);
-    if (!entry || !addableToTier(*entry, m_tier)) return;
-    pushUndo(m_tier);
+    if (!entry || !addableToTier(*entry, tier)) return;
+    pushUndo(tier);
     // The level a model starts at *in this list*, the same rule Options › Models' "+ add a
     // model…" uses (card #TKN7): main the provider's own default, high the level a plan turn
     // takes, flash and lite the lowest.
-    curation::addToTier(m_tier, key, tierStartEffort(*entry, m_tier));
+    curation::addToTier(tier, key, tierStartEffort(*entry, tier));
     m_filter->clear();   // the row is in the list now; clearing shows it where it landed
     rebuild();
     selectKey(key);
@@ -1202,31 +1384,50 @@ void ModelPicker::undo() {
     if (m_undo.isEmpty()) return;
     const UndoStep step = m_undo.takeLast();
     curation::setTierList(step.tier, step.list);
-    if (step.tier != m_tier && tabIds().contains(step.tier)) { m_tier = step.tier; syncTabBar(); }
+    // On the sectioned page every class is already on screen, so there is nowhere to go; on a
+    // single-class page the undone list is brought in front, or its edit would be invisible.
+    if (!sectionsPage() && step.tier != m_tier && tabIds().contains(step.tier)) { m_tier = step.tier; syncTabBar(); }
     rebuild();
     changed();
 }
 
 void ModelPicker::commitDragOrder() {
     if (m_tier == kAll) return;
-    const QList<curation::TierEntry> before = curation::tierList(m_tier);
-    QHash<QString, QString> efforts;
-    for (const curation::TierEntry &item : before) efforts.insert(item.key, item.effort);
-    QList<curation::TierEntry> after;
+    // The rows as they now read, split by the section each one is in. A drag that crossed a header
+    // changes two sections' counts, and a section whose count is not its list's length is not an
+    // order to store — the same rule a filtered view has always had.
+    QStringList order;
+    QHash<QString, QList<QString>> rows;
     for (int i = 0; i < m_list->topLevelItemCount(); ++i) {
         QTreeWidgetItem *item = m_list->topLevelItem(i);
         if (item->data(0, SectionRole).toBool() || !item->data(0, ListedRole).toBool()) continue;
-        const QString key = item->data(0, KeyRole).toString();
-        if (!efforts.contains(key)) continue;
-        after << curation::TierEntry{key, efforts.value(key)};
+        const QString tier = rowTier(item);
+        if (tier.isEmpty()) continue;
+        if (!order.contains(tier)) order << tier;
+        rows[tier] << item->data(0, KeyRole).toString();
     }
-    if (after.size() != before.size()) { rebuild(); return; }   // a filtered view: not an order to store
-    bool moved = false;
-    for (int i = 0; i < after.size(); ++i) moved = moved || after.at(i).key != before.at(i).key;
-    if (!moved) return;
+    bool redraw = false, anyMoved = false;
+    for (const QString &tier : std::as_const(order)) {
+        const QList<curation::TierEntry> before = curation::tierList(tier);
+        const QStringList keys = rows.value(tier);
+        if (keys.size() != before.size()) { redraw = true; continue; }
+        QHash<QString, QString> efforts;
+        for (const curation::TierEntry &item : before) efforts.insert(item.key, item.effort);
+        QList<curation::TierEntry> after;
+        for (const QString &key : keys) {
+            if (!efforts.contains(key)) { after.clear(); break; }
+            after << curation::TierEntry{key, efforts.value(key)};
+        }
+        if (after.size() != before.size()) { redraw = true; continue; }
+        bool moved = false;
+        for (int i = 0; i < after.size(); ++i) moved = moved || after.at(i).key != before.at(i).key;
+        if (!moved) continue;
+        pushUndo(tier);
+        curation::setTierList(tier, after);
+        anyMoved = true;
+    }
+    if (!anyMoved) { if (redraw) rebuild(); return; }
     const QString key = selectedKey();
-    pushUndo(m_tier);
-    curation::setTierList(m_tier, after);
     rebuild();
     selectKey(key);
     changed();
@@ -1282,13 +1483,18 @@ bool ModelPicker::eventFilter(QObject *watched, QEvent *event) {
             // text and the caret is somewhere inside it, when they are a caret's arrows again.
             // Hosted on the flat tab this widget's class row is hidden, so ←/→ have no tab of
             // its own to walk: they fall through to the host's three (src/ModelsPane.cpp).
-            const bool ownTabs = !(m_hosted && m_tier == kAll);
+            // Hosted, this widget has no tab row at all any more: ←/→ are the host's three tabs.
+            const bool ownTabs = !m_hosted && !sectionsPage();
             if (ownTabs && key->key() == Qt::Key_Left && (m_filter->text().isEmpty() || m_filter->cursorPosition() == 0)) { stepTab(-1); return true; }
             if (ownTabs && key->key() == Qt::Key_Right && (m_filter->text().isEmpty() || m_filter->cursorPosition() == m_filter->text().size())) { stepTab(1); return true; }
         }
         if (watched == m_list) {
             // The view swallows Enter (it emits activated), so the default button never sees it.
             if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) { use(); return true; }
+            if (!key->modifiers() && (key->key() == Qt::Key_Up || key->key() == Qt::Key_Down)) {
+                stepRow(key->key() == Qt::Key_Down ? 1 : -1);
+                return true;
+            }
             if (key->key() == Qt::Key_Right) {                                   // → the providers, then the levels
                 if (m_vias->isVisible() && m_vias->count()) { m_vias->setFocus(); return true; }
                 if (m_levels->count()) { m_levels->setFocus(); return true; }

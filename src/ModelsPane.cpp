@@ -54,7 +54,7 @@ ModelsPane::ModelsPane(std::function<QList<SettingsSection>()> sections, QWidget
     }
     m_tabs->setTabToolTip(0, QStringLiteral("Step 1 — the providers this machine can reach, and their keys"));
     m_tabs->setTabToolTip(1, QStringLiteral("Step 2 — which models exist for the lists, the box and its filter"));
-    m_tabs->setTabToolTip(2, QStringLiteral("Steps 3 and 4 — the five class lists, their order, levels and box cutoffs"));
+    m_tabs->setTabToolTip(2, QStringLiteral("Steps 3 and 4 — one section per class: its order, levels and box cutoffs"));
     m_tabs->setTabToolTip(3, QStringLiteral("What each job relay does runs on right now, and a model of its own for one"));
     layout->addWidget(m_tabs);
 
@@ -175,7 +175,10 @@ void ModelsPane::setTarget(const Target &target) {
     } else {
         buildPicker();
     }
-    if (!samePane && currentTab() == prioritiesTab()) m_picker->setTier(m_classTab);
+    if (!samePane && currentTab() == prioritiesTab()) {
+        m_picker->setTier(ModelPicker::classesTier());
+        m_picker->focusClass(m_classTab);
+    }
     updateHeader();
 }
 
@@ -194,7 +197,15 @@ QString ModelsPane::currentTab() const {
     return index < 0 ? QString() : m_tabs->tabData(index).toString();
 }
 
-QString ModelsPane::tier() const { return m_picker ? m_picker->tier() : m_classTab; }
+// Which class list the priorities page is *in*. It was the class tab in front; since the page
+// became one scrolling set of sections (card #MDL1, owner 2026-09-21) it is the class of the row
+// under the highlight, which is the same question and the same answer.
+QString ModelsPane::tier() const {
+    if (!m_picker) return m_classTab;
+    // The flat tab is not a class and answers as itself; the priorities page answers the class the
+    // highlight is in, which is what the class tab in front used to answer.
+    return m_picker->tier() == kAll ? kAll : m_picker->currentClass();
+}
 
 void ModelsPane::showTab(const QString &id) {
     const int index = tabIds().indexOf(id);
@@ -214,11 +225,15 @@ void ModelsPane::showTab(const QString &id) {
     m_pages->setCurrentWidget(m_pickerPage);
     if (!m_picker) return;
     if (id == availableTab()) {
-        // Leaving priorities: remember which class list to come back to.
-        if (m_picker->tier() != kAll) m_classTab = m_picker->tier();
+        // Leaving priorities: remember which class the highlight was in, to come back to it.
+        if (m_picker->tier() != kAll) m_classTab = m_picker->currentClass();
         m_picker->setTier(kAll);
     } else {
-        m_picker->setTier(m_classTab.isEmpty() ? QStringLiteral("main") : m_classTab);
+        // One page, four sections — no class tabs (owner, 2026-09-21: "in a pane, i dont want
+        // separate tabs for the modes. they should just be in divided sections"). The class the
+        // served pane is in is where the highlight lands, which is what opening on its tab was.
+        m_picker->setTier(ModelPicker::classesTier());
+        m_picker->focusClass(m_classTab.isEmpty() ? QStringLiteral("main") : m_classTab);
     }
 }
 
@@ -248,16 +263,17 @@ void ModelsPane::stepTab(int delta) {
     focusFilter();
 }
 
-// Two rows of tabs need a key each. ←/→ are the class tabs of the priorities page (the picker's
-// own); these three are **Alt+1 / Alt+2 / Alt+3**, and ←/→ as well wherever the picker has no
-// class row in front of it (the available tab) or there is no picker at all (providers).
+// There is one row of tabs now: **Alt+1 … Alt+4**, and ←/→ as well. The priorities page used to
+// carry a second row, one tab per class, which took ←/→ for itself; since it became one page of
+// sections (card #MDL1, owner 2026-09-21) nothing below this row wants the arrows, so they walk
+// these tabs everywhere the caret is not in typed filter text.
 //
 // Not Ctrl+Tab, which is the window's **Next tab** (Keymap `tab.next`) and never reaches a pane:
 // a first Xvfb run of this pane pressed it three times and stayed on the same tab.
 bool ModelsPane::handleShortcut(QKeyEvent *event) {
     const Qt::KeyboardModifiers mods = event->modifiers();
     const int key = event->key();
-    // The same three tabs, for the controls this pane filters directly. The QShortcut above is
+    // The same tabs, for the controls this pane filters directly. The QShortcut above is
     // what covers the providers tab's own search line; this is what answers where there is no
     // active window for a shortcut to match against, which is every headless test.
     if ((mods & Qt::AltModifier) && key >= Qt::Key_1 && key < Qt::Key_1 + tabIds().size()) {
@@ -266,10 +282,10 @@ bool ModelsPane::handleShortcut(QKeyEvent *event) {
         return true;
     }
     if (mods != Qt::NoModifier || (key != Qt::Key_Left && key != Qt::Key_Right)) return false;
-    // Only where the picker is not using them: on priorities they are its class tabs, and in a
-    // filter line with text in it they are the caret's (the picker answers that case itself).
-    if (currentTab() == prioritiesTab()) return false;
+    // Only where nothing below is using them: in a filter line with text in it they are the
+    // caret's, and a row's → opens its providers (the picker answers both itself).
     if (currentTab() == jobsTab()) return false;   // ←/→ are the tree's own column keys
+    if (m_picker && m_picker->list()->hasFocus()) return false;
     if (m_picker && m_picker->filter()->hasFocus() && !m_picker->filter()->text().isEmpty()) return false;
     stepTab(key == Qt::Key_Left ? -1 : 1);
     return true;

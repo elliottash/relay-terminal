@@ -16,7 +16,13 @@
 // think we should beef up the ctrl alt m dialogue to be the main way to select / prioritize
 // models." So the dialog is now tabbed:
 //
-//   high · main · flash · lite · local        each tab *is* that tier list, numbered, in order
+//   priorities   one scrolling page of **sections**, one per class — high, main, flash, and local
+//                where this machine serves one — each a header line (the class, its "show this
+//                class in the box" switch and a one-line note) over that class's numbered rows.
+//                A section *is* that tier list. There is no lite section: lite is never a pane
+//                mode, its storage stays, and the jobs tab is where a chore's model is set
+//                (owner, 2026-09-21: "in a pane, i dont want separate tabs for the modes. they
+//                should just be in divided sections. remove the lite section").
 //   all                                        every available model: favorites, then a section per
 //                                              provider **alphabetically**, the sort menu, and
 //                                              "+ add a model by id…" at the end. No "recent"
@@ -37,19 +43,22 @@
 //
 // The keys, which the footer line spells out for the tab you are on:
 //
-//   ←/→            change tab (in the filter: when it is empty, or the caret is at that end)
-//   ctrl+tab       change tab, wherever the focus is; ctrl+shift+tab goes back
-//   ↑/↓            move through the rows, from the filter too
+//   ↑/↓            move through the rows — **across** the sections, skipping their headers
 //   enter          use this row in the pane — the model and the level together
-//   tab            the focus along filter → rows → providers → levels (←/→ belong to the tabs)
+//   tab            the focus along filter → rows → providers → levels
 //   →  on a row    the providers of this row, then the levels; ← comes back
-//   alt+↑ / alt+↓  move the row up or down the list (a drag does the same)
-//   delete         take the row out of the list (backspace does it while the filter is empty)
-//   ctrl+enter     add the highlighted model to this list, at the end
-//   typing         searches every usable model, this tab's list first; an open-ended provider's
-//                  long tail (OpenRouter's live listing) comes under "more from <provider>"
-//   ctrl+z         undo a list edit made in this dialog
-//   the "in box" column is a cutoff: it says how far down this class the Alt+M box shows
+//   alt+↑ / alt+↓  move the row up or down **its own** section (a drag does the same)
+//   delete         take the row out of its section (backspace does it while the filter is empty)
+//   ctrl+enter     add the highlighted model to the section it is in, at the end
+//   typing         searches every usable model; each section shows its own matches, then the
+//                  models it does not list under "not in <class>", then an open-ended provider's
+//                  long tail (OpenRouter's live listing) under "more from <provider>"
+//   ctrl+z         undo a list edit made here
+//   the "in box" column is a cutoff: it says how far down this class the Alt+M box shows, and the
+//                  tick on a section's own header is that class's "show it in the box" switch
+//
+// Every edit reads the **row's** class (`rowTier`), not a tab: on the sectioned page four lists are
+// on screen at once, so "which list is this" is a property of the row under the highlight.
 //
 // It reads a relay::models::Catalog and QSettings and hands back a key and a level; it never talks
 // to the worker. The **served pane** does the switch (Pane::selectEntry) so that every door — the
@@ -89,9 +98,10 @@ public:
         models::Catalog catalog;
         QString currentKey;      // the pane's model now; drawn bold and selected first
         QString currentEffort;   // the pane's level now; the default for a row with no memory
-        // The tab it opens on: the tier the served pane is running in (`modelrows::roleTier` of
-        // its agent role), so Ctrl+Shift+M from a /flash pane lands on the flash list. "all" is
-        // the flat tab. An id no tab has falls back to main.
+        // What it opens on. `classes` is the sectioned priorities page and `all` the flat tab; a
+        // single class id puts the widget on that one list alone, which is what a caller with one
+        // list to show wants. On the sectioned page the served pane's class is where the highlight
+        // starts (`focusClass`), so Ctrl+Shift+M from a /flash pane lands in the flash section.
         QString tier = QStringLiteral("main");
         // What the filter line starts with. Options › Models' per-provider "models… (N of M
         // available)" link opens the available tab with the provider's name typed, so step 2 is
@@ -156,7 +166,23 @@ public:
     // checking rank n shows ranks 1..n of this class in the Alt+M box, unchecking n hides n and
     // everything under it. Unchecking rank 1 switches the class off altogether, which is the same
     // statement. Public because a test presses it without a window manager.
-    void setBoxCutoffFromRow(int rank, bool on);
+    void setBoxCutoffFromRow(const QString &tier, int rank, bool on);
+    // The tick on a section's own header: "show this class in the box" (design 5.3), the same
+    // statement `classSwitch()` makes on a single-class page.
+    void setClassShown(const QString &tier, bool on);
+    // The sectioned priorities page, and the one class list a single-class caller gets. `tier()`
+    // answers `classes` on the page; `currentClass()` is the class of the row under the highlight,
+    // which is the sectioned page's answer to "which list am I in".
+    static QString classesTier() { return QStringLiteral("classes"); }
+    bool sectionsPage() const;
+    // high · main · flash, and local where this machine serves one: the sections, in order. Never
+    // lite (design 5.3: it is not a pane mode and the box has never had a row for it).
+    QStringList sectionTiers() const;
+    QString currentClass() const;
+    // Put the highlight in this class's section — rank 1, or the pane's own model where that
+    // section holds it. A no-op off the sectioned page and for a class with no section.
+    void focusClass(const QString &tier);
+
     // The `all` tab's availability column — step 2 of the owner's four (card #MDL1, design 5.7):
     // whether this model exists for the lists, the box and the box's typed filter at all. It
     // covers every provider of the row, because a row is one model (rule 2): un-ticking sonnet
@@ -198,22 +224,31 @@ private:
 
     void populateTabs();
     QStringList tabBarIds() const;   // tabIds(), less the flat tab while hosted
-    void addSection(const QString &title);
-    QTreeWidgetItem *addListRow(int rank, const models::curation::TierEntry &item, const models::Entry *entry);
-    QTreeWidgetItem *addGroupRow(const models::Group &group, bool addable);
-    void buildTier(const QString &query);
+    void addSection(const QString &title, const QString &tier = QString());
+    // A class's own header line on the sectioned page: the class, its "in box" switch and a note.
+    QTreeWidgetItem *addClassHeader(const QString &tier);
+    QTreeWidgetItem *addListRow(const QString &tier, int rank, const models::curation::TierEntry &item,
+                                const models::Entry *entry);
+    QTreeWidgetItem *addGroupRow(const models::Group &group, bool addable, const QString &tier = QString());
+    void buildSections(const QString &query);
+    void buildTier(const QString &tier, const QString &query);
     void buildAll(const QString &query);
+    // The class this row belongs to: a list entry's own class, or the class whose "not in …"
+    // section an addable row was drawn under. Empty on the flat tab, where no list is in play.
+    QString rowTier(const QTreeWidgetItem *row) const;
+    QString editTier() const;        // rowTier(currentRow()) — which list an edit key acts on
+    void stepRow(int delta);         // ↑/↓ over the rows, skipping the section headers
     void addAddByIdRow();
     void promptAddModelById();
     void onCheckChanged(QTreeWidgetItem *item, int column);
-    void refreshBoxChecks();   // the ticks again from the stored cutoff, without rebuilding the rows
+    void refreshBoxChecks();   // the ticks again from the stored cutoffs, without rebuilding the rows
     // The availability ticks and the greying again, in place: an un-tick changes no row's place in
     // the `all` tab (the row stays, to be ticked back), so rebuilding under the signal that
     // delivered the click would only delete the item mid-click.
     void refreshAvailability();
     void applyAvailability(QTreeWidgetItem *row, bool available, const QString &reason);
     bool availabilityTab() const;    // the `all` tab, the one place step 2 is edited
-    bool boxClassTab() const;        // this tab is one of the four classes the box can draw
+    bool boxClassTier(const QString &tier) const;   // one of the four classes the box can draw
     void syncClassSwitch();
     void onRowChanged();
     void onViaChanged();
@@ -256,6 +291,10 @@ private:
     bool m_filling = false;   // the right-hand lists are being populated: their signals are not picks
     bool m_building = false;  // the rows are being built: an itemChanged is ours, not a click
     bool m_hosted = false;    // embedded in the models pane, which owns the flat tab
+    // The class the sectioned page was last pointed at (`focusClass`). It is what `currentClass()`
+    // answers while the highlight is on no row of a class — an empty section, or a page with no
+    // list at all — so "which class is this page on" has an answer before anything is ranked.
+    QString m_focusClass;
 };
 
 }  // namespace relay
