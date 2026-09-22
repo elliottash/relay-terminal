@@ -974,11 +974,20 @@ class AlwaysOnTests(unittest.TestCase):
                 client, _ = await h.phone()
                 await h.until(lambda: h.state()["devices"] == 1, what="the phone counted")
                 self.assertTrue(h.state()["online"])
+                # The `devices` line names the phone as connected, and is sent again when the
+                # count moves, so the Sharing pane can say "iPhone connected" (#SHRP).
+                devices = lambda: [m for m in h.out if m.get("t") == "devices"]
+                await h.until(lambda: devices() and devices()[-1]["items"]
+                              and devices()[-1]["items"][-1].get("online") is True,
+                              what="the devices line saying the phone is online")
+                self.assertEqual(devices()[-1]["items"][-1]["name"], "iPhone")
                 await client.send({"t": "panes_get"})
                 listed = await client.expect("panes")
                 self.assertEqual([item["id"] for item in listed["items"]], ["p1"])
                 await client.close()
                 await h.until(lambda: h.state()["devices"] == 0, what="the phone gone")
+                await h.until(lambda: devices()[-1]["items"][-1].get("online") is False,
+                              what="the devices line saying the phone is gone")
         run(main(), timeout=90)
 
     def test_a_rendezvous_restart_flips_online_false_then_true(self):
