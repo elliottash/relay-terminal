@@ -1,0 +1,293 @@
+{
+  "before": {
+    "unittest:unittest.loader._FailedTest.test_board_protocol": {
+      "key": "unittest:unittest.loader._FailedTest.test_board_protocol",
+      "source": "unittest",
+      "kind": "broken",
+      "state": "open",
+      "first_seen": "2026-09-21T23:34:23Z",
+      "last_seen": "2026-09-21T23:34:23Z",
+      "count": 2,
+      "green_streak": 0,
+      "runs": 2,
+      "fingerprint": "",
+      "regressed": false,
+      "stale": false,
+      "version": 1,
+      "excerpt": "AttributeError: type object '_FailedTest' has no attribute 'test_board_protocol'",
+      "message": "AttributeError: type object '_FailedTest' has no attribute 'test_board_protocol'",
+      "session": "codex-hq",
+      "first_run": "20260921T233422Z-ba41",
+      "opened_run": "20260921T233422Z-ba41-rerun",
+      "dismissed": {
+        "reason": "environmental",
+        "comment": "Tracked invocation omitted tests/ from PYTHONPATH, so fake_cards could not import. Repeated with PYTHONPATH=backend:tests:.; all 11 InitTests passed in runs 20260921T233453Z-1582 and 20260921T233455Z-6953. Synthetic unittest loader key does not correspond to a test.",
+        "until": "2026-09-22T00:00:00Z",
+        "by": "codex-hq",
+        "expired": true
+      }
+    },
+    "run:unittest": {
+      "key": "run:unittest",
+      "source": "run",
+      "kind": "run",
+      "state": "open",
+      "first_seen": "2026-09-21T23:34:23Z",
+      "last_seen": "2026-09-21T23:34:23Z",
+      "count": 2,
+      "green_streak": 0,
+      "runs": 2,
+      "fingerprint": "",
+      "regressed": false,
+      "stale": false,
+      "version": 1,
+      "excerpt": "11 of 11 executed tests failed in one run: one cause, not 11.",
+      "message": "11 of 11 executed tests failed in one run: one cause, not 11.",
+      "session": "codex-hq",
+      "first_run": "20260921T233422Z-ba41",
+      "opened_run": "20260921T233422Z-ba41",
+      "dismissed": {
+        "reason": "environmental",
+        "comment": "This run-level signal grouped the missing tests/ PYTHONPATH import failures. Corrected environment yielded 11/11 passes in both 20260921T233453Z-1582 and 20260921T233455Z-6953.",
+        "until": "2026-09-22T00:00:00Z",
+        "by": "codex-hq",
+        "expired": true
+      },
+      "members": [
+        "unittest:unittest.loader._FailedTest.test_board_protocol"
+      ]
+    }
+  },
+  "runs": [
+    {
+      "command": [
+        "/usr/bin/python3",
+        "-m",
+        "relay_core.junit_runner",
+        "--junit",
+        "/tmp/relay-hg26-collection-a4ai6x05/unittest.xml",
+        "--root",
+        "/home/elliott/repos/relay-terminal",
+        "-q",
+        "tests.test_board_protocol"
+      ],
+      "PYTHONPATH": "backend:tests",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "----------------------------------------------------------------------\nRan 177 tests in 15.524s\n\nOK\n",
+      "run_id": "hg26-collection-20260922T165814Z-8da95bce",
+      "commit": "4ac6499ad1d39f495ded67ec96d660823366b3a7",
+      "tree_digest": "dbe4a0e9a468",
+      "stored": 178,
+      "after": {
+        "unittest:unittest.loader._FailedTest.test_board_protocol": {
+          "key": "unittest:unittest.loader._FailedTest.test_board_protocol",
+          "source": "unittest",
+          "kind": "broken",
+          "state": "open",
+          "first_seen": "2026-09-21T23:34:23Z",
+          "last_seen": "2026-09-21T23:34:23Z",
+          "count": 2,
+          "green_streak": 1,
+          "runs": 2,
+          "fingerprint": "",
+          "regressed": false,
+          "stale": false,
+          "version": 1,
+          "excerpt": "AttributeError: type object '_FailedTest' has no attribute 'test_board_protocol'",
+          "message": "AttributeError: type object '_FailedTest' has no attribute 'test_board_protocol'",
+          "session": "codex-hq",
+          "first_run": "20260921T233422Z-ba41",
+          "opened_run": "20260921T233422Z-ba41-rerun",
+          "dismissed": {
+            "reason": "environmental",
+            "comment": "Tracked invocation omitted tests/ from PYTHONPATH, so fake_cards could not import. Repeated with PYTHONPATH=backend:tests:.; all 11 InitTests passed in runs 20260921T233453Z-1582 and 20260921T233455Z-6953. Synthetic unittest loader key does not correspond to a test.",
+            "until": "2026-09-22T00:00:00Z",
+            "by": "codex-hq",
+            "expired": true
+          }
+        },
+        "run:unittest": {
+          "key": "run:unittest",
+          "source": "run",
+          "kind": "run",
+          "state": "open",
+          "first_seen": "2026-09-21T23:34:23Z",
+          "last_seen": "2026-09-21T23:34:23Z",
+          "count": 2,
+          "green_streak": 1,
+          "runs": 2,
+          "fingerprint": "",
+          "regressed": false,
+          "stale": false,
+          "version": 1,
+          "excerpt": "11 of 11 executed tests failed in one run: one cause, not 11.",
+          "message": "11 of 11 executed tests failed in one run: one cause, not 11.",
+          "session": "codex-hq",
+          "first_run": "20260921T233422Z-ba41",
+          "opened_run": "20260921T233422Z-ba41",
+          "dismissed": {
+            "reason": "environmental",
+            "comment": "This run-level signal grouped the missing tests/ PYTHONPATH import failures. Corrected environment yielded 11/11 passes in both 20260921T233453Z-1582 and 20260921T233455Z-6953.",
+            "until": "2026-09-22T00:00:00Z",
+            "by": "codex-hq",
+            "expired": true
+          },
+          "members": [
+            "unittest:unittest.loader._FailedTest.test_board_protocol"
+          ]
+        }
+      },
+      "result_counts": {
+        "pass": 178
+      },
+      "collection_executions": [
+        {
+          "ts": "2026-09-22T16:58:14Z",
+          "run_id": "hg26-collection-20260922T165814Z-8da95bce",
+          "id": "collection:unittest:tests.test_board_protocol",
+          "runner": "unittest",
+          "result": "pass",
+          "duration": 0.0,
+          "commit": "4ac6499ad1d39f495ded67ec96d660823366b3a7",
+          "host": "spark-dcc9",
+          "message": "scope execution",
+          "tree_digest": "dbe4a0e9a468"
+        }
+      ]
+    },
+    {
+      "command": [
+        "/usr/bin/python3",
+        "-m",
+        "relay_core.junit_runner",
+        "--junit",
+        "/tmp/relay-hg26-collection-lu3lsv14/unittest.xml",
+        "--root",
+        "/home/elliott/repos/relay-terminal",
+        "-q",
+        "tests.test_board_protocol"
+      ],
+      "PYTHONPATH": "backend:tests",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "----------------------------------------------------------------------\nRan 177 tests in 15.297s\n\nOK\n",
+      "run_id": "hg26-collection-20260922T165830Z-aee9d126",
+      "commit": "4ac6499ad1d39f495ded67ec96d660823366b3a7",
+      "tree_digest": "dbe4a0e9a468",
+      "stored": 178,
+      "after": {
+        "unittest:unittest.loader._FailedTest.test_board_protocol": {
+          "key": "unittest:unittest.loader._FailedTest.test_board_protocol",
+          "source": "unittest",
+          "kind": "broken",
+          "state": "resolved",
+          "first_seen": "2026-09-21T23:34:23Z",
+          "last_seen": "2026-09-21T23:34:23Z",
+          "count": 2,
+          "green_streak": 2,
+          "runs": 2,
+          "fingerprint": "",
+          "regressed": false,
+          "stale": false,
+          "version": 1,
+          "excerpt": "AttributeError: type object '_FailedTest' has no attribute 'test_board_protocol'",
+          "message": "AttributeError: type object '_FailedTest' has no attribute 'test_board_protocol'",
+          "fixed_in": "4ac6499ad1d39f495ded67ec96d660823366b3a7",
+          "resolved_at": "2026-09-22T16:58:30Z",
+          "first_run": "20260921T233422Z-ba41",
+          "opened_run": "20260921T233422Z-ba41-rerun"
+        },
+        "run:unittest": {
+          "key": "run:unittest",
+          "source": "run",
+          "kind": "run",
+          "state": "resolved",
+          "first_seen": "2026-09-21T23:34:23Z",
+          "last_seen": "2026-09-21T23:34:23Z",
+          "count": 2,
+          "green_streak": 2,
+          "runs": 2,
+          "fingerprint": "",
+          "regressed": false,
+          "stale": false,
+          "version": 1,
+          "excerpt": "11 of 11 executed tests failed in one run: one cause, not 11.",
+          "message": "11 of 11 executed tests failed in one run: one cause, not 11.",
+          "fixed_in": "4ac6499ad1d39f495ded67ec96d660823366b3a7",
+          "resolved_at": "2026-09-22T16:58:30Z",
+          "first_run": "20260921T233422Z-ba41",
+          "opened_run": "20260921T233422Z-ba41",
+          "members": [
+            "unittest:unittest.loader._FailedTest.test_board_protocol"
+          ]
+        }
+      },
+      "result_counts": {
+        "pass": 178
+      },
+      "collection_executions": [
+        {
+          "ts": "2026-09-22T16:58:30Z",
+          "run_id": "hg26-collection-20260922T165830Z-aee9d126",
+          "id": "collection:unittest:tests.test_board_protocol",
+          "runner": "unittest",
+          "result": "pass",
+          "duration": 0.0,
+          "commit": "4ac6499ad1d39f495ded67ec96d660823366b3a7",
+          "host": "spark-dcc9",
+          "message": "scope execution",
+          "tree_digest": "dbe4a0e9a468"
+        }
+      ]
+    }
+  ],
+  "ingestion": "H.ingest_junit(xml, runner=\"unittest\", commit=HEAD, run_id=unique, tree_digest=H.tree_digest_of(project)); H.append(rows, H.default_path(project))",
+  "after": {
+    "unittest:unittest.loader._FailedTest.test_board_protocol": {
+      "key": "unittest:unittest.loader._FailedTest.test_board_protocol",
+      "source": "unittest",
+      "kind": "broken",
+      "state": "resolved",
+      "first_seen": "2026-09-21T23:34:23Z",
+      "last_seen": "2026-09-21T23:34:23Z",
+      "count": 2,
+      "green_streak": 2,
+      "runs": 2,
+      "fingerprint": "",
+      "regressed": false,
+      "stale": false,
+      "version": 1,
+      "excerpt": "AttributeError: type object '_FailedTest' has no attribute 'test_board_protocol'",
+      "message": "AttributeError: type object '_FailedTest' has no attribute 'test_board_protocol'",
+      "fixed_in": "4ac6499ad1d39f495ded67ec96d660823366b3a7",
+      "resolved_at": "2026-09-22T16:58:30Z",
+      "first_run": "20260921T233422Z-ba41",
+      "opened_run": "20260921T233422Z-ba41-rerun"
+    },
+    "run:unittest": {
+      "key": "run:unittest",
+      "source": "run",
+      "kind": "run",
+      "state": "resolved",
+      "first_seen": "2026-09-21T23:34:23Z",
+      "last_seen": "2026-09-21T23:34:23Z",
+      "count": 2,
+      "green_streak": 2,
+      "runs": 2,
+      "fingerprint": "",
+      "regressed": false,
+      "stale": false,
+      "version": 1,
+      "excerpt": "11 of 11 executed tests failed in one run: one cause, not 11.",
+      "message": "11 of 11 executed tests failed in one run: one cause, not 11.",
+      "fixed_in": "4ac6499ad1d39f495ded67ec96d660823366b3a7",
+      "resolved_at": "2026-09-22T16:58:30Z",
+      "first_run": "20260921T233422Z-ba41",
+      "opened_run": "20260921T233422Z-ba41",
+      "members": [
+        "unittest:unittest.loader._FailedTest.test_board_protocol"
+      ]
+    }
+  }
+}

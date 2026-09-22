@@ -34,6 +34,22 @@ and fresh JUnit output from a valid temporary module. No private history/events 
 | First passing full module | open; 1 green | open; 1 green | codex-hq |
 | Second passing full module | resolved; 2 green | resolved; 2 green | cleared by normal fold |
 
-The live signals remain open and owned; no takeover, dismissal, manual closure or production
-recovery execution was performed. Board MCP discovery returned no relay_board tools. This package
+At initial implementation, the live signals remained open and owned; no takeover, dismissal
+or manual closure was performed. Authorized live verification followed, as recorded below. Board MCP discovery returned no relay_board tools. This package
 used the assigned parent scope, left HG26/AQ6X cards and threads untouched, and did not delegate.
+
+## Authorized live verification
+
+Two complete `tests.test_board_protocol` executions passed: **177 tests each**, in 15.524s and
+15.297s. Both used `PYTHONPATH=backend:tests` (absolute equivalents), temporary XDG directories,
+and `python3 -m relay_core.junit_runner --junit <temporary>/unittest.xml --root <repo> -q tests.test_board_protocol`.
+Each report was parsed through `test_history.ingest_junit` with its actual commit/tree identity
+and unique run ID, then appended with `test_history.append` to the normal private history store.
+Each stored 177 test passes plus one full-module collection pass.
+
+- `hg26-collection-20260922T165814Z-8da95bce`: both historical signals remained open, green streak 1, held by `codex-hq`.
+- `hg26-collection-20260922T165830Z-aee9d126`: both resolved naturally, green streak 2; the fold cleared claims on resolution.
+
+No signal event was written, no claim was changed manually, and neither card was edited.
+Exact commands, output, commit/tree identities, scope rows and before/after signal snapshots:
+[`collection-live-recovery.json`](collection-live-recovery.json).
